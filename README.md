@@ -8,14 +8,21 @@ l'Hôtel de Vente, échanges) vers le même compte que l'application web.
 
 **Plateformes visées : Windows et Linux (X11 / XWayland).** macOS est hors périmètre.
 
-État : conception + spikes de validation technique (`spikes/`), pas encore de code applicatif
-(`crates/`).
+État : spikes de validation technique (`spikes/`) terminés, premier lot applicatif réel en cours
+(`crates/`, workspace Cargo à la racine).
 
 📄 **[Plan d'architecture technique](docs/plan-architecture.md)** — stack, modèle de threads,
 ingestion du log, rendu et click-through par OS, synchronisation serveur, budget mémoire,
 feuille de route et revue d'experts.
 
-## Spikes
+## Crates (`crates/`)
+
+| Crate | Lot | Contenu |
+| --- | --- | --- |
+| [`overlay-ingest`](crates/overlay-ingest/) | L1 ✅ | Suivi de `wakfu.log` : découverte de chemin, lecture incrémentale, rotation/troncature. `cargo test -p overlay-ingest`. |
+| [`overlay-app`](crates/overlay-app/) | L1 (câblage) | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
+
+## Spikes (`spikes/`)
 
 | Spike | État | Prévisualisation |
 | --- | --- | --- |

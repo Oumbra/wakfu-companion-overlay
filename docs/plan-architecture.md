@@ -26,7 +26,7 @@
 | Le fichier lu est `wakfu.log`, encapsulé dans le log technique Java : `LEVEL HH:MM:SS,mmm [thread] (classe:ligne) - contenu`. Seul `INFO` est traité. | `src/app/core/services/log-parser.ts` (`HEADER_RE`) |
 | Le log ne contient **aucune date**, seulement `HH:MM:SS,mmm`. | idem |
 | Encodage **UTF-8** (vérifié sur `tests/wakfu.log`, 10 975 lignes). | `file -i tests/wakfu.log` |
-| Chemin Windows : `%APPDATA%\zaap\gamesLogs\wakfu\wakfu.log`. | ligne 1 de `tests/wakfu.log` |
+| Chemin Windows : `%APPDATA%\zaap\gamesLogs\wakfu\logs\wakfu.log`. | Constat direct sur une installation réelle du client (2026-08-31) — corrige la première version de ce document, qui omettait le sous-dossier `logs\` (déduit à tort d'une ligne de log mentionnant un *autre* fichier, `.../wakfu/config`, dans `tests/wakfu.log` du dépôt web) |
 | Les motifs de parsing sont **en français** (`Vous avez gagné … kamas`, `Vous avez ramassé …`). Le client de jeu doit être en FR. | `log-parser.ts` |
 | Volume de logique métier à porter : `log-parser.ts` **1 053 l.**, `stats-store.service.ts` **2 755 l.**, `history-sync.service.ts` 435 l., `sync-queue.service.ts` 314 l., `history-archive.service.ts` 789 l. | `wc -l` |
 | API : `/api/v1/history/{fights,purchases,trades}` en `POST` (ingestion idempotente par lots) et `GET` (pagination curseur). | `functions/api/v1/history/*.ts` |
@@ -206,8 +206,8 @@ Ordre d'essai, premier existant retenu, **toujours surchargeable** par la config
 de fichier dans l'UI :
 
 **Windows**
-1. `%APPDATA%\zaap\gamesLogs\wakfu\wakfu.log` *(vérifié)*
-2. `%LOCALAPPDATA%\Ankama\zaap\gamesLogs\wakfu\wakfu.log` *(à confirmer)*
+1. `%APPDATA%\zaap\gamesLogs\wakfu\logs\wakfu.log` *(vérifié sur machine réelle, 2026-08-31)*
+2. `%LOCALAPPDATA%\Ankama\zaap\gamesLogs\wakfu\logs\wakfu.log` *(à confirmer — sous-dossier `logs\` aligné par cohérence sur le n°1, pas vérifié pour cet emplacement)*
 
 **Linux**
 1. `$XDG_CONFIG_HOME/zaap/gamesLogs/wakfu/wakfu.log` puis `~/.config/zaap/gamesLogs/wakfu/wakfu.log` *(à confirmer)*
@@ -227,7 +227,11 @@ L'échec de détection n'est **pas** une erreur fatale : l'overlay démarre et a
   jamais tuer l'ingestion.
 - **Détection de rotation/troncature** : si `len < offset` → repartir de 0 ; comparer aussi
   l'identité du fichier (Linux `st_dev`/`st_ino`, Windows `FILE_ID_INFO` via
-  `GetFileInformationByHandleEx`) pour repérer un remplacement à taille croissante.
+  `GetFileInformationByHandleEx`) pour repérer un remplacement à taille croissante. Implémenté et
+  testé dans `crates/overlay-ingest/` (L1). Le répertoire de logs réel observé (§5.1) confirme une
+  rotation par **renommage** (`wakfu.log` → `wakfu.log.0` → `.1` → `.2`, un nouveau `wakfu.log`
+  recréé au même chemin) plutôt qu'une troncature en place — exactement le cas que la comparaison
+  d'identité est conçue pour couvrir.
 - Ouverture en lecture seule ; `std::fs` sous Windows demande déjà
   `FILE_SHARE_READ|WRITE|DELETE` — le client Java garde donc son handle sans conflit.
 
