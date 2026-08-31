@@ -8,8 +8,16 @@ l'Hôtel de Vente, échanges) vers le même compte que l'application web.
 
 **Plateformes visées : Windows et Linux (X11 / XWayland).** macOS est hors périmètre.
 
-État : conception. Aucun code applicatif à ce stade.
+État : conception + spikes de validation technique (`spikes/`), pas encore de code applicatif
+(`crates/`).
 
 📄 **[Plan d'architecture technique](docs/plan-architecture.md)** — stack, modèle de threads,
 ingestion du log, rendu et click-through par OS, synchronisation serveur, budget mémoire,
 feuille de route et revue d'experts.
+
+## Spikes
+
+| Spike | État | Prévisualisation |
+| --- | --- | --- |
+| [`s1-window-windows`](spikes/s1-window-windows/) | ✅ validé | `.\preview.ps1` depuis le dossier du spike |
+| [`s2-engine-quickjs`](spikes/s2-engine-quickjs/) | ✅ validé | voir son README |

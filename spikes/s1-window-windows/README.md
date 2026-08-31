@@ -24,6 +24,11 @@ non élucidée mais sans impact restant) pour le détail.
 Build : `cd spikes/s1-window-windows && bash patches/setup-vendor.sh && cargo build --release`
 (voir §"Le patch wgpu-hal" plus bas — `vendor/` n'est pas commité, seul le patch l'est).
 
+**Prévisualisation à tout moment** : `.\preview.ps1` depuis ce dossier (PowerShell) — prépare
+`vendor/` si besoin, puis compile et lance directement la fenêtre overlay (`-Debug` pour un build
+debug, plus rapide à recompiler en itérant). Ctrl+Alt+W bascule interactif / clic-traversant,
+Échap ou Ctrl+C quitte.
+
 ## Découverte n°1 — pas besoin de piloter DirectComposition à la main
 
 Le plan v2 (§6.2) prévoyait de créer `IDCompositionDevice`/`Target`/`Visual` nous-mêmes. **Faux
