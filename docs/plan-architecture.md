@@ -494,15 +494,20 @@ Chaque panneau est déplaçable, redimensionnable, avec opacité réglable ; dis
 | --- | --- | --- |
 | **S1 — Spike rendu Windows** ✅ fait | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Voir `spikes/s1-window-windows/README.md` : panneau egui semi-transparent confirmé par capture d'écran par-dessus une autre fenêtre, hotkey global de bascule confirmé sans focus, RSS ~87 Mo — **verdict : chemin DirectComposition via `wgpu-hal` (`DxgiFromVisual`) validé**, plus simple que prévu (§6.2 mis à jour) |
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
-| **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland | Idem, sur GNOME/KDE Wayland via XWayland et sur une session X11 pure |
-| **L1 — Ingestion** | tail, rotation, découverte de chemin, `isInitialLoad` | Rejeu, rotation et troncature couverts par des tests |
+| **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland | **Reporté** (aucune machine Linux disponible pour l'instant) — S1/S2 suffisent à valider la stack sur Windows ; à faire avant tout travail spécifique Linux |
+| **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel) |
 | **L2 — UI** | dégâts, suivi, alertes, récap, disposition persistée | Utilisable en jeu une soirée sans redémarrage |
 | **L3 — Catalogue** | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files |
 | **L4 — Auth native** | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable |
 | **L5 — Synchro** | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay |
 | **L6 — Packaging** | AppImage, installeur, mise à jour signée | Installation propre sur une machine vierge Windows et Linux |
 
-S1/S2/S3 sont **bloquants** : ils peuvent remettre en cause la stack. Rien d'autre ne démarre avant.
+S1/S2/S3 étaient prévus **bloquants** (ils peuvent remettre en cause la stack). **Décision du
+mainteneur (2026-08-31) : S3 est reporté** faute de machine Linux disponible pour l'instant — S1 et
+S2 ont validé la stack sur Windows, suffisant pour démarrer L1. S3 reste à faire **avant** tout
+travail spécifique à `overlay-platform::linux` (§6.4) ou toute distribution Linux (§11) : le risque
+qu'il couvre (Wayland/X11, XWayland avec le vrai client Wakfu) ne disparaît pas, il est seulement
+découplé du reste de la feuille de route.
 
 ---
 

@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+# `crates/*` uniquement — les crates sous `spikes/` sont des harnais jetables, indépendants,
+# avec leur propre patch vendored (voir spikes/s1-window-windows/README.md) : les inclure ici
+# ferait fuiter ce patch dans la résolution de dépendances de l'application réelle.
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+publish = false
