@@ -249,9 +249,18 @@ web actuel). Deux conséquences déjà traitées côté web, à ne pas casser :
 
 ### 5.5 Performance cible
 
-Fichier réel de 80 000 lignes ingéré en **< 2 s** sans gel de l'UI (l'UI reste à 60 fps pendant
-l'ingestion initiale, avec une barre de progression). Non négociable : c'est exactement la
-régression vécue côté web (~10 s de gel, corrigée le 2026-08-30).
+**Critère non négociable, celui-là mesurable indépendamment du moteur retenu** : l'UI reste à
+60 fps pendant l'ingestion initiale d'un gros fichier — jamais de gel, avec une barre de
+progression. C'est exactement la régression vécue côté web (~10 s de gel, sans spinner, corrigée
+le 2026-08-30) ; le modèle de threading (§3) la rend structurellement impossible ici, l'Engine
+tournant sur un thread séparé du rendu.
+
+Le débit d'ingestion lui-même (« 80 000 lignes en combien de temps ») est un critère secondaire,
+d'expérience utilisateur (délai avant historique complet disponible), pas de fluidité : voir le
+spike S2 (`spikes/s2-engine-quickjs/README.md`), qui mesure ~28 000 lignes/s avec QuickJS sur le
+vrai `LogParser` — sous la cible initiale de ~40 000 lignes/s, mais sans jamais bloquer le rendu.
+Prérequis qui en découle pour L1 : publier des `UiSnapshot` intermédiaires pendant `isInitialLoad`
+(pas seulement à la fin), pour que la barre de progression avance réellement.
 
 ---
 
@@ -464,7 +473,7 @@ Chaque panneau est déplaçable, redimensionnable, avec opacité réglable ; dis
 | Lot | Contenu | Critère de sortie |
 | --- | --- | --- |
 | **S1 — Spike rendu Windows** (3 j) | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Un carré egui semi-transparent flotte au-dessus de Wakfu en fenêtré sans bordure, la souris traverse, RSS mesuré |
-| **S2 — Spike moteur** (3 j) | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | 80 k lignes < 2 s, snapshot identique au web sur les golden files |
+| **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
 | **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland | Idem, sur GNOME/KDE Wayland via XWayland et sur une session X11 pure |
 | **L1 — Ingestion** | tail, rotation, découverte de chemin, `isInitialLoad` | Rejeu, rotation et troncature couverts par des tests |
 | **L2 — UI** | dégâts, suivi, alertes, récap, disposition persistée | Utilisable en jeu une soirée sans redémarrage |
@@ -546,7 +555,12 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
 
 ## 14. Décisions ouvertes (à trancher par le mainteneur)
 
-1. **Moteur** : QuickJS embarqué (recommandé) ou port Rust intégral ? → tranché par S2.
+1. ~~**Moteur** : QuickJS embarqué ou port Rust intégral ?~~ **Tranché par S2 (voir
+   `spikes/s2-engine-quickjs/`) : QuickJS embarqué, confirmé.** Correction validée sur
+   `LogParser` (rejeu identique après `reset()`), débit ~28 000 lignes/s — sous la cible initiale
+   mais sans conséquence grâce au threading (§5.5, reformulé). Reste à valider sur
+   `StatsStoreService` (bien plus gros, couplé Angular) lors de l'extraction réelle côté
+   `wakfu-companion` (point 3 ci-dessous).
 2. **Auth native** : appairage par code (recommandé) ou redirection loopback ? Le premier ne touche
    à aucune configuration OAuth existante.
 3. **Extraction du moteur headless** : lot à planifier **dans `wakfu-companion`** — qui le fait,
