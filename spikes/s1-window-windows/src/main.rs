@@ -211,8 +211,19 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                gpu.config.width = size.width;
-                gpu.config.height = size.height;
+                let max_dim = gpu.device.limits().max_texture_dimension_2d;
+                let clamped_w = size.width.min(max_dim);
+                let clamped_h = size.height.min(max_dim);
+                println!(
+                    "[DIAG] Resized -> {}x{} (scale_factor={}) | clampé à {}x{} (max supporté = {max_dim})",
+                    size.width,
+                    size.height,
+                    window.scale_factor(),
+                    clamped_w,
+                    clamped_h
+                );
+                gpu.config.width = clamped_w;
+                gpu.config.height = clamped_h;
                 gpu.surface.configure(&gpu.device, &gpu.config);
             }
             WindowEvent::RedrawRequested => {

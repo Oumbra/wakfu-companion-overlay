@@ -4,8 +4,11 @@ Voir [`docs/plan-architecture.md`](../../docs/plan-architecture.md) §6.2/§12 (
 S1). Question posée : **une fenêtre transparente, toujours au-dessus, traversable par la souris,
 rendue avec wgpu+egui, est-elle atteignable sous Windows sans piège de composition ?**
 
-**État : en cours — la composition DirectComposition fonctionne (fenêtre transparente affichée),
-un bug de redimensionnement au démarrage reste à corriger avant de considérer le spike terminé.**
+**État : validé.** La composition DirectComposition fonctionne, fenêtre transparente affichée et
+confirmée visuellement par-dessus une autre fenêtre, hotkey global de bascule interactif /
+clic-traversant confirmé fonctionnel sans focus. Réponse à la question posée : **oui, atteignable**
+— voir §"Validation visuelle" et §"Bug de redimensionnement au démarrage" (contourné, cause racine
+non élucidée mais sans impact restant) pour le détail.
 
 ## Méthode
 
@@ -91,11 +94,12 @@ D3D12) n'est pas installée sur cette machine, et son installation nécessite un
 tentée dans cette session. C'est ce qui a motivé le repro brut de la découverte n°3 plutôt que
 d'attendre cette installation.
 
-## État actuel — CE QUI RESTE À FAIRE
+## Bug de redimensionnement au démarrage — contourné, cause racine non élucidée
 
-Avec les trois corrections ci-dessus, la swapchain composition est créée avec succès et la fenêtre
-transparente s'affiche (`AlphaMode(1)` = `PREMULTIPLIED` confirmé dans les logs). Un nouveau
-problème, **non résolu**, apparaît juste après :
+Avec les trois corrections ci-dessus, la swapchain composition se créait avec succès et la fenêtre
+transparente s'affichait (`AlphaMode(1)` = `PREMULTIPLIED` confirmé dans les logs), mais un
+`WindowEvent::Resized` arrivait juste après avec une taille incohérente et faisait planter la
+`Surface::configure()` qui suit :
 
 ```
 wgpu error: Validation Error
@@ -104,30 +108,52 @@ wgpu error: Validation Error
     Requested was (3824, 984), maximum extent for either dimension is 2048.
 ```
 
-Un `WindowEvent::Resized` arrive avec une taille incohérente (3824×984, ratio ~3.9:1, sans rapport
-avec les 420×220 logiques demandés ni avec une mise à l'échelle DPI simple). Hypothèses non
-encore testées : storm de redimensionnement transitoire lié à `with_no_redirection_bitmap(true)`
-+ `WS_EX_TOOLWINDOW` à la création, ou bug d'interaction winit/DirectComposition sur le tout
-premier `WM_SIZE`. **Prochaine étape** : logger `size` et `scale_factor` à chaque
-`WindowEvent::Resized`, et clamper défensivement `config.width/height` à la capacité annoncée par
-`surface.get_capabilities()` avant `configure()` — ce qui aurait aussi évité le crash ici (pattern
-à adopter dans l'implémentation finale de toute façon, un redimensionnement excessif ne doit
-jamais faire planter l'overlay).
+Logué précisément (`[DIAG] Resized -> ...` dans `main.rs`), la séquence réelle au démarrage est :
 
-## Prochaines étapes (une fois le redimensionnement résolu)
+```
+[DIAG] Resized -> 3824x984  (scale_factor=1) | clampé à 2048x984
+[DIAG] Resized -> 3840x1023 (scale_factor=1) | clampé à 2048x1023
+[DIAG] Resized -> 420x220   (scale_factor=1) | clampé à 420x220   ← taille demandée, enfin correcte
+[DIAG] Resized -> 420x220   (scale_factor=1) | clampé à 420x220
+```
 
-1. Confirmer visuellement le rendu (capture d'écran) par-dessus une fenêtre quelconque en mode
-   fenêtré sans bordure.
-2. Mesurer le RSS en continu (déjà instrumenté, `print_rss()`).
-3. Vérifier le clic-traversant réel (`Ctrl+Alt+W`) avec une autre fenêtre focalisée dessous.
-4. Retester si l'exclusion de `FRAME_LATENCY_WAITABLE_OBJECT` pour la composition (découverte
-   n°2, note dans le patch) est réellement nécessaire maintenant que la vraie cause (AlphaMode)
-   est connue — elle a été laissée par prudence sans être re-vérifiée isolément.
-5. Ouvrir les deux issues amont sur `gfx-rs/wgpu` (ALLOW_TEARING + SwapEffect pour la cible
+`scale_factor` reste à 1 sur toute la séquence : **pas un problème de DPI**. Deux redimensionnements
+aberrants transitoires (sans rapport avec les 420×220 logiques demandés, ni entre eux : ratio
+~3.9:1 puis ~3.75:1) précèdent la taille correcte, qui se stabilise ensuite. Cause racine non
+identifiée avec certitude — hypothèse la plus probable : interaction entre
+`with_no_redirection_bitmap(true)` + `WS_EX_TOOLWINDOW` (posé après coup sur le HWND, cf.
+`apply_extended_styles`) et le tout premier `WM_SIZE` envoyé par Windows lors de la création de la
+fenêtre, avant que winit n'ait fini d'appliquer `with_inner_size`. **Non creusé plus avant** : la
+fenêtre se stabilise d'elle-même sur la bonne taille en quelques frames, et clamper
+défensivement `config.width/height` à `device.limits().max_texture_dimension_2d` avant
+`configure()` (fait dans `main.rs`) élimine tout risque de crash — un pattern à adopter de toute
+façon dans l'implémentation finale, un redimensionnement excessif ne devant jamais faire planter
+l'overlay quelle qu'en soit la cause. À revisiter seulement si le même storm apparaît en dehors du
+tout premier redimensionnement (ce qui n'a pas été observé).
+
+## Validation visuelle
+
+Capture d'écran (mode INTERACTIF, fenêtre overlay positionnée par-dessus un terminal) : panneau
+egui bleu-nuit translucide (`Color32::from_rgba_unmultiplied(20, 24, 34, 200)`), titre, labels de
+mode et bouton, tous rendus correctement par-dessus le contenu de la fenêtre en dessous — pas de
+rectangle opaque, pas de bordure, pas d'artefact. `WS_EX_NOACTIVATE` confirmé : le hotkey global
+(`Ctrl+Alt+W`, envoyé par `SendKeys` alors que PowerShell avait le focus) bascule bien le mode
+(logs `>>> Bascule ... : mode = CLIC-TRAVERSANT` puis `INTERACTIF`) sans jamais donner le focus à
+l'overlay.
+
+## Prochaines étapes (hors spike, pour l'implémentation finale)
+
+1. Ouvrir les deux issues amont sur `gfx-rs/wgpu` (ALLOW_TEARING + SwapEffect pour la cible
    composition).
-6. Nettoyer les instrumentations de diagnostic (`install_dxgi_debug_panic_hook`, dump `DIAG desc`
-   dans le patch) une fois le spike conclu — volontairement conservées pour l'instant, utiles à
-   qui reprend l'investigation du redimensionnement.
+2. Retester si l'exclusion de `FRAME_LATENCY_WAITABLE_OBJECT` pour la composition (découverte
+   n°2, note dans le patch) est réellement nécessaire maintenant que la vraie cause de l'échec
+   initial (AlphaMode) est connue — elle a été laissée par prudence sans être re-vérifiée
+   isolément.
+3. Nettoyer les instrumentations de diagnostic (`install_dxgi_debug_panic_hook`, dump `DIAG desc`
+   dans le patch, logs `[DIAG] Resized`) — volontairement conservées ici, utiles à qui relit ce
+   spike, mais à ne pas reporter telles quelles dans `overlay-platform`.
+4. Reprendre le clamp défensif `config.width/height` (voir §"Bug de redimensionnement") comme
+   pattern systématique dans le futur `overlay-platform`, indépendamment de sa cause ici.
 
 ## Le patch wgpu-hal — pourquoi il n'est pas commité tel quel
 
