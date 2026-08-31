@@ -4,3 +4,7 @@
 
 # Node (spikes)
 **/node_modules/
+
+# Sources tierces vendues + patchées, regénérées par patches/setup-vendor.sh — seul le patch
+# lui-même (patches/*.patch) est commité, pas la copie complète du crate.
+spikes/*/vendor/
