@@ -1,0 +1,17 @@
+[package]
+name = "overlay-ingest"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Suivi (tail) de wakfu.log : découverte de chemin, lecture incrémentale, détection de rotation/troncature — voir docs/plan-architecture.md §5."
+
+[dependencies]
+crossbeam-channel = "0.5"
+notify = "8"
+tracing = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3"
