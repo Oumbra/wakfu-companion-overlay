@@ -1,9 +1,9 @@
 //! Découverte du chemin de `wakfu.log` — voir docs/plan-architecture.md §5.1.
 //!
-//! Seul le premier chemin Windows est **vérifié** (présent dans `tests/wakfu.log` du dépôt web).
-//! Tous les autres sont des hypothèses documentées comme telles dans le plan — l'appelant ne doit
-//! jamais traiter une découverte manquée comme une erreur fatale : c'est le rôle du sélecteur de
-//! fichier manuel côté UI (hors périmètre de ce crate).
+//! Seul le premier chemin Windows est **vérifié** — sur une installation réelle (2026-08-31), pas
+//! seulement déduit d'une ligne de log. Tous les autres sont des hypothèses documentées comme
+//! telles dans le plan — l'appelant ne doit jamais traiter une découverte manquée comme une erreur
+//! fatale : c'est le rôle du sélecteur de fichier manuel côté UI (hors périmètre de ce crate).
 
 #[cfg(not(windows))]
 use std::path::Path;
@@ -30,13 +30,17 @@ pub fn discover() -> Option<PathBuf> {
 #[cfg(windows)]
 fn windows_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    // 1. Vérifié sur machine réelle (tests/wakfu.log du dépôt web).
+    // 1. Vérifié sur machine réelle (2026-08-31) : le plan v2 initial (§1) citait
+    // `%APPDATA%\zaap\gamesLogs\wakfu\wakfu.log` sans le sous-dossier `logs\`, déduit à tort d'une
+    // ligne de log mentionnant un *autre* fichier (`.../wakfu/config`) — corrigé ici après
+    // constat direct sur une installation réelle du client.
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        out.push(PathBuf::from(appdata).join("zaap/gamesLogs/wakfu/wakfu.log"));
+        out.push(PathBuf::from(appdata).join("zaap/gamesLogs/wakfu/logs/wakfu.log"));
     }
-    // 2. Hypothèse non confirmée (installation via un autre lanceur Ankama).
+    // 2. Hypothèse non confirmée (installation via un autre lanceur Ankama) — sous-dossier
+    // `logs\` aligné sur le n°1 par cohérence, mais pas vérifié pour cet emplacement précis.
     if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
-        out.push(PathBuf::from(localappdata).join("Ankama/zaap/gamesLogs/wakfu/wakfu.log"));
+        out.push(PathBuf::from(localappdata).join("Ankama/zaap/gamesLogs/wakfu/logs/wakfu.log"));
     }
     out
 }

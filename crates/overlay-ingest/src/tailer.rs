@@ -83,10 +83,21 @@ impl Tailer {
             return Ok(Vec::new());
         }
 
+        // Capturé *avant* la lecture : c'est l'état de rattrapage au moment où ce lot a été
+        // demandé qui détermine son `is_initial_load`, pas l'état une fois la lecture terminée.
+        let was_caught_up = self.caught_up;
+
         file.seek(SeekFrom::Start(self.offset))?;
         let mut buf = Vec::with_capacity((len - self.offset) as usize);
         file.read_to_end(&mut buf)?;
         self.offset = len;
+        // On vient de lire tout ce qui existait au moment de ce `poll()` : qu'il en ressorte des
+        // lignes complètes ou seulement un reliquat partiel, on est désormais à jour. Repasser à
+        // `false` n'arrive qu'au prochain appel, s'il détecte une rotation (plus haut). Sans ce
+        // flag posé ici (et pas seulement dans la branche `len == self.offset` ci-dessus), une
+        // ligne ajoutée en direct juste après le rattrapage initial restait à tort étiquetée
+        // rattrapage — observé en conditions réelles via `overlay-app` sur un vrai `wakfu.log`.
+        self.caught_up = true;
         self.pending.extend_from_slice(&buf);
 
         let mut lines = Vec::new();
@@ -106,7 +117,7 @@ impl Tailer {
             return Ok(Vec::new());
         }
 
-        let is_initial_load = !self.caught_up;
+        let is_initial_load = !was_caught_up;
         Ok(lines
             .chunks(MAX_BATCH_LINES)
             .map(|chunk| LineBatch {
