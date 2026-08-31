@@ -1,10 +1,16 @@
 [workspace]
 resolver = "2"
-# `crates/*` uniquement — les crates sous `spikes/` sont des harnais jetables, indépendants,
-# avec leur propre patch vendored (voir spikes/s1-window-windows/README.md) : les inclure ici
-# ferait fuiter ce patch dans la résolution de dépendances de l'application réelle.
+# `crates/*` uniquement — les crates sous `spikes/` sont des harnais jetables et indépendants
+# (chacun son propre Cargo.lock, jamais résolus avec le workspace principal).
 members = ["crates/*"]
 
 [workspace.package]
 edition = "2021"
 publish = false
+
+# `overlay-ui` a besoin de DirectComposition sous Windows (fenêtre transparente, voir S1 —
+# spikes/s1-window-windows/README.md pour le détail complet des deux bugs corrigés). `vendor/`
+# n'est PAS commité (voir .gitignore) : lancer `bash patches/setup-vendor.sh` après un clone,
+# avant tout `cargo build` touchant overlay-ui.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal-30.0.1" }

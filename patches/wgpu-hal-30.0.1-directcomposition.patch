@@ -1,0 +1,135 @@
+--- a/src/dx12/mod.rs
++++ b/src/dx12/mod.rs
+@@ -1474,14 +1474,45 @@
+         device: &Device,
+         config: &crate::SurfaceConfiguration,
+     ) -> Result<(), crate::SurfaceError> {
+-        let mut flags = Dxgi::DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
++        let is_composition_target = matches!(
++            self.target,
++            SurfaceTarget::Visual(_)
++                | SurfaceTarget::VisualFromWndHandle { .. }
++                | SurfaceTarget::SwapChainPanel(_)
++        );
++
++        // PATCH (wakfu-companion-overlay, spike S1) : wgpu-hal 30.0.1 pose inconditionnellement
++        // DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT. Exclu ici pour une cible
++        // composition par prudence pendant l'investigation (hypothèse initiale : incompatible
++        // avec CreateSwapChainForComposition, comme ALLOW_TEARING plus bas) — hypothèse NON
++        // CONFIRMÉE au final : la cause réelle de l'échec DXGI_ERROR_INVALID_CALL rencontré
++        // était `AlphaMode: DXGI_ALPHA_MODE_STRAIGHT` (rejeté par ce pilote pour une swapchain
++        // composition, DXGI_ALPHA_MODE_PREMULTIPLIED fonctionne — voir main.rs, `alpha_mode:
++        // PreMultiplied`), pas ce flag. Cette exclusion n'a donc PAS été re-testée avec le flag
++        // remis et le bon AlphaMode — elle peut être superflue. Laissée en l'état par prudence
++        // (elle prive seulement les surfaces composition de `GetFrameLatencyWaitableObject`,
++        // dégradation mineure — voir la garde `has_waitable_object_flag` plus bas) ; à
++        // retester avant de proposer une correction définitive en amont. Voir
++        // spikes/s1-window-windows/README.md.
++        let mut flags = Dxgi::DXGI_SWAP_CHAIN_FLAG(0);
++        if !is_composition_target {
++            flags |= Dxgi::DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
++        }
+         // We always set ALLOW_TEARING on the swapchain no matter
+         // what kind of swapchain we want because ResizeBuffers
+         // cannot change the swapchain's ALLOW_TEARING flag.
+         //
+         // This does not change the behavior of the swapchain, just
+         // allow present calls to use tearing.
+-        if self.supports_allow_tearing {
++        //
++        // PATCH (wakfu-companion-overlay, spike S1) : DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING n'est
++        // documenté par Microsoft que pour les swapchains créées via CreateSwapChainForHwnd —
++        // le combiner avec CreateSwapChainForComposition (notre cas, SurfaceTarget::Visual* /
++        // SwapChainPanel) fait échouer la création avec DXGI_ERROR_INVALID_CALL (0x887A0001),
++        // reproduit et confirmé sur ce spike (RTX 3080 Ti, driver 32.0.16.1062, Windows 11).
++        // Voir spikes/s1-window-windows/README.md pour le détail complet et le lien à faire
++        // remonter en amont (upstream wgpu).
++        if self.supports_allow_tearing && !is_composition_target {
+             flags |= Dxgi::DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+         }
+ 
+@@ -1535,9 +1566,48 @@
+                     BufferUsage: Dxgi::DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                     BufferCount: swap_chain_buffer,
+                     Scaling: Dxgi::DXGI_SCALING_STRETCH,
+-                    SwapEffect: Dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD,
++                    // PATCH (wakfu-companion-overlay, spike S1) : Microsoft documente
++                    // explicitement que CreateSwapChainForComposition EXIGE
++                    // DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, pas FLIP_DISCARD — voir
++                    // https://learn.microsoft.com/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgifactory2-createswapchainforcomposition
++                    // ("You must specify the DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL value in the
++                    // SwapEffect member ... because CreateSwapChainForComposition supports only
++                    // flip presentation model"). wgpu-hal 30.0.1 posait FLIP_DISCARD
++                    // inconditionnellement ; c'était le second facteur (avec ALLOW_TEARING,
++                    // déjà patché plus haut) de l'échec DXGI_ERROR_INVALID_CALL (0x887A0001) sur
++                    // ce spike (RTX 3080 Ti, driver 32.0.16.1062, Windows 11) — voir
++                    // spikes/s1-window-windows/README.md.
++                    SwapEffect: if is_composition_target {
++                        Dxgi::DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
++                    } else {
++                        Dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD
++                    },
+                     Flags: flags.0 as u32,
+                 };
++                // DIAGNOSTIC TEMPORAIRE (spike S1) : dump exhaustif du descripteur juste avant
++                // l'appel, pour identifier avec certitude le paramètre en cause plutôt que de
++                // continuer à tester des hypothèses une à une.
++                log::error!(
++                    "DIAG desc = {{ AlphaMode: {:?}, Width: {}, Height: {}, Format: {:?}, \
++                     BufferCount: {}, Scaling: {:?}, SwapEffect: {:?}, Flags: {} }}, \
++                     is_composition_target = {}, target = {:?}",
++                    desc.AlphaMode,
++                    desc.Width,
++                    desc.Height,
++                    desc.Format,
++                    desc.BufferCount,
++                    desc.Scaling,
++                    desc.SwapEffect,
++                    desc.Flags,
++                    is_composition_target,
++                    match &self.target {
++                        SurfaceTarget::WndHandle(_) => "WndHandle",
++                        SurfaceTarget::VisualFromWndHandle { .. } => "VisualFromWndHandle",
++                        SurfaceTarget::Visual(_) => "Visual",
++                        SurfaceTarget::SurfaceHandle(_) => "SurfaceHandle",
++                        SurfaceTarget::SwapChainPanel(_) => "SwapChainPanel",
++                    }
++                );
+                 let swap_chain1 = match self.target {
+                     SurfaceTarget::Visual(_)
+                     | SurfaceTarget::VisualFromWndHandle { .. }
+@@ -1675,15 +1745,31 @@
+             | SurfaceTarget::SwapChainPanel(_) => {}
+         }
+ 
+-        unsafe { swap_chain.SetMaximumFrameLatency(config.maximum_frame_latency) }
+-            .into_device_result("SetMaximumFrameLatency")?;
++        // PATCH (wakfu-companion-overlay, spike S1) : Microsoft documente que
++        // `SetMaximumFrameLatency` (et de même `GetFrameLatencyWaitableObject` juste après)
++        // « n'est valide que sur les swapchains créées avec
++        // DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT ; sinon DXGI_ERROR_INVALID_CALL » —
++        // https://learn.microsoft.com/windows/win32/api/dxgi1_3/nf-dxgi1_3-idxgiswapchain2-setmaximumframelatency
++        // Or ce flag n'est plus posé pour une cible composition (voir patch ci-dessus) : les
++        // deux appels doivent donc devenir conditionnels, sous peine de faire échouer TOUTE
++        // reconfiguration ultérieure de la surface (resize...), pas seulement la création
++        // initiale. Voir spikes/s1-window-windows/README.md.
++        let has_waitable_object_flag = flags.0 & Dxgi::DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 != 0;
++        if has_waitable_object_flag {
++            unsafe { swap_chain.SetMaximumFrameLatency(config.maximum_frame_latency) }
++                .into_device_result("SetMaximumFrameLatency")?;
++        }
+ 
+         let waitable = match device.options.latency_waitable_object {
+             wgt::Dx12UseFrameLatencyWaitableObject::None => None,
+             wgt::Dx12UseFrameLatencyWaitableObject::Wait
+-            | wgt::Dx12UseFrameLatencyWaitableObject::DontWait => {
++            | wgt::Dx12UseFrameLatencyWaitableObject::DontWait
++                if has_waitable_object_flag =>
++            {
+                 Some(unsafe { swap_chain.GetFrameLatencyWaitableObject() })
+             }
++            wgt::Dx12UseFrameLatencyWaitableObject::Wait
++            | wgt::Dx12UseFrameLatencyWaitableObject::DontWait => None,
+         };
+ 
+         let mut resources = Vec::with_capacity(swap_chain_buffer as usize);
