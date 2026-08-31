@@ -10,6 +10,8 @@
 //! synchro serveur, L4/L5), pas de disposition persistée par écran, pas de thème configurable. Ce
 //! sont les deux panneaux atteignables avec `overlay-engine` tel qu'il existe aujourd'hui.
 
+mod game_window;
+
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +19,7 @@ use std::thread;
 
 use arc_swap::ArcSwap;
 use egui_wgpu::wgpu;
+use game_window::GameWindowTracker;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{Engine, SessionSnapshot};
@@ -27,6 +30,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -37,6 +41,10 @@ use winit::platform::windows::WindowAttributesExtWindows;
 
 const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
 const WINDOW_SIZE: (f64, f64) = (360.0, 480.0);
+/// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
+/// gauche de l'overlay — « collé à quelques pixels près » (demande utilisateur). À ajuster après
+/// avoir vu le rendu en pratique.
+const GAME_EDGE_MARGIN_PX: i32 = 12;
 
 /// Émis par le thread Engine (§3 du plan) quand un nouveau `SessionSnapshot` est disponible —
 /// réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 : pas de boucle 60 Hz
@@ -64,6 +72,13 @@ struct App {
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     log_path: PathBuf,
+    game_window: GameWindowTracker,
+    /// Dernière position appliquée à l'overlay — évite de rappeler `set_outer_position` à chaque
+    /// tick (50 ms) quand la fenêtre de jeu n'a pas bougé.
+    last_position: Option<PhysicalPosition<i32>>,
+    /// `true` tant qu'aucune fenêtre de jeu n'a jamais été trouvée — sert uniquement à logger la
+    /// découverte/perte une seule fois plutôt qu'à chaque tick.
+    game_window_seen: bool,
 }
 
 impl App {
@@ -82,6 +97,39 @@ impl App {
             interactive: true,
             snapshot,
             log_path,
+            game_window: GameWindowTracker::new(),
+            last_position: None,
+            game_window_seen: false,
+        }
+    }
+
+    /// Recolle l'overlay au bord gauche de la fenêtre de jeu si elle est trouvée, verticalement
+    /// centrée dessus (demande utilisateur). Suit tout déplacement/redimensionnement en continu
+    /// (rappelé à chaque tick, voir `about_to_wait`) ; n'appelle `set_outer_position` que si la
+    /// position cible a changé, pour ne pas spammer le compositeur DWM 20×/s pour rien.
+    fn track_game_window(&mut self, window: &Window) {
+        let Some(game) = self.game_window.rect() else {
+            if self.game_window_seen {
+                println!(
+                    "[fenêtre de jeu] introuvable (Wakfu fermé ?) — dernière position gardée."
+                );
+                self.game_window_seen = false;
+            }
+            return;
+        };
+        if !self.game_window_seen {
+            println!("[fenêtre de jeu] trouvée, l'overlay se cale dessus.");
+            self.game_window_seen = true;
+        }
+
+        let overlay_height = window.outer_size().height as i32;
+        let desired = PhysicalPosition::new(
+            game.left + GAME_EDGE_MARGIN_PX,
+            game.top + (game.height - overlay_height) / 2,
+        );
+        if self.last_position != Some(desired) {
+            window.set_outer_position(desired);
+            self.last_position = Some(desired);
         }
     }
 
@@ -209,10 +257,17 @@ impl ApplicationHandler<UserEvent> for App {
         if self.hotkey_events.try_recv().is_ok() {
             self.toggle_interactive();
         }
+        // Suivi de la fenêtre de jeu : même sondage périodique que le hotkey (pas d'API Win32
+        // pour être notifié d'un déplacement/redimensionnement d'une fenêtre qui n'est pas la
+        // nôtre sans un hook global — un sondage à 20 Hz est largement assez réactif ici et reste
+        // négligeable en coût, voir game_window.rs).
+        if let Some(window) = self.window {
+            self.track_game_window(window);
+        }
         // Réactif (§6.1) : on attend soit un événement fenêtre, soit un `UserEvent::NewSnapshot`
-        // du thread Engine, jamais de boucle 60 Hz forcée. Le sondage hotkey ci-dessus impose
-        // quand même un réveil périodique court, sans quoi le hotkey ne serait vu qu'au prochain
-        // événement fenêtre.
+        // du thread Engine, jamais de boucle 60 Hz forcée. Le sondage hotkey/fenêtre de jeu
+        // ci-dessus impose quand même un réveil périodique court, sans quoi ni l'un ni l'autre ne
+        // seraient vus qu'au prochain événement fenêtre.
         event_loop.set_control_flow(ControlFlow::WaitUntil(
             std::time::Instant::now() + std::time::Duration::from_millis(50),
         ));
@@ -308,7 +363,7 @@ async fn init_gpu(window: &'static Window) -> GpuState {
 
 fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &SessionSnapshot) {
     let raw_input = gpu.egui_winit.take_egui_input(window);
-    let full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
+    let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::default().fill(egui::Color32::from_rgba_unmultiplied(18, 20, 28, 215)),
@@ -410,6 +465,22 @@ fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &Ses
         .egui_ctx
         .tessellate(full_output.shapes, full_output.pixels_per_point);
 
+    // Traité inconditionnellement, *avant* toute sortie anticipée ci-dessous : `textures_delta`
+    // doit être appliqué (set) puis libéré (free), et explicitement vidé (`clear`) ensuite, quel
+    // que soit le sort de cette frame — `TexturesDelta` panique (`debug_assert!`, donc invisible
+    // en `--release`, ce qui l'a caché jusqu'ici) si ses collections ne sont pas vides à sa
+    // destruction, et les itérer par référence ne les vide pas.
+    for (id, deltas) in &full_output.textures_delta.set {
+        for delta in deltas {
+            gpu.egui_renderer
+                .update_texture(&gpu.device, &gpu.queue, *id, delta);
+        }
+    }
+    for id in &full_output.textures_delta.free {
+        gpu.egui_renderer.free_texture(id);
+    }
+    full_output.textures_delta.clear();
+
     let output_frame = match gpu.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(frame) => frame,
         wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -431,13 +502,6 @@ fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &Ses
         size_in_pixels: [gpu.config.width, gpu.config.height],
         pixels_per_point: full_output.pixels_per_point,
     };
-
-    for (id, deltas) in &full_output.textures_delta.set {
-        for delta in deltas {
-            gpu.egui_renderer
-                .update_texture(&gpu.device, &gpu.queue, *id, delta);
-        }
-    }
 
     let mut encoder = gpu
         .device
@@ -473,10 +537,6 @@ fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &Ses
             .forget_lifetime();
         gpu.egui_renderer
             .render(&mut render_pass, &paint_jobs, &screen_descriptor);
-    }
-
-    for id in &full_output.textures_delta.free {
-        gpu.egui_renderer.free_texture(id);
     }
 
     gpu.queue.submit(Some(encoder.finish()));
