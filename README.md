@@ -8,8 +8,9 @@ l'Hôtel de Vente, échanges) vers le même compte que l'application web.
 
 **Plateformes visées : Windows et Linux (X11 / XWayland).** macOS est hors périmètre.
 
-État : spikes de validation technique (`spikes/`) terminés, premier lot applicatif réel en cours
-(`crates/`, workspace Cargo à la racine).
+État : spikes de validation technique (`spikes/`) terminés ; L1 (ingestion) fait, L2 (UI) en
+cours — deux panneaux réels (dégâts du combat, récap de session) tournent déjà sur un vrai
+`wakfu.log` (`crates/`, workspace Cargo à la racine).
 
 📄 **[Plan d'architecture technique](docs/plan-architecture.md)** — stack, modèle de threads,
 ingestion du log, rendu et click-through par OS, synchronisation serveur, budget mémoire,
@@ -21,6 +22,8 @@ feuille de route et revue d'experts.
 | --- | --- | --- |
 | [`overlay-ingest`](crates/overlay-ingest/) | L1 ✅ | Suivi de `wakfu.log` : découverte de chemin, lecture incrémentale, rotation/troncature. `cargo test -p overlay-ingest`. |
 | [`overlay-app`](crates/overlay-app/) | L1 (câblage) | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
+| [`overlay-engine`](crates/overlay-engine/) | L2 🟡 | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
+| [`overlay-ui`](crates/overlay-ui/) | L2 🟡 | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, sur un vrai `wakfu.log`. `.\preview.ps1` depuis le dossier du crate. |
 
 ## Spikes (`spikes/`)
 

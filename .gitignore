@@ -7,4 +7,5 @@
 
 # Sources tierces vendues + patchées, regénérées par patches/setup-vendor.sh — seul le patch
 # lui-même (patches/*.patch) est commité, pas la copie complète du crate.
+/vendor/
 spikes/*/vendor/
