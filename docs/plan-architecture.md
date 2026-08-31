@@ -347,6 +347,29 @@ explicitement cliqué (`WS_EX_NOACTIVATE` côté Windows, `_NET_WM_STATE_ABOVE` 
 - Multi-écran/HiDPI : suivre le `scale_factor` winit ; ancrage de l'overlay par écran + décalage,
   persistés par identifiant d'écran.
 
+### 6.5 Ancrage sur la fenêtre de jeu
+
+L'overlay se cale au bord gauche de la fenêtre du client de jeu, verticalement centré dessus, et
+suit tout déplacement/redimensionnement (`crates/overlay-ui/src/game_window.rs`) :
+
+- **Identification par titre, pas par process.** Le titre de la fenêtre de jeu est
+  `"<Nom du personnage> - WAKFU"` — variable, mais le suffixe `" - WAKFU"` est constant. Vérifié en
+  conditions réelles : le client tourne sous un process `java`/`javaw` générique (Wakfu est Java,
+  voir §6.4), donc filtrer par nom d'exécutable est trop large pour être fiable — seul le titre
+  discrimine correctement.
+- **Windows** : `EnumWindows` + `GetWindowTextW` pour trouver la fenêtre, `HWND` mis en cache tant
+  qu'`IsWindow` le confirme vivant. Rectangle via `DWMWA_EXTENDED_FRAME_BOUNDS` (bord réellement
+  visible, pas la marge de redimensionnement invisible que `GetWindowRect` inclut sur Windows
+  10/11), repli sur `GetWindowRect` si l'appel DWM échoue.
+- **Sondage à 20 Hz** (même tick que le sondage hotkey, §6.3) plutôt qu'un événement : il n'existe
+  pas d'API portable pour être notifié du déplacement d'une fenêtre qui n'est pas la nôtre sans un
+  hook global (`SetWinEventHook`) — jugé disproportionné pour ce besoin. Coût mesuré négligeable ;
+  repositionnement (`set_outer_position`) uniquement si la position cible a changé, pas à chaque
+  tick.
+- **X11 (à faire, S3 différé)** : équivalent par `_NET_WM_NAME` (ou `WM_NAME`) + comparaison de
+  suffixe, `_NET_CLIENT_LIST` pour l'énumération, `XGetWindowProperty`/`_NET_FRAME_EXTENTS` pour le
+  rectangle visible.
+
 ---
 
 ## 7. Synchronisation serveur
