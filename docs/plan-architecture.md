@@ -277,21 +277,41 @@ Prérequis qui en découle pour L1 : publier des `UiSnapshot` intermédiaires pe
 
 C'est ce qui rend l'outil « léger » en CPU/GPU/batterie, bien plus que le choix du langage.
 
-### 6.2 Windows — la partie qui doit être prototypée en premier
+### 6.2 Windows — validé par S1 (`spikes/s1-window-windows/`)
 
 Une fenêtre à transparence par pixel + toujours au-dessus + traversable, avec un swapchain moderne,
-ne s'obtient pas naïvement. Chemin retenu :
+ne s'obtient pas naïvement, mais le chemin est **plus simple que prévu ici** : pas besoin de piloter
+`IDCompositionDevice`/`Target`/`Visual` à la main, `wgpu-hal` le fait déjà en interne. Chemin
+confirmé par le spike :
 
 1. Fenêtre `winit` : `with_transparent(true)`, `with_decorations(false)`,
    `with_window_level(AlwaysOnTop)`, et extensions Windows `with_skip_taskbar(true)`,
    `with_no_redirection_bitmap(true)`.
-2. Styles étendus complémentaires : `WS_EX_NOACTIVATE` (ne vole jamais le focus au jeu),
-   `WS_EX_TOOLWINDOW`.
-3. Composition **DirectComposition** : `IDCompositionDevice` → `Target` sur le HWND → `Visual`, et
-   surface `wgpu` créée depuis ce visual (`SurfaceTargetUnsafe::CompositionVisual`). C'est la voie
-   fiable pour l'alpha ; la présentation DXGI directe sur fenêtre layered est le piège classique.
-4. Repli documenté si le spike échoue sur une configuration : fond opaque + mode « fenêtre compagnon
-   accolée » plutôt qu'overlay transparent.
+2. Styles étendus complémentaires, posés à la main sur le HWND (non exposés par `winit`) :
+   `WS_EX_NOACTIVATE` (ne vole jamais le focus au jeu), `WS_EX_TOOLWINDOW`.
+3. Composition **DirectComposition**, pilotée entièrement par `wgpu-hal` : backend forcé DX12,
+   `Dx12BackendOptions { presentation_system: Dx12SwapchainKind::DxgiFromVisual, .. }` à la création
+   de l'instance `wgpu`. `wgpu-hal` crée et gère lui-même `IDCompositionDevice`/`Target`/`Visual` en
+   interne dès la configuration de la surface (`DCompState::get_or_init`) — nul besoin de code
+   DirectComposition manuel côté `overlay-platform`. `CompositeAlphaMode::PreMultiplied`
+   obligatoire (`PostMultiplied` est rejeté par `CreateSwapChainForComposition` sur ce pilote), ce
+   qui correspond de toute façon au blending qu'`egui_wgpu::Renderer` produit déjà.
+4. Deux bugs réels de `wgpu-hal` 30.0.1 pour la cible composition (`DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING`
+   posé inconditionnellement, `SwapEffect` codé en dur à `FLIP_DISCARD` au lieu de
+   `FLIP_SEQUENTIAL`) nécessitent un patch vendored tant qu'ils ne sont pas corrigés en amont — voir
+   `spikes/s1-window-windows/README.md` (§"Découverte n°2") et le patch associé. À réévaluer pour
+   `overlay-platform` : soit une PR amont sur `gfx-rs/wgpu` d'ici là, soit reconduire le même patch.
+5. Clamper `config.width`/`height` à `device.limits().max_texture_dimension_2d` avant chaque
+   `Surface::configure()` : un `WindowEvent::Resized` incohérent et transitoire a été observé au
+   tout premier redimensionnement (cause racine non élucidée, sans impact une fois clampé) — pattern
+   à reprendre systématiquement, indépendamment de sa cause.
+6. Repli documenté si une configuration matérielle future s'avère incompatible : fond opaque + mode
+   « fenêtre compagnon accolée » plutôt qu'overlay transparent — non nécessaire sur le matériel testé
+   (RTX 3080 Ti, driver 32.0.16.1062, Windows 11).
+
+Détail complet (bugs, découvertes, repro isolé, capture d'écran de validation) dans
+`spikes/s1-window-windows/README.md` — à relire avant d'implémenter `overlay-platform::windows`,
+ce document ne le répète pas.
 
 ### 6.3 Click-through et retour de la souris
 
@@ -472,7 +492,7 @@ Chaque panneau est déplaçable, redimensionnable, avec opacité réglable ; dis
 
 | Lot | Contenu | Critère de sortie |
 | --- | --- | --- |
-| **S1 — Spike rendu Windows** (3 j) | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Un carré egui semi-transparent flotte au-dessus de Wakfu en fenêtré sans bordure, la souris traverse, RSS mesuré |
+| **S1 — Spike rendu Windows** ✅ fait | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Voir `spikes/s1-window-windows/README.md` : panneau egui semi-transparent confirmé par capture d'écran par-dessus une autre fenêtre, hotkey global de bascule confirmé sans focus, RSS ~87 Mo — **verdict : chemin DirectComposition via `wgpu-hal` (`DxgiFromVisual`) validé**, plus simple que prévu (§6.2 mis à jour) |
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
 | **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland | Idem, sur GNOME/KDE Wayland via XWayland et sur une session X11 pure |
 | **L1 — Ingestion** | tail, rotation, découverte de chemin, `isInitialLoad` | Rejeu, rotation et troncature couverts par des tests |

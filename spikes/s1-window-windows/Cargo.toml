@@ -3,6 +3,8 @@ name = "s1-window-windows"
 version = "0.1.0"
 edition = "2021"
 publish = false
+# Deux binaires dans ce crate (voir [[bin]] plus bas) : sans ceci, `cargo run` nu est ambigu.
+default-run = "s1-window-windows"
 
 [[bin]]
 name = "s1-window-windows"
