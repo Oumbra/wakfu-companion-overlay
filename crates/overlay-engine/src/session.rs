@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use crate::class_breed::class_for_breed;
 use crate::model::{FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
+use crate::watchlist::{WatchlistEntry, WatchlistState};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FighterDamage {
@@ -336,6 +337,10 @@ pub struct Engine {
     /// (`SessionState::default()` ci-dessous), ce qui effacerait le roster à chaque
     /// reconnexion/rotation de `wakfu.log` si on le stockait là.
     roster: Option<RosterIndex>,
+    /// Suivi (watchlist, §9) — même raison qu'au-dessus : un compteur doit survivre à un
+    /// rattrapage, PORTÉ PAR `Engine` et jamais recréé avec `SessionState`. Voir `watchlist.rs`
+    /// pour la frontière définitions (compte)/compteurs (local à l'overlay).
+    watchlist: WatchlistState,
 }
 
 impl Engine {
@@ -345,6 +350,7 @@ impl Engine {
             state: SessionState::default(),
             in_initial_sweep: false,
             roster: None,
+            watchlist: WatchlistState::new(crate::watchlist::default_store_path()),
         })
     }
 
@@ -358,6 +364,18 @@ impl Engine {
         self.roster = roster;
     }
 
+    /// Remplace la liste des entrées suivies par celle renvoyée par le compte (voir
+    /// `watchlist_from_settings_json`), en conservant les compteurs locaux déjà en cours pour
+    /// toute entrée déjà connue (voir `WatchlistState::merge_config`). Appelé par l'hôte au même
+    /// moment que `set_roster` — même source `GET /api/v1/settings`.
+    pub fn set_watchlist_entries(&mut self, entries: Vec<WatchlistEntry>) {
+        self.watchlist.merge_config(entries);
+    }
+
+    pub fn watchlist_entries(&self) -> &[WatchlistEntry] {
+        self.watchlist.entries()
+    }
+
     /// Ingère un lot déjà lu par `overlay-ingest`, met à jour l'état de session en place, et
     /// renvoie les `LogEntry` produits (utile pour un affichage brut — chat, journal — que ce
     /// premier slice de L2 n'agrège pas encore, voir le module `session`).
@@ -367,7 +385,9 @@ impl Engine {
     ) -> Result<Vec<LogEntry>, crate::quickjs_engine::EngineError> {
         if batch.is_initial_load && !self.in_initial_sweep {
             // Nouveau rattrapage (reconnexion ou rotation, §5.3) : on repart de zéro, parser ET
-            // état de session — c'est la sémantique `resetSessionState()` décrite au plan.
+            // état de session — c'est la sémantique `resetSessionState()` décrite au plan. La
+            // watchlist n'est PAS réinitialisée ici (voir son champ ci-dessus) : ses compteurs
+            // sont un suivi persistant, pas un état de combat.
             self.parser.reset()?;
             self.state = SessionState::default();
         }
@@ -376,6 +396,12 @@ impl Engine {
         let entries = self.parser.parse_lines(&batch.lines)?;
         for entry in &entries {
             self.state.apply(entry, self.roster.as_ref());
+            // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
+            // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
+            // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
+            if !batch.is_initial_load {
+                self.watchlist.apply(entry);
+            }
         }
         Ok(entries)
     }

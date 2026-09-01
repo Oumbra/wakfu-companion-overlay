@@ -548,7 +548,7 @@ Chaque panneau est déplaçable, redimensionnable, avec opacité réglable ; dis
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
 | **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland | **Reporté** (aucune machine Linux disponible pour l'instant) — S1/S2 suffisent à valider la stack sur Windows ; à faire avant tout travail spécifique Linux |
 | **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel) |
-| **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap, disposition persistée | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`) et `crates/overlay-ui/` (fenêtre S1 + panneaux Dégâts du combat/Récap de session), validés sur un vrai `wakfu.log`. **Reste** : Suivi (watchlist), Alertes de drop, État de synchro, disposition persistée par écran, thème configurable — les deux premiers hors de portée sans décision sur `StatsStoreService` (§14 point 3) |
+| **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap, disposition persistée | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi porté en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1 + panneaux Dégâts du combat/Récap de session), validés sur un vrai `wakfu.log`. **Reste** : câblage UI + compte du Suivi (panneau, fetch `watchlist` depuis `GET /api/v1/settings`, persistance locale des compteurs déjà en place côté moteur), Alertes de drop, État de synchro, disposition persistée par écran, thème configurable |
 | **L3 — Catalogue** | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files |
 | **L4 — Auth native** 🟡 en cours | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable — **fait** : 3 endpoints serveur (`/api/v1/auth/native/{pair,claim,poll}`, table `native_pairings`, `Authorization: Bearer` accepté par `_auth.ts`), page web `/pair`, crate `overlay-sync` (pairing bloquant + `keyring`/repli fichier + `GET /settings`), roster appliqué à `overlay-engine::session` (priorité sur `breed`), portraits de classe affichés dans le panneau Combat (`overlay-ui`). **Reste** : UI de pairing dans la fenêtre overlay (console-only pour l'instant), révocation/déconnexion côté overlay, vérification bout en bout contre un vrai déploiement (non joignable depuis un sandbox de dev, voir `crates/overlay-sync/README.md`) |
 | **L5 — Synchro** | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay |
@@ -642,7 +642,17 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
    appairage par code, implémenté (voir L4 ci-dessus)** — ne touche à aucune configuration OAuth
    existante, conforme à la recommandation initiale de ce document.
 3. **Extraction du moteur headless** : lot à planifier **dans `wakfu-companion`** — qui le fait,
-   quand, et sur quelle branche ?
+   quand, et sur quelle branche ? **Reste ouvert pour le récap de session complet et les
+   heuristiques kamas/HDV** (`StatsStoreService`, 2 755 l.). **Tranché différemment pour le Suivi
+   (watchlist), 2026-09-01** : la logique de comptage réelle (`registerLoot`/`registerDefeat`/
+   `incrementWatched`) est une trentaine de lignes isolées, sans heuristique de corrélation
+   comparable à celles qui motivaient la décision B du §2 — portée directement en Rust
+   (`overlay-engine::watchlist`) plutôt que d'attendre l'extraction complète, décision utilisateur
+   assumée comme une dérogation ciblée à la décision B, pas une remise en cause. La LISTE des
+   entrées suivies reste lue en lecture seule depuis le compte (`GET /api/v1/settings`, clé
+   `"watchlist"`, comme le roster) ; les COMPTEURS, eux, sont **locaux à l'overlay** (pas de
+   `PATCH /api/v1/settings` pour l'instant — synchroniser les compteurs eux-mêmes reste un
+   chantier futur, plus proche de L5).
 4. **Signature Authenticode** Windows : budget accepté ou distribution non signée assumée en v1 ?
 5. **Langue du client de jeu** : le parser actuel est FR uniquement. L'overlay hérite de cette
    limite — la documenter, ou élargir le parser côté web (qui bénéficierait aux deux) ?

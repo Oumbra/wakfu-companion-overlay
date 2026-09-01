@@ -2191,6 +2191,7 @@ dependencies = [
 name = "overlay-engine"
 version = "0.1.0"
 dependencies = [
+ "directories",
  "overlay-ingest",
  "rquickjs",
  "serde",
