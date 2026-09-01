@@ -34,9 +34,14 @@ redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et
   icône de connexion au compte. Pas de titre ni de fond opaque (retours utilisateur 2026-09-01) —
   voir la doc de tête du fichier pour le détail des refontes.
 - **Suivi** (`src/panels/watchlist.rs`) — collée au bord HAUT de la fenêtre de jeu, centrée
-  horizontalement, **largeur dynamique** (`watchlist_width`, `main.rs` — une fraction de la
-  largeur de la fenêtre de jeu réelle, calculée à la création, retour utilisateur 2026-09-02 :
-  440px fixes étaient bien trop étroits). Bande de tuiles carrées à l'image du bandeau du dépôt web
+  horizontalement, **largeur pilotée par le CONTENU** (`watchlist_target_width`, `main.rs` —
+  recalculée à chaque redessin, jamais plus large que nécessaire pour les entrées actuellement
+  affichées, plafonnée par une fraction de la largeur de la fenêtre de jeu réelle). Retour
+  utilisateur 2026-09-02, deux allers-retours : 440px fixes étaient bien trop étroits ; une largeur
+  fixe plus généreuse (fraction de la fenêtre de jeu) restait un problème dans l'autre sens — une
+  fenêtre transparente plus large que son contenu réel reste cliquable/bloquante sur toute sa zone
+  (pas de test de transparence par pixel côté Win32), l'utilisateur ne pouvait alors pas deviner où
+  s'arrêtait l'overlay. Bande de tuiles carrées à l'image du bandeau du dépôt web
   (`tracker-strip.component`/`.kpi`, **rendu refondu 2026-09-02 pour rester raccord avec le web** :
   bordure/fond en dégradé selon la RARETÉ de l'objet — `overlay_engine::WakfuRarity`, couleurs de
   `styles.css` — bordure grise unie pour un ennemi ; badge de compteur ancré HORS du coin bas-droit

@@ -68,38 +68,43 @@ use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 use winit::platform::windows::WindowAttributesExtWindows;
 
 const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
+/// Voir `App::sync_topmost`.
+const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
 // voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
 // faire.
 const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
 /// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
-/// `panels::watchlist`) — la LARGEUR, elle, est calculée dynamiquement par `watchlist_width` (voir
-/// sa doc), pas une constante fixe. 84 -> 116 px (2026-09-02) pour réserver l'espace du toast
-/// d'alerte SOUS la bande de tuiles (voir `panels::watchlist::show`) — sans agrandir la fenêtre à
-/// la volée à l'apparition d'un toast, ce qui aurait fait bouger la bande de tuiles elle-même dont
-/// l'ancrage vient d'être mis au point avec l'utilisateur.
+/// `panels::watchlist`) — la LARGEUR, elle, suit dynamiquement le CONTENU (voir
+/// `watchlist_target_width`), pas une constante fixe. 84 -> 116 px (2026-09-02) pour réserver
+/// l'espace du toast d'alerte SOUS la bande de tuiles (voir `panels::watchlist::show`) — sans
+/// agrandir la fenêtre à la volée à l'apparition d'un toast, ce qui aurait fait bouger la bande de
+/// tuiles elle-même dont l'ancrage vient d'être mis au point avec l'utilisateur.
 const WATCHLIST_HEIGHT: f64 = 116.0;
-/// Fraction de la largeur de la fenêtre de jeu occupée par l'overlay Suivi — retour utilisateur
-/// 2026-09-02 (capture d'écran à l'appui) : 440px fixes étaient bien trop étroits, la moindre
-/// poignée d'entrées suivies forçait un défilement horizontal disgracieux. Calculée une seule
-/// fois À LA CRÉATION de la fenêtre (voir `create_overlay_window`) à partir de la largeur RÉELLE
-/// de la fenêtre de jeu à cet instant — jamais recalculée ensuite (la fenêtre reste
-/// `with_resizable(false)`, un vrai redimensionnement dynamique suivant le jeu est un chantier à
-/// part). Bornée par prudence plutôt que par mesure précise de l'espace réellement libre entre les
-/// groupes de boutons du jeu (variable selon la résolution/l'UI du client) — à ajuster si ça
-/// chevauche quand même l'interface du jeu sur une configuration donnée.
+/// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
+/// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
+/// nécessaire, pas seulement celle du contenu peint dedans.
+const WATCHLIST_INNER_MARGIN: f64 = 12.0;
+/// Plafond de largeur — fraction de la largeur de la fenêtre de jeu, jamais dépassée même avec
+/// beaucoup d'entrées suivies (la bande de tuiles défile horizontalement au-delà, voir
+/// `panels::watchlist::show`). Bornée par prudence plutôt que par mesure précise de l'espace
+/// réellement libre entre les groupes de boutons du jeu (variable selon la résolution/l'UI du
+/// client) — à ajuster si ça chevauche quand même l'interface du jeu sur une configuration donnée.
 const WATCHLIST_WIDTH_FRACTION: f64 = 0.5;
-const WATCHLIST_MIN_WIDTH: f64 = 440.0;
-const WATCHLIST_MAX_WIDTH: f64 = 1000.0;
+const WATCHLIST_MAX_CEILING: f64 = 1000.0;
 
-/// Voir `WATCHLIST_WIDTH_FRACTION`. `game_width_px` est en pixels PHYSIQUES (`GameRect::width`,
-/// Win32) — traité ici comme un nombre de points logiques directement, comme le reste des tailles
-/// de fenêtre de ce fichier (`WINDOW_SIZE`, `GAME_EDGE_MARGIN_PX`...) : imprécis sur un écran dont
-/// la mise à l'échelle Windows n'est pas 100 %, mais aucune de ces constantes ne corrige déjà cet
-/// écart — pas introduit spécifiquement ici.
-fn watchlist_width(game_width_px: i32) -> f64 {
-    (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION)
-        .clamp(WATCHLIST_MIN_WIDTH, WATCHLIST_MAX_WIDTH)
+/// Largeur RÉELLEMENT nécessaire à l'affichage actuel — retour utilisateur 2026-09-02 : « je ne
+/// veux pas de fond, je veux que ça reste transparent, mais [...] l'overlay n'a pas plus de taille
+/// s'il n'y a pas besoin » — une fenêtre plus large que son contenu reste cliquable/bloquante sur
+/// toute sa zone même là où rien n'est peint (pas de test de transparence par pixel côté Win32),
+/// l'utilisateur ne peut alors pas deviner où s'arrête l'overlay. Toujours le MINIMUM entre ce que
+/// le contenu demande (`content_width`, croît avec le nombre d'entrées) et le plafond
+/// (`WATCHLIST_WIDTH_FRACTION` de la fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse :
+/// avec peu d'entrées, la fenêtre reste étroite même si le plafond est large.
+fn watchlist_target_width(entry_count: usize, game_width_px: i32) -> f64 {
+    let ceiling = (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION).min(WATCHLIST_MAX_CEILING);
+    let content = panels::watchlist::content_width(entry_count) as f64 + WATCHLIST_INNER_MARGIN;
+    content.min(ceiling).max(WATCHLIST_INNER_MARGIN)
 }
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
 /// gauche de l'overlay Combat — « collé à quelques pixels près » (demande utilisateur). À ajuster
@@ -207,13 +212,25 @@ struct OverlayWindow {
     /// création de fenêtre (demande utilisateur explicite). Sans objet pour une fenêtre `Suivi`.
     combat_side: CombatSide,
     game_hwnd: HWND,
+    /// Dernier rectangle connu de la fenêtre de jeu (mis à jour par `sync_windows`/`reposition`,
+    /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
+    /// dynamique du Suivi (`watchlist_target_width`) sans re-scanner les fenêtres à chaque frame.
+    game_rect: GameRect,
     character_name: String,
     /// Dernière position appliquée — évite de rappeler `set_outer_position` à chaque tick (50 ms)
     /// quand la fenêtre de jeu n'a pas bougé.
     last_position: Option<PhysicalPosition<i32>>,
+    /// Dernière largeur demandée pour une fenêtre `Suivi` (voir `watchlist_target_width`) — évite
+    /// de rappeler `request_inner_size` à chaque frame quand le nombre d'entrées n'a pas changé.
+    /// Sans objet pour une fenêtre `Combat` (toujours `None`).
+    last_watchlist_width: Option<f64>,
     /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
     /// rien (voir `App::sync_topmost`).
     is_topmost: bool,
+    /// Dernière réaffirmation PÉRIODIQUE de `HWND_TOPMOST` (voir `App::sync_topmost` et
+    /// `TOPMOST_REASSERT_INTERVAL`) — distincte d'un changement d'état détecté (`is_topmost`),
+    /// qui reste réaffirmé immédiatement quel que soit ce champ.
+    last_topmost_reassert: Option<std::time::Instant>,
     /// Prochain redessin déjà planifié par une frame précédente qui a demandé un délai (retour
     /// egui `ViewportOutput::repaint_delay` — ex. le délai d'apparition d'une tooltip au survol
     /// d'un portrait, voir `panels::combat`) — sans ce champ, ce délai n'avait AUCUN moyen d'être
@@ -394,7 +411,10 @@ impl App {
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
-            OverlayKind::Watchlist => (watchlist_width(rect.width), WATCHLIST_HEIGHT),
+            // 0 entrée à la création : rien n'est encore chargé (compte/catalogue), la fenêtre
+            // démarre donc au plus étroit (juste les 2 tuiles "+"/"−") et s'élargit dès que
+            // `watchlist` se remplit (voir le redimensionnement dans `RedrawRequested`).
+            OverlayKind::Watchlist => (watchlist_target_width(0, rect.width), WATCHLIST_HEIGHT),
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
@@ -457,9 +477,15 @@ impl App {
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
             game_hwnd,
+            game_rect: rect,
             character_name,
             last_position: Some(position),
+            // Déjà la largeur demandée ci-dessus (`size.0`) pour une fenêtre `Suivi` — la première
+            // vérification dans `RedrawRequested` ne redemande donc rien tant que le nombre
+            // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
+            last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
+            last_topmost_reassert: None,
             next_redraw_at: None,
         }
     }
@@ -468,6 +494,7 @@ impl App {
     /// `anchor_position`) ; n'appelle `set_outer_position` que si la position cible a changé, pour
     /// ne pas spammer le compositeur DWM 20×/s pour rien.
     fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
+        overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
         let desired =
             Self::anchor_position(overlay.kind, rect, outer.width as i32, outer.height as i32);
@@ -530,6 +557,7 @@ impl App {
     /// (ré)inséré en tête du groupe topmost par ce `SetWindowPos`, les autres retombent derrière.
     fn sync_topmost(&mut self) {
         let foreground = unsafe { GetForegroundWindow() };
+        let now = std::time::Instant::now();
 
         for overlay in self.windows.values_mut() {
             let relevant =
@@ -541,13 +569,25 @@ impl App {
             // réclame aussi le premier plan...) SANS passer par notre `SetWindowPos` — `is_topmost`
             // continuait alors de croire l'overlay au premier plan (rien n'avait changé de NOTRE
             // point de vue) et ne le réaffirmait donc jamais, laissant l'overlay caché derrière le
-            // jeu indéfiniment. Fix : réaffirmer HWND_TOPMOST à CHAQUE tick tant que `relevant`
-            // reste vrai (coût négligeable, un `SetWindowPos` sans changement réel de z-order est
-            // très bon marché) — seule la transition vers NOTOPMOST reste optimisée (pas cette
-            // même urgence à la retirer du premier plan).
-            if !relevant && overlay.is_topmost == relevant {
+            // jeu indéfiniment.
+            //
+            // Fix : réaffirmer HWND_TOPMOST PÉRIODIQUEMENT (`TOPMOST_REASSERT_INTERVAL`) tant que
+            // `relevant` reste vrai — immédiatement sur toute transition détectée (`is_topmost` qui
+            // change), sinon au plus toutes les `TOPMOST_REASSERT_INTERVAL` (throttle ajouté après
+            // un premier essai « à chaque tick », 20×/s — pas de raison connue de le soupçonner
+            // dans un nouveau signalement de disparition prolongée après une longue session, mais
+            // par prudence : un `SetWindowPos` qui ne change réellement rien reste rare mais pas
+            // strictement gratuit, autant l'éviter sur des heures de jeu). La transition vers
+            // NOTOPMOST, elle, reste optimisée comme avant (pas cette même urgence).
+            let transitioned = overlay.is_topmost != relevant;
+            let due_for_reassert = relevant
+                && overlay
+                    .last_topmost_reassert
+                    .is_none_or(|t| now.duration_since(t) >= TOPMOST_REASSERT_INTERVAL);
+            if !transitioned && !due_for_reassert {
                 continue;
             }
+
             let insert_after = if relevant {
                 HWND_TOPMOST
             } else {
@@ -566,6 +606,9 @@ impl App {
                 );
             }
             overlay.is_topmost = relevant;
+            if relevant {
+                overlay.last_topmost_reassert = Some(now);
+            }
         }
     }
 }
@@ -634,6 +677,26 @@ impl ApplicationHandler<UserEvent> for App {
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
                 let watchlist = self.watchlist.load();
+                if overlay.kind == OverlayKind::Watchlist {
+                    // Largeur pilotée par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre
+                    // plus large que nécessaire reste cliquable/bloquante sur toute sa zone même
+                    // transparente, l'utilisateur ne peut alors pas deviner où s'arrête l'overlay)
+                    // — voir la doc de `watchlist_target_width`. Comparée à la dernière largeur
+                    // DEMANDÉE (`last_watchlist_width`), pas à la taille réelle actuelle de la
+                    // fenêtre : `request_inner_size` sur Windows n'est pas garanti instantané,
+                    // comparer à la taille réelle redemanderait inutilement tant que le compositeur
+                    // n'a pas fini d'appliquer la précédente demande.
+                    let target = watchlist_target_width(watchlist.len(), overlay.game_rect.width);
+                    if overlay.last_watchlist_width != Some(target) {
+                        let _ = overlay
+                            .window
+                            .request_inner_size(winit::dpi::LogicalSize::new(
+                                target,
+                                WATCHLIST_HEIGHT,
+                            ));
+                        overlay.last_watchlist_width = Some(target);
+                    }
+                }
                 let watchlist_toast_guard = self.watchlist_toast.load();
                 let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
                 let catalog = self.catalog.load();
