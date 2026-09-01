@@ -46,6 +46,13 @@ impl UiIcons {
             ))
             .maintain_aspect_ratio(false)
     }
+
+    /// Texture brute du repli générique — pour un appelant qui a besoin d'une taille différente de
+    /// `PORTRAIT_SIZE` (voir `unknown_entity_image`), ex. les tuiles du panneau Suivi
+    /// (`panels::watchlist`), plus petites que les portraits du panneau Combat.
+    pub fn unknown_entity_texture(&self) -> &egui::TextureHandle {
+        &self.unknown_entity
+    }
 }
 
 fn load_texture(ctx: &egui::Context, name: &'static str, bytes: &[u8]) -> egui::TextureHandle {

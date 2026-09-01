@@ -1,115 +1,154 @@
-//! Panneau "Suivi" (watchlist, §9 du plan) — liste compacte en LECTURE SEULE des entrées suivies
-//! (nom/genre/mode/compteur), affichée sous le panneau Combat quand le compte en déclare au moins
-//! une (voir l'appelant, `main.rs::render`). Aucune édition possible depuis l'overlay pour cette
-//! première version : la liste elle-même reste éditée sur le web (voir `overlay_engine::watchlist`
-//! pour la frontière définitions/compteurs), seuls les compteurs — incrémentés localement à chaque
-//! ramassage/ennemi vaincu — sont propres à l'overlay.
+//! Panneau "Suivi" (watchlist, §9 du plan) — bande horizontale de tuiles carrées, à l'image du
+//! bandeau du dépôt web (`tracker-strip.component`/`.kpi`) : demande utilisateur explicite
+//! 2026-09-01 (capture d'écran de référence à l'appui), qui remplace la première version en liste
+//! verticale de lignes (retours utilisateur précédents, gardée en mémoire dans l'historique Git
+//! mais plus dans ce fichier). Rendu dans sa PROPRE fenêtre overlay (`OverlayKind::Watchlist`,
+//! `main.rs`), décorrélée de la fenêtre Combat — demande utilisateur explicite : les deux zones
+//! doivent pouvoir, à terme, être pilotées indépendamment en visibilité.
 //!
-//! Pas de portrait par entrée (contrairement au panneau Combat, `portraits::PortraitAtlas`) : rien
-//! de comparable n'existe pour un objet/monstre quelconque du jeu — un simple repère de couleur
-//! (`marker_color`) distingue objet suivi et ennemi suivi ; le nom reste donc affiché en clair,
-//! jamais caché derrière un survol comme au panneau Combat (ici le nom EST l'information, il n'y a
-//! rien d'autre à montrer à sa place).
+//! Toujours en LECTURE SEULE (voir `overlay_engine::watchlist` pour la frontière
+//! définitions/compteurs) : les deux premières tuiles ("+"/"−", voir `control_tile`) reprennent la
+//! forme du bandeau web (ajouter un suivi / sélection multiple + suppression) mais restent
+//! INERTES ici — aucun formulaire d'ajout, aucune sélection ne sont câblés côté overlay pour cette
+//! itération (demande utilisateur : "je pense qu'on le fera plus tard quand tu auras tout câblé").
+//! Un survol affiche un tooltip explicite plutôt que de laisser un bouton cliquable qui ne ferait
+//! rien silencieusement (retour utilisateur déjà vécu sur le bouton de connexion au compte).
+//!
+//! Pas d'icône par objet/monstre pour l'instant (`catalog_id` existe déjà sur `WatchlistEntry`
+//! mais rien ne le résout encore en image — lot L3, Catalogue, pas encore fait) : chaque tuile
+//! affiche le même repli générique que le panneau Combat (`UiIcons::unknown_entity_texture`),
+//! sciemment identique quel que soit l'objet/l'ennemi réel — seule la couleur de bordure
+//! (`marker_color`) distingue objet suivi et ennemi suivi. À remplacer dès qu'une vraie icône par
+//! objet/monstre sera câblée.
 
-use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
+use overlay_engine::{WatchlistEntry, WatchlistKind};
 
-const ROW_GAP: f32 = 4.0;
-const MARKER_SIZE: f32 = 8.0;
-const NAME_COLOR: egui::Color32 = egui::Color32::from_rgb(220, 224, 230);
+use crate::ui_icons::UiIcons;
+
+const TILE_SIZE: f32 = 52.0;
+const TILE_GAP: f32 = 6.0;
+const TILE_ROUNDING: f32 = 8.0;
+const ICON_SIZE: f32 = 30.0;
+
+const TILE_BG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(18, 20, 28, 235);
+const CONTROL_BORDER: egui::Color32 =
+    egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 90);
+const CONTROL_GLYPH: egui::Color32 =
+    egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 170);
 
 // Même bleu que le switch/la barre de dégâts du panneau Combat (`panels::combat::ACCENT`) — un
 // objet suivi partage la charte ; un ennemi suivi s'en distingue par une teinte chaude, seule
-// façon de les différencier au premier coup d'œil sans icône dédiée par entrée.
+// façon de les différencier sans icône dédiée par entrée (voir la doc de module).
 const ITEM_MARKER: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
 const ENEMY_MARKER: egui::Color32 = egui::Color32::from_rgb(0xff, 0x6b, 0x5b);
 
-/// Même famille visuelle que `panels::combat::damage_bar` (fond opaque très sombre, remplissage
-/// bleu, chiffre peint dessus) — réutilisée ici pour le mode `down` uniquement : c'est le seul cas
-/// où un dénominateur naturel existe (`countdown_target`), le mode `up` n'a aucun maximum connu à
-/// représenter en proportion.
-const BAR_HEIGHT: f32 = 14.0;
-const BAR_BG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(8, 10, 16, 235);
-const BAR_FILL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(0x00, 0xd2, 0xff, 110);
-const BAR_TEXT: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
-const BAR_TEXT_SHADOW: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(0, 0, 0, 200);
+const BADGE_BG: egui::Color32 = egui::Color32::from_rgb(0x0a, 0x0c, 0x12);
+const BADGE_TEXT: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 
-pub fn show(ui: &mut egui::Ui, entries: &[WatchlistEntry]) {
-    ui.weak("Suivi");
-    ui.add_space(4.0);
-    for (i, entry) in entries.iter().enumerate() {
-        if i > 0 {
-            ui.add_space(ROW_GAP);
-        }
-        row(ui, entry);
-    }
+pub fn show(ui: &mut egui::Ui, icons: &UiIcons, entries: &[WatchlistEntry]) {
+    egui::ScrollArea::horizontal()
+        .id_salt("watchlist-strip")
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                control_tile(ui, "+", "Ajouter un suivi (bientôt disponible)");
+                ui.add_space(TILE_GAP);
+                control_tile(
+                    ui,
+                    "−",
+                    "Sélection multiple / suppression (bientôt disponible)",
+                );
+                ui.add_space(TILE_GAP);
+
+                for (i, entry) in entries.iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(TILE_GAP);
+                    }
+                    entry_tile(ui, icons, entry);
+                }
+            });
+        });
 }
 
-fn row(ui: &mut egui::Ui, entry: &WatchlistEntry) {
-    let (marker_color, kind_label) = match entry.kind {
-        WatchlistKind::Item => (ITEM_MARKER, "Objet suivi"),
-        WatchlistKind::Enemy => (ENEMY_MARKER, "Ennemi suivi"),
+/// Tuile "+"/"−" du bandeau web — bordure en pointillés (`egui::Shape::dashed_line`, pas de
+/// primitive "rectangle en pointillés" dans `epaint`, reconstruite à la main à partir des 4
+/// coins) : signale visuellement qu'il s'agit d'une action, pas d'une entrée suivie, cohérent avec
+/// la charte `.kpi-add` du web.
+fn control_tile(ui: &mut egui::Ui, glyph: &str, tooltip: &str) {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, TILE_ROUNDING, TILE_BG);
+
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+        rect.left_top(),
+    ];
+    painter.extend(egui::Shape::dashed_line(
+        &corners,
+        egui::Stroke::new(1.0, CONTROL_BORDER),
+        4.0,
+        3.0,
+    ));
+
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        egui::FontId::proportional(20.0),
+        CONTROL_GLYPH,
+    );
+
+    response.on_hover_text(tooltip);
+}
+
+/// Tuile d'une entrée suivie : icône générique (voir doc de module) bordée de la couleur de
+/// `kind`, badge de compteur ancré en bas-à-droite (même position que `.kpi-count-badge` côté
+/// web). Nom complet en tooltip — jamais tronqué silencieusement sans recours.
+fn entry_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &WatchlistEntry) {
+    let marker_color = match entry.kind {
+        WatchlistKind::Item => ITEM_MARKER,
+        WatchlistKind::Enemy => ENEMY_MARKER,
     };
 
-    ui.horizontal(|ui| {
-        let (marker_rect, _resp) =
-            ui.allocate_exact_size(egui::vec2(MARKER_SIZE, MARKER_SIZE), egui::Sense::hover());
-        ui.painter()
-            .circle_filled(marker_rect.center(), MARKER_SIZE / 2.0, marker_color);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, TILE_ROUNDING, TILE_BG);
+    painter.rect_stroke(
+        rect,
+        TILE_ROUNDING,
+        egui::Stroke::new(1.5, marker_color),
+        egui::StrokeKind::Inside,
+    );
 
-        ui.label(egui::RichText::new(&entry.name).color(NAME_COLOR));
+    // `paint_at` peint directement DANS le rect donné (ignore fit_to_exact_size/
+    // maintain_aspect_ratio, qui ne s'appliquent qu'au layout via `ui.add`) — même motif que
+    // `panels::combat::draw_centered_icon`, pas la peine de les poser ici.
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(ICON_SIZE, ICON_SIZE));
+    egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect);
 
-        ui.with_layout(
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| match entry.mode {
-                WatchlistMode::Up => {
-                    ui.label(
-                        egui::RichText::new(entry.count.to_string())
-                            .strong()
-                            .color(marker_color),
-                    );
-                }
-                WatchlistMode::Down => {
-                    let width = ui.available_width().clamp(60.0, 140.0);
-                    countdown_bar(ui, width, entry.count, entry.countdown_target);
-                }
-            },
-        );
-    })
-    .response
-    .on_hover_text(kind_label);
+    count_badge(ui, rect, entry.count);
+
+    response.on_hover_text(&entry.name);
 }
 
-/// Barre de progression du décompte (mode `down`) : remplissage proportionnel à ce qui a déjà été
-/// collecté (`target - count`, PAS `count` lui-même — `count` décompte vers 0, voir
-/// `overlay_engine::watchlist::WatchlistMode::Down`), chiffres `count/target` peints dessus.
-fn countdown_bar(ui: &mut egui::Ui, width: f32, count: i64, target: i64) {
-    let width = width.max(1.0);
-    let (rect, _response) =
-        ui.allocate_exact_size(egui::vec2(width, BAR_HEIGHT), egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 4.0, BAR_BG);
-
-    if target > 0 {
-        let collected = (target - count).max(0);
-        let ratio = (collected as f32 / target as f32).clamp(0.0, 1.0);
-        if ratio > 0.0 {
-            let fill_rect = egui::Rect::from_min_size(
-                rect.min,
-                egui::vec2(rect.width() * ratio, rect.height()),
-            );
-            painter.rect_filled(fill_rect, 4.0, BAR_FILL);
-        }
-    }
-
-    let text = format!("{count}/{target}");
+/// Petit badge circulaire ancré au coin bas-droit de la tuile — assez grand pour 3 chiffres sans
+/// déborder (`count` plafonne rarement au-delà en pratique, mais le rayon n'est pas figé sur 1
+/// chiffre pour éviter un chevauchement disgracieux dès qu'un suivi dépasse 9).
+fn count_badge(ui: &mut egui::Ui, tile_rect: egui::Rect, count: i64) {
+    let text = count.to_string();
     let font = egui::FontId::monospace(11.0);
-    let text_pos = rect.right_center() - egui::vec2(6.0, 0.0);
-    painter.text(
-        text_pos + egui::vec2(1.0, 1.0),
-        egui::Align2::RIGHT_CENTER,
-        &text,
-        font.clone(),
-        BAR_TEXT_SHADOW,
-    );
-    painter.text(text_pos, egui::Align2::RIGHT_CENTER, &text, font, BAR_TEXT);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.clone(), font.clone(), BADGE_TEXT);
+    let radius = (galley.size().x.max(galley.size().y) / 2.0 + 4.0).max(10.0);
+    let center = tile_rect.right_bottom() - egui::vec2(radius * 0.7, radius * 0.7);
+
+    let painter = ui.painter();
+    painter.circle_filled(center, radius, BADGE_BG);
+    painter.circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::BLACK));
+    painter.text(center, egui::Align2::CENTER_CENTER, &text, font, BADGE_TEXT);
 }

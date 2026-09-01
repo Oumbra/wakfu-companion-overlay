@@ -1,7 +1,7 @@
 # `overlay-ui` — premier overlay réel (L2)
 
-Fenêtre transparente Windows (DirectComposition, voir spike S1) affichant deux panneaux réels,
-alimentés en direct par [`overlay-ingest`](../overlay-ingest/) + [`overlay-engine`](../overlay-engine/)
+Fenêtres transparentes Windows (DirectComposition, voir spike S1) affichant deux zones réelles,
+alimentées en direct par [`overlay-ingest`](../overlay-ingest/) + [`overlay-engine`](../overlay-engine/)
 sur un vrai `wakfu.log` — voir [`docs/plan-architecture.md`](../../docs/plan-architecture.md) §6,
 §9, §12.
 
@@ -18,26 +18,37 @@ Prépare `vendor/wgpu-hal-30.0.1` (patch DirectComposition, à la racine du dép
 `patches/setup-vendor.sh`) s'il est absent, puis `cargo run -p overlay-ui`. `Ctrl+Alt+W` bascule
 interactif / clic-traversant (hotkey global, fonctionne sans focus). Échap ou Ctrl+C pour quitter.
 
-## Panneaux actuellement affichés
+## Deux fenêtres overlay indépendantes par personnage
 
-- **Dégâts du combat** (`src/panels/combat.rs`, extrait de `main.rs` pour préparer la séparation
-  en zones indépendantes visée au §9) — switch Alliés/Ennemis, liste verticale de portraits de
-  classe (nom au survol), barre de dégâts par combattant. Pas de titre ni de fond opaque (retours
-  utilisateur 2026-09-01) — voir la doc de tête du fichier pour le détail des refontes.
-- **Suivi** (`src/panels/watchlist.rs`) — liste en LECTURE SEULE des entrées suivies déclarées sur
-  le compte (nom, marqueur de couleur objet/ennemi, compteur), affichée sous le panneau Combat
-  quand le compte en déclare au moins une. Aucune édition possible depuis l'overlay : la liste
-  reste éditée sur le web, seuls les compteurs sont incrémentés — et persistés localement — par
-  l'overlay (voir `overlay_engine::watchlist`, `docs/plan-architecture.md` §14 point 3).
+Demande utilisateur explicite (2026-09-01) : Combat et Suivi ne sont plus deux panneaux dans une
+même fenêtre, mais deux **fenêtres overlay réellement séparées** (`OverlayKind`, `main.rs`), toutes
+deux ancrées sur la même fenêtre de jeu mais positionnées et redessinées indépendamment — pour
+permettre à terme de piloter leur visibilité séparément (manuellement ou par un mécanisme
+automatique, voir §9 du plan). Elles partagent le même type `OverlayWindow` (position/topmost/
+redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et le contenu rendu.
+
+- **Combat** (`src/panels/combat.rs`) — collée au bord GAUCHE de la fenêtre de jeu, centrée
+  verticalement (comportement d'origine). Switch Alliés/Ennemis, liste verticale de portraits de
+  classe (nom au survol), barre de dégâts par combattant, icône de connexion au compte. Pas de
+  titre ni de fond opaque (retours utilisateur 2026-09-01) — voir la doc de tête du fichier pour le
+  détail des refontes.
+- **Suivi** (`src/panels/watchlist.rs`) — collée au bord HAUT de la fenêtre de jeu, centrée
+  horizontalement. Bande de tuiles carrées à l'image du bandeau du dépôt web
+  (`tracker-strip.component`/`.kpi`) : tuiles "+"/"−" reprenant la forme du web mais INERTES pour
+  l'instant (aucun formulaire d'ajout ni sélection multiple câblés côté overlay), puis une tuile par
+  entrée suivie (icône générique tant qu'aucune vraie icône d'objet/monstre n'est câblée — lot L3,
+  Catalogue — nom complet en tooltip, badge de compteur). Toujours en LECTURE SEULE côté définitions
+  (la liste elle-même reste éditée sur le web) ; les compteurs, eux, sont incrémentés — et
+  persistés localement — par l'overlay (voir `overlay_engine::watchlist`,
+  `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le compte ne déclare aucune
+  entrée.
 
 Voir §9 du plan pour le contenu complet visé : **Alertes de drop** (son + toast) et **État de
 synchro** ne sont pas encore câblés — le pairing reste console-only pour l'instant (voir plus bas).
-**Récap de session** (kamas/XP/combats/butin) a été retiré du panneau (retour utilisateur
-2026-09-01 : n'apportait plus rien une fois le reste simplifié) — sera repensé dans un autre
-chantier, `overlay_engine::session::SessionTotals` existe toujours côté moteur. Pas de disposition
-persistée par écran ni de thème configurable non plus à ce stade — opacité codée en dur. Toujours
-une fenêtre UNIQUE par personnage (pas encore les zones indépendantes/activables séparément visées
-au §9 — Combat/Récap/Suivi).
+**Récap de session** (kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 :
+n'apportait plus rien une fois le reste simplifié) — sera repensé dans un autre chantier,
+`overlay_engine::session::SessionTotals` existe toujours côté moteur. Pas de disposition persistée
+par écran ni de thème configurable non plus à ce stade — opacité codée en dur.
 
 ## Compte lié (roster + suivi) — lot L4
 

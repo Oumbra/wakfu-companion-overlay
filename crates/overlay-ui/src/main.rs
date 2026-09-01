@@ -68,10 +68,29 @@ const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
 // voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
 // faire.
 const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
+/// Fenêtre du panneau Suivi — large et basse (bande horizontale de tuiles, voir
+/// `panels::watchlist`), pas un panneau vertical comme Combat.
+const WATCHLIST_WINDOW_SIZE: (f64, f64) = (440.0, 84.0);
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
-/// gauche de l'overlay — « collé à quelques pixels près » (demande utilisateur). À ajuster après
-/// avoir vu le rendu en pratique.
+/// gauche de l'overlay Combat — « collé à quelques pixels près » (demande utilisateur). À ajuster
+/// après avoir vu le rendu en pratique.
 const GAME_EDGE_MARGIN_PX: i32 = 12;
+/// Même principe que `GAME_EDGE_MARGIN_PX`, mais pour le bord HAUT — ancrage de l'overlay Suivi
+/// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »).
+const GAME_TOP_MARGIN_PX: i32 = 12;
+
+/// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
+/// (2026-09-01) : Combat et Suivi doivent être deux fenêtres RÉELLEMENT séparées (pas seulement
+/// deux panneaux dans la même fenêtre), pour permettre à terme de piloter leur visibilité
+/// indépendamment (manuellement ou par un mécanisme automatique) — voir §9 du plan, qui vise à
+/// terme autant de zones indépendantes que de panneaux. `OverlayWindow` reste un seul type partagé
+/// (position/topmost/redraw sont identiques pour les deux) : seul `kind` distingue la taille,
+/// l'ancrage (`App::anchor_position`) et le contenu rendu (`render`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverlayKind {
+    Combat,
+    Watchlist,
+}
 
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
@@ -126,15 +145,20 @@ struct OverlayWindow {
     /// longtemps que la `Surface`, donnant un `Surface<'static>` sans fuite).
     window: Arc<Window>,
     gpu: GpuState,
+    /// Zone affichée par CETTE fenêtre (voir `OverlayKind`) — deux `OverlayWindow` distinctes
+    /// partagent le même `game_hwnd`/`character_name`, une par zone.
+    kind: OverlayKind,
     /// Chargée par fenêtre (chacune a son propre `egui::Context`) — léger surcoût de
-    /// décodage/upload par fenêtre, négligeable pour le nombre de comptes réaliste.
+    /// décodage/upload par fenêtre, négligeable pour le nombre de comptes réaliste. Utilisée par
+    /// les deux zones (portrait de classe en Combat, icône générique en Suivi tant qu'aucune
+    /// icône d'objet/monstre n'est câblée — voir `panels::watchlist`).
     portraits: PortraitAtlas,
     /// Icônes du switch Alliés/Ennemis + portrait générique d'ennemi — même remarque que
     /// `portraits` (une texture par fenêtre, coût négligeable).
     icons: UiIcons,
     /// Camp affiché dans la liste verticale du panneau Combat (voir `panels::combat::CombatSide`)
     /// — état PAR FENÊTRE (donc par personnage), pas global : `Allies` par défaut à chaque
-    /// création de fenêtre (demande utilisateur explicite).
+    /// création de fenêtre (demande utilisateur explicite). Sans objet pour une fenêtre `Suivi`.
     combat_side: CombatSide,
     game_hwnd: HWND,
     character_name: String,
@@ -232,32 +256,72 @@ impl App {
         });
 
         for (character_name, info) in &found {
-            if let Some(existing) = self.windows.values_mut().find(|w| w.game_hwnd == info.hwnd) {
-                Self::reposition(existing, info.rect);
-                continue;
+            for kind in [OverlayKind::Combat, OverlayKind::Watchlist] {
+                if let Some(existing) = self
+                    .windows
+                    .values_mut()
+                    .find(|w| w.game_hwnd == info.hwnd && w.kind == kind)
+                {
+                    Self::reposition(existing, info.rect);
+                    continue;
+                }
+                let overlay = Self::create_overlay_window(
+                    event_loop,
+                    kind,
+                    info.hwnd,
+                    character_name.clone(),
+                    info.rect,
+                    self.interactive,
+                );
+                println!("[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé.");
+                self.windows.insert(overlay.window.id(), overlay);
             }
-            let overlay = Self::create_overlay_window(
-                event_loop,
-                info.hwnd,
-                character_name.clone(),
-                info.rect,
-                self.interactive,
-            );
-            println!("[fenêtre de jeu] {character_name} trouvée — overlay créé.");
-            self.windows.insert(overlay.window.id(), overlay);
+        }
+    }
+
+    /// Position ancrée sur la fenêtre de jeu selon la zone (voir `OverlayKind`) : Combat reste
+    /// collé au bord gauche, centré verticalement (comportement d'origine, S1/L2) ; Suivi est
+    /// désormais collé au bord HAUT, centré horizontalement — demande utilisateur explicite
+    /// 2026-09-01, à l'image du bandeau du web (`tracker-strip.component`).
+    fn anchor_position(
+        kind: OverlayKind,
+        rect: GameRect,
+        overlay_width: i32,
+        overlay_height: i32,
+    ) -> PhysicalPosition<i32> {
+        match kind {
+            OverlayKind::Combat => PhysicalPosition::new(
+                rect.left + GAME_EDGE_MARGIN_PX,
+                rect.top + (rect.height - overlay_height) / 2,
+            ),
+            OverlayKind::Watchlist => PhysicalPosition::new(
+                rect.left + (rect.width - overlay_width) / 2,
+                rect.top + GAME_TOP_MARGIN_PX,
+            ),
         }
     }
 
     fn create_overlay_window(
         event_loop: &ActiveEventLoop,
+        kind: OverlayKind,
         game_hwnd: HWND,
         character_name: String,
         rect: GameRect,
         interactive: bool,
     ) -> OverlayWindow {
+        let size = match kind {
+            OverlayKind::Combat => WINDOW_SIZE,
+            OverlayKind::Watchlist => WATCHLIST_WINDOW_SIZE,
+        };
+        let title_suffix = match kind {
+            OverlayKind::Combat => "Combat",
+            OverlayKind::Watchlist => "Suivi",
+        };
         let attrs = WindowAttributes::default()
-            .with_title(format!("wakfu-companion-overlay — {character_name}"))
-            .with_inner_size(winit::dpi::LogicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1))
+            .with_title(format!(
+                "wakfu-companion-overlay — {character_name} — {title_suffix}"
+            ))
+            .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
             .with_transparent(true)
             .with_decorations(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
@@ -282,16 +346,14 @@ impl App {
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
 
-        let overlay_height = window.outer_size().height as i32;
-        let position = PhysicalPosition::new(
-            rect.left + GAME_EDGE_MARGIN_PX,
-            rect.top + (rect.height - overlay_height) / 2,
-        );
+        let outer = window.outer_size();
+        let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
         window.set_outer_position(position);
 
         OverlayWindow {
             window,
             gpu,
+            kind,
             portraits,
             icons,
             combat_side: CombatSide::default(),
@@ -303,15 +365,13 @@ impl App {
         }
     }
 
-    /// Recolle une fenêtre overlay au bord gauche de sa fenêtre de jeu, verticalement centrée
-    /// (demande utilisateur) ; n'appelle `set_outer_position` que si la position cible a changé,
-    /// pour ne pas spammer le compositeur DWM 20×/s pour rien.
+    /// Recolle une fenêtre overlay sur sa fenêtre de jeu selon son ancrage (voir
+    /// `anchor_position`) ; n'appelle `set_outer_position` que si la position cible a changé, pour
+    /// ne pas spammer le compositeur DWM 20×/s pour rien.
     fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
-        let overlay_height = overlay.window.outer_size().height as i32;
-        let desired = PhysicalPosition::new(
-            rect.left + GAME_EDGE_MARGIN_PX,
-            rect.top + (rect.height - overlay_height) / 2,
-        );
+        let outer = overlay.window.outer_size();
+        let desired =
+            Self::anchor_position(overlay.kind, rect, outer.width as i32, outer.height as i32);
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
             overlay.last_position = Some(desired);
@@ -469,6 +529,7 @@ impl ApplicationHandler<UserEvent> for App {
                     &mut overlay.gpu,
                     &overlay.window,
                     RenderContent {
+                        kind: overlay.kind,
                         fight,
                         portraits: &overlay.portraits,
                         icons: &overlay.icons,
@@ -618,6 +679,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
 /// (clippy), la fonction ayant crû à mesure que le panneau Combat (icônes, camp affiché) et
 /// l'icône de relance d'appairage (statut de connexion, canal de retentative) s'y sont ajoutés.
 struct RenderContent<'a> {
+    kind: OverlayKind,
     fight: Option<&'a FightSnapshot>,
     portraits: &'a PortraitAtlas,
     icons: &'a UiIcons,
@@ -643,6 +705,7 @@ struct RenderContent<'a> {
 /// boucle de rendu continue.
 fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> std::time::Duration {
     let RenderContent {
+        kind,
         fight,
         portraits,
         icons,
@@ -656,59 +719,70 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.inner_margin(6))
-            .show(ui, |ui| {
-                // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au compte a
-                // échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier appairage,
-                // aucun moyen de retenter sans relancer tout le logiciel), réduite au minimum et
-                // collée à droite (retour utilisateur : la barre pleine largeur précédente était
-                // trop imposante) — le libellé passe en tooltip. `reason` (message d'erreur de la
-                // dernière tentative) y est ajouté : un clic qui ne se traduit par rien de visible
-                // (le serveur refuse la requête avant même qu'un code d'appairage existe, donc
-                // aucun navigateur ne s'ouvre) est indiscernable d'un bouton cassé sans lui —
-                // retour utilisateur : « l'appui du bouton ne déclenche rien, pas de message
-                // d'erreur dans la console » (le message existait déjà, seulement en console).
-                // Un clic renvoie sur `spawn_auth_thread`, qui relance un appairage COMPLET
-                // (rouvre le navigateur avec un nouveau code, voir `overlay_sync::pair_and_wait`).
-                match auth_status {
-                    AuthStatus::Disconnected { reason } => {
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let retry = ui
-                                        .add(egui::Button::new("🔌").small())
-                                        .on_hover_text(format!(
-                                            "Connecter le compte (relance l'appairage, ouvre \
+            .show(ui, |ui| match kind {
+                // Zone Combat : dégâts du combat en cours + icône de connexion au compte. Cette
+                // dernière reste ici (pas dans la zone Suivi) — ni l'une ni l'autre zone n'en est
+                // propriétaire de façon évidente, mais Combat est la fenêtre "historique", la
+                // moins perturbante à faire bouger encore une fois.
+                OverlayKind::Combat => {
+                    // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au
+                    // compte a échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier
+                    // appairage, aucun moyen de retenter sans relancer tout le logiciel), réduite
+                    // au minimum et collée à droite (retour utilisateur : la barre pleine largeur
+                    // précédente était trop imposante) — le libellé passe en tooltip. `reason`
+                    // (message d'erreur de la dernière tentative) y est ajouté : un clic qui ne se
+                    // traduit par rien de visible (le serveur refuse la requête avant même qu'un
+                    // code d'appairage existe, donc aucun navigateur ne s'ouvre) est indiscernable
+                    // d'un bouton cassé sans lui — retour utilisateur : « l'appui du bouton ne
+                    // déclenche rien, pas de message d'erreur dans la console » (le message
+                    // existait déjà, seulement en console). Un clic renvoie sur
+                    // `spawn_auth_thread`, qui relance un appairage COMPLET (rouvre le navigateur
+                    // avec un nouveau code, voir `overlay_sync::pair_and_wait`).
+                    match auth_status {
+                        AuthStatus::Disconnected { reason } => {
+                            ui.horizontal(|ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let retry = ui
+                                            .add(egui::Button::new("🔌").small())
+                                            .on_hover_text(format!(
+                                                "Connecter le compte (relance l'appairage, ouvre \
                                                  le navigateur).\nDernier échec : {reason}"
-                                        ));
-                                    if retry.clicked() {
-                                        let _ = auth_retry_tx.send(());
-                                    }
-                                },
-                            );
-                        });
-                        ui.add_space(4.0);
+                                            ));
+                                        if retry.clicked() {
+                                            let _ = auth_retry_tx.send(());
+                                        }
+                                    },
+                                );
+                            });
+                            ui.add_space(4.0);
+                        }
+                        // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
+                        // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
+                        // « on dirait que ça ne fait rien »).
+                        AuthStatus::Connecting => {
+                            ui.horizontal(|ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| ui.weak("Connexion…"),
+                                );
+                            });
+                            ui.add_space(4.0);
+                        }
+                        AuthStatus::Connected => {}
                     }
-                    // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
-                    // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
-                    // « on dirait que ça ne fait rien »).
-                    AuthStatus::Connecting => {
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| ui.weak("Connexion…"),
-                            );
-                        });
-                        ui.add_space(4.0);
-                    }
-                    AuthStatus::Connected => {}
+
+                    panels::combat::show(ui, fight, portraits, icons, combat_side);
                 }
-
-                panels::combat::show(ui, fight, portraits, icons, combat_side);
-
-                if !watchlist.is_empty() {
-                    ui.add_space(10.0);
-                    panels::watchlist::show(ui, watchlist);
+                // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
+                // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir
+                // `panels::watchlist`. Rien affiché tant que le compte ne déclare aucune entrée
+                // (fenêtre transparente vide plutôt qu'un cadre vide disgracieux).
+                OverlayKind::Watchlist => {
+                    if !watchlist.is_empty() {
+                        panels::watchlist::show(ui, icons, watchlist);
+                    }
                 }
             });
     });
