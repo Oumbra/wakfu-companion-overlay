@@ -8,8 +8,10 @@ pub mod model;
 pub mod quickjs_engine;
 pub mod roster;
 pub mod session;
+pub mod watchlist;
 
 pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
 pub use session::{Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals};
+pub use watchlist::{watchlist_from_settings_json, WatchlistEntry, WatchlistKind, WatchlistMode};
