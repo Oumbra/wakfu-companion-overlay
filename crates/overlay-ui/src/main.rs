@@ -85,7 +85,14 @@ const GAME_EDGE_MARGIN_PX: i32 = 12;
 /// titre au lieu du contenu du jeu — invisible sur l'ancrage gauche du panneau Combat (`rect.top`
 /// n'y sert qu'à un centrage vertical sur toute la hauteur, l'écart s'y noie), mais immédiatement
 /// visible sur un ancrage haut avec une marge fixe aussi petite.
-const GAME_TOP_MARGIN_PX: i32 = 12;
+///
+/// **Second essai (2026-09-01)** : 12 px restait visiblement insuffisant même après le fix
+/// `client_top` (retour utilisateur, deuxième capture d'écran) — estimation visuelle du manque
+/// à combler (~15 px) reportée ici. Voir le diagnostic `println!` de `create_overlay_window`
+/// (`[overlay Suivi] rect.top=... client_top=...`) pour confirmer que `client_top` est bien
+/// résolu (écart non nul avec `rect.top`) avant de retoucher cette constante à l'aveugle si ce
+/// nouvel essai est encore imprécis.
+const GAME_TOP_MARGIN_PX: i32 = 28;
 
 /// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
 /// (2026-09-01) : Combat et Suivi doivent être deux fenêtres RÉELLEMENT séparées (pas seulement
@@ -357,6 +364,21 @@ impl App {
         let outer = window.outer_size();
         let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
         window.set_outer_position(position);
+        if kind == OverlayKind::Watchlist {
+            // Diagnostic PERMANENT (pas juste temporaire) : l'écart entre `rect.top` (bord
+            // extérieur, barre de titre comprise) et `rect.client_top` (vrai bord de la zone de
+            // jeu) est la source du bug d'ancrage corrigé le 2026-09-01 (voir la doc de
+            // `GameRect::client_top`) — utile pour vérifier en un coup d'œil, sur une machine
+            // donnée, que `client_top` a bien été résolu (pas replié sur `rect.top`, ce qui se
+            // voit ici par un écart nul) avant de retoucher `GAME_TOP_MARGIN_PX` à l'aveugle.
+            println!(
+                "[overlay Suivi] rect.top={} client_top={} (écart {}) -> position.y={}",
+                rect.top,
+                rect.client_top,
+                rect.client_top - rect.top,
+                position.y
+            );
+        }
 
         OverlayWindow {
             window,
