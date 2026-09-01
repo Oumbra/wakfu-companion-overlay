@@ -1,19 +1,32 @@
-//! `overlay-ui` (docs/plan-architecture.md §6 et §9, lot L2) — premier vrai overlay : fenêtre
-//! transparente Windows (DirectComposition, voir spike S1) rendant deux panneaux réels alimentés
+//! `overlay-ui` (docs/plan-architecture.md §6 et §9, lot L2) — overlay natif : fenêtres
+//! transparentes Windows (DirectComposition, voir spike S1) rendant deux panneaux réels alimentés
 //! par `overlay-ingest` + `overlay-engine` sur un vrai `wakfu.log` : dégâts du combat en cours,
 //! récap de session. Le fenêtrage/rendu reprend telle quelle l'approche validée par S1
 //! (`spikes/s1-window-windows/README.md`) — mêmes bugs déjà corrigés (patch `wgpu-hal`, alpha
 //! prémultiplié, clamp de redimensionnement), pas réinventée ici.
 //!
+//! **Multi-fenêtre** (2026-09-01, retour utilisateur en test réel multi-compte) : `wakfu.log` est
+//! partagé et entrelacé par toutes les instances du client (contrairement à Dofus, un fichier par
+//! instance) — un seul `Engine`/thread suffit à le suivre (voir `spawn_engine_thread`), mais il
+//! faut désormais **une fenêtre overlay par fenêtre de jeu trouvée**, chacune affichant le combat
+//! de SON personnage (`overlay_engine::SessionSnapshot::fight_for_character`, le nom venant du
+//! titre de fenêtre `"<Personnage> - WAKFU"`). Les fenêtres sont créées/détruites dynamiquement à
+//! chaque tick (`App::sync_windows`) au gré des clients qui se lancent/se ferment — voir
+//! `OverlayWindow` et le commentaire sur `Arc<Window>` (remplace la fuite `'static` d'origine,
+//! plus tenable dès que des fenêtres doivent pouvoir être détruites).
+//!
 //! Volontairement incomplet par rapport à §9 du plan : pas encore de panneau Suivi/Alertes/État de
 //! synchro (ceux-là dépendent soit de `StatsStoreService` non porté — §14 point 3 — soit de la
-//! synchro serveur, L4/L5), pas de disposition persistée par écran, pas de thème configurable. Ce
-//! sont les deux panneaux atteignables avec `overlay-engine` tel qu'il existe aujourd'hui.
+//! synchro serveur, L5), pas de disposition persistée par écran, pas de thème configurable. Le
+//! récap de session reste également **global** (identique sur toutes les fenêtres, pas ventilé par
+//! personnage — limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec
+//! `overlay-engine` tel qu'il existe aujourd'hui.
 
 mod game_window;
 mod panels;
 mod portraits;
 
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -23,16 +36,18 @@ use std::thread;
 use arc_swap::ArcSwap;
 use crossbeam_channel::RecvTimeoutError;
 use egui_wgpu::wgpu;
-use game_window::GameWindowTracker;
+use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
-use overlay_engine::{Engine, RosterIndex, SessionSnapshot};
+use overlay_engine::{Engine, FightSnapshot, RosterIndex, SessionSnapshot};
 use overlay_ingest::discovery;
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetForegroundWindow, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
+    HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
@@ -45,7 +60,10 @@ use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 use winit::platform::windows::WindowAttributesExtWindows;
 
 const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
-const WINDOW_SIZE: (f64, f64) = (360.0, 480.0);
+// Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
+// voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
+// faire.
+const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
 /// gauche de l'overlay — « collé à quelques pixels près » (demande utilisateur). À ajuster après
 /// avoir vu le rendu en pratique.
@@ -68,12 +86,31 @@ struct GpuState {
     egui_renderer: egui_wgpu::Renderer,
 }
 
+/// Une fenêtre overlay, ancrée sur UNE fenêtre de jeu précise — un personnage, un combat. Créée et
+/// détruite dynamiquement par `App::sync_windows` au gré des clients qui se lancent/se ferment.
+struct OverlayWindow {
+    /// `Arc`, pas `&'static` : contrairement à la version mono-fenêtre d'origine (`Box::leak`),
+    /// une fenêtre doit pouvoir être réellement détruite quand son client de jeu ferme — l'`Arc`
+    /// est le motif standard wgpu+winit pour des fenêtres à durée de vie dynamique
+    /// (`wgpu::Instance::create_surface` accepte `Arc<Window>`, qui garde la fenêtre en vie aussi
+    /// longtemps que la `Surface`, donnant un `Surface<'static>` sans fuite).
+    window: Arc<Window>,
+    gpu: GpuState,
+    /// Chargée par fenêtre (chacune a son propre `egui::Context`) — léger surcoût de
+    /// décodage/upload par fenêtre, négligeable pour le nombre de comptes réaliste.
+    portraits: PortraitAtlas,
+    game_hwnd: HWND,
+    character_name: String,
+    /// Dernière position appliquée — évite de rappeler `set_outer_position` à chaque tick (50 ms)
+    /// quand la fenêtre de jeu n'a pas bougé.
+    last_position: Option<PhysicalPosition<i32>>,
+    /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
+    /// rien (voir `App::sync_topmost`).
+    is_topmost: bool,
+}
+
 struct App {
-    window: Option<&'static Window>,
-    gpu: Option<GpuState>,
-    /// `None` jusqu'au premier `resumed()` — chargée dès qu'un `egui::Context` existe (voir
-    /// `PortraitAtlas::load`), jamais avant.
-    portraits: Option<PortraitAtlas>,
+    windows: HashMap<WindowId, OverlayWindow>,
     #[allow(dead_code)] // jamais relu : sa seule raison d'être est de rester en vie (voir S1)
     hotkey_manager: GlobalHotKeyManager,
     hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
@@ -81,12 +118,10 @@ struct App {
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     log_path: PathBuf,
     game_window: GameWindowTracker,
-    /// Dernière position appliquée à l'overlay — évite de rappeler `set_outer_position` à chaque
-    /// tick (50 ms) quand la fenêtre de jeu n'a pas bougé.
-    last_position: Option<PhysicalPosition<i32>>,
-    /// `true` tant qu'aucune fenêtre de jeu n'a jamais été trouvée — sert uniquement à logger la
-    /// découverte/perte une seule fois plutôt qu'à chaque tick.
-    game_window_seen: bool,
+    /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
+    /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
+    /// bannière.
+    banner_printed: bool,
 }
 
 impl App {
@@ -98,47 +133,116 @@ impl App {
             .expect("enregistrement du hotkey global");
 
         Self {
-            window: None,
-            gpu: None,
-            portraits: None,
+            windows: HashMap::new(),
             hotkey_manager,
             hotkey_events: GlobalHotKeyEvent::receiver(),
             interactive: true,
             snapshot,
             log_path,
             game_window: GameWindowTracker::new(),
-            last_position: None,
-            game_window_seen: false,
+            banner_printed: false,
         }
     }
 
-    /// Recolle l'overlay au bord gauche de la fenêtre de jeu si elle est trouvée, verticalement
-    /// centrée dessus (demande utilisateur). Suit tout déplacement/redimensionnement en continu
-    /// (rappelé à chaque tick, voir `about_to_wait`) ; n'appelle `set_outer_position` que si la
-    /// position cible a changé, pour ne pas spammer le compositeur DWM 20×/s pour rien.
-    fn track_game_window(&mut self, window: &Window) {
-        let Some(game) = self.game_window.rect() else {
-            if self.game_window_seen {
+    /// Scanne les fenêtres de jeu actuellement ouvertes et fait converger `self.windows` vers cet
+    /// état : retire les overlays dont le client a fermé, crée un overlay pour chaque nouvelle
+    /// fenêtre de jeu trouvée, repositionne les autres. Appelé au premier `resumed()` et à chaque
+    /// tick d'`about_to_wait` (comme l'ancien `track_game_window` mono-fenêtre) — idempotent,
+    /// rappelable sans risque.
+    fn sync_windows(&mut self, event_loop: &ActiveEventLoop) {
+        let found = self.game_window.scan();
+
+        self.windows.retain(|_, overlay| {
+            let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
+            if !still_here {
                 println!(
-                    "[fenêtre de jeu] introuvable (Wakfu fermé ?) — dernière position gardée."
+                    "[fenêtre de jeu] {} fermée — son overlay est retiré.",
+                    overlay.character_name
                 );
-                self.game_window_seen = false;
             }
-            return;
-        };
-        if !self.game_window_seen {
-            println!("[fenêtre de jeu] trouvée, l'overlay se cale dessus.");
-            self.game_window_seen = true;
+            still_here
+        });
+
+        for (character_name, info) in &found {
+            if let Some(existing) = self.windows.values_mut().find(|w| w.game_hwnd == info.hwnd) {
+                Self::reposition(existing, info.rect);
+                continue;
+            }
+            let overlay = Self::create_overlay_window(
+                event_loop,
+                info.hwnd,
+                character_name.clone(),
+                info.rect,
+                self.interactive,
+            );
+            println!("[fenêtre de jeu] {character_name} trouvée — overlay créé.");
+            self.windows.insert(overlay.window.id(), overlay);
+        }
+    }
+
+    fn create_overlay_window(
+        event_loop: &ActiveEventLoop,
+        game_hwnd: HWND,
+        character_name: String,
+        rect: GameRect,
+        interactive: bool,
+    ) -> OverlayWindow {
+        let attrs = WindowAttributes::default()
+            .with_title(format!("wakfu-companion-overlay — {character_name}"))
+            .with_inner_size(winit::dpi::LogicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1))
+            .with_transparent(true)
+            .with_decorations(false)
+            .with_window_level(WindowLevel::AlwaysOnTop)
+            .with_resizable(false);
+        #[cfg(target_os = "windows")]
+        let attrs = attrs
+            .with_skip_taskbar(true)
+            .with_no_redirection_bitmap(true);
+
+        let window = event_loop
+            .create_window(attrs)
+            .expect("création de la fenêtre overlay");
+        let window = Arc::new(window);
+
+        let hwnd = Self::hwnd_of(&window);
+        Self::apply_extended_styles(hwnd);
+        if let Err(err) = window.set_cursor_hittest(interactive) {
+            eprintln!("set_cursor_hittest a échoué à la création : {err}");
         }
 
+        let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
+        let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+
         let overlay_height = window.outer_size().height as i32;
-        let desired = PhysicalPosition::new(
-            game.left + GAME_EDGE_MARGIN_PX,
-            game.top + (game.height - overlay_height) / 2,
+        let position = PhysicalPosition::new(
+            rect.left + GAME_EDGE_MARGIN_PX,
+            rect.top + (rect.height - overlay_height) / 2,
         );
-        if self.last_position != Some(desired) {
-            window.set_outer_position(desired);
-            self.last_position = Some(desired);
+        window.set_outer_position(position);
+
+        OverlayWindow {
+            window,
+            gpu,
+            portraits,
+            game_hwnd,
+            character_name,
+            last_position: Some(position),
+            is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
+        }
+    }
+
+    /// Recolle une fenêtre overlay au bord gauche de sa fenêtre de jeu, verticalement centrée
+    /// (demande utilisateur) ; n'appelle `set_outer_position` que si la position cible a changé,
+    /// pour ne pas spammer le compositeur DWM 20×/s pour rien.
+    fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
+        let overlay_height = overlay.window.outer_size().height as i32;
+        let desired = PhysicalPosition::new(
+            rect.left + GAME_EDGE_MARGIN_PX,
+            rect.top + (rect.height - overlay_height) / 2,
+        );
+        if overlay.last_position != Some(desired) {
+            overlay.window.set_outer_position(desired);
+            overlay.last_position = Some(desired);
         }
     }
 
@@ -160,11 +264,11 @@ impl App {
 
     fn toggle_interactive(&mut self) {
         self.interactive = !self.interactive;
-        if let Some(window) = self.window {
-            if let Err(err) = window.set_cursor_hittest(self.interactive) {
+        for overlay in self.windows.values() {
+            if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
                 eprintln!("set_cursor_hittest a échoué : {err}");
             }
-            window.request_redraw();
+            overlay.window.request_redraw();
         }
         println!(
             ">>> Bascule ({HOTKEY_LABEL}) : mode = {}",
@@ -175,70 +279,83 @@ impl App {
             }
         );
     }
+
+    /// Au-dessus tant qu'une fenêtre pertinente (n'importe laquelle des fenêtres de jeu suivies,
+    /// OU n'importe lequel des overlays lui-même) a le focus ; sinon repli en z-order normal, pour
+    /// ne plus recouvrir une application quelconque devenue active (retour utilisateur,
+    /// 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus l'explorateur de fichiers"). Un
+    /// seul `GetForegroundWindow()` par tick, comparé aux `HWND` déjà connus — coût négligeable.
+    ///
+    /// Politique volontairement simplifiée : TOUTE fenêtre de jeu Wakfu (pas seulement celle du
+    /// personnage actif) remet TOUS les overlays au premier plan, pas de logique par-personnage —
+    /// à affiner si un besoin réel l'impose en usage.
+    fn sync_topmost(&mut self) {
+        let foreground = unsafe { GetForegroundWindow() };
+        let relevant = self
+            .windows
+            .values()
+            .any(|w| w.game_hwnd == foreground || Self::hwnd_of(&w.window) == foreground);
+
+        for overlay in self.windows.values_mut() {
+            if overlay.is_topmost == relevant {
+                continue;
+            }
+            let insert_after = if relevant {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            };
+            let hwnd = Self::hwnd_of(&overlay.window);
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(insert_after),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+            overlay.is_topmost = relevant;
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
+        self.sync_windows(event_loop);
+        if !self.banner_printed {
+            println!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
+            println!("Suivi de {}", self.log_path.display());
+            println!(
+                "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. Échap/Ctrl+C pour quitter.\n"
+            );
+            self.banner_printed = true;
         }
-
-        let attrs = WindowAttributes::default()
-            .with_title("wakfu-companion-overlay")
-            .with_inner_size(winit::dpi::LogicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1))
-            .with_transparent(true)
-            .with_decorations(false)
-            .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_resizable(false);
-        #[cfg(target_os = "windows")]
-        let attrs = attrs
-            .with_skip_taskbar(true)
-            .with_no_redirection_bitmap(true);
-
-        let window = event_loop
-            .create_window(attrs)
-            .expect("création de la fenêtre");
-        // Fuite volontaire : durée de vie 'static nécessaire pour wgpu::Surface<'static> — une
-        // seule fenêtre, jamais recréée, jamais libérée avant la fin du process (voir S1).
-        let window: &'static Window = Box::leak(Box::new(window));
-
-        Self::apply_extended_styles(Self::hwnd_of(window));
-
-        let gpu = pollster::block_on(init_gpu(window));
-        // Chargée une seule fois, dès qu'un `egui::Context` existe — jamais recréée (une seule
-        // fenêtre, jamais reconstruite avant la fin du process, voir le commentaire sur `window`
-        // ci-dessus).
-        self.portraits = Some(PortraitAtlas::load(&gpu.egui_ctx));
-        self.window = Some(window);
-        self.gpu = Some(gpu);
-
-        println!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
-        println!("Suivi de {}", self.log_path.display());
-        println!("{HOTKEY_LABEL} pour basculer interactif / clic-traversant. Échap/Ctrl+C pour quitter.\n");
-
-        window.request_redraw();
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::NewSnapshot => {
-                if let Some(window) = self.window {
-                    window.request_redraw();
+                for overlay in self.windows.values() {
+                    overlay.window.request_redraw();
                 }
             }
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        let Some(window) = self.window else { return };
-        if window.id() != id {
-            return;
-        }
-        let Some(gpu) = self.gpu.as_mut() else { return };
+        let Some(overlay) = self.windows.get_mut(&id) else {
+            return; // événement d'une fenêtre déjà retirée (client fermé entre-temps) — ignoré
+        };
 
-        let response = gpu.egui_winit.on_window_event(window, &event);
+        let response = overlay
+            .gpu
+            .egui_winit
+            .on_window_event(&overlay.window, &event);
         if response.repaint {
-            window.request_redraw();
+            overlay.window.request_redraw();
         }
 
         match event {
@@ -253,23 +370,26 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 // Clamp défensif (voir S1, README.md §"Bug de redimensionnement") : un resize
                 // excessif ne doit jamais faire planter l'overlay, quelle qu'en soit la cause.
-                let max_dim = gpu.device.limits().max_texture_dimension_2d;
-                gpu.config.width = size.width.min(max_dim);
-                gpu.config.height = size.height.min(max_dim);
-                gpu.surface.configure(&gpu.device, &gpu.config);
+                let max_dim = overlay.gpu.device.limits().max_texture_dimension_2d;
+                overlay.gpu.config.width = size.width.min(max_dim);
+                overlay.gpu.config.height = size.height.min(max_dim);
+                overlay
+                    .gpu
+                    .surface
+                    .configure(&overlay.gpu.device, &overlay.gpu.config);
             }
             WindowEvent::RedrawRequested => {
-                let portraits = self
-                    .portraits
-                    .as_ref()
-                    .expect("portraits chargées dès resumed(), avant tout redraw possible");
+                let snapshot = self.snapshot.load();
+                let fight = snapshot.fight_for_character(&overlay.character_name);
                 render(
-                    gpu,
-                    window,
+                    &mut overlay.gpu,
+                    &overlay.window,
                     self.interactive,
-                    &self.snapshot.load(),
-                    portraits,
-                )
+                    &snapshot,
+                    fight,
+                    &overlay.character_name,
+                    &overlay.portraits,
+                );
             }
             _ => {}
         }
@@ -280,13 +400,12 @@ impl ApplicationHandler<UserEvent> for App {
         if self.hotkey_events.try_recv().is_ok() {
             self.toggle_interactive();
         }
-        // Suivi de la fenêtre de jeu : même sondage périodique que le hotkey (pas d'API Win32
-        // pour être notifié d'un déplacement/redimensionnement d'une fenêtre qui n'est pas la
-        // nôtre sans un hook global — un sondage à 20 Hz est largement assez réactif ici et reste
-        // négligeable en coût, voir game_window.rs).
-        if let Some(window) = self.window {
-            self.track_game_window(window);
-        }
+        // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
+        // Win32 pour être notifié d'un déplacement/redimensionnement/apparition d'une fenêtre qui
+        // n'est pas la nôtre sans un hook global — un sondage à 20 Hz est largement assez réactif
+        // ici et reste négligeable en coût, voir game_window.rs).
+        self.sync_windows(event_loop);
+        self.sync_topmost();
         // Réactif (§6.1) : on attend soit un événement fenêtre, soit un `UserEvent::NewSnapshot`
         // du thread Engine, jamais de boucle 60 Hz forcée. Le sondage hotkey/fenêtre de jeu
         // ci-dessus impose quand même un réveil périodique court, sans quoi ni l'un ni l'autre ne
@@ -297,7 +416,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-async fn init_gpu(window: &'static Window) -> GpuState {
+async fn init_gpu(window: Arc<Window>) -> GpuState {
     // Voir spikes/s1-window-windows/README.md pour le détail complet de ce qui suit — bugs
     // wgpu-hal corrigés par le patch vendored, choix d'alpha prémultiplié, etc.
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -312,8 +431,10 @@ async fn init_gpu(window: &'static Window) -> GpuState {
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
 
+    // `Arc<Window>` donne un `Surface<'static>` sans fuite (la surface garde l'`Arc` en interne,
+    // la fenêtre reste vivante aussi longtemps qu'elle) — voir la doc d'`OverlayWindow::window`.
     let surface = instance
-        .create_surface(window)
+        .create_surface(Arc::clone(&window))
         .expect("création de la surface (DirectComposition visual)");
 
     let adapter = instance
@@ -365,7 +486,7 @@ async fn init_gpu(window: &'static Window) -> GpuState {
     let egui_winit = egui_winit::State::new(
         egui_ctx.clone(),
         egui::ViewportId::ROOT,
-        window,
+        window.as_ref(),
         Some(window.scale_factor() as f32),
         None,
         None,
@@ -389,6 +510,8 @@ fn render(
     window: &Window,
     interactive: bool,
     snapshot: &SessionSnapshot,
+    fight: Option<&FightSnapshot>,
+    character_name: &str,
     portraits: &PortraitAtlas,
 ) {
     let raw_input = gpu.egui_winit.take_egui_input(window);
@@ -400,7 +523,10 @@ fn render(
             .show(ui, |ui| {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.heading("wakfu-companion-overlay");
+                    // Repère visuel du rapprochement fenêtre↔personnage (multi-compte,
+                    // 2026-09-01) : le nom affiché DOIT correspondre à la fenêtre de jeu sur
+                    // laquelle cet overlay est collé — vérifiable d'un coup d'œil en test réel.
+                    ui.heading(character_name);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.small(if interactive {
                             "interactif"
@@ -412,7 +538,7 @@ fn render(
                 ui.small(format!("{HOTKEY_LABEL} pour basculer"));
                 ui.separator();
 
-                panels::combat::show(ui, snapshot.current_fight.as_ref(), portraits);
+                panels::combat::show(ui, fight, portraits);
 
                 ui.add_space(8.0);
                 ui.separator();
@@ -535,7 +661,9 @@ fn render(
 /// Thread Engine (§3 du plan) : lit `wakfu.log` en continu, alimente `overlay-engine`, publie
 /// chaque nouveau `SessionSnapshot` par `ArcSwap` et réveille le main thread. Ne rappelle jamais
 /// l'UI directement — l'UI ne lit que la dernière valeur publiée (§3 : « zéro verrou sur le
-/// chemin de rendu »).
+/// chemin de rendu »). Un seul thread/`Engine` pour toutes les fenêtres overlay (voir doc de
+/// module) : `wakfu.log` est partagé par tous les clients, `SessionSnapshot::fights` porte déjà
+/// tous les combats simultanés.
 ///
 /// Reçoit aussi (lot L4) le roster récupéré par le thread Auth (`spawn_auth_thread`) via
 /// `roster_rx` — appliqué à `Engine` de façon non bloquante entre deux lots, jamais en attendant

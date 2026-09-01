@@ -1,6 +1,8 @@
-//! Repérage et suivi de la fenêtre du jeu Wakfu — l'overlay se positionne collé au bord gauche
-//! de cette fenêtre, verticalement centré (demande utilisateur), et suit tout déplacement ou
-//! redimensionnement du client de jeu en continu.
+//! Repérage de **toutes** les fenêtres du jeu Wakfu actuellement ouvertes — une par personnage
+//! connecté (multi-compte, plusieurs clients simultanés sous le même compte Windows). Chaque
+//! fenêtre overlay se positionne collée au bord gauche de SA fenêtre de jeu, verticalement
+//! centrée, et affiche le combat de SON personnage (voir `main.rs::sync_windows` et
+//! `overlay_engine::SessionSnapshot::fight_for_character`).
 //!
 //! Le titre de la fenêtre de jeu est `"<Nom du personnage> - WAKFU"` (ex. `"Sagittarius Caecus -
 //! WAKFU"`) — le nom du personnage varie selon l'utilisateur et la session, mais le suffixe
@@ -9,7 +11,16 @@
 //! process `java`/`javaw` (Wakfu est une application Java) — matcher sur le nom d'exécutable
 //! (`wakfu.exe`) était une hypothèse fausse, corrigée ici avant d'avoir été committée. Le nom du
 //! process n'est donc pas assez distinctif à lui seul (n'importe quel `java(w).exe` le porte) ;
-//! seul le suffixe de titre discrimine correctement.
+//! seul le suffixe de titre discrimine correctement, ET c'est lui qui donne le nom du personnage
+//! (2026-09-01 : confirmé en test réel multi-compte — c'est ce qui permet de rapprocher une
+//! fenêtre de jeu du bon combat).
+//!
+//! **Multi-fenêtre** (2026-09-01, retour utilisateur) : `EnumWindows` s'arrêtait auparavant à la
+//! **première** fenêtre trouvée — correct pour un seul client ouvert, mais en multi-compte
+//! l'overlay se retrouvait ancré sur une fenêtre arbitraire, sans rapport avec le combat affiché
+//! (dérivé du seul `wakfu.log`, partagé et entrelacé par tous les clients — voir
+//! `overlay_engine::session`, doc de module). `scan()` collecte maintenant **toutes** les fenêtres
+//! correspondantes à chaque appel.
 //!
 //! Windows uniquement pour l'instant (S3 — spike X11/Linux — différé, voir
 //! `docs/plan-architecture.md` §12). `imp` ci-dessous bascule vers une implémentation vide sur les
@@ -40,31 +51,46 @@ mod imp {
     /// commentaire de module.
     const TITLE_SUFFIX: &str = " - WAKFU";
 
-    /// Cache paresseusement le HWND trouvé : pas besoin de re-scanner tout le bureau à chaque
-    /// tick (50 ms, voir `main.rs::about_to_wait`) tant que la fenêtre de jeu reste vivante.
-    pub struct GameWindowTracker {
-        hwnd: Option<HWND>,
+    /// Une fenêtre de jeu trouvée — `hwnd` sert de clé stable tant que la fenêtre vit (voir
+    /// `main.rs::sync_windows`, qui diffuse un scan contre l'état précédent par `hwnd`).
+    #[derive(Debug, Clone, Copy)]
+    pub struct GameWindowInfo {
+        pub hwnd: HWND,
+        pub rect: GameRect,
     }
+
+    /// Sans état : chaque `scan()` refait un `EnumWindows` complet (coût négligeable, déjà le
+    /// principe accepté pour le cas mono-fenêtre — voir §6.5 du plan d'archi). Un type nommé
+    /// plutôt que des fonctions libres, pour rester cohérent avec l'appel côté `main.rs`
+    /// (`self.game_window.scan()`) et laisser la porte ouverte à un futur état interne (debounce,
+    /// cache) sans changer l'API appelante.
+    #[derive(Debug, Default)]
+    pub struct GameWindowTracker;
 
     impl GameWindowTracker {
         pub fn new() -> Self {
-            Self { hwnd: None }
+            Self
         }
 
-        pub fn rect(&mut self) -> Option<GameRect> {
-            if let Some(hwnd) = self.hwnd {
-                if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
-                    if let Some(rect) = window_rect(hwnd) {
-                        return Some(rect);
-                    }
-                }
-                // Fenêtre fermée entre deux ticks (jeu quitté) : on oubliera ce HWND et on
-                // re-scannera au prochain appel.
-                self.hwnd = None;
+        /// Toutes les fenêtres de jeu actuellement visibles, avec le nom de personnage extrait du
+        /// titre (suffixe retiré) et son rectangle.
+        pub fn scan(&mut self) -> Vec<(String, GameWindowInfo)> {
+            let mut found: Vec<(String, HWND)> = Vec::new();
+            unsafe {
+                let _ = EnumWindows(
+                    Some(enum_proc),
+                    LPARAM(std::ptr::addr_of_mut!(found) as isize),
+                );
             }
-            let found = find_game_window();
-            self.hwnd = found;
-            found.and_then(window_rect)
+            found
+                .into_iter()
+                .filter_map(|(character_name, hwnd)| {
+                    // Un rectangle introuvable (fenêtre fermée entre l'énumération et cet appel,
+                    // ou appel DWM/GetWindowRect en échec) exclut simplement cette fenêtre de ce
+                    // scan — elle réapparaîtra au prochain si elle est toujours là.
+                    window_rect(hwnd).map(|rect| (character_name, GameWindowInfo { hwnd, rect }))
+                })
+                .collect()
         }
     }
 
@@ -87,6 +113,9 @@ mod imp {
         if !dwm_ok && unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
             return None;
         }
+        if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+            return None;
+        }
         Some(GameRect {
             left: rect.left,
             top: rect.top,
@@ -95,28 +124,18 @@ mod imp {
         })
     }
 
-    fn find_game_window() -> Option<HWND> {
-        let mut result: Option<HWND> = None;
-        unsafe {
-            let _ = EnumWindows(
-                Some(enum_proc),
-                LPARAM(std::ptr::addr_of_mut!(result) as isize),
-            );
-        }
-        result
-    }
-
     extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         unsafe {
             if !IsWindowVisible(hwnd).as_bool() {
                 return true.into();
             }
-            if !window_title(hwnd).ends_with(TITLE_SUFFIX) {
-                return true.into();
-            }
-            let result = &mut *(lparam.0 as *mut Option<HWND>);
-            *result = Some(hwnd);
-            false.into() // trouvé : arrêter l'énumération ici
+            let title = window_title(hwnd);
+            let Some(character_name) = title.strip_suffix(TITLE_SUFFIX) else {
+                return true.into(); // continue l'énumération
+            };
+            let out = &mut *(lparam.0 as *mut Vec<(String, HWND)>);
+            out.push((character_name.to_string(), hwnd));
+            true.into() // continue : on veut TOUTES les fenêtres, pas seulement la première
         }
     }
 
@@ -140,7 +159,14 @@ mod imp {
     use super::GameRect;
 
     /// TODO(S3, différé — voir `docs/plan-architecture.md` §12) : équivalent X11/XWayland
-    /// (`_NET_WM_PID` + `/proc/<pid>/comm`, ou `_NET_CLIENT_LIST` + `XGetWindowProperty`).
+    /// (`_NET_CLIENT_LIST` + `XGetWindowProperty`/`_NET_WM_NAME` pour le titre et le nom de
+    /// personnage, `_NET_FRAME_EXTENTS` pour le rectangle visible).
+    #[derive(Debug, Clone, Copy)]
+    pub struct GameWindowInfo {
+        pub rect: GameRect,
+    }
+
+    #[derive(Debug, Default)]
     pub struct GameWindowTracker;
 
     impl GameWindowTracker {
@@ -148,8 +174,8 @@ mod imp {
             Self
         }
 
-        pub fn rect(&mut self) -> Option<GameRect> {
-            None
+        pub fn scan(&mut self) -> Vec<(String, GameWindowInfo)> {
+            Vec::new()
         }
     }
 }
