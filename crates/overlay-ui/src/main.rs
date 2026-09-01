@@ -76,7 +76,15 @@ const WATCHLIST_WINDOW_SIZE: (f64, f64) = (440.0, 84.0);
 /// après avoir vu le rendu en pratique.
 const GAME_EDGE_MARGIN_PX: i32 = 12;
 /// Même principe que `GAME_EDGE_MARGIN_PX`, mais pour le bord HAUT — ancrage de l'overlay Suivi
-/// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »).
+/// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
+/// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
+/// en haut-droite). Mesuré depuis `GameRect::client_top` (bord réel de la zone de jeu, PAS la barre
+/// de titre Windows) — un bug réel a été corrigé ici (même retour utilisateur, capture d'écran à
+/// l'appui) : l'ancrage utilisait `rect.top` (bord EXTÉRIEUR de la fenêtre, barre de titre
+/// comprise), ce qui plaçait l'overlay bien plus haut que prévu, quasiment collé à la barre de
+/// titre au lieu du contenu du jeu — invisible sur l'ancrage gauche du panneau Combat (`rect.top`
+/// n'y sert qu'à un centrage vertical sur toute la hauteur, l'écart s'y noie), mais immédiatement
+/// visible sur un ancrage haut avec une marge fixe aussi petite.
 const GAME_TOP_MARGIN_PX: i32 = 12;
 
 /// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
@@ -296,7 +304,7 @@ impl App {
             ),
             OverlayKind::Watchlist => PhysicalPosition::new(
                 rect.left + (rect.width - overlay_width) / 2,
-                rect.top + GAME_TOP_MARGIN_PX,
+                rect.client_top + GAME_TOP_MARGIN_PX,
             ),
         }
     }

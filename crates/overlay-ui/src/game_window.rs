@@ -33,6 +33,15 @@ pub struct GameRect {
     pub top: i32,
     pub width: i32,
     pub height: i32,
+    /// Coordonnée écran du bord HAUT de la zone CLIENTE (contenu du jeu, sous la barre de titre
+    /// Windows) — distincte de `top` (bord extérieur de la fenêtre, barre de titre comprise, voir
+    /// `window_rect`). Nécessaire pour ancrer l'overlay Suivi (`OverlayKind::Watchlist`,
+    /// `main.rs::anchor_position`) : `top` convenait pour le centrage vertical du panneau Combat
+    /// (l'écart lié à la barre de titre y est noyé dans un grand rectangle), mais un ancrage HAUT
+    /// avec une petite marge fixe rendait visible cet écart (retour utilisateur 2026-09-01,
+    /// capture d'écran à l'appui : l'overlay Suivi apparaissait bien plus haut que les éléments
+    /// d'interface du jeu ayant la même intention d'ancrage).
+    pub client_top: i32,
 }
 
 pub use imp::GameWindowTracker;
@@ -41,10 +50,12 @@ pub use imp::GameWindowTracker;
 mod imp {
     use super::GameRect;
     use windows::core::BOOL;
-    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
     use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindow, IsWindowVisible,
+        EnumWindows, GetClientRect, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindow,
+        IsWindowVisible,
     };
 
     /// Suffixe distinctif et invariant du titre de la fenêtre du client Wakfu — voir le
@@ -116,12 +127,30 @@ mod imp {
         if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
             return None;
         }
+
+        // Bord haut RÉEL de la zone cliente (sous la barre de titre) — voir la doc de
+        // `GameRect::client_top`. `GetClientRect` donne une origine (0,0), `ClientToScreen` la
+        // convertit en coordonnées écran ; repli sur `rect.top` (bord extérieur) si l'un des deux
+        // appels échoue plutôt que d'écarter toute la fenêtre pour ça — seul l'ancrage du panneau
+        // Suivi en dépend, tout le reste continue de fonctionner avec une valeur approximative.
+        let client_top = client_top_screen_y(hwnd).unwrap_or(rect.top);
+
         Some(GameRect {
             left: rect.left,
             top: rect.top,
             width: rect.right - rect.left,
             height: rect.bottom - rect.top,
+            client_top,
         })
+    }
+
+    fn client_top_screen_y(hwnd: HWND) -> Option<i32> {
+        let mut client_rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client_rect) }.ok()?;
+        let mut origin = POINT { x: 0, y: 0 };
+        unsafe { ClientToScreen(hwnd, &mut origin) }
+            .as_bool()
+            .then_some(origin.y)
     }
 
     extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
