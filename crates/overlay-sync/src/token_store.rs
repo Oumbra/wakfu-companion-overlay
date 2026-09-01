@@ -7,15 +7,24 @@ use std::path::PathBuf;
 
 use crate::SyncError;
 
-const SERVICE: &str = "wakfu-companion-overlay";
+// Nom d'app DISTINCT en test (`#[cfg(test)]`) — un bug réel a été trouvé en session (2026-09-01) :
+// le test de non-régression ci-dessous appelait `clear_token()` sur le VRAI jeton natif de
+// l'utilisateur (même trousseau/même fichier que la production), effaçant silencieusement une
+// session déjà appairée à chaque `cargo test`. Jamais de recouvrement possible entre l'app réelle
+// et ses propres tests.
+#[cfg(not(test))]
+const APP_NAME: &str = "wakfu-companion-overlay";
+#[cfg(test)]
+const APP_NAME: &str = "wakfu-companion-overlay-test";
+
 const ACCOUNT: &str = "native-session";
 
 fn entry() -> Result<keyring::Entry, SyncError> {
-    keyring::Entry::new(SERVICE, ACCOUNT).map_err(|err| SyncError::TokenStore(err.to_string()))
+    keyring::Entry::new(APP_NAME, ACCOUNT).map_err(|err| SyncError::TokenStore(err.to_string()))
 }
 
 fn token_file_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", "wakfu-companion-overlay")
+    directories::ProjectDirs::from("", "", APP_NAME)
         .map(|dirs| dirs.data_dir().join("native-session.token"))
         .unwrap_or_else(|| PathBuf::from("native-session.token"))
 }
