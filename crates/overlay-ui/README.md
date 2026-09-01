@@ -51,7 +51,8 @@ roster de personnages déclaré sur le compte web, **jamais bloquant** pour le r
 
 Le roster récupéré est poussé à l'`Engine` (thread dédié) via un canal, appliqué de façon non
 bloquante entre deux lots de lignes — jamais en attendant dessus. Domaine de l'API configurable via
-`WAKFU_COMPANION_API_URL` (utile contre un `wrangler pages dev` local du dépôt `wakfu-companion`).
+`WAKFU_COMPANION_API_URL` (utile contre un `wrangler pages dev` local du dépôt `wakfu-companion`) ;
+repli par défaut sur `claude-dev.wakfu-companion.com`, **pas** la prod — voir `overlay-sync/README.md`.
 
 ## Ancrage sur la fenêtre de jeu
 

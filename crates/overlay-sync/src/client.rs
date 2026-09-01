@@ -10,11 +10,16 @@ use serde_json::Value;
 
 use crate::SyncError;
 
-const DEFAULT_BASE_URL: &str = "https://wakfu-companion.com";
+// ⚠️ Pointe vers le déploiement DEV (`claude-dev.wakfu-companion.com`), PAS la prod
+// (`wakfu-companion.com`) — retour utilisateur 2026-09-01 : les routes d'appairage natif
+// (`/api/v1/auth/native/*`) ne sont pas encore déployées en prod à ce stade (confirmé : la prod
+// renvoie 405 sur `POST /api/v1/auth/native/pair`, le domaine dev répond 200). À repointer vers la
+// prod dès que l'appairage natif y est déployé — ne pas oublier avant toute release réelle.
+const DEFAULT_BASE_URL: &str = "https://claude-dev.wakfu-companion.com";
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Origine de l'API — `WAKFU_COMPANION_API_URL` en priorité (utile contre un `wrangler pages dev`
-/// local), repli sur le domaine public. Jamais codée en dur sans repli overridable.
+/// local), repli sur `DEFAULT_BASE_URL` ci-dessus. Jamais codée en dur sans repli overridable.
 pub fn base_url() -> String {
     std::env::var("WAKFU_COMPANION_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
 }
