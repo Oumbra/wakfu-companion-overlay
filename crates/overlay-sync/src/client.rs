@@ -40,6 +40,30 @@ pub(crate) fn post_json(path: &str, body: &Value) -> Result<Value, SyncError> {
     parse_json_body(path, response)
 }
 
+/// Récupère les octets bruts d'une URL absolue quelconque — PAS `base_url()` (utilisé tel quel
+/// pour un CDN externe, ex. les icônes `wakassets`, voir `overlay_engine::catalog::IconRef::
+/// image_url`), pas d'en-tête d'authentification (jamais nécessaire hors du propre domaine de
+/// l'API). Toute réponse non 2xx est une erreur — pas de distinction faite ici entre "objet
+/// inconnu de ce CDN" et une vraie panne réseau, l'appelant traite les deux de la même façon
+/// (repli sur l'icône générique).
+pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
+    let mut response = agent()
+        .get(url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(SyncError::Http {
+            status,
+            path: url.to_string(),
+        });
+    }
+    response
+        .body_mut()
+        .read_to_vec()
+        .map_err(|err| SyncError::Network(err.to_string()))
+}
+
 fn parse_json_body(
     path: &str,
     mut response: ureq::http::Response<ureq::Body>,
@@ -99,4 +123,36 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
         roster: RosterIndex::from_settings_json(&data),
         watchlist: watchlist_from_settings_json(&data),
     })
+}
+
+/// `GET /api/v1/catalog/version` — juste assez pour détecter un changement (voir
+/// `functions/api/v1/catalog/version.ts`, dépôt `wakfu-companion`) : `indexHash`, une empreinte du
+/// contenu réellement servi par `fetch_catalog_index`, à comparer à celle du cache disque avant de
+/// retélécharger ~350 Ko pour rien (voir §7.4 du plan).
+pub fn fetch_catalog_version() -> Result<String, SyncError> {
+    let url = format!("{}/api/v1/catalog/version", base_url());
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    let body = parse_json_body("/api/v1/catalog/version", response)?;
+    body.get("indexHash")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| SyncError::Json("champ indexHash absent de /api/v1/catalog/version".into()))
+}
+
+/// `GET /api/v1/catalog/` — index compact objets+monstres tel quel (voir
+/// `overlay_engine::CatalogIndex::from_compact_json`, qui en attend exactement cette forme :
+/// `{ items: [...], monsters: [...] }`, tuples positionnels — voir `server/catalog/
+/// compact-index.ts` côté `wakfu-companion` pour le format exact). ~1,14 Mo bruts / ~348 Ko gzip
+/// mesurés côté serveur — jamais appelé sans avoir d'abord comparé `fetch_catalog_version` au
+/// cache disque (voir `catalog_cache.rs`).
+pub fn fetch_catalog_index() -> Result<Value, SyncError> {
+    let url = format!("{}/api/v1/catalog/", base_url());
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body("/api/v1/catalog/", response)
 }

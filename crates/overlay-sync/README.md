@@ -1,9 +1,10 @@
-# `overlay-sync` — L4 : auth native + roster (lecture)
+# `overlay-sync` — L4 : auth native + roster (lecture) + L3 : catalogue (icônes)
 
 Auth native par appairage (device pairing) + récupération en lecture seule du roster de
 personnages du compte — voir [`docs/plan-architecture.md`](../../docs/plan-architecture.md) §7.2,
-§12, §14 point 2. Première brique réseau de l'overlay : pas encore de file d'envoi ni de synchro
-d'historique (L5, à venir).
+§12, §14 point 2. Depuis 2026-09-02, sert aussi de brique réseau pour le catalogue objets/monstres
+(lot L3 réduit — §7.4, voir `overlay-engine::catalog`), pour résoudre l'icône réelle d'une entrée
+suivie. Pas encore de file d'envoi ni de synchro d'historique (L5, à venir).
 
 ## Contenu
 
@@ -11,7 +12,9 @@ d'historique (L5, à venir).
 | --- | --- |
 | `pairing.rs` | `pair_and_wait(on_started)` : `POST /api/v1/auth/native/pair`, affiche le code (callback `on_started`, appelé avant tout sondage), ouvre le navigateur par défaut (`open`, best-effort), sonde `POST /api/v1/auth/native/poll` toutes les ~3 s jusqu'à confirmation/expiration. |
 | `token_store.rs` | `save_token`/`load_token`/`clear_token` — trousseau OS (`keyring`) en priorité, repli fichier `0600` explicite (jamais silencieux, `tracing::warn!`) sous le dossier de données de l'app (`directories::ProjectDirs`) si aucun trousseau n'est disponible. |
-| `client.rs` | `fetch_settings(token)` : `GET /api/v1/settings` avec `Authorization: Bearer <token>` → `AccountSettings { roster: overlay_engine::RosterIndex, watchlist: Vec<overlay_engine::WatchlistEntry> }` (roster et watchlist sont deux clés du même objet `data`, un seul appel réseau pour les deux — voir `docs/plan-architecture.md` §14 point 3). Origine configurable (`WAKFU_COMPANION_API_URL`, repli sur **`claude-dev.wakfu-companion.com`** — voir la note ci-dessous, pas la prod). |
+| `client.rs` | `fetch_settings(token)` : `GET /api/v1/settings` → `AccountSettings { roster, watchlist }`. `fetch_catalog_version()`/`fetch_catalog_index()` : `GET /api/v1/catalog/version`/`GET /api/v1/catalog/` (index compact, ~1,14 Mo bruts/~348 Ko gzip). `fetch_bytes(url)` : octets bruts d'une URL absolue quelconque, sans authentification — utilisé pour les icônes `wakassets` (CDN externe, hors du domaine de l'API). Origine de l'API configurable (`WAKFU_COMPANION_API_URL`, repli sur **`claude-dev.wakfu-companion.com`** — voir la note ci-dessous, pas la prod) ; les icônes `wakassets` ne passent jamais par cette origine (URL absolue vers un CDN tiers). |
+| `catalog_cache.rs` | Cache disque du catalogue (`GET /api/v1/catalog/`) — un fichier JSON sous le dossier de données de l'app, comparé par `indexHash` avant tout retéléchargement. Offline-first : chargé et utilisable immédiatement au démarrage, sans attendre le réseau. |
+| `icon_cache.rs` | Cache disque des icônes `wakassets` elles-mêmes (un PNG par `gfx_id`, jamais d'expiration — le contenu d'un `gfx_id` donné ne change pas). |
 
 ## Pourquoi `ureq` plutôt que `reqwest`+`tokio`
 

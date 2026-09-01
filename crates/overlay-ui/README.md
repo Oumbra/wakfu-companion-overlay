@@ -36,12 +36,22 @@ redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et
   horizontalement. Bande de tuiles carrées à l'image du bandeau du dépôt web
   (`tracker-strip.component`/`.kpi`) : tuiles "+"/"−" reprenant la forme du web mais INERTES pour
   l'instant (aucun formulaire d'ajout ni sélection multiple câblés côté overlay), puis une tuile par
-  entrée suivie (icône générique tant qu'aucune vraie icône d'objet/monstre n'est câblée — lot L3,
-  Catalogue — nom complet en tooltip, badge de compteur). Toujours en LECTURE SEULE côté définitions
-  (la liste elle-même reste éditée sur le web) ; les compteurs, eux, sont incrémentés — et
-  persistés localement — par l'overlay (voir `overlay_engine::watchlist`,
-  `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le compte ne déclare aucune
-  entrée.
+  entrée suivie — **icône réelle** résolue par le catalogue (`overlay_engine::CatalogIndex`,
+  téléchargée/décodée par `remote_icons.rs`, voir plus bas), repli sur l'icône générique tant
+  qu'elle n'est pas résolue/téléchargée ; nom complet en tooltip, badge de compteur (`"3"` en mode
+  incrémental, `"5/10"` compte/cible en mode décompte — miroir du bandeau web, retour utilisateur
+  2026-09-02). Toujours en LECTURE SEULE côté définitions (la liste elle-même reste éditée sur le
+  web) ; les compteurs, eux, sont incrémentés — et persistés localement — par l'overlay (voir
+  `overlay_engine::watchlist`, `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le
+  compte ne déclare aucune entrée.
+
+**Icônes réelles d'objets/monstres** (`remote_icons.rs`, lot L3 réduit — retour utilisateur
+2026-09-02 : icône générique partout, tuiles impossibles à distinguer) : `spawn_catalog_thread`
+charge le catalogue (offline-first — cache disque publié immédiatement, rafraîchi en arrière-plan
+si `indexHash` a changé, voir `overlay-sync/README.md`) ; `RemoteIconStore`, un thread PARTAGÉ par
+toutes les fenêtres, télécharge (repli disque, CDN communautaire `wakassets`) et décode chaque
+icône une seule fois même avec plusieurs comptes ; `RemoteIconTextures`, PAR fenêtre, uploade les
+octets décodés en texture `egui` (une `TextureHandle` n'est valide que pour SON `egui::Context`).
 
 **Alertes de drop** (son + toast quand un décompte de suivi atteint 0, §9 du plan) : dès qu'
 `overlay_engine::Engine::drain_watchlist_alerts` signale un décompte tombé à 0,

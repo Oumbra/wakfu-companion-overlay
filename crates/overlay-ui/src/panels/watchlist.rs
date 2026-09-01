@@ -14,15 +14,17 @@
 //! Un survol affiche un tooltip explicite plutôt que de laisser un bouton cliquable qui ne ferait
 //! rien silencieusement (retour utilisateur déjà vécu sur le bouton de connexion au compte).
 //!
-//! Pas d'icône par objet/monstre pour l'instant (`catalog_id` existe déjà sur `WatchlistEntry`
-//! mais rien ne le résout encore en image — lot L3, Catalogue, pas encore fait) : chaque tuile
-//! affiche le même repli générique que le panneau Combat (`UiIcons::unknown_entity_texture`),
-//! sciemment identique quel que soit l'objet/l'ennemi réel — seule la couleur de bordure
-//! (`marker_color`) distingue objet suivi et ennemi suivi. À remplacer dès qu'une vraie icône par
-//! objet/monstre sera câblée.
+//! Icône réelle de chaque tuile (retour utilisateur 2026-09-02 : « comme les images de
+//! ressources/monstres n'est pas présent c'est très compliqué pour l'utilisateur » de distinguer
+//! les tuiles entre elles) — résolue via `overlay_engine::CatalogIndex` (lot L3 réduit, voir
+//! `catalog.rs`) puis téléchargée/décodée par `remote_icons::RemoteIconStore`, mise en cache par
+//! fenêtre dans `remote_icons::RemoteIconTextures`. Repli sur l'icône générique (`UiIcons::
+//! unknown_entity_texture`) tant que l'entrée n'est pas résolue par le catalogue OU que son icône
+//! n'a pas fini de télécharger — jamais une tuile vide ou un blocage du rendu.
 
-use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
+use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
+use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 /// Durée d'affichage du toast d'alerte (§9 du plan : « toast ≤ 5 s, non bloquant, jamais
@@ -69,9 +71,13 @@ const BADGE_TEXT: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 /// sombre de l'overlay.
 const NAME_COLOR: egui::Color32 = egui::Color32::from_rgb(220, 224, 230);
 
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
     icons: &UiIcons,
+    catalog: &CatalogIndex,
+    remote_icons: &RemoteIconStore,
+    remote_icon_textures: &mut RemoteIconTextures,
     entries: &[WatchlistEntry],
     toast: Option<&WatchlistToast>,
 ) {
@@ -92,7 +98,14 @@ pub fn show(
                     if i > 0 {
                         ui.add_space(TILE_GAP);
                     }
-                    entry_tile(ui, icons, entry);
+                    entry_tile(
+                        ui,
+                        icons,
+                        catalog,
+                        remote_icons,
+                        remote_icon_textures,
+                        entry,
+                    );
                 }
             });
         });
@@ -165,10 +178,19 @@ fn control_tile(ui: &mut egui::Ui, glyph: &str, tooltip: &str) {
     response.on_hover_text(tooltip);
 }
 
-/// Tuile d'une entrée suivie : icône générique (voir doc de module) bordée de la couleur de
-/// `kind`, badge de compteur ancré en bas-à-droite (même position que `.kpi-count-badge` côté
-/// web). Nom complet en tooltip — jamais tronqué silencieusement sans recours.
-fn entry_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &WatchlistEntry) {
+/// Tuile d'une entrée suivie : icône réelle si le catalogue la résout et qu'elle a fini de
+/// télécharger (voir doc de module), repli générique sinon — bordée de la couleur de `kind`,
+/// badge de compteur ancré en bas-à-droite (même position que `.kpi-count-badge` côté web). Nom
+/// complet en tooltip — jamais tronqué silencieusement sans recours, y compris avec une icône
+/// réelle (contrairement au web, dont l'image elle-même porte souvent assez d'info visuelle).
+fn entry_tile(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    catalog: &CatalogIndex,
+    remote_icons: &RemoteIconStore,
+    remote_icon_textures: &mut RemoteIconTextures,
+    entry: &WatchlistEntry,
+) {
     let marker_color = match entry.kind {
         WatchlistKind::Item => ITEM_MARKER,
         WatchlistKind::Enemy => ENEMY_MARKER,
@@ -185,11 +207,22 @@ fn entry_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &WatchlistEntry) {
         egui::StrokeKind::Inside,
     );
 
+    let icon_ref = match entry.kind {
+        WatchlistKind::Item => catalog.find_item_icon(&entry.name, entry.catalog_id),
+        WatchlistKind::Enemy => catalog.find_monster_icon(&entry.name, entry.catalog_id),
+    };
+    let remote_texture = icon_ref
+        .as_ref()
+        .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
+
     // `paint_at` peint directement DANS le rect donné (ignore fit_to_exact_size/
     // maintain_aspect_ratio, qui ne s'appliquent qu'au layout via `ui.add`) — même motif que
     // `panels::combat::draw_centered_icon`, pas la peine de les poser ici.
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(ICON_SIZE, ICON_SIZE));
-    egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect);
+    match &remote_texture {
+        Some(texture) => egui::Image::new(texture).paint_at(ui, icon_rect),
+        None => egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect),
+    }
 
     count_badge(ui, rect, entry);
 
