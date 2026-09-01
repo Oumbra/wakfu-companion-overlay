@@ -14,4 +14,6 @@ pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, Tr
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
 pub use session::{Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals};
-pub use watchlist::{watchlist_from_settings_json, WatchlistEntry, WatchlistKind, WatchlistMode};
+pub use watchlist::{
+    watchlist_from_settings_json, WatchlistAlert, WatchlistEntry, WatchlistKind, WatchlistMode,
+};

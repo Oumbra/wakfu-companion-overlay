@@ -25,6 +25,26 @@ use overlay_engine::{WatchlistEntry, WatchlistKind};
 
 use crate::ui_icons::UiIcons;
 
+/// Durée d'affichage du toast d'alerte (§9 du plan : « toast ≤ 5 s, non bloquant, jamais
+/// interactif ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
+/// dupliquer.
+pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Un décompte de suivi vient d'atteindre 0 (voir `overlay_engine::WatchlistAlert`) — construit
+/// par `main.rs::spawn_engine_thread` à réception de l'alerte, publié via `ArcSwap` (comme
+/// `watchlist`/`snapshot`) pour que le thread UI l'affiche sans coupler le thread Engine au rendu.
+#[derive(Debug, Clone)]
+pub struct WatchlistToast {
+    pub name: String,
+    pub kind: WatchlistKind,
+    /// Instant auquel le toast doit cesser de s'afficher — comparé à `Instant::now()` à chaque
+    /// rendu (voir `show`) plutôt que de faire expirer activement l'`ArcSwap` : cette architecture
+    /// n'a pas de boucle de rendu continue (§6.1 du plan), `main.rs::render` reprogramme lui-même
+    /// un redessin à cette échéance via `OverlayWindow::next_redraw_at` pour que le toast
+    /// disparaisse sans qu'aucun autre événement n'ait à se produire.
+    pub hide_at: std::time::Instant,
+}
+
 const TILE_SIZE: f32 = 52.0;
 const TILE_GAP: f32 = 6.0;
 const TILE_ROUNDING: f32 = 8.0;
@@ -45,7 +65,16 @@ const ENEMY_MARKER: egui::Color32 = egui::Color32::from_rgb(0xff, 0x6b, 0x5b);
 const BADGE_BG: egui::Color32 = egui::Color32::from_rgb(0x0a, 0x0c, 0x12);
 const BADGE_TEXT: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 
-pub fn show(ui: &mut egui::Ui, icons: &UiIcons, entries: &[WatchlistEntry]) {
+/// Couleur du texte du toast (`toast_banner`) — même teinte claire que le reste de l'interface
+/// sombre de l'overlay.
+const NAME_COLOR: egui::Color32 = egui::Color32::from_rgb(220, 224, 230);
+
+pub fn show(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    entries: &[WatchlistEntry],
+    toast: Option<&WatchlistToast>,
+) {
     egui::ScrollArea::horizontal()
         .id_salt("watchlist-strip")
         .show(ui, |ui| {
@@ -67,6 +96,38 @@ pub fn show(ui: &mut egui::Ui, icons: &UiIcons, entries: &[WatchlistEntry]) {
                 }
             });
         });
+
+    // Espace TOUJOURS réservé sous la bande de tuiles (fenêtre dimensionnée en conséquence, voir
+    // `main.rs::WATCHLIST_WINDOW_SIZE`) plutôt qu'agrandir la fenêtre à la volée à l'apparition
+    // d'un toast : ancrage déjà mis au point avec l'utilisateur (2026-09-01, plusieurs allers-
+    // retours) pour la bande de tuiles elle-même — l'y toucher à nouveau pour un toast occasionnel
+    // aurait tout redécalé. Invisible quand inactif (rien n'est peint, fond transparent).
+    ui.add_space(6.0);
+    if let Some(toast) = toast.filter(|t| t.hide_at > std::time::Instant::now()) {
+        toast_banner(ui, toast);
+    }
+}
+
+/// Toast d'alerte (§9 du plan : « toast + son quand un objet suivi tombe ») — non interactif
+/// (`Sense::hover()` seulement), disparaît de lui-même après `TOAST_DURATION` (voir la doc de
+/// `WatchlistToast::hide_at`). Pas de confettis contrairement à `loot-alert.component.ts` : le
+/// plan (§9) ne demande qu'« un toast ≤ 5 s, non bloquant, jamais interactif », une bannière de
+/// texte suffit pour cette itération.
+fn toast_banner(ui: &mut egui::Ui, toast: &WatchlistToast) {
+    let marker_color = match toast.kind {
+        WatchlistKind::Item => ITEM_MARKER,
+        WatchlistKind::Enemy => ENEMY_MARKER,
+    };
+    ui.horizontal(|ui| {
+        let (dot_rect, _resp) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+        ui.painter()
+            .circle_filled(dot_rect.center(), 4.0, marker_color);
+        ui.label(
+            egui::RichText::new(format!("Suivi terminé : {}", toast.name))
+                .color(NAME_COLOR)
+                .strong(),
+        );
+    });
 }
 
 /// Tuile "+"/"−" du bandeau web — bordure en pointillés (`egui::Shape::dashed_line`, pas de

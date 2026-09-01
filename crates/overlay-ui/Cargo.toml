@@ -21,6 +21,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4.34"
 pollster = "1.0.1"
 raw-window-handle = "0.6"
+rodio = { version = "0.21", default-features = false, features = ["mp3", "playback"] }
 tracing = "0.1"
 wgpu = { version = "30", features = ["dx12", "vulkan"] }
 winit = { version = "0.30", features = ["rwh_06"] }

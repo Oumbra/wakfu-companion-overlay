@@ -22,6 +22,7 @@
 //! personnage — limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec
 //! `overlay-engine` tel qu'il existe aujourd'hui.
 
+mod alert_sound;
 mod game_window;
 mod panels;
 mod portraits;
@@ -44,6 +45,7 @@ use overlay_engine::{Engine, FightSnapshot, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_sync::AccountSettings;
 use panels::combat::CombatSide;
+use panels::watchlist::WatchlistToast;
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use ui_icons::UiIcons;
@@ -69,8 +71,12 @@ const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
 // faire.
 const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
 /// Fenêtre du panneau Suivi — large et basse (bande horizontale de tuiles, voir
-/// `panels::watchlist`), pas un panneau vertical comme Combat.
-const WATCHLIST_WINDOW_SIZE: (f64, f64) = (440.0, 84.0);
+/// `panels::watchlist`), pas un panneau vertical comme Combat. Hauteur augmentée de 84 à 116 px
+/// (2026-09-02) pour réserver l'espace du toast d'alerte SOUS la bande de tuiles (voir
+/// `panels::watchlist::show`) — sans agrandir la fenêtre à la volée à l'apparition d'un toast, ce
+/// qui aurait fait bouger la bande de tuiles elle-même dont l'ancrage vient d'être mis au point
+/// avec l'utilisateur.
+const WATCHLIST_WINDOW_SIZE: (f64, f64) = (440.0, 116.0);
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
 /// gauche de l'overlay Combat — « collé à quelques pixels près » (demande utilisateur). À ajuster
 /// après avoir vu le rendu en pratique.
@@ -206,6 +212,10 @@ struct App {
     /// `overlay_engine::watchlist`). Global comme `snapshot`, pas par fenêtre : le suivi est un
     /// suivi de compte, pas d'un personnage précis.
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
+    /// Publié par le thread Engine à chaque décompte de suivi qui vient d'atteindre 0 (voir
+    /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
+    /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
+    watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     /// Publié par le thread Auth (voir `spawn_auth_thread`) — piloté l'affichage de l'icône de
     /// relance d'appairage (`render`).
     auth_status: Arc<ArcSwap<AuthStatus>>,
@@ -225,6 +235,7 @@ impl App {
         log_path: PathBuf,
         snapshot: Arc<ArcSwap<SessionSnapshot>>,
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
+        watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
         auth_status: Arc<ArcSwap<AuthStatus>>,
         auth_retry_tx: mpsc::Sender<()>,
     ) -> Self {
@@ -241,6 +252,7 @@ impl App {
             interactive: true,
             snapshot,
             watchlist,
+            watchlist_toast,
             auth_status,
             auth_retry_tx,
             log_path,
@@ -552,6 +564,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
                 let watchlist = self.watchlist.load();
+                let watchlist_toast_guard = self.watchlist_toast.load();
+                let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
                 let auth_status = self.auth_status.load();
                 let repaint_delay = render(
                     &mut overlay.gpu,
@@ -563,6 +577,7 @@ impl ApplicationHandler<UserEvent> for App {
                         icons: &overlay.icons,
                         combat_side: &mut overlay.combat_side,
                         watchlist: &watchlist,
+                        watchlist_toast,
                         auth_status: &auth_status,
                         auth_retry_tx: &self.auth_retry_tx,
                     },
@@ -713,6 +728,7 @@ struct RenderContent<'a> {
     icons: &'a UiIcons,
     combat_side: &'a mut CombatSide,
     watchlist: &'a [WatchlistEntry],
+    watchlist_toast: Option<&'a WatchlistToast>,
     auth_status: &'a AuthStatus,
     auth_retry_tx: &'a mpsc::Sender<()>,
 }
@@ -739,6 +755,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         icons,
         combat_side,
         watchlist,
+        watchlist_toast,
         auth_status,
         auth_retry_tx,
     } = content;
@@ -809,7 +826,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                 // (fenêtre transparente vide plutôt qu'un cadre vide disgracieux).
                 OverlayKind::Watchlist => {
                     if !watchlist.is_empty() {
-                        panels::watchlist::show(ui, icons, watchlist);
+                        panels::watchlist::show(ui, icons, watchlist, watchlist_toast);
                     }
                 }
             });
@@ -820,10 +837,20 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
     // cette architecture sans boucle de rendu continue. Repli `Duration::MAX` ("pas de redessin
     // demandé") si jamais le viewport racine n'a pas d'entrée — ne devrait pas arriver en
     // pratique (une seule fenêtre racine par `egui::Context`, jamais de sous-viewport ici).
-    let repaint_delay = full_output
+    let mut repaint_delay = full_output
         .viewport_output
         .get(&egui::ViewportId::ROOT)
         .map_or(std::time::Duration::MAX, |viewport| viewport.repaint_delay);
+    // Le toast d'alerte disparaît de lui-même après `WatchlistToast::hide_at` (voir sa doc) — sans
+    // ceci, rien ne redéclencherait de redessin à cette échéance dans cette architecture sans
+    // boucle continue (§6.1), le toast resterait affiché indéfiniment jusqu'au prochain redessin
+    // dû à une AUTRE cause.
+    if let Some(toast) = watchlist_toast {
+        let now = std::time::Instant::now();
+        if toast.hide_at > now {
+            repaint_delay = repaint_delay.min(toast.hide_at - now);
+        }
+    }
 
     gpu.egui_winit
         .handle_platform_output(window, full_output.platform_output);
@@ -928,10 +955,19 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
 /// n'influence l'affichage qu'indirectement, via la classe résolue au prochain `FighterJoined`),
 /// les entrées suivies sont DIRECTEMENT affichées (`panels::watchlist`) — sans cette publication
 /// immédiate, la liste resterait vide à l'écran jusqu'au prochain lot de lignes de log.
+///
+/// Publie aussi `watchlist_toast` (§9 du plan, « Alertes de drop ») dès qu'`Engine::
+/// drain_watchlist_alerts` renvoie quelque chose après un lot ingéré — jamais depuis la boucle
+/// `settings_rx` ci-dessus, `set_watchlist_entries`/`merge_config` ne peut par construction jamais
+/// déclencher d'alerte (voir `overlay_engine::watchlist::WatchlistState::merge_config`, qui
+/// n'appelle jamais `increment`). Le son est joué sur son propre thread éphémère
+/// (`alert_sound::play_countdown_alert`), jamais en bloquant CE thread — bloquer ici retarderait
+/// l'ingestion du log pour tous les personnages.
 fn spawn_engine_thread(
     log_path: PathBuf,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
+    watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     proxy: EventLoopProxy<UserEvent>,
     settings_rx: mpsc::Receiver<AccountSettings>,
 ) {
@@ -965,6 +1001,16 @@ fn spawn_engine_thread(
                         }
                         snapshot.store(Arc::new(engine.snapshot()));
                         watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
+                        for alert in engine.drain_watchlist_alerts() {
+                            tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
+                            alert_sound::play_countdown_alert();
+                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
+                                name: alert.name,
+                                kind: alert.kind,
+                                hide_at: std::time::Instant::now()
+                                    + panels::watchlist::TOAST_DURATION,
+                            })));
+                        }
                         let _ = proxy.send_event(UserEvent::NewSnapshot);
                     }
                     Ok(Err(err)) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
@@ -1117,6 +1163,7 @@ fn main() {
     let log_path = resolve_path();
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
+    let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
@@ -1135,11 +1182,19 @@ fn main() {
         log_path.clone(),
         Arc::clone(&snapshot),
         Arc::clone(&watchlist),
+        Arc::clone(&watchlist_toast),
         proxy,
         settings_rx,
     );
 
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(log_path, snapshot, watchlist, auth_status, auth_retry_tx);
+    let mut app = App::new(
+        log_path,
+        snapshot,
+        watchlist,
+        watchlist_toast,
+        auth_status,
+        auth_retry_tx,
+    );
     event_loop.run_app(&mut app).expect("boucle d'événements");
 }

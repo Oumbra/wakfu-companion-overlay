@@ -42,6 +42,19 @@ pub enum WatchlistMode {
     Down,
 }
 
+/// Émis par `WatchlistState::apply` quand un décompte (mode `down`) vient d'atteindre 0 — §9 du
+/// plan, « Alertes de drop » : « toast + son quand un objet suivi tombe ». Miroir minimal de
+/// `LootAlertEvent` (`loot-alert.service.ts`), réduit au seul cas `reason: 'countdown'` : le cas
+/// `reason: 'loot'` (son configurable par objet ramassé, indépendant de la watchlist — voir
+/// `ProfileService.findEnabledSoundItem`) dépend des réglages `profile` du compte, pas encore lus
+/// par l'overlay — hors périmètre de cette itération, qui ne couvre que ce que `WatchlistState`
+/// sait déjà détecter seul.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchlistAlert {
+    pub name: String,
+    pub kind: WatchlistKind,
+}
+
 /// Miroir de `WatchlistEntry` (`stats-store.service.ts`). `catalog_id` est lu depuis le compte
 /// mais n'intervient JAMAIS dans le comptage (le log ne référence jamais un id, seulement un nom
 /// — voir la doc TS d'origine) : conservé uniquement pour un futur affichage d'icône exacte en
@@ -160,37 +173,53 @@ impl WatchlistState {
     /// Applique un `LogEntry` déjà déterminé comme HORS rattrapage initial par l'appelant (voir
     /// `Engine::ingest_batch`) — miroir du gating `if (this.currentBatchIsInitialLoad) return;`
     /// fait côté web dans `registerLoot`/`registerDefeat`, pas ici : `WatchlistState` n'a aucune
-    /// notion de rattrapage en cours, exactement comme `roster` sur `Engine`.
-    pub fn apply(&mut self, entry: &LogEntry) {
-        let changed = match entry {
+    /// notion de rattrapage en cours, exactement comme `roster` sur `Engine`. Renvoie les alertes
+    /// (voir `WatchlistAlert`) déclenchées par CET événement, à faire remonter à l'hôte (toast +
+    /// son) — vide dans l'immense majorité des cas (mode `up`, ou aucune entrée qui vient
+    /// d'atteindre 0).
+    pub fn apply(&mut self, entry: &LogEntry) -> Vec<WatchlistAlert> {
+        let (changed, alerts) = match entry {
             LogEntry::Loot { item, quantity, .. } => self.increment(item, *quantity),
             LogEntry::EnemyDefeated { name, .. } => self.increment(name, 1),
-            _ => false,
+            _ => (false, Vec::new()),
         };
         if changed {
             self.persist();
         }
+        alerts
     }
 
     /// Incrémente (mode `up`) ou décompte vers 0 (mode `down`) TOUTE entrée dont le nom matche —
     /// miroir exact d'`incrementWatched` : le matching se fait sur le nom SEUL, pas sur `kind`
     /// (un objet et un ennemi de même nom incrémenteraient tous les deux, comme côté web).
     /// Renvoie `true` si au moins une entrée a été modifiée (sert à ne persister sur disque que
-    /// quand c'est utile).
-    fn increment(&mut self, raw_name: &str, by: i64) -> bool {
+    /// quand c'est utile), et la liste des entrées qui viennent de FRANCHIR le seuil de 0 (compte
+    /// strictement positif avant, nul après) — un compte déjà à 0 qui reste à 0 n'alerte pas une
+    /// deuxième fois, miroir du `if (entry.count > 0 && next === 0)` d'`incrementWatched`.
+    fn increment(&mut self, raw_name: &str, by: i64) -> (bool, Vec<WatchlistAlert>) {
         let normalized = raw_name.trim().to_lowercase();
         let mut changed = false;
+        let mut alerts = Vec::new();
         for entry in &mut self.entries {
             if entry.name.to_lowercase() != normalized {
                 continue;
             }
             changed = true;
             match entry.mode {
-                WatchlistMode::Down => entry.count = (entry.count - by).max(0),
+                WatchlistMode::Down => {
+                    let was_positive = entry.count > 0;
+                    entry.count = (entry.count - by).max(0);
+                    if was_positive && entry.count == 0 {
+                        alerts.push(WatchlistAlert {
+                            name: entry.name.clone(),
+                            kind: entry.kind,
+                        });
+                    }
+                }
                 WatchlistMode::Up => entry.count += by,
             }
         }
-        changed
+        (changed, alerts)
     }
 
     fn persist(&self) {
@@ -306,6 +335,33 @@ mod tests {
         assert_eq!(state.entries()[0].count, 1);
         state.apply(&loot("Ortie Sauvage", 5)); // dépasse largement la cible restante
         assert_eq!(state.entries()[0].count, 0);
+    }
+
+    #[test]
+    fn mode_down_declenche_une_alerte_en_atteignant_zero_pour_la_premiere_fois() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Down, 2)]);
+        assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 2 -> 1, pas encore 0
+        let alerts = state.apply(&loot("Ortie Sauvage", 1)); // 1 -> 0
+        assert_eq!(
+            alerts,
+            vec![WatchlistAlert {
+                name: "Ortie Sauvage".to_string(),
+                kind: WatchlistKind::Item,
+            }]
+        );
+    }
+
+    #[test]
+    fn mode_down_ne_realerte_pas_une_fois_deja_a_zero() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Down, 1)]);
+        assert!(!state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 1 -> 0, alerte
+        assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // déjà à 0, silence
+    }
+
+    #[test]
+    fn mode_up_ne_declenche_jamais_dalerte() {
+        let mut state = state_with(vec![item("Larve Bleue", WatchlistMode::Up, 0)]);
+        assert!(state.apply(&loot("Larve Bleue", 100)).is_empty());
     }
 
     #[test]
