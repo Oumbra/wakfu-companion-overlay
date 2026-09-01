@@ -85,14 +85,24 @@ enum UserEvent {
 /// d'afficher ou non l'icône de relance d'appairage (voir `render`). Volontairement distinct d'un
 /// simple `bool` : `Connecting` évite d'afficher l'icône pendant la toute première tentative
 /// (jeton déjà stocké, ou premier appairage) — elle ne doit apparaître qu'après un échec avéré.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum AuthStatus {
     Connecting,
     Connected,
     /// Ni jeton valide ni appairage complété — l'icône de relance doit être visible (retour
     /// utilisateur 2026-09-01 : appairage en échec — 405 côté serveur — sans aucun moyen de
     /// retenter sans relancer tout le logiciel).
-    Disconnected,
+    ///
+    /// `reason` porte le message d'erreur de la DERNIÈRE tentative (`attempt_connect`) — affiché
+    /// en tooltip sur l'icône de relance (voir `render`) : un clic qui ne se traduit par rien de
+    /// visible (le serveur refuse la requête AVANT même qu'un code d'appairage existe, donc aucun
+    /// navigateur ne s'ouvre) est indiscernable d'un bouton cassé sans ce message — retour
+    /// utilisateur 2026-09-01 : « l'appui du bouton ne déclenche rien, pas de message d'erreur
+    /// dans la console » — le message existait déjà (console), seulement invisible pour qui ne
+    /// regarde pas un terminal ; il l'est maintenant aussi directement dans l'overlay.
+    Disconnected {
+        reason: String,
+    },
 }
 
 struct GpuState {
@@ -133,6 +143,16 @@ struct OverlayWindow {
     /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
     /// rien (voir `App::sync_topmost`).
     is_topmost: bool,
+    /// Prochain redessin déjà planifié par une frame précédente qui a demandé un délai (retour
+    /// egui `ViewportOutput::repaint_delay` — ex. le délai d'apparition d'une tooltip au survol
+    /// d'un portrait, voir `panels::combat`) — sans ce champ, ce délai n'avait AUCUN moyen d'être
+    /// honoré : cette architecture n'a pas de boucle 60 Hz (§6.1 du plan), le rendu ne se
+    /// redéclenche que sur un `WindowEvent` (dont `CursorMoved`, mais UNE seule fois à l'entrée du
+    /// survol) ou un `UserEvent`, jamais après un délai pur — la tooltip ne s'affichait donc
+    /// qu'au hasard d'un autre redessin (retour utilisateur 2026-09-01 : « c'est bizarre, ça
+    /// s'est affiché, là ça s'est caché »). Consommé par `App::about_to_wait`, qui redessine et
+    /// vide ce champ une fois l'échéance atteinte.
+    next_redraw_at: Option<std::time::Instant>,
 }
 
 struct App {
@@ -270,6 +290,7 @@ impl App {
             character_name,
             last_position: Some(position),
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
+            next_redraw_at: None,
         }
     }
 
@@ -427,8 +448,8 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
-                let auth_status = **self.auth_status.load();
-                render(
+                let auth_status = self.auth_status.load();
+                let repaint_delay = render(
                     &mut overlay.gpu,
                     &overlay.window,
                     RenderContent {
@@ -436,10 +457,15 @@ impl ApplicationHandler<UserEvent> for App {
                         portraits: &overlay.portraits,
                         icons: &overlay.icons,
                         combat_side: &mut overlay.combat_side,
-                        auth_status,
+                        auth_status: &auth_status,
                         auth_retry_tx: &self.auth_retry_tx,
                     },
                 );
+                // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
+                // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
+                // `about_to_wait` est responsable de le consommer le moment venu.
+                overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
+                    .then(|| std::time::Instant::now() + repaint_delay);
             }
             _ => {}
         }
@@ -456,13 +482,29 @@ impl ApplicationHandler<UserEvent> for App {
         // ici et reste négligeable en coût, voir game_window.rs).
         self.sync_windows(event_loop);
         self.sync_topmost();
+
+        // Honore les délais de redessin qu'egui a demandés (tooltip au survol d'un portrait,
+        // typiquement) et qu'aucun `WindowEvent`/`UserEvent` ne redéclenchera de lui-même — voir
+        // `OverlayWindow::next_redraw_at` et `render`. Sans ceci, la tooltip ne s'affichait qu'au
+        // hasard d'un autre redessin (retour utilisateur 2026-09-01).
+        let now = std::time::Instant::now();
+        let mut next_wake = now + std::time::Duration::from_millis(50);
+        for overlay in self.windows.values_mut() {
+            if let Some(due) = overlay.next_redraw_at {
+                if due <= now {
+                    overlay.next_redraw_at = None;
+                    overlay.window.request_redraw();
+                } else {
+                    next_wake = next_wake.min(due);
+                }
+            }
+        }
+
         // Réactif (§6.1) : on attend soit un événement fenêtre, soit un `UserEvent::NewSnapshot`
         // du thread Engine, jamais de boucle 60 Hz forcée. Le sondage hotkey/fenêtre de jeu
-        // ci-dessus impose quand même un réveil périodique court, sans quoi ni l'un ni l'autre ne
-        // seraient vus qu'au prochain événement fenêtre.
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            std::time::Instant::now() + std::time::Duration::from_millis(50),
-        ));
+        // ci-dessus impose quand même un réveil périodique court (borne haute de `next_wake`),
+        // sans quoi ni l'un ni l'autre ne seraient vus qu'au prochain événement fenêtre.
+        event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
     }
 }
 
@@ -563,7 +605,7 @@ struct RenderContent<'a> {
     portraits: &'a PortraitAtlas,
     icons: &'a UiIcons,
     combat_side: &'a mut CombatSide,
-    auth_status: AuthStatus,
+    auth_status: &'a AuthStatus,
     auth_retry_tx: &'a mpsc::Sender<()>,
 }
 
@@ -576,7 +618,12 @@ struct RenderContent<'a> {
 /// plaque sombre visible même quand il n'y a presque rien à afficher, voir la capture) est
 /// également retiré : `Frame::NONE`, seuls les widgets eux-mêmes restent visibles par-dessus le
 /// jeu.
-fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
+///
+/// Renvoie le délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::
+/// repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at`
+/// pour pourquoi l'appelant doit impérativement en tenir compte, cette architecture n'ayant pas de
+/// boucle de rendu continue.
+fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> std::time::Duration {
     let RenderContent {
         fight,
         portraits,
@@ -593,36 +640,47 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
             .show(ui, |ui| {
                 // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au compte a
                 // échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier appairage,
-                // aucun moyen de retenter sans relancer tout le logiciel). Barre pleine largeur
-                // avec libellé plutôt qu'une icône seule (l'icône précédente, 🔗 seul en 22px,
-                // était illisible en test réel — retour utilisateur). Un clic renvoie sur
-                // `spawn_auth_thread`, qui relance un appairage COMPLET (rouvre le navigateur avec
-                // un nouveau code, voir `overlay_sync::pair_and_wait` — code/URL toujours affichés
-                // en console faute de panneau dédié, voir §9 du plan « État de synchro », pas
-                // encore construit).
+                // aucun moyen de retenter sans relancer tout le logiciel), réduite au minimum et
+                // collée à droite (retour utilisateur : la barre pleine largeur précédente était
+                // trop imposante) — le libellé passe en tooltip. `reason` (message d'erreur de la
+                // dernière tentative) y est ajouté : un clic qui ne se traduit par rien de visible
+                // (le serveur refuse la requête avant même qu'un code d'appairage existe, donc
+                // aucun navigateur ne s'ouvre) est indiscernable d'un bouton cassé sans lui —
+                // retour utilisateur : « l'appui du bouton ne déclenche rien, pas de message
+                // d'erreur dans la console » (le message existait déjà, seulement en console).
+                // Un clic renvoie sur `spawn_auth_thread`, qui relance un appairage COMPLET
+                // (rouvre le navigateur avec un nouveau code, voir `overlay_sync::pair_and_wait`).
                 match auth_status {
-                    AuthStatus::Disconnected => {
-                        let retry = ui
-                            .add_sized(
-                                egui::vec2(ui.available_width(), 26.0),
-                                egui::Button::new("🔗  Connecter le compte"),
-                            )
-                            .on_hover_text(
-                                "Lance l'appairage du compte (ouvre le navigateur — code à \
-                                 entrer affiché dans la console).",
+                    AuthStatus::Disconnected { reason } => {
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let retry = ui
+                                        .add(egui::Button::new("🔌").small())
+                                        .on_hover_text(format!(
+                                            "Connecter le compte (relance l'appairage, ouvre \
+                                                 le navigateur).\nDernier échec : {reason}"
+                                        ));
+                                    if retry.clicked() {
+                                        let _ = auth_retry_tx.send(());
+                                    }
+                                },
                             );
-                        if retry.clicked() {
-                            let _ = auth_retry_tx.send(());
-                        }
-                        ui.add_space(6.0);
+                        });
+                        ui.add_space(4.0);
                     }
                     // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
                     // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
-                    // « on dirait que ça ne fait rien »). Toujours pas de code/URL affichés ici
-                    // même en connexion — seulement en console, voir plus haut.
+                    // « on dirait que ça ne fait rien »).
                     AuthStatus::Connecting => {
-                        ui.weak("Connexion au compte en cours…");
-                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| ui.weak("Connexion…"),
+                            );
+                        });
+                        ui.add_space(4.0);
                     }
                     AuthStatus::Connected => {}
                 }
@@ -630,6 +688,17 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
                 panels::combat::show(ui, fight, portraits, icons, combat_side);
             });
     });
+    // Capturé AVANT de consommer `full_output` ci-dessous (tessellate/textures_delta le vident
+    // progressivement) — voir la doc de `render` et `OverlayWindow::next_redraw_at` : c'est le
+    // SEUL moyen d'honorer un délai de redessin demandé par egui (tooltip, animation...) dans
+    // cette architecture sans boucle de rendu continue. Repli `Duration::MAX` ("pas de redessin
+    // demandé") si jamais le viewport racine n'a pas d'entrée — ne devrait pas arriver en
+    // pratique (une seule fenêtre racine par `egui::Context`, jamais de sous-viewport ici).
+    let repaint_delay = full_output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .map_or(std::time::Duration::MAX, |viewport| viewport.repaint_delay);
+
     gpu.egui_winit
         .handle_platform_output(window, full_output.platform_output);
 
@@ -656,14 +725,16 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
     let output_frame = match gpu.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(frame) => frame,
         wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
+        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+            return repaint_delay;
+        }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             gpu.surface.configure(&gpu.device, &gpu.config);
-            return;
+            return repaint_delay;
         }
         wgpu::CurrentSurfaceTexture::Validation => {
             eprintln!("get_current_texture: erreur de validation");
-            return;
+            return repaint_delay;
         }
     };
     let view = output_frame
@@ -713,6 +784,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
 
     gpu.queue.submit(Some(encoder.finish()));
     gpu.queue.present(output_frame);
+    repaint_delay
 }
 
 /// Thread Engine (§3 du plan) : lit `wakfu.log` en continu, alimente `overlay-engine`, publie
@@ -776,12 +848,13 @@ fn spawn_engine_thread(
 ///
 /// **Boucle de retentative** (2026-09-01, retour utilisateur : appairage en échec — 405 côté
 /// serveur — sans aucun moyen de retenter sans relancer tout le logiciel) : une tentative échouée
-/// (`attempt_connect` renvoie `false`) publie `AuthStatus::Disconnected` (voir `status`) plutôt que
-/// de laisser le thread mourir — `render` en déduit l'icône de relance, dont le clic pousse dans
-/// `retry_rx` pour reprendre cette boucle. Toujours pas d'UI de pairing complète dans la fenêtre
-/// overlay (hors périmètre de cette itération, voir le panneau "État de synchro" du plan §9,
-/// toujours à construire) : le code d'appairage reste affiché en console, seul le déclenchement
-/// d'une nouvelle tentative est maintenant possible depuis l'overlay.
+/// (`attempt_connect` renvoie `Err(raison)`) publie `AuthStatus::Disconnected { reason }` (voir
+/// `status`) plutôt que de laisser le thread mourir — `render` en déduit l'icône de relance (dont
+/// le tooltip affiche `reason`), et son clic pousse dans `retry_rx` pour reprendre cette boucle.
+/// Toujours pas d'UI de pairing complète dans la fenêtre overlay (hors périmètre de cette
+/// itération, voir le panneau "État de synchro" du plan §9, toujours à construire) : le code
+/// d'appairage reste affiché en console, seuls le déclenchement d'une nouvelle tentative et la
+/// raison du dernier échec sont maintenant visibles depuis l'overlay.
 fn spawn_auth_thread(
     roster_tx: mpsc::Sender<RosterIndex>,
     status: Arc<ArcSwap<AuthStatus>>,
@@ -794,12 +867,12 @@ fn spawn_auth_thread(
             status.store(Arc::new(AuthStatus::Connecting));
             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
-            let connected = attempt_connect(&roster_tx);
+            let result = attempt_connect(&roster_tx);
 
-            status.store(Arc::new(if connected {
-                AuthStatus::Connected
-            } else {
-                AuthStatus::Disconnected
+            let connected = result.is_ok();
+            status.store(Arc::new(match result {
+                Ok(()) => AuthStatus::Connected,
+                Err(reason) => AuthStatus::Disconnected { reason },
             }));
             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
@@ -818,16 +891,17 @@ fn spawn_auth_thread(
 
 /// Une tentative complète de connexion au compte : jeton déjà stocké et encore valide, sinon
 /// nouvel appairage — voir la doc de `spawn_auth_thread` pour la boucle de retentative autour de
-/// cette fonction. Renvoie `true` si le roster a bien été récupéré et transmis (`roster_tx`),
-/// `false` sinon (appairage non complété, ou roster injoignable même après appairage) : dans tous
-/// les cas l'overlay continue, au pire en mode invité (repli `breed`).
-fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> bool {
+/// cette fonction. `Ok(())` si le roster a bien été récupéré et transmis (`roster_tx`), `Err(_)`
+/// sinon (appairage non complété, ou roster injoignable même après appairage) avec un message
+/// COURT destiné à l'utilisateur (tooltip de l'icône de relance, voir `render` — pas qu'à la
+/// console) : dans tous les cas l'overlay continue, au pire en mode invité (repli `breed`).
+fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> Result<(), String> {
     if let Some(token) = overlay_sync::token_store::load_token() {
         match overlay_sync::client::fetch_roster(&token) {
             Ok(roster) => {
                 println!("[compte] roster récupéré depuis le jeton natif déjà connu.");
                 let _ = roster_tx.send(roster);
-                return true;
+                return Ok(());
             }
             Err(err) => {
                 println!(
@@ -851,7 +925,11 @@ fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> bool {
         Ok(token) => token,
         Err(err) => {
             println!("[compte] appairage non complété ({err}) — l'overlay continue sans roster.");
-            return false;
+            // Le message le plus utile ici précise que la requête de DÉPART (obtenir un code) a
+            // échoué — donc qu'aucun navigateur n'a pu s'ouvrir (retour utilisateur 2026-09-01 :
+            // « il devrait ouvrir le navigateur... rien ne se passe ») : ce n'est pas un appairage
+            // abandonné/expiré après affichage d'un code, l'échec est plus en amont.
+            return Err(format!("impossible de démarrer l'appairage ({err})"));
         }
     };
 
@@ -868,11 +946,11 @@ fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> bool {
         Ok(roster) => {
             println!("[compte] connecté — roster récupéré.");
             let _ = roster_tx.send(roster);
-            true
+            Ok(())
         }
         Err(err) => {
             println!("[compte] échec de récupération du roster après appairage ({err}).");
-            false
+            Err(format!("roster injoignable après appairage ({err})"))
         }
     }
 }
