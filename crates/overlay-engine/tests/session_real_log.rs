@@ -40,7 +40,8 @@ fn ingest_vrai_wakfu_log_produit_un_recap_plausible() {
     assert!(snapshot.totals.xp_gained > 0, "aucun gain d'XP détecté");
 
     let fight = snapshot
-        .current_fight
+        .fights
+        .last()
         .expect("aucun combat courant/dernier après un vrai log de combat");
     assert!(
         !fight.fighters.is_empty(),
@@ -122,7 +123,7 @@ fn lot_en_direct_apres_rattrapage_ne_reinitialise_pas_letat() {
         "un lot en direct sans nouvel événement ne doit pas changer le récap"
     );
     assert_eq!(
-        before.current_fight, after.current_fight,
+        before.fights, after.fights,
         "le combat en cours ne doit pas être perdu"
     );
 }
