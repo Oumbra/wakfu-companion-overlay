@@ -347,28 +347,53 @@ explicitement cliqué (`WS_EX_NOACTIVATE` côté Windows, `_NET_WM_STATE_ABOVE` 
 - Multi-écran/HiDPI : suivre le `scale_factor` winit ; ancrage de l'overlay par écran + décalage,
   persistés par identifiant d'écran.
 
-### 6.5 Ancrage sur la fenêtre de jeu
+### 6.5 Ancrage sur la fenêtre de jeu — une fenêtre overlay par fenêtre de jeu
 
-L'overlay se cale au bord gauche de la fenêtre du client de jeu, verticalement centré dessus, et
-suit tout déplacement/redimensionnement (`crates/overlay-ui/src/game_window.rs`) :
+**Multi-compte (2026-09-01, retour utilisateur en test réel)** : `wakfu.log` est **partagé et
+entrelacé** par toutes les instances du client lancées sous le même compte Windows (contrairement à
+Dofus, qui écrit un fichier par instance — vérifié sur le disque). Un seul overlay ancré sur une
+fenêtre trouvée « au hasard » affichait donc le combat d'un **autre** personnage que celui de la
+fenêtre sur laquelle il était collé. Correction : **une fenêtre overlay par fenêtre de jeu
+trouvée**, créée/détruite dynamiquement au gré des clients qui se lancent/se ferment, chacune
+affichant le combat de SON personnage (`overlay_engine::SessionSnapshot::fight_for_character`,
+résolu depuis le nom extrait du titre de fenêtre — voir §2 du plan overlay-engine et
+`crates/overlay-ui/src/main.rs::App::sync_windows`). Chaque fenêtre overlay se cale au bord gauche
+de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/redimensionnement
+(`crates/overlay-ui/src/game_window.rs`) :
 
 - **Identification par titre, pas par process.** Le titre de la fenêtre de jeu est
-  `"<Nom du personnage> - WAKFU"` — variable, mais le suffixe `" - WAKFU"` est constant. Vérifié en
+  `"<Nom du personnage> - WAKFU"` — variable, mais le suffixe `" - WAKFU"` est constant, ET c'est
+  lui qui donne le nom de personnage servant au rapprochement fenêtre↔combat. Vérifié en
   conditions réelles : le client tourne sous un process `java`/`javaw` générique (Wakfu est Java,
   voir §6.4), donc filtrer par nom d'exécutable est trop large pour être fiable — seul le titre
   discrimine correctement.
-- **Windows** : `EnumWindows` + `GetWindowTextW` pour trouver la fenêtre, `HWND` mis en cache tant
-  qu'`IsWindow` le confirme vivant. Rectangle via `DWMWA_EXTENDED_FRAME_BOUNDS` (bord réellement
-  visible, pas la marge de redimensionnement invisible que `GetWindowRect` inclut sur Windows
-  10/11), repli sur `GetWindowRect` si l'appel DWM échoue.
+- **Windows** : `EnumWindows` + `GetWindowTextW` pour trouver **toutes** les fenêtres de jeu (pas
+  la première seulement) à chaque scan — pas de cache de `HWND` unique, un `EnumWindows` complet
+  reste négligeable même répété à 20 Hz. Rectangle via `DWMWA_EXTENDED_FRAME_BOUNDS` (bord
+  réellement visible, pas la marge de redimensionnement invisible que `GetWindowRect` inclut sur
+  Windows 10/11), repli sur `GetWindowRect` si l'appel DWM échoue.
 - **Sondage à 20 Hz** (même tick que le sondage hotkey, §6.3) plutôt qu'un événement : il n'existe
   pas d'API portable pour être notifié du déplacement d'une fenêtre qui n'est pas la nôtre sans un
   hook global (`SetWinEventHook`) — jugé disproportionné pour ce besoin. Coût mesuré négligeable ;
   repositionnement (`set_outer_position`) uniquement si la position cible a changé, pas à chaque
-  tick.
+  tick. Même tick pour la création/destruction dynamique des fenêtres overlay (diff par `HWND`
+  entre deux scans).
+- **Focus-aware topmost** : chaque overlay reste au-dessus tant qu'une fenêtre de jeu (n'importe
+  laquelle, pas nécessairement la sienne) ou un overlay a le focus (`GetForegroundWindow` comparé
+  aux `HWND` connus), sinon repli en z-order normal via `SetWindowPos(HWND_NOTOPMOST, ...)` — ne
+  recouvre plus une application quelconque devenue active (explorateur de fichiers, navigateur…),
+  retour utilisateur du 2026-09-01. Politique volontairement simplifiée (pas de logique « seulement
+  l'overlay du personnage actif »).
+- **Fenêtres à durée de vie dynamique** : le motif `Box::leak`/`&'static Window` du mono-fenêtre
+  d'origine ne tient plus dès qu'une fenêtre doit pouvoir être détruite (client fermé) —
+  `Arc<Window>` à la place (`wgpu::Instance::create_surface` l'accepte directement, donnant un
+  `Surface<'static>` sans fuite : motif standard wgpu+winit pour ce cas).
+- **Récap de session encore global** : chaque overlay affiche pour l'instant les mêmes totaux
+  cumulés (kamas/XP/combats), pas ventilés par personnage — limitation connue, kamas n'a pas de
+  champ personnage dans le log (XP si, mais nécessiterait un vrai second lot de travail).
 - **X11 (à faire, S3 différé)** : équivalent par `_NET_WM_NAME` (ou `WM_NAME`) + comparaison de
   suffixe, `_NET_CLIENT_LIST` pour l'énumération, `XGetWindowProperty`/`_NET_FRAME_EXTENTS` pour le
-  rectangle visible.
+  rectangle visible — devra couvrir le multi-fenêtre dès le départ, pas en repli après coup.
 
 ---
 
