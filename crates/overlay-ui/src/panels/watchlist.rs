@@ -78,6 +78,19 @@ const CONTROL_BORDER: egui::Color32 =
 const CONTROL_GLYPH: egui::Color32 =
     egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 170);
 
+/// Largeur de contenu nécessaire pour afficher `entry_count` entrées + les deux tuiles de
+/// contrôle ("+"/"−"), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
+/// appelant) — utilisée par `main.rs` pour dimensionner dynamiquement la fenêtre Suivi (retour
+/// utilisateur 2026-09-02 : « je ne veux pas de fond, je veux que ça reste transparent, mais [...]
+/// l'overlay n'a pas plus de taille s'il n'y a pas besoin » — une fenêtre plus large que son
+/// contenu reste cliquable/bloquante sur toute sa zone même là où rien n'est visible, l'utilisateur
+/// ne peut alors pas deviner où s'arrête l'overlay). Seule source de vérité pour `TILE_SIZE`/
+/// `TILE_GAP` : `main.rs` ne les duplique pas.
+pub fn content_width(entry_count: usize) -> f32 {
+    let tile_count = entry_count as f32 + 2.0; // + les tuiles "+"/"−", toujours présentes
+    tile_count * TILE_SIZE + (tile_count - 1.0).max(0.0) * TILE_GAP
+}
+
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
 // l'overlay reproduit pour l'instant, voir `panels::combat::ACCENT` et sa propre justification).
 /// `--panel-bg`.
