@@ -26,6 +26,7 @@ mod alert_sound;
 mod game_window;
 mod panels;
 mod portraits;
+mod remote_icons;
 mod ui_icons;
 
 use std::collections::HashMap;
@@ -41,13 +42,14 @@ use egui_wgpu::wgpu;
 use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
-use overlay_engine::{Engine, FightSnapshot, SessionSnapshot, WatchlistEntry};
+use overlay_engine::{CatalogIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_sync::AccountSettings;
 use panels::combat::CombatSide;
 use panels::watchlist::WatchlistToast;
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use remote_icons::{RemoteIconStore, RemoteIconTextures};
 use ui_icons::UiIcons;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -175,6 +177,9 @@ struct OverlayWindow {
     /// Icônes du switch Alliés/Ennemis + portrait générique d'ennemi — même remarque que
     /// `portraits` (une texture par fenêtre, coût négligeable).
     icons: UiIcons,
+    /// Cache PAR FENÊTRE des icônes réelles d'objets/monstres déjà uploadées (voir
+    /// `remote_icons::RemoteIconTextures`) — sans objet pour une fenêtre `Combat`.
+    remote_icon_textures: RemoteIconTextures,
     /// Camp affiché dans la liste verticale du panneau Combat (voir `panels::combat::CombatSide`)
     /// — état PAR FENÊTRE (donc par personnage), pas global : `Allies` par défaut à chaque
     /// création de fenêtre (demande utilisateur explicite). Sans objet pour une fenêtre `Suivi`.
@@ -216,6 +221,16 @@ struct App {
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+    /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
+    /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
+    /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
+    /// être chargé — les tuiles du panneau Suivi retombent alors sur l'icône générique.
+    catalog: Arc<ArcSwap<CatalogIndex>>,
+    /// Un seul thread/état de téléchargement d'icônes PARTAGÉ par toutes les fenêtres (voir
+    /// `remote_icons::RemoteIconStore`) — chaque fenêtre garde son propre cache de textures déjà
+    /// uploadées (`OverlayWindow::remote_icon_textures`), mais ne retélécharge jamais une icône
+    /// qu'une AUTRE fenêtre a déjà demandée.
+    remote_icons: RemoteIconStore,
     /// Publié par le thread Auth (voir `spawn_auth_thread`) — piloté l'affichage de l'icône de
     /// relance d'appairage (`render`).
     auth_status: Arc<ArcSwap<AuthStatus>>,
@@ -230,15 +245,34 @@ struct App {
     banner_printed: bool,
 }
 
+/// Regroupe les paramètres de construction d'`App` au-delà de `log_path` — sinon
+/// `too_many_arguments` (clippy), le nombre d'états partagés publiés par les threads de fond
+/// ayant crû au fil des lots (roster/watchlist L4, toast + catalogue L2/L3). Même motif que
+/// `RenderContent` pour `render()`.
+struct AppState {
+    log_path: PathBuf,
+    snapshot: Arc<ArcSwap<SessionSnapshot>>,
+    watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
+    watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+    catalog: Arc<ArcSwap<CatalogIndex>>,
+    remote_icons: RemoteIconStore,
+    auth_status: Arc<ArcSwap<AuthStatus>>,
+    auth_retry_tx: mpsc::Sender<()>,
+}
+
 impl App {
-    fn new(
-        log_path: PathBuf,
-        snapshot: Arc<ArcSwap<SessionSnapshot>>,
-        watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
-        watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
-        auth_status: Arc<ArcSwap<AuthStatus>>,
-        auth_retry_tx: mpsc::Sender<()>,
-    ) -> Self {
+    fn new(state: AppState) -> Self {
+        let AppState {
+            log_path,
+            snapshot,
+            watchlist,
+            watchlist_toast,
+            catalog,
+            remote_icons,
+            auth_status,
+            auth_retry_tx,
+        } = state;
+
         let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
         let hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
         hotkey_manager
@@ -253,6 +287,8 @@ impl App {
             snapshot,
             watchlist,
             watchlist_toast,
+            catalog,
+            remote_icons,
             auth_status,
             auth_retry_tx,
             log_path,
@@ -396,6 +432,7 @@ impl App {
             kind,
             portraits,
             icons,
+            remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
             game_hwnd,
             character_name,
@@ -566,6 +603,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let watchlist = self.watchlist.load();
                 let watchlist_toast_guard = self.watchlist_toast.load();
                 let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
+                let catalog = self.catalog.load();
                 let auth_status = self.auth_status.load();
                 let repaint_delay = render(
                     &mut overlay.gpu,
@@ -578,6 +616,9 @@ impl ApplicationHandler<UserEvent> for App {
                         combat_side: &mut overlay.combat_side,
                         watchlist: &watchlist,
                         watchlist_toast,
+                        catalog: &catalog,
+                        remote_icons: &self.remote_icons,
+                        remote_icon_textures: &mut overlay.remote_icon_textures,
                         auth_status: &auth_status,
                         auth_retry_tx: &self.auth_retry_tx,
                     },
@@ -729,6 +770,9 @@ struct RenderContent<'a> {
     combat_side: &'a mut CombatSide,
     watchlist: &'a [WatchlistEntry],
     watchlist_toast: Option<&'a WatchlistToast>,
+    catalog: &'a CatalogIndex,
+    remote_icons: &'a RemoteIconStore,
+    remote_icon_textures: &'a mut RemoteIconTextures,
     auth_status: &'a AuthStatus,
     auth_retry_tx: &'a mpsc::Sender<()>,
 }
@@ -756,6 +800,9 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         combat_side,
         watchlist,
         watchlist_toast,
+        catalog,
+        remote_icons,
+        remote_icon_textures,
         auth_status,
         auth_retry_tx,
     } = content;
@@ -826,7 +873,15 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                 // (fenêtre transparente vide plutôt qu'un cadre vide disgracieux).
                 OverlayKind::Watchlist => {
                     if !watchlist.is_empty() {
-                        panels::watchlist::show(ui, icons, watchlist, watchlist_toast);
+                        panels::watchlist::show(
+                            ui,
+                            icons,
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                            watchlist,
+                            watchlist_toast,
+                        );
                     }
                 }
             });
@@ -1027,6 +1082,56 @@ fn spawn_engine_thread(
 /// jeton stocké ni appairage complété, l'overlay continue simplement en mode invité (repli
 /// `breed` déjà géré par `overlay-engine::session`), exactement comme le mode invité du web.
 ///
+/// Thread Catalogue (lot L3, §7.4 du plan — réduit pour l'instant à la résolution d'icônes, voir
+/// `overlay_engine::catalog`) : résout les icônes réelles d'objets/monstres affichées par le
+/// panneau Suivi (retour utilisateur 2026-09-02, capture d'écran à l'appui : icône générique
+/// partout, tuiles impossibles à distinguer). Offline-first (mêmes principes que
+/// `CatalogService.initialize()` côté web) : le cache disque
+/// (`overlay_sync::catalog_cache`) est chargé et publié IMMÉDIATEMENT s'il existe, sans attendre
+/// le réseau — le rafraîchissement qui suit ne republie que si `GET /api/v1/catalog/version`
+/// (`indexHash`) a changé depuis le cache, jamais pour rien.
+fn spawn_catalog_thread(catalog: Arc<ArcSwap<CatalogIndex>>, proxy: EventLoopProxy<UserEvent>) {
+    thread::Builder::new()
+        .name("overlay-catalog".into())
+        .spawn(move || {
+            let mut cached_hash = None;
+            if let Some((hash, index)) = overlay_sync::catalog_cache::load() {
+                catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
+                let _ = proxy.send_event(UserEvent::NewSnapshot);
+                cached_hash = Some(hash);
+            }
+
+            let latest_hash = match overlay_sync::client::fetch_catalog_version() {
+                Ok(hash) => hash,
+                Err(err) => {
+                    tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
+                    return;
+                }
+            };
+            if cached_hash.as_deref() == Some(latest_hash.as_str()) {
+                tracing::info!("catalogue déjà à jour (cache local)");
+                return;
+            }
+            match overlay_sync::client::fetch_catalog_index() {
+                Ok(index) => {
+                    catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
+                    let _ = proxy.send_event(UserEvent::NewSnapshot);
+                    if let Err(err) = overlay_sync::catalog_cache::save(&latest_hash, &index) {
+                        tracing::warn!(
+                            %err,
+                            "échec de mise en cache du catalogue (retéléchargé au prochain lancement)"
+                        );
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    %err,
+                    "téléchargement du catalogue impossible, repli sur le cache local"
+                ),
+            }
+        })
+        .expect("échec de création du thread Catalogue");
+}
+
 /// **Boucle de retentative** (2026-09-01, retour utilisateur : appairage en échec — 405 côté
 /// serveur — sans aucun moyen de retenter sans relancer tout le logiciel) : une tentative échouée
 /// (`attempt_connect` renvoie `Err(raison)`) publie `AuthStatus::Disconnected { reason }` (voir
@@ -1164,6 +1269,7 @@ fn main() {
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
+    let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
@@ -1178,6 +1284,8 @@ fn main() {
         auth_retry_rx,
         proxy.clone(),
     );
+    spawn_catalog_thread(Arc::clone(&catalog), proxy.clone());
+    let remote_icons = RemoteIconStore::spawn(proxy.clone());
     spawn_engine_thread(
         log_path.clone(),
         Arc::clone(&snapshot),
@@ -1188,13 +1296,15 @@ fn main() {
     );
 
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(
+    let mut app = App::new(AppState {
         log_path,
         snapshot,
         watchlist,
         watchlist_toast,
+        catalog,
+        remote_icons,
         auth_status,
         auth_retry_tx,
-    );
+    });
     event_loop.run_app(&mut app).expect("boucle d'événements");
 }
