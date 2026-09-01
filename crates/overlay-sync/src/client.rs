@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use overlay_engine::RosterIndex;
+use overlay_engine::{watchlist_from_settings_json, RosterIndex, WatchlistEntry};
 use serde_json::Value;
 
 use crate::SyncError;
@@ -58,11 +58,25 @@ fn parse_json_body(
     Ok(value)
 }
 
+/// Ce qu'`overlay-engine` a besoin de connaître du compte au démarrage — un seul
+/// `GET /api/v1/settings` (voir `fetch_settings`) suffit aux deux, `roster` et `watchlist` étant
+/// deux clés du même objet `data` (voir `functions/api/v1/settings.ts`, dépôt `wakfu-companion`).
+pub struct AccountSettings {
+    pub roster: RosterIndex,
+    /// Liste des entrées suivies — définitions SEULEMENT (nom/genre/mode/cible), lues en lecture
+    /// seule depuis le compte comme le roster. Les compteurs (`count`) eux-mêmes restent locaux à
+    /// l'overlay pour cette première version (voir `overlay_engine::watchlist`, décision
+    /// utilisateur 2026-09-01, `docs/plan-architecture.md` §14 point 3) : `Engine::
+    /// set_watchlist_entries` écrase le `count` de chaque entrée reçue ici par le compteur local
+    /// déjà en cours, s'il existe.
+    pub watchlist: Vec<WatchlistEntry>,
+}
+
 /// `GET /api/v1/settings` avec `Authorization: Bearer <token>` — voir `functions/api/_auth.ts`
-/// (dépôt `wakfu-companion`) pour l'acceptation du porteur en plus du cookie. Renvoie directement
-/// le roster déjà indexé (`RosterIndex::from_settings_json` attend l'objet `data` de cette
-/// réponse, pas la réponse entière — voir sa doc).
-pub fn fetch_roster(token: &str) -> Result<RosterIndex, SyncError> {
+/// (dépôt `wakfu-companion`) pour l'acceptation du porteur en plus du cookie. `RosterIndex::
+/// from_settings_json`/`watchlist_from_settings_json` attendent l'objet `data` de cette réponse,
+/// pas la réponse entière — voir leur doc respective.
+pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
     let url = format!("{}/api/v1/settings", base_url());
     let mut response = agent()
         .get(&url)
@@ -81,5 +95,8 @@ pub fn fetch_roster(token: &str) -> Result<RosterIndex, SyncError> {
         });
     }
     let data = body.get("data").cloned().unwrap_or(Value::Null);
-    Ok(RosterIndex::from_settings_json(&data))
+    Ok(AccountSettings {
+        roster: RosterIndex::from_settings_json(&data),
+        watchlist: watchlist_from_settings_json(&data),
+    })
 }

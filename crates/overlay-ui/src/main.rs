@@ -40,8 +40,9 @@ use egui_wgpu::wgpu;
 use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
-use overlay_engine::{Engine, FightSnapshot, RosterIndex, SessionSnapshot};
+use overlay_engine::{Engine, FightSnapshot, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
+use overlay_sync::AccountSettings;
 use panels::combat::CombatSide;
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -162,6 +163,12 @@ struct App {
     hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
+    /// Publié par le thread Engine à chaque lot ingéré (et une fois de plus dès la réception des
+    /// entrées suivies par le thread Auth, voir `spawn_engine_thread`) — état COMPLET du Suivi
+    /// (définitions + compteurs), déjà fusionné avec les compteurs locaux persistés (voir
+    /// `overlay_engine::watchlist`). Global comme `snapshot`, pas par fenêtre : le suivi est un
+    /// suivi de compte, pas d'un personnage précis.
+    watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     /// Publié par le thread Auth (voir `spawn_auth_thread`) — piloté l'affichage de l'icône de
     /// relance d'appairage (`render`).
     auth_status: Arc<ArcSwap<AuthStatus>>,
@@ -180,6 +187,7 @@ impl App {
     fn new(
         log_path: PathBuf,
         snapshot: Arc<ArcSwap<SessionSnapshot>>,
+        watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         auth_status: Arc<ArcSwap<AuthStatus>>,
         auth_retry_tx: mpsc::Sender<()>,
     ) -> Self {
@@ -195,6 +203,7 @@ impl App {
             hotkey_events: GlobalHotKeyEvent::receiver(),
             interactive: true,
             snapshot,
+            watchlist,
             auth_status,
             auth_retry_tx,
             log_path,
@@ -454,6 +463,7 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
+                let watchlist = self.watchlist.load();
                 let auth_status = self.auth_status.load();
                 let repaint_delay = render(
                     &mut overlay.gpu,
@@ -463,6 +473,7 @@ impl ApplicationHandler<UserEvent> for App {
                         portraits: &overlay.portraits,
                         icons: &overlay.icons,
                         combat_side: &mut overlay.combat_side,
+                        watchlist: &watchlist,
                         auth_status: &auth_status,
                         auth_retry_tx: &self.auth_retry_tx,
                     },
@@ -611,6 +622,7 @@ struct RenderContent<'a> {
     portraits: &'a PortraitAtlas,
     icons: &'a UiIcons,
     combat_side: &'a mut CombatSide,
+    watchlist: &'a [WatchlistEntry],
     auth_status: &'a AuthStatus,
     auth_retry_tx: &'a mpsc::Sender<()>,
 }
@@ -635,6 +647,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         portraits,
         icons,
         combat_side,
+        watchlist,
         auth_status,
         auth_retry_tx,
     } = content;
@@ -692,6 +705,11 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                 }
 
                 panels::combat::show(ui, fight, portraits, icons, combat_side);
+
+                if !watchlist.is_empty() {
+                    ui.add_space(10.0);
+                    panels::watchlist::show(ui, watchlist);
+                }
             });
     });
     // Capturé AVANT de consommer `full_output` ci-dessous (tessellate/textures_delta le vident
@@ -800,15 +818,20 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
 /// module) : `wakfu.log` est partagé par tous les clients, `SessionSnapshot::fights` porte déjà
 /// tous les combats simultanés.
 ///
-/// Reçoit aussi (lot L4) le roster récupéré par le thread Auth (`spawn_auth_thread`) via
-/// `roster_rx` — appliqué à `Engine` de façon non bloquante entre deux lots, jamais en attendant
-/// activement dessus (voir la sélection `recv_timeout` ci-dessous, seule façon de sonder les DEUX
-/// canaux — lignes de log et roster — sans thread de sondage dédié).
+/// Reçoit aussi (lot L4) les réglages de compte récupérés par le thread Auth
+/// (`spawn_auth_thread`) via `settings_rx` — appliqués à `Engine` de façon non bloquante entre
+/// deux lots, jamais en attendant activement dessus (voir la sélection `recv_timeout` ci-dessous,
+/// seule façon de sonder les DEUX canaux — lignes de log et réglages de compte — sans thread de
+/// sondage dédié). Publie aussi `watchlist` en plus de `snapshot` : contrairement au roster (qui
+/// n'influence l'affichage qu'indirectement, via la classe résolue au prochain `FighterJoined`),
+/// les entrées suivies sont DIRECTEMENT affichées (`panels::watchlist`) — sans cette publication
+/// immédiate, la liste resterait vide à l'écran jusqu'au prochain lot de lignes de log.
 fn spawn_engine_thread(
     log_path: PathBuf,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
+    watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     proxy: EventLoopProxy<UserEvent>,
-    roster_rx: mpsc::Receiver<RosterIndex>,
+    settings_rx: mpsc::Receiver<AccountSettings>,
 ) {
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -822,12 +845,15 @@ fn spawn_engine_thread(
             };
             let rx = overlay_ingest::watcher::spawn(&log_path);
             loop {
-                // Non bloquant : n'attend jamais activement le roster, seulement les lignes de
-                // log (voir recv_timeout plus bas) — un roster qui n'arrive jamais (pas de
-                // compte lié) ne doit pas retarder l'ingestion d'un seul milliseconde.
-                while let Ok(roster) = roster_rx.try_recv() {
-                    tracing::info!("roster appliqué à l'Engine (lot L4)");
-                    engine.set_roster(Some(roster));
+                // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
+                // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
+                // retarder l'ingestion d'un seul milliseconde.
+                while let Ok(settings) = settings_rx.try_recv() {
+                    tracing::info!("réglages de compte appliqués à l'Engine (lot L4)");
+                    engine.set_roster(Some(settings.roster));
+                    engine.set_watchlist_entries(settings.watchlist);
+                    watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
+                    let _ = proxy.send_event(UserEvent::NewSnapshot);
                 }
                 match rx.recv_timeout(std::time::Duration::from_millis(200)) {
                     Ok(Ok(batch)) => {
@@ -836,6 +862,7 @@ fn spawn_engine_thread(
                             continue;
                         }
                         snapshot.store(Arc::new(engine.snapshot()));
+                        watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
                         let _ = proxy.send_event(UserEvent::NewSnapshot);
                     }
                     Ok(Err(err)) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
@@ -862,7 +889,7 @@ fn spawn_engine_thread(
 /// d'appairage reste affiché en console, seuls le déclenchement d'une nouvelle tentative et la
 /// raison du dernier échec sont maintenant visibles depuis l'overlay.
 fn spawn_auth_thread(
-    roster_tx: mpsc::Sender<RosterIndex>,
+    settings_tx: mpsc::Sender<AccountSettings>,
     status: Arc<ArcSwap<AuthStatus>>,
     retry_rx: mpsc::Receiver<()>,
     proxy: EventLoopProxy<UserEvent>,
@@ -873,7 +900,7 @@ fn spawn_auth_thread(
             status.store(Arc::new(AuthStatus::Connecting));
             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
-            let result = attempt_connect(&roster_tx);
+            let result = attempt_connect(&settings_tx);
 
             let connected = result.is_ok();
             status.store(Arc::new(match result {
@@ -897,16 +924,17 @@ fn spawn_auth_thread(
 
 /// Une tentative complète de connexion au compte : jeton déjà stocké et encore valide, sinon
 /// nouvel appairage — voir la doc de `spawn_auth_thread` pour la boucle de retentative autour de
-/// cette fonction. `Ok(())` si le roster a bien été récupéré et transmis (`roster_tx`), `Err(_)`
-/// sinon (appairage non complété, ou roster injoignable même après appairage) avec un message
-/// COURT destiné à l'utilisateur (tooltip de l'icône de relance, voir `render` — pas qu'à la
-/// console) : dans tous les cas l'overlay continue, au pire en mode invité (repli `breed`).
-fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> Result<(), String> {
+/// cette fonction. `Ok(())` si les réglages de compte (roster + watchlist) ont bien été récupérés
+/// et transmis (`settings_tx`), `Err(_)` sinon (appairage non complété, ou réglages injoignables
+/// même après appairage) avec un message COURT destiné à l'utilisateur (tooltip de l'icône de
+/// relance, voir `render` — pas qu'à la console) : dans tous les cas l'overlay continue, au pire
+/// en mode invité (repli `breed`, aucun suivi affiché).
+fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), String> {
     if let Some(token) = overlay_sync::token_store::load_token() {
-        match overlay_sync::client::fetch_roster(&token) {
-            Ok(roster) => {
-                println!("[compte] roster récupéré depuis le jeton natif déjà connu.");
-                let _ = roster_tx.send(roster);
+        match overlay_sync::client::fetch_settings(&token) {
+            Ok(settings) => {
+                println!("[compte] réglages récupérés depuis le jeton natif déjà connu.");
+                let _ = settings_tx.send(settings);
                 return Ok(());
             }
             Err(err) => {
@@ -948,15 +976,15 @@ fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> Result<(), String> 
             "[compte] échec de sauvegarde du jeton natif ({err}) — sera redemandé au prochain lancement."
         );
     }
-    match overlay_sync::client::fetch_roster(&token) {
-        Ok(roster) => {
-            println!("[compte] connecté — roster récupéré.");
-            let _ = roster_tx.send(roster);
+    match overlay_sync::client::fetch_settings(&token) {
+        Ok(settings) => {
+            println!("[compte] connecté — réglages récupérés.");
+            let _ = settings_tx.send(settings);
             Ok(())
         }
         Err(err) => {
-            println!("[compte] échec de récupération du roster après appairage ({err}).");
-            Err(format!("roster injoignable après appairage ({err})"))
+            println!("[compte] échec de récupération des réglages après appairage ({err}).");
+            Err(format!("réglages injoignables après appairage ({err})"))
         }
     }
 }
@@ -986,23 +1014,30 @@ fn main() {
 
     let log_path = resolve_path();
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
+    let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .expect("création de l'event loop");
     let proxy = event_loop.create_proxy();
-    let (roster_tx, roster_rx) = mpsc::channel();
+    let (settings_tx, settings_rx) = mpsc::channel();
     let (auth_retry_tx, auth_retry_rx) = mpsc::channel();
     spawn_auth_thread(
-        roster_tx,
+        settings_tx,
         Arc::clone(&auth_status),
         auth_retry_rx,
         proxy.clone(),
     );
-    spawn_engine_thread(log_path.clone(), Arc::clone(&snapshot), proxy, roster_rx);
+    spawn_engine_thread(
+        log_path.clone(),
+        Arc::clone(&snapshot),
+        Arc::clone(&watchlist),
+        proxy,
+        settings_rx,
+    );
 
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(log_path, snapshot, auth_status, auth_retry_tx);
+    let mut app = App::new(log_path, snapshot, watchlist, auth_status, auth_retry_tx);
     event_loop.run_app(&mut app).expect("boucle d'événements");
 }
