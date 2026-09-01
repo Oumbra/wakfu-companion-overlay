@@ -54,12 +54,46 @@ impl IconRef {
     }
 }
 
+/// Rareté d'objet — miroir de `WakfuRarity` (`wakfu-item-rarity.data.ts`). `Old` (« Ancien »,
+/// objets historiques retirés du jeu) n'est en pratique jamais renvoyée au runtime côté web (les
+/// objets `old` sont exclus de ce qui est exposé par le catalogue serveur) ; conservée ici
+/// uniquement pour que `rarity_from_sort_order` couvre bien les 8 valeurs de `RARITY_SORT_ORDER`
+/// sans repli arbitraire sur une valeur voisine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakfuRarity {
+    Old,
+    Common,
+    Rare,
+    Mythical,
+    Legendary,
+    Memory,
+    Epic,
+    Relic,
+}
+
+/// Miroir de `RARITY_SORT_ORDER` (`wakfu-item-rarity.data.ts`) — l'index compact
+/// (`server/catalog/compact-index.ts`) encode la rareté par cet entier, pas par son nom. Toute
+/// valeur inconnue (référentiel étendu côté serveur avant ce module) retombe sur `Common`, comme
+/// `getWakfuItemRarity` (`?? 'common'`) pour un objet non résolu.
+fn rarity_from_sort_order(order: i64) -> WakfuRarity {
+    match order {
+        0 => WakfuRarity::Old,
+        2 => WakfuRarity::Rare,
+        3 => WakfuRarity::Mythical,
+        4 => WakfuRarity::Legendary,
+        5 => WakfuRarity::Memory,
+        6 => WakfuRarity::Epic,
+        7 => WakfuRarity::Relic,
+        _ => WakfuRarity::Common, // 1 (Common lui-même) ET tout ordre non reconnu.
+    }
+}
+
 /// Un tuple positionnel de `data["items"]` — `[id, fr, en, es, pt, gfxId, raritySortOrder,
 /// hasRecipe(0|1), categorySortOrder]` (voir `server/catalog/compact-index.ts` côté
-/// `wakfu-companion`, dont l'arité DOIT rester en phase avec cette struct). Les 3 derniers champs
-/// (rareté/recette/catégorie) ne sont pas encore exploités ici — seule l'icône (`gfxId`) intéresse
-/// cette itération — mais doivent rester déclarés pour que la désérialisation positionnelle de
-/// serde consomme le tuple entier plutôt que de rejeter la ligne pour arité inattendue.
+/// `wakfu-companion`, dont l'arité DOIT rester en phase avec cette struct). Recette/catégorie ne
+/// sont pas encore exploitées ici — seules l'icône (`gfxId`) et la rareté intéressent cette
+/// itération — mais doivent rester déclarées pour que la désérialisation positionnelle de serde
+/// consomme le tuple entier plutôt que de rejeter la ligne pour arité inattendue.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 struct RawItemRow(i64, String, String, String, String, i64, i64, i64, i64);
@@ -82,8 +116,10 @@ struct RawMonsterRow(
     i64,
 );
 
+#[derive(Clone)]
 struct ItemEntry {
     icon: IconRef,
+    rarity: WakfuRarity,
 }
 
 struct MonsterEntry {
@@ -101,7 +137,7 @@ pub struct CatalogIndex {
     /// pratique la distinction ne joue que si le NOM (normalisé) est identique entre deux entrées
     /// différentes, cas limite déjà accepté tel quel côté web (`findWakfuItemEntry`, « renvoie une
     /// seule entrée arbitrairement »).
-    items_by_name: HashMap<String, IconRef>,
+    items_by_name: HashMap<String, ItemEntry>,
     monsters_by_id: HashMap<i64, MonsterEntry>,
     monsters_by_name: HashMap<String, IconRef>,
 }
@@ -119,18 +155,21 @@ impl CatalogIndex {
             .get("items")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        for RawItemRow(id, fr, en, es, pt, gfx_id, ..) in raw_items {
-            let icon = IconRef {
-                kind: IconKind::Item,
-                gfx_id: gfx_id.to_string(),
+        for RawItemRow(id, fr, en, es, pt, gfx_id, rarity_sort_order, ..) in raw_items {
+            let entry = ItemEntry {
+                icon: IconRef {
+                    kind: IconKind::Item,
+                    gfx_id: gfx_id.to_string(),
+                },
+                rarity: rarity_from_sort_order(rarity_sort_order),
             };
             for name in [&fr, &en, &es, &pt] {
                 index
                     .items_by_name
                     .entry(normalize_wakfu_name(name))
-                    .or_insert_with(|| icon.clone());
+                    .or_insert_with(|| entry.clone());
             }
-            index.items_by_id.insert(id, ItemEntry { icon });
+            index.items_by_id.insert(id, entry);
         }
 
         let raw_monsters: Vec<RawMonsterRow> = data
@@ -160,12 +199,25 @@ impl CatalogIndex {
     /// l'id est déjà connu). `None` si le catalogue n'est pas encore chargé ou si l'objet n'y est
     /// pas trouvé — jamais une erreur, l'appelant retombe sur l'icône générique dans les deux cas.
     pub fn find_item_icon(&self, name: &str, catalog_id: Option<i64>) -> Option<IconRef> {
+        self.find_item_entry(name, catalog_id)
+            .map(|entry| entry.icon.clone())
+    }
+
+    /// Rareté d'un objet — miroir de `getWakfuItemRarity` (`wakfu-item-rarity.data.ts`), même
+    /// repli sur `Common` pour un objet non résolu (catalogue pas encore chargé, ou nom introuvable
+    /// — ex. ajouté au suivi sous un nom que le référentiel ne connaît pas).
+    pub fn find_item_rarity(&self, name: &str, catalog_id: Option<i64>) -> WakfuRarity {
+        self.find_item_entry(name, catalog_id)
+            .map_or(WakfuRarity::Common, |entry| entry.rarity)
+    }
+
+    fn find_item_entry(&self, name: &str, catalog_id: Option<i64>) -> Option<&ItemEntry> {
         if let Some(id) = catalog_id {
             if let Some(entry) = self.items_by_id.get(&id) {
-                return Some(entry.icon.clone());
+                return Some(entry);
             }
         }
-        self.items_by_name.get(&normalize_wakfu_name(name)).cloned()
+        self.items_by_name.get(&normalize_wakfu_name(name))
     }
 
     /// Miroir de `find_item_icon` pour un monstre.
@@ -192,7 +244,8 @@ mod tests {
     fn sample() -> serde_json::Value {
         serde_json::json!({
             "items": [
-                [24029, "Larme d'Ogrest", "Ogrest's Tear", "Lágrima de Ogrest", "Lágrima de Ogrest", 1234, 0, 0, 1],
+                // raritySortOrder=2 -> "rare" (voir rarity_from_sort_order).
+                [24029, "Larme d'Ogrest", "Ogrest's Tear", "Lágrima de Ogrest", "Lágrima de Ogrest", 1234, 2, 0, 1],
             ],
             "monsters": [
                 [24875, "El Pochito", "El Pochito", "El Pochito", "El Pochito", "5421", -1, 1, 0, 0],
@@ -213,6 +266,24 @@ mod tests {
         let index = CatalogIndex::from_compact_json(&sample());
         let icon = index.find_item_icon("larme d'ogrest", None).unwrap();
         assert_eq!(icon.gfx_id, "1234");
+    }
+
+    #[test]
+    fn resout_la_rarete_dun_objet_par_id() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        assert_eq!(
+            index.find_item_rarity("peu importe", Some(24029)),
+            WakfuRarity::Rare
+        );
+    }
+
+    #[test]
+    fn objet_non_resolu_retombe_sur_la_rarete_commune() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        assert_eq!(
+            index.find_item_rarity("Introuvable", None),
+            WakfuRarity::Common
+        );
     }
 
     #[test]

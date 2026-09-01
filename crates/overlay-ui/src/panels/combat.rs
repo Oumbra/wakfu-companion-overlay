@@ -15,9 +15,10 @@
 //! maintenant avec un portrait générique (`UiIcons::unknown_entity_image`). Ligne "Combat #N —
 //! gagné/perdu" retirée (retour utilisateur : n'apporte rien).
 
-use overlay_engine::FightSnapshot;
+use overlay_engine::{CatalogIndex, FightSnapshot};
 
 use crate::portraits::PortraitAtlas;
+use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
@@ -67,11 +68,15 @@ const BAR_TEXT: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 /// de sécurité supplémentaire aux endroits où le remplissage bleu est le plus clair.
 const BAR_TEXT_SHADOW: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(0, 0, 0, 200);
 
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
     fight: Option<&FightSnapshot>,
     portraits: &PortraitAtlas,
     icons: &UiIcons,
+    catalog: &CatalogIndex,
+    remote_icons: &RemoteIconStore,
+    remote_icon_textures: &mut RemoteIconTextures,
     side: &mut CombatSide,
 ) {
     // Pas de titre "Dégâts du combat" (retour utilisateur 2026-09-01 : n'apporte rien, retiré) —
@@ -107,17 +112,34 @@ pub fn show(
                     ui.add_space(ROW_GAP);
                 }
                 ui.horizontal(|ui| {
-                    // Portrait de classe pour un allié classifié ; repli générique sinon (ennemi,
-                    // ou allié pas encore classifié — même image que pour un ennemi, faute de
-                    // mieux tant qu'aucune classe n'est connue). Aucun fond derrière l'image :
-                    // uniquement le portrait, comme demandé.
+                    // Portrait de classe pour un allié classifié. Sinon (ennemi, ou allié pas
+                    // encore classifié) : portrait RÉEL du monstre si le catalogue le résout par
+                    // nom (retour utilisateur 2026-09-02 — le catalogue existe désormais, voir
+                    // `panels::watchlist` pour le même mécanisme), repli générique tant qu'il n'a
+                    // pas fini de télécharger ou si le nom n'est pas reconnu. Aucun fond derrière
+                    // l'image : uniquement le portrait, comme demandé.
                     let class_portrait = fighter
                         .class_name
                         .as_deref()
                         .and_then(|class_name| portraits.image(class_name, fighter.gender));
-                    let response = match class_portrait {
-                        Some(image) => ui.add(image),
-                        None => ui.add(icons.unknown_entity_image()),
+                    let remote_monster_texture = class_portrait.is_none().then(|| {
+                        catalog
+                            .find_monster_icon(&fighter.name, None)
+                            .and_then(|icon_ref| {
+                                remote_icon_textures.resolve(ui.ctx(), remote_icons, &icon_ref)
+                            })
+                    });
+                    let response = match (class_portrait, remote_monster_texture.flatten()) {
+                        (Some(image), _) => ui.add(image),
+                        (None, Some(texture)) => ui.add(
+                            egui::Image::new(&texture)
+                                .fit_to_exact_size(egui::vec2(
+                                    crate::portraits::PORTRAIT_SIZE,
+                                    crate::portraits::PORTRAIT_SIZE,
+                                ))
+                                .maintain_aspect_ratio(false),
+                        ),
+                        (None, None) => ui.add(icons.unknown_entity_image()),
                     };
                     response.on_hover_text(fighter.name.as_str());
 
