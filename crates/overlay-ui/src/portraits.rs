@@ -11,7 +11,11 @@ const SPRITE_COLS: f32 = 2.0;
 const SPRITE_ROWS: f32 = 18.0;
 
 /// Taille (carrée, points egui) à laquelle un portrait est dessiné dans le panneau Combat.
-pub const PORTRAIT_SIZE: f32 = 22.0;
+/// 22px d'origine confirmé illisible en test réel (2026-09-01, retour utilisateur avec capture
+/// d'écran) — passé à 40px. Le réglage visuel fin (mise en page de la ligne combattant, largeur de
+/// fenêtre) reste à faire, voir panels/combat.rs — ce n'est qu'une taille lisible, pas la version
+/// définitive.
+pub const PORTRAIT_SIZE: f32 = 40.0;
 
 pub struct PortraitAtlas {
     texture: egui::TextureHandle,
@@ -49,7 +53,13 @@ impl PortraitAtlas {
         Some(
             egui::Image::new(&self.texture)
                 .uv(uv)
-                .fit_to_exact_size(egui::vec2(PORTRAIT_SIZE, PORTRAIT_SIZE)),
+                .fit_to_exact_size(egui::vec2(PORTRAIT_SIZE, PORTRAIT_SIZE))
+                // Sans ça, `ImageSize::calc_size` (egui 0.36.1, widgets/image.rs) applique quand
+                // même `scale_to_fit` avec le ratio d'aspect de la planche ENTIÈRE (200×1800 px,
+                // pas le rectangle après `.uv(...)`, qu'egui ignore pour ce calcul) : un carré
+                // 40×40 demandé devenait ~4×40 (bug réel constaté en session, 2026-09-01, capture
+                // d'écran à l'appui — un fin trait vertical coloré, pas un portrait).
+                .maintain_aspect_ratio(false),
         )
     }
 }
