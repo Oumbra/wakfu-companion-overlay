@@ -72,13 +72,35 @@ const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
 // voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
 // faire.
 const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
-/// Fenêtre du panneau Suivi — large et basse (bande horizontale de tuiles, voir
-/// `panels::watchlist`), pas un panneau vertical comme Combat. Hauteur augmentée de 84 à 116 px
-/// (2026-09-02) pour réserver l'espace du toast d'alerte SOUS la bande de tuiles (voir
-/// `panels::watchlist::show`) — sans agrandir la fenêtre à la volée à l'apparition d'un toast, ce
-/// qui aurait fait bouger la bande de tuiles elle-même dont l'ancrage vient d'être mis au point
-/// avec l'utilisateur.
-const WATCHLIST_WINDOW_SIZE: (f64, f64) = (440.0, 116.0);
+/// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
+/// `panels::watchlist`) — la LARGEUR, elle, est calculée dynamiquement par `watchlist_width` (voir
+/// sa doc), pas une constante fixe. 84 -> 116 px (2026-09-02) pour réserver l'espace du toast
+/// d'alerte SOUS la bande de tuiles (voir `panels::watchlist::show`) — sans agrandir la fenêtre à
+/// la volée à l'apparition d'un toast, ce qui aurait fait bouger la bande de tuiles elle-même dont
+/// l'ancrage vient d'être mis au point avec l'utilisateur.
+const WATCHLIST_HEIGHT: f64 = 116.0;
+/// Fraction de la largeur de la fenêtre de jeu occupée par l'overlay Suivi — retour utilisateur
+/// 2026-09-02 (capture d'écran à l'appui) : 440px fixes étaient bien trop étroits, la moindre
+/// poignée d'entrées suivies forçait un défilement horizontal disgracieux. Calculée une seule
+/// fois À LA CRÉATION de la fenêtre (voir `create_overlay_window`) à partir de la largeur RÉELLE
+/// de la fenêtre de jeu à cet instant — jamais recalculée ensuite (la fenêtre reste
+/// `with_resizable(false)`, un vrai redimensionnement dynamique suivant le jeu est un chantier à
+/// part). Bornée par prudence plutôt que par mesure précise de l'espace réellement libre entre les
+/// groupes de boutons du jeu (variable selon la résolution/l'UI du client) — à ajuster si ça
+/// chevauche quand même l'interface du jeu sur une configuration donnée.
+const WATCHLIST_WIDTH_FRACTION: f64 = 0.5;
+const WATCHLIST_MIN_WIDTH: f64 = 440.0;
+const WATCHLIST_MAX_WIDTH: f64 = 1000.0;
+
+/// Voir `WATCHLIST_WIDTH_FRACTION`. `game_width_px` est en pixels PHYSIQUES (`GameRect::width`,
+/// Win32) — traité ici comme un nombre de points logiques directement, comme le reste des tailles
+/// de fenêtre de ce fichier (`WINDOW_SIZE`, `GAME_EDGE_MARGIN_PX`...) : imprécis sur un écran dont
+/// la mise à l'échelle Windows n'est pas 100 %, mais aucune de ces constantes ne corrige déjà cet
+/// écart — pas introduit spécifiquement ici.
+fn watchlist_width(game_width_px: i32) -> f64 {
+    (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION)
+        .clamp(WATCHLIST_MIN_WIDTH, WATCHLIST_MAX_WIDTH)
+}
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
 /// gauche de l'overlay Combat — « collé à quelques pixels près » (demande utilisateur). À ajuster
 /// après avoir vu le rendu en pratique.
@@ -372,7 +394,7 @@ impl App {
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
-            OverlayKind::Watchlist => WATCHLIST_WINDOW_SIZE,
+            OverlayKind::Watchlist => (watchlist_width(rect.width), WATCHLIST_HEIGHT),
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
@@ -512,7 +534,18 @@ impl App {
         for overlay in self.windows.values_mut() {
             let relevant =
                 overlay.game_hwnd == foreground || Self::hwnd_of(&overlay.window) == foreground;
-            if overlay.is_topmost == relevant {
+
+            // Retour utilisateur 2026-09-02 : « l'overlay disparaît de manière indéterminée, il
+            // n'y a rien qui permet de le réafficher ». Cause trouvée : Windows peut démoter un
+            // HWND_TOPMOST tout seul (alt-tab, notification système, une autre fenêtre qui
+            // réclame aussi le premier plan...) SANS passer par notre `SetWindowPos` — `is_topmost`
+            // continuait alors de croire l'overlay au premier plan (rien n'avait changé de NOTRE
+            // point de vue) et ne le réaffirmait donc jamais, laissant l'overlay caché derrière le
+            // jeu indéfiniment. Fix : réaffirmer HWND_TOPMOST à CHAQUE tick tant que `relevant`
+            // reste vrai (coût négligeable, un `SetWindowPos` sans changement réel de z-order est
+            // très bon marché) — seule la transition vers NOTOPMOST reste optimisée (pas cette
+            // même urgence à la retirer du premier plan).
+            if !relevant && overlay.is_topmost == relevant {
                 continue;
             }
             let insert_after = if relevant {
@@ -865,7 +898,16 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                         AuthStatus::Connected => {}
                     }
 
-                    panels::combat::show(ui, fight, portraits, icons, combat_side);
+                    panels::combat::show(
+                        ui,
+                        fight,
+                        portraits,
+                        icons,
+                        catalog,
+                        remote_icons,
+                        remote_icon_textures,
+                        combat_side,
+                    );
                 }
                 // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
                 // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir

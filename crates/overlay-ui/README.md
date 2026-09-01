@@ -28,22 +28,30 @@ automatique, voir §9 du plan). Elles partagent le même type `OverlayWindow` (p
 redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et le contenu rendu.
 
 - **Combat** (`src/panels/combat.rs`) — collée au bord GAUCHE de la fenêtre de jeu, centrée
-  verticalement (comportement d'origine). Switch Alliés/Ennemis, liste verticale de portraits de
-  classe (nom au survol), barre de dégâts par combattant, icône de connexion au compte. Pas de
-  titre ni de fond opaque (retours utilisateur 2026-09-01) — voir la doc de tête du fichier pour le
-  détail des refontes.
+  verticalement (comportement d'origine). Switch Alliés/Ennemis, liste verticale de portraits (de
+  classe pour un allié classifié, **icône réelle du monstre** pour un ennemi résolu par le
+  catalogue — 2026-09-02, repli générique sinon, voir plus bas), barre de dégâts par combattant,
+  icône de connexion au compte. Pas de titre ni de fond opaque (retours utilisateur 2026-09-01) —
+  voir la doc de tête du fichier pour le détail des refontes.
 - **Suivi** (`src/panels/watchlist.rs`) — collée au bord HAUT de la fenêtre de jeu, centrée
-  horizontalement. Bande de tuiles carrées à l'image du bandeau du dépôt web
-  (`tracker-strip.component`/`.kpi`) : tuiles "+"/"−" reprenant la forme du web mais INERTES pour
-  l'instant (aucun formulaire d'ajout ni sélection multiple câblés côté overlay), puis une tuile par
-  entrée suivie — **icône réelle** résolue par le catalogue (`overlay_engine::CatalogIndex`,
-  téléchargée/décodée par `remote_icons.rs`, voir plus bas), repli sur l'icône générique tant
-  qu'elle n'est pas résolue/téléchargée ; nom complet en tooltip, badge de compteur (`"3"` en mode
-  incrémental, `"5/10"` compte/cible en mode décompte — miroir du bandeau web, retour utilisateur
-  2026-09-02). Toujours en LECTURE SEULE côté définitions (la liste elle-même reste éditée sur le
-  web) ; les compteurs, eux, sont incrémentés — et persistés localement — par l'overlay (voir
-  `overlay_engine::watchlist`, `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le
-  compte ne déclare aucune entrée.
+  horizontalement, **largeur dynamique** (`watchlist_width`, `main.rs` — une fraction de la
+  largeur de la fenêtre de jeu réelle, calculée à la création, retour utilisateur 2026-09-02 :
+  440px fixes étaient bien trop étroits). Bande de tuiles carrées à l'image du bandeau du dépôt web
+  (`tracker-strip.component`/`.kpi`, **rendu refondu 2026-09-02 pour rester raccord avec le web** :
+  bordure/fond en dégradé selon la RARETÉ de l'objet — `overlay_engine::WakfuRarity`, couleurs de
+  `styles.css` — bordure grise unie pour un ennemi ; badge de compteur ancré HORS du coin bas-droit
+  de la tuile, plus par-dessus l'icône ; valeur courante d'un décompte en couleur kamas, cible en
+  gris) : tuiles "+"/"−" reprenant la forme du web mais INERTES pour l'instant (aucun formulaire
+  d'ajout ni sélection multiple câblés côté overlay), puis une tuile par entrée suivie — icône
+  réelle résolue par le catalogue, repli sur l'icône générique tant qu'elle n'est pas
+  résolue/téléchargée ; nom complet en tooltip, badge `"3"` en mode incrémental / `"5/10"`
+  compte/cible en mode décompte. Barre de défilement horizontale fine et flottante
+  (`ScrollStyle::thin()`, retour utilisateur : le style natif large et gris « passe sur les
+  objets », « pas très moderne ») plutôt que la barre native épaisse. Toujours en LECTURE SEULE
+  côté définitions (la liste elle-même reste éditée sur le web) ; les compteurs, eux, sont
+  incrémentés — et persistés localement — par l'overlay (voir `overlay_engine::watchlist`,
+  `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le compte ne déclare aucune
+  entrée.
 
 **Icônes réelles d'objets/monstres** (`remote_icons.rs`, lot L3 réduit — retour utilisateur
 2026-09-02 : icône générique partout, tuiles impossibles à distinguer) : `spawn_catalog_thread`
@@ -51,7 +59,9 @@ charge le catalogue (offline-first — cache disque publié immédiatement, rafr
 si `indexHash` a changé, voir `overlay-sync/README.md`) ; `RemoteIconStore`, un thread PARTAGÉ par
 toutes les fenêtres, télécharge (repli disque, CDN communautaire `wakassets`) et décode chaque
 icône une seule fois même avec plusieurs comptes ; `RemoteIconTextures`, PAR fenêtre, uploade les
-octets décodés en texture `egui` (une `TextureHandle` n'est valide que pour SON `egui::Context`).
+octets décodés en texture `egui` (une `TextureHandle` n'est valide que pour SON `egui::Context`) —
+utilisé aussi bien par le panneau Suivi que par le panneau Combat (icône de monstre par nom, aucun
+id capturé au moment d'un combat contrairement à une entrée de suivi).
 
 **Alertes de drop** (son + toast quand un décompte de suivi atteint 0, §9 du plan) : dès qu'
 `overlay_engine::Engine::drain_watchlist_alerts` signale un décompte tombé à 0,

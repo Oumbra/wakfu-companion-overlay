@@ -11,7 +11,7 @@ pub mod roster;
 pub mod session;
 pub mod watchlist;
 
-pub use catalog::{CatalogIndex, IconKind, IconRef};
+pub use catalog::{CatalogIndex, IconKind, IconRef, WakfuRarity};
 pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
