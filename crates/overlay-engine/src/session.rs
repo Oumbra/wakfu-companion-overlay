@@ -405,12 +405,27 @@ pub struct Engine {
 
 impl Engine {
     pub fn new() -> Result<Self, crate::quickjs_engine::EngineError> {
+        Self::with_watchlist_store(crate::watchlist::default_store_path())
+    }
+
+    /// Comme `new()`, avec un chemin de compteurs de suivi explicite — **PUBLIC MAIS RÉSERVÉ AUX
+    /// TESTS D'INTÉGRATION** (`tests/*.rs`). `#[cfg(test)]` sur `watchlist::APP_NAME` ne protège
+    /// que les tests INTERNES de ce crate (`src/watchlist.rs::tests`, compilés avec `cfg(test)`
+    /// actif pour `overlay-engine` lui-même) : un test d'intégration est un crate SÉPARÉ qui
+    /// dépend d'`overlay-engine` normalement, sans `cfg(test)` actif pour lui — `Engine::new()` y
+    /// résout donc le VRAI chemin de production. Bug réel vécu en session (2026-09-01) : un test
+    /// d'intégration a écrasé le fichier de compteurs réel de l'utilisateur (compteurs d'objets
+    /// perdus) avant que ce constructeur n'existe — toujours passer par lui (avec un chemin de
+    /// fichier temporaire) depuis `tests/`, jamais `Engine::new()`.
+    pub fn with_watchlist_store(
+        store_path: std::path::PathBuf,
+    ) -> Result<Self, crate::quickjs_engine::EngineError> {
         Ok(Self {
             parser: crate::quickjs_engine::LogParserEngine::new()?,
             state: SessionState::default(),
             in_initial_sweep: false,
             roster: None,
-            watchlist: WatchlistState::new(crate::watchlist::default_store_path()),
+            watchlist: WatchlistState::new(store_path),
         })
     }
 
