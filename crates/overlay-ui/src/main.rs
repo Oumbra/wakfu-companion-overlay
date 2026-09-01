@@ -25,6 +25,7 @@
 mod game_window;
 mod panels;
 mod portraits;
+mod ui_icons;
 
 use std::collections::HashMap;
 use std::env;
@@ -41,8 +42,10 @@ use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{Engine, FightSnapshot, RosterIndex, SessionSnapshot};
 use overlay_ingest::discovery;
+use panels::combat::CombatSide;
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use ui_icons::UiIcons;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
@@ -69,11 +72,27 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
 /// avoir vu le rendu en pratique.
 const GAME_EDGE_MARGIN_PX: i32 = 12;
 
-/// Émis par le thread Engine (§3 du plan) quand un nouveau `SessionSnapshot` est disponible —
-/// réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 : pas de boucle 60 Hz
-/// forcée, l'overlay ne consomme rien tant que rien ne change).
+/// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
+/// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
+/// pas de boucle 60 Hz forcée, l'overlay ne consomme rien tant que rien ne change).
 enum UserEvent {
     NewSnapshot,
+    AuthStatusChanged,
+}
+
+/// État de la connexion au compte (lot L4, §7.2 du plan) — publié par le thread Auth
+/// (`spawn_auth_thread`) via `Arc<ArcSwap<_>>`, lu par le main thread à chaque frame pour décider
+/// d'afficher ou non l'icône de relance d'appairage (voir `render`). Volontairement distinct d'un
+/// simple `bool` : `Connecting` évite d'afficher l'icône pendant la toute première tentative
+/// (jeton déjà stocké, ou premier appairage) — elle ne doit apparaître qu'après un échec avéré.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthStatus {
+    Connecting,
+    Connected,
+    /// Ni jeton valide ni appairage complété — l'icône de relance doit être visible (retour
+    /// utilisateur 2026-09-01 : appairage en échec — 405 côté serveur — sans aucun moyen de
+    /// retenter sans relancer tout le logiciel).
+    Disconnected,
 }
 
 struct GpuState {
@@ -99,6 +118,13 @@ struct OverlayWindow {
     /// Chargée par fenêtre (chacune a son propre `egui::Context`) — léger surcoût de
     /// décodage/upload par fenêtre, négligeable pour le nombre de comptes réaliste.
     portraits: PortraitAtlas,
+    /// Icônes du switch Alliés/Ennemis + portrait générique d'ennemi — même remarque que
+    /// `portraits` (une texture par fenêtre, coût négligeable).
+    icons: UiIcons,
+    /// Camp affiché dans la liste verticale du panneau Combat (voir `panels::combat::CombatSide`)
+    /// — état PAR FENÊTRE (donc par personnage), pas global : `Allies` par défaut à chaque
+    /// création de fenêtre (demande utilisateur explicite).
+    combat_side: CombatSide,
     game_hwnd: HWND,
     character_name: String,
     /// Dernière position appliquée — évite de rappeler `set_outer_position` à chaque tick (50 ms)
@@ -116,6 +142,12 @@ struct App {
     hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
+    /// Publié par le thread Auth (voir `spawn_auth_thread`) — piloté l'affichage de l'icône de
+    /// relance d'appairage (`render`).
+    auth_status: Arc<ArcSwap<AuthStatus>>,
+    /// Signale au thread Auth qu'un appairage doit être retenté (clic sur l'icône de relance,
+    /// visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`).
+    auth_retry_tx: mpsc::Sender<()>,
     log_path: PathBuf,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
@@ -125,7 +157,12 @@ struct App {
 }
 
 impl App {
-    fn new(log_path: PathBuf, snapshot: Arc<ArcSwap<SessionSnapshot>>) -> Self {
+    fn new(
+        log_path: PathBuf,
+        snapshot: Arc<ArcSwap<SessionSnapshot>>,
+        auth_status: Arc<ArcSwap<AuthStatus>>,
+        auth_retry_tx: mpsc::Sender<()>,
+    ) -> Self {
         let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
         let hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
         hotkey_manager
@@ -138,6 +175,8 @@ impl App {
             hotkey_events: GlobalHotKeyEvent::receiver(),
             interactive: true,
             snapshot,
+            auth_status,
+            auth_retry_tx,
             log_path,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
@@ -212,6 +251,7 @@ impl App {
 
         let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+        let icons = UiIcons::load(&gpu.egui_ctx);
 
         let overlay_height = window.outer_size().height as i32;
         let position = PhysicalPosition::new(
@@ -224,6 +264,8 @@ impl App {
             window,
             gpu,
             portraits,
+            icons,
+            combat_side: CombatSide::default(),
             game_hwnd,
             character_name,
             last_position: Some(position),
@@ -337,7 +379,11 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::NewSnapshot => {
+            // Les deux variantes ont le même effet ici : un nouvel état est disponible (snapshot
+            // de combat, ou statut de connexion au compte), toutes les fenêtres doivent redessiner
+            // pour le refléter (le statut de connexion, en particulier, pilote l'icône de relance
+            // d'appairage — voir `render`).
+            UserEvent::NewSnapshot | UserEvent::AuthStatusChanged => {
                 for overlay in self.windows.values() {
                     overlay.window.request_redraw();
                 }
@@ -381,14 +427,21 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
+                let auth_status = **self.auth_status.load();
                 render(
                     &mut overlay.gpu,
                     &overlay.window,
-                    self.interactive,
-                    &snapshot,
-                    fight,
-                    &overlay.character_name,
-                    &overlay.portraits,
+                    RenderContent {
+                        interactive: self.interactive,
+                        snapshot: &snapshot,
+                        fight,
+                        character_name: &overlay.character_name,
+                        portraits: &overlay.portraits,
+                        icons: &overlay.icons,
+                        combat_side: &mut overlay.combat_side,
+                        auth_status,
+                        auth_retry_tx: &self.auth_retry_tx,
+                    },
                 );
             }
             _ => {}
@@ -505,15 +558,34 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
     }
 }
 
-fn render(
-    gpu: &mut GpuState,
-    window: &Window,
+/// Regroupe les paramètres de `render` au-delà de `gpu`/`window` — sinon `too_many_arguments`
+/// (clippy), la fonction ayant crû à mesure que le panneau Combat (icônes, camp affiché) et
+/// l'icône de relance d'appairage (statut de connexion, canal de retentative) s'y sont ajoutés.
+struct RenderContent<'a> {
     interactive: bool,
-    snapshot: &SessionSnapshot,
-    fight: Option<&FightSnapshot>,
-    character_name: &str,
-    portraits: &PortraitAtlas,
-) {
+    snapshot: &'a SessionSnapshot,
+    fight: Option<&'a FightSnapshot>,
+    character_name: &'a str,
+    portraits: &'a PortraitAtlas,
+    icons: &'a UiIcons,
+    combat_side: &'a mut CombatSide,
+    auth_status: AuthStatus,
+    auth_retry_tx: &'a mpsc::Sender<()>,
+}
+
+fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
+    let RenderContent {
+        interactive,
+        snapshot,
+        fight,
+        character_name,
+        portraits,
+        icons,
+        combat_side,
+        auth_status,
+        auth_retry_tx,
+    } = content;
+
     let raw_input = gpu.egui_winit.take_egui_input(window);
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
@@ -533,12 +605,28 @@ fn render(
                         } else {
                             "clic-traversant"
                         });
+                        // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au
+                        // compte a échoué (retour utilisateur 2026-09-01 : 405 côté serveur au
+                        // premier appairage, aucun moyen de retenter sans relancer tout le
+                        // logiciel). Un clic renvoie sur `spawn_auth_thread`, qui rouvre le
+                        // navigateur avec un nouveau code (voir `overlay_sync::pair_and_wait`,
+                        // code/URL toujours affichés en console faute de panneau dédié — voir
+                        // §9 du plan, « État de synchro », pas encore construit).
+                        if auth_status == AuthStatus::Disconnected {
+                            let retry = ui.add(egui::Button::new("🔗").small()).on_hover_text(
+                                "Compte non connecté — cliquer pour relancer l'appairage \
+                                     (voir la console pour le code et l'URL).",
+                            );
+                            if retry.clicked() {
+                                let _ = auth_retry_tx.send(());
+                            }
+                        }
                     });
                 });
                 ui.small(format!("{HOTKEY_LABEL} pour basculer"));
                 ui.separator();
 
-                panels::combat::show(ui, fight, portraits);
+                panels::combat::show(ui, fight, portraits, icons, combat_side);
 
                 ui.add_space(8.0);
                 ui.separator();
@@ -717,60 +805,107 @@ fn spawn_engine_thread(
 /// jeton stocké ni appairage complété, l'overlay continue simplement en mode invité (repli
 /// `breed` déjà géré par `overlay-engine::session`), exactement comme le mode invité du web.
 ///
-/// Pas encore d'UI de pairing dans la fenêtre overlay elle-même (hors périmètre de cette
-/// itération, voir le panneau "État de synchro" du plan §9, toujours à construire) : le code
-/// d'appairage est affiché en console.
-fn spawn_auth_thread(roster_tx: mpsc::Sender<RosterIndex>) {
+/// **Boucle de retentative** (2026-09-01, retour utilisateur : appairage en échec — 405 côté
+/// serveur — sans aucun moyen de retenter sans relancer tout le logiciel) : une tentative échouée
+/// (`attempt_connect` renvoie `false`) publie `AuthStatus::Disconnected` (voir `status`) plutôt que
+/// de laisser le thread mourir — `render` en déduit l'icône de relance, dont le clic pousse dans
+/// `retry_rx` pour reprendre cette boucle. Toujours pas d'UI de pairing complète dans la fenêtre
+/// overlay (hors périmètre de cette itération, voir le panneau "État de synchro" du plan §9,
+/// toujours à construire) : le code d'appairage reste affiché en console, seul le déclenchement
+/// d'une nouvelle tentative est maintenant possible depuis l'overlay.
+fn spawn_auth_thread(
+    roster_tx: mpsc::Sender<RosterIndex>,
+    status: Arc<ArcSwap<AuthStatus>>,
+    retry_rx: mpsc::Receiver<()>,
+    proxy: EventLoopProxy<UserEvent>,
+) {
     thread::Builder::new()
         .name("overlay-auth".into())
-        .spawn(move || {
-            if let Some(token) = overlay_sync::token_store::load_token() {
-                match overlay_sync::client::fetch_roster(&token) {
-                    Ok(roster) => {
-                        println!("[compte] roster récupéré depuis le jeton natif déjà connu.");
-                        let _ = roster_tx.send(roster);
-                        return;
-                    }
-                    Err(err) => {
-                        println!("[compte] jeton natif invalide/expiré ({err}) — nouvel appairage nécessaire.");
-                        overlay_sync::token_store::clear_token();
-                    }
-                }
-            }
+        .spawn(move || loop {
+            status.store(Arc::new(AuthStatus::Connecting));
+            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
-            let token = match overlay_sync::pair_and_wait(|handle| {
-                println!("\n=== Connexion du compte (optionnelle) ===");
-                println!(
-                    "Ouvre {} et entre le code : {}",
-                    handle.verification_url, handle.pairing_code
-                );
-                println!(
-                    "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)\n"
-                );
-            }) {
-                Ok(token) => token,
-                Err(err) => {
-                    println!("[compte] appairage non complété ({err}) — l'overlay continue sans roster.");
-                    return;
-                }
-            };
+            let connected = attempt_connect(&roster_tx);
 
-            if let Err(err) = overlay_sync::token_store::save_token(&token) {
-                // Volontairement `eprintln!`, pas seulement `tracing::warn!` (invisible par
-                // défaut ici, voir main() — aucun subscriber `tracing` installé, seulement
-                // `env_logger` pour la façade `log`) : un jeton non sauvegardé fait
-                // silencieusement recommencer l'appairage à chaque lancement, ça DOIT être vu.
-                eprintln!("[compte] échec de sauvegarde du jeton natif ({err}) — sera redemandé au prochain lancement.");
+            status.store(Arc::new(if connected {
+                AuthStatus::Connected
+            } else {
+                AuthStatus::Disconnected
+            }));
+            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+
+            if connected {
+                return; // rien de plus à faire — même comportement qu'avant cette itération
             }
-            match overlay_sync::client::fetch_roster(&token) {
-                Ok(roster) => {
-                    println!("[compte] connecté — roster récupéré.");
-                    let _ = roster_tx.send(roster);
-                }
-                Err(err) => println!("[compte] échec de récupération du roster après appairage ({err})."),
+            // Attend un clic sur l'icône de relance (voir `render`) avant de retenter — jamais de
+            // nouvelle tentative automatique en boucle, ce serait spammer le serveur/le navigateur
+            // pour un utilisateur qui n'a peut-être pas l'intention de lier son compte.
+            if retry_rx.recv().is_err() {
+                return; // App fermée (canal fermé avec l'émetteur) — rien à retenter.
             }
         })
         .expect("échec de création du thread Auth");
+}
+
+/// Une tentative complète de connexion au compte : jeton déjà stocké et encore valide, sinon
+/// nouvel appairage — voir la doc de `spawn_auth_thread` pour la boucle de retentative autour de
+/// cette fonction. Renvoie `true` si le roster a bien été récupéré et transmis (`roster_tx`),
+/// `false` sinon (appairage non complété, ou roster injoignable même après appairage) : dans tous
+/// les cas l'overlay continue, au pire en mode invité (repli `breed`).
+fn attempt_connect(roster_tx: &mpsc::Sender<RosterIndex>) -> bool {
+    if let Some(token) = overlay_sync::token_store::load_token() {
+        match overlay_sync::client::fetch_roster(&token) {
+            Ok(roster) => {
+                println!("[compte] roster récupéré depuis le jeton natif déjà connu.");
+                let _ = roster_tx.send(roster);
+                return true;
+            }
+            Err(err) => {
+                println!(
+                    "[compte] jeton natif invalide/expiré ({err}) — nouvel appairage nécessaire."
+                );
+                overlay_sync::token_store::clear_token();
+            }
+        }
+    }
+
+    let token = match overlay_sync::pair_and_wait(|handle| {
+        println!("\n=== Connexion du compte (optionnelle) ===");
+        println!(
+            "Ouvre {} et entre le code : {}",
+            handle.verification_url, handle.pairing_code
+        );
+        println!(
+            "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)\n"
+        );
+    }) {
+        Ok(token) => token,
+        Err(err) => {
+            println!("[compte] appairage non complété ({err}) — l'overlay continue sans roster.");
+            return false;
+        }
+    };
+
+    if let Err(err) = overlay_sync::token_store::save_token(&token) {
+        // Volontairement `eprintln!`, pas seulement `tracing::warn!` (invisible par défaut ici,
+        // voir main() — aucun subscriber `tracing` installé, seulement `env_logger` pour la
+        // façade `log`) : un jeton non sauvegardé fait silencieusement recommencer l'appairage à
+        // chaque lancement, ça DOIT être vu.
+        eprintln!(
+            "[compte] échec de sauvegarde du jeton natif ({err}) — sera redemandé au prochain lancement."
+        );
+    }
+    match overlay_sync::client::fetch_roster(&token) {
+        Ok(roster) => {
+            println!("[compte] connecté — roster récupéré.");
+            let _ = roster_tx.send(roster);
+            true
+        }
+        Err(err) => {
+            println!("[compte] échec de récupération du roster après appairage ({err}).");
+            false
+        }
+    }
 }
 
 fn resolve_path() -> PathBuf {
@@ -798,16 +933,23 @@ fn main() {
 
     let log_path = resolve_path();
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
+    let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .expect("création de l'event loop");
     let proxy = event_loop.create_proxy();
     let (roster_tx, roster_rx) = mpsc::channel();
-    spawn_auth_thread(roster_tx);
+    let (auth_retry_tx, auth_retry_rx) = mpsc::channel();
+    spawn_auth_thread(
+        roster_tx,
+        Arc::clone(&auth_status),
+        auth_retry_rx,
+        proxy.clone(),
+    );
     spawn_engine_thread(log_path.clone(), Arc::clone(&snapshot), proxy, roster_rx);
 
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(log_path, snapshot);
+    let mut app = App::new(log_path, snapshot, auth_status, auth_retry_tx);
     event_loop.run_app(&mut app).expect("boucle d'événements");
 }
