@@ -49,6 +49,7 @@ conclure, même pour un travail intermédiaire.
   `refactor:`, `chore:`, `test:` — comme sur `Oumbra/wakfu-companion`.
 - Ligne de sujet courte (< 50 caractères), en français.
 - Un commit = un changement cohérent ; ne pas mélanger documentation et code applicatif.
+- Ne pas ajouter d'attribution IA (pas de "Co-Authored-By: Claude")
 
 # Contexte projet
 
