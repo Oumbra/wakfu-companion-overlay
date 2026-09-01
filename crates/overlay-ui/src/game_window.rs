@@ -33,14 +33,21 @@ pub struct GameRect {
     pub top: i32,
     pub width: i32,
     pub height: i32,
-    /// Coordonnée écran du bord HAUT de la zone CLIENTE (contenu du jeu, sous la barre de titre
-    /// Windows) — distincte de `top` (bord extérieur de la fenêtre, barre de titre comprise, voir
-    /// `window_rect`). Nécessaire pour ancrer l'overlay Suivi (`OverlayKind::Watchlist`,
-    /// `main.rs::anchor_position`) : `top` convenait pour le centrage vertical du panneau Combat
-    /// (l'écart lié à la barre de titre y est noyé dans un grand rectangle), mais un ancrage HAUT
-    /// avec une petite marge fixe rendait visible cet écart (retour utilisateur 2026-09-01,
-    /// capture d'écran à l'appui : l'overlay Suivi apparaissait bien plus haut que les éléments
-    /// d'interface du jeu ayant la même intention d'ancrage).
+    /// Coordonnée écran du bord HAUT de la zone CLIENTE Win32 — distincte de `top` en théorie
+    /// (bord extérieur de la fenêtre, barre de titre Windows comprise, voir `window_rect`), utile
+    /// pour ancrer l'overlay Suivi (`OverlayKind::Watchlist`, `main.rs::anchor_position`) sans que
+    /// l'écart s'y noie comme au centrage vertical du panneau Combat.
+    ///
+    /// **En pratique sur le client Wakfu, `client_top == top` (écart nul, confirmé par le
+    /// diagnostic `println!` de `create_overlay_window`, 2026-09-01)** : le client Wakfu (Java/AWT)
+    /// dessine lui-même sa fausse barre de titre (bouton menu, "Sagittarius Caecus - WAKFU",
+    /// réduire/agrandir/fermer) DANS sa zone cliente, en fenêtre non décorée côté Win32 — il n'y a
+    /// donc aucune vraie barre de titre Windows à exclure, la zone cliente Win32 commence bien à
+    /// `top`. Le calcul `GetClientRect`/`ClientToScreen` reste correct et vaut la peine d'être
+    /// gardé (couvre le cas où un jeu utiliserait un JOUR une vraie fenêtre décorée), mais l'écart
+    /// visible constaté par l'utilisateur ne venait PAS de là : c'était bien `GAME_TOP_MARGIN_PX`
+    /// lui-même qui était trop petit pour dégager la fausse barre de titre dessinée par le jeu (~28
+    /// px, voir sa doc).
     pub client_top: i32,
 }
 

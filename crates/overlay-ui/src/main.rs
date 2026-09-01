@@ -78,20 +78,18 @@ const GAME_EDGE_MARGIN_PX: i32 = 12;
 /// Même principe que `GAME_EDGE_MARGIN_PX`, mais pour le bord HAUT — ancrage de l'overlay Suivi
 /// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
 /// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
-/// en haut-droite). Mesuré depuis `GameRect::client_top` (bord réel de la zone de jeu, PAS la barre
-/// de titre Windows) — un bug réel a été corrigé ici (même retour utilisateur, capture d'écran à
-/// l'appui) : l'ancrage utilisait `rect.top` (bord EXTÉRIEUR de la fenêtre, barre de titre
-/// comprise), ce qui plaçait l'overlay bien plus haut que prévu, quasiment collé à la barre de
-/// titre au lieu du contenu du jeu — invisible sur l'ancrage gauche du panneau Combat (`rect.top`
-/// n'y sert qu'à un centrage vertical sur toute la hauteur, l'écart s'y noie), mais immédiatement
-/// visible sur un ancrage haut avec une marge fixe aussi petite.
+/// en haut-droite).
 ///
-/// **Second essai (2026-09-01)** : 12 px restait visiblement insuffisant même après le fix
-/// `client_top` (retour utilisateur, deuxième capture d'écran) — estimation visuelle du manque
-/// à combler (~15 px) reportée ici. Voir le diagnostic `println!` de `create_overlay_window`
-/// (`[overlay Suivi] rect.top=... client_top=...`) pour confirmer que `client_top` est bien
-/// résolu (écart non nul avec `rect.top`) avant de retoucher cette constante à l'aveugle si ce
-/// nouvel essai est encore imprécis.
+/// **Historique de mise au point (2026-09-01, deux allers-retours avec capture d'écran)** : la
+/// valeur initiale (12 px, copiée de `GAME_EDGE_MARGIN_PX`) était bien trop petite — l'overlay
+/// apparaissait quasiment collé au très haut de la fenêtre de jeu. Diagnostic confirmé par le
+/// `println!` de `create_overlay_window` (`rect.top=0 client_top=0, écart 0`) : **le client Wakfu
+/// dessine lui-même sa fausse barre de titre DANS sa zone cliente** (voir `GameRect::client_top`,
+/// fenêtre non décorée côté Win32) — il n'y avait donc aucune vraie barre de titre Windows à
+/// exclure, `client_top` valait déjà `top`. Toute la hauteur à compenser est celle de cette fausse
+/// barre de titre dessinée par le jeu, pas une histoire de coordonnées Win32 : 28 px s'est avéré
+/// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
+/// boutons Menu/Boutique du jeu).
 const GAME_TOP_MARGIN_PX: i32 = 28;
 
 /// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
