@@ -604,7 +604,7 @@ fn spawn_auth_thread(roster_tx: mpsc::Sender<RosterIndex>) {
                         return;
                     }
                     Err(err) => {
-                        tracing::warn!(%err, "jeton natif invalide/expiré — nouvel appairage nécessaire");
+                        println!("[compte] jeton natif invalide/expiré ({err}) — nouvel appairage nécessaire.");
                         overlay_sync::token_store::clear_token();
                     }
                 }
@@ -622,20 +622,24 @@ fn spawn_auth_thread(roster_tx: mpsc::Sender<RosterIndex>) {
             }) {
                 Ok(token) => token,
                 Err(err) => {
-                    tracing::warn!(%err, "appairage non complété — l'overlay continue sans roster");
+                    println!("[compte] appairage non complété ({err}) — l'overlay continue sans roster.");
                     return;
                 }
             };
 
             if let Err(err) = overlay_sync::token_store::save_token(&token) {
-                tracing::warn!(%err, "échec de sauvegarde du jeton natif (sera redemandé au prochain lancement)");
+                // Volontairement `eprintln!`, pas seulement `tracing::warn!` (invisible par
+                // défaut ici, voir main() — aucun subscriber `tracing` installé, seulement
+                // `env_logger` pour la façade `log`) : un jeton non sauvegardé fait
+                // silencieusement recommencer l'appairage à chaque lancement, ça DOIT être vu.
+                eprintln!("[compte] échec de sauvegarde du jeton natif ({err}) — sera redemandé au prochain lancement.");
             }
             match overlay_sync::client::fetch_roster(&token) {
                 Ok(roster) => {
                     println!("[compte] connecté — roster récupéré.");
                     let _ = roster_tx.send(roster);
                 }
-                Err(err) => tracing::warn!(%err, "échec de récupération du roster après appairage"),
+                Err(err) => println!("[compte] échec de récupération du roster après appairage ({err})."),
             }
         })
         .expect("échec de création du thread Auth");
