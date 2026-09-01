@@ -18,7 +18,9 @@
 
 use std::collections::HashMap;
 
+use crate::class_breed::class_for_breed;
 use crate::model::{FightResult, LogEntry};
+use crate::roster::{Gender, RosterIndex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FighterDamage {
@@ -26,6 +28,30 @@ pub struct FighterDamage {
     pub is_ally: bool,
     pub total_damage: i64,
     pub total_heal: i64,
+    /// Classe de l'allié — roster déclaré par l'utilisateur prioritaire, sinon `breed` du combat
+    /// (voir `resolve_ally_class`), sinon `None` (allié pas encore classifié, ou ennemi — les
+    /// ennemis n'ont jamais de classe). `None` signifie « pas de portrait à afficher », jamais un
+    /// repli inventé.
+    pub class_name: Option<String>,
+    /// Sexe de l'icône — connu seulement via le roster ; repli `M` sinon (même défaut que le web,
+    /// `EntityClassifierService.getGender`, la détection par sort ne donne aucune info de sexe).
+    pub gender: Gender,
+}
+
+/// Cascade de classe/sexe d'un allié CONFIRMÉ (`is_controlled_by_ai == false`) — miroir de
+/// `EntityClassifierService.getDetectedClass`/`getGender` restreint à ce qu'`overlay-engine` sait
+/// dériver seul (roster déclaré, sinon `breed` déterministe de ce combat) : roster prioritaire,
+/// sinon `breed`, sinon aucune classe. Ne jamais appeler pour un ennemi — `breed` n'y est pas
+/// déterministe (voir `class_breed.rs`).
+fn resolve_ally_class(
+    name: &str,
+    breed: i64,
+    roster: Option<&RosterIndex>,
+) -> (Option<String>, Gender) {
+    if let Some(character) = roster.and_then(|r| r.find(name)) {
+        return (Some(character.class_name.clone()), character.gender);
+    }
+    (class_for_breed(breed).map(str::to_string), Gender::M)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,16 +108,23 @@ struct SessionState {
 }
 
 impl SessionState {
-    fn apply(&mut self, entry: &LogEntry) {
+    fn apply(&mut self, entry: &LogEntry, roster: Option<&RosterIndex>) {
         match entry {
             LogEntry::FighterJoined {
                 fight_id,
                 name,
+                breed,
                 is_controlled_by_ai,
                 ..
             } => {
                 self.ensure_fight(*fight_id);
-                self.upsert_fighter(name, !is_controlled_by_ai);
+                let is_ally = !is_controlled_by_ai;
+                let (class_name, gender) = if is_ally {
+                    resolve_ally_class(name, *breed, roster)
+                } else {
+                    (None, Gender::M) // un ennemi n'a jamais de classe (breed pas déterministe ici)
+                };
+                self.upsert_fighter(name, is_ally, class_name, gender);
             }
             LogEntry::Damage {
                 fight_id: Some(fight_id),
@@ -171,7 +204,13 @@ impl SessionState {
         }
     }
 
-    fn upsert_fighter(&mut self, name: &str, is_ally: bool) {
+    fn upsert_fighter(
+        &mut self,
+        name: &str,
+        is_ally: bool,
+        class_name: Option<String>,
+        gender: Gender,
+    ) {
         let Some(fight) = &mut self.current_fight else {
             return;
         };
@@ -185,15 +224,19 @@ impl SessionState {
             is_ally,
             total_damage: 0,
             total_heal: 0,
+            class_name,
+            gender,
         });
     }
 
     /// Ajoute défensivement le combattant s'il n'a jamais été vu via `FighterJoined` (ne devrait
     /// pas arriver — voir la doc de `FighterJoinedEntry`, émis pour chaque combattant — mais un
-    /// combat en cours au moment de la connexion peut en avoir manqué le début).
+    /// combat en cours au moment de la connexion peut en avoir manqué le début). Pas de `breed`
+    /// disponible ici : aucune classe, comme un allié pas encore classifié (voir doc de
+    /// `FighterDamage::class_name`).
     fn fighter_mut(&mut self, name: &str) -> &mut FighterDamage {
         if !self.fighter_index.contains_key(name) {
-            self.upsert_fighter(name, true);
+            self.upsert_fighter(name, true, None, Gender::M);
         }
         let idx = self.fighter_index[name];
         &mut self
@@ -224,6 +267,11 @@ pub struct Engine {
     /// rattrapage qui continuent la même séquence logique (un combat, ou même une seule ligne
     /// multi-lignes, peut s'étaler sur plusieurs `LineBatch` à cause de `MAX_BATCH_LINES`).
     in_initial_sweep: bool,
+    /// Roster déclaré par l'utilisateur (compte, lot L4) — délibérément PORTÉ PAR `Engine`, pas
+    /// par `SessionState` : ce dernier est entièrement recréé à chaque nouveau rattrapage
+    /// (`SessionState::default()` ci-dessous), ce qui effacerait le roster à chaque
+    /// reconnexion/rotation de `wakfu.log` si on le stockait là.
+    roster: Option<crate::roster::RosterIndex>,
 }
 
 impl Engine {
@@ -232,7 +280,18 @@ impl Engine {
             parser: crate::quickjs_engine::LogParserEngine::new()?,
             state: SessionState::default(),
             in_initial_sweep: false,
+            roster: None,
         })
+    }
+
+    /// Remplace le roster utilisé pour classer les alliés (voir `resolve_ally_class`) — appelé
+    /// par l'hôte (`overlay-ui`) une fois l'auth/le fetch `GET /api/v1/settings` résolus, et à
+    /// chaque nouveau fetch (roster modifié sur le compte). `None` = pas de roster connu (mode
+    /// invité, ou pas encore récupéré) : la classification retombe entièrement sur `breed`. Ne
+    /// touche PAS aux combats déjà en cours — un allié déjà rejoint garde la classe qu'il avait à
+    /// sa jonction, comme le web (le roster n'est consulté qu'à `FighterJoined`).
+    pub fn set_roster(&mut self, roster: Option<crate::roster::RosterIndex>) {
+        self.roster = roster;
     }
 
     /// Ingère un lot déjà lu par `overlay-ingest`, met à jour l'état de session en place, et
@@ -252,12 +311,80 @@ impl Engine {
 
         let entries = self.parser.parse_lines(&batch.lines)?;
         for entry in &entries {
-            self.state.apply(entry);
+            self.state.apply(entry, self.roster.as_ref());
         }
         Ok(entries)
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
         self.state.snapshot()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fighter_joined(name: &str, breed: i64, is_controlled_by_ai: bool) -> LogEntry {
+        LogEntry::FighterJoined {
+            time: "12:00:00,000".to_string(),
+            fight_id: 1,
+            name: name.to_string(),
+            breed,
+            fighter_id: 1,
+            is_controlled_by_ai,
+            summoned_by: None,
+        }
+    }
+
+    fn roster_with(name: &str, class_name: &str, gender: Gender) -> RosterIndex {
+        RosterIndex::from_settings_json(&serde_json::json!({
+            "roster": [{
+                "characters": [{ "name": name, "className": class_name, "gender": if gender == Gender::F { "f" } else { "m" } }],
+            }],
+        }))
+    }
+
+    #[test]
+    fn roster_prioritaire_sur_breed_pour_un_allie_confirme() {
+        let mut state = SessionState::default();
+        let roster = roster_with("Oumbra", "cra", Gender::F);
+        // breed=1 (feca) volontairement en désaccord avec le roster (iop) : le roster doit gagner.
+        state.apply(&fighter_joined("Oumbra", 1, false), Some(&roster));
+
+        let fighter = &state.current_fight.unwrap().fighters[0];
+        assert_eq!(fighter.class_name.as_deref(), Some("cra"));
+        assert_eq!(fighter.gender, Gender::F);
+    }
+
+    #[test]
+    fn repli_sur_breed_si_absent_du_roster() {
+        let mut state = SessionState::default();
+        let roster = roster_with("QuelquUnDAutre", "sram", Gender::F);
+        state.apply(&fighter_joined("Oumbra", 8, false), Some(&roster)); // breed 8 = iop
+
+        let fighter = &state.current_fight.unwrap().fighters[0];
+        assert_eq!(fighter.class_name.as_deref(), Some("iop"));
+        assert_eq!(fighter.gender, Gender::M); // repli par défaut, pas d'info de sexe via breed
+    }
+
+    #[test]
+    fn aucune_classe_sans_roster_ni_breed_connu() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined("Oumbra", 0, false), None); // breed 0 : inconnu
+
+        let fighter = &state.current_fight.unwrap().fighters[0];
+        assert_eq!(fighter.class_name, None);
+    }
+
+    #[test]
+    fn un_ennemi_na_jamais_de_classe_meme_avec_un_breed_valide() {
+        let mut state = SessionState::default();
+        let roster = roster_with("Monstre", "iop", Gender::M); // ne doit jamais s'appliquer
+        state.apply(&fighter_joined("Monstre", 1, true), Some(&roster)); // breed 1 = feca, is_controlled_by_ai=true
+
+        let fighter = &state.current_fight.unwrap().fighters[0];
+        assert!(!fighter.is_ally);
+        assert_eq!(fighter.class_name, None);
     }
 }

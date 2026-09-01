@@ -1,0 +1,17 @@
+[package]
+name = "overlay-sync"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Auth native par appairage (lot L4, docs/plan-architecture.md §7.2) + recuperation du roster de personnages (GET /api/v1/settings) — premiere brique reseau de l'overlay."
+
+[dependencies]
+overlay-engine = { path = "../overlay-engine" }
+keyring = "3"
+open = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+ureq = { version = "3", features = ["json"] }
+directories = "5"

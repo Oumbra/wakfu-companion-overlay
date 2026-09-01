@@ -11,19 +11,24 @@
 //! sont les deux panneaux atteignables avec `overlay-engine` tel qu'il existe aujourd'hui.
 
 mod game_window;
+mod panels;
+mod portraits;
 
 use std::env;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
 use arc_swap::ArcSwap;
+use crossbeam_channel::RecvTimeoutError;
 use egui_wgpu::wgpu;
 use game_window::GameWindowTracker;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
-use overlay_engine::{Engine, SessionSnapshot};
+use overlay_engine::{Engine, RosterIndex, SessionSnapshot};
 use overlay_ingest::discovery;
+use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -66,6 +71,9 @@ struct GpuState {
 struct App {
     window: Option<&'static Window>,
     gpu: Option<GpuState>,
+    /// `None` jusqu'au premier `resumed()` — chargée dès qu'un `egui::Context` existe (voir
+    /// `PortraitAtlas::load`), jamais avant.
+    portraits: Option<PortraitAtlas>,
     #[allow(dead_code)] // jamais relu : sa seule raison d'être est de rester en vie (voir S1)
     hotkey_manager: GlobalHotKeyManager,
     hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
@@ -92,6 +100,7 @@ impl App {
         Self {
             window: None,
             gpu: None,
+            portraits: None,
             hotkey_manager,
             hotkey_events: GlobalHotKeyEvent::receiver(),
             interactive: true,
@@ -196,6 +205,10 @@ impl ApplicationHandler<UserEvent> for App {
         Self::apply_extended_styles(Self::hwnd_of(window));
 
         let gpu = pollster::block_on(init_gpu(window));
+        // Chargée une seule fois, dès qu'un `egui::Context` existe — jamais recréée (une seule
+        // fenêtre, jamais reconstruite avant la fin du process, voir le commentaire sur `window`
+        // ci-dessus).
+        self.portraits = Some(PortraitAtlas::load(&gpu.egui_ctx));
         self.window = Some(window);
         self.gpu = Some(gpu);
 
@@ -246,7 +259,17 @@ impl ApplicationHandler<UserEvent> for App {
                 gpu.surface.configure(&gpu.device, &gpu.config);
             }
             WindowEvent::RedrawRequested => {
-                render(gpu, window, self.interactive, &self.snapshot.load())
+                let portraits = self
+                    .portraits
+                    .as_ref()
+                    .expect("portraits chargées dès resumed(), avant tout redraw possible");
+                render(
+                    gpu,
+                    window,
+                    self.interactive,
+                    &self.snapshot.load(),
+                    portraits,
+                )
             }
             _ => {}
         }
@@ -361,7 +384,13 @@ async fn init_gpu(window: &'static Window) -> GpuState {
     }
 }
 
-fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &SessionSnapshot) {
+fn render(
+    gpu: &mut GpuState,
+    window: &Window,
+    interactive: bool,
+    snapshot: &SessionSnapshot,
+    portraits: &PortraitAtlas,
+) {
     let raw_input = gpu.egui_winit.take_egui_input(window);
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
@@ -383,47 +412,7 @@ fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &Ses
                 ui.small(format!("{HOTKEY_LABEL} pour basculer"));
                 ui.separator();
 
-                ui.strong("Dégâts du combat");
-                match &snapshot.current_fight {
-                    None => {
-                        ui.weak("Aucun combat pour l'instant.");
-                    }
-                    Some(fight) => {
-                        let mut fighters = fight.fighters.clone();
-                        fighters.sort_by_key(|f| std::cmp::Reverse(f.total_damage));
-                        let max_damage =
-                            fighters.first().map(|f| f.total_damage).unwrap_or(0).max(1);
-                        for fighter in &fighters {
-                            ui.horizontal(|ui| {
-                                let color = if fighter.is_ally {
-                                    egui::Color32::from_rgb(110, 200, 140)
-                                } else {
-                                    egui::Color32::from_rgb(210, 100, 100)
-                                };
-                                ui.colored_label(color, &fighter.name);
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.monospace(fighter.total_damage.to_string());
-                                    },
-                                );
-                            });
-                            let ratio = fighter.total_damage as f32 / max_damage as f32;
-                            ui.add(
-                                egui::ProgressBar::new(ratio)
-                                    .desired_height(4.0)
-                                    .show_percentage()
-                                    .text(""),
-                            );
-                        }
-                        let status = match fight.result {
-                            None => "en cours".to_string(),
-                            Some(overlay_engine::FightResult::Won) => "gagné".to_string(),
-                            Some(overlay_engine::FightResult::Lost) => "perdu".to_string(),
-                        };
-                        ui.small(format!("Combat #{} — {status}", fight.fight_id));
-                    }
-                }
+                panels::combat::show(ui, snapshot.current_fight.as_ref(), portraits);
 
                 ui.add_space(8.0);
                 ui.separator();
@@ -547,10 +536,16 @@ fn render(gpu: &mut GpuState, window: &Window, interactive: bool, snapshot: &Ses
 /// chaque nouveau `SessionSnapshot` par `ArcSwap` et réveille le main thread. Ne rappelle jamais
 /// l'UI directement — l'UI ne lit que la dernière valeur publiée (§3 : « zéro verrou sur le
 /// chemin de rendu »).
+///
+/// Reçoit aussi (lot L4) le roster récupéré par le thread Auth (`spawn_auth_thread`) via
+/// `roster_rx` — appliqué à `Engine` de façon non bloquante entre deux lots, jamais en attendant
+/// activement dessus (voir la sélection `recv_timeout` ci-dessous, seule façon de sonder les DEUX
+/// canaux — lignes de log et roster — sans thread de sondage dédié).
 fn spawn_engine_thread(
     log_path: PathBuf,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     proxy: EventLoopProxy<UserEvent>,
+    roster_rx: mpsc::Receiver<RosterIndex>,
 ) {
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -563,9 +558,16 @@ fn spawn_engine_thread(
                 }
             };
             let rx = overlay_ingest::watcher::spawn(&log_path);
-            for result in rx {
-                match result {
-                    Ok(batch) => {
+            loop {
+                // Non bloquant : n'attend jamais activement le roster, seulement les lignes de
+                // log (voir recv_timeout plus bas) — un roster qui n'arrive jamais (pas de
+                // compte lié) ne doit pas retarder l'ingestion d'un seul milliseconde.
+                while let Ok(roster) = roster_rx.try_recv() {
+                    tracing::info!("roster appliqué à l'Engine (lot L4)");
+                    engine.set_roster(Some(roster));
+                }
+                match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                    Ok(Ok(batch)) => {
                         if let Err(err) = engine.ingest_batch(&batch) {
                             tracing::warn!(%err, "échec d'ingestion d'un lot, ligne(s) ignorée(s)");
                             continue;
@@ -573,11 +575,70 @@ fn spawn_engine_thread(
                         snapshot.store(Arc::new(engine.snapshot()));
                         let _ = proxy.send_event(UserEvent::NewSnapshot);
                     }
-                    Err(err) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
+                    Ok(Err(err)) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break, // watcher arrêté (process en fin de vie)
                 }
             }
         })
         .expect("échec de création du thread Engine");
+}
+
+/// Thread Auth (lot L4, §7.2 du plan) : résout l'accès au compte AVANT de bloquer sur quoi que ce
+/// soit d'autre — jamais le thread Engine ni le main thread. Best-effort et jamais fatal : sans
+/// jeton stocké ni appairage complété, l'overlay continue simplement en mode invité (repli
+/// `breed` déjà géré par `overlay-engine::session`), exactement comme le mode invité du web.
+///
+/// Pas encore d'UI de pairing dans la fenêtre overlay elle-même (hors périmètre de cette
+/// itération, voir le panneau "État de synchro" du plan §9, toujours à construire) : le code
+/// d'appairage est affiché en console.
+fn spawn_auth_thread(roster_tx: mpsc::Sender<RosterIndex>) {
+    thread::Builder::new()
+        .name("overlay-auth".into())
+        .spawn(move || {
+            if let Some(token) = overlay_sync::token_store::load_token() {
+                match overlay_sync::client::fetch_roster(&token) {
+                    Ok(roster) => {
+                        println!("[compte] roster récupéré depuis le jeton natif déjà connu.");
+                        let _ = roster_tx.send(roster);
+                        return;
+                    }
+                    Err(err) => {
+                        tracing::warn!(%err, "jeton natif invalide/expiré — nouvel appairage nécessaire");
+                        overlay_sync::token_store::clear_token();
+                    }
+                }
+            }
+
+            let token = match overlay_sync::pair_and_wait(|handle| {
+                println!("\n=== Connexion du compte (optionnelle) ===");
+                println!(
+                    "Ouvre {} et entre le code : {}",
+                    handle.verification_url, handle.pairing_code
+                );
+                println!(
+                    "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)\n"
+                );
+            }) {
+                Ok(token) => token,
+                Err(err) => {
+                    tracing::warn!(%err, "appairage non complété — l'overlay continue sans roster");
+                    return;
+                }
+            };
+
+            if let Err(err) = overlay_sync::token_store::save_token(&token) {
+                tracing::warn!(%err, "échec de sauvegarde du jeton natif (sera redemandé au prochain lancement)");
+            }
+            match overlay_sync::client::fetch_roster(&token) {
+                Ok(roster) => {
+                    println!("[compte] connecté — roster récupéré.");
+                    let _ = roster_tx.send(roster);
+                }
+                Err(err) => tracing::warn!(%err, "échec de récupération du roster après appairage"),
+            }
+        })
+        .expect("échec de création du thread Auth");
 }
 
 fn resolve_path() -> PathBuf {
@@ -610,7 +671,9 @@ fn main() {
         .build()
         .expect("création de l'event loop");
     let proxy = event_loop.create_proxy();
-    spawn_engine_thread(log_path.clone(), Arc::clone(&snapshot), proxy);
+    let (roster_tx, roster_rx) = mpsc::channel();
+    spawn_auth_thread(roster_tx);
+    spawn_engine_thread(log_path.clone(), Arc::clone(&snapshot), proxy, roster_rx);
 
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(log_path, snapshot);

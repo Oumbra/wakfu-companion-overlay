@@ -12,6 +12,8 @@
 | `quickjs_engine.rs` | `LogParserEngine` : charge le bundle dans `rquickjs`, expose `parse_lines()`/`reset()`. Aucune logique métier ici, seulement le pont QuickJS↔Rust. |
 | `model.rs` | Miroir Rust exact (`serde`) de `engine-js/src/log-entry.model.ts` — la forme de chaque `LogEntry`, jamais sa sémantique (qui reste dans le TS vendu). |
 | `session.rs` | `Engine` (gère la sémantique `is_initial_load`/reset, §5.3) + `SessionState` : agrégation **en Rust**, pas vendue — dégâts par combattant du combat en cours, récap de session (kamas, XP, combats, butin). Volontairement minimal, voir le commentaire de module pour ce qui manque (`StatsStoreService`, §14 point 3). |
+| `class_breed.rs` | Port de `wakfu-class-breed-ids.data.ts` (breed → classe, uniquement déterministe pour un allié confirmé) + `class-portraits.data.ts::CLASS_PORTRAIT_ORDER` (ligne d'une classe dans la planche de portraits, utilisée par `overlay-ui`). |
+| `roster.rs` | `RosterIndex` : lecture seule du roster de personnages déclaré par l'utilisateur (`GET /api/v1/settings`, clé `roster` — voir `overlay-sync`), lookup O(1) par nom normalisé (`normalize_wakfu_name`, port de `wakfu-name.util.ts`). Priorité sur `breed` dans `session.rs::resolve_ally_class`, comme `EntityClassifierService.getDetectedClass` côté web. |
 
 ## Pourquoi vendre `LogParser` plutôt que le réimplémenter
 
