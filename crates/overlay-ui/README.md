@@ -21,38 +21,44 @@ interactif / clic-traversant (hotkey global, fonctionne sans focus). Échap ou C
 ## Panneaux actuellement affichés
 
 - **Dégâts du combat** (`src/panels/combat.rs`, extrait de `main.rs` pour préparer la séparation
-  en zones indépendantes visée au §9) — combattants du combat en cours (ou du dernier terminé),
-  triés par dégâts décroissants, colorés allié (vert) / ennemi (rouge), **portrait de classe**
-  pour chaque allié dont la classe a pu être résolue (roster déclaré par l'utilisateur, sinon
-  `breed` du combat — voir `overlay_engine::session`, `src/portraits.rs`).
-- **Récap de session** — kamas nets, XP gagnée, combats gagnés/perdus, butin ramassé.
+  en zones indépendantes visée au §9) — switch Alliés/Ennemis, liste verticale de portraits de
+  classe (nom au survol), barre de dégâts par combattant. Pas de titre ni de fond opaque (retours
+  utilisateur 2026-09-01) — voir la doc de tête du fichier pour le détail des refontes.
+- **Suivi** (`src/panels/watchlist.rs`) — liste en LECTURE SEULE des entrées suivies déclarées sur
+  le compte (nom, marqueur de couleur objet/ennemi, compteur), affichée sous le panneau Combat
+  quand le compte en déclare au moins une. Aucune édition possible depuis l'overlay : la liste
+  reste éditée sur le web, seuls les compteurs sont incrémentés — et persistés localement — par
+  l'overlay (voir `overlay_engine::watchlist`, `docs/plan-architecture.md` §14 point 3).
 
-Voir §9 du plan pour le contenu complet visé : **Suivi (watchlist)** et **Alertes de drop** ne sont
-pas encore câblés (dépendent de fonctionnalités qu'`overlay-engine` ne couvre pas encore —
-persistance, sons). **État de synchro** : l'auth native (L4, `overlay-sync`) existe désormais
-(pairing + `GET /settings`, voir plus bas), mais aucun panneau ne l'affiche encore — le pairing est
-console-only pour l'instant. Pas de disposition persistée par écran ni de thème configurable non
-plus à ce stade — opacité codée en dur. Toujours une fenêtre UNIQUE (pas encore les 3 zones
-indépendantes/activables séparément demandées — Combat/Récap/Suivi — hors périmètre de cette
-itération, qui n'a porté que sur le contenu du panneau Combat).
+Voir §9 du plan pour le contenu complet visé : **Alertes de drop** (son + toast) et **État de
+synchro** ne sont pas encore câblés — le pairing reste console-only pour l'instant (voir plus bas).
+**Récap de session** (kamas/XP/combats/butin) a été retiré du panneau (retour utilisateur
+2026-09-01 : n'apportait plus rien une fois le reste simplifié) — sera repensé dans un autre
+chantier, `overlay_engine::session::SessionTotals` existe toujours côté moteur. Pas de disposition
+persistée par écran ni de thème configurable non plus à ce stade — opacité codée en dur. Toujours
+une fenêtre UNIQUE par personnage (pas encore les zones indépendantes/activables séparément visées
+au §9 — Combat/Récap/Suivi).
 
-## Compte lié (roster) — lot L4
+## Compte lié (roster + suivi) — lot L4
 
-Au démarrage, un thread `overlay-auth` dédié (`spawn_auth_thread`, `main.rs`) tente de récupérer le
-roster de personnages déclaré sur le compte web, **jamais bloquant** pour le reste de l'overlay :
+Au démarrage, un thread `overlay-auth` dédié (`spawn_auth_thread`, `main.rs`) tente de récupérer
+les réglages du compte web (`overlay_sync::client::fetch_settings`, un seul `GET /api/v1/settings`
+— roster de personnages ET liste des entrées suivies, deux clés du même objet `data`), **jamais
+bloquant** pour le reste de l'overlay :
 
 1. Jeton natif déjà stocké (trousseau OS, repli fichier — voir `overlay-sync::token_store`) →
    `GET /api/v1/settings` directement.
 2. Sinon (ou jeton devenu invalide) → appairage par code (`overlay_sync::pair_and_wait`) : le code
    et l'URL de confirmation (`<domaine>/pair?code=...`) sont affichés en **console**, le navigateur
    par défaut est ouvert en best-effort. Sans confirmation (ou sans réseau), l'overlay continue
-   simplement sans roster — repli entier sur `breed` (voir `overlay_engine::class_breed`), comme le
-   mode invité du web.
+   simplement sans roster ni suivi — repli entier sur `breed` (voir `overlay_engine::class_breed`),
+   comme le mode invité du web.
 
-Le roster récupéré est poussé à l'`Engine` (thread dédié) via un canal, appliqué de façon non
-bloquante entre deux lots de lignes — jamais en attendant dessus. Domaine de l'API configurable via
-`WAKFU_COMPANION_API_URL` (utile contre un `wrangler pages dev` local du dépôt `wakfu-companion`) ;
-repli par défaut sur `claude-dev.wakfu-companion.com`, **pas** la prod — voir `overlay-sync/README.md`.
+Les réglages récupérés sont poussés à l'`Engine` (thread dédié) via un canal, appliqués de façon
+non bloquante entre deux lots de lignes — jamais en attendant dessus. Domaine de l'API configurable
+via `WAKFU_COMPANION_API_URL` (utile contre un `wrangler pages dev` local du dépôt
+`wakfu-companion`) ; repli par défaut sur `claude-dev.wakfu-companion.com`, **pas** la prod — voir
+`overlay-sync/README.md`.
 
 ## Ancrage sur la fenêtre de jeu
 

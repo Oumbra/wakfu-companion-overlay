@@ -7,7 +7,7 @@ pub mod client;
 pub mod pairing;
 pub mod token_store;
 
-pub use client::fetch_roster;
+pub use client::{fetch_settings, AccountSettings};
 pub use pairing::{pair_and_wait, PairingHandle};
 
 #[derive(Debug, thiserror::Error)]

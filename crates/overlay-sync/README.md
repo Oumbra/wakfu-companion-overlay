@@ -11,7 +11,7 @@ d'historique (L5, à venir).
 | --- | --- |
 | `pairing.rs` | `pair_and_wait(on_started)` : `POST /api/v1/auth/native/pair`, affiche le code (callback `on_started`, appelé avant tout sondage), ouvre le navigateur par défaut (`open`, best-effort), sonde `POST /api/v1/auth/native/poll` toutes les ~3 s jusqu'à confirmation/expiration. |
 | `token_store.rs` | `save_token`/`load_token`/`clear_token` — trousseau OS (`keyring`) en priorité, repli fichier `0600` explicite (jamais silencieux, `tracing::warn!`) sous le dossier de données de l'app (`directories::ProjectDirs`) si aucun trousseau n'est disponible. |
-| `client.rs` | `fetch_roster(token)` : `GET /api/v1/settings` avec `Authorization: Bearer <token>` → `overlay_engine::RosterIndex`. Origine configurable (`WAKFU_COMPANION_API_URL`, repli sur **`claude-dev.wakfu-companion.com`** — voir la note ci-dessous, pas la prod). |
+| `client.rs` | `fetch_settings(token)` : `GET /api/v1/settings` avec `Authorization: Bearer <token>` → `AccountSettings { roster: overlay_engine::RosterIndex, watchlist: Vec<overlay_engine::WatchlistEntry> }` (roster et watchlist sont deux clés du même objet `data`, un seul appel réseau pour les deux — voir `docs/plan-architecture.md` §14 point 3). Origine configurable (`WAKFU_COMPANION_API_URL`, repli sur **`claude-dev.wakfu-companion.com`** — voir la note ci-dessous, pas la prod). |
 
 ## Pourquoi `ureq` plutôt que `reqwest`+`tokio`
 
