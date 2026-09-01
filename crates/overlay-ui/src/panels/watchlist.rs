@@ -21,7 +21,7 @@
 //! (`marker_color`) distingue objet suivi et ennemi suivi. À remplacer dès qu'une vraie icône par
 //! objet/monstre sera câblée.
 
-use overlay_engine::{WatchlistEntry, WatchlistKind};
+use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::ui_icons::UiIcons;
 
@@ -191,25 +191,42 @@ fn entry_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &WatchlistEntry) {
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(ICON_SIZE, ICON_SIZE));
     egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect);
 
-    count_badge(ui, rect, entry.count);
+    count_badge(ui, rect, entry);
 
     response.on_hover_text(&entry.name);
 }
 
-/// Petit badge circulaire ancré au coin bas-droit de la tuile — assez grand pour 3 chiffres sans
-/// déborder (`count` plafonne rarement au-delà en pratique, mais le rayon n'est pas figé sur 1
-/// chiffre pour éviter un chevauchement disgracieux dès qu'un suivi dépasse 9).
-fn count_badge(ui: &mut egui::Ui, tile_rect: egui::Rect, count: i64) {
-    let text = count.to_string();
+/// Badge ancré au coin bas-droit de la tuile — texte selon le mode, miroir du bandeau web (retour
+/// utilisateur 2026-09-02, capture d'écran à l'appui : « contrairement au mode incrémental qui
+/// n'affiche qu'un nombre qui s'incrémente, un décompte part d'un nombre et réduit, donc
+/// visuellement... le nombre courant est affiché par rapport au nombre attendu ») :
+/// - `up` : le compte seul (ex. `"3"`).
+/// - `down` : compte courant sur cible (ex. `"5/10"`) — PAS de conversion en "déjà collecté" (le
+///   web n'affiche que `count`/`countdownTarget` bruts, jamais `target - count`).
+///
+/// Forme en pilule (rectangle très arrondi) plutôt qu'un cercle forcé : un cercle imposerait sa
+/// hauteur comme largeur minimale, ce qui déborderait ou tronquerait un texte "10/10" bien plus
+/// large qu'un simple chiffre — la pilule s'adapte à la largeur du texte dans les deux cas.
+fn count_badge(ui: &mut egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
+    let text = match entry.mode {
+        WatchlistMode::Down => format!("{}/{}", entry.count, entry.countdown_target),
+        WatchlistMode::Up => entry.count.to_string(),
+    };
     let font = egui::FontId::monospace(11.0);
     let galley = ui
         .painter()
         .layout_no_wrap(text.clone(), font.clone(), BADGE_TEXT);
-    let radius = (galley.size().x.max(galley.size().y) / 2.0 + 4.0).max(10.0);
-    let center = tile_rect.right_bottom() - egui::vec2(radius * 0.7, radius * 0.7);
+    let size = (galley.size() + egui::vec2(10.0, 4.0)).max(egui::vec2(18.0, 16.0));
+    let center = tile_rect.right_bottom() - (size / 2.0 + egui::vec2(2.0, 2.0));
+    let badge_rect = egui::Rect::from_center_size(center, size);
 
     let painter = ui.painter();
-    painter.circle_filled(center, radius, BADGE_BG);
-    painter.circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::BLACK));
+    painter.rect_filled(badge_rect, size.y / 2.0, BADGE_BG);
+    painter.rect_stroke(
+        badge_rect,
+        size.y / 2.0,
+        egui::Stroke::new(1.0, egui::Color32::BLACK),
+        egui::StrokeKind::Inside,
+    );
     painter.text(center, egui::Align2::CENTER_CENTER, &text, font, BADGE_TEXT);
 }
