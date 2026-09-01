@@ -151,6 +151,10 @@ pub fn show(
     egui::ScrollArea::horizontal()
         .id_salt("watchlist-strip")
         .auto_shrink([false, true])
+        // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
+        // flottante une bande dégagée sous les icônes/badges plutôt que de la faire chevaucher
+        // presque entièrement — retour utilisateur 2026-09-02 : « impossible de l'agripper ».
+        .min_scrolled_height(TILE_SIZE + 14.0)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 control_tile(ui, "+", "Ajouter un suivi (bientôt disponible)");
@@ -204,6 +208,20 @@ fn style_thin_scrollbar(style: &mut egui::Style) {
     style.visuals.widgets.inactive.bg_fill = BORDER_STRONG;
     style.visuals.widgets.hovered.bg_fill = TEXT_MUTED;
     style.visuals.widgets.active.bg_fill = TEXT_MUTED;
+    // « La molette n'est pas prise en compte » (retour utilisateur 2026-09-02) : par défaut, egui
+    // ne route la molette (verticale) vers une zone de défilement HORIZONTALE que si l'utilisateur
+    // maintient Maj — `always_scroll_the_only_direction` lève cette exigence quand une seule
+    // direction est activée (notre cas, `ScrollArea::horizontal()`), exactement le comportement
+    // demandé (« que si on utilise la molette [...] ça applique le scroll »).
+    style.always_scroll_the_only_direction = true;
+    // Élimine l'espacement AUTOMATIQUE qu'`egui` insère entre deux éléments d'un même
+    // `ui.horizontal` (`spacing.item_spacing`, par défaut ~8px) — sans ça, chaque `add_space`
+    // explicite de `TILE_GAP` s'additionne à cet espacement caché, et `content_width` (dont
+    // `main.rs` dépend pour dimensionner la fenêtre) sous-estime la largeur réellement occupée :
+    // c'est la cause du décalage constaté par l'utilisateur (« il manque littéralement un
+    // objet » — la dernière tuile débordait hors de la fenêtre, trop étroite de quelques dizaines
+    // de pixels). `TILE_GAP` reste la SEULE source d'espacement horizontal après ce réglage.
+    style.spacing.item_spacing.x = 0.0;
 }
 
 /// Toast d'alerte (§9 du plan : « toast + son quand un objet suivi tombe ») — non interactif

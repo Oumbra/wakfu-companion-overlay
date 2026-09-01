@@ -317,7 +317,21 @@ impl SessionState {
             return;
         };
         if fight.fighter_index.contains_key(name) {
-            return; // déjà rejoint (multi-compte : un même nom ne rejoint qu'une fois un combat donné)
+            // Déjà rejoint sous CE nom — limitation CONFIRMÉE (retour utilisateur 2026-09-02 :
+            // « il n'y a que quatre monstres qui sont toujours affichés, pas plus » sur des
+            // combats qui en affichent visiblement bien plus). Plusieurs ennemis PEUVENT partager
+            // exactement le même nom dans un même combat (pack du même monstre) — le log ne relie
+            // JAMAIS une ligne de dégâts/soin à un `fighterId` précis (seule la ligne de jointure
+            // `[_FL_]` le porte, voir `FighterJoinedEntry`), donc rien ici ne peut distinguer DEUX
+            // instances de même nom déjà rejointes : la seconde est silencieusement ignorée, ses
+            // dégâts se retrouvent crédités à la première (même nom) plutôt que d'apparaître comme
+            // un combattant séparé. `StatsStoreService` (web) résout ça avec un système de
+            // "sièges" d'initiative (`InitiativeSeat`/`resolveNextActor`) qui déduit, tour par
+            // tour, LAQUELLE des instances de même nom est en train d'agir — une vraie heuristique
+            // (~100 lignes), pas une correction ponctuelle : non portée ici, hors périmètre de
+            // cette itération (voir §14 point 3 du plan pour la décision d'ensemble sur la
+            // logique portée vs vendue).
+            return;
         }
         fight
             .fighter_index
