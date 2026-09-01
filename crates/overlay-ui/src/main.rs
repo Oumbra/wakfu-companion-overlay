@@ -343,23 +343,29 @@ impl App {
         );
     }
 
-    /// Au-dessus tant qu'une fenêtre pertinente (n'importe laquelle des fenêtres de jeu suivies,
-    /// OU n'importe lequel des overlays lui-même) a le focus ; sinon repli en z-order normal, pour
-    /// ne plus recouvrir une application quelconque devenue active (retour utilisateur,
-    /// 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus l'explorateur de fichiers"). Un
-    /// seul `GetForegroundWindow()` par tick, comparé aux `HWND` déjà connus — coût négligeable.
+    /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
+    /// sinon repli en z-order normal — pour ne plus recouvrir une application quelconque devenue
+    /// active (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus
+    /// l'explorateur de fichiers"), ET pour que passer d'une fenêtre de jeu à l'autre en
+    /// multi-compte fasse remonter le BON overlay au premier plan. Un seul `GetForegroundWindow()`
+    /// par tick, comparé au `HWND` de chaque fenêtre suivie — coût négligeable.
     ///
-    /// Politique volontairement simplifiée : TOUTE fenêtre de jeu Wakfu (pas seulement celle du
-    /// personnage actif) remet TOUS les overlays au premier plan, pas de logique par-personnage —
-    /// à affiner si un besoin réel l'impose en usage.
+    /// **Correctif 2026-09-01** (retour utilisateur, multi-fenêtre) : la politique précédente
+    /// (« TOUTE fenêtre de jeu Wakfu remet TOUS les overlays au premier plan ») avait deux défauts
+    /// en pratique avec 2+ personnages simultanés : (a) passer d'une fenêtre de jeu à l'autre ne
+    /// changeait RIEN au z-order relatif entre les deux overlays (les deux restaient topmost tout
+    /// du long, celui déjà au-dessus le restait indéfiniment, quel que soit le personnage
+    /// réellement actif) — un seul overlay restait visible, souvent le mauvais ; (b) `Ctrl+Alt+W`
+    /// bascule `interactive` pour TOUTES les fenêtres à la fois (voir `toggle_interactive`), donc
+    /// l'overlay resté topmost au mauvais endroit interceptait aussi les clics destinés au jeu
+    /// dessous. Callback PAR overlay : celui dont la fenêtre de jeu vient de reprendre le focus est
+    /// (ré)inséré en tête du groupe topmost par ce `SetWindowPos`, les autres retombent derrière.
     fn sync_topmost(&mut self) {
         let foreground = unsafe { GetForegroundWindow() };
-        let relevant = self
-            .windows
-            .values()
-            .any(|w| w.game_hwnd == foreground || Self::hwnd_of(&w.window) == foreground);
 
         for overlay in self.windows.values_mut() {
+            let relevant =
+                overlay.game_hwnd == foreground || Self::hwnd_of(&overlay.window) == foreground;
             if overlay.is_topmost == relevant {
                 continue;
             }
