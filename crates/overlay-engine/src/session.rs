@@ -401,6 +401,12 @@ pub struct Engine {
     /// rattrapage, PORTÉ PAR `Engine` et jamais recréé avec `SessionState`. Voir `watchlist.rs`
     /// pour la frontière définitions (compte)/compteurs (local à l'overlay).
     watchlist: WatchlistState,
+    /// Alertes de décompte à 0 (voir `WatchlistAlert`) accumulées depuis le dernier
+    /// `drain_watchlist_alerts` — motif « drain » (comme `drainSyncEvents()` esquissé au §2.1 du
+    /// plan pour le futur moteur headless) plutôt que de changer la signature d'`ingest_batch` :
+    /// l'hôte (thread dédié `overlay-ui`) les récupère à son rythme, sans coupler cette API au
+    /// détail de la watchlist.
+    pending_alerts: Vec<crate::watchlist::WatchlistAlert>,
 }
 
 impl Engine {
@@ -426,6 +432,7 @@ impl Engine {
             in_initial_sweep: false,
             roster: None,
             watchlist: WatchlistState::new(store_path),
+            pending_alerts: Vec::new(),
         })
     }
 
@@ -449,6 +456,13 @@ impl Engine {
 
     pub fn watchlist_entries(&self) -> &[WatchlistEntry] {
         self.watchlist.entries()
+    }
+
+    /// Vide et renvoie les alertes de décompte accumulées depuis le dernier appel (voir
+    /// `pending_alerts`) — à appeler par l'hôte après chaque `ingest_batch` pour déclencher
+    /// toast/son (§9 du plan, « Alertes de drop »). Vide dans l'immense majorité des appels.
+    pub fn drain_watchlist_alerts(&mut self) -> Vec<crate::watchlist::WatchlistAlert> {
+        std::mem::take(&mut self.pending_alerts)
     }
 
     /// Ingère un lot déjà lu par `overlay-ingest`, met à jour l'état de session en place, et
@@ -475,17 +489,18 @@ impl Engine {
             // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
             // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
             if !batch.is_initial_load {
-                self.watchlist.apply(entry);
+                self.pending_alerts.extend(self.watchlist.apply(entry));
                 // Filet de rattrapage du dernier ennemi d'un combat (voir la doc de
                 // `SessionState::apply`, cas `CombatEnd`) : crédité à la watchlist comme s'il
                 // s'agissait d'autant de `LogEntry::EnemyDefeated` supplémentaires — même chemin,
                 // pas de logique dupliquée dans `WatchlistState`.
                 for name in implicitly_defeated {
-                    self.watchlist.apply(&LogEntry::EnemyDefeated {
+                    let alerts = self.watchlist.apply(&LogEntry::EnemyDefeated {
                         time: entry.time().to_string(),
                         name,
                         fight_id: None,
                     });
+                    self.pending_alerts.extend(alerts);
                 }
             }
         }

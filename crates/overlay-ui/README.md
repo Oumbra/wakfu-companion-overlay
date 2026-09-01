@@ -43,12 +43,22 @@ redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et
   `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le compte ne déclare aucune
   entrée.
 
-Voir §9 du plan pour le contenu complet visé : **Alertes de drop** (son + toast) et **État de
-synchro** ne sont pas encore câblés — le pairing reste console-only pour l'instant (voir plus bas).
-**Récap de session** (kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 :
-n'apportait plus rien une fois le reste simplifié) — sera repensé dans un autre chantier,
-`overlay_engine::session::SessionTotals` existe toujours côté moteur. Pas de disposition persistée
-par écran ni de thème configurable non plus à ce stade — opacité codée en dur.
+**Alertes de drop** (son + toast quand un décompte de suivi atteint 0, §9 du plan) : dès qu'
+`overlay_engine::Engine::drain_watchlist_alerts` signale un décompte tombé à 0,
+`spawn_engine_thread` joue le son d'alerte (`alert_sound.rs`, `rodio`, sur un thread éphémère
+dédié — jamais bloquant pour l'ingestion du log) et publie un toast (`panels::watchlist::
+WatchlistToast`) affiché sous la bande de tuiles pendant `TOAST_DURATION` (5 s), non interactif.
+Réduit par rapport au web (`loot-alert.component.ts` : confettis, deux sons distincts selon la
+raison, durée configurable) — seul le cas `reason: 'countdown'` est câblé, le cas `reason: 'loot'`
+(son configurable par objet ramassé) dépend des réglages `profile` du compte, pas encore lus par
+l'overlay.
+
+Voir §9 du plan pour le contenu complet visé : **État de synchro** n'est pas encore câblé — le
+pairing reste console-only pour l'instant (voir plus bas). **Récap de session**
+(kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 : n'apportait plus rien une
+fois le reste simplifié) — sera repensé dans un autre chantier, `overlay_engine::session::
+SessionTotals` existe toujours côté moteur. Pas de disposition persistée par écran ni de thème
+configurable non plus à ce stade — opacité codée en dur.
 
 ## Compte lié (roster + suivi) — lot L4
 
