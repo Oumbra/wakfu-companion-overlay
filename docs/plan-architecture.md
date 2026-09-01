@@ -175,7 +175,7 @@ wakfu-companion-overlay/
 │   ├── overlay-engine/            # frontière métier
 │   │   └── src/{lib.rs,backend.rs,quickjs.rs,model.rs,snapshot.rs}
 │   ├── overlay-sync/              # API + file persistante + auth
-│   │   └── src/{client.rs,auth.rs,queue.rs,catalog.rs,payload.rs}
+│   │   └── src/{client.rs,pairing.rs,token_store.rs}  # auth native (L4) fait ; queue.rs/catalog.rs/payload.rs restent à faire (L3/L5)
 │   ├── overlay-ui/                # egui : panneaux, thème, i18n
 │   │   └── src/{app.rs,panels/{damage.rs,tracker.rs,alerts.rs,recap.rs,status.rs},theme.rs}
 │   └── overlay-platform/          # tout le code spécifique OS
@@ -525,7 +525,7 @@ Chaque panneau est déplaçable, redimensionnable, avec opacité réglable ; dis
 | **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel) |
 | **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap, disposition persistée | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`) et `crates/overlay-ui/` (fenêtre S1 + panneaux Dégâts du combat/Récap de session), validés sur un vrai `wakfu.log`. **Reste** : Suivi (watchlist), Alertes de drop, État de synchro, disposition persistée par écran, thème configurable — les deux premiers hors de portée sans décision sur `StatsStoreService` (§14 point 3) |
 | **L3 — Catalogue** | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files |
-| **L4 — Auth native** | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable |
+| **L4 — Auth native** 🟡 en cours | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable — **fait** : 3 endpoints serveur (`/api/v1/auth/native/{pair,claim,poll}`, table `native_pairings`, `Authorization: Bearer` accepté par `_auth.ts`), page web `/pair`, crate `overlay-sync` (pairing bloquant + `keyring`/repli fichier + `GET /settings`), roster appliqué à `overlay-engine::session` (priorité sur `breed`), portraits de classe affichés dans le panneau Combat (`overlay-ui`). **Reste** : UI de pairing dans la fenêtre overlay (console-only pour l'instant), révocation/déconnexion côté overlay, vérification bout en bout contre un vrai déploiement (non joignable depuis un sandbox de dev, voir `crates/overlay-sync/README.md`) |
 | **L5 — Synchro** | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay |
 | **L6 — Packaging** | AppImage, installeur, mise à jour signée | Installation propre sur une machine vierge Windows et Linux |
 
@@ -613,8 +613,9 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
    mais sans conséquence grâce au threading (§5.5, reformulé). Reste à valider sur
    `StatsStoreService` (bien plus gros, couplé Angular) lors de l'extraction réelle côté
    `wakfu-companion` (point 3 ci-dessous).
-2. **Auth native** : appairage par code (recommandé) ou redirection loopback ? Le premier ne touche
-   à aucune configuration OAuth existante.
+2. ~~**Auth native** : appairage par code (recommandé) ou redirection loopback ?~~ **Tranché :
+   appairage par code, implémenté (voir L4 ci-dessus)** — ne touche à aucune configuration OAuth
+   existante, conforme à la recommandation initiale de ce document.
 3. **Extraction du moteur headless** : lot à planifier **dans `wakfu-companion`** — qui le fait,
    quand, et sur quelle branche ?
 4. **Signature Authenticode** Windows : budget accepté ou distribution non signée assumée en v1 ?

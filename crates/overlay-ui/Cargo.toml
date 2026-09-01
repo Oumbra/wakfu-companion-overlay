@@ -8,13 +8,16 @@ description = "Fenetre overlay transparente (Windows, DirectComposition — voir
 [dependencies]
 overlay-engine = { path = "../overlay-engine" }
 overlay-ingest = { path = "../overlay-ingest" }
+overlay-sync = { path = "../overlay-sync" }
 
 arc-swap = "1"
+crossbeam-channel = "0.5"
 egui = "0.36.1"
 egui-wgpu = "0.36.1"
 egui-winit = "0.36.1"
 env_logger = "0.11.11"
 global-hotkey = "0.8.0"
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4.34"
 pollster = "1.0.1"
 raw-window-handle = "0.6"
