@@ -49,7 +49,8 @@ pub fn show(
     icons: &UiIcons,
     side: &mut CombatSide,
 ) {
-    ui.strong("Dégâts du combat");
+    // Pas de titre "Dégâts du combat" (retour utilisateur 2026-09-01 : n'apporte rien, retiré) —
+    // le switch Alliés/Ennemis en tête suffit à situer ce que montre la liste.
     side_switch(ui, side, icons);
     ui.add_space(6.0);
     match fight {

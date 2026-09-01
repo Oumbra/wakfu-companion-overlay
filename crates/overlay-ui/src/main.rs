@@ -432,10 +432,7 @@ impl ApplicationHandler<UserEvent> for App {
                     &mut overlay.gpu,
                     &overlay.window,
                     RenderContent {
-                        interactive: self.interactive,
-                        snapshot: &snapshot,
                         fight,
-                        character_name: &overlay.character_name,
                         portraits: &overlay.portraits,
                         icons: &overlay.icons,
                         combat_side: &mut overlay.combat_side,
@@ -562,10 +559,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
 /// (clippy), la fonction ayant crû à mesure que le panneau Combat (icônes, camp affiché) et
 /// l'icône de relance d'appairage (statut de connexion, canal de retentative) s'y sont ajoutés.
 struct RenderContent<'a> {
-    interactive: bool,
-    snapshot: &'a SessionSnapshot,
     fight: Option<&'a FightSnapshot>,
-    character_name: &'a str,
     portraits: &'a PortraitAtlas,
     icons: &'a UiIcons,
     combat_side: &'a mut CombatSide,
@@ -573,12 +567,18 @@ struct RenderContent<'a> {
     auth_retry_tx: &'a mpsc::Sender<()>,
 }
 
+/// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
+/// l'état interactif/clic-traversant et le rappel du raccourci n'apportaient rien (l'utilisateur
+/// sait déjà quel personnage est le sien et derrière quelle fenêtre de jeu il joue) — retirés, de
+/// même que le titre "Dégâts du combat" (voir `panels::combat`) et toute la section "Récap de
+/// session" (Kamas/XP/Combats/Butin — retour utilisateur : la garder n'a plus de sens une fois le
+/// reste simplifié, sera repensée dans un autre chantier). Le fond opaque du panneau (une grande
+/// plaque sombre visible même quand il n'y a presque rien à afficher, voir la capture) est
+/// également retiré : `Frame::NONE`, seuls les widgets eux-mêmes restent visibles par-dessus le
+/// jeu.
 fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
     let RenderContent {
-        interactive,
-        snapshot,
         fight,
-        character_name,
         portraits,
         icons,
         combat_side,
@@ -589,76 +589,45 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) {
     let raw_input = gpu.egui_winit.take_egui_input(window);
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::default().fill(egui::Color32::from_rgba_unmultiplied(18, 20, 28, 215)),
-            )
+            .frame(egui::Frame::NONE.inner_margin(6))
             .show(ui, |ui| {
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    // Repère visuel du rapprochement fenêtre↔personnage (multi-compte,
-                    // 2026-09-01) : le nom affiché DOIT correspondre à la fenêtre de jeu sur
-                    // laquelle cet overlay est collé — vérifiable d'un coup d'œil en test réel.
-                    ui.heading(character_name);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.small(if interactive {
-                            "interactif"
-                        } else {
-                            "clic-traversant"
-                        });
-                        // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au
-                        // compte a échoué (retour utilisateur 2026-09-01 : 405 côté serveur au
-                        // premier appairage, aucun moyen de retenter sans relancer tout le
-                        // logiciel). Un clic renvoie sur `spawn_auth_thread`, qui rouvre le
-                        // navigateur avec un nouveau code (voir `overlay_sync::pair_and_wait`,
-                        // code/URL toujours affichés en console faute de panneau dédié — voir
-                        // §9 du plan, « État de synchro », pas encore construit).
-                        if auth_status == AuthStatus::Disconnected {
-                            let retry = ui.add(egui::Button::new("🔗").small()).on_hover_text(
-                                "Compte non connecté — cliquer pour relancer l'appairage \
-                                     (voir la console pour le code et l'URL).",
+                // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au compte a
+                // échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier appairage,
+                // aucun moyen de retenter sans relancer tout le logiciel). Barre pleine largeur
+                // avec libellé plutôt qu'une icône seule (l'icône précédente, 🔗 seul en 22px,
+                // était illisible en test réel — retour utilisateur). Un clic renvoie sur
+                // `spawn_auth_thread`, qui relance un appairage COMPLET (rouvre le navigateur avec
+                // un nouveau code, voir `overlay_sync::pair_and_wait` — code/URL toujours affichés
+                // en console faute de panneau dédié, voir §9 du plan « État de synchro », pas
+                // encore construit).
+                match auth_status {
+                    AuthStatus::Disconnected => {
+                        let retry = ui
+                            .add_sized(
+                                egui::vec2(ui.available_width(), 26.0),
+                                egui::Button::new("🔗  Connecter le compte"),
+                            )
+                            .on_hover_text(
+                                "Lance l'appairage du compte (ouvre le navigateur — code à \
+                                 entrer affiché dans la console).",
                             );
-                            if retry.clicked() {
-                                let _ = auth_retry_tx.send(());
-                            }
+                        if retry.clicked() {
+                            let _ = auth_retry_tx.send(());
                         }
-                    });
-                });
-                ui.small(format!("{HOTKEY_LABEL} pour basculer"));
-                ui.separator();
+                        ui.add_space(6.0);
+                    }
+                    // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
+                    // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
+                    // « on dirait que ça ne fait rien »). Toujours pas de code/URL affichés ici
+                    // même en connexion — seulement en console, voir plus haut.
+                    AuthStatus::Connecting => {
+                        ui.weak("Connexion au compte en cours…");
+                        ui.add_space(6.0);
+                    }
+                    AuthStatus::Connected => {}
+                }
 
                 panels::combat::show(ui, fight, portraits, icons, combat_side);
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.strong("Récap de session");
-                let t = &snapshot.totals;
-                egui::Grid::new("recap-grid")
-                    .num_columns(2)
-                    .spacing([12.0, 2.0])
-                    .show(ui, |ui| {
-                        ui.label("Kamas");
-                        ui.monospace(format!("{:+}", t.kamas_gained - t.kamas_lost));
-                        ui.end_row();
-                        ui.label("XP gagnée");
-                        ui.monospace(t.xp_gained.to_string());
-                        ui.end_row();
-                        ui.label("Combats");
-                        ui.monospace(format!(
-                            "{} gagnés / {} perdus",
-                            t.fights_won, t.fights_lost
-                        ));
-                        ui.end_row();
-                        ui.label("Butin ramassé");
-                        ui.monospace(t.loot_count.to_string());
-                        ui.end_row();
-                    });
-
-                if let Some(last) = snapshot.recent_loot.last() {
-                    ui.small(format!(
-                        "Dernier butin : {} ×{} ({})",
-                        last.item, last.quantity, last.time
-                    ));
-                }
             });
     });
     gpu.egui_winit
