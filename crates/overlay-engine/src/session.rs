@@ -147,6 +147,12 @@ struct FightWorking {
     /// Index par nom dans `snapshot.fighters` — propre à CE combat (plus de notion de « combat
     /// courant » à vider/recréer, chaque `fight_id` a son propre index depuis sa création).
     fighter_index: HashMap<String, usize>,
+    /// Noms d'ennemis (normalisés en minuscules) déjà "résolus" — vaincus explicitement
+    /// (`EnemyDefeated`) ou en fuite (`EnemyFled`) — voir le filet de rattrapage de `apply` pour
+    /// `CombatEnd`. Miroir simplifié de `FightWorking.defeatedNames`/`fledNames`
+    /// (`stats-store.service.ts`) : pas de comptage par instance, notre modèle ne garde qu'UNE
+    /// entrée par nom de toute façon (voir `upsert_fighter`, qui ignore un nom déjà rejoint).
+    resolved_enemies: std::collections::HashSet<String>,
 }
 
 /// Accumulateur mutable — voir [`SessionSnapshot`] pour la vue immuable qu'il produit.
@@ -158,7 +164,12 @@ struct SessionState {
 }
 
 impl SessionState {
-    fn apply(&mut self, entry: &LogEntry, roster: Option<&RosterIndex>) {
+    /// Renvoie les noms d'ennemis crédités IMPLICITEMENT comme vaincus par le filet de rattrapage
+    /// de `CombatEnd` ci-dessous (vide dans tous les autres cas) — l'appelant (`Engine::
+    /// ingest_batch`) s'en sert pour créditer la watchlist comme s'il s'agissait d'autant de
+    /// `LogEntry::EnemyDefeated` supplémentaires, seul endroit qui connaît `WatchlistState`.
+    fn apply(&mut self, entry: &LogEntry, roster: Option<&RosterIndex>) -> Vec<String> {
+        let mut implicitly_defeated_enemies = Vec::new();
         match entry {
             LogEntry::FighterJoined {
                 fight_id,
@@ -192,12 +203,49 @@ impl SessionState {
             } => {
                 self.fighter_mut(*fight_id, attacker).total_heal += amount;
             }
+            LogEntry::EnemyDefeated {
+                name,
+                fight_id: Some(fight_id),
+                ..
+            } => {
+                self.mark_resolved(*fight_id, name);
+            }
+            // Un combattant qui s'échappe n'a PAS été vaincu, même si le combat se termine par une
+            // victoire (mimique qui se révèle puis fuit) — marqué "résolu" quand même pour que le
+            // filet de rattrapage de `CombatEnd` ci-dessous ne le crédite pas à tort. Miroir de
+            // `registerFightFlee` (`stats-store.service.ts`), qui n'appelle jamais `registerDefeat`.
+            LogEntry::EnemyFled {
+                name,
+                fight_id: Some(fight_id),
+                ..
+            } => {
+                self.mark_resolved(*fight_id, name);
+            }
             LogEntry::CombatEnd {
                 fight_id, result, ..
             } => {
                 if let Some(fight) = self.fights.get_mut(fight_id) {
                     fight.snapshot.ongoing = false;
                     fight.snapshot.result = Some(*result);
+                    // Filet de rattrapage — miroir de `finalizeFight` (`stats-store.service.ts`) :
+                    // le dernier ennemi d'un combat (souvent le boss) meurt parfois EXACTEMENT en
+                    // même temps que le combat se termine, sans jamais produire sa propre ligne
+                    // "est KO !"/"est hors-combat !" (constaté en session, 2026-09-01 : boss "El
+                    // Pochito" jamais crédité dans le Suivi malgré une victoire confirmée par le
+                    // butin ramassé juste après — vérifié dans le vrai wakfu.log, aucune ligne de
+                    // défaite ne précède le ramassage). Un combat GAGNÉ implique que tout ennemi
+                    // ayant rejoint et jamais résolu (ni vaincu explicitement, ni en fuite) est
+                    // mort en même temps que le combat.
+                    if *result == FightResult::Won {
+                        for fighter in &fight.snapshot.fighters {
+                            if fighter.is_ally {
+                                continue;
+                            }
+                            if fight.resolved_enemies.insert(fighter.name.to_lowercase()) {
+                                implicitly_defeated_enemies.push(fighter.name.clone());
+                            }
+                        }
+                    }
                 }
                 match result {
                     FightResult::Won => self.totals.fights_won += 1,
@@ -225,11 +273,22 @@ impl SessionState {
                 }
             }
             // Hors périmètre de ce premier slice (voir le commentaire de module) : chat,
-            // spell-cast, armor, enemy-defeated/fled, combat-defeat-marker, combat-start (ne
-            // porte pas de fightId, voir le TS vendu), challenge-result, market-occupation,
-            // log-date-anchor, trade-completed, et les variantes sans fightId (kamas/loot hors
-            // combat, dégâts non résolus).
+            // spell-cast, armor, combat-defeat-marker, combat-start (ne porte pas de fightId, voir
+            // le TS vendu), challenge-result, market-occupation, log-date-anchor, trade-completed,
+            // et les variantes sans fightId (kamas/loot hors combat, dégâts non résolus,
+            // enemy-defeated/fled sans fightId résolu par le parser).
             _ => {}
+        }
+        implicitly_defeated_enemies
+    }
+
+    /// Marque un nom d'ennemi comme "résolu" pour ce combat (vaincu explicitement ou en fuite) —
+    /// voir `resolved_enemies` et le filet de rattrapage de `CombatEnd` ci-dessus. No-op si le
+    /// combat n'est pas suivi (jamais vu de `FighterJoined`, ex. combat déjà en cours à l'ouverture
+    /// du fichier — même défense que `registerFightDefeat`/`registerFightFlee` côté web).
+    fn mark_resolved(&mut self, fight_id: i64, name: &str) {
+        if let Some(fight) = self.fights.get_mut(&fight_id) {
+            fight.resolved_enemies.insert(name.to_lowercase());
         }
     }
 
@@ -242,6 +301,7 @@ impl SessionState {
                 fighters: Vec::new(),
             },
             fighter_index: HashMap::new(),
+            resolved_enemies: std::collections::HashSet::new(),
         });
     }
 
@@ -395,12 +455,23 @@ impl Engine {
 
         let entries = self.parser.parse_lines(&batch.lines)?;
         for entry in &entries {
-            self.state.apply(entry, self.roster.as_ref());
+            let implicitly_defeated = self.state.apply(entry, self.roster.as_ref());
             // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
             // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
             // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
             if !batch.is_initial_load {
                 self.watchlist.apply(entry);
+                // Filet de rattrapage du dernier ennemi d'un combat (voir la doc de
+                // `SessionState::apply`, cas `CombatEnd`) : crédité à la watchlist comme s'il
+                // s'agissait d'autant de `LogEntry::EnemyDefeated` supplémentaires — même chemin,
+                // pas de logique dupliquée dans `WatchlistState`.
+                for name in implicitly_defeated {
+                    self.watchlist.apply(&LogEntry::EnemyDefeated {
+                        time: entry.time().to_string(),
+                        name,
+                        fight_id: None,
+                    });
+                }
             }
         }
         Ok(entries)
@@ -575,5 +646,81 @@ mod tests {
             "le combat encore en cours ne doit jamais être purgé"
         );
         assert!(state.fights[&0].snapshot.ongoing);
+    }
+
+    fn combat_end(fight_id: i64, result: FightResult) -> LogEntry {
+        LogEntry::CombatEnd {
+            time: "12:00:02,000".to_string(),
+            fight_id,
+            result,
+        }
+    }
+
+    fn enemy_defeated(fight_id: i64, name: &str) -> LogEntry {
+        LogEntry::EnemyDefeated {
+            time: "12:00:01,500".to_string(),
+            name: name.to_string(),
+            fight_id: Some(fight_id),
+        }
+    }
+
+    fn enemy_fled(fight_id: i64, name: &str) -> LogEntry {
+        LogEntry::EnemyFled {
+            time: "12:00:01,500".to_string(),
+            name: name.to_string(),
+            fight_id: Some(fight_id),
+        }
+    }
+
+    /// Régression réelle (retour utilisateur, 2026-09-01) : un boss qui meurt exactement en même
+    /// temps que la fin du combat n'a pas toujours droit à sa propre ligne "est KO !" — voir la
+    /// doc de `SessionState::apply`, cas `CombatEnd`.
+    #[test]
+    fn filet_de_rattrapage_credite_un_ennemi_jamais_vaincu_explicitement_sur_victoire() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "El Pochito", 1, true), None);
+        state.apply(&fighter_joined(1, "Oumbra Canin", 15, false), None);
+
+        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Won), None);
+
+        assert_eq!(implicitly_defeated, vec!["El Pochito".to_string()]);
+    }
+
+    #[test]
+    fn filet_de_rattrapage_ne_double_compte_pas_un_ennemi_deja_vaincu_explicitement() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "Bwork", 1, true), None);
+        state.apply(&enemy_defeated(1, "Bwork"), None); // ligne "est KO !" explicite, avant la fin
+
+        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Won), None);
+
+        assert!(
+            implicitly_defeated.is_empty(),
+            "déjà crédité explicitement, le filet ne doit rien ajouter"
+        );
+    }
+
+    /// Demande explicite de l'utilisateur (cas des mimiques, voir `registerFightFlee` côté web) :
+    /// une fuite n'est jamais requalifiée en victoire sous prétexte que le reste de l'équipe a
+    /// gagné.
+    #[test]
+    fn filet_de_rattrapage_ne_credite_jamais_un_ennemi_en_fuite() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "Mimique", 1, true), None);
+        state.apply(&enemy_fled(1, "Mimique"), None);
+
+        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Won), None);
+
+        assert!(implicitly_defeated.is_empty());
+    }
+
+    #[test]
+    fn filet_de_rattrapage_ne_sapplique_pas_sur_une_defaite() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "Bwork", 1, true), None);
+
+        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Lost), None);
+
+        assert!(implicitly_defeated.is_empty());
     }
 }
