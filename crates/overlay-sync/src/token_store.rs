@@ -46,19 +46,34 @@ fn load_token_file() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Sauvegarde le jeton natif — trousseau OS, repli fichier si indisponible (tracing::warn! posé
-/// dans `save_token_file`, jamais silencieux).
+/// Sauvegarde le jeton natif — trousseau OS, repli fichier si indisponible.
+///
+/// ⚠️ Écrit PUIS relit immédiatement avant de faire confiance au trousseau (`verify_keyring_write`)
+/// — un `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit réellement
+/// relisible par une `Entry` construite séparément (observé en session : reproductible même en
+/// mono-processus, deux `Entry` indépendantes créées à la suite — cause exacte non élucidée,
+/// probablement un trousseau système restreint/virtualisé dans un environnement d'exécution
+/// contraint). Sans cette vérification, un jeton silencieusement non persisté ferait recommencer
+/// l'appairage à **chaque** lancement sans que rien ne le signale — exactement ce que §7.2 du plan
+/// interdit ("jamais silencieux").
 pub fn save_token(token: &str) -> Result<(), SyncError> {
-    match entry().and_then(|e| {
-        e.set_password(token)
-            .map_err(|err| SyncError::TokenStore(err.to_string()))
-    }) {
-        Ok(()) => Ok(()),
-        Err(err) => {
-            tracing::warn!(%err, "échec d'écriture dans le trousseau OS, repli fichier");
-            save_token_file(token)
-        }
+    if verify_keyring_write(token) {
+        return Ok(());
     }
+    tracing::warn!("trousseau OS indisponible ou écriture non relisible — repli fichier");
+    save_token_file(token)
+}
+
+/// Écrit dans le trousseau puis relit via une `Entry` FRAÎCHE (jamais celle qui a écrit) pour
+/// détecter une écriture qui « réussit » sans être réellement persistée — voir `save_token`.
+fn verify_keyring_write(token: &str) -> bool {
+    let Ok(write_entry) = entry() else {
+        return false;
+    };
+    if write_entry.set_password(token).is_err() {
+        return false;
+    }
+    matches!(entry().and_then(|e| e.get_password().map_err(|err| SyncError::TokenStore(err.to_string()))), Ok(readback) if readback == token)
 }
 
 /// `None` si aucun jeton n'a jamais été enregistré (ou trousseau ET fichier absents/illisibles) —
@@ -77,4 +92,39 @@ pub fn clear_token() {
         let _ = e.delete_credential();
     }
     let _ = std::fs::remove_file(token_file_path());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Garde-fou de non-régression : trouvé en session (2026-09-01) en testant contre un vrai
+    /// déploiement — `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit
+    /// relisible par une `Entry` FRAÎCHE (reproductible même en mono-processus, deux `Entry`
+    /// indépendantes créées à la suite ; cause exacte non élucidée, probablement un trousseau
+    /// système restreint/virtualisé selon l'environnement d'exécution). `save_token`/`load_token`
+    /// doivent rester cohérents entre eux quel que soit le backend réellement utilisé derrière —
+    /// exécuté depuis un thread dédié (comme le vrai `spawn_auth_thread` d'`overlay-ui`, jamais le
+    /// thread de test lui-même) pour rester fidèle au contexte réel.
+    #[test]
+    fn sauvegarde_puis_lecture_du_jeton_coherentes_meme_si_le_trousseau_ment() {
+        let handle = std::thread::Builder::new()
+            .name("token-store-test".into())
+            .spawn(|| {
+                clear_token(); // état propre, au cas où un run précédent aurait laissé une trace
+                assert!(load_token().is_none());
+
+                save_token("jeton-de-test-123")
+                    .expect("save_token ne doit jamais échouer totalement (repli fichier)");
+                assert_eq!(load_token().as_deref(), Some("jeton-de-test-123"));
+
+                clear_token();
+                assert!(
+                    load_token().is_none(),
+                    "clear_token doit effacer les deux emplacements"
+                );
+            })
+            .unwrap();
+        handle.join().unwrap();
+    }
 }
