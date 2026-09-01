@@ -30,7 +30,18 @@ fn watched(name: &str, kind: WatchlistKind) -> WatchlistEntry {
 
 #[test]
 fn tous_les_ennemis_dun_combat_gagne_sont_credites_meme_sans_ligne_de_defaite_dediee() {
-    let mut engine = Engine::new().expect("création de l'Engine");
+    // JAMAIS `Engine::new()` ici — voir la doc d'`Engine::with_watchlist_store` : un test
+    // d'intégration (ce fichier) n'a pas `cfg(test)` actif pour `overlay-engine`, donc
+    // `Engine::new()` y écrirait dans le VRAI fichier de compteurs de production (bug réel vécu en
+    // session, 2026-09-01 — compteurs d'objets de l'utilisateur perdus). Chemin temporaire dédié,
+    // nettoyé en fin de test.
+    let store_dir = std::env::temp_dir().join(format!(
+        "wakfu-overlay-engine-test-{}-{}",
+        module_path!().replace("::", "_"),
+        std::process::id()
+    ));
+    let store_path = store_dir.join("watchlist-counts.json");
+    let mut engine = Engine::with_watchlist_store(store_path).expect("création de l'Engine");
     engine.set_watchlist_entries(vec![
         watched("El Pochito", WatchlistKind::Enemy),
         watched("Rey Mystroolrio", WatchlistKind::Enemy),
@@ -67,4 +78,6 @@ fn tous_les_ennemis_dun_combat_gagne_sont_credites_meme_sans_ligne_de_defaite_de
         counts["Un Monstre Absent"], 0,
         "jamais rejoint ce combat, ne doit rien recevoir"
     );
+
+    let _ = fs::remove_dir_all(&store_dir);
 }
