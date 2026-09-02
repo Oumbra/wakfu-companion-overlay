@@ -46,13 +46,16 @@ pub enum WatchlistMode {
 /// plan, « Alertes de drop » : « toast + son quand un objet suivi tombe ». Miroir minimal de
 /// `LootAlertEvent` (`loot-alert.service.ts`), réduit au seul cas `reason: 'countdown'` : le cas
 /// `reason: 'loot'` (son configurable par objet ramassé, indépendant de la watchlist — voir
-/// `ProfileService.findEnabledSoundItem`) dépend des réglages `profile` du compte, pas encore lus
-/// par l'overlay — hors périmètre de cette itération, qui ne couvre que ce que `WatchlistState`
-/// sait déjà détecter seul.
+/// `ProfileService.findEnabledSoundItem`) est couvert séparément par `overlay_engine::profile::
+/// LootAlert`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WatchlistAlert {
     pub name: String,
     pub kind: WatchlistKind,
+    /// Repris de `WatchlistEntry::catalog_id` de l'entrée qui vient de déclencher l'alerte —
+    /// résolution non ambiguë de l'icône affichée par le toast (`panels::watchlist`) en cas
+    /// d'homonymes, même principe que `LootAlert::catalog_id`.
+    pub catalog_id: Option<i64>,
 }
 
 /// Miroir de `WatchlistEntry` (`stats-store.service.ts`). `catalog_id` est lu depuis le compte
@@ -213,6 +216,7 @@ impl WatchlistState {
                         alerts.push(WatchlistAlert {
                             name: entry.name.clone(),
                             kind: entry.kind,
+                            catalog_id: entry.catalog_id,
                         });
                     }
                 }
@@ -347,6 +351,7 @@ mod tests {
             vec![WatchlistAlert {
                 name: "Ortie Sauvage".to_string(),
                 kind: WatchlistKind::Item,
+                catalog_id: None,
             }]
         );
     }
