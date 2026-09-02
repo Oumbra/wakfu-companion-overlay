@@ -630,19 +630,48 @@ impl App {
     /// `REFRESH_HOTKEY_LABEL` : demande explicite de l'utilisateur (2026-09-02) — « il faut trouver
     /// une solution » pour un overlay bloqué (mauvaise taille, plus au premier plan, Suivi resté
     /// masqué après un lot de réglages arrivé trop tôt) sans devoir relancer tout le processus.
-    /// Ne redétecte PAS les fenêtres de jeu elles-mêmes (`sync_windows` le fait déjà en continu,
-    /// ~20 Hz, voir `about_to_wait`) — force : (a) le prochain redessin de CHAQUE fenêtre
-    /// (recalcule au passage la largeur du Suivi, voir `WindowEvent::RedrawRequested`), (b) une
-    /// réaffirmation topmost IMMÉDIATE (bypass `TOPMOST_REASSERT_INTERVAL`, voir `sync_topmost`),
-    /// et (c) depuis le retour utilisateur du 2026-09-02 (Suivi resté vide en tout début de
-    /// session malgré plusieurs `Ctrl+Alt+R`), une NOUVELLE tentative de récupération des réglages
-    /// de compte (roster + suivi) — un redessin seul ne peut rien montrer si `watchlist` (l'
-    /// `ArcSwap` publié par le thread Engine, voir `spawn_engine_thread`) n'a en réalité jamais
-    /// reçu les entrées suivies (jeton pas encore chargé, requête réseau pas encore aboutie au
-    /// moment du tout premier lot de réglages). Non bloquant : lancé sur un thread éphémère dédié,
-    /// jamais depuis ce thread (winit) ni le thread Engine.
-    fn force_refresh(&mut self) {
+    /// Explicitement voulu comme un « bouton nucléaire » (retour utilisateur 2026-09-02 : « mon
+    /// envie [...] ce serait que quand l'utilisateur appuie sur ce raccourci, ça rafraîchit tout et
+    /// ça redessine tout ») après une nouvelle disparition de l'overlay COMBAT cette fois (pas
+    /// seulement Suivi) malgré plusieurs `Ctrl+Alt+R` — plutôt que de chercher à isoler laquelle des
+    /// pistes déjà connues (topmost silencieusement démoté par Windows, voir `sync_topmost` ;
+    /// fenêtre non retrouvée par un `sync_windows` pas encore repassé) était en cause CETTE fois,
+    /// ce hotkey doit rester la réponse universelle à « quelque chose s'est mal affiché » sans
+    /// obliger l'utilisateur à deviner quoi. Force donc, dans l'ordre : (a) un `sync_windows`
+    /// IMMÉDIAT (pas seulement le prochain tick d'`about_to_wait`, ~20 Hz mais quand même un délai
+    /// perceptible pour un correctif demandé à la main) — recrée toute fenêtre qu'un passage de
+    /// scan aurait pu manquer ; (b) une réaffirmation `HWND_TOPMOST` INCONDITIONNELLE pour chaque
+    /// fenêtre encore existante, style étendu (`WS_EX_NOACTIVATE`/`TOOLWINDOW`) réappliqué au
+    /// passage — contrairement à `sync_topmost` (réservé au ballet automatique focus/pas-focus),
+    /// on ne laisse pas ici le filtre `relevant` (jeu au premier plan À CET INSTANT PRÉCIS) décider
+    /// si l'utilisateur a le droit de récupérer SON overlay ; `sync_topmost`, appelé juste après,
+    /// reprend la main dès ce même tick si le jeu n'a en réalité pas le focus (repli immédiat en
+    /// NOTOPMOST) — jamais une dérogation permanente à la règle "ne pas s'afficher par-dessus une
+    /// autre appli" (retour utilisateur 2026-09-01) ; (c) un redessin de CHAQUE fenêtre (recalcule
+    /// au passage la largeur du Suivi, voir `WindowEvent::RedrawRequested`) ; et (d) depuis le
+    /// retour utilisateur du 2026-09-02 (Suivi resté vide en tout début de session malgré plusieurs
+    /// `Ctrl+Alt+R`), une NOUVELLE tentative de récupération des réglages de compte (roster +
+    /// suivi) — un redessin seul ne peut rien montrer si `watchlist` (l'`ArcSwap` publié par le
+    /// thread Engine, voir `spawn_engine_thread`) n'a en réalité jamais reçu les entrées suivies.
+    /// Cette dernière étape reste non bloquante : lancée sur un thread éphémère dédié, jamais
+    /// depuis ce thread (winit) ni le thread Engine.
+    fn force_refresh(&mut self, event_loop: &ActiveEventLoop) {
+        self.sync_windows(event_loop);
         for overlay in self.windows.values_mut() {
+            let hwnd = Self::hwnd_of(&overlay.window);
+            Self::apply_extended_styles(hwnd);
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+            overlay.is_topmost = true;
             overlay.last_topmost_reassert = None;
             overlay.window.request_redraw();
         }
@@ -888,7 +917,7 @@ impl ApplicationHandler<UserEvent> for App {
             if event.id == self.toggle_hotkey_id {
                 self.toggle_interactive();
             } else if event.id == self.refresh_hotkey_id {
-                self.force_refresh();
+                self.force_refresh(event_loop);
             } else if event.id == self.quit_hotkey_id {
                 logging::log_session_end(QUIT_HOTKEY_LABEL);
                 event_loop.exit();
