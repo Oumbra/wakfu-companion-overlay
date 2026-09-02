@@ -24,6 +24,7 @@
 
 mod alert_sound;
 mod game_window;
+mod logging;
 mod panels;
 mod portraits;
 mod remote_icons;
@@ -391,7 +392,7 @@ impl App {
         self.windows.retain(|_, overlay| {
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
             if !still_here {
-                println!(
+                tracing::info!(
                     "[fenêtre de jeu] {} fermée — son overlay est retiré.",
                     overlay.character_name
                 );
@@ -417,7 +418,9 @@ impl App {
                     info.rect,
                     self.interactive,
                 );
-                println!("[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé.");
+                tracing::info!(
+                    "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
+                );
                 // Explicite plutôt que de compter sur un premier `RedrawRequested` implicite —
                 // diagnostic 2026-09-02 (Suivi resté vide au tout premier lancement) : sans
                 // certitude que ce premier redessin lise `watchlist`/`snapshot` APRÈS que ces
@@ -494,7 +497,7 @@ impl App {
         let hwnd = Self::hwnd_of(&window);
         Self::apply_extended_styles(hwnd);
         if let Err(err) = window.set_cursor_hittest(interactive) {
-            eprintln!("set_cursor_hittest a échoué à la création : {err}");
+            tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
         }
 
         let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
@@ -511,7 +514,7 @@ impl App {
             // `GameRect::client_top`) — utile pour vérifier en un coup d'œil, sur une machine
             // donnée, que `client_top` a bien été résolu (pas replié sur `rect.top`, ce qui se
             // voit ici par un écart nul) avant de retoucher `GAME_TOP_MARGIN_PX` à l'aveugle.
-            println!(
+            tracing::debug!(
                 "[overlay Suivi] rect.top={} client_top={} (écart {}) -> position.y={}",
                 rect.top,
                 rect.client_top,
@@ -576,11 +579,11 @@ impl App {
         self.interactive = !self.interactive;
         for overlay in self.windows.values() {
             if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
-                eprintln!("set_cursor_hittest a échoué : {err}");
+                tracing::warn!("set_cursor_hittest a échoué : {err}");
             }
             overlay.window.request_redraw();
         }
-        println!(
+        tracing::info!(
             ">>> Bascule ({HOTKEY_LABEL}) : mode = {}",
             if self.interactive {
                 "INTERACTIF"
@@ -614,21 +617,21 @@ impl App {
         thread::spawn(move || match overlay_sync::token_store::load_token() {
             Some(token) => match overlay_sync::client::fetch_settings(&token) {
                 Ok(settings) => {
-                    println!(
+                    tracing::info!(
                         ">>> Réglages de compte redemandés ({REFRESH_HOTKEY_LABEL}) : {} entrée(s) de suivi."
                         , settings.watchlist.len()
                     );
                     let _ = settings_tx.send(settings);
                 }
                 Err(err) => {
-                    println!(">>> Échec de la nouvelle demande de réglages ({REFRESH_HOTKEY_LABEL}) : {err}");
+                    tracing::warn!(">>> Échec de la nouvelle demande de réglages ({REFRESH_HOTKEY_LABEL}) : {err}");
                 }
             },
-            None => println!(
+            None => tracing::info!(
                 ">>> Aucun jeton de compte stocké — rien à redemander ({REFRESH_HOTKEY_LABEL})."
             ),
         });
-        println!(">>> Rafraîchissement forcé ({REFRESH_HOTKEY_LABEL})");
+        tracing::info!(">>> Rafraîchissement forcé ({REFRESH_HOTKEY_LABEL})");
     }
 
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
@@ -710,13 +713,13 @@ impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_windows(event_loop);
         if !self.banner_printed {
-            println!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
-            println!("Suivi de {}", self.log_path.display());
-            println!(
+            tracing::info!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
+            tracing::info!("Suivi de {}", self.log_path.display());
+            tracing::info!(
                 "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. \
                  {REFRESH_HOTKEY_LABEL} pour forcer un rafraîchissement (overlay bloqué/mal \
                  positionné, ou Suivi resté vide). {QUIT_HOTKEY_LABEL} ou Ctrl+C (dans ce \
-                 terminal) pour quitter.\n"
+                 terminal) pour quitter."
             );
             self.banner_printed = true;
         }
@@ -750,7 +753,10 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                logging::log_session_end("fermeture de fenêtre");
+                event_loop.exit();
+            }
             // Ne se déclenche en pratique JAMAIS (voir la doc de `QUIT_HOTKEY_LABEL`) : ces
             // fenêtres portent `WS_EX_NOACTIVATE`, donc ne reçoivent jamais le focus clavier quel
             // que soit le mode — laissé en place au cas où une future fenêtre overlay redeviendrait
@@ -846,7 +852,7 @@ impl ApplicationHandler<UserEvent> for App {
             } else if event.id == self.refresh_hotkey_id {
                 self.force_refresh();
             } else if event.id == self.quit_hotkey_id {
-                println!(">>> Sortie ({QUIT_HOTKEY_LABEL})");
+                logging::log_session_end(QUIT_HOTKEY_LABEL);
                 event_loop.exit();
             }
         }
@@ -912,7 +918,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         })
         .await
         .expect("aucun adaptateur DX12 compatible");
-    println!("Adaptateur GPU : {:?}", adapter.get_info());
+    tracing::info!("Adaptateur GPU : {:?}", adapter.get_info());
 
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
@@ -1181,7 +1187,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
             return repaint_delay;
         }
         wgpu::CurrentSurfaceTexture::Validation => {
-            eprintln!("get_current_texture: erreur de validation");
+            tracing::warn!("get_current_texture: erreur de validation");
             return repaint_delay;
         }
     };
@@ -1273,7 +1279,7 @@ fn spawn_engine_thread(
             let mut engine = match Engine::new() {
                 Ok(engine) => engine,
                 Err(err) => {
-                    eprintln!("[erreur fatale] création de l'Engine QuickJS : {err}");
+                    tracing::error!("[erreur fatale] création de l'Engine QuickJS : {err}");
                     return;
                 }
             };
@@ -1475,7 +1481,7 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
                 // ça, impossible de savoir si le problème vient d'une réponse déjà vide ou d'une
                 // course entre son application et le premier redessin du Suivi (voir
                 // `force_refresh`).
-                println!(
+                tracing::info!(
                     "[compte] réglages récupérés depuis le jeton natif déjà connu ({} entrée(s) de suivi).",
                     settings.watchlist.len()
                 );
@@ -1483,7 +1489,7 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
                 return Ok(());
             }
             Err(err) => {
-                println!(
+                tracing::warn!(
                     "[compte] jeton natif invalide/expiré ({err}) — nouvel appairage nécessaire."
                 );
                 overlay_sync::token_store::clear_token();
@@ -1492,18 +1498,21 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
     }
 
     let token = match overlay_sync::pair_and_wait(|handle| {
-        println!("\n=== Connexion du compte (optionnelle) ===");
-        println!(
+        tracing::info!("=== Connexion du compte (optionnelle) ===");
+        tracing::info!(
             "Ouvre {} et entre le code : {}",
-            handle.verification_url, handle.pairing_code
+            handle.verification_url,
+            handle.pairing_code
         );
-        println!(
-            "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)\n"
+        tracing::info!(
+            "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)"
         );
     }) {
         Ok(token) => token,
         Err(err) => {
-            println!("[compte] appairage non complété ({err}) — l'overlay continue sans roster.");
+            tracing::warn!(
+                "[compte] appairage non complété ({err}) — l'overlay continue sans roster."
+            );
             // Le message le plus utile ici précise que la requête de DÉPART (obtenir un code) a
             // échoué — donc qu'aucun navigateur n'a pu s'ouvrir (retour utilisateur 2026-09-01 :
             // « il devrait ouvrir le navigateur... rien ne se passe ») : ce n'est pas un appairage
@@ -1513,17 +1522,15 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
     };
 
     if let Err(err) = overlay_sync::token_store::save_token(&token) {
-        // Volontairement `eprintln!`, pas seulement `tracing::warn!` (invisible par défaut ici,
-        // voir main() — aucun subscriber `tracing` installé, seulement `env_logger` pour la
-        // façade `log`) : un jeton non sauvegardé fait silencieusement recommencer l'appairage à
-        // chaque lancement, ça DOIT être vu.
-        eprintln!(
+        // `warn!` : un jeton non sauvegardé fait silencieusement recommencer l'appairage à chaque
+        // lancement, ça DOIT être vu — jamais le jeton lui-même dans ce message (§10 du plan).
+        tracing::warn!(
             "[compte] échec de sauvegarde du jeton natif ({err}) — sera redemandé au prochain lancement."
         );
     }
     match overlay_sync::client::fetch_settings(&token) {
         Ok(settings) => {
-            println!(
+            tracing::info!(
                 "[compte] connecté — réglages récupérés ({} entrée(s) de suivi).",
                 settings.watchlist.len()
             );
@@ -1531,7 +1538,7 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
             Ok(())
         }
         Err(err) => {
-            println!("[compte] échec de récupération des réglages après appairage ({err}).");
+            tracing::warn!("[compte] échec de récupération des réglages après appairage ({err}).");
             Err(format!("réglages injoignables après appairage ({err})"))
         }
     }
@@ -1544,21 +1551,25 @@ fn resolve_path() -> PathBuf {
     match discovery::discover() {
         Some(path) => path,
         None => {
-            eprintln!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
+            tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
             for candidate in discovery::candidate_paths() {
-                eprintln!("  - {}", candidate.display());
+                tracing::error!("  - {}", candidate.display());
             }
-            eprintln!("\nPrécisez le chemin explicitement : cargo run -p overlay-ui -- <chemin>");
+            tracing::error!(
+                "Précisez le chemin explicitement : cargo run -p overlay-ui -- <chemin>"
+            );
+            logging::log_session_end("échec de démarrage (wakfu.log introuvable)");
             std::process::exit(1);
         }
     }
 }
 
 fn main() {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn,wgpu_hal=info"),
-    )
-    .init();
+    let log_dir = logging::init();
+    logging::install_ctrlc_handler();
+    if let Some(dir) = &log_dir {
+        tracing::info!("journal de session : {}", dir.display());
+    }
 
     let log_path = resolve_path();
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
