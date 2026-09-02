@@ -16,18 +16,12 @@
 //! plus tenable dès que des fenêtres doivent pouvoir être détruites).
 //!
 //! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
-//! synchro serveur, L5). Pas de thème configurable — décision du mainteneur (§9 du plan,
-//! 2026-09-02) : un overlay n'est pas un site, palette fixe assumée. Le récap de session reste
+//! synchro serveur, L5). Pas de thème configurable ni de disposition repositionnable/persistée par
+//! écran — décision du mainteneur (§9 du plan, 2026-09-02) : un overlay n'est pas un site, palette
+//! fixe et ancrage automatique (`App::anchor_position`) seuls assumés. Le récap de session reste
 //! également **global** (identique sur toutes les fenêtres, pas ventilé par personnage —
 //! limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec `overlay-engine`
 //! tel qu'il existe aujourd'hui.
-//!
-//! **Disposition persistée par écran (2026-09-02, §6.4/§9 du plan)** : chaque panneau reste ancré
-//! automatiquement sur SA fenêtre de jeu (`App::anchor_position`), mais l'utilisateur peut affiner
-//! cet ancrage en faisant glisser la petite poignée « ⠿ » (visible en mode INTERACTIF seulement) —
-//! le décalage résultant est persisté par écran (`layout_store`, identifié par
-//! `MonitorHandle::name()`) et réappliqué au-dessus de l'ancrage automatique à chaque repositionnement
-//! ultérieur, y compris après redémarrage.
 //!
 //! **Alertes de drop version « ramassage » (2026-09-02, §9 du plan)** : `overlay_engine::profile`
 //! lit désormais `data.profile.soundItems` (`GET /api/v1/settings`) — indépendant de la watchlist,
@@ -37,7 +31,6 @@
 
 mod alert_sound;
 mod game_window;
-mod layout_store;
 mod logging;
 mod panels;
 mod portraits;
@@ -58,7 +51,6 @@ use egui_wgpu::wgpu;
 use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
-use layout_store::PanelOffset;
 use overlay_engine::{
     CatalogIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry, WatchlistKind,
 };
@@ -297,18 +289,6 @@ struct OverlayWindow {
     /// Dernière position appliquée — évite de rappeler `set_outer_position` à chaque tick (50 ms)
     /// quand la fenêtre de jeu n'a pas bougé.
     last_position: Option<PhysicalPosition<i32>>,
-    /// Décalage manuel PERSISTÉ (§6.4/§9 du plan, « disposition persistée par écran ») — ajouté à
-    /// l'ancrage automatique (voir `App::anchor_position`), jamais une position absolue. Chargé
-    /// depuis `layout_store` à la création de la fenêtre (voir `create_overlay_window`), mis à jour
-    /// en direct pendant un glissement de la poignée « ⠿ » (voir `render`/le point d'appel dans
-    /// `RedrawRequested`), et réécrit sur disque au relâchement.
-    manual_offset: PanelOffset,
-    /// Identifiant de l'écran sur lequel cette fenêtre a été créée (`MonitorHandle::name()`,
-    /// `None` si non résolvable) — clé de persistance de `manual_offset` dans `layout_store`.
-    /// Résolu UNE FOIS à la création, jamais réévalué si la fenêtre est ensuite déplacée sur un
-    /// autre écran (limitation connue : le décalage d'un panneau glissé sur un écran secondaire
-    /// resterait alors associé au premier écran résolu — cas rare, pas traité ici).
-    screen_id: String,
     /// Dernière largeur demandée pour une fenêtre `Suivi` (voir `watchlist_target_width`) — évite
     /// de rappeler `request_inner_size` à chaque frame quand le nombre d'entrées n'a pas changé.
     /// Sans objet pour une fenêtre `Combat` (toujours `None`).
@@ -536,19 +516,13 @@ impl App {
     /// collé au bord gauche, centré verticalement (comportement d'origine, S1/L2) ; Suivi est
     /// désormais collé au bord HAUT, centré horizontalement — demande utilisateur explicite
     /// 2026-09-01, à l'image du bandeau du web (`tracker-strip.component`).
-    ///
-    /// `offset` (§6.4/§9 du plan, « disposition persistée par écran ») s'ajoute EN PLUS de cet
-    /// ancrage automatique — réglage manuel de l'utilisateur (poignée « ⠿ », voir `render`),
-    /// `PanelOffset::default()` (nul) tant qu'il n'a jamais fait glisser ce panneau sur cet écran :
-    /// comportement inchangé par rapport à avant ce lot dans ce cas.
     fn anchor_position(
         kind: OverlayKind,
         rect: GameRect,
         overlay_width: i32,
         overlay_height: i32,
-        offset: PanelOffset,
     ) -> PhysicalPosition<i32> {
-        let base = match kind {
+        match kind {
             OverlayKind::Combat => PhysicalPosition::new(
                 rect.left + GAME_EDGE_MARGIN_PX,
                 rect.top + (rect.height - overlay_height) / 2,
@@ -557,22 +531,7 @@ impl App {
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
             ),
-        };
-        PhysicalPosition::new(base.x + offset.dx, base.y + offset.dy)
-    }
-
-    /// Identifiant d'écran stable (§6.4 du plan) servant de clé à `layout_store` — nom du
-    /// périphérique d'affichage (`MonitorHandle::name()`, ex. `\\.\DISPLAY1` sous Windows) plutôt
-    /// que ses coordonnées/sa résolution : insensible à un réagencement des écrans qui ne change
-    /// pas leur identité, contrairement à des coordonnées. Repli sur une clé fixe (`"écran-inconnu"`)
-    /// si non résolvable (jamais un `Option` propagé jusqu'à `layout_store`, qui n'a pas besoin de
-    /// le savoir) — tous les panneaux partageraient alors le même décalage, dégradation
-    /// acceptable plutôt que de désactiver la persistance entièrement.
-    fn screen_id_of(window: &Window) -> String {
-        window
-            .current_monitor()
-            .and_then(|monitor| monitor.name())
-            .unwrap_or_else(|| "écran-inconnu".to_string())
+        }
     }
 
     fn create_overlay_window(
@@ -623,16 +582,8 @@ impl App {
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
 
-        let screen_id = Self::screen_id_of(&window);
-        let manual_offset = layout_store::load_offset(&screen_id, kind);
         let outer = window.outer_size();
-        let position = Self::anchor_position(
-            kind,
-            rect,
-            outer.width as i32,
-            outer.height as i32,
-            manual_offset,
-        );
+        let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
         window.set_outer_position(position);
         if kind == OverlayKind::Watchlist {
             // Diagnostic PERMANENT (pas juste temporaire) : l'écart entre `rect.top` (bord
@@ -662,8 +613,6 @@ impl App {
             game_rect: rect,
             character_name,
             last_position: Some(position),
-            manual_offset,
-            screen_id,
             // Déjà la largeur demandée ci-dessus (`size.0`) pour une fenêtre `Suivi` — la première
             // vérification dans `RedrawRequested` ne redemande donc rien tant que le nombre
             // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
@@ -681,13 +630,8 @@ impl App {
     fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
-        let desired = Self::anchor_position(
-            overlay.kind,
-            rect,
-            outer.width as i32,
-            outer.height as i32,
-            overlay.manual_offset,
-        );
+        let desired =
+            Self::anchor_position(overlay.kind, rect, outer.width as i32, outer.height as i32);
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
             overlay.last_position = Some(desired);
@@ -1047,7 +991,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
                 let catalog = self.catalog.load();
                 let auth_status = self.auth_status.load();
-                let outcome = render(
+                let repaint_delay = render(
                     &mut overlay.gpu,
                     &overlay.window,
                     RenderContent {
@@ -1067,45 +1011,9 @@ impl ApplicationHandler<UserEvent> for App {
                         interactive: self.interactive,
                     },
                 );
-                // Disposition persistée par écran (§6.4/§9 du plan) : `render` ne fait que
-                // REPORTER le glissement de la poignée (pur dessin, voir sa doc) — c'est ici,
-                // seul endroit qui connaît à la fois la position de fenêtre courante et
-                // `layout_store`, que le déplacement est réellement appliqué. Recalculé via
-                // `anchor_position` (pas un simple ajout à `last_position`) pour rester la SEULE
-                // source de vérité de la position — évite toute dérive si `game_rect` a par
-                // ailleurs changé entre-temps.
-                if let Some((ddx, ddy)) = outcome.drag_delta_physical {
-                    overlay.manual_offset.dx += ddx;
-                    overlay.manual_offset.dy += ddy;
-                    let outer = overlay.window.outer_size();
-                    let desired = Self::anchor_position(
-                        overlay.kind,
-                        overlay.game_rect,
-                        outer.width as i32,
-                        outer.height as i32,
-                        overlay.manual_offset,
-                    );
-                    overlay.window.set_outer_position(desired);
-                    overlay.last_position = Some(desired);
-                }
-                if outcome.drag_stopped {
-                    layout_store::save_offset(
-                        &overlay.screen_id,
-                        overlay.kind,
-                        overlay.manual_offset,
-                    );
-                    tracing::info!(
-                        "[disposition] panneau {:?} repositionné sur l'écran {} (décalage {:+},{:+})",
-                        overlay.kind,
-                        overlay.screen_id,
-                        overlay.manual_offset.dx,
-                        overlay.manual_offset.dy
-                    );
-                }
                 // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
                 // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
                 // `about_to_wait` est responsable de le consommer le moment venu.
-                let repaint_delay = outcome.repaint_delay;
                 overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
                     .then(|| std::time::Instant::now() + repaint_delay);
             }
@@ -1299,22 +1207,6 @@ struct RenderContent<'a> {
     interactive: bool,
 }
 
-/// Résultat d'un appel à `render` — en plus du délai de redessin déjà existant avant ce lot, porte
-/// le glissement de la poignée de disposition (§6.4/§9 du plan, « disposition persistée par
-/// écran ») détecté CETTE frame. `render` reste pur dessin : c'est l'appelant (`RedrawRequested`,
-/// seul à connaître la position de fenêtre courante et `layout_store`) qui applique le déplacement
-/// et persiste le résultat — jamais d'I/O disque ni de `set_outer_position` depuis `render`
-/// lui-même.
-struct RenderOutcome {
-    repaint_delay: std::time::Duration,
-    /// Delta accumulé CE tick par la poignée de glissement (pixels PHYSIQUES, déjà convertis
-    /// depuis les points logiques egui via `pixels_per_point`) — `None` hors glissement.
-    drag_delta_physical: Option<(i32, i32)>,
-    /// `true` le tick où le glissement vient de s'arrêter (relâchement du bouton) — signal pour
-    /// que l'appelant persiste `OverlayWindow::manual_offset` via `layout_store::save_offset`.
-    drag_stopped: bool,
-}
-
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
 /// l'état interactif/clic-traversant EN TEXTE et le rappel du raccourci n'apportaient rien
 /// (l'utilisateur sait déjà quel personnage est le sien et derrière quelle fenêtre de jeu il
@@ -1336,12 +1228,11 @@ struct RenderOutcome {
 /// widget : les enfants créés ensuite héritent de l'opacité du `Painter` au moment de leur
 /// création (voir `egui::Painter::{set,multiply}_opacity`).
 ///
-/// Renvoie (voir `RenderOutcome`) le délai de redessin demandé par egui pour CETTE fenêtre
-/// (`ViewportOutput::repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir
-/// `OverlayWindow::next_redraw_at` pour pourquoi l'appelant doit impérativement en tenir compte,
-/// cette architecture n'ayant pas de boucle de rendu continue — ainsi que le glissement éventuel
-/// de la poignée de disposition (§6.4/§9 du plan).
-fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> RenderOutcome {
+/// Renvoie le délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::
+/// repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at`
+/// pour pourquoi l'appelant doit impérativement en tenir compte, cette architecture n'ayant pas de
+/// boucle de rendu continue.
+fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> std::time::Duration {
     let RenderContent {
         kind,
         fight,
@@ -1359,10 +1250,6 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
         interactive,
     } = content;
 
-    // Rempli par la poignée de glissement ci-dessous, lue après `run_ui` — voir `RenderOutcome`.
-    let mut drag_delta_physical: Option<(i32, i32)> = None;
-    let mut drag_stopped = false;
-
     let raw_input = gpu.egui_winit.take_egui_input(window);
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
@@ -1375,35 +1262,6 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
                 } else {
                     CLICK_THROUGH_OPACITY
                 });
-                // Poignée de disposition (§6.4/§9 du plan, « disposition persistée par écran ») —
-                // UNIQUEMENT en mode INTERACTIF : en clic-traversant la fenêtre ne reçoit de toute
-                // façon plus aucun événement souris (voir `App::toggle_interactive`), une poignée y
-                // serait un widget mort, invisible et non cliquable dans les deux cas. Placée en
-                // tout premier (avant le contenu par zone) donc toujours dans le coin haut-gauche du
-                // panneau, quelle que soit la zone.
-                if interactive {
-                    let grip = ui
-                        .add(
-                            egui::Label::new(
-                                egui::RichText::new("⠿").color(egui::Color32::from_gray(150)),
-                            )
-                            .sense(egui::Sense::drag()),
-                        )
-                        .on_hover_text(
-                            "Glisser pour ajuster la position de ce panneau (mémorisée pour cet écran)",
-                        );
-                    if grip.dragged() {
-                        let delta = grip.drag_delta();
-                        let ppp = ui.ctx().pixels_per_point();
-                        drag_delta_physical = Some((
-                            (delta.x * ppp).round() as i32,
-                            (delta.y * ppp).round() as i32,
-                        ));
-                    }
-                    if grip.drag_stopped() {
-                        drag_stopped = true;
-                    }
-                }
                 match kind {
                     // Zone Combat : dégâts du combat en cours + icône de connexion au compte. Cette
                     // dernière reste ici (pas dans la zone Suivi) — ni l'une ni l'autre zone n'en est
@@ -1531,15 +1389,6 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
             repaint_delay = repaint_delay.min(toast.hide_at - now);
         }
     }
-    // Construit `RenderOutcome` à partir du délai final ci-dessus — `drag_delta_physical`/
-    // `drag_stopped` sont déjà connus depuis la poignée dessinée plus haut (`Copy`, capturés tels
-    // quels) : une seule closure plutôt que de répéter ce triplet à chaque sortie anticipée
-    // ci-dessous (occlusion/validation de la surface).
-    let outcome = |repaint_delay| RenderOutcome {
-        repaint_delay,
-        drag_delta_physical,
-        drag_stopped,
-    };
 
     gpu.egui_winit
         .handle_platform_output(window, full_output.platform_output);
@@ -1582,7 +1431,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
             // perdue, sans `request_redraw` ici plus rien ne retente tant qu'un événement SANS
             // RAPPORT ne survient par ailleurs (§6.1 : pas de boucle de rendu continue).
             window.request_redraw();
-            return outcome(repaint_delay);
+            return repaint_delay;
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             gpu.surface.configure(&gpu.device, &gpu.config);
@@ -1597,7 +1446,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
             // `request_redraw` ici force une nouvelle tentative dès le prochain tour de la boucle
             // d'événements, sur la surface qui vient d'être reconfigurée juste au-dessus.
             window.request_redraw();
-            return outcome(repaint_delay);
+            return repaint_delay;
         }
         wgpu::CurrentSurfaceTexture::Validation => {
             // PAS de `request_redraw` ici, contrairement à Outdated/Lost ci-dessus : cette
@@ -1607,7 +1456,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
             // architecture évite justement (§6.1). Se contente de journaliser ; un `Ctrl+Alt+R`
             // (qui force un redessin ET une resynchronisation complète) reste le recours.
             tracing::warn!("get_current_texture: erreur de validation");
-            return outcome(repaint_delay);
+            return repaint_delay;
         }
     };
     let view = output_frame
@@ -1657,7 +1506,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> Re
 
     gpu.queue.submit(Some(encoder.finish()));
     gpu.queue.present(output_frame);
-    outcome(repaint_delay)
+    repaint_delay
 }
 
 /// Thread Engine (§3 du plan) : lit `wakfu.log` en continu, alimente `overlay-engine`, publie
