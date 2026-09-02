@@ -141,13 +141,38 @@ const WATCHLIST_MAX_CEILING: f64 = 1000.0;
 /// s'il n'y a pas besoin » — une fenêtre plus large que son contenu reste cliquable/bloquante sur
 /// toute sa zone même là où rien n'est peint (pas de test de transparence par pixel côté Win32),
 /// l'utilisateur ne peut alors pas deviner où s'arrête l'overlay. Toujours le MINIMUM entre ce que
-/// le contenu demande (`content_width`, croît avec le nombre d'entrées) et le plafond
-/// (`WATCHLIST_WIDTH_FRACTION` de la fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse :
-/// avec peu d'entrées, la fenêtre reste étroite même si le plafond est large.
-fn watchlist_target_width(entry_count: usize, game_width_px: i32) -> f64 {
+/// le contenu demande (`content_width`, croît avec le nombre d'entrées, et avec `toast_active` —
+/// voir `panels::watchlist::TOAST_LAYER_WIDTH`) et le plafond (`WATCHLIST_WIDTH_FRACTION` de la
+/// fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse : avec peu d'entrées et sans toast,
+/// la fenêtre reste étroite même si le plafond est large.
+fn watchlist_target_width(entry_count: usize, toast_active: bool, game_width_px: i32) -> f64 {
     let ceiling = (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION).min(WATCHLIST_MAX_CEILING);
-    let content = panels::watchlist::content_width(entry_count) as f64 + WATCHLIST_INNER_MARGIN;
+    let tiles = panels::watchlist::content_width(entry_count) as f64;
+    // La couche de confettis est centrée sur le MÊME axe que la bande de tuiles (voir
+    // `panels::watchlist::toast_card`) : sans cette largeur minimale pendant qu'un toast est
+    // affiché, ses confettis les plus excentrés seraient rognés par le bord de la fenêtre.
+    let toast = if toast_active {
+        panels::watchlist::TOAST_LAYER_WIDTH as f64
+    } else {
+        0.0
+    };
+    let content = tiles.max(toast) + WATCHLIST_INNER_MARGIN;
     content.min(ceiling).max(WATCHLIST_INNER_MARGIN)
+}
+
+/// Hauteur nécessaire à l'affichage actuel — même principe que `watchlist_target_width`
+/// (dimensionnée sur le CONTENU, pas une constante toujours large) : `WATCHLIST_HEIGHT` seule
+/// tant qu'aucun toast n'est affiché, plus `panels::watchlist::TOAST_AREA_HEIGHT` pendant qu'un
+/// toast (carte + confettis) est actif. L'ancrage de la fenêtre Suivi (`App::anchor_position`) ne
+/// dépend que de sa LARGEUR, jamais de sa hauteur — grandir vers le bas ne déplace donc jamais la
+/// bande de tuiles déjà positionnée.
+fn watchlist_target_height(toast_active: bool) -> f64 {
+    WATCHLIST_HEIGHT
+        + if toast_active {
+            panels::watchlist::TOAST_AREA_HEIGHT as f64
+        } else {
+            0.0
+        }
 }
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
 /// gauche de l'overlay Combat — « collé à quelques pixels près » (demande utilisateur). À ajuster
@@ -293,6 +318,9 @@ struct OverlayWindow {
     /// de rappeler `request_inner_size` à chaque frame quand le nombre d'entrées n'a pas changé.
     /// Sans objet pour une fenêtre `Combat` (toujours `None`).
     last_watchlist_width: Option<f64>,
+    /// Même principe que `last_watchlist_width`, pour la HAUTEUR (voir `watchlist_target_height`)
+    /// — change uniquement à l'apparition/disparition d'un toast, jamais avec le nombre d'entrées.
+    last_watchlist_height: Option<f64>,
     /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
     /// rien (voir `App::sync_topmost`).
     is_topmost: bool,
@@ -547,7 +575,10 @@ impl App {
             // 0 entrée à la création : rien n'est encore chargé (compte/catalogue), la fenêtre
             // démarre donc au plus étroit (juste les 2 tuiles "+"/"−") et s'élargit dès que
             // `watchlist` se remplit (voir le redimensionnement dans `RedrawRequested`).
-            OverlayKind::Watchlist => (watchlist_target_width(0, rect.width), WATCHLIST_HEIGHT),
+            OverlayKind::Watchlist => (
+                watchlist_target_width(0, false, rect.width),
+                watchlist_target_height(false),
+            ),
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
@@ -617,6 +648,7 @@ impl App {
             // vérification dans `RedrawRequested` ne redemande donc rien tant que le nombre
             // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
             last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
+            last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
             last_topmost_reassert: None,
             pending_demote_since: None,
@@ -956,16 +988,26 @@ impl ApplicationHandler<UserEvent> for App {
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
                 let watchlist = self.watchlist.load();
+                let watchlist_toast_guard = self.watchlist_toast.load();
+                let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
                 if overlay.kind == OverlayKind::Watchlist {
-                    // Largeur pilotée par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre
+                    // Gabarit piloté par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre
                     // plus large que nécessaire reste cliquable/bloquante sur toute sa zone même
                     // transparente, l'utilisateur ne peut alors pas deviner où s'arrête l'overlay)
-                    // — voir la doc de `watchlist_target_width`. Comparée à la dernière largeur
-                    // DEMANDÉE (`last_watchlist_width`), pas à la taille réelle actuelle de la
-                    // fenêtre, pour ne pas rappeler `request_inner_size` en boucle tant que le
-                    // nombre d'entrées n'a pas changé.
-                    let target = watchlist_target_width(watchlist.len(), overlay.game_rect.width);
-                    if overlay.last_watchlist_width != Some(target) {
+                    // — voir la doc de `watchlist_target_width`/`watchlist_target_height`.
+                    // Comparé à la dernière valeur DEMANDÉE (`last_watchlist_width`/`_height`), pas
+                    // à la taille réelle actuelle de la fenêtre, pour ne pas rappeler
+                    // `request_inner_size` en boucle tant que rien n'a changé.
+                    let toast_active = panels::watchlist::is_active(watchlist_toast);
+                    let target_width = watchlist_target_width(
+                        watchlist.len(),
+                        toast_active,
+                        overlay.game_rect.width,
+                    );
+                    let target_height = watchlist_target_height(toast_active);
+                    if overlay.last_watchlist_width != Some(target_width)
+                        || overlay.last_watchlist_height != Some(target_height)
+                    {
                         // Sur Windows, cet appel s'applique TOUJOURS de façon synchrone — `Some`
                         // est renvoyé immédiatement et AUCUN `WindowEvent::Resized` ne suit jamais
                         // (voir la doc de `reconfigure_surface`, qui corrige exactement ce cas :
@@ -978,20 +1020,19 @@ impl ApplicationHandler<UserEvent> for App {
                             overlay
                                 .window
                                 .request_inner_size(winit::dpi::LogicalSize::new(
-                                    target,
-                                    WATCHLIST_HEIGHT,
+                                    target_width,
+                                    target_height,
                                 ))
                         {
                             Self::reconfigure_surface(&mut overlay.gpu, actual);
                         }
-                        overlay.last_watchlist_width = Some(target);
+                        overlay.last_watchlist_width = Some(target_width);
+                        overlay.last_watchlist_height = Some(target_height);
                     }
                 }
-                let watchlist_toast_guard = self.watchlist_toast.load();
-                let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
                 let catalog = self.catalog.load();
                 let auth_status = self.auth_status.load();
-                let repaint_delay = render(
+                let (repaint_delay, close_toast) = render(
                     &mut overlay.gpu,
                     &overlay.window,
                     RenderContent {
@@ -1011,6 +1052,14 @@ impl ApplicationHandler<UserEvent> for App {
                         interactive: self.interactive,
                     },
                 );
+                // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
+                // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
+                // le toast qu'en lecture, voir `RenderContent::watchlist_toast`). Le clic ayant
+                // déjà fait passer `response.repaint` à `true` plus haut, le prochain redessin
+                // relira `None` et n'affichera plus rien.
+                if close_toast {
+                    self.watchlist_toast.store(Arc::new(None));
+                }
                 // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
                 // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
                 // `about_to_wait` est responsable de le consommer le moment venu.
@@ -1231,8 +1280,14 @@ struct RenderContent<'a> {
 /// Renvoie le délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::
 /// repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at`
 /// pour pourquoi l'appelant doit impérativement en tenir compte, cette architecture n'ayant pas de
-/// boucle de rendu continue.
-fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> std::time::Duration {
+/// boucle de rendu continue — ainsi que si CETTE frame doit effacer le toast affiché (clic sur la
+/// carte/la croix, voir `panels::watchlist::toast_card`) : seul l'appelant (`window_event`) détient
+/// un accès en écriture à l'`ArcSwap` correspondant.
+fn render(
+    gpu: &mut GpuState,
+    window: &Window,
+    content: RenderContent<'_>,
+) -> (std::time::Duration, bool) {
     let RenderContent {
         kind,
         fight,
@@ -1250,6 +1305,10 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         interactive,
     } = content;
 
+    // Vrai quand CETTE frame doit effacer le toast affiché — voir la doc de `render` et
+    // `panels::watchlist::show`, seul endroit qui le renseigne (`OverlayKind::Watchlist`
+    // ci-dessous).
+    let mut close_toast = false;
     let raw_input = gpu.egui_winit.take_egui_input(window);
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
@@ -1351,11 +1410,14 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                     }
                     // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
                     // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir
-                    // `panels::watchlist`. Rien affiché tant que le compte ne déclare aucune entrée
-                    // (fenêtre transparente vide plutôt qu'un cadre vide disgracieux).
+                    // `panels::watchlist`. Bande de tuiles absente tant que le compte ne déclare
+                    // aucune entrée (fenêtre transparente vide plutôt qu'un cadre vide disgracieux)
+                    // — un toast de ramassage à son activé (`overlay_engine::profile`) reste
+                    // toutefois possible dans ce cas, INDÉPENDANT de la watchlist (voir
+                    // `panels::watchlist::show`), d'où la garde sur les deux conditions ici.
                     OverlayKind::Watchlist => {
-                        if !watchlist.is_empty() {
-                            panels::watchlist::show(
+                        if !watchlist.is_empty() || panels::watchlist::is_active(watchlist_toast) {
+                            close_toast = panels::watchlist::show(
                                 ui,
                                 icons,
                                 catalog,
@@ -1379,14 +1441,20 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         .viewport_output
         .get(&egui::ViewportId::ROOT)
         .map_or(std::time::Duration::MAX, |viewport| viewport.repaint_delay);
-    // Le toast d'alerte disparaît de lui-même après `WatchlistToast::hide_at` (voir sa doc) — sans
-    // ceci, rien ne redéclencherait de redessin à cette échéance dans cette architecture sans
-    // boucle continue (§6.1), le toast resterait affiché indéfiniment jusqu'au prochain redessin
-    // dû à une AUTRE cause.
+    // Le toast d'alerte anime des confettis en continu (voir `panels::watchlist::toast_card`) et
+    // disparaît de lui-même après `WatchlistToast::hide_at` (voir sa doc) — sans ceci, rien ne
+    // redéclencherait de redessin pendant l'animation NI à l'expiration, dans cette architecture
+    // sans boucle de rendu continue (§6.1). S'arrête de lui-même dès que `hide_at` est dépassé (le
+    // toast n'est alors plus reçu par `panels::watchlist::show`, voir son filtre) — jamais de
+    // minuterie à annuler explicitement, seulement des redessins qui cessent d'être redemandés.
     if let Some(toast) = watchlist_toast {
         let now = std::time::Instant::now();
         if toast.hide_at > now {
-            repaint_delay = repaint_delay.min(toast.hide_at - now);
+            const CONFETTI_FRAME_INTERVAL: std::time::Duration =
+                std::time::Duration::from_millis(33); // ~30 images/s, largement suffisant à cette échelle
+            repaint_delay = repaint_delay
+                .min(toast.hide_at - now)
+                .min(CONFETTI_FRAME_INTERVAL);
         }
     }
 
@@ -1431,7 +1499,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
             // perdue, sans `request_redraw` ici plus rien ne retente tant qu'un événement SANS
             // RAPPORT ne survient par ailleurs (§6.1 : pas de boucle de rendu continue).
             window.request_redraw();
-            return repaint_delay;
+            return (repaint_delay, close_toast);
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             gpu.surface.configure(&gpu.device, &gpu.config);
@@ -1446,7 +1514,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
             // `request_redraw` ici force une nouvelle tentative dès le prochain tour de la boucle
             // d'événements, sur la surface qui vient d'être reconfigurée juste au-dessus.
             window.request_redraw();
-            return repaint_delay;
+            return (repaint_delay, close_toast);
         }
         wgpu::CurrentSurfaceTexture::Validation => {
             // PAS de `request_redraw` ici, contrairement à Outdated/Lost ci-dessus : cette
@@ -1456,7 +1524,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
             // architecture évite justement (§6.1). Se contente de journaliser ; un `Ctrl+Alt+R`
             // (qui force un redessin ET une resynchronisation complète) reste le recours.
             tracing::warn!("get_current_texture: erreur de validation");
-            return repaint_delay;
+            return (repaint_delay, close_toast);
         }
     };
     let view = output_frame
@@ -1506,7 +1574,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
 
     gpu.queue.submit(Some(encoder.finish()));
     gpu.queue.present(output_frame);
-    repaint_delay
+    (repaint_delay, close_toast)
 }
 
 /// Thread Engine (§3 du plan) : lit `wakfu.log` en continu, alimente `overlay-engine`, publie
@@ -1616,12 +1684,15 @@ fn spawn_engine_thread(
                         for alert in engine.drain_watchlist_alerts() {
                             tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
                             alert_sound::play_countdown_alert();
+                            let created_at = std::time::Instant::now();
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.name,
                                 kind: alert.kind,
                                 reason: WatchlistToastReason::Countdown,
-                                hide_at: std::time::Instant::now()
-                                    + panels::watchlist::TOAST_DURATION,
+                                catalog_id: alert.catalog_id,
+                                created_at,
+                                confetti: panels::watchlist::build_confetti(),
+                                hide_at: created_at + panels::watchlist::TOAST_DURATION,
                             })));
                         }
                         // Ramassage d'un objet à son activé (compte, voir `overlay_engine::profile`)
@@ -1636,14 +1707,17 @@ fn spawn_engine_thread(
                                 "alerte de ramassage (son activé)"
                             );
                             alert_sound::play_loot_alert();
+                            let created_at = std::time::Instant::now();
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.name,
                                 kind: WatchlistKind::Item,
                                 reason: WatchlistToastReason::Loot {
                                     quantity: alert.quantity,
                                 },
-                                hide_at: std::time::Instant::now()
-                                    + panels::watchlist::TOAST_DURATION,
+                                catalog_id: alert.catalog_id,
+                                created_at,
+                                confetti: panels::watchlist::build_confetti(),
+                                hide_at: created_at + panels::watchlist::TOAST_DURATION,
                             })));
                         }
                         let _ = proxy.send_event(UserEvent::NewSnapshot);

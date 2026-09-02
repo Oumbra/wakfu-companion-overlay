@@ -41,13 +41,14 @@ use overlay_engine::{CatalogIndex, WakfuRarity, WatchlistEntry, WatchlistKind, W
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-/// Durée d'affichage du toast d'alerte (§9 du plan : « toast ≤ 5 s, non bloquant, jamais
-/// interactif ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
-/// dupliquer.
+/// Durée d'affichage du toast d'alerte avant fermeture automatique (§9 du plan : « toast ≤ 5 s,
+/// non bloquant ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
+/// dupliquer. Peut aussi être fermé PLUS TÔT par un clic (voir `toast_card`) : les deux cohabitent,
+/// contrairement au réglage exclusif `ProfileService.alertManualClose` côté web.
 pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Distingue les deux déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
-/// `loot-alert.service.ts`) — seul le libellé affiché change (voir `toast_banner`), le son a déjà
+/// `loot-alert.service.ts`) — seul le libellé affiché change (voir `toast_card`), le son a déjà
 /// été choisi par l'appelant (`main.rs::spawn_engine_thread`, `alert_sound::{play_countdown_alert,
 /// play_loot_alert}`) avant même la construction de ce toast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,8 +56,85 @@ pub enum WatchlistToastReason {
     /// Un décompte de suivi (mode `down`) vient d'atteindre 0.
     Countdown,
     /// Un objet à son activé (compte, voir `overlay_engine::profile`) vient d'être ramassé —
-    /// `quantity` affichée seulement si > 1 (voir `toast_banner`).
+    /// `quantity` affichée seulement si > 1 (voir `toast_card`).
     Loot { quantity: i64 },
+}
+
+/// Un confetti du toast — mêmes bornes aléatoires que `buildConfetti()`
+/// (`loot-alert.component.ts`) : position/délai/durée/rotation/couleur tirés UNE FOIS à la
+/// création du toast (voir `build_confetti`, appelé par `main.rs::spawn_engine_thread`) puis
+/// rejoués en boucle tant que le toast reste affiché — miroir de l'animation CSS `confetti-fall`
+/// (`animation-iteration-count: infinite`), ici recalculée à chaque frame depuis
+/// `WatchlistToast::created_at` puisque `egui` n'a pas de moteur d'animation CSS (voir `toast_card`).
+#[derive(Debug, Clone, Copy)]
+pub struct ConfettiPiece {
+    /// Position horizontale, en fraction (0.0-1.0) de `TOAST_LAYER_WIDTH` — miroir de `left`
+    /// (`Math.random() * 100`, en %).
+    left_frac: f32,
+    /// Retard avant le début de la chute, en secondes — miroir de `delay` (0.0-0.3s).
+    delay: f32,
+    /// Durée d'une chute complète, en secondes — miroir de `duration` (1.1-1.9s).
+    duration: f32,
+    /// Rotation totale atteinte en fin de chute, en radians — miroir de `rotate` (0-360deg,
+    /// `--rot` en CSS).
+    rotation: f32,
+    color: egui::Color32,
+}
+
+/// Mêmes 8 couleurs que `CONFETTI_COLORS` (`loot-alert.component.ts`), reprises telles quelles.
+const CONFETTI_COLORS: [egui::Color32; 8] = [
+    egui::Color32::from_rgb(0xff, 0xb7, 0x03),
+    egui::Color32::from_rgb(0xfb, 0x85, 0x00),
+    egui::Color32::from_rgb(0x21, 0x9e, 0xbc),
+    egui::Color32::from_rgb(0x8e, 0xca, 0xe6),
+    egui::Color32::from_rgb(0xff, 0x00, 0x6e),
+    egui::Color32::from_rgb(0x83, 0x38, 0xec),
+    egui::Color32::from_rgb(0x3a, 0x86, 0xff),
+    egui::Color32::from_rgb(0x06, 0xd6, 0xa0),
+];
+/// Même effectif que `CONFETTI_PIECE_COUNT` (`loot-alert.component.ts`).
+const CONFETTI_PIECE_COUNT: usize = 28;
+
+/// Générateur pseudo-aléatoire minimal (xorshift64) — pas de dépendance `rand` pour la seule
+/// dispersion visuelle des confettis (aucun besoin cryptographique ni même de reproductibilité).
+struct SmallRng(u64);
+
+impl SmallRng {
+    /// Graine dérivée de l'horloge système à chaque appel de `build_confetti`, pour que deux
+    /// toasts consécutifs n'affichent pas exactement la même dispersion.
+    fn seeded() -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9e37_79b9_7f4a_7c15);
+        Self(nanos | 1) // jamais 0 : état absorbant du xorshift
+    }
+
+    /// Suivant, dans `[0.0, 1.0)`.
+    fn next_f32(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 40) as f32 / (1u32 << 24) as f32
+    }
+}
+
+/// Construit un jeu de confettis aléatoire — miroir de `buildConfetti()`
+/// (`loot-alert.component.ts`), appelé une fois par déclenchement de toast (voir
+/// `main.rs::spawn_engine_thread`) pour que la dispersion reste stable tant que le toast est
+/// affiché, plutôt que régénérée à chaque frame.
+pub fn build_confetti() -> Vec<ConfettiPiece> {
+    let mut rng = SmallRng::seeded();
+    (0..CONFETTI_PIECE_COUNT)
+        .map(|_| ConfettiPiece {
+            left_frac: rng.next_f32(),
+            delay: rng.next_f32() * 0.3,
+            duration: 1.1 + rng.next_f32() * 0.8,
+            rotation: rng.next_f32() * std::f32::consts::TAU,
+            color: CONFETTI_COLORS
+                [(rng.next_f32() * CONFETTI_COLORS.len() as f32) as usize % CONFETTI_COLORS.len()],
+        })
+        .collect()
 }
 
 /// Un décompte de suivi à 0 OU un ramassage à son activé (voir `WatchlistToastReason`) — construit
@@ -67,12 +145,29 @@ pub struct WatchlistToast {
     pub name: String,
     pub kind: WatchlistKind,
     pub reason: WatchlistToastReason,
+    /// Id catalogue de l'objet/monstre, quand connu — résolution non ambiguë de l'icône affichée
+    /// (voir `toast_card`), même principe que `WatchlistEntry::catalog_id`.
+    pub catalog_id: Option<i64>,
+    /// Instant de création — sert de référence de temps à l'animation d'entrée et à la boucle de
+    /// confettis (voir `toast_card`), indépendamment de `hide_at`.
+    pub created_at: std::time::Instant,
+    /// Dispersion tirée une fois à la création (voir `build_confetti`) — stable tant que le toast
+    /// reste affiché.
+    pub confetti: Vec<ConfettiPiece>,
     /// Instant auquel le toast doit cesser de s'afficher — comparé à `Instant::now()` à chaque
-    /// rendu (voir `show`) plutôt que de faire expirer activement l'`ArcSwap` : cette architecture
-    /// n'a pas de boucle de rendu continue (§6.1 du plan), `main.rs::render` reprogramme lui-même
-    /// un redessin à cette échéance via `OverlayWindow::next_redraw_at` pour que le toast
-    /// disparaisse sans qu'aucun autre événement n'ait à se produire.
+    /// rendu (voir `show`/`is_active`) plutôt que de faire expirer activement l'`ArcSwap` : cette
+    /// architecture n'a pas de boucle de rendu continue (§6.1 du plan), `main.rs::render`
+    /// reprogramme lui-même un redessin à cette échéance via `OverlayWindow::next_redraw_at` pour
+    /// que le toast disparaisse sans qu'aucun autre événement n'ait à se produire. Peut aussi être
+    /// effacé PLUS TÔT par un clic (voir `toast_card`, `main.rs::window_event`).
     pub hide_at: std::time::Instant,
+}
+
+/// Vrai tant que `toast` n'a pas atteint son expiration — source de vérité unique utilisée à la
+/// fois ici (`show`) et par `main.rs` (gabarit dynamique de la fenêtre Suivi, garde d'affichage
+/// quand la watchlist elle-même est vide) sur « un toast est-il actuellement affiché ? ».
+pub fn is_active(toast: Option<&WatchlistToast>) -> bool {
+    toast.is_some_and(|t| t.hide_at > std::time::Instant::now())
 }
 
 /// 58×58, coins arrondis 10px — mêmes dimensions que `.kpi` (`tracker-strip.component.css`),
@@ -129,8 +224,61 @@ const TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(0xe0, 0xe0, 0xe0);
 /// `--kama-color` — valeur COURANTE d'un décompte (`.kpi-count-badge.is-fraction`).
 const KAMA_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
 
-/// Couleur du texte du toast — même teinte claire que le reste de l'interface sombre de l'overlay.
-const NAME_COLOR: egui::Color32 = TEXT_COLOR;
+/// `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
+/// `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`.
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
+/// `--surface-raised` — fond du toast (`loot-alert-card`, dégradé à deux arrêts IDENTIQUES côté
+/// web donc simple aplat ici).
+const SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x26);
+/// `--text-bright` — nom de l'objet/monstre dans le toast (`loot-alert-name`).
+const TEXT_BRIGHT: egui::Color32 = egui::Color32::from_rgb(0xf2, 0xf2, 0xf2);
+/// `--tint-medium` — fond du bouton de fermeture au repos (`loot-alert-close`).
+const TINT_MEDIUM: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 31);
+/// `--tint-strong` — fond du bouton de fermeture survolé (`loot-alert-close:hover`).
+const TINT_STRONG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
+
+/// Largeur de la couche de confettis (`.confetti-layer`, `loot-alert.component.css`) — reprise
+/// telle quelle du web (320px), centrée sur le même axe que la carte : `main.rs::
+/// watchlist_target_width` s'en sert pour élargir la fenêtre Suivi le temps qu'un toast est
+/// affiché, sans quoi les confettis les plus excentrés seraient rognés par le bord de fenêtre.
+pub const TOAST_LAYER_WIDTH: f32 = 320.0;
+/// Hauteur SUPPLÉMENTAIRE à réserver sous la bande de tuiles quand un toast est affiché (carte +
+/// dépassement des confettis, voir `toast_card`) — ajoutée par `main.rs::watchlist_target_height`
+/// à la hauteur de base, seulement tant qu'un toast est actif (voir `is_active`), pour ne pas
+/// garder en permanence une zone de fenêtre cliquable/bloquante plus grande que nécessaire (même
+/// principe que `watchlist_target_width` pour la largeur).
+pub const TOAST_AREA_HEIGHT: f32 = 170.0;
+
+const CARD_ROUNDING: f32 = 12.0;
+const CARD_BORDER_WIDTH: f32 = 1.0;
+const CARD_PAD_V: f32 = 10.0;
+const CARD_PAD_LEFT: f32 = 16.0;
+/// Plus large qu'à gauche : réserve la place du bouton de fermeture (coin haut-droit, voir
+/// `close_rect`) — miroir de `padding: 10px 30px 10px 18px` (`loot-alert-card`).
+const CARD_PAD_RIGHT: f32 = 28.0;
+const CARD_ICON_GAP: f32 = 10.0;
+/// Écart vertical entre le titre et le nom — miroir de l'empilement `flex-direction: column` sans
+/// gap explicite de `.loot-alert-text` (léger espace naturel entre deux lignes de texte).
+const CARD_TEXT_GAP: f32 = 2.0;
+/// Écart entre le bas de la bande de tuiles et le haut de la carte.
+const CARD_TOP_GAP: f32 = 12.0;
+const CLOSE_BTN_SIZE: f32 = 18.0;
+const CLOSE_BTN_ROUNDING: f32 = 4.0;
+const CLOSE_BTN_MARGIN: f32 = 4.0;
+/// Durée de l'animation d'entrée — miroir de `@keyframes loot-pop` (0.35s). `egui` n'exprimant pas
+/// de transformation `scale`, l'entrée est ici un fondu + léger glissement vertical plutôt qu'un
+/// vrai zoom (voir `toast_card`).
+const POP_DURATION: f32 = 0.35;
+/// Les confettis démarrent au-dessus du haut de la carte — miroir de `top: -10px` du calque de
+/// confettis relatif au conteneur, dont le `margin-top: 40px` pousse la carte plus bas (ici
+/// ramené à une valeur plus modeste, la fenêtre Suivi ayant nettement moins de hauteur disponible
+/// qu'une page web).
+const CONFETTI_TOP_OVERSHOOT: f32 = 18.0;
+/// Distance de chute d'un confetti — réduite par rapport aux 220px web (`translateY(220px)`,
+/// `@keyframes confetti-fall`) pour tenir dans `TOAST_AREA_HEIGHT`.
+const CONFETTI_FALL_HEIGHT: f32 = 120.0;
+/// Même taille que `.confetti-piece` (8x8px, `loot-alert.component.css`).
+const CONFETTI_SIZE: f32 = 8.0;
 
 /// Miroir des 7 `.rarity-xxx { --rarity-color: ... }` de `styles.css` (thème sombre) —
 /// `WakfuRarity::Old` n'est jamais réellement résolue au runtime (voir sa doc), sa couleur n'a
@@ -158,6 +306,9 @@ fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
     egui::Color32::from_rgb(lerp(a.r(), b.r()), lerp(a.g(), b.g()), lerp(a.b(), b.b()))
 }
 
+/// Renvoie `true` quand l'utilisateur vient de fermer le toast affiché (clic sur la carte ou sur
+/// sa croix, voir `toast_card`) — `main.rs::window_event` est seul à détenir un accès en écriture
+/// à l'`ArcSwap` du toast, donc seul à pouvoir agir sur ce signal.
 pub fn show(
     ui: &mut egui::Ui,
     icons: &UiIcons,
@@ -166,63 +317,73 @@ pub fn show(
     remote_icon_textures: &mut RemoteIconTextures,
     entries: &[WatchlistEntry],
     toast: Option<&WatchlistToast>,
-) {
-    let mut style = (**ui.style()).clone();
-    style_thin_scrollbar(&mut style);
-    ui.set_style(style);
+) -> bool {
+    // Bande de tuiles absente tant que le compte ne déclare aucune entrée suivie (voir
+    // `main.rs::render`, commentaire de `OverlayKind::Watchlist`) — un ramassage à son activé
+    // (`overlay_engine::profile`, INDÉPENDANT de la watchlist) doit pouvoir déclencher un toast
+    // même dans ce cas, d'où la garde ici plutôt qu'en amont.
+    if !entries.is_empty() {
+        let mut style = (**ui.style()).clone();
+        style_thin_scrollbar(&mut style);
+        ui.set_style(style);
 
-    egui::ScrollArea::horizontal()
-        .id_salt("watchlist-strip")
-        .auto_shrink([false, true])
-        // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
-        // flottante une bande dégagée sous les icônes/badges plutôt que de la faire chevaucher
-        // presque entièrement — retour utilisateur 2026-09-02 : « impossible de l'agripper ».
-        .min_scrolled_height(TILE_SIZE + 14.0)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                control_tile(ui, "+", "Ajouter un suivi (bientôt disponible)");
-                ui.add_space(TILE_GAP);
-                control_tile(
-                    ui,
-                    "−",
-                    "Sélection multiple / suppression (bientôt disponible)",
-                );
-                ui.add_space(TILE_GAP);
-
-                for (i, entry) in entries.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(TILE_GAP);
-                    }
-                    entry_tile(
+        egui::ScrollArea::horizontal()
+            .id_salt("watchlist-strip")
+            .auto_shrink([false, true])
+            // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
+            // flottante une bande dégagée sous les icônes/badges plutôt que de la faire chevaucher
+            // presque entièrement — retour utilisateur 2026-09-02 : « impossible de l'agripper ».
+            .min_scrolled_height(TILE_SIZE + 14.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    control_tile(ui, "+", "Ajouter un suivi (bientôt disponible)");
+                    ui.add_space(TILE_GAP);
+                    control_tile(
                         ui,
-                        icons,
-                        catalog,
-                        remote_icons,
-                        remote_icon_textures,
-                        entry,
+                        "−",
+                        "Sélection multiple / suppression (bientôt disponible)",
                     );
-                }
+                    ui.add_space(TILE_GAP);
 
-                // Le badge de compteur (`count_badge`) déborde de `BADGE_OVERFLOW` px hors du coin
-                // bas-droit de sa tuile, peint directement via `ui.painter()` — donc INVISIBLE pour
-                // le calcul d'étendue du `ScrollArea` (basé sur l'espace ALLOUÉ par `horizontal`,
-                // pas sur ce qui est peint hors allocation). Sans cet espace réservé explicitement,
-                // le badge de la toute dernière tuile reste tronqué par le clip rect du `ScrollArea`
-                // une fois défilé au maximum (cas plafonné, `WATCHLIST_MAX_CEILING`) — même quand la
-                // fenêtre elle-même est assez large (voir `content_width`, qui couvre le cas non
-                // plafonné). Retour utilisateur 2026-09-02, capture d'écran à l'appui.
-                ui.add_space(BADGE_OVERFLOW);
+                    for (i, entry) in entries.iter().enumerate() {
+                        if i > 0 {
+                            ui.add_space(TILE_GAP);
+                        }
+                        entry_tile(
+                            ui,
+                            icons,
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                            entry,
+                        );
+                    }
+
+                    // Le badge de compteur (`count_badge`) déborde de `BADGE_OVERFLOW` px hors du coin
+                    // bas-droit de sa tuile, peint directement via `ui.painter()` — donc INVISIBLE pour
+                    // le calcul d'étendue du `ScrollArea` (basé sur l'espace ALLOUÉ par `horizontal`,
+                    // pas sur ce qui est peint hors allocation). Sans cet espace réservé explicitement,
+                    // le badge de la toute dernière tuile reste tronqué par le clip rect du `ScrollArea`
+                    // une fois défilé au maximum (cas plafonné, `WATCHLIST_MAX_CEILING`) — même quand la
+                    // fenêtre elle-même est assez large (voir `content_width`, qui couvre le cas non
+                    // plafonné). Retour utilisateur 2026-09-02, capture d'écran à l'appui.
+                    ui.add_space(BADGE_OVERFLOW);
+                });
             });
-        });
 
-    // Espace TOUJOURS réservé sous la bande de tuiles (fenêtre dimensionnée en conséquence, voir
-    // `main.rs::WATCHLIST_WINDOW_SIZE`) plutôt qu'agrandir la fenêtre à la volée à l'apparition
-    // d'un toast : ancrage déjà mis au point avec l'utilisateur (2026-09-01, plusieurs allers-
-    // retours) pour la bande de tuiles elle-même — l'y toucher à nouveau pour un toast occasionnel
-    // aurait tout redécalé. Invisible quand inactif (rien n'est peint, fond transparent).
-    ui.add_space(6.0);
-    if let Some(toast) = toast.filter(|t| t.hide_at > std::time::Instant::now()) {
-        toast_banner(ui, toast);
+        ui.add_space(6.0);
+    }
+
+    match toast.filter(|t| t.hide_at > std::time::Instant::now()) {
+        Some(toast) => toast_card(
+            ui,
+            icons,
+            catalog,
+            remote_icons,
+            remote_icon_textures,
+            toast,
+        ),
+        None => false,
     }
 }
 
@@ -257,29 +418,214 @@ fn style_thin_scrollbar(style: &mut egui::Style) {
     style.spacing.item_spacing.x = 0.0;
 }
 
-/// Toast d'alerte (§9 du plan : « toast + son quand un objet suivi tombe ») — non interactif
-/// (`Sense::hover()` seulement), disparaît de lui-même après `TOAST_DURATION` (voir la doc de
-/// `WatchlistToast::hide_at`). Pas de confettis contrairement à `loot-alert.component.ts` : le
-/// plan (§9) ne demande qu'« un toast ≤ 5 s, non bloquant, jamais interactif », une bannière de
-/// texte suffit pour cette itération.
-fn toast_banner(ui: &mut egui::Ui, toast: &WatchlistToast) {
-    let marker_color = match toast.kind {
-        WatchlistKind::Item => rarity_color(WakfuRarity::Common),
-        WatchlistKind::Enemy => TEXT_MUTED,
+/// Multiplie le canal alpha de `color` par `factor` (`0.0..=1.0`) — sert au fondu d'entrée du
+/// toast (voir `POP_DURATION`) et au fondu de sortie de chaque confetti (voir `toast_card`),
+/// appliqué uniformément à tous les éléments peints (fond, bordure, texte, icône).
+fn with_alpha(color: egui::Color32, factor: f32) -> egui::Color32 {
+    let a = (color.a() as f32 * factor.clamp(0.0, 1.0)).round() as u8;
+    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a)
+}
+
+/// Les 4 coins d'un carré de côté `2*half` centré sur `center`, tournés de `angle` radians —
+/// `epaint` n'a pas de primitive « rectangle tourné », un confetti (`toast_card`) se peint donc
+/// comme un polygone convexe à 4 points calculés à la main.
+fn rotated_square(center: egui::Pos2, half: f32, angle: f32) -> [egui::Pos2; 4] {
+    let (sin, cos) = angle.sin_cos();
+    [
+        egui::vec2(-half, -half),
+        egui::vec2(half, -half),
+        egui::vec2(half, half),
+        egui::vec2(-half, half),
+    ]
+    .map(|c| center + egui::vec2(c.x * cos - c.y * sin, c.x * sin + c.y * cos))
+}
+
+/// Carte d'alerte de ramassage/décompte — miroir visuel de `loot-alert.component.html`/`.css` du
+/// dépôt web : icône réelle, titre coloré (`ACCENT`, identique pour les deux `reason` — voir sa
+/// doc), nom (+ quantité si > 1), bouton de fermeture, confettis tombants en fond. Contrairement à
+/// `LootAlertComponent` (minuterie OU fermeture manuelle, réglage exclusif côté web via
+/// `ProfileService.alertManualClose` — pas encore porté ici), les DEUX cohabitent déjà : minuterie
+/// fixe (voir `WatchlistToast::hide_at`) ET fermeture au clic (carte entière ou croix), sans que
+/// l'utilisateur ait à choisir. Renvoie `true` quand CE clic doit effacer le toast (voir la doc de
+/// `show` — seul `main.rs::window_event` peut écrire dans l'`ArcSwap` correspondant).
+fn toast_card(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    catalog: &CatalogIndex,
+    remote_icons: &RemoteIconStore,
+    remote_icon_textures: &mut RemoteIconTextures,
+    toast: &WatchlistToast,
+) -> bool {
+    let now = std::time::Instant::now();
+    let elapsed = now
+        .saturating_duration_since(toast.created_at)
+        .as_secs_f32();
+
+    // Entrée en fondu + léger glissement vertical — repli sur ce qu'un painter bas niveau sait
+    // exprimer facilement, `egui` n'ayant pas de transformation `scale` de calque comme
+    // `@keyframes loot-pop` (CSS).
+    let pop_t = (elapsed / POP_DURATION).min(1.0);
+    let pop_eased = 1.0 - (1.0 - pop_t) * (1.0 - pop_t); // ease-out quadratique
+    let card_alpha = pop_eased;
+    let slide = (1.0 - pop_eased) * 10.0;
+
+    let title = match toast.reason {
+        WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !",
+        WatchlistToastReason::Loot { .. } => "OBJET OBTENU !",
     };
-    let label = match toast.reason {
-        WatchlistToastReason::Countdown => format!("Suivi terminé : {}", toast.name),
+    let name_text = match toast.reason {
         WatchlistToastReason::Loot { quantity } if quantity > 1 => {
-            format!("Ramassé : {} x{quantity}", toast.name)
+            format!("{} × {quantity}", toast.name)
         }
-        WatchlistToastReason::Loot { .. } => format!("Ramassé : {}", toast.name),
+        _ => toast.name.clone(),
     };
-    ui.horizontal(|ui| {
-        let (dot_rect, _resp) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-        ui.painter()
-            .circle_filled(dot_rect.center(), 4.0, marker_color);
-        ui.label(egui::RichText::new(label).color(NAME_COLOR).strong());
-    });
+
+    let painter = ui.painter();
+    let title_galley =
+        painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(11.0), ACCENT);
+    let name_galley =
+        painter.layout_no_wrap(name_text, egui::FontId::proportional(14.0), TEXT_BRIGHT);
+
+    let text_width = title_galley.size().x.max(name_galley.size().x);
+    let text_height = title_galley.size().y + CARD_TEXT_GAP + name_galley.size().y;
+    let content_height = ICON_SIZE.max(text_height);
+    let card_width = CARD_PAD_LEFT + ICON_SIZE + CARD_ICON_GAP + text_width + CARD_PAD_RIGHT;
+    let card_height = content_height + 2.0 * CARD_PAD_V;
+
+    let center_x = ui.max_rect().center().x;
+    let confetti_top = ui.cursor().top() + slide;
+    let card_top = confetti_top + CONFETTI_TOP_OVERSHOOT + CARD_TOP_GAP;
+    let card_rect = egui::Rect::from_min_size(
+        egui::pos2(center_x - card_width / 2.0, card_top),
+        egui::vec2(card_width, card_height),
+    );
+
+    // Zone de clic AVANT la peinture, même motif que `entry_tile`/`control_tile` — la carte
+    // ENTIÈRE ferme le toast, pas seulement sa croix (demande utilisateur explicite).
+    let card_response = ui.interact(
+        card_rect,
+        ui.id().with(("loot-alert-card", toast.name.as_str())),
+        egui::Sense::click(),
+    );
+
+    // --- Confettis (peints AVANT la carte pour rester visuellement derrière elle) ---
+    let layer_left = center_x - TOAST_LAYER_WIDTH / 2.0;
+    for piece in &toast.confetti {
+        if elapsed < piece.delay {
+            continue; // pas encore démarré, miroir de `animation-delay`
+        }
+        let local = (elapsed - piece.delay) % piece.duration; // boucle, miroir de `infinite`
+        let t = (local / piece.duration).clamp(0.0, 1.0);
+        let eased = t * t; // approximation de la temporisation CSS `ease-in`
+        let alpha = (1.0 - eased) * card_alpha; // rejoint le fondu d'entrée de la carte
+        if alpha <= 0.01 {
+            continue;
+        }
+        let x = layer_left + piece.left_frac * TOAST_LAYER_WIDTH;
+        let y = confetti_top + eased * CONFETTI_FALL_HEIGHT;
+        let points = rotated_square(
+            egui::pos2(x, y),
+            CONFETTI_SIZE / 2.0,
+            piece.rotation * eased,
+        );
+        ui.painter().add(egui::Shape::convex_polygon(
+            points.to_vec(),
+            with_alpha(piece.color, alpha),
+            egui::Stroke::NONE,
+        ));
+    }
+
+    // --- Carte ---
+    let painter = ui.painter();
+    painter.rect_filled(
+        card_rect.translate(egui::vec2(0.0, 6.0)),
+        CARD_ROUNDING,
+        egui::Color32::from_rgba_unmultiplied(0, 0, 0, (90.0 * card_alpha) as u8),
+    ); // ombre portée approximée (`box-shadow`) en une seule passe plutôt qu'un flou multi-passes
+    painter.rect_filled(
+        card_rect,
+        CARD_ROUNDING,
+        with_alpha(SURFACE_RAISED, card_alpha),
+    );
+    painter.rect_stroke(
+        card_rect,
+        CARD_ROUNDING,
+        egui::Stroke::new(CARD_BORDER_WIDTH, with_alpha(ACCENT, card_alpha)),
+        egui::StrokeKind::Inside,
+    );
+
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            card_rect.left() + CARD_PAD_LEFT + ICON_SIZE / 2.0,
+            card_rect.center().y,
+        ),
+        egui::vec2(ICON_SIZE, ICON_SIZE),
+    );
+    let icon_ref = match toast.kind {
+        WatchlistKind::Item => catalog.find_item_icon(&toast.name, toast.catalog_id),
+        WatchlistKind::Enemy => catalog.find_monster_icon(&toast.name, toast.catalog_id),
+    };
+    let remote_texture = icon_ref
+        .as_ref()
+        .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
+    let icon_tint = egui::Color32::from_white_alpha((255.0 * card_alpha) as u8);
+    match &remote_texture {
+        Some(texture) => egui::Image::new(texture)
+            .tint(icon_tint)
+            .paint_at(ui, icon_rect),
+        None => egui::Image::new(icons.unknown_entity_texture())
+            .tint(icon_tint)
+            .paint_at(ui, icon_rect),
+    }
+
+    let text_left = icon_rect.right() + CARD_ICON_GAP;
+    let text_top = card_rect.center().y - text_height / 2.0;
+    let painter = ui.painter();
+    painter.galley(
+        egui::pos2(text_left, text_top),
+        title_galley.clone(),
+        with_alpha(ACCENT, card_alpha),
+    );
+    painter.galley(
+        egui::pos2(text_left, text_top + title_galley.size().y + CARD_TEXT_GAP),
+        name_galley.clone(),
+        with_alpha(TEXT_BRIGHT, card_alpha),
+    );
+
+    // --- Bouton de fermeture (coin haut-droit, miroir de `loot-alert-close`) ---
+    let close_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            card_rect.right() - CLOSE_BTN_MARGIN - CLOSE_BTN_SIZE,
+            card_rect.top() + CLOSE_BTN_MARGIN,
+        ),
+        egui::vec2(CLOSE_BTN_SIZE, CLOSE_BTN_SIZE),
+    );
+    let close_response = ui.interact(
+        close_rect,
+        ui.id().with(("loot-alert-close", toast.name.as_str())),
+        egui::Sense::click(),
+    );
+    let (close_bg, close_glyph) = if close_response.hovered() {
+        (TINT_STRONG, TEXT_BRIGHT)
+    } else {
+        (TINT_MEDIUM, TEXT_MUTED)
+    };
+    let painter = ui.painter();
+    painter.rect_filled(
+        close_rect,
+        CLOSE_BTN_ROUNDING,
+        with_alpha(close_bg, card_alpha),
+    );
+    painter.text(
+        close_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "×",
+        egui::FontId::proportional(12.0),
+        with_alpha(close_glyph, card_alpha),
+    );
+    let close_response = close_response.on_hover_text("Fermer");
+
+    card_response.clicked() || close_response.clicked()
 }
 
 /// Contour d'un rectangle à coins arrondis, comme suivi par un traceur — mêmes 4 arcs que
