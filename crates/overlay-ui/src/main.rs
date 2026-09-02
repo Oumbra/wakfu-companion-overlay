@@ -33,6 +33,7 @@ mod ui_icons;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -292,6 +293,12 @@ struct App {
     /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
     /// être chargé — les tuiles du panneau Suivi retombent alors sur l'icône générique.
     catalog: Arc<ArcSwap<CatalogIndex>>,
+    /// `true` quand `catalog` provient du repli hors-ligne EMBARQUÉ (`spawn_catalog_thread`,
+    /// §7.4 du plan) — ni cache disque ni réseau disponibles au démarrage. Pilote le petit
+    /// indicateur « catalogue daté » de la zone Combat (voir `render`) : ce n'était encore qu'un
+    /// `tracing::warn!` invisible en jeu avant ce lot (retour utilisateur : rien ne signale à
+    /// l'écran que les icônes/classements affichés peuvent dater du dernier build embarqué).
+    catalog_stale: Arc<AtomicBool>,
     /// Un seul thread/état de téléchargement d'icônes PARTAGÉ par toutes les fenêtres (voir
     /// `remote_icons::RemoteIconStore`) — chaque fenêtre garde son propre cache de textures déjà
     /// uploadées (`OverlayWindow::remote_icon_textures`), mais ne retélécharge jamais une icône
@@ -323,6 +330,7 @@ struct AppState {
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     catalog: Arc<ArcSwap<CatalogIndex>>,
+    catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
     auth_status: Arc<ArcSwap<AuthStatus>>,
     auth_retry_tx: mpsc::Sender<()>,
@@ -339,6 +347,7 @@ impl App {
             watchlist,
             watchlist_toast,
             catalog,
+            catalog_stale,
             remote_icons,
             auth_status,
             auth_retry_tx,
@@ -371,6 +380,7 @@ impl App {
             watchlist,
             watchlist_toast,
             catalog,
+            catalog_stale,
             remote_icons,
             auth_status,
             auth_retry_tx,
@@ -820,6 +830,7 @@ impl ApplicationHandler<UserEvent> for App {
                         watchlist: &watchlist,
                         watchlist_toast,
                         catalog: &catalog,
+                        catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
                         remote_icons: &self.remote_icons,
                         remote_icon_textures: &mut overlay.remote_icon_textures,
                         auth_status: &auth_status,
@@ -1008,6 +1019,7 @@ struct RenderContent<'a> {
     watchlist: &'a [WatchlistEntry],
     watchlist_toast: Option<&'a WatchlistToast>,
     catalog: &'a CatalogIndex,
+    catalog_stale: bool,
     remote_icons: &'a RemoteIconStore,
     remote_icon_textures: &'a mut RemoteIconTextures,
     auth_status: &'a AuthStatus,
@@ -1038,6 +1050,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         watchlist,
         watchlist_toast,
         catalog,
+        catalog_stale,
         remote_icons,
         remote_icon_textures,
         auth_status,
@@ -1100,6 +1113,28 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                             ui.add_space(4.0);
                         }
                         AuthStatus::Connected => {}
+                    }
+
+                    // Indicateur « catalogue daté » (§7.4/§9 du plan, lot L3) — visible UNIQUEMENT
+                    // quand `catalog` provient du repli hors-ligne embarqué (ni cache disque ni
+                    // réseau au démarrage, voir `spawn_catalog_thread`) : les icônes/classements
+                    // affichés peuvent alors dater du dernier build de l'overlay plutôt que du vrai
+                    // catalogue serveur. Avant ce lot, seul un `tracing::warn!` signalait ce cas —
+                    // invisible pour qui ne regarde pas les logs en jouant.
+                    if catalog_stale {
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label("📦⚠").on_hover_text(
+                                        "Catalogue hors ligne : réseau et cache local tous deux \
+                                         indisponibles au démarrage, repli sur la base embarquée \
+                                         dans l'overlay (peut être datée).",
+                                    );
+                                },
+                            );
+                        });
+                        ui.add_space(4.0);
                     }
 
                     panels::combat::show(
@@ -1362,10 +1397,16 @@ fn spawn_engine_thread(
 ///
 /// Tout premier lancement SANS cache disque ET SANS réseau : repli sur le catalogue embarqué
 /// (`overlay_sync::catalog_cache::embedded_fallback`, §7.4 du plan) — l'overlay reste utilisable
-/// plutôt que de rester sur un `CatalogIndex::default()` vide. Pas encore de bandeau « catalogue
-/// daté » visible dans l'UI pour signaler ce cas (§9 du plan ne liste pas encore un tel indicateur
-/// parmi les panneaux) — seulement un `tracing::warn!`, à reprendre par un futur lot L2.
-fn spawn_catalog_thread(catalog: Arc<ArcSwap<CatalogIndex>>, proxy: EventLoopProxy<UserEvent>) {
+/// plutôt que de rester sur un `CatalogIndex::default()` vide. `catalog_stale` (lu par `render`,
+/// icône « 📦⚠ » de la zone Combat) est mis à `true` dans ce seul cas — jamais réinitialisé à
+/// `false` explicitement ailleurs dans ce thread : sa valeur initiale (posée par `main`) est déjà
+/// `false`, et les autres branches de cette fonction ne s'exécutent qu'une fois par lancement, donc
+/// aucune ne peut suivre une mise à `true` pour la corriger a posteriori.
+fn spawn_catalog_thread(
+    catalog: Arc<ArcSwap<CatalogIndex>>,
+    catalog_stale: Arc<AtomicBool>,
+    proxy: EventLoopProxy<UserEvent>,
+) {
     thread::Builder::new()
         .name("overlay-catalog".into())
         .spawn(move || {
@@ -1391,6 +1432,7 @@ fn spawn_catalog_thread(catalog: Arc<ArcSwap<CatalogIndex>>, proxy: EventLoopPro
                         catalog.store(Arc::new(CatalogIndex::from_compact_json(
                             &overlay_sync::catalog_cache::embedded_fallback(),
                         )));
+                        catalog_stale.store(true, Ordering::Relaxed);
                         let _ = proxy.send_event(UserEvent::NewSnapshot);
                     } else {
                         tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
@@ -1576,6 +1618,7 @@ fn main() {
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
+    let catalog_stale = Arc::new(AtomicBool::new(false));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
@@ -1590,7 +1633,11 @@ fn main() {
         auth_retry_rx,
         proxy.clone(),
     );
-    spawn_catalog_thread(Arc::clone(&catalog), proxy.clone());
+    spawn_catalog_thread(
+        Arc::clone(&catalog),
+        Arc::clone(&catalog_stale),
+        proxy.clone(),
+    );
     let remote_icons = RemoteIconStore::spawn(proxy.clone());
     spawn_engine_thread(
         log_path.clone(),
@@ -1609,6 +1656,7 @@ fn main() {
         watchlist,
         watchlist_toast,
         catalog,
+        catalog_stale,
         remote_icons,
         auth_status,
         auth_retry_tx,
