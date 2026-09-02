@@ -398,6 +398,17 @@ de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/
   recouvre plus une application quelconque devenue active (explorateur de fichiers, navigateur…),
   retour utilisateur du 2026-09-01. Politique volontairement simplifiée (pas de logique « seulement
   l'overlay du personnage actif »).
+  **Délai de grâce avant repli (2026-09-02, retour utilisateur, vidéo à l'appui)** : la démotion en
+  `HWND_NOTOPMOST` était jusqu'ici IMMÉDIATE dès qu'un seul tick (~50 ms, cadence de sondage §6.5)
+  voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu — l'overlay Combat
+  disparaissait alors « un coup sur deux » en changeant de fenêtre, alors que le Suivi du MÊME
+  personnage restait visible au même instant bien que les deux passent par exactement le même code
+  (`App::sync_topmost`, vérifié identique pour les deux) : un aléa d'ordonnancement Windows d'un
+  seul tick entre les deux `SetWindowPos` suffisait à les faire diverger visuellement. Un overlay
+  qui vient de perdre `relevant` n'est désormais démoté qu'après `TOPMOST_DEMOTE_GRACE` (1,5 s)
+  écoulée EN CONTINU sans redevenir pertinent — la réaffirmation en topmost, elle, reste immédiate
+  dès que le focus revient, avant l'échéance. Ne revient pas sur le principe du 2026-09-01 (repli
+  toujours appliqué au bout du délai), absorbe seulement les aléas de timing d'un tick.
 - **Fenêtres à durée de vie dynamique** : le motif `Box::leak`/`&'static Window` du mono-fenêtre
   d'origine ne tient plus dès qu'une fenêtre doit pouvoir être détruite (client fermé) —
   `Arc<Window>` à la place (`wgpu::Instance::create_surface` l'accepte directement, donnant un
