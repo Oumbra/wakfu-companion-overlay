@@ -154,6 +154,8 @@ mod tests {
             total_heal: 0,
             class_name: None,
             gender: Gender::M,
+            xp_gained: 0,
+            spells: std::collections::HashMap::new(),
         }
     }
 

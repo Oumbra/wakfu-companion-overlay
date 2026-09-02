@@ -23,6 +23,7 @@ pub use history::{
     fight_signature, purchase_signature, trade_signature, FightLootPayload,
     FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,
     HistoryPayload, PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+    HDV_KAMAS_SALE_ITEM,
 };
 pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
 pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
