@@ -671,7 +671,9 @@
   };
 
   // src/entry.ts
-  var parser = new LogParser();
+  var parser = new LogParser({
+    isKnownMonsterName: (name) => globalThis.hostIsKnownMonsterName?.(name) ?? false
+  });
   function serialize(entry) {
     return entry === null || entry === void 0 ? "" : JSON.stringify(entry);
   }

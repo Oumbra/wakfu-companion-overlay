@@ -9,7 +9,7 @@
 | Module | Rôle |
 | --- | --- |
 | `engine-js/` | `LogParser` + `LogEntry` **vendus tels quels** depuis `Oumbra/wakfu-companion` (voir `engine-js/VENDORED_FROM.txt` — même commit que le spike S2), bundlés en IIFE ES2020 (`esbuild`, `dist/engine.bundle.js` **committé**, ~30 Ko : pas besoin de Node.js pour `cargo build`, seulement pour retoucher le TS vendu). |
-| `quickjs_engine.rs` | `LogParserEngine` : charge le bundle dans `rquickjs`, expose `parse_lines()`/`reset()`. Aucune logique métier ici, seulement le pont QuickJS↔Rust. |
+| `quickjs_engine.rs` | `LogParserEngine` : charge le bundle dans `rquickjs`, expose `parse_lines()`/`reset()`/`set_catalog()`. Aucune logique métier ici, seulement le pont QuickJS↔Rust — y compris dans l'autre sens : `hostIsKnownMonsterName`, une fonction NATIVE posée sur les globals AVANT évaluation du bundle, lue par `entry.ts` (voir plus bas). |
 | `model.rs` | Miroir Rust exact (`serde`) de `engine-js/src/log-entry.model.ts` — la forme de chaque `LogEntry`, jamais sa sémantique (qui reste dans le TS vendu). |
 | `session.rs` | `Engine` (gère la sémantique `is_initial_load`/reset, §5.3) + `SessionState` : agrégation **en Rust**, pas vendue — dégâts par combattant du combat en cours, récap de session (kamas, XP, combats, butin). Volontairement minimal, voir le commentaire de module pour ce qui manque (`StatsStoreService`, §14 point 3). Inclut un portage complet de `InitiativeSeat`/`resolveNextActor` (`stats-store.service.ts`) pour distinguer plusieurs combattants qui partagent EXACTEMENT le même nom (pack du même monstre) — voir plus bas. |
 | `class_breed.rs` | Port de `wakfu-class-breed-ids.data.ts` (breed → classe, uniquement déterministe pour un allié confirmé) + `class-portraits.data.ts::CLASS_PORTRAIT_ORDER` (ligne d'une classe dans la planche de portraits, utilisée par `overlay-ui`). |
@@ -53,10 +53,22 @@ silencieuse de dégâts. Ambiguïté résiduelle documentée et non résolue (co
 instances homonymes dont les tours se suivent sans aucun autre acteur entre les deux fusionnent sur
 le même siège.
 
-## Simplification assumée (à ne pas oublier)
+## Invocations exclues du récap (`summonedBy`)
 
-La classification allié/ennemi utilise `FighterJoinedEntry::is_controlled_by_ai` directement, sans
-suivre `summonedBy` (héritage du camp d'une invocation) — voir le commentaire en tête de
-`session.rs`. Une invocation alliée s'affichera donc comme ennemie. Corriger ça correctement
-reviendrait à dupliquer une heuristique de `StatsStoreService`, contraire à la raison d'être du
-choix QuickJS (§2) — à ne pas « corriger » ici sans y réfléchir à deux fois.
+Retour utilisateur 2026-09-02 (captures d'écran à l'appui) : l'invocation d'un allié (mécanisme,
+totem) s'affichait à tort côté ennemis — `wakfu.log` logue TOUJOURS `isControlledByAI=true` pour
+une invocation, quel que soit le camp réel de son invocateur. `session.rs` suit maintenant
+`FighterJoinedEntry::summoned_by` (déjà résolu par le TS vendu, `log-parser.ts::parseFighterJoin`) :
+une entrée dont `summoned_by` est renseigné n'obtient jamais de ligne dans le récap, ni ses dégâts
+« bruts » (non réattribués à l'invocateur par le parser) ne créditent qui que ce soit — miroir du
+`return` anticipé de `registerFighterJoin`/du filtre `summonNames` (`stats-store.service.ts`).
+
+Protégé contre le cas inverse (un vrai monstre qui se révèle EXACTEMENT comme une invocation aux
+yeux du parser — mimique, brèche — sans jamais avoir été annoncé par une ligne « X: Invoque ... »)
+par `hostIsKnownMonsterName` : une fonction Rust posée sur les globals QuickJS AVANT l'évaluation du
+bundle (`quickjs_engine.rs::LogParserEngine::new`), lue par `entry.ts` et transmise à `LogParser`
+(`isKnownMonsterName`, un prédicat optionnel que `LogParser` accepte déjà — vendu tel quel, zéro
+ligne modifiée), qui consulte `overlay_engine::CatalogIndex` en temps réel (`Engine::set_catalog`,
+relayé par `overlay-ui` à chaque rechargement du catalogue) — miroir exact de `StatsStoreService`
+(`isKnownMonsterName: (name) => this.catalog.isKnownWakfuMonsterName(name)`), adapté à
+`CatalogIndex` plutôt que `CatalogService`.

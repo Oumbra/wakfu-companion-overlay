@@ -16,7 +16,25 @@
  */
 import { LogParser } from './log-parser';
 
-const parser = new LogParser();
+// `isKnownMonsterName` (voir sa doc dans `LogParser`) est fourni par le harnais Rust AVANT
+// l'évaluation de ce bundle (`hostIsKnownMonsterName` posé sur les globals par
+// `quickjs_engine.rs::LogParserEngine::new`, lu ici en fermeture — jamais rappelé directement
+// depuis `LogParser`, qui reste volontairement sans dépendance) : reproduit le même
+// branchement que `StatsStoreService` côté web (`isKnownMonsterName: (name) =>
+// this.catalog.isKnownWakfuMonsterName(name)`), sur `overlay_engine::CatalogIndex` plutôt que
+// `CatalogService` — seule façon de protéger un vrai monstre qui se révèle (mimique, brèche —
+// voir CLAUDE.md du dépôt web) contre le repli "invocation sans annonce" du parser (retour
+// utilisateur 2026-09-02 : une invocation de mécanisme apparaissait à tort côté ennemis).
+// `?? false` si le harnais n'a pas encore posé de catalogue (tout premier appel avant tout
+// chargement réseau/cache) — comportement historique inchangé, jamais un blocage.
+declare const globalThis: {
+  wakfuEngine?: unknown;
+  hostIsKnownMonsterName?: (name: string) => boolean;
+};
+
+const parser = new LogParser({
+  isKnownMonsterName: (name) => globalThis.hostIsKnownMonsterName?.(name) ?? false,
+});
 
 function serialize(entry: unknown): string {
   return entry === null || entry === undefined ? '' : JSON.stringify(entry);
@@ -64,5 +82,4 @@ export function parseBatch(linesJoined: string): string {
 // dans le contexte d'exécution. On republie donc l'API sur `globalThis` pour que le harnais Rust
 // l'appelle par un nom stable, indépendamment du format de bundle (`esbuild --format=iife`, voir
 // build.mjs).
-declare const globalThis: { wakfuEngine?: unknown };
 globalThis.wakfuEngine = { parseLine, flush, resetParser, parseBatch };
