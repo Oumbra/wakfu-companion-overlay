@@ -4,16 +4,35 @@
 //! jeu, pas juste que le code s'exécute sans paniquer.
 
 use std::fs;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use overlay_engine::Engine;
 use overlay_ingest::{LineBatch, Tailer};
 
 const WAKFU_LOG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/wakfu.log");
 
+static NEXT_TEST_ID: AtomicU32 = AtomicU32::new(0);
+
+/// JAMAIS `Engine::new()`/`Engine::with_watchlist_store()` seul ici — voir la doc d'`Engine::
+/// with_stores` : ce fichier est un test d'intégration (pas de `cfg(test)` actif pour
+/// `overlay-engine`), et plusieurs de ces tests laissent volontairement un combat `ongoing` à la
+/// fin (précisément ce que `fight_store` persiste) — sans chemin dédié, ils écriraient dans le
+/// VRAI dossier de combats de production. Chemin temporaire unique par appel (plusieurs tests, et
+/// plusieurs `Engine` par test, tournent en parallèle).
+fn test_engine() -> Engine {
+    let dir = std::env::temp_dir().join(format!(
+        "wakfu-overlay-session-real-log-test-{}-{}",
+        std::process::id(),
+        NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    Engine::with_stores(dir.join("watchlist-counts.json"), dir.join("fights"))
+        .expect("création de l'Engine")
+}
+
 #[test]
 fn ingest_vrai_wakfu_log_produit_un_recap_plausible() {
     let mut tailer = Tailer::new(WAKFU_LOG);
-    let mut engine = Engine::new().expect("création de l'Engine");
+    let mut engine = test_engine();
 
     let mut total_entries = 0usize;
     loop {
@@ -64,7 +83,7 @@ fn rattrapage_en_plusieurs_lots_donne_le_meme_recap_quun_lot_unique() {
     let lines: Vec<String> = content.lines().map(str::to_string).collect();
     let split_at = lines.len() / 2;
 
-    let mut engine_single = Engine::new().unwrap();
+    let mut engine_single = test_engine();
     let batch_single = LineBatch {
         lines: lines.clone(),
         is_initial_load: true,
@@ -72,7 +91,7 @@ fn rattrapage_en_plusieurs_lots_donne_le_meme_recap_quun_lot_unique() {
     engine_single.ingest_batch(&batch_single).unwrap();
     let snapshot_single = engine_single.snapshot();
 
-    let mut engine_split = Engine::new().unwrap();
+    let mut engine_split = test_engine();
     let batch1 = LineBatch {
         lines: lines[..split_at].to_vec(),
         is_initial_load: true,
@@ -99,7 +118,7 @@ fn lot_en_direct_apres_rattrapage_ne_reinitialise_pas_letat() {
     let content = fs::read_to_string(WAKFU_LOG).unwrap();
     let lines: Vec<String> = content.lines().map(str::to_string).collect();
 
-    let mut engine = Engine::new().unwrap();
+    let mut engine = test_engine();
     engine
         .ingest_batch(&LineBatch {
             lines,
@@ -142,7 +161,7 @@ fn rotation_en_cours_de_session_ne_perd_pas_le_combat_en_cours() {
     let lines: Vec<String> = content.lines().map(str::to_string).collect();
     let split_at = lines.len() / 2;
 
-    let mut engine = Engine::new().unwrap();
+    let mut engine = test_engine();
     engine
         .ingest_batch(&LineBatch {
             lines: lines[..split_at].to_vec(),
