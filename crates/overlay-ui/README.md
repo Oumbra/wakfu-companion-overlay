@@ -16,7 +16,11 @@ cd crates\overlay-ui
 
 Prépare `vendor/wgpu-hal-30.0.1` (patch DirectComposition, à la racine du dépôt — voir
 `patches/setup-vendor.sh`) s'il est absent, puis `cargo run -p overlay-ui`. `Ctrl+Alt+W` bascule
-interactif / clic-traversant (hotkey global, fonctionne sans focus). Échap ou Ctrl+C pour quitter.
+interactif / clic-traversant (hotkey global, fonctionne sans focus). `Ctrl+Alt+R` force un
+rafraîchissement de tous les overlays (redessin + réaffirmation topmost immédiate — voir
+`App::force_refresh`, `main.rs`) : demande utilisateur explicite 2026-09-02 pour récupérer un
+overlay bloqué (mauvaise taille, plus au premier plan) sans relancer tout le processus. Échap ou
+Ctrl+C pour quitter.
 
 ## Deux fenêtres overlay indépendantes par personnage
 

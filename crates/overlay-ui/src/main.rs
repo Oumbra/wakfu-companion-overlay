@@ -68,6 +68,13 @@ use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 use winit::platform::windows::WindowAttributesExtWindows;
 
 const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
+/// Ctrl+Alt+R plutôt que F5 (suggestion initiale de l'utilisateur, 2026-09-02) : F5 est un
+/// raccourci GLOBAL (`GlobalHotKeyManager`, jamais limité à une fenêtre précise malgré la demande
+/// « quand on est focus sur une fenêtre de jeu ») — le voler à Wakfu (raccourcis de sort/action
+/// fréquents sur les touches de fonction) ou à n'importe quelle autre appli au premier plan serait
+/// activement nuisible. Même préfixe que `HOTKEY_LABEL` : cohérent, déjà éprouvé sans collision
+/// connue avec le jeu.
+const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Alt+R";
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
@@ -251,6 +258,11 @@ struct App {
     #[allow(dead_code)] // jamais relu : sa seule raison d'être est de rester en vie (voir S1)
     hotkey_manager: GlobalHotKeyManager,
     hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
+    /// `HotKey::id()` de `HOTKEY_LABEL`/`REFRESH_HOTKEY_LABEL` — un seul `GlobalHotKeyEventReceiver`
+    /// partagé pour tous les raccourcis enregistrés (API de `global_hotkey`), distingué par cet id
+    /// à la réception (voir `about_to_wait`).
+    toggle_hotkey_id: u32,
+    refresh_hotkey_id: u32,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     /// Publié par le thread Engine à chaque lot ingéré (et une fois de plus dès la réception des
@@ -316,15 +328,21 @@ impl App {
         } = state;
 
         let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
-        let hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
+        let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
+        let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyR);
         hotkey_manager
-            .register(hotkey)
+            .register(toggle_hotkey)
             .expect("enregistrement du hotkey global");
+        hotkey_manager
+            .register(refresh_hotkey)
+            .expect("enregistrement du hotkey de rafraîchissement");
 
         Self {
             windows: HashMap::new(),
             hotkey_manager,
             hotkey_events: GlobalHotKeyEvent::receiver(),
+            toggle_hotkey_id: toggle_hotkey.id(),
+            refresh_hotkey_id: refresh_hotkey.id(),
             interactive: true,
             snapshot,
             watchlist,
@@ -541,6 +559,23 @@ impl App {
         );
     }
 
+    /// `REFRESH_HOTKEY_LABEL` : demande explicite de l'utilisateur (2026-09-02) — « il faut trouver
+    /// une solution » pour un overlay bloqué (mauvaise taille, plus au premier plan, Suivi resté
+    /// masqué après un lot de réglages arrivé trop tôt) sans devoir relancer tout le processus.
+    /// Ne redétecte PAS les fenêtres de jeu elles-mêmes (`sync_windows` le fait déjà en continu,
+    /// ~20 Hz, voir `about_to_wait`) — force seulement : (a) le prochain redessin de CHAQUE
+    /// fenêtre (recalcule au passage la largeur du Suivi, voir `WindowEvent::RedrawRequested`), et
+    /// (b) une réaffirmation topmost IMMÉDIATE (bypass `TOPMOST_REASSERT_INTERVAL`, voir
+    /// `sync_topmost`) — les deux causes de blocage réellement observées jusqu'ici.
+    fn force_refresh(&mut self) {
+        for overlay in self.windows.values_mut() {
+            overlay.last_topmost_reassert = None;
+            overlay.window.request_redraw();
+        }
+        self.sync_topmost();
+        println!(">>> Rafraîchissement forcé ({REFRESH_HOTKEY_LABEL})");
+    }
+
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
     /// sinon repli en z-order normal — pour ne plus recouvrir une application quelconque devenue
     /// active (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus
@@ -623,7 +658,9 @@ impl ApplicationHandler<UserEvent> for App {
             println!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
             println!("Suivi de {}", self.log_path.display());
             println!(
-                "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. Échap/Ctrl+C pour quitter.\n"
+                "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. \
+                 {REFRESH_HOTKEY_LABEL} pour forcer un rafraîchissement (overlay bloqué/mal \
+                 positionné). Échap/Ctrl+C pour quitter.\n"
             );
             self.banner_printed = true;
         }
@@ -733,9 +770,21 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Hotkey global : thread OS dédié, sondé ici sans bloquer (voir S1).
-        if self.hotkey_events.try_recv().is_ok() {
-            self.toggle_interactive();
+        // Hotkey global : thread OS dédié, sondé ici sans bloquer (voir S1). `while let` (pas un
+        // simple `if`) : chaque appui PHYSIQUE produit deux événements (`Pressed` PUIS `Released`,
+        // voir `HotKeyState`) — les deux peuvent être en file au même tick à ~20 Hz. Filtré sur
+        // `Pressed` uniquement : le code précédent réagissait aux deux, togglant deux fois de
+        // suite pour un seul appui (bug réel, symptôme observé 2026-09-02 : plusieurs lignes
+        // ">>> Bascule" consécutives dans les logs pour un nombre d'appuis bien moindre).
+        while let Ok(event) = self.hotkey_events.try_recv() {
+            if event.state != global_hotkey::HotKeyState::Pressed {
+                continue;
+            }
+            if event.id == self.toggle_hotkey_id {
+                self.toggle_interactive();
+            } else if event.id == self.refresh_hotkey_id {
+                self.force_refresh();
+            }
         }
         // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
         // Win32 pour être notifié d'un déplacement/redimensionnement/apparition d'une fenêtre qui
@@ -836,6 +885,25 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
     surface.configure(&device, &config);
 
     let egui_ctx = egui::Context::default();
+    // Délai de tooltip par défaut d'egui (0,5s, `show_tooltips_only_when_still=true` : le
+    // minuteur repart de zéro à chaque micro-mouvement de la souris, pas seulement au premier
+    // survol) — trop long/imprévisible dans cette architecture SANS boucle de rendu continue
+    // (§6.1) : chaque redessin dépend du réveil `about_to_wait`/`next_redraw_at`, qui n'apporte
+    // qu'une granularité de 50ms au mieux, jamais un vrai 60Hz qui masquerait la latence. Retour
+    // utilisateur 2026-09-02 : « il faut bien quasiment quatre, cinq secondes avant que la
+    // tooltip s'affiche » — `show_tooltips_only_when_still` désactivé (affichée dès le survol,
+    // sans exiger une souris parfaitement immobile) et le délai réduit à 150ms (perceptible comme
+    // quasi immédiat, tout en évitant un flash sur un simple passage de souris).
+    // `style_mut_of` (par thème, egui 0.36) plutôt que `style_mut` (retiré) — appliqué aux DEUX
+    // thèmes : ce réglage ne touche qu'à l'interaction, pas aux couleurs (seul le thème sombre est
+    // par ailleurs reproduit ici, voir `panels::combat::ACCENT`), autant ne pas dépendre de celui
+    // qu'egui choisit par défaut.
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        egui_ctx.style_mut_of(theme, |style| {
+            style.interaction.show_tooltips_only_when_still = false;
+            style.interaction.tooltip_delay = 0.15;
+        });
+    }
     let egui_winit = egui_winit::State::new(
         egui_ctx.clone(),
         egui::ViewportId::ROOT,
