@@ -38,9 +38,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::CatalogIndex;
 use crate::class_breed::class_for_breed;
+use crate::history::{
+    fight_signature, purchase_signature, trade_signature, FightLootPayload,
+    FightParticipantPayload, FightPayload, FightSide, HistoryEventKind, HistoryPayload,
+    PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+};
+use crate::log_time::{format_iso_utc, time_of_day_ms, LogDateTracker};
 use crate::model::{FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
 use crate::watchlist::{WatchlistEntry, WatchlistState};
+
+/// Fenêtre de corrélation perte de kamas → ramassage suivant pour reconnaître un achat marchand/
+/// HDV — miroir exact de `PURCHASE_WINDOW_MS` (`stats-store.service.ts`).
+const PURCHASE_WINDOW_MS: i64 = 2_000;
 
 /// `Serialize`/`Deserialize` servent à la persistance disque du combat en cours (voir
 /// `fight_store.rs`, §9 du plan) — restauration après un redémarrage de l'overlay survenu pendant
@@ -221,6 +231,37 @@ struct FightWorking {
     /// et le retour utilisateur 2026-09-02 (captures d'écran à l'appui : « Balise de Contact »,
     /// mécanisme allié, listé côté ennemis).
     summon_names: std::collections::HashSet<String>,
+    /// Noms (minuscules) d'ennemis résolus par une FUITE (`EnemyFled`) — sous-ensemble de
+    /// `resolved_enemies` (voir `mark_resolved`) : sert uniquement à distinguer `defeated`/`fled`
+    /// au moment de construire `FightParticipantPayload` (L5, §7.1), `resolved_enemies` seul ne le
+    /// permettant pas (les deux causes de résolution y sont fusionnées, voir sa doc). Perdu si
+    /// l'overlay redémarre en cours de combat (`restore_fight` ne le reconstruit pas, comme le
+    /// reste de l'état d'attribution) — un ennemi déjà fui avant un redémarrage serait alors
+    /// compté `defeated` plutôt que `fled` s'il se trouve aussi implicitement résolu par le filet
+    /// de rattrapage : écart mineur assumé, cohérent avec les autres pertes déjà documentées de
+    /// `restore_fight`.
+    fled_names: std::collections::HashSet<String>,
+    /// Instant (ms, époque Unix) de la toute première jonction de ce combat — voir
+    /// `LogDateTracker::full_timestamp_ms`. Base de `FightPayload::started_at`/`duration_ms`.
+    /// `0` (jamais un vrai combat, epoch 1970) uniquement pour un combat restauré depuis un fichier
+    /// `fight-*.json` écrit par une version de l'overlay antérieure à ce champ — voir
+    /// `restore_fight`, cas limite transitoire sans conséquence passé la toute première mise à
+    /// jour.
+    started_at_ms: i64,
+    /// Butin ramassé PENDANT ce combat (nom, quantité) — jamais un objet déjà classé "achat" (voir
+    /// le filet purchase de `SessionState::apply`) : distinct de `SessionState::recent_loot`
+    /// (fenêtre glissante d'affichage, tous combats confondus) et non affiché par L2, seulement
+    /// utile à `FightPayload::loot` (L5).
+    loot: Vec<(String, i64)>,
+    /// Kamas gagnés PENDANT ce combat — voir `FightPayload::kamas_gained`. Accumulation directe
+    /// sur le `fight_id` porté par `LogEntry::KamaGain`, plus simple que le mécanisme "en attente
+    /// jusqu'au prochain combat-end" de `pendingFightKamas` côté web (utile là-bas seulement parce
+    /// que son fightId n'est jamais fiable à cet endroit précis du pipeline TS) : ici
+    /// `LogEntry::KamaGain::fight_id` vient déjà résolu par le parser vendu, l'attribution directe
+    /// suffit.
+    kamas_gained: i64,
+    challenges_passed: i64,
+    challenges_failed: i64,
 }
 
 impl FightWorking {
@@ -329,6 +370,17 @@ struct SessionState {
     totals: SessionTotals,
     fights: HashMap<i64, FightWorking>,
     recent_loot: Vec<LootItem>,
+    /// Reconstruction de date calendaire réelle depuis `LogEntry::LogDateAnchor` — voir
+    /// `log_time.rs`. Un seul tracker pour tout `wakfu.log` (flux chronologique unique, voir doc
+    /// de module) : une rotation en cours de session pose simplement un nouvel ancrage par-dessus,
+    /// jamais réinitialisé explicitement (pas plus que `totals`/`recent_loot` ne le sont à une
+    /// rotation, voir `Engine::state_initialized`).
+    date_tracker: LogDateTracker,
+    /// Perte de kamas en attente d'un ramassage corrélé (fenêtre `PURCHASE_WINDOW_MS`) — miroir de
+    /// `pendingPurchase` (`stats-store.service.ts`) : `(montant, heure du jour en ms)`. Volontairement
+    /// PAS scopé à un combat : un achat marchand/HDV n'est jamais un événement de combat, même si un
+    /// combat est actif en parallèle sur un autre personnage (multi-compte).
+    pending_purchase: Option<(i64, i64)>,
 }
 
 impl SessionState {
@@ -336,9 +388,76 @@ impl SessionState {
     /// de `CombatEnd` ci-dessous (vide dans tous les autres cas) — l'appelant (`Engine::
     /// ingest_batch`) s'en sert pour créditer la watchlist comme s'il s'agissait d'autant de
     /// `LogEntry::EnemyDefeated` supplémentaires, seul endroit qui connaît `WatchlistState`.
-    fn apply(&mut self, entry: &LogEntry, roster: Option<&RosterIndex>) -> Vec<String> {
+    ///
+    /// `sync_events` (L5, §7.1) reçoit tout événement d'historique prêt à synchroniser détecté sur
+    /// CETTE ligne : un fight au `CombatEnd`, un purchase à un `Loot` corrélé à une perte de kamas
+    /// récente, un trade à un `TradeCompleted`. Motif "out-param" plutôt qu'un second `Vec` en
+    /// retour : `apply` a déjà un retour dédié (`implicitly_defeated_enemies`), et l'appelant a de
+    /// toute façon besoin d'accumuler ces événements sur PLUSIEURS appels (tout un lot) avant de
+    /// les drainer — voir `Engine::pending_sync_events`/`drain_sync_events`.
+    fn apply(
+        &mut self,
+        entry: &LogEntry,
+        roster: Option<&RosterIndex>,
+        sync_events: &mut Vec<SyncEvent>,
+    ) -> Vec<String> {
         let mut implicitly_defeated_enemies = Vec::new();
+
+        // Détection d'achat marchand/HDV (miroir du préambule d'`apply` côté web,
+        // `stats-store.service.ts`) : une perte de kamas immédiatement suivie (fenêtre
+        // `PURCHASE_WINDOW_MS`) d'un ramassage en fait un achat, jamais du butin de combat — voir
+        // la doc de `FightWorking::loot`. `pending_purchase` est remis à `None` après TOUTE ligne
+        // qui n'est pas elle-même une nouvelle perte de kamas (même règle que le web : un achat
+        // groupé où plusieurs objets suivent une seule perte n'associe l'achat qu'au tout premier
+        // ramassage, les suivants restent traités comme avant — écart de fidélité assumé, voir la
+        // doc de module de `history.rs`).
+        let mut purchase_loot = false;
+        if let LogEntry::Loot {
+            item,
+            quantity,
+            time,
+            fight_id,
+        } = entry
+        {
+            if let Some((amount, pending_time_ms)) = self.pending_purchase {
+                if let Some(time_ms) = time_of_day_ms(time) {
+                    if time_ms - pending_time_ms <= PURCHASE_WINDOW_MS {
+                        purchase_loot = true;
+                        let signature = purchase_signature(time, item, *quantity, amount);
+                        let occurred_at_ms = self.date_tracker.full_timestamp_ms(time);
+                        sync_events.push(SyncEvent {
+                            kind: HistoryEventKind::Purchase,
+                            signature,
+                            payload: HistoryPayload::Purchase(PurchasePayload {
+                                item_id: None,
+                                item_name: Some(item.clone()),
+                                quantity: *quantity,
+                                total_cost: amount,
+                                occurred_at: format_iso_utc(occurred_at_ms),
+                                game_server: None,
+                            }),
+                        });
+                    }
+                }
+            }
+            if !purchase_loot {
+                if let Some(fight_id) = fight_id {
+                    if let Some(fight) = self.fights.get_mut(fight_id) {
+                        fight.loot.push((item.clone(), *quantity));
+                    }
+                }
+            }
+        }
+        if !matches!(entry, LogEntry::KamaLoss { .. }) {
+            self.pending_purchase = None;
+        }
+
         match entry {
+            LogEntry::LogDateAnchor {
+                year, month, day, ..
+            } => {
+                self.date_tracker.set_anchor(*year, *month, *day);
+            }
             LogEntry::FighterJoined {
                 fight_id,
                 name,
@@ -347,7 +466,8 @@ impl SessionState {
                 summoned_by,
                 ..
             } => {
-                self.ensure_fight(*fight_id);
+                let started_at_ms = self.date_tracker.full_timestamp_ms(entry.time());
+                self.ensure_fight(*fight_id, started_at_ms);
                 if summoned_by.is_some() {
                     // Voir `FightWorking::summon_names` : jamais de ligne pour une invocation,
                     // quel que soit `is_controlled_by_ai` (toujours `true` en pratique côté log,
@@ -416,6 +536,9 @@ impl SessionState {
                 ..
             } => {
                 self.mark_resolved(*fight_id, name);
+                if let Some(fight) = self.fights.get_mut(fight_id) {
+                    fight.fled_names.insert(name.to_lowercase());
+                }
             }
             LogEntry::CombatEnd {
                 fight_id, result, ..
@@ -447,11 +570,48 @@ impl SessionState {
                     FightResult::Won => self.totals.fights_won += 1,
                     FightResult::Lost => self.totals.fights_lost += 1,
                 }
+                // L5, §7.1 : un combat terminé est toujours prêt à synchroniser, qu'il soit gagné
+                // ou perdu — construit AVANT `prune_ended_fights()` ci-dessous, qui retire ce
+                // combat de `self.fights` dès que la limite `MAX_TRACKED_FIGHTS` l'exige.
+                if let Some(fight) = self.fights.get(fight_id) {
+                    let end_ms = self.date_tracker.full_timestamp_ms(entry.time());
+                    sync_events.push(build_fight_sync_event(
+                        fight,
+                        entry.time(),
+                        *result == FightResult::Won,
+                        end_ms,
+                    ));
+                }
                 self.prune_ended_fights();
             }
-            LogEntry::KamaGain { amount, .. } => self.totals.kamas_gained += amount,
-            LogEntry::KamaLoss { amount, .. } => self.totals.kamas_lost += amount,
+            LogEntry::KamaGain {
+                amount, fight_id, ..
+            } => {
+                self.totals.kamas_gained += amount;
+                if let Some(fight_id) = fight_id {
+                    if let Some(fight) = self.fights.get_mut(fight_id) {
+                        fight.kamas_gained += amount;
+                    }
+                }
+            }
+            LogEntry::KamaLoss { amount, time } => {
+                self.totals.kamas_lost += amount;
+                self.pending_purchase = time_of_day_ms(time).map(|ms| (*amount, ms));
+            }
             LogEntry::XpGain { amount, .. } => self.totals.xp_gained += amount,
+            LogEntry::ChallengeResult {
+                success,
+                fight_id: Some(fight_id),
+                ..
+            } => {
+                if let Some(fight) = self.fights.get_mut(fight_id) {
+                    if *success {
+                        fight.challenges_passed += 1;
+                    } else {
+                        fight.challenges_failed += 1;
+                    }
+                }
+            }
             LogEntry::Loot {
                 item,
                 quantity,
@@ -468,11 +628,17 @@ impl SessionState {
                     self.recent_loot.remove(0);
                 }
             }
+            LogEntry::TradeCompleted { time, sides } => {
+                let occurred_ms = self.date_tracker.full_timestamp_ms(time);
+                if let Some(event) = build_trade_sync_event(time, sides, roster, occurred_ms) {
+                    sync_events.push(event);
+                }
+            }
             // Hors périmètre de ce premier slice (voir le commentaire de module) : chat, armor,
             // combat-defeat-marker, combat-start (ne porte pas de fightId, voir le TS vendu),
-            // challenge-result, market-occupation, log-date-anchor, trade-completed, et les
-            // variantes sans fightId (kamas/loot hors combat, dégâts non résolus, spell-cast/
-            // enemy-defeated/fled sans fightId résolu par le parser).
+            // market-occupation, et les variantes sans fightId (kamas/loot hors combat, dégâts non
+            // résolus, spell-cast/enemy-defeated/fled/challenge-result sans fightId résolu par le
+            // parser).
             _ => {}
         }
         implicitly_defeated_enemies
@@ -488,7 +654,7 @@ impl SessionState {
         }
     }
 
-    fn ensure_fight(&mut self, fight_id: i64) {
+    fn ensure_fight(&mut self, fight_id: i64, started_at_ms: i64) {
         self.fights.entry(fight_id).or_insert_with(|| FightWorking {
             snapshot: FightSnapshot {
                 fight_id,
@@ -503,6 +669,12 @@ impl SessionState {
             last_turn_actor: None,
             last_resolved_seat_by_name: HashMap::new(),
             summon_names: std::collections::HashSet::new(),
+            fled_names: std::collections::HashSet::new(),
+            started_at_ms,
+            loot: Vec::new(),
+            kamas_gained: 0,
+            challenges_passed: 0,
+            challenges_failed: 0,
         });
     }
 
@@ -532,6 +704,16 @@ impl SessionState {
                 last_turn_actor: None,
                 last_resolved_seat_by_name: HashMap::new(),
                 summon_names: std::collections::HashSet::new(),
+                fled_names: std::collections::HashSet::new(),
+                // Pas persisté par `fight_store` (voir `FightSnapshot`) : `0` (epoch 1970) pour un
+                // combat restauré, comme documenté sur `FightWorking::started_at_ms` — repli
+                // sans conséquence pratique (combat déjà entamé avant le redémarrage de l'overlay,
+                // cas rare).
+                started_at_ms: 0,
+                loot: Vec::new(),
+                kamas_gained: 0,
+                challenges_passed: 0,
+                challenges_failed: 0,
             },
         );
     }
@@ -593,7 +775,10 @@ impl SessionState {
     /// le plus profond, voir `log-parser.ts`) ne créditent personne, plutôt que de créer une ligne
     /// pour l'invocation elle-même (voir la doc de module, cas `FighterJoined`).
     fn fighter_mut(&mut self, fight_id: i64, name: &str) -> Option<&mut FighterDamage> {
-        self.ensure_fight(fight_id);
+        // `0` (epoch 1970) plutôt qu'un horodatage réel : ce chemin est un pur filet défensif (un
+        // combat déjà en cours au moment de la connexion, jamais vu `FighterJoined`), voir la doc
+        // ci-dessus — `FightWorking::started_at_ms` documente ce repli, sans conséquence pratique.
+        self.ensure_fight(fight_id, 0);
 
         let known_idx = {
             let fight = self
@@ -657,6 +842,163 @@ impl SessionState {
     }
 }
 
+/// Construit l'événement d'historique d'un combat terminé — appelé une seule fois, au
+/// `CombatEnd` (voir `SessionState::apply`). `instanceIndex` recalculé ici par ordre de jonction
+/// (le Nᵉ combattant partageant ce nom obtient l'index N-1) : suffisant pour distinguer des
+/// homonymes dans la signature/le payload, sans dépendre de `FightWorking::fighter_index` (déjà
+/// utilisé pour un besoin différent, l'attribution des dégâts par siège d'initiative — voir sa
+/// doc). Voir la doc de module de `history.rs` pour le détail des champs volontairement pas
+/// encore alimentés (`spells`, `xpGained` par participant, `monsterId`, `dungeonId`, `gameServer`,
+/// `turns`).
+fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i64) -> SyncEvent {
+    let mut instance_seen: HashMap<String, i64> = HashMap::new();
+    let mut sig_participants: Vec<(String, i64)> =
+        Vec::with_capacity(fight.snapshot.fighters.len());
+    let participants: Vec<FightParticipantPayload> = fight
+        .snapshot
+        .fighters
+        .iter()
+        .map(|fighter| {
+            let counter = instance_seen.entry(fighter.name.clone()).or_insert(0);
+            let instance_index = *counter;
+            *counter += 1;
+            sig_participants.push((fighter.name.clone(), instance_index));
+
+            let (defeated, fled) = if fighter.is_ally {
+                (false, false)
+            } else {
+                let lower = fighter.name.to_lowercase();
+                let fled = fight.fled_names.contains(&lower);
+                let defeated = !fled && fight.resolved_enemies.contains(&lower);
+                (defeated, fled)
+            };
+            FightParticipantPayload {
+                side: if fighter.is_ally {
+                    FightSide::Ally
+                } else {
+                    FightSide::Enemy
+                },
+                name: fighter.name.clone(),
+                monster_id: None,
+                instance_index,
+                class_name: fighter.class_name.clone(),
+                damage: fighter.total_damage,
+                defeated,
+                fled,
+                spells: Vec::new(),
+                xp_gained: 0,
+            }
+        })
+        .collect();
+
+    // Dégâts de l'équipe du joueur : la somme des lignes classées alliées, jamais les deux camps
+    // ensemble (mélangerait dégâts subis et infligés) — miroir exact de `HistorySyncService.
+    // recordFight` (`totalDamage`) côté web.
+    let total_damage: i64 = participants
+        .iter()
+        .filter(|p| p.side == FightSide::Ally)
+        .map(|p| p.damage)
+        .sum();
+    let loot = fight
+        .loot
+        .iter()
+        .map(|(name, quantity)| FightLootPayload {
+            item_id: None,
+            item_name: Some(name.clone()),
+            quantity: *quantity,
+        })
+        .collect();
+    let signature = fight_signature(time, fight.snapshot.fight_id, won, &sig_participants);
+    let duration_ms = (end_ms - fight.started_at_ms).max(0);
+
+    SyncEvent {
+        kind: HistoryEventKind::Fight,
+        signature,
+        payload: HistoryPayload::Fight(FightPayload {
+            fight_id: Some(fight.snapshot.fight_id),
+            started_at: format_iso_utc(fight.started_at_ms),
+            duration_ms: Some(duration_ms),
+            won,
+            turns: 0,
+            total_damage,
+            xp_gained: 0,
+            kamas_gained: Some(fight.kamas_gained),
+            game_server: None,
+            dungeon_id: None,
+            dungeon_run_signature: None,
+            challenges_passed: fight.challenges_passed,
+            challenges_failed: fight.challenges_failed,
+            participants,
+            loot,
+        }),
+    }
+}
+
+/// Construit l'événement d'historique d'un échange — miroir de `registerTrade`
+/// (`stats-store.service.ts`) : le personnage "en face" (`peerName`) est celui des deux côtés qui
+/// n'appartient PAS au roster déclaré (`self_name`) ; `None` si les deux côtés appartiennent au
+/// roster (échange entre deux comptes du même joueur, pas un vrai échange avec un tiers) ; repli
+/// sur le premier côté comme "soi" si NI L'UN NI L'AUTRE n'est reconnu (roster pas encore chargé,
+/// ou personnage pas déclaré) — même choix stable que le web plutôt que de ne rien enregistrer.
+fn build_trade_sync_event(
+    time: &str,
+    sides: &[crate::model::TradeSide; 2],
+    roster: Option<&RosterIndex>,
+    occurred_ms: i64,
+) -> Option<SyncEvent> {
+    let [a, b] = sides;
+    let a_is_self = roster.is_some_and(|r| r.find(&a.player_name).is_some());
+    let b_is_self = roster.is_some_and(|r| r.find(&b.player_name).is_some());
+    if a_is_self && b_is_self {
+        return None;
+    }
+    let (self_side, other_side) = if b_is_self { (b, a) } else { (a, b) };
+
+    let mut items = Vec::with_capacity(self_side.items.len() + other_side.items.len());
+    let mut sig_items = Vec::with_capacity(items.capacity());
+    for item in &other_side.items {
+        items.push(TradeItemPayload {
+            direction: TradeDirection::Acquired,
+            item_id: None,
+            item_name: Some(item.name.clone()),
+            quantity: item.quantity,
+        });
+        sig_items.push((TradeDirection::Acquired, item.name.clone(), item.quantity));
+    }
+    for item in &self_side.items {
+        items.push(TradeItemPayload {
+            direction: TradeDirection::Given,
+            item_id: None,
+            item_name: Some(item.name.clone()),
+            quantity: item.quantity,
+        });
+        sig_items.push((TradeDirection::Given, item.name.clone(), item.quantity));
+    }
+
+    let signature = trade_signature(
+        time,
+        &other_side.player_name,
+        &self_side.player_name,
+        other_side.kamas,
+        self_side.kamas,
+        &sig_items,
+    );
+
+    Some(SyncEvent {
+        kind: HistoryEventKind::Trade,
+        signature,
+        payload: HistoryPayload::Trade(TradePayload {
+            peer_name: other_side.player_name.clone(),
+            self_name: self_side.player_name.clone(),
+            occurred_at: format_iso_utc(occurred_ms),
+            kamas_acquired: other_side.kamas,
+            kamas_given: self_side.kamas,
+            game_server: None,
+            items,
+        }),
+    })
+}
+
 /// Frontière métier complète (§2 du plan) : `LineBatch` → `LogEntry` (QuickJS) → `SessionSnapshot`
 /// (agrégation Rust). Un thread dédié le possède (§3) ; jamais partagé entre threads directement,
 /// voir `overlay-app` pour le câblage réel (`ArcSwap<SessionSnapshot>` publié vers l'UI).
@@ -713,6 +1055,16 @@ pub struct Engine {
     /// indépendants côté web (`LootAlertService` reçoit les deux, mais depuis deux déclencheurs
     /// distincts, voir `profile.rs`).
     pending_loot_alerts: Vec<crate::profile::LootAlert>,
+    /// Événements d'historique (combat/achat/échange) prêts à synchroniser, accumulés depuis le
+    /// dernier `drain_sync_events` (L5, §7.1) — même motif « drain » que `pending_alerts`/
+    /// `pending_loot_alerts`, file SÉPARÉE : l'hôte (`overlay-ui`) les relaie tels quels au thread
+    /// Sync (§3 du plan, `overlay_sync::queue`), qui ne connaît que des payloads déjà sérialisés
+    /// et ne rappelle jamais l'Engine. Contrairement aux deux files ci-dessus, alimentée aussi
+    /// pendant un rattrapage (`is_initial_load`) : un combat/achat/échange déjà présent dans le
+    /// fichier doit être renvoyé à chaque reconnexion (idempotence côté serveur via `clientKey`,
+    /// voir la doc de `history.rs`), exactement comme `HistorySyncService` le fait côté web après
+    /// `resetSessionState()`.
+    pending_sync_events: Vec<SyncEvent>,
     /// Dossier de persistance des combats encore en cours (§9 du plan, voir `fight_store.rs`) —
     /// un fichier `fight-{fight_id}.json` par combat `ongoing`, mis à jour à chaque lot qui le
     /// touche (voir `ingest_batch`) et supprimé à sa fin (`CombatEnd`). Contrairement à `roster`/
@@ -777,6 +1129,7 @@ impl Engine {
             pending_alerts: Vec::new(),
             sound_items: Vec::new(),
             pending_loot_alerts: Vec::new(),
+            pending_sync_events: Vec::new(),
             fight_store_dir,
         })
     }
@@ -838,6 +1191,14 @@ impl Engine {
         std::mem::take(&mut self.pending_loot_alerts)
     }
 
+    /// Vide et renvoie les événements d'historique accumulés depuis le dernier appel (voir
+    /// `pending_sync_events`) — à appeler par l'hôte après chaque `ingest_batch` pour les relayer
+    /// au thread Sync (§7.1 du plan, L5). Un lot volumineux peut en produire beaucoup d'un coup
+    /// (rattrapage initial d'un `wakfu.log` déjà rempli d'historique).
+    pub fn drain_sync_events(&mut self) -> Vec<SyncEvent> {
+        std::mem::take(&mut self.pending_sync_events)
+    }
+
     /// Ingère un lot déjà lu par `overlay-ingest`, met à jour l'état de session en place, et
     /// renvoie les `LogEntry` produits (utile pour un affichage brut — chat, journal — que ce
     /// premier slice de L2 n'agrège pas encore, voir le module `session`).
@@ -873,7 +1234,11 @@ impl Engine {
             if let Some(fight_id) = entry_fight_id(entry) {
                 touched_fight_ids.insert(fight_id);
             }
-            let implicitly_defeated = self.state.apply(entry, self.roster.as_ref());
+            let mut new_sync_events = Vec::new();
+            let implicitly_defeated =
+                self.state
+                    .apply(entry, self.roster.as_ref(), &mut new_sync_events);
+            self.pending_sync_events.extend(new_sync_events);
             // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
             // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
             // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
@@ -1028,7 +1393,11 @@ mod tests {
         let mut state = SessionState::default();
         let roster = roster_with("Oumbra", "cra", Gender::F);
         // breed=1 (feca) volontairement en désaccord avec le roster (iop) : le roster doit gagner.
-        state.apply(&fighter_joined(1, "Oumbra", 1, false), Some(&roster));
+        state.apply(
+            &fighter_joined(1, "Oumbra", 1, false),
+            Some(&roster),
+            &mut Vec::new(),
+        );
 
         let fighter = &state.fights[&1].snapshot.fighters[0];
         assert_eq!(fighter.class_name.as_deref(), Some("cra"));
@@ -1039,7 +1408,11 @@ mod tests {
     fn repli_sur_breed_si_absent_du_roster() {
         let mut state = SessionState::default();
         let roster = roster_with("QuelquUnDAutre", "sram", Gender::F);
-        state.apply(&fighter_joined(1, "Oumbra", 8, false), Some(&roster)); // breed 8 = iop
+        state.apply(
+            &fighter_joined(1, "Oumbra", 8, false),
+            Some(&roster),
+            &mut Vec::new(),
+        ); // breed 8 = iop
 
         let fighter = &state.fights[&1].snapshot.fighters[0];
         assert_eq!(fighter.class_name.as_deref(), Some("iop"));
@@ -1049,7 +1422,11 @@ mod tests {
     #[test]
     fn aucune_classe_sans_roster_ni_breed_connu() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Oumbra", 0, false), None); // breed 0 : inconnu
+        state.apply(
+            &fighter_joined(1, "Oumbra", 0, false),
+            None,
+            &mut Vec::new(),
+        ); // breed 0 : inconnu
 
         let fighter = &state.fights[&1].snapshot.fighters[0];
         assert_eq!(fighter.class_name, None);
@@ -1059,7 +1436,11 @@ mod tests {
     fn un_ennemi_na_jamais_de_classe_meme_avec_un_breed_valide() {
         let mut state = SessionState::default();
         let roster = roster_with("Monstre", "iop", Gender::M); // ne doit jamais s'appliquer
-        state.apply(&fighter_joined(1, "Monstre", 1, true), Some(&roster)); // breed 1 = feca, is_controlled_by_ai=true
+        state.apply(
+            &fighter_joined(1, "Monstre", 1, true),
+            Some(&roster),
+            &mut Vec::new(),
+        ); // breed 1 = feca, is_controlled_by_ai=true
 
         let fighter = &state.fights[&1].snapshot.fighters[0];
         assert!(!fighter.is_ally);
@@ -1072,11 +1453,19 @@ mod tests {
     fn deux_combats_simultanes_entrelaces_restent_independants() {
         let mut state = SessionState::default();
         // Entrelacement délibéré : A rejoint, B rejoint, dégâts A, dégâts B, dégâts A...
-        state.apply(&fighter_joined(1, "PersoA", 9, false), None); // fight 1, cra
-        state.apply(&fighter_joined(2, "PersoB", 4, false), None); // fight 2, sram
-        state.apply(&damage(1, "PersoA", 100), None);
-        state.apply(&damage(2, "PersoB", 50), None);
-        state.apply(&damage(1, "PersoA", 25), None);
+        state.apply(
+            &fighter_joined(1, "PersoA", 9, false),
+            None,
+            &mut Vec::new(),
+        ); // fight 1, cra
+        state.apply(
+            &fighter_joined(2, "PersoB", 4, false),
+            None,
+            &mut Vec::new(),
+        ); // fight 2, sram
+        state.apply(&damage(1, "PersoA", 100), None, &mut Vec::new());
+        state.apply(&damage(2, "PersoB", 50), None, &mut Vec::new());
+        state.apply(&damage(1, "PersoA", 25), None, &mut Vec::new());
 
         let snapshot = state.snapshot();
         assert_eq!(snapshot.fights.len(), 2);
@@ -1097,15 +1486,19 @@ mod tests {
     #[test]
     fn deux_ennemis_homonymes_dans_un_meme_combat_restent_deux_lignes_distinctes() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Mouton", 1, true), None); // 1ʳᵉ instance
-        state.apply(&fighter_joined(1, "Mouton", 1, true), None); // 2ᵉ instance, MÊME nom
-        state.apply(&fighter_joined(1, "Oumbra", 9, false), None); // allié, sert d'intercalaire
+        state.apply(&fighter_joined(1, "Mouton", 1, true), None, &mut Vec::new()); // 1ʳᵉ instance
+        state.apply(&fighter_joined(1, "Mouton", 1, true), None, &mut Vec::new()); // 2ᵉ instance, MÊME nom
+        state.apply(
+            &fighter_joined(1, "Oumbra", 9, false),
+            None,
+            &mut Vec::new(),
+        ); // allié, sert d'intercalaire
 
-        state.apply(&spell_cast(1, "Mouton"), None); // 1er tour de Mouton -> siège #1
-        state.apply(&damage(1, "Mouton", 50), None);
-        state.apply(&spell_cast(1, "Oumbra"), None); // tour intercalaire (autre acteur)
-        state.apply(&spell_cast(1, "Mouton"), None); // tour SUIVANT de Mouton -> siège #2
-        state.apply(&damage(1, "Mouton", 30), None);
+        state.apply(&spell_cast(1, "Mouton"), None, &mut Vec::new()); // 1er tour de Mouton -> siège #1
+        state.apply(&damage(1, "Mouton", 50), None, &mut Vec::new());
+        state.apply(&spell_cast(1, "Oumbra"), None, &mut Vec::new()); // tour intercalaire (autre acteur)
+        state.apply(&spell_cast(1, "Mouton"), None, &mut Vec::new()); // tour SUIVANT de Mouton -> siège #2
+        state.apply(&damage(1, "Mouton", 30), None, &mut Vec::new());
 
         let snapshot = state.snapshot();
         let fight = &snapshot.fights[0];
@@ -1136,10 +1529,15 @@ mod tests {
     #[test]
     fn une_invocation_nobtient_jamais_sa_propre_ligne() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Oumbra", 9, false), None); // allié invocateur
+        state.apply(
+            &fighter_joined(1, "Oumbra", 9, false),
+            None,
+            &mut Vec::new(),
+        ); // allié invocateur
         state.apply(
             &summoned_fighter_joined(1, "Balise de Contact", "Oumbra"),
             None,
+            &mut Vec::new(),
         );
 
         let fight = &state.fights[&1];
@@ -1158,12 +1556,17 @@ mod tests {
     #[test]
     fn les_degats_bruts_dune_invocation_ne_creditent_personne() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Oumbra", 9, false), None);
+        state.apply(
+            &fighter_joined(1, "Oumbra", 9, false),
+            None,
+            &mut Vec::new(),
+        );
         state.apply(
             &summoned_fighter_joined(1, "Balise de Contact", "Oumbra"),
             None,
+            &mut Vec::new(),
         );
-        state.apply(&damage(1, "Balise de Contact", 999), None);
+        state.apply(&damage(1, "Balise de Contact", 999), None, &mut Vec::new());
 
         let fight = &state.fights[&1];
         assert_eq!(fight.snapshot.fighters.len(), 1);
@@ -1176,8 +1579,16 @@ mod tests {
     #[test]
     fn fight_for_character_retrouve_le_bon_combat_par_personnage() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Zoroark Shiny", 9, false), None);
-        state.apply(&fighter_joined(2, "Canis Furiosus", 4, false), None);
+        state.apply(
+            &fighter_joined(1, "Zoroark Shiny", 9, false),
+            None,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(2, "Canis Furiosus", 4, false),
+            None,
+            &mut Vec::new(),
+        );
 
         let snapshot = state.snapshot();
         assert_eq!(
@@ -1204,7 +1615,11 @@ mod tests {
     #[test]
     fn fight_for_character_absent_renvoie_none() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Zoroark Shiny", 9, false), None);
+        state.apply(
+            &fighter_joined(1, "Zoroark Shiny", 9, false),
+            None,
+            &mut Vec::new(),
+        );
 
         let snapshot = state.snapshot();
         assert_eq!(snapshot.fight_for_character("Personne Ici"), None);
@@ -1214,9 +1629,17 @@ mod tests {
     fn purge_ne_touche_jamais_un_combat_en_cours() {
         let mut state = SessionState::default();
         // MAX_TRACKED_FIGHTS + quelques combats, tous terminés sauf le tout premier (`ongoing`).
-        state.apply(&fighter_joined(0, "EnCours", 9, false), None);
+        state.apply(
+            &fighter_joined(0, "EnCours", 9, false),
+            None,
+            &mut Vec::new(),
+        );
         for fight_id in 1..=(MAX_TRACKED_FIGHTS as i64 + 5) {
-            state.apply(&fighter_joined(fight_id, "Autre", 9, false), None);
+            state.apply(
+                &fighter_joined(fight_id, "Autre", 9, false),
+                None,
+                &mut Vec::new(),
+            );
             state.apply(
                 &LogEntry::CombatEnd {
                     time: "12:00:02,000".to_string(),
@@ -1224,6 +1647,7 @@ mod tests {
                     result: FightResult::Won,
                 },
                 None,
+                &mut Vec::new(),
             );
         }
 
@@ -1265,10 +1689,19 @@ mod tests {
     #[test]
     fn filet_de_rattrapage_credite_un_ennemi_jamais_vaincu_explicitement_sur_victoire() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "El Pochito", 1, true), None);
-        state.apply(&fighter_joined(1, "Oumbra Canin", 15, false), None);
+        state.apply(
+            &fighter_joined(1, "El Pochito", 1, true),
+            None,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Oumbra Canin", 15, false),
+            None,
+            &mut Vec::new(),
+        );
 
-        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Won), None);
+        let implicitly_defeated =
+            state.apply(&combat_end(1, FightResult::Won), None, &mut Vec::new());
 
         assert_eq!(implicitly_defeated, vec!["El Pochito".to_string()]);
     }
@@ -1276,10 +1709,11 @@ mod tests {
     #[test]
     fn filet_de_rattrapage_ne_double_compte_pas_un_ennemi_deja_vaincu_explicitement() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Bwork", 1, true), None);
-        state.apply(&enemy_defeated(1, "Bwork"), None); // ligne "est KO !" explicite, avant la fin
+        state.apply(&fighter_joined(1, "Bwork", 1, true), None, &mut Vec::new());
+        state.apply(&enemy_defeated(1, "Bwork"), None, &mut Vec::new()); // ligne "est KO !" explicite, avant la fin
 
-        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Won), None);
+        let implicitly_defeated =
+            state.apply(&combat_end(1, FightResult::Won), None, &mut Vec::new());
 
         assert!(
             implicitly_defeated.is_empty(),
@@ -1293,10 +1727,15 @@ mod tests {
     #[test]
     fn filet_de_rattrapage_ne_credite_jamais_un_ennemi_en_fuite() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Mimique", 1, true), None);
-        state.apply(&enemy_fled(1, "Mimique"), None);
+        state.apply(
+            &fighter_joined(1, "Mimique", 1, true),
+            None,
+            &mut Vec::new(),
+        );
+        state.apply(&enemy_fled(1, "Mimique"), None, &mut Vec::new());
 
-        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Won), None);
+        let implicitly_defeated =
+            state.apply(&combat_end(1, FightResult::Won), None, &mut Vec::new());
 
         assert!(implicitly_defeated.is_empty());
     }
@@ -1304,9 +1743,10 @@ mod tests {
     #[test]
     fn filet_de_rattrapage_ne_sapplique_pas_sur_une_defaite() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Bwork", 1, true), None);
+        state.apply(&fighter_joined(1, "Bwork", 1, true), None, &mut Vec::new());
 
-        let implicitly_defeated = state.apply(&combat_end(1, FightResult::Lost), None);
+        let implicitly_defeated =
+            state.apply(&combat_end(1, FightResult::Lost), None, &mut Vec::new());
 
         assert!(implicitly_defeated.is_empty());
     }
