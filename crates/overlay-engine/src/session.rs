@@ -631,6 +631,24 @@ pub struct Engine {
     /// rattrapage qui continuent la même séquence logique (un combat, ou même une seule ligne
     /// multi-lignes, peut s'étaler sur plusieurs `LineBatch` à cause de `MAX_BATCH_LINES`).
     in_initial_sweep: bool,
+    /// `true` dès que `state` a été initialisé une première fois par `ingest_batch` — sert à NE
+    /// PLUS jamais vider `state` lors d'un rattrapage ULTÉRIEUR (voir `ingest_batch`).
+    ///
+    /// Régression réelle (retour utilisateur 2026-09-02, vidéo à l'appui) : `wakfu.log` peut être
+    /// remplacé par un fichier neuf **en cours de partie** (rotation à date fixe côté client
+    /// Wakfu), et le fichier rotaté ne rejoue PAS l'historique déjà lu — confirmé par la vidéo,
+    /// où le panneau Combat perd tous ses alliés/ennemis pile au moment où
+    /// `overlay_ingest::tailer` logue « rotation/troncature détectée », alors que le combat était
+    /// toujours en cours en jeu. `Tailer::poll` (voir sa doc) marque cette relecture avec
+    /// `is_initial_load: true` — EXACTEMENT le même signal qu'un tout premier lancement contre un
+    /// `wakfu.log` déjà volumineux — ce qui déclenchait avant ce champ le même
+    /// `state = SessionState::default()` que pour un vrai premier rattrapage, effaçant à tort un
+    /// combat encore actif. Ce champ distingue les deux cas : au tout premier rattrapage, `state`
+    /// est de toute façon déjà vide (le reset est un no-op) ; à toute rotation SUIVANTE, `state`
+    /// contient un vécu de session légitime (combats en cours, totaux) qui doit survivre — seul le
+    /// PARSER (contexte transitoire QuickJS, resynchronisation avec la position de lecture) a
+    /// besoin d'être réinitialisé, jamais `state`.
+    state_initialized: bool,
     /// Roster déclaré par l'utilisateur (compte, lot L4) — délibérément PORTÉ PAR `Engine`, pas
     /// par `SessionState` : ce dernier est entièrement recréé à chaque nouveau rattrapage
     /// (`SessionState::default()` ci-dessous), ce qui effacerait le roster à chaque
@@ -669,6 +687,7 @@ impl Engine {
             parser: crate::quickjs_engine::LogParserEngine::new()?,
             state: SessionState::default(),
             in_initial_sweep: false,
+            state_initialized: false,
             roster: None,
             watchlist: WatchlistState::new(store_path),
             pending_alerts: Vec::new(),
@@ -724,12 +743,19 @@ impl Engine {
         batch: &overlay_ingest::LineBatch,
     ) -> Result<Vec<LogEntry>, crate::quickjs_engine::EngineError> {
         if batch.is_initial_load && !self.in_initial_sweep {
-            // Nouveau rattrapage (reconnexion ou rotation, §5.3) : on repart de zéro, parser ET
-            // état de session — c'est la sémantique `resetSessionState()` décrite au plan. La
+            // Nouveau rattrapage (reconnexion ou rotation, §5.3) : le PARSER repart toujours de
+            // zéro (contexte transitoire QuickJS resynchronisé avec la position de lecture). La
             // watchlist n'est PAS réinitialisée ici (voir son champ ci-dessus) : ses compteurs
             // sont un suivi persistant, pas un état de combat.
             self.parser.reset()?;
-            self.state = SessionState::default();
+            // `state`, en revanche, n'est vidé qu'au TOUT PREMIER rattrapage (voir
+            // `state_initialized`) — jamais à une rotation ultérieure en cours de session, qui
+            // effacerait à tort un combat encore actif (retour utilisateur 2026-09-02, vidéo à
+            // l'appui : Wakfu ne rejoue pas l'historique déjà lu après rotation).
+            if !self.state_initialized {
+                self.state = SessionState::default();
+                self.state_initialized = true;
+            }
         }
         self.in_initial_sweep = batch.is_initial_load;
 

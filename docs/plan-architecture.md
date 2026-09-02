@@ -243,6 +243,20 @@ true`, ce qui déclenche côté Engine `resetSessionState()` (historique/kamas/X
 du `CLAUDE.md` du dépôt web : le reproduire à l'identique, sinon les compteurs de suivi regonflent
 à chaque relance de l'overlay.
 
+**Écart assumé, portage seulement (2026-09-02, retour utilisateur, vidéo à l'appui) :**
+`resetSessionState()` n'est en réalité rejoué qu'au **tout premier** rattrapage de l'Engine, jamais
+à une rotation `wakfu.log` ultérieure survenant EN COURS DE SESSION (`Engine::state_initialized`,
+`overlay-engine/src/session.rs`) — un fichier rotaté ne rejoue PAS l'historique déjà lu côté client
+Wakfu (vérifié en conditions réelles), donc vider `state` à ce moment-là effaçait un combat encore
+actif en jeu (allés/ennemis disparaissaient du panneau Combat pile à la rotation). Le PARSER, lui,
+est toujours réinitialisé à chaque rattrapage, rotation comprise (contexte transitoire QuickJS à
+resynchroniser avec la position de lecture) — seul `state` (combats/totaux Rust) survit désormais
+au-delà du tout premier. Le dépôt web n'a pas ce problème dans les mêmes proportions (page
+généralement rechargée entière avant qu'une reconnexion ne survienne) ; ce n'est donc pas un écart
+de parité fonctionnelle voulu, seulement une conséquence du fait que l'overlay, contrairement à un
+onglet de navigateur, reste ouvert en continu pendant des heures de jeu et traverse donc bien plus
+souvent une vraie rotation `wakfu.log` mid-session.
+
 ### 5.4 Date et heure
 
 Le log ne porte que `HH:MM:SS,mmm`. L'Engine reconstitue la date du jour de lecture (comportement

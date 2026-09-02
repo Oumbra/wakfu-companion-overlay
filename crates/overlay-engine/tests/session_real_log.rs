@@ -127,3 +127,47 @@ fn lot_en_direct_apres_rattrapage_ne_reinitialise_pas_letat() {
         "le combat en cours ne doit pas être perdu"
     );
 }
+
+/// Régression réelle (retour utilisateur 2026-09-02, vidéo à l'appui) : `wakfu.log` peut être
+/// remplacé par un fichier neuf **en cours de partie** (rotation) — `overlay_ingest::tailer` le
+/// détecte et relit depuis le début avec `is_initial_load: true`, EXACTEMENT le même signal qu'un
+/// tout premier lancement. Le fichier rotaté ne rejoue PAS l'historique déjà lu (vérifié en
+/// conditions réelles : le combat était toujours en cours en jeu, mais le panneau Combat a perdu
+/// tous ses alliés/ennemis pile au moment de la rotation). Un deuxième rattrapage (`is_initial_
+/// load: true`) survenant APRÈS que l'Engine ait déjà un vécu de session ne doit donc jamais
+/// effacer ce vécu, contrairement au tout premier.
+#[test]
+fn rotation_en_cours_de_session_ne_perd_pas_le_combat_en_cours() {
+    let content = fs::read_to_string(WAKFU_LOG).unwrap();
+    let lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let split_at = lines.len() / 2;
+
+    let mut engine = Engine::new().unwrap();
+    engine
+        .ingest_batch(&LineBatch {
+            lines: lines[..split_at].to_vec(),
+            is_initial_load: true,
+        })
+        .unwrap();
+    let before = engine.snapshot();
+    assert!(
+        !before.fights.is_empty(),
+        "précondition : au moins un combat après le premier rattrapage"
+    );
+
+    // Rotation en cours de session : `is_initial_load: true` de nouveau, mais le fichier rotaté
+    // (simulé ici) ne contient qu'une poignée de nouvelles lignes sans rapport — PAS un rejeu de
+    // l'historique déjà lu (comportement réel observé de Wakfu).
+    engine
+        .ingest_batch(&LineBatch {
+            lines: vec![" INFO 23:59:59,999 [x] (y:1) - ligne sans rapport".to_string()],
+            is_initial_load: true,
+        })
+        .unwrap();
+    let after = engine.snapshot();
+
+    assert_eq!(
+        before.fights, after.fights,
+        "une rotation en cours de session ne doit jamais effacer un combat déjà suivi"
+    );
+}
