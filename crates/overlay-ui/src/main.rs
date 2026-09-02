@@ -17,10 +17,11 @@
 //!
 //! Volontairement incomplet par rapport à §9 du plan : pas encore de panneau Alertes de drop
 //! (version « son ») ni d'État de synchro (dépendent soit de réglages de compte pas encore lus,
-//! soit de la synchro serveur, L5), pas de thème configurable. Le récap de session reste également
-//! **global** (identique sur toutes les fenêtres, pas ventilé par personnage — limitation connue,
-//! voir le plan) : ce sont les deux panneaux atteignables avec `overlay-engine` tel qu'il existe
-//! aujourd'hui.
+//! soit de la synchro serveur, L5). Pas de thème configurable — décision du mainteneur (§9 du
+//! plan, 2026-09-02) : un overlay n'est pas un site, palette fixe assumée. Le récap de session
+//! reste également **global** (identique sur toutes les fenêtres, pas ventilé par personnage —
+//! limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec `overlay-engine`
+//! tel qu'il existe aujourd'hui.
 //!
 //! **Disposition persistée par écran (2026-09-02, §6.4/§9 du plan)** : chaque panneau reste ancré
 //! automatiquement sur SA fenêtre de jeu (`App::anchor_position`), mais l'utilisateur peut affiner
