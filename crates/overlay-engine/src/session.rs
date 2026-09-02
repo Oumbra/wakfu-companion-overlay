@@ -664,6 +664,17 @@ pub struct Engine {
     /// l'hôte (thread dédié `overlay-ui`) les récupère à son rythme, sans coupler cette API au
     /// détail de la watchlist.
     pending_alerts: Vec<crate::watchlist::WatchlistAlert>,
+    /// Objets à son activé au ramassage (compte, §9 du plan « Alertes de drop » — cas
+    /// `reason: 'loot'`, voir `profile.rs`) — même raison qu'au-dessus (`roster`/`watchlist`) :
+    /// PORTÉ PAR `Engine`, jamais recréé avec `SessionState`. Indépendant de `watchlist` : ce
+    /// n'est PAS la liste suivie, un objet peut avoir son son activé sans être suivi et
+    /// réciproquement.
+    sound_items: Vec<crate::profile::SoundItemEntry>,
+    /// Alertes de ramassage (voir `LootAlert`) accumulées depuis le dernier `drain_loot_alerts` —
+    /// même motif « drain » que `pending_alerts`, file SÉPARÉE : les deux mécanismes sont
+    /// indépendants côté web (`LootAlertService` reçoit les deux, mais depuis deux déclencheurs
+    /// distincts, voir `profile.rs`).
+    pending_loot_alerts: Vec<crate::profile::LootAlert>,
 }
 
 impl Engine {
@@ -691,6 +702,8 @@ impl Engine {
             roster: None,
             watchlist: WatchlistState::new(store_path),
             pending_alerts: Vec::new(),
+            sound_items: Vec::new(),
+            pending_loot_alerts: Vec::new(),
         })
     }
 
@@ -724,6 +737,15 @@ impl Engine {
         self.watchlist.merge_config(entries);
     }
 
+    /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte
+    /// (voir `profile::sound_items_from_settings_json`) — appelé par l'hôte au même moment que
+    /// `set_roster`/`set_watchlist_entries` (même source `GET /api/v1/settings`). Contrairement à
+    /// `set_watchlist_entries`, rien à conserver d'une précédente valeur : cette liste ne porte
+    /// aucun état local (pas de compteur), un simple remplacement suffit.
+    pub fn set_sound_items(&mut self, items: Vec<crate::profile::SoundItemEntry>) {
+        self.sound_items = items;
+    }
+
     pub fn watchlist_entries(&self) -> &[WatchlistEntry] {
         self.watchlist.entries()
     }
@@ -733,6 +755,13 @@ impl Engine {
     /// toast/son (§9 du plan, « Alertes de drop »). Vide dans l'immense majorité des appels.
     pub fn drain_watchlist_alerts(&mut self) -> Vec<crate::watchlist::WatchlistAlert> {
         std::mem::take(&mut self.pending_alerts)
+    }
+
+    /// Vide et renvoie les alertes de ramassage (son activé) accumulées depuis le dernier appel
+    /// (voir `pending_loot_alerts`) — même usage que `drain_watchlist_alerts`, file séparée (voir
+    /// la doc de `pending_loot_alerts`). Vide dans l'immense majorité des appels.
+    pub fn drain_loot_alerts(&mut self) -> Vec<crate::profile::LootAlert> {
+        std::mem::take(&mut self.pending_loot_alerts)
     }
 
     /// Ingère un lot déjà lu par `overlay-ingest`, met à jour l'état de session en place, et
@@ -778,6 +807,21 @@ impl Engine {
                         fight_id: None,
                     });
                     self.pending_alerts.extend(alerts);
+                }
+                // Miroir de `registerLoot` (`stats-store.service.ts`), même gating
+                // `currentBatchIsInitialLoad` que ci-dessus — indépendant de la watchlist (voir la
+                // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom a son activé au
+                // compte, suivi ou non.
+                if let LogEntry::Loot { item, quantity, .. } = entry {
+                    if let Some(sound_entry) =
+                        crate::profile::find_enabled_sound_item(&self.sound_items, item)
+                    {
+                        self.pending_loot_alerts.push(crate::profile::LootAlert {
+                            name: item.clone(),
+                            quantity: *quantity,
+                            catalog_id: sound_entry.catalog_id,
+                        });
+                    }
                 }
             }
         }

@@ -8,6 +8,7 @@ pub mod class_breed;
 pub mod dungeon;
 pub mod model;
 pub mod monster_family;
+pub mod profile;
 pub mod quickjs_engine;
 pub mod roster;
 pub mod session;
@@ -17,6 +18,7 @@ pub use catalog::{CatalogIndex, IconKind, IconRef, MonsterClassification, WakfuR
 pub use dungeon::{DungeonEntry, DungeonIndex};
 pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
 pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
+pub use profile::{sound_items_from_settings_json, LootAlert, SoundItemEntry};
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
 pub use session::{Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals};

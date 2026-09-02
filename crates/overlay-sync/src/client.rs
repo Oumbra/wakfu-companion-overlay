@@ -5,7 +5,10 @@
 
 use std::time::Duration;
 
-use overlay_engine::{watchlist_from_settings_json, RosterIndex, WatchlistEntry};
+use overlay_engine::{
+    sound_items_from_settings_json, watchlist_from_settings_json, RosterIndex, SoundItemEntry,
+    WatchlistEntry,
+};
 use serde_json::Value;
 
 use crate::SyncError;
@@ -94,6 +97,11 @@ pub struct AccountSettings {
     /// set_watchlist_entries` écrase le `count` de chaque entrée reçue ici par le compteur local
     /// déjà en cours, s'il existe.
     pub watchlist: Vec<WatchlistEntry>,
+    /// Objets à son activé au ramassage (`data.profile.soundItems`, voir
+    /// `overlay_engine::profile`) — INDÉPENDANT de `watchlist` : un objet peut avoir son son
+    /// activé sans être suivi, et réciproquement. Lu en lecture seule comme le reste de cette
+    /// structure, jamais réécrit par l'overlay.
+    pub sound_items: Vec<SoundItemEntry>,
 }
 
 /// `GET /api/v1/settings` avec `Authorization: Bearer <token>` — voir `functions/api/_auth.ts`
@@ -122,6 +130,7 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
     Ok(AccountSettings {
         roster: RosterIndex::from_settings_json(&data),
         watchlist: watchlist_from_settings_json(&data),
+        sound_items: sound_items_from_settings_json(&data),
     })
 }
 

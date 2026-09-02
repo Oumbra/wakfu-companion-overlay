@@ -15,11 +15,10 @@
 //! `OverlayWindow` et le commentaire sur `Arc<Window>` (remplace la fuite `'static` d'origine,
 //! plus tenable dès que des fenêtres doivent pouvoir être détruites).
 //!
-//! Volontairement incomplet par rapport à §9 du plan : pas encore de panneau Alertes de drop
-//! (version « son ») ni d'État de synchro (dépendent soit de réglages de compte pas encore lus,
-//! soit de la synchro serveur, L5). Pas de thème configurable — décision du mainteneur (§9 du
-//! plan, 2026-09-02) : un overlay n'est pas un site, palette fixe assumée. Le récap de session
-//! reste également **global** (identique sur toutes les fenêtres, pas ventilé par personnage —
+//! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
+//! synchro serveur, L5). Pas de thème configurable — décision du mainteneur (§9 du plan,
+//! 2026-09-02) : un overlay n'est pas un site, palette fixe assumée. Le récap de session reste
+//! également **global** (identique sur toutes les fenêtres, pas ventilé par personnage —
 //! limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec `overlay-engine`
 //! tel qu'il existe aujourd'hui.
 //!
@@ -29,6 +28,12 @@
 //! le décalage résultant est persisté par écran (`layout_store`, identifié par
 //! `MonitorHandle::name()`) et réappliqué au-dessus de l'ancrage automatique à chaque repositionnement
 //! ultérieur, y compris après redémarrage.
+//!
+//! **Alertes de drop version « ramassage » (2026-09-02, §9 du plan)** : `overlay_engine::profile`
+//! lit désormais `data.profile.soundItems` (`GET /api/v1/settings`) — indépendant de la watchlist,
+//! n'importe quel objet ramassé avec son son activé au compte déclenche toast + son
+//! (`alert_sound::play_loot_alert`), pas seulement les entrées suivies. Seul le cas
+//! `reason: 'countdown'` était câblé jusqu'ici (voir `spawn_engine_thread`).
 
 mod alert_sound;
 mod game_window;
@@ -54,11 +59,13 @@ use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use layout_store::PanelOffset;
-use overlay_engine::{CatalogIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry};
+use overlay_engine::{
+    CatalogIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry, WatchlistKind,
+};
 use overlay_ingest::discovery;
 use overlay_sync::AccountSettings;
 use panels::combat::CombatSide;
-use panels::watchlist::WatchlistToast;
+use panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -1711,25 +1718,31 @@ fn spawn_engine_thread(
                     match command {
                         EngineCommand::ApplySettings(settings) => {
                             let entry_count = settings.watchlist.len();
+                            let sound_item_count = settings.sound_items.len();
                             tracing::info!(
                                 entry_count,
+                                sound_item_count,
                                 "réglages de compte appliqués à l'Engine (lot L4)"
                             );
                             engine.set_roster(Some(settings.roster));
                             engine.set_watchlist_entries(settings.watchlist);
+                            engine.set_sound_items(settings.sound_items);
                         }
                         // Déconnexion volontaire (voir `spawn_auth_thread`, §14 point 3 du plan) :
                         // repli mode invité — plus de roster connu (classification retombe sur
                         // `breed`), Suivi vidé (la LISTE suivie est lue depuis le compte ; sans
-                        // compte, il n'y a plus de liste à afficher). Les compteurs déjà persistés
-                        // sur disque (voir `overlay_engine::watchlist`) ne sont pas effacés : une
-                        // reconnexion ultérieure au MÊME compte les retrouve (`merge_config`).
+                        // compte, il n'y a plus de liste à afficher), plus aucun son de ramassage
+                        // activé (même raison : cette liste vient elle aussi du compte, voir
+                        // `overlay_engine::profile`). Les compteurs déjà persistés sur disque (voir
+                        // `overlay_engine::watchlist`) ne sont pas effacés : une reconnexion
+                        // ultérieure au MÊME compte les retrouve (`merge_config`).
                         EngineCommand::Disconnect => {
                             tracing::info!(
                                 "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé)"
                             );
                             engine.set_roster(None);
                             engine.set_watchlist_entries(Vec::new());
+                            engine.set_sound_items(Vec::new());
                         }
                     }
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
@@ -1757,6 +1770,29 @@ fn spawn_engine_thread(
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.name,
                                 kind: alert.kind,
+                                reason: WatchlistToastReason::Countdown,
+                                hide_at: std::time::Instant::now()
+                                    + panels::watchlist::TOAST_DURATION,
+                            })));
+                        }
+                        // Ramassage d'un objet à son activé (compte, voir `overlay_engine::profile`)
+                        // — INDÉPENDANT de la watchlist ci-dessus (voir la doc de
+                        // `EngineCommand::ApplySettings`), même mécanisme de toast (un seul emplacement
+                        // affiché à la fois : le plus récent des deux écrase l'autre, jamais de file
+                        // d'attente — acceptable, ces alertes sont rares et ≤ 5 s chacune).
+                        for alert in engine.drain_loot_alerts() {
+                            tracing::info!(
+                                name = %alert.name,
+                                quantity = alert.quantity,
+                                "alerte de ramassage (son activé)"
+                            );
+                            alert_sound::play_loot_alert();
+                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
+                                name: alert.name,
+                                kind: WatchlistKind::Item,
+                                reason: WatchlistToastReason::Loot {
+                                    quantity: alert.quantity,
+                                },
                                 hide_at: std::time::Instant::now()
                                     + panels::watchlist::TOAST_DURATION,
                             })));
