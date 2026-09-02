@@ -7,15 +7,16 @@
 //! Repli hors-ligne EMBARQUÉ (`assets/catalog/catalog-index.json.gz`, `embedded_fallback` —
 //! §7.4 du plan) : utilisé UNIQUEMENT quand ni le cache disque ci-dessus ni le réseau ne sont
 //! disponibles au démarrage (voir `overlay-ui::main::spawn_catalog_thread`) — l'overlay reste
-//! utilisable (icônes réelles pour les quelques entrées embarquées, icône générique sinon) plutôt
+//! utilisable (catalogue complet, seulement potentiellement daté par rapport au serveur) plutôt
 //! que de retomber sur un catalogue totalement vide au tout premier lancement hors ligne.
+//! `overlay-ui` signale ce cas par un petit indicateur « 📦⚠ » (zone Combat, voir
+//! `overlay-ui::main::render` et `App::catalog_stale`).
 //!
-//! ⚠️ Le fichier embarqué est un PLACEHOLDER volontairement réduit (voir sa fixture de test
-//! ci-dessous pour le contenu exact) : ce sandbox de développement ne peut atteindre ni Neon ni
-//! `*.pages.dev` (même limite documentée partout ailleurs dans ce dépôt et dans `wakfu-companion`,
-//! voir `server/README.md` côté web) et ne peut donc pas produire le vrai catalogue complet
-//! (~11 700 objets / ~850 monstres). **À régénérer depuis un vrai déploiement avant toute release**
-//! via `cargo run -p overlay-sync --bin gen-catalog-fallback` (voir ce binaire) — jamais à la main.
+//! Régénéré depuis le vrai déploiement dev (`claude-dev.wakfu-companion.com`, 2026-09-02) via
+//! `cargo run -p overlay-sync --bin gen-catalog-fallback` (voir ce binaire) — jamais à la main.
+//! Catalogue complet réel (~489 Ko gzip, ~1,8 Mo bruts). À régénérer de la même façon si le
+//! catalogue serveur change significativement avant une release, et à repointer sur le domaine
+//! prod une fois celui-ci confirmé équivalent (voir la note de `client.rs` sur `DEFAULT_BASE_URL`).
 
 use std::io::Read;
 use std::path::PathBuf;
