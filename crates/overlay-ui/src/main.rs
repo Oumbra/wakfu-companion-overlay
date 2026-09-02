@@ -232,6 +232,19 @@ enum UserEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AuthStatus {
     Connecting,
+    /// Code d'appairage obtenu (`POST /api/v1/auth/native/pair`), en attente que l'utilisateur le
+    /// saisisse sur `verification_url` — voir `overlay_sync::pair_and_wait`. Publié UNE FOIS par
+    /// tentative, avant le premier sondage (`poll`), donc bien avant `Connected`/`Disconnected`.
+    ///
+    /// **UI de pairing (2026-09-02, lot L4)** : jusqu'ici le code n'était visible qu'en console
+    /// (`tracing::info!`) — invisible pour qui joue en plein écran sans terminal à côté. `render`
+    /// l'affiche maintenant directement dans la fenêtre overlay (voir sa doc), le navigateur étant
+    /// déjà ouvert automatiquement en best-effort (`open::that`, voir `pair_and_wait`) — ce champ
+    /// couvre le cas où cette ouverture automatique échoue ou où l'onglet a été fermé par erreur.
+    PairingStarted {
+        pairing_code: String,
+        verification_url: String,
+    },
     Connected,
     /// Ni jeton valide ni appairage complété — l'icône de relance doit être visible (retour
     /// utilisateur 2026-09-01 : appairage en échec — 405 côté serveur — sans aucun moyen de
@@ -1373,6 +1386,47 @@ fn render(
                                 });
                                 ui.add_space(4.0);
                             }
+                            // UI de pairing (2026-09-02, lot L4) : le code n'était jusqu'ici visible
+                            // qu'en console (`tracing::info!`) — invisible pour qui joue en plein
+                            // écran sans terminal à côté. Le navigateur s'est déjà ouvert tout seul
+                            // (best-effort, `open::that` dans `pair_and_wait`) ; cette carte couvre
+                            // le cas où cette ouverture échoue ou où l'onglet a été fermé par erreur
+                            // — code affiché en GRAND (il faut pouvoir le lire et le taper sans
+                            // plisser les yeux), bouton de copie, et bouton pour rouvrir la page si
+                            // besoin. Reste minimal : pas de fenêtre dédiée, une simple carte dans la
+                            // zone Combat comme le reste de ces indicateurs.
+                            AuthStatus::PairingStarted {
+                                pairing_code,
+                                verification_url,
+                            } => {
+                                egui::Frame::new()
+                                    .fill(ui.visuals().extreme_bg_color)
+                                    .corner_radius(4.0)
+                                    .inner_margin(6.0)
+                                    .show(ui, |ui| {
+                                        ui.vertical_centered(|ui| {
+                                            ui.weak("Connexion du compte — code d'appairage");
+                                            ui.add_space(2.0);
+                                            ui.label(
+                                                egui::RichText::new(pairing_code)
+                                                    .monospace()
+                                                    .size(20.0)
+                                                    .strong(),
+                                            );
+                                            ui.add_space(2.0);
+                                            ui.horizontal(|ui| {
+                                                if ui.small_button("📋 Copier").clicked() {
+                                                    ui.ctx().copy_text(pairing_code.clone());
+                                                }
+                                                if ui.small_button("🌐 Ouvrir la page").clicked()
+                                                {
+                                                    let _ = open::that(verification_url);
+                                                }
+                                            });
+                                        });
+                                    });
+                                ui.add_space(4.0);
+                            }
                             // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
                             // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
                             // « on dirait que ça ne fait rien »).
@@ -2032,10 +2086,10 @@ fn backoff_delay(consecutive_failures: u32) -> std::time::Duration {
 /// alors que déjà connecté, `Disconnect` reçu alors que déjà déconnecté ou en pleine tentative) est
 /// silencieusement ignorée plutôt que de perturber l'état courant.
 ///
-/// Toujours pas d'UI de pairing complète dans la fenêtre overlay (hors périmètre de cette
-/// itération, voir le panneau "État de synchro" du plan §9, toujours à construire) : le code
-/// d'appairage reste affiché en console, seuls le déclenchement d'une nouvelle tentative, la
-/// déconnexion et la raison du dernier échec sont maintenant visibles/pilotables depuis l'overlay.
+/// **UI de pairing (2026-09-02)** : le code d'appairage est désormais publié via
+/// `AuthStatus::PairingStarted` (voir `attempt_connect`) et affiché directement dans la fenêtre
+/// overlay (voir `render`), plus seulement en console — en plus du déclenchement d'une nouvelle
+/// tentative, de la déconnexion et de la raison du dernier échec, déjà pilotables depuis l'overlay.
 fn spawn_auth_thread(
     settings_tx: mpsc::Sender<EngineCommand>,
     sync_tx: mpsc::Sender<SyncCommand>,
@@ -2049,7 +2103,7 @@ fn spawn_auth_thread(
             status.store(Arc::new(AuthStatus::Connecting));
             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
-            let result = attempt_connect(&settings_tx, &sync_tx);
+            let result = attempt_connect(&settings_tx, &sync_tx, &status, &proxy);
 
             let mut connected = result.is_ok();
             status.store(Arc::new(match result {
@@ -2095,10 +2149,14 @@ fn spawn_auth_thread(
 /// et transmis (`settings_tx`), `Err(_)` sinon (appairage non complété, ou réglages injoignables
 /// même après appairage) avec un message COURT destiné à l'utilisateur (tooltip de l'icône de
 /// relance, voir `render` — pas qu'à la console) : dans tous les cas l'overlay continue, au pire
-/// en mode invité (repli `breed`, aucun suivi affiché).
+/// en mode invité (repli `breed`, aucun suivi affiché). `status`/`proxy` servent uniquement à
+/// publier `AuthStatus::PairingStarted` dès que le code d'appairage est connu (voir plus bas) —
+/// `spawn_auth_thread` publie lui-même `Connecting`/`Connected`/`Disconnected` autour de l'appel.
 fn attempt_connect(
     settings_tx: &mpsc::Sender<EngineCommand>,
     sync_tx: &mpsc::Sender<SyncCommand>,
+    status: &Arc<ArcSwap<AuthStatus>>,
+    proxy: &EventLoopProxy<UserEvent>,
 ) -> Result<(), String> {
     if let Some(token) = overlay_sync::token_store::load_token() {
         match overlay_sync::client::fetch_settings(&token) {
@@ -2135,6 +2193,13 @@ fn attempt_connect(
         tracing::info!(
             "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)"
         );
+        // Voir `AuthStatus::PairingStarted` : c'est ce qui rend le code visible directement dans
+        // la fenêtre overlay, pas seulement dans ces logs.
+        status.store(Arc::new(AuthStatus::PairingStarted {
+            pairing_code: handle.pairing_code.clone(),
+            verification_url: handle.verification_url.clone(),
+        }));
+        let _ = proxy.send_event(UserEvent::AuthStatusChanged);
     }) {
         Ok(token) => token,
         Err(err) => {
