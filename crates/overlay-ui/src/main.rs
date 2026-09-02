@@ -89,6 +89,12 @@ const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Alt+R";
 const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+/// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
+/// `App::sync_topmost`. Assez court pour qu'un changement de fenêtre volontaire et soutenu
+/// reste respecté rapidement (ne pas recouvrir durablement une autre appli, retour utilisateur
+/// 2026-09-01), assez long pour absorber un aléa de timing d'un seul tick (~50 ms) entre les deux
+/// overlays d'un même personnage.
+const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
 // voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
 // faire.
@@ -260,6 +266,20 @@ struct OverlayWindow {
     /// `TOPMOST_REASSERT_INTERVAL`) — distincte d'un changement d'état détecté (`is_topmost`),
     /// qui reste réaffirmé immédiatement quel que soit ce champ.
     last_topmost_reassert: Option<std::time::Instant>,
+    /// Instant depuis lequel `relevant` est retombé à `false` en continu, tant que l'overlay est
+    /// encore `HWND_TOPMOST` — `None` tant qu'il est retombé à `false` pour la première fois OU
+    /// que l'overlay est déjà en retrait. Voir `TOPMOST_DEMOTE_GRACE` dans `App::sync_topmost` :
+    /// retour utilisateur 2026-09-02 (vidéo à l'appui), l'overlay Combat disparaissait « un coup
+    /// sur deux » en changeant de fenêtre alors que le Suivi du même personnage restait visible au
+    /// même instant — la démotion en `HWND_NOTOPMOST` était jusqu'ici IMMÉDIATE dès que
+    /// `GetForegroundWindow()` cessait de désigner la fenêtre de jeu ne serait-ce qu'un seul tick
+    /// (~50 ms), ce qui rend le résultat sensible au moindre aléa de timing entre deux fenêtres
+    /// overlay qui tournent pourtant sur le MÊME code (`sync_topmost` itère les deux de façon
+    /// identique, mais Windows peut livrer les changements de premier plan avec un tick d'écart
+    /// entre deux `SetWindowPos` consécutifs). Un délai de grâce absorbe ces aléas sans revenir sur
+    /// le principe du 2026-09-01 (ne pas recouvrir durablement une autre appli) : la réaffirmation
+    /// en topmost, elle, reste immédiate (voir plus bas) — seule la démotion est temporisée.
+    pending_demote_since: Option<std::time::Instant>,
     /// Prochain redessin déjà planifié par une frame précédente qui a demandé un délai (retour
     /// egui `ViewportOutput::repaint_delay` — ex. le délai d'apparition d'une tooltip au survol
     /// d'un portrait, voir `panels::combat`) — sans ce champ, ce délai n'avait AUCUN moyen d'être
@@ -558,6 +578,7 @@ impl App {
             last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
             last_topmost_reassert: None,
+            pending_demote_since: None,
             next_redraw_at: None,
         }
     }
@@ -680,6 +701,7 @@ impl App {
             }
             overlay.is_topmost = true;
             overlay.last_topmost_reassert = None;
+            overlay.pending_demote_since = None;
             overlay.window.request_redraw();
         }
         self.sync_topmost();
@@ -743,27 +765,57 @@ impl App {
             // un premier essai « à chaque tick », 20×/s — pas de raison connue de le soupçonner
             // dans un nouveau signalement de disparition prolongée après une longue session, mais
             // par prudence : un `SetWindowPos` qui ne change réellement rien reste rare mais pas
-            // strictement gratuit, autant l'éviter sur des heures de jeu). La transition vers
-            // NOTOPMOST, elle, reste optimisée comme avant (pas cette même urgence).
-            let transitioned = overlay.is_topmost != relevant;
-            let due_for_reassert = relevant
-                && overlay
+            // strictement gratuit, autant l'éviter sur des heures de jeu).
+            if relevant {
+                overlay.pending_demote_since = None;
+                let transitioned = !overlay.is_topmost;
+                let due_for_reassert = overlay
                     .last_topmost_reassert
                     .is_none_or(|t| now.duration_since(t) >= TOPMOST_REASSERT_INTERVAL);
-            if !transitioned && !due_for_reassert {
+                if !transitioned && !due_for_reassert {
+                    continue;
+                }
+                let hwnd = Self::hwnd_of(&overlay.window);
+                unsafe {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                }
+                overlay.is_topmost = true;
+                overlay.last_topmost_reassert = Some(now);
                 continue;
             }
 
-            let insert_after = if relevant {
-                HWND_TOPMOST
-            } else {
-                HWND_NOTOPMOST
-            };
+            // `relevant == false` : retour utilisateur 2026-09-02 (vidéo à l'appui), l'overlay
+            // Combat disparaissait « un coup sur deux » en changeant de fenêtre alors que le Suivi
+            // du même personnage restait visible au même instant, bien que les deux passent par ce
+            // même code — la démotion en NOTOPMOST était jusqu'ici IMMÉDIATE dès qu'un seul tick
+            // (~50 ms) voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu, ce qui
+            // rend le résultat sensible au moindre aléa d'ordonnancement entre les deux fenêtres
+            // overlay (Windows peut livrer le nouveau premier plan à l'un des deux `SetWindowPos`
+            // un tick avant l'autre). `pending_demote_since` absorbe cet aléa : on ne démote qu'une
+            // fois `relevant` resté faux pendant `TOPMOST_DEMOTE_GRACE` en continu, pas déjà
+            // démoté sinon. Un retour à `relevant == true` avant l'échéance annule la démotion sans
+            // jamais avoir bougé le z-order (voir la branche `if relevant` ci-dessus, qui vide
+            // `pending_demote_since`).
+            if !overlay.is_topmost {
+                continue;
+            }
+            let demote_due_at = *overlay.pending_demote_since.get_or_insert(now);
+            if now.duration_since(demote_due_at) < TOPMOST_DEMOTE_GRACE {
+                continue;
+            }
             let hwnd = Self::hwnd_of(&overlay.window);
             unsafe {
                 let _ = SetWindowPos(
                     hwnd,
-                    Some(insert_after),
+                    Some(HWND_NOTOPMOST),
                     0,
                     0,
                     0,
@@ -771,10 +823,8 @@ impl App {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                 );
             }
-            overlay.is_topmost = relevant;
-            if relevant {
-                overlay.last_topmost_reassert = Some(now);
-            }
+            overlay.is_topmost = false;
+            overlay.pending_demote_since = None;
         }
     }
 }
