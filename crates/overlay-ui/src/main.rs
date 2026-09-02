@@ -1305,6 +1305,20 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         wgpu::CurrentSurfaceTexture::Success(frame) => frame,
         wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
         wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+            // Même piège que `Outdated | Lost` juste en dessous (voir sa doc), constaté à
+            // nouveau au retour utilisateur 2026-09-02 (vidéo à l'appui) : bascule
+            // `Ctrl+Alt+W`, un seul des deux overlays passe en opacité clic-traversant, l'AUTRE
+            // reste figé sur sa dernière frame tant qu'on ne passe pas la souris dessus. DXGI
+            // renvoie couramment `Occluded` pour une fenêtre `AlwaysOnTop` qui vient de recevoir
+            // un changement de style étendu sans qu'aucune entrée utilisateur ne lui soit
+            // adressée (`WS_EX_TRANSPARENT` posé par `set_cursor_hittest` en clic-traversant :
+            // plus aucun événement souris ne lui parvient pour redéclencher `response.repaint`
+            // dans `window_event`). Guide officiel DXGI : sur `DXGI_STATUS_OCCLUDED`, arrêter de
+            // dessiner MAIS continuer à sonder périodiquement pour détecter la fin de
+            // l'occlusion — cette frame-ci (qui portait justement le changement d'opacité) est
+            // perdue, sans `request_redraw` ici plus rien ne retente tant qu'un événement SANS
+            // RAPPORT ne survient par ailleurs (§6.1 : pas de boucle de rendu continue).
+            window.request_redraw();
             return repaint_delay;
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
