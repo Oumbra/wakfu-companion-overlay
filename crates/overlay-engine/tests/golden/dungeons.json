@@ -1,0 +1,32 @@
+[
+  {
+    "id": 65,
+    "fr": "Larventura",
+    "en": "Larventura",
+    "es": "Larventura",
+    "pt": "Larventura",
+    "level": 155,
+    "bracket": 3,
+    "bossMonsterId": [24875],
+    "monsterFamilyId": [42],
+    "pictureUrl": "https://example.invalid/larventura.png",
+    "wakassetsAvailable": true,
+    "type": "DUNGEON",
+    "hasPreBossArchi": false
+  },
+  {
+    "id": 12,
+    "fr": "Sans boss",
+    "en": "No boss",
+    "es": "Sin jefe",
+    "pt": "Sem chefe",
+    "level": 1,
+    "bracket": 1,
+    "bossMonsterId": [],
+    "monsterFamilyId": [],
+    "pictureUrl": "https://example.invalid/sans-boss.png",
+    "wakassetsAvailable": true,
+    "type": "ARCADE",
+    "hasPreBossArchi": false
+  }
+]

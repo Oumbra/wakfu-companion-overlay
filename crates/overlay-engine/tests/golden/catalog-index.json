@@ -1,0 +1,12 @@
+{
+  "items": [
+    [24029, "Larme d'Ogrest", "Ogrest's Tear", "Lágrima de Ogrest", "Lágrima de Ogrest", 1234, 2, 0, 1],
+    [9001, "Pain de Craqueleur", "Craqueleur Bread", "Pan de Craqueleur", "Pão de Craqueleur", 4321, 1, 1, 6]
+  ],
+  "monsters": [
+    [24875, "El Pochito", "El Pochito", "El Pochito", "El Pochito", "5421", -1, 1, 0, 0],
+    [501, "Bwork Archi", "Bwork Archi", "Bwork Archi", "Bwork Archi", "9999", 42, 0, 1, 0],
+    [502, "Bwork Dominant", "Bwork Dominant", "Bwork Dominant", "Bwork Dominant", "8888", 42, 0, 0, 1],
+    [503, "Bwork Lambda", "Bwork Lambda", "Bwork Lambda", "Bwork Lambda", "7777", -1, 0, 0, 0]
+  ]
+}
