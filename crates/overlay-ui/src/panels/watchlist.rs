@@ -72,6 +72,15 @@ const TILE_GAP: f32 = 12.0;
 const TILE_ROUNDING: f32 = 10.0;
 /// `app-item-icon [size]="30"` dans le template web — mêmes proportions.
 const ICON_SIZE: f32 = 30.0;
+/// `bottom:-7px; right:-7px` (`.kpi-count-badge`, `tracker-strip.component.css`) : débordement du
+/// badge de compteur HORS du coin bas-droit de sa tuile (voir `count_badge`) — repris ici comme
+/// constante nommée plutôt qu'un `7.0` répété, pour que `content_width` réserve exactement la même
+/// marge côté DROIT de la dernière tuile. Retour utilisateur 2026-09-02 (capture d'écran à
+/// l'appui) : sans cette marge, le badge de la dernière tuile de la bande était tronqué par le bord
+/// de la fenêtre (dimensionnée pile sur `content_width`, voir `main.rs::watchlist_target_width`) —
+/// invisible pour toutes les tuiles précédentes, dont le badge déborde dans l'espace laissé par
+/// `TILE_GAP` avant la tuile suivante.
+const BADGE_OVERFLOW: f32 = 7.0;
 
 const CONTROL_BORDER: egui::Color32 =
     egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 90);
@@ -88,7 +97,7 @@ const CONTROL_GLYPH: egui::Color32 =
 /// `TILE_GAP` : `main.rs` ne les duplique pas.
 pub fn content_width(entry_count: usize) -> f32 {
     let tile_count = entry_count as f32 + 2.0; // + les tuiles "+"/"−", toujours présentes
-    tile_count * TILE_SIZE + (tile_count - 1.0).max(0.0) * TILE_GAP
+    tile_count * TILE_SIZE + (tile_count - 1.0).max(0.0) * TILE_GAP + BADGE_OVERFLOW
 }
 
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
@@ -179,6 +188,16 @@ pub fn show(
                         entry,
                     );
                 }
+
+                // Le badge de compteur (`count_badge`) déborde de `BADGE_OVERFLOW` px hors du coin
+                // bas-droit de sa tuile, peint directement via `ui.painter()` — donc INVISIBLE pour
+                // le calcul d'étendue du `ScrollArea` (basé sur l'espace ALLOUÉ par `horizontal`,
+                // pas sur ce qui est peint hors allocation). Sans cet espace réservé explicitement,
+                // le badge de la toute dernière tuile reste tronqué par le clip rect du `ScrollArea`
+                // une fois défilé au maximum (cas plafonné, `WATCHLIST_MAX_CEILING`) — même quand la
+                // fenêtre elle-même est assez large (voir `content_width`, qui couvre le cas non
+                // plafonné). Retour utilisateur 2026-09-02, capture d'écran à l'appui.
+                ui.add_space(BADGE_OVERFLOW);
             });
         });
 
@@ -469,7 +488,7 @@ fn count_badge(ui: &mut egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry)
     // `bottom:-7px; right:-7px` (CSS) : le coin bas-droit du BADGE se place 7px au-delà du coin
     // bas-droit de la TUILE, pas de son centre — miroir direct plutôt qu'un simple recentrage sur
     // le coin.
-    let badge_max = tile_rect.right_bottom() + egui::vec2(7.0, 7.0);
+    let badge_max = tile_rect.right_bottom() + egui::vec2(BADGE_OVERFLOW, BADGE_OVERFLOW);
     let badge_rect = egui::Rect::from_min_size(badge_max - size, size);
 
     painter.rect_filled(badge_rect, badge_rect.height() / 2.0, SURFACE_WELL);

@@ -56,7 +56,11 @@ redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et
   côté définitions (la liste elle-même reste éditée sur le web) ; les compteurs, eux, sont
   incrémentés — et persistés localement — par l'overlay (voir `overlay_engine::watchlist`,
   `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le compte ne déclare aucune
-  entrée.
+  entrée. Le badge déborde de `BADGE_OVERFLOW` (7px, miroir CSS `bottom:-7px; right:-7px`) hors du
+  coin bas-droit de sa tuile — réservé à la fois dans `content_width` (largeur de FENÊTRE) et par un
+  `ui.add_space` de fin dans le `ScrollArea` lui-même (étendue de DÉFILEMENT, pour le cas plafonné
+  par `WATCHLIST_MAX_CEILING`) : sans les deux, le badge de la toute dernière tuile de la bande
+  restait tronqué (retour utilisateur 2026-09-02, capture d'écran à l'appui).
 
 **Icônes réelles d'objets/monstres** (`remote_icons.rs`, lot L3 réduit — retour utilisateur
 2026-09-02 : icône générique partout, tuiles impossibles à distinguer) : `spawn_catalog_thread`
