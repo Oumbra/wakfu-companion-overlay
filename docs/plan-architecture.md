@@ -142,7 +142,7 @@ ne voit jamais de doublon.
              ArcSwap<Snapshot>│                             │ channel<SyncEvent>
                               ▼                             ▼
         ┌─────────────────────────────────┐   ┌──────────────────────────────────┐
-        │ MAIN THREAD — winit + egui/wgpu │   │ Thread SYNC (tokio current_thread)│
+        │ MAIN THREAD — winit + egui/wgpu │   │ Thread SYNC (std::thread bloquant)│
         │  rendu réactif, hit-test,       │   │  file SQLite persistante          │
         │  hotkey global, sondage curseur │   │  POST /api/v1/history/*           │
         └─────────────────────────────────┘   │  auth (keyring), catalogue        │
@@ -175,7 +175,7 @@ wakfu-companion-overlay/
 │   ├── overlay-engine/            # frontière métier
 │   │   └── src/{lib.rs,backend.rs,quickjs.rs,model.rs,snapshot.rs}
 │   ├── overlay-sync/              # API + file persistante + auth
-│   │   └── src/{client.rs,pairing.rs,token_store.rs}  # auth native (L4) fait ; queue.rs/catalog.rs/payload.rs restent à faire (L3/L5)
+│   │   └── src/{client.rs,pairing.rs,token_store.rs,queue.rs}  # auth native (L4) fait ; catalogue (L3) fait ; file d'envoi (L5) fait — voir son statut au §12
 │   ├── overlay-ui/                # egui : panneaux, thème, i18n
 │   │   └── src/{app.rs,panels/{damage.rs,tracker.rs,alerts.rs,recap.rs,status.rs},theme.rs}
 │   └── overlay-platform/          # tout le code spécifique OS
@@ -192,7 +192,7 @@ wakfu-companion-overlay/
 ```
 
 Dépendances principales : `winit`, `wgpu`, `egui`/`egui-wgpu`/`egui-winit`, `notify`,
-`rquickjs`, `serde`/`serde_json`, `reqwest` (rustls), `tokio` (rt current_thread),
+`rquickjs`, `serde`/`serde_json`, `ureq` (rustls) — voir §7.3 pour pourquoi PAS `reqwest`/`tokio`,
 `rusqlite` (bundled), `keyring`, `global-hotkey`, `sha2`, `arc-swap`, `crossbeam-channel`,
 `directories`, `tracing`. Sur Windows : `windows` (Win32 + DirectComposition). Sur Linux : `x11rb`.
 
@@ -468,21 +468,92 @@ automatiquement par un navigateur, ce qui n'existe pas ici).
 sous Linux). Repli explicite et signalé à l'utilisateur : fichier `0600` sous
 `$XDG_DATA_HOME/wakfu-overlay/` quand aucun Secret Service n'est disponible (WM minimalistes).
 
-### 7.3 File d'envoi (miroir Rust de `SyncQueueService`)
+### 7.3 File d'envoi (miroir Rust de `SyncQueueService`) — ✅ fait (lot L5, 2026-09-02)
 
-Table SQLite `sync_queue(id TEXT PRIMARY KEY, kind, payload_json, signature, queued_at, attempts,
-next_attempt_at)` — `id = "{kind}:{signature}"`, donc dédoublonnage naturel, comme en IndexedDB.
+Table SQLite `sync_queue(id TEXT PRIMARY KEY, kind, payload_json, signature, queued_at, attempts)`
+— `id = "{kind}:{signature}"`, donc dédoublonnage naturel, comme en IndexedDB.
+**Simplification retenue par rapport à la table esquissée initialement ici** : pas de colonne
+`next_attempt_at` — un seul backoff GLOBAL pour toute la file (`SyncQueue::consecutive_failures`,
+en mémoire, jamais persisté), pas un par ligne : c'est exactement ce que fait déjà
+`SyncQueueService.consecutiveFailures` côté web (un seul compteur d'instance, pas un champ par
+entrée IndexedDB) — reproduire une planification par ligne aurait été plus fidèle au schéma
+esquissé mais moins fidèle au COMPORTEMENT réel qu'il miroir. Pas de plafond de taille de payload
+appliqué côté client non plus (le serveur, lui, borne déjà tout ce qui compte — `MAX_HISTORY_BATCH`,
+tailles de champs — voir `server/history/parse.ts`) : un payload construit depuis
+`overlay_engine::history` ne peut de toute façon pas dépasser 1 Mio en pratique (pas de champ non
+borné), ce n'était pas un vrai garde-fou à porter ici.
 
-Paramètres **identiques au web**, pour ne pas surprendre le serveur : lots de **50**, debounce
-**2 s**, backoff **15 s → 5 min** (doublement), abandon d'une entrée après **10 tentatives non
-réseau**, payload ≤ 1 Mio.
+Paramètres **identiques au web** (`overlay_sync::queue`) : lots de **50** (`SYNC_BATCH_SIZE`),
+backoff **15 s → 5 min** (doublement, `backoff_delay` côté `overlay-ui`), abandon d'une entrée
+après **10 tentatives non réseau** (`MAX_ATTEMPTS`) — seul un rejet HTTP 4xx (hors 401/429) compte
+comme tentative, exactement comme `permanent` côté web.
 
-Propriétés à tenir : jamais bloquant pour l'UI (l'enfilage est une écriture mémoire, la persistance
-et le hachage viennent après), survit à un crash / une coupure réseau / un redémarrage, et rejeu
-sans conséquence grâce à l'idempotence.
+**Écart assumé : pas de vrai debounce de 2 s** (`FLUSH_DEBOUNCE_MS` côté web) — chaque
+`SyncCommand::Enqueue` reçu par le thread Sync (`overlay-ui::spawn_sync_thread`) déclenche une
+tentative d'envoi immédiate de TOUT ce qui est en file à cet instant (pas seulement ce qui vient
+d'arriver). Jamais incorrect (rien n'est perdu, l'idempotence tient toujours), seulement plus
+d'appels réseau qu'un vrai regroupement dans le cas d'une rafale de petits lots rapprochés — non
+mesuré comme gênant en pratique, à revisiter si ça devient un problème réel.
 
-**Mode invité par défaut** : sans compte connecté, la file n'est pas active et **rien ne quitte la
-machine**. C'est la définition du mode invité côté web ; l'overlay ne doit pas l'affaiblir.
+**`reqwest`/`tokio` (esquissés au §4 dans une itération précédente de ce document) abandonnés au
+profit de `ureq` bloquant sur un `std::thread` dédié** : toutes les autres briques réseau de
+l'overlay (auth, catalogue, référentiels) sont déjà des threads `std::thread` bloquants avec `ureq`
+(voir `spawn_auth_thread`/`spawn_catalog_thread`) — introduire un runtime `tokio` pour la seule
+file d'envoi aurait ajouté une dépendance lourde et un DEUXIÈME modèle de concurrence dans le même
+binaire, pour un gain nul (le thread Sync ne fait jamais qu'une poignée de requêtes HTTP
+séquentielles par passage, jamais de parallélisme à en tirer). Décision cohérente avec §13 (revue
+d'architecture) : simplicité et homogénéité du modèle de threads plutôt qu'une optimisation sans
+bénéfice mesurable.
+
+Propriétés tenues : jamais bloquant pour l'Engine (`Engine::drain_sync_events` ne fait qu'accumuler
+en mémoire, `overlay-ui::spawn_engine_thread` relaie par canal sans jamais attendre le thread Sync),
+survit à un crash/une coupure réseau/un redémarrage (la file SQLite est écrite AVANT tout envoi),
+rejeu sans conséquence grâce à l'idempotence (`SyncQueue::enqueue`, testé par rejeu 10x — voir
+`crates/overlay-sync/src/queue.rs::tests`, critère de sortie du §12).
+
+**Mode invité par défaut** : sans compte connecté (`uid` jamais résolu, voir plus bas), le thread
+Sync n'envoie jamais rien — `SyncCommand::Enqueue` continue d'ÉCRIRE en file (persistance locale,
+comme le web écrit quand même en IndexedDB en mode invité) mais `flush_once` n'est jamais appelé
+sans `uid` connu. **Rien ne quitte la machine** tant qu'aucun compte n'est lié.
+
+**`uid` (clé de `client_key = sha256(uid|kind|signature)`) résolu via `GET /api/v1/auth/me`**
+(`overlay_sync::client::fetch_account_id`, nouveau — `AuthService.uid` côté web vient du cookie de
+session, indisponible pour un client natif) : appelé une fois après chaque connexion réussie
+(`attempt_connect` → `activate_sync_queue`), jamais par événement. Best-effort, comme le reste de
+l'auth native : un échec laisse la file simplement inactive cette session (roster/watchlist restent
+pleinement fonctionnels), sans jamais faire échouer toute la connexion pour ce besoin annexe.
+
+**Génération des événements (`overlay_engine::history`, `crates/overlay-engine/src/session.rs`)**
+— parité VOLONTAIREMENT partielle sur cette première itération par rapport à `StatsStoreService`
+(voir la doc de tête de `history.rs` pour le détail complet et le raisonnement) :
+- **Fait** : signatures (`fight_signature`/`purchase_signature`/`trade_signature`, testées
+  vecteur-à-vecteur contre les formules TS), détection d'achat marchand/HDV (perte de kamas suivie
+  d'un ramassage dans `PURCHASE_WINDOW_MS`, miroir de `registerPurchase`), échanges
+  (`LogEntry::TradeCompleted`, déjà présent dans le modèle L2 — résolution allié/adversaire via le
+  roster), combats (`FightPayload` construit au `CombatEnd` depuis `FightSnapshot` — participants,
+  dégâts, `defeated`/`fled` distingués via un nouveau `FightWorking::fled_names`), reconstruction de
+  date calendaire réelle depuis `LogEntry::LogDateAnchor` (`overlay_engine::log_time`, miroir
+  simplifié de `buildFullTimestampMs` — voir ses deux limites documentées : pas de
+  `primeLogDateAnchorFromBatch`, instants traités en UTC plutôt qu'au fuseau local de la machine).
+- **Reste** (serveur accepte déjà ces champs `null`/vides, aucun blocage à lever pour que la synchro
+  fonctionne — juste moins détaillée que le web) : ventilation des dégâts par sort/élément
+  (`spells`, toujours vide — `overlay-engine::session` ne suit que des totaux par combattant),
+  `xpGained` PAR participant (0 partout, seul le total de session est suivi), résolution
+  `monsterId`/`itemId` par le catalogue (`itemName`/le nom brut suffisent au serveur, mais
+  `overlay_engine::catalog` n'est pas encore câblé jusqu'à `session.rs`), assignation de donjon
+  (`dungeonId`/`dungeonRunSignature` toujours `None`), détection du serveur de jeu (`gameServer`
+  toujours `None`), récupération de kamas HDV sans achat adjacent (`HDV_KAMAS_SALE_ITEM`, distincte
+  de l'achat classique — non portée).
+- **Vérifié** : 100 tests (`overlay-engine` + `overlay-sync`), `clippy -D warnings`/`fmt --check`
+  propres sur les deux crates, y compris le test d'intégration sur un vrai `wakfu.log`
+  (`session_real_log.rs`, non affecté par ce lot). `overlay-ui` (câblage du thread Sync,
+  `spawn_sync_thread`/`SyncCommand`) compile sans erreur propre à ce lot — **non exécutable dans ce
+  sandbox** : `cargo build -p overlay-ui` y échoue sur 5 erreurs entièrement PRÉ-EXISTANTES et sans
+  rapport avec L5 (`use windows::...`/`GameWindowInfo::hwnd` non compilables hors Windows, code pas
+  encore gaté `#[cfg(windows)]` — gap Linux déjà connu, voir S3 « reporté »), confirmé identique en
+  comparant avec un `cargo build -p overlay-ui` sur l'état du dépôt AVANT ce lot (`git stash`, même
+  5 erreurs, mêmes lignes). Pas de vérification bout en bout possible ici faute d'un vrai serveur
+  Neon/compte natif joignable ET d'un Windows/Linux+X11 réel dans ce sandbox — comme pour L3/L4.
 
 ### 7.4 Catalogue
 
@@ -593,7 +664,7 @@ proposer une disposition personnalisable comme le ferait un site web.
 | **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Reste** : État de synchro (dépend de L5). **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés |
 | **L3 — Catalogue** ✅ fait | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files — **fait (2026-09-02, retour utilisateur)** : `overlay_engine::catalog` (index O(1) par id/nom, depuis `GET /api/v1/catalog/`) + `overlay-sync` (fetch + cache disque `catalog_cache.rs`, offline-first) + `overlay-ui::remote_icons` (résolution/téléchargement/cache d'icônes réelles `wakassets` pour le panneau Suivi, vérifié en direct contre le déploiement dev). **Fait (2026-09-02, suite)** : `catalog::find_item_has_recipe` (drapeau recette) et `catalog::find_monster_classification`/`find_monster_family_id` (boss/archimonstre/dominant, priorité `MonsterClassification`, miroir de `resolveFightTypeClassification`) ; `dungeon.rs`/`monster_family.rs` — deux nouveaux index O(1) (par id, + réciproque boss→donjon) construits depuis `GET /api/v1/dungeons`/`GET /api/v1/monster-families` (`overlay_sync::client::fetch_dungeons`/`fetch_monster_families`, cache disque `reference_data_cache.rs`, sans endpoint `/version` dédié côté serveur donc toujours rechargés en tâche de fond) ; repli hors-ligne embarqué (`overlay_sync::catalog_cache::embedded_fallback`, `assets/catalog/catalog-index.json.gz` via `include_bytes!`, décompression `flate2`) branché dans `spawn_catalog_thread` (utilisé seulement si aucun cache disque ET réseau injoignable) ; golden files de non-régression (`crates/overlay-engine/tests/golden/*.json` + `tests/catalog_golden.rs`, cohérence croisée catalogue/donjons/familles). **Clôturé (2026-09-02, poste de dev avec accès réseau réel)** : les lots précédents avaient été développés dans un sandbox sans accès à Neon/`*.pages.dev` ni à `overlay-ui` (Windows-only, non buildable là-bas) — ce n'est plus le cas ici, les trois points bloquants ont donc été levés pour de vrai plutôt que redocumentés comme limite : (1) `claude-dev.wakfu-companion.com` confirmé joignable (`catalog/`, `catalog/version`, `dungeons`, `monster-families` en 200) ; (2) repli embarqué **régénéré depuis ce déploiement réel** via `cargo run -p overlay-sync --bin gen-catalog-fallback` — catalogue complet (~1,8 Mo bruts / ~489 Ko gzip), n'est plus un placeholder ; (3) petit indicateur « 📦⚠ catalogue daté » ajouté dans la zone Combat de `overlay-ui` (`catalog_stale: Arc<AtomicBool>`, posé par `spawn_catalog_thread` uniquement quand le repli embarqué est utilisé, tooltip explicatif) — remplace le `tracing::warn!` jusque-là invisible en jeu. `cargo build`/`test`/`clippy -D warnings`/`fmt --check` **propres sur les 5 crates du workspace, `overlay-ui` compris** (précédemment non vérifiable en sandbox). **Volontairement reporté, pas un blocage de clôture** : brancher `DungeonIndex`/`MonsterFamilyIndex` dans `overlay-ui` — aucun panneau §9 n'en a besoin aujourd'hui (`LogEntry` n'a pas de `dungeonId` par combat, voir `model.rs`), prévu pour un futur panneau Combat conscient du donjon, pas une régression de ce lot. |
 | **L4 — Auth native** 🟡 en cours | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable — **fait** : 3 endpoints serveur (`/api/v1/auth/native/{pair,claim,poll}`, table `native_pairings`, `Authorization: Bearer` accepté par `_auth.ts`), page web `/pair`, crate `overlay-sync` (pairing bloquant + `keyring`/repli fichier + `GET /settings`), roster appliqué à `overlay-engine::session` (priorité sur `breed`), portraits de classe affichés dans le panneau Combat (`overlay-ui`). **Fait (2026-09-02, suite)** : révocation/déconnexion — raccourci global `Ctrl+Alt+D` (`App::disconnect_account`), commande `AuthCommand::Disconnect` traitée par le thread Auth (`spawn_auth_thread`, restructuré pour rester vivant après une connexion réussie plutôt que de se terminer, condition requise pour pouvoir déconnecter PUIS reconnecter sans redémarrer l'overlay) — efface le jeton (trousseau + repli fichier) et notifie le thread Engine (`EngineCommand::Disconnect`) qui repasse en mode invité (roster `None` → repli `breed`, Suivi vidé ; compteurs locaux déjà persistés conservés pour une reconnexion ultérieure). Vérification bout en bout **partiellement levée** (poste de dev avec accès réseau réel, comme pour L3) : `claude-dev.wakfu-companion.com` confirmé joignable sur les trois routes d'appairage natif (`pair` → 200 avec code+URL réels, `poll` → `pending`/`expired` conformes au format attendu par `pairing.rs`, `settings` sans/avec jeton invalide → 401 comme attendu) ; la complétion réelle d'un appairage (connexion Discord/Google dans un navigateur) reste non automatisable depuis ici et n'a donc pas été rejouée. **Reste** : UI de pairing dans la fenêtre overlay (toujours console-only, délibérément reporté) |
-| **L5 — Synchro** | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay |
+| **L5 — Synchro** 🟡 en cours | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay — **fait (2026-09-02)** : `overlay_engine::history` (signatures + payloads fight/purchase/trade, parité volontairement partielle — voir détail §7.3) + `overlay_engine::log_time` (dates réelles depuis `LogDateAnchor`) + `overlay_sync::queue::SyncQueue` (file SQLite idempotente, lots de 50, backoff 15s→5min, abandon après 10 tentatives non réseau — testé par rejeu 10x, critère de sortie ci-contre) + câblage `overlay-ui` (thread Sync dédié, activé/désactivé avec le compte). **Reste** : ventilation par sort/élément, xpGained par participant, résolution monsterId/itemId par catalogue, assignation de donjon, détection du serveur de jeu, récupération de kamas HDV sans achat adjacent — voir §7.3 pour le détail complet |
 | **L6 — Packaging** | AppImage, installeur, mise à jour signée | Installation propre sur une machine vierge Windows et Linux |
 
 S1/S2/S3 étaient prévus **bloquants** (ils peuvent remettre en cause la stack). **Décision du
