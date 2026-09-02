@@ -1131,6 +1131,7 @@ fn spawn_engine_thread(
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+    catalog: Arc<ArcSwap<CatalogIndex>>,
     proxy: EventLoopProxy<UserEvent>,
     settings_rx: mpsc::Receiver<AccountSettings>,
 ) {
@@ -1144,6 +1145,13 @@ fn spawn_engine_thread(
                     return;
                 }
             };
+            // Dernier catalogue déjà transmis à l'Engine (voir `Engine::set_catalog`) — comparé par
+            // pointeur à chaque tick pour ne relayer qu'un VRAI changement (`spawn_catalog_thread`
+            // republie via `ArcSwap::store`, jamais une mutation en place). Protège
+            // `hostIsKnownMonsterName` (voir `quickjs_engine.rs`) contre un vrai monstre qui se
+            // révèle (mimique, brèche) confondu à tort avec une invocation — retour utilisateur
+            // 2026-09-02.
+            let mut last_seen_catalog: Option<Arc<CatalogIndex>> = None;
             let rx = overlay_ingest::watcher::spawn(&log_path);
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
@@ -1155,6 +1163,14 @@ fn spawn_engine_thread(
                     engine.set_watchlist_entries(settings.watchlist);
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
                     let _ = proxy.send_event(UserEvent::NewSnapshot);
+                }
+                let current_catalog = catalog.load_full();
+                let already_seen = last_seen_catalog
+                    .as_ref()
+                    .is_some_and(|seen| Arc::ptr_eq(seen, &current_catalog));
+                if !already_seen {
+                    engine.set_catalog(Arc::clone(&current_catalog));
+                    last_seen_catalog = Some(current_catalog);
                 }
                 match rx.recv_timeout(std::time::Duration::from_millis(200)) {
                     Ok(Ok(batch)) => {
@@ -1197,7 +1213,10 @@ fn spawn_engine_thread(
 /// `CatalogService.initialize()` côté web) : le cache disque
 /// (`overlay_sync::catalog_cache`) est chargé et publié IMMÉDIATEMENT s'il existe, sans attendre
 /// le réseau — le rafraîchissement qui suit ne republie que si `GET /api/v1/catalog/version`
-/// (`indexHash`) a changé depuis le cache, jamais pour rien.
+/// (`indexHash`) a changé depuis le cache, jamais pour rien. Le MÊME `Arc<ArcSwap<CatalogIndex>>`
+/// est aussi relayé au thread Engine (voir `spawn_engine_thread`, `Engine::set_catalog`) : sert
+/// cette fois de garde-fou `hostIsKnownMonsterName` (`quickjs_engine.rs`) contre un vrai monstre
+/// qui se révèle (mimique, brèche) confondu à tort avec une invocation.
 fn spawn_catalog_thread(catalog: Arc<ArcSwap<CatalogIndex>>, proxy: EventLoopProxy<UserEvent>) {
     thread::Builder::new()
         .name("overlay-catalog".into())
@@ -1399,6 +1418,7 @@ fn main() {
         Arc::clone(&snapshot),
         Arc::clone(&watchlist),
         Arc::clone(&watchlist_toast),
+        Arc::clone(&catalog),
         proxy,
         settings_rx,
     );

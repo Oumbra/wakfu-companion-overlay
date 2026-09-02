@@ -2,19 +2,25 @@
 //!
 //! Volontairement minimal et documenté comme tel : `StatsStoreService` (2 755 l., couplé Angular,
 //! extraction encore une décision ouverte — docs/plan-architecture.md §14 point 3) porte des
-//! heuristiques bien plus fines (classification allié/ennemi par héritage d'invocation via
-//! `summonedBy`, regroupement de runs de donjon, rapprochement kamas↔achat HDV…). Ce module ne
+//! heuristiques bien plus fines (regroupement de runs de donjon, rapprochement kamas↔achat HDV…).
+//! Ce module ne
 //! couvre que ce qui est directement lisible dans le flux d'événements — suffisant pour les deux
 //! premiers panneaux de L2 (dégâts du combat en cours, récap de session), pas pour l'historique
 //! long terme ni la synchro serveur (§7, qui exigera la parité stricte que `StatsStoreService`
 //! seul peut garantir).
 //!
-//! **Simplification assumée** : la classification allié/ennemi utilise directement
-//! `FighterJoinedEntry::is_controlled_by_ai`, sans suivre `summonedBy` — une invocation alliée
-//! (contrôlée par l'IA, `summonedBy = Some(joueur)`) sera donc affichée comme ennemie ici. Le vrai
-//! comportement (héritage du camp de l'invocateur) est documenté dans le TS vendu
-//! (`FighterJoinedEntry`) mais pas reproduit : ce serait dupliquer une heuristique de
-//! `StatsStoreService`, contraire à la raison d'être du choix QuickJS (§2 du plan).
+//! **`summonedBy` suivi depuis le 2026-09-02** (retour utilisateur, captures d'écran à l'appui :
+//! une invocation alliée — mécanisme, totem — s'affichait à tort côté ennemis) : une
+//! `FighterJoinedEntry` dont `summoned_by` est renseigné n'obtient JAMAIS de ligne dans
+//! `snapshot.fighters` (ni alliée ni ennemie) — miroir du `return` anticipé de
+//! `registerFighterJoin` (`stats-store.service.ts`) sur `summonNames`, voir `FightWorking::
+//! summon_names`. Volontairement PAS un héritage complet du camp de l'invocateur (le web
+//! lui-même n'affiche jamais l'invocation comme une ligne à part, avec sa propre classe/icône —
+//! seul le filtrage compte ici) : ce serait aller au-delà de ce que `StatsStoreService` fait
+//! réellement, contraire à la raison d'être du choix QuickJS (§2 du plan). `summoned_by`
+//! lui-même reste résolu par le TS vendu (`log-parser.ts::parseFighterJoin`), protégé côté hôte
+//! par `hostIsKnownMonsterName` (voir `quickjs_engine.rs`) contre un vrai monstre qui se révèle
+//! (mimique, brèche) — jamais avalé à tort par le repli "invocation sans annonce" du parser.
 //!
 //! **Combats multiples simultanés** (2026-09-01, retour utilisateur multi-compte en test réel) :
 //! `wakfu.log` est **partagé et entrelacé** par toutes les instances du client lancées sous le même
@@ -27,6 +33,7 @@
 
 use std::collections::HashMap;
 
+use crate::catalog::CatalogIndex;
 use crate::class_breed::class_for_breed;
 use crate::model::{FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
@@ -197,6 +204,15 @@ struct FightWorking {
     /// reçoit les dégâts/soins d'une ligne dont l'attaquant porte ce nom, jusqu'au prochain sort
     /// lancé par ce même nom (miroir de `lastResolvedSeatByName`).
     last_resolved_seat_by_name: HashMap<String, usize>,
+    /// Noms (minuscules) identifiés comme une invocation de CE combat (`FighterJoinedEntry::
+    /// summoned_by`) — miroir de `FightWorking.summonNames` (`stats-store.service.ts`) : jamais de
+    /// ligne dans `snapshot.fighters` (voir `apply`, cas `FighterJoined`), jamais crédité en
+    /// dégâts/soin (voir `fighter_mut`). Wakfu logue TOUJOURS une invocation avec
+    /// `isControlledByAI: true`, quel que soit le camp réel de son invocateur — sans ce filtre, une
+    /// invocation alliée (mécanisme, totem...) s'affiche à tort côté ennemis, voir la doc de module
+    /// et le retour utilisateur 2026-09-02 (captures d'écran à l'appui : « Balise de Contact »,
+    /// mécanisme allié, listé côté ennemis).
+    summon_names: std::collections::HashSet<String>,
 }
 
 impl FightWorking {
@@ -320,9 +336,20 @@ impl SessionState {
                 name,
                 breed,
                 is_controlled_by_ai,
+                summoned_by,
                 ..
             } => {
                 self.ensure_fight(*fight_id);
+                if summoned_by.is_some() {
+                    // Voir `FightWorking::summon_names` : jamais de ligne pour une invocation,
+                    // quel que soit `is_controlled_by_ai` (toujours `true` en pratique côté log,
+                    // même pour une invocation alliée) — retour anticipé, comme
+                    // `registerFighterJoin` côté web.
+                    if let Some(fight) = self.fights.get_mut(fight_id) {
+                        fight.summon_names.insert(name.to_lowercase());
+                    }
+                    return implicitly_defeated_enemies;
+                }
                 let is_ally = !is_controlled_by_ai;
                 let (class_name, gender) = if is_ally {
                     resolve_ally_class(name, *breed, roster)
@@ -350,7 +377,9 @@ impl SessionState {
                 amount,
                 ..
             } => {
-                self.fighter_mut(*fight_id, attacker).total_damage += amount;
+                if let Some(fighter) = self.fighter_mut(*fight_id, attacker) {
+                    fighter.total_damage += amount;
+                }
             }
             LogEntry::Heal {
                 fight_id: Some(fight_id),
@@ -358,7 +387,9 @@ impl SessionState {
                 amount,
                 ..
             } => {
-                self.fighter_mut(*fight_id, attacker).total_heal += amount;
+                if let Some(fighter) = self.fighter_mut(*fight_id, attacker) {
+                    fighter.total_heal += amount;
+                }
             }
             LogEntry::EnemyDefeated {
                 name,
@@ -463,6 +494,7 @@ impl SessionState {
             initiative_cursor: 0,
             last_turn_actor: None,
             last_resolved_seat_by_name: HashMap::new(),
+            summon_names: std::collections::HashSet::new(),
         });
     }
 
@@ -516,7 +548,13 @@ impl SessionState {
     /// devrait pas arriver — voir la doc de `FighterJoinedEntry`, émis pour chaque combattant —
     /// mais un combat en cours au moment de la connexion peut en avoir manqué le début) : sans
     /// classe, comme un allié pas encore classifié (voir doc de `FighterDamage::class_name`).
-    fn fighter_mut(&mut self, fight_id: i64, name: &str) -> &mut FighterDamage {
+    ///
+    /// `None` si `name` est une invocation connue de ce combat (`FightWorking::summon_names`) —
+    /// miroir du filtre `summonNames` de `addDamage`/`ensurePresent` côté web : ses actions dont
+    /// l'attaquant n'a PAS été réattribué à son invocateur par le parser (repli `resolveEffectTail`
+    /// le plus profond, voir `log-parser.ts`) ne créditent personne, plutôt que de créer une ligne
+    /// pour l'invocation elle-même (voir la doc de module, cas `FighterJoined`).
+    fn fighter_mut(&mut self, fight_id: i64, name: &str) -> Option<&mut FighterDamage> {
         self.ensure_fight(fight_id);
 
         let known_idx = {
@@ -524,6 +562,9 @@ impl SessionState {
                 .fights
                 .get(&fight_id)
                 .expect("ensure_fight vient de garantir sa présence");
+            if fight.summon_names.contains(&name.to_lowercase()) {
+                return None;
+            }
             fight
                 .last_resolved_seat_by_name
                 .get(name)
@@ -544,7 +585,7 @@ impl SessionState {
             .fights
             .get_mut(&fight_id)
             .expect("ensure_fight vient de garantir sa présence");
-        &mut fight.snapshot.fighters[idx]
+        Some(&mut fight.snapshot.fighters[idx])
     }
 
     /// Purge le(s) plus ancien(s) combat(s) **terminé(s)** (jamais `ongoing`) au-delà de
@@ -644,6 +685,18 @@ impl Engine {
         self.roster = roster;
     }
 
+    /// Relaie le catalogue (lot L3, `overlay_engine::catalog`) au parser QuickJS (voir
+    /// `quickjs_engine.rs::LogParserEngine::set_catalog`) — protège `hostIsKnownMonsterName`
+    /// contre un vrai monstre qui se révèle (mimique, brèche) confondu à tort avec une invocation
+    /// (voir la doc de module). Appelé par l'hôte à chaque (re)chargement du catalogue, comme
+    /// `set_roster`/`set_watchlist_entries` — n'affecte que les `FighterJoined` futurs, jamais un
+    /// combat déjà résolu. Prend un `Arc` (voir sa doc côté `quickjs_engine.rs`), pas une valeur
+    /// possédée : simple partage de référence avec l'`Arc<ArcSwap<CatalogIndex>>` déjà détenu par
+    /// l'hôte, jamais de copie du catalogue entier.
+    pub fn set_catalog(&mut self, catalog: std::sync::Arc<CatalogIndex>) {
+        self.parser.set_catalog(catalog);
+    }
+
     /// Remplace la liste des entrées suivies par celle renvoyée par le compte (voir
     /// `watchlist_from_settings_json`), en conservant les compteurs locaux déjà en cours pour
     /// toute entrée déjà connue (voir `WatchlistState::merge_config`). Appelé par l'hôte au même
@@ -728,6 +781,21 @@ mod tests {
             fighter_id: 1,
             is_controlled_by_ai,
             summoned_by: None,
+        }
+    }
+
+    /// Comme `fighter_joined`, mais pour une invocation (`summoned_by` renseigné) — `wakfu.log`
+    /// logue TOUJOURS `is_controlled_by_ai: true` pour une invocation, même alliée, d'où le
+    /// paramètre fixé en dur ici plutôt qu'exposé à l'appelant (jamais autre chose en pratique).
+    fn summoned_fighter_joined(fight_id: i64, name: &str, summoned_by: &str) -> LogEntry {
+        LogEntry::FighterJoined {
+            time: "12:00:00,000".to_string(),
+            fight_id,
+            name: name.to_string(),
+            breed: 0,
+            fighter_id: 2,
+            is_controlled_by_ai: true,
+            summoned_by: Some(summoned_by.to_string()),
         }
     }
 
@@ -863,6 +931,51 @@ mod tests {
             moutons,
             vec![50, 30],
             "chaque tour de Mouton doit créditer une instance DIFFÉRENTE, pas toujours la même"
+        );
+    }
+
+    /// Retour utilisateur 2026-09-02 (captures d'écran à l'appui) : l'invocation d'un allié
+    /// (mécanisme, totem) s'affichait à tort côté ennemis — `wakfu.log` logue TOUJOURS
+    /// `is_controlled_by_ai: true` pour une invocation, quel que soit le camp réel de son
+    /// invocateur. `summoned_by` doit donc primer sur `is_controlled_by_ai` : aucune ligne pour
+    /// l'invocation, ni alliée ni ennemie (voir la doc de module).
+    #[test]
+    fn une_invocation_nobtient_jamais_sa_propre_ligne() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "Oumbra", 9, false), None); // allié invocateur
+        state.apply(
+            &summoned_fighter_joined(1, "Balise de Contact", "Oumbra"),
+            None,
+        );
+
+        let fight = &state.fights[&1];
+        assert_eq!(
+            fight.snapshot.fighters.len(),
+            1,
+            "seul l'invocateur doit avoir une ligne, jamais son invocation"
+        );
+        assert_eq!(fight.snapshot.fighters[0].name, "Oumbra");
+    }
+
+    /// Complète le test ci-dessus : si une ligne de dégâts porte malgré tout le nom BRUT de
+    /// l'invocation (cas non réattribué par le parser, voir `fighter_mut`), ces dégâts ne doivent
+    /// créditer PERSONNE — ni l'invocation (pas de ligne), ni l'invocateur par erreur (miroir du
+    /// filtre `summonNames` d'`addDamage`/`ensurePresent` côté web).
+    #[test]
+    fn les_degats_bruts_dune_invocation_ne_creditent_personne() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "Oumbra", 9, false), None);
+        state.apply(
+            &summoned_fighter_joined(1, "Balise de Contact", "Oumbra"),
+            None,
+        );
+        state.apply(&damage(1, "Balise de Contact", 999), None);
+
+        let fight = &state.fights[&1];
+        assert_eq!(fight.snapshot.fighters.len(), 1);
+        assert_eq!(
+            fight.snapshot.fighters[0].total_damage, 0,
+            "les dégâts d'une invocation non réattribuée ne doivent créditer personne"
         );
     }
 
