@@ -23,8 +23,8 @@ fn main() {
         .init();
 
     let path = resolve_path();
-    println!("=== overlay-app (L1) — suivi de {} ===", path.display());
-    println!("Ctrl+C pour arrêter.\n");
+    tracing::info!("=== overlay-app (L1) — suivi de {} ===", path.display());
+    tracing::info!("Ctrl+C pour arrêter.");
 
     let rx = watcher::spawn(&path);
     let mut batch_count: u64 = 0;
@@ -40,7 +40,7 @@ fn main() {
                 } else {
                     "DIRECT    "
                 };
-                println!(
+                tracing::info!(
                     "[lot #{batch_count:>4}] {tag} {:>5} ligne(s)  (cumul {total_lines})",
                     batch.lines.len()
                 );
@@ -48,13 +48,13 @@ fn main() {
                 // sur un fichier de plusieurs milliers de lignes.
                 const APERCU: usize = 3;
                 for line in batch.lines.iter().take(APERCU) {
-                    println!("    {line}");
+                    tracing::info!("    {line}");
                 }
                 if batch.lines.len() > APERCU {
-                    println!("    … ({} ligne(s) de plus)", batch.lines.len() - APERCU);
+                    tracing::info!("    … ({} ligne(s) de plus)", batch.lines.len() - APERCU);
                 }
             }
-            Err(err) => eprintln!("[erreur de lecture] {err}"),
+            Err(err) => tracing::error!("[erreur de lecture] {err}"),
         }
     }
 }
@@ -69,11 +69,13 @@ fn resolve_path() -> PathBuf {
     match discovery::discover() {
         Some(path) => path,
         None => {
-            eprintln!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
+            tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
             for candidate in discovery::candidate_paths() {
-                eprintln!("  - {}", candidate.display());
+                tracing::error!("  - {}", candidate.display());
             }
-            eprintln!("\nPrécisez le chemin explicitement : cargo run -p overlay-app -- <chemin>");
+            tracing::error!(
+                "Précisez le chemin explicitement : cargo run -p overlay-app -- <chemin>"
+            );
             std::process::exit(1);
         }
     }

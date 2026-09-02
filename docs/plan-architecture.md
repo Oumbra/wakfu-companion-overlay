@@ -656,3 +656,48 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
 4. **Signature Authenticode** Windows : budget accepté ou distribution non signée assumée en v1 ?
 5. **Langue du client de jeu** : le parser actuel est FR uniquement. L'overlay hérite de cette
    limite — la documenter, ou élargir le parser côté web (qui bénéficierait aux deux) ?
+
+---
+
+## 15. Journalisation (`overlay-ui`, 2026-09-02)
+
+Objectif : que chaque exécution soit rejouable/analysable après coup (dégâts, alertes, appairage,
+fenêtrage) sans dépendre d'un copier-coller du terminal — le fichier EST la source de vérité,
+la console n'en est qu'un miroir.
+
+- **Un seul système de journalisation** : `tracing` partout (`overlay-ingest`/`overlay-engine`
+  l'utilisaient déjà). Avant ce lot, `overlay-ui` faisait cohabiter `tracing::info!/warn!` (sans
+  aucun subscriber installé — donc **invisibles**, bug silencieux) et `env_logger` (façade `log`,
+  console uniquement) : les deux sont partis, remplacés par un unique
+  `tracing_subscriber::registry()` (voir `crates/overlay-ui/src/logging.rs`). Les dépendances
+  externes qui utilisent encore la façade `log` (wgpu, winit) sont pontées automatiquement vers ce
+  même subscriber par `tracing-subscriber` (feature `tracing-log`, activée par défaut sur `.init()`
+  — aucun code de pont à écrire).
+- **Deux sorties, un seul contenu** : une couche console (`fmt::layer()`, ANSI) et une couche
+  fichier (`fmt::layer().with_ansi(false)`), toutes deux sous le même `EnvFilter` — ce qui apparaît
+  dans le terminal est exactement ce qui est écrit sur disque (horodatage, champs structurés,
+  thread, ligne compris).
+- **Emplacement** : `<dossier de données de l'appli>/logs/` (même racine que
+  `catalog_cache`/`token_store`/`watchlist`, résolue par `directories::ProjectDirs` — sous Windows
+  `%APPDATA%\wakfu-companion-overlay\logs\`), fichier `overlay-ui.<AAAA-MM-JJ>.log`.
+- **Rotation** : quotidienne (`tracing_appender::rolling::Rotation::DAILY`), 14 fichiers conservés
+  (`max_log_files`) — pas de croissance illimitée sur un poste laissé tel quel.
+- **Écriture synchrone** (pas de `tracing_appender::non_blocking`) : volume de lignes faible (pas
+  un chemin chaud), et ça garantit qu'aucune ligne n'est perdue si le process s'arrête
+  brutalement — notamment Ctrl+C dans le terminal, un des deux moyens de sortie documentés dans la
+  bannière de démarrage (l'autre étant le hotkey Quitter).
+- **Horodatage** : UTC ISO-8601 microseconde (`fmt::time::SystemTime`, timer par défaut de
+  `tracing-subscriber`, zéro dépendance supplémentaire) — UTC plutôt qu'heure locale pour un tri
+  lexical fiable et aucune ambiguïté de fuseau/heure d'été.
+- **Niveau** : `info` sur le code de l'appli, `warn` sur `wgpu_hal`/`wgpu_core`/`naga` (bruyants),
+  réglable sans recompiler via `RUST_LOG` (même convention que `overlay-app`).
+- **Bornes de session** : chaque lancement journalise `=== session démarrée ===` (PID, version, OS)
+  en tout premier dans `main()`, et `=== session terminée ===` (même PID, + la raison) à CHAQUE
+  point de sortie — fermeture de fenêtre, hotkey Quitter, Ctrl+C (`logging::install_ctrlc_handler`,
+  sans quoi ce chemin de sortie n'aurait jamais de borne de fin exploitable), échec de démarrage
+  (`wakfu.log` introuvable). Absence de ligne de fin avant la prochaine ligne de début = sortie
+  anormale (crash).
+- Le jeton de compte ne transite **jamais** dans ces logs (§10) — seuls des messages de statut
+  (succès/échec d'appairage, de sauvegarde, de récupération des réglages) y apparaissent.
+- `overlay-app` (harnais L1, pas l'overlay final) garde un `tracing_subscriber::fmt` console
+  uniquement — pas de fichier, pas de rotation : pas l'usage visé par ce lot.
