@@ -524,45 +524,58 @@ l'auth native : un échec laisse la file simplement inactive cette session (rost
 pleinement fonctionnels), sans jamais faire échouer toute la connexion pour ce besoin annexe.
 
 **Génération des événements (`overlay_engine::history`, `crates/overlay-engine/src/session.rs`)**
-— parité désormais quasi complète avec `StatsStoreService`, en s'appuyant directement sur le dépôt
-web local (`../wakfu-companion`, présent sur ce poste de dev) pour retrouver les formules et
-raisonnements exacts plutôt que de les redeviner (voir la doc de tête de `history.rs` pour le
-détail complet) :
-- **Fait (2026-09-02, complété)** : signatures (`fight_signature`/`purchase_signature`/
-  `trade_signature`), détection d'achat marchand/HDV, échanges, combats (participants, dégâts,
-  `defeated`/`fled`), reconstruction de date calendaire réelle — **ventilation des dégâts par
-  sort/élément** (`FighterDamage::spells`, alimentée depuis `LogEntry::Damage` uniquement, pas les
-  soins — voir `build_fight_sync_event`), **`xpGained` par participant ET total du combat**
-  (`LogEntry::XpGain::character`, filtré comme `registerFightXp`/`isRosterMember` : un nom qui n'a
-  pas rejoint CE combat ne crédite ni le participant ni le total), **résolution `monsterId`/
-  `itemId`** via le catalogue déjà chargé (`CatalogIndex::find_item_id`/`find_monster_id`, nouveau —
-  `itemId`/`itemName` mutuellement exclusifs comme `HistorySyncService.itemPayload`), **`gameServer`**
-  (déduit du dernier personnage du roster reconnu dans le log — `RosterAccount::game_server` +
-  `Engine::current_game_server`/`notice_character`, miroir de `GameServerService`), **récupération
-  de kamas HDV sans achat adjacent** (`HDV_KAMAS_SALE_ITEM`, corrélée à un `TradeCompleted` proche
-  via `PURCHASE_WINDOW_MS` dans les deux sens, miroir de `considerHdvKamaGain`/
-  `resolvePendingHdvKamaGain`/`flushPendingHdvKamaGain`), et **`dungeonId`/`dungeonRunKey`** pour le
-  seul cas « ce combat contient lui-même le boss d'un donjon classique » (`DungeonIndex::
-  find_by_boss_monster_id` + `client_key(uid, Fight, signature)` haché à l'envoi dans
-  `overlay_sync::queue::flush_once`, exactement la formule de `sync-queue.service.ts`).
-- **Reste, volontairement hors périmètre** : le regroupement de PLUSIEURS combats en un seul run de
-  donjon multi-salles (`dungeon-run-grouping.util.ts`, ~240 lignes de heuristique de corrélation) et
-  la détection de brèche/brèche ultime (référentiel absent côté overlay) — catégorie de heuristique
-  que le §2 de ce document réserve explicitement au moteur TS partagé, pas à un module Rust ; le
-  serveur tolère déjà un rattachement partiel (`fights.ts`, `COALESCE`). `turns` (nombre de tours)
-  reste à `0`, aucun panneau n'en affiche le besoin. **`dungeonId` non câblé en pratique** : la
-  résolution est prête et testée côté `overlay-engine` (`Engine::set_dungeons`), mais rien
-  n'appelle `GET /api/v1/dungeons` dans `overlay-ui` (décision du mainteneur : ce lot ne devait
-  toucher aucun fichier `overlay-ui`) — `dungeonId`/`dungeonRunKey` restent donc `None` tant qu'un
-  futur petit lot dédié n'ajoute pas ce fetch, même statut que L3 l'avait déjà documenté pour
-  `DungeonIndex`.
-- **Vérifié** : 120 tests (`overlay-engine` 101 + `overlay-sync` 19, incluant 15 tests nouveaux pour
-  ce lot : XP par participant/total, ventilation sort/élément, résolution monsterId/itemId par
-  nom seul, gameServer par compte, kamas HDV détectée/annulée par échange, dungeonId résolu/absent,
-  hachage dungeonRunKey), `clippy -D warnings`/`fmt --check` propres sur les deux crates. `overlay-ui` non
-  touché par ce lot (aucun diff) — `cargo build`/`clippy` y échouent sur 2 erreurs entièrement
-  PRÉ-EXISTANTES et sans rapport (fonction à 8 arguments, fermeture redondante), confirmé identique
-  via `git stash`/`clippy` sur l'état du dépôt avant ce lot.
+— parité complète avec `StatsStoreService` sur tous les champs de `FightPayload`/`PurchasePayload`/
+`TradePayload`, en s'appuyant directement sur le dépôt web local (`../wakfu-companion`, présent sur
+ce poste de dev) pour retrouver les formules et raisonnements exacts plutôt que de les redeviner
+(voir la doc de tête de `history.rs`/`dungeon_run.rs` pour le détail complet) :
+- **Fait (2026-09-02)** : signatures, détection d'achat marchand/HDV, échanges, combats
+  (participants, dégâts, `defeated`/`fled`), reconstruction de date calendaire réelle, ventilation
+  des dégâts par sort/élément (dégâts uniquement, pas les soins), `xpGained` par participant ET
+  total du combat (miroir de `registerFightXp`/`isRosterMember` — un nom qui n'a pas rejoint CE
+  combat ne crédite ni le participant ni le total), résolution `monsterId`/`itemId` via le
+  catalogue (`itemId`/`itemName` mutuellement exclusifs comme `HistorySyncService.itemPayload`),
+  `gameServer` (déduit du dernier personnage du roster reconnu dans le log —
+  `RosterAccount::game_server` + `Engine::current_game_server`/`notice_character`, miroir de
+  `GameServerService`), récupération de kamas HDV sans achat adjacent (`HDV_KAMAS_SALE_ITEM`,
+  corrélée à un `TradeCompleted` proche dans les deux sens, miroir de `considerHdvKamaGain`/
+  `resolvePendingHdvKamaGain`/`flushPendingHdvKamaGain`).
+- **Fait (2026-09-02, suite — regroupement de donjon multi-salles)** : `overlay_engine::
+  dungeon_run` porte désormais `find_dungeon_for_enemies` (3 priorités : brèche ultime par boss
+  distincts, donjon classique par boss, brèche simple par familles — miroir complet de
+  `findDungeonForEnemies`, `fight-image.util.ts`) et `group_dungeon_runs` (port direct de
+  `groupDungeonRuns`/`dungeon-run-grouping.util.ts` : cluster de tentatives contre un même boss,
+  créneau archimonstre pré-boss optionnel, salles précédentes bornées par `roomSlots` avec
+  vérification de composition — tous les cas documentés côté web, y compris les bugs déjà corrigés
+  là-bas, sont couverts par des tests dédiés). `dungeon.rs` porte `WakfuDungeonType`/
+  `has_pre_boss_archi` (mêmes champs que `GET /api/v1/dungeons`, jusque-là ignorés) et les
+  recherches de brèche (`find_ultimate_breach_by_boss_monsters`/`find_breach_by_monster_families`).
+  `SessionState::resolve_dungeon_assignment` (`session.rs`) regroupe TOUS les combats non `ongoing`
+  de la session à chaque `CombatEnd`, et **renvoie aussi les SIBLINGS** d'un run tout juste complété
+  (salles déjà envoyées sans rattachement) avec le même `dungeonId` et la même graine de run — miroir
+  de `HistorySyncService.recordFight`, boucle `assignment.siblings` (nécessite de conserver l'heure
+  de fin propre à chaque combat, voir `FightWorking::ended_at_time`/`ended_at_ms`, pour pouvoir
+  rebâtir fidèlement un combat déjà terminé longtemps après coup).
+- **Fait (2026-09-02, suite — branchement `overlay-ui`)** : `dungeonId`/`dungeonRunKey` sont
+  désormais réellement alimentés en production, pas seulement prêts côté `overlay-engine` — nouveau
+  thread `spawn_dungeon_thread` (`overlay-ui/src/main.rs`, miroir simplifié de
+  `spawn_catalog_thread` : pas d'endpoint `/version` pour ce référentiel, cache disque chargé puis
+  toujours remplacé par la version réseau) alimente un `Arc<ArcSwap<DungeonIndex>>` relayé à
+  `Engine::set_dungeons` par le thread Engine, même mécanique de comparaison par pointeur que pour
+  le catalogue. `spawn_engine_thread` regroupe ses `Arc<ArcSwap<_>>` dans un nouveau
+  `struct EngineHandles` (5 paramètres au lieu de 8+1) — corrige au passage un dépassement
+  `clippy::too_many_arguments` pré-existant plutôt que l'aggraver.
+- **Reste, volontairement hors périmètre** : `turns` (nombre de tours) reste à `0`, aucun panneau
+  n'en affiche le besoin et aucune formule ne le nécessite (jamais dans une signature).
+- **Vérifié** : 133 tests (`overlay-engine` 114 + `overlay-sync` 19, dont une quarantaine nouveaux
+  sur l'ensemble de ces lots : XP, ventilation sort/élément, résolution monsterId/itemId,
+  gameServer, kamas HDV, hachage dungeonRunKey, `find_dungeon_for_enemies` 3 priorités,
+  `group_dungeon_runs` — clusters de tentatives, archimonstre pré-boss réel/absent, salles bornées,
+  deux runs successifs jamais fusionnés — et bout-en-bout via `SessionState::apply`, siblings
+  compris), `clippy -D warnings`/`fmt --check` propres sur `overlay-engine`/`overlay-sync`/
+  `overlay-ui`, `cargo build --workspace` propre. Les 2 erreurs clippy pré-existantes d'`overlay-ui`
+  (fonction à 8 arguments, fermeture redondante), confirmées présentes sur l'état du dépôt avant ce
+  lot (`git stash`), sont corrigées au passage — le workspace entier est maintenant propre sous
+  `clippy -D warnings`.
 
 ### 7.4 Catalogue
 
@@ -673,7 +686,7 @@ proposer une disposition personnalisable comme le ferait un site web.
 | **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Reste** : État de synchro (dépend de L5). **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés |
 | **L3 — Catalogue** ✅ fait | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files — **fait (2026-09-02, retour utilisateur)** : `overlay_engine::catalog` (index O(1) par id/nom, depuis `GET /api/v1/catalog/`) + `overlay-sync` (fetch + cache disque `catalog_cache.rs`, offline-first) + `overlay-ui::remote_icons` (résolution/téléchargement/cache d'icônes réelles `wakassets` pour le panneau Suivi, vérifié en direct contre le déploiement dev). **Fait (2026-09-02, suite)** : `catalog::find_item_has_recipe` (drapeau recette) et `catalog::find_monster_classification`/`find_monster_family_id` (boss/archimonstre/dominant, priorité `MonsterClassification`, miroir de `resolveFightTypeClassification`) ; `dungeon.rs`/`monster_family.rs` — deux nouveaux index O(1) (par id, + réciproque boss→donjon) construits depuis `GET /api/v1/dungeons`/`GET /api/v1/monster-families` (`overlay_sync::client::fetch_dungeons`/`fetch_monster_families`, cache disque `reference_data_cache.rs`, sans endpoint `/version` dédié côté serveur donc toujours rechargés en tâche de fond) ; repli hors-ligne embarqué (`overlay_sync::catalog_cache::embedded_fallback`, `assets/catalog/catalog-index.json.gz` via `include_bytes!`, décompression `flate2`) branché dans `spawn_catalog_thread` (utilisé seulement si aucun cache disque ET réseau injoignable) ; golden files de non-régression (`crates/overlay-engine/tests/golden/*.json` + `tests/catalog_golden.rs`, cohérence croisée catalogue/donjons/familles). **Clôturé (2026-09-02, poste de dev avec accès réseau réel)** : les lots précédents avaient été développés dans un sandbox sans accès à Neon/`*.pages.dev` ni à `overlay-ui` (Windows-only, non buildable là-bas) — ce n'est plus le cas ici, les trois points bloquants ont donc été levés pour de vrai plutôt que redocumentés comme limite : (1) `claude-dev.wakfu-companion.com` confirmé joignable (`catalog/`, `catalog/version`, `dungeons`, `monster-families` en 200) ; (2) repli embarqué **régénéré depuis ce déploiement réel** via `cargo run -p overlay-sync --bin gen-catalog-fallback` — catalogue complet (~1,8 Mo bruts / ~489 Ko gzip), n'est plus un placeholder ; (3) petit indicateur « 📦⚠ catalogue daté » ajouté dans la zone Combat de `overlay-ui` (`catalog_stale: Arc<AtomicBool>`, posé par `spawn_catalog_thread` uniquement quand le repli embarqué est utilisé, tooltip explicatif) — remplace le `tracing::warn!` jusque-là invisible en jeu. `cargo build`/`test`/`clippy -D warnings`/`fmt --check` **propres sur les 5 crates du workspace, `overlay-ui` compris** (précédemment non vérifiable en sandbox). **Volontairement reporté, pas un blocage de clôture** : brancher `DungeonIndex`/`MonsterFamilyIndex` dans `overlay-ui` — aucun panneau §9 n'en a besoin aujourd'hui (`LogEntry` n'a pas de `dungeonId` par combat, voir `model.rs`), prévu pour un futur panneau Combat conscient du donjon, pas une régression de ce lot. |
 | **L4 — Auth native** 🟡 en cours | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable — **fait** : 3 endpoints serveur (`/api/v1/auth/native/{pair,claim,poll}`, table `native_pairings`, `Authorization: Bearer` accepté par `_auth.ts`), page web `/pair`, crate `overlay-sync` (pairing bloquant + `keyring`/repli fichier + `GET /settings`), roster appliqué à `overlay-engine::session` (priorité sur `breed`), portraits de classe affichés dans le panneau Combat (`overlay-ui`). **Fait (2026-09-02, suite)** : révocation/déconnexion — raccourci global `Ctrl+Alt+D` (`App::disconnect_account`), commande `AuthCommand::Disconnect` traitée par le thread Auth (`spawn_auth_thread`, restructuré pour rester vivant après une connexion réussie plutôt que de se terminer, condition requise pour pouvoir déconnecter PUIS reconnecter sans redémarrer l'overlay) — efface le jeton (trousseau + repli fichier) et notifie le thread Engine (`EngineCommand::Disconnect`) qui repasse en mode invité (roster `None` → repli `breed`, Suivi vidé ; compteurs locaux déjà persistés conservés pour une reconnexion ultérieure). Vérification bout en bout **partiellement levée** (poste de dev avec accès réseau réel, comme pour L3) : `claude-dev.wakfu-companion.com` confirmé joignable sur les trois routes d'appairage natif (`pair` → 200 avec code+URL réels, `poll` → `pending`/`expired` conformes au format attendu par `pairing.rs`, `settings` sans/avec jeton invalide → 401 comme attendu) ; la complétion réelle d'un appairage (connexion Discord/Google dans un navigateur) reste non automatisable depuis ici et n'a donc pas été rejouée. **Reste** : UI de pairing dans la fenêtre overlay (toujours console-only, délibérément reporté) |
-| **L5 — Synchro** 🟡 en cours | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay — **fait (2026-09-02)** : `overlay_engine::history` (signatures + payloads fight/purchase/trade) + `overlay_engine::log_time` (dates réelles depuis `LogDateAnchor`) + `overlay_sync::queue::SyncQueue` (file SQLite idempotente, lots de 50, backoff 15s→5min, abandon après 10 tentatives non réseau — testé par rejeu 10x, critère de sortie ci-contre) + câblage `overlay-ui` (thread Sync dédié, activé/désactivé avec le compte). **Complété (2026-09-02, suite, depuis le dépôt web local)** : ventilation par sort/élément, xpGained par participant ET total du combat, résolution monsterId/itemId par catalogue, gameServer (déduit du roster), récupération de kamas HDV sans achat adjacent, dungeonId/dungeonRunKey pour un combat contenant lui-même son boss — voir §7.3 pour le détail et les limites assumées (regroupement multi-salles hors périmètre, dungeonId non câblé côté `overlay-ui` par choix du mainteneur). **Reste** : rien de bloquant pour ce lot ; le petit branchement `overlay-ui` pour `dungeonId` est un futur lot séparé |
+| **L5 — Synchro** ✅ fait | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay — **fait (2026-09-02)** : `overlay_engine::history` (signatures + payloads fight/purchase/trade) + `overlay_engine::log_time` (dates réelles depuis `LogDateAnchor`) + `overlay_sync::queue::SyncQueue` (file SQLite idempotente, lots de 50, backoff 15s→5min, abandon après 10 tentatives non réseau — testé par rejeu 10x, critère de sortie ci-contre) + câblage `overlay-ui` (thread Sync dédié, activé/désactivé avec le compte). **Complété (2026-09-02, suite, depuis le dépôt web local)** : ventilation par sort/élément, xpGained par participant ET total du combat, résolution monsterId/itemId par catalogue, gameServer (déduit du roster), récupération de kamas HDV sans achat adjacent. **Clôturé (2026-09-02, suite — demande explicite du mainteneur de lever les deux limites restantes)** : regroupement de donjon multi-salles complet (`overlay_engine::dungeon_run`, port direct de `dungeon-run-grouping.util.ts` + `findDungeonForEnemies` 3 priorités, siblings renvoyés avec le rattachement une fois le run complété — voir §7.3) ET branchement réel `overlay-ui` (`spawn_dungeon_thread`, `GET /api/v1/dungeons` → `Engine::set_dungeons`) : `dungeonId`/`dungeonRunKey` sont désormais alimentés en production, plus seulement prêts côté moteur. **Reste** : rien — voir §7.3 pour le seul renoncement volontaire restant (`turns`, jamais utilisé) |
 | **L6 — Packaging** | AppImage, installeur, mise à jour signée | Installation propre sur une machine vierge Windows et Linux |
 
 S1/S2/S3 étaient prévus **bloquants** (ils peuvent remettre en cause la stack). **Décision du

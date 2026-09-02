@@ -11,7 +11,7 @@
     "monsterFamilyId": [42],
     "pictureUrl": "https://example.invalid/larventura.png",
     "wakassetsAvailable": true,
-    "type": "DUNGEON",
+    "type": "TWO_ROOMS",
     "hasPreBossArchi": false
   },
   {

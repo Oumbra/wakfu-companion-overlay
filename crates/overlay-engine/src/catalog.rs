@@ -328,6 +328,19 @@ impl CatalogIndex {
             .and_then(|entry| entry.family_id)
     }
 
+    /// Drapeau `isArchi` BRUT — contrairement à `find_monster_classification` (qui priorise
+    /// `boss > archi > dominant`, donc masque `isArchi` pour un monstre qui est AUSSI un boss),
+    /// cette méthode répond directement à la question "cette entrée porte-t-elle le drapeau
+    /// archimonstre ?", sans considération de priorité. Miroir de `entry?.isArchi === true`
+    /// (`HistorySyncService.hasArchiEnemy`, `dungeon-run-grouping.util.ts`) : nécessaire pour le
+    /// créneau "archimonstre pré-boss" du regroupement de donjon (`dungeon_run.rs`), où un combat
+    /// SANS boss doit être reconnu comme contenant un archimonstre même si celui-ci était,
+    /// ailleurs, aussi classé boss.
+    pub fn find_monster_is_archi(&self, name: &str, catalog_id: Option<i64>) -> bool {
+        self.find_monster_entry(name, catalog_id)
+            .is_some_and(|entry| entry.is_archi)
+    }
+
     fn find_monster_entry(&self, name: &str, catalog_id: Option<i64>) -> Option<&MonsterEntry> {
         if let Some(id) = catalog_id {
             if let Some(entry) = self.monsters_by_id.get(&id) {
@@ -450,6 +463,15 @@ mod tests {
             index.find_monster_classification("peu importe", Some(502)),
             MonsterClassification::Dominant
         );
+    }
+
+    #[test]
+    fn drapeau_archi_brut_reste_disponible_meme_derriere_un_classement_boss() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        assert!(index.find_monster_is_archi("peu importe", Some(501)));
+        assert!(!index.find_monster_is_archi("peu importe", Some(502))); // dominant, pas archi
+        assert!(!index.find_monster_is_archi("peu importe", Some(24875))); // boss, pas archi
+        assert!(!index.find_monster_is_archi("Introuvable", None));
     }
 
     #[test]
