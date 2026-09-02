@@ -156,3 +156,27 @@ pub fn fetch_catalog_index() -> Result<Value, SyncError> {
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body("/api/v1/catalog/", response)
 }
+
+/// `GET /api/v1/dungeons` — liste complète des donjons (voir `overlay_engine::DungeonIndex::
+/// from_json`, qui en attend exactement cette forme : un tableau d'objets, pas de tuples compacts,
+/// voir `functions/api/v1/dungeons.ts` côté `wakfu-companion`). Pas de endpoint `/version` séparé
+/// pour ce référentiel (voir `reference_data_cache.rs`) — toujours rechargé en entier.
+pub fn fetch_dungeons() -> Result<Value, SyncError> {
+    let url = format!("{}/api/v1/dungeons", base_url());
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body("/api/v1/dungeons", response)
+}
+
+/// `GET /api/v1/monster-families` — miroir de `fetch_dungeons` pour les familles de monstres (voir
+/// `overlay_engine::MonsterFamilyIndex::from_json`).
+pub fn fetch_monster_families() -> Result<Value, SyncError> {
+    let url = format!("{}/api/v1/monster-families", base_url());
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body("/api/v1/monster-families", response)
+}

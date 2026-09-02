@@ -4,16 +4,27 @@
 //! `token_store.rs` : un fichier JSON sous le dossier de données de l'app
 //! (`directories::ProjectDirs`), jamais une base de données pour un besoin aussi simple.
 //!
-//! Repli hors-ligne EMBARQUÉ (`assets/catalog/…`, prévu au plan) volontairement absent de cette
-//! itération : sans cache disque ET sans réseau au tout premier lancement, le catalogue reste
-//! simplement vide — les tuiles du panneau Suivi retombent sur l'icône générique, jamais une
-//! erreur bloquante (voir `overlay_engine::CatalogIndex::is_empty`).
+//! Repli hors-ligne EMBARQUÉ (`assets/catalog/catalog-index.json.gz`, `embedded_fallback` —
+//! §7.4 du plan) : utilisé UNIQUEMENT quand ni le cache disque ci-dessus ni le réseau ne sont
+//! disponibles au démarrage (voir `overlay-ui::main::spawn_catalog_thread`) — l'overlay reste
+//! utilisable (icônes réelles pour les quelques entrées embarquées, icône générique sinon) plutôt
+//! que de retomber sur un catalogue totalement vide au tout premier lancement hors ligne.
+//!
+//! ⚠️ Le fichier embarqué est un PLACEHOLDER volontairement réduit (voir sa fixture de test
+//! ci-dessous pour le contenu exact) : ce sandbox de développement ne peut atteindre ni Neon ni
+//! `*.pages.dev` (même limite documentée partout ailleurs dans ce dépôt et dans `wakfu-companion`,
+//! voir `server/README.md` côté web) et ne peut donc pas produire le vrai catalogue complet
+//! (~11 700 objets / ~850 monstres). **À régénérer depuis un vrai déploiement avant toute release**
+//! via `cargo run -p overlay-sync --bin gen-catalog-fallback` (voir ce binaire) — jamais à la main.
 
+use std::io::Read;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::SyncError;
+
+const EMBEDDED_FALLBACK_GZ: &[u8] = include_bytes!("../assets/catalog/catalog-index.json.gz");
 
 // Même précaution de nommage qu'ailleurs dans ce crate (`token_store.rs`) — un test ne doit
 // jamais lire/écraser le VRAI cache de l'utilisateur.
@@ -62,6 +73,24 @@ pub fn save(index_hash: &str, index: &serde_json::Value) -> Result<(), SyncError
     std::fs::write(&path, json).map_err(|err| SyncError::TokenStore(err.to_string()))
 }
 
+/// Décompresse le repli embarqué (`assets/catalog/catalog-index.json.gz`, voir doc de module) —
+/// n'échoue jamais en pratique (fichier connu à la compilation, vérifié par
+/// `decompresse_sans_planter` ci-dessous) mais retombe quand même sur un catalogue vide plutôt que
+/// de paniquer si le fichier venait à être corrompu par une future édition manuelle malheureuse,
+/// même politique de tolérance que `load`/le reste de ce module.
+pub fn embedded_fallback() -> serde_json::Value {
+    let mut decoder = flate2::read::GzDecoder::new(EMBEDDED_FALLBACK_GZ);
+    let mut json = String::new();
+    if decoder.read_to_string(&mut json).is_err() {
+        tracing::warn!("repli hors-ligne embarqué illisible (asset corrompu ?)");
+        return serde_json::json!({ "items": [], "monsters": [] });
+    }
+    serde_json::from_str(&json).unwrap_or_else(|err| {
+        tracing::warn!(%err, "repli hors-ligne embarqué mal formé (asset corrompu ?)");
+        serde_json::json!({ "items": [], "monsters": [] })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +120,17 @@ mod tests {
     fn absence_de_cache_ne_plante_pas() {
         let _ = std::fs::remove_file(cache_file_path());
         assert!(load().is_none());
+    }
+
+    /// Non-régression du repli embarqué : vérifie que l'asset compilé dans le binaire se
+    /// décompresse en un JSON exploitable par `overlay_engine::CatalogIndex::from_compact_json`
+    /// (pas seulement « ne panique pas ») — un asset corrompu/mal régénéré (voir
+    /// `gen-catalog-fallback`) serait détecté ici plutôt qu'au premier lancement hors ligne d'un
+    /// utilisateur.
+    #[test]
+    fn le_repli_embarque_se_decompresse_en_catalogue_exploitable() {
+        let index = embedded_fallback();
+        let catalog = overlay_engine::CatalogIndex::from_compact_json(&index);
+        assert!(!catalog.is_empty());
     }
 }
