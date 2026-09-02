@@ -1309,9 +1309,26 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             gpu.surface.configure(&gpu.device, &gpu.config);
+            // Retour utilisateur 2026-09-02 (opacité clic-traversant restée pleine sur le Suivi
+            // malgré la bascule, largeur parfois restée à l'ancienne valeur après un premier
+            // élargissement) : CETTE frame-ci — celle qui portait le changement (opacité, largeur,
+            // n'importe quel contenu) — est purement et simplement PERDUE, jamais présentée. Sans
+            // redemander explicitement un redessin ici, plus rien ne le fait tant qu'un événement
+            // SANS RAPPORT ne survient par ailleurs (§6.1 : pas de boucle de rendu continue) —
+            // l'écran reste bloqué sur la DERNIÈRE frame réellement présentée, potentiellement
+            // périmée indéfiniment (ex. encore pleinement opaque après une bascule Ctrl+Alt+W).
+            // `request_redraw` ici force une nouvelle tentative dès le prochain tour de la boucle
+            // d'événements, sur la surface qui vient d'être reconfigurée juste au-dessus.
+            window.request_redraw();
             return repaint_delay;
         }
         wgpu::CurrentSurfaceTexture::Validation => {
+            // PAS de `request_redraw` ici, contrairement à Outdated/Lost ci-dessus : cette
+            // branche ne reconfigure rien, donc rien ne garantit qu'une nouvelle tentative
+            // réussirait mieux que celle-ci — redemander sans arrêt un redessin qui échouerait à
+            // nouveau à chaque tick reviendrait à la boucle de rendu continue que cette
+            // architecture évite justement (§6.1). Se contente de journaliser ; un `Ctrl+Alt+R`
+            // (qui force un redessin ET une resynchronisation complète) reste le recours.
             tracing::warn!("get_current_texture: erreur de validation");
             return repaint_delay;
         }
