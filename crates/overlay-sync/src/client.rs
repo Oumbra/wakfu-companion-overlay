@@ -1,7 +1,7 @@
-//! Petit client HTTP bloquant (`ureq`, rustls) — voir `docs/plan-architecture.md` §7.2 pour le
-//! choix de rester en `ureq` plutôt que `reqwest`+`tokio` tant que la vraie file d'envoi
-//! asynchrone (L5) n'existe pas : ce crate ne fait que quelques requêtes ponctuelles sur son
-//! propre thread, jamais sur le chemin chaud du rendu.
+//! Petit client HTTP bloquant (`ureq`, rustls) — voir `docs/plan-architecture.md` §7.3 pour le
+//! choix définitif de rester en `ureq` plutôt que `reqwest`+`tokio`, y compris pour la file d'envoi
+//! (L5, `queue.rs`) : chaque thread réseau (auth, catalogue, sync) reste un `std::thread` bloquant
+//! dédié, jamais sur le chemin chaud du rendu — un seul modèle de concurrence dans tout le binaire.
 
 use std::time::Duration;
 
@@ -34,7 +34,11 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-pub(crate) fn post_json(path: &str, body: &Value) -> Result<Value, SyncError> {
+/// `pub` (pas seulement `pub(crate)`) depuis le lot L5 : `overlay_sync::queue::SyncQueue::
+/// flush_once` prend son transport HTTP en paramètre plutôt que d'appeler cette fonction en dur
+/// (voir la doc de `queue.rs`) — l'hôte (`overlay-ui`, thread Sync) doit donc pouvoir la passer
+/// telle quelle en production (`|path, body| overlay_sync::post_json(path, body)`).
+pub fn post_json(path: &str, body: &Value) -> Result<Value, SyncError> {
     let url = format!("{}{path}", base_url());
     let response = agent()
         .post(&url)
@@ -102,6 +106,37 @@ pub struct AccountSettings {
     /// activé sans être suivi, et réciproquement. Lu en lecture seule comme le reste de cette
     /// structure, jamais réécrit par l'overlay.
     pub sound_items: Vec<SoundItemEntry>,
+}
+
+/// `GET /api/v1/auth/me` avec `Authorization: Bearer <token>` — seule source de l'`uid` requis par
+/// `overlay_sync::queue::client_key` (L5, §7.1 du plan) : `AuthService.uid` côté web vient du
+/// cookie de session, indisponible ici (voir §7.2, appairage natif) ; le serveur expose la même
+/// information (`user.id`) via cet endpoint, qui accepte déjà `Authorization: Bearer` comme
+/// `/settings` (même middleware `_auth.ts`). Résolu une fois par connexion réussie
+/// (`attempt_connect`), jamais recalculé par événement.
+pub fn fetch_account_id(token: &str) -> Result<String, SyncError> {
+    let url = format!("{}/api/v1/auth/me", base_url());
+    let mut response = agent()
+        .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    let status = response.status().as_u16();
+    let body: Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|err| SyncError::Json(err.to_string()))?;
+    if !(200..300).contains(&status) {
+        return Err(SyncError::Http {
+            status,
+            path: "/api/v1/auth/me".to_string(),
+        });
+    }
+    body.get("user")
+        .and_then(|user| user.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| SyncError::Json("champ user.id absent de /api/v1/auth/me".into()))
 }
 
 /// `GET /api/v1/settings` avec `Authorization: Bearer <token>` — voir `functions/api/_auth.ts`

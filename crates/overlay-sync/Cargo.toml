@@ -9,8 +9,16 @@ description = "Auth native par appairage (lot L4, docs/plan-architecture.md §7.
 overlay-engine = { path = "../overlay-engine" }
 keyring = "3"
 open = "5"
+# `bundled` : compile sqlite3 depuis ses sources C plutôt que de dépendre d'une lib système —
+# indispensable pour un binaire livré tel quel sur Windows (pas de sqlite3.dll garanti présent) et
+# cohérent avec le reste de l'overlay (rien d'autre n'exige de dépendance système). Voir §4/§7.3 du
+# plan (« file SQLite persistante », lot L5) — `overlay_sync::queue`.
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Hachage du `clientKey` (§7.1 du plan) — même formule que `computeClientKey` côté web
+# (`crypto.subtle.digest('SHA-256', ...)`), voir `queue::client_key`.
+sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1"
 ureq = { version = "3", features = ["json"] }
