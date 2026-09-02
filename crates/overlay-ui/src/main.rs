@@ -267,6 +267,18 @@ enum EngineCommand {
     Disconnect,
 }
 
+/// Message transmis au thread Sync (`spawn_sync_thread`, lot L5, §7.3 du plan) — `Activate`/
+/// `Deactivate` suivent exactement `AuthCommand::Retry`/`Disconnect` (compte lié ⇒ file active,
+/// mode invité ⇒ rien ne quitte la machine, voir la doc de `overlay_sync::queue`) ; `Enqueue`
+/// relaie les événements produits par `Engine::drain_sync_events` après chaque lot ingéré (thread
+/// Engine, voir `spawn_engine_thread`) — jamais bloquant pour ce dernier, l'écriture SQLite et
+/// l'envoi réseau se font entièrement sur le thread Sync.
+enum SyncCommand {
+    Activate(String),
+    Deactivate,
+    Enqueue(Vec<overlay_engine::SyncEvent>),
+}
+
 struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -1608,6 +1620,7 @@ fn spawn_engine_thread(
     catalog: Arc<ArcSwap<CatalogIndex>>,
     proxy: EventLoopProxy<UserEvent>,
     settings_rx: mpsc::Receiver<EngineCommand>,
+    sync_tx: mpsc::Sender<SyncCommand>,
 ) {
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -1681,6 +1694,14 @@ fn spawn_engine_thread(
                         }
                         snapshot.store(Arc::new(engine.snapshot()));
                         watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
+                        // L5, §7.1 du plan : relayé tel quel au thread Sync, qu'un compte soit lié
+                        // ou non — `SyncCommand::Enqueue` en mode invité est simplement ignoré par
+                        // ce dernier (aucune écriture réseau, voir sa doc), jamais retenu ici. Ne
+                        // bloque jamais ce thread : l'écriture SQLite/l'envoi vivent ailleurs.
+                        let sync_events = engine.drain_sync_events();
+                        if !sync_events.is_empty() {
+                            let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
+                        }
                         for alert in engine.drain_watchlist_alerts() {
                             tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
                             alert_sound::play_countdown_alert();
@@ -1817,6 +1838,111 @@ fn spawn_catalog_thread(
         .expect("échec de création du thread Catalogue");
 }
 
+/// Thread Sync (lot L5, §7.3 du plan) : possède la file SQLite persistante (`overlay_sync::
+/// SyncQueue`) — écriture (`enqueue`) ET envoi réseau (`flush_once`) vivent entièrement ici, jamais
+/// sur le thread Engine (voir `spawn_engine_thread`, qui ne fait que relayer des `SyncEvent` déjà
+/// sérialisés sans jamais attendre dessus) ni sur le main thread. Best-effort à l'ouverture de la
+/// file elle-même (dossier de données/SQLite indisponible) : le thread se termine simplement,
+/// l'overlay continue sans synchro plutôt que de planter — même philosophie que
+/// `spawn_catalog_thread`/`spawn_auth_thread`.
+///
+/// **Simplification assumée par rapport à `SyncQueueService` côté web** : pas de debounce explicite
+/// de 2 s avant un envoi (`FLUSH_DEBOUNCE_MS`) — chaque `SyncCommand::Enqueue` tente un
+/// `flush_once` immédiatement après écriture. Les entrées ne sont de toute façon jamais perdues
+/// (persistées avant tout envoi), un lot ingéré produit rarement plus d'une poignée d'événements à
+/// la fois (contrairement au rattrapage initial d'un `wakfu.log` entier, qui arrive lui aussi par
+/// lots ≤ 2 000 lignes, voir `overlay-ingest`), et `flush_once` traite de toute façon TOUT ce qui
+/// est en file au moment de l'appel (pas seulement le dernier lot reçu) — la seule perte réelle est
+/// un envoi réseau de plus qu'avec un vrai debounce, jamais un comportement incorrect.
+///
+/// Le délai avant le PROCHAIN passage (`wait`, argument de `recv_timeout`) encode à la fois
+/// l'inactivité (aucun compte connu : 1 h, réveillé immédiatement par la prochaine commande) et le
+/// backoff après un échec réessayable (`FlushOutcome::Retry`, voir `backoff_delay` — 15 s à 5 min,
+/// doublé à chaque échec consécutif, miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS` côté web).
+fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
+    thread::Builder::new()
+        .name("overlay-sync".into())
+        .spawn(move || {
+            let mut queue = match overlay_sync::SyncQueue::default_store_path() {
+                Some(path) => match overlay_sync::SyncQueue::open(&path) {
+                    Ok(queue) => queue,
+                    Err(err) => {
+                        tracing::warn!(
+                            %err,
+                            "file de synchro (SQLite) indisponible — historique non envoyé au compte cette session"
+                        );
+                        return;
+                    }
+                },
+                None => {
+                    tracing::warn!(
+                        "impossible de résoudre le dossier de données de l'overlay — file de synchro désactivée"
+                    );
+                    return;
+                }
+            };
+
+            let mut uid: Option<String> = None;
+            // Pas de compte connu au démarrage : n'attend qu'une commande, ne sonde jamais pour
+            // rien (même philosophie que `settings_rx.try_recv()` côté thread Engine).
+            let mut wait = std::time::Duration::from_secs(3600);
+            loop {
+                match command_rx.recv_timeout(wait) {
+                    Ok(SyncCommand::Activate(new_uid)) => {
+                        tracing::info!("file de synchro activée (compte connecté, lot L5)");
+                        uid = Some(new_uid);
+                    }
+                    Ok(SyncCommand::Deactivate) => {
+                        tracing::info!(
+                            "file de synchro désactivée (mode invité) — contenu déjà en file conservé sur disque"
+                        );
+                        uid = None;
+                    }
+                    Ok(SyncCommand::Enqueue(events)) => {
+                        for event in &events {
+                            if let Err(err) = queue.enqueue(event) {
+                                tracing::warn!(
+                                    %err,
+                                    kind = event.kind.as_str(),
+                                    "échec d'enfilage d'un événement d'historique (SQLite)"
+                                );
+                            }
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {} // réessai programmé (backoff) — retombe sur le flush ci-dessous
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break, // App fermée
+                }
+
+                wait = match &uid {
+                    None => std::time::Duration::from_secs(3600),
+                    Some(uid) => {
+                        match queue.flush_once(uid, |path, body| overlay_sync::post_json(path, body)) {
+                            Ok(overlay_sync::FlushOutcome::Idle | overlay_sync::FlushOutcome::Synced) => {
+                                std::time::Duration::from_secs(3600)
+                            }
+                            Ok(overlay_sync::FlushOutcome::Retry) => backoff_delay(queue.consecutive_failures()),
+                            Err(err) => {
+                                tracing::warn!(%err, "erreur de file de synchro (SQLite)");
+                                std::time::Duration::from_secs(60)
+                            }
+                        }
+                    }
+                };
+            }
+        })
+        .expect("échec de création du thread Sync");
+}
+
+/// Miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS`/le calcul de `scheduleRetry`
+/// (`sync-queue.service.ts`) — 15 s doublés à chaque échec consécutif, plafonné à 5 min.
+fn backoff_delay(consecutive_failures: u32) -> std::time::Duration {
+    const BASE_MS: u64 = 15_000;
+    const MAX_MS: u64 = 5 * 60_000;
+    let exponent = consecutive_failures.saturating_sub(1).min(20); // évite un débordement de décalage
+    let delay_ms = BASE_MS.saturating_mul(1u64 << exponent).min(MAX_MS);
+    std::time::Duration::from_millis(delay_ms)
+}
+
 /// **Boucle de retentative** (2026-09-01, retour utilisateur : appairage en échec — 405 côté
 /// serveur — sans aucun moyen de retenter sans relancer tout le logiciel) : une tentative échouée
 /// (`attempt_connect` renvoie `Err(raison)`) publie `AuthStatus::Disconnected { reason }` (voir
@@ -1842,6 +1968,7 @@ fn spawn_catalog_thread(
 /// déconnexion et la raison du dernier échec sont maintenant visibles/pilotables depuis l'overlay.
 fn spawn_auth_thread(
     settings_tx: mpsc::Sender<EngineCommand>,
+    sync_tx: mpsc::Sender<SyncCommand>,
     status: Arc<ArcSwap<AuthStatus>>,
     command_rx: mpsc::Receiver<AuthCommand>,
     proxy: EventLoopProxy<UserEvent>,
@@ -1852,7 +1979,7 @@ fn spawn_auth_thread(
             status.store(Arc::new(AuthStatus::Connecting));
             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
-            let result = attempt_connect(&settings_tx);
+            let result = attempt_connect(&settings_tx, &sync_tx);
 
             let mut connected = result.is_ok();
             status.store(Arc::new(match result {
@@ -1874,6 +2001,7 @@ fn spawn_auth_thread(
                     Ok(AuthCommand::Disconnect) if connected => {
                         overlay_sync::token_store::clear_token();
                         let _ = settings_tx.send(EngineCommand::Disconnect);
+                        let _ = sync_tx.send(SyncCommand::Deactivate);
                         connected = false;
                         status.store(Arc::new(AuthStatus::Disconnected {
                             reason: "déconnecté manuellement".to_string(),
@@ -1898,7 +2026,10 @@ fn spawn_auth_thread(
 /// même après appairage) avec un message COURT destiné à l'utilisateur (tooltip de l'icône de
 /// relance, voir `render` — pas qu'à la console) : dans tous les cas l'overlay continue, au pire
 /// en mode invité (repli `breed`, aucun suivi affiché).
-fn attempt_connect(settings_tx: &mpsc::Sender<EngineCommand>) -> Result<(), String> {
+fn attempt_connect(
+    settings_tx: &mpsc::Sender<EngineCommand>,
+    sync_tx: &mpsc::Sender<SyncCommand>,
+) -> Result<(), String> {
     if let Some(token) = overlay_sync::token_store::load_token() {
         match overlay_sync::client::fetch_settings(&token) {
             Ok(settings) => {
@@ -1912,6 +2043,7 @@ fn attempt_connect(settings_tx: &mpsc::Sender<EngineCommand>) -> Result<(), Stri
                     settings.watchlist.len()
                 );
                 let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                activate_sync_queue(&token, sync_tx);
                 return Ok(());
             }
             Err(err) => {
@@ -1961,11 +2093,32 @@ fn attempt_connect(settings_tx: &mpsc::Sender<EngineCommand>) -> Result<(), Stri
                 settings.watchlist.len()
             );
             let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+            activate_sync_queue(&token, sync_tx);
             Ok(())
         }
         Err(err) => {
             tracing::warn!("[compte] échec de récupération des réglages après appairage ({err}).");
             Err(format!("réglages injoignables après appairage ({err})"))
+        }
+    }
+}
+
+/// Résout l'`uid` (`GET /api/v1/auth/me`, voir `overlay_sync::client::fetch_account_id`) et active
+/// la file de synchro (L5, §7.1/§7.3 du plan) — appelé après CHAQUE connexion réussie
+/// (`attempt_connect`, jeton déjà connu ou tout juste obtenu par appairage). Best-effort et jamais
+/// fatal, comme le reste de cette fonction : un échec ici laisse simplement la file inactive cette
+/// session (roster/watchlist restent pleinement fonctionnels, seul l'historique ne remonte pas au
+/// compte) plutôt que de faire échouer toute la connexion pour un besoin annexe.
+fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
+    match overlay_sync::client::fetch_account_id(token) {
+        Ok(uid) => {
+            let _ = sync_tx.send(SyncCommand::Activate(uid));
+        }
+        Err(err) => {
+            tracing::warn!(
+                %err,
+                "[compte] identifiant introuvable (/api/v1/auth/me) — historique non synchronisé cette session."
+            );
         }
     }
 }
@@ -2011,8 +2164,11 @@ fn main() {
     let proxy = event_loop.create_proxy();
     let (settings_tx, settings_rx) = mpsc::channel();
     let (auth_command_tx, auth_command_rx) = mpsc::channel();
+    let (sync_tx, sync_rx) = mpsc::channel();
+    spawn_sync_thread(sync_rx);
     spawn_auth_thread(
         settings_tx.clone(),
+        sync_tx.clone(),
         Arc::clone(&auth_status),
         auth_command_rx,
         proxy.clone(),
@@ -2031,6 +2187,7 @@ fn main() {
         Arc::clone(&catalog),
         proxy,
         settings_rx,
+        sync_tx,
     );
 
     event_loop.set_control_flow(ControlFlow::Wait);
