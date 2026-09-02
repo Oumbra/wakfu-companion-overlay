@@ -1,21 +1,26 @@
 //! Événements d'historique synchronisés vers le compte (L5, §7.1 du plan) — miroir Rust de
 //! `history-event.model.ts` côté web : mêmes formes de payload, mêmes formules de signature.
 //!
-//! **Parité assumée volontairement partielle sur cette première itération** — voir §7 du plan
-//! (statut L5) pour le détail complet des champs non encore alimentés :
-//! - `FightPayload` : pas de ventilation par sort (`spells` toujours vide, `overlay-engine::
-//!   session` ne suit que des totaux dégâts/soin par combattant, pas par sort/élément) ; pas
-//!   d'`xpGained` PAR participant (seul le total de session est suivi) ; pas d'assignation de
-//!   donjon (`dungeonId`/`dungeonRunSignature` toujours `None`).
-//! - `gameServer` toujours `None` sur les trois payloads (pas de détection du serveur de jeu
-//!   côté overlay pour l'instant).
-//! - La "récupération de kamas HDV" (`HDV_KAMAS_SALE_ITEM`, gain de kamas hors combat corrélé à
-//!   AUCUN achat/échange) n'est pas détectée : seul l'achat classique (perte de kamas suivie d'un
-//!   ramassage, voir `session.rs::apply`) l'est.
+//! **Statut (2026-09-02, complété depuis le dépôt `wakfu-companion` local)** : la quasi-totalité
+//! des champs listés comme volontairement partiels dans une itération précédente de ce module sont
+//! désormais alimentés — ventilation par sort/élément (`spells`), `xpGained` par participant,
+//! résolution `monsterId`/`itemId` via le catalogue (voir `session::build_fight_sync_event`),
+//! `gameServer` (déduit du dernier personnage du roster reconnu dans le log — voir
+//! `session::Engine::current_game_server`, miroir de `GameServerService`), et récupération de
+//! kamas HDV sans achat adjacent (`HDV_KAMAS_SALE_ITEM`, voir `session::SessionState::apply` et
+//! `considerHdvKamaGain`/`resolvePendingHdvKamaGain` côté `stats-store.service.ts`).
 //!
-//! Ces champs acceptent tous `null`/liste vide côté serveur (`server/history/parse.ts`) : les
-//! événements envoyés sont donc valides dès aujourd'hui, seulement moins détaillés que ce que
-//! `StatsStoreService` produit — jamais rejetés pour autant.
+//! **Reste volontairement hors périmètre** (voir la doc de `FightPayload::dungeon_id` pour le
+//! détail) : le regroupement de plusieurs combats en un seul run de donjon multi-salles
+//! (`dungeon-run-grouping.util.ts`, ~240 lignes de heuristique) et la détection de brèche/brèche
+//! ultime (`findDungeonForEnemies`, priorités 0 et 2) — seul le cas « ce combat contient lui-même
+//! le boss d'un donjon classique » est porté. `turns` (nombre de tours) reste également à `0` :
+//! rien dans `overlay-engine::session` ne compte les tours aujourd'hui (aucun panneau n'en affiche
+//! le besoin, voir §9 du plan), et ce champ n'entre dans aucune signature/idempotence.
+//!
+//! Tous ces champs acceptent `null`/liste vide côté serveur (`server/history/parse.ts`) : un champ
+//! non résolu (catalogue pas encore chargé, roster vide, personnage jamais reconnu) part donc tel
+//! quel, jamais une erreur.
 
 use std::collections::HashMap;
 
@@ -59,6 +64,15 @@ impl HistoryEventKind {
         }
     }
 }
+
+/// Nom d'objet sentinelle d'une récupération de kamas à l'Hôtel de Vente — miroir exact de
+/// `HDV_KAMAS_SALE_ITEM` (`stats-store.service.ts`) : un gain de kamas hors combat (`KamaGain`
+/// sans `fightId`) non expliqué par un échange tout juste conclu est enregistré comme un
+/// `PurchasePayload` avec ce nom, `quantity = 0` (ni `itemId` ni vraie quantité, uniquement le
+/// montant dans `totalCost`) — même endpoint que l'achat classique, seul le nom sentinelle permet
+/// de distinguer les deux dans la même table côté serveur (`fights.kamasFromHdvSales` vs
+/// `kamasSpentOnPurchases`). Voir `session::SessionState::apply`.
+pub const HDV_KAMAS_SALE_ITEM: &str = "__hdv_kamas_sale__";
 
 /// `value.trim().to_lowercase()` — miroir de `normalize()` (`history-event.model.ts`). La
 /// casse Unicode peut différer marginalement de `String.prototype.toLowerCase()` sur des scripts
@@ -117,11 +131,25 @@ pub struct FightPayload {
     pub xp_gained: i64,
     pub kamas_gained: Option<i64>,
     pub game_server: Option<String>,
+    /// Id Ankama du donjon dont ce combat contient LUI-MÊME le boss — résolu via
+    /// `DungeonIndex::find_by_boss_monster_id` sur les ennemis de ce combat (voir
+    /// `session::resolve_dungeon_assignment`). `None` hors donjon, mais aussi pour une simple
+    /// SALLE d'un donjon multi-combats dont le boss n'est pas dans CE combat précis : le
+    /// regroupement multi-salles (`dungeon-run-grouping.util.ts` côté web, groupDungeonRuns) n'est
+    /// volontairement pas porté — heuristique de corrélation entre PLUSIEURS combats, exactement
+    /// la catégorie que le §2 du plan réserve au moteur TS partagé, pas à ce module Rust. Le
+    /// serveur tolère déjà ce cas (`fights.ts`, `COALESCE` sur `dungeonId`/`dungeonRunKey` :
+    /// « quand le boss apparaîtra à son tour dans l'historique connu ») : une salle envoyée sans
+    /// rattachement aujourd'hui n'est pas une donnée perdue, juste un rattachement différé.
     pub dungeon_id: Option<i64>,
-    /// Jamais envoyé tel quel : `overlay_sync::queue` le hache en `dungeonRunKey` au moment de
-    /// l'envoi, comme `SyncQueueService.send` côté web — voir la doc de `FightPayload`
-    /// ci-dessus (toujours `None` cette itération, aucune assignation de donjon encore portée).
-    #[serde(skip_serializing)]
+    /// Signature de contenu du combat REPRÉSENTATIF du run (voir `fight_signature`) — jamais
+    /// envoyée telle quelle : `overlay_sync::queue::flush_once` la hache en `dungeonRunKey` au
+    /// moment de l'envoi via `client_key(uid, Fight, signature)`, EXACTEMENT la même fonction que
+    /// pour `clientKey` (miroir de `SyncQueueService.send`, vérifié dans `sync-queue.service.ts`
+    /// du dépôt web : `computeClientKey(uid, entry.kind, dungeonRunSignature)`). Dans le seul cas
+    /// porté ici (ce combat contient son propre boss), cette signature est TOUJOURS identique à la
+    /// signature du combat lui-même — d'où `dungeonRunKey` du run == `clientKey` du combat de boss,
+    /// sans aller-retour serveur pour l'obtenir (voir `history-sync.service.ts::runSignature`).
     pub dungeon_run_signature: Option<String>,
     pub challenges_passed: i64,
     pub challenges_failed: i64,

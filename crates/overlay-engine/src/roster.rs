@@ -24,8 +24,9 @@ pub enum Gender {
 }
 
 /// Miroir de `RosterCharacter` (`character-roster.service.ts`) — seuls les champs utiles au
-/// panneau Combat sont repris (pas `id`/`label`/`gameServer` du compte, qui restent une
-/// préoccupation web).
+/// panneau Combat sont repris (pas `id`/`label` du compte, qui restent une préoccupation web).
+/// `gameServer` (voir `RosterAccount`) reste, lui, porté au niveau du COMPTE, pas du personnage —
+/// voir `RosterIndex::find_game_server`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RosterCharacter {
     pub name: String,
@@ -34,10 +35,16 @@ pub struct RosterCharacter {
     pub gender: Gender,
 }
 
+/// Miroir de `RosterAccount` (`character-roster.service.ts`) — `game_server` (le code
+/// `game_servers.code`, jamais une valeur inventée) est LE SEUL moyen de résoudre `gameServer`
+/// (L5, §7.1 du plan) : le log Wakfu ne contient aucune indication de serveur (voir
+/// `GameServerService`, dépôt web), il faut donc le rattacher au compte qui l'a déclaré.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 struct RosterAccount {
     #[serde(default)]
     characters: Vec<RosterCharacter>,
+    #[serde(rename = "gameServer", default)]
+    game_server: Option<String>,
 }
 
 /// Port direct de `normalizeWakfuName` (`wakfu-name.util.ts`) : minuscule, espaces superflus
@@ -55,6 +62,10 @@ pub fn normalize_wakfu_name(name: &str) -> String {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RosterIndex {
     by_normalized_name: HashMap<String, RosterCharacter>,
+    /// `gameServer` du COMPTE auquel appartient ce personnage — voir `find_game_server`. `None`
+    /// (compte sans serveur déclaré) distinct d'une absence d'entrée (personnage inconnu) : les
+    /// deux renvoient `None` côté `find_game_server`, mais seule cette table sait laquelle.
+    game_server_by_normalized_name: HashMap<String, Option<String>>,
 }
 
 impl RosterIndex {
@@ -68,23 +79,43 @@ impl RosterIndex {
             .unwrap_or_default();
 
         let mut by_normalized_name = HashMap::new();
+        let mut game_server_by_normalized_name = HashMap::new();
         for account in accounts {
             for character in account.characters {
                 // Dernier écrivain gagne en cas d'homonyme entre deux comptes — comportement
                 // best-effort assumé, un vrai conflit de nom entre comptes est un cas limite que
                 // le web lui-même ne résout pas autrement (premier compte trouvé dans son
                 // `findCharacter`, ici l'ordre d'itération du JSON n'est pas garanti identique de
-                // toute façon).
-                by_normalized_name.insert(normalize_wakfu_name(&character.name), character);
+                // toute façon). Même choix pour le gameServer du compte : les deux tables
+                // partagent le même dernier écrivain, jamais désynchronisées l'une de l'autre.
+                let key = normalize_wakfu_name(&character.name);
+                game_server_by_normalized_name.insert(key.clone(), account.game_server.clone());
+                by_normalized_name.insert(key, character);
             }
         }
-        Self { by_normalized_name }
+        Self {
+            by_normalized_name,
+            game_server_by_normalized_name,
+        }
     }
 
     /// Recherche insensible à la casse/accents/apostrophes — miroir de
     /// `CharacterRosterService.findCharacter`.
     pub fn find(&self, name: &str) -> Option<&RosterCharacter> {
         self.by_normalized_name.get(&normalize_wakfu_name(name))
+    }
+
+    /// Code du serveur de jeu (`game_servers.code`) du compte auquel appartient ce personnage —
+    /// miroir de `GameServerService.activeServer` restreint à la résolution par nom (voir
+    /// `overlay_engine::session::Engine::current_game_server` pour la déduction "dernier
+    /// personnage du roster reconnu dans le log", qui appelle cette méthode). `None` aussi bien
+    /// pour un personnage inconnu que pour un compte qui n'a pas déclaré de serveur — jamais une
+    /// valeur inventée (voir `RosterAccount::game_server`).
+    pub fn find_game_server(&self, name: &str) -> Option<String> {
+        self.game_server_by_normalized_name
+            .get(&normalize_wakfu_name(name))
+            .cloned()
+            .flatten()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -107,6 +138,14 @@ mod tests {
                         { "name": "Éclair-Ïo", "className": "iop", "gender": "m" },
                         { "name": "Brise'Os", "className": "sram", "gender": "f" },
                     ],
+                    "gameServer": "pandora",
+                },
+                {
+                    "id": "acc-2",
+                    "label": "Secondaire",
+                    "characters": [
+                        { "name": "SansServeur", "className": "sacrieur", "gender": "m" },
+                    ],
                 },
             ],
         })
@@ -127,6 +166,32 @@ mod tests {
         assert!(roster.find("ECLAIR-IO").is_some());
         // apostrophe typographique (’) vs droite (') — le nom stocké utilise l'apostrophe droite.
         assert!(roster.find("Brise’Os").is_some());
+    }
+
+    #[test]
+    fn resout_le_serveur_du_compte_dun_personnage() {
+        let roster = RosterIndex::from_settings_json(&sample_settings());
+        assert_eq!(
+            roster.find_game_server("Éclair-Ïo"),
+            Some("pandora".to_string())
+        );
+        // insensible casse/accents, même règle que `find`.
+        assert_eq!(
+            roster.find_game_server("eclair-io"),
+            Some("pandora".to_string())
+        );
+    }
+
+    #[test]
+    fn compte_sans_serveur_declare_renvoie_none() {
+        let roster = RosterIndex::from_settings_json(&sample_settings());
+        assert_eq!(roster.find_game_server("SansServeur"), None);
+    }
+
+    #[test]
+    fn personnage_inconnu_renvoie_none_pour_le_serveur() {
+        let roster = RosterIndex::from_settings_json(&sample_settings());
+        assert_eq!(roster.find_game_server("Quidam"), None);
     }
 
     #[test]

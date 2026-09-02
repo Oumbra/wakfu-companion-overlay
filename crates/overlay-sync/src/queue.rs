@@ -253,6 +253,23 @@ impl SyncQueue {
                                 "clientKey".to_string(),
                                 Value::String(client_key(uid, kind, &row.signature)),
                             );
+                            // `dungeonRunSignature` (kind `Fight` uniquement, voir `FightPayload`)
+                            // n'est qu'une graine de contenu : jamais envoyée telle quelle, hachée
+                            // ICI en `dungeonRunKey` EXACTEMENT comme `clientKey` ci-dessus — miroir
+                            // vérifié dans `sync-queue.service.ts` (dépôt web) :
+                            // `payload['dungeonRunKey'] = await computeClientKey(uid, entry.kind,
+                            // dungeonRunSignature)`. C'est ce qui fait que tous les combats d'un
+                            // même run finissent par partager le `clientKey` de leur boss comme
+                            // `dungeonRunKey`, sans aller-retour serveur pour l'obtenir.
+                            if kind == HistoryEventKind::Fight {
+                                let run_key = match map.remove("dungeonRunSignature") {
+                                    Some(Value::String(signature)) => {
+                                        Value::String(client_key(uid, kind, &signature))
+                                    }
+                                    _ => Value::Null,
+                                };
+                                map.insert("dungeonRunKey".to_string(), run_key);
+                            }
                         }
                         value
                     })
@@ -445,6 +462,54 @@ mod tests {
             sent_key,
             client_key("uid-1", HistoryEventKind::Purchase, "10:00:00,000|x|1|100")
         );
+    }
+
+    /// `dungeonRunSignature` (kind `Fight` uniquement) est haché en `dungeonRunKey` à l'envoi,
+    /// EXACTEMENT comme `clientKey` (voir la doc de `flush_once`) — jamais transmise telle quelle.
+    #[test]
+    fn dungeon_run_signature_est_hachee_en_dungeon_run_key_a_lenvoi() {
+        let mut event = fight_event("10:00:00,000|42|won|", 42);
+        if let HistoryPayload::Fight(fight) = &mut event.payload {
+            fight.dungeon_id = Some(65);
+            fight.dungeon_run_signature = Some("10:00:00,000|42|won|".to_string());
+        }
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&event).unwrap();
+
+        let transport = FakeTransport::new(vec![Ok(serde_json::json!({}))]);
+        queue
+            .flush_once("uid-1", |path, body| transport.send(path, body))
+            .unwrap();
+
+        let calls = transport.calls.borrow();
+        let sent = &calls[0].1["entries"][0];
+        assert!(
+            sent.get("dungeonRunSignature").is_none(),
+            "la graine brute ne doit jamais être transmise au serveur"
+        );
+        assert_eq!(
+            sent["dungeonRunKey"].as_str().unwrap(),
+            client_key("uid-1", HistoryEventKind::Fight, "10:00:00,000|42|won|"),
+            "même fonction que clientKey, appliquée à la signature de run"
+        );
+    }
+
+    /// Un combat sans rattachement de donjon connu envoie `dungeonRunKey: null` — jamais absent
+    /// (miroir de `dungeonId: null`) et jamais une chaîne inventée.
+    #[test]
+    fn absence_de_rattachement_de_donjon_envoie_un_dungeon_run_key_nul() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue
+            .enqueue(&fight_event("10:00:00,000|42|won|", 42))
+            .unwrap();
+
+        let transport = FakeTransport::new(vec![Ok(serde_json::json!({}))]);
+        queue
+            .flush_once("uid-1", |path, body| transport.send(path, body))
+            .unwrap();
+
+        let calls = transport.calls.borrow();
+        assert!(calls[0].1["entries"][0]["dungeonRunKey"].is_null());
     }
 
     #[test]

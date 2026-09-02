@@ -38,19 +38,69 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::CatalogIndex;
 use crate::class_breed::class_for_breed;
+use crate::dungeon::DungeonIndex;
 use crate::history::{
     fight_signature, purchase_signature, trade_signature, FightLootPayload,
-    FightParticipantPayload, FightPayload, FightSide, HistoryEventKind, HistoryPayload,
-    PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+    FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,
+    HistoryPayload, PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+    HDV_KAMAS_SALE_ITEM,
 };
 use crate::log_time::{format_iso_utc, time_of_day_ms, LogDateTracker};
-use crate::model::{FightResult, LogEntry};
+use crate::model::{DamageElement, FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
 use crate::watchlist::{WatchlistEntry, WatchlistState};
 
 /// Fenêtre de corrélation perte de kamas → ramassage suivant pour reconnaître un achat marchand/
-/// HDV — miroir exact de `PURCHASE_WINDOW_MS` (`stats-store.service.ts`).
+/// HDV — miroir exact de `PURCHASE_WINDOW_MS` (`stats-store.service.ts`). Réutilisée aussi pour
+/// corréler un gain de kamas hors combat à un échange tout juste conclu (voir
+/// `SessionState::consider_hdv_kama_gain`/`resolve_pending_hdv_kama_gain`) — même fenêtre côté web
+/// (`considerHdvKamaGain`).
 const PURCHASE_WINDOW_MS: i64 = 2_000;
+
+/// Résout `itemId`/`itemName`, mutuellement exclusifs — miroir exact d'`HistorySyncService.
+/// itemPayload` (`history-sync.service.ts`) : un id catalogue connu remplace TOUJOURS le nom brut
+/// (jamais les deux à la fois), et un objet non résolu (catalogue pas encore chargé, ou nom que le
+/// référentiel ne connaît pas) retombe sur le nom brut seul.
+fn item_payload(catalog: Option<&CatalogIndex>, name: &str) -> (Option<i64>, Option<String>) {
+    match catalog.and_then(|c| c.find_item_id(name)) {
+        Some(id) => (Some(id), None),
+        None => (None, Some(name.to_string())),
+    }
+}
+
+/// Étiquette d'élément telle qu'attendue dans `FightSpellPayload::by_element` — miroir des clés de
+/// `DAMAGE_ELEMENTS` (`log-parser.ts`) : mêmes chaînes françaises que celles déjà affichées dans le
+/// log lui-même, `element` n'étant reconstruit ici que pour ce besoin d'agrégation (aucun autre
+/// consommateur overlay n'a besoin de sérialiser `DamageElement`, voir sa doc dans `model.rs`).
+fn damage_element_label(element: DamageElement) -> &'static str {
+    match element {
+        DamageElement::Neutre => "Neutre",
+        DamageElement::Terre => "Terre",
+        DamageElement::Feu => "Feu",
+        DamageElement::Eau => "Eau",
+        DamageElement::Air => "Air",
+        DamageElement::Lumiere => "Lumière",
+        DamageElement::Stasis => "Stasis",
+        DamageElement::Inconnu => "Inconnu",
+    }
+}
+
+/// Données de référence nécessaires à la construction des événements d'historique (L5, §7.1 du
+/// plan) et à la classification d'un allié (§2 du plan) — regroupées pour éviter une signature à
+/// rallonge sur `SessionState::apply`/`build_fight_sync_event`. Toutes optionnelles : un champ
+/// `None` signifie simplement « pas encore chargé/résolu », jamais une erreur (voir chaque champ
+/// consommé pour son repli précis).
+#[derive(Clone, Copy, Default)]
+struct ApplyContext<'a> {
+    roster: Option<&'a RosterIndex>,
+    catalog: Option<&'a CatalogIndex>,
+    dungeons: Option<&'a DungeonIndex>,
+    /// Code du serveur de jeu déduit du dernier personnage du roster reconnu dans le log — voir
+    /// `Engine::current_game_server`. Calculé une fois par ligne par l'appelant (`Engine::
+    /// ingest_batch`), jamais recalculé ici : `SessionState` ne connaît ni le roster complet ni
+    /// l'historique des personnages déjà croisés (portés par `Engine`, voir sa doc).
+    game_server: Option<&'a str>,
+}
 
 /// `Serialize`/`Deserialize` servent à la persistance disque du combat en cours (voir
 /// `fight_store.rs`, §9 du plan) — restauration après un redémarrage de l'overlay survenu pendant
@@ -69,6 +119,19 @@ pub struct FighterDamage {
     /// Sexe de l'icône — connu seulement via le roster ; repli `M` sinon (même défaut que le web,
     /// `EntityClassifierService.getGender`, la détection par sort ne donne aucune info de sexe).
     pub gender: Gender,
+    /// XP gagnée par CE combattant sur ce combat (0 pour tout ennemi, un monstre n'en gagne
+    /// jamais) — miroir de `registerFightXp`/`FightRecord.xp` (`stats-store.service.ts`) : accumulé
+    /// depuis `LogEntry::XpGain::character`, jamais recalculé à l'envoi (voir
+    /// `build_fight_sync_event`). `#[serde(default)]` : un fichier `fight-*.json` persisté par une
+    /// version de l'overlay antérieure à ce champ (voir `fight_store.rs`) reste chargeable, à `0`.
+    #[serde(default)]
+    pub xp_gained: i64,
+    /// Dégâts infligés PAR ce combattant, ventilés par nom de sort puis par élément — miroir de
+    /// `FightSpellPayload`/`SpellBreakdownRow` (`stats-store.service.ts`). Alimenté UNIQUEMENT
+    /// depuis `LogEntry::Damage` (pas les soins, voir `build_fight_sync_event` pour la doc de ce
+    /// choix) — `#[serde(default)]` même raison que `xp_gained` ci-dessus.
+    #[serde(default)]
+    pub spells: HashMap<String, HashMap<String, i64>>,
 }
 
 /// Cascade de classe/sexe d'un allié CONFIRMÉ (`is_controlled_by_ai == false`) — miroir de
@@ -260,6 +323,14 @@ struct FightWorking {
     /// `LogEntry::KamaGain::fight_id` vient déjà résolu par le parser vendu, l'attribution directe
     /// suffit.
     kamas_gained: i64,
+    /// XP gagnée PENDANT ce combat, TOUS participants confondus — voir `FightPayload::xp_gained`
+    /// (total, distinct de la ventilation par participant portée par `FighterDamage::xp_gained`).
+    /// Miroir de `record.xp.reduce((sum, row) => sum + row.amount, 0)` (`HistorySyncService.
+    /// enqueueFight`), où `record.xp` n'est alimenté QUE par `registerFightXp` — donc seulement les
+    /// `LogEntry::XpGain` dont le `character` a réellement rejoint CE combat (voir
+    /// `SessionState::apply`, cas `XpGain`) ; jamais un nom inconnu de ce combat, même si son
+    /// `fight_id` s'y résout (fightId mal résolu, combat concurrent).
+    xp_gained_total: i64,
     challenges_passed: i64,
     challenges_failed: i64,
 }
@@ -381,6 +452,20 @@ struct SessionState {
     /// PAS scopé à un combat : un achat marchand/HDV n'est jamais un événement de combat, même si un
     /// combat est actif en parallèle sur un autre personnage (multi-compte).
     pending_purchase: Option<(i64, i64)>,
+    /// Gain de kamas hors combat en attente de confirmation — miroir de `pendingHdvKamaGain`
+    /// (`stats-store.service.ts`) : `(montant, heure brute du log, heure du jour en ms)`. Committé
+    /// comme récupération de kamas HDV (voir `HDV_KAMAS_SALE_ITEM`) dès que la ligne SUIVANTE
+    /// n'est pas l'échange qui l'expliquerait (voir `resolve_pending_hdv_kama_gain`) — la ligne
+    /// "Vous avez gagné" d'un échange peut précéder OU suivre de très peu son propre
+    /// `TradeCompleted` selon les fichiers observés, d'où cette confirmation à un pas plutôt qu'un
+    /// simple regard en arrière (voir `consider_hdv_kama_gain`, qui consulte
+    /// `last_trade_completed_at_ms` pour le cas où le trade précède).
+    pending_hdv_kama_gain: Option<(i64, String, i64)>,
+    /// Horodatage (ms du jour) du dernier `TradeCompleted` traité — miroir de
+    /// `lastTradeCompletedAtMs` : permet à `consider_hdv_kama_gain` de reconnaître un gain de kamas
+    /// qui vient d'être expliqué par un échange tout juste conclu (cas où le `TradeCompleted`
+    /// PRÉCÈDE la ligne de gain).
+    last_trade_completed_at_ms: Option<i64>,
 }
 
 impl SessionState {
@@ -398,7 +483,7 @@ impl SessionState {
     fn apply(
         &mut self,
         entry: &LogEntry,
-        roster: Option<&RosterIndex>,
+        ctx: ApplyContext<'_>,
         sync_events: &mut Vec<SyncEvent>,
     ) -> Vec<String> {
         let mut implicitly_defeated_enemies = Vec::new();
@@ -423,20 +508,14 @@ impl SessionState {
                 if let Some(time_ms) = time_of_day_ms(time) {
                     if time_ms - pending_time_ms <= PURCHASE_WINDOW_MS {
                         purchase_loot = true;
-                        let signature = purchase_signature(time, item, *quantity, amount);
-                        let occurred_at_ms = self.date_tracker.full_timestamp_ms(time);
-                        sync_events.push(SyncEvent {
-                            kind: HistoryEventKind::Purchase,
-                            signature,
-                            payload: HistoryPayload::Purchase(PurchasePayload {
-                                item_id: None,
-                                item_name: Some(item.clone()),
-                                quantity: *quantity,
-                                total_cost: amount,
-                                occurred_at: format_iso_utc(occurred_at_ms),
-                                game_server: None,
-                            }),
-                        });
+                        sync_events.push(build_purchase_sync_event(
+                            item,
+                            *quantity,
+                            amount,
+                            time,
+                            self.date_tracker.full_timestamp_ms(time),
+                            ctx,
+                        ));
                     }
                 }
             }
@@ -450,6 +529,27 @@ impl SessionState {
         }
         if !matches!(entry, LogEntry::KamaLoss { .. }) {
             self.pending_purchase = None;
+        }
+
+        // Un gain de kamas hors combat en attente de confirmation (voir `pending_hdv_kama_gain`)
+        // est committé comme récupération de kamas HDV dès que CETTE ligne n'est pas l'échange qui
+        // l'expliquerait — avant de traiter la ligne courante elle-même. Miroir exact de
+        // `resolvePendingHdvKamaGain`, appelé au même endroit côté web (après le préambule achat,
+        // avant le `switch` principal).
+        if let Some((amount, pending_time, pending_time_ms)) = self.pending_hdv_kama_gain.take() {
+            let explained_by_this_trade = matches!(entry, LogEntry::TradeCompleted { time, .. }
+                if time_of_day_ms(time).is_some_and(|ms| (ms - pending_time_ms).abs() <= PURCHASE_WINDOW_MS));
+            if !explained_by_this_trade {
+                let occurred_at_ms = self.date_tracker.full_timestamp_ms(&pending_time);
+                sync_events.push(build_purchase_sync_event(
+                    HDV_KAMAS_SALE_ITEM,
+                    0,
+                    amount,
+                    &pending_time,
+                    occurred_at_ms,
+                    ctx,
+                ));
+            }
         }
 
         match entry {
@@ -480,7 +580,7 @@ impl SessionState {
                 }
                 let is_ally = !is_controlled_by_ai;
                 let (class_name, gender) = if is_ally {
-                    resolve_ally_class(name, *breed, roster)
+                    resolve_ally_class(name, *breed, ctx.roster)
                 } else {
                     (None, Gender::M) // un ennemi n'a jamais de classe (breed pas déterministe ici)
                 };
@@ -503,10 +603,22 @@ impl SessionState {
                 fight_id: Some(fight_id),
                 attacker,
                 amount,
+                spell,
+                element,
                 ..
             } => {
                 if let Some(fighter) = self.fighter_mut(*fight_id, attacker) {
                     fighter.total_damage += amount;
+                    // Ventilation par sort/élément (L5, §7.1) — miroir de `SpellBreakdownRow`, mais
+                    // UNIQUEMENT pour les dégâts (voir la doc de `FighterDamage::spells` et de
+                    // `build_fight_sync_event` pour le raisonnement de ce choix, les soins n'y
+                    // entrent volontairement pas).
+                    *fighter
+                        .spells
+                        .entry(spell.clone())
+                        .or_default()
+                        .entry(damage_element_label(*element).to_string())
+                        .or_insert(0) += amount;
                 }
             }
             LogEntry::Heal {
@@ -580,25 +692,63 @@ impl SessionState {
                         entry.time(),
                         *result == FightResult::Won,
                         end_ms,
+                        ctx,
                     ));
                 }
                 self.prune_ended_fights();
             }
             LogEntry::KamaGain {
-                amount, fight_id, ..
+                amount,
+                fight_id,
+                time,
             } => {
                 self.totals.kamas_gained += amount;
-                if let Some(fight_id) = fight_id {
-                    if let Some(fight) = self.fights.get_mut(fight_id) {
-                        fight.kamas_gained += amount;
+                match fight_id {
+                    Some(fight_id) => {
+                        if let Some(fight) = self.fights.get_mut(fight_id) {
+                            fight.kamas_gained += amount;
+                        }
                     }
+                    // Gain hors combat : candidat à une récupération de kamas HDV, sauf s'il vient
+                    // d'être expliqué par un échange tout juste conclu — voir
+                    // `consider_hdv_kama_gain` et la doc de `pending_hdv_kama_gain`.
+                    None => self.consider_hdv_kama_gain(*amount, time),
                 }
             }
             LogEntry::KamaLoss { amount, time } => {
                 self.totals.kamas_lost += amount;
                 self.pending_purchase = time_of_day_ms(time).map(|ms| (*amount, ms));
             }
-            LogEntry::XpGain { amount, .. } => self.totals.xp_gained += amount,
+            LogEntry::XpGain {
+                character,
+                amount,
+                fight_id,
+                ..
+            } => {
+                self.totals.xp_gained += amount;
+                if let Some(fight_id) = fight_id {
+                    if let Some(fight) = self.fights.get_mut(fight_id) {
+                        // Miroir exact de `registerFightXp` : ni la ventilation par participant NI
+                        // le total du combat (`FightPayload::xp_gained` = `record.xp.reduce(sum)`,
+                        // qui ne lit QUE les entrées poussées par `registerFightXp`) ne créditent un
+                        // nom qui n'a jamais rejoint CE combat précis (`isRosterMember`, ici "membre
+                        // de CE combat", pas du roster de compte) — un fightId mal résolu (repli sur
+                        // le dernier combat courant côté web) ne doit jamais gonfler le total d'un
+                        // AUTRE combat. `fighter_index` ne pointe que vers des combattants ayant
+                        // réellement rejoint ce combat, et seul le PREMIER (`ids.first()`) d'un nom
+                        // partagé est crédité (plusieurs instances homonymes ne multiplient jamais
+                        // l'XP par leur nombre).
+                        if let Some(&idx) = fight
+                            .fighter_index
+                            .get(character)
+                            .and_then(|ids| ids.first())
+                        {
+                            fight.xp_gained_total += amount;
+                            fight.snapshot.fighters[idx].xp_gained += amount;
+                        }
+                    }
+                }
+            }
             LogEntry::ChallengeResult {
                 success,
                 fight_id: Some(fight_id),
@@ -629,8 +779,13 @@ impl SessionState {
                 }
             }
             LogEntry::TradeCompleted { time, sides } => {
+                // Voir `pending_hdv_kama_gain` : un gain de kamas hors combat qui vient tout juste
+                // d'être expliqué par CET échange est déjà traité ci-dessus (résolution en tête de
+                // fonction) — cet horodatage sert au cas symétrique (le gain survient APRÈS
+                // l'échange qui l'explique), consulté par `consider_hdv_kama_gain`.
+                self.last_trade_completed_at_ms = time_of_day_ms(time);
                 let occurred_ms = self.date_tracker.full_timestamp_ms(time);
-                if let Some(event) = build_trade_sync_event(time, sides, roster, occurred_ms) {
+                if let Some(event) = build_trade_sync_event(time, sides, occurred_ms, ctx) {
                     sync_events.push(event);
                 }
             }
@@ -642,6 +797,46 @@ impl SessionState {
             _ => {}
         }
         implicitly_defeated_enemies
+    }
+
+    /// Met en attente un gain de kamas hors combat comme candidat à une récupération de kamas HDV
+    /// (voir `HDV_KAMAS_SALE_ITEM`) — miroir exact de `considerHdvKamaGain` (`stats-store.service.
+    /// ts`). Annulé si un `TradeCompleted` vient d'être traité dans la fenêtre `PURCHASE_WINDOW_MS`
+    /// (cas où l'échange PRÉCÈDE la ligne de gain — le cas symétrique, où l'échange SUIT, est
+    /// géré par `apply`, résolution en tête de fonction).
+    fn consider_hdv_kama_gain(&mut self, amount: i64, time: &str) {
+        let Some(time_ms) = time_of_day_ms(time) else {
+            return;
+        };
+        if let Some(last_trade_ms) = self.last_trade_completed_at_ms {
+            if (time_ms - last_trade_ms).abs() <= PURCHASE_WINDOW_MS {
+                return; // déjà expliqué par l'échange qui vient d'être traité
+            }
+        }
+        self.pending_hdv_kama_gain = Some((amount, time.to_string(), time_ms));
+    }
+
+    /// Committe SANS CONDITION le gain en attente (voir `pending_hdv_kama_gain`) — à appeler par
+    /// `Engine::ingest_batch` en fin de lot, pour ne jamais le perdre si la prochaine ligne tarde
+    /// à arriver (voire une reconnexion qui viderait silencieusement l'état). Miroir exact de
+    /// `flushPendingHdvKamaGain`, appelé au même moment côté web (fin d'`ingest()`).
+    fn flush_pending_hdv_kama_gain(
+        &mut self,
+        ctx: ApplyContext<'_>,
+        sync_events: &mut Vec<SyncEvent>,
+    ) {
+        let Some((amount, time, _)) = self.pending_hdv_kama_gain.take() else {
+            return;
+        };
+        let occurred_at_ms = self.date_tracker.full_timestamp_ms(&time);
+        sync_events.push(build_purchase_sync_event(
+            HDV_KAMAS_SALE_ITEM,
+            0,
+            amount,
+            &time,
+            occurred_at_ms,
+            ctx,
+        ));
     }
 
     /// Marque un nom d'ennemi comme "résolu" pour ce combat (vaincu explicitement ou en fuite) —
@@ -673,6 +868,7 @@ impl SessionState {
             started_at_ms,
             loot: Vec::new(),
             kamas_gained: 0,
+            xp_gained_total: 0,
             challenges_passed: 0,
             challenges_failed: 0,
         });
@@ -712,6 +908,7 @@ impl SessionState {
                 started_at_ms: 0,
                 loot: Vec::new(),
                 kamas_gained: 0,
+                xp_gained_total: 0,
                 challenges_passed: 0,
                 challenges_failed: 0,
             },
@@ -742,6 +939,8 @@ impl SessionState {
             total_heal: 0,
             class_name,
             gender,
+            xp_gained: 0,
+            spells: HashMap::new(),
         });
         fight
             .fighter_index
@@ -842,15 +1041,49 @@ impl SessionState {
     }
 }
 
+/// Construit l'événement d'historique d'un achat (marchand/HDV classique, ou récupération de
+/// kamas HDV via `HDV_KAMAS_SALE_ITEM`) — factorisé entre les deux appelants (`SessionState::
+/// apply`, préambule achat ; `flush_pending_hdv_kama_gain`) : même construction de payload, seule
+/// la provenance de `item`/`quantity`/`total_cost` diffère. Miroir de `HistorySyncService.
+/// recordPurchase`.
+fn build_purchase_sync_event(
+    item: &str,
+    quantity: i64,
+    total_cost: i64,
+    time: &str,
+    occurred_at_ms: i64,
+    ctx: ApplyContext<'_>,
+) -> SyncEvent {
+    let signature = purchase_signature(time, item, quantity, total_cost);
+    let (item_id, item_name) = item_payload(ctx.catalog, item);
+    SyncEvent {
+        kind: HistoryEventKind::Purchase,
+        signature,
+        payload: HistoryPayload::Purchase(PurchasePayload {
+            item_id,
+            item_name,
+            quantity,
+            total_cost,
+            occurred_at: format_iso_utc(occurred_at_ms),
+            game_server: ctx.game_server.map(str::to_string),
+        }),
+    }
+}
+
 /// Construit l'événement d'historique d'un combat terminé — appelé une seule fois, au
 /// `CombatEnd` (voir `SessionState::apply`). `instanceIndex` recalculé ici par ordre de jonction
 /// (le Nᵉ combattant partageant ce nom obtient l'index N-1) : suffisant pour distinguer des
 /// homonymes dans la signature/le payload, sans dépendre de `FightWorking::fighter_index` (déjà
 /// utilisé pour un besoin différent, l'attribution des dégâts par siège d'initiative — voir sa
-/// doc). Voir la doc de module de `history.rs` pour le détail des champs volontairement pas
-/// encore alimentés (`spells`, `xpGained` par participant, `monsterId`, `dungeonId`, `gameServer`,
-/// `turns`).
-fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i64) -> SyncEvent {
+/// doc). `turns` reste à `0`, volontairement (voir la doc de module de `history.rs`) : rien ici ne
+/// compte les tours, aucun consommateur overlay n'en a besoin.
+fn build_fight_sync_event(
+    fight: &FightWorking,
+    time: &str,
+    won: bool,
+    end_ms: i64,
+    ctx: ApplyContext<'_>,
+) -> SyncEvent {
     let mut instance_seen: HashMap<String, i64> = HashMap::new();
     let mut sig_participants: Vec<(String, i64)> =
         Vec::with_capacity(fight.snapshot.fighters.len());
@@ -872,6 +1105,27 @@ fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i
                 let defeated = !fled && fight.resolved_enemies.contains(&lower);
                 (defeated, fled)
             };
+            // Un allié n'a jamais d'id monstre (aucun monstre ne porte un nom de personnage) —
+            // miroir de `HistorySyncService.monsterId`, appelé côté web UNIQUEMENT pour `side ===
+            // 'enemy'`.
+            let monster_id = if fighter.is_ally {
+                None
+            } else {
+                ctx.catalog.and_then(|c| c.find_monster_id(&fighter.name))
+            };
+            // Ventilation par sort/élément — voir `FighterDamage::spells`. Triée par nom de sort
+            // pour un résultat déterministe (HashMap n'a pas d'ordre stable), utile aux tests et
+            // sans aucune importance pour le serveur (simple liste, jamais indexée par position).
+            let mut spells: Vec<FightSpellPayload> = fighter
+                .spells
+                .iter()
+                .map(|(spell, by_element)| FightSpellPayload {
+                    spell: spell.clone(),
+                    total: by_element.values().sum(),
+                    by_element: by_element.clone(),
+                })
+                .collect();
+            spells.sort_by(|a, b| a.spell.cmp(&b.spell));
             FightParticipantPayload {
                 side: if fighter.is_ally {
                     FightSide::Ally
@@ -879,14 +1133,14 @@ fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i
                     FightSide::Enemy
                 },
                 name: fighter.name.clone(),
-                monster_id: None,
+                monster_id,
                 instance_index,
                 class_name: fighter.class_name.clone(),
                 damage: fighter.total_damage,
                 defeated,
                 fled,
-                spells: Vec::new(),
-                xp_gained: 0,
+                spells,
+                xp_gained: fighter.xp_gained,
             }
         })
         .collect();
@@ -902,18 +1156,36 @@ fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i
     let loot = fight
         .loot
         .iter()
-        .map(|(name, quantity)| FightLootPayload {
-            item_id: None,
-            item_name: Some(name.clone()),
-            quantity: *quantity,
+        .map(|(name, quantity)| {
+            let (item_id, item_name) = item_payload(ctx.catalog, name);
+            FightLootPayload {
+                item_id,
+                item_name,
+                quantity: *quantity,
+            }
         })
         .collect();
     let signature = fight_signature(time, fight.snapshot.fight_id, won, &sig_participants);
     let duration_ms = (end_ms - fight.started_at_ms).max(0);
 
+    // Assignation de donjon (voir `FightPayload::dungeon_id` pour la portée volontairement
+    // restreinte à ce seul cas) : ce combat contient-il LUI-MÊME le boss d'un donjon classique ?
+    // Premier ennemi résolu qui l'est, dans l'ordre de jonction — miroir de la boucle
+    // `for (name of enemyNames)` de `findDungeonForEnemies` restreinte à sa priorité 1 (pas de
+    // brèche/brèche ultime ici, référentiel absent côté overlay).
+    let dungeon = ctx.dungeons.and_then(|dungeons| {
+        fight.snapshot.fighters.iter().find_map(|fighter| {
+            if fighter.is_ally {
+                return None;
+            }
+            let monster_id = ctx.catalog.and_then(|c| c.find_monster_id(&fighter.name))?;
+            dungeons.find_by_boss_monster_id(monster_id)
+        })
+    });
+
     SyncEvent {
         kind: HistoryEventKind::Fight,
-        signature,
+        signature: signature.clone(),
         payload: HistoryPayload::Fight(FightPayload {
             fight_id: Some(fight.snapshot.fight_id),
             started_at: format_iso_utc(fight.started_at_ms),
@@ -921,11 +1193,14 @@ fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i
             won,
             turns: 0,
             total_damage,
-            xp_gained: 0,
+            xp_gained: fight.xp_gained_total,
             kamas_gained: Some(fight.kamas_gained),
-            game_server: None,
-            dungeon_id: None,
-            dungeon_run_signature: None,
+            game_server: ctx.game_server.map(str::to_string),
+            dungeon_id: dungeon.map(|d| d.id),
+            // Ce combat étant, dans le seul cas porté, son PROPRE représentant de run (voir la doc
+            // de `FightPayload::dungeon_run_signature`), la graine est directement la signature de
+            // CE combat — jamais recalculée séparément.
+            dungeon_run_signature: dungeon.map(|_| signature),
             challenges_passed: fight.challenges_passed,
             challenges_failed: fight.challenges_failed,
             participants,
@@ -943,12 +1218,12 @@ fn build_fight_sync_event(fight: &FightWorking, time: &str, won: bool, end_ms: i
 fn build_trade_sync_event(
     time: &str,
     sides: &[crate::model::TradeSide; 2],
-    roster: Option<&RosterIndex>,
     occurred_ms: i64,
+    ctx: ApplyContext<'_>,
 ) -> Option<SyncEvent> {
     let [a, b] = sides;
-    let a_is_self = roster.is_some_and(|r| r.find(&a.player_name).is_some());
-    let b_is_self = roster.is_some_and(|r| r.find(&b.player_name).is_some());
+    let a_is_self = ctx.roster.is_some_and(|r| r.find(&a.player_name).is_some());
+    let b_is_self = ctx.roster.is_some_and(|r| r.find(&b.player_name).is_some());
     if a_is_self && b_is_self {
         return None;
     }
@@ -957,19 +1232,21 @@ fn build_trade_sync_event(
     let mut items = Vec::with_capacity(self_side.items.len() + other_side.items.len());
     let mut sig_items = Vec::with_capacity(items.capacity());
     for item in &other_side.items {
+        let (item_id, item_name) = item_payload(ctx.catalog, &item.name);
         items.push(TradeItemPayload {
             direction: TradeDirection::Acquired,
-            item_id: None,
-            item_name: Some(item.name.clone()),
+            item_id,
+            item_name,
             quantity: item.quantity,
         });
         sig_items.push((TradeDirection::Acquired, item.name.clone(), item.quantity));
     }
     for item in &self_side.items {
+        let (item_id, item_name) = item_payload(ctx.catalog, &item.name);
         items.push(TradeItemPayload {
             direction: TradeDirection::Given,
-            item_id: None,
-            item_name: Some(item.name.clone()),
+            item_id,
+            item_name,
             quantity: item.quantity,
         });
         sig_items.push((TradeDirection::Given, item.name.clone(), item.quantity));
@@ -993,7 +1270,7 @@ fn build_trade_sync_event(
             occurred_at: format_iso_utc(occurred_ms),
             kamas_acquired: other_side.kamas,
             kamas_given: self_side.kamas,
-            game_server: None,
+            game_server: ctx.game_server.map(str::to_string),
             items,
         }),
     })
@@ -1034,6 +1311,23 @@ pub struct Engine {
     /// (`SessionState::default()` ci-dessous), ce qui effacerait le roster à chaque
     /// reconnexion/rotation de `wakfu.log` si on le stockait là.
     roster: Option<RosterIndex>,
+    /// Catalogue (lot L3) — PORTÉ PAR `Engine`, même raison que `roster` ci-dessus. Copie
+    /// indépendante de celle relayée à `self.parser` (`quickjs_engine::LogParserEngine::catalog`,
+    /// interne, utilisée uniquement pour `hostIsKnownMonsterName`) : celle-ci sert à résoudre
+    /// `monsterId`/`itemId`/`dungeonId` (L5, §7.1) au moment de construire un `SyncEvent`, un
+    /// besoin que `SessionState` (recréé à chaque rattrapage) ne peut pas porter lui-même.
+    catalog: Option<std::sync::Arc<CatalogIndex>>,
+    /// Référentiel des donjons — voir `set_dungeons`. `None` tant que rien ne l'a chargé : c'est
+    /// le cas de PRODUCTION aujourd'hui (voir la doc de `set_dungeons`), pas une erreur — laisse
+    /// simplement `dungeon_id`/`dungeon_run_signature` à `None` sur tout `FightPayload` construit
+    /// (voir `build_fight_sync_event`, qui tolère déjà ce champ absent).
+    dungeons: Option<std::sync::Arc<DungeonIndex>>,
+    /// Dernier personnage du roster déclaré reconnu dans le log (allié confirmé à un
+    /// `FighterJoined`, ou côté "soi" d'un `TradeCompleted`) — miroir de `GameServerService.
+    /// lastKnownCharacter` : PORTÉ PAR `Engine`, jamais recréé avec `SessionState` (une rotation
+    /// mid-session ne doit pas faire disparaître le serveur déjà déduit avant elle). Voir
+    /// `current_game_server`.
+    last_known_character: Option<String>,
     /// Suivi (watchlist, §9) — même raison qu'au-dessus : un compteur doit survivre à un
     /// rattrapage, PORTÉ PAR `Engine` et jamais recréé avec `SessionState`. Voir `watchlist.rs`
     /// pour la frontière définitions (compte)/compteurs (local à l'overlay).
@@ -1125,6 +1419,9 @@ impl Engine {
             in_initial_sweep: false,
             state_initialized: has_restored_fights,
             roster: None,
+            catalog: None,
+            dungeons: None,
+            last_known_character: None,
             watchlist: WatchlistState::new(store_path),
             pending_alerts: Vec::new(),
             sound_items: Vec::new(),
@@ -1153,7 +1450,61 @@ impl Engine {
     /// possédée : simple partage de référence avec l'`Arc<ArcSwap<CatalogIndex>>` déjà détenu par
     /// l'hôte, jamais de copie du catalogue entier.
     pub fn set_catalog(&mut self, catalog: std::sync::Arc<CatalogIndex>) {
+        // Copie propre à `Engine`, distincte de celle relayée au parser juste après — voir la doc
+        // du champ `catalog` ci-dessus (L5, résolution `monsterId`/`itemId`/`dungeonId`).
+        self.catalog = Some(std::sync::Arc::clone(&catalog));
         self.parser.set_catalog(catalog);
+    }
+
+    /// Remplace le référentiel des donjons consulté pour l'assignation `dungeonId` (L5, §7.1 —
+    /// voir `build_fight_sync_event`). **Non appelé en production aujourd'hui** : aucun code de
+    /// `overlay-ui` ne charge encore `GET /api/v1/dungeons` (contrairement au catalogue) — brancher
+    /// ce chargement est un petit lot dédié, volontairement laissé de côté ici pour ne toucher
+    /// aucun fichier `overlay-ui` dans ce lot-ci (décision du mainteneur, 2026-09-02). Tant que
+    /// cette méthode n'est pas appelée, `dungeon_id`/`dungeon_run_signature` restent `None` sur
+    /// tout `FightPayload` construit — pas une régression, un statut assumé, comme `DungeonIndex`
+    /// lui-même l'était déjà pour L3 (voir §12 du plan, statut L3 : « aucun panneau n'en a besoin
+    /// aujourd'hui »).
+    pub fn set_dungeons(&mut self, dungeons: std::sync::Arc<DungeonIndex>) {
+        self.dungeons = Some(dungeons);
+    }
+
+    /// Code du serveur de jeu déduit du dernier personnage du roster reconnu dans le log — miroir
+    /// de `GameServerService.activeServer` (voir `RosterIndex::find_game_server`). `None` tant
+    /// qu'aucun personnage du roster n'a encore été reconnu (ou que son compte n'a pas de serveur
+    /// déclaré) — jamais une valeur inventée, exactement comme côté web.
+    fn current_game_server(&self) -> Option<String> {
+        let roster = self.roster.as_ref()?;
+        let character = self.last_known_character.as_deref()?;
+        roster.find_game_server(character)
+    }
+
+    /// Met à jour `last_known_character` (voir `current_game_server`) si CETTE ligne notifie un
+    /// personnage du roster déclaré — miroir de `GameServerService.noticeCharacter`, appelé côté
+    /// web depuis `registerFighterJoin` (alliés confirmés uniquement, `!isControlledByAI`) et
+    /// `registerTrade` (le côté "soi" de l'échange). Sans effet si aucun roster n'est connu, ou si
+    /// aucun nom de cette ligne ne correspond à un personnage déclaré.
+    fn notice_character(&mut self, entry: &LogEntry) {
+        let Some(roster) = self.roster.as_ref() else {
+            return;
+        };
+        match entry {
+            LogEntry::FighterJoined {
+                name,
+                is_controlled_by_ai: false,
+                ..
+            } if roster.find(name).is_some() => {
+                self.last_known_character = Some(name.clone());
+            }
+            LogEntry::TradeCompleted { sides, .. } => {
+                for side in sides {
+                    if roster.find(&side.player_name).is_some() {
+                        self.last_known_character = Some(side.player_name.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Remplace la liste des entrées suivies par celle renvoyée par le compte (voir
@@ -1234,10 +1585,21 @@ impl Engine {
             if let Some(fight_id) = entry_fight_id(entry) {
                 touched_fight_ids.insert(fight_id);
             }
+            self.notice_character(entry);
+            let game_server = self.current_game_server();
+            // Construit `ctx` en accédant directement aux champs de `self` (pas via une méthode
+            // `&self`) : le vérificateur d'emprunts ne sait raisonner sur des champs disjoints
+            // (`roster`/`catalog`/`dungeons`, immuables) qu'à ce niveau — masqués derrière un
+            // appel de méthode, ils entreraient en conflit avec l'emprunt mutable de `self.state`
+            // juste en dessous.
+            let ctx = ApplyContext {
+                roster: self.roster.as_ref(),
+                catalog: self.catalog.as_deref(),
+                dungeons: self.dungeons.as_deref(),
+                game_server: game_server.as_deref(),
+            };
             let mut new_sync_events = Vec::new();
-            let implicitly_defeated =
-                self.state
-                    .apply(entry, self.roster.as_ref(), &mut new_sync_events);
+            let implicitly_defeated = self.state.apply(entry, ctx, &mut new_sync_events);
             self.pending_sync_events.extend(new_sync_events);
             // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
             // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
@@ -1272,6 +1634,23 @@ impl Engine {
                     }
                 }
             }
+        }
+        // Un gain de kamas hors combat encore en attente de confirmation en fin de LOT n'a plus de
+        // ligne suivante à attendre dans l'immédiat (la prochaine pourrait tarder, voire ne jamais
+        // arriver avant une reconnexion) — committé maintenant plutôt que risqué de le perdre.
+        // Miroir de `flushPendingHdvKamaGain()`, appelé au même moment côté web (fin d'`ingest()`).
+        {
+            let game_server = self.current_game_server();
+            let ctx = ApplyContext {
+                roster: self.roster.as_ref(),
+                catalog: self.catalog.as_deref(),
+                dungeons: self.dungeons.as_deref(),
+                game_server: game_server.as_deref(),
+            };
+            let mut flush_events = Vec::new();
+            self.state
+                .flush_pending_hdv_kama_gain(ctx, &mut flush_events);
+            self.pending_sync_events.extend(flush_events);
         }
         // Voir la doc de `touched_fight_ids` ci-dessus : un combat absent de `self.state.fights`
         // ici a forcément déjà été purgé (`SessionState::prune_ended_fights`, sur `CombatEnd`) —
@@ -1395,7 +1774,10 @@ mod tests {
         // breed=1 (feca) volontairement en désaccord avec le roster (iop) : le roster doit gagner.
         state.apply(
             &fighter_joined(1, "Oumbra", 1, false),
-            Some(&roster),
+            ApplyContext {
+                roster: Some(&roster),
+                ..Default::default()
+            },
             &mut Vec::new(),
         );
 
@@ -1410,7 +1792,10 @@ mod tests {
         let roster = roster_with("QuelquUnDAutre", "sram", Gender::F);
         state.apply(
             &fighter_joined(1, "Oumbra", 8, false),
-            Some(&roster),
+            ApplyContext {
+                roster: Some(&roster),
+                ..Default::default()
+            },
             &mut Vec::new(),
         ); // breed 8 = iop
 
@@ -1424,7 +1809,7 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "Oumbra", 0, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         ); // breed 0 : inconnu
 
@@ -1438,7 +1823,10 @@ mod tests {
         let roster = roster_with("Monstre", "iop", Gender::M); // ne doit jamais s'appliquer
         state.apply(
             &fighter_joined(1, "Monstre", 1, true),
-            Some(&roster),
+            ApplyContext {
+                roster: Some(&roster),
+                ..Default::default()
+            },
             &mut Vec::new(),
         ); // breed 1 = feca, is_controlled_by_ai=true
 
@@ -1455,17 +1843,29 @@ mod tests {
         // Entrelacement délibéré : A rejoint, B rejoint, dégâts A, dégâts B, dégâts A...
         state.apply(
             &fighter_joined(1, "PersoA", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         ); // fight 1, cra
         state.apply(
             &fighter_joined(2, "PersoB", 4, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         ); // fight 2, sram
-        state.apply(&damage(1, "PersoA", 100), None, &mut Vec::new());
-        state.apply(&damage(2, "PersoB", 50), None, &mut Vec::new());
-        state.apply(&damage(1, "PersoA", 25), None, &mut Vec::new());
+        state.apply(
+            &damage(1, "PersoA", 100),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        state.apply(
+            &damage(2, "PersoB", 50),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        state.apply(
+            &damage(1, "PersoA", 25),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         let snapshot = state.snapshot();
         assert_eq!(snapshot.fights.len(), 2);
@@ -1486,19 +1886,47 @@ mod tests {
     #[test]
     fn deux_ennemis_homonymes_dans_un_meme_combat_restent_deux_lignes_distinctes() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Mouton", 1, true), None, &mut Vec::new()); // 1ʳᵉ instance
-        state.apply(&fighter_joined(1, "Mouton", 1, true), None, &mut Vec::new()); // 2ᵉ instance, MÊME nom
+        state.apply(
+            &fighter_joined(1, "Mouton", 1, true),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        ); // 1ʳᵉ instance
+        state.apply(
+            &fighter_joined(1, "Mouton", 1, true),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        ); // 2ᵉ instance, MÊME nom
         state.apply(
             &fighter_joined(1, "Oumbra", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         ); // allié, sert d'intercalaire
 
-        state.apply(&spell_cast(1, "Mouton"), None, &mut Vec::new()); // 1er tour de Mouton -> siège #1
-        state.apply(&damage(1, "Mouton", 50), None, &mut Vec::new());
-        state.apply(&spell_cast(1, "Oumbra"), None, &mut Vec::new()); // tour intercalaire (autre acteur)
-        state.apply(&spell_cast(1, "Mouton"), None, &mut Vec::new()); // tour SUIVANT de Mouton -> siège #2
-        state.apply(&damage(1, "Mouton", 30), None, &mut Vec::new());
+        state.apply(
+            &spell_cast(1, "Mouton"),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        ); // 1er tour de Mouton -> siège #1
+        state.apply(
+            &damage(1, "Mouton", 50),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast(1, "Oumbra"),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        ); // tour intercalaire (autre acteur)
+        state.apply(
+            &spell_cast(1, "Mouton"),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        ); // tour SUIVANT de Mouton -> siège #2
+        state.apply(
+            &damage(1, "Mouton", 30),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         let snapshot = state.snapshot();
         let fight = &snapshot.fights[0];
@@ -1531,12 +1959,12 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "Oumbra", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         ); // allié invocateur
         state.apply(
             &summoned_fighter_joined(1, "Balise de Contact", "Oumbra"),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
 
@@ -1558,15 +1986,19 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "Oumbra", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
         state.apply(
             &summoned_fighter_joined(1, "Balise de Contact", "Oumbra"),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
-        state.apply(&damage(1, "Balise de Contact", 999), None, &mut Vec::new());
+        state.apply(
+            &damage(1, "Balise de Contact", 999),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         let fight = &state.fights[&1];
         assert_eq!(fight.snapshot.fighters.len(), 1);
@@ -1581,12 +2013,12 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "Zoroark Shiny", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
         state.apply(
             &fighter_joined(2, "Canis Furiosus", 4, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
 
@@ -1617,7 +2049,7 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "Zoroark Shiny", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
 
@@ -1631,13 +2063,13 @@ mod tests {
         // MAX_TRACKED_FIGHTS + quelques combats, tous terminés sauf le tout premier (`ongoing`).
         state.apply(
             &fighter_joined(0, "EnCours", 9, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
         for fight_id in 1..=(MAX_TRACKED_FIGHTS as i64 + 5) {
             state.apply(
                 &fighter_joined(fight_id, "Autre", 9, false),
-                None,
+                ApplyContext::default(),
                 &mut Vec::new(),
             );
             state.apply(
@@ -1646,7 +2078,7 @@ mod tests {
                     fight_id,
                     result: FightResult::Won,
                 },
-                None,
+                ApplyContext::default(),
                 &mut Vec::new(),
             );
         }
@@ -1691,17 +2123,20 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "El Pochito", 1, true),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
         state.apply(
             &fighter_joined(1, "Oumbra Canin", 15, false),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
 
-        let implicitly_defeated =
-            state.apply(&combat_end(1, FightResult::Won), None, &mut Vec::new());
+        let implicitly_defeated = state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         assert_eq!(implicitly_defeated, vec!["El Pochito".to_string()]);
     }
@@ -1709,11 +2144,22 @@ mod tests {
     #[test]
     fn filet_de_rattrapage_ne_double_compte_pas_un_ennemi_deja_vaincu_explicitement() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Bwork", 1, true), None, &mut Vec::new());
-        state.apply(&enemy_defeated(1, "Bwork"), None, &mut Vec::new()); // ligne "est KO !" explicite, avant la fin
+        state.apply(
+            &fighter_joined(1, "Bwork", 1, true),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        state.apply(
+            &enemy_defeated(1, "Bwork"),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        ); // ligne "est KO !" explicite, avant la fin
 
-        let implicitly_defeated =
-            state.apply(&combat_end(1, FightResult::Won), None, &mut Vec::new());
+        let implicitly_defeated = state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         assert!(
             implicitly_defeated.is_empty(),
@@ -1729,13 +2175,20 @@ mod tests {
         let mut state = SessionState::default();
         state.apply(
             &fighter_joined(1, "Mimique", 1, true),
-            None,
+            ApplyContext::default(),
             &mut Vec::new(),
         );
-        state.apply(&enemy_fled(1, "Mimique"), None, &mut Vec::new());
+        state.apply(
+            &enemy_fled(1, "Mimique"),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
-        let implicitly_defeated =
-            state.apply(&combat_end(1, FightResult::Won), None, &mut Vec::new());
+        let implicitly_defeated = state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         assert!(implicitly_defeated.is_empty());
     }
@@ -1743,11 +2196,323 @@ mod tests {
     #[test]
     fn filet_de_rattrapage_ne_sapplique_pas_sur_une_defaite() {
         let mut state = SessionState::default();
-        state.apply(&fighter_joined(1, "Bwork", 1, true), None, &mut Vec::new());
+        state.apply(
+            &fighter_joined(1, "Bwork", 1, true),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
-        let implicitly_defeated =
-            state.apply(&combat_end(1, FightResult::Lost), None, &mut Vec::new());
+        let implicitly_defeated = state.apply(
+            &combat_end(1, FightResult::Lost),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
 
         assert!(implicitly_defeated.is_empty());
+    }
+
+    // --- L5, §7.1 : événements d'historique complétés (2026-09-02) ------------------------------
+
+    fn xp_gain(fight_id: i64, character: &str, amount: i64) -> LogEntry {
+        LogEntry::XpGain {
+            time: "12:00:03,000".to_string(),
+            character: character.to_string(),
+            amount,
+            fight_id: Some(fight_id),
+        }
+    }
+
+    fn damage_with_spell(
+        fight_id: i64,
+        attacker: &str,
+        spell: &str,
+        element: DamageElement,
+        amount: i64,
+    ) -> LogEntry {
+        LogEntry::Damage {
+            time: "12:00:01,000".to_string(),
+            target: "cible".to_string(),
+            attacker: attacker.to_string(),
+            spell: spell.to_string(),
+            element,
+            amount,
+            fight_id: Some(fight_id),
+        }
+    }
+
+    /// Extrait le seul `FightPayload` d'une liste de `SyncEvent` — panique si absent/ambigu,
+    /// pratique pour les assertions de ces tests (un seul combat terminé par scénario).
+    fn only_fight_payload(events: &[SyncEvent]) -> &FightPayload {
+        let fights: Vec<&FightPayload> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                HistoryPayload::Fight(f) => Some(f),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fights.len(), 1, "un seul FightPayload attendu");
+        fights[0]
+    }
+
+    fn only_purchase_payload(events: &[SyncEvent]) -> &PurchasePayload {
+        let purchases: Vec<&PurchasePayload> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                HistoryPayload::Purchase(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(purchases.len(), 1, "un seul PurchasePayload attendu");
+        purchases[0]
+    }
+
+    #[test]
+    fn xp_gagnee_est_ventilee_par_participant_et_totalisee_pour_le_combat() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &xp_gain(1, "Oumbra", 1000),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &xp_gain(1, "Oumbra", 500),
+            ApplyContext::default(),
+            &mut events,
+        );
+        // Un nom non résolu dans ce combat (ex. XP d'un combat concurrent mal routée) ne doit
+        // créditer personne — miroir d'`isRosterMember` (fight roster, pas le compte).
+        state.apply(
+            &xp_gain(1, "Quidam", 999),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        assert_eq!(
+            fight.xp_gained, 1500,
+            "total du combat, XP non routée exclue"
+        );
+        assert_eq!(fight.participants[0].xp_gained, 1500);
+    }
+
+    #[test]
+    fn degats_ventiles_par_sort_et_element_uniquement_pour_les_degats() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &damage_with_spell(1, "Oumbra", "Frappe", DamageElement::Feu, 100),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &damage_with_spell(1, "Oumbra", "Frappe", DamageElement::Feu, 50),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &damage_with_spell(1, "Oumbra", "Frappe", DamageElement::Air, 30),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        let spells = &fight.participants[0].spells;
+        assert_eq!(spells.len(), 1, "un seul sort utilisé");
+        assert_eq!(spells[0].spell, "Frappe");
+        assert_eq!(spells[0].total, 180);
+        assert_eq!(spells[0].by_element.get("Feu"), Some(&150));
+        assert_eq!(spells[0].by_element.get("Air"), Some(&30));
+    }
+
+    fn sample_catalog() -> CatalogIndex {
+        CatalogIndex::from_compact_json(&serde_json::json!({
+            "items": [[100, "Larme d'Ogrest", "Ogrest's Tear", "x", "x", 1, 1, 0, 1]],
+            "monsters": [[200, "El Pochito", "El Pochito", "x", "x", "1", -1, 1, 0, 0]],
+        }))
+    }
+
+    #[test]
+    fn monster_id_et_item_id_resolus_via_le_catalogue() {
+        let catalog = sample_catalog();
+        let ctx = ApplyContext {
+            catalog: Some(&catalog),
+            ..Default::default()
+        };
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(&fighter_joined(1, "El Pochito", 1, true), ctx, &mut events);
+        state.apply(
+            &LogEntry::Loot {
+                time: "12:00:01,500".to_string(),
+                item: "Larme d'Ogrest".to_string(),
+                quantity: 1,
+                fight_id: Some(1),
+            },
+            ctx,
+            &mut events,
+        );
+        state.apply(&combat_end(1, FightResult::Won), ctx, &mut events);
+
+        let fight = only_fight_payload(&events);
+        assert_eq!(fight.participants[0].monster_id, Some(200));
+        assert_eq!(fight.loot[0].item_id, Some(100));
+        assert_eq!(
+            fight.loot[0].item_name, None,
+            "mutuellement exclusif avec itemId"
+        );
+    }
+
+    #[test]
+    fn game_server_deduit_du_dernier_personnage_du_roster_reconnu() {
+        // `Engine::notice_character`/`current_game_server` ne sont testés qu'indirectement ici
+        // (via `ApplyContext::game_server` déjà résolu) : `SessionState::apply` lui-même ne fait
+        // que STAMPER la valeur reçue sur les payloads construits, jamais sa propre déduction.
+        let ctx = ApplyContext {
+            game_server: Some("pandora"),
+            ..Default::default()
+        };
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(&fighter_joined(1, "Oumbra", 9, false), ctx, &mut events);
+        state.apply(&combat_end(1, FightResult::Won), ctx, &mut events);
+
+        assert_eq!(
+            only_fight_payload(&events).game_server.as_deref(),
+            Some("pandora")
+        );
+    }
+
+    #[test]
+    fn kamas_hdv_sans_achat_adjacent_est_detecte_en_fin_de_lot() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &LogEntry::KamaGain {
+                time: "12:00:00,000".to_string(),
+                amount: 5000,
+                fight_id: None,
+            },
+            ApplyContext::default(),
+            &mut events,
+        );
+        assert!(events.is_empty(), "en attente jusqu'à la fin du lot");
+        state.flush_pending_hdv_kama_gain(ApplyContext::default(), &mut events);
+
+        let purchase = only_purchase_payload(&events);
+        assert_eq!(purchase.item_name.as_deref(), Some(HDV_KAMAS_SALE_ITEM));
+        assert_eq!(purchase.item_id, None);
+        assert_eq!(purchase.quantity, 0);
+        assert_eq!(purchase.total_cost, 5000);
+    }
+
+    #[test]
+    fn kamas_hdv_annule_si_explique_par_un_echange_tout_juste_conclu() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &LogEntry::KamaGain {
+                time: "12:00:00,000".to_string(),
+                amount: 5000,
+                fight_id: None,
+            },
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &LogEntry::TradeCompleted {
+                time: "12:00:00,500".to_string(), // 500 ms plus tard, dans PURCHASE_WINDOW_MS
+                sides: [
+                    crate::model::TradeSide {
+                        player_name: "Oumbra".to_string(),
+                        items: Vec::new(),
+                        kamas: 5000,
+                    },
+                    crate::model::TradeSide {
+                        player_name: "Peer".to_string(),
+                        items: Vec::new(),
+                        kamas: 0,
+                    },
+                ],
+            },
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.flush_pending_hdv_kama_gain(ApplyContext::default(), &mut events);
+
+        assert!(
+            events.iter().all(|e| !matches!(&e.payload, HistoryPayload::Purchase(p) if p.item_name.as_deref() == Some(HDV_KAMAS_SALE_ITEM))),
+            "expliqué par l'échange, ne doit jamais devenir une vente HDV"
+        );
+    }
+
+    #[test]
+    fn dungeon_id_resolu_quand_ce_combat_contient_son_propre_boss() {
+        let catalog = sample_catalog(); // "El Pochito", id 200, isBoss=1
+        let dungeons = DungeonIndex::from_json(&serde_json::json!([
+            { "id": 65, "fr": "Larventura", "en": "x", "es": "x", "pt": "x",
+              "bossMonsterId": [200], "monsterFamilyId": [] },
+        ]));
+        let ctx = ApplyContext {
+            catalog: Some(&catalog),
+            dungeons: Some(&dungeons),
+            ..Default::default()
+        };
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(&fighter_joined(1, "El Pochito", 1, true), ctx, &mut events);
+        state.apply(&combat_end(1, FightResult::Won), ctx, &mut events);
+
+        let fight = only_fight_payload(&events);
+        assert_eq!(fight.dungeon_id, Some(65));
+        // Cas "propre représentant" (§7.1 de `history.rs`) : la graine du run == la signature du
+        // combat lui-même.
+        assert_eq!(
+            fight.dungeon_run_signature,
+            Some(fight_signature(
+                "12:00:02,000",
+                1,
+                true,
+                &[("El Pochito".to_string(), 0)]
+            ))
+        );
+    }
+
+    #[test]
+    fn dungeon_id_reste_none_hors_donjon_connu() {
+        let catalog = sample_catalog();
+        let ctx = ApplyContext {
+            catalog: Some(&catalog),
+            dungeons: Some(&DungeonIndex::from_json(&serde_json::json!([]))),
+            ..Default::default()
+        };
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(&fighter_joined(1, "El Pochito", 1, true), ctx, &mut events);
+        state.apply(&combat_end(1, FightResult::Won), ctx, &mut events);
+
+        let fight = only_fight_payload(&events);
+        assert_eq!(fight.dungeon_id, None);
+        assert_eq!(fight.dungeon_run_signature, None);
     }
 }

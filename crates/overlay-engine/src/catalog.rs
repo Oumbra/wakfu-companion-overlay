@@ -137,6 +137,7 @@ pub enum MonsterClassification {
 
 #[derive(Clone)]
 struct ItemEntry {
+    id: i64,
     icon: IconRef,
     rarity: WakfuRarity,
     has_recipe: bool,
@@ -144,6 +145,7 @@ struct ItemEntry {
 
 #[derive(Clone)]
 struct MonsterEntry {
+    id: i64,
     icon: IconRef,
     family_id: Option<i64>,
     is_boss: bool,
@@ -197,6 +199,7 @@ impl CatalogIndex {
             .unwrap_or_default();
         for RawItemRow(id, fr, en, es, pt, gfx_id, rarity_sort_order, has_recipe, ..) in raw_items {
             let entry = ItemEntry {
+                id,
                 icon: IconRef {
                     kind: IconKind::Item,
                     gfx_id: gfx_id.to_string(),
@@ -221,6 +224,7 @@ impl CatalogIndex {
             raw_monsters
         {
             let entry = MonsterEntry {
+                id,
                 icon: IconRef {
                     kind: IconKind::Monster,
                     gfx_id,
@@ -278,6 +282,24 @@ impl CatalogIndex {
     pub fn find_item_has_recipe(&self, name: &str, catalog_id: Option<i64>) -> bool {
         self.find_item_entry(name, catalog_id)
             .is_some_and(|entry| entry.has_recipe)
+    }
+
+    /// Id Ankama d'un objet par NOM SEUL — miroir de `itemPayload`/`HistorySyncService.monsterId`
+    /// (`history-sync.service.ts`) : sert à remplir `itemId`/`monsterId` (L5, §7.1 du plan) à partir
+    /// d'un nom brut lu dans le log, jamais l'inverse (contrairement à `find_item_icon`, qui
+    /// préfère un id déjà connu). `None` si le catalogue n'est pas encore chargé ou si l'objet n'y
+    /// est pas trouvé — l'appelant retombe alors sur le nom brut (`itemName`), jamais une erreur.
+    pub fn find_item_id(&self, name: &str) -> Option<i64> {
+        self.items_by_name
+            .get(&normalize_wakfu_name(name))
+            .map(|entry| entry.id)
+    }
+
+    /// Miroir de `find_item_id` pour un monstre — voir `HistorySyncService.monsterId`.
+    pub fn find_monster_id(&self, name: &str) -> Option<i64> {
+        self.monsters_by_name
+            .get(&normalize_wakfu_name(name))
+            .map(|entry| entry.id)
     }
 
     /// Miroir de `find_item_icon` pour un monstre.
@@ -384,6 +406,20 @@ mod tests {
         let icon = index.find_monster_icon("peu importe", Some(24875)).unwrap();
         assert_eq!(icon.kind, IconKind::Monster);
         assert_eq!(icon.gfx_id, "5421");
+    }
+
+    #[test]
+    fn resout_lid_dun_objet_par_nom_seul() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        assert_eq!(index.find_item_id("larme d'ogrest"), Some(24029));
+        assert_eq!(index.find_item_id("Introuvable"), None);
+    }
+
+    #[test]
+    fn resout_lid_dun_monstre_par_nom_seul() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        assert_eq!(index.find_monster_id("el pochito"), Some(24875));
+        assert_eq!(index.find_monster_id("Introuvable"), None);
     }
 
     #[test]
