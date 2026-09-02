@@ -84,22 +84,26 @@ octets décodés en texture `egui` (une `TextureHandle` n'est valide que pour SO
 utilisé aussi bien par le panneau Suivi que par le panneau Combat (icône de monstre par nom, aucun
 id capturé au moment d'un combat contrairement à une entrée de suivi).
 
-**Alertes de drop** (son + toast quand un décompte de suivi atteint 0, §9 du plan) : dès qu'
-`overlay_engine::Engine::drain_watchlist_alerts` signale un décompte tombé à 0,
-`spawn_engine_thread` joue le son d'alerte (`alert_sound.rs`, `rodio`, sur un thread éphémère
-dédié — jamais bloquant pour l'ingestion du log) et publie un toast (`panels::watchlist::
-WatchlistToast`) affiché sous la bande de tuiles pendant `TOAST_DURATION` (5 s), non interactif.
-Réduit par rapport au web (`loot-alert.component.ts` : confettis, deux sons distincts selon la
-raison, durée configurable) — seul le cas `reason: 'countdown'` est câblé, le cas `reason: 'loot'`
-(son configurable par objet ramassé) dépend des réglages `profile` du compte, pas encore lus par
-l'overlay.
+**Alertes de drop** (son + toast, §9 du plan) : les DEUX déclencheurs du web sont câblés,
+`reason: 'countdown'` (décompte de suivi à 0, `overlay_engine::Engine::drain_watchlist_alerts`)
+comme `reason: 'loot'` (ramassage d'un objet à son activé au compte,
+`overlay_engine::Engine::drain_loot_alerts`, voir `overlay_engine::profile` — INDÉPENDANT de la
+watchlist, lu depuis `data.profile.soundItems`). Dans les deux cas, `spawn_engine_thread` joue le
+son correspondant (`alert_sound::{play_countdown_alert, play_loot_alert}`, `rodio`, fichiers mp3
+identiques au web, sur un thread éphémère dédié — jamais bloquant pour l'ingestion du log) et
+publie un toast (`panels::watchlist::WatchlistToast`, champ `reason: WatchlistToastReason`
+pilotant le libellé) affiché sous la bande de tuiles pendant `TOAST_DURATION` (5 s), non
+interactif. Réduit par rapport au web (`loot-alert.component.ts` : confettis, durée configurable) —
+un seul emplacement de toast, le plus récent des deux déclencheurs écrase l'autre.
 
 Voir §9 du plan pour le contenu complet visé : **État de synchro** n'est pas encore câblé — le
-pairing reste console-only pour l'instant (voir plus bas). **Récap de session**
+pairing reste console-only pour l'instant (voir plus bas), dépend de L5. **Récap de session**
 (kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 : n'apportait plus rien une
 fois le reste simplifié) — sera repensé dans un autre chantier, `overlay_engine::session::
-SessionTotals` existe toujours côté moteur. Pas de disposition persistée par écran ni de thème
-configurable non plus à ce stade — opacité codée en dur.
+SessionTotals` existe toujours côté moteur. **Disposition persistée par écran** : faite (poignée
+de glissement « ⠿ » en mode interactif, décalage persisté par écran, `layout_store.rs`). **Thème
+configurable** : décision du mainteneur (2026-09-02, voir §9 du plan) — pas de thème ni de mode
+daltonien, un overlay colle au design du jeu plutôt que d'offrir un réglage ; palette fixe assumée.
 
 ## Compte lié (roster + suivi) — lot L4
 
