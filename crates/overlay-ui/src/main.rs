@@ -87,6 +87,12 @@ const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Alt+R";
 /// `REFRESH_HOTKEY_LABEL` (hotkey GLOBAL, fonctionne sans focus sur aucune fenêtre précise) pour
 /// vraiment permettre ce que la bannière annonce.
 const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
+/// Déconnexion volontaire du compte (lot L4, §7.2/§14 point 3 du plan) — jusqu'ici, révoquer une
+/// session native depuis l'overlay exigeait d'aller effacer le jeton à la main sur disque/dans le
+/// trousseau (aucun moyen depuis l'overlay lui-même). Même famille de raccourci GLOBAL que les
+/// trois précédents ; ne fait rien de visible en mode invité (aucun compte lié) — voir
+/// `App::disconnect_account`.
+const DISCONNECT_HOTKEY_LABEL: &str = "Ctrl+Alt+D";
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
@@ -208,6 +214,25 @@ enum AuthStatus {
     },
 }
 
+/// Commande envoyée au thread Auth (`spawn_auth_thread`) depuis le main thread — `Retry` (clic sur
+/// l'icône de relance, `render`) n'a d'effet que si PAS déjà connecté ; `Disconnect` (raccourci
+/// `DISCONNECT_HOTKEY_LABEL`, `App::disconnect_account`) n'a d'effet que si déjà connecté. Les deux
+/// canaux d'origine (icône cliquée / hotkey pressé) convergent sur ce même type plutôt que sur deux
+/// canaux séparés : un seul thread Auth, un seul point d'attente (`command_rx.recv()`).
+enum AuthCommand {
+    Retry,
+    Disconnect,
+}
+
+/// Message transmis au thread Engine (`spawn_engine_thread`) sur le même canal que les réglages de
+/// compte récupérés (`AccountSettings`) — `Disconnect` (déconnexion volontaire, voir `AuthCommand`)
+/// n'est PAS juste une absence de réglages : il doit activement effacer le roster/suivi déjà
+/// appliqués (repli `breed`, Suivi vidé), ce qu'un simple silence sur le canal ne ferait jamais.
+enum EngineCommand {
+    ApplySettings(AccountSettings),
+    Disconnect,
+}
+
 struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -303,6 +328,7 @@ struct App {
     toggle_hotkey_id: u32,
     refresh_hotkey_id: u32,
     quit_hotkey_id: u32,
+    disconnect_hotkey_id: u32,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     /// Publié par le thread Engine à chaque lot ingéré (et une fois de plus dès la réception des
@@ -334,11 +360,12 @@ struct App {
     /// Publié par le thread Auth (voir `spawn_auth_thread`) — piloté l'affichage de l'icône de
     /// relance d'appairage (`render`).
     auth_status: Arc<ArcSwap<AuthStatus>>,
-    /// Signale au thread Auth qu'un appairage doit être retenté (clic sur l'icône de relance,
-    /// visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`).
-    auth_retry_tx: mpsc::Sender<()>,
+    /// Signale au thread Auth une commande (`AuthCommand`) : `Retry` sur clic sur l'icône de
+    /// relance (visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`),
+    /// `Disconnect` sur `DISCONNECT_HOTKEY_LABEL` (voir `disconnect_account`).
+    auth_command_tx: mpsc::Sender<AuthCommand>,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
-    settings_tx: mpsc::Sender<AccountSettings>,
+    settings_tx: mpsc::Sender<EngineCommand>,
     log_path: PathBuf,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
@@ -360,10 +387,10 @@ struct AppState {
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
     auth_status: Arc<ArcSwap<AuthStatus>>,
-    auth_retry_tx: mpsc::Sender<()>,
+    auth_command_tx: mpsc::Sender<AuthCommand>,
     /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
     /// redemander les réglages de compte à la volée — voir sa doc.
-    settings_tx: mpsc::Sender<AccountSettings>,
+    settings_tx: mpsc::Sender<EngineCommand>,
 }
 
 impl App {
@@ -377,7 +404,7 @@ impl App {
             catalog_stale,
             remote_icons,
             auth_status,
-            auth_retry_tx,
+            auth_command_tx,
             settings_tx,
         } = state;
 
@@ -385,6 +412,7 @@ impl App {
         let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
         let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyR);
         let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyQ);
+        let disconnect_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyD);
         hotkey_manager
             .register(toggle_hotkey)
             .expect("enregistrement du hotkey global");
@@ -394,6 +422,9 @@ impl App {
         hotkey_manager
             .register(quit_hotkey)
             .expect("enregistrement du hotkey de sortie");
+        hotkey_manager
+            .register(disconnect_hotkey)
+            .expect("enregistrement du hotkey de déconnexion");
 
         Self {
             windows: HashMap::new(),
@@ -402,6 +433,7 @@ impl App {
             toggle_hotkey_id: toggle_hotkey.id(),
             refresh_hotkey_id: refresh_hotkey.id(),
             quit_hotkey_id: quit_hotkey.id(),
+            disconnect_hotkey_id: disconnect_hotkey.id(),
             interactive: true,
             snapshot,
             watchlist,
@@ -410,7 +442,7 @@ impl App {
             catalog_stale,
             remote_icons,
             auth_status,
-            auth_retry_tx,
+            auth_command_tx,
             settings_tx,
             log_path,
             game_window: GameWindowTracker::new(),
@@ -713,7 +745,7 @@ impl App {
                         ">>> Réglages de compte redemandés ({REFRESH_HOTKEY_LABEL}) : {} entrée(s) de suivi."
                         , settings.watchlist.len()
                     );
-                    let _ = settings_tx.send(settings);
+                    let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
                 }
                 Err(err) => {
                     tracing::warn!(">>> Échec de la nouvelle demande de réglages ({REFRESH_HOTKEY_LABEL}) : {err}");
@@ -724,6 +756,24 @@ impl App {
             ),
         });
         tracing::info!(">>> Rafraîchissement forcé ({REFRESH_HOTKEY_LABEL})");
+    }
+
+    /// `DISCONNECT_HOTKEY_LABEL` : déconnexion volontaire du compte lié (lot L4, §7.2/§14 point 3
+    /// du plan) — jusqu'ici la seule façon de révoquer une session native depuis l'overlay était
+    /// d'aller effacer le jeton à la main sur disque/dans le trousseau (aucun moyen depuis
+    /// l'overlay lui-même). Purement une commande envoyée au thread Auth (voir `spawn_auth_thread`)
+    /// : c'est LUI qui efface le jeton (trousseau + repli fichier) et notifie le thread Engine
+    /// (`EngineCommand::Disconnect`) pour revenir en mode invité (repli `breed`, Suivi vidé) —
+    /// jamais depuis ce thread (winit) directement, même raison que `force_refresh` (l'accès
+    /// trousseau/fichier ne doit jamais bloquer le rendu). Sans effet si aucun compte n'est
+    /// actuellement lié (voir `AuthCommand::Disconnect`, ignoré par le thread Auth hors de l'état
+    /// `Connected`) — ni si une tentative de connexion est en cours (`Connecting`, ex. en pleine
+    /// attente de confirmation d'appairage) : le thread Auth est alors occupé dans
+    /// `attempt_connect`, pas encore revenu écouter les commandes ; la déconnexion redeviendra
+    /// effective au prochain appui une fois cette tentative résolue.
+    fn disconnect_account(&mut self) {
+        let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+        tracing::info!(">>> Déconnexion du compte demandée ({DISCONNECT_HOTKEY_LABEL})");
     }
 
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
@@ -838,7 +888,8 @@ impl ApplicationHandler<UserEvent> for App {
             tracing::info!(
                 "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. \
                  {REFRESH_HOTKEY_LABEL} pour forcer un rafraîchissement (overlay bloqué/mal \
-                 positionné, ou Suivi resté vide). {QUIT_HOTKEY_LABEL} ou Ctrl+C (dans ce \
+                 positionné, ou Suivi resté vide). {DISCONNECT_HOTKEY_LABEL} pour déconnecter le \
+                 compte lié (repli mode invité). {QUIT_HOTKEY_LABEL} ou Ctrl+C (dans ce \
                  terminal) pour quitter."
             );
             self.banner_printed = true;
@@ -947,7 +998,7 @@ impl ApplicationHandler<UserEvent> for App {
                         remote_icons: &self.remote_icons,
                         remote_icon_textures: &mut overlay.remote_icon_textures,
                         auth_status: &auth_status,
-                        auth_retry_tx: &self.auth_retry_tx,
+                        auth_command_tx: &self.auth_command_tx,
                         interactive: self.interactive,
                     },
                 );
@@ -979,6 +1030,8 @@ impl ApplicationHandler<UserEvent> for App {
             } else if event.id == self.quit_hotkey_id {
                 logging::log_session_end(QUIT_HOTKEY_LABEL);
                 event_loop.exit();
+            } else if event.id == self.disconnect_hotkey_id {
+                self.disconnect_account();
             }
         }
         // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
@@ -1137,7 +1190,7 @@ struct RenderContent<'a> {
     remote_icons: &'a RemoteIconStore,
     remote_icon_textures: &'a mut RemoteIconTextures,
     auth_status: &'a AuthStatus,
-    auth_retry_tx: &'a mpsc::Sender<()>,
+    auth_command_tx: &'a mpsc::Sender<AuthCommand>,
     /// `true` en mode INTERACTIF (clics capturés), `false` en CLIC-TRAVERSANT (voir
     /// `App::toggle_interactive`) — pilote l'opacité de la fenêtre entière (voir `render`),
     /// seul indicateur de mode conservé (demande explicite de l'utilisateur 2026-09-02, en
@@ -1184,7 +1237,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         remote_icons,
         remote_icon_textures,
         auth_status,
-        auth_retry_tx,
+        auth_command_tx,
         interactive,
     } = content;
 
@@ -1232,7 +1285,7 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
                                                  le navigateur).\nDernier échec : {reason}"
                                             ));
                                             if retry.clicked() {
-                                                let _ = auth_retry_tx.send(());
+                                                let _ = auth_command_tx.send(AuthCommand::Retry);
                                             }
                                         },
                                     );
@@ -1477,7 +1530,7 @@ fn spawn_engine_thread(
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     proxy: EventLoopProxy<UserEvent>,
-    settings_rx: mpsc::Receiver<AccountSettings>,
+    settings_rx: mpsc::Receiver<EngineCommand>,
 ) {
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -1501,14 +1554,31 @@ fn spawn_engine_thread(
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
                 // retarder l'ingestion d'un seul milliseconde.
-                while let Ok(settings) = settings_rx.try_recv() {
-                    let entry_count = settings.watchlist.len();
-                    tracing::info!(
-                        entry_count,
-                        "réglages de compte appliqués à l'Engine (lot L4)"
-                    );
-                    engine.set_roster(Some(settings.roster));
-                    engine.set_watchlist_entries(settings.watchlist);
+                while let Ok(command) = settings_rx.try_recv() {
+                    match command {
+                        EngineCommand::ApplySettings(settings) => {
+                            let entry_count = settings.watchlist.len();
+                            tracing::info!(
+                                entry_count,
+                                "réglages de compte appliqués à l'Engine (lot L4)"
+                            );
+                            engine.set_roster(Some(settings.roster));
+                            engine.set_watchlist_entries(settings.watchlist);
+                        }
+                        // Déconnexion volontaire (voir `spawn_auth_thread`, §14 point 3 du plan) :
+                        // repli mode invité — plus de roster connu (classification retombe sur
+                        // `breed`), Suivi vidé (la LISTE suivie est lue depuis le compte ; sans
+                        // compte, il n'y a plus de liste à afficher). Les compteurs déjà persistés
+                        // sur disque (voir `overlay_engine::watchlist`) ne sont pas effacés : une
+                        // reconnexion ultérieure au MÊME compte les retrouve (`merge_config`).
+                        EngineCommand::Disconnect => {
+                            tracing::info!(
+                                "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé)"
+                            );
+                            engine.set_roster(None);
+                            engine.set_watchlist_entries(Vec::new());
+                        }
+                    }
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
                     let _ = proxy.send_event(UserEvent::NewSnapshot);
                 }
@@ -1639,15 +1709,29 @@ fn spawn_catalog_thread(
 /// serveur — sans aucun moyen de retenter sans relancer tout le logiciel) : une tentative échouée
 /// (`attempt_connect` renvoie `Err(raison)`) publie `AuthStatus::Disconnected { reason }` (voir
 /// `status`) plutôt que de laisser le thread mourir — `render` en déduit l'icône de relance (dont
-/// le tooltip affiche `reason`), et son clic pousse dans `retry_rx` pour reprendre cette boucle.
+/// le tooltip affiche `reason`), et son clic pousse `AuthCommand::Retry` dans `command_rx` pour
+/// reprendre cette boucle.
+///
+/// **Déconnexion volontaire** (2026-09-02, §14 point 3 du plan) : contrairement à la version
+/// initiale de ce thread, une connexion réussie ne fait PLUS terminer le thread (`return`) — il
+/// reste vivant, à l'écoute de `command_rx`, pour pouvoir traiter un `AuthCommand::Disconnect`
+/// (raccourci `DISCONNECT_HOTKEY_LABEL`, voir `App::disconnect_account`) à tout moment tant que le
+/// compte reste lié. Un `Disconnect` efface le jeton (`token_store::clear_token`), notifie le
+/// thread Engine (`EngineCommand::Disconnect`, voir `spawn_engine_thread`) pour qu'il revienne en
+/// mode invité, republie `AuthStatus::Disconnected`, puis attend un `AuthCommand::Retry` avant de
+/// relancer un appairage — **jamais automatiquement** : une déconnexion volontaire ne doit pas
+/// rouvrir le navigateur toute seule. Chaque commande hors de son état pertinent (`Retry` reçu
+/// alors que déjà connecté, `Disconnect` reçu alors que déjà déconnecté ou en pleine tentative) est
+/// silencieusement ignorée plutôt que de perturber l'état courant.
+///
 /// Toujours pas d'UI de pairing complète dans la fenêtre overlay (hors périmètre de cette
 /// itération, voir le panneau "État de synchro" du plan §9, toujours à construire) : le code
-/// d'appairage reste affiché en console, seuls le déclenchement d'une nouvelle tentative et la
-/// raison du dernier échec sont maintenant visibles depuis l'overlay.
+/// d'appairage reste affiché en console, seuls le déclenchement d'une nouvelle tentative, la
+/// déconnexion et la raison du dernier échec sont maintenant visibles/pilotables depuis l'overlay.
 fn spawn_auth_thread(
-    settings_tx: mpsc::Sender<AccountSettings>,
+    settings_tx: mpsc::Sender<EngineCommand>,
     status: Arc<ArcSwap<AuthStatus>>,
-    retry_rx: mpsc::Receiver<()>,
+    command_rx: mpsc::Receiver<AuthCommand>,
     proxy: EventLoopProxy<UserEvent>,
 ) {
     thread::Builder::new()
@@ -1658,21 +1742,38 @@ fn spawn_auth_thread(
 
             let result = attempt_connect(&settings_tx);
 
-            let connected = result.is_ok();
+            let mut connected = result.is_ok();
             status.store(Arc::new(match result {
                 Ok(()) => AuthStatus::Connected,
                 Err(reason) => AuthStatus::Disconnected { reason },
             }));
             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
 
-            if connected {
-                return; // rien de plus à faire — même comportement qu'avant cette itération
-            }
-            // Attend un clic sur l'icône de relance (voir `render`) avant de retenter — jamais de
-            // nouvelle tentative automatique en boucle, ce serait spammer le serveur/le navigateur
-            // pour un utilisateur qui n'a peut-être pas l'intention de lier son compte.
-            if retry_rx.recv().is_err() {
-                return; // App fermée (canal fermé avec l'émetteur) — rien à retenter.
+            // Attend la commande qui justifie de reprendre la boucle externe (nouvel appel à
+            // `attempt_connect`) : `Retry` seulement si PAS déjà connecté, jamais de nouvelle
+            // tentative automatique en boucle (ce serait spammer le serveur/le navigateur pour un
+            // utilisateur qui n'a peut-être pas l'intention de lier son compte). Une fois
+            // `Disconnect` traité (voir `connected = false` ci-dessous), un `Retry` suivant reprend
+            // normalement la boucle externe — c'est ce qui permet de relier un compte après une
+            // déconnexion volontaire sans redémarrer l'overlay.
+            loop {
+                match command_rx.recv() {
+                    Ok(AuthCommand::Retry) if !connected => break,
+                    Ok(AuthCommand::Disconnect) if connected => {
+                        overlay_sync::token_store::clear_token();
+                        let _ = settings_tx.send(EngineCommand::Disconnect);
+                        connected = false;
+                        status.store(Arc::new(AuthStatus::Disconnected {
+                            reason: "déconnecté manuellement".to_string(),
+                        }));
+                        let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+                        tracing::info!(
+                            "[compte] déconnecté ({DISCONNECT_HOTKEY_LABEL}) — repli mode invité."
+                        );
+                    }
+                    Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
+                    Err(_) => return,  // App fermée (canal fermé avec l'émetteur) — rien à faire.
+                }
             }
         })
         .expect("échec de création du thread Auth");
@@ -1685,7 +1786,7 @@ fn spawn_auth_thread(
 /// même après appairage) avec un message COURT destiné à l'utilisateur (tooltip de l'icône de
 /// relance, voir `render` — pas qu'à la console) : dans tous les cas l'overlay continue, au pire
 /// en mode invité (repli `breed`, aucun suivi affiché).
-fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), String> {
+fn attempt_connect(settings_tx: &mpsc::Sender<EngineCommand>) -> Result<(), String> {
     if let Some(token) = overlay_sync::token_store::load_token() {
         match overlay_sync::client::fetch_settings(&token) {
             Ok(settings) => {
@@ -1698,7 +1799,7 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
                     "[compte] réglages récupérés depuis le jeton natif déjà connu ({} entrée(s) de suivi).",
                     settings.watchlist.len()
                 );
-                let _ = settings_tx.send(settings);
+                let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
                 return Ok(());
             }
             Err(err) => {
@@ -1747,7 +1848,7 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
                 "[compte] connecté — réglages récupérés ({} entrée(s) de suivi).",
                 settings.watchlist.len()
             );
-            let _ = settings_tx.send(settings);
+            let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
             Ok(())
         }
         Err(err) => {
@@ -1797,11 +1898,11 @@ fn main() {
         .expect("création de l'event loop");
     let proxy = event_loop.create_proxy();
     let (settings_tx, settings_rx) = mpsc::channel();
-    let (auth_retry_tx, auth_retry_rx) = mpsc::channel();
+    let (auth_command_tx, auth_command_rx) = mpsc::channel();
     spawn_auth_thread(
         settings_tx.clone(),
         Arc::clone(&auth_status),
-        auth_retry_rx,
+        auth_command_rx,
         proxy.clone(),
     );
     spawn_catalog_thread(
@@ -1830,7 +1931,7 @@ fn main() {
         catalog_stale,
         remote_icons,
         auth_status,
-        auth_retry_tx,
+        auth_command_tx,
         settings_tx,
     });
     event_loop.run_app(&mut app).expect("boucle d'événements");
