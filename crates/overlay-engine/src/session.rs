@@ -138,21 +138,165 @@ impl SessionSnapshot {
     }
 }
 
+/// Un "siège" de la file d'initiative d'un combat — miroir de `InitiativeSeat`/`resolveNextActor`
+/// (`stats-store.service.ts`) : mémorise l'ORDRE DE JEU réel (fixe pour toute la durée d'un combat
+/// Wakfu, propriété du tour par tour) pour pouvoir distinguer PLUSIEURS combattants qui partagent
+/// EXACTEMENT le même nom (pack du même monstre — retour utilisateur 2026-09-02 : « il n'y a que
+/// quatre monstres qui sont toujours affichés, pas plus » sur des combats qui en affichent
+/// visiblement bien plus). Le log ne relie JAMAIS une ligne de dégâts/soin à un `fighterId` précis
+/// (seule la ligne de jointure `[_FL_]` le porte, voir `FighterJoinedEntry`) — voir
+/// `FightWorking::resolve_next_actor` pour le mécanisme complet.
+///
+/// `fighter_index` pointe DIRECTEMENT vers la ligne du combattant concerné dans
+/// `FightSnapshot::fighters` — plus simple que la clé de chaîne synthétique "Nom#i" du web, qui
+/// n'existe là-bas que parce que `StatsStoreService` agrège AUSSI par sort/tour dans des `Map` à
+/// clé texte (`attackerMap`, `healSourceMap`...), un besoin que ce module (de simples totaux par
+/// combattant, pas de détail par sort) n'a pas.
+#[derive(Debug)]
+struct InitiativeSeat {
+    fighter_index: usize,
+    name: String,
+    /// Nombre de tours consécutifs sautés (ce siège attendu n'a pas rejoué) sans avoir rejoué
+    /// depuis — à 2, considéré définitivement hors rotation (probablement mort/parti).
+    consecutive_skips: u8,
+    /// `true` dès que ce siège est sorti de la rotation — ignoré par la recherche du prochain
+    /// siège, mais jamais retiré du tableau (les index des autres sièges doivent rester stables).
+    retired: bool,
+}
+
 /// État de travail d'un combat en cours de suivi — la partie mutable (`fighter_index`) reste
 /// interne à `SessionState`, jamais exposée : `snapshot()` n'en extrait que le `FightSnapshot`
 /// immuable.
 #[derive(Debug)]
 struct FightWorking {
     snapshot: FightSnapshot,
-    /// Index par nom dans `snapshot.fighters` — propre à CE combat (plus de notion de « combat
-    /// courant » à vider/recréer, chaque `fight_id` a son propre index depuis sa création).
-    fighter_index: HashMap<String, usize>,
+    /// TOUTES les lignes de `snapshot.fighters` partageant ce nom, dans l'ordre de jonction —
+    /// plusieurs entrées possibles depuis que deux combattants homonymes ne sont plus fusionnés
+    /// (voir `InitiativeSeat` et `resolve_next_actor`). Propre à CE combat (plus de notion de
+    /// « combat courant » à vider/recréer, chaque `fight_id` a son propre index depuis sa
+    /// création).
+    fighter_index: HashMap<String, Vec<usize>>,
     /// Noms d'ennemis (normalisés en minuscules) déjà "résolus" — vaincus explicitement
     /// (`EnemyDefeated`) ou en fuite (`EnemyFled`) — voir le filet de rattrapage de `apply` pour
     /// `CombatEnd`. Miroir simplifié de `FightWorking.defeatedNames`/`fledNames`
-    /// (`stats-store.service.ts`) : pas de comptage par instance, notre modèle ne garde qu'UNE
-    /// entrée par nom de toute façon (voir `upsert_fighter`, qui ignore un nom déjà rejoint).
+    /// (`stats-store.service.ts`) : pas de comptage PAR INSTANCE comme `defeatedInstanceCounts`
+    /// côté web — un nom marqué résolu l'est pour TOUTES ses instances d'un coup. Écart assumé,
+    /// hors périmètre de ce portage (qui couvre l'attribution des dégâts/soins, pas le comptage de
+    /// victoires par instance du panneau Suivi) : au pire, un deuxième combattant homonyme jamais
+    /// explicitement vaincu ne sera pas crédité une deuxième fois par le filet de rattrapage.
     resolved_enemies: std::collections::HashSet<String>,
+    /// File d'initiative de ce combat — voir `InitiativeSeat`/`resolve_next_actor`.
+    initiative_seats: Vec<InitiativeSeat>,
+    /// Index (dans `initiative_seats`) du prochain siège attendu à jouer.
+    initiative_cursor: usize,
+    /// Dernier acteur (nom brut) ayant lancé un sort — un même acteur qui enchaîne plusieurs sorts
+    /// DANS LE MÊME TOUR ne doit pas faire avancer la file une deuxième fois (voir
+    /// `register_fight_turn`).
+    last_turn_actor: Option<String>,
+    /// Dernier siège résolu pour un nom donné (voir `resolve_next_actor`) — c'est CE siège qui
+    /// reçoit les dégâts/soins d'une ligne dont l'attaquant porte ce nom, jusqu'au prochain sort
+    /// lancé par ce même nom (miroir de `lastResolvedSeatByName`).
+    last_resolved_seat_by_name: HashMap<String, usize>,
+}
+
+impl FightWorking {
+    /// Nombre d'instances CONNUES (rejointes via `[_FL_]`) portant ce nom — miroir de
+    /// `countNameInstances` (restreint aux ennemis/alliés de CE combat, notre `fighter_index` ne
+    /// contient déjà qu'eux).
+    fn count_name_instances(&self, name: &str) -> usize {
+        self.fighter_index.get(name).map_or(0, Vec::len)
+    }
+
+    /// Miroir de `registerFightTurn` (`stats-store.service.ts`) — voir sa doc pour le
+    /// raisonnement complet. Le comptage de tours (`turnSeatsSeen`/`fight.turnCount` côté web)
+    /// n'est PAS porté : rien dans l'overlay n'affiche encore de numéro de tour, seule
+    /// l'attribution des dégâts/soins par siège est utile ici.
+    fn register_fight_turn(&mut self, actor: &str) {
+        if self.last_turn_actor.as_deref() == Some(actor) {
+            return; // même tour en cours (plusieurs sorts d'affilée par le même acteur).
+        }
+        let seat_fighter_index = self.resolve_next_actor(actor);
+        self.last_turn_actor = Some(actor.to_string());
+        self.last_resolved_seat_by_name
+            .insert(actor.to_string(), seat_fighter_index);
+    }
+
+    /// Miroir de `resolveNextActor` (`stats-store.service.ts`) — voir sa doc détaillée côté web
+    /// pour le raisonnement complet (limite résiduelle irréductible comprise : deux instances
+    /// homonymes dont l'une termine son tour exactement quand l'autre commence, sans aucun autre
+    /// acteur entre les deux, sont fusionnées sur le même siège — rien dans le log ne permet de
+    /// distinguer ce cas d'un deuxième sort de la même instance dans son propre tour). Reproduit à
+    /// l'identique sur le fond, adapté sur la forme : un siège pointe directement vers une ligne de
+    /// `FightSnapshot::fighters` plutôt qu'une clé de chaîne synthétique (voir doc d'
+    /// `InitiativeSeat`).
+    fn resolve_next_actor(&mut self, name: &str) -> usize {
+        let instance_count = self.count_name_instances(name).max(1);
+        let seat_count = self.initiative_seats.len();
+        let existing_seats_for_name = self
+            .initiative_seats
+            .iter()
+            .filter(|seat| seat.name == name)
+            .count();
+        // Tant que ce nom n'a pas encore autant de sièges que d'instances connues, la recherche ne
+        // boucle PAS par la fin de la file (voir doc de `resolveNextActor` côté web pour pourquoi :
+        // impossible sinon de savoir si une occurrence plus loin dans la file est une instance déjà
+        // vue qui rejoue ou une instance encore jamais vue).
+        let allow_wrap = existing_seats_for_name >= instance_count;
+        let max_offset = if allow_wrap {
+            seat_count
+        } else {
+            seat_count.saturating_sub(self.initiative_cursor)
+        };
+
+        for offset in 0..max_offset {
+            let idx = (self.initiative_cursor + offset) % seat_count;
+            if self.initiative_seats[idx].retired || self.initiative_seats[idx].name != name {
+                continue;
+            }
+
+            for skip_offset in 0..offset {
+                let skipped_idx = (self.initiative_cursor + skip_offset) % seat_count;
+                if self.initiative_seats[skipped_idx].retired {
+                    continue;
+                }
+                self.initiative_seats[skipped_idx].consecutive_skips += 1;
+                if self.initiative_seats[skipped_idx].consecutive_skips >= 2 {
+                    self.initiative_seats[skipped_idx].retired = true;
+                }
+            }
+
+            self.initiative_seats[idx].consecutive_skips = 0;
+            self.initiative_cursor = (idx + 1) % seat_count;
+            return self.initiative_seats[idx].fighter_index;
+        }
+
+        // Aucun siège actif existant pour ce nom (dans la plage de recherche autorisée) : associe
+        // un nouveau siège à la prochaine instance CONNUE de ce nom pas encore assise. Repli sur la
+        // DERNIÈRE instance connue si toutes le sont déjà (ne devrait pas arriver en pratique —
+        // plus de sièges demandés pour ce nom que d'instances jamais rejointes, ex. une jointure
+        // manquée en tout début de lecture) plutôt que de paniquer sur un index hors limites.
+        let known = self.fighter_index.get(name).cloned().unwrap_or_default();
+        let fighter_index = known
+            .get(existing_seats_for_name)
+            .or_else(|| known.last())
+            .copied()
+            .unwrap_or(0);
+
+        self.initiative_seats.insert(
+            self.initiative_cursor.min(self.initiative_seats.len()),
+            InitiativeSeat {
+                fighter_index,
+                name: name.to_string(),
+                consecutive_skips: 0,
+                retired: false,
+            },
+        );
+        // Pas de modulo ici (contrairement à la branche "trouvé" ci-dessus) : la file grandit
+        // encore pendant la découverte initiale, `initiative_cursor` doit alors simplement suivre
+        // la queue au fil des insertions successives.
+        self.initiative_cursor += 1;
+        fighter_index
+    }
 }
 
 /// Accumulateur mutable — voir [`SessionSnapshot`] pour la vue immuable qu'il produit.
@@ -186,6 +330,19 @@ impl SessionState {
                     (None, Gender::M) // un ennemi n'a jamais de classe (breed pas déterministe ici)
                 };
                 self.upsert_fighter(*fight_id, name, is_ally, class_name, gender);
+            }
+            // Établit QUI agit maintenant sous ce nom (voir `FightWorking::register_fight_turn`) —
+            // c'est CE siège qui recevra les lignes de dégâts/soin de cet attaquant jusqu'au
+            // prochain sort lancé par ce même nom. Miroir de `registerFightTurn`, cas
+            // `'spell-cast'` de `StatsStoreService.apply()`.
+            LogEntry::SpellCast {
+                caster,
+                fight_id: Some(fight_id),
+                ..
+            } => {
+                if let Some(fight) = self.fights.get_mut(fight_id) {
+                    fight.register_fight_turn(caster);
+                }
             }
             LogEntry::Damage {
                 fight_id: Some(fight_id),
@@ -272,10 +429,10 @@ impl SessionState {
                     self.recent_loot.remove(0);
                 }
             }
-            // Hors périmètre de ce premier slice (voir le commentaire de module) : chat,
-            // spell-cast, armor, combat-defeat-marker, combat-start (ne porte pas de fightId, voir
-            // le TS vendu), challenge-result, market-occupation, log-date-anchor, trade-completed,
-            // et les variantes sans fightId (kamas/loot hors combat, dégâts non résolus,
+            // Hors périmètre de ce premier slice (voir le commentaire de module) : chat, armor,
+            // combat-defeat-marker, combat-start (ne porte pas de fightId, voir le TS vendu),
+            // challenge-result, market-occupation, log-date-anchor, trade-completed, et les
+            // variantes sans fightId (kamas/loot hors combat, dégâts non résolus, spell-cast/
             // enemy-defeated/fled sans fightId résolu par le parser).
             _ => {}
         }
@@ -302,9 +459,17 @@ impl SessionState {
             },
             fighter_index: HashMap::new(),
             resolved_enemies: std::collections::HashSet::new(),
+            initiative_seats: Vec::new(),
+            initiative_cursor: 0,
+            last_turn_actor: None,
+            last_resolved_seat_by_name: HashMap::new(),
         });
     }
 
+    /// Ajoute TOUJOURS une nouvelle ligne — plus de fusion des combattants homonymes (voir
+    /// `InitiativeSeat` : la distinction entre plusieurs instances d'un même nom se fait
+    /// maintenant à l'attribution des dégâts/soins, pas ici). Renvoie l'index de la ligne créée
+    /// dans `snapshot.fighters`, utile au repli défensif de `fighter_mut`.
     fn upsert_fighter(
         &mut self,
         fight_id: i64,
@@ -312,30 +477,12 @@ impl SessionState {
         is_ally: bool,
         class_name: Option<String>,
         gender: Gender,
-    ) {
-        let Some(fight) = self.fights.get_mut(&fight_id) else {
-            return;
-        };
-        if fight.fighter_index.contains_key(name) {
-            // Déjà rejoint sous CE nom — limitation CONFIRMÉE (retour utilisateur 2026-09-02 :
-            // « il n'y a que quatre monstres qui sont toujours affichés, pas plus » sur des
-            // combats qui en affichent visiblement bien plus). Plusieurs ennemis PEUVENT partager
-            // exactement le même nom dans un même combat (pack du même monstre) — le log ne relie
-            // JAMAIS une ligne de dégâts/soin à un `fighterId` précis (seule la ligne de jointure
-            // `[_FL_]` le porte, voir `FighterJoinedEntry`), donc rien ici ne peut distinguer DEUX
-            // instances de même nom déjà rejointes : la seconde est silencieusement ignorée, ses
-            // dégâts se retrouvent crédités à la première (même nom) plutôt que d'apparaître comme
-            // un combattant séparé. `StatsStoreService` (web) résout ça avec un système de
-            // "sièges" d'initiative (`InitiativeSeat`/`resolveNextActor`) qui déduit, tour par
-            // tour, LAQUELLE des instances de même nom est en train d'agir — une vraie heuristique
-            // (~100 lignes), pas une correction ponctuelle : non portée ici, hors périmètre de
-            // cette itération (voir §14 point 3 du plan pour la décision d'ensemble sur la
-            // logique portée vs vendue).
-            return;
-        }
-        fight
-            .fighter_index
-            .insert(name.to_string(), fight.snapshot.fighters.len());
+    ) -> usize {
+        let fight = self
+            .fights
+            .get_mut(&fight_id)
+            .expect("ensure_fight doit toujours être appelé avant upsert_fighter");
+        let idx = fight.snapshot.fighters.len();
         fight.snapshot.fighters.push(FighterDamage {
             name: name.to_string(),
             is_ally,
@@ -344,22 +491,59 @@ impl SessionState {
             class_name,
             gender,
         });
+        fight
+            .fighter_index
+            .entry(name.to_string())
+            .or_default()
+            .push(idx);
+        idx
     }
 
-    /// Ajoute défensivement le combattant s'il n'a jamais été vu via `FighterJoined` (ne devrait
-    /// pas arriver — voir la doc de `FighterJoinedEntry`, émis pour chaque combattant — mais un
-    /// combat en cours au moment de la connexion peut en avoir manqué le début), et le combat
-    /// lui-même s'il n'a jamais été vu non plus (même raison). Pas de `breed` disponible ici :
-    /// aucune classe, comme un allié pas encore classifié (voir doc de
-    /// `FighterDamage::class_name`).
+    /// Combattant à créditer pour une ligne de dégâts/soin dont l'attaquant est nommé `name` —
+    /// résout via la file d'initiative (voir `InitiativeSeat`/`FightWorking::resolve_next_actor`)
+    /// le SIÈGE précis à créditer quand `name` est porté par plusieurs combattants du même combat,
+    /// en s'appuyant sur le dernier sort lancé par ce nom (`last_resolved_seat_by_name`, mis à jour
+    /// par `register_fight_turn`, JAMAIS ici) — miroir de `StatsStoreService.apply()`, cas
+    /// `'damage'`/`'heal'` (`lastResolvedSeatByName.get(entry.attacker) ?? entry.attacker`).
+    ///
+    /// Écart assumé avec le web pour le repli (aucun sort encore vu pour ce nom ce combat) : le
+    /// web retombe sur une clé "nom brut" qui, pour un nom AMBIGU, ne correspond à AUCUNE ligne de
+    /// `buildEntityDamageRows` — ces dégâts sont donc silencieusement perdus côté web. Ici, plus
+    /// simple et strictement meilleur : repli sur la PREMIÈRE instance jointe de ce nom, jamais de
+    /// dégâts perdus.
+    ///
+    /// Ajoute aussi défensivement le combattant lui-même s'il n'a jamais été vu rejoindre (ne
+    /// devrait pas arriver — voir la doc de `FighterJoinedEntry`, émis pour chaque combattant —
+    /// mais un combat en cours au moment de la connexion peut en avoir manqué le début) : sans
+    /// classe, comme un allié pas encore classifié (voir doc de `FighterDamage::class_name`).
     fn fighter_mut(&mut self, fight_id: i64, name: &str) -> &mut FighterDamage {
         self.ensure_fight(fight_id);
-        self.upsert_fighter(fight_id, name, true, None, Gender::M); // no-op si déjà présent
+
+        let known_idx = {
+            let fight = self
+                .fights
+                .get(&fight_id)
+                .expect("ensure_fight vient de garantir sa présence");
+            fight
+                .last_resolved_seat_by_name
+                .get(name)
+                .copied()
+                .or_else(|| {
+                    fight
+                        .fighter_index
+                        .get(name)
+                        .and_then(|ids| ids.first().copied())
+                })
+        };
+        let idx = match known_idx {
+            Some(idx) => idx,
+            None => self.upsert_fighter(fight_id, name, true, None, Gender::M),
+        };
+
         let fight = self
             .fights
             .get_mut(&fight_id)
             .expect("ensure_fight vient de garantir sa présence");
-        let idx = fight.fighter_index[name];
         &mut fight.snapshot.fighters[idx]
     }
 
@@ -559,6 +743,16 @@ mod tests {
         }
     }
 
+    fn spell_cast(fight_id: i64, caster: &str) -> LogEntry {
+        LogEntry::SpellCast {
+            time: "12:00:00,500".to_string(),
+            caster: caster.to_string(),
+            spell: "sort".to_string(),
+            critical: false,
+            fight_id: Some(fight_id),
+        }
+    }
+
     fn roster_with(name: &str, class_name: &str, gender: Gender) -> RosterIndex {
         RosterIndex::from_settings_json(&serde_json::json!({
             "roster": [{
@@ -628,6 +822,48 @@ mod tests {
         let fight2 = snapshot.fights.iter().find(|f| f.fight_id == 2).unwrap();
         assert_eq!(fight1.fighters[0].total_damage, 125);
         assert_eq!(fight2.fighters[0].total_damage, 50);
+    }
+
+    /// Régression réelle (retour utilisateur, 2026-09-02, captures d'écran à l'appui) :
+    /// « il n'y a que quatre monstres qui sont toujours affichés, pas plus » sur des combats qui
+    /// en affichent visiblement bien plus — deux ennemis EXACTEMENT homonymes (pack du même
+    /// monstre) se fusionnaient en une seule ligne. Séquence délibérément entrelacée pour exercer
+    /// la file d'initiative (`InitiativeSeat`/`resolve_next_actor`) : un sort d'un tiers ("Oumbra")
+    /// s'intercale entre les deux tours de "Mouton", condition nécessaire pour que le deuxième
+    /// tour soit reconnu comme une AUTRE instance plutôt que fusionné avec le premier (limite
+    /// documentée, voir la doc de `resolve_next_actor`).
+    #[test]
+    fn deux_ennemis_homonymes_dans_un_meme_combat_restent_deux_lignes_distinctes() {
+        let mut state = SessionState::default();
+        state.apply(&fighter_joined(1, "Mouton", 1, true), None); // 1ʳᵉ instance
+        state.apply(&fighter_joined(1, "Mouton", 1, true), None); // 2ᵉ instance, MÊME nom
+        state.apply(&fighter_joined(1, "Oumbra", 9, false), None); // allié, sert d'intercalaire
+
+        state.apply(&spell_cast(1, "Mouton"), None); // 1er tour de Mouton -> siège #1
+        state.apply(&damage(1, "Mouton", 50), None);
+        state.apply(&spell_cast(1, "Oumbra"), None); // tour intercalaire (autre acteur)
+        state.apply(&spell_cast(1, "Mouton"), None); // tour SUIVANT de Mouton -> siège #2
+        state.apply(&damage(1, "Mouton", 30), None);
+
+        let snapshot = state.snapshot();
+        let fight = &snapshot.fights[0];
+        let moutons: Vec<i64> = fight
+            .fighters
+            .iter()
+            .filter(|f| f.name == "Mouton")
+            .map(|f| f.total_damage)
+            .collect();
+
+        assert_eq!(
+            fight.fighters.len(),
+            3,
+            "3 combattants distincts ont rejoint (2 Mouton + 1 Oumbra), aucune fusion attendue"
+        );
+        assert_eq!(
+            moutons,
+            vec![50, 30],
+            "chaque tour de Mouton doit créditer une instance DIFFÉRENTE, pas toujours la même"
+        );
     }
 
     #[test]
