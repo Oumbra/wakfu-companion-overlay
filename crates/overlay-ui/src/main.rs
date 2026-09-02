@@ -149,6 +149,13 @@ const GAME_EDGE_MARGIN_PX: i32 = 12;
 /// boutons Menu/Boutique du jeu).
 const GAME_TOP_MARGIN_PX: i32 = 28;
 
+/// Opacité de la fenêtre entière en mode CLIC-TRAVERSANT (voir `render`) — seul indicateur de mode
+/// restant depuis le retrait du texte d'état le 2026-09-01 (retour utilisateur 2026-09-02 : « ça
+/// peut jouer sur une opacité à trente pour cent [...] pour indiquer [...] que le clic est
+/// traversant [...] et que lors de la bascule, l'opacité redevient à un »). Valeur exacte demandée
+/// par l'utilisateur, pas de raisonnement supplémentaire à documenter ici.
+const CLICK_THROUGH_OPACITY: f32 = 0.3;
+
 /// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
 /// (2026-09-01) : Combat et Suivi doivent être deux fenêtres RÉELLEMENT séparées (pas seulement
 /// deux panneaux dans la même fenêtre), pour permettre à terme de piloter leur visibilité
@@ -891,6 +898,7 @@ impl ApplicationHandler<UserEvent> for App {
                         remote_icon_textures: &mut overlay.remote_icon_textures,
                         auth_status: &auth_status,
                         auth_retry_tx: &self.auth_retry_tx,
+                        interactive: self.interactive,
                     },
                 );
                 // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
@@ -1080,17 +1088,33 @@ struct RenderContent<'a> {
     remote_icon_textures: &'a mut RemoteIconTextures,
     auth_status: &'a AuthStatus,
     auth_retry_tx: &'a mpsc::Sender<()>,
+    /// `true` en mode INTERACTIF (clics capturés), `false` en CLIC-TRAVERSANT (voir
+    /// `App::toggle_interactive`) — pilote l'opacité de la fenêtre entière (voir `render`),
+    /// seul indicateur de mode conservé (demande explicite de l'utilisateur 2026-09-02, en
+    /// remplacement du texte/icône d'état retiré le 2026-09-01 — voir la doc de `render`).
+    interactive: bool,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
-/// l'état interactif/clic-traversant et le rappel du raccourci n'apportaient rien (l'utilisateur
-/// sait déjà quel personnage est le sien et derrière quelle fenêtre de jeu il joue) — retirés, de
+/// l'état interactif/clic-traversant EN TEXTE et le rappel du raccourci n'apportaient rien
+/// (l'utilisateur sait déjà quel personnage est le sien et derrière quelle fenêtre de jeu il
+/// joue) — retirés, de
 /// même que le titre "Dégâts du combat" (voir `panels::combat`) et toute la section "Récap de
 /// session" (Kamas/XP/Combats/Butin — retour utilisateur : la garder n'a plus de sens une fois le
 /// reste simplifié, sera repensée dans un autre chantier). Le fond opaque du panneau (une grande
 /// plaque sombre visible même quand il n'y a presque rien à afficher, voir la capture) est
 /// également retiré : `Frame::NONE`, seuls les widgets eux-mêmes restent visibles par-dessus le
 /// jeu.
+///
+/// **Indicateur de mode par opacité, 2026-09-02** (retour utilisateur, vidéo à l'appui : clics sur
+/// le switch Alliés/Ennemis sans effet visible, sans moyen de savoir si l'overlay était alors en
+/// CLIC-TRAVERSANT — le texte d'état ci-dessus avait justement été retiré la veille comme
+/// n'apportant rien) : plutôt que de réintroduire ce texte, toute la fenêtre passe à
+/// `CLICK_THROUGH_OPACITY` (30 %, proposition explicite de l'utilisateur) en CLIC-TRAVERSANT et
+/// revient à pleine opacité en INTERACTIF — un simple coup d'œil suffit alors à savoir si un clic
+/// va être capté, sans texte à lire. `Ui::set_opacity` appliqué en tout premier, avant tout
+/// widget : les enfants créés ensuite héritent de l'opacité du `Painter` au moment de leur
+/// création (voir `egui::Painter::{set,multiply}_opacity`).
 ///
 /// Renvoie le délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::
 /// repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at`
@@ -1111,114 +1135,124 @@ fn render(gpu: &mut GpuState, window: &Window, content: RenderContent<'_>) -> st
         remote_icon_textures,
         auth_status,
         auth_retry_tx,
+        interactive,
     } = content;
 
     let raw_input = gpu.egui_winit.take_egui_input(window);
     let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.inner_margin(6))
-            .show(ui, |ui| match kind {
-                // Zone Combat : dégâts du combat en cours + icône de connexion au compte. Cette
-                // dernière reste ici (pas dans la zone Suivi) — ni l'une ni l'autre zone n'en est
-                // propriétaire de façon évidente, mais Combat est la fenêtre "historique", la
-                // moins perturbante à faire bouger encore une fois.
-                OverlayKind::Combat => {
-                    // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au
-                    // compte a échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier
-                    // appairage, aucun moyen de retenter sans relancer tout le logiciel), réduite
-                    // au minimum et collée à droite (retour utilisateur : la barre pleine largeur
-                    // précédente était trop imposante) — le libellé passe en tooltip. `reason`
-                    // (message d'erreur de la dernière tentative) y est ajouté : un clic qui ne se
-                    // traduit par rien de visible (le serveur refuse la requête avant même qu'un
-                    // code d'appairage existe, donc aucun navigateur ne s'ouvre) est indiscernable
-                    // d'un bouton cassé sans lui — retour utilisateur : « l'appui du bouton ne
-                    // déclenche rien, pas de message d'erreur dans la console » (le message
-                    // existait déjà, seulement en console). Un clic renvoie sur
-                    // `spawn_auth_thread`, qui relance un appairage COMPLET (rouvre le navigateur
-                    // avec un nouveau code, voir `overlay_sync::pair_and_wait`).
-                    match auth_status {
-                        AuthStatus::Disconnected { reason } => {
+            .show(ui, |ui| {
+                // Voir la doc de `render` : seul indicateur de mode restant, en tout premier
+                // avant le moindre widget pour que tout hérite de cette opacité.
+                ui.set_opacity(if interactive {
+                    1.0
+                } else {
+                    CLICK_THROUGH_OPACITY
+                });
+                match kind {
+                    // Zone Combat : dégâts du combat en cours + icône de connexion au compte. Cette
+                    // dernière reste ici (pas dans la zone Suivi) — ni l'une ni l'autre zone n'en est
+                    // propriétaire de façon évidente, mais Combat est la fenêtre "historique", la
+                    // moins perturbante à faire bouger encore une fois.
+                    OverlayKind::Combat => {
+                        // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au
+                        // compte a échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier
+                        // appairage, aucun moyen de retenter sans relancer tout le logiciel), réduite
+                        // au minimum et collée à droite (retour utilisateur : la barre pleine largeur
+                        // précédente était trop imposante) — le libellé passe en tooltip. `reason`
+                        // (message d'erreur de la dernière tentative) y est ajouté : un clic qui ne se
+                        // traduit par rien de visible (le serveur refuse la requête avant même qu'un
+                        // code d'appairage existe, donc aucun navigateur ne s'ouvre) est indiscernable
+                        // d'un bouton cassé sans lui — retour utilisateur : « l'appui du bouton ne
+                        // déclenche rien, pas de message d'erreur dans la console » (le message
+                        // existait déjà, seulement en console). Un clic renvoie sur
+                        // `spawn_auth_thread`, qui relance un appairage COMPLET (rouvre le navigateur
+                        // avec un nouveau code, voir `overlay_sync::pair_and_wait`).
+                        match auth_status {
+                            AuthStatus::Disconnected { reason } => {
+                                ui.horizontal(|ui| {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let retry = ui
+                                                .add(egui::Button::new("🔌").small())
+                                                .on_hover_text(format!(
+                                                "Connecter le compte (relance l'appairage, ouvre \
+                                                 le navigateur).\nDernier échec : {reason}"
+                                            ));
+                                            if retry.clicked() {
+                                                let _ = auth_retry_tx.send(());
+                                            }
+                                        },
+                                    );
+                                });
+                                ui.add_space(4.0);
+                            }
+                            // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
+                            // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
+                            // « on dirait que ça ne fait rien »).
+                            AuthStatus::Connecting => {
+                                ui.horizontal(|ui| {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| ui.weak("Connexion…"),
+                                    );
+                                });
+                                ui.add_space(4.0);
+                            }
+                            AuthStatus::Connected => {}
+                        }
+
+                        // Indicateur « catalogue daté » (§7.4/§9 du plan, lot L3) — visible UNIQUEMENT
+                        // quand `catalog` provient du repli hors-ligne embarqué (ni cache disque ni
+                        // réseau au démarrage, voir `spawn_catalog_thread`) : les icônes/classements
+                        // affichés peuvent alors dater du dernier build de l'overlay plutôt que du vrai
+                        // catalogue serveur. Avant ce lot, seul un `tracing::warn!` signalait ce cas —
+                        // invisible pour qui ne regarde pas les logs en jouant.
+                        if catalog_stale {
                             ui.horizontal(|ui| {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        let retry = ui
-                                            .add(egui::Button::new("🔌").small())
-                                            .on_hover_text(format!(
-                                                "Connecter le compte (relance l'appairage, ouvre \
-                                                 le navigateur).\nDernier échec : {reason}"
-                                            ));
-                                        if retry.clicked() {
-                                            let _ = auth_retry_tx.send(());
-                                        }
+                                        ui.label("📦⚠").on_hover_text(
+                                        "Catalogue hors ligne : réseau et cache local tous deux \
+                                         indisponibles au démarrage, repli sur la base embarquée \
+                                         dans l'overlay (peut être datée).",
+                                    );
                                     },
                                 );
                             });
                             ui.add_space(4.0);
                         }
-                        // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
-                        // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
-                        // « on dirait que ça ne fait rien »).
-                        AuthStatus::Connecting => {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| ui.weak("Connexion…"),
-                                );
-                            });
-                            ui.add_space(4.0);
-                        }
-                        AuthStatus::Connected => {}
-                    }
 
-                    // Indicateur « catalogue daté » (§7.4/§9 du plan, lot L3) — visible UNIQUEMENT
-                    // quand `catalog` provient du repli hors-ligne embarqué (ni cache disque ni
-                    // réseau au démarrage, voir `spawn_catalog_thread`) : les icônes/classements
-                    // affichés peuvent alors dater du dernier build de l'overlay plutôt que du vrai
-                    // catalogue serveur. Avant ce lot, seul un `tracing::warn!` signalait ce cas —
-                    // invisible pour qui ne regarde pas les logs en jouant.
-                    if catalog_stale {
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label("📦⚠").on_hover_text(
-                                        "Catalogue hors ligne : réseau et cache local tous deux \
-                                         indisponibles au démarrage, repli sur la base embarquée \
-                                         dans l'overlay (peut être datée).",
-                                    );
-                                },
-                            );
-                        });
-                        ui.add_space(4.0);
-                    }
-
-                    panels::combat::show(
-                        ui,
-                        fight,
-                        portraits,
-                        icons,
-                        catalog,
-                        remote_icons,
-                        remote_icon_textures,
-                        combat_side,
-                    );
-                }
-                // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
-                // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir
-                // `panels::watchlist`. Rien affiché tant que le compte ne déclare aucune entrée
-                // (fenêtre transparente vide plutôt qu'un cadre vide disgracieux).
-                OverlayKind::Watchlist => {
-                    if !watchlist.is_empty() {
-                        panels::watchlist::show(
+                        panels::combat::show(
                             ui,
+                            fight,
+                            portraits,
                             icons,
                             catalog,
                             remote_icons,
                             remote_icon_textures,
-                            watchlist,
-                            watchlist_toast,
+                            combat_side,
                         );
+                    }
+                    // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
+                    // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir
+                    // `panels::watchlist`. Rien affiché tant que le compte ne déclare aucune entrée
+                    // (fenêtre transparente vide plutôt qu'un cadre vide disgracieux).
+                    OverlayKind::Watchlist => {
+                        if !watchlist.is_empty() {
+                            panels::watchlist::show(
+                                ui,
+                                icons,
+                                catalog,
+                                remote_icons,
+                                remote_icon_textures,
+                                watchlist,
+                                watchlist_toast,
+                            );
+                        }
                     }
                 }
             });
