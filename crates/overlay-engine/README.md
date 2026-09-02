@@ -11,7 +11,7 @@
 | `engine-js/` | `LogParser` + `LogEntry` **vendus tels quels** depuis `Oumbra/wakfu-companion` (voir `engine-js/VENDORED_FROM.txt` — même commit que le spike S2), bundlés en IIFE ES2020 (`esbuild`, `dist/engine.bundle.js` **committé**, ~30 Ko : pas besoin de Node.js pour `cargo build`, seulement pour retoucher le TS vendu). |
 | `quickjs_engine.rs` | `LogParserEngine` : charge le bundle dans `rquickjs`, expose `parse_lines()`/`reset()`. Aucune logique métier ici, seulement le pont QuickJS↔Rust. |
 | `model.rs` | Miroir Rust exact (`serde`) de `engine-js/src/log-entry.model.ts` — la forme de chaque `LogEntry`, jamais sa sémantique (qui reste dans le TS vendu). |
-| `session.rs` | `Engine` (gère la sémantique `is_initial_load`/reset, §5.3) + `SessionState` : agrégation **en Rust**, pas vendue — dégâts par combattant du combat en cours, récap de session (kamas, XP, combats, butin). Volontairement minimal, voir le commentaire de module pour ce qui manque (`StatsStoreService`, §14 point 3). |
+| `session.rs` | `Engine` (gère la sémantique `is_initial_load`/reset, §5.3) + `SessionState` : agrégation **en Rust**, pas vendue — dégâts par combattant du combat en cours, récap de session (kamas, XP, combats, butin). Volontairement minimal, voir le commentaire de module pour ce qui manque (`StatsStoreService`, §14 point 3). Inclut un portage complet de `InitiativeSeat`/`resolveNextActor` (`stats-store.service.ts`) pour distinguer plusieurs combattants qui partagent EXACTEMENT le même nom (pack du même monstre) — voir plus bas. |
 | `class_breed.rs` | Port de `wakfu-class-breed-ids.data.ts` (breed → classe, uniquement déterministe pour un allié confirmé) + `class-portraits.data.ts::CLASS_PORTRAIT_ORDER` (ligne d'une classe dans la planche de portraits, utilisée par `overlay-ui`). |
 | `roster.rs` | `RosterIndex` : lecture seule du roster de personnages déclaré par l'utilisateur (`GET /api/v1/settings`, clé `roster` — voir `overlay-sync`), lookup O(1) par nom normalisé (`normalize_wakfu_name`, port de `wakfu-name.util.ts`). Priorité sur `breed` dans `session.rs::resolve_ally_class`, comme `EntityClassifierService.getDetectedClass` côté web. |
 | `watchlist.rs` | `WatchlistState` : comptage du Suivi (§9 du plan) **porté en Rust plutôt que vendu** (§14 point 3 — logique isolée, sans rapport avec les heuristiques kamas/HDV qui motivent le choix B du §2) — définitions lues en lecture seule depuis le compte, compteurs incrémentés et persistés localement. Détecte aussi les alertes de décompte à 0 (`WatchlistAlert`, drainées par `Engine::drain_watchlist_alerts`). |
@@ -34,6 +34,24 @@ fichier que S2) — pas un fichier synthétique : vérifie un récap plausible (
 nuls), l'invariant « un rattrapage découpé en plusieurs `LineBatch` (à cause de
 `MAX_BATCH_LINES`) donne le même résultat qu'un lot unique », et qu'un lot en direct après
 rattrapage ne réinitialise pas l'état.
+
+## Combattants homonymes dans un même combat (`InitiativeSeat`)
+
+Retour utilisateur 2026-09-02 : « il n'y a que quatre monstres qui sont toujours affichés, pas
+plus » sur des combats en affichant visiblement plus — cause racine : le log ne relie JAMAIS une
+ligne de dégâts/soin à un `fighterId` précis (seule la ligne de jointure `[_FL_]` le porte), et
+Wakfu autorise plusieurs ennemis du même pack à partager EXACTEMENT le même nom affiché. La version
+initiale de `upsert_fighter` dédupliquait par nom exact, fusionnant silencieusement ces instances.
+
+Corrigé par un portage complet de l'heuristique du web (`InitiativeSeat`, `resolveNextActor`,
+`registerFightTurn` — `stats-store.service.ts`) : chaque combat suit une file de « sièges »
+d'initiative, mise à jour à chaque ligne « X lance le sort Y » (`SpellCast`) — la ligne suivante de
+dégâts/soin est attribuée au dernier siège résolu pour ce nom. Adapté en Rust avec une différence
+assumée : à la place du web (qui perd silencieusement les dégâts d'un nom ambigu sans `SpellCast`
+préalable), le repli ici retombe sur la première instance jointe de ce nom — jamais de perte
+silencieuse de dégâts. Ambiguïté résiduelle documentée et non résolue (comme côté web) : deux
+instances homonymes dont les tours se suivent sans aucun autre acteur entre les deux fusionnent sur
+le même siège.
 
 ## Simplification assumée (à ne pas oublier)
 
