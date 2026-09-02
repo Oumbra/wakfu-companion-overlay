@@ -11,8 +11,10 @@
 
     La fenêtre est transparente, toujours au-dessus, sans bordure. Ctrl+Alt+W bascule interactif /
     clic-traversant (hotkey global). Ctrl+Alt+R force un rafraîchissement (overlay bloqué, mal
-    positionné ou mal dimensionné) sans relancer tout le processus. Échap (fenêtre focalisée) ou
-    Ctrl+C (dans cette console) pour quitter.
+    positionné/dimensionné, ou Suivi resté vide — redemande aussi les réglages de compte) sans
+    relancer tout le processus. Ctrl+Alt+Q (hotkey global, fonctionne sans focus) ou Ctrl+C (dans
+    cette console) pour quitter — les fenêtres overlay ne peuvent jamais recevoir le focus clavier
+    (WS_EX_NOACTIVATE), Échap ne fonctionne donc pas en pratique.
 
 .PARAMETER LogPath
     Chemin explicite vers un wakfu.log (utile pour rejouer un fichier plutôt que suivre le vrai
@@ -48,7 +50,7 @@ if (-not (Test-Path $vendorDir)) {
 
 Write-Host ""
 Write-Host "=== overlay-ui — prévisualisation ===" -ForegroundColor Cyan
-Write-Host "Ctrl+Alt+W = bascule interactif / clic-traversant  |  Ctrl+Alt+R = rafraîchir  |  Échap ou Ctrl+C = quitter" -ForegroundColor Cyan
+Write-Host "Ctrl+Alt+W = bascule interactif / clic-traversant  |  Ctrl+Alt+R = rafraîchir  |  Ctrl+Alt+Q ou Ctrl+C = quitter" -ForegroundColor Cyan
 Write-Host ""
 
 $cargoArgs = @("run", "-p", "overlay-ui")

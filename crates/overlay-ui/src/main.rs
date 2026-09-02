@@ -75,6 +75,16 @@ const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
 /// activement nuisible. Même préfixe que `HOTKEY_LABEL` : cohérent, déjà éprouvé sans collision
 /// connue avec le jeu.
 const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Alt+R";
+/// Raccourci global de sortie (retour utilisateur 2026-09-02) : les fenêtres overlay portent
+/// `WS_EX_NOACTIVATE` (voir `apply_extended_styles`, jamais désactivé même en mode interactif —
+/// nécessaire pour ne jamais voler le focus au jeu) donc ne reçoivent JAMAIS `WindowEvent::
+/// KeyboardInput`, quel que soit le mode : Échap (voir `window_event`) ne peut en pratique jamais
+/// se déclencher, malgré ce qu'annonçait la bannière de démarrage. L'utilisateur devait donc
+/// systématiquement faire un Ctrl+C dans le terminal (` STATUS_CONTROL_C_EXIT` en sortie — normal
+/// dans ce cas, pas un plantage, mais peu clair). Même mécanisme que `HOTKEY_LABEL`/
+/// `REFRESH_HOTKEY_LABEL` (hotkey GLOBAL, fonctionne sans focus sur aucune fenêtre précise) pour
+/// vraiment permettre ce que la bannière annonce.
+const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
@@ -263,6 +273,7 @@ struct App {
     /// à la réception (voir `about_to_wait`).
     toggle_hotkey_id: u32,
     refresh_hotkey_id: u32,
+    quit_hotkey_id: u32,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     /// Publié par le thread Engine à chaque lot ingéré (et une fois de plus dès la réception des
@@ -291,6 +302,8 @@ struct App {
     /// Signale au thread Auth qu'un appairage doit être retenté (clic sur l'icône de relance,
     /// visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`).
     auth_retry_tx: mpsc::Sender<()>,
+    /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
+    settings_tx: mpsc::Sender<AccountSettings>,
     log_path: PathBuf,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
@@ -312,6 +325,9 @@ struct AppState {
     remote_icons: RemoteIconStore,
     auth_status: Arc<ArcSwap<AuthStatus>>,
     auth_retry_tx: mpsc::Sender<()>,
+    /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
+    /// redemander les réglages de compte à la volée — voir sa doc.
+    settings_tx: mpsc::Sender<AccountSettings>,
 }
 
 impl App {
@@ -325,17 +341,22 @@ impl App {
             remote_icons,
             auth_status,
             auth_retry_tx,
+            settings_tx,
         } = state;
 
         let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
         let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
         let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyR);
+        let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyQ);
         hotkey_manager
             .register(toggle_hotkey)
             .expect("enregistrement du hotkey global");
         hotkey_manager
             .register(refresh_hotkey)
             .expect("enregistrement du hotkey de rafraîchissement");
+        hotkey_manager
+            .register(quit_hotkey)
+            .expect("enregistrement du hotkey de sortie");
 
         Self {
             windows: HashMap::new(),
@@ -343,6 +364,7 @@ impl App {
             hotkey_events: GlobalHotKeyEvent::receiver(),
             toggle_hotkey_id: toggle_hotkey.id(),
             refresh_hotkey_id: refresh_hotkey.id(),
+            quit_hotkey_id: quit_hotkey.id(),
             interactive: true,
             snapshot,
             watchlist,
@@ -351,6 +373,7 @@ impl App {
             remote_icons,
             auth_status,
             auth_retry_tx,
+            settings_tx,
             log_path,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
@@ -395,6 +418,14 @@ impl App {
                     self.interactive,
                 );
                 println!("[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé.");
+                // Explicite plutôt que de compter sur un premier `RedrawRequested` implicite —
+                // diagnostic 2026-09-02 (Suivi resté vide au tout premier lancement) : sans
+                // certitude que ce premier redessin lise `watchlist`/`snapshot` APRÈS que ces
+                // `ArcSwap` aient pu être remplis par un thread de fond déjà en avance sur celui-ci
+                // (compte déjà lié via jeton natif, réponse quasi instantanée), autant forcer un
+                // redessin explicite dès la création plutôt que de risquer un premier rendu figé
+                // sur un état encore vide.
+                overlay.window.request_redraw();
                 self.windows.insert(overlay.window.id(), overlay);
             }
         }
@@ -563,16 +594,40 @@ impl App {
     /// une solution » pour un overlay bloqué (mauvaise taille, plus au premier plan, Suivi resté
     /// masqué après un lot de réglages arrivé trop tôt) sans devoir relancer tout le processus.
     /// Ne redétecte PAS les fenêtres de jeu elles-mêmes (`sync_windows` le fait déjà en continu,
-    /// ~20 Hz, voir `about_to_wait`) — force seulement : (a) le prochain redessin de CHAQUE
-    /// fenêtre (recalcule au passage la largeur du Suivi, voir `WindowEvent::RedrawRequested`), et
-    /// (b) une réaffirmation topmost IMMÉDIATE (bypass `TOPMOST_REASSERT_INTERVAL`, voir
-    /// `sync_topmost`) — les deux causes de blocage réellement observées jusqu'ici.
+    /// ~20 Hz, voir `about_to_wait`) — force : (a) le prochain redessin de CHAQUE fenêtre
+    /// (recalcule au passage la largeur du Suivi, voir `WindowEvent::RedrawRequested`), (b) une
+    /// réaffirmation topmost IMMÉDIATE (bypass `TOPMOST_REASSERT_INTERVAL`, voir `sync_topmost`),
+    /// et (c) depuis le retour utilisateur du 2026-09-02 (Suivi resté vide en tout début de
+    /// session malgré plusieurs `Ctrl+Alt+R`), une NOUVELLE tentative de récupération des réglages
+    /// de compte (roster + suivi) — un redessin seul ne peut rien montrer si `watchlist` (l'
+    /// `ArcSwap` publié par le thread Engine, voir `spawn_engine_thread`) n'a en réalité jamais
+    /// reçu les entrées suivies (jeton pas encore chargé, requête réseau pas encore aboutie au
+    /// moment du tout premier lot de réglages). Non bloquant : lancé sur un thread éphémère dédié,
+    /// jamais depuis ce thread (winit) ni le thread Engine.
     fn force_refresh(&mut self) {
         for overlay in self.windows.values_mut() {
             overlay.last_topmost_reassert = None;
             overlay.window.request_redraw();
         }
         self.sync_topmost();
+        let settings_tx = self.settings_tx.clone();
+        thread::spawn(move || match overlay_sync::token_store::load_token() {
+            Some(token) => match overlay_sync::client::fetch_settings(&token) {
+                Ok(settings) => {
+                    println!(
+                        ">>> Réglages de compte redemandés ({REFRESH_HOTKEY_LABEL}) : {} entrée(s) de suivi."
+                        , settings.watchlist.len()
+                    );
+                    let _ = settings_tx.send(settings);
+                }
+                Err(err) => {
+                    println!(">>> Échec de la nouvelle demande de réglages ({REFRESH_HOTKEY_LABEL}) : {err}");
+                }
+            },
+            None => println!(
+                ">>> Aucun jeton de compte stocké — rien à redemander ({REFRESH_HOTKEY_LABEL})."
+            ),
+        });
         println!(">>> Rafraîchissement forcé ({REFRESH_HOTKEY_LABEL})");
     }
 
@@ -660,7 +715,8 @@ impl ApplicationHandler<UserEvent> for App {
             println!(
                 "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. \
                  {REFRESH_HOTKEY_LABEL} pour forcer un rafraîchissement (overlay bloqué/mal \
-                 positionné). Échap/Ctrl+C pour quitter.\n"
+                 positionné, ou Suivi resté vide). {QUIT_HOTKEY_LABEL} ou Ctrl+C (dans ce \
+                 terminal) pour quitter.\n"
             );
             self.banner_printed = true;
         }
@@ -695,6 +751,11 @@ impl ApplicationHandler<UserEvent> for App {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            // Ne se déclenche en pratique JAMAIS (voir la doc de `QUIT_HOTKEY_LABEL`) : ces
+            // fenêtres portent `WS_EX_NOACTIVATE`, donc ne reçoivent jamais le focus clavier quel
+            // que soit le mode — laissé en place au cas où une future fenêtre overlay redeviendrait
+            // focalisable, mais `QUIT_HOTKEY_LABEL` est le SEUL moyen fiable de quitter sans passer
+            // par le terminal.
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed
                     && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
@@ -784,6 +845,9 @@ impl ApplicationHandler<UserEvent> for App {
                 self.toggle_interactive();
             } else if event.id == self.refresh_hotkey_id {
                 self.force_refresh();
+            } else if event.id == self.quit_hotkey_id {
+                println!(">>> Sortie ({QUIT_HOTKEY_LABEL})");
+                event_loop.exit();
             }
         }
         // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
@@ -1226,7 +1290,11 @@ fn spawn_engine_thread(
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
                 // retarder l'ingestion d'un seul milliseconde.
                 while let Ok(settings) = settings_rx.try_recv() {
-                    tracing::info!("réglages de compte appliqués à l'Engine (lot L4)");
+                    let entry_count = settings.watchlist.len();
+                    tracing::info!(
+                        entry_count,
+                        "réglages de compte appliqués à l'Engine (lot L4)"
+                    );
                     engine.set_roster(Some(settings.roster));
                     engine.set_watchlist_entries(settings.watchlist);
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
@@ -1381,7 +1449,15 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
     if let Some(token) = overlay_sync::token_store::load_token() {
         match overlay_sync::client::fetch_settings(&token) {
             Ok(settings) => {
-                println!("[compte] réglages récupérés depuis le jeton natif déjà connu.");
+                // Nombre d'entrées loggé (pas seulement « récupéré ») — diagnostic ajouté après un
+                // retour utilisateur 2026-09-02 (Suivi resté vide au tout premier lancement) : sans
+                // ça, impossible de savoir si le problème vient d'une réponse déjà vide ou d'une
+                // course entre son application et le premier redessin du Suivi (voir
+                // `force_refresh`).
+                println!(
+                    "[compte] réglages récupérés depuis le jeton natif déjà connu ({} entrée(s) de suivi).",
+                    settings.watchlist.len()
+                );
                 let _ = settings_tx.send(settings);
                 return Ok(());
             }
@@ -1426,7 +1502,10 @@ fn attempt_connect(settings_tx: &mpsc::Sender<AccountSettings>) -> Result<(), St
     }
     match overlay_sync::client::fetch_settings(&token) {
         Ok(settings) => {
-            println!("[compte] connecté — réglages récupérés.");
+            println!(
+                "[compte] connecté — réglages récupérés ({} entrée(s) de suivi).",
+                settings.watchlist.len()
+            );
             let _ = settings_tx.send(settings);
             Ok(())
         }
@@ -1474,7 +1553,7 @@ fn main() {
     let (settings_tx, settings_rx) = mpsc::channel();
     let (auth_retry_tx, auth_retry_rx) = mpsc::channel();
     spawn_auth_thread(
-        settings_tx,
+        settings_tx.clone(),
         Arc::clone(&auth_status),
         auth_retry_rx,
         proxy.clone(),
@@ -1501,6 +1580,7 @@ fn main() {
         remote_icons,
         auth_status,
         auth_retry_tx,
+        settings_tx,
     });
     event_loop.run_app(&mut app).expect("boucle d'événements");
 }

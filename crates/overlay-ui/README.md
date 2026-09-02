@@ -17,10 +17,18 @@ cd crates\overlay-ui
 Prépare `vendor/wgpu-hal-30.0.1` (patch DirectComposition, à la racine du dépôt — voir
 `patches/setup-vendor.sh`) s'il est absent, puis `cargo run -p overlay-ui`. `Ctrl+Alt+W` bascule
 interactif / clic-traversant (hotkey global, fonctionne sans focus). `Ctrl+Alt+R` force un
-rafraîchissement de tous les overlays (redessin + réaffirmation topmost immédiate — voir
-`App::force_refresh`, `main.rs`) : demande utilisateur explicite 2026-09-02 pour récupérer un
-overlay bloqué (mauvaise taille, plus au premier plan) sans relancer tout le processus. Échap ou
-Ctrl+C pour quitter.
+rafraîchissement de tous les overlays (redessin + réaffirmation topmost immédiate + nouvelle
+demande des réglages de compte — voir `App::force_refresh`, `main.rs`) : demande utilisateur
+explicite 2026-09-02 pour récupérer un overlay bloqué (mauvaise taille, plus au premier plan, Suivi
+resté vide) sans relancer tout le processus.
+
+`Ctrl+Alt+Q` (hotkey global) pour quitter — ou Ctrl+C dans le terminal. Pas Échap : retour
+utilisateur 2026-09-02, contraint de faire un Ctrl+C dans le terminal (` STATUS_CONTROL_C_EXIT` en
+sortie, normal dans ce cas mais ressemble à un plantage) car Échap ne fonctionnait jamais malgré ce
+qu'annonçait la bannière — cause trouvée : les fenêtres overlay portent `WS_EX_NOACTIVATE` (jamais
+désactivé, y compris en mode interactif, pour ne jamais voler le focus au jeu) donc ne reçoivent
+JAMAIS `WindowEvent::KeyboardInput`. `Ctrl+Alt+Q` règle ça en restant, comme `Ctrl+Alt+W`/
+`Ctrl+Alt+R`, un hotkey GLOBAL indépendant du focus.
 
 ## Deux fenêtres overlay indépendantes par personnage
 
