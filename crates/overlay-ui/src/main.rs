@@ -60,7 +60,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW,
 };
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalPosition;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -585,6 +585,30 @@ impl App {
         }
     }
 
+    /// Reconfigure la surface wgpu sur la taille physique donnée — factorisé pour être appelable
+    /// depuis DEUX points, pas seulement `WindowEvent::Resized` : le redimensionnement du Suivi
+    /// (`RedrawRequested`, voir plus bas) appelle `Window::request_inner_size`, dont la doc winit
+    /// est explicite — « on platforms where the size is entirely controlled by the user [Windows
+    /// en fait partie] the applied size will be returned immediately, resize event in such case
+    /// may not be generated » — et c'était jusqu'ici purement ignoré (`let _ = ...`). Sur Windows,
+    /// `request_inner_size` s'applique donc TOUJOURS de façon synchrone : aucun `Resized` ne suit
+    /// jamais, la surface restait configurée à l'ancienne (étroite) largeur alors que la fenêtre
+    /// elle-même s'élargissait bel et bien — `get_current_texture()` échouait alors sa validation
+    /// (taille de surface ≠ taille de fenêtre) et `render` abandonnait le dessin sans rien afficher
+    /// (voir son bras `wgpu::CurrentSurfaceTexture::Validation`). Symptôme exact du retour
+    /// utilisateur 2026-09-02 : Suivi vide malgré des logs confirmant les entrées bien reçues,
+    /// `Ctrl+Alt+R` semblant ne « rien faire » alors qu'il redemandait bien les données à chaque
+    /// fois — la fenêtre s'élargissait réellement, mais son contenu ne pouvait plus jamais être
+    /// dessiné après ce tout premier redimensionnement synchrone.
+    fn reconfigure_surface(gpu: &mut GpuState, size: PhysicalSize<u32>) {
+        // Clamp défensif (voir S1, README.md §"Bug de redimensionnement") : un resize excessif ne
+        // doit jamais faire planter l'overlay, quelle qu'en soit la cause.
+        let max_dim = gpu.device.limits().max_texture_dimension_2d;
+        gpu.config.width = size.width.min(max_dim);
+        gpu.config.height = size.height.min(max_dim);
+        gpu.surface.configure(&gpu.device, &gpu.config);
+    }
+
     fn toggle_interactive(&mut self) {
         self.interactive = !self.interactive;
         for overlay in self.windows.values() {
@@ -780,15 +804,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                // Clamp défensif (voir S1, README.md §"Bug de redimensionnement") : un resize
-                // excessif ne doit jamais faire planter l'overlay, quelle qu'en soit la cause.
-                let max_dim = overlay.gpu.device.limits().max_texture_dimension_2d;
-                overlay.gpu.config.width = size.width.min(max_dim);
-                overlay.gpu.config.height = size.height.min(max_dim);
-                overlay
-                    .gpu
-                    .surface
-                    .configure(&overlay.gpu.device, &overlay.gpu.config);
+                Self::reconfigure_surface(&mut overlay.gpu, size);
             }
             WindowEvent::RedrawRequested => {
                 let snapshot = self.snapshot.load();
@@ -800,17 +816,28 @@ impl ApplicationHandler<UserEvent> for App {
                     // transparente, l'utilisateur ne peut alors pas deviner où s'arrête l'overlay)
                     // — voir la doc de `watchlist_target_width`. Comparée à la dernière largeur
                     // DEMANDÉE (`last_watchlist_width`), pas à la taille réelle actuelle de la
-                    // fenêtre : `request_inner_size` sur Windows n'est pas garanti instantané,
-                    // comparer à la taille réelle redemanderait inutilement tant que le compositeur
-                    // n'a pas fini d'appliquer la précédente demande.
+                    // fenêtre, pour ne pas rappeler `request_inner_size` en boucle tant que le
+                    // nombre d'entrées n'a pas changé.
                     let target = watchlist_target_width(watchlist.len(), overlay.game_rect.width);
                     if overlay.last_watchlist_width != Some(target) {
-                        let _ = overlay
-                            .window
-                            .request_inner_size(winit::dpi::LogicalSize::new(
-                                target,
-                                WATCHLIST_HEIGHT,
-                            ));
+                        // Sur Windows, cet appel s'applique TOUJOURS de façon synchrone — `Some`
+                        // est renvoyé immédiatement et AUCUN `WindowEvent::Resized` ne suit jamais
+                        // (voir la doc de `reconfigure_surface`, qui corrige exactement ce cas :
+                        // sans ce bras, la surface wgpu restait configurée à l'ancienne largeur
+                        // pour toujours, `render` échouait alors sa validation à chaque tentative
+                        // suivante et n'affichait plus jamais rien — Suivi durablement invisible
+                        // dès le tout premier élargissement, quel que soit le nombre de
+                        // `Ctrl+Alt+R`).
+                        if let Some(actual) =
+                            overlay
+                                .window
+                                .request_inner_size(winit::dpi::LogicalSize::new(
+                                    target,
+                                    WATCHLIST_HEIGHT,
+                                ))
+                        {
+                            Self::reconfigure_surface(&mut overlay.gpu, actual);
+                        }
                         overlay.last_watchlist_width = Some(target);
                     }
                 }
