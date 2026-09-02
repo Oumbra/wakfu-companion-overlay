@@ -265,25 +265,64 @@ fn toast_banner(ui: &mut egui::Ui, toast: &WatchlistToast) {
     });
 }
 
+/// Contour d'un rectangle à coins arrondis, comme suivi par un traceur — mêmes 4 arcs que
+/// `rounded_gradient_rect`, mais en simples points (pas un maillage coloré) : sert à faire longer
+/// une bordure en POINTILLÉS (`egui::Shape::dashed_line`, qui ne prend qu'une polyligne) le long
+/// des coins arrondis plutôt que des coins droits — sans ça, `dashed_line` trace tout droit d'un
+/// coin à l'autre et déborde visiblement du remplissage arrondi en dessous (voir `control_tile`).
+fn rounded_rect_outline(rect: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
+    const ARC_SEGMENTS: usize = 6;
+    let radius = radius
+        .min(rect.width() / 2.0)
+        .min(rect.height() / 2.0)
+        .max(0.0);
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let corners = [
+        (
+            egui::pos2(rect.right() - radius, rect.top() + radius),
+            -quarter,
+        ), // haut-droit
+        (
+            egui::pos2(rect.right() - radius, rect.bottom() - radius),
+            0.0,
+        ), // bas-droit
+        (
+            egui::pos2(rect.left() + radius, rect.bottom() - radius),
+            quarter,
+        ), // bas-gauche
+        (
+            egui::pos2(rect.left() + radius, rect.top() + radius),
+            2.0 * quarter,
+        ), // haut-gauche
+    ];
+    let mut points = Vec::with_capacity(corners.len() * (ARC_SEGMENTS + 1) + 1);
+    for (center, start_angle) in corners {
+        for i in 0..=ARC_SEGMENTS {
+            let angle = start_angle + quarter * (i as f32 / ARC_SEGMENTS as f32);
+            points.push(center + radius * egui::vec2(angle.cos(), angle.sin()));
+        }
+    }
+    if let Some(&first) = points.first() {
+        points.push(first); // referme le contour, comme les 4 coins droits d'avant
+    }
+    points
+}
+
 /// Tuile "+"/"−" du bandeau web — bordure en pointillés (`egui::Shape::dashed_line`, pas de
-/// primitive "rectangle en pointillés" dans `epaint`, reconstruite à la main à partir des 4
-/// coins) : signale visuellement qu'il s'agit d'une action, pas d'une entrée suivie, cohérent avec
-/// la charte `.kpi-add` du web.
+/// primitive "rectangle en pointillés" dans `epaint`) qui longe le contour ARRONDI de la tuile
+/// (voir `rounded_rect_outline`) — retour utilisateur 2026-09-02 : les deux tuiles de contrôle
+/// étaient les deux SEULS éléments de la bande à afficher des coins droits, incohérent avec le
+/// reste (`TILE_ROUNDING` partout ailleurs, y compris le fond plein de CETTE tuile). Signale
+/// visuellement qu'il s'agit d'une action, pas d'une entrée suivie, cohérent avec la charte
+/// `.kpi-add` du web.
 fn control_tile(ui: &mut egui::Ui, glyph: &str, tooltip: &str) {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, TILE_ROUNDING, PANEL_BG);
 
-    let corners = [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-        rect.left_top(),
-    ];
     painter.extend(egui::Shape::dashed_line(
-        &corners,
+        &rounded_rect_outline(rect, TILE_ROUNDING),
         egui::Stroke::new(1.0, CONTROL_BORDER),
         4.0,
         3.0,
