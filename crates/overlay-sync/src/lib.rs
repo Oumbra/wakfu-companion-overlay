@@ -7,9 +7,13 @@ pub mod catalog_cache;
 pub mod client;
 pub mod icon_cache;
 pub mod pairing;
+pub mod reference_data_cache;
 pub mod token_store;
 
-pub use client::{fetch_catalog_index, fetch_catalog_version, fetch_settings, AccountSettings};
+pub use client::{
+    fetch_catalog_index, fetch_catalog_version, fetch_dungeons, fetch_monster_families,
+    fetch_settings, AccountSettings,
+};
 pub use pairing::{pair_and_wait, PairingHandle};
 
 #[derive(Debug, thiserror::Error)]

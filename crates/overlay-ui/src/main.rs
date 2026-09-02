@@ -1353,6 +1353,12 @@ fn spawn_engine_thread(
 /// est aussi relayé au thread Engine (voir `spawn_engine_thread`, `Engine::set_catalog`) : sert
 /// cette fois de garde-fou `hostIsKnownMonsterName` (`quickjs_engine.rs`) contre un vrai monstre
 /// qui se révèle (mimique, brèche) confondu à tort avec une invocation.
+///
+/// Tout premier lancement SANS cache disque ET SANS réseau : repli sur le catalogue embarqué
+/// (`overlay_sync::catalog_cache::embedded_fallback`, §7.4 du plan) — l'overlay reste utilisable
+/// plutôt que de rester sur un `CatalogIndex::default()` vide. Pas encore de bandeau « catalogue
+/// daté » visible dans l'UI pour signaler ce cas (§9 du plan ne liste pas encore un tel indicateur
+/// parmi les panneaux) — seulement un `tracing::warn!`, à reprendre par un futur lot L2.
 fn spawn_catalog_thread(catalog: Arc<ArcSwap<CatalogIndex>>, proxy: EventLoopProxy<UserEvent>) {
     thread::Builder::new()
         .name("overlay-catalog".into())
@@ -1367,7 +1373,22 @@ fn spawn_catalog_thread(catalog: Arc<ArcSwap<CatalogIndex>>, proxy: EventLoopPro
             let latest_hash = match overlay_sync::client::fetch_catalog_version() {
                 Ok(hash) => hash,
                 Err(err) => {
-                    tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
+                    // Repli hors-ligne EMBARQUÉ (§7.4 du plan, `catalog_cache::embedded_fallback`)
+                    // — uniquement si `cached_hash` est vide : un cache disque déjà chargé
+                    // ci-dessus reste toujours préférable (référentiel plus récent que le
+                    // placeholder embarqué), le réseau injoignable n'y change rien.
+                    if cached_hash.is_none() {
+                        tracing::warn!(
+                            %err,
+                            "catalogue injoignable ET aucun cache local — repli sur le catalogue embarqué (daté)"
+                        );
+                        catalog.store(Arc::new(CatalogIndex::from_compact_json(
+                            &overlay_sync::catalog_cache::embedded_fallback(),
+                        )));
+                        let _ = proxy.send_event(UserEvent::NewSnapshot);
+                    } else {
+                        tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
+                    }
                     return;
                 }
             };

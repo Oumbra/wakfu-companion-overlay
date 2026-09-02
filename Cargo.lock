@@ -2404,6 +2404,7 @@ name = "overlay-sync"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "flate2",
  "keyring",
  "open",
  "overlay-engine",
