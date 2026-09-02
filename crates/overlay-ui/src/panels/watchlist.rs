@@ -46,13 +46,27 @@ use crate::ui_icons::UiIcons;
 /// dupliquer.
 pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Un décompte de suivi vient d'atteindre 0 (voir `overlay_engine::WatchlistAlert`) — construit
+/// Distingue les deux déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
+/// `loot-alert.service.ts`) — seul le libellé affiché change (voir `toast_banner`), le son a déjà
+/// été choisi par l'appelant (`main.rs::spawn_engine_thread`, `alert_sound::{play_countdown_alert,
+/// play_loot_alert}`) avant même la construction de ce toast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchlistToastReason {
+    /// Un décompte de suivi (mode `down`) vient d'atteindre 0.
+    Countdown,
+    /// Un objet à son activé (compte, voir `overlay_engine::profile`) vient d'être ramassé —
+    /// `quantity` affichée seulement si > 1 (voir `toast_banner`).
+    Loot { quantity: i64 },
+}
+
+/// Un décompte de suivi à 0 OU un ramassage à son activé (voir `WatchlistToastReason`) — construit
 /// par `main.rs::spawn_engine_thread` à réception de l'alerte, publié via `ArcSwap` (comme
 /// `watchlist`/`snapshot`) pour que le thread UI l'affiche sans coupler le thread Engine au rendu.
 #[derive(Debug, Clone)]
 pub struct WatchlistToast {
     pub name: String,
     pub kind: WatchlistKind,
+    pub reason: WatchlistToastReason,
     /// Instant auquel le toast doit cesser de s'afficher — comparé à `Instant::now()` à chaque
     /// rendu (voir `show`) plutôt que de faire expirer activement l'`ArcSwap` : cette architecture
     /// n'a pas de boucle de rendu continue (§6.1 du plan), `main.rs::render` reprogramme lui-même
@@ -253,15 +267,18 @@ fn toast_banner(ui: &mut egui::Ui, toast: &WatchlistToast) {
         WatchlistKind::Item => rarity_color(WakfuRarity::Common),
         WatchlistKind::Enemy => TEXT_MUTED,
     };
+    let label = match toast.reason {
+        WatchlistToastReason::Countdown => format!("Suivi terminé : {}", toast.name),
+        WatchlistToastReason::Loot { quantity } if quantity > 1 => {
+            format!("Ramassé : {} x{quantity}", toast.name)
+        }
+        WatchlistToastReason::Loot { .. } => format!("Ramassé : {}", toast.name),
+    };
     ui.horizontal(|ui| {
         let (dot_rect, _resp) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
         ui.painter()
             .circle_filled(dot_rect.center(), 4.0, marker_color);
-        ui.label(
-            egui::RichText::new(format!("Suivi terminé : {}", toast.name))
-                .color(NAME_COLOR)
-                .strong(),
-        );
+        ui.label(egui::RichText::new(label).color(NAME_COLOR).strong());
     });
 }
 
