@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod class_breed;
 pub mod dungeon;
+pub mod dungeon_run;
 pub mod fight_store;
 pub mod history;
 pub mod log_time;
@@ -18,7 +19,7 @@ pub mod session;
 pub mod watchlist;
 
 pub use catalog::{CatalogIndex, IconKind, IconRef, MonsterClassification, WakfuRarity};
-pub use dungeon::{DungeonEntry, DungeonIndex};
+pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
     fight_signature, purchase_signature, trade_signature, FightLootPayload,
     FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,

@@ -52,7 +52,8 @@ use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{
-    CatalogIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry, WatchlistKind,
+    CatalogIndex, DungeonIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry,
+    WatchlistKind,
 };
 use overlay_ingest::discovery;
 use overlay_sync::AccountSettings;
@@ -1612,16 +1613,34 @@ fn render(
 /// n'appelle jamais `increment`). Le son est joué sur son propre thread éphémère
 /// (`alert_sound::play_countdown_alert`), jamais en bloquant CE thread — bloquer ici retarderait
 /// l'ingestion du log pour tous les personnages.
-fn spawn_engine_thread(
-    log_path: PathBuf,
+/// Regroupe les `Arc<ArcSwap<_>>` partagés avec le reste de l'app que le thread Engine consomme —
+/// factorisé pour que `spawn_engine_thread` reste sous la limite `clippy::too_many_arguments`
+/// (8 paramètres séparés avant ce lot, 9 avec `dungeons` sans ce regroupement).
+struct EngineHandles {
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     catalog: Arc<ArcSwap<CatalogIndex>>,
+    /// Référentiel des donjons (L5, §7.1 du plan — assignation `dungeonId`/`dungeonRunKey`) —
+    /// voir `spawn_dungeon_thread`. Contrairement au catalogue, aucun panneau ne le consomme
+    /// directement : seul l'Engine s'en sert, pour la synchro serveur.
+    dungeons: Arc<ArcSwap<DungeonIndex>>,
+}
+
+fn spawn_engine_thread(
+    log_path: PathBuf,
+    handles: EngineHandles,
     proxy: EventLoopProxy<UserEvent>,
     settings_rx: mpsc::Receiver<EngineCommand>,
     sync_tx: mpsc::Sender<SyncCommand>,
 ) {
+    let EngineHandles {
+        snapshot,
+        watchlist,
+        watchlist_toast,
+        catalog,
+        dungeons,
+    } = handles;
     thread::Builder::new()
         .name("overlay-engine".into())
         .spawn(move || {
@@ -1632,13 +1651,15 @@ fn spawn_engine_thread(
                     return;
                 }
             };
-            // Dernier catalogue déjà transmis à l'Engine (voir `Engine::set_catalog`) — comparé par
-            // pointeur à chaque tick pour ne relayer qu'un VRAI changement (`spawn_catalog_thread`
-            // republie via `ArcSwap::store`, jamais une mutation en place). Protège
-            // `hostIsKnownMonsterName` (voir `quickjs_engine.rs`) contre un vrai monstre qui se
-            // révèle (mimique, brèche) confondu à tort avec une invocation — retour utilisateur
-            // 2026-09-02.
+            // Dernier catalogue/référentiel de donjons déjà transmis à l'Engine (voir
+            // `Engine::set_catalog`/`set_dungeons`) — comparés par pointeur à chaque tick pour ne
+            // relayer qu'un VRAI changement (`spawn_catalog_thread`/`spawn_dungeon_thread`
+            // republient via `ArcSwap::store`, jamais une mutation en place). Pour le catalogue,
+            // protège `hostIsKnownMonsterName` (voir `quickjs_engine.rs`) contre un vrai monstre
+            // qui se révèle (mimique, brèche) confondu à tort avec une invocation — retour
+            // utilisateur 2026-09-02.
             let mut last_seen_catalog: Option<Arc<CatalogIndex>> = None;
+            let mut last_seen_dungeons: Option<Arc<DungeonIndex>> = None;
             let rx = overlay_ingest::watcher::spawn(&log_path);
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
@@ -1685,6 +1706,14 @@ fn spawn_engine_thread(
                 if !already_seen {
                     engine.set_catalog(Arc::clone(&current_catalog));
                     last_seen_catalog = Some(current_catalog);
+                }
+                let current_dungeons = dungeons.load_full();
+                let dungeons_already_seen = last_seen_dungeons
+                    .as_ref()
+                    .is_some_and(|seen| Arc::ptr_eq(seen, &current_dungeons));
+                if !dungeons_already_seen {
+                    engine.set_dungeons(Arc::clone(&current_dungeons));
+                    last_seen_dungeons = Some(current_dungeons);
                 }
                 match rx.recv_timeout(std::time::Duration::from_millis(200)) {
                     Ok(Ok(batch)) => {
@@ -1838,6 +1867,47 @@ fn spawn_catalog_thread(
         .expect("échec de création du thread Catalogue");
 }
 
+/// Thread Donjons (L5, §7.1 du plan — assignation `dungeonId`/`dungeonRunKey`) : miroir simplifié
+/// de `spawn_catalog_thread` ci-dessus — `GET /api/v1/dungeons` n'expose pas d'endpoint `/version`
+/// séparé (voir `reference_data_cache.rs`), donc pas de comparaison de hash possible : le cache
+/// disque est chargé immédiatement (l'Engine reste utilisable pour la synchro dès le démarrage même
+/// hors ligne), puis la version réseau REMPLACE inconditionnellement l'index en mémoire dès qu'elle
+/// arrive, sans jamais bloquer ce thread ni les autres. Volume négligeable (~150 lignes, voir la
+/// doc de tête de `dungeon.rs`) : pas de repli embarqué comme pour le catalogue (~1,8 Mo) — un
+/// référentiel de donjons manquant laisse simplement `dungeonId` à `None`, jamais un blocage.
+fn spawn_dungeon_thread(dungeons: Arc<ArcSwap<DungeonIndex>>, proxy: EventLoopProxy<UserEvent>) {
+    thread::Builder::new()
+        .name("overlay-dungeons".into())
+        .spawn(move || {
+            if let Some(rows) = overlay_sync::reference_data_cache::load(
+                overlay_sync::reference_data_cache::ReferenceData::Dungeons,
+            ) {
+                dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
+                let _ = proxy.send_event(UserEvent::NewSnapshot);
+            }
+            match overlay_sync::client::fetch_dungeons() {
+                Ok(rows) => {
+                    dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
+                    let _ = proxy.send_event(UserEvent::NewSnapshot);
+                    if let Err(err) = overlay_sync::reference_data_cache::save(
+                        overlay_sync::reference_data_cache::ReferenceData::Dungeons,
+                        &rows,
+                    ) {
+                        tracing::warn!(
+                            %err,
+                            "échec de mise en cache du référentiel de donjons (retéléchargé au prochain lancement)"
+                        );
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    %err,
+                    "téléchargement du référentiel de donjons impossible, repli sur le cache local (dungeonId non résolu si aucun cache)"
+                ),
+            }
+        })
+        .expect("échec de création du thread Donjons");
+}
+
 /// Thread Sync (lot L5, §7.3 du plan) : possède la file SQLite persistante (`overlay_sync::
 /// SyncQueue`) — écriture (`enqueue`) ET envoi réseau (`flush_once`) vivent entièrement ici, jamais
 /// sur le thread Engine (voir `spawn_engine_thread`, qui ne fait que relayer des `SyncEvent` déjà
@@ -1916,7 +1986,7 @@ fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                 wait = match &uid {
                     None => std::time::Duration::from_secs(3600),
                     Some(uid) => {
-                        match queue.flush_once(uid, |path, body| overlay_sync::post_json(path, body)) {
+                        match queue.flush_once(uid, overlay_sync::post_json) {
                             Ok(overlay_sync::FlushOutcome::Idle | overlay_sync::FlushOutcome::Synced) => {
                                 std::time::Duration::from_secs(3600)
                             }
@@ -2156,6 +2226,7 @@ fn main() {
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
+    let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
@@ -2178,13 +2249,17 @@ fn main() {
         Arc::clone(&catalog_stale),
         proxy.clone(),
     );
+    spawn_dungeon_thread(Arc::clone(&dungeons), proxy.clone());
     let remote_icons = RemoteIconStore::spawn(proxy.clone());
     spawn_engine_thread(
         log_path.clone(),
-        Arc::clone(&snapshot),
-        Arc::clone(&watchlist),
-        Arc::clone(&watchlist_toast),
-        Arc::clone(&catalog),
+        EngineHandles {
+            snapshot: Arc::clone(&snapshot),
+            watchlist: Arc::clone(&watchlist),
+            watchlist_toast: Arc::clone(&watchlist_toast),
+            catalog: Arc::clone(&catalog),
+            dungeons,
+        },
         proxy,
         settings_rx,
         sync_tx,

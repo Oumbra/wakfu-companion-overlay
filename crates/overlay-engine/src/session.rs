@@ -1,13 +1,12 @@
 //! Agrégation `LogEntry` → `SessionSnapshot`, en Rust, **pas** vendue depuis `StatsStoreService`.
 //!
-//! Volontairement minimal et documenté comme tel : `StatsStoreService` (2 755 l., couplé Angular,
-//! extraction encore une décision ouverte — docs/plan-architecture.md §14 point 3) porte des
-//! heuristiques bien plus fines (regroupement de runs de donjon, rapprochement kamas↔achat HDV…).
-//! Ce module ne
-//! couvre que ce qui est directement lisible dans le flux d'événements — suffisant pour les deux
-//! premiers panneaux de L2 (dégâts du combat en cours, récap de session), pas pour l'historique
-//! long terme ni la synchro serveur (§7, qui exigera la parité stricte que `StatsStoreService`
-//! seul peut garantir).
+//! Volontairement minimal pour ce qu'affiche L2 (dégâts du combat en cours, récap de session) —
+//! pas d'extraction de `StatsStoreService` (2 755 l., couplé Angular, décision encore ouverte,
+//! voir docs/plan-architecture.md §14 point 3) pour ce périmètre. La synchro serveur (§7, L5),
+//! elle, EXIGE une parité plus stricte sur certains points précis : le regroupement de combats de
+//! donjon multi-salles (`resolve_dungeon_assignment`, voir `dungeon_run.rs`) et la corrélation
+//! kamas↔achat HDV (`consider_hdv_kama_gain`) sont désormais portés ici, vérifiés directement
+//! contre le dépôt web (`../wakfu-companion`, disponible en local) plutôt que redevinés.
 //!
 //! **`summonedBy` suivi depuis le 2026-09-02** (retour utilisateur, captures d'écran à l'appui :
 //! une invocation alliée — mécanisme, totem — s'affichait à tort côté ennemis) : une
@@ -38,7 +37,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::CatalogIndex;
 use crate::class_breed::class_for_breed;
-use crate::dungeon::DungeonIndex;
+use crate::dungeon::{DungeonEntry, DungeonIndex};
+use crate::dungeon_run::{
+    enemy_composition_key, find_dungeon_for_enemies, group_dungeon_runs, DungeonHistoryEntry,
+    GroupableFight,
+};
 use crate::history::{
     fight_signature, purchase_signature, trade_signature, FightLootPayload,
     FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,
@@ -331,6 +334,15 @@ struct FightWorking {
     /// `SessionState::apply`, cas `XpGain`) ; jamais un nom inconnu de ce combat, même si son
     /// `fight_id` s'y résout (fightId mal résolu, combat concurrent).
     xp_gained_total: i64,
+    /// Heure brute (`HH:MM:SS,mmm`) de la ligne `CombatEnd` de CE combat, et son équivalent en
+    /// horodatage complet (ms) — capturés une seule fois à sa fin, `None` tant qu'il est `ongoing`.
+    /// Nécessaires pour recalculer la signature/le payload d'un combat déjà terminé s'il devient
+    /// SIBLING d'un run de donjon découvert par un combat plus récent (voir `dungeon_run.rs`,
+    /// `SessionState::resolve_dungeon_assignment`) : sans ces deux valeurs, impossible de rebâtir
+    /// fidèlement son `SyncEvent` (même `started_at`/`duration_ms`/signature qu'à l'origine) une
+    /// seconde fois, longtemps après que la ligne `CombatEnd` d'origine a été traitée.
+    ended_at_time: Option<String>,
+    ended_at_ms: Option<i64>,
     challenges_passed: i64,
     challenges_failed: i64,
 }
@@ -655,9 +667,16 @@ impl SessionState {
             LogEntry::CombatEnd {
                 fight_id, result, ..
             } => {
+                let end_ms = self.date_tracker.full_timestamp_ms(entry.time());
+                let won = *result == FightResult::Won;
                 if let Some(fight) = self.fights.get_mut(fight_id) {
                     fight.snapshot.ongoing = false;
                     fight.snapshot.result = Some(*result);
+                    // Voir `FightWorking::ended_at_time`/`ended_at_ms` : nécessaires pour rebâtir
+                    // ce combat plus tard s'il devient sibling d'un run découvert par un combat
+                    // plus récent (voir `resolve_dungeon_assignment`).
+                    fight.ended_at_time = Some(entry.time().to_string());
+                    fight.ended_at_ms = Some(end_ms);
                     // Filet de rattrapage — miroir de `finalizeFight` (`stats-store.service.ts`) :
                     // le dernier ennemi d'un combat (souvent le boss) meurt parfois EXACTEMENT en
                     // même temps que le combat se termine, sans jamais produire sa propre ligne
@@ -667,7 +686,7 @@ impl SessionState {
                     // défaite ne précède le ramassage). Un combat GAGNÉ implique que tout ennemi
                     // ayant rejoint et jamais résolu (ni vaincu explicitement, ni en fuite) est
                     // mort en même temps que le combat.
-                    if *result == FightResult::Won {
+                    if won {
                         for fighter in &fight.snapshot.fighters {
                             if fighter.is_ally {
                                 continue;
@@ -685,15 +704,54 @@ impl SessionState {
                 // L5, §7.1 : un combat terminé est toujours prêt à synchroniser, qu'il soit gagné
                 // ou perdu — construit AVANT `prune_ended_fights()` ci-dessous, qui retire ce
                 // combat de `self.fights` dès que la limite `MAX_TRACKED_FIGHTS` l'exige.
-                if let Some(fight) = self.fights.get(fight_id) {
-                    let end_ms = self.date_tracker.full_timestamp_ms(entry.time());
-                    sync_events.push(build_fight_sync_event(
-                        fight,
-                        entry.time(),
-                        *result == FightResult::Won,
-                        end_ms,
-                        ctx,
-                    ));
+                if self.fights.contains_key(fight_id) {
+                    // Voir `resolve_dungeon_assignment` : ce combat rejoint-il un run multi-salles
+                    // (donjon `TWO_ROOMS`/`THREE_ROOMS`/`FOUR_ROOMS`) déjà entamé ? `fight_id` est
+                    // TOUJOURS le représentant d'un run trouvé ici (c'est nécessairement le combat
+                    // le plus récent de la session — voir la doc de tête de `dungeon_run.rs`).
+                    let (dungeon, siblings) = self.resolve_dungeon_assignment(*fight_id, ctx);
+                    let dungeon_id = dungeon.as_ref().map(|(id, _)| *id);
+
+                    // Siblings du run (salles/tentatives antérieures déjà envoyées SANS
+                    // rattachement) : renvoyés à leur tour avec le MÊME dungeonId et la MÊME
+                    // graine de run (la signature de CE combat, calculée une seule fois) — miroir
+                    // de `HistorySyncService.recordFight`, boucle sur `assignment.siblings`.
+                    if let (Some(dungeon_id), false) = (dungeon_id, siblings.is_empty()) {
+                        let run_signature = self
+                            .fights
+                            .get(fight_id)
+                            .map(|fight| fight_own_signature(fight, entry.time(), won));
+                        for sibling_id in &siblings {
+                            let Some(sibling) = self.fights.get(sibling_id) else {
+                                continue;
+                            };
+                            let (Some(sib_time), Some(sib_end_ms)) =
+                                (sibling.ended_at_time.clone(), sibling.ended_at_ms)
+                            else {
+                                continue; // ne devrait pas arriver : un sibling est par définition déjà terminé
+                            };
+                            let sib_won = matches!(sibling.snapshot.result, Some(FightResult::Won));
+                            sync_events.push(build_fight_sync_event(
+                                sibling,
+                                &sib_time,
+                                sib_won,
+                                sib_end_ms,
+                                ctx,
+                                Some((dungeon_id, run_signature.clone())),
+                            ));
+                        }
+                    }
+
+                    if let Some(fight) = self.fights.get(fight_id) {
+                        sync_events.push(build_fight_sync_event(
+                            fight,
+                            entry.time(),
+                            won,
+                            end_ms,
+                            ctx,
+                            dungeon,
+                        ));
+                    }
                 }
                 self.prune_ended_fights();
             }
@@ -839,6 +897,95 @@ impl SessionState {
         ));
     }
 
+    /// Résout l'assignation de donjon d'un combat qui vient de se terminer — miroir de
+    /// `HistorySyncService.resolveDungeonAssignment` (voir la doc de tête de `dungeon_run.rs`) :
+    /// 1. Regroupe TOUS les combats connus de la session (`self.fights`, non `ongoing`, plus
+    ///    récent en premier — voir `group_dungeon_runs`) et cherche si `fight_id` appartient à un
+    ///    run multi-salles tout juste complété.
+    /// 2. Si oui : renvoie `(Some((dungeonId, None)), siblings)` — `None` en 2ᵉ position signale à
+    ///    `build_fight_sync_event` d'utiliser la signature de CE combat comme graine du run (il en
+    ///    est le représentant, voir la doc de tête du module) ; `siblings` liste les AUTRES combats
+    ///    du run (salles/tentatives déjà envoyées sans rattachement), à renvoyer à leur tour.
+    /// 3. Sinon : repli sur la résolution PROPRE à ce seul combat (`find_dungeon_for_enemies`,
+    ///    couvre aussi les donjons à un seul combat — brèche, arcade... — qui ne passent jamais
+    ///    par le regroupement multi-salles) — `siblings` toujours vide dans ce cas.
+    ///
+    /// `None` sans même essayer si le catalogue ou le référentiel de donjons ne sont pas encore
+    /// chargés (`ctx.catalog`/`ctx.dungeons`) — jamais une erreur, voir la doc de `ApplyContext`.
+    fn resolve_dungeon_assignment(
+        &self,
+        fight_id: i64,
+        ctx: ApplyContext<'_>,
+    ) -> (Option<(i64, Option<String>)>, Vec<i64>) {
+        let (Some(catalog), Some(dungeons)) = (ctx.catalog, ctx.dungeons) else {
+            return (None, Vec::new());
+        };
+
+        let mut records: Vec<GroupableFight> = self
+            .fights
+            .values()
+            .filter(|f| !f.snapshot.ongoing)
+            .map(|f| GroupableFight {
+                id: f.snapshot.fight_id,
+                won: matches!(f.snapshot.result, Some(FightResult::Won)),
+            })
+            .collect();
+        // Plus récent en premier — même convention que `HistoryArchiveService.mergedFights`
+        // côté web, requise par `group_dungeon_runs` (voir sa doc).
+        records.sort_by_key(|r| std::cmp::Reverse(r.id));
+
+        let find_dungeon = |id: i64| -> Option<&DungeonEntry> {
+            let fight = self.fights.get(&id)?;
+            find_dungeon_for_enemies(catalog, dungeons, &fight_enemy_names(fight))
+        };
+        let has_archi_enemy = |id: i64| -> bool {
+            self.fights.get(&id).is_some_and(|fight| {
+                fight_enemy_names(fight)
+                    .iter()
+                    .any(|name| catalog.find_monster_is_archi(name, None))
+            })
+        };
+        let room_composition_key = |id: i64| -> String {
+            self.fights
+                .get(&id)
+                .map(|fight| enemy_composition_key(&fight_enemy_names(fight)))
+                .unwrap_or_default()
+        };
+
+        let entries = group_dungeon_runs(
+            &records,
+            find_dungeon,
+            has_archi_enemy,
+            room_composition_key,
+        );
+
+        let run = entries.iter().find_map(|found| match found {
+            DungeonHistoryEntry::DungeonRun { dungeon, fight_ids }
+                if fight_ids.contains(&fight_id) =>
+            {
+                Some((*dungeon, fight_ids.clone()))
+            }
+            _ => None,
+        });
+
+        match run {
+            Some((dungeon, fight_ids)) => {
+                let siblings = fight_ids.into_iter().filter(|id| *id != fight_id).collect();
+                (Some((dungeon.id, None)), siblings)
+            }
+            None => {
+                let own = self
+                    .fights
+                    .get(&fight_id)
+                    .and_then(|fight| {
+                        find_dungeon_for_enemies(catalog, dungeons, &fight_enemy_names(fight))
+                    })
+                    .map(|dungeon| (dungeon.id, None));
+                (own, Vec::new())
+            }
+        }
+    }
+
     /// Marque un nom d'ennemi comme "résolu" pour ce combat (vaincu explicitement ou en fuite) —
     /// voir `resolved_enemies` et le filet de rattrapage de `CombatEnd` ci-dessus. No-op si le
     /// combat n'est pas suivi (jamais vu de `FighterJoined`, ex. combat déjà en cours à l'ouverture
@@ -869,6 +1016,8 @@ impl SessionState {
             loot: Vec::new(),
             kamas_gained: 0,
             xp_gained_total: 0,
+            ended_at_time: None,
+            ended_at_ms: None,
             challenges_passed: 0,
             challenges_failed: 0,
         });
@@ -909,6 +1058,10 @@ impl SessionState {
                 loot: Vec::new(),
                 kamas_gained: 0,
                 xp_gained_total: 0,
+                // Un combat restauré est TOUJOURS `ongoing` (voir `fight_store::save_fight`, qui ne
+                // persiste jamais un combat déjà terminé) : jamais de vraie fin à restaurer ici.
+                ended_at_time: None,
+                ended_at_ms: None,
                 challenges_passed: 0,
                 challenges_failed: 0,
             },
@@ -1070,19 +1223,75 @@ fn build_purchase_sync_event(
     }
 }
 
-/// Construit l'événement d'historique d'un combat terminé — appelé une seule fois, au
-/// `CombatEnd` (voir `SessionState::apply`). `instanceIndex` recalculé ici par ordre de jonction
-/// (le Nᵉ combattant partageant ce nom obtient l'index N-1) : suffisant pour distinguer des
-/// homonymes dans la signature/le payload, sans dépendre de `FightWorking::fighter_index` (déjà
-/// utilisé pour un besoin différent, l'attribution des dégâts par siège d'initiative — voir sa
-/// doc). `turns` reste à `0`, volontairement (voir la doc de module de `history.rs`) : rien ici ne
-/// compte les tours, aucun consommateur overlay n'en a besoin.
+/// Noms des ennemis d'un combat, dans l'ordre de jonction — entrée commune de
+/// `dungeon_run::find_dungeon_for_enemies`/`enemy_composition_key`/`CatalogIndex::
+/// find_monster_is_archi` partout où ce module en a besoin (résolution de donjon, regroupement de
+/// runs). Facturé une seule fois plutôt que dupliqué à chaque site d'appel.
+fn fight_enemy_names(fight: &FightWorking) -> Vec<String> {
+    fight
+        .snapshot
+        .fighters
+        .iter()
+        .filter(|f| !f.is_ally)
+        .map(|f| f.name.clone())
+        .collect()
+}
+
+/// Paires `(nom, instanceIndex)` dans l'ordre de jonction — même calcul que celui fait pour
+/// `FightParticipantPayload` dans `build_fight_sync_event` (`instance_seen`), mais isolé ici pour
+/// pouvoir obtenir la signature d'un combat SANS construire tout son payload — nécessaire pour
+/// calculer la signature du combat REPRÉSENTATIF d'un run avant de rebâtir ses éventuels siblings
+/// (voir `SessionState::resolve_dungeon_assignment`).
+fn fight_signature_participants(fight: &FightWorking) -> Vec<(String, i64)> {
+    let mut instance_seen: HashMap<String, i64> = HashMap::new();
+    fight
+        .snapshot
+        .fighters
+        .iter()
+        .map(|fighter| {
+            let counter = instance_seen.entry(fighter.name.clone()).or_insert(0);
+            let idx = *counter;
+            *counter += 1;
+            (fighter.name.clone(), idx)
+        })
+        .collect()
+}
+
+/// Signature de contenu d'UN combat, indépendamment de son assignation de donjon — miroir de
+/// `HistorySyncService.runSignature`. Recalculable pour n'importe quel combat encore présent dans
+/// `SessionState::fights`, à condition de connaître son heure de fin et son résultat (voir
+/// `FightWorking::ended_at_time`) — c'est ce qui permet de retrouver, longtemps après coup, LA MÊME
+/// chaîne que celle produite à l'origine par `build_fight_sync_event` pour ce combat.
+fn fight_own_signature(fight: &FightWorking, time: &str, won: bool) -> String {
+    let participants = fight_signature_participants(fight);
+    fight_signature(time, fight.snapshot.fight_id, won, &participants)
+}
+
+/// Construit l'événement d'historique d'un combat terminé — appelé pour le combat qui vient de se
+/// terminer (`CombatEnd`, voir `SessionState::apply`) ET pour chaque SIBLING d'un run de donjon
+/// tout juste découvert (voir `resolve_dungeon_assignment`) : `time`/`won`/`end_ms` sont alors ceux
+/// D'ORIGINE de ce sibling (voir `FightWorking::ended_at_time`/`ended_at_ms`), jamais ceux du
+/// combat qui a déclenché le nouveau regroupement.
+///
+/// `dungeon` est résolu par l'APPELANT, jamais recalculé ici (voir `resolve_dungeon_assignment`) :
+/// `None` hors donjon ; `Some((id, None))` pour un combat qui contient LUI-MÊME son donjon (sa
+/// propre signature, calculée plus bas, sert alors de graine de run) ; `Some((id, Some(sig)))`
+/// pour un combat appartenant à un run dont un AUTRE combat (le boss, plus récent) est le
+/// représentant — `sig` est alors LA signature de ce représentant, partagée par tout le run.
+///
+/// `instanceIndex` recalculé ici par ordre de jonction (le Nᵉ combattant partageant ce nom obtient
+/// l'index N-1) : suffisant pour distinguer des homonymes dans la signature/le payload, sans
+/// dépendre de `FightWorking::fighter_index` (déjà utilisé pour un besoin différent, l'attribution
+/// des dégâts par siège d'initiative — voir sa doc). `turns` reste à `0`, volontairement (voir la
+/// doc de module de `history.rs`) : rien ici ne compte les tours, aucun consommateur overlay n'en
+/// a besoin.
 fn build_fight_sync_event(
     fight: &FightWorking,
     time: &str,
     won: bool,
     end_ms: i64,
     ctx: ApplyContext<'_>,
+    dungeon: Option<(i64, Option<String>)>,
 ) -> SyncEvent {
     let mut instance_seen: HashMap<String, i64> = HashMap::new();
     let mut sig_participants: Vec<(String, i64)> =
@@ -1168,24 +1377,18 @@ fn build_fight_sync_event(
     let signature = fight_signature(time, fight.snapshot.fight_id, won, &sig_participants);
     let duration_ms = (end_ms - fight.started_at_ms).max(0);
 
-    // Assignation de donjon (voir `FightPayload::dungeon_id` pour la portée volontairement
-    // restreinte à ce seul cas) : ce combat contient-il LUI-MÊME le boss d'un donjon classique ?
-    // Premier ennemi résolu qui l'est, dans l'ordre de jonction — miroir de la boucle
-    // `for (name of enemyNames)` de `findDungeonForEnemies` restreinte à sa priorité 1 (pas de
-    // brèche/brèche ultime ici, référentiel absent côté overlay).
-    let dungeon = ctx.dungeons.and_then(|dungeons| {
-        fight.snapshot.fighters.iter().find_map(|fighter| {
-            if fighter.is_ally {
-                return None;
-            }
-            let monster_id = ctx.catalog.and_then(|c| c.find_monster_id(&fighter.name))?;
-            dungeons.find_by_boss_monster_id(monster_id)
-        })
-    });
+    // `dungeon_run_signature` : quand aucune graine n'est forcée par l'appelant (`Some((id,
+    // None))` — ce combat est son PROPRE représentant, voir la doc ci-dessus), sa graine est
+    // directement SA PROPRE signature, jamais recalculée séparément.
+    let (dungeon_id, dungeon_run_signature) = match dungeon {
+        Some((id, Some(run_signature))) => (Some(id), Some(run_signature)),
+        Some((id, None)) => (Some(id), Some(signature.clone())),
+        None => (None, None),
+    };
 
     SyncEvent {
         kind: HistoryEventKind::Fight,
-        signature: signature.clone(),
+        signature,
         payload: HistoryPayload::Fight(FightPayload {
             fight_id: Some(fight.snapshot.fight_id),
             started_at: format_iso_utc(fight.started_at_ms),
@@ -1196,11 +1399,8 @@ fn build_fight_sync_event(
             xp_gained: fight.xp_gained_total,
             kamas_gained: Some(fight.kamas_gained),
             game_server: ctx.game_server.map(str::to_string),
-            dungeon_id: dungeon.map(|d| d.id),
-            // Ce combat étant, dans le seul cas porté, son PROPRE représentant de run (voir la doc
-            // de `FightPayload::dungeon_run_signature`), la graine est directement la signature de
-            // CE combat — jamais recalculée séparément.
-            dungeon_run_signature: dungeon.map(|_| signature),
+            dungeon_id,
+            dungeon_run_signature,
             challenges_passed: fight.challenges_passed,
             challenges_failed: fight.challenges_failed,
             participants,
@@ -2348,7 +2548,11 @@ mod tests {
     fn sample_catalog() -> CatalogIndex {
         CatalogIndex::from_compact_json(&serde_json::json!({
             "items": [[100, "Larme d'Ogrest", "Ogrest's Tear", "x", "x", 1, 1, 0, 1]],
-            "monsters": [[200, "El Pochito", "El Pochito", "x", "x", "1", -1, 1, 0, 0]],
+            "monsters": [
+                [200, "El Pochito", "El Pochito", "x", "x", "1", -1, 1, 0, 0],
+                // Pas boss (isBoss=0) — sert de "salle" pour les tests de regroupement de donjon.
+                [201, "Salle Larventura", "Salle Larventura", "x", "x", "2", -1, 0, 0, 0],
+            ],
         }))
     }
 
@@ -2471,7 +2675,7 @@ mod tests {
         let catalog = sample_catalog(); // "El Pochito", id 200, isBoss=1
         let dungeons = DungeonIndex::from_json(&serde_json::json!([
             { "id": 65, "fr": "Larventura", "en": "x", "es": "x", "pt": "x",
-              "bossMonsterId": [200], "monsterFamilyId": [] },
+              "bossMonsterId": [200], "monsterFamilyId": [], "type": "TWO_ROOMS" },
         ]));
         let ctx = ApplyContext {
             catalog: Some(&catalog),
@@ -2514,5 +2718,146 @@ mod tests {
         let fight = only_fight_payload(&events);
         assert_eq!(fight.dungeon_id, None);
         assert_eq!(fight.dungeon_run_signature, None);
+    }
+
+    /// Test d'intégration bout en bout du regroupement multi-salles (L5, §7.1) : une salle gagnée
+    /// AVANT que son boss n'ait jamais été rencontré part d'abord sans rattachement (le boss n'est
+    /// pas encore dans l'historique connu, voir `resolve_dungeon_assignment`) ; dès que le boss se
+    /// termine à son tour, la salle DÉJÀ ENVOYÉE est rebâtie et renvoyée avec le MÊME `dungeonId`
+    /// et la MÊME graine de run que le boss (miroir de `HistorySyncService.recordFight`, boucle
+    /// `assignment.siblings`).
+    #[test]
+    fn run_de_donjon_multi_salles_renvoie_les_siblings_avec_le_meme_dungeon_run_key() {
+        let catalog = sample_catalog();
+        let dungeons = DungeonIndex::from_json(&serde_json::json!([
+            { "id": 65, "fr": "Larventura", "en": "x", "es": "x", "pt": "x",
+              "bossMonsterId": [200], "monsterFamilyId": [], "type": "TWO_ROOMS",
+              "hasPreBossArchi": false },
+        ]));
+        let ctx = ApplyContext {
+            catalog: Some(&catalog),
+            dungeons: Some(&dungeons),
+            ..Default::default()
+        };
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+
+        // Salle (fight 1), gagnée : aucun boss dedans -> pas de rattachement pour l'instant.
+        state.apply(
+            &fighter_joined(1, "Salle Larventura", 1, true),
+            ctx,
+            &mut events,
+        );
+        state.apply(&combat_end(1, FightResult::Won), ctx, &mut events);
+        assert_eq!(events.len(), 1);
+        assert_eq!(only_fight_payload(&events).dungeon_id, None);
+        events.clear();
+
+        // Boss (fight 2), gagné à son tour : le run se complète — la salle 1 doit être RENVOYÉE.
+        state.apply(&fighter_joined(2, "El Pochito", 1, true), ctx, &mut events);
+        state.apply(&combat_end(2, FightResult::Won), ctx, &mut events);
+
+        assert_eq!(
+            events.len(),
+            2,
+            "le boss ET la salle (sibling) doivent repartir"
+        );
+        let fights: std::collections::HashMap<i64, &FightPayload> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                HistoryPayload::Fight(f) => Some((f.fight_id.unwrap(), f)),
+                _ => None,
+            })
+            .collect();
+        let boss = fights[&2];
+        let salle = fights[&1];
+        assert_eq!(boss.dungeon_id, Some(65));
+        assert_eq!(salle.dungeon_id, Some(65));
+        assert!(boss.dungeon_run_signature.is_some());
+        assert_eq!(
+            boss.dungeon_run_signature, salle.dungeon_run_signature,
+            "même graine de run pour tout le run"
+        );
+        // La graine du run est la signature PROPRE du combat de boss (représentant) — miroir de
+        // « dungeonRunKey du run == clientKey du boss lui-même ».
+        assert_eq!(
+            boss.dungeon_run_signature,
+            Some(fight_signature(
+                "12:00:02,000",
+                2,
+                true,
+                &[("El Pochito".to_string(), 0)]
+            ))
+        );
+        // La salle garde SA PROPRE signature d'identité (celle qui la dédoublonne), distincte de
+        // la graine de run partagée.
+        assert_ne!(salle.dungeon_run_signature, None);
+        assert_eq!(
+            fights[&1].dungeon_id, fights[&2].dungeon_id,
+            "les deux combats du run partagent le même donjon"
+        );
+    }
+
+    /// Complète le test précédent : une victoire plus ANCIENNE contre le même boss n'est jamais
+    /// fusionnée dans le run le plus récent (miroir de `groupDungeonRuns`, étape 1) — deux clears
+    /// distincts de Larventura restent deux runs séparés, chacun avec sa propre graine.
+    #[test]
+    fn deux_clears_successifs_du_meme_donjon_restent_deux_runs_distincts() {
+        let catalog = sample_catalog();
+        let dungeons = DungeonIndex::from_json(&serde_json::json!([
+            { "id": 65, "fr": "Larventura", "en": "x", "es": "x", "pt": "x",
+              "bossMonsterId": [200], "monsterFamilyId": [], "type": "TWO_ROOMS",
+              "hasPreBossArchi": false },
+        ]));
+        let ctx = ApplyContext {
+            catalog: Some(&catalog),
+            dungeons: Some(&dungeons),
+            ..Default::default()
+        };
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+
+        // Premier clear complet : salle (1) puis boss (2).
+        state.apply(
+            &fighter_joined(1, "Salle Larventura", 1, true),
+            ctx,
+            &mut events,
+        );
+        state.apply(&combat_end(1, FightResult::Won), ctx, &mut events);
+        state.apply(&fighter_joined(2, "El Pochito", 1, true), ctx, &mut events);
+        state.apply(&combat_end(2, FightResult::Won), ctx, &mut events);
+        events.clear();
+
+        // Second clear complet, indépendant : salle (3) puis boss (4). La salle 3 part d'abord
+        // sans rattachement (boss 4 pas encore connu, même comportement que le premier test) —
+        // on vide `events` juste après pour n'observer QUE ce que déclenche la fin du boss.
+        state.apply(
+            &fighter_joined(3, "Salle Larventura", 1, true),
+            ctx,
+            &mut events,
+        );
+        state.apply(&combat_end(3, FightResult::Won), ctx, &mut events);
+        events.clear();
+        state.apply(&fighter_joined(4, "El Pochito", 1, true), ctx, &mut events);
+        state.apply(&combat_end(4, FightResult::Won), ctx, &mut events);
+
+        assert_eq!(
+            events.len(),
+            2,
+            "le boss ET son sibling (3) repartent, jamais 1/2"
+        );
+        let fights: std::collections::HashMap<i64, &FightPayload> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                HistoryPayload::Fight(f) => Some((f.fight_id.unwrap(), f)),
+                _ => None,
+            })
+            .collect();
+        assert!(fights.contains_key(&3));
+        assert!(fights.contains_key(&4));
+        assert_eq!(
+            fights[&3].dungeon_run_signature,
+            fights[&4].dungeon_run_signature
+        );
     }
 }
