@@ -10,8 +10,9 @@
          fenêtre overlay, câblée sur overlay-ingest + overlay-engine.
 
     La fenêtre est transparente, toujours au-dessus, sans bordure. Ctrl+Alt+W bascule interactif /
-    clic-traversant (hotkey global). Échap (fenêtre focalisée) ou Ctrl+C (dans cette console) pour
-    quitter.
+    clic-traversant (hotkey global). Ctrl+Alt+R force un rafraîchissement (overlay bloqué, mal
+    positionné ou mal dimensionné) sans relancer tout le processus. Échap (fenêtre focalisée) ou
+    Ctrl+C (dans cette console) pour quitter.
 
 .PARAMETER LogPath
     Chemin explicite vers un wakfu.log (utile pour rejouer un fichier plutôt que suivre le vrai
@@ -47,7 +48,7 @@ if (-not (Test-Path $vendorDir)) {
 
 Write-Host ""
 Write-Host "=== overlay-ui — prévisualisation ===" -ForegroundColor Cyan
-Write-Host "Ctrl+Alt+W = bascule interactif / clic-traversant  |  Échap ou Ctrl+C = quitter" -ForegroundColor Cyan
+Write-Host "Ctrl+Alt+W = bascule interactif / clic-traversant  |  Ctrl+Alt+R = rafraîchir  |  Échap ou Ctrl+C = quitter" -ForegroundColor Cyan
 Write-Host ""
 
 $cargoArgs = @("run", "-p", "overlay-ui")
