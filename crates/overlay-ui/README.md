@@ -100,10 +100,11 @@ Voir §9 du plan pour le contenu complet visé : **État de synchro** n'est pas 
 pairing reste console-only pour l'instant (voir plus bas), dépend de L5. **Récap de session**
 (kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 : n'apportait plus rien une
 fois le reste simplifié) — sera repensé dans un autre chantier, `overlay_engine::session::
-SessionTotals` existe toujours côté moteur. **Disposition persistée par écran** : faite (poignée
-de glissement « ⠿ » en mode interactif, décalage persisté par écran, `layout_store.rs`). **Thème
-configurable** : décision du mainteneur (2026-09-02, voir §9 du plan) — pas de thème ni de mode
-daltonien, un overlay colle au design du jeu plutôt que d'offrir un réglage ; palette fixe assumée.
+SessionTotals` existe toujours côté moteur. **Disposition persistée par écran** : retirée (décision
+du mainteneur, voir §9 du plan) — pas de repositionnement manuel des panneaux, l'ancrage automatique
+(`App::anchor_position`) suffit. **Thème configurable** : décision du mainteneur (2026-09-02, voir
+§9 du plan) — pas de thème ni de mode daltonien, un overlay colle au design du jeu plutôt que
+d'offrir un réglage ; palette fixe assumée.
 
 ## Compte lié (roster + suivi) — lot L4
 
