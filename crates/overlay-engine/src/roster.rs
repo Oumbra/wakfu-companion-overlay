@@ -10,12 +10,13 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
 /// Miroir de `Gender` (`class-icons.data.ts`) — féminin/masculin, les deux seules valeurs que le
-/// jeu propose à la création de personnage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// jeu propose à la création de personnage. `Serialize` sert à la persistance disque des combats
+/// en cours (voir `fight_store.rs`) — `FighterDamage::gender` doit survivre à un redémarrage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Gender {
     F,

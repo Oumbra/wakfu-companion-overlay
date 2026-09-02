@@ -32,6 +32,9 @@
 //! le combat de SON personnage).
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::CatalogIndex;
 use crate::class_breed::class_for_breed;
@@ -39,7 +42,10 @@ use crate::model::{FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
 use crate::watchlist::{WatchlistEntry, WatchlistState};
 
-#[derive(Debug, Clone, PartialEq)]
+/// `Serialize`/`Deserialize` servent à la persistance disque du combat en cours (voir
+/// `fight_store.rs`, §9 du plan) — restauration après un redémarrage de l'overlay survenu pendant
+/// une rotation de `wakfu.log`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FighterDamage {
     pub name: String,
     pub is_ally: bool,
@@ -71,7 +77,9 @@ fn resolve_ally_class(
     (class_for_breed(breed).map(str::to_string), Gender::M)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// `Serialize`/`Deserialize` : voir `FighterDamage` — c'est la forme exacte persistée par
+/// `fight_store::save_fight`/`load_ongoing_fights` (un fichier par combat encore `ongoing`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FightSnapshot {
     pub fight_id: i64,
     pub ongoing: bool,
@@ -498,6 +506,36 @@ impl SessionState {
         });
     }
 
+    /// Réinjecte un combat encore en cours retrouvé sur disque (voir `fight_store`, appelé une
+    /// seule fois par `Engine::with_stores` avant tout premier lot ingéré) — reconstruit
+    /// uniquement l'index nom→lignes (`fighter_index`) nécessaire pour que les dégâts/soins À
+    /// VENIR continuent de créditer les combattants déjà affichés plutôt que d'en recréer des
+    /// doublons ; le reste de l'état d'attribution (file d'initiative, sièges) repart neuf — voir
+    /// la doc de module de `fight_store` pour le raisonnement complet de cet écart assumé.
+    fn restore_fight(&mut self, fight: FightSnapshot) {
+        let fight_id = fight.fight_id;
+        let mut fighter_index: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, fighter) in fight.fighters.iter().enumerate() {
+            fighter_index
+                .entry(fighter.name.clone())
+                .or_default()
+                .push(idx);
+        }
+        self.fights.insert(
+            fight_id,
+            FightWorking {
+                snapshot: fight,
+                fighter_index,
+                resolved_enemies: std::collections::HashSet::new(),
+                initiative_seats: Vec::new(),
+                initiative_cursor: 0,
+                last_turn_actor: None,
+                last_resolved_seat_by_name: HashMap::new(),
+                summon_names: std::collections::HashSet::new(),
+            },
+        );
+    }
+
     /// Ajoute TOUJOURS une nouvelle ligne — plus de fusion des combattants homonymes (voir
     /// `InitiativeSeat` : la distinction entre plusieurs instances d'un même nom se fait
     /// maintenant à l'attribution des dégâts/soins, pas ici). Renvoie l'index de la ligne créée
@@ -675,35 +713,71 @@ pub struct Engine {
     /// indépendants côté web (`LootAlertService` reçoit les deux, mais depuis deux déclencheurs
     /// distincts, voir `profile.rs`).
     pending_loot_alerts: Vec<crate::profile::LootAlert>,
+    /// Dossier de persistance des combats encore en cours (§9 du plan, voir `fight_store.rs`) —
+    /// un fichier `fight-{fight_id}.json` par combat `ongoing`, mis à jour à chaque lot qui le
+    /// touche (voir `ingest_batch`) et supprimé à sa fin (`CombatEnd`). Contrairement à `roster`/
+    /// `watchlist`, ne porte aucun état en mémoire : simple chemin utilisé en lecture/écriture.
+    fight_store_dir: PathBuf,
 }
 
 impl Engine {
     pub fn new() -> Result<Self, crate::quickjs_engine::EngineError> {
-        Self::with_watchlist_store(crate::watchlist::default_store_path())
+        Self::with_stores(
+            crate::watchlist::default_store_path(),
+            crate::fight_store::default_store_dir(),
+        )
     }
 
-    /// Comme `new()`, avec un chemin de compteurs de suivi explicite — **PUBLIC MAIS RÉSERVÉ AUX
-    /// TESTS D'INTÉGRATION** (`tests/*.rs`). `#[cfg(test)]` sur `watchlist::APP_NAME` ne protège
-    /// que les tests INTERNES de ce crate (`src/watchlist.rs::tests`, compilés avec `cfg(test)`
-    /// actif pour `overlay-engine` lui-même) : un test d'intégration est un crate SÉPARÉ qui
-    /// dépend d'`overlay-engine` normalement, sans `cfg(test)` actif pour lui — `Engine::new()` y
-    /// résout donc le VRAI chemin de production. Bug réel vécu en session (2026-09-01) : un test
-    /// d'intégration a écrasé le fichier de compteurs réel de l'utilisateur (compteurs d'objets
-    /// perdus) avant que ce constructeur n'existe — toujours passer par lui (avec un chemin de
-    /// fichier temporaire) depuis `tests/`, jamais `Engine::new()`.
+    /// Comme `new()`, avec un chemin de compteurs de suivi explicite (dossier de combats en cours
+    /// laissé au défaut de production, voir `with_stores` pour un contrôle complet) — **PUBLIC MAIS
+    /// RÉSERVÉ AUX TESTS D'INTÉGRATION** (`tests/*.rs`). `#[cfg(test)]` sur `watchlist::APP_NAME`
+    /// ne protège que les tests INTERNES de ce crate (`src/watchlist.rs::tests`, compilés avec
+    /// `cfg(test)` actif pour `overlay-engine` lui-même) : un test d'intégration est un crate
+    /// SÉPARÉ qui dépend d'`overlay-engine` normalement, sans `cfg(test)` actif pour lui —
+    /// `Engine::new()` y résout donc le VRAI chemin de production. Bug réel vécu en session
+    /// (2026-09-01) : un test d'intégration a écrasé le fichier de compteurs réel de l'utilisateur
+    /// (compteurs d'objets perdus) avant que ce constructeur n'existe — toujours passer par lui
+    /// (avec un chemin de fichier temporaire) depuis `tests/`, jamais `Engine::new()`.
     pub fn with_watchlist_store(
         store_path: std::path::PathBuf,
     ) -> Result<Self, crate::quickjs_engine::EngineError> {
+        Self::with_stores(store_path, crate::fight_store::default_store_dir())
+    }
+
+    /// Comme `new()`, avec un chemin de compteurs de suivi ET un dossier de combats en cours
+    /// explicites — à utiliser depuis `tests/*.rs` dès qu'un test laisse un combat `ongoing` à la
+    /// fin (voir la doc de `with_watchlist_store` : un test d'intégration qui appellerait `new()`
+    /// ou `with_watchlist_store()` seul écrirait tout de même un `fight-{fight_id}.json` dans le
+    /// VRAI dossier de combats de production).
+    ///
+    /// Restaure ici, avant tout premier lot ingéré, les combats encore persistés depuis un
+    /// précédent process (voir `fight_store::load_ongoing_fights` et `SessionState::restore_fight`)
+    /// — s'il y en a au moins un, `state_initialized` démarre à `true` : le tout premier lot ingéré
+    /// (forcément marqué `is_initial_load`, que ce soit un vrai premier rattrapage ou la reprise
+    /// après une rotation survenue overlay éteint) ne doit PAS vider `state`, exactement comme une
+    /// rotation survenue en cours de process (voir la doc de `state_initialized`) — sinon la
+    /// restauration serait immédiatement écrasée par le tout premier `ingest_batch`.
+    pub fn with_stores(
+        store_path: std::path::PathBuf,
+        fight_store_dir: std::path::PathBuf,
+    ) -> Result<Self, crate::quickjs_engine::EngineError> {
+        let mut state = SessionState::default();
+        let restored_fights = crate::fight_store::load_ongoing_fights(&fight_store_dir);
+        let has_restored_fights = !restored_fights.is_empty();
+        for fight in restored_fights {
+            state.restore_fight(fight);
+        }
         Ok(Self {
             parser: crate::quickjs_engine::LogParserEngine::new()?,
-            state: SessionState::default(),
+            state,
             in_initial_sweep: false,
-            state_initialized: false,
+            state_initialized: has_restored_fights,
             roster: None,
             watchlist: WatchlistState::new(store_path),
             pending_alerts: Vec::new(),
             sound_items: Vec::new(),
             pending_loot_alerts: Vec::new(),
+            fight_store_dir,
         })
     }
 
@@ -789,7 +863,16 @@ impl Engine {
         self.in_initial_sweep = batch.is_initial_load;
 
         let entries = self.parser.parse_lines(&batch.lines)?;
+        // Combats touchés par CE lot (voir `entry_fight_id`) — persistés/supprimés sur disque une
+        // fois le lot entier appliqué (§9 du plan, `fight_store.rs`), pas ligne par ligne : un
+        // combat encaisse potentiellement des dizaines de lignes par lot, une écriture disque par
+        // ligne serait un gaspillage sans rien apporter (seul l'état final du lot compte pour la
+        // restauration après redémarrage).
+        let mut touched_fight_ids = std::collections::HashSet::new();
         for entry in &entries {
+            if let Some(fight_id) = entry_fight_id(entry) {
+                touched_fight_ids.insert(fight_id);
+            }
             let implicitly_defeated = self.state.apply(entry, self.roster.as_ref());
             // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
             // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
@@ -825,11 +908,52 @@ impl Engine {
                 }
             }
         }
+        // Voir la doc de `touched_fight_ids` ci-dessus : un combat absent de `self.state.fights`
+        // ici a forcément déjà été purgé (`SessionState::prune_ended_fights`, sur `CombatEnd`) —
+        // son fichier n'a alors plus rien à faire sur disque non plus.
+        for fight_id in touched_fight_ids {
+            match self.state.fights.get(&fight_id) {
+                Some(fight) if fight.snapshot.ongoing => {
+                    crate::fight_store::save_fight(&self.fight_store_dir, &fight.snapshot);
+                }
+                _ => crate::fight_store::delete_fight(&self.fight_store_dir, fight_id),
+            }
+        }
         Ok(entries)
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
         self.state.snapshot()
+    }
+}
+
+/// `fight_id` porté par un `LogEntry`, quand la variante en a un — miroir du besoin de
+/// `Engine::ingest_batch` pour savoir quels combats persister/supprimer sur disque après un lot
+/// (voir `fight_store.rs`). Volontairement séparé de `LogEntry::time()` (déjà exhaustif pour un
+/// besoin différent) : toutes les variantes n'ont pas de `fight_id`, `None` ici couvre à la fois
+/// « pas de notion de combat » (chat, échange...) et « combat non résolu par le parser ».
+fn entry_fight_id(entry: &LogEntry) -> Option<i64> {
+    match entry {
+        LogEntry::FighterJoined { fight_id, .. } | LogEntry::CombatEnd { fight_id, .. } => {
+            Some(*fight_id)
+        }
+        LogEntry::KamaGain { fight_id, .. }
+        | LogEntry::XpGain { fight_id, .. }
+        | LogEntry::SpellCast { fight_id, .. }
+        | LogEntry::Damage { fight_id, .. }
+        | LogEntry::Heal { fight_id, .. }
+        | LogEntry::Armor { fight_id, .. }
+        | LogEntry::EnemyDefeated { fight_id, .. }
+        | LogEntry::EnemyFled { fight_id, .. }
+        | LogEntry::CombatDefeatMarker { fight_id, .. }
+        | LogEntry::Loot { fight_id, .. }
+        | LogEntry::ChallengeResult { fight_id, .. } => *fight_id,
+        LogEntry::Chat { .. }
+        | LogEntry::KamaLoss { .. }
+        | LogEntry::CombatStart { .. }
+        | LogEntry::MarketOccupation { .. }
+        | LogEntry::LogDateAnchor { .. }
+        | LogEntry::TradeCompleted { .. } => None,
     }
 }
 

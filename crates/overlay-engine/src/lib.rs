@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod class_breed;
 pub mod dungeon;
+pub mod fight_store;
 pub mod model;
 pub mod monster_family;
 pub mod profile;

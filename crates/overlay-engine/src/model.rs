@@ -8,7 +8,7 @@
 //! Rust via `#[serde(rename = "...")]`, un par un plutôt que `rename_all_fields` — plus verbeux,
 //! mais sans dépendre d'une version précise de `serde` pour cette fonctionnalité.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Éléments de dégâts/soins reconnus — miroir de `DamageElement`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -186,7 +186,10 @@ pub enum LogEntry {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+// `Serialize` sert à la persistance disque du combat en cours (voir `fight_store.rs`) —
+// `FightSnapshot::result` doit rester (re)sérialisable même si sa valeur reste `None` tant que le
+// combat n'est pas terminé (seuls les combats `ongoing` sont persistés, voir `fight_store::save_fight`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FightResult {
     Won,

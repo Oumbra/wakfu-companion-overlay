@@ -743,3 +743,39 @@ la console n'en est qu'un miroir.
   (succès/échec d'appairage, de sauvegarde, de récupération des réglages) y apparaissent.
 - `overlay-app` (harnais L1, pas l'overlay final) garde un `tracing_subscriber::fmt` console
   uniquement — pas de fichier, pas de rotation : pas l'usage visé par ce lot.
+
+---
+
+## 16. Persistance du combat en cours (`overlay-engine::fight_store`, 2026-09-02)
+
+Complète `Engine::state_initialized` (§5.3) : ce champ protège déjà un combat actif d'une rotation
+de `wakfu.log` survenant **pendant que l'overlay tourne**, mais rien ne protégeait une rotation
+survenue **pendant que l'overlay est arrêté** — au redémarrage, `Engine::new()` repartait d'un état
+vide, et le nouveau `wakfu.log` ne rejoue jamais l'historique déjà lu (même constat que §5.3) : un
+combat toujours en cours en jeu réapparaissait à zéro (dégâts perdus) le temps qu'une nouvelle ligne
+survienne.
+
+- **Un fichier JSON par combat encore `ongoing`**, `fight-{fight_id}.json`, sous
+  `%APPDATA%/wakfu-companion-overlay/data/` (`fight_store::default_store_dir`, même racine
+  `directories::ProjectDirs` que `watchlist`/`catalog_cache`/`logs`). Contenu : `FightSnapshot` tel
+  qu'affiché par l'UI (liste des combattants alliés/ennemis, dégâts/soins cumulés) — pas l'état
+  interne d'attribution par siège d'initiative (`FightWorking`, propre à un process), qui repart
+  neuf après restauration (écart assumé, voir la doc de `fight_store.rs` pour le raisonnement).
+- **Écriture** : après chaque lot (`Engine::ingest_batch`) qui touche un combat encore en cours —
+  pas ligne par ligne, un combat encaisse potentiellement des dizaines de lignes par lot.
+- **Suppression** : dès que le combat se termine (`CombatEnd`) ou est purgé de la mémoire
+  (`MAX_TRACKED_FIGHTS`, voir `session.rs`) — il n'y a alors plus rien à restaurer.
+- **Restauration** : `Engine::new()`/`with_stores` recharge tout fichier restant au démarrage
+  (forcément un combat qui n'a jamais reçu sa ligne de fin) et le réinjecte dans `SessionState`
+  avant tout premier lot ingéré. `state_initialized` démarre à `true` dès qu'au moins un combat est
+  restauré, pour que le tout premier lot (marqué `is_initial_load`, rattrapage ou reprise après
+  rotation à froid) ne vide pas cet état comme un vrai premier lancement le ferait.
+- **Nettoyage des fichiers orphelins** : un fichier de plus de 24 h (crash sans `CombatEnd`, ou
+  overlay resté éteint longtemps) est supprimé sans être restauré, plutôt que de réafficher
+  indéfiniment un combat quitté depuis longtemps.
+- **Piège de test déjà documenté** (voir `Engine::with_watchlist_store`, `watchlist.rs`) : un test d'intégration
+  (`tests/*.rs`, sans `cfg(test)` actif pour `overlay-engine`) qui appellerait `Engine::new()` ou
+  `with_watchlist_store()` seul écrirait dans le VRAI dossier de combats de production dès qu'il
+  laisse un combat `ongoing` en fin de test. `Engine::with_stores(watchlist_path, fight_store_dir)`
+  expose les deux chemins explicitement — utilisé par `tests/session_real_log.rs` (plusieurs
+  combats laissés `ongoing` en fin de test) et `tests/watchlist_boss_sans_ligne_ko.rs`.
