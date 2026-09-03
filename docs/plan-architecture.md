@@ -681,7 +681,8 @@ proposer une disposition personnalisable comme le ferait un site web.
 | --- | --- | --- |
 | **S1 — Spike rendu Windows** ✅ fait | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Voir `spikes/s1-window-windows/README.md` : panneau egui semi-transparent confirmé par capture d'écran par-dessus une autre fenêtre, hotkey global de bascule confirmé sans focus, RSS ~87 Mo — **verdict : chemin DirectComposition via `wgpu-hal` (`DxgiFromVisual`) validé**, plus simple que prévu (§6.2 mis à jour) |
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
-| **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland | **Reporté** (aucune machine Linux disponible pour l'instant) — S1/S2 suffisent à valider la stack sur Windows ; à faire avant tout travail spécifique Linux |
+| **S3 — Spike X11** (2 j) | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Reporté** (aucune machine Linux disponible pour l'instant) — S1/S2 suffisent à valider la stack sur Windows ; à faire avant tout travail spécifique Linux. **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6)** : en plus de l'équivalent fonctionnel de S1, avant clôture du lot — le CODE de production (`linux/x11.rs`) migre de `spikes/s3-window-linux/` vers `crates/overlay-platform/` ; le HARNAIS de test (orchestration Xvfb/openbox/xdotool/ffmpeg, assertions Shape/stacking/focus) est extrait vers des sous-commandes `xtask visual-check` — rien ne doit rester enterré dans `spikes/` une fois le lot clos |
+| **L7 — Outillage de test visuel (Niveau 1)** | Rendu offscreen déterministe des panneaux `overlay-ui` (crate `overlay-testkit`), voir §17.1 | Un changement de panneau (combat/watchlist) produit un diff visuel détecté automatiquement, sans Xvfb ni GPU physique, exécutable dans une session Claude cloud headless — critère détaillé en §17.6 |
 | **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel) |
 | **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Reste** : État de synchro (dépend de L5). **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés |
 | **L3 — Catalogue** ✅ fait | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files — **fait (2026-09-02, retour utilisateur)** : `overlay_engine::catalog` (index O(1) par id/nom, depuis `GET /api/v1/catalog/`) + `overlay-sync` (fetch + cache disque `catalog_cache.rs`, offline-first) + `overlay-ui::remote_icons` (résolution/téléchargement/cache d'icônes réelles `wakassets` pour le panneau Suivi, vérifié en direct contre le déploiement dev). **Fait (2026-09-02, suite)** : `catalog::find_item_has_recipe` (drapeau recette) et `catalog::find_monster_classification`/`find_monster_family_id` (boss/archimonstre/dominant, priorité `MonsterClassification`, miroir de `resolveFightTypeClassification`) ; `dungeon.rs`/`monster_family.rs` — deux nouveaux index O(1) (par id, + réciproque boss→donjon) construits depuis `GET /api/v1/dungeons`/`GET /api/v1/monster-families` (`overlay_sync::client::fetch_dungeons`/`fetch_monster_families`, cache disque `reference_data_cache.rs`, sans endpoint `/version` dédié côté serveur donc toujours rechargés en tâche de fond) ; repli hors-ligne embarqué (`overlay_sync::catalog_cache::embedded_fallback`, `assets/catalog/catalog-index.json.gz` via `include_bytes!`, décompression `flate2`) branché dans `spawn_catalog_thread` (utilisé seulement si aucun cache disque ET réseau injoignable) ; golden files de non-régression (`crates/overlay-engine/tests/golden/*.json` + `tests/catalog_golden.rs`, cohérence croisée catalogue/donjons/familles). **Clôturé (2026-09-02, poste de dev avec accès réseau réel)** : les lots précédents avaient été développés dans un sandbox sans accès à Neon/`*.pages.dev` ni à `overlay-ui` (Windows-only, non buildable là-bas) — ce n'est plus le cas ici, les trois points bloquants ont donc été levés pour de vrai plutôt que redocumentés comme limite : (1) `claude-dev.wakfu-companion.com` confirmé joignable (`catalog/`, `catalog/version`, `dungeons`, `monster-families` en 200) ; (2) repli embarqué **régénéré depuis ce déploiement réel** via `cargo run -p overlay-sync --bin gen-catalog-fallback` — catalogue complet (~1,8 Mo bruts / ~489 Ko gzip), n'est plus un placeholder ; (3) petit indicateur « 📦⚠ catalogue daté » ajouté dans la zone Combat de `overlay-ui` (`catalog_stale: Arc<AtomicBool>`, posé par `spawn_catalog_thread` uniquement quand le repli embarqué est utilisé, tooltip explicatif) — remplace le `tracing::warn!` jusque-là invisible en jeu. `cargo build`/`test`/`clippy -D warnings`/`fmt --check` **propres sur les 5 crates du workspace, `overlay-ui` compris** (précédemment non vérifiable en sandbox). **Volontairement reporté, pas un blocage de clôture** : brancher `DungeonIndex`/`MonsterFamilyIndex` dans `overlay-ui` — aucun panneau §9 n'en a besoin aujourd'hui (`LogEntry` n'a pas de `dungeonId` par combat, voir `model.rs`), prévu pour un futur panneau Combat conscient du donjon, pas une régression de ce lot. |
@@ -872,3 +873,205 @@ survienne.
   laisse un combat `ongoing` en fin de test. `Engine::with_stores(watchlist_path, fight_store_dir)`
   expose les deux chemins explicitement — utilisé par `tests/session_real_log.rs` (plusieurs
   combats laissés `ongoing` en fin de test) et `tests/watchlist_boss_sans_ligne_ko.rs`.
+
+---
+
+## 17. Harnais de test visuel et comportemental (rendu, multi-fenêtres, interactions)
+
+**Contrainte de départ, propre à ce projet** : le développement se fait par des sessions Claude
+Code, y compris des sessions **cloud Linux headless** — sans GPU garanti, sans display interactif,
+sans le jeu Wakfu installé, sans machine Windows. Sans un système dédié, tout ce qui touche au
+rendu egui, à l'ancrage multi-fenêtres ou au click-through ne peut être vérifié qu'en décrivant le
+code, jamais en le montrant. Ce chapitre décrit le système retenu pour lever cette limite,
+**challengé par trois relectures Rust indépendantes jusqu'à accord unanime** (§17.6) : rendu
+wgpu/egui, systèmes X11/fenêtrage, testing/architecture CI.
+
+Deux niveaux de test, délibérément séparés (ils ne couvrent pas la même chose et n'ont pas la même
+maturité), plus un mécanisme de restitution humaine.
+
+### 17.1 Niveau 1 — Rendu offscreen déterministe
+
+Objectif : visualiser tout changement des panneaux egui (`crates/overlay-ui/src/panels/*.rs`) sans
+fenêtre système, sans GPU physique, exécutable dans une session Claude cloud comme dans une CI
+standard.
+
+- **Nouveau crate `crates/overlay-testkit`** (lib + tests). Jamais dans le graphe de dépendances du
+  binaire livré — vérifié en CI par `cargo tree -p overlay-app` (aucune occurrence attendue).
+- **Frontière à extraire de `crates/overlay-ui/src/main.rs::render()`** : une fonction pure
+  `build_ui(ctx: &egui::Context, content: RenderContent<'_>) -> egui::FullOutput`, qui ne contient
+  que ce qui est aujourd'hui dans la fermeture `ctx.run_ui(...)`. `render()` garde tout ce qui
+  touche `egui_winit`/`Window`/`wgpu::Surface`. `RenderContent` doit devenir constructible sans
+  canaux `mpsc` réels (champs `Option`, ou petit trait `AuthCommandSink` mocké en test).
+  `RemoteIconStore` (icônes `wakassets` réseau, `remote_icons.rs`) est construit à la main dans le
+  harnais (vide ou préchargé) — jamais alimenté par le thread réseau réel, pour ne dépendre d'aucun
+  accès réseau pendant un test « offscreen ».
+- **Horloge injectable, condition de non-flakiness dès le premier panneau testé** :
+  `panels::watchlist::toast_card`/`is_active` lisent aujourd'hui `std::time::Instant::now()` en
+  interne (fondu d'entrée du toast, chute des confettis, expiration `hide_at`) — indépendamment de
+  tout ce que contient le `WatchlistToast` passé en entrée. Sans correctif, deux exécutions du même
+  test à deux instants réels différents affichent une carte à une phase d'animation différente : ce
+  n'est pas du bruit d'anticrénelage absorbable par un seuil de diff, c'est une différence
+  structurelle de contenu. Un instant explicite (`now: std::time::Instant` propagé dans la chaîne
+  d'appel, ou un `trait Clock` minimal) doit être fait transiter jusqu'à ces deux points, dans le
+  **même chantier** que l'extraction de `build_ui`, pas en suivi séparé. Le champ `confetti:
+  Vec<ConfettiPiece>` lui-même n'est pas concerné (déjà résolu une fois par
+  `main.rs::spawn_engine_thread`, jamais régénéré au rendu) : le harnais le construit à valeurs
+  fixes sans jamais rappeler `build_confetti()`.
+- **Snapshot testing via `egui_kittest`** (dev-dependency, version alignée sur `egui`/`egui-wgpu`
+  déjà utilisées par `overlay-ui`, feature `wgpu` + `snapshot`) plutôt qu'un harnais offscreen fait
+  maison — le crate encapsule déjà la sélection d'un adaptateur logiciel, la convention
+  `tests/snapshots/`, et la comparaison à seuil de tolérance ; réinventer cette mécanique serait un
+  coût de maintenance pur.
+- **Driver logiciel** : `mesa-vulkan-drivers` (lavapipe) comme prérequis documenté, installé par un
+  script idempotent unique (modèle `patches/setup-vendor.sh`), version pinnée. Filet si Vulkan
+  indisponible localement : feature `gles` ajoutée à `wgpu` **et** l'instance du testkit construite
+  avec `Backends::VULKAN | Backends::GL` explicitement (pas seulement le flag Cargo) — sans quoi
+  l'énumération d'adaptateurs ne retombe pas automatiquement sur llvmpipe/GL.
+- **Comparaison à seuil, jamais pixel-exact** : `assert_eq!` sur des octets PNG est écarté d'emblée
+  (dérive connue de rastérisation entre versions de Mesa). Image de référence versionnée dans le
+  dépôt, version de Mesa figée dans l'image CI, flux explicite de mise à jour des références,
+  revu en PR dédiée — jamais glissé dans une PR fonctionnelle.
+- **Fixtures : jamais de `UiSnapshot`/`SessionSnapshot` construit à la main.** Il doit systématiquement
+  être dérivé du rejeu du vrai `crates/overlay-engine/tests/wakfu.log` à travers le vrai
+  `EngineBackend` — pour rester attelé au harnais de parité existant (§2.2) et casser visiblement le
+  harnais si la forme du snapshot change, plutôt que de rendre silencieusement des données obsolètes.
+- **Gouvernance CI** : démarre en job **informatif** (artefact publié, non bloquant), promu en gate
+  seulement après une période de rodage sans flake constaté sur les runners réels. Pour la partie
+  qui doit bloquer, préférer des assertions structurelles (layout, présence/absence de panneau,
+  contenu textuel) au diff pixel brut.
+
+### 17.2 Niveau 2 — Comportemental multi-fenêtres/click-through (X11, sous Xvfb)
+
+**Ce n'est pas un harnais de non-régression sur du code existant** : à ce jour, aucun code
+d'ancrage/multi-fenêtre/click-through X11 n'existe dans le dépôt (S3 non commencé — toute la logique
+de `game_window.rs`/`main.rs` est `cfg(target_os = "windows")`). C'est donc un **spike S3
+« implémentation + harnais conjoint »** : `overlay-platform::linux/x11.rs` s'écrit EN MÊME TEMPS
+que son harnais Xvfb, le second servant de TDD au premier — voir le critère de sortie enrichi au
+§12.
+
+**Prérequis à valider EN PREMIER, dans cet ordre, avant tout investissement supplémentaire**
+(goulots d'étranglement de faisabilité binaire, pas des nuances à traiter en cours de route) :
+
+1. `overlay-ui` produit-il une frame sous Xvfb sans GPU réel ? → valider `mesa-vulkan-drivers`/
+   lavapipe isolément, en tout premier (mêmes paquets qu'au §17.1).
+2. Un **gestionnaire de fenêtres EWMH minimal** tourne-t-il dans le Xvfb (`openbox` recommandé) ?
+   Xvfb seul ne fournit aucun WM : sans lui, poser `_NET_WM_STATE_ABOVE` ou lire l'ordre
+   d'empilement n'a aucun sens observable — un compositeur (`picom`) n'est pas un substitut, il gère
+   la composition, pas le focus/la pile de fenêtres. Extension **XTEST** activée dans le même Xvfb
+   (au même rang que RENDER/COMPOSITE) : sans elle, tout le pilotage `xdotool` (clics, focus, hotkey
+   simulé) échoue.
+3. Le **scénario sans compositeur est le cas par défaut du harnais** (repli opaque automatique et
+   silencieux à vérifier — jamais une fenêtre noire inexpliquée, cf. réserve Expert 3 du §13) ; le
+   cas ARGB 32 bits + `picom --backend xrender` (le seul backend utilisable sans GPU réel) est un
+   scénario secondaire, avec vérification explicite du visuel choisi (`xdpyinfo`) plutôt qu'une
+   déduction depuis le rendu final.
+
+Architecture, une fois ces prérequis validés :
+
+- **Fenêtre factice** : `xterm -T "<Nom> - WAKFU"` piloté par `xdotool` — pas de binaire GUI ad hoc,
+  effort superflu tant que la détection reste par suffixe de titre (§6.5). Le suffixe
+  `" - WAKFU"` utilisé par le harnais **réutilise la constante réelle** du code de détection,
+  jamais une chaîne recopiée à la main. **Scénario multi-fenêtres nommé explicitement** dans le plan
+  de test (2+ `xterm` à titres différents, création/fermeture asynchrone) : c'est le cœur du
+  problème métier du 2026-09-01 (une overlay par fenêtre, jamais de mélange de personnages), pas un
+  cas secondaire sous-entendu.
+- **Vérification programmatique, jamais seulement « regarder la capture d'écran »** :
+  - hit-test/click-through : extension **Shape** via `x11rb` (`shape::get_rectangles`, kind
+    `Input`) — réponse binaire instantanée, pas de délai ni de course ;
+  - réception réelle du clic : la fenêtre factice journalise les `ButtonPress` reçus (présents si
+    click-through actif, absents avec timeout court sinon) ;
+  - focus : `xdotool getwindowfocus`/`getactivewindow` avant/après clic (vérifie l'exigence
+    « pas d'`input_focus` en mode passthrough », §6.3) ;
+  - topmost/stacking : `_NET_CLIENT_LIST_STACKING` (exposé par le WM EWMH) comparé avant/après le
+    délai de grâce.
+- **Horloge injectable côté X11 aussi** : `sync_topmost`/`sync_windows` s'appuient directement sur
+  `std::time::Instant::now()` (`TOPMOST_DEMOTE_GRACE` 1,5 s, sondage 20 Hz) sans abstraction
+  aujourd'hui. Extraire cette logique derrière une horloge substituable pour la couvrir par des
+  tests **unitaires, synchrones, sans Xvfb**, sur le modèle de `overlay-ingest::Tailer::poll` (§12,
+  L1). Réserver Xvfb à un très petit nombre de tests d'intégration tolérants en délai, qui vérifient
+  que le vrai code X11 appelle bien ces primitives — pas à couvrir la matrice de timing.
+- **Artefact vidéo/image (`ffmpeg -f x11grab`, `xwd`/`import`) réservé exclusivement à la
+  restitution humaine** (§17.4) — jamais utilisé comme oracle de test automatique. Deux mécanismes
+  distincts : les assertions protocolaires ci-dessus sont la source de vérité CI, la capture sert la
+  revue humaine.
+- **Cycle de vie des process orchestrés** (Xvfb, openbox, picom, xterm, ffmpeg) : un garde RAII qui
+  les termine proprement même en cas de panique/échec d'assertion en cours de scénario — sinon un
+  test précédent en échec laisse un display corrompu qui fait échouer le suivant sans rapport avec
+  le bug réel.
+- **Placement** : sous-commandes `xtask visual-check` pour l'orchestration (peu de logique Rust,
+  des appels système enchaînés) — jamais `spikes/` pour cette partie durable (sémantique du dépôt :
+  « harnais jetables, jamais résolus avec le workspace principal », `Cargo.toml` racine). Le spike
+  S3 lui-même démarre bien dans `spikes/s3-window-linux/` (même régime que S1/S2, implémentation et
+  harnais encore instables et co-écrits en TDD) — voir le critère de sortie enrichi au §12, qui
+  impose la migration du code vers `crates/overlay-platform/` et du harnais vers `xtask` avant
+  clôture du lot : rien ne doit rester enterré dans un dossier jetable.
+- **Isolation workspace** : à trancher explicitement au moment d'écrire `xtask` — membre du
+  workspace principal ou crate autonome à `Cargo.lock` séparé (même logique que `spikes/`), pour ne
+  pas faire peser `x11rb`/les dépendances de pilotage sur la résolution de dépendances de
+  production.
+- **Gouvernance** : jamais un gate CI par défaut (`push`/`pull_request`) — strictement à la demande
+  (`workflow_dispatch` ou déclenché par une session Claude). Politique de quarantaine automatique
+  (désactivation + ticket) au premier flake répété dans une fenêtre glissante, jamais un correctif
+  par `sleep`/retry.
+- **Limite assumée et documentée explicitement** : ce dispositif couvre X11 natif, **pas XWayland**
+  (pas de compositeur Wayland réel dans Xvfb) — une partie seulement du périmètre Linux annoncé
+  comme supporté (§6.4). Le chemin Windows natif (DirectComposition, Win32) reste hors périmètre,
+  testé manuellement en local (`spikes/s1-window-windows/preview.ps1` + capture humaine), comme
+  aujourd'hui.
+
+### 17.3 Dépendances et discipline
+
+Même discipline que celle déjà tenue pour `wgpu-hal` (patch vendored plutôt que dépendance non
+maîtrisée) et pour `ureq`/`tokio` (refus d'un second modèle de concurrence sans gain mesurable,
+§7.3) :
+
+- **Dépendances système** (Xvfb, openbox, picom, `xdotool`, `ffmpeg`, `mesa-vulkan-drivers`) : un
+  seul script d'installation idempotent versionné (modèle `patches/setup-vendor.sh`), versions
+  documentées et pinnées — jamais d'`apt-get` ad hoc au fil d'une session.
+- **Dépendances Rust nouvelles** (`egui_kittest`, `x11rb` pour les assertions du harnais, une
+  éventuelle lib de diff d'image) : en `[dev-dependencies]` d'`overlay-testkit` ou du harnais
+  Niveau 2 uniquement — jamais dans `overlay-ui`/`overlay-app`, chacune justifiée par une ligne
+  écrite (modèle §7.3 pour `ureq` vs `tokio`).
+- Aucune de ces dépendances ne remonte dans `[patch.crates-io]` du `Cargo.toml` racine — réservé au
+  patch DirectComposition de production.
+- **Séquencement** : la CI de base décrite au §8/§11 (build Windows+Linux, parité, budget mémoire,
+  clippy) est documentée mais absente du disque à ce jour — à écrire d'abord, avant de greffer les
+  Niveaux 1/2 dessus, pour disposer d'un signal de référence stable.
+
+### 17.4 Restitution humaine
+
+- Publication d'un artefact (page HTML avant/après pour le Niveau 1, courte vidéo pour le Niveau 2)
+  déclenchée **mécaniquement** par un diff visuel réellement détecté par le harnais — jamais à
+  chaque commit, jamais au jugement libre de Claude. Granularité par unité de revue (session/tâche),
+  pas par micro-commit. Exclusion explicite des changements internes sans effet observable à l'écran
+  (refactor, synchro, données).
+- Jamais de blob vidéo/image commité dans le dépôt — publié en artefact CI à rétention limitée ou en
+  Artifact Claude.
+
+### 17.5 Documentation
+
+Ce chapitre est la documentation unique du système — pas de fichier séparé, pour ne pas ajouter une
+deuxième source à la dérive documentaire déjà connue entre §4 et le disque réel. Toute évolution du
+harnais se met à jour ici, avec la même exigence de dater et sourcer les faits que le reste du plan.
+
+### 17.6 Revue à trois experts Rust (2026-09-03)
+
+Système challengé par trois relectures indépendantes (rendu wgpu/egui, systèmes X11/fenêtrage,
+testing/architecture CI), sur le modèle du §13, jusqu'à accord unanime — deux tours ont été
+nécessaires :
+
+- **Tour 1** : rendu → ✅ OK sous réserve (adopter `egui_kittest`, extraire `build_ui`, mocker
+  `RemoteIconStore`, diff à seuil). Systèmes/X11 → ❌ PAS OK — le Niveau 2 prétendait valider un
+  code X11 qui n'existe pas encore, sans WM EWMH ni validation préalable du rendu logiciel.
+  Testing/CI → ✅ OK sous réserve (placement `overlay-testkit`/`xtask` plutôt que `spikes/`,
+  gouvernance CI progressive, dérivation systématique du snapshot depuis un rejeu réel).
+- **Tour 2** (proposition amendée : Niveau 2 reformulé en spike S3 conjoint avec prérequis validés
+  en premier) : les trois passent à ✅ OK, avec deux réserves supplémentaires précises — horloge
+  injectable requise dès le premier panneau testé (rendu) et contradiction à lever entre
+  « rien dans `spikes/` » et « Niveau 2 = spike S3 » (testing/CI).
+- **Tour 3** (critère de sortie de S3 enrichi, §12, pour garantir l'extraction du harnais hors de
+  `spikes/`) : les trois confirment **✅ OK**, sans réserve bloquante restante.
+
+Toutes les réserves des trois tours sont intégrées dans le texte des §17.1/§17.2/§17.3 ci-dessus,
+pas seulement listées ici — ce paragraphe n'est qu'un journal de la délibération, pas une liste
+d'actions à part.
