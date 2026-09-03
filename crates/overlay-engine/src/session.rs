@@ -135,6 +135,17 @@ pub struct FighterDamage {
     /// choix) — `#[serde(default)]` même raison que `xp_gained` ci-dessus.
     #[serde(default)]
     pub spells: HashMap<String, HashMap<String, i64>>,
+    /// Ce combattant a-t-il été mis KO au moins une fois DANS ce combat — alimenté par
+    /// `LogEntry::EnemyDefeated` (voir `SessionState::apply`, cas `EnemyDefeated`), qui malgré son
+    /// nom couvre aussi bien "X est KO !" (réservé aux alliés, `KO_RE`) que "X est hors-combat !"
+    /// (diffusé à tout combattant, `HORS_COMBAT_RE`) — voir `log-parser.ts`. Ne redevient JAMAIS
+    /// `false` une fois posé (pas de suivi de "ressuscité en plein combat" ici) : c'est un simple
+    /// indicateur d'affichage (portrait grisé, `overlay-ui::panels::combat`), pas une donnée de
+    /// synchro — `build_fight_sync_event` continue de dériver `defeated`/`fled` indépendamment à
+    /// partir de `resolved_enemies`/`fled_names` pour le payload serveur, ce champ-ci n'y participe
+    /// pas. `#[serde(default)]` même raison que `xp_gained` ci-dessus (champ ajouté après coup).
+    #[serde(default)]
+    pub is_ko: bool,
 }
 
 /// Cascade de classe/sexe d'un allié CONFIRMÉ (`is_controlled_by_ai == false`) — miroir de
@@ -649,6 +660,11 @@ impl SessionState {
                 ..
             } => {
                 self.mark_resolved(*fight_id, name);
+                // `EnemyDefeated` couvre aussi bien un ennemi qu'un allié (voir la doc de
+                // `FighterDamage::is_ko`) : poser le drapeau d'affichage sur CE combattant précis,
+                // indépendamment de `resolved_enemies` (partagé avec `EnemyFled`, où ce drapeau ne
+                // doit PAS être posé — voir plus bas).
+                self.mark_ko(*fight_id, name);
             }
             // Un combattant qui s'échappe n'a PAS été vaincu, même si le combat se termine par une
             // victoire (mimique qui se révèle puis fuit) — marqué "résolu" quand même pour que le
@@ -996,6 +1012,25 @@ impl SessionState {
         }
     }
 
+    /// Pose `FighterDamage::is_ko = true` sur CHAQUE ligne de `fight.snapshot.fighters` dont le nom
+    /// correspond (comparaison insensible à la casse, même règle que `resolved_enemies`/
+    /// `fled_names`) — toutes les instances d'un nom ambigu (homonymes, limite déjà assumée
+    /// ailleurs dans ce module, voir `EntityClassifierService` côté web) plutôt qu'une seule au
+    /// hasard. No-op si le combat n'est pas suivi ou si `name` ne correspond à aucun combattant
+    /// déjà rejoint (ex. `FighterJoined` manqué, combat déjà en cours à l'ouverture du fichier) —
+    /// même défense que `mark_resolved`.
+    fn mark_ko(&mut self, fight_id: i64, name: &str) {
+        let Some(fight) = self.fights.get_mut(&fight_id) else {
+            return;
+        };
+        let lower = name.to_lowercase();
+        for fighter in &mut fight.snapshot.fighters {
+            if fighter.name.to_lowercase() == lower {
+                fighter.is_ko = true;
+            }
+        }
+    }
+
     fn ensure_fight(&mut self, fight_id: i64, started_at_ms: i64) {
         self.fights.entry(fight_id).or_insert_with(|| FightWorking {
             snapshot: FightSnapshot {
@@ -1094,6 +1129,7 @@ impl SessionState {
             gender,
             xp_gained: 0,
             spells: HashMap::new(),
+            is_ko: false,
         });
         fight
             .fighter_index
@@ -2365,6 +2401,56 @@ mod tests {
             implicitly_defeated.is_empty(),
             "déjà crédité explicitement, le filet ne doit rien ajouter"
         );
+    }
+
+    /// `EnemyDefeated` couvre aussi bien "X est KO !" (allié) que "X est hors-combat !" (n'importe
+    /// qui) — voir `FighterDamage::is_ko`. Régression visée : ne pas confondre avec
+    /// `resolved_enemies`, qui n'a de sens que pour les ennemis (voir `build_fight_sync_event`).
+    #[test]
+    fn enemy_defeated_marque_is_ko_meme_pour_un_allie() {
+        let mut state = SessionState::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 8, false), // allié confirmé (isControlledByAI=false)
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Bwork", 1, true),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &enemy_defeated(1, "Oumbra"), // "Oumbra est KO !"
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+
+        let fighters = &state.fights[&1].snapshot.fighters;
+        assert!(fighters.iter().find(|f| f.name == "Oumbra").unwrap().is_ko);
+        assert!(!fighters.iter().find(|f| f.name == "Bwork").unwrap().is_ko);
+    }
+
+    /// Une fuite n'est PAS un KO (`is_ko` doit rester `false`) — contrairement à `resolved_enemies`
+    /// (partagé entre les deux), volontairement posé par `EnemyFled` pour empêcher le filet de
+    /// rattrapage de `CombatEnd` de créditer à tort un fuyard comme vaincu (voir ce test juste en
+    /// dessous, `filet_de_rattrapage_ne_credite_jamais_un_ennemi_en_fuite`), mais sans effet sur
+    /// l'affichage.
+    #[test]
+    fn enemy_fled_ne_marque_jamais_is_ko() {
+        let mut state = SessionState::default();
+        state.apply(
+            &fighter_joined(1, "Mimique", 1, true),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        state.apply(
+            &enemy_fled(1, "Mimique"),
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+
+        assert!(!state.fights[&1].snapshot.fighters[0].is_ko);
     }
 
     /// Demande explicite de l'utilisateur (cas des mimiques, voir `registerFightFlee` côté web) :

@@ -156,6 +156,7 @@ mod tests {
             gender: Gender::M,
             xp_gained: 0,
             spells: std::collections::HashMap::new(),
+            is_ko: false,
         }
     }
 
