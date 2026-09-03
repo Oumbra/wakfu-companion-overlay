@@ -299,6 +299,16 @@ struct FightWorking {
     /// reçoit les dégâts/soins d'une ligne dont l'attaquant porte ce nom, jusqu'au prochain sort
     /// lancé par ce même nom (miroir de `lastResolvedSeatByName`).
     last_resolved_seat_by_name: HashMap<String, usize>,
+    /// Nombre de tours du combat — miroir de `Fight.turnCount`/`registerFightTurn`
+    /// (`stats-store.service.ts`), démarre à `1` comme côté web. Alimente `FightPayload::turns`
+    /// (L5, §7.1). Incrémenté par `register_fight_turn` quand un siège déjà vu dans
+    /// `turn_seats_seen` rejoue (le tour a bouclé).
+    turn_count: i64,
+    /// Sièges (index dans `initiative_seats` via leur `fighter_index`, PAS des noms comme côté web
+    /// — voir doc de `InitiativeSeat`) ayant déjà joué au cours du tour courant — miroir de
+    /// `turnSeatsSeen` (`stats-store.service.ts`) : un siège qui rejoue alors qu'il a déjà joué ce
+    /// tour-ci signale que le tour a bouclé (voir `register_fight_turn`).
+    turn_seats_seen: std::collections::HashSet<usize>,
     /// Noms (minuscules) identifiés comme une invocation de CE combat (`FighterJoinedEntry::
     /// summoned_by`) — miroir de `FightWorking.summonNames` (`stats-store.service.ts`) : jamais de
     /// ligne dans `snapshot.fighters` (voir `apply`, cas `FighterJoined`), jamais crédité en
@@ -367,9 +377,9 @@ impl FightWorking {
     }
 
     /// Miroir de `registerFightTurn` (`stats-store.service.ts`) — voir sa doc pour le
-    /// raisonnement complet. Le comptage de tours (`turnSeatsSeen`/`fight.turnCount` côté web)
-    /// n'est PAS porté : rien dans l'overlay n'affiche encore de numéro de tour, seule
-    /// l'attribution des dégâts/soins par siège est utile ici.
+    /// raisonnement complet, comptage de tours (`turnSeatsSeen`/`fight.turnCount` côté web)
+    /// compris : alimente `FightPayload::turns` (L5, §7.1) en plus de l'attribution des
+    /// dégâts/soins par siège.
     fn register_fight_turn(&mut self, actor: &str) {
         if self.last_turn_actor.as_deref() == Some(actor) {
             return; // même tour en cours (plusieurs sorts d'affilée par le même acteur).
@@ -378,6 +388,14 @@ impl FightWorking {
         self.last_turn_actor = Some(actor.to_string());
         self.last_resolved_seat_by_name
             .insert(actor.to_string(), seat_fighter_index);
+
+        // Un siège qui rejoue alors qu'il a déjà joué ce tour-ci signale que le tour a bouclé —
+        // miroir exact de `turnSeatsSeen` côté web.
+        if self.turn_seats_seen.contains(&seat_fighter_index) {
+            self.turn_count += 1;
+            self.turn_seats_seen.clear();
+        }
+        self.turn_seats_seen.insert(seat_fighter_index);
     }
 
     /// Miroir de `resolveNextActor` (`stats-store.service.ts`) — voir sa doc détaillée côté web
@@ -1045,6 +1063,8 @@ impl SessionState {
             initiative_cursor: 0,
             last_turn_actor: None,
             last_resolved_seat_by_name: HashMap::new(),
+            turn_count: 1,
+            turn_seats_seen: std::collections::HashSet::new(),
             summon_names: std::collections::HashSet::new(),
             fled_names: std::collections::HashSet::new(),
             started_at_ms,
@@ -1083,6 +1103,12 @@ impl SessionState {
                 initiative_cursor: 0,
                 last_turn_actor: None,
                 last_resolved_seat_by_name: HashMap::new(),
+                // Comme le reste de l'état d'attribution (file d'initiative, sièges), pas
+                // persisté par `fight_store` — repart de la convention de départ du web (`1`),
+                // écart mineur assumé (un combat restauré en cours de tour sous-compte le tour
+                // déjà entamé avant le redémarrage, cas rare comme le reste de cette fonction).
+                turn_count: 1,
+                turn_seats_seen: std::collections::HashSet::new(),
                 summon_names: std::collections::HashSet::new(),
                 fled_names: std::collections::HashSet::new(),
                 // Pas persisté par `fight_store` (voir `FightSnapshot`) : `0` (epoch 1970) pour un
@@ -1318,9 +1344,8 @@ fn fight_own_signature(fight: &FightWorking, time: &str, won: bool) -> String {
 /// `instanceIndex` recalculé ici par ordre de jonction (le Nᵉ combattant partageant ce nom obtient
 /// l'index N-1) : suffisant pour distinguer des homonymes dans la signature/le payload, sans
 /// dépendre de `FightWorking::fighter_index` (déjà utilisé pour un besoin différent, l'attribution
-/// des dégâts par siège d'initiative — voir sa doc). `turns` reste à `0`, volontairement (voir la
-/// doc de module de `history.rs`) : rien ici ne compte les tours, aucun consommateur overlay n'en
-/// a besoin.
+/// des dégâts par siège d'initiative — voir sa doc). `turns` vient de `FightWorking::turn_count`
+/// (voir `register_fight_turn`).
 fn build_fight_sync_event(
     fight: &FightWorking,
     time: &str,
@@ -1430,7 +1455,7 @@ fn build_fight_sync_event(
             started_at: format_iso_utc(fight.started_at_ms),
             duration_ms: Some(duration_ms),
             won,
-            turns: 0,
+            turns: fight.turn_count,
             total_damage,
             xp_gained: fight.xp_gained_total,
             kamas_gained: Some(fight.kamas_gained),
@@ -2629,6 +2654,38 @@ mod tests {
         assert_eq!(spells[0].total, 180);
         assert_eq!(spells[0].by_element.get("Feu"), Some(&150));
         assert_eq!(spells[0].by_element.get("Air"), Some(&30));
+    }
+
+    #[test]
+    fn nombre_de_tours_incremente_quand_un_siege_rejoue_dans_le_meme_tour() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Alpha", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &fighter_joined(1, "Beta", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        // Tour 1 : Alpha puis Beta jouent chacun une fois — aucun siège ne rejoue encore.
+        state.apply(&spell_cast(1, "Alpha"), ApplyContext::default(), &mut events);
+        state.apply(&spell_cast(1, "Beta"), ApplyContext::default(), &mut events);
+        // Tour 2 : Alpha rejoue — son siège a déjà joué ce tour-ci, le tour boucle.
+        state.apply(&spell_cast(1, "Alpha"), ApplyContext::default(), &mut events);
+        state.apply(&spell_cast(1, "Beta"), ApplyContext::default(), &mut events);
+
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        assert_eq!(fight.turns, 2, "deux tours complets joués");
     }
 
     fn sample_catalog() -> CatalogIndex {
