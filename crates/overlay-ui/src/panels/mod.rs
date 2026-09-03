@@ -5,4 +5,5 @@
 //! exact).
 
 pub mod combat;
+pub mod combat_frame;
 pub mod watchlist;

@@ -40,9 +40,12 @@ englobante mesurée du rond (pas de redimensionnement du portrait), puis le
 template est redessiné par-dessus pour que l'anneau masque proprement tout
 débordement d'anti-aliasing.
 
-## État — décision à prendre plus tard
+## État — décision prise (2026-09-03)
 
-Les templates de production (`assets/templates/`) n'ont **pas été modifiés** :
-ce dossier ne sert que de preuve de validation. Le remplacement effectif des
-6 templates de production par ces versions redimensionnées reste à faire quand
-l'intégration dans l'overlay combat sera engagée.
+**Fait** : les 6 templates de production (`assets/templates/`) ont été
+remplacés par ces versions redimensionnées, à l'intégration effective dans le
+panneau Combat de l'overlay (`crates/overlay-ui/src/panels/combat_frame.rs`,
+qui embarque sa propre copie sous `crates/overlay-ui/assets/templates/` —
+voir la doc de ce module pour la géométrie des médaillons mesurée sur ces
+mêmes fichiers). Ce dossier `_test/` reste la preuve de validation d'origine,
+non modifiée, mais n'est plus la seule source des templates "définitifs".

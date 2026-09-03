@@ -14,12 +14,29 @@
 //! ennemi, voir `class_breed.rs`) donc n'était jusqu'ici jamais affiché du tout ; il l'est
 //! maintenant avec un portrait générique (`UiIcons::unknown_entity_image`). Ligne "Combat #N —
 //! gagné/perdu" retirée (retour utilisateur : n'apporte rien).
+//!
+//! **Refonte 2026-09-03** (demande utilisateur, redesign complet) :
+//! - Camp Alliés : fond décoratif par nombre d'alliés (`crate::panels::combat_frame::CombatFrame`,
+//!   médaillons "totem" contenant les portraits de classe, voir sa doc de module) au-delà de 6
+//!   alliés (aucun template ne va plus loin), les alliés excédentaires continuent dans le style
+//!   "plat" ci-dessous plutôt que de faire échouer l'affichage.
+//! - Camp Ennemis, et alliés excédentaires : liste "plate" inchangée dans son principe (portrait +
+//!   barre par ligne), mais `damage_bar` peint désormais le NOM du combattant et son POURCENTAGE
+//!   d'équivalence par rapport au total de dégâts du camp affiché (voir sa doc) — plus seulement
+//!   le chiffre brut.
+//! - Total de dégâts du camp affiché, affiché avant la liste (`ui.label` dédié).
+//! - Portrait grisé (`FighterDamage::is_ko`, voir `overlay_engine::session`) pour tout combattant
+//!   déjà mis KO au moins une fois ce combat — vrai niveau de gris précalculé pour les portraits de
+//!   classe (`PortraitAtlas`), simple tint pour les icônes de repli/distantes (`grey_tint_if_ko`,
+//!   voir sa doc — pas de version grisée précalculée pour celles-ci).
 
 use overlay_engine::{CatalogIndex, FightSnapshot};
 
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
+
+use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
 /// (`side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
@@ -38,7 +55,7 @@ pub enum CombatSide {
 const SWITCH_HEIGHT: f32 = 26.0;
 const SWITCH_OPTION_WIDTH: f32 = 30.0;
 const SWITCH_ICON_SIZE: f32 = 15.0;
-/// Écart vertical entre deux portraits de la liste (demande utilisateur explicite).
+/// Écart vertical entre deux portraits de la liste "plate" (demande utilisateur explicite).
 const ROW_GAP: f32 = 6.0;
 
 // Charte reprise telle quelle du thème sombre par défaut du dépôt web (`styles.css` `:root`, voir
@@ -47,25 +64,28 @@ const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
 const TINT_MEDIUM: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 31);
 const TINT_STRONG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
 
-/// Hauteur de la barre de dégâts d'une ligne — plus fine que le portrait (`PORTRAIT_SIZE`),
-/// centrée verticalement à côté de lui (alignement par défaut de `ui.horizontal`).
-const BAR_HEIGHT: f32 = 18.0;
-/// Fond de la barre : opaque et TRÈS sombre plutôt qu'un simple gris — c'est lui qui garantit que
-/// le chiffre reste lisible par-dessus n'importe quel décor de jeu, quelle que soit la proportion
-/// remplie (voir `damage_bar`). Même famille que le fond de l'ancien panneau (`18, 20, 28`), en
-/// plus sombre et plus opaque : ce fond-ci est volontaire (demande explicite d'une barre), à ne
-/// pas confondre avec le fond de panneau plein retiré par ailleurs.
-const BAR_BG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(8, 10, 16, 235);
-/// Remplissage proportionnel : le même bleu que le switch (`ACCENT`), mais semi-transparent plutôt
-/// qu'opaque — demande explicite ("une couleur sombre et par-dessus le même bleu que le switch").
-/// Un `ACCENT` opaque plein rendrait le chiffre illisible une fois dessus (bleu clair = mauvais
-/// contraste avec un texte clair) ; en semi-transparent sur `BAR_BG`, le mélange reste assez sombre
-/// pour que le texte clair de `BAR_TEXT` garde un contraste correct sur toute la largeur de la
-/// barre, remplie ou non.
-const BAR_FILL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(0x00, 0xd2, 0xff, 110);
+/// Hauteur d'une barre de dégâts dans la liste "plate" (ennemis, ou alliés au-delà de
+/// `MAX_FRAME_SLOTS`) — voir `combat_frame::BAR_ROW_HEIGHT` pour la variante dessinée à côté d'un
+/// médaillon du cadre, légèrement plus haute pour rester proportionnée à son diamètre.
+const BAR_HEIGHT: f32 = 24.0;
+
+/// Couleurs de la barre de dégâts — mesurées sur la maquette fournie par l'utilisateur (capture
+/// d'écran jointe à la demande de redesign, 2026-09-03) plutôt que reprises de `ACCENT` (le bleu du
+/// switch, qui habillait l'ancienne barre) : la maquette est un dégradé sarcelle/turquoise distinct,
+/// pas une déclinaison de `ACCENT`.
+const BAR_BORDER: egui::Color32 = egui::Color32::from_rgb(30, 31, 37);
+const BAR_TRACK: egui::Color32 = egui::Color32::from_rgb(22, 23, 28);
+/// Base du remplissage (bas de la barre) — voir `BAR_FILL_HIGHLIGHT` pour le reflet du haut.
+const BAR_FILL_BASE: egui::Color32 = egui::Color32::from_rgb(7, 121, 130);
+/// Reflet plus clair peint sur le tiers supérieur du remplissage — effet "verre/glacis" mesuré sur
+/// la maquette (bande nettement plus claire que `BAR_FILL_BASE` juste sous le bord supérieur).
+const BAR_FILL_HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(13, 190, 190);
+/// Ligne de biseau (haut et bas de la piste, qu'elle soit remplie ou non à cet endroit) — un blanc
+/// translucide fin, mesuré comme un éclaircissement d'environ +40 sur la piste sombre.
+const BAR_BEVEL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 40);
 const BAR_TEXT: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 /// Copie du texte peinte 1px en dessous/à droite avant le texte principal (pseudo-contour) — filet
-/// de sécurité supplémentaire aux endroits où le remplissage bleu est le plus clair.
+/// de sécurité supplémentaire aux endroits où le remplissage clair est le plus proche du texte.
 const BAR_TEXT_SHADOW: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(0, 0, 0, 200);
 
 #[allow(clippy::too_many_arguments)]
@@ -73,6 +93,7 @@ pub fn show(
     ui: &mut egui::Ui,
     fight: Option<&FightSnapshot>,
     portraits: &PortraitAtlas,
+    frame: &CombatFrame,
     icons: &UiIcons,
     catalog: &CatalogIndex,
     remote_icons: &RemoteIconStore,
@@ -100,14 +121,41 @@ pub fn show(
                     CombatSide::Allies => "Aucun allié pour l'instant.",
                     CombatSide::Enemies => "Aucun ennemi pour l'instant.",
                 });
+                return;
             }
 
-            // Sert de référence 100% à la barre de chaque ligne (voir `damage_bar`) — celui qui
-            // inflige le plus de dégâts DANS LE CAMP AFFICHÉ, pas tous combattants confondus :
-            // sinon la barre du camp le plus faible resterait quasi vide en permanence.
+            // Dénominateurs des deux barres, calculés UNE FOIS sur tout le camp affiché — voir
+            // `damage_bar` : `max_damage` pilote le remplissage (proportionnel au plus gros dégât
+            // du camp), `total_damage` pilote le pourcentage affiché (part de chacun dans le total
+            // du camp). Partagés entre le cadre et le repli "plat" pour qu'un allié affiché dans
+            // l'un ou l'autre selon sa position (voir `MAX_FRAME_SLOTS`) reste cohérent avec ses
+            // voisins.
             let max_damage = fighters.first().map_or(1, |f| f.total_damage).max(1);
+            let total_damage = fighters.iter().map(|f| f.total_damage).sum::<i64>().max(1);
 
-            for (i, fighter) in fighters.iter().enumerate() {
+            // Total de dégâts du camp affiché — demande utilisateur explicite, affiché AVANT la
+            // liste des barres (pas dans la liste elle-même).
+            ui.label(
+                egui::RichText::new(format!("Total : {total_damage}"))
+                    .strong()
+                    .size(13.0),
+            );
+            ui.add_space(4.0);
+
+            let (framed, flat): (&[&_], &[&_]) = if *side == CombatSide::Allies {
+                fighters.split_at(fighters.len().min(MAX_FRAME_SLOTS))
+            } else {
+                (&[], &fighters)
+            };
+
+            if !framed.is_empty() {
+                frame.show(ui, portraits, icons, framed, max_damage, total_damage);
+                if !flat.is_empty() {
+                    ui.add_space(ROW_GAP);
+                }
+            }
+
+            for (i, fighter) in flat.iter().enumerate() {
                 if i > 0 {
                     ui.add_space(ROW_GAP);
                 }
@@ -118,10 +166,9 @@ pub fn show(
                     // `panels::watchlist` pour le même mécanisme), repli générique tant qu'il n'a
                     // pas fini de télécharger ou si le nom n'est pas reconnu. Aucun fond derrière
                     // l'image : uniquement le portrait, comme demandé.
-                    let class_portrait = fighter
-                        .class_name
-                        .as_deref()
-                        .and_then(|class_name| portraits.image(class_name, fighter.gender));
+                    let class_portrait = fighter.class_name.as_deref().and_then(|class_name| {
+                        portraits.image(class_name, fighter.gender, fighter.is_ko)
+                    });
                     let remote_monster_texture = class_portrait.is_none().then(|| {
                         catalog
                             .find_monster_icon(&fighter.name, None)
@@ -137,49 +184,143 @@ pub fn show(
                                     crate::portraits::PORTRAIT_SIZE,
                                     crate::portraits::PORTRAIT_SIZE,
                                 ))
-                                .maintain_aspect_ratio(false),
+                                .maintain_aspect_ratio(false)
+                                // Pas de version grisée précalculée pour une icône distante (voir
+                                // doc de module) : simple tint, approximation acceptée.
+                                .tint(grey_tint_if_ko(fighter.is_ko)),
                         ),
-                        (None, None) => ui.add(icons.unknown_entity_image()),
+                        (None, None) => ui.add(
+                            icons
+                                .unknown_entity_image()
+                                .tint(grey_tint_if_ko(fighter.is_ko)),
+                        ),
                     };
                     response.on_hover_text(fighter.name.as_str());
 
-                    damage_bar(ui, ui.available_width(), fighter.total_damage, max_damage);
+                    let bar_rect = ui
+                        .allocate_exact_size(
+                            egui::vec2(ui.available_width(), BAR_HEIGHT),
+                            egui::Sense::hover(),
+                        )
+                        .0;
+                    damage_bar(
+                        ui,
+                        bar_rect,
+                        &fighter.name,
+                        fighter.total_damage,
+                        max_damage,
+                        total_damage,
+                    );
                 });
             }
         }
     }
 }
 
-/// Barre de dégâts d'une ligne : fond sombre pleine largeur (garantit la lisibilité du chiffre
-/// quel que soit le décor de jeu derrière), rempli d'une proportion `damage / max_damage` dans le
-/// bleu du switch (`BAR_FILL`), chiffre peint DANS la barre (pas à côté, en clair : la barre EST
-/// le fond du chiffre — demande utilisateur explicite). Centrée verticalement à côté du portrait
-/// par le layout par défaut de `ui.horizontal` (`Align::Center`).
-fn damage_bar(ui: &mut egui::Ui, width: f32, damage: i64, max_damage: i64) {
-    let width = width.max(1.0);
-    let (rect, _response) =
-        ui.allocate_exact_size(egui::vec2(width, BAR_HEIGHT), egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 4.0, BAR_BG);
+/// Tint à appliquer à une icône de repli/distante pour approximer un grisé KO — voir la doc de
+/// module pour pourquoi ce n'est PAS utilisé sur les portraits de classe (`PortraitAtlas` en
+/// précalcule une vraie version en niveaux de gris). Un tint multiplie chaque canal de couleur par
+/// le tint : un gris moyen assombrit uniformément sans désaturer la teinte d'origine — moins bon
+/// qu'un vrai niveau de gris, mais suffisant pour un repli rarement affiché (allié pas encore
+/// classifié avec un cadre visible, ou une icône réseau qui n'a de toute façon pas d'équivalent
+/// niveaux de gris préchargé).
+pub(crate) fn grey_tint_if_ko(is_ko: bool) -> egui::Color32 {
+    if is_ko {
+        egui::Color32::from_gray(130)
+    } else {
+        egui::Color32::WHITE
+    }
+}
+
+/// Barre de dégâts d'une ligne, peinte dans `rect` (déjà alloué par l'appelant — voir
+/// `panels::combat_frame::CombatFrame::show` pour la variante "cadre", et la boucle ci-dessus pour
+/// la variante "plate") : fond sombre biseauté, rempli d'un dégradé sarcelle/turquoise dans une
+/// proportion `damage / max_damage` (référence = plus gros dégât du camp affiché, PAS le total :
+/// c'est ce qui donne sa longueur visuelle à chaque barre), nom à gauche et pourcentage
+/// `damage / total_damage` centré — deux dénominateurs volontairement distincts, voir la doc de
+/// `show` ci-dessus. Couleurs : voir `BAR_BORDER`/`BAR_TRACK`/`BAR_FILL_BASE`/`BAR_FILL_HIGHLIGHT`/
+/// `BAR_BEVEL`, mesurées sur la maquette fournie par l'utilisateur.
+pub(crate) fn damage_bar(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    name: &str,
+    damage: i64,
+    max_damage: i64,
+    total_damage: i64,
+) {
+    let painter = ui.painter().with_clip_rect(rect);
+    let rounding = (rect.height() * 0.3).min(8.0);
+    painter.rect_filled(rect, rounding, BAR_BORDER);
+
+    const BORDER_WIDTH: f32 = 2.0;
+    let track_rect = rect.shrink(BORDER_WIDTH);
+    let inner_rounding = (rounding - BORDER_WIDTH).max(0.0);
+    painter.rect_filled(track_rect, inner_rounding, BAR_TRACK);
 
     let ratio = (damage as f32 / max_damage as f32).clamp(0.0, 1.0);
     if ratio > 0.0 {
-        let fill_rect =
-            egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * ratio, rect.height()));
-        painter.rect_filled(fill_rect, 4.0, BAR_FILL);
+        let fill_rect = egui::Rect::from_min_size(
+            track_rect.min,
+            egui::vec2(track_rect.width() * ratio, track_rect.height()),
+        );
+        // Coins non arrondis (voir doc de fonction) : négligeable, seul le bord droit — jamais
+        // visible au repos puisqu'il tombe presque toujours à l'intérieur de la piste arrondie.
+        painter.rect_filled(fill_rect, 0.0, BAR_FILL_BASE);
+        let highlight_rect = egui::Rect::from_min_size(
+            fill_rect.min,
+            egui::vec2(fill_rect.width(), fill_rect.height() * 0.4),
+        );
+        painter.rect_filled(highlight_rect, 0.0, BAR_FILL_HIGHLIGHT);
     }
 
-    let text = damage.to_string();
-    let font = egui::FontId::monospace(12.0);
-    let text_pos = rect.right_center() - egui::vec2(6.0, 0.0);
+    // Biseau haut/bas — fin liseré clair, présent qu'il y ait remplissage ou non à cet endroit
+    // (voir doc de module).
+    let top_bevel = egui::Rect::from_min_size(
+        track_rect.min + egui::vec2(0.0, 1.0),
+        egui::vec2(track_rect.width(), 1.0),
+    );
+    let bottom_bevel = egui::Rect::from_min_size(
+        track_rect.left_bottom() + egui::vec2(0.0, -2.0),
+        egui::vec2(track_rect.width(), 1.0),
+    );
+    painter.rect_filled(top_bevel, 0.0, BAR_BEVEL);
+    painter.rect_filled(bottom_bevel, 0.0, BAR_BEVEL);
+
+    let name_font = egui::FontId::proportional(12.0);
+    let name_pos = rect.left_center() + egui::vec2(8.0, 0.0);
     painter.text(
-        text_pos + egui::vec2(1.0, 1.0),
-        egui::Align2::RIGHT_CENTER,
-        &text,
-        font.clone(),
+        name_pos + egui::vec2(1.0, 1.0),
+        egui::Align2::LEFT_CENTER,
+        name,
+        name_font.clone(),
         BAR_TEXT_SHADOW,
     );
-    painter.text(text_pos, egui::Align2::RIGHT_CENTER, &text, font, BAR_TEXT);
+    painter.text(
+        name_pos,
+        egui::Align2::LEFT_CENTER,
+        name,
+        name_font,
+        BAR_TEXT,
+    );
+
+    let percent = ((damage as f64 / total_damage as f64) * 100.0).round() as i64;
+    let percent_text = format!("{percent}%");
+    let percent_font = egui::FontId::proportional(12.0);
+    let percent_pos = rect.center();
+    painter.text(
+        percent_pos + egui::vec2(1.0, 1.0),
+        egui::Align2::CENTER_CENTER,
+        &percent_text,
+        percent_font.clone(),
+        BAR_TEXT_SHADOW,
+    );
+    painter.text(
+        percent_pos,
+        egui::Align2::CENTER_CENTER,
+        &percent_text,
+        percent_font,
+        BAR_TEXT,
+    );
 }
 
 /// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du
