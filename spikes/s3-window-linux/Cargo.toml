@@ -1,0 +1,50 @@
+# Table vide indispensable : sans elle, Cargo (≥ 1.9x) refuse toute commande ici en croyant ce
+# crate membre du workspace racine (`members = ["crates/*"]`) alors qu'il en est explicitement
+# exclu — défaut constaté aussi sur `spikes/s1-window-windows`/`s2-engine-quickjs` (préexistant,
+# non introduit par ce spike, pas corrigé ici pour rester dans le périmètre de ce lot).
+[workspace]
+
+[package]
+name = "s3-window-linux"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# Trois binaires dans ce crate (voir [[bin]] plus bas) : sans ceci, `cargo run` nu est ambigu.
+default-run = "s3-window-linux"
+
+[lib]
+name = "s3_window_linux"
+path = "src/lib.rs"
+
+[[bin]]
+name = "s3-window-linux"
+path = "src/main.rs"
+
+# Sonde d'assertions du harnais (§17.2 du plan) : interroge l'état RÉEL du serveur X (extension
+# Shape, ordre d'empilement EWMH, focus) — jamais une déduction depuis une capture d'écran. Un
+# binaire séparé plutôt qu'un module de `main.rs` : la sonde tourne en PARALLÈLE de l'overlay
+# (process distinct), elle ne doit dépendre d'aucun état interne à celui-ci.
+[[bin]]
+name = "probe"
+path = "src/probe.rs"
+
+[dependencies]
+egui = "0.36.1"
+egui-wgpu = "0.36.1"
+egui-winit = "0.36.1"
+env_logger = "0.11.11"
+global-hotkey = "0.8.0"
+log = "0.4.34"
+pollster = "1.0.1"
+raw-window-handle = "0.6"
+# `vulkan` : chemin préféré (lavapipe sous Xvfb, voir README.md — prérequis n°1 validé isolément
+# avant tout le reste). `gles` : filet documenté au §17.1 du plan si aucun ICD Vulkan n'est
+# enregistré (repli sur llvmpipe/GL via EGL) — activé ici pour le même motif, jamais éprouvé en
+# pratique dans ce spike (lavapipe a suffi sur cette machine), gardé par prudence pour d'autres
+# environnements CI.
+wgpu = { version = "30", features = ["vulkan", "gles"] }
+winit = { version = "0.30", features = ["rwh_06"] }
+# Uniquement pour `probe` (assertions protocolaires) et `src/discovery.rs` (découverte de fenêtre
+# de jeu par titre, ancêtre direct de `overlay-platform::linux::x11` — voir §6.5/§17.2 du plan) :
+# jamais utilisé par le chemin de rendu lui-même, qui passe entièrement par winit.
+x11rb = { version = "0.13", features = ["shape"] }
