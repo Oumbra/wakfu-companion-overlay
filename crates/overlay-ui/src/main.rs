@@ -289,7 +289,14 @@ enum EngineCommand {
 /// Engine, voir `spawn_engine_thread`) — jamais bloquant pour ce dernier, l'écriture SQLite et
 /// l'envoi réseau se font entièrement sur le thread Sync.
 enum SyncCommand {
-    Activate(String),
+    /// `uid` (pour `client_key`) ET `token` (pour authentifier réellement l'envoi, voir
+    /// `overlay_sync::client::post_json_authenticated`) — **correctif du 2026-09-03** : seul l'uid
+    /// était transmis jusqu'ici, l'envoi d'historique partait donc systématiquement sans jeton et
+    /// échouait en 401, silencieusement (voir la doc de `spawn_sync_thread`).
+    Activate {
+        uid: String,
+        token: String,
+    },
     Deactivate,
     Enqueue(Vec<overlay_engine::SyncEvent>),
 }
@@ -2058,21 +2065,23 @@ fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                 }
             };
 
-            let mut uid: Option<String> = None;
+            // `uid` (pour `client_key`) ET `token` (pour authentifier l'envoi, voir
+            // `SyncCommand::Activate`) — toujours mis à jour ensemble.
+            let mut account: Option<(String, String)> = None;
             // Pas de compte connu au démarrage : n'attend qu'une commande, ne sonde jamais pour
             // rien (même philosophie que `settings_rx.try_recv()` côté thread Engine).
             let mut wait = std::time::Duration::from_secs(3600);
             loop {
                 match command_rx.recv_timeout(wait) {
-                    Ok(SyncCommand::Activate(new_uid)) => {
+                    Ok(SyncCommand::Activate { uid, token }) => {
                         tracing::info!("file de synchro activée (compte connecté, lot L5)");
-                        uid = Some(new_uid);
+                        account = Some((uid, token));
                     }
                     Ok(SyncCommand::Deactivate) => {
                         tracing::info!(
                             "file de synchro désactivée (mode invité) — contenu déjà en file conservé sur disque"
                         );
-                        uid = None;
+                        account = None;
                     }
                     Ok(SyncCommand::Enqueue(events)) => {
                         for event in &events {
@@ -2089,14 +2098,26 @@ fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                     Err(mpsc::RecvTimeoutError::Disconnected) => break, // App fermée
                 }
 
-                wait = match &uid {
+                wait = match &account {
                     None => std::time::Duration::from_secs(3600),
-                    Some(uid) => {
-                        match queue.flush_once(uid, overlay_sync::post_json) {
+                    Some((uid, token)) => {
+                        match queue.flush_once(uid, |path, body| {
+                            overlay_sync::post_json_authenticated(token, path, body)
+                        }) {
                             Ok(overlay_sync::FlushOutcome::Idle | overlay_sync::FlushOutcome::Synced) => {
                                 std::time::Duration::from_secs(3600)
                             }
-                            Ok(overlay_sync::FlushOutcome::Retry) => backoff_delay(queue.consecutive_failures()),
+                            // **Correctif du 2026-09-03** : cet échec n'était auparavant tracé
+                            // nulle part — un blocage persistant (401/429/réseau/5xx) restait
+                            // invisible, backoff après backoff, jusqu'à 5 min entre essais.
+                            Ok(overlay_sync::FlushOutcome::Retry(reason)) => {
+                                tracing::warn!(
+                                    reason = %reason,
+                                    consecutive_failures = queue.consecutive_failures(),
+                                    "échec d'envoi de l'historique — nouvel essai après un backoff"
+                                );
+                                backoff_delay(queue.consecutive_failures())
+                            }
                             Err(err) => {
                                 tracing::warn!(%err, "erreur de file de synchro (SQLite)");
                                 std::time::Duration::from_secs(60)
@@ -2299,7 +2320,10 @@ fn attempt_connect(
 fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
     match overlay_sync::client::fetch_account_id(token) {
         Ok(uid) => {
-            let _ = sync_tx.send(SyncCommand::Activate(uid));
+            let _ = sync_tx.send(SyncCommand::Activate {
+                uid,
+                token: token.to_string(),
+            });
         }
         Err(err) => {
             tracing::warn!(
