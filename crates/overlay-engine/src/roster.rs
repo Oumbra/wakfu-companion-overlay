@@ -16,7 +16,9 @@ use unicode_normalization::UnicodeNormalization;
 /// Miroir de `Gender` (`class-icons.data.ts`) — féminin/masculin, les deux seules valeurs que le
 /// jeu propose à la création de personnage. `Serialize` sert à la persistance disque des combats
 /// en cours (voir `fight_store.rs`) — `FighterDamage::gender` doit survivre à un redémarrage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `Hash` : clé de `HashMap` côté `overlay-ui` (`portraits::PortraitAtlas`, une texture par
+/// couple classe/sexe).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Gender {
     F,
