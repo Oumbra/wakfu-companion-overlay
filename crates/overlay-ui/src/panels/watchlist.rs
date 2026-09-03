@@ -154,9 +154,10 @@ pub struct WatchlistToast {
     /// Dispersion tirée une fois à la création (voir `build_confetti`) — stable tant que le toast
     /// reste affiché.
     pub confetti: Vec<ConfettiPiece>,
-    /// Instant auquel le toast doit cesser de s'afficher — comparé à `Instant::now()` à chaque
-    /// rendu (voir `show`/`is_active`) plutôt que de faire expirer activement l'`ArcSwap` : cette
-    /// architecture n'a pas de boucle de rendu continue (§6.1 du plan), `main.rs::render`
+    /// Instant auquel le toast doit cesser de s'afficher — comparé à l'instant courant (`now`,
+    /// fourni par l'appelant, voir `show`/`is_active`) à chaque rendu plutôt que de faire expirer
+    /// activement l'`ArcSwap` : cette architecture n'a pas de boucle de rendu continue (§6.1 du
+    /// plan), `main.rs::render`
     /// reprogramme lui-même un redessin à cette échéance via `OverlayWindow::next_redraw_at` pour
     /// que le toast disparaisse sans qu'aucun autre événement n'ait à se produire. Peut aussi être
     /// effacé PLUS TÔT par un clic (voir `toast_card`, `main.rs::window_event`).
@@ -166,8 +167,16 @@ pub struct WatchlistToast {
 /// Vrai tant que `toast` n'a pas atteint son expiration — source de vérité unique utilisée à la
 /// fois ici (`show`) et par `main.rs` (gabarit dynamique de la fenêtre Suivi, garde d'affichage
 /// quand la watchlist elle-même est vide) sur « un toast est-il actuellement affiché ? ».
-pub fn is_active(toast: Option<&WatchlistToast>) -> bool {
-    toast.is_some_and(|t| t.hide_at > std::time::Instant::now())
+///
+/// `now` est fourni par l'appelant plutôt que lu ici (horloge injectable, §17.1 du plan) : lire
+/// `Instant::now()` à l'intérieur de cette fonction rendrait le résultat dépendant de l'instant
+/// réel d'exécution, donc non reproductible pour un futur harnais de rendu offscreen qui fige
+/// `now` — un même `WatchlistToast` doit produire le même résultat quel que soit le moment où le
+/// test tourne. `main.rs` calcule `now` UNE FOIS par frame (`window_event`) et le fait transiter
+/// jusqu'ici comme jusqu'à `toast_card`, pour qu'un même rendu utilise une seule référence de
+/// temps cohérente.
+pub fn is_active(toast: Option<&WatchlistToast>, now: std::time::Instant) -> bool {
+    toast.is_some_and(|t| t.hide_at > now)
 }
 
 /// 58×58, coins arrondis 10px — mêmes dimensions que `.kpi` (`tracker-strip.component.css`),
@@ -306,18 +315,37 @@ fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
     egui::Color32::from_rgb(lerp(a.r(), b.r()), lerp(a.g(), b.g()), lerp(a.b(), b.b()))
 }
 
+/// Dépendances de rendu communes à ce panneau (icônes UI génériques, catalogue, store/cache
+/// d'icônes réelles) — regroupées ici pour que `show` reste sous la limite clippy
+/// `too_many_arguments` une fois `now` ajouté (horloge injectable, voir sa doc et celle de
+/// `is_active`) : même motif que `RenderContent`/`AppState` (`main.rs`), pas un
+/// `#[allow(clippy::too_many_arguments)]`.
+pub struct WatchlistAssets<'a> {
+    pub icons: &'a UiIcons,
+    pub catalog: &'a CatalogIndex,
+    pub remote_icons: &'a RemoteIconStore,
+    pub remote_icon_textures: &'a mut RemoteIconTextures,
+}
+
 /// Renvoie `true` quand l'utilisateur vient de fermer le toast affiché (clic sur la carte ou sur
 /// sa croix, voir `toast_card`) — `main.rs::window_event` est seul à détenir un accès en écriture
 /// à l'`ArcSwap` du toast, donc seul à pouvoir agir sur ce signal.
+///
+/// `now` : voir la doc de `is_active` — même horloge injectable, propagée jusqu'à `toast_card`
+/// (fondu d'entrée, chute des confettis).
 pub fn show(
     ui: &mut egui::Ui,
-    icons: &UiIcons,
-    catalog: &CatalogIndex,
-    remote_icons: &RemoteIconStore,
-    remote_icon_textures: &mut RemoteIconTextures,
+    assets: WatchlistAssets<'_>,
     entries: &[WatchlistEntry],
     toast: Option<&WatchlistToast>,
+    now: std::time::Instant,
 ) -> bool {
+    let WatchlistAssets {
+        icons,
+        catalog,
+        remote_icons,
+        remote_icon_textures,
+    } = assets;
     // Bande de tuiles absente tant que le compte ne déclare aucune entrée suivie (voir
     // `main.rs::render`, commentaire de `OverlayKind::Watchlist`) — un ramassage à son activé
     // (`overlay_engine::profile`, INDÉPENDANT de la watchlist) doit pouvoir déclencher un toast
@@ -374,7 +402,7 @@ pub fn show(
         ui.add_space(6.0);
     }
 
-    match toast.filter(|t| t.hide_at > std::time::Instant::now()) {
+    match toast.filter(|t| t.hide_at > now) {
         Some(toast) => toast_card(
             ui,
             icons,
@@ -382,6 +410,7 @@ pub fn show(
             remote_icons,
             remote_icon_textures,
             toast,
+            now,
         ),
         None => false,
     }
@@ -448,6 +477,14 @@ fn rotated_square(center: egui::Pos2, half: f32, angle: f32) -> [egui::Pos2; 4] 
 /// fixe (voir `WatchlistToast::hide_at`) ET fermeture au clic (carte entière ou croix), sans que
 /// l'utilisateur ait à choisir. Renvoie `true` quand CE clic doit effacer le toast (voir la doc de
 /// `show` — seul `main.rs::window_event` peut écrire dans l'`ArcSwap` correspondant).
+///
+/// `now` : voir la doc de `is_active` — pilote à la fois le fondu d'entrée (`pop_t`/`slide`, via
+/// `elapsed`) et la boucle de confettis ci-dessous. Fourni par l'appelant plutôt que lu ici :
+/// c'était le seul point de ce panneau encore couplé à l'horloge murale, ce qui aurait rendu deux
+/// rendus du même `WatchlistToast` visuellement différents selon l'instant réel d'exécution —
+/// incompatible avec un harnais de rendu offscreen déterministe (§17.1 du plan). `toast.confetti`
+/// lui n'a jamais posé ce problème : sa dispersion est tirée une fois à la création du toast
+/// (`build_confetti`, appelé par `main.rs::spawn_engine_thread`), jamais régénérée ici.
 fn toast_card(
     ui: &mut egui::Ui,
     icons: &UiIcons,
@@ -455,8 +492,8 @@ fn toast_card(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
     toast: &WatchlistToast,
+    now: std::time::Instant,
 ) -> bool {
-    let now = std::time::Instant::now();
     let elapsed = now
         .saturating_duration_since(toast.created_at)
         .as_secs_f32();
