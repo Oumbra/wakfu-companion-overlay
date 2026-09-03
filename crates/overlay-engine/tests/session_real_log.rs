@@ -6,7 +6,7 @@
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use overlay_engine::Engine;
+use overlay_engine::{Engine, HistoryPayload};
 use overlay_ingest::{LineBatch, Tailer};
 
 const WAKFU_LOG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/wakfu.log");
@@ -69,6 +69,21 @@ fn ingest_vrai_wakfu_log_produit_un_recap_plausible() {
     assert!(
         fight.fighters.iter().any(|f| f.total_damage > 0),
         "aucun dégât enregistré dans le dernier combat"
+    );
+
+    // Nombre de tours : sur un vrai fichier de combats, au moins un événement d'historique doit
+    // avoir bouclé plus d'un tour (voir `session::FightWorking::turn_count`) — un combat qui reste
+    // figé à `1` sur tout un fichier réel signalerait une régression du comptage.
+    let sync_events = engine.drain_sync_events();
+    let multi_turn_fight = sync_events.iter().any(|event| {
+        matches!(
+            &event.payload,
+            HistoryPayload::Fight(fight) if fight.turns > 1
+        )
+    });
+    assert!(
+        multi_turn_fight,
+        "aucun combat à plusieurs tours détecté sur un vrai log de combat"
     );
 }
 
