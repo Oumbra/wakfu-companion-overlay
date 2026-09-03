@@ -58,6 +58,7 @@ use overlay_engine::{
 use overlay_ingest::discovery;
 use overlay_sync::AccountSettings;
 use panels::combat::CombatSide;
+use panels::combat_frame::CombatFrame;
 use panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use portraits::PortraitAtlas;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -321,6 +322,9 @@ struct OverlayWindow {
     /// les deux zones (portrait de classe en Combat, icône générique en Suivi tant qu'aucune
     /// icône d'objet/monstre n'est câblée — voir `panels::watchlist`).
     portraits: PortraitAtlas,
+    /// Cadre décoratif "totem" du panneau Combat (`panels::combat_frame`) — même remarque que
+    /// `portraits` (une texture par fenêtre, coût négligeable, 6 templates au lieu de 36 portraits).
+    combat_frame: CombatFrame,
     /// Icônes du switch Alliés/Ennemis + portrait générique d'ennemi — même remarque que
     /// `portraits` (une texture par fenêtre, coût négligeable).
     icons: UiIcons,
@@ -637,6 +641,7 @@ impl App {
 
         let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+        let combat_frame = CombatFrame::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
 
         let outer = window.outer_size();
@@ -663,6 +668,7 @@ impl App {
             gpu,
             kind,
             portraits,
+            combat_frame,
             icons,
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
@@ -1065,6 +1071,7 @@ impl ApplicationHandler<UserEvent> for App {
                         kind: overlay.kind,
                         fight,
                         portraits: &overlay.portraits,
+                        combat_frame: &overlay.combat_frame,
                         icons: &overlay.icons,
                         combat_side: &mut overlay.combat_side,
                         watchlist: &watchlist,
@@ -1265,6 +1272,7 @@ struct RenderContent<'a> {
     kind: OverlayKind,
     fight: Option<&'a FightSnapshot>,
     portraits: &'a PortraitAtlas,
+    combat_frame: &'a CombatFrame,
     icons: &'a UiIcons,
     combat_side: &'a mut CombatSide,
     watchlist: &'a [WatchlistEntry],
@@ -1318,6 +1326,7 @@ fn render(
         kind,
         fight,
         portraits,
+        combat_frame,
         icons,
         combat_side,
         watchlist,
@@ -1468,6 +1477,7 @@ fn render(
                             ui,
                             fight,
                             portraits,
+                            combat_frame,
                             icons,
                             catalog,
                             remote_icons,
