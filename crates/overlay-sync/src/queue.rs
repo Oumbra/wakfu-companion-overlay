@@ -72,7 +72,7 @@ fn now_ms() -> i64 {
 }
 
 /// Résultat d'un `flush_once` — pilote le rythme de réessai côté appelant (voir la doc de module).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlushOutcome {
     /// Rien en file au moment de l'appel.
     Idle,
@@ -80,8 +80,12 @@ pub enum FlushOutcome {
     Synced,
     /// Un lot a échoué (réseau, 5xx, 401, 429 — réessayable — ou rejet permanent d'un lot, qui
     /// n'empêche pas non plus un réessai ultérieur des lots suivants, voir la doc de module) :
-    /// rien de plus tenté ce passage, l'appelant programme un réessai (backoff).
-    Retry,
+    /// rien de plus tenté ce passage, l'appelant programme un réessai (backoff). Porte la
+    /// description de l'échec (`Display` de `SyncError`) — **correctif du 2026-09-03** : cet échec
+    /// n'était jusqu'ici tracé nulle part côté `overlay-ui` (voir `spawn_sync_thread`), ce qui a
+    /// laissé un vrai blocage de synchronisation (jeton non transmis, voir `post_json_authenticated`)
+    /// totalement invisible pendant plusieurs jours.
+    Retry(String),
 }
 
 /// Un rejet HTTP 4xx (hors 401/429) signifie que le SERVEUR a refusé la charge utile elle-même —
@@ -286,11 +290,11 @@ impl SyncQueue {
                     Err(err) if is_permanent_rejection(&err) => {
                         self.bump_attempts_and_prune(&batch)?;
                         self.consecutive_failures += 1;
-                        return Ok(FlushOutcome::Retry);
+                        return Ok(FlushOutcome::Retry(err.to_string()));
                     }
-                    Err(_) => {
+                    Err(err) => {
                         self.consecutive_failures += 1;
-                        return Ok(FlushOutcome::Retry);
+                        return Ok(FlushOutcome::Retry(err.to_string()));
                     }
                 }
             }
@@ -590,7 +594,7 @@ mod tests {
             .flush_once("uid-1", |p, b| transport.send(p, b))
             .unwrap();
 
-        assert_eq!(outcome, FlushOutcome::Retry);
+        assert!(matches!(outcome, FlushOutcome::Retry(_)));
         assert_eq!(queue.consecutive_failures(), 1);
         // Toujours en file : un échec réseau ne consomme jamais `attempts`.
         assert_eq!(queue.pending_count().unwrap(), 1);
@@ -609,7 +613,7 @@ mod tests {
             let outcome = queue
                 .flush_once("uid-1", |p, b| transport.send(p, b))
                 .unwrap();
-            assert_eq!(outcome, FlushOutcome::Retry);
+            assert!(matches!(outcome, FlushOutcome::Retry(_)));
             if attempt < MAX_ATTEMPTS {
                 assert_eq!(queue.pending_count().unwrap(), 1, "tentative {attempt}");
             }

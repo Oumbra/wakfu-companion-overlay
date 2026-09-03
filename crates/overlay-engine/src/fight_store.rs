@@ -166,6 +166,11 @@ mod tests {
             ongoing: true,
             result: None,
             fighters: vec![fighter("Oumbra", true, 120), fighter("Bwork", false, 0)],
+            // Valeur non nulle délibérée (pas `0`) : un round-trip save/load qui perdrait
+            // silencieusement ce champ (regression du correctif du 2026-09-04, voir sa doc) doit
+            // faire échouer le test ci-dessous, pas passer par coïncidence avec le repli
+            // `#[serde(default)]`.
+            started_at_ms: 1_757_000_000_000,
         }
     }
 

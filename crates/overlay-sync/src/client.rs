@@ -34,14 +34,36 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-/// `pub` (pas seulement `pub(crate)`) depuis le lot L5 : `overlay_sync::queue::SyncQueue::
-/// flush_once` prend son transport HTTP en paramètre plutôt que d'appeler cette fonction en dur
-/// (voir la doc de `queue.rs`) — l'hôte (`overlay-ui`, thread Sync) doit donc pouvoir la passer
-/// telle quelle en production (`|path, body| overlay_sync::post_json(path, body)`).
+/// POST anonyme — utilisé par `pairing.rs` pour les deux seules routes appelées AVANT qu'un jeton
+/// n'existe (`/api/v1/auth/native/{pair,poll}`). **Ne jamais l'utiliser pour l'historique** (voir
+/// [`post_json_authenticated`]) : `SyncQueue::flush_once` en a besoin d'une variante qui envoie le
+/// jeton — le bug corrigé le 2026-09-03 était exactement cette confusion.
 pub fn post_json(path: &str, body: &Value) -> Result<Value, SyncError> {
     let url = format!("{}{path}", base_url());
     let response = agent()
         .post(&url)
+        .send_json(body)
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body(path, response)
+}
+
+/// Variante authentifiée de [`post_json`] — ajoute `Authorization: Bearer <token>`, requis par les
+/// routes mutatives d'historique (`/api/v1/history/{fights,purchases,trades}`, voir
+/// `functions/api/_auth.ts::authenticate` côté dépôt web, qui accepte le porteur au même titre que
+/// le cookie de session, mais SANS repli anonyme).
+///
+/// **Correctif du 2026-09-03** (retour utilisateur : une récupération de kamas HDV jamais visible
+/// sur le site) : `SyncQueue::flush_once` appelait jusqu'ici `post_json` — sans jeton — pour ces
+/// trois routes, exactement comme `fetch_account_id`/`fetch_settings` le font correctement pour les
+/// leurs. Résultat vérifié en conditions réelles : chaque envoi d'historique échouait en `401 non
+/// authentifié`, silencieusement (401 est un rejet réessayable, jamais un rejet permanent — voir
+/// `is_permanent_rejection` — donc jamais tracé), depuis l'introduction de la file d'envoi (lot L5,
+/// 2026-09-02). Aucun événement d'historique n'a donc jamais pu atteindre le compte avant ce jour.
+pub fn post_json_authenticated(token: &str, path: &str, body: &Value) -> Result<Value, SyncError> {
+    let url = format!("{}{path}", base_url());
+    let response = agent()
+        .post(&url)
+        .header("Authorization", &format!("Bearer {token}"))
         .send_json(body)
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body(path, response)
