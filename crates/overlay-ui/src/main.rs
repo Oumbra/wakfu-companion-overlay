@@ -1017,6 +1017,12 @@ impl ApplicationHandler<UserEvent> for App {
                 Self::reconfigure_surface(&mut overlay.gpu, size);
             }
             WindowEvent::RedrawRequested => {
+                // Une seule lecture de l'horloge par frame (voir la doc de `RenderContent::now`)
+                // — réutilisée ci-dessous pour le gabarit dynamique du Suivi ET transmise à
+                // `render`/`build_ui`, plutôt que deux `Instant::now()` distincts à quelques
+                // instructions d'écart qui pourraient (rarement) diverger pile à l'expiration
+                // d'un toast.
+                let now = std::time::Instant::now();
                 let snapshot = self.snapshot.load();
                 let fight = snapshot.fight_for_character(&overlay.character_name);
                 let watchlist = self.watchlist.load();
@@ -1030,7 +1036,7 @@ impl ApplicationHandler<UserEvent> for App {
                     // Comparé à la dernière valeur DEMANDÉE (`last_watchlist_width`/`_height`), pas
                     // à la taille réelle actuelle de la fenêtre, pour ne pas rappeler
                     // `request_inner_size` en boucle tant que rien n'a changé.
-                    let toast_active = panels::watchlist::is_active(watchlist_toast);
+                    let toast_active = panels::watchlist::is_active(watchlist_toast, now);
                     let target_width = watchlist_target_width(
                         watchlist.len(),
                         toast_active,
@@ -1083,6 +1089,7 @@ impl ApplicationHandler<UserEvent> for App {
                         auth_status: &auth_status,
                         auth_command_tx: &self.auth_command_tx,
                         interactive: self.interactive,
+                        now,
                     },
                 );
                 // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
@@ -1288,6 +1295,14 @@ struct RenderContent<'a> {
     /// seul indicateur de mode conservé (demande explicite de l'utilisateur 2026-09-02, en
     /// remplacement du texte/icône d'état retiré le 2026-09-01 — voir la doc de `render`).
     interactive: bool,
+    /// Instant de référence pour CETTE frame — calculé UNE FOIS par `window_event`
+    /// (`WindowEvent::RedrawRequested`) et propagé jusqu'à `panels::watchlist::is_active`/`show`/
+    /// `toast_card` (horloge injectable, §17.1 du plan) plutôt que lu à nouveau à chaque étage via
+    /// `Instant::now()` : un même rendu doit utiliser une seule référence de temps cohérente (le
+    /// gabarit de fenêtre calculé juste avant `render`, voir `window_event`, et le contenu peint
+    /// à l'intérieur doivent voir exactement le même `now`), et cette même valeur devient
+    /// reproductible pour un futur harnais de rendu offscreen qui la fige.
+    now: std::time::Instant,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
@@ -1311,17 +1326,19 @@ struct RenderContent<'a> {
 /// widget : les enfants créés ensuite héritent de l'opacité du `Painter` au moment de leur
 /// création (voir `egui::Painter::{set,multiply}_opacity`).
 ///
-/// Renvoie le délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::
-/// repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at`
-/// pour pourquoi l'appelant doit impérativement en tenir compte, cette architecture n'ayant pas de
-/// boucle de rendu continue — ainsi que si CETTE frame doit effacer le toast affiché (clic sur la
-/// carte/la croix, voir `panels::watchlist::toast_card`) : seul l'appelant (`window_event`) détient
-/// un accès en écriture à l'`ArcSwap` correspondant.
-fn render(
-    gpu: &mut GpuState,
-    window: &Window,
+/// **Extrait de `render` en fonction séparée (2026-09-03, §17.1 du plan)** : cette fonction est
+/// désormais PURE — elle ne touche ni `Window`, ni `egui_winit`, ni `wgpu::Surface`, seulement
+/// `egui::Context`/`egui::RawInput`/`egui::FullOutput`. `render` (ci-dessous) reste seule
+/// responsable du fenêtrage/GPU ; un futur harnais de rendu offscreen (crate `overlay-testkit`,
+/// même section du plan) pourra appeler exactement cette fonction sans fenêtre système ni GPU
+/// physique. Renvoie le `FullOutput` produit et si CETTE frame doit effacer le toast affiché (clic
+/// sur la carte/la croix, voir `panels::watchlist::toast_card`) : seul l'appelant final
+/// (`window_event`, via `render`) détient un accès en écriture à l'`ArcSwap` correspondant.
+fn build_ui(
+    ctx: &egui::Context,
+    raw_input: egui::RawInput,
     content: RenderContent<'_>,
-) -> (std::time::Duration, bool) {
+) -> (egui::FullOutput, bool) {
     let RenderContent {
         kind,
         fight,
@@ -1338,18 +1355,18 @@ fn render(
         auth_status,
         auth_command_tx,
         interactive,
+        now,
     } = content;
 
-    // Vrai quand CETTE frame doit effacer le toast affiché — voir la doc de `render` et
+    // Vrai quand CETTE frame doit effacer le toast affiché — voir la doc de `build_ui` et
     // `panels::watchlist::show`, seul endroit qui le renseigne (`OverlayKind::Watchlist`
     // ci-dessous).
     let mut close_toast = false;
-    let raw_input = gpu.egui_winit.take_egui_input(window);
-    let mut full_output = gpu.egui_ctx.run_ui(raw_input, |ui| {
+    let full_output = ctx.run_ui(raw_input, |ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.inner_margin(6))
             .show(ui, |ui| {
-                // Voir la doc de `render` : seul indicateur de mode restant, en tout premier
+                // Voir la doc de `build_ui` : seul indicateur de mode restant, en tout premier
                 // avant le moindre widget pour que tout hérite de cette opacité.
                 ui.set_opacity(if interactive {
                     1.0
@@ -1493,27 +1510,53 @@ fn render(
                     // toutefois possible dans ce cas, INDÉPENDANT de la watchlist (voir
                     // `panels::watchlist::show`), d'où la garde sur les deux conditions ici.
                     OverlayKind::Watchlist => {
-                        if !watchlist.is_empty() || panels::watchlist::is_active(watchlist_toast) {
+                        if !watchlist.is_empty()
+                            || panels::watchlist::is_active(watchlist_toast, now)
+                        {
                             close_toast = panels::watchlist::show(
                                 ui,
-                                icons,
-                                catalog,
-                                remote_icons,
-                                remote_icon_textures,
+                                panels::watchlist::WatchlistAssets {
+                                    icons,
+                                    catalog,
+                                    remote_icons,
+                                    remote_icon_textures,
+                                },
                                 watchlist,
                                 watchlist_toast,
+                                now,
                             );
                         }
                     }
                 }
             });
     });
-    // Capturé AVANT de consommer `full_output` ci-dessous (tessellate/textures_delta le vident
-    // progressivement) — voir la doc de `render` et `OverlayWindow::next_redraw_at` : c'est le
-    // SEUL moyen d'honorer un délai de redessin demandé par egui (tooltip, animation...) dans
-    // cette architecture sans boucle de rendu continue. Repli `Duration::MAX` ("pas de redessin
-    // demandé") si jamais le viewport racine n'a pas d'entrée — ne devrait pas arriver en
-    // pratique (une seule fenêtre racine par `egui::Context`, jamais de sous-viewport ici).
+    (full_output, close_toast)
+}
+
+/// Fenêtrage/GPU autour de `build_ui` (voir sa doc) : prend l'entrée egui de la fenêtre réelle,
+/// construit l'interface, puis tessèle/uploade/présente sur la vraie `wgpu::Surface`. Renvoie le
+/// délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::repaint_delay`, ex. le
+/// délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at` pour pourquoi
+/// l'appelant doit impérativement en tenir compte, cette architecture n'ayant pas de boucle de
+/// rendu continue — ainsi que si CETTE frame doit effacer le toast affiché (voir la doc de
+/// `build_ui`).
+fn render(
+    gpu: &mut GpuState,
+    window: &Window,
+    content: RenderContent<'_>,
+) -> (std::time::Duration, bool) {
+    // Copiés hors de `content` (tous deux `Copy`) AVANT qu'il ne soit déplacé dans `build_ui` —
+    // réutilisés juste en dessous pour le calcul du délai de redessin, sur la MÊME référence de
+    // temps que celle vue par le contenu peint (voir la doc de `RenderContent::now`).
+    let now = content.now;
+    let watchlist_toast = content.watchlist_toast;
+
+    let raw_input = gpu.egui_winit.take_egui_input(window);
+    let (mut full_output, close_toast) = build_ui(&gpu.egui_ctx, raw_input, content);
+
+    // Repli `Duration::MAX` ("pas de redessin demandé") si jamais le viewport racine n'a pas
+    // d'entrée — ne devrait pas arriver en pratique (une seule fenêtre racine par `egui::Context`,
+    // jamais de sous-viewport ici).
     let mut repaint_delay = full_output
         .viewport_output
         .get(&egui::ViewportId::ROOT)
@@ -1525,7 +1568,6 @@ fn render(
     // toast n'est alors plus reçu par `panels::watchlist::show`, voir son filtre) — jamais de
     // minuterie à annuler explicitement, seulement des redessins qui cessent d'être redemandés.
     if let Some(toast) = watchlist_toast {
-        let now = std::time::Instant::now();
         if toast.hide_at > now {
             const CONFETTI_FRAME_INTERVAL: std::time::Duration =
                 std::time::Duration::from_millis(33); // ~30 images/s, largement suffisant à cette échelle
