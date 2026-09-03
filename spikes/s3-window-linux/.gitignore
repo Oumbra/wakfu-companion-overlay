@@ -1,0 +1,5 @@
+# `/target` déjà couvert par `**/target/` du .gitignore racine — seul l'artefact produit par
+# harness.sh (jamais commité, voir §17.4 du plan : « jamais de blob vidéo/image commité ») est
+# spécifique à ce dossier.
+/artifact.png
+/artifact.mp4
