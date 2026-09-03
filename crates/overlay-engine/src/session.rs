@@ -175,6 +175,13 @@ pub struct FightSnapshot {
     /// Dans l'ordre d'arrivée des `FighterJoinedEntry` — stable pour l'affichage, pas trié par
     /// dégâts (l'UI trie elle-même si besoin, voir §9 du plan).
     pub fighters: Vec<FighterDamage>,
+    /// Miroir de `FightWorking::started_at_ms` (voir sa doc pour l'incident réel du 2026-09-04
+    /// qu'ajouter ce champ corrige) — seule raison d'être de ce champ : permettre à `restore_fight`
+    /// de restaurer un horodatage de départ fidèle après un redémarrage, plutôt que de retomber sur
+    /// l'epoch. `#[serde(default)]` : un fichier `fight-*.json` persisté avant ce champ reste
+    /// lisible (repli `0`, seulement pour un combat déjà en vol au moment de la mise à jour).
+    #[serde(default)]
+    pub started_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -330,10 +337,20 @@ struct FightWorking {
     fled_names: std::collections::HashSet<String>,
     /// Instant (ms, époque Unix) de la toute première jonction de ce combat — voir
     /// `LogDateTracker::full_timestamp_ms`. Base de `FightPayload::started_at`/`duration_ms`.
-    /// `0` (jamais un vrai combat, epoch 1970) uniquement pour un combat restauré depuis un fichier
-    /// `fight-*.json` écrit par une version de l'overlay antérieure à ce champ — voir
-    /// `restore_fight`, cas limite transitoire sans conséquence passé la toute première mise à
-    /// jour.
+    /// Persisté dans `FightSnapshot::started_at_ms` (voir sa doc) pour que `restore_fight` le
+    /// récupère fidèlement après un redémarrage — **avant le correctif du 2026-09-04, ce champ
+    /// n'existait PAS côté `FightSnapshot`** : `restore_fight` retombait alors sur `0` (epoch 1970),
+    /// documenté ici à tort comme "sans conséquence pratique". En réalité, un combat restauré finit
+    /// TOUJOURS par recevoir sa ligne `CombatEnd` à un instant bien postérieur à l'epoch, donnant un
+    /// `duration_ms` de plusieurs dizaines d'années en millisecondes — bien au-delà de la colonne
+    /// Postgres `integer` (32 bits) qui le reçoit côté serveur. Résultat vécu en conditions réelles :
+    /// exception non gérée (500 générique, `error code: 1101` Cloudflare) sur CE combat, qui
+    /// bloquait la synchronisation de tout le lot envoyé avec lui (jusqu'à 50 événements, voir
+    /// `MAX_HISTORY_BATCH` côté serveur) — pas seulement le combat fautif, puisque
+    /// `SyncQueue::flush_once` envoie un lot en un seul `POST`. Un fichier `fight-*.json` déjà
+    /// persisté par une version antérieure de l'overlay (donc sans ce champ) reste lisible grâce à
+    /// `#[serde(default)]` sur `FightSnapshot::started_at_ms` — repli sur `0`, cas transitoire qui
+    /// ne peut plus survenir que pour un combat déjà en vol au moment de la mise à jour.
     started_at_ms: i64,
     /// Butin ramassé PENDANT ce combat (nom, quantité) — jamais un objet déjà classé "achat" (voir
     /// le filet purchase de `SessionState::apply`) : distinct de `SessionState::recent_loot`
@@ -646,9 +663,10 @@ impl SessionState {
                 amount,
                 spell,
                 element,
+                time,
                 ..
             } => {
-                if let Some(fighter) = self.fighter_mut(*fight_id, attacker) {
+                if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
                     fighter.total_damage += amount;
                     // Ventilation par sort/élément (L5, §7.1) — miroir de `SpellBreakdownRow`, mais
                     // UNIQUEMENT pour les dégâts (voir la doc de `FighterDamage::spells` et de
@@ -666,9 +684,10 @@ impl SessionState {
                 fight_id: Some(fight_id),
                 attacker,
                 amount,
+                time,
                 ..
             } => {
-                if let Some(fighter) = self.fighter_mut(*fight_id, attacker) {
+                if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
                     fighter.total_heal += amount;
                 }
             }
@@ -1056,6 +1075,7 @@ impl SessionState {
                 ongoing: true,
                 result: None,
                 fighters: Vec::new(),
+                started_at_ms,
             },
             fighter_index: HashMap::new(),
             resolved_enemies: std::collections::HashSet::new(),
@@ -1086,6 +1106,7 @@ impl SessionState {
     /// la doc de module de `fight_store` pour le raisonnement complet de cet écart assumé.
     fn restore_fight(&mut self, fight: FightSnapshot) {
         let fight_id = fight.fight_id;
+        let started_at_ms = fight.started_at_ms;
         let mut fighter_index: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, fighter) in fight.fighters.iter().enumerate() {
             fighter_index
@@ -1111,11 +1132,12 @@ impl SessionState {
                 turn_seats_seen: std::collections::HashSet::new(),
                 summon_names: std::collections::HashSet::new(),
                 fled_names: std::collections::HashSet::new(),
-                // Pas persisté par `fight_store` (voir `FightSnapshot`) : `0` (epoch 1970) pour un
-                // combat restauré, comme documenté sur `FightWorking::started_at_ms` — repli
-                // sans conséquence pratique (combat déjà entamé avant le redémarrage de l'overlay,
-                // cas rare).
-                started_at_ms: 0,
+                // Correctif du 2026-09-04 : désormais persisté par `fight_store` via
+                // `FightSnapshot::started_at_ms` (voir sa doc et celle de
+                // `FightWorking::started_at_ms` pour l'incident réel qu'un simple `0` en dur
+                // causait). Ne retombe sur `0` que pour un fichier `fight-*.json` écrit par une
+                // version antérieure de l'overlay, sans ce champ (`#[serde(default)]`).
+                started_at_ms,
                 loot: Vec::new(),
                 kamas_gained: 0,
                 xp_gained_total: 0,
@@ -1188,11 +1210,17 @@ impl SessionState {
     /// l'attaquant n'a PAS été réattribué à son invocateur par le parser (repli `resolveEffectTail`
     /// le plus profond, voir `log-parser.ts`) ne créditent personne, plutôt que de créer une ligne
     /// pour l'invocation elle-même (voir la doc de module, cas `FighterJoined`).
-    fn fighter_mut(&mut self, fight_id: i64, name: &str) -> Option<&mut FighterDamage> {
-        // `0` (epoch 1970) plutôt qu'un horodatage réel : ce chemin est un pur filet défensif (un
-        // combat déjà en cours au moment de la connexion, jamais vu `FighterJoined`), voir la doc
-        // ci-dessus — `FightWorking::started_at_ms` documente ce repli, sans conséquence pratique.
-        self.ensure_fight(fight_id, 0);
+    fn fighter_mut(&mut self, fight_id: i64, name: &str, time: &str) -> Option<&mut FighterDamage> {
+        // Correctif du 2026-09-04 : horodatage de LA LIGNE COURANTE (dégâts/soin), pas `0` (epoch
+        // 1970) — ce chemin est un pur filet défensif (un combat déjà en cours au moment de la
+        // connexion, jamais vu `FighterJoined`, voir la doc ci-dessus), mais un `0` en dur ici
+        // produisait exactement le même `duration_ms` aberrant (dépassement `integer` 32 bits côté
+        // serveur, voir la doc de `FightWorking::started_at_ms`) que le cas `restore_fight` déjà
+        // corrigé — un combat démarré AVANT que l'overlay ne le voie a nécessairement débuté un peu
+        // avant cette toute première ligne de dégâts/soin résolue, ce qui reste une bien meilleure
+        // approximation que l'epoch.
+        let started_at_ms = self.date_tracker.full_timestamp_ms(time);
+        self.ensure_fight(fight_id, started_at_ms);
 
         let known_idx = {
             let fight = self
@@ -2577,6 +2605,56 @@ mod tests {
         purchases[0]
     }
 
+    /// Régression réelle (retour utilisateur, 2026-09-04) : un combat restauré depuis
+    /// `fight_store` (overlay redémarré en cours de combat) doit garder son `started_at_ms`
+    /// d'origine, pas retomber sur l'epoch — voir la doc de `FightWorking::started_at_ms`. Avant
+    /// le correctif, `duration_ms` valait `fin - 0`, soit l'horodatage complet de fin (plusieurs
+    /// dizaines d'années en ms) : bien au-delà de la colonne Postgres `integer` (32 bits) qui le
+    /// reçoit côté serveur, provoquant une exception non gérée (500) qui bloquait la
+    /// synchronisation de tout le lot envoyé avec ce combat.
+    #[test]
+    fn combat_restaure_garde_une_duree_saine_apres_sa_fin() {
+        let mut state = SessionState::default();
+        state.apply(
+            &LogEntry::LogDateAnchor {
+                time: "00:00:00,000".to_string(),
+                year: 2026,
+                month: 9,
+                day: 3,
+            },
+            ApplyContext::default(),
+            &mut Vec::new(),
+        );
+        let started_at_ms = state.date_tracker.full_timestamp_ms("12:00:00,000");
+
+        state.restore_fight(FightSnapshot {
+            fight_id: 42,
+            ongoing: true,
+            result: None,
+            fighters: Vec::new(),
+            started_at_ms,
+        });
+
+        let mut events = Vec::new();
+        state.apply(
+            &combat_end(42, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let duration_ms = only_fight_payload(&events)
+            .duration_ms
+            .expect("duration_ms attendu pour un combat terminé");
+        assert_eq!(
+            duration_ms, 2000,
+            "12:00:00,000 → 12:00:02,000 (voir combat_end)"
+        );
+        assert!(
+            duration_ms < i32::MAX as i64,
+            "doit tenir dans la colonne Postgres `integer` (32 bits) — {duration_ms}"
+        );
+    }
+
     #[test]
     fn xp_gagnee_est_ventilee_par_participant_et_totalisee_pour_le_combat() {
         let mut state = SessionState::default();
@@ -2672,10 +2750,18 @@ mod tests {
         );
 
         // Tour 1 : Alpha puis Beta jouent chacun une fois — aucun siège ne rejoue encore.
-        state.apply(&spell_cast(1, "Alpha"), ApplyContext::default(), &mut events);
+        state.apply(
+            &spell_cast(1, "Alpha"),
+            ApplyContext::default(),
+            &mut events,
+        );
         state.apply(&spell_cast(1, "Beta"), ApplyContext::default(), &mut events);
         // Tour 2 : Alpha rejoue — son siège a déjà joué ce tour-ci, le tour boucle.
-        state.apply(&spell_cast(1, "Alpha"), ApplyContext::default(), &mut events);
+        state.apply(
+            &spell_cast(1, "Alpha"),
+            ApplyContext::default(),
+            &mut events,
+        );
         state.apply(&spell_cast(1, "Beta"), ApplyContext::default(), &mut events);
 
         state.apply(
