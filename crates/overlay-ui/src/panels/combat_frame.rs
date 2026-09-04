@@ -1,18 +1,25 @@
 //! Cadre décoratif "totem" du panneau Combat, un par nombre d'alliés (`assets/templates/
-//! template_1.png` à `template_6.png`, copie de `assets/_test/templates-resized/` à la racine du
-//! dépôt — voir `assets/_test/README.md` pour la méthode de validation d'origine) : une colonne
-//! verticale de N médaillons circulaires, chacun destiné à recevoir le portrait de classe d'un
-//! allié (`crate::portraits::PortraitAtlas`), reliés par un petit connecteur latéral qui accroche
+//! template_1.png` à `template_6.png` à la racine du dépôt, copiés tels quels sous
+//! `crates/overlay-ui/assets/templates/` — c'est cette copie locale au crate qu'`include_bytes!`
+//! embarque, la source à la racine n'est qu'un lieu d'édition) : une colonne verticale de N
+//! médaillons circulaires, chacun destiné à recevoir le portrait de classe d'un allié
+//! (`crate::portraits::PortraitAtlas`), reliés par un petit connecteur latéral qui accroche
 //! visuellement la barre de dégâts de la même ligne (voir `super::combat::damage_bar`, peinte
 //! juste à droite de chaque médaillon par `show` ci-dessous).
 //!
-//! **Géométrie des médaillons** : mesurée une fois pour toutes par analyse de pixels des 6 PNG
-//! (zones alpha=0 internes, non touchées par le bord du canevas — script Python, pas reproduit
-//! ici) plutôt que déduite d'une formule : les écarts verticaux entre médaillons ne sont pas
-//! parfaitement constants d'un template à l'autre (arrondis de redimensionnement indépendants,
-//! voir `assets/_test/README.md`), donc une formule aurait introduit une erreur de 1-2 px que la
-//! mesure directe évite. Chaque template garde une largeur de canevas identique (79 px) — seule la
-//! hauteur varie avec N — donc un seul `FRAME_WIDTH` sert aux 6.
+//! **Géométrie des médaillons** — refonte 2026-09-04 (nouveaux templates fournis par
+//! l'utilisateur, dessinés pour que chaque rond de slot soit strictement remplaçable par le
+//! portrait 48×48 déjà en place) : mesurée une fois pour toutes par analyse de pixels des 6 PNG
+//! (bbox de chaque zone alpha=0 interne, non touchée par le bord du canevas — script Python, pas
+//! reproduit ici, méthode identique à celle documentée dans `assets/_test/README.md`) plutôt que
+//! déduite d'une formule, pour la même raison que la refonte précédente : les écarts entre
+//! médaillons ne sont pas parfaitement constants d'un template à l'autre. Chaque `SlotRect` est le
+//! coin haut-gauche + la taille de cette bbox, mise à l'échelle du canevas natif (68 px, commun
+//! aux 6 PNG) vers `FRAME_WIDTH` — **le portrait est collé À CE COIN, à CETTE taille, jamais
+//! centré sur un point avec une taille fixe supposée** (c'était le bug de l'ancienne géométrie :
+//! un centre + `NATIVE_PORTRAIT_SIZE` fixe suppose un rond parfaitement régulier, faux d'un
+//! médaillon à l'autre). Chaque template garde une largeur de canevas identique (68 px natifs) —
+//! seule la hauteur varie avec N — donc un seul `FRAME_WIDTH` sert aux 6.
 //!
 //! **Ordre des slots = ordre d'affichage** (trié par dégâts décroissant, voir `panels::combat::
 //! show`) : le médaillon du haut est toujours le plus gros dégât du camp affiché.
@@ -24,7 +31,7 @@
 
 use overlay_engine::FighterDamage;
 
-use crate::portraits::{PortraitAtlas, NATIVE_PORTRAIT_SIZE};
+use crate::portraits::PortraitAtlas;
 use crate::ui_icons::UiIcons;
 
 use super::combat::damage_bar;
@@ -32,16 +39,26 @@ use super::combat::damage_bar;
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
 pub const MAX_FRAME_SLOTS: usize = 6;
 
-/// Largeur de canevas commune aux 6 templates (mesurée, voir doc de module) — c'est aussi
-/// l'abscisse à laquelle démarre la barre de dégâts de chaque ligne.
+/// Largeur de canevas commune aux 6 templates, à laquelle chaque PNG natif (68 px de large,
+/// commun aux 6 — voir doc de module) est mis à l'échelle pour l'affichage. C'est aussi l'abscisse
+/// à laquelle démarre la barre de dégâts de chaque ligne. Valeur inchangée depuis l'ancienne
+/// géométrie (voir `assets/_test/README.md`) : un rond de slot natif de 41 px mis à l'échelle par
+/// `FRAME_WIDTH / 68` donne ~47.6 px, la taille attendue pour un portrait 48×48 collé sans
+/// redimensionnement perceptible.
 const FRAME_WIDTH: f32 = 79.0;
+
+/// Rectangle d'un médaillon en coordonnées locales au canevas (origine = coin haut-gauche du
+/// template, avant tout décalage à l'écran) : le portrait s'y colle par son coin haut-gauche, à
+/// SA taille — voir doc de module pour pourquoi ce n'est plus un centre + une taille fixe.
+struct SlotRect {
+    min: egui::Pos2,
+    size: egui::Vec2,
+}
 
 struct TemplateInfo {
     bytes: &'static [u8],
     height: f32,
-    /// Centre de chaque médaillon, coordonnées locales au canevas (origine = coin haut-gauche du
-    /// template, avant tout décalage à l'écran) — voir doc de module pour la méthode de mesure.
-    slot_centers: &'static [egui::Pos2],
+    slots: &'static [SlotRect],
 }
 
 macro_rules! template_asset {
@@ -53,57 +70,120 @@ macro_rules! template_asset {
 const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     TemplateInfo {
         bytes: template_asset!(1),
-        height: 141.0,
-        slot_centers: &[egui::Pos2 { x: 31.0, y: 69.0 }],
+        height: 140.6,
+        slots: &[SlotRect {
+            min: egui::pos2(6.97, 45.31),
+            size: egui::vec2(47.63, 47.63),
+        }],
     },
     TemplateInfo {
         bytes: template_asset!(2),
-        height: 203.0,
-        slot_centers: &[
-            egui::Pos2 { x: 31.0, y: 69.0 },
-            egui::Pos2 { x: 31.0, y: 131.0 },
+        height: 202.1,
+        slots: &[
+            SlotRect {
+                min: egui::pos2(6.97, 46.47),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 106.88),
+                size: egui::vec2(47.63, 47.63),
+            },
         ],
     },
     TemplateInfo {
         bytes: template_asset!(3),
-        height: 265.0,
-        slot_centers: &[
-            egui::Pos2 { x: 31.0, y: 69.0 },
-            egui::Pos2 { x: 31.0, y: 131.0 },
-            egui::Pos2 { x: 31.0, y: 192.5 },
+        height: 263.7,
+        slots: &[
+            SlotRect {
+                min: egui::pos2(6.97, 46.47),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 105.72),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 168.46),
+                size: egui::vec2(47.63, 47.63),
+            },
         ],
     },
     TemplateInfo {
         bytes: template_asset!(4),
-        height: 336.0,
-        slot_centers: &[
-            egui::Pos2 { x: 31.0, y: 70.0 },
-            egui::Pos2 { x: 31.0, y: 130.5 },
-            egui::Pos2 { x: 31.0, y: 192.5 },
-            egui::Pos2 { x: 31.0, y: 255.0 },
+        height: 334.6,
+        slots: &[
+            SlotRect {
+                min: egui::pos2(9.29, 46.47),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(8.13, 105.72),
+                size: egui::vec2(47.63, 48.79),
+            },
+            SlotRect {
+                min: egui::pos2(8.13, 168.46),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 230.03),
+                size: egui::vec2(47.63, 48.79),
+            },
         ],
     },
     TemplateInfo {
         bytes: template_asset!(5),
-        height: 388.0,
-        slot_centers: &[
-            egui::Pos2 { x: 31.0, y: 69.0 },
-            egui::Pos2 { x: 31.0, y: 131.0 },
-            egui::Pos2 { x: 31.0, y: 192.0 },
-            egui::Pos2 { x: 31.0, y: 254.0 },
-            egui::Pos2 { x: 31.0, y: 316.0 },
+        height: 386.9,
+        slots: &[
+            SlotRect {
+                min: egui::pos2(6.97, 46.47),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 105.72),
+                size: egui::vec2(47.63, 48.79),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 168.46),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 230.03),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 291.60),
+                size: egui::vec2(47.63, 47.63),
+            },
         ],
     },
     TemplateInfo {
         bytes: template_asset!(6),
-        height: 450.0,
-        slot_centers: &[
-            egui::Pos2 { x: 31.0, y: 69.0 },
-            egui::Pos2 { x: 31.0, y: 131.0 },
-            egui::Pos2 { x: 31.0, y: 192.0 },
-            egui::Pos2 { x: 31.0, y: 254.0 },
-            egui::Pos2 { x: 31.0, y: 316.0 },
-            egui::Pos2 { x: 31.0, y: 378.0 },
+        height: 448.4,
+        slots: &[
+            SlotRect {
+                min: egui::pos2(6.97, 46.47),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 105.72),
+                size: egui::vec2(47.63, 48.79),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 168.46),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 230.03),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 291.60),
+                size: egui::vec2(47.63, 47.63),
+            },
+            SlotRect {
+                min: egui::pos2(6.97, 353.18),
+                size: egui::vec2(47.63, 47.63),
+            },
         ],
     },
 ];
@@ -144,7 +224,8 @@ impl CombatFrame {
     ///
     /// Ordre de peinture (voir `assets/_test/README.md`, méthode déjà validée) : portrait D'ABORD,
     /// template ENSUITE par-dessus — l'anneau opaque du médaillon masque proprement tout
-    /// débordement du portrait 48×48 collé sans redimensionnement dans un trou mesuré à 45-48 px.
+    /// débordement d'anti-aliasing du portrait collé exactement au coin haut-gauche + à la taille
+    /// de son `SlotRect` (voir doc de module).
     pub fn show(
         &self,
         ui: &mut egui::Ui,
@@ -169,12 +250,9 @@ impl CombatFrame {
         let frame_rect =
             egui::Rect::from_min_size(full_rect.min, egui::vec2(FRAME_WIDTH, template.height));
 
-        for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
-            let pos = frame_rect.min + center.to_vec2();
-            let portrait_rect = egui::Rect::from_center_size(
-                pos,
-                egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
-            );
+        for (fighter, slot) in fighters.iter().zip(template.slots) {
+            let portrait_rect =
+                egui::Rect::from_min_size(frame_rect.min + slot.min.to_vec2(), slot.size);
             let texture = fighter.class_name.as_deref().and_then(|class_name| {
                 portraits.texture(class_name, fighter.gender, fighter.is_ko)
             });
@@ -199,11 +277,12 @@ impl CombatFrame {
         // l'anneau de chaque médaillon masque le débordement de chacun d'eux d'un coup.
         egui::Image::new(texture).paint_at(ui, frame_rect);
 
-        for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
+        for (fighter, slot) in fighters.iter().zip(template.slots) {
+            let slot_center_y = slot.min.y + slot.size.y / 2.0;
             let bar_rect = egui::Rect::from_min_size(
                 egui::pos2(
                     frame_rect.max.x,
-                    frame_rect.min.y + center.y - row_height / 2.0,
+                    frame_rect.min.y + slot_center_y - row_height / 2.0,
                 ),
                 egui::vec2(full_rect.max.x - frame_rect.max.x, row_height),
             );
