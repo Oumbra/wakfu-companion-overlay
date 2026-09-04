@@ -6,9 +6,11 @@
 # `workflow_dispatch` uniquement une fois écrit (§17.2 : « jamais un gate CI par défaut »
 # pour ce harnais précis) — le contenu de ce fichier n'a donc pas vocation à y faire de la place.
 #
-# `overlay-ui` (le binaire) importe `windows::` sans `cfg` et ne compile QUE sous Windows — d'où
-# le découpage par paquet plutôt que `--workspace` partout : sa LIB (`--lib`) compile nativement
-# sous Linux (voir `crates/overlay-ui/src/lib.rs`), pas son binaire.
+# `overlay-ui::main` (le binaire `overlay-ui`) importe `windows::` sans `cfg` et ne compile QUE
+# sous Windows — d'où le découpage par paquet/binaire plutôt que `--workspace` partout : sa LIB
+# (`--lib`) compile nativement sous Linux (voir `crates/overlay-ui/src/lib.rs`), tout comme le
+# second binaire du même paquet, `overlay-ui-x11` (§17.2 du plan) — build/clippy/test le ciblent
+# donc explicitement en plus de `--lib`.
 name: CI
 
 on:
@@ -45,7 +47,7 @@ jobs:
       - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
         run: bash patches/setup-vendor.sh
       - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
-      - run: cargo clippy -p overlay-ui --lib -- -D warnings
+      - run: cargo clippy -p overlay-ui --lib --bin overlay-ui-x11 -- -D warnings
       - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 
@@ -62,6 +64,8 @@ jobs:
         run: bash patches/setup-vendor.sh
       - run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
       - run: cargo test -p overlay-ui --lib
+      - name: overlay-ui-x11 — compile (pas de tests unitaires, voir bin/overlay-ui-x11.rs)
+        run: cargo build -p overlay-ui --bin overlay-ui-x11
       - name: "overlay-testkit — snapshots offscreen (informatif, voir §17.3 : pas encore promu en gate)"
         run: cargo test -p overlay-testkit
         continue-on-error: true
