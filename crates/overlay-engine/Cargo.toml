@@ -8,6 +8,11 @@ description = "Frontiere metier : QuickJS + LogParser vendu depuis wakfu-compani
 [dependencies]
 overlay-ingest = { path = "../overlay-ingest" }
 arc-swap = "1"
+# Fuseau LOCAL de la machine hôte (`Local`, feature `clock`) — PAS `chrono-tz` : aucune base de
+# fuseaux IANA embarquée, on délègue à l'OS (Windows API / `/etc/localtime` via `iana-time-zone`,
+# déjà tiré par `chrono` lui-même). Voir `overlay_engine::log_time` : c'est précisément ce qui
+# manquait pour convertir l'heure LOCALE écrite par Wakfu dans son log en un vrai instant UTC.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 directories = "5"
 rquickjs = "0.12.2"
 serde = { version = "1", features = ["derive"] }
