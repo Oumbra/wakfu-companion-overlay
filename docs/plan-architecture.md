@@ -1087,6 +1087,45 @@ Architecture, une fois ces prérequis validés :
   testé manuellement en local (`spikes/s1-window-windows/preview.ps1` + capture humaine), comme
   aujourd'hui.
 
+**État (2026-09-04) : critère de sortie de S3 partiellement rempli — migration faite et vérifiée,
+câblage complet du rendu Linux volontairement différé.**
+
+- **Point 1 du critère de sortie (migration `discovery.rs`/`topmost.rs`) : fait.** Nouvelle crate de
+  production `crates/overlay-platform` (membre du workspace, `x11rb` en dépendance uniquement sous
+  `cfg(not(target_os = "windows"))` — jamais tirée côté Windows) : `linux::x11` (ex-`discovery.rs`)
+  et `linux::topmost` (ex-`topmost.rs`), code inchangé, seul le module hôte change. Les 7 tests
+  unitaires de `topmost::decide` tournent nativement (`cargo test -p overlay-platform`, aucun Xvfb
+  requis, voir sa doc).
+- **Point 2 (multi-fenêtres réel côté `overlay-ui`) : câblage de la DÉCOUVERTE fait, câblage du
+  RENDU différé.** `game_window.rs` déplacé de `main.rs` (module privé, jamais compilé sur Linux
+  puisque `main.rs` importe `windows::` sans `cfg`) vers `overlay-ui/src/lib.rs` (`pub mod
+  game_window`) : son `imp` non-Windows délègue désormais réellement à
+  `overlay_platform::linux::x11::GameWindowTracker` (connexion X11 paresseuse au premier `scan()`,
+  jamais dans `new()` — jamais de panique en contexte sans `$DISPLAY`) au lieu du stub vide
+  d'origine. Vérifié compilable des DEUX côtés : `cargo check -p overlay-ui --lib` (natif Linux) et
+  `cargo check -p overlay-ui --bin overlay-ui --target x86_64-pc-windows-gnu` (Windows inchangé),
+  clippy/fmt propres sur les deux. **Ce que ça NE couvre PAS** : aucun point d'entrée Linux réel
+  n'existe encore — `scan()` compile et est prêt à l'emploi, mais n'est appelé par aucun code de
+  production sur cette plateforme. Câbler un vrai rendu winit multi-fenêtres Linux (ancrage,
+  `set_window_level`/`set_cursor_hittest`, création/destruction dynamique par fenêtre de jeu comme
+  `App::sync_windows` le fait pour Windows) demande de dupliquer une bonne partie de la boucle `App`
+  de `main.rs` (2 000+ lignes, fortement couplée à des appels Win32 bruts — `SetWindowPos`,
+  `WS_EX_NOACTIVATE`/`WS_EX_TOOLWINDOW`, `GetForegroundWindow` — non exposés par `winit` et sans
+  équivalent direct côté X11, qui utilise nativement `WindowLevel`/`set_cursor_hittest` de `winit`
+  à la place, voir `spikes/s3-window-linux/src/main.rs`). Chantier distinct, plus risqué (touche au
+  binaire de production Windows fonctionnel), délibérément reporté plutôt que précipité dans cette
+  session.
+- **Point 3 (extraire `harness.sh`/`probe.rs` vers `xtask visual-check`) : reporté.** Migrer ce
+  harnais avant qu'un vrai binaire Linux existe reviendrait à déplacer le spike tel quel sans rien
+  résoudre — voir §17.3 sur la CI de base à écrire d'abord.
+- **Point 4 (bug `global-hotkey` double-événement côté Windows) : déjà résolu, vérifié dans cette
+  session.** `main.rs::about_to_wait` filtre déjà sur `HotKeyState::Pressed` depuis le 2026-09-02
+  (corrigé côté Windows avant même que ce bug ne soit re-découvert indépendamment dans le spike
+  X11) — rien à faire.
+- **Point 5 (scénario `override_redirect`) : question ouverte, non retranchée.** Toujours jamais
+  rencontrée (aucun test dessus) ; à rouvrir si le vrai client Wakfu s'avère un jour se comporter
+  différemment d'un `xterm` géré par un WM classique.
+
 ### 17.3 Dépendances et discipline
 
 Même discipline que celle déjà tenue pour `wgpu-hal` (patch vendored plutôt que dépendance non

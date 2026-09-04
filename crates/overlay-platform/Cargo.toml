@@ -1,0 +1,9 @@
+[package]
+name = "overlay-platform"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Primitives systeme specifiques a l'OS (decouverte de fenetre de jeu, decision topmost) pour overlay-ui — voir docs/plan-architecture.md §17.2. Migre depuis spikes/s3-window-linux/ (portage direct, voir son README pour la validation Xvfb)."
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+x11rb = "0.13"

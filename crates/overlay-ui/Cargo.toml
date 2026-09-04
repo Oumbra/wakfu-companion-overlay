@@ -9,6 +9,7 @@ description = "Fenetre overlay transparente (Windows, DirectComposition — voir
 overlay-engine = { path = "../overlay-engine" }
 overlay-ingest = { path = "../overlay-ingest" }
 overlay-sync = { path = "../overlay-sync" }
+overlay-platform = { path = "../overlay-platform" }
 
 arc-swap = "1"
 crossbeam-channel = "0.5"
