@@ -60,12 +60,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
       - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
         run: bash patches/setup-vendor.sh
-      - name: overlay-ingest (2 tests exclus — bug réel connu, voir docs/plan-architecture.md §5.2)
-        run: >
-          cargo test -p overlay-ingest --
-          --skip rotation::tests::remplacement_identite_differente
-          --skip rotation_nouveau_fichier_meme_chemin_relit_depuis_zero
-      - run: cargo test -p overlay-engine -p overlay-sync -p overlay-platform -p overlay-app
+      - run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
       - run: cargo test -p overlay-ui --lib
       - name: "overlay-testkit — snapshots offscreen (informatif, voir §17.3 : pas encore promu en gate)"
         run: cargo test -p overlay-testkit
@@ -81,14 +76,7 @@ jobs:
         run: bash patches/setup-vendor.sh
       - run: cargo build --workspace
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
-        run: >
-          cargo test -p overlay-engine -p overlay-sync -p overlay-app --
-          --skip rotation_nouveau_fichier_meme_chemin_relit_depuis_zero
-      - name: overlay-ingest (2 tests exclus — bug réel connu, voir docs/plan-architecture.md §5.2)
-        run: >
-          cargo test -p overlay-ingest --
-          --skip rotation::tests::remplacement_identite_differente
-          --skip rotation_nouveau_fichier_meme_chemin_relit_depuis_zero
+        run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
 
   mem-budget:
     runs-on: ubuntu-latest
