@@ -1,6 +1,18 @@
 //! Identité de fichier, indépendante du chemin — sert à distinguer « le même fichier a grandi »
 //! de « un nouveau fichier a été créé au même chemin » (rotation), même quand la taille seule ne
 //! permet pas de trancher (remplacement à taille croissante, voir docs/plan-architecture.md §5.2).
+//!
+//! **Limite connue, pas garantie par POSIX (2026-09-04, voir §5.2 du plan)** : après un `rm` suivi
+//! d'un `create` au même chemin, RIEN ne garantit que l'OS alloue un inode différent de celui tout
+//! juste libéré — constaté empiriquement ici (démontré non déterministe : reproductible seul,
+//! disparaît selon quelle autre activité fichier a eu lieu juste avant dans le même process). C'est
+//! pour ça que [`crate::tailer::Tailer`] ne s'appuie JAMAIS sur `FileIdentity` seule pour détecter
+//! une rotation — voir son champ `identity_prefix` et son test d'intégration
+//! `rotation_nouveau_fichier_meme_chemin_relit_depuis_zero`, qui couvrent ce cas précis avec un
+//! second signal fiable (le contenu d'un fichier ne se réécrit jamais rétroactivement). Un ancien
+//! test unitaire ici affirmait `assert_ne!` sur les identités après un tel remplacement — retiré
+//! (2026-09-04) car il encodait cette hypothèse justement fausse, pas un comportement de notre
+//! code ; voir git blame pour son contenu d'origine si besoin.
 
 use std::fs::File;
 use std::io;
@@ -68,7 +80,6 @@ impl FileIdentity {
 mod tests {
     use super::*;
     use std::fs;
-    use std::io::Write;
 
     #[test]
     fn meme_fichier_meme_identite() {
@@ -84,19 +95,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn remplacement_identite_differente() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.log");
-        fs::write(&path, b"avant\n").unwrap();
-        let before = FileIdentity::of(&File::open(&path).unwrap()).unwrap();
-
-        // Remplacement (pas simple troncature) : nouveau fichier au même chemin.
-        fs::remove_file(&path).unwrap();
-        let mut f = fs::File::create(&path).unwrap();
-        f.write_all(b"apres\n").unwrap();
-        let after = FileIdentity::of(&File::open(&path).unwrap()).unwrap();
-
-        assert_ne!(before, after);
-    }
+    // `remplacement_identite_differente` (assert_ne! avant/après un `rm`+`create` au même chemin)
+    // retiré le 2026-09-04 : il affirmait une garantie que l'OS ne donne pas (inode réutilisé
+    // possible) — voir la doc de module pour le détail et où cette couverture vit désormais
+    // (`Tailer`, pas `FileIdentity`).
 }

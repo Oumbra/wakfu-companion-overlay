@@ -13,6 +13,11 @@ use crate::rotation::FileIdentity;
 /// un seul lot géant, qui gèlerait la publication du premier `UiSnapshot` intermédiaire (§5.5).
 pub const MAX_BATCH_LINES: usize = 2000;
 
+/// Nombre d'octets du DÉBUT du fichier comparés à chaque `poll()` en plus de `FileIdentity` — voir
+/// la doc de `Tailer::identity_prefix` pour pourquoi. Quelques dizaines d'octets suffisent (une
+/// ligne de log typique), coût négligeable face au reste d'un `poll()`.
+const IDENTITY_PREFIX_LEN: usize = 64;
+
 /// Un lot de lignes complètes fraîchement lues, dans l'ordre du fichier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineBatch {
@@ -30,6 +35,16 @@ pub struct LineBatch {
 pub struct Tailer {
     path: PathBuf,
     identity: Option<FileIdentity>,
+    /// Jusqu'à [`IDENTITY_PREFIX_LEN`] octets lus depuis le DÉBUT du fichier actuellement suivi,
+    /// recapturés à chaque `poll()` — voir sa doc pour pourquoi `FileIdentity` (dev+ino) seule ne
+    /// suffit pas : un `rm` suivi d'un `create` au même chemin peut obtenir un inode réutilisé
+    /// (constaté en pratique, pas seulement théorique — voir docs/plan-architecture.md §5.2), ce
+    /// qui rendrait une vraie rotation invisible à la seule comparaison d'identité. Un fichier de
+    /// log ne réécrit jamais son contenu déjà écrit (`§5.2` : ajout en fin de fichier uniquement) :
+    /// tant que c'est vraiment le même fichier, son préfixe ne peut que rester stable ou s'allonger
+    /// (jamais changer) — un préfixe qui diffère de celui mémorisé (sur leur longueur commune)
+    /// prouve donc un remplacement, indépendamment de ce que dit `FileIdentity`.
+    identity_prefix: Vec<u8>,
     offset: u64,
     /// Reliquat d'une ligne pas encore terminée par `\n` — jamais transmis tant qu'il n'est pas
     /// complet (docs/plan-architecture.md §5.2 : « jamais de parsing d'une demi-ligne »).
@@ -42,6 +57,7 @@ impl Tailer {
         Self {
             path: path.into(),
             identity: None,
+            identity_prefix: Vec::new(),
             offset: 0,
             pending: Vec::new(),
             caught_up: false,
@@ -66,9 +82,24 @@ impl Tailer {
         let identity = FileIdentity::of(&file)?;
         let len = file.metadata()?.len();
 
-        // Rotation/troncature (§5.2) : identité changée, ou taille retombée sous l'offset connu
-        // (couvre le remplacement à taille croissante, où la seule taille ne suffit pas).
-        let rotated = self.identity.is_some_and(|prev| prev != identity) || len < self.offset;
+        // Préfixe ACTUEL du fichier (voir la doc de `identity_prefix`) — lu depuis le début, donc
+        // AVANT le `seek(self.offset)` plus bas. `read` (pas `read_exact`) : `len` peut être
+        // périmée d'un instant (fichier concurrent), un préfixe plus court que demandé n'est pas
+        // une erreur, juste moins de garantie ce tour-ci.
+        let mut current_prefix = vec![0u8; IDENTITY_PREFIX_LEN];
+        let prefix_read = file.read(&mut current_prefix)?;
+        current_prefix.truncate(prefix_read);
+
+        // Rotation/troncature (§5.2) : identité changée, taille retombée sous l'offset connu
+        // (couvre le remplacement à taille croissante, où la seule taille ne suffit pas), OU
+        // préfixe incohérent avec celui mémorisé (couvre le remplacement à IDENTITÉ INCHANGÉE —
+        // inode réutilisé, voir la doc d'`identity_prefix` — que ni l'identité ni la taille seules
+        // ne peuvent détecter si le nouveau contenu est plus long que l'ancien).
+        let common_len = current_prefix.len().min(self.identity_prefix.len());
+        let prefix_changed = current_prefix[..common_len] != self.identity_prefix[..common_len];
+        let rotated = self.identity.is_some_and(|prev| prev != identity)
+            || len < self.offset
+            || (self.identity.is_some() && prefix_changed);
         if rotated {
             tracing::info!(path = %self.path.display(), "rotation/troncature détectée, relecture depuis le début");
             self.offset = 0;
@@ -76,6 +107,7 @@ impl Tailer {
             self.caught_up = false;
         }
         self.identity = Some(identity);
+        self.identity_prefix = current_prefix;
 
         if len == self.offset {
             // Rien de neuf : on vient de rattraper le direct (ou on l'avait déjà rattrapé).
