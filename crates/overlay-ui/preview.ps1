@@ -48,12 +48,20 @@ if (-not (Test-Path $vendorDir)) {
     }
 }
 
+# Deux binaires coexistent dans le crate (overlay-ui pour Windows, overlay-ui-x11 pour
+# Linux/X11) — cargo ne peut pas choisir seul, on détermine ici lequel lancer selon l'OS courant
+# pour que l'utilisateur n'ait jamais à s'en soucier. $IsWindows n'existe pas sous Windows
+# PowerShell 5.1 (toujours Windows dans ce cas) mais existe sous pwsh (Core, cross-plateforme).
+$isWindowsHost = $true
+if (Test-Path variable:IsWindows) { $isWindowsHost = $IsWindows }
+$binName = if ($isWindowsHost) { "overlay-ui" } else { "overlay-ui-x11" }
+
 Write-Host ""
-Write-Host "=== overlay-ui — prévisualisation ===" -ForegroundColor Cyan
+Write-Host "=== overlay-ui — prévisualisation ($binName) ===" -ForegroundColor Cyan
 Write-Host "Ctrl+Alt+W = bascule interactif / clic-traversant  |  Ctrl+Alt+R = rafraîchir  |  Ctrl+Alt+Q ou Ctrl+C = quitter" -ForegroundColor Cyan
 Write-Host ""
 
-$cargoArgs = @("run", "-p", "overlay-ui")
+$cargoArgs = @("run", "-p", "overlay-ui", "--bin", $binName)
 if (-not $Debug) { $cargoArgs += "--release" }
 if ($LogPath) { $cargoArgs += @("--", $LogPath) }
 
