@@ -23,7 +23,7 @@ use std::thread;
 use overlay_engine::{IconKind, IconRef};
 use winit::event_loop::EventLoopProxy;
 
-use crate::UserEvent;
+use crate::render_content::UserEvent;
 
 type IconKey = (IconKind, String);
 
@@ -81,6 +81,21 @@ impl RemoteIconStore {
 
         Self {
             decoded,
+            requested: Arc::new(Mutex::new(HashSet::new())),
+            request_tx,
+        }
+    }
+
+    /// Store vide, SANS thread réseau — pour un harnais de test qui ne doit dépendre d'aucun accès
+    /// réseau (§17.1 du plan : « `RemoteIconStore` construit à la main dans le harnais, jamais
+    /// alimenté par le thread réseau réel »). `decoded_or_request` y renvoie toujours `None`
+    /// (repli sur l'icône générique) : le récepteur du canal de requêtes est immédiatement
+    /// abandonné, tout envoi échoue silencieusement — déjà le comportement toléré en production
+    /// (`let _ = self.request_tx.send(...)`).
+    pub fn empty() -> Self {
+        let (request_tx, _request_rx) = mpsc::channel();
+        Self {
+            decoded: Arc::new(Mutex::new(HashMap::new())),
             requested: Arc::new(Mutex::new(HashSet::new())),
             request_tx,
         }
