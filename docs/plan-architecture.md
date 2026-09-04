@@ -194,7 +194,9 @@ wakfu-companion-overlay/
 Dépendances principales : `winit`, `wgpu`, `egui`/`egui-wgpu`/`egui-winit`, `notify`,
 `rquickjs`, `serde`/`serde_json`, `ureq` (rustls) — voir §7.3 pour pourquoi PAS `reqwest`/`tokio`,
 `rusqlite` (bundled), `keyring`, `global-hotkey`, `sha2`, `arc-swap`, `crossbeam-channel`,
-`directories`, `tracing`. Sur Windows : `windows` (Win32 + DirectComposition). Sur Linux : `x11rb`.
+`directories`, `tracing`, `chrono` (feature `clock` seulement — voir §5.4, conversion de fuseau
+LOCAL sans base de fuseaux IANA embarquée). Sur Windows : `windows` (Win32 + DirectComposition). Sur
+Linux : `x11rb`.
 
 ---
 
@@ -264,6 +266,22 @@ web actuel). Deux conséquences déjà traitées côté web, à ne pas casser :
 - les **signatures** n'utilisent que l'heure brute (relire demain le même fichier reste idempotent) ;
 - passage de minuit : détecter le recul de l'horloge (`HH:MM:SS` inférieur au précédent) et
   incrémenter le jour côté hôte plutôt que d'empiler les événements sur une seule date.
+
+**Fuseau horaire des instants synchronisés (`startedAt`/`occurredAt`, correctif du 2026-09-03,
+retour utilisateur en conditions réelles)** : le log Wakfu n'écrit que l'heure LOCALE de la machine
+qui fait tourner le client de jeu — exactement comme le `new Date(year, month, day, ...)` du web est
+implicitement local au fuseau du NAVIGATEUR. `overlay_engine::log_time::LogDateTracker::
+full_timestamp_ms` traitait initialement cette date civile comme un instant **UTC** au lieu de la
+convertir depuis le fuseau LOCAL de la machine — décalage constant, égal au fuseau de la machine,
+sur les seuls champs `startedAt`/`occurredAt` envoyés au serveur (jamais sur la signature, qui
+n'utilise que l'heure brute, donc sans impact sur l'idempotence). Repéré en usage réel : un
+événement survenu à 22h54 heure locale (CEST, UTC+2) apparaissait daté du LENDEMAIN sur le site
+(l'instant, réinterprété à tort comme "22h54 UTC", tombe après minuit une fois reconverti). Corrigé
+via `chrono::Local` (feature `clock` uniquement) : **pas `chrono-tz`**, aucune base de fuseaux IANA
+embarquée — la résolution de fuseau est déléguée entièrement à l'OS (API Windows / `/etc/localtime`
+sous Linux), donc pas la dépendance lourde qu'un premier jet de ce document écartait à tort pour ce
+besoin (elle visait la résolution d'un fuseau NOMMÉ arbitraire, jamais nécessaire ici : seul le
+fuseau COURANT de la machine locale compte, exactement ce que fournit `Local` sans base de données).
 
 ### 5.5 Performance cible
 
