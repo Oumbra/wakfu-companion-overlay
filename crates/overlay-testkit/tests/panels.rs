@@ -9,12 +9,14 @@
 //! fait main continuerait de compiler avec des données obsolètes si `SessionSnapshot` change de
 //! forme, alors qu'un rejeu réel casse la compilation ou change visiblement le rendu.
 //!
-//! **Portée actuelle, honnêtement limitée** : seuls les états qu'un rejeu simple (sans compte lié,
-//! donc sans réglages de compte ni watchlist) produit réellement sont couverts ici — panneau
-//! Combat sur le dernier combat encore suivi en fin de rejeu (si `Engine::snapshot().fights` en
-//! contient un), panneau Suivi à vide. Combat ABSENT, toast de ramassage, entrées suivies réelles
-//! restent à ajouter (nécessitent soit un log de test dédié avec un combat encore `ongoing` à sa
-//! toute fin, soit un compte lié avec des réglages de watchlist) — voir §17.1 du plan.
+//! **Portée actuelle, honnêtement limitée** : panneau Combat sur le dernier combat encore suivi en
+//! fin de rejeu (si `Engine::snapshot().fights` en contient un), panneau Suivi à vide (rejeu sans
+//! configuration de watchlist), panneau Suivi avec entrées réelles ET toast de ramassage actif
+//! (voir `panneau_suivi_avec_toast_de_ramassage_ne_panique_pas` — la LISTE des entrées est une
+//! configuration explicite, comme le ferait un compte lié via `Engine::set_watchlist_entries`,
+//! mais le FRANCHISSEMENT à 0 qui déclenche le toast provient du vrai rejeu, jamais fabriqué à la
+//! main). Combat ABSENT reste à ajouter (nécessite un log de test dédié avec un combat encore
+//! `ongoing` à sa toute fin) — voir §17.1 du plan.
 //!
 //! **Driver logiciel requis** : `egui_kittest` (feature `wgpu`) préfère un adaptateur logiciel
 //! (lavapipe/llvmpipe, voir son code source) — sous Linux, paquet système `mesa-vulkan-drivers`
@@ -25,10 +27,16 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use egui_kittest::Harness;
-use overlay_engine::{CatalogIndex, Engine, FightSnapshot, SessionSnapshot};
+use overlay_engine::{
+    CatalogIndex, Engine, FightSnapshot, SessionSnapshot, WatchlistEntry, WatchlistKind,
+    WatchlistMode,
+};
 use overlay_ingest::Tailer;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_ui::panels::watchlist::{
+    build_confetti, WatchlistToast, WatchlistToastReason, TOAST_DURATION,
+};
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{
@@ -196,4 +204,147 @@ fn panneau_suivi_vide_ne_panique_pas() {
 
     harness.run();
     harness.snapshot("watchlist_vide");
+}
+
+#[test]
+fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
+    // Contrairement aux deux tests précédents, la LISTE des entrées suivies est ici une
+    // configuration explicite (`Engine::set_watchlist_entries`, alimentée en production par
+    // `GET /api/v1/settings` — un compte lié n'est qu'un transport HTTP autour du même appel), pas
+    // une donnée produite par le rejeu — voir la doc de module. Ce qui DOIT provenir du vrai
+    // contenu du `wakfu.log`, c'est le franchissement à 0 qui déclenche le toast
+    // (`WatchlistState::increment`), jamais fabriqué à la main.
+    //
+    // **Piège évité** : `Engine::ingest_batch` n'applique JAMAIS la watchlist pendant un
+    // rattrapage initial (`batch.is_initial_load`, miroir du gating `currentBatchIsInitialLoad`
+    // côté web — voir sa doc) : sinon lancer l'overlay sur un `wakfu.log` déjà long re-alerterait
+    // sur tout ce qui a déjà été ramassé avant même son démarrage. Un scénario de toast honnête
+    // doit donc reproduire les DEUX phases réelles, pas un simple rejeu en une passe :
+    // 1. rattrapage complet du fichier existant tel quel, watchlist encore vide (comme au tout
+    //    premier lancement, avant toute réponse `GET /api/v1/settings`) ;
+    // 2. le compte "vient de répondre" : watchlist configurée maintenant, hors rattrapage ;
+    // 3. le jeu continue — une ligne supplémentaire, au format réel (identique à celle trouvée
+    //    ligne 537 du fichier source, « Vous avez ramassé 1x Bottes Lantha »), ajoutée à une COPIE
+    //    du fichier de test après la phase de rattrapage. Seul le TIMING de cette ligne est
+    //    contrôlé par le test — jamais un `WatchlistAlert`/`WatchlistToast` fabriqué à la main.
+    let log_path = std::env::temp_dir().join(format!(
+        "wakfu-overlay-testkit-toast-{}-{}.log",
+        std::process::id(),
+        NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::copy(WAKFU_LOG, &log_path).expect("copie du wakfu.log de test");
+
+    let mut engine = test_engine();
+    let mut tailer = Tailer::new(&log_path);
+
+    // Phase 1 : rattrapage complet, avant toute configuration de watchlist.
+    loop {
+        let batches = tailer.poll().expect("poll() du tailer (rattrapage)");
+        if batches.is_empty() {
+            break;
+        }
+        for batch in &batches {
+            engine
+                .ingest_batch(batch)
+                .expect("ingestion d'un lot (rattrapage)");
+        }
+    }
+
+    // Phase 2 : le compte vient de répondre — cible de décompte à 1 sur un objet ramassé 15 fois
+    // dans le fichier (voir ci-dessus), donc déjà purgée par le rattrapage : rien à re-déclencher
+    // ici, seul un ramassage ultérieur doit compter.
+    engine.set_watchlist_entries(vec![WatchlistEntry {
+        name: "Bottes Lantha".to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Down,
+        count: 1,
+        countdown_target: 1,
+        catalog_id: None,
+    }]);
+
+    // Phase 3 : le jeu continue, un nouveau ramassage réel survient après le rattrapage.
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log_path)
+            .expect("ouverture du log en écriture pour simuler la suite du jeu");
+        writeln!(
+            file,
+            " INFO 22:03:40,000 [AWT-EventQueue-0] (aPV:174) - [Information (jeu)] Vous avez ramassé 1x Bottes Lantha ."
+        )
+        .expect("écriture de la ligne simulant la suite du jeu");
+    }
+
+    let mut toast: Option<WatchlistToast> = None;
+    loop {
+        let batches = tailer.poll().expect("poll() du tailer (suite)");
+        if batches.is_empty() {
+            break;
+        }
+        for batch in &batches {
+            engine
+                .ingest_batch(batch)
+                .expect("ingestion d'un lot (suite)");
+        }
+        // Même construction que `overlay_ui::engine_thread::spawn_engine_thread` à réception
+        // d'une alerte réelle — voir sa doc. Le toast le plus récent écrase le précédent, comme en
+        // production (un seul emplacement affiché à la fois).
+        for alert in engine.drain_watchlist_alerts() {
+            let created_at = std::time::Instant::now();
+            toast = Some(WatchlistToast {
+                name: alert.name,
+                kind: alert.kind,
+                reason: WatchlistToastReason::Countdown,
+                catalog_id: alert.catalog_id,
+                created_at,
+                confetti: build_confetti(),
+                hide_at: created_at + TOAST_DURATION,
+            });
+        }
+    }
+    let _ = std::fs::remove_file(&log_path);
+    let toast = toast.expect(
+        "la ligne ajoutée après le rattrapage (voir la doc de ce test) doit avoir déclenché \
+         l'alerte de décompte à 0",
+    );
+    let watchlist_entries = engine.watchlist_entries().to_vec();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = toast.created_at; // dans la fenêtre d'affichage (`TOAST_DURATION`), rendu reproductible
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Watchlist,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &watchlist_entries,
+                watchlist_toast: Some(&toast),
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("watchlist_avec_toast_ramassage");
 }

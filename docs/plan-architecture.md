@@ -1017,23 +1017,41 @@ réduite pour l'instant.**
   dans le rejeu (`Erz-Wouaf`, 38 733 dégâts, portraits et barres de progression réels) — image
   envoyée à l'utilisateur en session, deux tests verts (`cargo test -p overlay-testkit`), images de
   référence versionnées dans `crates/overlay-testkit/tests/snapshots/`.
-- **Portée actuellement couverte, volontairement limitée** : seuls les états qu'un rejeu simple
-  (sans compte lié) produit réellement — panneau Combat sur le dernier combat encore suivi en fin
-  de rejeu, panneau Suivi vide. **Reste, avant de considérer ce lot clos** : scénario avec toast de
-  ramassage actif (nécessite l'horloge injectable de `panels::watchlist`, déjà en place depuis le
-  chantier précédent, mais pas encore exercée par un test testkit), entrées watchlist réelles
-  (nécessite un compte lié ou des réglages de test), diff à seuil de tolérance explicite plutôt que
-  la comparaison stricte par défaut d'`egui_kittest`. **Mise en défaut RÉELLE constatée le
-  2026-09-04** (pas plus une hypothèse) : un snapshot régénéré et committé sur une machine
-  (changement légitime des templates du cadre Combat) a fait échouer le test sur cette session,
-  écart visuel confirmé minime (quelques lignes de séparation décalées de sub-pixels — rendu
-  logiciel lavapipe, pas une régression), corrigé en régénérant le snapshot depuis CET
-  environnement. Renforce la nécessité du seuil de tolérance explicite, toujours pas implémenté.
-  Gouvernance CI (le job « informatif » lui-même n'existe pas encore au moment de l'écriture de ce
-  paragraphe, voir §17.3 sur l'absence de CI de base — **fait depuis, voir §11/§17.3 mis à jour**).
-  Point vérifié dans cette session :
+- **Portée actuellement couverte** : panneau Combat sur le dernier combat encore suivi en fin de
+  rejeu, panneau Suivi vide (rejeu sans configuration de watchlist), panneau Suivi avec entrées
+  réelles ET toast de ramassage actif. **Mise en défaut RÉELLE constatée le 2026-09-04** (pas plus
+  une hypothèse) : un snapshot régénéré et committé sur une machine (changement légitime des
+  templates du cadre Combat) a fait échouer le test sur cette session, écart visuel confirmé minime
+  (quelques lignes de séparation décalées de sub-pixels — rendu logiciel lavapipe, pas une
+  régression), corrigé dans l'urgence en régénérant le snapshot depuis CET environnement, PUIS
+  traité à la racine le même jour (voir juste en dessous). Point vérifié dans cette session :
   `cargo tree -p overlay-app | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
   le graphe du binaire livré.
+- **Clôturé (2026-09-04, suite)** — les trois manques listés ci-dessus au moment de l'écriture de
+  ce paragraphe sont désormais traités :
+  - **Seuil de tolérance explicite** : `crates/overlay-testkit/kittest.toml` (`max_failed_pixels =
+    32`, `threshold` laissé à sa valeur par défaut 0.6) — valeur choisie comme la marge minimale
+    qui absorbe l'écart réellement observé ci-dessus (quelques dizaines de pixels de bordure) sans
+    s'approcher des centaines/milliers de pixels qu'affecterait un changement visuel réel sur une
+    image 800×600 ; voir les commentaires du fichier pour le raisonnement complet et la règle de
+    révision (à la hausse seulement si un futur écart légitime la dépasse, jamais préventivement).
+  - **Scénario toast de ramassage + entrées watchlist réelles** :
+    `panneau_suivi_avec_toast_de_ramassage_ne_panique_pas` (`tests/panels.rs`) — la LISTE des
+    entrées watchlist est une configuration explicite (`Engine::set_watchlist_entries`, ce
+    qu'alimenterait un compte lié via `GET /api/v1/settings`, un simple transport HTTP autour du
+    même appel), mais le FRANCHISSEMENT à 0 qui construit le toast provient du vrai rejeu : « Bottes
+    Lantha », ramassée 15 fois dans le vrai `wakfu.log` de test dont la première dès la ligne 537,
+    configurée en cible de décompte à 1 pour un déclenchement déterministe dès le premier
+    ramassage. Le `WatchlistToast` est construit avec la même logique que
+    `engine_thread::spawn_engine_thread` en production.
+  - **Reste, seul point non couvert** : scénario Combat ABSENT — nécessite un log de test dédié
+    avec un combat encore `ongoing` à sa toute fin (le `wakfu.log` de parité existant n'a pas cet
+    état), non bloquant pour clore ce lot.
+  - **Gouvernance CI** : le job « informatif » (§11/§17.3) reste **non-gate** — la mise en défaut
+    RÉELLE ci-dessus, aussi minime soit-elle une fois le seuil corrigé, est précisément le signal
+    qu'une période de rodage sans flake constaté (§17.3) n'a pas encore commencé pour de bon ;
+    repartir de zéro sur ce compteur à partir de ce commit plutôt que de considérer un incident déjà
+    corrigé comme suffisant serait prématuré.
 
 ### 17.2 Niveau 2 — Comportemental multi-fenêtres/click-through (X11, sous Xvfb)
 
