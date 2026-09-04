@@ -1023,9 +1023,15 @@ réduite pour l'instant.**
   ramassage actif (nécessite l'horloge injectable de `panels::watchlist`, déjà en place depuis le
   chantier précédent, mais pas encore exercée par un test testkit), entrées watchlist réelles
   (nécessite un compte lié ou des réglages de test), diff à seuil de tolérance explicite plutôt que
-  la comparaison stricte par défaut d'`egui_kittest` (jamais mise en défaut jusqu'ici — pas encore
-  éprouvée sur un changement mineur de version Mesa), gouvernance CI (le job « informatif » lui-même
-  n'existe pas encore, voir §17.3 sur l'absence de CI de base). Point vérifié dans cette session :
+  la comparaison stricte par défaut d'`egui_kittest`. **Mise en défaut RÉELLE constatée le
+  2026-09-04** (pas plus une hypothèse) : un snapshot régénéré et committé sur une machine
+  (changement légitime des templates du cadre Combat) a fait échouer le test sur cette session,
+  écart visuel confirmé minime (quelques lignes de séparation décalées de sub-pixels — rendu
+  logiciel lavapipe, pas une régression), corrigé en régénérant le snapshot depuis CET
+  environnement. Renforce la nécessité du seuil de tolérance explicite, toujours pas implémenté.
+  Gouvernance CI (le job « informatif » lui-même n'existe pas encore au moment de l'écriture de ce
+  paragraphe, voir §17.3 sur l'absence de CI de base — **fait depuis, voir §11/§17.3 mis à jour**).
+  Point vérifié dans cette session :
   `cargo tree -p overlay-app | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
   le graphe du binaire livré.
 
