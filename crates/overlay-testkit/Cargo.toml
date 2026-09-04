@@ -1,0 +1,23 @@
+[package]
+name = "overlay-testkit"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Harnais de rendu offscreen pour overlay-ui (§17.1 du plan) : rejoue les panneaux egui à partir d'un snapshot dérivé du rejeu réel de wakfu.log, sans fenêtre système ni GPU physique — voir tests/panels.rs."
+
+[dependencies]
+# Dépendance à la LIB `overlay-ui` uniquement (jamais son binaire, Windows-only) — voir
+# `crates/overlay-ui/src/lib.rs`. Compile nativement sous Linux (vérifié dans cette session, voir
+# §17.1 du plan) : aucun de `panels`/`portraits`/`remote_icons`/`ui_icons`/`render_content` ne
+# touche `winit::Window`/`wgpu::Surface`/`windows::`.
+overlay-ui = { path = "../overlay-ui" }
+overlay-engine = { path = "../overlay-engine" }
+overlay-ingest = { path = "../overlay-ingest" }
+egui = "0.36.1"
+
+[dev-dependencies]
+# `wgpu`+`snapshot` : sélectionne un adaptateur logiciel de préférence (lavapipe/llvmpipe, voir
+# son code source `src/wgpu.rs`) — jamais un harnais offscreen fait main, voir la revue à trois
+# experts (§17.6 du plan). Version alignée EXACTEMENT sur `egui`/`egui-wgpu` déjà utilisées par
+# `overlay-ui` (0.36.1) : jamais un mismatch à gérer.
+egui_kittest = { version = "0.36.1", features = ["wgpu", "snapshot"] }

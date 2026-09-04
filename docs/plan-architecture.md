@@ -966,6 +966,48 @@ standard.
   qui doit bloquer, préférer des assertions structurelles (layout, présence/absence de panneau,
   contenu textuel) au diff pixel brut.
 
+**État (2026-09-04) : Niveau 1 implémenté et validé de bout en bout, portée volontairement
+réduite pour l'instant.**
+
+- `overlay-ui` converti en crate **lib + bin** : `src/lib.rs` expose `panels`/`portraits`/
+  `remote_icons`/`ui_icons`/`render_content` ; `main.rs` (le binaire, Windows-only, `windows::`
+  importé sans `cfg`) consomme ces items depuis la lib au lieu de les définir localement. La LIB
+  seule compile nativement sous Linux (vérifié : `cargo check -p overlay-ui --lib` sans cible
+  croisée), condition nécessaire pour qu'`overlay-testkit` tourne dans une session Claude cloud.
+  Dépendance système supplémentaire découverte au passage : `rodio` (son, module `alert_sound`
+  resté privé au binaire) tire `alsa-sys`, qui a besoin de `libasound2-dev` installé pour compiler
+  ne serait-ce que la lib — sans lien avec le rendu, mais Cargo compile toutes les dépendances du
+  paquet quelle que soit la target demandée.
+- `render_content::build_ui` scindée en deux : `build_ui` (fenêtrage-adjacent, reconstruit un
+  `RenderContent` frais à chaque appel de sa fermeture — `ctx.run_ui` exige `FnMut`, déplacer
+  l'agrégat capturé ne typerait qu'en `FnOnce`) et **`paint_content(ui, RenderContent) -> bool`**,
+  qui porte toute la logique de peinture et ne dépend que d'`egui::Ui` — directement appelable par
+  `egui_kittest::Harness::new_ui`, qui fournit déjà son propre `&mut egui::Ui`.
+- `AuthCommandSink` (trait, implémenté par `mpsc::Sender<AuthCommand>` en prod, `NoopAuthSink` en
+  test) et `RemoteIconStore::empty()` (store sans thread réseau) rendent `RenderContent`
+  constructible sans aucun état de production — exactement la réserve de la revue à trois experts.
+- **Crate `crates/overlay-testkit`** (dépend de la LIB `overlay-ui`, jamais de son binaire) :
+  `tests/panels.rs` rejoue le vrai `crates/overlay-engine/tests/wakfu.log` via `Tailer` + `Engine`
+  (même mécanique que le harnais de parité, §2.2) puis appelle `paint_content` avec le
+  `SessionSnapshot` réellement obtenu — jamais un littéral fait main. `egui_kittest` (feature
+  `wgpu`+`snapshot`) choisit lui-même un adaptateur logiciel ; `mesa-vulkan-drivers` (lavapipe,
+  déjà nécessaire au spike S3, §17.2) est le seul prérequis système.
+- **Résultat obtenu, avec preuve visuelle** : le panneau Combat rendu depuis un vrai combat trouvé
+  dans le rejeu (`Erz-Wouaf`, 38 733 dégâts, portraits et barres de progression réels) — image
+  envoyée à l'utilisateur en session, deux tests verts (`cargo test -p overlay-testkit`), images de
+  référence versionnées dans `crates/overlay-testkit/tests/snapshots/`.
+- **Portée actuellement couverte, volontairement limitée** : seuls les états qu'un rejeu simple
+  (sans compte lié) produit réellement — panneau Combat sur le dernier combat encore suivi en fin
+  de rejeu, panneau Suivi vide. **Reste, avant de considérer ce lot clos** : scénario avec toast de
+  ramassage actif (nécessite l'horloge injectable de `panels::watchlist`, déjà en place depuis le
+  chantier précédent, mais pas encore exercée par un test testkit), entrées watchlist réelles
+  (nécessite un compte lié ou des réglages de test), diff à seuil de tolérance explicite plutôt que
+  la comparaison stricte par défaut d'`egui_kittest` (jamais mise en défaut jusqu'ici — pas encore
+  éprouvée sur un changement mineur de version Mesa), gouvernance CI (le job « informatif » lui-même
+  n'existe pas encore, voir §17.3 sur l'absence de CI de base). Point vérifié dans cette session :
+  `cargo tree -p overlay-app | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
+  le graphe du binaire livré.
+
 ### 17.2 Niveau 2 — Comportemental multi-fenêtres/click-through (X11, sous Xvfb)
 
 **Ce n'est pas un harnais de non-régression sur du code existant** : à ce jour, aucun code
