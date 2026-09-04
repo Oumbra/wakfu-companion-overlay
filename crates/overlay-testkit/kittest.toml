@@ -1,0 +1,22 @@
+# Seuil de tolérance des comparaisons de snapshots `egui_kittest` (§17.1 du plan). Cherché par
+# `egui_kittest` en remontant depuis le répertoire courant du process de test — le répertoire
+# courant de `cargo test -p overlay-testkit` est la racine de CE crate, donc ce fichier doit rester
+# ici (pas à la racine du dépôt).
+#
+# Contexte (2026-09-04) : la comparaison stricte par défaut (`max_failed_pixels = 0`) a fait
+# échouer `combat_apres_rejeu_reel` après un simple changement légitime de gabarit du cadre Combat
+# régénéré sur une autre machine — écart réel confirmé par inspection du `.diff.png` généré :
+# quelques pixels de lignes de séparation décalés d'un sous-pixel (variance du rendu logiciel
+# lavapipe/Mesa d'une machine à l'autre), jamais une régression visuelle. Une tolérance à 0 pixel
+# rend donc le test fragile à chaque changement d'environnement de rendu sans mieux détecter les
+# vraies régressions — première mise en défaut RÉELLE (pas hypothétique) de ce risque déjà anticipé.
+#
+# `max_failed_pixels` autorise un petit nombre de pixels à dépasser `threshold` (tolérance
+# colorimétrique par pixel, laissée à sa valeur par défaut 0.6) avant d'échouer le test — assez pour
+# absorber ce bruit de rendu, trop peu pour masquer un changement visuel réel : un élément déplacé,
+# apparu ou disparu affecte des centaines à des milliers de pixels sur les images 800×600 de
+# `tests/panels.rs`, très loin de cette marge. Valeur choisie avec la marge minimale qui absorbe
+# l'écart observé (quelques dizaines de pixels de bordure) sans se rapprocher de ces ordres de
+# grandeur — à réévaluer à la hausse SEULEMENT si un futur écart légitime la dépasse, jamais
+# préventivement.
+max_failed_pixels = 32
