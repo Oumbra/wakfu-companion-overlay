@@ -260,8 +260,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
     // `panels::watchlist::show`, seul endroit qui le renseigne (`OverlayKind::Watchlist`
     // ci-dessous).
     let mut close_toast = false;
+    // Marge interne nulle pour Combat (refonte 2026-09-04, retour utilisateur : collé au bord de
+    // la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui ferait partie du
+    // jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même raison). Suivi
+    // garde sa marge d'origine : non concerné par cette demande, bande de tuiles qui a toujours
+    // besoin d'un peu d'air pour ne pas coller aux boutons d'interface du jeu.
+    let inner_margin = match kind {
+        OverlayKind::Combat => 0,
+        OverlayKind::Watchlist => 6,
+    };
     egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.inner_margin(6))
+        .frame(egui::Frame::NONE.inner_margin(inner_margin))
         .show(ui, |ui| {
             // Voir la doc de `build_ui` : seul indicateur de mode restant, en tout premier
             // avant le moindre widget pour que tout hérite de cette opacité.

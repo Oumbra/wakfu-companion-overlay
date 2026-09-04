@@ -3,9 +3,7 @@
 //! `crates/overlay-ui/assets/templates/` — c'est cette copie locale au crate qu'`include_bytes!`
 //! embarque, la source à la racine n'est qu'un lieu d'édition) : une colonne verticale de N
 //! médaillons circulaires, chacun destiné à recevoir le portrait de classe d'un allié
-//! (`crate::portraits::PortraitAtlas`), reliés par un petit connecteur latéral qui accroche
-//! visuellement la barre de dégâts de la même ligne (voir `super::combat::damage_bar`, peinte
-//! juste à droite de chaque médaillon par `show` ci-dessous).
+//! (`crate::portraits::PortraitAtlas`).
 //!
 //! **Géométrie des médaillons** — refonte 2026-09-04 (nouveaux templates fournis par
 //! l'utilisateur) : centre de chaque médaillon mesuré par analyse de pixels des 6 PNG (bbox de
@@ -26,8 +24,15 @@
 //! conséquence pour garder le même ratio taille-portrait/taille-trou que celui mesuré sur
 //! `cible.png`, inutilement compliqué face à un simple 1:1.
 //!
-//! **Ordre des slots = ordre d'affichage** (trié par dégâts décroissant, voir `panels::combat::
-//! show`) : le médaillon du haut est toujours le plus gros dégât du camp affiché.
+//! **Ordre des slots — refonte 2026-09-04** (retour utilisateur, redesign des barres) : ce N'EST
+//! PLUS l'ordre d'affichage trié par dégâts décroissant. `fighters` est désormais dans l'ordre
+//! STABLE défini par `overlay_engine::FightSnapshot::fighters` (ordre d'arrivée en combat, voir sa
+//! doc) — les portraits ne doivent plus changer de position à mesure que les dégâts évoluent,
+//! seules les barres de dégâts (peintes ailleurs, voir `panels::combat::show`) restent triées et
+//! filtrées (uniquement dégâts > 0). Ce module ne peint donc plus aucune barre : seuls le cadre,
+//! les portraits, leur infobulle au survol et leur pourcentage de dégâts (coin bas-droit, voir
+//! `panels::combat::paint_portrait_percent`) — le découplage complet portraits/barres est décidé
+//! et assemblé par l'appelant.
 //!
 //! **Alliés au-delà de 6** (aucun template ne va plus loin — cas rare, Wakfu ne compose
 //! normalement pas d'équipe à 7+ joueurs) : `MAX_FRAME_SLOTS` borne ce module, l'appelant
@@ -39,14 +44,11 @@ use overlay_engine::FighterDamage;
 use crate::portraits::{PortraitAtlas, NATIVE_PORTRAIT_SIZE};
 use crate::ui_icons::UiIcons;
 
-use super::combat::damage_bar;
-
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
 pub const MAX_FRAME_SLOTS: usize = 6;
 
 /// Largeur de canevas commune aux 6 templates — largeur NATIVE du PNG (68 px, commune aux 6),
-/// canevas non étiré à l'affichage (voir doc de module). C'est aussi l'abscisse à laquelle
-/// démarre la barre de dégâts de chaque ligne.
+/// canevas non étiré à l'affichage (voir doc de module).
 const FRAME_WIDTH: f32 = 68.0;
 
 struct TemplateInfo {
@@ -144,25 +146,23 @@ impl CombatFrame {
         Self { textures }
     }
 
-    /// Dessine le cadre + les portraits + une barre de dégâts par ligne pour `fighters` (déjà
-    /// triés par dégâts décroissant par l'appelant, longueur 1..=`MAX_FRAME_SLOTS` — panique en
-    /// debug sinon, voir `debug_assert!`). `max_damage`/`total_damage` calculés par l'appelant sur
-    /// TOUT le camp affiché, pas seulement `fighters` — voir `panels::combat::show` : un allié
-    /// excédentaire relégué dans la liste "plate" (au-delà de `MAX_FRAME_SLOTS`) doit rester
-    /// cohérent avec ceux affichés ici, d'où le partage de ces deux dénominateurs plutôt qu'un
-    /// recalcul local. Voir `panels::combat::damage_bar` pour ce qu'ils pilotent chacun.
+    /// Dessine le cadre + les portraits pour `fighters` (longueur 1..=`MAX_FRAME_SLOTS` — panique
+    /// en debug sinon, voir `debug_assert!`), dans l'ORDRE STABLE fourni par l'appelant (voir doc
+    /// de module — plus trié par dégâts). `total_damage` sert uniquement à calculer le pourcentage
+    /// peint sur chaque portrait (voir `panels::combat::paint_portrait_percent`) ; aucune barre
+    /// n'est peinte ici (voir doc de module).
     ///
     /// Ordre de peinture (voir `assets/_test/README.md`, méthode déjà validée) : portrait D'ABORD,
     /// template ENSUITE par-dessus — l'anneau opaque du médaillon masque proprement le
     /// débordement du portrait 48×48 collé sans redimensionnement dans un trou mesuré à ~41 px
-    /// (voir doc de module).
+    /// (voir doc de module). Infobulle + pourcentage sont peints en DERNIER, par-dessus le cadre :
+    /// une zone interactive ou un texte masqués par le cadre ne serviraient à rien.
     pub fn show(
         &self,
         ui: &mut egui::Ui,
         portraits: &PortraitAtlas,
         icons: &UiIcons,
         fighters: &[&FighterDamage],
-        max_damage: i64,
         total_damage: i64,
     ) {
         debug_assert!(!fighters.is_empty() && fighters.len() <= MAX_FRAME_SLOTS);
@@ -170,15 +170,16 @@ impl CombatFrame {
         let template = &TEMPLATES[n - 1];
         let texture = &self.textures[n - 1];
 
-        let row_height = BAR_ROW_HEIGHT.max(1.0);
-        let full_rect = ui
+        // `FRAME_WIDTH` fixe, PAS `ui.available_width()` (contrairement à l'ancienne version) :
+        // ce cadre partage désormais sa ligne avec une colonne de barres indépendante peinte par
+        // l'appelant (voir doc de module) — s'étirer sur toute la largeur disponible ne laisserait
+        // plus de place à cette colonne.
+        let frame_rect = ui
             .allocate_exact_size(
-                egui::vec2(ui.available_width(), template.height),
+                egui::vec2(FRAME_WIDTH, template.height),
                 egui::Sense::hover(),
             )
             .0;
-        let frame_rect =
-            egui::Rect::from_min_size(full_rect.min, egui::vec2(FRAME_WIDTH, template.height));
 
         for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
             let pos = frame_rect.min + center.to_vec2();
@@ -210,27 +211,28 @@ impl CombatFrame {
         // l'anneau de chaque médaillon masque le débordement de chacun d'eux d'un coup.
         egui::Image::new(texture).paint_at(ui, frame_rect);
 
+        // Infobulle (nom, demande utilisateur : les portraits ne sont plus alignés avec "leur"
+        // barre depuis le découplage tri portraits/barres — sans elle, un portrait devient
+        // impossible à identifier dès que sa barre n'est plus juste à côté) + pourcentage de
+        // dégâts sur le portrait (bas-droite, voir `panels::combat::paint_portrait_percent`),
+        // peints APRÈS le cadre — voir doc de fonction.
         for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
-            let bar_rect = egui::Rect::from_min_size(
-                egui::pos2(
-                    frame_rect.max.x,
-                    frame_rect.min.y + center.y - row_height / 2.0,
-                ),
-                egui::vec2(full_rect.max.x - frame_rect.max.x, row_height),
+            let pos = frame_rect.min + center.to_vec2();
+            let portrait_rect = egui::Rect::from_center_size(
+                pos,
+                egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
             );
-            damage_bar(
-                ui,
-                bar_rect,
-                &fighter.name,
-                fighter.total_damage,
-                max_damage,
-                total_damage,
-            );
+            let id = ui.id().with(("combat-frame-slot", fighter.name.as_str()));
+            ui.interact(portrait_rect, id, egui::Sense::hover())
+                .on_hover_text(fighter.name.as_str());
+            if fighter.total_damage > 0 {
+                super::combat::paint_portrait_percent(
+                    ui,
+                    portrait_rect,
+                    fighter.total_damage,
+                    total_damage,
+                );
+            }
         }
     }
 }
-
-/// Hauteur d'une ligne de barre dans le cadre — voir `panels::combat::BAR_HEIGHT` pour la barre
-/// "plate" (liste sans cadre) : légèrement plus haute ici pour rester proportionnée au diamètre
-/// des médaillons (~47 px) plutôt que de reprendre la même constante que la liste plate.
-const BAR_ROW_HEIGHT: f32 = 30.0;

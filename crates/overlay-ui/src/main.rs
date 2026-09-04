@@ -169,9 +169,15 @@ fn watchlist_target_height(toast_active: bool) -> f64 {
         }
 }
 /// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
-/// gauche de l'overlay Combat — « collé à quelques pixels près » (demande utilisateur). À ajuster
-/// après avoir vu le rendu en pratique.
-const GAME_EDGE_MARGIN_PX: i32 = 12;
+/// gauche de l'overlay Combat.
+///
+/// **Refonte 2026-09-04** (retour utilisateur, capture d'écran à l'appui) : la valeur initiale
+/// (12 px, « collé à quelques pixels près ») laissait un vide visible entre le bord de la fenêtre
+/// de jeu et le cadre — l'utilisateur veut désormais que l'overlay se fonde dans le jeu (« comme
+/// si l'overlay faisait partie du jeu »), donc un ancrage réellement à zéro. Voir aussi
+/// `render_content::paint_content` : la marge interne du panneau (`Frame::inner_margin`) doit être
+/// nulle elle aussi, sinon un vide subsiste malgré cette valeur à 0.
+const GAME_EDGE_MARGIN_PX: i32 = 0;
 /// Même principe que `GAME_EDGE_MARGIN_PX`, mais pour le bord HAUT — ancrage de l'overlay Suivi
 /// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
 /// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
