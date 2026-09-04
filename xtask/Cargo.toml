@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Outillage de CI (docs/plan-architecture.md §8/§11/§17.2) : mem-budget mesure le RSS apres un scenario scripte et echoue au-dessus du plafond documente. `[workspace]` vide ici (meme raison que spikes/, voir son README bug reel n.6) : evite de peser sur la resolution de dependances du workspace principal (x11rb, sysinfo...) sans avoir a etre membre de `crates/*`."
+
+[dependencies]
+overlay-engine = { path = "../crates/overlay-engine" }
+overlay-ingest = { path = "../crates/overlay-ingest" }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }

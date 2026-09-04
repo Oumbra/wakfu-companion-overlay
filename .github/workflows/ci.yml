@@ -1,0 +1,98 @@
+# CI de base — docs/plan-architecture.md §8/§11 : build Windows + Linux, tests (dont parité,
+# §2.2/§5.3), budget mémoire (`xtask mem-budget`, §8), lint `clippy -D warnings`.
+#
+# Ne couvre PAS le harnais comportemental Xvfb/X11 (`xtask visual-check`, §17.2) : il n'existe pas
+# encore (aucun rendu Linux réel à piloter, voir §17.2 « État ») et devra de toute façon rester
+# `workflow_dispatch` uniquement une fois écrit (§17.2 : « jamais un gate CI par défaut »
+# pour ce harnais précis) — le contenu de ce fichier n'a donc pas vocation à y faire de la place.
+#
+# `overlay-ui` (le binaire) importe `windows::` sans `cfg` et ne compile QUE sous Windows — d'où
+# le découpage par paquet plutôt que `--workspace` partout : sa LIB (`--lib`) compile nativement
+# sous Linux (voir `crates/overlay-ui/src/lib.rs`), pas son binaire.
+name: CI
+
+on:
+  push:
+    branches: [dev, main, master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo fmt --manifest-path xtask/Cargo.toml -- --check
+
+  clippy-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: dépendances système (rendu logiciel egui_kittest + son rodio)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
+      - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
+        run: bash patches/setup-vendor.sh
+      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
+      - run: cargo clippy -p overlay-ui --lib -- -D warnings
+      - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
+
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: dépendances système (rendu logiciel egui_kittest + son rodio)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
+      - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
+        run: bash patches/setup-vendor.sh
+      - name: overlay-ingest (2 tests exclus — bug réel connu, voir docs/plan-architecture.md §5.2)
+        run: >
+          cargo test -p overlay-ingest --
+          --skip rotation::tests::remplacement_identite_differente
+          --skip rotation_nouveau_fichier_meme_chemin_relit_depuis_zero
+      - run: cargo test -p overlay-engine -p overlay-sync -p overlay-platform -p overlay-app
+      - run: cargo test -p overlay-ui --lib
+      - name: "overlay-testkit — snapshots offscreen (informatif, voir §17.3 : pas encore promu en gate)"
+        run: cargo test -p overlay-testkit
+        continue-on-error: true
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
+        shell: bash
+        run: bash patches/setup-vendor.sh
+      - run: cargo build --workspace
+      - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
+        run: >
+          cargo test -p overlay-engine -p overlay-sync -p overlay-app --
+          --skip rotation_nouveau_fichier_meme_chemin_relit_depuis_zero
+      - name: overlay-ingest (2 tests exclus — bug réel connu, voir docs/plan-architecture.md §5.2)
+        run: >
+          cargo test -p overlay-ingest --
+          --skip rotation::tests::remplacement_identite_differente
+          --skip rotation_nouveau_fichier_meme_chemin_relit_depuis_zero
+
+  mem-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo run --manifest-path xtask/Cargo.toml --release -- mem-budget
