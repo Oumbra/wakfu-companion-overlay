@@ -720,7 +720,7 @@ proposer une disposition personnalisable comme le ferait un site web.
 | --- | --- | --- |
 | **S1 — Spike rendu Windows** ✅ fait | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Voir `spikes/s1-window-windows/README.md` : panneau egui semi-transparent confirmé par capture d'écran par-dessus une autre fenêtre, hotkey global de bascule confirmé sans focus, RSS ~87 Mo — **verdict : chemin DirectComposition via `wgpu-hal` (`DxgiFromVisual`) validé**, plus simple que prévu (§6.2 mis à jour) |
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
-| **S3 — Spike X11** 🟡 en cours | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Spike validé (2026-09-03)**, critère de sortie PAS ENCORE atteint. Voir `spikes/s3-window-linux/README.md` pour le détail complet : les trois prérequis de faisabilité (§17.2) vérifiés dans l'ordre — rendu logiciel Vulkan/lavapipe sous Xvfb confirmé avec du vrai code `wgpu` (pas seulement `vulkaninfo`), WM EWMH (`openbox`) nécessaire et suffisant, scénario sans compositeur (repli opaque) validé comme cas par défaut et scénario avec compositeur (`picom --backend xrender`, transparence ARGB32 réelle) en secondaire. Ancrage dynamique par titre, click-through (extension Shape) et focus-aware topmost (délai de grâce 1,5 s, horloge injectable dès l'écriture — `src/topmost.rs`, 7 tests unitaires sans Xvfb) validés **programmatiquement** par `harness.sh` (jamais une capture d'écran comme oracle), reproductible en une commande, guard de nettoyage systématique. Six bugs réels trouvés et corrigés en cours de route (dépendance système manquante, panique `TexturesDelta` en debug, double événement `global-hotkey` sous X11, piège de titre `xterm` dynamique, piège regex `xdotool search`, `[workspace]` manquant préexistant sur S1/S2 aussi) — voir le README pour le détail de chacun. **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6) — partiellement rempli le 2026-09-04, voir §17.2 « État »** : le CODE (`discovery.rs`/`topmost.rs`) **migré** vers `crates/overlay-platform/src/linux/` (7 tests unitaires topmost verts, `game_window.rs` d'`overlay-ui` câblé sur la vraie découverte X11) ; le multi-fenêtres réel côté `overlay-ui` (une overlay par fenêtre de jeu, comme `App::sync_windows` le fait déjà pour Windows) **reste à câbler** — aucun point d'entrée Linux réel n'existe encore, `main.rs` demeure Windows-only ; le HARNAIS (`harness.sh`/`probe.rs`) **reste** à extraire vers `xtask visual-check` (différé tant qu'aucun rendu Linux réel n'existe à piloter) |
+| **S3 — Spike X11** 🟡 en cours | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Spike validé (2026-09-03)**, critère de sortie PAS ENCORE atteint. Voir `spikes/s3-window-linux/README.md` pour le détail complet : les trois prérequis de faisabilité (§17.2) vérifiés dans l'ordre — rendu logiciel Vulkan/lavapipe sous Xvfb confirmé avec du vrai code `wgpu` (pas seulement `vulkaninfo`), WM EWMH (`openbox`) nécessaire et suffisant, scénario sans compositeur (repli opaque) validé comme cas par défaut et scénario avec compositeur (`picom --backend xrender`, transparence ARGB32 réelle) en secondaire. Ancrage dynamique par titre, click-through (extension Shape) et focus-aware topmost (délai de grâce 1,5 s, horloge injectable dès l'écriture — `src/topmost.rs`, 7 tests unitaires sans Xvfb) validés **programmatiquement** par `harness.sh` (jamais une capture d'écran comme oracle), reproductible en une commande, guard de nettoyage systématique. Six bugs réels trouvés et corrigés en cours de route (dépendance système manquante, panique `TexturesDelta` en debug, double événement `global-hotkey` sous X11, piège de titre `xterm` dynamique, piège regex `xdotool search`, `[workspace]` manquant préexistant sur S1/S2 aussi) — voir le README pour le détail de chacun. **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6) — rempli aux points 1/2/4 le 2026-09-04, voir §17.2 « État »** : le CODE (`discovery.rs`/`topmost.rs`) **migré** vers `crates/overlay-platform/src/linux/` (7 tests unitaires topmost verts) ; le multi-fenêtres réel côté `overlay-ui` **câblé** — nouveau binaire `crates/overlay-ui/src/bin/overlay-ui-x11.rs` (mode invité), validé sous Xvfb avec preuve visuelle (2 fenêtres Combat/Suivi réelles, ancrage/topmost/click-through/hotkey tous vérifiés programmatiquement) ; le HARNAIS (`harness.sh`/`probe.rs`) **reste** à extraire vers `xtask visual-check` — plus justifié par « rien à piloter » maintenant qu'un vrai binaire existe, simplement pas encore fait |
 | **L7 — Outillage de test visuel (Niveau 1)** | Rendu offscreen déterministe des panneaux `overlay-ui` (crate `overlay-testkit`), voir §17.1 | Un changement de panneau (combat/watchlist) produit un diff visuel détecté automatiquement, sans Xvfb ni GPU physique, exécutable dans une session Claude cloud headless — critère détaillé en §17.6 |
 | **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel). Réserve trouvée puis corrigée le 2026-09-04 (§5.2) : la détection de rotation combine désormais l'identité de fichier ET un second signal (préfixe de contenu), qui ne dépend pas de l'hypothèse fausse « inode jamais réutilisé ». |
 | **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Reste** : État de synchro (dépend de L5). **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés |
@@ -1108,8 +1108,8 @@ Architecture, une fois ces prérequis validés :
   testé manuellement en local (`spikes/s1-window-windows/preview.ps1` + capture humaine), comme
   aujourd'hui.
 
-**État (2026-09-04) : critère de sortie de S3 partiellement rempli — migration faite et vérifiée,
-câblage complet du rendu Linux volontairement différé.**
+**État (2026-09-04, mise à jour) : critère de sortie de S3 rempli aux points 1/2/4, validé sous
+Xvfb avec preuve visuelle. Points 3 (`xtask visual-check`) et 5 (`override_redirect`) restent.**
 
 - **Point 1 du critère de sortie (migration `discovery.rs`/`topmost.rs`) : fait.** Nouvelle crate de
   production `crates/overlay-platform` (membre du workspace, `x11rb` en dépendance uniquement sous
@@ -1117,32 +1117,50 @@ câblage complet du rendu Linux volontairement différé.**
   et `linux::topmost` (ex-`topmost.rs`), code inchangé, seul le module hôte change. Les 7 tests
   unitaires de `topmost::decide` tournent nativement (`cargo test -p overlay-platform`, aucun Xvfb
   requis, voir sa doc).
-- **Point 2 (multi-fenêtres réel côté `overlay-ui`) : câblage de la DÉCOUVERTE fait, câblage du
-  RENDU différé.** `game_window.rs` déplacé de `main.rs` (module privé, jamais compilé sur Linux
-  puisque `main.rs` importe `windows::` sans `cfg`) vers `overlay-ui/src/lib.rs` (`pub mod
-  game_window`) : son `imp` non-Windows délègue désormais réellement à
-  `overlay_platform::linux::x11::GameWindowTracker` (connexion X11 paresseuse au premier `scan()`,
-  jamais dans `new()` — jamais de panique en contexte sans `$DISPLAY`) au lieu du stub vide
-  d'origine. Vérifié compilable des DEUX côtés : `cargo check -p overlay-ui --lib` (natif Linux) et
-  `cargo check -p overlay-ui --bin overlay-ui --target x86_64-pc-windows-gnu` (Windows inchangé),
-  clippy/fmt propres sur les deux. **Ce que ça NE couvre PAS** : aucun point d'entrée Linux réel
-  n'existe encore — `scan()` compile et est prêt à l'emploi, mais n'est appelé par aucun code de
-  production sur cette plateforme. Câbler un vrai rendu winit multi-fenêtres Linux (ancrage,
-  `set_window_level`/`set_cursor_hittest`, création/destruction dynamique par fenêtre de jeu comme
-  `App::sync_windows` le fait pour Windows) demande de dupliquer une bonne partie de la boucle `App`
-  de `main.rs` (2 000+ lignes, fortement couplée à des appels Win32 bruts — `SetWindowPos`,
-  `WS_EX_NOACTIVATE`/`WS_EX_TOOLWINDOW`, `GetForegroundWindow` — non exposés par `winit` et sans
-  équivalent direct côté X11, qui utilise nativement `WindowLevel`/`set_cursor_hittest` de `winit`
-  à la place, voir `spikes/s3-window-linux/src/main.rs`). Chantier distinct, plus risqué (touche au
-  binaire de production Windows fonctionnel), délibérément reporté plutôt que précipité dans cette
-  session.
-- **Point 3 (extraire `harness.sh`/`probe.rs` vers `xtask visual-check`) : reporté.** Migrer ce
-  harnais avant qu'un vrai binaire Linux existe reviendrait à déplacer le spike tel quel sans rien
-  résoudre — voir §17.3 sur la CI de base à écrire d'abord.
-- **Point 4 (bug `global-hotkey` double-événement côté Windows) : déjà résolu, vérifié dans cette
-  session.** `main.rs::about_to_wait` filtre déjà sur `HotKeyState::Pressed` depuis le 2026-09-02
-  (corrigé côté Windows avant même que ce bug ne soit re-découvert indépendamment dans le spike
-  X11) — rien à faire.
+- **Point 2 (multi-fenêtres réel côté `overlay-ui`) : fait, y compris le rendu — nouveau binaire
+  `crates/overlay-ui/src/bin/overlay-ui-x11.rs`.** Plutôt que de dupliquer les 2 000+ lignes de
+  `main.rs` (fortement couplées à des appels Win32 bruts — `SetWindowPos`, `WS_EX_NOACTIVATE`/
+  `WS_EX_TOOLWINDOW`, `GetForegroundWindow`, non partageables), tout ce qui NE dépendait d'AUCUNE
+  API Windows en a d'abord été extrait vers la LIB (`overlay-ui/src/{frame,engine_thread,
+  alert_sound,logging}.rs`, voir la doc de `lib.rs`) : `frame::render` (boucle de peinture par
+  frame, générique wgpu/egui), `engine_thread::spawn_engine_thread` (thread d'ingestion, aucun
+  appel Windows), `alert_sound` (rodio pur), `logging`. `main.rs` consomme désormais ces mêmes
+  items depuis la lib au lieu de les définir localement — vérifié sans régression (`cargo check`/
+  `clippy -D warnings`/`fmt --check` propres sur la cible Windows croisée, `cargo test -p
+  overlay-testkit` toujours vert). Seul `init_gpu` (choix de backend GPU, DX12/DirectComposition
+  vs Vulkan/GL) reste dupliqué entre les deux binaires — pas du code partageable, le choix diffère
+  fondamentalement d'un OS à l'autre (§6.2).
+
+  Le nouveau binaire Linux (mode **invité uniquement** — pas de compte lié/synchro serveur L4-L5,
+  voir sa doc de module pour le détail exact de ce qui est omis) réutilise ces modules partagés
+  et parle directement à `overlay_platform::linux::{x11,topmost}` (pas via le wrapper cross-OS
+  `overlay_ui::game_window`, qui ne sert qu'à `main.rs`) : ancrage identique à Windows (même
+  formule, `GAME_EDGE_MARGIN_PX`/`GAME_TOP_MARGIN_PX`), topmost focus-aware via
+  `topmost::decide` + `Window::set_window_level` (déjà testé unitairement), click-through via
+  `Window::set_cursor_hittest` (extension Shape X11 sous le capot, déjà validée par le spike),
+  une fenêtre overlay PAR fenêtre de jeu trouvée créée/détruite dynamiquement (`sync_windows`,
+  même politique que `main.rs::App::sync_windows`), panneaux Combat/Suivi RÉELS (`paint_content`,
+  la même fonction que Windows et qu'`overlay-testkit`, pas un panneau de diagnostic).
+
+  **Validé sous Xvfb+openbox, programmatiquement (`xdotool`), avec preuve visuelle** — même
+  méthode que le spike S3 : ingestion réelle du vrai `crates/overlay-engine/tests/wakfu.log`,
+  adaptateur GPU logiciel confirmé (`llvmpipe`), DEUX fenêtres overlay créées pour la fenêtre de
+  jeu factice trouvée (`xdotool search --name wakfu-companion-overlay` → 2 résultats, Combat ET
+  Suivi), positions cohérentes avec la formule d'ancrage (vérifié par calcul contre la géométrie
+  réelle de la xterm factice), bascule interactif/clic-traversant testée 3 fois de suite
+  (`xdotool key ctrl+alt+w`) → exactement 3 lignes de log, **jamais de double-bascule** (le bug
+  #3 du spike, déjà corrigé dès l'écriture de ce binaire — voir point 4). Capture d'écran envoyée
+  à l'utilisateur en session : panneau Combat avec son vrai contenu (« Aucun combat pour
+  l'instant », switch Alliés/Ennemis), fond opaque en repli faute de compositeur (comportement
+  documenté, pas un bug). Chevauchement visuel Combat/Suivi sur cette capture : artefact de la
+  PETITE taille de la xterm de test (484×316 px, bien plus petite qu'un vrai client Wakfu), pas
+  un bug d'ancrage — les deux zones ne se recouvriraient pas sur une vraie fenêtre de jeu.
+- **Point 3 (extraire `harness.sh`/`probe.rs` vers `xtask visual-check`) : reste à faire.** Un vrai
+  binaire existe désormais (voir point 2) — ce report n'a plus la même justification qu'avant
+  (« rien à piloter »), mais n'a pas encore été fait dans cette session.
+- **Point 4 (bug `global-hotkey` double-événement) : résolu des DEUX côtés.** Déjà corrigé côté
+  Windows depuis le 2026-09-02 ; le nouveau binaire Linux filtre sur `HotKeyState::Pressed` dès
+  son écriture (jamais réintroduit), vérifié sous Xvfb ci-dessus (3 appuis, 3 bascules, jamais 6).
 - **Point 5 (scénario `override_redirect`) : question ouverte, non retranchée.** Toujours jamais
   rencontrée (aucun test dessus) ; à rouvrir si le vrai client Wakfu s'avère un jour se comporter
   différemment d'un `xterm` géré par un WM classique.
