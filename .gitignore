@@ -13,3 +13,9 @@ spikes/*/vendor/
 # Artefact produit par `xtask visual-check` (voir §17.4 du plan : « jamais de blob vidéo/image
 # commité ») — même règle que `spikes/s3-window-linux/.gitignore` pour son `artifact.png`.
 xtask/visual-check.png
+
+# Artefacts de diagnostic générés par `egui_kittest` à chaque échec de comparaison de snapshot
+# (§17.1 du plan) — utiles seulement le temps d'inspecter un écart, jamais un fichier à committer
+# (seule l'image de référence sous tests/snapshots/*.png l'est).
+crates/overlay-testkit/tests/snapshots/*.diff.png
+crates/overlay-testkit/tests/snapshots/*.old.png
