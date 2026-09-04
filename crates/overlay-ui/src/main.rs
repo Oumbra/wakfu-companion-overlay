@@ -29,9 +29,6 @@
 //! (`alert_sound::play_loot_alert`), pas seulement les entrées suivies. Seul le cas
 //! `reason: 'countdown'` était câblé jusqu'ici (voir `spawn_engine_thread`).
 
-mod alert_sound;
-mod logging;
-
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -41,25 +38,22 @@ use std::sync::Arc;
 use std::thread;
 
 use arc_swap::ArcSwap;
-use crossbeam_channel::RecvTimeoutError;
 use egui_wgpu::wgpu;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
-use overlay_engine::{
-    CatalogIndex, DungeonIndex, Engine, SessionSnapshot, WatchlistEntry, WatchlistKind,
-};
+use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
-use overlay_sync::AccountSettings;
+use overlay_ui::engine_thread::{spawn_engine_thread, EngineCommand, EngineHandles, SyncCommand};
+use overlay_ui::frame::{render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
+use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
-use overlay_ui::panels::watchlist::{WatchlistToast, WatchlistToastReason};
+use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
-use overlay_ui::render_content::{
-    build_ui, AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent,
-};
+use overlay_ui::render_content::{AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent};
 use overlay_ui::ui_icons::UiIcons;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
@@ -202,43 +196,10 @@ const GAME_TOP_MARGIN_PX: i32 = 28;
 // de rendu offscreen (`overlay-testkit`) sans dépendre du binaire `overlay-ui`, qui reste
 // Windows-only (import inconditionnel de `windows::`, voir plus haut).
 
-/// Message transmis au thread Engine (`spawn_engine_thread`) sur le même canal que les réglages de
-/// compte récupérés (`AccountSettings`) — `Disconnect` (déconnexion volontaire, voir `AuthCommand`)
-/// n'est PAS juste une absence de réglages : il doit activement effacer le roster/suivi déjà
-/// appliqués (repli `breed`, Suivi vidé), ce qu'un simple silence sur le canal ne ferait jamais.
-enum EngineCommand {
-    ApplySettings(AccountSettings),
-    Disconnect,
-}
-
-/// Message transmis au thread Sync (`spawn_sync_thread`, lot L5, §7.3 du plan) — `Activate`/
-/// `Deactivate` suivent exactement `AuthCommand::Retry`/`Disconnect` (compte lié ⇒ file active,
-/// mode invité ⇒ rien ne quitte la machine, voir la doc de `overlay_sync::queue`) ; `Enqueue`
-/// relaie les événements produits par `Engine::drain_sync_events` après chaque lot ingéré (thread
-/// Engine, voir `spawn_engine_thread`) — jamais bloquant pour ce dernier, l'écriture SQLite et
-/// l'envoi réseau se font entièrement sur le thread Sync.
-enum SyncCommand {
-    /// `uid` (pour `client_key`) ET `token` (pour authentifier réellement l'envoi, voir
-    /// `overlay_sync::client::post_json_authenticated`) — **correctif du 2026-09-03** : seul l'uid
-    /// était transmis jusqu'ici, l'envoi d'historique partait donc systématiquement sans jeton et
-    /// échouait en 401, silencieusement (voir la doc de `spawn_sync_thread`).
-    Activate {
-        uid: String,
-        token: String,
-    },
-    Deactivate,
-    Enqueue(Vec<overlay_engine::SyncEvent>),
-}
-
-struct GpuState {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    egui_ctx: egui::Context,
-    egui_winit: egui_winit::State,
-    egui_renderer: egui_wgpu::Renderer,
-}
+// `EngineCommand`/`SyncCommand`/`EngineHandles`/`spawn_engine_thread` ont migré vers
+// `overlay_ui::engine_thread` (§17.2 du plan, Niveau 2) — voir sa doc, importés en tête de ce
+// fichier. `GpuState`/`render` ont migré vers `overlay_ui::frame` (même raison : rien dans ces
+// deux-là ne dépend de Windows, seul `init_gpu` ci-dessous reste spécifique).
 
 /// Une fenêtre overlay, ancrée sur UNE fenêtre de jeu précise — un personnage, un combat. Créée et
 /// détruite dynamiquement par `App::sync_windows` au gré des clients qui se lancent/se ferment.
@@ -1206,360 +1167,6 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         egui_winit,
         egui_renderer,
     }
-}
-
-/// Fenêtrage/GPU autour de `render_content::build_ui` (voir sa doc) : prend l'entrée egui de la fenêtre réelle,
-/// construit l'interface, puis tessèle/uploade/présente sur la vraie `wgpu::Surface`. Renvoie le
-/// délai de redessin demandé par egui pour CETTE fenêtre (`ViewportOutput::repaint_delay`, ex. le
-/// délai d'apparition d'une tooltip) — voir `OverlayWindow::next_redraw_at` pour pourquoi
-/// l'appelant doit impérativement en tenir compte, cette architecture n'ayant pas de boucle de
-/// rendu continue — ainsi que si CETTE frame doit effacer le toast affiché (voir la doc de
-/// `build_ui`).
-fn render(
-    gpu: &mut GpuState,
-    window: &Window,
-    content: RenderContent<'_>,
-) -> (std::time::Duration, bool) {
-    // Copiés hors de `content` (tous deux `Copy`) AVANT qu'il ne soit déplacé dans `build_ui` —
-    // réutilisés juste en dessous pour le calcul du délai de redessin, sur la MÊME référence de
-    // temps que celle vue par le contenu peint (voir la doc de `RenderContent::now`).
-    let now = content.now;
-    let watchlist_toast = content.watchlist_toast;
-
-    let raw_input = gpu.egui_winit.take_egui_input(window);
-    let (mut full_output, close_toast) = build_ui(&gpu.egui_ctx, raw_input, content);
-
-    // Repli `Duration::MAX` ("pas de redessin demandé") si jamais le viewport racine n'a pas
-    // d'entrée — ne devrait pas arriver en pratique (une seule fenêtre racine par `egui::Context`,
-    // jamais de sous-viewport ici).
-    let mut repaint_delay = full_output
-        .viewport_output
-        .get(&egui::ViewportId::ROOT)
-        .map_or(std::time::Duration::MAX, |viewport| viewport.repaint_delay);
-    // Le toast d'alerte anime des confettis en continu (voir `panels::watchlist::toast_card`) et
-    // disparaît de lui-même après `WatchlistToast::hide_at` (voir sa doc) — sans ceci, rien ne
-    // redéclencherait de redessin pendant l'animation NI à l'expiration, dans cette architecture
-    // sans boucle de rendu continue (§6.1). S'arrête de lui-même dès que `hide_at` est dépassé (le
-    // toast n'est alors plus reçu par `panels::watchlist::show`, voir son filtre) — jamais de
-    // minuterie à annuler explicitement, seulement des redessins qui cessent d'être redemandés.
-    if let Some(toast) = watchlist_toast {
-        if toast.hide_at > now {
-            const CONFETTI_FRAME_INTERVAL: std::time::Duration =
-                std::time::Duration::from_millis(33); // ~30 images/s, largement suffisant à cette échelle
-            repaint_delay = repaint_delay
-                .min(toast.hide_at - now)
-                .min(CONFETTI_FRAME_INTERVAL);
-        }
-    }
-
-    gpu.egui_winit
-        .handle_platform_output(window, full_output.platform_output);
-
-    let paint_jobs = gpu
-        .egui_ctx
-        .tessellate(full_output.shapes, full_output.pixels_per_point);
-
-    // Traité inconditionnellement, *avant* toute sortie anticipée ci-dessous : `textures_delta`
-    // doit être appliqué (set) puis libéré (free), et explicitement vidé (`clear`) ensuite, quel
-    // que soit le sort de cette frame — `TexturesDelta` panique (`debug_assert!`, donc invisible
-    // en `--release`, ce qui l'a caché jusqu'ici) si ses collections ne sont pas vides à sa
-    // destruction, et les itérer par référence ne les vide pas.
-    for (id, deltas) in &full_output.textures_delta.set {
-        for delta in deltas {
-            gpu.egui_renderer
-                .update_texture(&gpu.device, &gpu.queue, *id, delta);
-        }
-    }
-    for id in &full_output.textures_delta.free {
-        gpu.egui_renderer.free_texture(id);
-    }
-    full_output.textures_delta.clear();
-
-    let output_frame = match gpu.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-        wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-            // Même piège que `Outdated | Lost` juste en dessous (voir sa doc), constaté à
-            // nouveau au retour utilisateur 2026-09-02 (vidéo à l'appui) : bascule
-            // `Ctrl+Alt+W`, un seul des deux overlays passe en opacité clic-traversant, l'AUTRE
-            // reste figé sur sa dernière frame tant qu'on ne passe pas la souris dessus. DXGI
-            // renvoie couramment `Occluded` pour une fenêtre `AlwaysOnTop` qui vient de recevoir
-            // un changement de style étendu sans qu'aucune entrée utilisateur ne lui soit
-            // adressée (`WS_EX_TRANSPARENT` posé par `set_cursor_hittest` en clic-traversant :
-            // plus aucun événement souris ne lui parvient pour redéclencher `response.repaint`
-            // dans `window_event`). Guide officiel DXGI : sur `DXGI_STATUS_OCCLUDED`, arrêter de
-            // dessiner MAIS continuer à sonder périodiquement pour détecter la fin de
-            // l'occlusion — cette frame-ci (qui portait justement le changement d'opacité) est
-            // perdue, sans `request_redraw` ici plus rien ne retente tant qu'un événement SANS
-            // RAPPORT ne survient par ailleurs (§6.1 : pas de boucle de rendu continue).
-            window.request_redraw();
-            return (repaint_delay, close_toast);
-        }
-        wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-            gpu.surface.configure(&gpu.device, &gpu.config);
-            // Retour utilisateur 2026-09-02 (opacité clic-traversant restée pleine sur le Suivi
-            // malgré la bascule, largeur parfois restée à l'ancienne valeur après un premier
-            // élargissement) : CETTE frame-ci — celle qui portait le changement (opacité, largeur,
-            // n'importe quel contenu) — est purement et simplement PERDUE, jamais présentée. Sans
-            // redemander explicitement un redessin ici, plus rien ne le fait tant qu'un événement
-            // SANS RAPPORT ne survient par ailleurs (§6.1 : pas de boucle de rendu continue) —
-            // l'écran reste bloqué sur la DERNIÈRE frame réellement présentée, potentiellement
-            // périmée indéfiniment (ex. encore pleinement opaque après une bascule Ctrl+Alt+W).
-            // `request_redraw` ici force une nouvelle tentative dès le prochain tour de la boucle
-            // d'événements, sur la surface qui vient d'être reconfigurée juste au-dessus.
-            window.request_redraw();
-            return (repaint_delay, close_toast);
-        }
-        wgpu::CurrentSurfaceTexture::Validation => {
-            // PAS de `request_redraw` ici, contrairement à Outdated/Lost ci-dessus : cette
-            // branche ne reconfigure rien, donc rien ne garantit qu'une nouvelle tentative
-            // réussirait mieux que celle-ci — redemander sans arrêt un redessin qui échouerait à
-            // nouveau à chaque tick reviendrait à la boucle de rendu continue que cette
-            // architecture évite justement (§6.1). Se contente de journaliser ; un `Ctrl+Alt+R`
-            // (qui force un redessin ET une resynchronisation complète) reste le recours.
-            tracing::warn!("get_current_texture: erreur de validation");
-            return (repaint_delay, close_toast);
-        }
-    };
-    let view = output_frame
-        .texture
-        .create_view(&wgpu::TextureViewDescriptor::default());
-
-    let screen_descriptor = egui_wgpu::ScreenDescriptor {
-        size_in_pixels: [gpu.config.width, gpu.config.height],
-        pixels_per_point: full_output.pixels_per_point,
-    };
-
-    let mut encoder = gpu
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("overlay-ui-encoder"),
-        });
-    gpu.egui_renderer.update_buffers(
-        &gpu.device,
-        &gpu.queue,
-        &mut encoder,
-        &paint_jobs,
-        &screen_descriptor,
-    );
-
-    {
-        let mut render_pass = encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("overlay-ui-egui-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                ..Default::default()
-            })
-            .forget_lifetime();
-        gpu.egui_renderer
-            .render(&mut render_pass, &paint_jobs, &screen_descriptor);
-    }
-
-    gpu.queue.submit(Some(encoder.finish()));
-    gpu.queue.present(output_frame);
-    (repaint_delay, close_toast)
-}
-
-/// Thread Engine (§3 du plan) : lit `wakfu.log` en continu, alimente `overlay-engine`, publie
-/// chaque nouveau `SessionSnapshot` par `ArcSwap` et réveille le main thread. Ne rappelle jamais
-/// l'UI directement — l'UI ne lit que la dernière valeur publiée (§3 : « zéro verrou sur le
-/// chemin de rendu »). Un seul thread/`Engine` pour toutes les fenêtres overlay (voir doc de
-/// module) : `wakfu.log` est partagé par tous les clients, `SessionSnapshot::fights` porte déjà
-/// tous les combats simultanés.
-///
-/// Reçoit aussi (lot L4) les réglages de compte récupérés par le thread Auth
-/// (`spawn_auth_thread`) via `settings_rx` — appliqués à `Engine` de façon non bloquante entre
-/// deux lots, jamais en attendant activement dessus (voir la sélection `recv_timeout` ci-dessous,
-/// seule façon de sonder les DEUX canaux — lignes de log et réglages de compte — sans thread de
-/// sondage dédié). Publie aussi `watchlist` en plus de `snapshot` : contrairement au roster (qui
-/// n'influence l'affichage qu'indirectement, via la classe résolue au prochain `FighterJoined`),
-/// les entrées suivies sont DIRECTEMENT affichées (`panels::watchlist`) — sans cette publication
-/// immédiate, la liste resterait vide à l'écran jusqu'au prochain lot de lignes de log.
-///
-/// Publie aussi `watchlist_toast` (§9 du plan, « Alertes de drop ») dès qu'`Engine::
-/// drain_watchlist_alerts` renvoie quelque chose après un lot ingéré — jamais depuis la boucle
-/// `settings_rx` ci-dessus, `set_watchlist_entries`/`merge_config` ne peut par construction jamais
-/// déclencher d'alerte (voir `overlay_engine::watchlist::WatchlistState::merge_config`, qui
-/// n'appelle jamais `increment`). Le son est joué sur son propre thread éphémère
-/// (`alert_sound::play_countdown_alert`), jamais en bloquant CE thread — bloquer ici retarderait
-/// l'ingestion du log pour tous les personnages.
-/// Regroupe les `Arc<ArcSwap<_>>` partagés avec le reste de l'app que le thread Engine consomme —
-/// factorisé pour que `spawn_engine_thread` reste sous la limite `clippy::too_many_arguments`
-/// (8 paramètres séparés avant ce lot, 9 avec `dungeons` sans ce regroupement).
-struct EngineHandles {
-    snapshot: Arc<ArcSwap<SessionSnapshot>>,
-    watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
-    watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
-    catalog: Arc<ArcSwap<CatalogIndex>>,
-    /// Référentiel des donjons (L5, §7.1 du plan — assignation `dungeonId`/`dungeonRunKey`) —
-    /// voir `spawn_dungeon_thread`. Contrairement au catalogue, aucun panneau ne le consomme
-    /// directement : seul l'Engine s'en sert, pour la synchro serveur.
-    dungeons: Arc<ArcSwap<DungeonIndex>>,
-}
-
-fn spawn_engine_thread(
-    log_path: PathBuf,
-    handles: EngineHandles,
-    proxy: EventLoopProxy<UserEvent>,
-    settings_rx: mpsc::Receiver<EngineCommand>,
-    sync_tx: mpsc::Sender<SyncCommand>,
-) {
-    let EngineHandles {
-        snapshot,
-        watchlist,
-        watchlist_toast,
-        catalog,
-        dungeons,
-    } = handles;
-    thread::Builder::new()
-        .name("overlay-engine".into())
-        .spawn(move || {
-            let mut engine = match Engine::new() {
-                Ok(engine) => engine,
-                Err(err) => {
-                    tracing::error!("[erreur fatale] création de l'Engine QuickJS : {err}");
-                    return;
-                }
-            };
-            // Dernier catalogue/référentiel de donjons déjà transmis à l'Engine (voir
-            // `Engine::set_catalog`/`set_dungeons`) — comparés par pointeur à chaque tick pour ne
-            // relayer qu'un VRAI changement (`spawn_catalog_thread`/`spawn_dungeon_thread`
-            // republient via `ArcSwap::store`, jamais une mutation en place). Pour le catalogue,
-            // protège `hostIsKnownMonsterName` (voir `quickjs_engine.rs`) contre un vrai monstre
-            // qui se révèle (mimique, brèche) confondu à tort avec une invocation — retour
-            // utilisateur 2026-09-02.
-            let mut last_seen_catalog: Option<Arc<CatalogIndex>> = None;
-            let mut last_seen_dungeons: Option<Arc<DungeonIndex>> = None;
-            let rx = overlay_ingest::watcher::spawn(&log_path);
-            loop {
-                // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
-                // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
-                // retarder l'ingestion d'un seul milliseconde.
-                while let Ok(command) = settings_rx.try_recv() {
-                    match command {
-                        EngineCommand::ApplySettings(settings) => {
-                            let entry_count = settings.watchlist.len();
-                            let sound_item_count = settings.sound_items.len();
-                            tracing::info!(
-                                entry_count,
-                                sound_item_count,
-                                "réglages de compte appliqués à l'Engine (lot L4)"
-                            );
-                            engine.set_roster(Some(settings.roster));
-                            engine.set_watchlist_entries(settings.watchlist);
-                            engine.set_sound_items(settings.sound_items);
-                        }
-                        // Déconnexion volontaire (voir `spawn_auth_thread`, §14 point 3 du plan) :
-                        // repli mode invité — plus de roster connu (classification retombe sur
-                        // `breed`), Suivi vidé (la LISTE suivie est lue depuis le compte ; sans
-                        // compte, il n'y a plus de liste à afficher), plus aucun son de ramassage
-                        // activé (même raison : cette liste vient elle aussi du compte, voir
-                        // `overlay_engine::profile`). Les compteurs déjà persistés sur disque (voir
-                        // `overlay_engine::watchlist`) ne sont pas effacés : une reconnexion
-                        // ultérieure au MÊME compte les retrouve (`merge_config`).
-                        EngineCommand::Disconnect => {
-                            tracing::info!(
-                                "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé)"
-                            );
-                            engine.set_roster(None);
-                            engine.set_watchlist_entries(Vec::new());
-                            engine.set_sound_items(Vec::new());
-                        }
-                    }
-                    watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
-                    let _ = proxy.send_event(UserEvent::NewSnapshot);
-                }
-                let current_catalog = catalog.load_full();
-                let already_seen = last_seen_catalog
-                    .as_ref()
-                    .is_some_and(|seen| Arc::ptr_eq(seen, &current_catalog));
-                if !already_seen {
-                    engine.set_catalog(Arc::clone(&current_catalog));
-                    last_seen_catalog = Some(current_catalog);
-                }
-                let current_dungeons = dungeons.load_full();
-                let dungeons_already_seen = last_seen_dungeons
-                    .as_ref()
-                    .is_some_and(|seen| Arc::ptr_eq(seen, &current_dungeons));
-                if !dungeons_already_seen {
-                    engine.set_dungeons(Arc::clone(&current_dungeons));
-                    last_seen_dungeons = Some(current_dungeons);
-                }
-                match rx.recv_timeout(std::time::Duration::from_millis(200)) {
-                    Ok(Ok(batch)) => {
-                        if let Err(err) = engine.ingest_batch(&batch) {
-                            tracing::warn!(%err, "échec d'ingestion d'un lot, ligne(s) ignorée(s)");
-                            continue;
-                        }
-                        snapshot.store(Arc::new(engine.snapshot()));
-                        watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
-                        // L5, §7.1 du plan : relayé tel quel au thread Sync, qu'un compte soit lié
-                        // ou non — `SyncCommand::Enqueue` en mode invité est simplement ignoré par
-                        // ce dernier (aucune écriture réseau, voir sa doc), jamais retenu ici. Ne
-                        // bloque jamais ce thread : l'écriture SQLite/l'envoi vivent ailleurs.
-                        let sync_events = engine.drain_sync_events();
-                        if !sync_events.is_empty() {
-                            let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
-                        }
-                        for alert in engine.drain_watchlist_alerts() {
-                            tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
-                            alert_sound::play_countdown_alert();
-                            let created_at = std::time::Instant::now();
-                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
-                                name: alert.name,
-                                kind: alert.kind,
-                                reason: WatchlistToastReason::Countdown,
-                                catalog_id: alert.catalog_id,
-                                created_at,
-                                confetti: panels::watchlist::build_confetti(),
-                                hide_at: created_at + panels::watchlist::TOAST_DURATION,
-                            })));
-                        }
-                        // Ramassage d'un objet à son activé (compte, voir `overlay_engine::profile`)
-                        // — INDÉPENDANT de la watchlist ci-dessus (voir la doc de
-                        // `EngineCommand::ApplySettings`), même mécanisme de toast (un seul emplacement
-                        // affiché à la fois : le plus récent des deux écrase l'autre, jamais de file
-                        // d'attente — acceptable, ces alertes sont rares et ≤ 5 s chacune).
-                        for alert in engine.drain_loot_alerts() {
-                            tracing::info!(
-                                name = %alert.name,
-                                quantity = alert.quantity,
-                                "alerte de ramassage (son activé)"
-                            );
-                            alert_sound::play_loot_alert();
-                            let created_at = std::time::Instant::now();
-                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
-                                name: alert.name,
-                                kind: WatchlistKind::Item,
-                                reason: WatchlistToastReason::Loot {
-                                    quantity: alert.quantity,
-                                },
-                                catalog_id: alert.catalog_id,
-                                created_at,
-                                confetti: panels::watchlist::build_confetti(),
-                                hide_at: created_at + panels::watchlist::TOAST_DURATION,
-                            })));
-                        }
-                        let _ = proxy.send_event(UserEvent::NewSnapshot);
-                    }
-                    Ok(Err(err)) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break, // watcher arrêté (process en fin de vie)
-                }
-            }
-        })
-        .expect("échec de création du thread Engine");
 }
 
 /// Thread Auth (lot L4, §7.2 du plan) : résout l'accès au compte AVANT de bloquer sur quoi que ce
