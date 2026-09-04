@@ -30,7 +30,6 @@
 //! `reason: 'countdown'` était câblé jusqu'ici (voir `spawn_engine_thread`).
 
 mod alert_sound;
-mod game_window;
 mod logging;
 
 use std::collections::HashMap;
@@ -44,7 +43,6 @@ use std::thread;
 use arc_swap::ArcSwap;
 use crossbeam_channel::RecvTimeoutError;
 use egui_wgpu::wgpu;
-use game_window::{GameRect, GameWindowTracker};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{
@@ -52,6 +50,7 @@ use overlay_engine::{
 };
 use overlay_ingest::discovery;
 use overlay_sync::AccountSettings;
+use overlay_ui::game_window::{GameRect, GameWindowTracker};
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;

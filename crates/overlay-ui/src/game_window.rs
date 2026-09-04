@@ -22,9 +22,20 @@
 //! `overlay_engine::session`, doc de module). `scan()` collecte maintenant **toutes** les fenêtres
 //! correspondantes à chaque appel.
 //!
-//! Windows uniquement pour l'instant (S3 — spike X11/Linux — différé, voir
-//! `docs/plan-architecture.md` §12). `imp` ci-dessous bascule vers une implémentation vide sur les
-//! autres OS pour que le reste d'`overlay-ui` n'ait pas besoin de `#[cfg]` disséminés.
+//! **Windows** (`imp` sous `#[cfg(target_os = "windows")]`) : `EnumWindows`/`DwmGetWindowAttribute`,
+//! production depuis L2. **Linux/X11** (`imp` sous `#[cfg(not(target_os = "windows"))]`, câblé
+//! depuis cette session, §17.2 du plan) : délègue à `overlay_platform::linux::x11` (migré du spike
+//! S3, voir sa doc) — connexion X11 établie PARESSEUSEMENT au premier `scan()`, jamais dans `new()`
+//! (voir la doc de son `imp`). Les deux `imp` exposent la même forme (`GameWindowTracker::new()`,
+//! `scan() -> Vec<(String, GameWindowInfo)>`, `GameRect` commun ci-dessous) pour que le reste
+//! d'`overlay-ui` n'ait besoin d'aucun `#[cfg]` disséminé.
+//!
+//! **Ce que ce câblage ne couvre PAS encore** : aucun point d'entrée Linux réel n'existe (le seul
+//! binaire, `main.rs`, importe `windows::` sans `cfg` et ne compile donc que sous Windows) — ce
+//! module est verifié par `cargo check -p overlay-ui --lib` (compile nativement sous Linux) mais
+//! `scan()` n'est encore appelé par aucun code de production sur cette plateforme. Voir
+//! `docs/plan-architecture.md` §17.2 « État » pour le reste du critère de sortie de S3 (fenêtre
+//! winit réelle, ancrage/topmost/click-through câblés, multi-fenêtres).
 
 /// Rectangle (coordonnées bureau, pixels physiques) de la fenêtre de jeu trouvée.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,25 +204,75 @@ mod imp {
 #[cfg(not(target_os = "windows"))]
 mod imp {
     use super::GameRect;
+    use overlay_platform::linux::x11::GameWindowTracker as X11Tracker;
 
-    /// TODO(S3, différé — voir `docs/plan-architecture.md` §12) : équivalent X11/XWayland
-    /// (`_NET_CLIENT_LIST` + `XGetWindowProperty`/`_NET_WM_NAME` pour le titre et le nom de
-    /// personnage, `_NET_FRAME_EXTENTS` pour le rectangle visible).
+    /// `window` (XID X11) sert de clé stable tant que la fenêtre vit — même rôle que `hwnd` côté
+    /// Windows (voir `main.rs::sync_windows`, qui diffusera un jour un scan Linux contre l'état
+    /// précédent par cette clé, comme il le fait déjà par `hwnd`).
     #[derive(Debug, Clone, Copy)]
     pub struct GameWindowInfo {
+        pub window: u32,
         pub rect: GameRect,
     }
 
-    #[derive(Debug, Default)]
-    pub struct GameWindowTracker;
+    /// Connexion X11 établie PARESSEUSEMENT au premier `scan()`, jamais dans `new()` : un
+    /// `overlay-ui` construit dans un contexte sans `$DISPLAY` (session headless, futur test) ne
+    /// doit pas paniquer avant même d'avoir tenté d'afficher quoi que ce soit — c'est `new()` qui
+    /// est appelé à la construction de l'`App`, bien avant que quiconque ne se soucie de savoir si
+    /// une fenêtre de jeu existe. Échec de connexion persistant (`connect_failed`, jamais retenté
+    /// une fois établi) : `scan()` renvoie alors une liste vide, jamais un crash — même politique
+    /// que `overlay_platform::linux::x11::GameWindowTracker::scan` face à un WM non-EWMH (voir sa
+    /// doc).
+    #[derive(Default)]
+    pub struct GameWindowTracker {
+        tracker: Option<X11Tracker>,
+        connect_failed: bool,
+    }
+
+    impl std::fmt::Debug for GameWindowTracker {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("GameWindowTracker").finish_non_exhaustive()
+        }
+    }
 
     impl GameWindowTracker {
         pub fn new() -> Self {
-            Self
+            Self::default()
         }
 
+        /// Toutes les fenêtres de jeu actuellement visibles — voir la doc de module pour le
+        /// contrat partagé avec l'`imp` Windows. `Vec::new()` tant qu'aucune connexion X11 n'a pu
+        /// être établie (voir la doc de `GameWindowTracker`), jamais un crash.
         pub fn scan(&mut self) -> Vec<(String, GameWindowInfo)> {
-            Vec::new()
+            if self.tracker.is_none() && !self.connect_failed {
+                match X11Tracker::connect() {
+                    Ok(tracker) => self.tracker = Some(tracker),
+                    Err(_) => self.connect_failed = true,
+                }
+            }
+            let Some(tracker) = &self.tracker else {
+                return Vec::new();
+            };
+            tracker
+                .scan()
+                .into_iter()
+                .map(|(character_name, info)| {
+                    let rect = GameRect {
+                        left: info.rect.left,
+                        top: info.rect.top,
+                        width: info.rect.width,
+                        height: info.rect.height,
+                        client_top: info.rect.client_top,
+                    };
+                    (
+                        character_name,
+                        GameWindowInfo {
+                            window: info.window,
+                            rect,
+                        },
+                    )
+                })
+                .collect()
         }
     }
 }

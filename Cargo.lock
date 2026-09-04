@@ -2525,6 +2525,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "overlay-platform"
+version = "0.1.0"
+dependencies = [
+ "x11rb",
+]
+
+[[package]]
 name = "overlay-sync"
 version = "0.1.0"
 dependencies = [
@@ -2569,6 +2576,7 @@ dependencies = [
  "open",
  "overlay-engine",
  "overlay-ingest",
+ "overlay-platform",
  "overlay-sync",
  "pollster",
  "raw-window-handle",
