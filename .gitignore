@@ -9,3 +9,7 @@
 # lui-même (patches/*.patch) est commité, pas la copie complète du crate.
 /vendor/
 spikes/*/vendor/
+
+# Artefact produit par `xtask visual-check` (voir §17.4 du plan : « jamais de blob vidéo/image
+# commité ») — même règle que `spikes/s3-window-linux/.gitignore` pour son `artifact.png`.
+xtask/visual-check.png

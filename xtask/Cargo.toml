@@ -11,3 +11,4 @@ description = "Outillage de CI (docs/plan-architecture.md §8/§11/§17.2) : mem
 overlay-engine = { path = "../crates/overlay-engine" }
 overlay-ingest = { path = "../crates/overlay-ingest" }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+x11rb = { version = "0.14.0", features = ["shape"] }
