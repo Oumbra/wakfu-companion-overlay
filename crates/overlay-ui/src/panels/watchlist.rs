@@ -539,11 +539,13 @@ fn toast_card(
 
     // Zone de clic AVANT la peinture, même motif que `entry_tile`/`control_tile` — la carte
     // ENTIÈRE ferme le toast, pas seulement sa croix (demande utilisateur explicite).
-    let card_response = ui.interact(
-        card_rect,
-        ui.id().with(("loot-alert-card", toast.name.as_str())),
-        egui::Sense::click(),
-    );
+    let card_response = ui
+        .interact(
+            card_rect,
+            ui.id().with(("loot-alert-card", toast.name.as_str())),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
 
     // --- Confettis (peints AVANT la carte pour rester visuellement derrière elle) ---
     let layer_left = center_x - TOAST_LAYER_WIDTH / 2.0;
@@ -637,11 +639,13 @@ fn toast_card(
         ),
         egui::vec2(CLOSE_BTN_SIZE, CLOSE_BTN_SIZE),
     );
-    let close_response = ui.interact(
-        close_rect,
-        ui.id().with(("loot-alert-close", toast.name.as_str())),
-        egui::Sense::click(),
-    );
+    let close_response = ui
+        .interact(
+            close_rect,
+            ui.id().with(("loot-alert-close", toast.name.as_str())),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
     let (close_bg, close_glyph) = if close_response.hovered() {
         (TINT_STRONG, TEXT_BRIGHT)
     } else {
