@@ -7,10 +7,10 @@
 //! doivent pouvoir, à terme, être pilotées indépendamment en visibilité.
 //!
 //! Toujours en LECTURE SEULE (voir `overlay_engine::watchlist` pour la frontière
-//! définitions/compteurs) : les deux premières tuiles ("+"/"−", voir `control_tile`) reprennent la
-//! forme du bandeau web (ajouter un suivi / sélection multiple + suppression) mais restent
-//! INERTES ici — aucun formulaire d'ajout, aucune sélection ne sont câblés côté overlay pour cette
-//! itération (demande utilisateur : "je pense qu'on le fera plus tard quand tu auras tout câblé").
+//! définitions/compteurs) : les deux boutons "+"/"−" (voir `control_button`) reprennent l'intention
+//! du bandeau web (ajouter un suivi / sélection multiple + suppression) mais restent INERTES ici —
+//! aucun formulaire d'ajout, aucune sélection ne sont câblés côté overlay pour cette itération
+//! (demande utilisateur : "je pense qu'on le fera plus tard quand tu auras tout câblé").
 //! Un survol affiche un tooltip explicite plutôt que de laisser un bouton cliquable qui ne ferait
 //! rien silencieusement (retour utilisateur déjà vécu sur le bouton de connexion au compte).
 //!
@@ -35,8 +35,33 @@
 //! - Couleurs du texte du badge : mode `up` en clair neutre, mode `down` avec la valeur COURANTE
 //!   en couleur kamas (`--kama-color`, or) et la cible en gris (`--text-muted`) — miroir de
 //!   `.kpi-count-badge.is-fraction`/`.kpi-count-badge-target`.
+//!
+//! **Refonte 2026-09-06** (retour utilisateur explicite, images de référence à l'appui) — cette
+//! fois pour coller à l'apparence du JEU plutôt qu'à celle du dépôt web :
+//! - Les deux tuiles "+"/"−" (bordure pointillée + glyphe ASCII dessinés à la main) sont
+//!   remplacées par deux VRAIES icônes du jeu (`UiIcons::watchlist_add`/`watchlist_remove`, voir sa
+//!   doc) empilées verticalement (+ au-dessus de −) plutôt que côte à côte — gain de place
+//!   explicitement demandé (34px de large empilés contre 2×58px+écart côte à côte auparavant) ET
+//!   réutilisation d'icônes que l'utilisateur reconnaît déjà dans l'interface du jeu, plutôt que
+//!   des glyphes maison. Éclaircissement au survol précalculé (`ui_icons::brighten`, pas de tint
+//!   dynamique, voir sa doc). Infobulle à GAUCHE désormais (`show_tooltip_left`), pas au-dessus
+//!   comme le reste du panneau — demande explicite pour CES deux boutons précisément.
+//! - Les tuiles OBJET (`WatchlistKind::Item`) n'utilisent plus le dégradé diagonal dessiné à la
+//!   main du point précédent : la texture `Border-<RARETÉ>.webp` correspondante (`UiIcons::
+//!   item_border`, voir sa doc et `docs/design-system.md` §2.4/§7) est peinte par-dessus l'icône,
+//!   exactement l'asset d'emplacement d'objet du jeu — plus fidèle qu'une approximation de
+//!   dégradé mesurée au pixel. Géométrie mesurée une fois par script Python/Pillow sur les 7
+//!   fichiers (identique sur les 7) : fenêtre intérieure = pixels 52..460 d'un canevas 512×512,
+//!   voir `ITEM_BORDER_INNER_MARGIN_RATIO`. Les tuiles ENNEMI (`WatchlistKind::Enemy`) gardent le
+//!   style précédent (fond plat, bordure grise unie) — demande explicite : « pour les monstres, on
+//!   verra ultérieurement comment on fait ».
+//! - Le badge de compteur en pilule (débordant hors du coin bas-droit) est retiré : les captures de
+//!   référence du jeu montrent un simple nombre en texte cerné de noir (même procédé que
+//!   `combat::paint_outlined_text`, réutilisé ici), incrusté DANS le coin bas-droit de la tuile —
+//!   voir `paint_count_inline`. Plus aucun débordement hors tuile : `content_width` n'a donc plus
+//!   besoin de réserver `BADGE_OVERFLOW` (retiré).
 
-use overlay_engine::{CatalogIndex, WakfuRarity, WatchlistEntry, WatchlistKind, WatchlistMode};
+use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -182,40 +207,65 @@ pub fn is_active(toast: Option<&WatchlistToast>, now: std::time::Instant) -> boo
 /// 58×58, coins arrondis 10px — mêmes dimensions que `.kpi` (`tracker-strip.component.css`),
 /// repliée (pas l'état `.expanded` au clic, jamais câblé côté overlay pour l'instant).
 const TILE_SIZE: f32 = 58.0;
-/// Un peu plus que le simple espacement visuel du web (`.kpi-strip { gap: ... }`) : le badge de
-/// compteur déborde maintenant du coin bas-droit de la tuile (voir `count_badge`, miroir de
-/// `overflow: visible` côté web) — assez de marge pour qu'un badge large ("999/999") ne chevauche
-/// pas l'icône de la tuile suivante.
+/// Un peu plus que le simple espacement visuel du web (`.kpi-strip { gap: ... }`) — écart
+/// suffisant pour distinguer clairement deux tuiles adjacentes.
 const TILE_GAP: f32 = 12.0;
 const TILE_ROUNDING: f32 = 10.0;
-/// `app-item-icon [size]="30"` dans le template web — mêmes proportions.
+/// `app-item-icon [size]="30"` dans le template web — mêmes proportions ; ne s'applique plus qu'aux
+/// tuiles ENNEMI (voir `entry_tile`), les tuiles OBJET utilisant désormais `ITEM_ICON_SIZE`.
 const ICON_SIZE: f32 = 30.0;
-/// `bottom:-7px; right:-7px` (`.kpi-count-badge`, `tracker-strip.component.css`) : débordement du
-/// badge de compteur HORS du coin bas-droit de sa tuile (voir `count_badge`) — repris ici comme
-/// constante nommée plutôt qu'un `7.0` répété, pour que `content_width` réserve exactement la même
-/// marge côté DROIT de la dernière tuile. Retour utilisateur 2026-09-02 (capture d'écran à
-/// l'appui) : sans cette marge, le badge de la dernière tuile de la bande était tronqué par le bord
-/// de la fenêtre (dimensionnée pile sur `content_width`, voir `main.rs::watchlist_target_width`) —
-/// invisible pour toutes les tuiles précédentes, dont le badge déborde dans l'espace laissé par
-/// `TILE_GAP` avant la tuile suivante.
-const BADGE_OVERFLOW: f32 = 7.0;
 
-const CONTROL_BORDER: egui::Color32 =
-    egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 90);
-const CONTROL_GLYPH: egui::Color32 =
-    egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 170);
+/// Taille (largeur ET hauteur) des boutons "+"/"−" du bandeau (`UiIcons::watchlist_add`/
+/// `watchlist_remove`) — taille NATIVE de l'asset (34×34), non redimensionnée : contrairement au
+/// socle générique `button_background` (voir `combat::paint_icon_button`), l'utilisateur a fourni
+/// ces icônes directement à la taille voulue.
+const CONTROL_BUTTON_SIZE: f32 = 34.0;
+/// Écart vertical entre le bouton "+" et le bouton "−", empilés (voir doc de module, refonte
+/// 2026-09-06) — volontairement plus serré que `TILE_GAP` (les deux boutons forment un seul groupe
+/// visuel "ajouter/supprimer", pas deux entrées indépendantes).
+const CONTROL_BUTTON_GAP: f32 = 4.0;
 
-/// Largeur de contenu nécessaire pour afficher `entry_count` entrées + les deux tuiles de
-/// contrôle ("+"/"−"), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
+/// Marge intérieure des textures `Border-<RARETÉ>.webp` — mesurée par script Python/Pillow
+/// (bbox de la fenêtre où l'icône doit se peindre, transition alpha/couleur repérée à 52px puis
+/// 460px sur un canevas 512×512, IDENTIQUE sur les 7 fichiers) : voir doc de module et
+/// `docs/design-system.md` §2.4/§7. `1.0 - 2.0 * ITEM_BORDER_INNER_MARGIN_RATIO` donne la fraction
+/// de `TILE_SIZE` correspondant à la fenêtre intérieure (~0.797, `entry_tile`).
+const ITEM_BORDER_INNER_MARGIN_RATIO: f32 = 52.0 / 512.0;
+/// Fraction de la fenêtre intérieure mesurée (voir ci-dessus) effectivement occupée par l'icône
+/// d'objet — pas 100% : les captures de référence (`common-items.png` et consorts, voir
+/// `docs/design-system.md` §7) montrent toujours une petite marge entre l'icône et le cadre, jamais
+/// un remplissage pixel-perfect du carré intérieur.
+const ITEM_ICON_FILL_RATIO: f32 = 0.9;
+/// Taille cible de l'icône d'une tuile OBJET — dérivée des deux constantes ci-dessus plutôt qu'une
+/// valeur fixe indépendante, pour rester proportionnée si `TILE_SIZE` change un jour.
+const ITEM_ICON_SIZE: f32 =
+    TILE_SIZE * (1.0 - 2.0 * ITEM_BORDER_INNER_MARGIN_RATIO) * ITEM_ICON_FILL_RATIO;
+
+/// Marge entre le texte du compteur (voir `paint_count_inline`) et le bord de la tuile — assez
+/// pour rester lisible par-dessus le cadre de rareté (dont le liseré occupe déjà quelques pixels,
+/// voir `ITEM_BORDER_INNER_MARGIN_RATIO`) sans empiéter dessus.
+const COUNT_INSET: f32 = 5.0;
+
+/// Largeur de contenu nécessaire pour afficher `entry_count` entrées + la colonne de contrôle
+/// ("+"/"−" empilés), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
 /// appelant) — utilisée par `main.rs` pour dimensionner dynamiquement la fenêtre Suivi (retour
 /// utilisateur 2026-09-02 : « je ne veux pas de fond, je veux que ça reste transparent, mais [...]
 /// l'overlay n'a pas plus de taille s'il n'y a pas besoin » — une fenêtre plus large que son
 /// contenu reste cliquable/bloquante sur toute sa zone même là où rien n'est visible, l'utilisateur
 /// ne peut alors pas deviner où s'arrête l'overlay). Seule source de vérité pour `TILE_SIZE`/
-/// `TILE_GAP` : `main.rs` ne les duplique pas.
+/// `TILE_GAP`/`CONTROL_BUTTON_SIZE` : `main.rs` ne les duplique pas.
+///
+/// Refonte 2026-09-06 : la colonne de contrôle vaut maintenant `CONTROL_BUTTON_SIZE` de large (les
+/// deux boutons sont empilés, plus côte à côte) au lieu de `2 * TILE_SIZE + TILE_GAP` — et plus
+/// aucune réserve `BADGE_OVERFLOW` : le compteur ne déborde plus de sa tuile (voir
+/// `paint_count_inline`).
 pub fn content_width(entry_count: usize) -> f32 {
-    let tile_count = entry_count as f32 + 2.0; // + les tuiles "+"/"−", toujours présentes
-    tile_count * TILE_SIZE + (tile_count - 1.0).max(0.0) * TILE_GAP + BADGE_OVERFLOW
+    let entries_width = if entry_count == 0 {
+        0.0
+    } else {
+        entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
+    };
+    CONTROL_BUTTON_SIZE + TILE_GAP + entries_width
 }
 
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
@@ -289,32 +339,6 @@ const CONFETTI_FALL_HEIGHT: f32 = 120.0;
 /// Même taille que `.confetti-piece` (8x8px, `loot-alert.component.css`).
 const CONFETTI_SIZE: f32 = 8.0;
 
-/// Miroir des 7 `.rarity-xxx { --rarity-color: ... }` de `styles.css` (thème sombre) —
-/// `WakfuRarity::Old` n'est jamais réellement résolue au runtime (voir sa doc), sa couleur n'a
-/// donc aucune conséquence visible ; conservée à `TEXT_MUTED` par cohérence plutôt qu'une valeur
-/// arbitraire.
-fn rarity_color(rarity: WakfuRarity) -> egui::Color32 {
-    match rarity {
-        WakfuRarity::Old => TEXT_MUTED,
-        WakfuRarity::Common => egui::Color32::from_rgb(0xc8, 0xc8, 0xc8),
-        WakfuRarity::Rare => egui::Color32::from_rgb(0x1d, 0xd1, 0x5f),
-        WakfuRarity::Mythical => egui::Color32::from_rgb(0xd9, 0x7a, 0x00),
-        WakfuRarity::Legendary => egui::Color32::from_rgb(0xc7, 0xd4, 0x00),
-        WakfuRarity::Memory => egui::Color32::from_rgb(0x1f, 0x97, 0xe0),
-        WakfuRarity::Epic => egui::Color32::from_rgb(0xd8, 0x4f, 0xa0),
-        WakfuRarity::Relic => egui::Color32::from_rgb(0x94, 0x50, 0xd9),
-    }
-}
-
-/// Miroir de `color-mix(in srgb, a t%, b)` — mélange canal par canal dans l'espace sRGB (mêmes
-/// composantes que `Color32`, pas de conversion vers un espace linéaire : `color-mix(in srgb, ...)`
-/// est explicitement demandé côté CSS, pas `in oklab`/`in lab`).
-fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
-    let t = t.clamp(0.0, 1.0);
-    let lerp = |x: u8, y: u8| (x as f32 * t + y as f32 * (1.0 - t)).round() as u8;
-    egui::Color32::from_rgb(lerp(a.r(), b.r()), lerp(a.g(), b.g()), lerp(a.b(), b.b()))
-}
-
 /// Dépendances de rendu communes à ce panneau (icônes UI génériques, catalogue, store/cache
 /// d'icônes réelles) — regroupées ici pour que `show` reste sous la limite clippy
 /// `too_many_arguments` une fois `now` ajouté (horloge injectable, voir sa doc et celle de
@@ -364,13 +388,25 @@ pub fn show(
             .min_scrolled_height(TILE_SIZE + 14.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    control_tile(ui, "+", "Ajouter un suivi (bientôt disponible)");
-                    ui.add_space(TILE_GAP);
-                    control_tile(
-                        ui,
-                        "−",
-                        "Sélection multiple / suppression (bientôt disponible)",
-                    );
+                    // Colonne "+"/"−" empilée verticalement (voir doc de module, refonte
+                    // 2026-09-06) — `ui.horizontal` centre ses enfants verticalement par défaut,
+                    // ce qui aligne naturellement cette colonne (34+4+34=72px) sur le centre des
+                    // tuiles d'entrée (58px) juste à côté.
+                    ui.vertical(|ui| {
+                        control_button(
+                            ui,
+                            icons.watchlist_add(),
+                            icons.watchlist_add_hover(),
+                            "Ajouter",
+                        );
+                        ui.add_space(CONTROL_BUTTON_GAP);
+                        control_button(
+                            ui,
+                            icons.watchlist_remove(),
+                            icons.watchlist_remove_hover(),
+                            "Supprimer",
+                        );
+                    });
                     ui.add_space(TILE_GAP);
 
                     for (i, entry) in entries.iter().enumerate() {
@@ -386,16 +422,6 @@ pub fn show(
                             entry,
                         );
                     }
-
-                    // Le badge de compteur (`count_badge`) déborde de `BADGE_OVERFLOW` px hors du coin
-                    // bas-droit de sa tuile, peint directement via `ui.painter()` — donc INVISIBLE pour
-                    // le calcul d'étendue du `ScrollArea` (basé sur l'espace ALLOUÉ par `horizontal`,
-                    // pas sur ce qui est peint hors allocation). Sans cet espace réservé explicitement,
-                    // le badge de la toute dernière tuile reste tronqué par le clip rect du `ScrollArea`
-                    // une fois défilé au maximum (cas plafonné, `WATCHLIST_MAX_CEILING`) — même quand la
-                    // fenêtre elle-même est assez large (voir `content_width`, qui couvre le cas non
-                    // plafonné). Retour utilisateur 2026-09-02, capture d'écran à l'appui.
-                    ui.add_space(BADGE_OVERFLOW);
                 });
             });
 
@@ -537,8 +563,8 @@ fn toast_card(
         egui::vec2(card_width, card_height),
     );
 
-    // Zone de clic AVANT la peinture, même motif que `entry_tile`/`control_tile` — la carte
-    // ENTIÈRE ferme le toast, pas seulement sa croix (demande utilisateur explicite).
+    // Zone de clic AVANT la peinture, même motif que `entry_tile` — la carte ENTIÈRE ferme le
+    // toast, pas seulement sa croix (demande utilisateur explicite).
     let card_response = ui
         .interact(
             card_rect,
@@ -669,86 +695,68 @@ fn toast_card(
     card_response.clicked() || close_response.clicked()
 }
 
-/// Contour d'un rectangle à coins arrondis, comme suivi par un traceur — mêmes 4 arcs que
-/// `rounded_gradient_rect`, mais en simples points (pas un maillage coloré) : sert à faire longer
-/// une bordure en POINTILLÉS (`egui::Shape::dashed_line`, qui ne prend qu'une polyligne) le long
-/// des coins arrondis plutôt que des coins droits — sans ça, `dashed_line` trace tout droit d'un
-/// coin à l'autre et déborde visiblement du remplissage arrondi en dessous (voir `control_tile`).
-fn rounded_rect_outline(rect: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
-    const ARC_SEGMENTS: usize = 6;
-    let radius = radius
-        .min(rect.width() / 2.0)
-        .min(rect.height() / 2.0)
-        .max(0.0);
-    let quarter = std::f32::consts::FRAC_PI_2;
-    let corners = [
-        (
-            egui::pos2(rect.right() - radius, rect.top() + radius),
-            -quarter,
-        ), // haut-droit
-        (
-            egui::pos2(rect.right() - radius, rect.bottom() - radius),
-            0.0,
-        ), // bas-droit
-        (
-            egui::pos2(rect.left() + radius, rect.bottom() - radius),
-            quarter,
-        ), // bas-gauche
-        (
-            egui::pos2(rect.left() + radius, rect.top() + radius),
-            2.0 * quarter,
-        ), // haut-gauche
-    ];
-    let mut points = Vec::with_capacity(corners.len() * (ARC_SEGMENTS + 1) + 1);
-    for (center, start_angle) in corners {
-        for i in 0..=ARC_SEGMENTS {
-            let angle = start_angle + quarter * (i as f32 / ARC_SEGMENTS as f32);
-            points.push(center + radius * egui::vec2(angle.cos(), angle.sin()));
-        }
-    }
-    if let Some(&first) = points.first() {
-        points.push(first); // referme le contour, comme les 4 coins droits d'avant
-    }
-    points
+/// Affiche `text` en infobulle à GAUCHE de `response` (`RectAlign::LEFT`) — demande utilisateur
+/// explicite pour les boutons "+"/"−" du bandeau Suivi (voir doc de module, refonte 2026-09-06),
+/// contrairement au reste de l'UI qui affiche ses tooltips AU-DESSUS (`combat::show_tooltip_above`,
+/// voir sa doc pour le mécanisme de repli sur lequel celle-ci est calquée).
+///
+/// Ces deux boutons sont les tout premiers éléments du bandeau, collés au bord GAUCHE de la
+/// fenêtre Suivi (seulement `WATCHLIST_INNER_MARGIN` de marge, `main.rs` — quelques pixels) : une
+/// tooltip strictement à gauche ("Ajouter"/"Supprimer", bien plus large que cette marge) ne peut
+/// structurellement pas y tenir. `align_alternatives` couvre ce repli exactement comme
+/// `show_tooltip_above` le fait pour le bord opposé (même bug déjà rencontré et corrigé côté
+/// Combat, voir sa doc) : `LEFT_START`/`LEFT_END` d'abord (repli aligné au lieu de centré, qui ne
+/// déborde plus que du côté opposé au bord), `RIGHT*` en tout dernier recours plutôt que de laisser
+/// egui retomber sur son défaut `BOTTOM_START` (« sous la souris », déjà jugé désagréable ailleurs).
+fn show_tooltip_left(response: &egui::Response, text: &str) {
+    let mut tooltip = egui::Tooltip::for_enabled(response);
+    tooltip.popup = tooltip
+        .popup
+        .align(egui::RectAlign::LEFT)
+        .align_alternatives(&[
+            egui::RectAlign::LEFT_START,
+            egui::RectAlign::LEFT_END,
+            egui::RectAlign::RIGHT,
+            egui::RectAlign::RIGHT_START,
+            egui::RectAlign::RIGHT_END,
+        ]);
+    tooltip.show(|ui| {
+        ui.set_max_width(ui.spacing().tooltip_width);
+        ui.label(text);
+    });
 }
 
-/// Tuile "+"/"−" du bandeau web — bordure en pointillés (`egui::Shape::dashed_line`, pas de
-/// primitive "rectangle en pointillés" dans `epaint`) qui longe le contour ARRONDI de la tuile
-/// (voir `rounded_rect_outline`) — retour utilisateur 2026-09-02 : les deux tuiles de contrôle
-/// étaient les deux SEULS éléments de la bande à afficher des coins droits, incohérent avec le
-/// reste (`TILE_ROUNDING` partout ailleurs, y compris le fond plein de CETTE tuile). Signale
-/// visuellement qu'il s'agit d'une action, pas d'une entrée suivie, cohérent avec la charte
-/// `.kpi-add` du web.
-fn control_tile(ui: &mut egui::Ui, glyph: &str, tooltip: &str) {
+/// Bouton "+"/"−" du bandeau — icône du jeu à sa taille NATIVE (`CONTROL_BUTTON_SIZE`, voir sa
+/// doc), fond et glyphe déjà intégrés à l'asset (contrairement à `combat::paint_icon_button`, pas
+/// de socle séparé à composer). `Sense::hover()` seulement, PAS `click()` : ces deux boutons
+/// restent INERTES (voir doc de module) — un survol suffit à afficher l'infobulle explicative
+/// (`show_tooltip_left`), sans laisser croire qu'un clic ferait quoi que ce soit.
+fn control_button(
+    ui: &mut egui::Ui,
+    icon: &egui::TextureHandle,
+    icon_hover: &egui::TextureHandle,
+    tooltip: &str,
+) {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, TILE_ROUNDING, PANEL_BG);
-
-    painter.extend(egui::Shape::dashed_line(
-        &rounded_rect_outline(rect, TILE_ROUNDING),
-        egui::Stroke::new(1.0, CONTROL_BORDER),
-        4.0,
-        3.0,
-    ));
-
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        egui::FontId::proportional(20.0),
-        CONTROL_GLYPH,
-    );
-
-    response.on_hover_text(tooltip);
+        ui.allocate_exact_size(egui::Vec2::splat(CONTROL_BUTTON_SIZE), egui::Sense::hover());
+    let texture = if response.hovered() { icon_hover } else { icon };
+    egui::Image::new(texture).paint_at(ui, rect);
+    show_tooltip_left(&response, tooltip);
 }
 
 /// Tuile d'une entrée suivie : icône réelle si le catalogue la résout et qu'elle a fini de
-/// télécharger (voir doc de module), repli générique sinon — bordure/fond selon la rareté (objet)
-/// ou gris uni (ennemi, voir `tile_style`), badge de compteur ancré HORS du coin bas-droit (voir
-/// `count_badge`). Nom complet en tooltip — jamais tronqué silencieusement sans recours, y compris
-/// avec une icône réelle (contrairement au web, dont l'image elle-même porte souvent assez
-/// d'info visuelle).
+/// télécharger (voir doc de module), repli générique sinon.
+///
+/// Refonte 2026-09-06 (voir doc de module) — deux styles de cadre selon `entry.kind` :
+/// - OBJET : la texture `Border-<RARETÉ>.webp` (`UiIcons::item_border`) est peinte PAR-DESSUS
+///   l'icône, à `TILE_SIZE` — même technique que `combat_frame::CombatFrame::show` (contenu
+///   d'abord, décor ensuite, qui masque proprement tout léger débordement).
+/// - ENNEMI : inchangé (fond plat + bordure grise unie) — pas de rareté, pas d'asset dédié pour
+///   l'instant (demande utilisateur : « pour les monstres, on verra ultérieurement »).
+///
+/// Compteur incrusté dans le coin bas-droit (voir `paint_count_inline`), nom complet en tooltip —
+/// jamais tronqué silencieusement sans recours, y compris avec une icône réelle (contrairement au
+/// web, dont l'image elle-même porte souvent assez d'info visuelle).
 fn entry_tile(
     ui: &mut egui::Ui,
     icons: &UiIcons,
@@ -760,28 +768,9 @@ fn entry_tile(
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
 
-    let (border_color, gradient_from) = match entry.kind {
-        WatchlistKind::Item => {
-            let rarity = catalog.find_item_rarity(&entry.name, entry.catalog_id);
-            let color = rarity_color(rarity);
-            (color, Some(mix(color, PANEL_BG, 0.35)))
-        }
-        WatchlistKind::Enemy => (BORDER_STRONG, None),
-    };
-
-    let painter = ui.painter();
-    match gradient_from {
-        Some(from) => rounded_gradient_rect(painter, rect, TILE_ROUNDING, from, PANEL_BG),
-        None => {
-            painter.rect_filled(rect, TILE_ROUNDING, PANEL_BG);
-        }
-    }
-    painter.rect_stroke(
-        rect,
-        TILE_ROUNDING,
-        egui::Stroke::new(2.0, border_color),
-        egui::StrokeKind::Inside,
-    );
+    // Fond sombre uni dans tous les cas : la texture de bordure d'un OBJET porte déjà tout son
+    // propre contour/couleur/dégradé (voir doc de module), plus besoin de le reconstituer ici.
+    ui.painter().rect_filled(rect, TILE_ROUNDING, PANEL_BG);
 
     let icon_ref = match entry.kind {
         WatchlistKind::Item => catalog.find_item_icon(&entry.name, entry.catalog_id),
@@ -794,114 +783,48 @@ fn entry_tile(
     // `paint_at` peint directement DANS le rect donné (ignore fit_to_exact_size/
     // maintain_aspect_ratio, qui ne s'appliquent qu'au layout via `ui.add`) — même motif que
     // `panels::combat::draw_centered_icon`, pas la peine de les poser ici.
-    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(ICON_SIZE, ICON_SIZE));
+    let icon_size = match entry.kind {
+        WatchlistKind::Item => ITEM_ICON_SIZE,
+        WatchlistKind::Enemy => ICON_SIZE,
+    };
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_size, icon_size));
     match &remote_texture {
         Some(texture) => egui::Image::new(texture).paint_at(ui, icon_rect),
         None => egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect),
     }
 
-    count_badge(ui, rect, entry);
+    match entry.kind {
+        WatchlistKind::Item => {
+            let rarity = catalog.find_item_rarity(&entry.name, entry.catalog_id);
+            egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+        }
+        WatchlistKind::Enemy => {
+            ui.painter().rect_stroke(
+                rect,
+                TILE_ROUNDING,
+                egui::Stroke::new(2.0, BORDER_STRONG),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+
+    paint_count_inline(ui, rect, entry);
 
     response.on_hover_text(&entry.name);
 }
 
-/// Peint un rectangle à coins arrondis rempli d'un dégradé diagonal simple (haut-gauche vers
-/// bas-droite) — miroir de `linear-gradient(to bottom right, from, to 70%)`
-/// (`tracker-strip.component.css`, `.kpi[class*='rarity-']`). Pas de primitive `epaint` pour un
-/// dégradé (`RectShape::fill` est un `Color32` unique) : maillé à la main avec les mêmes coins
-/// arrondis qu'un `Painter::rect_filled` (4 arcs de quelques segments, largement suffisant à
-/// l'échelle d'une tuile de 58px) — chaque sommet reçoit la couleur interpolée selon sa position
-/// sur l'axe diagonal du rectangle (approximation propre d'un dégradé CSS, pas un rendu pixel
-/// identique, invisible à cette taille).
-fn rounded_gradient_rect(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    radius: f32,
-    from: egui::Color32,
-    to: egui::Color32,
-) {
-    const ARC_SEGMENTS: usize = 6;
-    let radius = radius
-        .min(rect.width() / 2.0)
-        .min(rect.height() / 2.0)
-        .max(0.0);
-
-    // Centre de chaque coin + plage d'angle (repère écran, y vers le bas) — même ordre que le
-    // contour d'un rectangle arrondi standard, sens horaire depuis le haut-droit.
-    let quarter = std::f32::consts::FRAC_PI_2;
-    let corners = [
-        (
-            egui::pos2(rect.right() - radius, rect.top() + radius),
-            -quarter,
-        ), // haut-droit
-        (
-            egui::pos2(rect.right() - radius, rect.bottom() - radius),
-            0.0,
-        ), // bas-droit
-        (
-            egui::pos2(rect.left() + radius, rect.bottom() - radius),
-            quarter,
-        ), // bas-gauche
-        (
-            egui::pos2(rect.left() + radius, rect.top() + radius),
-            2.0 * quarter,
-        ), // haut-gauche
-    ];
-
-    let diagonal = (rect.width() * rect.width() + rect.height() * rect.height()).sqrt();
-    let color_at = |p: egui::Pos2| -> egui::Color32 {
-        let along_diagonal = (p - rect.left_top()).dot(rect.right_bottom() - rect.left_top());
-        let t = (along_diagonal / (diagonal * diagonal)).clamp(0.0, 1.0);
-        mix(to, from, t)
-    };
-
-    let mut mesh = egui::Mesh::default();
-    let center_index = mesh.vertices.len() as u32;
-    mesh.vertices.push(egui::epaint::Vertex {
-        pos: rect.center(),
-        uv: egui::epaint::WHITE_UV,
-        color: color_at(rect.center()),
-    });
-
-    let mut outline_indices = Vec::with_capacity(corners.len() * (ARC_SEGMENTS + 1));
-    for (center, start_angle) in corners {
-        for i in 0..=ARC_SEGMENTS {
-            let angle = start_angle + quarter * (i as f32 / ARC_SEGMENTS as f32);
-            let pos = center + radius * egui::vec2(angle.cos(), angle.sin());
-            outline_indices.push(mesh.vertices.len() as u32);
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos,
-                uv: egui::epaint::WHITE_UV,
-                color: color_at(pos),
-            });
-        }
-    }
-
-    for window in outline_indices.windows(2) {
-        mesh.indices
-            .extend_from_slice(&[center_index, window[0], window[1]]);
-    }
-    if let (Some(&first), Some(&last)) = (outline_indices.first(), outline_indices.last()) {
-        mesh.indices.extend_from_slice(&[center_index, last, first]);
-    }
-
-    painter.add(egui::Shape::mesh(mesh));
-}
-
-/// Badge ancré HORS du coin bas-droit de la tuile (miroir de `.kpi-count-badge`, `bottom:-7px;
-/// right:-7px` — la tuile elle-même reste entièrement dégagée, contrairement à la version
-/// précédente qui peignait le badge PAR-DESSUS l'icône). Texte selon le mode (retour utilisateur
-/// 2026-09-02, capture d'écran à l'appui) :
+/// Compteur incrusté dans le coin bas-droit de la tuile — miroir des captures de référence du jeu
+/// (`docs/design-system.md` §7, ex. `rare-items.png` : un simple nombre cerné de noir, PAS de
+/// pastille/pilule de fond) : remplace l'ancien badge en pilule qui débordait hors de la tuile
+/// (voir doc de module, refonte 2026-09-06). Réutilise `combat::paint_outlined_text` (même procédé
+/// que le pourcentage de dégâts sur un portrait) plutôt que de dupliquer la boucle de décalages.
+///
+/// Couleur selon le mode (inchangé depuis la refonte 2026-09-02) :
 /// - `up` : le compte seul, en clair neutre (`TEXT_COLOR`).
 /// - `down` : compte courant EN COULEUR KAMAS (`KAMA_COLOR`) sur cible grisée (`TEXT_MUTED`),
 ///   PAS de conversion en "déjà collecté" (le web n'affiche que `count`/`countdownTarget` bruts).
-///
-/// Forme en pilule (rectangle très arrondi) plutôt qu'un cercle forcé : un cercle imposerait sa
-/// hauteur comme largeur minimale, ce qui déborderait ou tronquerait un texte "10/10" bien plus
-/// large qu'un simple chiffre — la pilule s'adapte à la largeur du texte dans les deux cas.
-fn count_badge(ui: &mut egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
+fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
     let font = egui::FontId::monospace(11.0);
-    let painter = ui.painter();
 
     let (current_text, target_part) = match entry.mode {
         WatchlistMode::Down => (
@@ -916,49 +839,39 @@ fn count_badge(ui: &mut egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry)
         TEXT_COLOR
     };
 
-    let current_galley = painter.layout_no_wrap(current_text, font.clone(), current_color);
-    let target_galley =
-        target_part.map(|text| painter.layout_no_wrap(text, font.clone(), TEXT_MUTED));
+    let right = tile_rect.right() - COUNT_INSET;
+    let bottom = tile_rect.bottom() - COUNT_INSET;
 
-    let text_width = current_galley.size().x + target_galley.as_ref().map_or(0.0, |g| g.size().x);
-    let text_height = current_galley
-        .size()
-        .y
-        .max(target_galley.as_ref().map_or(0.0, |g| g.size().y));
-    let size =
-        (egui::vec2(text_width, text_height) + egui::vec2(12.0, 4.0)).max(egui::vec2(18.0, 16.0));
+    // Le segment "cible" (ex. "/10") est peint EN PREMIER, ancré au coin bas-droit de la tuile ;
+    // le segment "courant" est ensuite peint juste à sa GAUCHE (ancré `RIGHT_BOTTOM` sur la
+    // largeur mesurée du segment cible) — évite de dupliquer la boucle de contour de
+    // `paint_outlined_text` pour composer deux galleys sur une même ligne.
+    let target_width = target_part
+        .as_ref()
+        .map(|text| {
+            ui.painter()
+                .layout_no_wrap(text.clone(), font.clone(), TEXT_MUTED)
+                .size()
+                .x
+        })
+        .unwrap_or(0.0);
 
-    // `bottom:-7px; right:-7px` (CSS) : le coin bas-droit du BADGE se place 7px au-delà du coin
-    // bas-droit de la TUILE, pas de son centre — miroir direct plutôt qu'un simple recentrage sur
-    // le coin.
-    let badge_max = tile_rect.right_bottom() + egui::vec2(BADGE_OVERFLOW, BADGE_OVERFLOW);
-    let badge_rect = egui::Rect::from_min_size(badge_max - size, size);
-
-    painter.rect_filled(badge_rect, badge_rect.height() / 2.0, SURFACE_WELL);
-    painter.rect_stroke(
-        badge_rect,
-        badge_rect.height() / 2.0,
-        egui::Stroke::new(1.0, BORDER_STRONG),
-        egui::StrokeKind::Inside,
-    );
-
-    let text_start = badge_rect.center() - egui::vec2(text_width / 2.0, 0.0);
-    painter.galley(
-        egui::pos2(
-            text_start.x,
-            badge_rect.center().y - current_galley.size().y / 2.0,
-        ),
-        current_galley.clone(),
-        current_color,
-    );
-    if let Some(target_galley) = target_galley {
-        painter.galley(
-            egui::pos2(
-                text_start.x + current_galley.size().x,
-                badge_rect.center().y - target_galley.size().y / 2.0,
-            ),
-            target_galley,
+    if let Some(target_text) = &target_part {
+        super::combat::paint_outlined_text(
+            ui,
+            egui::pos2(right, bottom),
+            egui::Align2::RIGHT_BOTTOM,
+            target_text,
+            font.clone(),
             TEXT_MUTED,
         );
     }
+    super::combat::paint_outlined_text(
+        ui,
+        egui::pos2(right - target_width, bottom),
+        egui::Align2::RIGHT_BOTTOM,
+        &current_text,
+        font,
+        current_color,
+    );
 }

@@ -53,26 +53,27 @@ redraw identiques pour les deux) : seul `kind` distingue la taille, l'ancrage et
   fixe plus généreuse (fraction de la fenêtre de jeu) restait un problème dans l'autre sens — une
   fenêtre transparente plus large que son contenu réel reste cliquable/bloquante sur toute sa zone
   (pas de test de transparence par pixel côté Win32), l'utilisateur ne pouvait alors pas deviner où
-  s'arrêtait l'overlay. Bande de tuiles carrées à l'image du bandeau du dépôt web
-  (`tracker-strip.component`/`.kpi`, **rendu refondu 2026-09-02 pour rester raccord avec le web** :
-  bordure/fond en dégradé selon la RARETÉ de l'objet — `overlay_engine::WakfuRarity`, couleurs de
-  `styles.css` — bordure grise unie pour un ennemi ; badge de compteur ancré HORS du coin bas-droit
-  de la tuile, plus par-dessus l'icône ; valeur courante d'un décompte en couleur kamas, cible en
-  gris) : tuiles "+"/"−" reprenant la forme du web mais INERTES pour l'instant (aucun formulaire
-  d'ajout ni sélection multiple câblés côté overlay), puis une tuile par entrée suivie — icône
+  s'arrêtait l'overlay. Bande de tuiles carrées, **rendu refondu 2026-09-06 pour coller à
+  l'apparence du JEU plutôt qu'à celle du dépôt web** : les tuiles OBJET (`overlay_engine::
+  WakfuRarity`) sont désormais habillées de la vraie texture d'emplacement d'objet du jeu par
+  rareté (`assets/items/Border-<RARETÉ>.webp`, `UiIcons::item_border` — voir
+  `docs/design-system.md` §2.4/§7), les tuiles ENNEMI gardant un fond plat + bordure grise unie
+  (pas de rareté, pas encore d'asset dédié) ; le compteur n'est plus une pilule qui déborde hors de
+  la tuile mais un simple nombre incrusté dans son coin bas-droit, cerné de noir comme dans le jeu
+  (`paint_count_inline`) — valeur courante d'un décompte en couleur kamas, cible en gris. Les deux
+  boutons "+"/"−" sont désormais deux VRAIES icônes du jeu (`UiIcons::watchlist_add`/
+  `watchlist_remove`) empilées verticalement (34px de large, gain de place) plutôt que deux tuiles
+  dessinées à la main côte à côte — toujours INERTES (aucun formulaire d'ajout ni sélection
+  multiple câblés côté overlay), infobulle à GAUCHE au survol (`show_tooltip_left`, seul endroit du
+  panneau à ne pas suivre `combat::show_tooltip_above`). Puis une tuile par entrée suivie — icône
   réelle résolue par le catalogue, repli sur l'icône générique tant qu'elle n'est pas
-  résolue/téléchargée ; nom complet en tooltip, badge `"3"` en mode incrémental / `"5/10"`
-  compte/cible en mode décompte. Barre de défilement horizontale fine et flottante
+  résolue/téléchargée ; nom complet en tooltip. Barre de défilement horizontale fine et flottante
   (`ScrollStyle::thin()`, retour utilisateur : le style natif large et gris « passe sur les
   objets », « pas très moderne ») plutôt que la barre native épaisse. Toujours en LECTURE SEULE
   côté définitions (la liste elle-même reste éditée sur le web) ; les compteurs, eux, sont
   incrémentés — et persistés localement — par l'overlay (voir `overlay_engine::watchlist`,
   `docs/plan-architecture.md` §14 point 3). N'apparaît pas tant que le compte ne déclare aucune
-  entrée. Le badge déborde de `BADGE_OVERFLOW` (7px, miroir CSS `bottom:-7px; right:-7px`) hors du
-  coin bas-droit de sa tuile — réservé à la fois dans `content_width` (largeur de FENÊTRE) et par un
-  `ui.add_space` de fin dans le `ScrollArea` lui-même (étendue de DÉFILEMENT, pour le cas plafonné
-  par `WATCHLIST_MAX_CEILING`) : sans les deux, le badge de la toute dernière tuile de la bande
-  restait tronqué (retour utilisateur 2026-09-02, capture d'écran à l'appui).
+  entrée.
 
 **Icônes réelles d'objets/monstres** (`remote_icons.rs`, lot L3 réduit — retour utilisateur
 2026-09-02 : icône générique partout, tuiles impossibles à distinguer) : `spawn_catalog_thread`

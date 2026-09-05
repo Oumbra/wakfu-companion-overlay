@@ -19,7 +19,7 @@ egui = "0.36.1"
 egui-wgpu = "0.36.1"
 egui-winit = "0.36.1"
 global-hotkey = "0.8.0"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 open = "5"
 pollster = "1.0.1"
 raw-window-handle = "0.6"

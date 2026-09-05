@@ -913,7 +913,7 @@ mod tests {
 /// ombre décalée d'un côté (ancienne version) reste illisible dès que ce fond est clair de ce
 /// côté-là. Même procédé que les incrustations du jeu lui-même (référence utilisateur, capture
 /// d'écran à l'appui : pourcentage de vie en blanc cerné de noir).
-fn paint_outlined_text(
+pub(crate) fn paint_outlined_text(
     ui: &egui::Ui,
     pos: egui::Pos2,
     align: egui::Align2,

@@ -92,16 +92,24 @@ bord sombre (bas-droit) sur le cadre carré de l'emplacement d'objet (~64×64 px
 > directement plutôt que les couleurs mesurées ci-dessus (approximation par échantillonnage de
 > pixels, voir §8). Format WebP avec alpha : décodable par la crate `image` déjà utilisée par
 > `overlay-ui` en activant sa feature `webp` (décodeur pur Rust `image-webp`, aucune dépendance
-> système — seule la feature `png` est activée aujourd'hui, voir `crates/overlay-ui/Cargo.toml`).
-> Pas encore embarquées dans `crates/overlay-ui/assets/` : aucun composant ne les affiche pour
-> l'instant, donc pas de copie dans le binaire tant que ce n'est pas le cas (budget mémoire, voir
-> `CLAUDE.md`) — seule la copie de référence à la racine du dépôt existe.
+> système).
 >
-> **Reste à déterminer avant intégration** : le ratio entre la taille de l'icône d'objet et celle
-> de la bordure — même problème déjà résolu une fois pour les médaillons du cadre de combat (un
-> facteur d'échelle empirique ≈0.3116 avait dû être mesuré entre le rond du template et le portrait
-> 48×48, voir la doc de module de `crates/overlay-ui/src/panels/combat_frame.rs`) — à mesurer sur
-> ces nouveaux fichiers avant tout code d'intégration.
+> **Intégrées le 2026-09-06** (`panels::watchlist::entry_tile`, refonte des tuiles OBJET du bandeau
+> Suivi — voir le README du crate et la doc de module de `watchlist.rs`) : la feature `webp` est
+> activée dans `crates/overlay-ui/Cargo.toml`, les 7 fichiers copiés dans
+> `crates/overlay-ui/assets/items/` (embarqués via `include_bytes!`, chargés une fois par
+> `UiIcons::load`, voir `ui_icons.rs`) et peints PAR-DESSUS l'icône d'objet (même ordre
+> contenu-d'abord/décor-ensuite que `combat_frame::CombatFrame::show`).
+>
+> **Géométrie mesurée** (script Python/Pillow, scan des transitions alpha le long des axes
+> horizontal ET vertical centraux, IDENTIQUE sur les 7 fichiers) : la fenêtre intérieure où poser
+> l'icône occupe les pixels `52..460` des deux côtés d'un canevas 512×512 — soit une marge de 52px
+> symétrique (`52 + 408 + 52 = 512`), retenue comme `ITEM_BORDER_INNER_MARGIN_RATIO = 52.0/512.0`
+> dans `watchlist.rs`. Contrairement aux médaillons du cadre de combat (facteur ≈0.3116 mesuré sur
+> le RÉSULTAT visuel, portrait natif non redimensionné, voir `combat_frame.rs`), l'icône d'objet ICI
+> est explicitement redimensionnée à `ITEM_ICON_SIZE` (≈90 % de la fenêtre mesurée,
+> `ITEM_ICON_FILL_RATIO`) plutôt que collée à sa taille native — les icônes distantes
+> (`remote_icons.rs`) n'ont pas de taille native fixe commune contrairement aux portraits de classe.
 
 ---
 
