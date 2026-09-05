@@ -32,6 +32,7 @@ use overlay_engine::{
     WatchlistMode,
 };
 use overlay_ingest::Tailer;
+use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::watchlist::{
@@ -347,4 +348,81 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
 
     harness.run();
     harness.snapshot("watchlist_avec_toast_ramassage");
+}
+
+/// Reproduit le bug rapporté 2026-09-06 (deux captures d'écran à l'appui, boutons "+"/"−" du
+/// bandeau Suivi) : l'infobulle "Ajouter"/"Supprimer" s'affichait à DROITE du bouton au lieu de
+/// GAUCHE. Cause : `RectAlign::LEFT` (voir `panels::watchlist::show_tooltip_left`) ne peut tenir
+/// que si la fenêtre a RÉELLEMENT de la place à gauche du bouton — or la fenêtre Suivi est
+/// dimensionnée pile sur son contenu (`content_width`), et la colonne de contrôle en est le tout
+/// premier élément, collée au bord gauche. `Harness::new_ui` (canevas 800×600 par défaut,
+/// utilisé par les autres tests de ce fichier) aurait masqué le bug en donnant une marge gauche
+/// que la fenêtre RÉELLE n'a jamais : ce test construit donc le harnais à la largeur EXACTE que
+/// `main.rs` calculerait pour une seule entrée (`content_width(1)`, même marge 6px de chaque
+/// côté que `render_content::paint_content`), seule façon de reproduire fidèlement la contrainte.
+///
+/// Position de survol dérivée de la mise en page (voir `panels::watchlist` : `CONTROL_TOOLTIP_
+/// RESERVE`, `CONTROL_BUTTON_SIZE`, `CONTROL_BUTTON_GAP`, privées à ce module — donc recalculées
+/// ici à la main plutôt qu'importées), plus l'`outer_margin(8.0)` fixe qu'`egui_kittest::AppKind::
+/// run_ui` ajoute lui-même autour de tout harnais `build_ui` : x = 8 (harnais) + 6 (marge Suivi) +
+/// 88 (réserve) + 17 (moitié de 34, centre du bouton) = 119 ; y du bouton "+" = 8 + 6 + 17 = 31,
+/// y du bouton "−" = 31 + 34 + 4 (`CONTROL_BUTTON_GAP`) = 69.
+#[test]
+fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let entries = vec![WatchlistEntry {
+        name: "Bottes Lantha".to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Down,
+        count: 0,
+        countdown_target: 1,
+        catalog_id: None,
+    }];
+
+    let window_width = panels::watchlist::content_width(1) + 12.0;
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, 150.0))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    combat_side: &mut combat_side,
+                    watchlist: &entries,
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    now,
+                },
+            );
+        });
+
+    harness.run();
+
+    harness.hover_at(egui::pos2(119.0, 31.0));
+    harness.run();
+    harness.snapshot("watchlist_tooltip_ajouter_a_gauche");
+
+    harness.hover_at(egui::pos2(119.0, 69.0));
+    harness.run();
+    harness.snapshot("watchlist_tooltip_supprimer_a_gauche");
 }

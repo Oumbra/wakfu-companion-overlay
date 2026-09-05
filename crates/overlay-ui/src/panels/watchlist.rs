@@ -48,13 +48,28 @@
 //!   comme le reste du panneau — demande explicite pour CES deux boutons précisément.
 //! - Les tuiles OBJET (`WatchlistKind::Item`) n'utilisent plus le dégradé diagonal dessiné à la
 //!   main du point précédent : la texture `Border-<RARETÉ>.webp` correspondante (`UiIcons::
-//!   item_border`, voir sa doc et `docs/design-system.md` §2.4/§7) est peinte par-dessus l'icône,
-//!   exactement l'asset d'emplacement d'objet du jeu — plus fidèle qu'une approximation de
+//!   item_border`, voir sa doc et `docs/design-system.md` §2.4/§7), exactement l'asset
+//!   d'emplacement d'objet du jeu, sert de fond de la tuile — plus fidèle qu'une approximation de
 //!   dégradé mesurée au pixel. Géométrie mesurée une fois par script Python/Pillow sur les 7
 //!   fichiers (identique sur les 7) : fenêtre intérieure = pixels 52..460 d'un canevas 512×512,
 //!   voir `ITEM_BORDER_INNER_MARGIN_RATIO`. Les tuiles ENNEMI (`WatchlistKind::Enemy`) gardent le
 //!   style précédent (fond plat, bordure grise unie) — demande explicite : « pour les monstres, on
 //!   verra ultérieurement comment on fait ».
+//!
+//! **Correctif same-day** (retour utilisateur, captures d'écran jeu/overlay à l'appui) : la
+//! première version de ce point peignait la texture de bordure PAR-DESSUS l'icône. Or la fenêtre
+//! intérieure de ces textures (52..460, ci-dessus) n'est PAS un trou transparent — un script
+//! Python/Pillow sur les octets décodés le confirme : c'est un aplat semi-transparent (~70 %
+//! d'opacité) teinté par la rareté (ex. `Border-LEGENDARY.webp` → `(139,149,0)`, un olive/jaune).
+//! Peinte après l'icône, cette texture recouvrait donc l'icône ENTIÈRE d'un voile coloré — d'où le
+//! rendu « en opacité » constaté (« j'ai l'impression que tu as mis les objets en opacité »),
+//! flagrant sur les raretés à teinte franche (jaune/olive), plus discret sur une rareté déjà proche
+//! en teinte de l'icône (ex. orangé). Le fond est maintenant peint EN PREMIER (comme un dégradé de
+//! fond classique), l'icône ENSUITE par-dessus, opaque : elle recouvre l'essentiel de cet aplat, ne
+//! laissant dépasser que l'anneau de rareté et un mince liseré — exactement le rendu du jeu. Icône
+//! aussi agrandie (`ITEM_ICON_FILL_RATIO` 0.9 → 0.96, second retour du même message : « les objets
+//! doivent être plus gros ») : rien n'empêche plus de s'approcher du bord de la fenêtre intérieure
+//! maintenant que la bordure ne risque plus de la recouvrir.
 //! - Le badge de compteur en pilule (débordant hors du coin bas-droit) est retiré : les captures de
 //!   référence du jeu montrent un simple nombre en texte cerné de noir (même procédé que
 //!   `combat::paint_outlined_text`, réutilisé ici), incrusté DANS le coin bas-droit de la tuile —
@@ -224,6 +239,31 @@ const CONTROL_BUTTON_SIZE: f32 = 34.0;
 /// 2026-09-06) — volontairement plus serré que `TILE_GAP` (les deux boutons forment un seul groupe
 /// visuel "ajouter/supprimer", pas deux entrées indépendantes).
 const CONTROL_BUTTON_GAP: f32 = 4.0;
+/// Espace réservé à GAUCHE de la colonne de contrôle, pour que l'infobulle de `control_button`
+/// (`show_tooltip_left`) ait matériellement la place de s'afficher à gauche — retour utilisateur
+/// 2026-09-06, capture d'écran à l'appui : sans cette réserve, l'infobulle s'affichait à DROITE du
+/// bouton (chevauchant la première tuile) malgré `RectAlign::LEFT` demandé, car la fenêtre Suivi
+/// est dimensionnée pile sur son contenu (`content_width`) — la colonne de contrôle est le tout
+/// premier élément, collé au bord gauche de la fenêtre à quelques pixels de marge près
+/// (`WATCHLIST_INNER_MARGIN`, `main.rs`) : `RectAlign::find_best_align` (voir sa doc,
+/// `combat::show_tooltip_above`) rejette alors LEFT/LEFT_START/LEFT_END, aucun n'y tenant, et
+/// retombe sur RIGHT — PHYSIQUEMENT, une popup ne peut pas se peindre en dehors de la fenêtre qui
+/// la contient (contrairement à `combat::show_tooltip_above`, où le problème ne concernait qu'un
+/// AXE d'alignement, ici il n'existe aucun repli qui n'exige pas de place à gauche).
+///
+/// Valeur mesurée (pas devinée) : rendu offscreen du bouton survolé sur un canevas large (sans
+/// contrainte de bord), diff pixel par pixel avec le même rendu non survolé — l'infobulle
+/// "Supprimer" (le plus long des deux libellés) occupe alors ~74px de large avec ~4px d'écart
+/// depuis le bord du bouton, soit ~78px de pied total ; arrondi à 88px pour absorber marge
+/// d'erreur de mesure/anticrénelage.
+///
+/// **Contrepartie assumée** : `content_width` (donc la largeur de FENÊTRE) grandit d'autant, et la
+/// fenêtre Suivi étant centrée horizontalement sur cette largeur (`main.rs::anchor_position`), la
+/// bande de tuiles visible se retrouve décalée d'environ la moitié de cette réserve (~44px) à
+/// DROITE du centre réel de la fenêtre de jeu — même compromis déjà accepté pour l'élargissement
+/// temporaire du toast (`TOAST_LAYER_WIDTH`, `toast_card`), ici permanent tant que la bande est
+/// affichée plutôt que ponctuel.
+const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
 
 /// Marge intérieure des textures `Border-<RARETÉ>.webp` — mesurée par script Python/Pillow
 /// (bbox de la fenêtre où l'icône doit se peindre, transition alpha/couleur repérée à 52px puis
@@ -234,8 +274,10 @@ const ITEM_BORDER_INNER_MARGIN_RATIO: f32 = 52.0 / 512.0;
 /// Fraction de la fenêtre intérieure mesurée (voir ci-dessus) effectivement occupée par l'icône
 /// d'objet — pas 100% : les captures de référence (`common-items.png` et consorts, voir
 /// `docs/design-system.md` §7) montrent toujours une petite marge entre l'icône et le cadre, jamais
-/// un remplissage pixel-perfect du carré intérieur.
-const ITEM_ICON_FILL_RATIO: f32 = 0.9;
+/// un remplissage pixel-perfect du carré intérieur. Relevé de 0.9 à 0.96 (retour utilisateur : «
+/// les objets doivent être plus gros ») une fois le fond de bordure repeint EN DESSOUS de l'icône
+/// (voir doc de module, correctif same-day) — plus aucun risque que la bordure recouvre un débord.
+const ITEM_ICON_FILL_RATIO: f32 = 0.96;
 /// Taille cible de l'icône d'une tuile OBJET — dérivée des deux constantes ci-dessus plutôt qu'une
 /// valeur fixe indépendante, pour rester proportionnée si `TILE_SIZE` change un jour.
 const ITEM_ICON_SIZE: f32 =
@@ -258,14 +300,16 @@ const COUNT_INSET: f32 = 5.0;
 /// Refonte 2026-09-06 : la colonne de contrôle vaut maintenant `CONTROL_BUTTON_SIZE` de large (les
 /// deux boutons sont empilés, plus côte à côte) au lieu de `2 * TILE_SIZE + TILE_GAP` — et plus
 /// aucune réserve `BADGE_OVERFLOW` : le compteur ne déborde plus de sa tuile (voir
-/// `paint_count_inline`).
+/// `paint_count_inline`). `CONTROL_TOOLTIP_RESERVE` ajoutée le même jour (voir sa doc) : espace à
+/// gauche de la colonne pour que l'infobulle "Ajouter"/"Supprimer" puisse réellement s'afficher à
+/// gauche plutôt que de retomber à droite faute de place.
 pub fn content_width(entry_count: usize) -> f32 {
     let entries_width = if entry_count == 0 {
         0.0
     } else {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
-    CONTROL_BUTTON_SIZE + TILE_GAP + entries_width
+    CONTROL_TOOLTIP_RESERVE + CONTROL_BUTTON_SIZE + TILE_GAP + entries_width
 }
 
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
@@ -388,6 +432,11 @@ pub fn show(
             .min_scrolled_height(TILE_SIZE + 14.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    // Réserve à GAUCHE de la colonne de contrôle pour que son infobulle ait la
+                    // place de s'afficher à gauche (voir `CONTROL_TOOLTIP_RESERVE`) — zone
+                    // transparente, aucun élément peint ni interactif dedans.
+                    ui.add_space(CONTROL_TOOLTIP_RESERVE);
+
                     // Colonne "+"/"−" empilée verticalement (voir doc de module, refonte
                     // 2026-09-06) — `ui.horizontal` centre ses enfants verticalement par défaut,
                     // ce qui aligne naturellement cette colonne (34+4+34=72px) sur le centre des
@@ -747,12 +796,14 @@ fn control_button(
 /// Tuile d'une entrée suivie : icône réelle si le catalogue la résout et qu'elle a fini de
 /// télécharger (voir doc de module), repli générique sinon.
 ///
-/// Refonte 2026-09-06 (voir doc de module) — deux styles de cadre selon `entry.kind` :
-/// - OBJET : la texture `Border-<RARETÉ>.webp` (`UiIcons::item_border`) est peinte PAR-DESSUS
-///   l'icône, à `TILE_SIZE` — même technique que `combat_frame::CombatFrame::show` (contenu
-///   d'abord, décor ensuite, qui masque proprement tout léger débordement).
-/// - ENNEMI : inchangé (fond plat + bordure grise unie) — pas de rareté, pas d'asset dédié pour
-///   l'instant (demande utilisateur : « pour les monstres, on verra ultérieurement »).
+/// Deux styles de cadre selon `entry.kind` :
+/// - OBJET : la texture `Border-<RARETÉ>.webp` (`UiIcons::item_border`) sert de FOND de la tuile,
+///   peinte AVANT l'icône (voir doc de module, correctif same-day) — sa fenêtre intérieure n'est
+///   pas un trou transparent mais un aplat teinté par la rareté, l'icône (opaque) peinte par-dessus
+///   en recouvre l'essentiel, ne laissant dépasser que l'anneau de rareté et un mince liseré.
+/// - ENNEMI : inchangé (fond plat + bordure grise unie, peinte après l'icône — un simple contour ne
+///   craint pas cet ordre) — pas de rareté, pas d'asset dédié pour l'instant (demande utilisateur :
+///   « pour les monstres, on verra ultérieurement »).
 ///
 /// Compteur incrusté dans le coin bas-droit (voir `paint_count_inline`), nom complet en tooltip —
 /// jamais tronqué silencieusement sans recours, y compris avec une icône réelle (contrairement au
@@ -768,9 +819,20 @@ fn entry_tile(
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
 
-    // Fond sombre uni dans tous les cas : la texture de bordure d'un OBJET porte déjà tout son
-    // propre contour/couleur/dégradé (voir doc de module), plus besoin de le reconstituer ici.
+    // Fond sombre uni dans tous les cas — pour un ENNEMI, seul fond de la tuile (voir plus bas) ;
+    // pour un OBJET, simple filet visible sous les coins arrondis de la texture de bordure peinte
+    // juste après (celle-ci a ses propres coins arrondis avec un alpha dégradé, voir doc de
+    // module), jamais sa couleur dominante.
     ui.painter().rect_filled(rect, TILE_ROUNDING, PANEL_BG);
+
+    // OBJET seulement : fond de bordure peint ICI, AVANT l'icône (voir doc de la fonction) —
+    // l'ordre inverse (bordure après icône) est le bug corrigé le jour même : la fenêtre
+    // "intérieure" de cette texture n'est pas transparente, peinte après elle voilait l'icône
+    // entière d'un aplat teinté par la rareté.
+    if let WatchlistKind::Item = entry.kind {
+        let rarity = catalog.find_item_rarity(&entry.name, entry.catalog_id);
+        egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+    }
 
     let icon_ref = match entry.kind {
         WatchlistKind::Item => catalog.find_item_icon(&entry.name, entry.catalog_id),
@@ -793,19 +855,13 @@ fn entry_tile(
         None => egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect),
     }
 
-    match entry.kind {
-        WatchlistKind::Item => {
-            let rarity = catalog.find_item_rarity(&entry.name, entry.catalog_id);
-            egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
-        }
-        WatchlistKind::Enemy => {
-            ui.painter().rect_stroke(
-                rect,
-                TILE_ROUNDING,
-                egui::Stroke::new(2.0, BORDER_STRONG),
-                egui::StrokeKind::Inside,
-            );
-        }
+    if let WatchlistKind::Enemy = entry.kind {
+        ui.painter().rect_stroke(
+            rect,
+            TILE_ROUNDING,
+            egui::Stroke::new(2.0, BORDER_STRONG),
+            egui::StrokeKind::Inside,
+        );
     }
 
     paint_count_inline(ui, rect, entry);
