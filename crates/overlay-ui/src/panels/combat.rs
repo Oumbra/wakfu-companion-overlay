@@ -583,15 +583,25 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, to
 /// TARD d'ouvrir un panneau d'options »), seule l'infobulle "Options" au survol est déjà là.
 /// Toujours peinte, quel que soit l'état du combat affiché : ce ne sont pas des actions liées au
 /// combat, contrairement au reste du panneau.
+///
+/// **Refonte 2026-09-05 (14e retour)** : marge à gauche du premier bouton (lien externe) ajoutée,
+/// de la MÊME valeur que l'écart entre les deux boutons (`ICON_BUTTON_GAP`) — retour utilisateur
+/// explicite (« j'aimerais que tu appliques le même nombre de pixels entre le premier icône bouton
+/// et le bord »). Auparavant collé au bord gauche du panneau, ce qui causait aussi le bug de
+/// tooltip corrigé au même retour (voir `show_tooltip_above`).
 fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
     let (row_rect, _) = ui.allocate_exact_size(
-        egui::vec2(ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_GAP, ICON_BUTTON_SIZE),
+        egui::vec2(
+            ICON_BUTTON_GAP + ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_GAP,
+            ICON_BUTTON_SIZE,
+        ),
         egui::Sense::hover(),
     );
+    let external_link_top_left = row_rect.min + egui::vec2(ICON_BUTTON_GAP, 0.0);
 
     let external_link_response = paint_icon_button(
         ui,
-        row_rect.min,
+        external_link_top_left,
         icons.button_background(),
         icons.button_background_hover(),
         icons.external_link_icon(),
@@ -604,7 +614,8 @@ fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
         let _ = open::that(overlay_sync::client::base_url());
     }
 
-    let options_top_left = row_rect.min + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_GAP, 0.0);
+    let options_top_left =
+        external_link_top_left + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_GAP, 0.0);
     let options_response = paint_icon_button(
         ui,
         options_top_left,
@@ -952,15 +963,32 @@ fn paint_outlined_text(
 /// widget (coin bas-gauche), au même titre que `BOTTOM` ; seul l'ancien réglage PAR DÉFAUT d'egui
 /// pour une tooltip combine cet alignement à un anchor "widget entier" sans jamais essayer `TOP`
 /// en premier, ce qui donnait l'impression d'un simple "en dessous" désagréable pour l'utilisateur.
-/// Les tooltips avec assez de place au-dessus (l'immense majorité — portraits, bouton "lien
-/// externe") gardent `TOP` sans changement visible ; seul le switch bascule en dessous.
+///
+/// **Refonte 2026-09-05 (14e retour)** : bug analogue rapporté sur le bouton lien externe
+/// (`bottom_toolbar`, capture à l'appui) une fois celui-ci déplacé au 11e retour dans la barre
+/// d'outils du bas, collée au bord GAUCHE — exactement la même cause que ci-dessus ("Alliés"),
+/// mais l'ancien repli ne la couvrait pas : TOP échoue (déborde à gauche), et TOUS les replis
+/// listés (`BOTTOM*`) sont des variantes EN DESSOUS — dès que TOP échoue pour n'importe quelle
+/// raison, la tooltip finit toujours en dessous, jamais au-dessus, même quand `TOP_START` (aligné
+/// au bord au lieu de centré, comme `BOTTOM_START` mais AU-DESSUS) aurait parfaitement tenu. Le
+/// bouton Options, juste à côté mais plus loin du bord (voir `ICON_BUTTON_GAP` dans
+/// `bottom_toolbar`), ne débordait pas et gardait donc `TOP` sans jamais révéler le problème.
+/// `TOP_START`/`TOP_END` ajoutés AVANT les replis `BOTTOM*` : un widget proche d'un bord horizontal
+/// reste maintenant au-dessus (juste réaligné) tant qu'il reste de la place au-dessus tout court —
+/// les replis `BOTTOM*` ne restent un dernier recours que s'il n'y a RÉELLEMENT aucune place
+/// au-dessus, sur aucun alignement.
 pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
     let mut tooltip = egui::Tooltip::for_enabled(response);
-    tooltip.popup = tooltip.popup.align(egui::RectAlign::TOP).align_alternatives(&[
-        egui::RectAlign::BOTTOM,
-        egui::RectAlign::BOTTOM_START,
-        egui::RectAlign::BOTTOM_END,
-    ]);
+    tooltip.popup = tooltip
+        .popup
+        .align(egui::RectAlign::TOP)
+        .align_alternatives(&[
+            egui::RectAlign::TOP_START,
+            egui::RectAlign::TOP_END,
+            egui::RectAlign::BOTTOM,
+            egui::RectAlign::BOTTOM_START,
+            egui::RectAlign::BOTTOM_END,
+        ]);
     tooltip.show(|ui| {
         ui.set_max_width(ui.spacing().tooltip_width);
         ui.label(text);
@@ -975,7 +1003,12 @@ pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
 /// bouton lien externe, retour utilisateur explicite (« meilleur emplacement que là où est le
 /// switch actuellement ») ; l'ancienne rangée pleine largeur en tête de panneau (qui s'allouait
 /// elle-même son espace) a disparu.
-fn paint_side_switch(ui: &mut egui::Ui, top_left: egui::Pos2, side: &mut CombatSide, icons: &UiIcons) {
+fn paint_side_switch(
+    ui: &mut egui::Ui,
+    top_left: egui::Pos2,
+    side: &mut CombatSide,
+    icons: &UiIcons,
+) {
     let option_size = egui::vec2(SWITCH_OPTION_WIDTH, SWITCH_HEIGHT);
     let allies_rect = egui::Rect::from_min_size(top_left, option_size);
     let enemies_rect =
