@@ -1,16 +1,17 @@
-//! Portraits de classe — un fichier PNG par classe et par sexe (`assets/class-profile/
-//! {classe}-{f|m}.png`, 48×48, cercle inscrit avec les 4 coins transparents), copie de
-//! `wakfu-companion-overlay/assets/class-profile/` (voir `docs/plan-architecture.md` : ces mêmes
-//! fichiers servent aussi de source à `crate::combat_frame`, qui compose les portraits DANS les
-//! médaillons du cadre décoratif — voir sa doc de module).
+//! Portraits de classe — un fichier PNG par classe et par sexe (`crates/overlay-ui/assets/
+//! class-profile/{classe}-{f|m}.png`, 48×48, cercle inscrit avec les 4 coins transparents). Ces
+//! mêmes fichiers servent aussi de source à `crate::combat_frame`, qui compose les portraits DANS
+//! les médaillons du cadre décoratif — voir sa doc de module.
 //!
 //! **Refonte 2026-09-03** (demande utilisateur, redesign du panneau Combat) : remplace la planche
 //! unique `class-avatars-sheet.png` (2 colonnes × 18 lignes, un seul rectangle UV par classe/sexe)
 //! par 36 textures indépendantes — nécessaire pour `crate::combat_frame`, qui a besoin de coller
 //! un portrait NATIF (48×48, non re-échantillonné) dans chaque médaillon d'un cadre déjà
-//! redimensionné à l'identique (voir `assets/_test/README.md` du dépôt pour la validation de cet
-//! ajustement) ; un rectangle UV sur la planche partagée aurait imposé le filtrage `LINEAR` de
-//! toute la planche aux bords de CHAQUE portrait, visible en zoom. Chaque portrait est chargé deux
+//! redimensionné à l'identique (validation ponctuelle 2026-09-03 par mesure/composite, voir
+//! `combat_frame` pour le facteur d'échelle retenu — désormais couverte en continu par les tests de
+//! non-régression visuelle d'`overlay-testkit`) ; un rectangle UV sur la planche partagée aurait
+//! imposé le filtrage `LINEAR` de toute la planche aux bords de CHAQUE portrait, visible en zoom.
+//! Chaque portrait est chargé deux
 //! fois (couleur + niveaux de gris précalculé, voir `to_grayscale`) : un combattant KO (`FighterDamage::
 //! is_ko`, voir `overlay_engine::session`) est affiché grisé dans la liste comme dans le cadre —
 //! demande explicite. Le gris est calculé une fois au chargement (luminance Rec. 601, alpha

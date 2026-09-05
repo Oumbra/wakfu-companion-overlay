@@ -1,9 +1,11 @@
-//! Cadre décoratif "totem" du panneau Combat, un par nombre d'alliés (`assets/templates/
-//! template_1.png` à `template_6.png` à la racine du dépôt, copiés tels quels sous
-//! `crates/overlay-ui/assets/templates/` — c'est cette copie locale au crate qu'`include_bytes!`
-//! embarque, la source à la racine n'est qu'un lieu d'édition) : une colonne verticale de N
-//! médaillons circulaires, chacun destiné à recevoir le portrait de classe d'un allié
-//! (`crate::portraits::PortraitAtlas`).
+//! Cadre décoratif "totem" du panneau Combat, un par nombre d'alliés (`template_1.png` à
+//! `template_6.png` sous `crates/overlay-ui/assets/templates/` — c'est cette copie locale au crate
+//! qu'`include_bytes!` embarque) : une colonne verticale de N médaillons circulaires, chacun
+//! destiné à recevoir le portrait de classe d'un allié (`crate::portraits::PortraitAtlas`).
+//! `assets/templates/` À LA RACINE DU DÉPÔT reste l'original non recoloré (voir la refonte
+//! 2026-09-04, 4e retour, dans `panels::combat`) : la copie embarquée a depuis été recolorée, les
+//! deux ne sont donc PLUS des miroirs identiques — la racine sert de référence pivot si la
+//! recoloration doit être refaite un jour, pas d'un simple lieu d'édition interchangeable.
 //!
 //! **Géométrie des médaillons** — refonte 2026-09-04 (nouveaux templates fournis par
 //! l'utilisateur) : centre de chaque médaillon mesuré par analyse de pixels des 6 PNG (bbox de
@@ -17,8 +19,12 @@
 //! voir `crate::portraits`), centré sur le trou mesuré — plus GRAND que le trou (~41 px), il
 //! déborde donc volontairement dans l'anneau, que le template repeint par-dessus masque
 //! proprement (voir l'ordre de peinture dans `show`). C'est exactement la méthode déjà validée
-//! pour l'ancienne géométrie (voir `assets/_test/README.md`), reconduite telle quelle ici — la
-//! seule chose qui change d'un jeu de templates à l'autre, ce sont les centres mesurés.
+//! pour l'ancienne géométrie — facteur d'échelle ≈0.3116 mesuré empiriquement (48⁄150, affiné après
+//! mesure du résultat) pour faire passer les ronds de slot des templates de ~150-155 px à ~47-48 px,
+//! compatibles avec des portraits natifs 48×48 (validation ponctuelle 2026-09-03, avant
+//! `overlay-testkit` ; désormais couverte en continu par ses tests de non-régression visuelle, voir
+//! `crates/overlay-testkit/tests/panels.rs`) — reconduite telle quelle ici, la seule chose qui
+//! change d'un jeu de templates à l'autre, ce sont les centres mesurés.
 //! Corollaire : le canevas n'est PAS étiré à l'affichage, `FRAME_WIDTH` vaut la largeur native du
 //! PNG (68 px, commune aux 6) — un canevas étiré aurait fallu re-proportionner le portrait en
 //! conséquence pour garder le même ratio taille-portrait/taille-trou que celui mesuré sur
@@ -152,7 +158,7 @@ impl CombatFrame {
     /// peint sur chaque portrait (voir `panels::combat::paint_portrait_percent`) ; aucune barre
     /// n'est peinte ici (voir doc de module).
     ///
-    /// Ordre de peinture (voir `assets/_test/README.md`, méthode déjà validée) : portrait D'ABORD,
+    /// Ordre de peinture (méthode déjà validée, voir doc de module) : portrait D'ABORD,
     /// template ENSUITE par-dessus — l'anneau opaque du médaillon masque proprement le
     /// débordement du portrait 48×48 collé sans redimensionnement dans un trou mesuré à ~41 px
     /// (voir doc de module). Infobulle + pourcentage sont peints en DERNIER, par-dessus le cadre :
