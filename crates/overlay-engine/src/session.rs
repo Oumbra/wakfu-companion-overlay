@@ -2797,6 +2797,111 @@ mod tests {
         );
     }
 
+    /// Régression du bug de FOND révélé par le correctif ci-dessus (retour utilisateur, base de
+    /// production, 2026-09-05, `fights.fight_log_id` partagé par deux lignes `client_key`
+    /// distinctes) : le test précédent prouve que l'AFFICHAGE n'est plus dupliqué, mais ne dit rien
+    /// de la SIGNATURE — c'est pourtant elle qui détermine le `clientKey` final envoyé au serveur
+    /// (`overlay_sync::queue::client_key`, `sha256(uid|kind|signature)`), donc l'idempotence
+    /// `UNIQUE(user_id, client_key)` côté serveur. Avant ce correctif, la liste de participants
+    /// utilisée par `fight_signature` (voir `sig_participants` dans `build_fight_sync_event`)
+    /// changeait entre l'envoi d'origine et le renvoi post-redémarrage (combattant dupliqué au
+    /// rattrapage), produisant un `clientKey` différent pour le MÊME combat — d'où une vraie ligne
+    /// en double côté serveur (même `fight_log_id`, `client_key` distinct, `game_server`/`xp_gained`
+    /// dégradés car reconstruits avant que le contexte du redémarrage ne soit rétabli). Ce test
+    /// vérifie directement la propriété qui compte : la signature de fin de combat d'un combat
+    /// redémarré-puis-rattrapé doit être IDENTIQUE à celle d'un combat strictement équivalent qui
+    /// n'aurait jamais été interrompu.
+    #[test]
+    fn redemarrage_en_plein_combat_ne_change_pas_la_signature_finale() {
+        fn fight_signature_of(events: &[SyncEvent]) -> String {
+            events
+                .iter()
+                .find(|e| e.kind == HistoryEventKind::Fight)
+                .expect("un événement de combat attendu")
+                .signature
+                .clone()
+        }
+
+        // Référence : le même combat, sans aucune interruption.
+        let mut baseline = SessionState::default();
+        let mut baseline_events = Vec::new();
+        baseline.apply(
+            &fighter_joined(7, "Oumbra", 9, false),
+            ApplyContext::default(),
+            &mut baseline_events,
+        );
+        baseline.apply(
+            &fighter_joined(7, "Bwork", 0, true),
+            ApplyContext::default(),
+            &mut baseline_events,
+        );
+        baseline.apply(
+            &combat_end(7, FightResult::Won),
+            ApplyContext::default(),
+            &mut baseline_events,
+        );
+        let baseline_signature = fight_signature_of(&baseline_events);
+
+        // Même combat, mais l'overlay redémarre juste avant sa fin : restauration depuis
+        // `fight_store` (mêmes combattants) puis rattrapage des mêmes lignes `[_FL_]` (`wakfu.log`
+        // non rotaté rejoué depuis le début) avant que la VRAIE ligne de fin de combat n'arrive.
+        let mut restarted = SessionState::default();
+        restarted.restore_fight(FightSnapshot {
+            fight_id: 7,
+            ongoing: true,
+            result: None,
+            fighters: vec![
+                FighterDamage {
+                    name: "Oumbra".to_string(),
+                    is_ally: true,
+                    total_damage: 0,
+                    total_heal: 0,
+                    class_name: None,
+                    gender: Gender::M,
+                    xp_gained: 0,
+                    spells: HashMap::new(),
+                    is_ko: false,
+                },
+                FighterDamage {
+                    name: "Bwork".to_string(),
+                    is_ally: false,
+                    total_damage: 0,
+                    total_heal: 0,
+                    class_name: None,
+                    gender: Gender::M,
+                    xp_gained: 0,
+                    spells: HashMap::new(),
+                    is_ko: false,
+                },
+            ],
+            started_at_ms: 1_757_000_000_000,
+        });
+        let sweep_ctx = ApplyContext {
+            in_initial_sweep: true,
+            ..Default::default()
+        };
+        let mut restarted_events = Vec::new();
+        restarted.apply(
+            &fighter_joined(7, "Oumbra", 9, false),
+            sweep_ctx,
+            &mut restarted_events,
+        );
+        restarted.apply(
+            &fighter_joined(7, "Bwork", 0, true),
+            sweep_ctx,
+            &mut restarted_events,
+        );
+        restarted.apply(&combat_end(7, FightResult::Won), sweep_ctx, &mut restarted_events);
+        let restarted_signature = fight_signature_of(&restarted_events);
+
+        assert_eq!(
+            restarted_signature, baseline_signature,
+            "un combat redémarré-puis-rattrapé doit produire EXACTEMENT la même signature (donc le \
+             même clientKey) qu'un combat jamais interrompu, sous peine de doublon en base \
+             (fights.fight_log_id partagé, client_key distinct)"
+        );
+    }
+
     #[test]
     fn xp_gagnee_est_ventilee_par_participant_et_totalisee_pour_le_combat() {
         let mut state = SessionState::default();
