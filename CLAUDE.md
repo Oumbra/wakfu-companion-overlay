@@ -65,3 +65,15 @@ Budget mémoire : **300 Mo maximum**.
 📄 L'architecture de référence est dans [`docs/plan-architecture.md`](docs/plan-architecture.md) —
 la lire avant toute décision technique structurante, et la mettre à jour si une décision la
 contredit.
+
+# Rendus visuels — toujours en artefact
+
+L'utilisateur travaille en mode terminal : une image affichée inline (`Read` sur un PNG) **ne
+s'affiche pas** dans son client, contrairement à l'aperçu visuel qu'en a Claude. Toute vérification
+visuelle doit donc être publiée comme **artefact** (page HTML, image(s) intégrée(s) en base64),
+jamais seulement montrée inline — sans quoi le résultat reste invisible pour lui.
+
+Concerné en particulier : les snapshots produits par le harnais de rendu offscreen
+`crates/overlay-testkit` (`egui_kittest`, `tests/snapshots/*.png`, §17.1 du plan) — après tout
+changement visuel dans `overlay-ui`, publier un artefact reprenant la capture obtenue (page entière
+et/ou détail recadré si utile), pas uniquement une ligne de terminal disant que le test passe.
