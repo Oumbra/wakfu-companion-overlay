@@ -27,14 +27,14 @@
     "title_text": "#FFFFFF"
   },
   "rarity_borders": {
-    "commun": { "light": null, "dark": "#4A4D52", "_uncertain": true },
+    "commun": { "light": "#C4C5C5", "dark": "#67696B", "_note": "gris neutre sans teinte, identique au cadre d'un emplacement vide" },
     "rare": { "light": "#28C080", "dark": "#0F6E3E" },
     "mythique": { "light": "#C97E1E", "dark": "#3B230D" },
     "legendaire": { "light": "#C4CC17", "dark": "#333B0E" },
     "epique": { "light": "#E050A8", "dark": "#33132A" },
     "relique": { "light": "#A878E8", "dark": "#2C1F42" },
     "souvenir": { "light": "#2898C0", "dark": "#0C2838" },
-    "ancien_objet": { "light": null, "dark": null, "_uncertain": true, "_note": "aucune capture fournie" }
+    "ancien_objet": { "light": null, "dark": null, "_note": "pas de rendu visuel propre pour cette categorie de filtre, rien a capturer" }
   },
   "scrollbar": {
     "handle_active": "#C0AC83",
@@ -52,13 +52,17 @@
       "style": "serif à empattements, caractère médiéval-fantastique",
       "weight": "bold",
       "usage": ["titres de bannière", "texte de bouton", "en-têtes de section repliable"],
-      "font_family_identified": false
+      "font_family_identified": false,
+      "source_font_available": false,
+      "substitution_candidates": ["IM Fell English", "Cinzel", "Pirata One"]
     },
     "body": {
       "style": "sans-serif neutre",
       "weight": "regular à semi-bold",
       "usage": ["tooltip", "tableaux", "champs de saisie", "onglets inactifs"],
-      "font_family_identified": false
+      "font_family_identified": false,
+      "source_font_available": false,
+      "substitution_candidates": ["police sans-serif système"]
     },
     "sizes_px_approx": {
       "window_title": [18, 20],

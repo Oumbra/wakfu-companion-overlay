@@ -72,7 +72,7 @@ bord sombre (bas-droit) sur le cadre carré de l'emplacement d'objet (~64×64 px
 
 | Rareté | Bordure claire | Bordure sombre | Repère |
 | --- | --- | --- | --- |
-| Commun | gris neutre, pas de teinte dominante — **à confirmer** (§8) | `#4A4D52` (estimation) | `common-items.png` |
+| Commun | `#C4C5C5` (arête haute, biseau lumineux) | `#67696B` (côtés/bas) | `common-items.png` — **confirmé** : cadre gris neutre par défaut, sans aucune teinte colorée (identique à un emplacement vide) |
 | Rare | `#28C080` | `#0F6E3E` | `rare-items.png` |
 | Mythique | `#C97E1E` | `#3B230D` | `mythical-items.png` |
 | Légendaire | `#C4CC17` | `#333B0E` | `legendary-items.png` |
@@ -80,15 +80,18 @@ bord sombre (bas-droit) sur le cadre carré de l'emplacement d'objet (~64×64 px
 | Relique | `#A878E8` | `#2C1F42` | `relic-items.png` |
 | Souvenir | `#2898C0` | `#0C2838` | `memory-items.png` |
 
-> « Ancien objet » existe comme catégorie de filtre mais aucune capture d'emplacement n'a été
-> fournie — bordure non mesurée.
+> « Ancien objet » existe comme catégorie de filtre mais n'a **aucun rendu visuel propre** :
+> ce n'est pas une rareté affichée sur un emplacement d'objet, donc pas de bordure à mesurer
+> (confirmé — il n'y a rien à capturer, pas un oubli de capture).
 
 ---
 
 ## 3. Typographie
 
-Deux familles de police coexistent (aucun fichier de police fourni — description visuelle
-seulement, voir §8) :
+Deux familles de police coexistent visuellement dans l'UI. **Aucun fichier de police n'est
+disponible côté client** (confirmé par l'utilisateur) — ce qui suit est une description
+visuelle destinée à guider le choix d'une police de substitution, pas une identification de la
+police source (voir §8) :
 
 | Rôle | Style observé | Poids | Où |
 | --- | --- | --- | --- |
@@ -243,12 +246,12 @@ octogonal (~8–10 px).
    patch de texture depuis `docs/design-reference/button-primary.png` (zone de fond hors texte)
    et l'appliquer en `egui::TextureId` tuilée sur les formes — sinon, s'en passer pour l'instant
    (le degré d'immersion apporté par la seule palette + chanfrein est déjà élevé).
-4. **Police** : aucun fichier de police fourni. Tant qu'une vraie police n'est pas récupérée
-   (ex. extraite du client Wakfu, ou police libre visuellement proche type *IM Fell English* /
-   *Cinzel* pour le display + une sans-serif système propre pour le corps), utiliser la police
-   par défaut d'egui pour le corps de texte et une police serif embarquée pour les titres/
-   boutons dès qu'elle sera disponible (`assets/fonts/`, dossier déjà prévu dans l'arborescence
-   cible).
+4. **Police** : pas de police source récupérable (confirmé, §8) — la piste « extraire la police
+   du client Wakfu » est abandonnée. Choisir une police libre de substitution visuellement
+   proche : un serif à empattements marqués type *IM Fell English*, *Cinzel* ou *Pirata One*
+   pour le display (titres/boutons), une sans-serif système propre pour le corps. Les embarquer
+   dans `assets/fonts/` (dossier déjà prévu dans l'arborescence cible) plutôt que d'attendre un
+   futur fichier officiel.
 5. **Un seul token de fond** (`#181820` / `#1D2024`) peut servir de `panel_fill` global — c'est
    la couleur la plus stable et la plus répétée dans tout le corpus analysé.
 6. **Ne pas confondre** l'or vif (CTA) et le kaki de sélection : dans l'UI actuelle d'overlay-ui
@@ -264,7 +267,9 @@ Captures d'écran fournies par l'utilisateur, analysées le 2026-09-05 :
 - `docs/design-reference/*.png` (31 fichiers, copiés depuis `C:\Users\Oumbra\Pictures\design-system\`)
   — boutons, inputs, checkbox, select, tabs, collapse, scrollbar, emplacements d'objets par
   rareté. **Conservés dans le dépôt** pour que les futures sessions (y compris cloud, sans accès
-  au dossier `Pictures` local) puissent les reconsulter.
+  au dossier `Pictures` local) puissent les reconsulter. `common-items.png` a été recadré par
+  l'utilisateur le 2026-09-05 (254×133, au lieu de 316×133 initialement) pour isoler la bordure
+  « Commun » (cf. §2.4) — c'est cette version recadrée qui est conservée dans le dépôt.
 - `C:\Users\Oumbra\Pictures\design-system-1.png`, `design-system-2.png`, `design-system-3.png`
   — captures pleine fenêtre (panneau Personnage/Build/Inventaire, Hôtel de vente + filtres,
   emplacements d'objets épiques). **Non copiées** dans le dépôt (poids : ~2 Mo chacune, valeur
@@ -277,21 +282,18 @@ Captures d'écran fournies par l'utilisateur, analysées le 2026-09-05 :
 
 ## 8. Incertitudes / à vérifier
 
-- **Police exacte non identifiée** : aucun fichier de police n'a été fourni malgré l'intention
-  annoncée par l'utilisateur (« je vais même te fournir des tout types ») — à refaire quand les
-  fichiers de police seront disponibles.
-- **Bordure « Commun »** : la détection automatique par saturation n'a pas isolé de teinte
-  propre à cette rareté (les icônes d'objets communs captées sont elles-mêmes dorées/beiges, ce
-  qui a pollué la détection) — valeur `#4A4D52` à confirmer sur une capture dédiée où
-  l'emplacement est vide ou l'objet moins saturé.
-- **Couleurs de bordure de rareté** : mesurées par détection de pixels saturés sur toute
-  l'image (bordure **et** contenu de l'icône peuvent tous deux contribuer) — fiables comme
-  « famille de teinte » (vert/bronze/olive/magenta/violet/cyan) mais la valeur hex exacte du
-  liseré seul mériterait une capture avec emplacement vide.
+- **Pas de police dédiée disponible.** Confirmé par l'utilisateur (2026-09-05) : malgré
+  l'intention initiale d'en fournir, aucun fichier de police n'existe côté client. La
+  description de §3 reste donc **qualitative uniquement** (styles serif/sans-serif observés) —
+  pour l'implémentation, voir §6 point 4 (police libre de substitution ou police système en
+  attendant).
+- **Couleurs de bordure de rareté (rare/mythique/légendaire/épique/relique/souvenir)** :
+  mesurées par détection de pixels saturés sur toute l'image (bordure **et** contenu de l'icône
+  peuvent tous deux contribuer) — fiables comme « famille de teinte » mais la valeur hex exacte
+  du liseré seul (isolé comme cela a été fait pour Commun, cf. §2.4) mériterait une capture
+  avec emplacement vide de chaque rareté si une fidélité pixel-perfect est requise plus tard.
 - **Tailles de police en px** : déduites de la hauteur des composants, pas mesurées sur un
   rendu de glyphe isolé — ordres de grandeur fiables, valeurs exactes à ajuster à l'œil une
   fois un premier composant réel affiché dans l'overlay.
 - **Couleur exacte du texte d'onglet inactif** : estimation visuelle (`#C9A227` env.), non
   confirmée par échantillonnage pixel dédié.
-- **Rareté « Ancien objet »** : présente dans le menu de filtre mais aucune capture
-  d'emplacement associée — bordure non documentée.
