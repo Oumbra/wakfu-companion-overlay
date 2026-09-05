@@ -12,6 +12,13 @@
 //! survolé (ajouté après coup, retour utilisateur explicite), `external-link-icon.png` l'icône à
 //! fond transparent à centrer dessus. Chargées une fois par fenêtre overlay, même logique que
 //! `PortraitAtlas`.
+//!
+//! **Ajout 2026-09-05** : `options-icon.png` (`nut.png` fourni par l'utilisateur — un écrou/rouage
+//! doré 22×22 à fond transparent) est l'icône du nouveau bouton "Options" de la barre d'outils en
+//! bas du panneau Combat (`panels::combat::bottom_toolbar`), composée avec le MÊME socle
+//! `button_background`/`button_background_hover` que le bouton lien externe — `paint_icon_button`
+//! reste un composant générique (voir sa doc). N'ouvre encore aucun panneau : réservé à une future
+//! page de réglages.
 
 const ALLIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-allies.png");
 const ENEMIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-enemies.png");
@@ -20,6 +27,7 @@ const BUTTON_BACKGROUND_BYTES: &[u8] = include_bytes!("../assets/ui/button-backg
 const BUTTON_BACKGROUND_HOVER_BYTES: &[u8] =
     include_bytes!("../assets/ui/button-background-hover.png");
 const EXTERNAL_LINK_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/external-link-icon.png");
+const OPTIONS_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/options-icon.png");
 
 pub struct UiIcons {
     allies: egui::TextureHandle,
@@ -28,6 +36,7 @@ pub struct UiIcons {
     button_background: egui::TextureHandle,
     button_background_hover: egui::TextureHandle,
     external_link_icon: egui::TextureHandle,
+    options_icon: egui::TextureHandle,
 }
 
 impl UiIcons {
@@ -43,6 +52,7 @@ impl UiIcons {
                 BUTTON_BACKGROUND_HOVER_BYTES,
             ),
             external_link_icon: load_texture(ctx, "icon-external-link", EXTERNAL_LINK_ICON_BYTES),
+            options_icon: load_texture(ctx, "icon-options", OPTIONS_ICON_BYTES),
         }
     }
 
@@ -91,6 +101,12 @@ impl UiIcons {
     /// module et `panels::combat::paint_icon_button`.
     pub fn external_link_icon(&self) -> &egui::TextureHandle {
         &self.external_link_icon
+    }
+
+    /// Icône "Options" à fond transparent, à centrer sur `button_background` — voir doc de module
+    /// et `panels::combat::bottom_toolbar`.
+    pub fn options_icon(&self) -> &egui::TextureHandle {
+        &self.options_icon
     }
 }
 
