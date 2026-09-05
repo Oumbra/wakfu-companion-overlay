@@ -292,8 +292,8 @@ const COUNT_INSET: f32 = 5.0;
 /// du jeu à l'appui (quantités d'objets en bas-droit d'un emplacement) : à 11px le nombre était
 /// « pas du tout lisible » par comparaison. Un premier essai à 15px s'est avéré « beaucoup trop
 /// élevé » une fois comparé en jeu (second retour, captures d'écran des deux côte à côte) — ramené
-/// à 13px, entre les deux.
-const COUNT_FONT_SIZE: f32 = 13.0;
+/// à 13px, puis affiné à 14px (troisième retour, après test en conditions réelles).
+const COUNT_FONT_SIZE: f32 = 14.0;
 
 /// Largeur de contenu nécessaire pour afficher `entry_count` entrées + la colonne de contrôle
 /// ("+"/"−" empilés), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
@@ -329,8 +329,13 @@ const SURFACE_WELL: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
 const BORDER_STRONG: egui::Color32 = egui::Color32::from_rgb(0x4d, 0x4d, 0x4d);
 /// `--text-muted` — cible grisée d'un décompte, texte des tuiles "+"/"−".
 const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(0x88, 0x88, 0x88);
-/// `--text-color` — texte neutre (badge en mode `up`).
-const TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(0xe0, 0xe0, 0xe0);
+/// Compte en mode `up` (`paint_count_inline`) — mirait `--text-color` (`0xe0e0e0`, gris très clair)
+/// jusqu'au retour utilisateur 2026-09-06 : « la couleur des chiffres [...] c'est bien du blanc
+/// rgb(255,255,255) ? [...] j'ai l'impression que c'est ce qui change véritablement la lecture ».
+/// Vérifié par échantillonnage pixel sur sa capture d'écran de référence (quantités du jeu) :
+/// `(255,255,255)` exactement, pas le gris du jeton web — ce badge suit ici l'apparence du JEU
+/// (voir doc de module, refonte 2026-09-06), pas le dépôt web, d'où la divergence assumée.
+const TEXT_COLOR: egui::Color32 = egui::Color32::WHITE;
 /// `--kama-color` — valeur COURANTE d'un décompte (`.kpi-count-badge.is-fraction`).
 const KAMA_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
 

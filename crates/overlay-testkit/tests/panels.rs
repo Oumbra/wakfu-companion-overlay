@@ -15,8 +15,9 @@
 //! (voir `panneau_suivi_avec_toast_de_ramassage_ne_panique_pas` — la LISTE des entrées est une
 //! configuration explicite, comme le ferait un compte lié via `Engine::set_watchlist_entries`,
 //! mais le FRANCHISSEMENT à 0 qui déclenche le toast provient du vrai rejeu, jamais fabriqué à la
-//! main). Combat ABSENT reste à ajouter (nécessite un log de test dédié avec un combat encore
-//! `ongoing` à sa toute fin) — voir §17.1 du plan.
+//! main), panneau Suivi en mode `up` (voir `panneau_suivi_mode_up_ne_panique_pas`, entrée
+//! construite à la main — aucun rejeu ne franchit ce mode). Combat ABSENT reste à ajouter (nécessite
+//! un log de test dédié avec un combat encore `ongoing` à sa toute fin) — voir §17.1 du plan.
 //!
 //! **Driver logiciel requis** : `egui_kittest` (feature `wgpu`) préfère un adaptateur logiciel
 //! (lavapipe/llvmpipe, voir son code source) — sous Linux, paquet système `mesa-vulkan-drivers`
@@ -348,6 +349,63 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
 
     harness.run();
     harness.snapshot("watchlist_avec_toast_ramassage");
+}
+
+/// Couvre le mode `up` du compteur d'une tuile OBJET (`panels::watchlist::paint_count_inline`) —
+/// jusqu'ici seul le mode `down` (voir le test précédent, avec sa fraction courant/cible en couleur
+/// kamas) avait un snapshot ; ce mode-ci a sa PROPRE couleur (`TEXT_COLOR`) et c'est justement elle
+/// qui a été corrigée par le troisième retour utilisateur du 2026-09-06 (« la couleur des chiffres
+/// [...] c'est bien du blanc rgb(255,255,255) ? [...] j'ai l'impression que c'est ce qui change
+/// véritablement la lecture ») : `0xe0e0e0` (mirroir du jeton web `--text-color`) remplacé par un
+/// blanc pur, vérifié pixel par pixel sur la capture de référence du jeu. Sans ce test, une
+/// régression sur CE mode précis serait passée inaperçue de toute la suite existante.
+#[test]
+fn panneau_suivi_mode_up_ne_panique_pas() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let entries = vec![WatchlistEntry {
+        name: "Plume de Craqueleur".to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Up,
+        count: 7,
+        countdown_target: 0,
+        catalog_id: None,
+    }];
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Watchlist,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &entries,
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("watchlist_mode_up");
 }
 
 /// Reproduit le bug rapporté 2026-09-06 (deux captures d'écran à l'appui, boutons "+"/"−" du
