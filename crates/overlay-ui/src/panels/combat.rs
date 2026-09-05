@@ -263,23 +263,15 @@
 //! fait réellement `RectAlign::BOTTOM_START`.
 //!
 //! **Refonte 2026-09-05 (11e retour)** : nouveau bouton "Options" (icône `nut.png` fournie par
-//! l'utilisateur, écrou/rouage — à l'origine doré, RECOLORÉ en blanc cassé `#fbfbfb` au retour
-//! suivant, voir `UiIcons::options_icon`) au bas du panneau, dans une nouvelle barre d'outils
-//! (`bottom_toolbar`) — n'ouvre encore aucun panneau (réservé à une future page de réglages),
-//! infobulle "Options" au survol dès maintenant. L'ancien bouton lien externe (`paint_icon_button`,
-//! ouvre la web app) est déplacé de la ligne leader vers cette même barre, juste AVANT (à gauche
-//! du) le nouveau bouton Options. La place qu'il laisse dans la ligne leader (`show_leader_row`) est
-//! prise par le switch Alliés/Ennemis (`paint_side_switch`, ex-`side_switch`) — retour utilisateur
-//! explicite : « je trouve que c'est un meilleur emplacement que là où est le switch actuellement ».
-//! L'ancienne rangée pleine largeur du switch, en tête de panneau, disparaît donc.
-//!
-//! **Retour suivant** : l'icône Options d'origine (doré/orangé/brun aux yeux de l'utilisateur)
-//! détonnait à côté de l'icône lien externe (blanche) dans la même barre d'outils — retour
-//! utilisateur explicite : « j'aimerais que tu lui appliques la même couleur que l'icône de
-//! external link ». Recolorée en `#fbfbfb` (couleur de remplissage mesurée sur
-//! `external-link-icon.png`, hors son léger contour sombre) : seul le canal RGB des pixels non
-//! totalement transparents change, l'alpha (donc la silhouette et son anticrénelage) reste
-//! identique au fichier fourni par l'utilisateur.
+//! l'utilisateur, écrou/rouage — à l'origine doré, RECOLORÉ au 12e retour, voir `UiIcons::
+//! options_icon`) au bas du panneau, dans une nouvelle barre d'outils (`bottom_toolbar`) — n'ouvre
+//! encore aucun panneau (réservé à une future page de réglages), infobulle "Options" au survol dès
+//! maintenant. L'ancien bouton lien externe (`paint_icon_button`, ouvre la web app) est déplacé de
+//! la ligne leader vers cette même barre, juste AVANT (à gauche du) le nouveau bouton Options. La
+//! place qu'il laisse dans la ligne leader (`show_leader_row`) est prise par le switch Alliés/
+//! Ennemis (`paint_side_switch`, ex-`side_switch`) — retour utilisateur explicite : « je trouve que
+//! c'est un meilleur emplacement que là où est le switch actuellement ». L'ancienne rangée pleine
+//! largeur du switch, en tête de panneau, disparaît donc.
 //!
 //! Pour que le switch reste TOUJOURS accessible (y compris combat vide ou camp affiché sans
 //! combattant — sans quoi un utilisateur basculé sur un camp vide n'aurait plus aucun moyen de
@@ -288,6 +280,20 @@
 //! message d'état ("Aucun combat pour l'instant.", "Aucun allié/ennemi pour l'instant.") remplaçant
 //! simplement les groupes nom+barre quand il n'y a rien à afficher, plutôt qu'un retour anticipé de
 //! la fonction qui escamotait tout, switch compris.
+//!
+//! **Refonte 2026-09-05 (12e retour)** : l'icône Options d'origine (doré/orangé/brun aux yeux de
+//! l'utilisateur) détonnait à côté de l'icône lien externe (blanche) dans la même barre d'outils —
+//! retour utilisateur explicite : « j'aimerais que tu lui appliques la même couleur que l'icône de
+//! external link ». Recolorée en `#fbfbfb` (couleur de remplissage mesurée sur
+//! `external-link-icon.png`, hors son léger contour sombre) : seul le canal RGB des pixels non
+//! totalement transparents change, l'alpha (donc la silhouette et son anticrénelage) reste
+//! identique au fichier fourni par l'utilisateur.
+//!
+//! **Refonte 2026-09-05 (13e retour)** : `assets/templates/` à la racine du dépôt (original non
+//! recoloré des templates, gardé un temps après le nettoyage des assets — voir `combat_frame`)
+//! retiré à son tour — retour utilisateur explicite : « je les ai déjà autre part, donc ils ne
+//! servent à rien ici ». L'utilisateur conserve cet original HORS du dépôt ; la seule copie qui y
+//! reste est la version recolorée sous `crates/overlay-ui/assets/templates/`, seule affichée en jeu.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 

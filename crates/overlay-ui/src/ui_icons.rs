@@ -20,10 +20,10 @@
 //! `paint_icon_button` reste un composant générique (voir sa doc). N'ouvre encore aucun panneau :
 //! réservé à une future page de réglages.
 //!
-//! **Retour utilisateur suivant** : le doré d'origine détonnait à côté du blanc de l'icône lien
-//! externe dans la même barre d'outils — recolorée en `#fbfbfb` (RGB des pixels opaques remplacé,
-//! alpha inchangé, donc silhouette et anticrénelage identiques au fichier fourni) pour reprendre
-//! exactement la couleur de remplissage de `external-link-icon.png`.
+//! **Refonte 2026-09-05 (12e retour, voir `panels::combat`)** : le doré d'origine détonnait à côté
+//! du blanc de l'icône lien externe dans la même barre d'outils — recolorée en `#fbfbfb` (RGB des
+//! pixels opaques remplacé, alpha inchangé, donc silhouette et anticrénelage identiques au fichier
+//! fourni) pour reprendre exactement la couleur de remplissage de `external-link-icon.png`.
 
 const ALLIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-allies.png");
 const ENEMIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-enemies.png");
