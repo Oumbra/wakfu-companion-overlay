@@ -84,6 +84,25 @@ bord sombre (bas-droit) sur le cadre carré de l'emplacement d'objet (~64×64 px
 > ce n'est pas une rareté affichée sur un emplacement d'objet, donc pas de bordure à mesurer
 > (confirmé — il n'y a rien à capturer, pas un oubli de capture).
 
+> **Mise à jour 2026-09-05** : des textures de bordure PROPRES (carré 512×512 avec canal alpha,
+> juste le cadre d'emplacement, sans contenu d'icône dessus) ont été trouvées et versionnées dans
+> `assets/items/Border-<RARETE>.webp` — `COMMON`, `RARE`, `MYTHICAL`, `LEGENDARY`, `EPIC`, `RELIC`,
+> `MEMORY` : les 7 raretés de la table ci-dessus, sous les noms anglais du jeu. Elles sont
+> **autoritaires** pour un futur composant "icône d'objet avec bordure de rareté" — à utiliser
+> directement plutôt que les couleurs mesurées ci-dessus (approximation par échantillonnage de
+> pixels, voir §8). Format WebP avec alpha : décodable par la crate `image` déjà utilisée par
+> `overlay-ui` en activant sa feature `webp` (décodeur pur Rust `image-webp`, aucune dépendance
+> système — seule la feature `png` est activée aujourd'hui, voir `crates/overlay-ui/Cargo.toml`).
+> Pas encore embarquées dans `crates/overlay-ui/assets/` : aucun composant ne les affiche pour
+> l'instant, donc pas de copie dans le binaire tant que ce n'est pas le cas (budget mémoire, voir
+> `CLAUDE.md`) — seule la copie de référence à la racine du dépôt existe.
+>
+> **Reste à déterminer avant intégration** : le ratio entre la taille de l'icône d'objet et celle
+> de la bordure — même problème déjà résolu une fois pour les médaillons du cadre de combat (un
+> facteur d'échelle empirique avait dû être mesuré entre le rond du template et le portrait 48×48,
+> voir `assets/_test/README.md`) — à mesurer sur ces nouveaux fichiers avant tout code
+> d'intégration.
+
 ---
 
 ## 3. Typographie
@@ -277,6 +296,10 @@ Captures d'écran fournies par l'utilisateur, analysées le 2026-09-05 :
   disponibles en local si une nouvelle mesure est nécessaire.
 - `C:\Users\Oumbra\Pictures\Capture d'écran 2026-09-04 16*.png` (3 fichiers) — exemples de
   tooltips. Non copiées, mêmes raisons.
+- `assets/items/Border-<RARETE>.webp` (7 fichiers, trouvés en ligne par l'utilisateur et versionnés
+  le 2026-09-05) — textures de bordure de rareté à fond carré, propres (sans contenu d'objet), voir
+  §2.4. Conservées dans le dépôt comme référentiel d'images pour un futur composant "icône d'objet
+  + bordure de rareté" ; pas encore consommées par aucun code.
 
 ---
 
@@ -292,6 +315,8 @@ Captures d'écran fournies par l'utilisateur, analysées le 2026-09-05 :
   peuvent tous deux contribuer) — fiables comme « famille de teinte » mais la valeur hex exacte
   du liseré seul (isolé comme cela a été fait pour Commun, cf. §2.4) mériterait une capture
   avec emplacement vide de chaque rareté si une fidélité pixel-perfect est requise plus tard.
+  → **Levé le 2026-09-05** par les textures de bordure propres `assets/items/Border-*.webp` (voir
+  §2.4) : plus besoin d'isoler le liseré du contenu de l'icône, l'asset lui-même est la référence.
 - **Tailles de police en px** : déduites de la hauteur des composants, pas mesurées sur un
   rendu de glyphe isolé — ordres de grandeur fiables, valeurs exactes à ajuster à l'œil une
   fois un premier composant réel affiché dans l'overlay.
