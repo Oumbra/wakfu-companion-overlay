@@ -780,14 +780,26 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
 /// de socle séparé à composer). `Sense::hover()` seulement, PAS `click()` : ces deux boutons
 /// restent INERTES (voir doc de module) — un survol suffit à afficher l'infobulle explicative
 /// (`show_tooltip_left`), sans laisser croire qu'un clic ferait quoi que ce soit.
+///
+/// Curseur "main" affiché au survol malgré cette inertie (retour utilisateur explicite
+/// 2026-09-06) : affordance visuelle demandée en plus de l'infobulle, en assumant que le risque
+/// d'ambiguïté déjà discuté (voir doc de module) reste acceptable ici tant que le câblage réel
+/// n'existe pas.
 fn control_button(
     ui: &mut egui::Ui,
     icon: &egui::TextureHandle,
     icon_hover: &egui::TextureHandle,
     tooltip: &str,
 ) {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::Vec2::splat(CONTROL_BUTTON_SIZE), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::Vec2::splat(CONTROL_BUTTON_SIZE),
+        egui::Sense::hover(),
+    );
+    // Curseur "main" malgré l'inertie du bouton (retour utilisateur explicite 2026-09-06,
+    // au-dessus des réserves de `control_button` : affordance visuelle demandée même sans clic
+    // câblé) — cohérent avec le réglage global `Visuals::interact_cursor` (`main.rs`) qui ne
+    // couvre pas les éléments dessinés à la main comme celui-ci.
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     let texture = if response.hovered() { icon_hover } else { icon };
     egui::Image::new(texture).paint_at(ui, rect);
     show_tooltip_left(&response, tooltip);
