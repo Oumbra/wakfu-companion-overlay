@@ -2,10 +2,11 @@
 //! `template_6.png` sous `crates/overlay-ui/assets/templates/` — c'est cette copie locale au crate
 //! qu'`include_bytes!` embarque) : une colonne verticale de N médaillons circulaires, chacun
 //! destiné à recevoir le portrait de classe d'un allié (`crate::portraits::PortraitAtlas`).
-//! `assets/templates/` À LA RACINE DU DÉPÔT reste l'original non recoloré (voir la refonte
-//! 2026-09-04, 4e retour, dans `panels::combat`) : la copie embarquée a depuis été recolorée, les
-//! deux ne sont donc PLUS des miroirs identiques — la racine sert de référence pivot si la
-//! recoloration doit être refaite un jour, pas d'un simple lieu d'édition interchangeable.
+//! **2026-09-05** : un `assets/templates/` à la racine du dépôt avait été gardé un temps comme
+//! référence de l'original non recoloré (la copie embarquée ci-dessus a été recolorée, voir la
+//! refonte 2026-09-04, 4e retour, dans `panels::combat`) — retiré depuis, l'utilisateur conservant
+//! déjà cet original ailleurs (hors dépôt). La seule copie versionnée ici est donc la version
+//! recolorée effectivement affichée.
 //!
 //! **Géométrie des médaillons** — refonte 2026-09-04 (nouveaux templates fournis par
 //! l'utilisateur) : centre de chaque médaillon mesuré par analyse de pixels des 6 PNG (bbox de
