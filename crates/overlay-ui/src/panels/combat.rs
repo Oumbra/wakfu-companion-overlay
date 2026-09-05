@@ -261,6 +261,25 @@
 //! supplémentaires (`BOTTOM_START`, `BOTTOM_END`, bord aligné au lieu de centré) couvrent ce cas —
 //! voir `show_tooltip_above`, dont la doc corrige aussi une erreur d'un retour précédent sur ce que
 //! fait réellement `RectAlign::BOTTOM_START`.
+//!
+//! **Refonte 2026-09-05 (11e retour)** : nouveau bouton "Options" (icône `nut.png` fournie par
+//! l'utilisateur — écrou/rouage doré, cohérent avec la palette or/kaki du design système du jeu,
+//! voir `docs/design-system.md` §2.2) au bas du panneau, dans une nouvelle barre d'outils
+//! (`bottom_toolbar`) — n'ouvre encore aucun panneau (réservé à une future page de réglages),
+//! infobulle "Options" au survol dès maintenant. L'ancien bouton lien externe (`paint_icon_button`,
+//! ouvre la web app) est déplacé de la ligne leader vers cette même barre, juste AVANT (à gauche
+//! du) le nouveau bouton Options. La place qu'il laisse dans la ligne leader (`show_leader_row`) est
+//! prise par le switch Alliés/Ennemis (`paint_side_switch`, ex-`side_switch`) — retour utilisateur
+//! explicite : « je trouve que c'est un meilleur emplacement que là où est le switch actuellement ».
+//! L'ancienne rangée pleine largeur du switch, en tête de panneau, disparaît donc.
+//!
+//! Pour que le switch reste TOUJOURS accessible (y compris combat vide ou camp affiché sans
+//! combattant — sans quoi un utilisateur basculé sur un camp vide n'aurait plus aucun moyen de
+//! revenir en arrière, le switch ayant disparu avec le reste de la ligne leader), `show` est
+//! restructurée : la ligne leader et la colonne de droite sont désormais TOUJOURS peintes, un
+//! message d'état ("Aucun combat pour l'instant.", "Aucun allié/ennemi pour l'instant.") remplaçant
+//! simplement les groupes nom+barre quand il n'y a rien à afficher, plutôt qu'un retour anticipé de
+//! la fonction qui escamotait tout, switch compris.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -271,7 +290,7 @@ use crate::ui_icons::UiIcons;
 use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
-/// (`side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
+/// (`paint_side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
 /// dans `main.rs`, pas un état global : rien n'empêche de vouloir regarder les ennemis d'un
 /// personnage pendant que la fenêtre d'un autre reste sur ses alliés.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -388,6 +407,8 @@ const LEADER_PANEL_FILL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_c
 /// à l'échelle dans le MÊME ratio (pas une taille fixe indépendante), pour rester proportionnée au
 /// socle quelle que soit sa taille cible.
 const ICON_BUTTON_SIZE: f32 = 24.0;
+/// Écart horizontal entre les deux boutons de la barre d'outils du bas (voir `bottom_toolbar`).
+const ICON_BUTTON_GAP: f32 = 6.0;
 
 #[allow(clippy::too_many_arguments)]
 pub fn show(
@@ -401,112 +422,122 @@ pub fn show(
     remote_icon_textures: &mut RemoteIconTextures,
     side: &mut CombatSide,
 ) {
-    // Pas de titre "Dégâts du combat" (retour utilisateur 2026-09-01 : n'apporte rien, retiré) —
-    // le switch Alliés/Ennemis en tête suffit à situer ce que montre la liste.
-    side_switch(ui, side, icons);
-    ui.add_space(6.0);
-    match fight {
-        None => {
-            ui.weak("Aucun combat pour l'instant.");
-        }
-        Some(fight) => {
-            // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`)
-            // — c'est l'ordre des PORTRAITS, cadre et liste plate confondus.
-            let fighters: Vec<&FighterDamage> = fight
+    // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`) — c'est
+    // l'ordre des PORTRAITS, cadre et liste plate confondus. Calculé ICI, avant toute mise en page
+    // (plutôt que dans un `match fight` qui pourrait s'arrêter avant), pour que la ligne leader
+    // ci-dessous (`show_leader_row`, qui porte désormais le switch Alliés/Ennemis — voir refonte
+    // 11e retour) soit systématiquement peinte, combat vide ou camp sans combattant compris.
+    let fighters: Vec<&FighterDamage> = fight
+        .map(|fight| {
+            fight
                 .fighters
                 .iter()
                 .filter(|f| f.is_ally == (*side == CombatSide::Allies))
-                .collect();
+                .collect()
+        })
+        .unwrap_or_default();
 
-            if fighters.is_empty() {
-                ui.weak(match side {
-                    CombatSide::Allies => "Aucun allié pour l'instant.",
-                    CombatSide::Enemies => "Aucun ennemi pour l'instant.",
-                });
-                return;
+    // Barres : liste SÉPARÉE, triée par dégâts décroissant, uniquement les combattants ayant
+    // infligé au moins 1 dégât (voir doc de module). `total_damage` est calculé sur TOUS les
+    // combattants affichés (y compris ceux à 0 dégât : ils comptent pour 0 dans la somme, le
+    // résultat est identique, mais c'est bien le total du camp affiché qui a du sens ici) — seule
+    // référence désormais pour le remplissage ET le pourcentage (voir doc de module, correctif de
+    // cohérence 2026-09-04).
+    let mut bars: Vec<&FighterDamage> =
+        fighters.iter().copied().filter(|f| f.total_damage > 0).collect();
+    bars.sort_by_key(|f| std::cmp::Reverse(f.total_damage));
+
+    // Vrai total (0 tant qu'il n'y a pas de combat, ou que le camp affiché est vide — on l'affiche
+    // tel quel, voir `show_leader_row`) — `total_damage` (avec `.max(1)`) n'existe que pour
+    // sécuriser les divisions de ratio ; sans effet sur le résultat puisqu'un dégât nul donne de
+    // toute façon un ratio nul.
+    let total_damage_raw = fighters.iter().map(|f| f.total_damage).sum::<i64>();
+    let total_damage = total_damage_raw.max(1);
+
+    let (framed, flat_portraits): (&[&FighterDamage], &[&FighterDamage]) =
+        if *side == CombatSide::Allies {
+            fighters.split_at(fighters.len().min(MAX_FRAME_SLOTS))
+        } else {
+            (&[], &fighters)
+        };
+
+    ui.horizontal_top(|ui| {
+        // Colonne de gauche : portraits (cadre pour les 6 premiers alliés dans l'ordre stable,
+        // liste plate sinon) — voir doc de module.
+        ui.vertical(|ui| {
+            if !framed.is_empty() {
+                frame.show(ui, portraits, icons, framed, total_damage);
             }
-
-            // Barres : liste SÉPARÉE, triée par dégâts décroissant, uniquement les combattants
-            // ayant infligé au moins 1 dégât (voir doc de module). `total_damage` est calculé sur
-            // TOUS les combattants affichés (y compris ceux à 0 dégât : ils comptent pour 0 dans
-            // la somme, le résultat est identique, mais c'est bien le total du camp affiché qui a
-            // du sens ici) — seule référence désormais pour le remplissage ET le pourcentage (voir
-            // doc de module, correctif de cohérence 2026-09-04).
-            let mut bars: Vec<&FighterDamage> =
-                fighters.iter().copied().filter(|f| f.total_damage > 0).collect();
-            bars.sort_by_key(|f| std::cmp::Reverse(f.total_damage));
-
-            let total_damage = fighters.iter().map(|f| f.total_damage).sum::<i64>().max(1);
-
-            let (framed, flat_portraits): (&[&FighterDamage], &[&FighterDamage]) =
-                if *side == CombatSide::Allies {
-                    fighters.split_at(fighters.len().min(MAX_FRAME_SLOTS))
-                } else {
-                    (&[], &fighters)
-                };
-
-            ui.horizontal_top(|ui| {
-                // Colonne de gauche : portraits (cadre pour les 6 premiers alliés dans l'ordre
-                // stable, liste plate sinon) — voir doc de module.
-                ui.vertical(|ui| {
-                    if !framed.is_empty() {
-                        frame.show(ui, portraits, icons, framed, total_damage);
+            if !flat_portraits.is_empty() {
+                if !framed.is_empty() {
+                    ui.add_space(ROW_GAP);
+                }
+                for (i, fighter) in flat_portraits.iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(ROW_GAP);
                     }
-                    if !flat_portraits.is_empty() {
-                        if !framed.is_empty() {
-                            ui.add_space(ROW_GAP);
-                        }
-                        for (i, fighter) in flat_portraits.iter().enumerate() {
-                            if i > 0 {
-                                ui.add_space(ROW_GAP);
-                            }
-                            paint_flat_portrait(
-                                ui,
-                                portraits,
-                                icons,
-                                catalog,
-                                remote_icons,
-                                remote_icon_textures,
-                                fighter,
-                                total_damage,
-                            );
-                        }
-                    }
+                    paint_flat_portrait(
+                        ui,
+                        portraits,
+                        icons,
+                        catalog,
+                        remote_icons,
+                        remote_icon_textures,
+                        fighter,
+                        total_damage,
+                    );
+                }
+            }
+        });
+
+        ui.add_space(COLUMN_GAP);
+
+        // Colonne de droite : ligne leader (switch Alliés/Ennemis + total, voir `show_leader_row`)
+        // — TOUJOURS peinte, y compris sans combat ou camp vide, pour que le switch reste
+        // accessible (le déplacer ici, à la place de l'ancien bouton lien externe, ne doit pas le
+        // rendre inatteignable dans un état particulier) — puis soit un message d'état, soit un
+        // groupe nom+dégâts+barre compact par combattant ayant infligé des dégâts, trié par
+        // dégâts décroissant — indépendante du rythme vertical de la colonne des portraits
+        // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
+        // portrait »).
+        ui.vertical(|ui| {
+            show_leader_row(ui, icons, side, total_damage_raw);
+            ui.add_space(TOTAL_GAP);
+            if fighters.is_empty() {
+                ui.weak(match fight {
+                    None => "Aucun combat pour l'instant.",
+                    Some(_) => match side {
+                        CombatSide::Allies => "Aucun allié pour l'instant.",
+                        CombatSide::Enemies => "Aucun ennemi pour l'instant.",
+                    },
                 });
-
-                ui.add_space(COLUMN_GAP);
-
-                // Colonne de droite : total, puis un groupe nom+dégâts+barre compact par
-                // combattant ayant infligé des dégâts, trié par dégâts décroissant —
-                // indépendante du rythme vertical de la colonne des portraits (demande
-                // utilisateur explicite : « il ne faut pas que les groupes soient alignés au
-                // portrait »).
-                ui.vertical(|ui| {
-                    show_leader_row(ui, icons, total_damage);
-                    ui.add_space(TOTAL_GAP);
-                    for (i, fighter) in bars.iter().enumerate() {
-                        if i > 0 {
-                            ui.add_space(ROW_GAP);
-                        }
-                        damage_bar_group(ui, &fighter.name, fighter.total_damage, total_damage);
+            } else {
+                for (i, fighter) in bars.iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(ROW_GAP);
                     }
-                });
-            });
-        }
-    }
+                    damage_bar_group(ui, &fighter.name, fighter.total_damage, total_damage);
+                }
+            }
+        });
+    });
+
+    ui.add_space(TOTAL_GAP);
+    bottom_toolbar(ui, icons);
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
-/// doc de module) qui la détache du reste de la colonne — bouton lien externe à gauche (socle +
-/// icône FOURNIS par l'utilisateur, voir `paint_icon_button`), total de dégâts du camp affiché à
-/// droite (même alignement que les chiffres de dégâts de chaque groupe, voir `damage_bar_group`),
-/// sans libellé "Total" (retiré, demande utilisateur explicite : le contexte suffit déjà, la ligne
-/// est seule tout en haut de la colonne). "Détails" n'apparaît qu'en infobulle au survol du bouton
-/// — PAS en texte visible à côté (une première version l'affichait en clair, corrigée : ce mot
-/// décrit l'action au survol, pas un libellé permanent).
-fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, total_damage: i64) {
+/// doc de module) qui la détache du reste de la colonne — switch Alliés/Ennemis à gauche (voir
+/// `paint_side_switch`, refonte 11e retour : remplace ici l'ancien bouton lien externe, déplacé en
+/// bas du panneau avec le nouveau bouton Options, voir `bottom_toolbar`), total de dégâts du camp
+/// affiché à droite (même alignement que les chiffres de dégâts de chaque groupe, voir
+/// `damage_bar_group`), sans libellé "Total" (retiré, demande utilisateur explicite : le contexte
+/// suffit déjà, la ligne est seule tout en haut de la colonne). Appelée par `show` dans TOUS les
+/// cas, y compris combat vide ou camp affiché sans combattant — voir sa doc — pour que le switch
+/// reste accessible en toute circonstance.
+fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, total_damage: i64) {
     let total_font = egui::FontId::proportional(TOTAL_FONT_SIZE);
-    let content_height = ICON_BUTTON_SIZE.max(total_font.size + 2.0);
+    let content_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
     let row_height = content_height + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
@@ -514,24 +545,11 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, total_damage: i64) {
     ui.painter()
         .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
 
-    let button_top_left = egui::pos2(
+    let switch_top_left = egui::pos2(
         row_rect.min.x + LEADER_PANEL_PADDING,
-        row_rect.center().y - ICON_BUTTON_SIZE / 2.0,
+        row_rect.center().y - SWITCH_HEIGHT / 2.0,
     );
-    let response = paint_icon_button(
-        ui,
-        button_top_left,
-        icons.button_background(),
-        icons.button_background_hover(),
-        icons.external_link_icon(),
-        "combat-open-wakfu-companion",
-        "Détails",
-    );
-    if response.clicked() {
-        // `base_url()` — jamais une URL codée en dur ici : c'est la même origine que le reste de
-        // l'overlay parle déjà (voir `overlay_sync::client`), dev ou prod selon le déploiement.
-        let _ = open::that(overlay_sync::client::base_url());
-    }
+    paint_side_switch(ui, switch_top_left, side, icons);
 
     paint_outlined_text(
         ui,
@@ -543,13 +561,59 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, total_damage: i64) {
     );
 }
 
+/// Barre d'outils en bas du panneau Combat, ajoutée à la refonte 11e retour : bouton "lien externe"
+/// (ouvre la web app — déplacé ici depuis la ligne leader, où le switch Alliés/Ennemis a pris sa
+/// place, voir `show_leader_row`) suivi du bouton "Options", NOUVEAU (icône `nut.png` fournie par
+/// l'utilisateur, voir `UiIcons::options_icon`) — n'ouvre encore aucun panneau : réservé à une
+/// future page de réglages (demande utilisateur explicite : « qui permettrait à l'utilisateur PLUS
+/// TARD d'ouvrir un panneau d'options »), seule l'infobulle "Options" au survol est déjà là.
+/// Toujours peinte, quel que soit l'état du combat affiché : ce ne sont pas des actions liées au
+/// combat, contrairement au reste du panneau.
+fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
+    let (row_rect, _) = ui.allocate_exact_size(
+        egui::vec2(ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_GAP, ICON_BUTTON_SIZE),
+        egui::Sense::hover(),
+    );
+
+    let external_link_response = paint_icon_button(
+        ui,
+        row_rect.min,
+        icons.button_background(),
+        icons.button_background_hover(),
+        icons.external_link_icon(),
+        "combat-open-wakfu-companion",
+        "Détails",
+    );
+    if external_link_response.clicked() {
+        // `base_url()` — jamais une URL codée en dur ici : c'est la même origine que le reste de
+        // l'overlay parle déjà (voir `overlay_sync::client`), dev ou prod selon le déploiement.
+        let _ = open::that(overlay_sync::client::base_url());
+    }
+
+    let options_top_left = row_rect.min + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_GAP, 0.0);
+    let options_response = paint_icon_button(
+        ui,
+        options_top_left,
+        icons.button_background(),
+        icons.button_background_hover(),
+        icons.options_icon(),
+        "combat-open-options",
+        "Options",
+    );
+    if options_response.clicked() {
+        // TODO: ouvrir le panneau d'options une fois qu'il existera (voir doc de module).
+    }
+}
+
 /// Bouton "icône" du jeu — un socle (`background`, ou `background_hover` quand survolé) et une
 /// icône à fond transparent (`icon`) centrée dessus, tous deux mis à l'échelle de `ICON_BUTTON_SIZE`
 /// dans le MÊME ratio (voir sa doc) — une première version les peignait à leur taille native sans
 /// redimensionnement (demande explicite à l'époque, le temps de juger les proportions) ; une fois
 /// jugées, retour utilisateur explicite : « réduis le bouton en 24×24 ». Composant volontairement
 /// générique (demande utilisateur explicite : « crée une espèce de composant qui permet de créer
-/// des boutons icône ») même si `show_leader_row` en est pour l'instant l'unique appelant.
+/// des boutons icône ») — appelé par `bottom_toolbar` pour les boutons lien externe ET Options
+/// (refonte 11e retour ; `show_leader_row` en était l'unique appelant jusque-là, avant que son
+/// bouton lien externe ne soit déplacé dans cette barre d'outils).
 /// `id_source` distingue plusieurs boutons icône dans le même conteneur egui (voir
 /// `ui.id().with(...)`, même mécanisme que `side_switch`).
 fn paint_icon_button(
@@ -891,16 +955,18 @@ pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
 
 /// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du
 /// dépôt web (`styles.css`), portée en dessin egui direct (peintre + zones cliquables) puisqu'il
-/// n'y a pas de CSS ici pour l'obtenir gratuitement.
-fn side_switch(ui: &mut egui::Ui, side: &mut CombatSide, icons: &UiIcons) {
+/// n'y a pas de CSS ici pour l'obtenir gratuitement. Peint à un `top_left` donné, SANS allocation
+/// via `ui.allocate_exact_size` (même logique que `paint_icon_button`) — depuis la refonte 11e
+/// retour, ce switch est logé dans la ligne leader (`show_leader_row`) à la place de l'ancien
+/// bouton lien externe, retour utilisateur explicite (« meilleur emplacement que là où est le
+/// switch actuellement ») ; l'ancienne rangée pleine largeur en tête de panneau (qui s'allouait
+/// elle-même son espace) a disparu.
+fn paint_side_switch(ui: &mut egui::Ui, top_left: egui::Pos2, side: &mut CombatSide, icons: &UiIcons) {
     let option_size = egui::vec2(SWITCH_OPTION_WIDTH, SWITCH_HEIGHT);
-    let (rect, _response) = ui.allocate_exact_size(
-        egui::vec2(option_size.x * 2.0, option_size.y),
-        egui::Sense::hover(),
-    );
-    let allies_rect = egui::Rect::from_min_size(rect.min, option_size);
+    let allies_rect = egui::Rect::from_min_size(top_left, option_size);
     let enemies_rect =
-        egui::Rect::from_min_size(rect.min + egui::vec2(option_size.x, 0.0), option_size);
+        egui::Rect::from_min_size(top_left + egui::vec2(option_size.x, 0.0), option_size);
+    let rect = allies_rect.union(enemies_rect);
 
     let painter = ui.painter();
     painter.rect_filled(rect, 5.0, TINT_MEDIUM);
