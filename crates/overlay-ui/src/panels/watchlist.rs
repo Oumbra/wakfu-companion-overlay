@@ -288,6 +288,13 @@ const ITEM_ICON_SIZE: f32 =
 /// voir `ITEM_BORDER_INNER_MARGIN_RATIO`) sans empiéter dessus.
 const COUNT_INSET: f32 = 5.0;
 
+/// Taille du compteur (voir `paint_count_inline`) — retour utilisateur 2026-09-06, capture d'écran
+/// du jeu à l'appui (quantités d'objets en bas-droit d'un emplacement) : à 11px le nombre était
+/// « pas du tout lisible » par comparaison. Le jeu affiche ses quantités à peu près au quart de la
+/// hauteur de l'emplacement ; `TILE_SIZE` valant 58px ici, 15px (~26 %) reproduit cette proportion
+/// sans notablement empiéter sur l'icône.
+const COUNT_FONT_SIZE: f32 = 15.0;
+
 /// Largeur de contenu nécessaire pour afficher `entry_count` entrées + la colonne de contrôle
 /// ("+"/"−" empilés), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
 /// appelant) — utilisée par `main.rs` pour dimensionner dynamiquement la fenêtre Suivi (retour
@@ -881,18 +888,61 @@ fn entry_tile(
     response.on_hover_text(&entry.name);
 }
 
+/// Contour NOIR épaissi (deux anneaux de décalage, rayon 1 ET 2, au lieu du simple anneau à 1px de
+/// `combat::paint_outlined_text`) — retour utilisateur 2026-09-06, capture d'écran du jeu à
+/// l'appui : à la taille d'un nombre de dégâts qui vole au-dessus d'un portrait, un contour à 1px
+/// suffit ; à `COUNT_FONT_SIZE`, sensiblement plus grand, ce même contour devenait un simple liseré
+/// fin et peu contrasté — le jeu cerne SES quantités d'un trait visiblement plus épais à cette
+/// taille (« mettre vraiment du plomb [...] avec un contour noir »). Dupliqué depuis
+/// `combat::paint_outlined_text` plutôt que d'épaissir SON anneau : les nombres de dégâts du
+/// panneau Combat n'ont pas ce problème (déjà validés par l'utilisateur), aucune raison d'y risquer
+/// une régression visuelle pour un besoin propre au compteur du panneau Suivi.
+fn paint_count_text(
+    ui: &egui::Ui,
+    pos: egui::Pos2,
+    align: egui::Align2,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    const RINGS: [f32; 2] = [1.0, 2.0];
+    const DIRECTIONS: [egui::Vec2; 8] = [
+        egui::vec2(-1.0, -1.0),
+        egui::vec2(0.0, -1.0),
+        egui::vec2(1.0, -1.0),
+        egui::vec2(-1.0, 0.0),
+        egui::vec2(1.0, 0.0),
+        egui::vec2(-1.0, 1.0),
+        egui::vec2(0.0, 1.0),
+        egui::vec2(1.0, 1.0),
+    ];
+    let painter = ui.painter();
+    for radius in RINGS {
+        for direction in DIRECTIONS {
+            painter.text(
+                pos + direction * radius,
+                align,
+                text,
+                font.clone(),
+                egui::Color32::BLACK,
+            );
+        }
+    }
+    painter.text(pos, align, text, font, color);
+}
+
 /// Compteur incrusté dans le coin bas-droit de la tuile — miroir des captures de référence du jeu
 /// (`docs/design-system.md` §7, ex. `rare-items.png` : un simple nombre cerné de noir, PAS de
 /// pastille/pilule de fond) : remplace l'ancien badge en pilule qui débordait hors de la tuile
-/// (voir doc de module, refonte 2026-09-06). Réutilise `combat::paint_outlined_text` (même procédé
-/// que le pourcentage de dégâts sur un portrait) plutôt que de dupliquer la boucle de décalages.
+/// (voir doc de module, refonte 2026-09-06). Contour épaissi via `paint_count_text` (voir sa doc,
+/// correctif 2026-09-06) plutôt que `combat::paint_outlined_text`.
 ///
 /// Couleur selon le mode (inchangé depuis la refonte 2026-09-02) :
 /// - `up` : le compte seul, en clair neutre (`TEXT_COLOR`).
 /// - `down` : compte courant EN COULEUR KAMAS (`KAMA_COLOR`) sur cible grisée (`TEXT_MUTED`),
 ///   PAS de conversion en "déjà collecté" (le web n'affiche que `count`/`countdownTarget` bruts).
 fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
-    let font = egui::FontId::monospace(11.0);
+    let font = egui::FontId::monospace(COUNT_FONT_SIZE);
 
     let (current_text, target_part) = match entry.mode {
         WatchlistMode::Down => (
@@ -913,7 +963,7 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
     // Le segment "cible" (ex. "/10") est peint EN PREMIER, ancré au coin bas-droit de la tuile ;
     // le segment "courant" est ensuite peint juste à sa GAUCHE (ancré `RIGHT_BOTTOM` sur la
     // largeur mesurée du segment cible) — évite de dupliquer la boucle de contour de
-    // `paint_outlined_text` pour composer deux galleys sur une même ligne.
+    // `paint_count_text` pour composer deux galleys sur une même ligne.
     let target_width = target_part
         .as_ref()
         .map(|text| {
@@ -925,7 +975,7 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
         .unwrap_or(0.0);
 
     if let Some(target_text) = &target_part {
-        super::combat::paint_outlined_text(
+        paint_count_text(
             ui,
             egui::pos2(right, bottom),
             egui::Align2::RIGHT_BOTTOM,
@@ -934,7 +984,7 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
             TEXT_MUTED,
         );
     }
-    super::combat::paint_outlined_text(
+    paint_count_text(
         ui,
         egui::pos2(right - target_width, bottom),
         egui::Align2::RIGHT_BOTTOM,
