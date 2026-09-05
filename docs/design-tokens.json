@@ -1,0 +1,93 @@
+{
+  "$comment": "Tokens extraits par analyse pixel de captures d'écran réelles du client Wakfu (2026-09-05). Voir docs/design-system.md pour le contexte, les états de composants et les incertitudes signalées (champ _uncertain).",
+  "neutrals": {
+    "panel_fill": "#181820",
+    "panel_fill_alt": "#1D2024",
+    "field_frame": "#26292F",
+    "border_dark": "#181818",
+    "border_darkest": "#101010",
+    "text_primary": "#F0F0F0",
+    "text_placeholder": { "value": "#7A7A7A", "_uncertain": true },
+    "text_disabled": "#8A8A8A",
+    "disabled_fill_light": "#646465",
+    "disabled_fill_dark": "#282A30"
+  },
+  "accent_warm": {
+    "gold_bright_top": "#F4D89E",
+    "gold_bright_bottom": "#E0C880",
+    "khaki_selected_top": "#A58E63",
+    "khaki_selected_bottom": "#675D46",
+    "input_border": "#595140",
+    "button_text_on_gold": "#3A3523",
+    "checkbox_checked_ring": "#D2AB5C"
+  },
+  "banner_teal": {
+    "gradient_start": "#0C6E80",
+    "gradient_end": "#1D8B9C",
+    "title_text": "#FFFFFF"
+  },
+  "rarity_borders": {
+    "commun": { "light": null, "dark": "#4A4D52", "_uncertain": true },
+    "rare": { "light": "#28C080", "dark": "#0F6E3E" },
+    "mythique": { "light": "#C97E1E", "dark": "#3B230D" },
+    "legendaire": { "light": "#C4CC17", "dark": "#333B0E" },
+    "epique": { "light": "#E050A8", "dark": "#33132A" },
+    "relique": { "light": "#A878E8", "dark": "#2C1F42" },
+    "souvenir": { "light": "#2898C0", "dark": "#0C2838" },
+    "ancien_objet": { "light": null, "dark": null, "_uncertain": true, "_note": "aucune capture fournie" }
+  },
+  "scrollbar": {
+    "handle_active": "#C0AC83",
+    "handle_inactive": "#5C5E61",
+    "track": "#242327",
+    "track_width_px": 14,
+    "handle_width_px": 4
+  },
+  "status_pill_active": {
+    "fill": "#E6D290",
+    "text": "#101215"
+  },
+  "typography": {
+    "display": {
+      "style": "serif à empattements, caractère médiéval-fantastique",
+      "weight": "bold",
+      "usage": ["titres de bannière", "texte de bouton", "en-têtes de section repliable"],
+      "font_family_identified": false
+    },
+    "body": {
+      "style": "sans-serif neutre",
+      "weight": "regular à semi-bold",
+      "usage": ["tooltip", "tableaux", "champs de saisie", "onglets inactifs"],
+      "font_family_identified": false
+    },
+    "sizes_px_approx": {
+      "window_title": [18, 20],
+      "button_text": [15, 16],
+      "section_header": [14, 15],
+      "body_text": 13,
+      "field_label": 13
+    }
+  },
+  "dimensions_px": {
+    "button_text_height": [63, 66],
+    "button_icon_square": [50, 54],
+    "checkbox": 28,
+    "input_standard_height": [41, 45],
+    "input_compact_height": [33, 36],
+    "stepper_height": [41, 48],
+    "stepper_button_square": 30,
+    "tab_row_height": [57, 58],
+    "collapse_header_height": [38, 45],
+    "item_slot_square": [63, 64],
+    "item_slot_gap": 2,
+    "item_slot_border": 2,
+    "input_border_width": 1,
+    "button_border_width": [1, 2],
+    "button_chamfer_cut": [8, 10]
+  },
+  "shape": {
+    "corner_style": "chamfer_octagonal_on_buttons_and_banners",
+    "corner_style_inputs_lists": "square_or_near_square",
+    "texture_overlay": "diagonal_crosshatch_weave_on_all_interactive_fills"
+  }
+}
