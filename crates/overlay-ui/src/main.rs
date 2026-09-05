@@ -1151,6 +1151,13 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         egui_ctx.style_mut_of(theme, |style| {
             style.interaction.show_tooltips_only_when_still = false;
             style.interaction.tooltip_delay = 0.15;
+            // Curseur "main" au survol de tout élément cliquable (retour utilisateur 2026-09-04 :
+            // rien ne l'indiquait visuellement) — couvre automatiquement les widgets `Button`/
+            // `small_button` (voir `render_content.rs`) ; un élément dessiné à la main via
+            // `Ui::interact` brut (voir `panels::combat`/`panels::watchlist`) ne consulte PAS ce
+            // réglage tout seul, d'où un `.on_hover_cursor(...)` explicite à chacun de ces
+            // endroits en complément.
+            style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
         });
     }
     let egui_winit = egui_winit::State::new(

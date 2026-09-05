@@ -223,8 +223,8 @@ impl CombatFrame {
                 egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
             );
             let id = ui.id().with(("combat-frame-slot", fighter.name.as_str()));
-            ui.interact(portrait_rect, id, egui::Sense::hover())
-                .on_hover_text(fighter.name.as_str());
+            let response = ui.interact(portrait_rect, id, egui::Sense::hover());
+            super::combat::show_tooltip_above(&response, fighter.name.as_str());
             if fighter.total_damage > 0 {
                 super::combat::paint_portrait_percent(
                     ui,

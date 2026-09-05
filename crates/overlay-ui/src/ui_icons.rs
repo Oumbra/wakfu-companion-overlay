@@ -1,19 +1,33 @@
 //! Icônes d'interface embarquées — switch Alliés/Ennemis du panneau Combat (mêmes fichiers PNG
 //! que le dépôt web, `public/assets/ui/header-allies-*.png`/`header-enemies-*.png` — hash de
-//! cache retiré du nom de fichier, inutile ici puisqu'il n'y a pas de navigateur) et portrait de
+//! cache retiré du nom de fichier, inutile ici puisqu'il n'y a pas de navigateur), portrait de
 //! repli pour un ennemi (`unknown-entity-*.png`) : un ennemi n'a jamais de classe résolue (`breed`
 //! pas déterministe côté ennemi, voir `overlay_engine::class_breed`), donc jamais de portrait de
-//! la planche `class-avatars-sheet.png` — voir `portraits.rs`. Chargées une fois par fenêtre
-//! overlay, même logique que `PortraitAtlas`.
+//! la planche `class-avatars-sheet.png` — voir `portraits.rs` ; et le socle + l'icône du bouton
+//! "lien externe" du panneau Combat (`panels::combat::show_leader_row`, composés par
+//! `panels::combat::paint_icon_button`) — **fournis directement par l'utilisateur** (pas extraits
+//! ni redessinés, contrairement à une première tentative rejetée qui avait isolé la texture au
+//! pixel près depuis une capture d'écran) : `button-background.png` est le socle générique d'un
+//! bouton icône du jeu au repos, `button-background-hover.png` le même socle éclairci pour l'état
+//! survolé (ajouté après coup, retour utilisateur explicite), `external-link-icon.png` l'icône à
+//! fond transparent à centrer dessus. Chargées une fois par fenêtre overlay, même logique que
+//! `PortraitAtlas`.
 
 const ALLIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-allies.png");
 const ENEMIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-enemies.png");
 const UNKNOWN_ENTITY_BYTES: &[u8] = include_bytes!("../assets/ui/unknown-entity.png");
+const BUTTON_BACKGROUND_BYTES: &[u8] = include_bytes!("../assets/ui/button-background.png");
+const BUTTON_BACKGROUND_HOVER_BYTES: &[u8] =
+    include_bytes!("../assets/ui/button-background-hover.png");
+const EXTERNAL_LINK_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/external-link-icon.png");
 
 pub struct UiIcons {
     allies: egui::TextureHandle,
     enemies: egui::TextureHandle,
     unknown_entity: egui::TextureHandle,
+    button_background: egui::TextureHandle,
+    button_background_hover: egui::TextureHandle,
+    external_link_icon: egui::TextureHandle,
 }
 
 impl UiIcons {
@@ -22,6 +36,13 @@ impl UiIcons {
             allies: load_texture(ctx, "icon-header-allies", ALLIES_ICON_BYTES),
             enemies: load_texture(ctx, "icon-header-enemies", ENEMIES_ICON_BYTES),
             unknown_entity: load_texture(ctx, "icon-unknown-entity", UNKNOWN_ENTITY_BYTES),
+            button_background: load_texture(ctx, "icon-button-background", BUTTON_BACKGROUND_BYTES),
+            button_background_hover: load_texture(
+                ctx,
+                "icon-button-background-hover",
+                BUTTON_BACKGROUND_HOVER_BYTES,
+            ),
+            external_link_icon: load_texture(ctx, "icon-external-link", EXTERNAL_LINK_ICON_BYTES),
         }
     }
 
@@ -52,6 +73,24 @@ impl UiIcons {
     /// (`panels::watchlist`), plus petites que les portraits du panneau Combat.
     pub fn unknown_entity_texture(&self) -> &egui::TextureHandle {
         &self.unknown_entity
+    }
+
+    /// Socle d'un bouton icône du jeu, état au repos — voir doc de module et
+    /// `panels::combat::paint_icon_button`.
+    pub fn button_background(&self) -> &egui::TextureHandle {
+        &self.button_background
+    }
+
+    /// Socle d'un bouton icône du jeu, état survolé (éclairci) — voir doc de module et
+    /// `panels::combat::paint_icon_button`.
+    pub fn button_background_hover(&self) -> &egui::TextureHandle {
+        &self.button_background_hover
+    }
+
+    /// Icône "lien externe" à fond transparent, à centrer sur `button_background` — voir doc de
+    /// module et `panels::combat::paint_icon_button`.
+    pub fn external_link_icon(&self) -> &egui::TextureHandle {
+        &self.external_link_icon
     }
 }
 
