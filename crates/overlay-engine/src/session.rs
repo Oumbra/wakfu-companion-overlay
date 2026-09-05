@@ -103,6 +103,17 @@ struct ApplyContext<'a> {
     /// ingest_batch`), jamais recalculé ici : `SessionState` ne connaît ni le roster complet ni
     /// l'historique des personnages déjà croisés (portés par `Engine`, voir sa doc).
     game_server: Option<&'a str>,
+    /// Reflet de `Engine::in_initial_sweep` (voir sa doc) — `true` tant que la ligne courante fait
+    /// partie d'un rattrapage (premier lancement, reconnexion, ou rotation de `wakfu.log`), jamais
+    /// une ligne lue "en direct". Sert UNIQUEMENT à `FighterJoined` (voir `FightWorking::
+    /// pending_restored_joins`) : un combat restauré depuis `fight_store` (§9 du plan) revoit, lors
+    /// de ce rattrapage, les MÊMES lignes `[_FL_]` qui avaient déjà construit son
+    /// `FightSnapshot::fighters` persisté avant l'arrêt de l'overlay (`wakfu.log` n'est pas rejoué
+    /// depuis zéro seulement s'il a été rotaté pendant l'arrêt, voir la doc de `fight_store.rs`) —
+    /// sans ce distinguo, chaque ligne rejouée ajoutait un DOUBLON de combattant déjà restauré (bug
+    /// réel, retour utilisateur 2026-09-04, captures à l'appui : alliés/ennemis dupliqués dès qu'un
+    /// combat en cours survit à un redémarrage).
+    in_initial_sweep: bool,
 }
 
 /// `Serialize`/`Deserialize` servent à la persistance disque du combat en cours (voir
@@ -335,6 +346,19 @@ struct FightWorking {
     /// de rattrapage : écart mineur assumé, cohérent avec les autres pertes déjà documentées de
     /// `restore_fight`.
     fled_names: std::collections::HashSet<String>,
+    /// Budget de lignes `FighterJoined` encore "attendues comme déjà connues" pour un combat
+    /// RESTAURÉ (voir `restore_fight`) — vide (`HashMap::new()`) pour un combat découvert
+    /// normalement, jamais alimenté ailleurs. Compte, par nom exact, combien de combattants de
+    /// `snapshot.fighters` restaient à "reconnaître" dans le rattrapage qui suit une restauration :
+    /// tant qu'il reste un jeton pour `name`, la ligne `[_FL_]` rejouée pendant ce rattrapage
+    /// (`ApplyContext::in_initial_sweep`) est la même que celle qui avait déjà produit la ligne
+    /// restaurée (`wakfu.log` non rotaté pendant l'arrêt — voir la doc de `fight_store.rs`) : elle
+    /// consomme un jeton au lieu d'appeler `upsert_fighter`, qui dupliquerait sinon ce combattant
+    /// (bug réel, retour utilisateur 2026-09-04). Une fois le budget d'un nom épuisé — ou hors
+    /// rattrapage, ou pour un combat jamais restauré — toute jointure de ce nom est une VRAIE
+    /// nouvelle instance (homonyme réel, ou combat rotaté-donc-neuf pour ce nom) et suit le chemin
+    /// normal, comme avant ce correctif.
+    pending_restored_joins: HashMap<String, usize>,
     /// Instant (ms, époque Unix) de la toute première jonction de ce combat — voir
     /// `LogDateTracker::full_timestamp_ms`. Base de `FightPayload::started_at`/`duration_ms`.
     /// Persisté dans `FightSnapshot::started_at_ms` (voir sa doc) pour que `restore_fight` le
@@ -355,7 +379,11 @@ struct FightWorking {
     /// Butin ramassé PENDANT ce combat (nom, quantité) — jamais un objet déjà classé "achat" (voir
     /// le filet purchase de `SessionState::apply`) : distinct de `SessionState::recent_loot`
     /// (fenêtre glissante d'affichage, tous combats confondus) et non affiché par L2, seulement
-    /// utile à `FightPayload::loot` (L5).
+    /// utile à `FightPayload::loot` (L5). **Une seule entrée par nom d'objet** : `SessionState::
+    /// apply` fusionne (somme des quantités) plutôt que d'empiler une entrée par ramassage brut —
+    /// sans quoi un objet lâché par plusieurs monstres du même combat finissait en plusieurs lignes
+    /// dans `FightPayload::loot` au lieu d'une seule ligne totalisée, contrairement à l'affichage
+    /// du client web (qui agrège en lisant directement `wakfu.log`).
     loot: Vec<(String, i64)>,
     /// Kamas gagnés PENDANT ce combat — voir `FightPayload::kamas_gained`. Accumulation directe
     /// sur le `fight_id` porté par `LogEntry::KamaGain`, plus simple que le mécanisme "en attente
@@ -580,7 +608,19 @@ impl SessionState {
             if !purchase_loot {
                 if let Some(fight_id) = fight_id {
                     if let Some(fight) = self.fights.get_mut(fight_id) {
-                        fight.loot.push((item.clone(), *quantity));
+                        // Fusionne avec une ligne déjà accumulée pour ce même objet plutôt que
+                        // d'empiler une entrée par ramassage : un même objet peut être lâché par
+                        // plusieurs monstres (ou en plusieurs lignes `[_LO_]`) au sein d'un même
+                        // combat, et `FightPayload::loot` doit refléter UN total par objet — comme
+                        // le fait déjà le client web en agrégeant côté lecture directe du log. Sans
+                        // cette fusion, `build_fight_sync_event` (plus bas) sérialisait autant de
+                        // lignes que de ramassages bruts (ex. "Eclats x48" répété 3 fois au lieu
+                        // d'un unique "Eclats x144"), désaccord visible entre les combats alimentés
+                        // par l'overlay et ceux lus directement depuis `wakfu.log` par le web.
+                        match fight.loot.iter_mut().find(|(name, _)| name == item) {
+                            Some((_, existing_quantity)) => *existing_quantity += *quantity,
+                            None => fight.loot.push((item.clone(), *quantity)),
+                        }
                     }
                 }
             }
@@ -635,6 +675,23 @@ impl SessionState {
                         fight.summon_names.insert(name.to_lowercase());
                     }
                     return implicitly_defeated_enemies;
+                }
+                // Combat restauré (`fight_store`, §9 du plan) en plein rattrapage : cette ligne
+                // `[_FL_]` est-elle l'une de celles qui avaient déjà produit un combattant restauré
+                // (voir la doc de `pending_restored_joins`) ? Si oui, consomme le jeton et s'arrête
+                // là — `upsert_fighter` dupliquerait sinon ce combattant déjà affiché. Hors
+                // rattrapage (lignes lues en direct), le budget n'est délibérément jamais consulté :
+                // une jointure de ce nom APRÈS le rattrapage est toujours une vraie nouvelle
+                // instance (le combat continue en direct), jamais un doublon à absorber.
+                if ctx.in_initial_sweep {
+                    if let Some(fight) = self.fights.get_mut(fight_id) {
+                        if let Some(remaining) = fight.pending_restored_joins.get_mut(name) {
+                            if *remaining > 0 {
+                                *remaining -= 1;
+                                return implicitly_defeated_enemies;
+                            }
+                        }
+                    }
                 }
                 let is_ally = !is_controlled_by_ai;
                 let (class_name, gender) = if is_ally {
@@ -1087,6 +1144,9 @@ impl SessionState {
             turn_seats_seen: std::collections::HashSet::new(),
             summon_names: std::collections::HashSet::new(),
             fled_names: std::collections::HashSet::new(),
+            // Combat découvert normalement (pas restauré) : rien à "reconnaître", voir la doc du
+            // champ — n'importe quelle jointure future suit le chemin normal (`upsert_fighter`).
+            pending_restored_joins: HashMap::new(),
             started_at_ms,
             loot: Vec::new(),
             kamas_gained: 0,
@@ -1108,17 +1168,25 @@ impl SessionState {
         let fight_id = fight.fight_id;
         let started_at_ms = fight.started_at_ms;
         let mut fighter_index: HashMap<String, Vec<usize>> = HashMap::new();
+        // Un jeton par combattant déjà restauré (voir la doc de `pending_restored_joins`) : le
+        // rattrapage qui va suivre (replay de `wakfu.log` depuis le début, voir `Tailer::poll`)
+        // revoit forcément ces mêmes lignes `[_FL_]` avant d'atteindre du contenu réellement
+        // nouveau — sans ce budget, chacune d'elles serait traitée comme une jointure inédite et
+        // dupliquerait ce combattant déjà affiché.
+        let mut pending_restored_joins: HashMap<String, usize> = HashMap::new();
         for (idx, fighter) in fight.fighters.iter().enumerate() {
             fighter_index
                 .entry(fighter.name.clone())
                 .or_default()
                 .push(idx);
+            *pending_restored_joins.entry(fighter.name.clone()).or_insert(0) += 1;
         }
         self.fights.insert(
             fight_id,
             FightWorking {
                 snapshot: fight,
                 fighter_index,
+                pending_restored_joins,
                 resolved_enemies: std::collections::HashSet::new(),
                 initiative_seats: Vec::new(),
                 initiative_cursor: 0,
@@ -1886,6 +1954,7 @@ impl Engine {
                 catalog: self.catalog.as_deref(),
                 dungeons: self.dungeons.as_deref(),
                 game_server: game_server.as_deref(),
+                in_initial_sweep: batch.is_initial_load,
             };
             let mut new_sync_events = Vec::new();
             let implicitly_defeated = self.state.apply(entry, ctx, &mut new_sync_events);
@@ -1935,6 +2004,7 @@ impl Engine {
                 catalog: self.catalog.as_deref(),
                 dungeons: self.dungeons.as_deref(),
                 game_server: game_server.as_deref(),
+                in_initial_sweep: batch.is_initial_load,
             };
             let mut flush_events = Vec::new();
             self.state
@@ -2655,6 +2725,78 @@ mod tests {
         );
     }
 
+    /// Régression réelle (retour utilisateur, 2026-09-04, captures à l'appui) : redémarrer
+    /// l'overlay en plein combat dupliquait chaque allié/ennemi déjà affiché. Cause : `wakfu.log`
+    /// non rotaté est rejoué en entier depuis le début (voir `Tailer::poll`), donc un combat
+    /// restauré depuis `fight_store` revoit les MÊMES lignes `[_FL_]` qui l'avaient déjà peuplé
+    /// avant l'arrêt — sans distinguo, chacune ajoutait un doublon (`upsert_fighter` ne fusionne
+    /// jamais, voir sa doc). Ce test rejoue exactement ce scénario : restauration, puis rattrapage
+    /// (`in_initial_sweep: true`) des mêmes jointures.
+    #[test]
+    fn rattrapage_apres_restauration_ne_duplique_pas_les_combattants_deja_connus() {
+        let mut state = SessionState::default();
+        state.restore_fight(FightSnapshot {
+            fight_id: 7,
+            ongoing: true,
+            result: None,
+            fighters: vec![
+                FighterDamage {
+                    name: "Oumbra".to_string(),
+                    is_ally: true,
+                    total_damage: 120,
+                    total_heal: 0,
+                    class_name: None,
+                    gender: Gender::M,
+                    xp_gained: 0,
+                    spells: HashMap::new(),
+                    is_ko: false,
+                },
+                FighterDamage {
+                    name: "Bwork".to_string(),
+                    is_ally: false,
+                    total_damage: 0,
+                    total_heal: 0,
+                    class_name: None,
+                    gender: Gender::M,
+                    xp_gained: 0,
+                    spells: HashMap::new(),
+                    is_ko: false,
+                },
+            ],
+            started_at_ms: 1_757_000_000_000,
+        });
+
+        let sweep_ctx = ApplyContext {
+            in_initial_sweep: true,
+            ..Default::default()
+        };
+        let mut events = Vec::new();
+        // Rejeu, en rattrapage, des mêmes lignes `[_FL_]` que celles qui avaient déjà produit les
+        // deux combattants restaurés ci-dessus (exactement ce qu'un `wakfu.log` non rotaté rejoue
+        // au redémarrage).
+        state.apply(&fighter_joined(7, "Oumbra", 9, false), sweep_ctx, &mut events);
+        state.apply(&fighter_joined(7, "Bwork", 0, true), sweep_ctx, &mut events);
+
+        assert_eq!(
+            state.fights[&7].snapshot.fighters.len(),
+            2,
+            "les lignes déjà connues rejouées en rattrapage ne doivent pas être dupliquées"
+        );
+
+        // Un VRAI nouvel homonyme rejoignant après le rattrapage (combat toujours en direct) doit
+        // en revanche obtenir sa propre ligne, comme avant ce correctif.
+        state.apply(
+            &fighter_joined(7, "Bwork", 0, true),
+            ApplyContext::default(), // in_initial_sweep: false — ligne lue en direct
+            &mut events,
+        );
+        assert_eq!(
+            state.fights[&7].snapshot.fighters.len(),
+            3,
+            "un homonyme rejoignant réellement après le rattrapage doit obtenir sa propre ligne"
+        );
+    }
+
     #[test]
     fn xp_gagnee_est_ventilee_par_participant_et_totalisee_pour_le_combat() {
         let mut state = SessionState::default();
@@ -2814,6 +2956,45 @@ mod tests {
             fight.loot[0].item_name, None,
             "mutuellement exclusif avec itemId"
         );
+    }
+
+    /// Non-régression : un même objet ramassé en plusieurs lignes `[_LO_]` distinctes au sein d'un
+    /// même combat (butin lâché par plusieurs monstres) doit être fusionné en UNE seule ligne
+    /// `FightPayload::loot` avec la quantité totale — pas une ligne par ramassage brut. Sans la
+    /// fusion dans `SessionState::apply`, le front affichait 3 lignes "Eclats x48" pour les combats
+    /// synchronisés par l'overlay là où la lecture directe du log affiche une seule ligne
+    /// "Eclats x144".
+    #[test]
+    fn butin_du_meme_objet_fusionne_en_une_seule_ligne() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "El Pochito", 1, true),
+            ApplyContext::default(),
+            &mut events,
+        );
+        for _ in 0..3 {
+            state.apply(
+                &LogEntry::Loot {
+                    time: "12:00:01,500".to_string(),
+                    item: "Eclats".to_string(),
+                    quantity: 48,
+                    fight_id: Some(1),
+                },
+                ApplyContext::default(),
+                &mut events,
+            );
+        }
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        assert_eq!(fight.loot.len(), 1, "une seule ligne pour \"Eclats\"");
+        assert_eq!(fight.loot[0].item_name.as_deref(), Some("Eclats"));
+        assert_eq!(fight.loot[0].quantity, 144);
     }
 
     #[test]
