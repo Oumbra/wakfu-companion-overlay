@@ -99,9 +99,9 @@ bord sombre (bas-droit) sur le cadre carré de l'emplacement d'objet (~64×64 px
 >
 > **Reste à déterminer avant intégration** : le ratio entre la taille de l'icône d'objet et celle
 > de la bordure — même problème déjà résolu une fois pour les médaillons du cadre de combat (un
-> facteur d'échelle empirique avait dû être mesuré entre le rond du template et le portrait 48×48,
-> voir `assets/_test/README.md`) — à mesurer sur ces nouveaux fichiers avant tout code
-> d'intégration.
+> facteur d'échelle empirique ≈0.3116 avait dû être mesuré entre le rond du template et le portrait
+> 48×48, voir la doc de module de `crates/overlay-ui/src/panels/combat_frame.rs`) — à mesurer sur
+> ces nouveaux fichiers avant tout code d'intégration.
 
 ---
 
