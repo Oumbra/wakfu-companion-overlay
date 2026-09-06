@@ -910,6 +910,20 @@ impl App {
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                     );
                 }
+                // Journalisé UNIQUEMENT sur une vraie transition (pas la réaffirmation
+                // périodique, qui tournerait sinon toutes les `TOPMOST_REASSERT_INTERVAL` pour
+                // rien) — diagnostic 2026-09-06 (retour utilisateur, instabilité perçue entre les
+                // deux overlays) : permet de voir dans le journal, sans vidéo à décortiquer, si
+                // les DEUX fenêtres d'un même personnage (Combat + Suivi) sont promues au même
+                // tick ou avec un décalage — voir aussi `GpuState::occluded_since` (`frame.rs`)
+                // pour corréler avec une éventuelle occlusion juste après ce changement de style.
+                if transitioned {
+                    tracing::info!(
+                        "[topmost] {} ({:?}) -> HWND_TOPMOST",
+                        overlay.character_name,
+                        overlay.kind
+                    );
+                }
                 overlay.is_topmost = true;
                 overlay.last_topmost_reassert = Some(now);
                 continue;
@@ -946,6 +960,12 @@ impl App {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                 );
             }
+            tracing::info!(
+                "[topmost] {} ({:?}) -> HWND_NOTOPMOST (après {:?} sans pertinence)",
+                overlay.character_name,
+                overlay.kind,
+                now.duration_since(demote_due_at)
+            );
             overlay.is_topmost = false;
             overlay.pending_demote_since = None;
         }
@@ -1270,6 +1290,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         egui_ctx,
         egui_winit,
         egui_renderer,
+        occluded_since: None,
     }
 }
 
