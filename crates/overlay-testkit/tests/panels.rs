@@ -496,3 +496,68 @@ fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
     harness.run();
     harness.snapshot("watchlist_tooltip_supprimer_a_gauche");
 }
+
+/// Reproduit le test utilisateur 2026-09-06 (capture d'écran à l'appui) : deux décomptes à
+/// GRANDES valeurs ("500/500" et "2000/2000") pour voir comment `paint_count_inline` les gère.
+/// Sur l'ancien rendu (courant+"/"+cible sur une seule ligne), le texte débordait de la tuile
+/// (58px) et chevauchait la tuile voisine — illisible. Ce test couvre le nouveau rendu, essai
+/// demandé par l'utilisateur : la fraction cible ("/500", "/2000") passe SOUS le nombre courant,
+/// même abscisse, police réduite (voir `panels::watchlist::TARGET_LINE_OFFSET`/`TARGET_FONT_SIZE`).
+#[test]
+fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let entries = vec![
+        WatchlistEntry {
+            name: "Mulette Bouffe Tout".to_string(),
+            kind: WatchlistKind::Enemy,
+            mode: WatchlistMode::Down,
+            count: 500,
+            countdown_target: 500,
+            catalog_id: None,
+        },
+        WatchlistEntry {
+            name: "Coiffe du Bouffe Tout".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Down,
+            count: 2000,
+            countdown_target: 2000,
+            catalog_id: None,
+        },
+    ];
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Watchlist,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &entries,
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("watchlist_decompte_grandes_valeurs");
+}

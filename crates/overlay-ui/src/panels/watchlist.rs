@@ -329,6 +329,23 @@ const COUNT_INSET_BOTTOM: f32 = 4.0;
 /// à 13px, puis affiné à 14px (troisième retour, après test en conditions réelles).
 const COUNT_FONT_SIZE: f32 = 14.0;
 
+/// Essai demandé par l'utilisateur 2026-09-06 (test volontaire à grandes valeurs, captures d'écran
+/// à l'appui : un décompte "500/500" ou "2000/2000" — deux fois un nombre à 3-4 chiffres plus le
+/// symbole de fraction sur UNE SEULE ligne — débordait de la tuile (58px) et chevauchait la tuile
+/// voisine). Plutôt que de composer courant+"/"+cible côte à côte (voir l'ancienne version de
+/// `paint_count_inline`, gardée en mémoire dans l'historique Git), la fraction cible passe
+/// maintenant SOUS le nombre courant : `TARGET_LINE_OFFSET` décale son ancrage vers le bas depuis
+/// la MÊME position que le nombre courant, `TARGET_FONT_SIZE` réduit sa police puisqu'elle ne
+/// porte plus qu'une information secondaire. Le nombre courant, lui, retrouve exactement
+/// l'emplacement/la police du mode `up` (aucun décalage horizontal pour laisser place à la
+/// fraction, qui n'est plus sur la même ligne) — demande explicite : « la couleur et le nombre de
+/// l'élément courant [...] le même emplacement que tous les autres nombres ».
+const TARGET_LINE_OFFSET: f32 = 20.0;
+/// Police de la fraction cible (ex. "/500") sous le nombre courant — plus petite que
+/// `COUNT_FONT_SIZE` (essai demandé : « on réduit la fonte [...] on la mettrait en onze ou en
+/// dix »), gardée en monospace comme le reste du compteur.
+const TARGET_FONT_SIZE: f32 = 10.0;
+
 /// Largeur de contenu nécessaire pour afficher `entry_count` entrées + la colonne de contrôle
 /// ("+"/"−" empilés), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
 /// appelant) — utilisée par `main.rs` pour dimensionner dynamiquement la fenêtre Suivi (retour
@@ -995,9 +1012,12 @@ fn entry_tile(
 /// - `up` : le compte seul, en clair neutre (`TEXT_COLOR`).
 /// - `down` : compte courant EN COULEUR KAMAS (`KAMA_COLOR`) sur cible grisée (`TEXT_MUTED`),
 ///   PAS de conversion en "déjà collecté" (le web n'affiche que `count`/`countdownTarget` bruts).
+///
+/// **Essai 2026-09-06** (voir `TARGET_LINE_OFFSET`) : le nombre courant et la fraction cible ne
+/// partagent plus la même ligne. Le courant garde EXACTEMENT l'ancrage/la police du mode `up`
+/// (`right`/`bottom`, `COUNT_FONT_SIZE`) ; la cible (ex. "/500") se peint sous lui, même abscisse
+/// `right`, décalée de `TARGET_LINE_OFFSET` vers le bas et réduite à `TARGET_FONT_SIZE`.
 fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
-    let font = egui::FontId::monospace(COUNT_FONT_SIZE);
-
     let (current_text, target_part) = match entry.mode {
         WatchlistMode::Down => (
             entry.count.to_string(),
@@ -1014,36 +1034,23 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
     let right = tile_rect.right() - COUNT_INSET_RIGHT;
     let bottom = tile_rect.bottom() - COUNT_INSET_BOTTOM;
 
-    // Le segment "cible" (ex. "/10") est peint EN PREMIER, ancré au coin bas-droit de la tuile ;
-    // le segment "courant" est ensuite peint juste à sa GAUCHE (ancré `RIGHT_BOTTOM` sur la
-    // largeur mesurée du segment cible) — évite de dupliquer la boucle de contour de
-    // `paint_outlined_text` pour composer deux galleys sur une même ligne.
-    let target_width = target_part
-        .as_ref()
-        .map(|text| {
-            ui.painter()
-                .layout_no_wrap(text.clone(), font.clone(), TEXT_MUTED)
-                .size()
-                .x
-        })
-        .unwrap_or(0.0);
+    super::combat::paint_outlined_text(
+        ui,
+        egui::pos2(right, bottom),
+        egui::Align2::RIGHT_BOTTOM,
+        &current_text,
+        egui::FontId::monospace(COUNT_FONT_SIZE),
+        current_color,
+    );
 
     if let Some(target_text) = &target_part {
         super::combat::paint_outlined_text(
             ui,
-            egui::pos2(right, bottom),
+            egui::pos2(right, bottom + TARGET_LINE_OFFSET),
             egui::Align2::RIGHT_BOTTOM,
             target_text,
-            font.clone(),
+            egui::FontId::monospace(TARGET_FONT_SIZE),
             TEXT_MUTED,
         );
     }
-    super::combat::paint_outlined_text(
-        ui,
-        egui::pos2(right - target_width, bottom),
-        egui::Align2::RIGHT_BOTTOM,
-        &current_text,
-        font,
-        current_color,
-    );
 }
