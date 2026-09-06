@@ -60,6 +60,13 @@
 //! voir sa doc) avant recolorage : la marge transparente propre à chaque fichier source
 //! (`external-link-icon.png`/`options-icon.png` en laissent, `icon-plus.png`/`icon-minus.png` non)
 //! ne fausse plus la mise à l'échelle de `paint_icon_button`, qui reste par ailleurs inchangée.
+//!
+//! **Correctif 2026-09-06 (second passage, Options encore trop petite)** : la normalisation
+//! ci-dessus alignait déjà la bbox d'Options (16×15) sur celle de "+"/"−" (16×16), mais retour
+//! utilisateur après capture : toujours perçue comme trop petite — un rouage à traits fins reste
+//! visuellement plus discret qu'un "+"/"−" plein à bbox strictement égale. `OPTIONS_ICON_CONTENT_
+//! REFERENCE` (18px, +12,5 % par rapport à `ICON_CONTENT_REFERENCE`) lui est désormais dédiée,
+//! `normalize_icon_content` prenant la référence cible en paramètre plutôt qu'une constante unique.
 
 use overlay_engine::WakfuRarity;
 
@@ -93,26 +100,36 @@ const ICON_COLOR: [u8; 3] = [0xc5, 0xcb, 0xcc];
 const ICON_COLOR_HOVER: [u8; 3] = [0xf4, 0xd8, 0x9f];
 
 /// Taille de référence (plus grande dimension du CONTENU opaque, pas du canevas) à laquelle
-/// `normalize_icon_content` recale les quatre icônes du design system boutons — voir sa doc.
-/// Étalon choisi : la taille native de `icon-plus.png`/`icon-minus.png` (16×16, fournis par
-/// l'utilisateur), déjà jugée correcte visuellement, plutôt qu'une valeur arbitraire.
+/// `normalize_icon_content` recale "lien externe"/"+"/"−" — voir sa doc. Étalon choisi : la taille
+/// native de `icon-plus.png`/`icon-minus.png` (16×16, fournis par l'utilisateur), déjà jugée
+/// correcte visuellement, plutôt qu'une valeur arbitraire.
 const ICON_CONTENT_REFERENCE: f32 = 16.0;
 
+/// Référence DÉDIÉE à l'icône "Options" — retour utilisateur 2026-09-06 (second passage, après la
+/// normalisation générale ci-dessus) : encore perçue comme trop petite alors que sa bbox (16×15,
+/// voir doc de `normalize_icon_content`) est DÉJÀ alignée sur `ICON_CONTENT_REFERENCE` — un rouage
+/// à traits fins reste visuellement plus discret qu'un "+"/"−" plein à bbox strictement égale (une
+/// bbox identique ne garantit pas la même DENSITÉ d'encre). Ajustement délibérément propre à cette
+/// icône (+12,5 %, 16 → 18px) plutôt qu'une nouvelle mesure générale qui aurait aussi fait grossir
+/// "+"/"−"/lien externe, déjà jugés corrects.
+const OPTIONS_ICON_CONTENT_REFERENCE: f32 = 18.0;
+
 /// Rogne `img` à la bbox de ses pixels opaques (seuil `ALPHA_THRESHOLD`) puis le remet à l'échelle
-/// (aspect ratio conservé) pour que la plus grande dimension de cette bbox atteigne
-/// `ICON_CONTENT_REFERENCE` — retour utilisateur 2026-09-06 (comparaison de deux captures des
-/// boutons Combat et Suivi) : l'icône "lien externe" paraissait nettement plus petite que "+"/"−"
-/// une fois posée sur le MÊME socle, alors que `paint_icon_button` les met toutes à l'échelle dans
-/// le même ratio (voir sa doc). Cause mesurée par bbox opaque, pas par impression : les canevas
-/// `external-link-icon.png` (18×18) et `options-icon.png` (22×22) laissent une marge transparente
-/// autour du glyphe (bbox réelle 13×13 et 16×15), alors que `icon-plus.png`/`icon-minus.png`
-/// (16×16) occupent tout leur canevas (bbox 16×16 et 16×6) — `paint_icon_button` met à l'échelle le
-/// CANEVAS entier, marge invisible comprise, donc un glyphe entouré de plus de marge ressort plus
-/// petit à socle égal. Rogner puis recaler sur un étalon commun élimine cette marge cachée sans
-/// toucher au reste du pipeline (recolorage, `paint_icon_button`) : "+"/"−" et Options (bbox déjà
-/// ≈16px) en ressortent quasi inchangés (facteur proche de 1.0), seul le lien externe (bbox 13px)
-/// est réellement agrandi (facteur ≈1.23).
-fn normalize_icon_content(img: &image::RgbaImage) -> image::RgbaImage {
+/// (aspect ratio conservé) pour que la plus grande dimension de cette bbox atteigne `target` — voir
+/// `ICON_CONTENT_REFERENCE`/`OPTIONS_ICON_CONTENT_REFERENCE`. Retour utilisateur 2026-09-06
+/// (comparaison de deux captures des boutons Combat et Suivi) : l'icône "lien externe" paraissait
+/// nettement plus petite que "+"/"−" une fois posée sur le MÊME socle, alors que `paint_icon_button`
+/// les met toutes à l'échelle dans le même ratio (voir sa doc). Cause mesurée par bbox opaque, pas
+/// par impression : les canevas `external-link-icon.png` (18×18) et `options-icon.png` (22×22)
+/// laissent une marge transparente autour du glyphe (bbox réelle 13×13 et 16×15), alors que
+/// `icon-plus.png`/`icon-minus.png` (16×16) occupent tout leur canevas (bbox 16×16 et 16×6) —
+/// `paint_icon_button` met à l'échelle le CANEVAS entier, marge invisible comprise, donc un glyphe
+/// entouré de plus de marge ressort plus petit à socle égal. Rogner puis recaler sur un étalon
+/// commun élimine cette marge cachée sans toucher au reste du pipeline (recolorage,
+/// `paint_icon_button`) : "+"/"−" (bbox déjà ≈16px) en ressortent quasi inchangés (facteur proche de
+/// 1.0), le lien externe (bbox 13px) est réellement agrandi (facteur ≈1.23) — et Options utilise sa
+/// propre référence, plus grande (voir `OPTIONS_ICON_CONTENT_REFERENCE`).
+fn normalize_icon_content(img: &image::RgbaImage, target: f32) -> image::RgbaImage {
     const ALPHA_THRESHOLD: u8 = 10;
     let (width, height) = img.dimensions();
     let mut min_x = width;
@@ -137,7 +154,7 @@ fn normalize_icon_content(img: &image::RgbaImage) -> image::RgbaImage {
     let cropped = image::imageops::crop_imm(img, min_x, min_y, bbox_w, bbox_h).to_image();
 
     let content_size = bbox_w.max(bbox_h) as f32;
-    let scale = ICON_CONTENT_REFERENCE / content_size;
+    let scale = target / content_size;
     if (scale - 1.0).abs() < 0.01 {
         return cropped;
     }
@@ -171,14 +188,30 @@ pub struct UiIcons {
 
 impl UiIcons {
     pub fn load(ctx: &egui::Context) -> Self {
-        let (external_link_icon, external_link_icon_hover) =
-            load_texture_recolored_pair(ctx, "icon-external-link", EXTERNAL_LINK_ICON_BYTES);
-        let (options_icon, options_icon_hover) =
-            load_texture_recolored_pair(ctx, "icon-options", OPTIONS_ICON_BYTES);
-        let (icon_plus, icon_plus_hover) =
-            load_texture_recolored_pair(ctx, "icon-plus", ICON_PLUS_BYTES);
-        let (icon_minus, icon_minus_hover) =
-            load_texture_recolored_pair(ctx, "icon-minus", ICON_MINUS_BYTES);
+        let (external_link_icon, external_link_icon_hover) = load_texture_recolored_pair(
+            ctx,
+            "icon-external-link",
+            EXTERNAL_LINK_ICON_BYTES,
+            ICON_CONTENT_REFERENCE,
+        );
+        let (options_icon, options_icon_hover) = load_texture_recolored_pair(
+            ctx,
+            "icon-options",
+            OPTIONS_ICON_BYTES,
+            OPTIONS_ICON_CONTENT_REFERENCE,
+        );
+        let (icon_plus, icon_plus_hover) = load_texture_recolored_pair(
+            ctx,
+            "icon-plus",
+            ICON_PLUS_BYTES,
+            ICON_CONTENT_REFERENCE,
+        );
+        let (icon_minus, icon_minus_hover) = load_texture_recolored_pair(
+            ctx,
+            "icon-minus",
+            ICON_MINUS_BYTES,
+            ICON_CONTENT_REFERENCE,
+        );
         Self {
             allies: load_texture(ctx, "icon-header-allies", ALLIES_ICON_BYTES),
             enemies: load_texture(ctx, "icon-header-enemies", ENEMIES_ICON_BYTES),
@@ -332,8 +365,9 @@ fn load_texture_recolored_pair(
     ctx: &egui::Context,
     name: &'static str,
     bytes: &[u8],
+    content_reference: f32,
 ) -> (egui::TextureHandle, egui::TextureHandle) {
-    let decoded = normalize_icon_content(&decode(bytes));
+    let decoded = normalize_icon_content(&decode(bytes), content_reference);
     let normal = recolor(&decoded, ICON_COLOR);
     let hovered = recolor(&decoded, ICON_COLOR_HOVER);
     (
@@ -400,7 +434,7 @@ mod tests {
         for pixel in img.pixels_mut() {
             *pixel = image::Rgba([255, 255, 255, 255]);
         }
-        let out = normalize_icon_content(&img);
+        let out = normalize_icon_content(&img, ICON_CONTENT_REFERENCE);
         assert_eq!(out.dimensions(), (16, 16));
     }
 
@@ -416,9 +450,22 @@ mod tests {
                 img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
             }
         }
-        let out = normalize_icon_content(&img);
+        let out = normalize_icon_content(&img, ICON_CONTENT_REFERENCE);
         // Bbox opaque = 13×13 (indices 3..=15) ; agrandie pour que sa plus grande dimension
         // atteigne ICON_CONTENT_REFERENCE (16px), donc 16×16 ici (carré).
         assert_eq!(out.dimensions(), (16, 16));
+    }
+
+    /// L'icône Options utilise sa PROPRE référence, plus grande (voir
+    /// `OPTIONS_ICON_CONTENT_REFERENCE`) — un glyphe déjà plein cadre à 16×16 doit donc quand même
+    /// être agrandi jusqu'à 18×18 avec cette référence, contrairement au cas générique ci-dessus.
+    #[test]
+    fn normalize_icon_content_options_utilise_sa_propre_reference() {
+        let mut img = image::RgbaImage::new(16, 16);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgba([255, 255, 255, 255]);
+        }
+        let out = normalize_icon_content(&img, OPTIONS_ICON_CONTENT_REFERENCE);
+        assert_eq!(out.dimensions(), (18, 18));
     }
 }

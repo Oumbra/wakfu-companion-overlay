@@ -40,16 +40,21 @@ pub fn apply(ctx: &egui::Context) {
 
             // Design system tooltip (retour utilisateur 2026-09-06, voir
             // `panels::icon_button::TOOLTIP_BG_FILL` et sa doc pour la mesure sur les captures de
-            // référence) : fond plein sans bordure ni ombre portée, à la place du thème PAR DÉFAUT
-            // d'egui (gris `#1b1b1b` flouté sur 8px) jugé « pas très joli [...] ça rend flou ».
-            // `window_fill`/`window_stroke`/`popup_shadow`/`menu_corner_radius` ne servent QUE de
-            // socle aux tooltips dans cette UI (aucun `egui::Window` ni menu/combobox ailleurs,
-            // voir la doc de `TOOLTIP_BG_FILL`) : ce réglage global couvre donc TOUS les tooltips
-            // de l'overlay en un seul endroit, plutôt qu'un style dupliqué à chaque appel.
+            // référence) : fond translucide (~82 % d'opacité, PAS opaque comme un premier passage
+            // l'avait posé) sans bordure ni ombre portée, à la place du thème PAR DÉFAUT d'egui
+            // (gris `#1b1b1b` flouté sur 8px) jugé « pas très joli [...] ça rend flou ».
+            // `window_fill`/`window_stroke`/`popup_shadow`/`menu_corner_radius`/`menu_margin` ne
+            // servent QUE de socle aux tooltips dans cette UI (aucun `egui::Window` ni menu/combobox
+            // ailleurs, voir la doc de `TOOLTIP_BG_FILL`) : ce réglage global couvre donc TOUS les
+            // tooltips de l'overlay en un seul endroit, plutôt qu'un style dupliqué à chaque appel.
             style.visuals.window_fill = icon_button::TOOLTIP_BG_FILL;
             style.visuals.window_stroke = egui::Stroke::NONE;
             style.visuals.popup_shadow = egui::Shadow::NONE;
             style.visuals.menu_corner_radius = egui::CornerRadius::same(6);
+            // Marge interne (retour utilisateur 2026-09-06, second passage : « plus de marge
+            // latérale et surtout plus de marge top et bottom » que le 6px uniforme d'egui) — voir
+            // la doc de `TOOLTIP_MARGIN` pour la mesure.
+            style.spacing.menu_margin = icon_button::TOOLTIP_MARGIN;
         });
     }
 }

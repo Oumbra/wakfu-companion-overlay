@@ -97,6 +97,33 @@ const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
 /// trois précédents ; ne fait rien de visible en mode invité (aucun compte lié) — voir
 /// `App::disconnect_account`.
 const DISCONNECT_HOTKEY_LABEL: &str = "Ctrl+Alt+D";
+
+/// Raccourci global pour "Détails" (bouton lien externe, `panels::combat::bottom_toolbar`) — même
+/// action qu'un clic (`open::that(overlay_sync::client::base_url())`, voir `App::open_details`).
+/// Retour utilisateur explicite 2026-09-06 (« à l'image de ce qu'il y a dans le jeu [...] rajoute
+/// les raccourcis [...] pour le détail [...] Ctrl+Shift+D ») : modificateur CTRL+SHIFT (pas
+/// CTRL+ALT comme les quatre raccourcis précédents), combinaisons données par l'utilisateur
+/// lui-même pour les cinq raccourcis de ce groupe — reflétées entre parenthèses dans les tooltips
+/// correspondants (voir `panels::combat::bottom_toolbar`/`paint_side_switch`,
+/// `panels::watchlist::control_button_row`), à l'image du jeu.
+const DETAILS_HOTKEY_LABEL: &str = "Ctrl+Shift+D";
+/// Raccourci global pour "Options" (`panels::combat::bottom_toolbar`) — n'ouvre encore aucun
+/// panneau, comme le clic sur le bouton lui-même (voir sa doc) : réservé à une future page de
+/// réglages, juste enregistré/journalisé pour l'instant (voir `about_to_wait`).
+const OPTIONS_HOTKEY_LABEL: &str = "Ctrl+Shift+O";
+/// Raccourci global pour "Ajouter" (`panels::watchlist::control_button_row`) — reste INERTE comme
+/// le bouton lui-même (voir doc de module de `watchlist` : aucune sélection/formulaire câblés côté
+/// overlay pour cette itération), juste enregistré/journalisé pour l'instant.
+const WATCHLIST_ADD_HOTKEY_LABEL: &str = "Ctrl+Shift+A";
+/// Raccourci global pour "Supprimer" — même remarque que `WATCHLIST_ADD_HOTKEY_LABEL`.
+const WATCHLIST_REMOVE_HOTKEY_LABEL: &str = "Ctrl+Shift+S";
+/// Raccourci global pour basculer Alliés/Ennemis (`panels::combat::paint_side_switch`) — EN MODE
+/// TOGGLE (retour utilisateur explicite : « ça inverse la sélection [...] si actuellement c'est
+/// sélectionné allié [...] ça passe en ennemi et inversement ») plutôt que deux raccourcis séparés
+/// un par camp : voir `CombatSide::toggled` et `App::toggle_combat_side`, appliqué à CHAQUE fenêtre
+/// Combat actuellement ouverte — même portée globale que les hotkeys existants, pas seulement celle
+/// au premier plan.
+const SIDE_HOTKEY_LABEL: &str = "Ctrl+Shift+E";
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
@@ -302,6 +329,15 @@ struct App {
     refresh_hotkey_id: u32,
     quit_hotkey_id: u32,
     disconnect_hotkey_id: u32,
+    /// Voir `DETAILS_HOTKEY_LABEL`/`OPTIONS_HOTKEY_LABEL`/`WATCHLIST_ADD_HOTKEY_LABEL`/
+    /// `WATCHLIST_REMOVE_HOTKEY_LABEL`/`SIDE_HOTKEY_LABEL` — même mécanisme d'id que les quatre
+    /// raccourcis ci-dessus, groupe distinct ajouté 2026-09-06 (design system tooltip, raccourcis
+    /// affichés entre parenthèses à l'image du jeu).
+    details_hotkey_id: u32,
+    options_hotkey_id: u32,
+    watchlist_add_hotkey_id: u32,
+    watchlist_remove_hotkey_id: u32,
+    side_hotkey_id: u32,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     /// Publié par le thread Engine à chaque lot ingéré (et une fois de plus dès la réception des
@@ -386,6 +422,14 @@ impl App {
         let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyR);
         let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyQ);
         let disconnect_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyD);
+        // Ctrl+Shift (pas Ctrl+Alt) — voir la doc de `DETAILS_HOTKEY_LABEL` et consorts.
+        let details_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD);
+        let options_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyO);
+        let watchlist_add_hotkey =
+            HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyA);
+        let watchlist_remove_hotkey =
+            HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
+        let side_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
         hotkey_manager
             .register(toggle_hotkey)
             .expect("enregistrement du hotkey global");
@@ -398,6 +442,21 @@ impl App {
         hotkey_manager
             .register(disconnect_hotkey)
             .expect("enregistrement du hotkey de déconnexion");
+        hotkey_manager
+            .register(details_hotkey)
+            .expect("enregistrement du hotkey Détails");
+        hotkey_manager
+            .register(options_hotkey)
+            .expect("enregistrement du hotkey Options");
+        hotkey_manager
+            .register(watchlist_add_hotkey)
+            .expect("enregistrement du hotkey Ajouter");
+        hotkey_manager
+            .register(watchlist_remove_hotkey)
+            .expect("enregistrement du hotkey Supprimer");
+        hotkey_manager
+            .register(side_hotkey)
+            .expect("enregistrement du hotkey Alliés/Ennemis");
 
         Self {
             windows: HashMap::new(),
@@ -407,6 +466,11 @@ impl App {
             refresh_hotkey_id: refresh_hotkey.id(),
             quit_hotkey_id: quit_hotkey.id(),
             disconnect_hotkey_id: disconnect_hotkey.id(),
+            details_hotkey_id: details_hotkey.id(),
+            options_hotkey_id: options_hotkey.id(),
+            watchlist_add_hotkey_id: watchlist_add_hotkey.id(),
+            watchlist_remove_hotkey_id: watchlist_remove_hotkey.id(),
+            side_hotkey_id: side_hotkey.id(),
             interactive: true,
             snapshot,
             watchlist,
@@ -755,6 +819,29 @@ impl App {
         tracing::info!(">>> Déconnexion du compte demandée ({DISCONNECT_HOTKEY_LABEL})");
     }
 
+    /// `DETAILS_HOTKEY_LABEL` : même action que le clic sur le bouton "lien externe"
+    /// (`panels::combat::bottom_toolbar`) — voir sa doc pour `base_url()`. `open::that` est
+    /// best-effort (résultat ignoré, même choix que le clic direct) : un navigateur qui ne s'ouvre
+    /// pas n'est pas une raison de faire quoi que ce soit d'autre planter.
+    fn open_details(&self) {
+        let _ = open::that(overlay_sync::client::base_url());
+        tracing::info!(">>> Détails ({DETAILS_HOTKEY_LABEL}) : ouverture du site.");
+    }
+
+    /// `SIDE_HOTKEY_LABEL` : bascule Alliés/Ennemis (`CombatSide::toggled`) de CHAQUE fenêtre Combat
+    /// actuellement ouverte, pas seulement celle au premier plan — même portée globale que les
+    /// autres hotkeys de cette liste. Sans effet sur les fenêtres Suivi (`combat_side` n'a de sens
+    /// que pour `OverlayKind::Combat`, voir sa doc dans `OverlayWindow`).
+    fn toggle_combat_side(&mut self) {
+        for overlay in self.windows.values_mut() {
+            if overlay.kind == OverlayKind::Combat {
+                overlay.combat_side = overlay.combat_side.toggled();
+                overlay.window.request_redraw();
+            }
+        }
+        tracing::info!(">>> Bascule Alliés/Ennemis ({SIDE_HOTKEY_LABEL})");
+    }
+
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
     /// sinon repli en z-order normal — pour ne plus recouvrir une application quelconque devenue
     /// active (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus
@@ -1036,6 +1123,21 @@ impl ApplicationHandler<UserEvent> for App {
                 event_loop.exit();
             } else if event.id == self.disconnect_hotkey_id {
                 self.disconnect_account();
+            } else if event.id == self.details_hotkey_id {
+                self.open_details();
+            } else if event.id == self.options_hotkey_id {
+                // Voir la doc de `OPTIONS_HOTKEY_LABEL` : aucun panneau à ouvrir pour l'instant,
+                // même no-op que le clic sur le bouton (`panels::combat::bottom_toolbar`).
+                tracing::debug!(
+                    ">>> Options ({OPTIONS_HOTKEY_LABEL}) : aucun panneau à ouvrir pour l'instant."
+                );
+            } else if event.id == self.watchlist_add_hotkey_id {
+                // Voir la doc de `WATCHLIST_ADD_HOTKEY_LABEL` : bouton encore inerte.
+                tracing::debug!(">>> Ajouter ({WATCHLIST_ADD_HOTKEY_LABEL}) : encore inerte.");
+            } else if event.id == self.watchlist_remove_hotkey_id {
+                tracing::debug!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL}) : encore inerte.");
+            } else if event.id == self.side_hotkey_id {
+                self.toggle_combat_side();
             }
         }
         // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
