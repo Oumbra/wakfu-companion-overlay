@@ -435,9 +435,21 @@ const LEADER_PANEL_FILL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_c
 /// dessus est mise à l'échelle dans le MÊME ratio (pas une taille fixe indépendante), pour rester
 /// proportionnée au socle quelle que soit sa taille cible.
 const ICON_BUTTON_SIZE: f32 = 24.0;
-/// Écart entre les deux boutons de la barre d'outils du bas, réutilisé aussi comme marge du fond
-/// translucide sur les quatre côtés (voir `bottom_toolbar`, refonte 2026-09-06).
+/// Marge du fond translucide sur les quatre côtés (voir `bottom_toolbar`, refonte 2026-09-06).
+/// N'est PLUS l'écart entre les deux boutons (voir `ICON_BUTTON_INNER_GAP`, retour utilisateur
+/// 2026-09-06 : « diminue de moitié l'écart entre les boutons » — les deux valeurs, jusque-là
+/// confondues, divergent depuis).
 const ICON_BUTTON_GAP: f32 = 6.0;
+/// Écart entre les boutons "lien externe" et "Options" — retour utilisateur explicite 2026-09-06
+/// (« diminue de moitié l'écart entre les boutons ») : moitié de l'ancienne valeur partagée avec
+/// `ICON_BUTTON_GAP` (6px), qui reste elle inchangée pour la marge du fond translucide.
+const ICON_BUTTON_INNER_GAP: f32 = 3.0;
+/// Marge entre le bord GAUCHE du panneau et le fond translucide de `bottom_toolbar` — retour
+/// utilisateur explicite 2026-09-06 (« écarte le groupe de boutons de la bordure, au moins de 5
+/// pixels ») : le panneau Combat garde `inner_margin(0)` dans l'ensemble (voir
+/// `render_content::paint_content`, « collé au bord de la fenêtre de jeu » — décision distincte,
+/// non remise en cause ici), seule cette barre d'outils reçoit une marge locale.
+const BOTTOM_TOOLBAR_LEFT_MARGIN: f32 = 5.0;
 
 #[allow(clippy::too_many_arguments)]
 pub fn show(
@@ -552,7 +564,13 @@ pub fn show(
     });
 
     ui.add_space(TOTAL_GAP);
-    bottom_toolbar(ui, icons);
+    // Marge à GAUCHE du panneau (voir `BOTTOM_TOOLBAR_LEFT_MARGIN`) — appliquée ici plutôt que
+    // dans `bottom_toolbar` : c'est un décalage de POSITION (avant le premier widget), pas une
+    // dimension du fond translucide lui-même.
+    ui.horizontal(|ui| {
+        ui.add_space(BOTTOM_TOOLBAR_LEFT_MARGIN);
+        bottom_toolbar(ui, icons);
+    });
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
@@ -607,10 +625,15 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, to
 ///
 /// **Refonte 2026-09-06** : marge symétrique sur les QUATRE côtés (haut/bas ajoutés, voir doc de
 /// module) + fond translucide (`icon_button::PANEL_BACKDROP_FILL`) peint AVANT les boutons.
+///
+/// **Refonte 2026-09-06 (suite)** : écart entre les deux boutons réduit de moitié
+/// (`ICON_BUTTON_INNER_GAP`, distinct désormais de `ICON_BUTTON_GAP`) + marge à GAUCHE du panneau
+/// ajoutée (`BOTTOM_TOOLBAR_LEFT_MARGIN`, via le `ui.horizontal` de l'appelant, voir `show`) — deux
+/// retours utilisateur explicites distincts, voir la doc de ces constantes.
 fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
     let (row_rect, _) = ui.allocate_exact_size(
         egui::vec2(
-            ICON_BUTTON_GAP + ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_GAP + ICON_BUTTON_GAP,
+            ICON_BUTTON_GAP + ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_INNER_GAP + ICON_BUTTON_GAP,
             ICON_BUTTON_GAP + ICON_BUTTON_SIZE + ICON_BUTTON_GAP,
         ),
         egui::Sense::hover(),
@@ -638,7 +661,7 @@ fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
     }
 
     let options_top_left =
-        external_link_top_left + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_GAP, 0.0);
+        external_link_top_left + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_INNER_GAP, 0.0);
     let options_response = paint_toolbar_button(
         ui,
         options_top_left,
