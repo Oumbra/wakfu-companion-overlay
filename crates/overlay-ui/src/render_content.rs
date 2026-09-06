@@ -23,6 +23,27 @@ use crate::ui_icons::UiIcons;
 /// par l'utilisateur, pas de raisonnement supplémentaire à documenter ici.
 pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 
+/// Espace réservé au-dessus du contenu du panneau Combat, pour que l'infobulle du switch Alliés/
+/// Ennemis (`panels::combat::paint_side_switch`, tout premier widget peint dans ce panneau — voir
+/// `show_tooltip_above`) puisse s'afficher AU-DESSUS de lui plutôt qu'en dessous (retour
+/// utilisateur : « les tooltips du switch alliés/ennemis s'affichent en dessous au lieu d'au
+/// dessus »). Avant ce correctif, `inner_margin` était nul sur les quatre côtés (voir `paint_
+/// content` ci-dessous) : le switch était donc collé au bord SUPÉRIEUR de la fenêtre, sans
+/// RIGOUREUSEMENT aucune place pour `RectAlign::TOP`, qui retombait systématiquement sur un repli
+/// `BOTTOM*` (voir la doc de `show_tooltip_above`, déjà plusieurs refontes sur ce seul repli sans
+/// jamais s'attaquer à la cause : l'absence de place elle-même).
+///
+/// Valeur choisie par observation du rendu offscreen (`overlay-testkit`, §17.1 du plan) : le popup
+/// par défaut d'egui (`icon_button::paint_tooltip_label`, fond plein, `inner_margin` 8px) contenant
+/// une étiquette courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
+/// `icon_button::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
+/// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite :
+/// « agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
+/// jeu, décision non remise en cause ici (voir `main.rs::GAME_EDGE_MARGIN_PX`) — `main.rs`/`bin/
+/// overlay-ui-x11.rs` agrandissent `WINDOW_SIZE` de ce même montant pour que le reste du panneau ne
+/// soit pas compressé d'autant.
+pub const COMBAT_TOP_MARGIN: f32 = 44.0;
+
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
 /// pas de boucle 60 Hz forcée, l'overlay ne consomme rien tant que rien ne change). Publique : à
@@ -260,14 +281,21 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
     // `panels::watchlist::show`, seul endroit qui le renseigne (`OverlayKind::Watchlist`
     // ci-dessous).
     let mut close_toast = false;
-    // Marge interne nulle pour Combat (refonte 2026-09-04, retour utilisateur : collé au bord de
-    // la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui ferait partie du
-    // jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même raison). Suivi
-    // garde sa marge d'origine : non concerné par cette demande, bande de tuiles qui a toujours
-    // besoin d'un peu d'air pour ne pas coller aux boutons d'interface du jeu.
+    // Marge interne nulle pour Combat sur trois côtés (refonte 2026-09-04, retour utilisateur :
+    // collé au bord de la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui
+    // ferait partie du jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même
+    // raison) — SEUL le haut gagne `COMBAT_TOP_MARGIN`, voir sa doc, pour que l'infobulle du switch
+    // Alliés/Ennemis ait la place de s'afficher au-dessus de lui. Suivi garde sa marge d'origine
+    // sur les quatre côtés : non concerné par cette demande, bande de tuiles qui a toujours besoin
+    // d'un peu d'air pour ne pas coller aux boutons d'interface du jeu.
     let inner_margin = match kind {
-        OverlayKind::Combat => 0,
-        OverlayKind::Watchlist => 6,
+        OverlayKind::Combat => egui::Margin {
+            left: 0,
+            right: 0,
+            top: COMBAT_TOP_MARGIN as i8,
+            bottom: 0,
+        },
+        OverlayKind::Watchlist => egui::Margin::same(6),
     };
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.inner_margin(inner_margin))

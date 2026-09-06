@@ -53,6 +53,7 @@ use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
+use overlay_ui::render_content;
 use overlay_ui::render_content::{AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent};
 use overlay_ui::ui_icons::UiIcons;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -106,8 +107,10 @@ const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from
 const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
 // voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
-// faire.
-const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
+// faire. Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
+// tooltips du switch Alliés/Ennemis affichées en dessous faute de place au-dessus) : voir sa doc,
+// seule façon de loger cette marge sans compresser le reste du panneau.
+const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGIN as f64);
 /// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
 /// `panels::watchlist`) — la LARGEUR, elle, suit dynamiquement le CONTENU (voir
 /// `watchlist_target_width`), pas une constante fixe. 84 -> 116 px (2026-09-02) pour réserver
