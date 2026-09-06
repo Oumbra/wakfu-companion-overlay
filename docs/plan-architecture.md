@@ -376,7 +376,7 @@ ce document ne le répète pas.
 aucun événement souris**, donc elle ne peut pas savoir que le curseur la survole. Deux mécanismes,
 volontairement redondants :
 
-1. **Hotkey global (mécanisme principal)** — `global-hotkey`, par défaut `Ctrl+Alt+W` : bascule
+1. **Hotkey global (mécanisme principal)** — `global-hotkey`, par défaut `Ctrl+Shift+W` : bascule
    interactif/traversable. Déterministe, fonctionne partout, aucun sondage.
 2. **Survol (confort)** — quand l'overlay est visible, sondage de la position curseur à 60 Hz sur le
    main thread (`GetCursorPos` / `XQueryPointer`), comparaison aux rectangles interactifs du dernier

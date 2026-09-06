@@ -13,7 +13,7 @@
 //!   `catalog`/`dungeons` restent à leurs valeurs par défaut (vides), `auth_status` reste
 //!   `Connected` fixe (aucune icône de relance d'appairage n'est jamais affichée),
 //!   `auth_command_tx` est un `NoopAuthSink` (rien n'écoute de toute façon).
-//! - Pas de hotkey rafraîchissement/déconnexion (`Ctrl+Alt+R`/`Ctrl+Alt+D`) : sans thread
+//! - Pas de hotkey rafraîchissement/déconnexion (`Ctrl+Shift+R`/`Ctrl+Alt+D`) : sans thread
 //!   Auth/Catalogue à redemander, ils n'auraient aucun effet ici. Seuls bascule (`HOTKEY_LABEL`)
 //!   et sortie (`QUIT_HOTKEY_LABEL`) sont câblés.
 //! - Icônes réelles d'objets/monstres : `RemoteIconStore::empty()` (pas de thread réseau, voir sa
@@ -81,8 +81,8 @@ mod linux_main {
     use winit::platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11, WindowType};
     use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 
-    const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
-    const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
+    const HOTKEY_LABEL: &str = "Ctrl+Shift+W";
+    const QUIT_HOTKEY_LABEL: &str = "Ctrl+Shift+Q";
     /// Même cadence que Windows (§6.5 du plan) : 20 Hz pour l'ancrage/topmost/hotkey.
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
     // Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
@@ -186,8 +186,8 @@ mod linux_main {
             } = state;
 
             let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
-            let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
-            let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyQ);
+            let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyW);
+            let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyQ);
             hotkey_manager
                 .register(toggle_hotkey)
                 .expect("enregistrement du hotkey global");

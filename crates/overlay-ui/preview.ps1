@@ -9,10 +9,10 @@
       2. `cargo run -p overlay-ui` (release par défaut) : compile puis lance directement la
          fenêtre overlay, câblée sur overlay-ingest + overlay-engine.
 
-    La fenêtre est transparente, toujours au-dessus, sans bordure. Ctrl+Alt+W bascule interactif /
-    clic-traversant (hotkey global). Ctrl+Alt+R force un rafraîchissement (overlay bloqué, mal
+    La fenêtre est transparente, toujours au-dessus, sans bordure. Ctrl+Shift+W bascule interactif /
+    clic-traversant (hotkey global). Ctrl+Shift+R force un rafraîchissement (overlay bloqué, mal
     positionné/dimensionné, ou Suivi resté vide — redemande aussi les réglages de compte) sans
-    relancer tout le processus. Ctrl+Alt+Q (hotkey global, fonctionne sans focus) ou Ctrl+C (dans
+    relancer tout le processus. Ctrl+Shift+Q (hotkey global, fonctionne sans focus) ou Ctrl+C (dans
     cette console) pour quitter — les fenêtres overlay ne peuvent jamais recevoir le focus clavier
     (WS_EX_NOACTIVATE), Échap ne fonctionne donc pas en pratique.
 
@@ -58,7 +58,7 @@ $binName = if ($isWindowsHost) { "overlay-ui" } else { "overlay-ui-x11" }
 
 Write-Host ""
 Write-Host "=== overlay-ui — prévisualisation ($binName) ===" -ForegroundColor Cyan
-Write-Host "Ctrl+Alt+W = bascule interactif / clic-traversant  |  Ctrl+Alt+R = rafraîchir  |  Ctrl+Alt+Q ou Ctrl+C = quitter" -ForegroundColor Cyan
+Write-Host "Ctrl+Shift+W = bascule interactif / clic-traversant  |  Ctrl+Shift+R = rafraîchir  |  Ctrl+Shift+Q ou Ctrl+C = quitter" -ForegroundColor Cyan
 Write-Host ""
 
 $cargoArgs = @("run", "-p", "overlay-ui", "--bin", $binName)

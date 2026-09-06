@@ -15,20 +15,21 @@ cd crates\overlay-ui
 ```
 
 Prépare `vendor/wgpu-hal-30.0.1` (patch DirectComposition, à la racine du dépôt — voir
-`patches/setup-vendor.sh`) s'il est absent, puis `cargo run -p overlay-ui`. `Ctrl+Alt+W` bascule
-interactif / clic-traversant (hotkey global, fonctionne sans focus). `Ctrl+Alt+R` force un
+`patches/setup-vendor.sh`) s'il est absent, puis `cargo run -p overlay-ui`. `Ctrl+Shift+W` bascule
+interactif / clic-traversant (hotkey global, fonctionne sans focus). `Ctrl+Shift+R` force un
 rafraîchissement de tous les overlays (redessin + réaffirmation topmost immédiate + nouvelle
 demande des réglages de compte — voir `App::force_refresh`, `main.rs`) : demande utilisateur
 explicite 2026-09-02 pour récupérer un overlay bloqué (mauvaise taille, plus au premier plan, Suivi
 resté vide) sans relancer tout le processus.
 
-`Ctrl+Alt+Q` (hotkey global) pour quitter — ou Ctrl+C dans le terminal. Pas Échap : retour
+`Ctrl+Shift+Q` (hotkey global) pour quitter — ou Ctrl+C dans le terminal. Pas Échap : retour
 utilisateur 2026-09-02, contraint de faire un Ctrl+C dans le terminal (` STATUS_CONTROL_C_EXIT` en
 sortie, normal dans ce cas mais ressemble à un plantage) car Échap ne fonctionnait jamais malgré ce
 qu'annonçait la bannière — cause trouvée : les fenêtres overlay portent `WS_EX_NOACTIVATE` (jamais
 désactivé, y compris en mode interactif, pour ne jamais voler le focus au jeu) donc ne reçoivent
-JAMAIS `WindowEvent::KeyboardInput`. `Ctrl+Alt+Q` règle ça en restant, comme `Ctrl+Alt+W`/
-`Ctrl+Alt+R`, un hotkey GLOBAL indépendant du focus.
+JAMAIS `WindowEvent::KeyboardInput`. `Ctrl+Shift+Q` règle ça en restant, comme `Ctrl+Shift+W`/
+`Ctrl+Shift+R`, un hotkey GLOBAL indépendant du focus (à l'origine en Ctrl+Alt, harmonisés sur
+Ctrl+Shift le 2026-09-06 — seul `Ctrl+Alt+D`, déconnexion, reste sur l'ancien préfixe).
 
 ## Deux fenêtres overlay indépendantes par personnage
 
@@ -144,7 +145,7 @@ Lancé contre le vrai `wakfu.log` de cette machine, capture d'écran à l'appui 
 de vrais combattants et de vrais nombres (dégâts, XP, kamas) — y compris des valeurs à neuf
 chiffres (XP à ce niveau de personnage dans Wakfu, confirmé dans les lignes brutes du log avant de
 conclure trop vite à un bug d'agrégation). Basculement clic-traversant confirmé fonctionnel
-(`Ctrl+Alt+W`, logué dans les deux sens). Réutilise tel quel le fenêtrage validé par S1
+(`Ctrl+Shift+W`, logué dans les deux sens). Réutilise tel quel le fenêtrage validé par S1
 (transparence, always-on-top, `WS_EX_NOACTIVATE`, clamp de redimensionnement) — pas retesté en
 détail ici, voir `spikes/s1-window-windows/README.md` pour cette partie.
 
