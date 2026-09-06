@@ -283,10 +283,16 @@ const ITEM_ICON_FILL_RATIO: f32 = 0.96;
 const ITEM_ICON_SIZE: f32 =
     TILE_SIZE * (1.0 - 2.0 * ITEM_BORDER_INNER_MARGIN_RATIO) * ITEM_ICON_FILL_RATIO;
 
-/// Marge entre le texte du compteur (voir `paint_count_inline`) et le bord de la tuile — assez
-/// pour rester lisible par-dessus le cadre de rareté (dont le liseré occupe déjà quelques pixels,
-/// voir `ITEM_BORDER_INNER_MARGIN_RATIO`) sans empiéter dessus.
-const COUNT_INSET: f32 = 5.0;
+/// Marge entre le texte du compteur (voir `paint_count_inline`) et le bord DROIT de la tuile —
+/// assez pour rester lisible par-dessus le cadre de rareté (dont le liseré occupe déjà quelques
+/// pixels, voir `ITEM_BORDER_INNER_MARGIN_RATIO`) sans empiéter dessus. Distincte de
+/// `COUNT_INSET_BOTTOM` depuis le retour utilisateur 2026-09-06 (« décale d'un pixel vers la
+/// gauche [...] et descends-le d'un pixel vers le bas ») : les deux marges n'ont plus besoin de
+/// rester égales.
+const COUNT_INSET_RIGHT: f32 = 6.0;
+/// Marge entre le texte du compteur et le bord BAS de la tuile — voir `COUNT_INSET_RIGHT`, 1px de
+/// moins pour rapprocher le nombre du bas (même retour utilisateur).
+const COUNT_INSET_BOTTOM: f32 = 4.0;
 
 /// Taille du compteur (voir `paint_count_inline`) — retour utilisateur 2026-09-06, capture d'écran
 /// du jeu à l'appui (quantités d'objets en bas-droit d'un emplacement) : à 11px le nombre était
@@ -922,8 +928,8 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
         TEXT_COLOR
     };
 
-    let right = tile_rect.right() - COUNT_INSET;
-    let bottom = tile_rect.bottom() - COUNT_INSET;
+    let right = tile_rect.right() - COUNT_INSET_RIGHT;
+    let bottom = tile_rect.bottom() - COUNT_INSET_BOTTOM;
 
     // Le segment "cible" (ex. "/10") est peint EN PREMIER, ancré au coin bas-droit de la tuile ;
     // le segment "courant" est ensuite peint juste à sa GAUCHE (ancré `RIGHT_BOTTOM` sur la
