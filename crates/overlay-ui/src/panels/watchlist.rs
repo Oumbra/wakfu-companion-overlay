@@ -75,11 +75,33 @@
 //!   `combat::paint_outlined_text`, réutilisé ici), incrusté DANS le coin bas-droit de la tuile —
 //!   voir `paint_count_inline`. Plus aucun débordement hors tuile : `content_width` n'a donc plus
 //!   besoin de réserver `BADGE_OVERFLOW` (retiré).
+//!
+//! **Refonte 2026-09-06 (design system boutons icône)** — retour utilisateur explicite (image de
+//! référence à l'appui, `menu-button-icon-first-plan.png`), les boutons "+"/"−" doivent maintenant
+//! utiliser EXACTEMENT le même système que les boutons Combat (lien externe, Options) : voir doc de
+//! `ui_icons` et `panels::icon_button`. Deux changements :
+//! - Les icônes "+"/"−" déjà intégrées à un fond (`watchlist-add.png`/`watchlist-remove.png`, retour
+//!   précédent ci-dessus) sont remplacées par des glyphes SEULS à fond transparent
+//!   (`UiIcons::icon_plus`/`icon_minus`), composés avec le MÊME socle `button_background`/
+//!   `button_background_hover` que Combat (`control_button`, désormais un fin appel à
+//!   `icon_button::paint_icon_button`) — plus une variante "survolée" approximée par éclaircissement
+//!   (`brighten`, retiré), mais la même paire de teintes exactes `#c5cbcc`/`#f4d89f` partout.
+//! - Empilement VERTICAL remplacé par une disposition HORIZONTALE (`control_button_row`), comme les
+//!   deux boutons Combat — demande explicite : « pas en vertical mais toujours en horizontal ». Fond
+//!   translucide ajouté derrière la paire (`icon_button::PANEL_BACKDROP_FILL`), avec une marge
+//!   symétrique sur les quatre côtés (`CONTROL_BUTTON_GAP`, réutilisée aussi comme marge — même
+//!   convention que `combat::ICON_BUTTON_GAP`). `content_width` recalcule en conséquence la largeur
+//!   de la colonne de contrôle (deux boutons + trois marges, plus large qu'un seul bouton empilé).
+//!   L'infobulle reste à GAUCHE (`show_tooltip_left`) : la réserve `CONTROL_TOOLTIP_RESERVE` protège
+//!   toujours le bouton "+" (le plus à gauche des deux) ; celle du bouton "−" peut chevaucher le
+//!   bouton "+" sans sortir de la fenêtre, ce qui reste correct (voir doc de `CONTROL_TOOLTIP_RESERVE`).
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
+
+use super::icon_button;
 
 /// Durée d'affichage du toast d'alerte avant fermeture automatique (§9 du plan : « toast ≤ 5 s,
 /// non bloquant ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
@@ -230,14 +252,15 @@ const TILE_ROUNDING: f32 = 10.0;
 /// tuiles ENNEMI (voir `entry_tile`), les tuiles OBJET utilisant désormais `ITEM_ICON_SIZE`.
 const ICON_SIZE: f32 = 30.0;
 
-/// Taille (largeur ET hauteur) des boutons "+"/"−" du bandeau (`UiIcons::watchlist_add`/
-/// `watchlist_remove`) — taille NATIVE de l'asset (34×34), non redimensionnée : contrairement au
-/// socle générique `button_background` (voir `combat::paint_icon_button`), l'utilisateur a fourni
-/// ces icônes directement à la taille voulue.
+/// Taille (largeur ET hauteur) du socle des boutons "+"/"−" du bandeau (`UiIcons::button_background`,
+/// même socle que Combat, voir doc de module refonte 2026-09-06) — mise à l'échelle du socle NATIF
+/// (36×36), pas une taille fixe indépendante : conservée à la taille déjà validée par l'utilisateur
+/// pour ces deux boutons avant leur passage au design system commun.
 const CONTROL_BUTTON_SIZE: f32 = 34.0;
-/// Écart vertical entre le bouton "+" et le bouton "−", empilés (voir doc de module, refonte
-/// 2026-09-06) — volontairement plus serré que `TILE_GAP` (les deux boutons forment un seul groupe
-/// visuel "ajouter/supprimer", pas deux entrées indépendantes).
+/// Écart entre le bouton "+" et le bouton "−" (côte à côte, voir doc de module, refonte
+/// 2026-09-06), réutilisé aussi comme marge du fond translucide sur les quatre côtés (même
+/// convention que `combat::ICON_BUTTON_GAP`) — volontairement plus serré que `TILE_GAP` (les deux
+/// boutons forment un seul groupe visuel "ajouter/supprimer", pas deux entrées indépendantes).
 const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// Espace réservé à GAUCHE de la colonne de contrôle, pour que l'infobulle de `control_button`
 /// (`show_tooltip_left`) ait matériellement la place de s'afficher à gauche — retour utilisateur
@@ -316,13 +339,30 @@ const COUNT_FONT_SIZE: f32 = 14.0;
 /// `paint_count_inline`). `CONTROL_TOOLTIP_RESERVE` ajoutée le même jour (voir sa doc) : espace à
 /// gauche de la colonne pour que l'infobulle "Ajouter"/"Supprimer" puisse réellement s'afficher à
 /// gauche plutôt que de retomber à droite faute de place.
+///
+/// **Refonte 2026-09-06 (design system boutons icône)** : la colonne de contrôle utilise maintenant
+/// `control_row_width` (deux boutons côte à côte + fond translucide, voir `control_button_row`) au
+/// lieu du seul `CONTROL_BUTTON_SIZE` (empilement vertical d'un bouton de large, retour ci-dessus).
 pub fn content_width(entry_count: usize) -> f32 {
     let entries_width = if entry_count == 0 {
         0.0
     } else {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
-    CONTROL_TOOLTIP_RESERVE + CONTROL_BUTTON_SIZE + TILE_GAP + entries_width
+    CONTROL_TOOLTIP_RESERVE + control_row_width() + TILE_GAP + entries_width
+}
+
+/// Largeur ET hauteur du fond translucide derrière les boutons "+"/"−" (voir `control_button_row`)
+/// — deux boutons côte à côte plus une marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre
+/// côtés (même convention que `combat::bottom_toolbar`). Fonction plutôt que constante : combine
+/// deux `const f32`, une multiplication de `f32` en contexte `const` restant plus fragile à faire
+/// évoluer ici qu'un simple appel.
+fn control_row_width() -> f32 {
+    CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
+}
+
+fn control_row_height() -> f32 {
+    CONTROL_BUTTON_GAP * 2.0 + CONTROL_BUTTON_SIZE
 }
 
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
@@ -455,25 +495,12 @@ pub fn show(
                     // transparente, aucun élément peint ni interactif dedans.
                     ui.add_space(CONTROL_TOOLTIP_RESERVE);
 
-                    // Colonne "+"/"−" empilée verticalement (voir doc de module, refonte
-                    // 2026-09-06) — `ui.horizontal` centre ses enfants verticalement par défaut,
-                    // ce qui aligne naturellement cette colonne (34+4+34=72px) sur le centre des
-                    // tuiles d'entrée (58px) juste à côté.
-                    ui.vertical(|ui| {
-                        control_button(
-                            ui,
-                            icons.watchlist_add(),
-                            icons.watchlist_add_hover(),
-                            "Ajouter",
-                        );
-                        ui.add_space(CONTROL_BUTTON_GAP);
-                        control_button(
-                            ui,
-                            icons.watchlist_remove(),
-                            icons.watchlist_remove_hover(),
-                            "Supprimer",
-                        );
-                    });
+                    // Rangée "+"/"−" côte à côte (voir doc de module, refonte 2026-09-06 — design
+                    // system boutons icône, remplace l'empilement vertical précédent) —
+                    // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
+                    // naturellement cette rangée sur le centre des tuiles d'entrée (58px) juste à
+                    // côté.
+                    control_button_row(ui, icons);
                     ui.add_space(TILE_GAP);
 
                     for (i, entry) in entries.iter().enumerate() {
@@ -793,33 +820,77 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
     });
 }
 
-/// Bouton "+"/"−" du bandeau — icône du jeu à sa taille NATIVE (`CONTROL_BUTTON_SIZE`, voir sa
-/// doc), fond et glyphe déjà intégrés à l'asset (contrairement à `combat::paint_icon_button`, pas
-/// de socle séparé à composer). `Sense::hover()` seulement, PAS `click()` : ces deux boutons
-/// restent INERTES (voir doc de module) — un survol suffit à afficher l'infobulle explicative
-/// (`show_tooltip_left`), sans laisser croire qu'un clic ferait quoi que ce soit.
+/// Rangée des boutons "+"/"−" du bandeau, côte à côte sur un fond translucide (voir doc de module,
+/// refonte 2026-09-06 — design system boutons icône, remplace l'empilement vertical précédent) —
+/// même fond que `combat::bottom_toolbar` (`icon_button::PANEL_BACKDROP_FILL`), marge symétrique de
+/// `CONTROL_BUTTON_GAP` sur les quatre côtés.
+fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
+    let row_rect = ui
+        .allocate_exact_size(
+            egui::vec2(control_row_width(), control_row_height()),
+            egui::Sense::hover(),
+        )
+        .0;
+    ui.painter().rect_filled(
+        row_rect,
+        icon_button::PANEL_BACKDROP_ROUNDING,
+        icon_button::PANEL_BACKDROP_FILL,
+    );
+
+    let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
+    control_button(
+        ui,
+        add_top_left,
+        icons,
+        icons.icon_plus(),
+        icons.icon_plus_hover(),
+        "watchlist-add",
+        "Ajouter",
+    );
+
+    let remove_top_left = add_top_left + egui::vec2(CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP, 0.0);
+    control_button(
+        ui,
+        remove_top_left,
+        icons,
+        icons.icon_minus(),
+        icons.icon_minus_hover(),
+        "watchlist-remove",
+        "Supprimer",
+    );
+}
+
+/// Bouton "+"/"−" du bandeau — socle `button_background`/`button_background_hover` (même socle que
+/// Combat, voir doc de module) et glyphe `icon`/`icon_hover` centré dessus, composés par
+/// `icon_button::paint_icon_button` (voir sa doc). `Sense::hover()` seulement, PAS `click()` : ces
+/// deux boutons restent INERTES (voir doc de module) — un survol suffit à afficher l'infobulle
+/// explicative (`show_tooltip_left`), sans laisser croire qu'un clic ferait quoi que ce soit.
 ///
 /// Curseur "main" affiché au survol malgré cette inertie (retour utilisateur explicite
 /// 2026-09-06) : affordance visuelle demandée en plus de l'infobulle, en assumant que le risque
 /// d'ambiguïté déjà discuté (voir doc de module) reste acceptable ici tant que le câblage réel
-/// n'existe pas.
+/// n'existe pas — déjà géré par `icon_button::paint_icon_button` (`on_hover_cursor`), pas besoin de
+/// le refaire ici.
 fn control_button(
     ui: &mut egui::Ui,
+    top_left: egui::Pos2,
+    icons: &UiIcons,
     icon: &egui::TextureHandle,
     icon_hover: &egui::TextureHandle,
+    id_source: &str,
     tooltip: &str,
 ) {
-    let (rect, response) = ui.allocate_exact_size(
-        egui::Vec2::splat(CONTROL_BUTTON_SIZE),
+    let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
+    let response = icon_button::paint_icon_button(
+        ui,
+        rect,
+        id_source,
         egui::Sense::hover(),
+        icons.button_background(),
+        icons.button_background_hover(),
+        icon,
+        icon_hover,
     );
-    // Curseur "main" malgré l'inertie du bouton (retour utilisateur explicite 2026-09-06,
-    // au-dessus des réserves de `control_button` : affordance visuelle demandée même sans clic
-    // câblé) — cohérent avec le réglage global `Visuals::interact_cursor` (`main.rs`) qui ne
-    // couvre pas les éléments dessinés à la main comme celui-ci.
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let texture = if response.hovered() { icon_hover } else { icon };
-    egui::Image::new(texture).paint_at(ui, rect);
     show_tooltip_left(&response, tooltip);
 }
 

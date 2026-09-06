@@ -6,4 +6,5 @@
 
 pub mod combat;
 pub mod combat_frame;
+pub mod icon_button;
 pub mod watchlist;
