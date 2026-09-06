@@ -973,10 +973,24 @@ impl App {
                 // tick ou avec un décalage — voir aussi `GpuState::occluded_since` (`frame.rs`)
                 // pour corréler avec une éventuelle occlusion juste après ce changement de style.
                 if transitioned {
+                    // Position/taille réelles ajoutées au diagnostic (2026-09-06, retour
+                    // utilisateur : Combat systématiquement plus touché que Suivi malgré des
+                    // transitions identiques) — écarte ou confirme une position aberrante
+                    // (partiellement hors écran, taille nulle) comme cause d'une fenêtre
+                    // "topmost" d'après nous mais invisible à l'écran, sans avoir à deviner depuis
+                    // une capture d'écran à chaque fois.
+                    let pos = overlay
+                        .window
+                        .outer_position()
+                        .map(|p| format!("{},{}", p.x, p.y))
+                        .unwrap_or_else(|_| "?".to_string());
+                    let size = overlay.window.outer_size();
                     tracing::info!(
-                        "[topmost] {} ({:?}) -> HWND_TOPMOST",
+                        "[topmost] {} ({:?}) -> HWND_TOPMOST @ ({pos}) {}x{}",
                         overlay.character_name,
-                        overlay.kind
+                        overlay.kind,
+                        size.width,
+                        size.height
                     );
                     // Correctif 2026-09-06 (retour utilisateur, `session_id=15744` : un combat
                     // qui ne s'affiche pas tant qu'on n'a pas cliqué sur l'overlay) — pendant
