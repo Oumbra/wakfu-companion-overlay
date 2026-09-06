@@ -341,6 +341,19 @@ pub enum CombatSide {
     Enemies,
 }
 
+impl CombatSide {
+    /// Inverse le camp affiché — utilisé par le raccourci global `Ctrl+Shift+E`
+    /// (`main.rs::App::toggle_combat_side`) en plus du clic direct sur `paint_side_switch` : retour
+    /// utilisateur explicite (« en mode toggle, c'est-à-dire que quand on appuie, ça inverse la
+    /// sélection »), un seul raccourci pour les deux camps plutôt qu'un par camp.
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Allies => Self::Enemies,
+            Self::Enemies => Self::Allies,
+        }
+    }
+}
+
 const SWITCH_HEIGHT: f32 = 26.0;
 const SWITCH_OPTION_WIDTH: f32 = 30.0;
 const SWITCH_ICON_SIZE: f32 = 15.0;
@@ -667,7 +680,7 @@ fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
         icons.external_link_icon(),
         icons.external_link_icon_hover(),
         "combat-open-wakfu-companion",
-        "Détails",
+        "Détails (Ctrl+Shift+D)",
     );
     if external_link_response.clicked() {
         // `base_url()` — jamais une URL codée en dur ici : c'est la même origine que le reste de
@@ -684,7 +697,7 @@ fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
         icons.options_icon(),
         icons.options_icon_hover(),
         "combat-open-options",
-        "Options",
+        "Options (Ctrl+Shift+O)",
     );
     if options_response.clicked() {
         // TODO: ouvrir le panneau d'options une fois qu'il existera (voir doc de module).
@@ -1099,7 +1112,7 @@ fn paint_side_switch(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    show_tooltip_above(&allies_response, "Alliés");
+    show_tooltip_above(&allies_response, "Alliés (Ctrl+Shift+E)");
     let enemies_response = ui
         .interact(
             enemies_rect,
@@ -1107,7 +1120,7 @@ fn paint_side_switch(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    show_tooltip_above(&enemies_response, "Ennemis");
+    show_tooltip_above(&enemies_response, "Ennemis (Ctrl+Shift+E)");
     if allies_response.clicked() {
         *side = CombatSide::Allies;
     }
