@@ -168,6 +168,73 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
     harness.snapshot("combat_apres_rejeu_reel");
 }
 
+/// Vérifie le correctif du bug rapporté (retour utilisateur : « les tooltips du switch
+/// alliés/ennemis s'affichent en dessous au lieu d'au dessus [...] agrandis légèrement l'overlay
+/// combat ») : l'infobulle du switch Alliés/Ennemis doit désormais s'afficher AU-DESSUS des deux
+/// boutons — voir `render_content::COMBAT_TOP_MARGIN`, qui réserve la place nécessaire à
+/// `RectAlign::TOP` (`combat::show_tooltip_above`) au-dessus du panneau Combat.
+///
+/// `fight: None` (aucun combat) plutôt qu'un rejeu réel : la colonne des portraits est alors VIDE
+/// (voir `combat::show`), ce qui fixe la position du switch à des coordonnées connues et stables
+/// (`x = COLUMN_GAP + LEADER_PANEL_PADDING = 12`, `y = COMBAT_TOP_MARGIN + LEADER_PANEL_PADDING =
+/// 50`, dans le repère du contenu peint par `paint_content` — `COLUMN_GAP`/`LEADER_PANEL_PADDING`
+/// sont privées à `combat.rs`, valeurs reprises ici à la main, même principe que `panneau_suivi_
+/// tooltips_ajouter_supprimer_visibles_a_gauche` ci-dessous). `Harness::new_ui` ajoute un
+/// `outer_margin(8.0)` autour de ce contenu (voir `egui_kittest::app_kind::AppKind::run_ui`) : les
+/// coordonnées de survol ci-dessous l'incluent.
+#[test]
+fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Combat,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+            },
+        );
+    });
+
+    harness.run();
+
+    // Centre du bouton "Alliés" (moitié gauche du switch) : 8 (outer_margin) + 12 (x du switch) +
+    // 15 (moitié de `SWITCH_OPTION_WIDTH`, 30) = 35 ; 8 + 50 (y du switch, `COMBAT_TOP_MARGIN` +
+    // `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
+    harness.hover_at(egui::pos2(35.0, 71.0));
+    harness.run();
+    harness.snapshot("combat_tooltip_allies_au_dessus");
+
+    // Centre du bouton "Ennemis" (moitié droite, décalée d'un `SWITCH_OPTION_WIDTH` complet) :
+    // 35 + 30 = 65 ; même y.
+    harness.hover_at(egui::pos2(65.0, 71.0));
+    harness.run();
+    harness.snapshot("combat_tooltip_ennemis_au_dessus");
+}
+
 #[test]
 fn panneau_suivi_vide_ne_panique_pas() {
     // Rejeu réel quand même (voir la doc de module) : un rejeu sans compte lié ne produit

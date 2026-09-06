@@ -67,6 +67,7 @@ mod linux_main {
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
+    use overlay_ui::render_content;
     use overlay_ui::render_content::{
         AuthStatus, NoopAuthSink, OverlayKind, RenderContent, UserEvent,
     };
@@ -84,7 +85,10 @@ mod linux_main {
     const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
     /// Même cadence que Windows (§6.5 du plan) : 20 Hz pour l'ancrage/topmost/hotkey.
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-    const WINDOW_SIZE: (f64, f64) = (420.0, 480.0);
+    // Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
+    // tooltips du switch Alliés/Ennemis affichées en dessous faute de place au-dessus, même
+    // correctif que `main.rs::WINDOW_SIZE`) — voir sa doc.
+    const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGIN as f64);
     const WATCHLIST_HEIGHT: f64 = 132.0;
     const WATCHLIST_INNER_MARGIN: f64 = 12.0;
     const WATCHLIST_WIDTH_FRACTION: f64 = 0.5;

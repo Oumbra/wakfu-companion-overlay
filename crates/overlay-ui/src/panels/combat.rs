@@ -306,6 +306,17 @@
 //! (`ICON_BUTTON_GAP`, réutilisée aussi pour le haut/bas — auparavant seuls la gauche et l'écart
 //! entre boutons en avaient une, voir 14e retour) : reproduit le petit fond noir semi-opaque visible
 //! entre les boutons de la planche de référence.
+//!
+//! **Refonte 2026-09-06 (marge du panneau, 15e retour)** : les refontes précédentes du 8e au 10e
+//! retour n'avaient corrigé que les REPLIS de `show_tooltip_above` (quel `RectAlign::BOTTOM*`
+//! choisir une fois `TOP` rejeté) sans jamais s'attaquer à la cause — le switch Alliés/Ennemis reste
+//! collé au bord SUPÉRIEUR du panneau (`inner_margin` nul), donc `TOP` échoue TOUJOURS pour lui,
+//! quel que soit le repli disponible : les deux infobulles s'affichaient en dessous plutôt qu'au-
+//! dessus (nouveau retour utilisateur explicite : « les tooltips du switch alliés/ennemis
+//! s'affichent en dessous au lieu d'au dessus [...] agrandis légèrement l'overlay combat »). Voir
+//! `render_content::COMBAT_TOP_MARGIN` : le panneau gagne une marge haute (44px) suffisante pour que
+//! `TOP` tienne enfin — la fenêtre Combat (`main.rs`/`bin/overlay-ui-x11.rs::WINDOW_SIZE`) est
+//! agrandie d'autant pour ne rien compresser d'autre.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -1020,6 +1031,13 @@ pub(crate) fn paint_outlined_text(
 /// `icon_button::TOOLTIP_GAP` (défaut egui 4px jugé trop proche de la référence mesurée, voir sa
 /// doc) et contenu peint par `icon_button::paint_tooltip_label` (couleur/fond/ombre du design
 /// system, voir sa doc) au lieu d'un `ui.label` brut hérité du thème par défaut d'egui.
+///
+/// **Refonte 2026-09-06 (marge du panneau, 15e retour)** : tous les replis ci-dessus ne changent
+/// RIEN pour un widget qui n'a RÉELLEMENT aucune place au-dessus de lui, comme le switch Alliés/
+/// Ennemis (`paint_side_switch`, tout premier widget peint dans le panneau Combat, collé au bord
+/// supérieur de la fenêtre) — `TOP` échouait alors systématiquement, retombant sur un repli
+/// `BOTTOM*` (bug rapporté explicitement). La vraie cause n'était pas ici : voir `render_content::
+/// COMBAT_TOP_MARGIN`, qui réserve désormais cette place manquante dans le panneau lui-même.
 pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
     let mut tooltip = egui::Tooltip::for_enabled(response);
     tooltip.popup = tooltip
