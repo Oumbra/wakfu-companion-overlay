@@ -95,12 +95,29 @@ pub fn render(
             // `AlwaysOnTop` qui vient de recevoir un changement de style étendu sans qu'aucune
             // entrée utilisateur ne lui soit adressée, voir `main.rs`) : sur `DXGI_STATUS_OCCLUDED`
             // (guide officiel), arrêter de dessiner MAIS continuer à sonder périodiquement pour
-            // détecter la fin de l'occlusion — cette frame-ci est perdue, sans `request_redraw` ici
-            // plus rien ne retente tant qu'un événement SANS RAPPORT ne survient par ailleurs
-            // (§6.1 : pas de boucle de rendu continue). Comportement générique wgpu, pas spécifique
-            // à un backend : traité pareil quel que soit l'OS qui exécute ce code.
-            window.request_redraw();
-            return (repaint_delay, close_toast);
+            // détecter la fin de l'occlusion — cette frame-ci est perdue.
+            //
+            // **Correctif 2026-09-06** (retour utilisateur : un overlay « gèle » ou perd le survol
+            // dès que l'autre reprend le premier plan) : l'ancien code rappelait `request_redraw()`
+            // ICI MÊME, sans aucun délai. Résultat : tant que la fenêtre restait occluse — ce qui
+            // arrive précisément à chaque bascule topmost entre les DEUX overlays (le changement de
+            // style qui déclenche `Occluded`, voir ci-dessus) — ce redessin immédiat en reprovoquait
+            // aussitôt un autre, en boucle SERRÉE, sur la boucle winit MONO-THREAD partagée par
+            // TOUTES les fenêtres overlay (une seule `App`/`run_app`, voir `main.rs`). Cette boucle
+            // de réessai monopolisait le thread au lieu de rendre la main à `about_to_wait`/
+            // `ControlFlow::WaitUntil`, empêchant les événements (survol, clic) de l'AUTRE fenêtre
+            // d'être traités tant qu'elle durait — exactement le gel observé. On borne désormais le
+            // délai avant nouvelle tentative à un sondage périodique court plutôt qu'un redessin
+            // instantané : imperceptible pour l'utilisateur une fois l'occlusion levée, mais laisse
+            // enfin la boucle d'événements respirer entre deux essais (§6.1 : pas de boucle de rendu
+            // continue — ce correctif restaure ce principe, que l'ancien code violait justement pour
+            // une fenêtre occluse). Le mécanisme de délai existe déjà (`next_redraw_at` côté
+            // appelant, voir sa doc) : inutile de forcer `request_redraw()` nous-mêmes, il suffit de
+            // renvoyer un délai borné. Comportement générique wgpu, pas spécifique à un backend :
+            // traité pareil quel que soit l'OS qui exécute ce code.
+            const OCCLUDED_RETRY_INTERVAL: std::time::Duration =
+                std::time::Duration::from_millis(150);
+            return (repaint_delay.min(OCCLUDED_RETRY_INTERVAL), close_toast);
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             gpu.surface.configure(&gpu.device, &gpu.config);
