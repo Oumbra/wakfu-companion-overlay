@@ -424,15 +424,19 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// ici à la main plutôt qu'importées), plus l'`outer_margin(8.0)` fixe qu'`egui_kittest::AppKind::
 /// run_ui` ajoute lui-même autour de tout harnais `build_ui`.
 ///
-/// **Recalculée à la refonte 2026-09-06 (design system boutons icône)** : les deux boutons sont
-/// maintenant côte à côte (voir doc de module) au lieu d'empilés — leur ligne (haute de
-/// `CONTROL_BUTTON_GAP*2+34 = 42px`) est désormais PLUS COURTE que la tuile d'entrée juste à côté
-/// (58px, `TILE_SIZE`) et donc centrée verticalement dedans par `ui.horizontal`, plutôt que l'
-/// inverse (l'ancienne colonne empilée, 72px, était la plus haute des deux et servait de référence).
+/// **Recalculée à la refonte 2026-09-06 (design system boutons icône)** : les deux boutons restent
+/// EMPILÉS (voir doc de module — une passe intermédiaire les avait mis côte à côte par erreur,
+/// corrigée sur retour utilisateur explicite le même jour), mais un fond translucide avec marge
+/// (`CONTROL_BUTTON_GAP` de chaque côté) entoure désormais la colonne.
+///
+/// **Recalculée à nouveau le même jour** : `CONTROL_BUTTON_SIZE` 34→24 (retour utilisateur, « essaie
+/// 24×24 pour voir le rendu »). Hauteur de colonne `CONTROL_BUTTON_GAP*3+24*2 = 60px`, toujours
+/// PLUS HAUTE que la tuile d'entrée juste à côté (58px, `TILE_SIZE`) — de justesse —, donc encore la
+/// référence de centrage vertical de `ui.horizontal`, sans décalage.
 /// Base commune : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 88 (réserve) +
-/// 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond translucide) + 17 (moitié de 34, centre du bouton)
-/// = 123 ; y = 14 + (58 - 42) / 2 (centrage vertical) + 4 (même marge, haut du fond) + 17 = 43.
-/// Bouton "−" : x = 123 + 34 + 4 (écart entre les deux boutons) = 161, MÊME y (côte à côte) = 43.
+/// 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié de 24, centre du bouton) = 118 ;
+/// y = 14 + 4 (même marge, haut du fond) + 12 = 30. Bouton "−" : MÊME x (empilé) = 118 ;
+/// y = 30 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux) = 58.
 #[test]
 fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
     let mut textures = Textures::new();
@@ -484,11 +488,11 @@ fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
 
     harness.run();
 
-    harness.hover_at(egui::pos2(123.0, 43.0));
+    harness.hover_at(egui::pos2(118.0, 30.0));
     harness.run();
     harness.snapshot("watchlist_tooltip_ajouter_a_gauche");
 
-    harness.hover_at(egui::pos2(161.0, 43.0));
+    harness.hover_at(egui::pos2(118.0, 58.0));
     harness.run();
     harness.snapshot("watchlist_tooltip_supprimer_a_gauche");
 }

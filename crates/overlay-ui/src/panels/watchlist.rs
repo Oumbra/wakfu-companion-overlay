@@ -86,15 +86,18 @@
 //!   `button_background_hover` que Combat (`control_button`, désormais un fin appel à
 //!   `icon_button::paint_icon_button`) — plus une variante "survolée" approximée par éclaircissement
 //!   (`brighten`, retiré), mais la même paire de teintes exactes `#c5cbcc`/`#f4d89f` partout.
-//! - Empilement VERTICAL remplacé par une disposition HORIZONTALE (`control_button_row`), comme les
-//!   deux boutons Combat — demande explicite : « pas en vertical mais toujours en horizontal ». Fond
-//!   translucide ajouté derrière la paire (`icon_button::PANEL_BACKDROP_FILL`), avec une marge
-//!   symétrique sur les quatre côtés (`CONTROL_BUTTON_GAP`, réutilisée aussi comme marge — même
-//!   convention que `combat::ICON_BUTTON_GAP`). `content_width` recalcule en conséquence la largeur
-//!   de la colonne de contrôle (deux boutons + trois marges, plus large qu'un seul bouton empilé).
-//!   L'infobulle reste à GAUCHE (`show_tooltip_left`) : la réserve `CONTROL_TOOLTIP_RESERVE` protège
-//!   toujours le bouton "+" (le plus à gauche des deux) ; celle du bouton "−" peut chevaucher le
-//!   bouton "+" sans sortir de la fenêtre, ce qui reste correct (voir doc de `CONTROL_TOOLTIP_RESERVE`).
+//! - Empilement VERTICAL conservé (`control_button_row`) — une première passe l'avait remplacé par
+//!   une disposition horizontale (mauvaise lecture de « pas en vertical mais toujours en horizontal
+//!   [comme Combat] », qui décrivait Combat, pas une consigne pour le Suivi), corrigée dans l'heure
+//!   suivante sur retour utilisateur explicite, capture d'écran de l'artefact à l'appui : « le
+//!   bouton plus et moins qui doivent être verticaux et pas horizontaux comme les autres boutons
+//!   external link et options ». Fond translucide ajouté derrière la paire (`icon_button::
+//!   PANEL_BACKDROP_FILL`), avec une marge symétrique sur les quatre côtés (`CONTROL_BUTTON_GAP`,
+//!   réutilisée aussi comme marge — même convention que `combat::ICON_BUTTON_GAP`), mais SANS
+//!   changer l'orientation : Combat et Suivi partagent le même socle et la même teinte d'icône,
+//!   PAS la même disposition. `content_width` recalcule `control_row_width` en conséquence (un seul
+//!   bouton de large, pas deux). L'infobulle reste à GAUCHE (`show_tooltip_left`) : la réserve
+//!   `CONTROL_TOOLTIP_RESERVE` protège les deux boutons, empilés à la MÊME abscisse.
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -254,11 +257,13 @@ const ICON_SIZE: f32 = 30.0;
 
 /// Taille (largeur ET hauteur) du socle des boutons "+"/"−" du bandeau (`UiIcons::button_background`,
 /// même socle que Combat, voir doc de module refonte 2026-09-06) — mise à l'échelle du socle NATIF
-/// (36×36), pas une taille fixe indépendante : conservée à la taille déjà validée par l'utilisateur
-/// pour ces deux boutons avant leur passage au design system commun.
-const CONTROL_BUTTON_SIZE: f32 = 34.0;
-/// Écart entre le bouton "+" et le bouton "−" (côte à côte, voir doc de module, refonte
-/// 2026-09-06), réutilisé aussi comme marge du fond translucide sur les quatre côtés (même
+/// (36×36), pas une taille fixe indépendante. Ramenée de 34×34 (taille déjà validée par
+/// l'utilisateur avant le passage au design system commun) à 24×24 — même taille que
+/// `combat::ICON_BUTTON_SIZE` — à l'essai, retour utilisateur explicite 2026-09-06 (« essaie
+/// vingt-quatre sur vingt-quatre pour voir le rendu que ça fait »).
+const CONTROL_BUTTON_SIZE: f32 = 24.0;
+/// Écart entre le bouton "+" et le bouton "−" (empilés, voir doc de module, refonte 2026-09-06),
+/// réutilisé aussi comme marge du fond translucide sur les quatre côtés (même
 /// convention que `combat::ICON_BUTTON_GAP`) — volontairement plus serré que `TILE_GAP` (les deux
 /// boutons forment un seul groupe visuel "ajouter/supprimer", pas deux entrées indépendantes).
 const CONTROL_BUTTON_GAP: f32 = 4.0;
@@ -341,8 +346,11 @@ const COUNT_FONT_SIZE: f32 = 14.0;
 /// gauche plutôt que de retomber à droite faute de place.
 ///
 /// **Refonte 2026-09-06 (design system boutons icône)** : la colonne de contrôle utilise maintenant
-/// `control_row_width` (deux boutons côte à côte + fond translucide, voir `control_button_row`) au
-/// lieu du seul `CONTROL_BUTTON_SIZE` (empilement vertical d'un bouton de large, retour ci-dessus).
+/// `control_row_width` (un fond translucide autour des boutons empilés, voir `control_button_row`)
+/// au lieu du seul `CONTROL_BUTTON_SIZE` — largeur quasi identique (le fond n'ajoute qu'une petite
+/// marge de chaque côté), la disposition reste VERTICALE (retour utilisateur explicite : « plus et
+/// moins doivent être verticaux, pas horizontaux comme Combat » — une première tentative les avait
+/// passés en horizontal par erreur, corrigée le même jour).
 pub fn content_width(entry_count: usize) -> f32 {
     let entries_width = if entry_count == 0 {
         0.0
@@ -352,17 +360,20 @@ pub fn content_width(entry_count: usize) -> f32 {
     CONTROL_TOOLTIP_RESERVE + control_row_width() + TILE_GAP + entries_width
 }
 
-/// Largeur ET hauteur du fond translucide derrière les boutons "+"/"−" (voir `control_button_row`)
-/// — deux boutons côte à côte plus une marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre
-/// côtés (même convention que `combat::bottom_toolbar`). Fonction plutôt que constante : combine
-/// deux `const f32`, une multiplication de `f32` en contexte `const` restant plus fragile à faire
-/// évoluer ici qu'un simple appel.
+/// Largeur du fond translucide derrière les boutons "+"/"−" (voir `control_button_row`) — UN
+/// bouton de large (empilés verticalement, voir doc de module, retour utilisateur 2026-09-06 : «
+/// plus et moins doivent être verticaux, pas horizontaux comme Combat ») plus une marge symétrique
+/// de `CONTROL_BUTTON_GAP` de chaque côté (même convention que `combat::bottom_toolbar`). Fonction
+/// plutôt que constante : combine deux `const f32`, une multiplication de `f32` en contexte `const`
+/// restant plus fragile à faire évoluer ici qu'un simple appel.
 fn control_row_width() -> f32 {
-    CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
+    CONTROL_BUTTON_GAP * 2.0 + CONTROL_BUTTON_SIZE
 }
 
+/// Hauteur du même fond translucide — DEUX boutons empilés (voir `control_row_width`) plus une
+/// marge symétrique en haut/bas et l'écart entre les deux au milieu.
 fn control_row_height() -> f32 {
-    CONTROL_BUTTON_GAP * 2.0 + CONTROL_BUTTON_SIZE
+    CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
 }
 
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
@@ -495,11 +506,11 @@ pub fn show(
                     // transparente, aucun élément peint ni interactif dedans.
                     ui.add_space(CONTROL_TOOLTIP_RESERVE);
 
-                    // Rangée "+"/"−" côte à côte (voir doc de module, refonte 2026-09-06 — design
-                    // system boutons icône, remplace l'empilement vertical précédent) —
-                    // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
-                    // naturellement cette rangée sur le centre des tuiles d'entrée (58px) juste à
-                    // côté.
+                    // Colonne "+"/"−" empilée (voir doc de module, refonte 2026-09-06 — design
+                    // system boutons icône, socle et teinte alignés sur Combat mais PAS
+                    // l'orientation) — `ui.horizontal` centre ses enfants verticalement par défaut,
+                    // ce qui aligne naturellement cette colonne sur le centre des tuiles d'entrée
+                    // (58px) juste à côté.
                     control_button_row(ui, icons);
                     ui.add_space(TILE_GAP);
 
@@ -820,10 +831,11 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
     });
 }
 
-/// Rangée des boutons "+"/"−" du bandeau, côte à côte sur un fond translucide (voir doc de module,
-/// refonte 2026-09-06 — design system boutons icône, remplace l'empilement vertical précédent) —
-/// même fond que `combat::bottom_toolbar` (`icon_button::PANEL_BACKDROP_FILL`), marge symétrique de
-/// `CONTROL_BUTTON_GAP` sur les quatre côtés.
+/// Colonne des boutons "+"/"−" du bandeau, empilés sur un fond translucide (voir doc de module,
+/// refonte 2026-09-06 — design system boutons icône : même socle et même teinte que Combat, mais
+/// disposition VERTICALE conservée, contrairement à Combat) — même fond que `combat::
+/// bottom_toolbar` (`icon_button::PANEL_BACKDROP_FILL`), marge symétrique de `CONTROL_BUTTON_GAP`
+/// sur les quatre côtés.
 fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
     let row_rect = ui
         .allocate_exact_size(
@@ -848,7 +860,7 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
         "Ajouter",
     );
 
-    let remove_top_left = add_top_left + egui::vec2(CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP, 0.0);
+    let remove_top_left = add_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
     control_button(
         ui,
         remove_top_left,
