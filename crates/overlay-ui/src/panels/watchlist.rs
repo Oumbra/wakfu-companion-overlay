@@ -406,6 +406,11 @@ const SURFACE_WELL: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
 const BORDER_STRONG: egui::Color32 = egui::Color32::from_rgb(0x4d, 0x4d, 0x4d);
 /// `--text-muted` — cible grisée d'un décompte, texte des tuiles "+"/"−".
 const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(0x88, 0x88, 0x88);
+/// Gris de la fraction cible d'un décompte (`paint_count_inline`) — plus clair que `TEXT_MUTED`
+/// (retour utilisateur 2026-09-06 : « éclaircir le gris utilisé pour la partie fraction »).
+/// Constante dédiée plutôt qu'un simple relèvement de `TEXT_MUTED` : ce dernier reste utilisé tel
+/// quel ailleurs (tuiles "+"/"−", bordure "monstre") où aucun éclaircissement n'a été demandé.
+const TARGET_TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(0xb0, 0xb0, 0xb0);
 /// Compte en mode `up` (`paint_count_inline`) — mirait `--text-color` (`0xe0e0e0`, gris très clair)
 /// jusqu'au retour utilisateur 2026-09-06 : « la couleur des chiffres [...] c'est bien du blanc
 /// rgb(255,255,255) ? [...] j'ai l'impression que c'est ce qui change véritablement la lecture ».
@@ -882,7 +887,7 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
         icons.icon_plus(),
         icons.icon_plus_hover(),
         "watchlist-add",
-        "Ajouter",
+        "Ajouter (Ctrl+Shift+A)",
     );
 
     let remove_top_left = add_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
@@ -893,7 +898,7 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
         icons.icon_minus(),
         icons.icon_minus_hover(),
         "watchlist-remove",
-        "Supprimer",
+        "Supprimer (Ctrl+Shift+S)",
     );
 }
 
@@ -1024,9 +1029,15 @@ fn entry_tile(
 ///   PAS de conversion en "déjà collecté" (le web n'affiche que `count`/`countdownTarget` bruts).
 ///
 /// **Essai 2026-09-06** (voir `TARGET_LINE_OFFSET`) : le nombre courant et la fraction cible ne
-/// partagent plus la même ligne. Le courant garde EXACTEMENT l'ancrage/la police du mode `up`
-/// (`right`/`bottom`, `COUNT_FONT_SIZE`) ; la cible (ex. "/500") se peint sous lui, même abscisse
-/// `right`, décalée de `TARGET_LINE_OFFSET` vers le bas et réduite à `TARGET_FONT_SIZE`.
+/// partagent plus la même ligne — la cible (ex. "/500") se peint sous le nombre courant, même
+/// abscisse `right`, réduite à `TARGET_FONT_SIZE`.
+///
+/// **Refonte 2026-09-06 (bis)** (retour utilisateur explicite) : c'est maintenant la FRACTION qui
+/// garde l'ancrage `bottom` du mode `up` (l'emplacement standard de TOUS les suivis incrémentaux),
+/// et le nombre courant qui remonte de `TARGET_LINE_OFFSET` au-dessus — inversion du point de
+/// référence par rapport à l'essai précédent, sur demande explicite (« remonter le groupe jusqu'à
+/// ce que la fraction soit exactement à l'emplacement des suivis incrémentaux »). Couleur de la
+/// fraction éclaircie à cette occasion (`TARGET_TEXT_COLOR`, plus clair que `TEXT_MUTED`).
 fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
     let (current_text, target_part) = match entry.mode {
         WatchlistMode::Down => (
@@ -1043,10 +1054,22 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
 
     let right = tile_rect.right() - COUNT_INSET_RIGHT;
     let bottom = tile_rect.bottom() - COUNT_INSET_BOTTOM;
+    // Le groupe courant+fraction remonte de `TARGET_LINE_OFFSET` par rapport à l'ancien ancrage du
+    // nombre courant (retour utilisateur 2026-09-06 : remonter tout le groupe jusqu'à ce que la
+    // fraction retombe exactement à l'emplacement standard des suivis incrémentaux, c'est-à-dire
+    // `bottom` — l'ancrage qu'utilise déjà le nombre courant seul en mode `up`, INCHANGÉ). Ce
+    // décalage ne s'applique donc QUE quand une fraction est réellement affichée (mode `down`) —
+    // le mode `up` garde exactement `bottom`, sans quoi « le même emplacement que tous les autres
+    // nombres » (demande d'origine, voir doc de module) ne serait plus respecté.
+    let current_bottom = if target_part.is_some() {
+        bottom - TARGET_LINE_OFFSET
+    } else {
+        bottom
+    };
 
     super::combat::paint_outlined_text(
         ui,
-        egui::pos2(right, bottom),
+        egui::pos2(right, current_bottom),
         egui::Align2::RIGHT_BOTTOM,
         &current_text,
         egui::FontId::monospace(COUNT_FONT_SIZE),
@@ -1056,11 +1079,11 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
     if let Some(target_text) = &target_part {
         super::combat::paint_outlined_text(
             ui,
-            egui::pos2(right, bottom + TARGET_LINE_OFFSET),
+            egui::pos2(right, bottom),
             egui::Align2::RIGHT_BOTTOM,
             target_text,
             egui::FontId::monospace(TARGET_FONT_SIZE),
-            TEXT_MUTED,
+            TARGET_TEXT_COLOR,
         );
     }
 }
