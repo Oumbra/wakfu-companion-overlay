@@ -688,6 +688,10 @@ mod linux_main {
             egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
 
         GpuState {
+            // Conservée pour la même raison que côté Windows (voir la doc de
+            // `GpuState::instance`) même si `recreate_surface` n'est pas appelée ici — X11/EWMH
+            // n'a pas de `Commit` DirectComposition séparé à rejouer, voir sa doc.
+            instance,
             surface,
             device,
             queue,

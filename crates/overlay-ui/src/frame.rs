@@ -11,6 +11,13 @@ use crate::render_content::{build_ui, RenderContent};
 /// État GPU/egui d'UNE fenêtre overlay — un par fenêtre, jamais partagé (voir la doc
 /// d'`OverlayWindow` dans chaque binaire).
 pub struct GpuState {
+    /// Conservée (pas seulement une variable locale d'`init_gpu`) pour permettre de RECRÉER
+    /// `surface` plus tard — voir `recreate_surface` et sa doc : un simple `surface.configure()`
+    /// répété sur la MÊME `Surface` ne suffit pas à rejouer `IDCompositionVisual::SetContent` +
+    /// `IDCompositionDevice::Commit()` (chemin `ResizeBuffers` de wgpu-hal, qui les saute
+    /// délibérément — voir `vendor/wgpu-hal-30.0.1/src/dx12/mod.rs`), seule une `Surface`
+    /// fraîchement créée le fait.
+    pub instance: wgpu::Instance,
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -216,4 +223,42 @@ pub fn render(
     gpu.queue.submit(Some(encoder.finish()));
     gpu.queue.present(output_frame);
     (repaint_delay, close_toast)
+}
+
+/// Recrée `gpu.surface` de zéro à partir de `gpu.instance` (même `device`/`queue` conservés,
+/// aucun besoin de re-négocier un adaptateur) et la reconfigure aussitôt — voir la doc de
+/// `GpuState::instance` pour la raison : un simple `gpu.surface.configure()` répété sur la MÊME
+/// `Surface` ne suffit PAS à rejouer `IDCompositionVisual::SetContent` +
+/// `IDCompositionDevice::Commit()` sous Windows (chemin `ResizeBuffers` de wgpu-hal, qui les
+/// saute délibérément une fois la surface déjà configurée une première fois).
+///
+/// **Diagnostic 2026-09-06** (retour utilisateur, plusieurs sessions) : une fenêtre restée
+/// `HWND_NOTOPMOST` un moment, puis repromue `HWND_TOPMOST`, pouvait continuer à présenter des
+/// frames "avec succès" (`get_current_texture()` ne renvoyait jamais `Occluded`/`Timeout` — voir
+/// `GpuState::occluded_since`, jamais atteint dans ces sessions) sans jamais réellement réapparaître
+/// à l'écran, jusqu'à une interaction quelconque de l'utilisateur dessus. Hypothèse la plus
+/// probable trouvée en lisant `vendor/wgpu-hal-30.0.1/src/dx12/mod.rs` : DWM peut ne pas avoir
+/// (re)composé le visual DirectComposition de cette fenêtre pendant sa période `NOTOPMOST`, et
+/// rien ne force `SetContent`/`Commit` à être rejoués depuis la toute première configuration —
+/// recréer la `Surface` à chaque repromotion (voir `main.rs::App::sync_topmost`) force ce chemin.
+///
+/// Réservé à cet appel PONCTUEL (à la repromotion, pas à chaque frame ni à chaque
+/// redimensionnement — `reconfigure_surface`/`surface.configure()` restent largement suffisants
+/// et bien moins coûteux pour ces deux cas) : recréer une `Surface` a un coût réel (nouvelle
+/// négociation DXGI), pas justifié pour un événement qui se produit au plus quelques fois par
+/// minute. Spécifique à `main.rs` (Windows/DirectComposition) : `overlay-ui-x11.rs` ne l'appelle
+/// pas, X11/EWMH n'ayant pas cette limitation de composition (pas de `Commit` séparé à rejouer).
+pub fn recreate_surface(gpu: &mut GpuState, window: &std::sync::Arc<winit::window::Window>) {
+    match gpu.instance.create_surface(std::sync::Arc::clone(window)) {
+        Ok(surface) => {
+            gpu.surface = surface;
+            gpu.surface.configure(&gpu.device, &gpu.config);
+        }
+        Err(err) => {
+            // Jamais fatal : la fenêtre continue avec son ANCIENNE surface (toujours valide,
+            // juste peut-être pas recomposée par DWM) plutôt que de planter tout l'overlay pour
+            // un correctif qui reste, par nature, best-effort.
+            tracing::warn!("recreate_surface : échec de recréation de la surface : {err}");
+        }
+    }
 }
