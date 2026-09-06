@@ -73,14 +73,15 @@ use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
 
-const HOTKEY_LABEL: &str = "Ctrl+Alt+W";
-/// Ctrl+Alt+R plutôt que F5 (suggestion initiale de l'utilisateur, 2026-09-02) : F5 est un
+const HOTKEY_LABEL: &str = "Ctrl+Shift+W";
+/// Ctrl+Shift+R plutôt que F5 (suggestion initiale de l'utilisateur, 2026-09-02) : F5 est un
 /// raccourci GLOBAL (`GlobalHotKeyManager`, jamais limité à une fenêtre précise malgré la demande
 /// « quand on est focus sur une fenêtre de jeu ») — le voler à Wakfu (raccourcis de sort/action
 /// fréquents sur les touches de fonction) ou à n'importe quelle autre appli au premier plan serait
 /// activement nuisible. Même préfixe que `HOTKEY_LABEL` : cohérent, déjà éprouvé sans collision
-/// connue avec le jeu.
-const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Alt+R";
+/// connue avec le jeu. CTRL+ALT+R -> CTRL+SHIFT+R (retour utilisateur 2026-09-06) : harmonisé avec
+/// `DETAILS_HOTKEY_LABEL` et consorts — seul `DISCONNECT_HOTKEY_LABEL` reste sur l'ancien préfixe.
+const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Shift+R";
 /// Raccourci global de sortie (retour utilisateur 2026-09-02) : les fenêtres overlay portent
 /// `WS_EX_NOACTIVATE` (voir `apply_extended_styles`, jamais désactivé même en mode interactif —
 /// nécessaire pour ne jamais voler le focus au jeu) donc ne reçoivent JAMAIS `WindowEvent::
@@ -89,23 +90,28 @@ const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Alt+R";
 /// systématiquement faire un Ctrl+C dans le terminal (` STATUS_CONTROL_C_EXIT` en sortie — normal
 /// dans ce cas, pas un plantage, mais peu clair). Même mécanisme que `HOTKEY_LABEL`/
 /// `REFRESH_HOTKEY_LABEL` (hotkey GLOBAL, fonctionne sans focus sur aucune fenêtre précise) pour
-/// vraiment permettre ce que la bannière annonce.
-const QUIT_HOTKEY_LABEL: &str = "Ctrl+Alt+Q";
+/// vraiment permettre ce que la bannière annonce. CTRL+ALT+Q -> CTRL+SHIFT+Q (retour utilisateur
+/// 2026-09-06), même changement que `HOTKEY_LABEL`/`REFRESH_HOTKEY_LABEL`.
+const QUIT_HOTKEY_LABEL: &str = "Ctrl+Shift+Q";
 /// Déconnexion volontaire du compte (lot L4, §7.2/§14 point 3 du plan) — jusqu'ici, révoquer une
 /// session native depuis l'overlay exigeait d'aller effacer le jeton à la main sur disque/dans le
 /// trousseau (aucun moyen depuis l'overlay lui-même). Même famille de raccourci GLOBAL que les
 /// trois précédents ; ne fait rien de visible en mode invité (aucun compte lié) — voir
-/// `App::disconnect_account`.
+/// `App::disconnect_account`. Resté sur CTRL+ALT lors du passage de `HOTKEY_LABEL`/
+/// `REFRESH_HOTKEY_LABEL`/`QUIT_HOTKEY_LABEL` à CTRL+SHIFT (2026-09-06, pas demandé par
+/// l'utilisateur pour celui-ci) — seul raccourci encore sur l'ancien préfixe.
 const DISCONNECT_HOTKEY_LABEL: &str = "Ctrl+Alt+D";
 
 /// Raccourci global pour "Détails" (bouton lien externe, `panels::combat::bottom_toolbar`) — même
 /// action qu'un clic (`open::that(overlay_sync::client::base_url())`, voir `App::open_details`).
 /// Retour utilisateur explicite 2026-09-06 (« à l'image de ce qu'il y a dans le jeu [...] rajoute
-/// les raccourcis [...] pour le détail [...] Ctrl+Shift+D ») : modificateur CTRL+SHIFT (pas
-/// CTRL+ALT comme les quatre raccourcis précédents), combinaisons données par l'utilisateur
-/// lui-même pour les cinq raccourcis de ce groupe — reflétées entre parenthèses dans les tooltips
-/// correspondants (voir `panels::combat::bottom_toolbar`/`paint_side_switch`,
-/// `panels::watchlist::control_button_row`), à l'image du jeu.
+/// les raccourcis [...] pour le détail [...] Ctrl+Shift+D ») : modificateur CTRL+SHIFT, combinaisons
+/// données par l'utilisateur lui-même pour les cinq raccourcis de ce groupe — reflétées entre
+/// parenthèses dans les tooltips correspondants (voir `panels::combat::bottom_toolbar`/
+/// `paint_side_switch`, `panels::watchlist::control_button_row`), à l'image du jeu. `HOTKEY_LABEL`/
+/// `REFRESH_HOTKEY_LABEL`/`QUIT_HOTKEY_LABEL`, initialement en CTRL+ALT, ont rejoint ce même
+/// préfixe CTRL+SHIFT le même jour (voir leur doc) ; seul `DISCONNECT_HOTKEY_LABEL` reste en
+/// CTRL+ALT.
 const DETAILS_HOTKEY_LABEL: &str = "Ctrl+Shift+D";
 /// Raccourci global pour "Options" (`panels::combat::bottom_toolbar`) — n'ouvre encore aucun
 /// panneau, comme le clic sur le bouton lui-même (voir sa doc) : réservé à une future page de
@@ -418,11 +424,12 @@ impl App {
         } = state;
 
         let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
-        let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyW);
-        let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyR);
-        let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyQ);
+        let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyW);
+        let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
+        let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyQ);
         let disconnect_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyD);
-        // Ctrl+Shift (pas Ctrl+Alt) — voir la doc de `DETAILS_HOTKEY_LABEL` et consorts.
+        // Ctrl+Shift comme les trois raccourcis ci-dessus — voir la doc de `DETAILS_HOTKEY_LABEL`
+        // et consorts ; seul `disconnect_hotkey` reste en Ctrl+Alt.
         let details_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD);
         let options_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyO);
         let watchlist_add_hotkey =
