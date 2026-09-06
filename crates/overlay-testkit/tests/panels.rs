@@ -105,6 +105,12 @@ impl Textures {
     }
 
     fn get_or_load(&mut self, ctx: &egui::Context) -> (&PortraitAtlas, &CombatFrame, &UiIcons) {
+        // `overlay_ui::style::apply` — MÊME style que les deux binaires (`main.rs`, `bin/
+        // overlay-ui-x11.rs`, voir sa doc), sans quoi ces snapshots resteraient sur le thème PAR
+        // DÉFAUT d'egui pour les tooltips (`egui_kittest::Harness::new_ui` crée son propre
+        // `egui::Context`, qui ne passe jamais par le point de configuration des deux binaires) et
+        // ne vaudraient plus rien pour vérifier visuellement le design system tooltip.
+        overlay_ui::style::apply(ctx);
         let portraits = self
             .portraits
             .get_or_insert_with(|| PortraitAtlas::load(ctx));

@@ -340,7 +340,10 @@ const COUNT_FONT_SIZE: f32 = 14.0;
 /// l'emplacement/la police du mode `up` (aucun décalage horizontal pour laisser place à la
 /// fraction, qui n'est plus sur la même ligne) — demande explicite : « la couleur et le nombre de
 /// l'élément courant [...] le même emplacement que tous les autres nombres ».
-const TARGET_LINE_OFFSET: f32 = 20.0;
+///
+/// Ramené de 20 à 12px (retour utilisateur suivant, sur le premier essai) : les deux lignes
+/// étaient trop écartées l'une de l'autre.
+const TARGET_LINE_OFFSET: f32 = 12.0;
 /// Police de la fraction cible (ex. "/500") sous le nombre courant — plus petite que
 /// `COUNT_FONT_SIZE` (essai demandé : « on réduit la fonte [...] on la mettrait en onze ou en
 /// dix »), gardée en monospace comme le reste du compteur.
@@ -812,7 +815,10 @@ fn toast_card(
         egui::FontId::proportional(12.0),
         with_alpha(close_glyph, card_alpha),
     );
-    let close_response = close_response.on_hover_text("Fermer");
+    // `combat::show_tooltip_above` plutôt qu'un `on_hover_text` brut (refonte 2026-09-06, design
+    // system tooltip) : même fond/texte/écart que le reste de l'UI, voir sa doc — pas de raison
+    // qu'un tooltip ponctuel comme celui-ci reste sur le thème par défaut d'egui.
+    super::combat::show_tooltip_above(&close_response, "Fermer");
 
     card_response.clicked() || close_response.clicked()
 }
@@ -830,6 +836,10 @@ fn toast_card(
 /// Combat, voir sa doc) : `LEFT_START`/`LEFT_END` d'abord (repli aligné au lieu de centré, qui ne
 /// déborde plus que du côté opposé au bord), `RIGHT*` en tout dernier recours plutôt que de laisser
 /// egui retomber sur son défaut `BOTTOM_START` (« sous la souris », déjà jugé désagréable ailleurs).
+///
+/// **Refonte 2026-09-06 (design system tooltip)** : écart au widget porté à
+/// `icon_button::TOOLTIP_GAP` et contenu peint par `icon_button::paint_tooltip_label` — même
+/// changement, mêmes raisons que `combat::show_tooltip_above` (voir sa doc).
 fn show_tooltip_left(response: &egui::Response, text: &str) {
     let mut tooltip = egui::Tooltip::for_enabled(response);
     tooltip.popup = tooltip
@@ -841,11 +851,9 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
             egui::RectAlign::RIGHT,
             egui::RectAlign::RIGHT_START,
             egui::RectAlign::RIGHT_END,
-        ]);
-    tooltip.show(|ui| {
-        ui.set_max_width(ui.spacing().tooltip_width);
-        ui.label(text);
-    });
+        ])
+        .gap(icon_button::TOOLTIP_GAP);
+    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
 }
 
 /// Colonne des boutons "+"/"−" du bandeau, empilés sur un fond translucide (voir doc de module,
@@ -996,7 +1004,9 @@ fn entry_tile(
 
     paint_count_inline(ui, rect, entry);
 
-    response.on_hover_text(&entry.name);
+    // `combat::show_tooltip_above` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
+    // 2026-09-06, design system tooltip).
+    super::combat::show_tooltip_above(&response, &entry.name);
 }
 
 /// Compteur incrusté dans le coin bas-droit de la tuile — miroir des captures de référence du jeu

@@ -440,10 +440,14 @@ const ICON_BUTTON_SIZE: f32 = 24.0;
 /// 2026-09-06 : « diminue de moitié l'écart entre les boutons » — les deux valeurs, jusque-là
 /// confondues, divergent depuis).
 const ICON_BUTTON_GAP: f32 = 6.0;
-/// Écart entre les boutons "lien externe" et "Options" — retour utilisateur explicite 2026-09-06
-/// (« diminue de moitié l'écart entre les boutons ») : moitié de l'ancienne valeur partagée avec
-/// `ICON_BUTTON_GAP` (6px), qui reste elle inchangée pour la marge du fond translucide.
-const ICON_BUTTON_INNER_GAP: f32 = 3.0;
+/// Écart entre les boutons "lien externe" et "Options" — d'abord réduit de moitié (3px, retour
+/// utilisateur 2026-09-06 : « diminue de moitié l'écart entre les boutons »), PUIS remonté à 4px au
+/// même jour (retour suivant, capture des deux groupes de boutons à l'appui) : comparée au bandeau
+/// Suivi (`watchlist::CONTROL_BUTTON_GAP`, 4px), cette valeur de 3px donnait un écart visiblement
+/// différent entre les deux groupes — demande explicite d'utiliser le MÊME écart, en alignant
+/// Combat sur Suivi plutôt que l'inverse. `ICON_BUTTON_GAP` (6px, marge du fond translucide) reste
+/// lui inchangé, seul l'écart ENTRE les deux boutons est concerné.
+const ICON_BUTTON_INNER_GAP: f32 = 4.0;
 /// Marge entre le bord GAUCHE du panneau et le fond translucide de `bottom_toolbar` — retour
 /// utilisateur explicite 2026-09-06 (« écarte le groupe de boutons de la bordure, au moins de 5
 /// pixels ») : le panneau Combat garde `inner_margin(0)` dans l'ensemble (voir
@@ -1011,6 +1015,11 @@ pub(crate) fn paint_outlined_text(
 /// reste maintenant au-dessus (juste réaligné) tant qu'il reste de la place au-dessus tout court —
 /// les replis `BOTTOM*` ne restent un dernier recours que s'il n'y a RÉELLEMENT aucune place
 /// au-dessus, sur aucun alignement.
+///
+/// **Refonte 2026-09-06 (design system tooltip)** : écart au widget porté à
+/// `icon_button::TOOLTIP_GAP` (défaut egui 4px jugé trop proche de la référence mesurée, voir sa
+/// doc) et contenu peint par `icon_button::paint_tooltip_label` (couleur/fond/ombre du design
+/// system, voir sa doc) au lieu d'un `ui.label` brut hérité du thème par défaut d'egui.
 pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
     let mut tooltip = egui::Tooltip::for_enabled(response);
     tooltip.popup = tooltip
@@ -1022,11 +1031,9 @@ pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
             egui::RectAlign::BOTTOM,
             egui::RectAlign::BOTTOM_START,
             egui::RectAlign::BOTTOM_END,
-        ]);
-    tooltip.show(|ui| {
-        ui.set_max_width(ui.spacing().tooltip_width);
-        ui.label(text);
-    });
+        ])
+        .gap(icon_button::TOOLTIP_GAP);
+    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
 }
 
 /// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du
