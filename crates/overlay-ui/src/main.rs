@@ -44,7 +44,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_ui::engine_thread::{spawn_engine_thread, EngineCommand, EngineHandles, SyncCommand};
-use overlay_ui::frame::{render, GpuState};
+use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
@@ -992,19 +992,31 @@ impl App {
                         size.width,
                         size.height
                     );
-                    // Correctif 2026-09-06 (retour utilisateur, `session_id=15744` : un combat
-                    // qui ne s'affiche pas tant qu'on n'a pas cliqué sur l'overlay) — pendant
-                    // qu'une fenêtre reste `HWND_NOTOPMOST` (donc probablement occluse derrière le
-                    // jeu, voir `GpuState::occluded_since`), un `UserEvent::NewSnapshot` a très
-                    // bien pu arriver et demander un redessin qui a échoué silencieusement
-                    // (`frame::render`, branche Occluded/Timeout — la frame est perdue, jamais
-                    // rattrapée toute seule). Une fois la fenêtre repromue ICI, rien ne
-                    // redemandait explicitement de redessin : elle restait figée sur son DERNIER
-                    // contenu peint avec succès jusqu'à ce qu'un `WindowEvent` sans rapport (un
-                    // clic dessus, typiquement — d'où « ça se rafraîchit dès que j'interagis
-                    // avec ») la redessine enfin. `force_refresh` (`Ctrl+Shift+R`) faisait déjà
-                    // ce `request_redraw()` explicitement pour cette même raison — cette
-                    // transition automatique en avait simplement toujours manqué l'équivalent.
+                    // Correctif 2026-09-06 (retour utilisateur, plusieurs sessions : Combat
+                    // "topmost" d'après ce journal, position/taille saines, mais réellement
+                    // invisible à l'écran pendant plusieurs secondes, jusqu'à un clic dessus) —
+                    // hypothèse `GpuState::occluded_since` (occlusion DXGI) désormais ÉCARTÉE PAR
+                    // LES FAITS : aucune session incriminée n'a jamais produit la moindre ligne
+                    // `[occlusion]`, alors que `get_current_texture()` continuait donc de réussir
+                    // (`Success`/`Suboptimal`) sans que rien ne s'affiche réellement.
+                    //
+                    // Cause probable, trouvée dans le vendor `wgpu-hal` lui-même
+                    // (`vendor/wgpu-hal-30.0.1/src/dx12/mod.rs`, chemin `configure_surface` /
+                    // `SurfaceTarget::VisualFromWndHandle`) : `IDCompositionVisual::SetContent` +
+                    // `IDCompositionDevice::Commit()` ne sont appelés QU'UNE SEULE FOIS, à la
+                    // création du swapchain — jamais rejoués ensuite. Si ce tout premier `Commit`
+                    // intervient avant que DWM n'ait fini d'intégrer la fenêtre dans son arbre de
+                    // composition (fenêtre tout juste créée, ou restée `HWND_NOTOPMOST` un long
+                    // moment), chaque `Present()` suivant peut continuer de réussir côté DXGI sans
+                    // jamais être réellement composé à l'écran — jusqu'à ce qu'un événement
+                    // quelconque pousse DWM à réévaluer (d'où « ça s'affiche dès que j'interagis
+                    // avec »). Un `request_redraw()` seul (Present() sur le MÊME swapchain déjà
+                    // potentiellement mal accroché) ne suffit PAS : un `surface.configure()`
+                    // répété ne le corrige pas non plus (chemin `ResizeBuffers` de wgpu-hal, qui
+                    // saute `SetContent`/`Commit` une fois la surface déjà configurée une
+                    // première fois — voir la doc de `frame::recreate_surface`). Seule une
+                    // `Surface` RECRÉÉE de zéro rejoue ce chemin.
+                    recreate_surface(&mut overlay.gpu, &overlay.window);
                     overlay.window.request_redraw();
                 }
                 overlay.is_topmost = true;
@@ -1366,6 +1378,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
 
     GpuState {
+        instance,
         surface,
         device,
         queue,
