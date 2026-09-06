@@ -925,9 +925,33 @@ impl App {
             }
         }
 
-        for overlay in self.windows.values_mut() {
-            let relevant =
+        // Correctif 2026-09-06/07 (retour utilisateur, `session_id=880` : Combat et Suivi
+        // basculent topmost/rétrogradé six fois en moins d'une minute, PAS TOUJOURS ENSEMBLE —
+        // et symptôme répété sur plusieurs sessions : « il faut interagir sur un overlay pour
+        // que l'autre revienne »). Cause : malgré `WS_EX_NOACTIVATE` (censé empêcher qu'une
+        // fenêtre overlay devienne jamais la fenêtre au premier plan, voir sa doc), un clic
+        // dessus en mode INTERACTIF peut brièvement faire de SA PROPRE `HWND` la valeur renvoyée
+        // par `GetForegroundWindow()` — observé dans plusieurs journaux (`sondage : premier plan
+        // actuel = « wakfu-companion-overlay — Oumbra — Combat »`, par exemple). L'ancien calcul
+        // ne comparait `foreground` qu'au `game_hwnd` OU À SA PROPRE HWND — cliquer sur Combat
+        // rendait donc *Combat* relevant (son propre hwnd correspond), mais pas *Suivi* du MÊME
+        // personnage (hwnd différent, ni le jeu) : Suivi se retrouvait démoté par la fenêtre
+        // sœur qu'on venait pourtant d'utiliser, sans aucune raison de l'utilisateur de penser
+        // que les deux étaient liées. Précalculé PAR PERSONNAGE (`game_hwnd`) avant la boucle :
+        // le focus sur N'IMPORTE LEQUEL des overlays d'un personnage (ou le jeu lui-même) rend
+        // TOUS les overlays de CE personnage relevant — jamais ceux d'un AUTRE personnage en
+        // multi-compte, qui gardent leur propre calcul indépendant.
+        let mut relevant_game_hwnds: Vec<HWND> = Vec::new();
+        for overlay in self.windows.values() {
+            let this_relevant =
                 overlay.game_hwnd == foreground || Self::hwnd_of(&overlay.window) == foreground;
+            if this_relevant && !relevant_game_hwnds.contains(&overlay.game_hwnd) {
+                relevant_game_hwnds.push(overlay.game_hwnd);
+            }
+        }
+
+        for overlay in self.windows.values_mut() {
+            let relevant = relevant_game_hwnds.contains(&overlay.game_hwnd);
 
             // Retour utilisateur 2026-09-02 : « l'overlay disparaît de manière indéterminée, il
             // n'y a rien qui permet de le réafficher ». Cause trouvée : Windows peut démoter un

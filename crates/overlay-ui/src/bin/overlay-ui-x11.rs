@@ -406,9 +406,20 @@ mod linux_main {
             let active = self.game_window.active_window();
             let now = std::time::Instant::now();
 
+            // Même correctif que `main.rs::App::sync_topmost` (2026-09-06/07) — voir sa doc :
+            // le focus sur N'IMPORTE LEQUEL des overlays d'un personnage (ou le jeu lui-même)
+            // rend TOUS les overlays de CE personnage relevant, pas seulement celui cliqué.
+            let mut relevant_game_windows: Vec<u32> = Vec::new();
+            for overlay in self.windows.values() {
+                let this_relevant = active == Some(overlay.game_window)
+                    || active == Some(Self::xid_of(&overlay.window));
+                if this_relevant && !relevant_game_windows.contains(&overlay.game_window) {
+                    relevant_game_windows.push(overlay.game_window);
+                }
+            }
+
             for overlay in self.windows.values_mut() {
-                let our_xid = Self::xid_of(&overlay.window);
-                let relevant = active == Some(overlay.game_window) || active == Some(our_xid);
+                let relevant = relevant_game_windows.contains(&overlay.game_window);
                 let (next_state, action) = topmost::decide(overlay.topmost_state, relevant, now);
                 overlay.topmost_state = next_state;
                 // Même diagnostic que `main.rs::App::sync_topmost` (2026-09-06) : journalise les
