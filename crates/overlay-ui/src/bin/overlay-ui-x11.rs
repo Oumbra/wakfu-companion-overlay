@@ -411,12 +411,24 @@ mod linux_main {
                 let relevant = active == Some(overlay.game_window) || active == Some(our_xid);
                 let (next_state, action) = topmost::decide(overlay.topmost_state, relevant, now);
                 overlay.topmost_state = next_state;
+                // Même diagnostic que `main.rs::App::sync_topmost` (2026-09-06) : journalise les
+                // vraies transitions topmost, pas le sondage — voir sa doc.
                 match action {
                     TopmostAction::None => {}
                     TopmostAction::SetAbove => {
+                        tracing::info!(
+                            "[topmost] {} ({:?}) -> AlwaysOnTop",
+                            overlay.character_name,
+                            overlay.kind
+                        );
                         overlay.window.set_window_level(WindowLevel::AlwaysOnTop)
                     }
                     TopmostAction::SetNormal => {
+                        tracing::info!(
+                            "[topmost] {} ({:?}) -> Normal",
+                            overlay.character_name,
+                            overlay.kind
+                        );
                         overlay.window.set_window_level(WindowLevel::Normal)
                     }
                 }

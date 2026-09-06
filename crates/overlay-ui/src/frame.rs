@@ -18,6 +18,15 @@ pub struct GpuState {
     pub egui_ctx: egui::Context,
     pub egui_winit: egui_winit::State,
     pub egui_renderer: egui_wgpu::Renderer,
+    /// Instant d'ENTRÉE dans l'état `Occluded`/`Timeout` (voir `render`), `None` tant que la
+    /// dernière tentative a réussi — sert uniquement à journaliser en `info!` l'ENTRÉE et la SORTIE
+    /// de cet état (une fois chacune, jamais à chaque essai de 150 ms) : diagnostic 2026-09-06
+    /// (retour utilisateur, instabilité perçue entre les deux overlays malgré le correctif de
+    /// boucle de réessai) — sans cette trace, impossible de savoir depuis un simple journal si
+    /// l'occlusion se produit effectivement pendant un test donné, combien de temps elle dure, et
+    /// si elle coïncide avec les bascules topmost (`main.rs::sync_topmost`) plutôt que de devoir
+    /// ré-analyser une vidéo image par image à chaque fois.
+    pub occluded_since: Option<std::time::Instant>,
 }
 
 /// Fenêtrage/GPU autour de `render_content::build_ui` (voir sa doc) : prend l'entrée egui de la
@@ -117,6 +126,16 @@ pub fn render(
             // traité pareil quel que soit l'OS qui exécute ce code.
             const OCCLUDED_RETRY_INTERVAL: std::time::Duration =
                 std::time::Duration::from_millis(150);
+            // `info!` une seule fois à l'ENTRÉE dans l'occlusion (jamais à chaque essai de 150 ms,
+            // qui spammerait le journal pour rien) — voir la doc de `GpuState::occluded_since`.
+            if gpu.occluded_since.is_none() {
+                gpu.occluded_since = Some(now);
+                tracing::info!(
+                    "[occlusion] fenêtre « {} » occluse/timeout — sondage toutes les {}ms",
+                    window.title(),
+                    OCCLUDED_RETRY_INTERVAL.as_millis()
+                );
+            }
             return (repaint_delay.min(OCCLUDED_RETRY_INTERVAL), close_toast);
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
@@ -140,6 +159,15 @@ pub fn render(
             return (repaint_delay, close_toast);
         }
     };
+    // Sortie de l'occlusion (voir son entrée ci-dessus) : cette frame-ci a réussi
+    // `get_current_texture()`, donc l'occlusion — si elle avait commencé — vient de se terminer.
+    if let Some(since) = gpu.occluded_since.take() {
+        tracing::info!(
+            "[occlusion] fenêtre « {} » de nouveau visible après {:?}",
+            window.title(),
+            since.elapsed()
+        );
+    }
     let view = output_frame
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
