@@ -52,6 +52,14 @@
 //!   paire `#c5cbcc`/`#f4d89f` — demande explicite : « appliques ce système aux quatre boutons ».
 //!   `brighten`/`WATCHLIST_BUTTON_HOVER_BRIGHTEN` (éclaircissement approximatif de l'ancien glyphe
 //!   intégré, ci-dessous) n'ont donc plus lieu d'être, retirés au passage.
+//!
+//! **Correctif 2026-09-06 (icônes visiblement plus petites en Combat)** : retour utilisateur,
+//! capture des deux groupes de boutons à l'appui — l'icône "lien externe" (et dans une moindre
+//! mesure "Options") paraissait nettement plus petite que "+"/"−" du panneau Suivi sur le MÊME
+//! socle. `load_texture_recolored_pair` normalise désormais chaque icône (`normalize_icon_content`,
+//! voir sa doc) avant recolorage : la marge transparente propre à chaque fichier source
+//! (`external-link-icon.png`/`options-icon.png` en laissent, `icon-plus.png`/`icon-minus.png` non)
+//! ne fausse plus la mise à l'échelle de `paint_icon_button`, qui reste par ailleurs inchangée.
 
 use overlay_engine::WakfuRarity;
 
@@ -83,6 +91,60 @@ const ICON_COLOR: [u8; 3] = [0xc5, 0xcb, 0xcc];
 /// Même rôle que `ICON_COLOR`, état survolé — `#f4d89f`, valeur donnée par l'utilisateur (pas
 /// mesurée sur la planche de référence, qui ne montre aucun bouton survolé).
 const ICON_COLOR_HOVER: [u8; 3] = [0xf4, 0xd8, 0x9f];
+
+/// Taille de référence (plus grande dimension du CONTENU opaque, pas du canevas) à laquelle
+/// `normalize_icon_content` recale les quatre icônes du design system boutons — voir sa doc.
+/// Étalon choisi : la taille native de `icon-plus.png`/`icon-minus.png` (16×16, fournis par
+/// l'utilisateur), déjà jugée correcte visuellement, plutôt qu'une valeur arbitraire.
+const ICON_CONTENT_REFERENCE: f32 = 16.0;
+
+/// Rogne `img` à la bbox de ses pixels opaques (seuil `ALPHA_THRESHOLD`) puis le remet à l'échelle
+/// (aspect ratio conservé) pour que la plus grande dimension de cette bbox atteigne
+/// `ICON_CONTENT_REFERENCE` — retour utilisateur 2026-09-06 (comparaison de deux captures des
+/// boutons Combat et Suivi) : l'icône "lien externe" paraissait nettement plus petite que "+"/"−"
+/// une fois posée sur le MÊME socle, alors que `paint_icon_button` les met toutes à l'échelle dans
+/// le même ratio (voir sa doc). Cause mesurée par bbox opaque, pas par impression : les canevas
+/// `external-link-icon.png` (18×18) et `options-icon.png` (22×22) laissent une marge transparente
+/// autour du glyphe (bbox réelle 13×13 et 16×15), alors que `icon-plus.png`/`icon-minus.png`
+/// (16×16) occupent tout leur canevas (bbox 16×16 et 16×6) — `paint_icon_button` met à l'échelle le
+/// CANEVAS entier, marge invisible comprise, donc un glyphe entouré de plus de marge ressort plus
+/// petit à socle égal. Rogner puis recaler sur un étalon commun élimine cette marge cachée sans
+/// toucher au reste du pipeline (recolorage, `paint_icon_button`) : "+"/"−" et Options (bbox déjà
+/// ≈16px) en ressortent quasi inchangés (facteur proche de 1.0), seul le lien externe (bbox 13px)
+/// est réellement agrandi (facteur ≈1.23).
+fn normalize_icon_content(img: &image::RgbaImage) -> image::RgbaImage {
+    const ALPHA_THRESHOLD: u8 = 10;
+    let (width, height) = img.dimensions();
+    let mut min_x = width;
+    let mut min_y = height;
+    let mut max_x: i64 = -1;
+    let mut max_y: i64 = -1;
+    for (x, y, pixel) in img.enumerate_pixels() {
+        if pixel.0[3] > ALPHA_THRESHOLD {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x as i64);
+            max_y = max_y.max(y as i64);
+        }
+    }
+    if max_x < 0 {
+        // Aucun pixel opaque (fichier corrompu/vide) — rien à rogner, on repart du canevas tel quel
+        // plutôt que de paniquer sur une bbox négative.
+        return img.clone();
+    }
+    let bbox_w = (max_x as u32 + 1).saturating_sub(min_x).max(1);
+    let bbox_h = (max_y as u32 + 1).saturating_sub(min_y).max(1);
+    let cropped = image::imageops::crop_imm(img, min_x, min_y, bbox_w, bbox_h).to_image();
+
+    let content_size = bbox_w.max(bbox_h) as f32;
+    let scale = ICON_CONTENT_REFERENCE / content_size;
+    if (scale - 1.0).abs() < 0.01 {
+        return cropped;
+    }
+    let new_w = (bbox_w as f32 * scale).round().max(1.0) as u32;
+    let new_h = (bbox_h as f32 * scale).round().max(1.0) as u32;
+    image::imageops::resize(&cropped, new_w, new_h, image::imageops::FilterType::CatmullRom)
+}
 
 pub struct UiIcons {
     allies: egui::TextureHandle,
@@ -271,7 +333,7 @@ fn load_texture_recolored_pair(
     name: &'static str,
     bytes: &[u8],
 ) -> (egui::TextureHandle, egui::TextureHandle) {
-    let decoded = decode(bytes);
+    let decoded = normalize_icon_content(&decode(bytes));
     let normal = recolor(&decoded, ICON_COLOR);
     let hovered = recolor(&decoded, ICON_COLOR_HOVER);
     (
@@ -327,5 +389,36 @@ mod tests {
         let out = recolor(&img, [0xc5, 0xcb, 0xcc]);
         let px = out.get_pixel(0, 0);
         assert_eq!(px.0, [0xc5, 0xcb, 0xcc, 137]);
+    }
+
+    /// Un glyphe déjà à la taille de référence (comme `icon-plus.png`, 16×16 plein cadre) ne doit
+    /// quasiment pas bouger — seule la marge transparente autour d'un glyphe plus petit doit être
+    /// éliminée (voir `normalize_icon_content`).
+    #[test]
+    fn normalize_icon_content_glyphe_deja_a_la_reference_inchange() {
+        let mut img = image::RgbaImage::new(16, 16);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgba([255, 255, 255, 255]);
+        }
+        let out = normalize_icon_content(&img);
+        assert_eq!(out.dimensions(), (16, 16));
+    }
+
+    /// Un glyphe entouré d'une marge transparente (bbox plus petite que son canevas, comme
+    /// `external-link-icon.png`) doit être rogné PUIS agrandi jusqu'à la référence, pas laissé à sa
+    /// taille de bbox — sans quoi il resterait plus petit que les glyphes déjà pleins cadre une fois
+    /// posé sur le même socle (retour utilisateur, voir doc de la fonction).
+    #[test]
+    fn normalize_icon_content_rogne_puis_agrandit_a_la_reference() {
+        let mut img = image::RgbaImage::new(18, 18);
+        for y in 3..16 {
+            for x in 3..16 {
+                img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+        let out = normalize_icon_content(&img);
+        // Bbox opaque = 13×13 (indices 3..=15) ; agrandie pour que sa plus grande dimension
+        // atteigne ICON_CONTENT_REFERENCE (16px), donc 16×16 ici (carré).
+        assert_eq!(out.dimensions(), (16, 16));
     }
 }

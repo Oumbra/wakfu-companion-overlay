@@ -304,12 +304,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        let retry = ui
-                                            .add(egui::Button::new("🔌").small())
-                                            .on_hover_text(format!(
+                                        let retry = ui.add(egui::Button::new("🔌").small());
+                                        // `combat::show_tooltip_above` plutôt qu'un `on_hover_text`
+                                        // brut (refonte 2026-09-06, design system tooltip) — voir
+                                        // sa doc.
+                                        panels::combat::show_tooltip_above(
+                                            &retry,
+                                            &format!(
                                                 "Connecter le compte (relance l'appairage, ouvre \
                                                  le navigateur).\nDernier échec : {reason}"
-                                            ));
+                                            ),
+                                        );
                                         if retry.clicked() {
                                             auth_command_tx.send(AuthCommand::Retry);
                                         }
@@ -384,7 +389,12 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.label("📦⚠").on_hover_text(
+                                    // `combat::show_tooltip_above` plutôt qu'un `on_hover_text`
+                                    // brut (refonte 2026-09-06, design system tooltip) — voir sa
+                                    // doc.
+                                    let warning = ui.label("📦⚠");
+                                    panels::combat::show_tooltip_above(
+                                        &warning,
                                         "Catalogue hors ligne : réseau et cache local tous deux \
                                          indisponibles au démarrage, repli sur la base embarquée \
                                          dans l'overlay (peut être datée).",

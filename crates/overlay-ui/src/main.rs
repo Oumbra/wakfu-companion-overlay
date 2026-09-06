@@ -1134,32 +1134,11 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
     surface.configure(&device, &config);
 
     let egui_ctx = egui::Context::default();
-    // Délai de tooltip par défaut d'egui (0,5s, `show_tooltips_only_when_still=true` : le
-    // minuteur repart de zéro à chaque micro-mouvement de la souris, pas seulement au premier
-    // survol) — trop long/imprévisible dans cette architecture SANS boucle de rendu continue
-    // (§6.1) : chaque redessin dépend du réveil `about_to_wait`/`next_redraw_at`, qui n'apporte
-    // qu'une granularité de 50ms au mieux, jamais un vrai 60Hz qui masquerait la latence. Retour
-    // utilisateur 2026-09-02 : « il faut bien quasiment quatre, cinq secondes avant que la
-    // tooltip s'affiche » — `show_tooltips_only_when_still` désactivé (affichée dès le survol,
-    // sans exiger une souris parfaitement immobile) et le délai réduit à 150ms (perceptible comme
-    // quasi immédiat, tout en évitant un flash sur un simple passage de souris).
-    // `style_mut_of` (par thème, egui 0.36) plutôt que `style_mut` (retiré) — appliqué aux DEUX
-    // thèmes : ce réglage ne touche qu'à l'interaction, pas aux couleurs (seul le thème sombre est
-    // par ailleurs reproduit ici, voir `panels::combat::ACCENT`), autant ne pas dépendre de celui
-    // qu'egui choisit par défaut.
-    for theme in [egui::Theme::Dark, egui::Theme::Light] {
-        egui_ctx.style_mut_of(theme, |style| {
-            style.interaction.show_tooltips_only_when_still = false;
-            style.interaction.tooltip_delay = 0.15;
-            // Curseur "main" au survol de tout élément cliquable (retour utilisateur 2026-09-04 :
-            // rien ne l'indiquait visuellement) — couvre automatiquement les widgets `Button`/
-            // `small_button` (voir `render_content.rs`) ; un élément dessiné à la main via
-            // `Ui::interact` brut (voir `panels::combat`/`panels::watchlist`) ne consulte PAS ce
-            // réglage tout seul, d'où un `.on_hover_cursor(...)` explicite à chacun de ces
-            // endroits en complément.
-            style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
-        });
-    }
+    // Style partagé avec le binaire Linux ET le harnais de rendu offscreen (`overlay_ui::style`,
+    // voir sa doc) : délai/persistance des tooltips, curseur "main" au survol, design system
+    // tooltip (retour utilisateur 2026-09-06) — plutôt qu'un réglage dupliqué à chaque point de
+    // création d'`egui::Context`, qui avait déjà divergé entre les deux binaires avant ce refactor.
+    overlay_ui::style::apply(&egui_ctx);
     let egui_winit = egui_winit::State::new(
         egui_ctx.clone(),
         egui::ViewportId::ROOT,

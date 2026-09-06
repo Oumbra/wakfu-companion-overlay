@@ -651,12 +651,11 @@ mod linux_main {
         surface.configure(&device, &config);
 
         let egui_ctx = egui::Context::default();
-        for theme in [egui::Theme::Dark, egui::Theme::Light] {
-            egui_ctx.style_mut_of(theme, |style| {
-                style.interaction.show_tooltips_only_when_still = false;
-                style.interaction.tooltip_delay = 0.15;
-            });
-        }
+        // Style partagé avec le binaire Windows ET le harnais de rendu offscreen
+        // (`overlay_ui::style`, voir sa doc) — remplace un réglage local qui avait déjà divergé de
+        // celui de `main.rs` (curseur "main" et design system tooltip absents ici avant ce
+        // refactor, 2026-09-06).
+        overlay_ui::style::apply(&egui_ctx);
         let egui_winit = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
