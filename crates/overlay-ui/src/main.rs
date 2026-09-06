@@ -978,6 +978,20 @@ impl App {
                         overlay.character_name,
                         overlay.kind
                     );
+                    // Correctif 2026-09-06 (retour utilisateur, `session_id=15744` : un combat
+                    // qui ne s'affiche pas tant qu'on n'a pas cliqué sur l'overlay) — pendant
+                    // qu'une fenêtre reste `HWND_NOTOPMOST` (donc probablement occluse derrière le
+                    // jeu, voir `GpuState::occluded_since`), un `UserEvent::NewSnapshot` a très
+                    // bien pu arriver et demander un redessin qui a échoué silencieusement
+                    // (`frame::render`, branche Occluded/Timeout — la frame est perdue, jamais
+                    // rattrapée toute seule). Une fois la fenêtre repromue ICI, rien ne
+                    // redemandait explicitement de redessin : elle restait figée sur son DERNIER
+                    // contenu peint avec succès jusqu'à ce qu'un `WindowEvent` sans rapport (un
+                    // clic dessus, typiquement — d'où « ça se rafraîchit dès que j'interagis
+                    // avec ») la redessine enfin. `force_refresh` (`Ctrl+Shift+R`) faisait déjà
+                    // ce `request_redraw()` explicitement pour cette même raison — cette
+                    // transition automatique en avait simplement toujours manqué l'équivalent.
+                    overlay.window.request_redraw();
                 }
                 overlay.is_topmost = true;
                 overlay.last_topmost_reassert = Some(now);

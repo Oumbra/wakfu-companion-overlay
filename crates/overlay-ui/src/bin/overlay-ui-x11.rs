@@ -421,7 +421,11 @@ mod linux_main {
                             overlay.character_name,
                             overlay.kind
                         );
-                        overlay.window.set_window_level(WindowLevel::AlwaysOnTop)
+                        overlay.window.set_window_level(WindowLevel::AlwaysOnTop);
+                        // Même correctif que `main.rs::App::sync_topmost` (2026-09-06) — voir sa
+                        // doc : un redessin peut avoir échoué silencieusement (occlusion) pendant
+                        // que cette fenêtre était `Normal`, rien ne le rattrapait à la repromotion.
+                        overlay.window.request_redraw();
                     }
                     TopmostAction::SetNormal => {
                         tracing::info!(
