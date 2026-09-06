@@ -294,6 +294,18 @@
 //! retiré à son tour — retour utilisateur explicite : « je les ai déjà autre part, donc ils ne
 //! servent à rien ici ». L'utilisateur conserve cet original HORS du dépôt ; la seule copie qui y
 //! reste est la version recolorée sous `crates/overlay-ui/assets/templates/`, seule affichée en jeu.
+//!
+//! **Refonte 2026-09-06 (design system boutons icône)** : `paint_icon_button` (socle + icône
+//! centrée, jusque-là privé à ce module) est EXTRAIT vers `panels::icon_button` — composant partagé
+//! avec `panels::watchlist` (boutons "+"/"−"), voir sa doc et celle de `ui_icons` : retour
+//! utilisateur explicite (image de référence à l'appui, `menu-button-icon-first-plan.png`), les
+//! quatre boutons icône de l'overlay doivent utiliser EXACTEMENT le même socle et la même teinte
+//! d'icône. `bottom_toolbar` garde une fine enveloppe locale (`paint_toolbar_button`, tooltip
+//! au-dessus + `Sense::click()`) autour du composant partagé. Fond translucide ajouté derrière la
+//! barre (`icon_button::PANEL_BACKDROP_FILL`) avec une marge symétrique sur les QUATRE côtés
+//! (`ICON_BUTTON_GAP`, réutilisée aussi pour le haut/bas — auparavant seuls la gauche et l'écart
+//! entre boutons en avaient une, voir 14e retour) : reproduit le petit fond noir semi-opaque visible
+//! entre les boutons de la planche de référence.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -302,6 +314,7 @@ use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
+use super::icon_button;
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
 /// (`paint_side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
@@ -415,13 +428,15 @@ const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// bleuté, assez opaque pour détacher la ligne du reste sans devenir un pavé plein.
 const LEADER_PANEL_FILL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
 
-/// Taille cible (largeur ET hauteur) du socle d'un bouton icône (voir `paint_icon_button`) — le
-/// socle fourni par l'utilisateur est natif en 37×37, réduit ici à 24×24 (retour utilisateur, 7e
-/// retour : « réduis l'icône bouton en 24×24 ») ; l'icône à fond transparent posée dessus est mise
-/// à l'échelle dans le MÊME ratio (pas une taille fixe indépendante), pour rester proportionnée au
-/// socle quelle que soit sa taille cible.
+/// Taille cible (largeur ET hauteur) du socle d'un bouton icône (voir
+/// `icon_button::paint_icon_button`) — le socle fourni par l'utilisateur est natif en 36×36 (37×37
+/// pour la première version, 12e retour, voir doc de module), réduit ici à 24×24 (retour
+/// utilisateur, 7e retour : « réduis l'icône bouton en 24×24 ») ; l'icône à fond transparent posée
+/// dessus est mise à l'échelle dans le MÊME ratio (pas une taille fixe indépendante), pour rester
+/// proportionnée au socle quelle que soit sa taille cible.
 const ICON_BUTTON_SIZE: f32 = 24.0;
-/// Écart horizontal entre les deux boutons de la barre d'outils du bas (voir `bottom_toolbar`).
+/// Écart entre les deux boutons de la barre d'outils du bas, réutilisé aussi comme marge du fond
+/// translucide sur les quatre côtés (voir `bottom_toolbar`, refonte 2026-09-06).
 const ICON_BUTTON_GAP: f32 = 6.0;
 
 #[allow(clippy::too_many_arguments)]
@@ -589,22 +604,30 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, to
 /// explicite (« j'aimerais que tu appliques le même nombre de pixels entre le premier icône bouton
 /// et le bord »). Auparavant collé au bord gauche du panneau, ce qui causait aussi le bug de
 /// tooltip corrigé au même retour (voir `show_tooltip_above`).
+///
+/// **Refonte 2026-09-06** : marge symétrique sur les QUATRE côtés (haut/bas ajoutés, voir doc de
+/// module) + fond translucide (`icon_button::PANEL_BACKDROP_FILL`) peint AVANT les boutons.
 fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
     let (row_rect, _) = ui.allocate_exact_size(
         egui::vec2(
-            ICON_BUTTON_GAP + ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_GAP,
-            ICON_BUTTON_SIZE,
+            ICON_BUTTON_GAP + ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_GAP + ICON_BUTTON_GAP,
+            ICON_BUTTON_GAP + ICON_BUTTON_SIZE + ICON_BUTTON_GAP,
         ),
         egui::Sense::hover(),
     );
-    let external_link_top_left = row_rect.min + egui::vec2(ICON_BUTTON_GAP, 0.0);
+    ui.painter().rect_filled(
+        row_rect,
+        icon_button::PANEL_BACKDROP_ROUNDING,
+        icon_button::PANEL_BACKDROP_FILL,
+    );
+    let external_link_top_left = row_rect.min + egui::vec2(ICON_BUTTON_GAP, ICON_BUTTON_GAP);
 
-    let external_link_response = paint_icon_button(
+    let external_link_response = paint_toolbar_button(
         ui,
         external_link_top_left,
-        icons.button_background(),
-        icons.button_background_hover(),
+        icons,
         icons.external_link_icon(),
+        icons.external_link_icon_hover(),
         "combat-open-wakfu-companion",
         "Détails",
     );
@@ -616,12 +639,12 @@ fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
 
     let options_top_left =
         external_link_top_left + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_GAP, 0.0);
-    let options_response = paint_icon_button(
+    let options_response = paint_toolbar_button(
         ui,
         options_top_left,
-        icons.button_background(),
-        icons.button_background_hover(),
+        icons,
         icons.options_icon(),
+        icons.options_icon_hover(),
         "combat-open-options",
         "Options",
     );
@@ -630,43 +653,31 @@ fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
     }
 }
 
-/// Bouton "icône" du jeu — un socle (`background`, ou `background_hover` quand survolé) et une
-/// icône à fond transparent (`icon`) centrée dessus, tous deux mis à l'échelle de `ICON_BUTTON_SIZE`
-/// dans le MÊME ratio (voir sa doc) — une première version les peignait à leur taille native sans
-/// redimensionnement (demande explicite à l'époque, le temps de juger les proportions) ; une fois
-/// jugées, retour utilisateur explicite : « réduis le bouton en 24×24 ». Composant volontairement
-/// générique (demande utilisateur explicite : « crée une espèce de composant qui permet de créer
-/// des boutons icône ») — appelé par `bottom_toolbar` pour les boutons lien externe ET Options
-/// (refonte 11e retour ; `show_leader_row` en était l'unique appelant jusque-là, avant que son
-/// bouton lien externe ne soit déplacé dans cette barre d'outils).
-/// `id_source` distingue plusieurs boutons icône dans le même conteneur egui (voir
-/// `ui.id().with(...)`, même mécanisme que `side_switch`).
-fn paint_icon_button(
+/// Enveloppe locale de `icon_button::paint_icon_button` (voir sa doc et celle de module) pour les
+/// boutons de `bottom_toolbar` : socle + icône mis à l'échelle de `ICON_BUTTON_SIZE`, `Sense::
+/// click()`, infobulle AU-DESSUS (`show_tooltip_above`) — propre à Combat (le Suivi reste inerte et
+/// affiche son infobulle à gauche, voir `panels::watchlist::control_button`).
+fn paint_toolbar_button(
     ui: &mut egui::Ui,
     top_left: egui::Pos2,
-    background: &egui::TextureHandle,
-    background_hover: &egui::TextureHandle,
+    icons: &UiIcons,
     icon: &egui::TextureHandle,
+    icon_hover: &egui::TextureHandle,
     id_source: &str,
     tooltip: &str,
 ) -> egui::Response {
-    // Ratio commun dérivé de la largeur du socle — appliqué tel quel à l'icône, pour qu'elle reste
-    // proportionnée au socle quelle que soit `ICON_BUTTON_SIZE` (voir sa doc), plutôt qu'une taille
-    // d'icône fixée indépendamment.
-    let scale = ICON_BUTTON_SIZE / background.size_vec2().x;
-    let bg_rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(ICON_BUTTON_SIZE));
-    let response = ui
-        .interact(bg_rect, ui.id().with(id_source), egui::Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(ICON_BUTTON_SIZE));
+    let response = icon_button::paint_icon_button(
+        ui,
+        rect,
+        id_source,
+        egui::Sense::click(),
+        icons.button_background(),
+        icons.button_background_hover(),
+        icon,
+        icon_hover,
+    );
     show_tooltip_above(&response, tooltip);
-    let bg_texture = if response.hovered() {
-        background_hover
-    } else {
-        background
-    };
-    egui::Image::new(bg_texture).paint_at(ui, bg_rect);
-    let icon_rect = egui::Rect::from_center_size(bg_rect.center(), icon.size_vec2() * scale);
-    egui::Image::new(icon).paint_at(ui, icon_rect);
     response
 }
 

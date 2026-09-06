@@ -422,9 +422,17 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// Position de survol dérivée de la mise en page (voir `panels::watchlist` : `CONTROL_TOOLTIP_
 /// RESERVE`, `CONTROL_BUTTON_SIZE`, `CONTROL_BUTTON_GAP`, privées à ce module — donc recalculées
 /// ici à la main plutôt qu'importées), plus l'`outer_margin(8.0)` fixe qu'`egui_kittest::AppKind::
-/// run_ui` ajoute lui-même autour de tout harnais `build_ui` : x = 8 (harnais) + 6 (marge Suivi) +
-/// 88 (réserve) + 17 (moitié de 34, centre du bouton) = 119 ; y du bouton "+" = 8 + 6 + 17 = 31,
-/// y du bouton "−" = 31 + 34 + 4 (`CONTROL_BUTTON_GAP`) = 69.
+/// run_ui` ajoute lui-même autour de tout harnais `build_ui`.
+///
+/// **Recalculée à la refonte 2026-09-06 (design system boutons icône)** : les deux boutons sont
+/// maintenant côte à côte (voir doc de module) au lieu d'empilés — leur ligne (haute de
+/// `CONTROL_BUTTON_GAP*2+34 = 42px`) est désormais PLUS COURTE que la tuile d'entrée juste à côté
+/// (58px, `TILE_SIZE`) et donc centrée verticalement dedans par `ui.horizontal`, plutôt que l'
+/// inverse (l'ancienne colonne empilée, 72px, était la plus haute des deux et servait de référence).
+/// Base commune : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 88 (réserve) +
+/// 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond translucide) + 17 (moitié de 34, centre du bouton)
+/// = 123 ; y = 14 + (58 - 42) / 2 (centrage vertical) + 4 (même marge, haut du fond) + 17 = 43.
+/// Bouton "−" : x = 123 + 34 + 4 (écart entre les deux boutons) = 161, MÊME y (côte à côte) = 43.
 #[test]
 fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
     let mut textures = Textures::new();
@@ -476,11 +484,11 @@ fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
 
     harness.run();
 
-    harness.hover_at(egui::pos2(119.0, 31.0));
+    harness.hover_at(egui::pos2(123.0, 43.0));
     harness.run();
     harness.snapshot("watchlist_tooltip_ajouter_a_gauche");
 
-    harness.hover_at(egui::pos2(119.0, 69.0));
+    harness.hover_at(egui::pos2(161.0, 43.0));
     harness.run();
     harness.snapshot("watchlist_tooltip_supprimer_a_gauche");
 }

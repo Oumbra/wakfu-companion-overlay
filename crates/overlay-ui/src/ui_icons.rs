@@ -26,20 +26,32 @@
 //! fourni) pour reprendre exactement la couleur de remplissage de `external-link-icon.png`.
 //!
 //! **Ajout 2026-09-06** (refonte du panneau Suivi, voir `panels::watchlist`) :
-//! - `watchlist-add.png`/`watchlist-remove.png` (`button-plus.png`/`button-moins.png` fournis par
-//!   l'utilisateur — deux icônes 34×34 à fond arrondi sombre déjà intégré, PAS un fond+glyphe
-//!   séparés comme `button_background`/`external_link_icon`) remplacent les deux tuiles "+"/"−"
-//!   dessinées à la main (bordure pointillée, glyphe ASCII) du bandeau Suivi — demande explicite :
-//!   réutiliser des icônes que l'utilisateur reconnaît déjà dans l'interface du jeu, et gagner de
-//!   la place (34px de large empilés verticalement contre 2×58px+écart côte à côte auparavant).
-//!   Contrairement à `button_background`, l'utilisateur n'a fourni qu'UNE SEULE variante de chacune
-//!   (pas de second fichier "survolé" séparé) — l'état survolé (« s'éclaircit ») est donc généré
-//!   ici au chargement plutôt qu'attendu comme un second asset, voir `brighten`.
 //! - `item_border_*` (`assets/items/Border-<RARETÉ>.webp`, copiés depuis la racine du dépôt, voir
 //!   `docs/design-system.md` §2.4/§7) : les 7 textures d'emplacement d'objet du jeu, une par
 //!   rareté — remplacent le dégradé+bordure dessinés à la main pour les tuiles ITEM du bandeau
 //!   Suivi (`panels::watchlist::entry_tile`). `WakfuRarity::Old` (jamais résolue au runtime, voir
 //!   sa doc) retombe sur la texture `Common`, aucun asset dédié n'existe pour cette rareté.
+//!
+//! **Refonte 2026-09-06 (design system boutons icône)** : l'utilisateur a fourni une planche de
+//! référence (`menu-button-icon-first-plan.png`, menu d'icônes de premier plan du jeu) ainsi que le
+//! socle qu'elle utilise, déjà détouré en deux états — `button-background.png`/
+//! `button-background-hover.png` REMPLACENT les fichiers du même nom (12e retour, ci-dessus) par
+//! cette nouvelle paire, plus proche du jeu que la première tentative. Conséquences :
+//! - `external_link_icon`/`options_icon` ne sont plus recolorées une fois en `#fbfbfb` (12e retour)
+//!   mais chargées en DEUX variantes (`_hover` incluse), recolorées à la volée en `#c5cbcc` au repos
+//!   et `#f4d89f` survolée (voir `recolor`) — ces deux teintes sont celles mesurées par
+//!   échantillonnage pixel sur la planche de référence, pas des valeurs devinées. `paint_icon_button`
+//!   (`panels::combat`) est du même coup extrait en composant PARTAGÉ (`panels::icon_button`, voir sa
+//!   doc), pour que ces deux boutons ET les deux boutons "+"/"−" du bandeau Suivi (ci-dessous)
+//!   utilisent EXACTEMENT le même socle et la même teinte.
+//! - `watchlist-add.png`/`watchlist-remove.png` (fond+glyphe déjà intégrés, ajoutés au retour
+//!   précédent) sont RETIRÉS, remplacés par `icon-plus.png`/`icon-minus.png` (`icon-plus.png`/
+//!   `icon-moins.png` fournis par l'utilisateur — glyphe seul, à fond transparent, PAS de socle
+//!   intégré) : `panels::watchlist::control_button_row` compose désormais ces glyphes avec le MÊME
+//!   `button_background`/`button_background_hover` que les boutons Combat, recolorés avec la MÊME
+//!   paire `#c5cbcc`/`#f4d89f` — demande explicite : « appliques ce système aux quatre boutons ».
+//!   `brighten`/`WATCHLIST_BUTTON_HOVER_BRIGHTEN` (éclaircissement approximatif de l'ancien glyphe
+//!   intégré, ci-dessous) n'ont donc plus lieu d'être, retirés au passage.
 
 use overlay_engine::WakfuRarity;
 
@@ -51,8 +63,8 @@ const BUTTON_BACKGROUND_HOVER_BYTES: &[u8] =
     include_bytes!("../assets/ui/button-background-hover.png");
 const EXTERNAL_LINK_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/external-link-icon.png");
 const OPTIONS_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/options-icon.png");
-const WATCHLIST_ADD_BYTES: &[u8] = include_bytes!("../assets/ui/watchlist-add.png");
-const WATCHLIST_REMOVE_BYTES: &[u8] = include_bytes!("../assets/ui/watchlist-remove.png");
+const ICON_PLUS_BYTES: &[u8] = include_bytes!("../assets/ui/icon-plus.png");
+const ICON_MINUS_BYTES: &[u8] = include_bytes!("../assets/ui/icon-minus.png");
 
 const ITEM_BORDER_COMMON_BYTES: &[u8] = include_bytes!("../assets/items/Border-COMMON.webp");
 const ITEM_BORDER_RARE_BYTES: &[u8] = include_bytes!("../assets/items/Border-RARE.webp");
@@ -62,14 +74,15 @@ const ITEM_BORDER_MEMORY_BYTES: &[u8] = include_bytes!("../assets/items/Border-M
 const ITEM_BORDER_EPIC_BYTES: &[u8] = include_bytes!("../assets/items/Border-EPIC.webp");
 const ITEM_BORDER_RELIC_BYTES: &[u8] = include_bytes!("../assets/items/Border-RELIC.webp");
 
-/// Facteur d'éclaircissement appliqué à `watchlist_add`/`watchlist_remove` pour produire leur
-/// variante survolée (voir `brighten`) — calibré par échantillonnage pixel sur la paire
-/// `button_background`/`button_background_hover` déjà fournie par l'utilisateur pour le bouton
-/// lien externe (centre de l'asset : `(112,104,85)` au repos → `(133,123,98)` survolé, soit un
-/// mélange vers le blanc d'environ 12 à 15 % selon le canal) : reprend le MÊME degré
-/// d'éclaircissement plutôt qu'une valeur arbitraire, pour rester cohérent avec le seul autre
-/// exemple de bouton survolé déjà validé par l'utilisateur dans cette UI.
-const WATCHLIST_BUTTON_HOVER_BRIGHTEN: f32 = 0.15;
+/// Teinte des icônes posées sur `button_background` au repos (`external_link_icon`, `options_icon`,
+/// `icon_plus`, `icon_minus`) — mesurée par échantillonnage pixel sur la planche de référence
+/// (`menu-button-icon-first-plan.png`, fournie par l'utilisateur), pas devinée : `#c5cbcc`. Voir
+/// `recolor` — remplace le canal RGB de chaque pixel opaque, alpha (donc silhouette et
+/// anticrénelage) inchangé.
+const ICON_COLOR: [u8; 3] = [0xc5, 0xcb, 0xcc];
+/// Même rôle que `ICON_COLOR`, état survolé — `#f4d89f`, valeur donnée par l'utilisateur (pas
+/// mesurée sur la planche de référence, qui ne montre aucun bouton survolé).
+const ICON_COLOR_HOVER: [u8; 3] = [0xf4, 0xd8, 0x9f];
 
 pub struct UiIcons {
     allies: egui::TextureHandle,
@@ -78,11 +91,13 @@ pub struct UiIcons {
     button_background: egui::TextureHandle,
     button_background_hover: egui::TextureHandle,
     external_link_icon: egui::TextureHandle,
+    external_link_icon_hover: egui::TextureHandle,
     options_icon: egui::TextureHandle,
-    watchlist_add: egui::TextureHandle,
-    watchlist_add_hover: egui::TextureHandle,
-    watchlist_remove: egui::TextureHandle,
-    watchlist_remove_hover: egui::TextureHandle,
+    options_icon_hover: egui::TextureHandle,
+    icon_plus: egui::TextureHandle,
+    icon_plus_hover: egui::TextureHandle,
+    icon_minus: egui::TextureHandle,
+    icon_minus_hover: egui::TextureHandle,
     item_border_common: egui::TextureHandle,
     item_border_rare: egui::TextureHandle,
     item_border_mythical: egui::TextureHandle,
@@ -94,18 +109,14 @@ pub struct UiIcons {
 
 impl UiIcons {
     pub fn load(ctx: &egui::Context) -> Self {
-        let (watchlist_add, watchlist_add_hover) = load_texture_with_hover(
-            ctx,
-            "icon-watchlist-add",
-            WATCHLIST_ADD_BYTES,
-            WATCHLIST_BUTTON_HOVER_BRIGHTEN,
-        );
-        let (watchlist_remove, watchlist_remove_hover) = load_texture_with_hover(
-            ctx,
-            "icon-watchlist-remove",
-            WATCHLIST_REMOVE_BYTES,
-            WATCHLIST_BUTTON_HOVER_BRIGHTEN,
-        );
+        let (external_link_icon, external_link_icon_hover) =
+            load_texture_recolored_pair(ctx, "icon-external-link", EXTERNAL_LINK_ICON_BYTES);
+        let (options_icon, options_icon_hover) =
+            load_texture_recolored_pair(ctx, "icon-options", OPTIONS_ICON_BYTES);
+        let (icon_plus, icon_plus_hover) =
+            load_texture_recolored_pair(ctx, "icon-plus", ICON_PLUS_BYTES);
+        let (icon_minus, icon_minus_hover) =
+            load_texture_recolored_pair(ctx, "icon-minus", ICON_MINUS_BYTES);
         Self {
             allies: load_texture(ctx, "icon-header-allies", ALLIES_ICON_BYTES),
             enemies: load_texture(ctx, "icon-header-enemies", ENEMIES_ICON_BYTES),
@@ -116,12 +127,14 @@ impl UiIcons {
                 "icon-button-background-hover",
                 BUTTON_BACKGROUND_HOVER_BYTES,
             ),
-            external_link_icon: load_texture(ctx, "icon-external-link", EXTERNAL_LINK_ICON_BYTES),
-            options_icon: load_texture(ctx, "icon-options", OPTIONS_ICON_BYTES),
-            watchlist_add,
-            watchlist_add_hover,
-            watchlist_remove,
-            watchlist_remove_hover,
+            external_link_icon,
+            external_link_icon_hover,
+            options_icon,
+            options_icon_hover,
+            icon_plus,
+            icon_plus_hover,
+            icon_minus,
+            icon_minus_hover,
             item_border_common: load_texture(ctx, "item-border-common", ITEM_BORDER_COMMON_BYTES),
             item_border_rare: load_texture(ctx, "item-border-rare", ITEM_BORDER_RARE_BYTES),
             item_border_mythical: load_texture(
@@ -169,49 +182,61 @@ impl UiIcons {
         &self.unknown_entity
     }
 
-    /// Socle d'un bouton icône du jeu, état au repos — voir doc de module et
-    /// `panels::combat::paint_icon_button`.
+    /// Socle d'un bouton icône du design system, état au repos — voir doc de module et
+    /// `panels::icon_button::paint_icon_button`. Partagé par les quatre boutons icône de l'overlay
+    /// (lien externe, Options, "+"/"−" du Suivi).
     pub fn button_background(&self) -> &egui::TextureHandle {
         &self.button_background
     }
 
-    /// Socle d'un bouton icône du jeu, état survolé (éclairci) — voir doc de module et
-    /// `panels::combat::paint_icon_button`.
+    /// Socle d'un bouton icône du design system, état survolé — voir `button_background`.
     pub fn button_background_hover(&self) -> &egui::TextureHandle {
         &self.button_background_hover
     }
 
-    /// Icône "lien externe" à fond transparent, à centrer sur `button_background` — voir doc de
-    /// module et `panels::combat::paint_icon_button`.
+    /// Icône "lien externe" à fond transparent recolorée en `ICON_COLOR`, à centrer sur
+    /// `button_background` — voir doc de module et `panels::icon_button::paint_icon_button`.
     pub fn external_link_icon(&self) -> &egui::TextureHandle {
         &self.external_link_icon
     }
 
-    /// Icône "Options" à fond transparent, à centrer sur `button_background` — voir doc de module
-    /// et `panels::combat::bottom_toolbar`.
+    /// Même icône, recolorée en `ICON_COLOR_HOVER` — à centrer sur `button_background_hover`.
+    pub fn external_link_icon_hover(&self) -> &egui::TextureHandle {
+        &self.external_link_icon_hover
+    }
+
+    /// Icône "Options" à fond transparent recolorée en `ICON_COLOR`, à centrer sur
+    /// `button_background` — voir doc de module et `panels::combat::bottom_toolbar`.
     pub fn options_icon(&self) -> &egui::TextureHandle {
         &self.options_icon
     }
 
-    /// Bouton "+" du bandeau Suivi, état au repos (fond arrondi + glyphe déjà intégrés à l'asset,
-    /// voir doc de module) — `panels::watchlist::control_button`.
-    pub fn watchlist_add(&self) -> &egui::TextureHandle {
-        &self.watchlist_add
+    /// Même icône, recolorée en `ICON_COLOR_HOVER` — à centrer sur `button_background_hover`.
+    pub fn options_icon_hover(&self) -> &egui::TextureHandle {
+        &self.options_icon_hover
     }
 
-    /// Même bouton, état survolé (éclairci, voir `brighten`).
-    pub fn watchlist_add_hover(&self) -> &egui::TextureHandle {
-        &self.watchlist_add_hover
+    /// Glyphe "+" à fond transparent recoloré en `ICON_COLOR` (`icon-plus.png`, fourni par
+    /// l'utilisateur) — à composer avec `button_background`, voir
+    /// `panels::watchlist::control_button_row`.
+    pub fn icon_plus(&self) -> &egui::TextureHandle {
+        &self.icon_plus
     }
 
-    /// Bouton "−" du bandeau Suivi, état au repos — voir `watchlist_add`.
-    pub fn watchlist_remove(&self) -> &egui::TextureHandle {
-        &self.watchlist_remove
+    /// Même glyphe, recoloré en `ICON_COLOR_HOVER` — à composer avec `button_background_hover`.
+    pub fn icon_plus_hover(&self) -> &egui::TextureHandle {
+        &self.icon_plus_hover
     }
 
-    /// Même bouton, état survolé (éclairci, voir `brighten`).
-    pub fn watchlist_remove_hover(&self) -> &egui::TextureHandle {
-        &self.watchlist_remove_hover
+    /// Glyphe "−" à fond transparent recoloré en `ICON_COLOR` (`icon-minus.png`, `icon-moins.png`
+    /// fourni par l'utilisateur) — voir `icon_plus`.
+    pub fn icon_minus(&self) -> &egui::TextureHandle {
+        &self.icon_minus
+    }
+
+    /// Même glyphe, recoloré en `ICON_COLOR_HOVER` — voir `icon_plus_hover`.
+    pub fn icon_minus_hover(&self) -> &egui::TextureHandle {
+        &self.icon_minus_hover
     }
 
     /// Texture d'emplacement d'objet du jeu pour `rarity` — voir doc de module et
@@ -235,25 +260,29 @@ fn load_texture(ctx: &egui::Context, name: &'static str, bytes: &[u8]) -> egui::
     load_rgba(ctx, name, decoded.dimensions(), decoded.as_raw())
 }
 
-/// Charge `bytes` en DEUX textures : la couleur d'origine, puis une variante éclaircie de
-/// `brighten_factor` (voir `brighten`) pour l'état survolé — voir doc de module (boutons "+"/"−"
-/// du bandeau Suivi, un seul fichier fourni par l'utilisateur).
-fn load_texture_with_hover(
+/// Charge `bytes` (glyphe à fond transparent, une seule teinte d'origine — voir doc de module) en
+/// DEUX textures : recolorée en `ICON_COLOR` (repos) puis en `ICON_COLOR_HOVER` (survolée), voir
+/// `recolor`. Utilisé pour les quatre icônes du design system boutons (lien externe, Options, "+",
+/// "−") — toutes partagent la même paire de teintes plutôt qu'un `tint()` egui dynamique (qui ne
+/// peut que MULTIPLIER la couleur d'origine, jamais l'éclaircir au-delà — même limite déjà
+/// rencontrée pour le grisé KO, voir `portraits::to_grayscale`).
+fn load_texture_recolored_pair(
     ctx: &egui::Context,
     name: &'static str,
     bytes: &[u8],
-    brighten_factor: f32,
 ) -> (egui::TextureHandle, egui::TextureHandle) {
     let decoded = decode(bytes);
-    let normal = load_rgba(ctx, name, decoded.dimensions(), decoded.as_raw());
-    let brightened = brighten(&decoded, brighten_factor);
-    let hover = load_rgba(
-        ctx,
-        &format!("{name}-hover"),
-        brightened.dimensions(),
-        brightened.as_raw(),
-    );
-    (normal, hover)
+    let normal = recolor(&decoded, ICON_COLOR);
+    let hovered = recolor(&decoded, ICON_COLOR_HOVER);
+    (
+        load_rgba(ctx, name, normal.dimensions(), normal.as_raw()),
+        load_rgba(
+            ctx,
+            &format!("{name}-hover"),
+            hovered.dimensions(),
+            hovered.as_raw(),
+        ),
+    )
 }
 
 fn decode(bytes: &[u8]) -> image::RgbaImage {
@@ -273,17 +302,16 @@ fn load_rgba(
     ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR)
 }
 
-/// Éclaircit `decoded` en mélangeant chaque canal de couleur vers le blanc dans la proportion
-/// `factor` (0.0 = inchangé, 1.0 = blanc plein), alpha préservé — un `tint()` egui à l'affichage ne
-/// peut que MULTIPLIER la couleur d'origine (donc l'assombrir ou la laisser inchangée, jamais
-/// l'éclaircir au-delà de l'original — même limite déjà rencontrée et contournée pour le grisé KO,
-/// voir `portraits::to_grayscale`), d'où un précalcul au chargement plutôt qu'un tint dynamique.
-fn brighten(decoded: &image::RgbaImage, factor: f32) -> image::RgbaImage {
+/// Remplace le canal RGB de CHAQUE pixel de `decoded` par `rgb` (alpha inchangé) — même principe
+/// que le recolorage ponctuel de `options-icon.png` en `#fbfbfb` (voir doc de module, 12e retour),
+/// généralisé ici en fonction réutilisable : un remplacement pur plutôt qu'un mélange (contrairement
+/// à l'ancien `brighten`), la silhouette et son anticrénelage (portés par l'alpha, pas la couleur)
+/// restent identiques au fichier fourni par l'utilisateur.
+fn recolor(decoded: &image::RgbaImage, rgb: [u8; 3]) -> image::RgbaImage {
     let mut out = decoded.clone();
     for pixel in out.pixels_mut() {
-        let [r, g, b, a] = pixel.0;
-        let toward_white = |c: u8| (c as f32 + (255.0 - c as f32) * factor).round() as u8;
-        pixel.0 = [toward_white(r), toward_white(g), toward_white(b), a];
+        let a = pixel.0[3];
+        pixel.0 = [rgb[0], rgb[1], rgb[2], a];
     }
     out
 }
@@ -293,11 +321,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn brighten_melange_vers_le_blanc_alpha_preserve() {
+    fn recolor_remplace_rgb_alpha_preserve() {
         let mut img = image::RgbaImage::new(1, 1);
         img.put_pixel(0, 0, image::Rgba([100, 100, 100, 137]));
-        let out = brighten(&img, 0.5);
+        let out = recolor(&img, [0xc5, 0xcb, 0xcc]);
         let px = out.get_pixel(0, 0);
-        assert_eq!(px.0, [178, 178, 178, 137]);
+        assert_eq!(px.0, [0xc5, 0xcb, 0xcc, 137]);
     }
 }
