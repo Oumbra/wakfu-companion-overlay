@@ -691,6 +691,7 @@ mod linux_main {
             egui_ctx,
             egui_winit,
             egui_renderer,
+            occluded_since: None,
         }
     }
 
