@@ -59,9 +59,9 @@ use overlay_ui::ui_icons::UiIcons;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
-    HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -138,6 +138,8 @@ const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from
 /// 2026-09-01), assez long pour absorber un aléa de timing d'un seul tick (~50 ms) entre les deux
 /// overlays d'un même personnage.
 const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// Voir `App::last_foreground_heartbeat`.
+const FOREGROUND_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
 // voir portraits.rs) sans écraser le nom/les dégâts — réglage fin de la mise en page toujours à
 // faire. Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
@@ -387,6 +389,16 @@ struct App {
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
     /// bannière.
     banner_printed: bool,
+    /// Diagnostic 2026-09-06 (retour utilisateur, `session_id=9956`) : le journal montrait une
+    /// démotion `HWND_NOTOPMOST` jamais suivie d'aucune repromotion pendant plus de 3 minutes,
+    /// jusqu'à la fin de la session — impossible de savoir, seulement à partir des transitions
+    /// déjà journalisées (`sync_topmost`), si `GetForegroundWindow()` désignait réellement autre
+    /// chose que le jeu pendant tout ce temps (l'utilisateur ayant réellement l'attention ailleurs)
+    /// ou si la détection elle-même restait bloquée sur une valeur obsolète. Sert à borner un
+    /// battement de coeur périodique (voir `sync_topmost`) qui journalise le titre de la fenêtre
+    /// actuellement au premier plan — mais SEULEMENT tant qu'au moins un overlay reste
+    /// `HWND_NOTOPMOST` (voir son appel), pour ne pas spammer le journal en usage normal.
+    last_foreground_heartbeat: Option<std::time::Instant>,
 }
 
 /// Regroupe les paramètres de construction d'`App` au-delà de `log_path` — sinon
@@ -491,6 +503,7 @@ impl App {
             log_path,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
+            last_foreground_heartbeat: None,
         }
     }
 
@@ -695,6 +708,26 @@ impl App {
         }
     }
 
+    /// Titre d'un HWND quelconque (pas nécessairement une fenêtre de jeu) — même appels que
+    /// `game_window::imp::window_title`, dupliqué ici plutôt que rendu `pub` là-bas : ce module-ci
+    /// n'a besoin que d'un diagnostic ponctuel (voir `last_foreground_heartbeat`), pas d'exposer
+    /// une API de fenêtrage générique depuis `game_window`. `"<sans titre ou HWND nul>"` si
+    /// indisponible — jamais fatal, juste une ligne de journal moins précise.
+    fn window_title(hwnd: HWND) -> String {
+        if hwnd.0.is_null() {
+            return "<aucune fenêtre au premier plan>".to_string();
+        }
+        unsafe {
+            let len = GetWindowTextLengthW(hwnd);
+            if len <= 0 {
+                return "<sans titre>".to_string();
+            }
+            let mut buf = vec![0u16; len as usize + 1];
+            let written = GetWindowTextW(hwnd, &mut buf);
+            String::from_utf16_lossy(&buf[..written as usize])
+        }
+    }
+
     /// Reconfigure la surface wgpu sur la taille physique donnée — factorisé pour être appelable
     /// depuis DEUX points, pas seulement `WindowEvent::Resized` : le redimensionnement du Suivi
     /// (`RedrawRequested`, voir plus bas) appelle `Window::request_inner_size`, dont la doc winit
@@ -869,6 +902,28 @@ impl App {
     fn sync_topmost(&mut self) {
         let foreground = unsafe { GetForegroundWindow() };
         let now = std::time::Instant::now();
+
+        // Diagnostic 2026-09-06 (retour utilisateur, `session_id=9956` : une démotion jamais
+        // suivie d'aucune repromotion pendant plus de 3 minutes, sans une seule ligne de journal
+        // entre les deux pour dire pourquoi) — voir la doc d'`App::last_foreground_heartbeat`.
+        // Se déclenche UNIQUEMENT tant qu'au moins un overlay reste `HWND_NOTOPMOST` : invisible
+        // en usage normal (aucun surcoût, aucun spam), mais donne enfin une trace exploitable
+        // pendant un épisode bloqué — au prochain test, on saura si `GetForegroundWindow()`
+        // désignait réellement autre chose que le jeu tout du long (l'utilisateur avait
+        // effectivement l'attention ailleurs) ou une valeur qui ne correspond à rien de connu
+        // (détection en défaut).
+        if self.windows.values().any(|o| !o.is_topmost) {
+            let due = self
+                .last_foreground_heartbeat
+                .is_none_or(|t| now.duration_since(t) >= FOREGROUND_HEARTBEAT_INTERVAL);
+            if due {
+                self.last_foreground_heartbeat = Some(now);
+                tracing::info!(
+                    "[topmost] sondage (overlay(s) toujours rétrogradé(s)) : premier plan actuel = « {} »",
+                    Self::window_title(foreground)
+                );
+            }
+        }
 
         for overlay in self.windows.values_mut() {
             let relevant =
