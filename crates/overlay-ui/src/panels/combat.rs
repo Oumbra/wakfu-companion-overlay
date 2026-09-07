@@ -317,6 +317,15 @@
 //! `render_content::COMBAT_TOP_MARGIN` : le panneau gagne une marge haute (44px) suffisante pour que
 //! `TOP` tienne enfin — la fenêtre Combat (`main.rs`/`bin/overlay-ui-x11.rs::WINDOW_SIZE`) est
 //! agrandie d'autant pour ne rien compresser d'autre.
+//!
+//! **Refonte 2026-09-07 (vision ennemie, scroll infini)** — demande utilisateur explicite (les
+//! breaches peuvent aligner 40 à 60+ monstres, jamais affichables en liste plate lisible) :
+//! - Camp Ennemis, jusqu'à `MAX_FRAME_SLOTS` : rejoint le même chemin que les alliés
+//!   (`CombatFrame::show`, gabarit exact) — jusqu'ici réservé aux alliés, les ennemis restaient
+//!   TOUJOURS en liste plate quel que soit leur nombre.
+//! - Camp Ennemis, au-delà de `MAX_FRAME_SLOTS` : `panels::combat_frame_scroll::EnemyFrameScroll`
+//!   (voir sa doc de module pour l'architecture complète, validée par plusieurs artefacts
+//!   interactifs) — plus de liste plate dans ce cas.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -325,6 +334,7 @@ use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
+use super::combat_frame_scroll::EnemyFrameScroll;
 use super::icon_button;
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
@@ -523,19 +533,35 @@ pub fn show(
     let total_damage_raw = fighters.iter().map(|f| f.total_damage).sum::<i64>();
     let total_damage = total_damage_raw.max(1);
 
-    let (framed, flat_portraits): (&[&FighterDamage], &[&FighterDamage]) =
-        if *side == CombatSide::Allies {
-            fighters.split_at(fighters.len().min(MAX_FRAME_SLOTS))
-        } else {
-            (&[], &fighters)
-        };
+    // `framed` : gabarit exact (`CombatFrame::show`, 1 à `MAX_FRAME_SLOTS` combattants). `enemy_
+    // scroll` : ennemis au-delà de `MAX_FRAME_SLOTS` (voir `combat_frame_scroll`, refonte
+    // 2026-09-07) — le plus grand gabarit réutilisé comme fenêtre fixe, portraits défilants dedans,
+    // JAMAIS de liste plate dans ce cas (contrairement à avant cette refonte). `flat_portraits` ne
+    // reste donc utile qu'aux alliés au-delà de `MAX_FRAME_SLOTS` (cas rare, voir doc de
+    // `combat_frame`).
+    let (framed, flat_portraits, enemy_scroll): (
+        &[&FighterDamage],
+        &[&FighterDamage],
+        &[&FighterDamage],
+    ) = match *side {
+        CombatSide::Allies => {
+            let (framed, flat) = fighters.split_at(fighters.len().min(MAX_FRAME_SLOTS));
+            (framed, flat, &[])
+        }
+        CombatSide::Enemies if fighters.len() <= MAX_FRAME_SLOTS => (fighters.as_slice(), &[], &[]),
+        CombatSide::Enemies => (&[], &[], fighters.as_slice()),
+    };
 
     ui.horizontal_top(|ui| {
-        // Colonne de gauche : portraits (cadre pour les 6 premiers alliés dans l'ordre stable,
-        // liste plate sinon) — voir doc de module.
+        // Colonne de gauche : portraits — cadre exact (alliés ou ennemis jusqu'à `MAX_FRAME_SLOTS`),
+        // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
+        // module.
         ui.vertical(|ui| {
             if !framed.is_empty() {
                 frame.show(ui, portraits, icons, framed, total_damage);
+            }
+            if !enemy_scroll.is_empty() {
+                EnemyFrameScroll::show(ui, frame, portraits, icons, enemy_scroll, total_damage);
             }
             if !flat_portraits.is_empty() {
                 if !framed.is_empty() {
