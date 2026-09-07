@@ -12,11 +12,15 @@
 //! - La LISTE des entrées suivies (nom/genre/mode/cible) reste éditée sur le web et lue en
 //!   lecture seule ici, comme le roster (`WatchlistEntry::from_settings_json`, même source
 //!   `GET /api/v1/settings`, clé `"watchlist"`).
-//! - Les COMPTEURS (`count`), eux, sont incrémentés et persistés **localement** par l'overlay
-//!   pour cette première version (pas de `PATCH /api/v1/settings` — `overlay-sync` ne réécrit
-//!   rien sur le compte). Un overlay et le web utilisés en parallèle sur le même personnage
-//!   peuvent donc diverger ; synchroniser les compteurs eux-mêmes est un chantier ultérieur
-//!   (rapprocherait ce module de la vraie file d'envoi de L5).
+//! - Les COMPTEURS (`count`), eux, sont incrémentés et persistés **localement** par l'overlay en
+//!   premier lieu (`store_path`, jamais perdu même hors ligne), PUIS répliqués vers le compte via
+//!   `PATCH /api/v1/settings` — voir `drain_pending_sync`/`watchlist_patch_entry` ci-dessous et
+//!   `overlay_sync::client::patch_watchlist` côté transport. **Fermé le 2026-09-07** (retour
+//!   utilisateur : un Suivi jamais visible sur le site) : cette réplication manquait entièrement
+//!   jusqu'ici (voir `docs/plan-architecture.md` §14 point 3) — un overlay et le web utilisés en
+//!   parallèle sur le même personnage restent malgré tout `count`-divergents PENDANT la fenêtre
+//!   de debounce/backoff (miroir exact de `RemoteUserDataRepository` côté web, jamais
+//!   instantané non plus là-bas).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -136,6 +140,13 @@ fn save_to(path: &Path, counts: &PersistedCounts) {
 pub struct WatchlistState {
     entries: Vec<WatchlistEntry>,
     store_path: PathBuf,
+    /// `true` dès qu'un `count` a changé (`apply`) ou qu'un rattrapage est nécessaire
+    /// (`merge_config`, voir sa doc) depuis le dernier `drain_pending_sync` — voir cette dernière
+    /// pour l'usage. Jamais réinitialisé par `persist()` (fichier LOCAL, indépendant de la
+    /// réplication réseau) : seul `drain_pending_sync` l'efface, PAS un envoi réseau réussi — cette
+    /// distinction ne vit pas ici (voir sa doc pour pourquoi un échec réseau n'a pas besoin de
+    /// remarquer `dirty`).
+    dirty: bool,
 }
 
 impl WatchlistState {
@@ -147,6 +158,7 @@ impl WatchlistState {
         Self {
             entries: Vec::new(),
             store_path,
+            dirty: false,
         }
     }
 
@@ -156,21 +168,49 @@ impl WatchlistState {
     /// malgré un re-fetch du compte à chaque connexion. Une entrée disparue du compte (supprimée
     /// sur le web) disparaît aussi d'ici ; une entrée nouvelle démarre avec le `count`/
     /// `countdown_target` que le compte lui donne.
+    ///
+    /// Marque l'état `dirty` (voir `take_pending_sync`) dès qu'au moins un `count` local diffère
+    /// de celui reçu ici : un compte qui répond avec une valeur en retard (compteur incrémenté
+    /// hors ligne, ou dernier envoi resté en échec avant une déconnexion/fermeture) doit être
+    /// rattrapé, exactement comme `RemoteUserDataRepository.pull()` pousse tout champ « jamais
+    /// envoyé » ou localement plus récent côté web.
     pub fn merge_config(&mut self, incoming: Vec<WatchlistEntry>) {
         let persisted = load_from(&self.store_path);
+        let mut needs_catchup = false;
         self.entries = incoming
             .into_iter()
             .map(|mut entry| {
                 if let Some(&count) = persisted.by_key.get(&counter_key(&entry.name, entry.kind)) {
+                    if count != entry.count {
+                        needs_catchup = true;
+                    }
                     entry.count = count;
                 }
                 entry
             })
             .collect();
+        if needs_catchup {
+            self.dirty = true;
+        }
     }
 
     pub fn entries(&self) -> &[WatchlistEntry] {
         &self.entries
+    }
+
+    /// Vide et renvoie un instantané des entrées suivies à répliquer vers le compte si `dirty`
+    /// (`None` dans l'immense majorité des appels) — à appeler par l'hôte (`overlay-ui`) après
+    /// chaque `apply`/`merge_config`, même motif « drain » qu'`Engine::drain_sync_events`/
+    /// `drain_watchlist_alerts`. Comme pour `drain_sync_events`, l'hôte relaie l'instantané tel
+    /// quel au thread Sync sans jamais rappeler l'`Engine` (§3 du plan) : un échec réseau ne doit
+    /// donc PAS reposer sur un nouveau drain pour être réessayé — c'est au thread Sync de garder
+    /// le dernier envoi en attente et de le retenter (backoff), pas à ce module.
+    pub fn drain_pending_sync(&mut self) -> Option<Vec<WatchlistEntry>> {
+        if !self.dirty {
+            return None;
+        }
+        self.dirty = false;
+        Some(self.entries.clone())
     }
 
     /// Applique un `LogEntry` déjà déterminé comme HORS rattrapage initial par l'appelant (voir
@@ -188,6 +228,7 @@ impl WatchlistState {
         };
         if changed {
             self.persist();
+            self.dirty = true;
         }
         alerts
     }
@@ -243,6 +284,20 @@ pub fn watchlist_from_settings_json(data: &serde_json::Value) -> Vec<WatchlistEn
     data.get("watchlist")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default()
+}
+
+/// Construit l'entrée `PATCH /api/v1/settings` (`{ key, value, updatedAt }`, voir
+/// `functions/api/v1/settings.ts::onRequestPatch` côté dépôt web) pour la clé `"watchlist"` —
+/// symétrique de `watchlist_from_settings_json`. `value` est la liste COMPLÈTE des entrées suivies
+/// (le serveur remplace la clé entière, pas un merge, voir sa doc) ; `updatedAt` arbitre le
+/// « dernier écrivain gagne » — horodaté à l'instant de l'appel, miroir de
+/// `RemoteUserDataRepository.sendPending()` (`this.local.updatedAt(key) ?? new Date()`) côté web.
+pub fn watchlist_patch_entry(entries: &[WatchlistEntry]) -> serde_json::Value {
+    serde_json::json!({
+        "key": "watchlist",
+        "value": entries,
+        "updatedAt": chrono::Utc::now().to_rfc3339(),
+    })
 }
 
 #[cfg(test)]
@@ -427,6 +482,83 @@ mod tests {
         assert_eq!(state.entries().len(), 1);
         assert_eq!(state.entries()[0].name, "Bwork");
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn apply_marque_dirty_et_drain_pending_sync_le_vide() {
+        let mut state = state_with(vec![enemy("Bwork Sram")]);
+        assert_eq!(state.drain_pending_sync(), None); // rien à synchroniser au départ
+        state.apply(&defeated("Bwork Sram"));
+        let pending = state.drain_pending_sync();
+        assert!(pending.is_some());
+        assert_eq!(pending.unwrap()[0].count, 1);
+        // Un deuxième drain sans nouveau changement entre-temps ne renvoie plus rien.
+        assert_eq!(state.drain_pending_sync(), None);
+    }
+
+    #[test]
+    fn apply_sans_entree_correspondante_ne_marque_pas_dirty() {
+        let mut state = state_with(vec![item("Larve Bleue", WatchlistMode::Up, 0)]);
+        state.apply(&loot("Autre Objet", 1));
+        assert_eq!(state.drain_pending_sync(), None);
+    }
+
+    #[test]
+    fn merge_config_marque_dirty_si_le_compte_est_en_retard_sur_le_local() {
+        let dir = std::env::temp_dir().join(format!(
+            "wakfu-overlay-watchlist-test-rattrapage-{}",
+            std::process::id()
+        ));
+        let path = dir.join("counts.json");
+        let mut state = WatchlistState::new(path.clone());
+
+        state.merge_config(vec![item("Larve Bleue", WatchlistMode::Up, 0)]);
+        assert_eq!(state.drain_pending_sync(), None); // premier fetch, rien à rattraper
+        state.apply(&loot("Larve Bleue", 4));
+        assert!(state.drain_pending_sync().is_some()); // drainé par l'appel ci-dessus
+
+        // Redémarrage : le compte répond toujours avec un `count` à 0 (l'envoi précédent n'a
+        // jamais atteint le compte, ex. overlay fermé avant la synchro) — le compte local
+        // persisté (4) doit à la fois gagner ET redéclencher un rattrapage.
+        let mut restarted = WatchlistState::new(path);
+        restarted.merge_config(vec![item("Larve Bleue", WatchlistMode::Up, 0)]);
+        let pending = restarted.drain_pending_sync();
+        assert_eq!(pending.map(|p| p[0].count), Some(4));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merge_config_ne_marque_pas_dirty_si_deja_a_jour() {
+        let dir = std::env::temp_dir().join(format!(
+            "wakfu-overlay-watchlist-test-deja-a-jour-{}",
+            std::process::id()
+        ));
+        let path = dir.join("counts.json");
+        let mut state = WatchlistState::new(path.clone());
+
+        state.merge_config(vec![item("Larve Bleue", WatchlistMode::Up, 0)]);
+        state.apply(&loot("Larve Bleue", 4));
+        state.drain_pending_sync(); // synchro "réussie" simulée
+
+        // Le compte répond maintenant avec le count déjà à jour (4) : rien à rattraper. (`item()`
+        // n'affecte `count` qu'en mode `Down`, voir sa doc — construit donc directement ici.)
+        let mut up_to_date = item("Larve Bleue", WatchlistMode::Up, 0);
+        up_to_date.count = 4;
+        let mut restarted = WatchlistState::new(path);
+        restarted.merge_config(vec![up_to_date]);
+        assert_eq!(restarted.drain_pending_sync(), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watchlist_patch_entry_porte_la_cle_watchlist_et_les_entrees() {
+        let entries = vec![item("Larve Bleue", WatchlistMode::Up, 0)];
+        let patch = watchlist_patch_entry(&entries);
+        assert_eq!(patch["key"], "watchlist");
+        assert_eq!(patch["value"][0]["name"], "Larve Bleue");
+        assert!(patch["updatedAt"].is_string());
     }
 
     #[test]

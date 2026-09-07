@@ -1562,6 +1562,18 @@ fn spawn_dungeon_thread(dungeons: Arc<ArcSwap<DungeonIndex>>, proxy: EventLoopPr
 /// l'inactivité (aucun compte connu : 1 h, réveillé immédiatement par la prochaine commande) et le
 /// backoff après un échec réessayable (`FlushOutcome::Retry`, voir `backoff_delay` — 15 s à 5 min,
 /// doublé à chaque échec consécutif, miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS` côté web).
+///
+/// **Compteurs de Suivi (`SyncCommand::SyncWatchlist`, §14 point 3 du plan, chantier fermé le
+/// 2026-09-07)** — même thread, mécanisme VOLONTAIREMENT séparé de la file `SyncQueue` ci-dessus :
+/// pas de file SQLite ni de `client_key` idempotent (la valeur ENTIÈRE remplace la clé côté
+/// serveur, voir `functions/api/v1/settings.ts::onRequestPatch`, « dernier écrivain gagne »), donc
+/// rien à dédupliquer — seul le DERNIER instantané reçu compte, porté en mémoire
+/// (`pending_watchlist`) plutôt qu'en base. Débounce de `WATCHLIST_DEBOUNCE` avant le premier
+/// essai (miroir de `WRITE_DEBOUNCE_MS` côté web, `RemoteUserDataRepository`) : un compteur qui
+/// s'incrémente à chaque kill d'un combat ne doit pas déclencher une requête par kill. Un nouvel
+/// instantané reçu PENDANT l'attente (débounce ou backoff) remplace le précédent et relance un
+/// débounce complet — rien n'est perdu (`WatchlistState` garde de toute façon le fichier local
+/// comme vérité, voir sa doc), seul le nombre de requêtes est réduit.
 fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
     thread::Builder::new()
         .name("overlay-sync".into())
@@ -1588,6 +1600,15 @@ fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
             // `uid` (pour `client_key`) ET `token` (pour authentifier l'envoi, voir
             // `SyncCommand::Activate`) — toujours mis à jour ensemble.
             let mut account: Option<(String, String)> = None;
+            // Dernier instantané de Suivi reçu et pas encore répliqué avec succès (voir la doc de
+            // `spawn_sync_thread` ci-dessus) — `None` tant qu'aucun `SyncCommand::SyncWatchlist`
+            // n'est arrivé, ou après un envoi réussi.
+            let mut pending_watchlist: Option<Vec<WatchlistEntry>> = None;
+            // Instant à partir duquel retenter l'envoi watchlist (fin du débounce, ou du backoff
+            // après un échec) — distinct du calcul `wait` de l'historique ci-dessous : les deux
+            // mécanismes n'ont ni la même cause de délai ni le même état.
+            let mut watchlist_ready_at: Option<std::time::Instant> = None;
+            let mut watchlist_consecutive_failures: u32 = 0;
             // Pas de compte connu au démarrage : n'attend qu'une commande, ne sonde jamais pour
             // rien (même philosophie que `settings_rx.try_recv()` côté thread Engine).
             let mut wait = std::time::Duration::from_secs(3600);
@@ -1614,11 +1635,16 @@ fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                             }
                         }
                     }
+                    Ok(SyncCommand::SyncWatchlist(entries)) => {
+                        pending_watchlist = Some(entries);
+                        watchlist_consecutive_failures = 0;
+                        watchlist_ready_at = Some(std::time::Instant::now() + WATCHLIST_DEBOUNCE);
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => {} // réessai programmé (backoff) — retombe sur le flush ci-dessous
                     Err(mpsc::RecvTimeoutError::Disconnected) => break, // App fermée
                 }
 
-                wait = match &account {
+                let history_wait = match &account {
                     None => std::time::Duration::from_secs(3600),
                     Some((uid, token)) => {
                         match queue.flush_once(uid, |path, body| {
@@ -1645,9 +1671,68 @@ fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                         }
                     }
                 };
+
+                let watchlist_wait = flush_watchlist_once(
+                    &account,
+                    &mut pending_watchlist,
+                    &mut watchlist_ready_at,
+                    &mut watchlist_consecutive_failures,
+                );
+
+                wait = history_wait.min(watchlist_wait);
             }
         })
         .expect("échec de création du thread Sync");
+}
+
+/// Débounce avant le premier essai d'un envoi watchlist — miroir de `WRITE_DEBOUNCE_MS`
+/// (`remote-user-data.repository.ts`) côté web.
+const WATCHLIST_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1_500);
+
+/// Tente, si le moment est venu, de répliquer le dernier instantané de Suivi reçu — voir la doc de
+/// `spawn_sync_thread` pour le mécanisme complet (débounce + backoff, sans file persistante).
+/// Renvoie le délai avant le PROCHAIN passage utile pour CE mécanisme (à combiner par l'appelant
+/// avec celui de l'historique, voir `wait`) : 1 h tant que rien n'est en attente ou qu'aucun
+/// compte n'est connu (réveillé immédiatement par la prochaine commande), le temps restant avant
+/// `ready_at` pendant un débounce/backoff en cours, ou le nouveau backoff après un échec.
+fn flush_watchlist_once(
+    account: &Option<(String, String)>,
+    pending: &mut Option<Vec<WatchlistEntry>>,
+    ready_at: &mut Option<std::time::Instant>,
+    consecutive_failures: &mut u32,
+) -> std::time::Duration {
+    let Some(entries) = pending.as_ref() else {
+        return std::time::Duration::from_secs(3600);
+    };
+    let Some((_, token)) = account else {
+        return std::time::Duration::from_secs(3600); // pas de compte : rien à tenter avant `Activate`
+    };
+    let now = std::time::Instant::now();
+    if let Some(at) = ready_at {
+        if now < *at {
+            return *at - now;
+        }
+    }
+
+    match overlay_sync::patch_watchlist(token, entries) {
+        Ok(_) => {
+            *pending = None;
+            *ready_at = None;
+            *consecutive_failures = 0;
+            std::time::Duration::from_secs(3600)
+        }
+        Err(err) => {
+            *consecutive_failures += 1;
+            tracing::warn!(
+                %err,
+                consecutive_failures = *consecutive_failures,
+                "échec de synchro des compteurs de Suivi — nouvel essai après un backoff"
+            );
+            let delay = backoff_delay(*consecutive_failures);
+            *ready_at = Some(now + delay);
+            delay
+        }
+    }
 }
 
 /// Miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS`/le calcul de `scheduleRetry`

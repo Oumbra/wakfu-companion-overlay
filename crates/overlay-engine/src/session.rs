@@ -1892,6 +1892,15 @@ impl Engine {
         std::mem::take(&mut self.pending_alerts)
     }
 
+    /// Vide et renvoie un instantané des entrées suivies à répliquer vers le compte si au moins un
+    /// compteur a changé depuis le dernier appel (`None` dans l'immense majorité des cas) — voir
+    /// `WatchlistState::drain_pending_sync`. À appeler par l'hôte après `ingest_batch` (compteur
+    /// incrémenté par le log) ET après `set_watchlist_entries` (rattrapage d'un compte en retard,
+    /// voir `WatchlistState::merge_config`), pour relayer au thread Sync (§7.3 du plan).
+    pub fn drain_watchlist_sync(&mut self) -> Option<Vec<WatchlistEntry>> {
+        self.watchlist.drain_pending_sync()
+    }
+
     /// Vide et renvoie les alertes de ramassage (son activé) accumulées depuis le dernier appel
     /// (voir `pending_loot_alerts`) — même usage que `drain_watchlist_alerts`, file séparée (voir
     /// la doc de `pending_loot_alerts`). Vide dans l'immense majorité des appels.

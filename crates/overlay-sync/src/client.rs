@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use overlay_engine::{
-    sound_items_from_settings_json, watchlist_from_settings_json, RosterIndex, SoundItemEntry,
-    WatchlistEntry,
+    sound_items_from_settings_json, watchlist_from_settings_json, watchlist_patch_entry,
+    RosterIndex, SoundItemEntry, WatchlistEntry,
 };
 use serde_json::Value;
 
@@ -67,6 +67,30 @@ pub fn post_json_authenticated(token: &str, path: &str, body: &Value) -> Result<
         .send_json(body)
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body(path, response)
+}
+
+/// Variante `PATCH` authentifiée de [`post_json_authenticated`] — utilisée pour
+/// `PATCH /api/v1/settings` (écriture PAR CLÉ, « dernier écrivain gagne », voir
+/// `functions/api/v1/settings.ts::onRequestPatch` côté dépôt web), PAS pour l'historique (routes
+/// `POST /api/v1/history/*`, qui restent sur [`post_json_authenticated`]).
+pub fn patch_json_authenticated(token: &str, path: &str, body: &Value) -> Result<Value, SyncError> {
+    let url = format!("{}{path}", base_url());
+    let response = agent()
+        .patch(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .send_json(body)
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body(path, response)
+}
+
+/// `PATCH /api/v1/settings` pour répliquer les compteurs de Suivi (watchlist) vers le compte —
+/// voir `overlay_engine::watchlist::watchlist_patch_entry` pour le format de l'entrée envoyée, et
+/// `docs/plan-architecture.md` §14 point 3 (chantier fermé le 2026-09-07, retour utilisateur : un
+/// Suivi jamais visible sur le site). Un lot d'une seule entrée EST l'écriture par clé (pas de
+/// route `/settings/{key}` séparée côté serveur).
+pub fn patch_watchlist(token: &str, entries: &[WatchlistEntry]) -> Result<Value, SyncError> {
+    let body = serde_json::json!({ "entries": [watchlist_patch_entry(entries)] });
+    patch_json_authenticated(token, "/api/v1/settings", &body)
 }
 
 /// Récupère les octets bruts d'une URL absolue quelconque — PAS `base_url()` (utilisé tel quel
