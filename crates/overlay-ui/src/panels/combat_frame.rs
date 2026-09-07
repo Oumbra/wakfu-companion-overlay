@@ -1,43 +1,44 @@
 //! Cadre décoratif "totem" du panneau Combat, un par nombre d'alliés (`template_1.png` à
 //! `template_6.png` sous `crates/overlay-ui/assets/templates/` — c'est cette copie locale au crate
-//! qu'`include_bytes!` embarque) : une colonne verticale de N médaillons circulaires, chacun
-//! destiné à recevoir le portrait de classe d'un allié (`crate::portraits::PortraitAtlas`).
-//! **2026-09-05** : un `assets/templates/` à la racine du dépôt avait été gardé un temps comme
-//! référence de l'original non recoloré (la copie embarquée ci-dessus a été recolorée, voir la
-//! refonte 2026-09-04, 4e retour, dans `panels::combat`) — retiré depuis, l'utilisateur conservant
-//! déjà cet original ailleurs (hors dépôt). La seule copie versionnée ici est donc la version
-//! recolorée effectivement affichée.
+//! qu'`include_bytes!` embarque) : une colonne verticale de N médaillons, chacun destiné à
+//! recevoir le portrait de classe d'un allié (`crate::portraits::PortraitAtlas`).
 //!
-//! **Géométrie des médaillons** — refonte 2026-09-04 (nouveaux templates fournis par
-//! l'utilisateur) : centre de chaque médaillon mesuré par analyse de pixels des 6 PNG (bbox de
-//! chaque zone alpha=0 interne, non touchée par le bord du canevas — script Python, pas reproduit
-//! ici) plutôt que déduit d'une formule, pour la même raison que la refonte précédente : les
-//! écarts entre médaillons ne sont pas parfaitement constants d'un template à l'autre.
+//! **Refonte 2026-09-07 (gabarits redessinés à la main par l'utilisateur)** : les 6 PNG ont changé
+//! de dimensions (largeur commune 68→70 px, hauteurs toutes légèrement modifiées) et surtout
+//! **n'ont plus de trou/anneau découpé dans le disque** — juste une plaque pleine, sans aucune
+//! zone transparente au centre de chaque médaillon (vérifié pixel par pixel : aucune marque, ni
+//! transparence ni couleur distincte, n'indique plus l'emplacement du portrait). Conséquences :
+//! - Le masquage circulaire, auparavant fourni par l'anneau opaque du template repeint par-dessus
+//!   le portrait, doit maintenant être fait **côté code** : chaque portrait est peint avec
+//!   `egui::Image::corner_radius` réglé à la moitié de `NATIVE_PORTRAIT_SIZE` (un carré aux coins
+//!   arrondis à 50 % devient un cercle parfait) — voir `PORTRAIT_CORNER_RADIUS`.
+//! - L'ordre de peinture s'inverse : le template est désormais peint **avant** les portraits (plus
+//!   de trou à masquer, c'est lui qui sert de fond), les portraits (déjà rognés en cercle) par-
+//!   dessus. Infobulle + pourcentage restent peints en dernier (inchangé).
+//! - Les centres de médaillon ne peuvent plus être mesurés depuis l'image (pas de trou à
+//!   localiser) : ils ont été validés avec l'utilisateur via un artefact de calibration interactif
+//!   (repère croix + carré 48×48, rendu avec portrait réel côté à côté pour chacun des 6 gabarits,
+//!   plusieurs itérations avant validation) plutôt que mesurés par script. Axe horizontal retenu :
+//!   x=29,5 pour les templates 1 à 5, x=27,5 pour le template 6 (dernier ajustement demandé
+//!   explicitement par l'utilisateur sur ce gabarit précis) — pas une formule unique, une valeur
+//!   par gabarit. Axe vertical : les N portraits d'un gabarit sont espacés de N+1 marges
+//!   rigoureusement égales (avant le premier, entre chaque paire, après le dernier) dans la
+//!   portion du gabarit qui atteint sa pleine largeur (hors chapiteaux/coins qui la rétrécissent).
 //!
-//! **Le portrait n'est PAS mis à l'échelle du trou mesuré** (première version de cette refonte,
-//! corrigée après retour utilisateur avec capture d'écran + composite de référence "cible.png" à
-//! l'appui) : il est collé à sa taille NATIVE `NATIVE_PORTRAIT_SIZE` (48×48, non re-échantillonné,
-//! voir `crate::portraits`), centré sur le trou mesuré — plus GRAND que le trou (~41 px), il
-//! déborde donc volontairement dans l'anneau, que le template repeint par-dessus masque
-//! proprement (voir l'ordre de peinture dans `show`). C'est exactement la méthode déjà validée
-//! pour l'ancienne géométrie — facteur d'échelle ≈0.3116 mesuré empiriquement (48⁄150, affiné après
-//! mesure du résultat) pour faire passer les ronds de slot des templates de ~150-155 px à ~47-48 px,
-//! compatibles avec des portraits natifs 48×48 (validation ponctuelle 2026-09-03, avant
-//! `overlay-testkit` ; désormais couverte en continu par ses tests de non-régression visuelle, voir
-//! `crates/overlay-testkit/tests/panels.rs`) — reconduite telle quelle ici, la seule chose qui
-//! change d'un jeu de templates à l'autre, ce sont les centres mesurés.
+//! **Le portrait n'est toujours PAS mis à l'échelle** : collé à sa taille NATIVE
+//! `NATIVE_PORTRAIT_SIZE` (48×48, non re-échantillonné, voir `crate::portraits`), seulement
+//! rogné en cercle — inchangé par rapport à la géométrie précédente, qui collait déjà un portrait
+//! 48×48 plus grand que le trou mesuré (~41 px) pour laisser l'anneau masquer le débordement ; ici
+//! le rognage en cercle joue exactement ce rôle.
 //! Corollaire : le canevas n'est PAS étiré à l'affichage, `FRAME_WIDTH` vaut la largeur native du
-//! PNG (68 px, commune aux 6) — un canevas étiré aurait fallu re-proportionner le portrait en
-//! conséquence pour garder le même ratio taille-portrait/taille-trou que celui mesuré sur
-//! `cible.png`, inutilement compliqué face à un simple 1:1.
+//! PNG (70 px, commune aux 6).
 //!
-//! **Ordre des slots — refonte 2026-09-04** (retour utilisateur, redesign des barres) : ce N'EST
-//! PLUS l'ordre d'affichage trié par dégâts décroissant. `fighters` est désormais dans l'ordre
-//! STABLE défini par `overlay_engine::FightSnapshot::fighters` (ordre d'arrivée en combat, voir sa
-//! doc) — les portraits ne doivent plus changer de position à mesure que les dégâts évoluent,
-//! seules les barres de dégâts (peintes ailleurs, voir `panels::combat::show`) restent triées et
-//! filtrées (uniquement dégâts > 0). Ce module ne peint donc plus aucune barre : seuls le cadre,
-//! les portraits, leur infobulle au survol et leur pourcentage de dégâts (coin bas-droit, voir
+//! **Ordre des slots** : `fighters` est dans l'ordre STABLE défini par
+//! `overlay_engine::FightSnapshot::fighters` (ordre d'arrivée en combat, voir sa doc) — les
+//! portraits ne changent pas de position à mesure que les dégâts évoluent, seules les barres de
+//! dégâts (peintes ailleurs, voir `panels::combat::show`) restent triées et filtrées (uniquement
+//! dégâts > 0). Ce module ne peint donc aucune barre : seuls le cadre, les portraits, leur
+//! infobulle au survol et leur pourcentage de dégâts (coin bas-droit, voir
 //! `panels::combat::paint_portrait_percent`) — le découplage complet portraits/barres est décidé
 //! et assemblé par l'appelant.
 //!
@@ -54,15 +55,21 @@ use crate::ui_icons::UiIcons;
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
 pub const MAX_FRAME_SLOTS: usize = 6;
 
-/// Largeur de canevas commune aux 6 templates — largeur NATIVE du PNG (68 px, commune aux 6),
+/// Largeur de canevas commune aux 6 templates — largeur NATIVE du PNG (70 px, commune aux 6),
 /// canevas non étiré à l'affichage (voir doc de module).
-const FRAME_WIDTH: f32 = 68.0;
+const FRAME_WIDTH: f32 = 70.0;
+
+/// Rayon de rognage circulaire du portrait — moitié de `NATIVE_PORTRAIT_SIZE` (48/2), un carré
+/// aux coins arrondis à ce rayon devient un cercle parfait (voir doc de module). Les gabarits
+/// n'ont plus de trou/anneau pour faire ce travail à la place du code.
+const PORTRAIT_CORNER_RADIUS: u8 = (NATIVE_PORTRAIT_SIZE / 2.0) as u8;
 
 struct TemplateInfo {
     bytes: &'static [u8],
     height: f32,
     /// Centre de chaque médaillon, coordonnées locales au canevas (origine = coin haut-gauche du
-    /// template, avant tout décalage à l'écran) — voir doc de module pour la méthode de mesure.
+    /// template, avant tout décalage à l'écran) — voir doc de module pour la méthode de
+    /// validation (artefact interactif, plus une mesure de trou : il n'y en a plus).
     slot_centers: &'static [egui::Pos2],
 }
 
@@ -75,54 +82,54 @@ macro_rules! template_asset {
 const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     TemplateInfo {
         bytes: template_asset!(1),
-        height: 121.0,
-        slot_centers: &[egui::pos2(26.0, 59.0)],
+        height: 130.0,
+        slot_centers: &[egui::pos2(29.5, 64.5)],
     },
     TemplateInfo {
         bytes: template_asset!(2),
-        height: 174.0,
-        slot_centers: &[egui::pos2(26.0, 60.0), egui::pos2(26.0, 112.0)],
+        height: 180.0,
+        slot_centers: &[egui::pos2(29.5, 62.3), egui::pos2(29.5, 114.7)],
     },
     TemplateInfo {
         bytes: template_asset!(3),
-        height: 227.0,
+        height: 232.0,
         slot_centers: &[
-            egui::pos2(26.0, 60.0),
-            egui::pos2(26.0, 111.0),
-            egui::pos2(26.0, 165.0),
+            egui::pos2(29.5, 64.2),
+            egui::pos2(29.5, 116.5),
+            egui::pos2(29.5, 168.8),
         ],
     },
     TemplateInfo {
         bytes: template_asset!(4),
         height: 288.0,
         slot_centers: &[
-            egui::pos2(28.0, 60.0),
-            egui::pos2(27.0, 111.5),
-            egui::pos2(27.0, 165.0),
-            egui::pos2(26.0, 218.5),
+            egui::pos2(29.5, 63.4),
+            egui::pos2(29.5, 115.8),
+            egui::pos2(29.5, 168.2),
+            egui::pos2(29.5, 220.6),
         ],
     },
     TemplateInfo {
         bytes: template_asset!(5),
-        height: 333.0,
+        height: 339.0,
         slot_centers: &[
-            egui::pos2(26.0, 60.0),
-            egui::pos2(26.0, 111.5),
-            egui::pos2(26.0, 165.0),
-            egui::pos2(26.0, 218.0),
-            egui::pos2(26.0, 271.0),
+            egui::pos2(29.5, 63.5),
+            egui::pos2(29.5, 116.0),
+            egui::pos2(29.5, 168.5),
+            egui::pos2(29.5, 221.0),
+            egui::pos2(29.5, 273.5),
         ],
     },
     TemplateInfo {
         bytes: template_asset!(6),
-        height: 386.0,
+        height: 393.0,
         slot_centers: &[
-            egui::pos2(26.0, 60.0),
-            egui::pos2(26.0, 111.5),
-            egui::pos2(26.0, 165.0),
-            egui::pos2(26.0, 218.0),
-            egui::pos2(26.0, 271.0),
-            egui::pos2(26.0, 324.0),
+            egui::pos2(27.5, 66.9),
+            egui::pos2(27.5, 118.7),
+            egui::pos2(27.5, 170.6),
+            egui::pos2(27.5, 222.4),
+            egui::pos2(27.5, 274.3),
+            egui::pos2(27.5, 326.1),
         ],
     },
 ];
@@ -159,11 +166,10 @@ impl CombatFrame {
     /// peint sur chaque portrait (voir `panels::combat::paint_portrait_percent`) ; aucune barre
     /// n'est peinte ici (voir doc de module).
     ///
-    /// Ordre de peinture (méthode déjà validée, voir doc de module) : portrait D'ABORD,
-    /// template ENSUITE par-dessus — l'anneau opaque du médaillon masque proprement le
-    /// débordement du portrait 48×48 collé sans redimensionnement dans un trou mesuré à ~41 px
-    /// (voir doc de module). Infobulle + pourcentage sont peints en DERNIER, par-dessus le cadre :
-    /// une zone interactive ou un texte masqués par le cadre ne serviraient à rien.
+    /// Ordre de peinture (inversé depuis la refonte 2026-09-07, voir doc de module) : template
+    /// D'ABORD (fond, plus de trou à masquer), portraits ENSUITE par-dessus — chacun rogné en
+    /// cercle via `PORTRAIT_CORNER_RADIUS`. Infobulle + pourcentage sont peints en DERNIER,
+    /// par-dessus les portraits : une zone interactive ou un texte masqués ne serviraient à rien.
     pub fn show(
         &self,
         ui: &mut egui::Ui,
@@ -188,6 +194,10 @@ impl CombatFrame {
             )
             .0;
 
+        // Le template est peint D'ABORD (voir doc de fonction) : simple fond, plus de trou à
+        // masquer côté image.
+        egui::Image::new(texture).paint_at(ui, frame_rect);
+
         for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
             let pos = frame_rect.min + center.to_vec2();
             let portrait_rect = egui::Rect::from_center_size(
@@ -199,7 +209,9 @@ impl CombatFrame {
             });
             match texture {
                 Some(texture) => {
-                    egui::Image::new(texture).paint_at(ui, portrait_rect);
+                    egui::Image::new(texture)
+                        .corner_radius(PORTRAIT_CORNER_RADIUS)
+                        .paint_at(ui, portrait_rect);
                 }
                 None => {
                     // Allié pas encore classifié (roster absent, `breed` inconnu de ce combat) :
@@ -208,21 +220,18 @@ impl CombatFrame {
                     // grey_tint_if_ko` : pas de version grisée précalculée pour cet asset unique,
                     // contrairement aux portraits de classe, voir `portraits.rs`).
                     let image = egui::Image::new(icons.unknown_entity_texture())
+                        .corner_radius(PORTRAIT_CORNER_RADIUS)
                         .tint(super::combat::grey_tint_if_ko(fighter.is_ko));
                     image.paint_at(ui, portrait_rect);
                 }
             }
         }
 
-        // Le template est peint APRÈS tous les portraits (voir doc de module) : un seul appel,
-        // l'anneau de chaque médaillon masque le débordement de chacun d'eux d'un coup.
-        egui::Image::new(texture).paint_at(ui, frame_rect);
-
         // Infobulle (nom, demande utilisateur : les portraits ne sont plus alignés avec "leur"
         // barre depuis le découplage tri portraits/barres — sans elle, un portrait devient
         // impossible à identifier dès que sa barre n'est plus juste à côté) + pourcentage de
         // dégâts sur le portrait (bas-droite, voir `panels::combat::paint_portrait_percent`),
-        // peints APRÈS le cadre — voir doc de fonction.
+        // peints APRÈS les portraits — voir doc de fonction.
         for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
             let pos = frame_rect.min + center.to_vec2();
             let portrait_rect = egui::Rect::from_center_size(
