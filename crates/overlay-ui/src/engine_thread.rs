@@ -41,11 +41,16 @@ pub enum EngineCommand {
 /// exactement `AuthCommand::Retry`/`Disconnect` (compte lié ⇒ file active, mode invité ⇒ rien ne
 /// quitte la machine) ; `Enqueue` relaie les événements produits par `Engine::drain_sync_events`
 /// après chaque lot ingéré — jamais bloquant pour ce dernier, l'écriture SQLite et l'envoi réseau
-/// se font entièrement sur le thread Sync.
+/// se font entièrement sur le thread Sync. `SyncWatchlist` relaie de même
+/// `Engine::drain_watchlist_sync` (compteurs de Suivi, §14 point 3 du plan, chantier fermé le
+/// 2026-09-07) — MÊME thread, mais mécanisme distinct de `Enqueue`/`SyncQueue` : pas de file
+/// SQLite ni de `client_key` idempotent, un simple `PATCH /api/v1/settings` « dernier écrivain
+/// gagne », débounce et backoff gérés côté thread Sync (voir `spawn_sync_thread`).
 pub enum SyncCommand {
     Activate { uid: String, token: String },
     Deactivate,
     Enqueue(Vec<overlay_engine::SyncEvent>),
+    SyncWatchlist(Vec<WatchlistEntry>),
 }
 
 /// Regroupe les `Arc<ArcSwap<_>>` partagés avec le reste de l'app que le thread Engine consomme —
@@ -127,6 +132,13 @@ pub fn spawn_engine_thread(
                         }
                     }
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
+                    // Rattrapage éventuel (voir `WatchlistState::merge_config`) : un compte qui
+                    // répond avec un `count` en retard sur le local doit être resynchronisé —
+                    // jamais après `Disconnect` (watchlist vidée, rien à rattraper), voir
+                    // `Engine::drain_watchlist_sync`.
+                    if let Some(entries) = engine.drain_watchlist_sync() {
+                        let _ = sync_tx.send(SyncCommand::SyncWatchlist(entries));
+                    }
                     let _ = proxy.send_event(UserEvent::NewSnapshot);
                 }
                 let current_catalog = catalog.load_full();
@@ -160,6 +172,12 @@ pub fn spawn_engine_thread(
                         let sync_events = engine.drain_sync_events();
                         if !sync_events.is_empty() {
                             let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
+                        }
+                        // Compteurs de Suivi (§14 point 3 du plan, chantier fermé le 2026-09-07) —
+                        // même relais sans blocage, mécanisme distinct de `Enqueue` ci-dessus (voir
+                        // la doc de `SyncCommand::SyncWatchlist`).
+                        if let Some(entries) = engine.drain_watchlist_sync() {
+                            let _ = sync_tx.send(SyncCommand::SyncWatchlist(entries));
                         }
                         for alert in engine.drain_watchlist_alerts() {
                             tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");

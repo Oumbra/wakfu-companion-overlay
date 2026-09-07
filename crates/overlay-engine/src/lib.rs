@@ -33,5 +33,6 @@ pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
 pub use session::{Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals};
 pub use watchlist::{
-    watchlist_from_settings_json, WatchlistAlert, WatchlistEntry, WatchlistKind, WatchlistMode,
+    watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistEntry,
+    WatchlistKind, WatchlistMode,
 };

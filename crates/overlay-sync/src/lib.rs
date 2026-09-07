@@ -12,7 +12,8 @@ pub mod token_store;
 
 pub use client::{
     fetch_account_id, fetch_catalog_index, fetch_catalog_version, fetch_dungeons,
-    fetch_monster_families, fetch_settings, post_json, post_json_authenticated, AccountSettings,
+    fetch_monster_families, fetch_settings, patch_json_authenticated, patch_watchlist, post_json,
+    post_json_authenticated, AccountSettings,
 };
 pub use pairing::{pair_and_wait, PairingHandle};
 pub use queue::{client_key, FlushOutcome, SyncQueue};
