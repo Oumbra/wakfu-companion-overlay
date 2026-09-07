@@ -134,6 +134,39 @@ const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     },
 ];
 
+/// Géométrie du plus grand gabarit (`template_6`, 6 emplacements) — voir
+/// `panels::combat_frame_scroll`, qui le réutilise TEL QUEL comme fenêtre fixe pour les ennemis
+/// au-delà de `MAX_FRAME_SLOTS` (aucun nouveau gabarit, aucune remesure : tout dérive des 6 centres
+/// déjà validés ci-dessus).
+pub(crate) struct LargestFrameGeometry {
+    /// Taille de canevas du plus grand gabarit — inchangée, non étirée à l'affichage.
+    pub frame_size: egui::Vec2,
+    /// Abscisse commune aux 6 médaillons du plus grand gabarit.
+    pub slot_x: f32,
+    /// Ordonnée du 1ᵉʳ médaillon.
+    pub first_center_y: f32,
+    /// Pas moyen entre deux médaillons consécutifs du plus grand gabarit — écart total (dernier
+    /// moins premier) divisé par le nombre d'intervalles, PAS une valeur remesurée séparément.
+    pub pitch: f32,
+    /// Rayon de rognage circulaire d'un portrait (moitié de `NATIVE_PORTRAIT_SIZE`).
+    pub portrait_radius: f32,
+}
+
+/// Voir `LargestFrameGeometry`.
+pub(crate) fn largest_frame_geometry() -> LargestFrameGeometry {
+    let largest = &TEMPLATES[MAX_FRAME_SLOTS - 1];
+    let first = largest.slot_centers[0];
+    let last = largest.slot_centers[largest.slot_centers.len() - 1];
+    let intervals = (largest.slot_centers.len() - 1) as f32;
+    LargestFrameGeometry {
+        frame_size: egui::vec2(FRAME_WIDTH, largest.height),
+        slot_x: first.x,
+        first_center_y: first.y,
+        pitch: (last.y - first.y) / intervals,
+        portrait_radius: PORTRAIT_CORNER_RADIUS as f32,
+    }
+}
+
 pub struct CombatFrame {
     textures: [egui::TextureHandle; MAX_FRAME_SLOTS],
 }
@@ -158,6 +191,14 @@ impl CombatFrame {
             )
         });
         Self { textures }
+    }
+
+    /// Texture du plus grand gabarit (`template_6`) — réutilisée TELLE QUELLE par
+    /// `panels::combat_frame_scroll::EnemyFrameScroll` comme fenêtre fixe pour les ennemis
+    /// au-delà de `MAX_FRAME_SLOTS`, sans recharger de texture séparée. Voir `LargestFrameGeometry`
+    /// pour la géométrie assortie.
+    pub(crate) fn largest_texture(&self) -> &egui::TextureHandle {
+        &self.textures[MAX_FRAME_SLOTS - 1]
     }
 
     /// Dessine le cadre + les portraits pour `fighters` (longueur 1..=`MAX_FRAME_SLOTS` — panique
