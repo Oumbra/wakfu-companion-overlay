@@ -95,10 +95,10 @@ pub(crate) fn paint_tooltip_label(ui: &mut egui::Ui, text: &str) {
 const DISABLED_TINT: egui::Color32 =
     egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 110);
 
-/// Peint le socle (repos ou survolé selon `response.hovered()`) puis l'icône (repos ou survolée)
-/// centrée dessus, mis à l'échelle de `rect` (doit être carré, comme le socle et l'icône) — voir
-/// doc de module. `id_source` distingue plusieurs boutons icône dans le même conteneur egui (même
-/// mécanisme que `combat::paint_side_switch`).
+/// Peint le socle (repos ou survolé selon `response.hovered()`, MAIS PAS pendant un clic — voir
+/// plus bas) puis l'icône (repos ou survolée) centrée dessus, mis à l'échelle de `rect` (doit être
+/// carré, comme le socle et l'icône) — voir doc de module. `id_source` distingue plusieurs boutons
+/// icône dans le même conteneur egui (même mécanisme que `combat::paint_side_switch`).
 ///
 /// `enabled: false` (demande utilisateur explicite : le bouton "−" du Suivi doit être désactivé
 /// tant qu'aucun objet n'est suivi, voir `panels::watchlist::control_button_row`) fige le bouton
@@ -106,6 +106,21 @@ const DISABLED_TINT: egui::Color32 =
 /// l'assombrit (`DISABLED_TINT`) et remplace le curseur "main" par le curseur par défaut — trois
 /// signaux visuels cumulés plutôt qu'un seul, pour qu'un état désactivé reste identifiable même en
 /// aperçu statique (capture d'écran, pas seulement au survol).
+///
+/// **Refonte 2026-09-08 (retour utilisateur explicite)** : `!ui.input(|i| i.pointer.any_down())`
+/// ajouté à la condition de survol — un clic maintenu enfoncé repasse le bouton en apparence
+/// "repos" (comme si la souris n'était plus dessus), le relâchement le fait revenir en apparence
+/// "survolé". Nécessaire pour que "Options"/"Détails" (`Sense::click()`) se comportent EXACTEMENT
+/// comme "+"/"−" (`Sense::hover()`) : `response.hovered()` reste `true` pendant tout le clic pour
+/// un widget `Sense::click()` (egui le considère "en cours d'interaction", voir
+/// `Context::interact`), alors qu'il devient `false` pendant le clic pour un widget `Sense::hover()`
+/// seul (qui ne peut jamais devenir "propriétaire" d'un clic potentiel) — c'est cette différence de
+/// comportement NATIF d'egui, pas un bug de ce composant, qui causait l'écart observé (« +"/"−" ont
+/// bien l'animation clic → repos → relâchement → survolé, mais pas Options/Détails »). Ce correctif
+/// couvre les DEUX cas identiquement, en ignorant volontairement la nuance "clic sur CE bouton
+/// précisément" (any bouton de souris enfoncé n'importe où sur l'écran suffit) — exactement la
+/// nuance déjà présente (et jamais reprochée) sur "+"/"−" avant ce correctif, reproduite à
+/// l'identique plutôt que raffinée.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_icon_button(
     ui: &mut egui::Ui,
@@ -124,7 +139,8 @@ pub fn paint_icon_button(
     } else {
         response.on_hover_cursor(egui::CursorIcon::Default)
     };
-    let hovered = enabled && response.hovered();
+    let pointer_down = ui.input(|i| i.pointer.any_down());
+    let hovered = enabled && response.hovered() && !pointer_down;
     let tint = if enabled {
         egui::Color32::WHITE
     } else {
