@@ -18,6 +18,7 @@ l'icône représente.
 | Glyphe clair sur bouton brun | blanc cerné de sombre sur hachures brunes | aucune (défauts) |
 | Bouton sombre, proche du décor | bouton presque noir, glyphe beige | `--tol 4` |
 | Glyphe sombre sur bouton doré | noir sur doré clair texturé | `--polarity dark --keep center --floor 45` |
+| Glyphe à ombre portée | halo doux de 2–3 px autour du glyphe | `--floor 45` |
 
 ## Réglages retenus
 
@@ -25,17 +26,17 @@ Tous avec `--from-button`, sortie en taille native (pas de `--size`).
 
 | Icône | Options supplémentaires | Glyphe |
 | --- | --- | --- |
-| `icon-bag-in` | — | 14 × 20 |
-| `icon-bag-out` | — | 16 × 16 |
-| `icon-filter` | — | 16 × 16 |
-| `icon-lock` | — | 16 × 18 |
-| `icon-order` | — | 16 × 16 |
-| `icon-pact` | — | 17 × 17 |
-| `icon-sort` | — | 19 × 16 |
+| `icon-bag-in` | — | 10 × 16 |
+| `icon-bag-out` | — | 12 × 12 |
+| `icon-filter` | — | 12 × 12 |
+| `icon-lock` | — | 12 × 14 |
+| `icon-pact` | — | 14 × 13 |
+| `icon-sort` | — | 16 × 12 |
+| `icon-order` | `--floor 45` | 14 × 14 |
 | `icon-delete` | `--tol 4` | 12 × 14 |
 | `icon-triangle-right` | `--tol 4` | 8 × 10 |
-| `icon-chevron-down` | `--polarity dark --keep center --floor 45` | 16 × 9 |
-| `icon-save` | `--tol 4 --polarity dark --keep center --floor 45` | 14 × 16 |
+| `icon-chevron-down` | `--polarity dark --keep center --floor 45` | 14 × 8 |
+| `icon-save` | `--tol 4 --polarity dark --keep center --floor 45` | 12 × 12 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -56,5 +57,12 @@ de flèches de tri) et les normaliser tous à 24 px détruirait ce rapport tout 
 rééchantillonnant une image de 16 px. Ajouter `--size 24 --padding 2` seulement si une
 grille d'icônes homogène est explicitement voulue.
 
-**Le contour sombre du glyphe est conservé.** Il fait partie du dessin en jeu ; sur fond
-clair il se voit nettement, ce qui est fidèle et non un défaut de détourage.
+**Le contour sombre du glyphe est conservé.** Il fait partie du dessin en jeu — c'est lui
+qui rend un glyphe blanc lisible sur fond clair.
+
+**Une ombre portée n'est pas un contour.** `icon-order` (barres noires sur beige uni) porte
+un halo beige sombre de 2–3 px qui n'appartient pas au dessin : il passait pour une
+transition légitime et donnait un pâté brun autour des barres. Le seuil du cœur le
+sépare — `--floor 45` — parce que l'ombre est une demi-teinte là où le glyphe est franc.
+Symptôme à reconnaître : le glyphe détouré traîne une masse de la couleur du bouton,
+alors que le contour d'un vrai cerne est fin et régulier.

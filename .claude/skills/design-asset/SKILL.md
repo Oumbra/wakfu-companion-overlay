@@ -96,10 +96,18 @@ représente :
 | Glyphe clair sur bouton brun | aucune |
 | Bouton sombre, proche du décor | `--tol 4` |
 | Glyphe sombre sur bouton doré | `--polarity dark --keep center --floor 45` |
+| Glyphe à ombre portée | `--floor 45` |
 
 `--k` est sans effet ici : sur le fond d'un bouton le MAD est trop faible pour peser dans
 `max(k × MAD, floor)`, c'est `--floor` qui pilote. Un `glyph_bbox` qui fait la taille du
 bouton signale que la bordure a été prise pour le glyphe — augmenter `--roi-inset`.
+
+Le halo est le défaut à surveiller : un glyphe qui traîne une frange de la couleur du
+bouton, invisible sur fond clair mais criante sur fond sombre. L'extraction le combat sur
+trois fronts — le cerne du glyphe entre dans le masque plein sous un seuil durci
+(`--rim-gain`), la bande de transition restante est filtrée par démélange à deux couleurs
+(`--residual`), et les pixels quasi transparents sont effacés (`--alpha-floor`). Toujours
+juger sur la bande « fond sombre » de la planche, jamais sur le damier seul.
 
 Réglages étalonnés icône par icône dans
 [`references/recettes-icones.md`](references/recettes-icones.md) : c'est aussi le jeu

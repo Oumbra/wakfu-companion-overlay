@@ -207,15 +207,19 @@ def cmd_icon(a):
     if inset > 0:
         roi = erode(roi, inset)
     icon, _hard, rep = extract_icon(rgba, roi=roi, polarity=a.polarity, keep=a.keep,
-                                    box=_box(a.box), floor=a.floor, k=a.k)
+                                    box=_box(a.box), floor=a.floor, k=a.k, grow=a.grow,
+                                    residual=a.residual, alpha_floor=a.alpha_floor,
+                                    rim_gain=a.rim_gain)
     if a.size:
         out = fit_box(icon, a.size, a.padding)
     else:
         out, _ = trim(icon)
     save_rgba(out, a.output)
     _emit({"input": str(a.image), "output": str(a.output), "roi_inset": inset,
-           "button": meta.get("size"),
-           "glyph_bbox": rep["bbox"], "size": [int(out.shape[1]), int(out.shape[0])]})
+           "button": meta.get("size"), "glyph_bbox": rep["bbox"],
+           "core_pixels": rep.get("core_pixels"), "rim_pixels": rep.get("rim_pixels"),
+           "band_kept": rep.get("band_kept"), "band_rejected": rep.get("band_rejected"),
+           "size": [int(out.shape[1]), int(out.shape[0])]})
 
 
 # ------------------------------------------------------------- harmonisation
@@ -349,6 +353,13 @@ def main(argv=None):
     p.add_argument("--keep", choices=["all", "center"], default="all")
     p.add_argument("--from-button", dest="from_button", action="store_true",
                    help="l'image est un bouton-icone : detoure d'abord le bouton")
+    p.add_argument("--residual", type=float, default=0.32,
+                   help="tolerance de residu du demelange : plus bas = rejette plus de "
+                        "pixels du fond autour du glyphe")
+    p.add_argument("--alpha-floor", dest="alpha_floor", type=float, default=0.12,
+                   help="alpha en dessous duquel un pixel est efface")
+    p.add_argument("--rim-gain", dest="rim_gain", type=float, default=2.4,
+                   help="durete du seuil du cerne, en multiple du seuil du coeur")
     content_opts(p)
     p.set_defaults(func=cmd_icon)
 
