@@ -600,6 +600,92 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     harness.snapshot("watchlist_tooltip_options_a_droite");
 }
 
+/// Retour utilisateur explicite 2026-09-08 : « je veux que tous les boutons se comportent EXACT de
+/// la même façon que ajouter et supprimer [...] quand on clique, il repasse en mode normal et quand
+/// on relâche, ils redeviennent en mode over ». Avant le correctif de `icon_button::
+/// paint_icon_button` (voir sa doc), ce n'était vrai que pour "+"/"−" (`Sense::hover()`) : un clic
+/// maintenu sur "Détails"/"Options" (`Sense::click()`) gardait l'apparence "survolée" tout du long
+/// (`response.hovered()` reste `true` pendant un clic pour un widget `Sense::click()`, contrairement
+/// à `Sense::hover()` — comportement NATIF d'egui, voir la doc du correctif), sans jamais repasser
+/// en apparence "repos".
+///
+/// Ce test presse (sans relâcher, `Harness::drag_at` — un simple appui maintenu, malgré son nom)
+/// le bouton "Détails" et vérifie par une CAPTURE RÉELLE (pas juste une assertion sur `Response`,
+/// qui n'aurait pas détecté le bug d'origine puisque `clicked()`/l'action elle-même fonctionnaient
+/// déjà) qu'il repasse bien en apparence "repos" (fond/glyphe non éclaircis) malgré le curseur
+/// dessus — puis qu'il revient en apparence "survolée" au relâchement (`Harness::drop_at`). Même
+/// position que "Détails" dans le test précédent (118, 58) — voir son détail de calcul.
+#[test]
+fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let entries = vec![WatchlistEntry {
+        name: "Bottes Lantha".to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Down,
+        count: 0,
+        countdown_target: 1,
+        catalog_id: None,
+    }];
+
+    let window_width = panels::watchlist::content_width(1) + 12.0;
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, 150.0))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    combat_side: &mut combat_side,
+                    watchlist: &entries,
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    now,
+                },
+            );
+        });
+
+    harness.run();
+
+    let details_pos = egui::pos2(118.0, 58.0);
+
+    // Survolé (curseur dessus, bouton relâché) : apparence "survolée" de référence.
+    harness.hover_at(details_pos);
+    harness.run();
+    harness.snapshot("watchlist_details_survole_avant_clic");
+
+    // Pressé (curseur dessus, bouton MAINTENU enfoncé, jamais relâché) : doit repasser en
+    // apparence "repos" — c'est précisément le comportement que ce test protège.
+    harness.drag_at(details_pos);
+    harness.run();
+    harness.snapshot("watchlist_details_repos_pendant_clic");
+
+    // Relâché (curseur toujours dessus) : redevient "survolé".
+    harness.drop_at(details_pos);
+    harness.hover_at(details_pos);
+    harness.run();
+    harness.snapshot("watchlist_details_survole_apres_relachement");
+}
+
 /// Reproduit le test utilisateur 2026-09-06 (capture d'écran à l'appui) : deux décomptes à
 /// GRANDES valeurs ("500/500" et "2000/2000") pour voir comment `paint_count_inline` les gère.
 /// Sur l'ancien rendu (courant+"/"+cible sur une seule ligne), le texte débordait de la tuile
