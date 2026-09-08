@@ -68,6 +68,13 @@ autre fond avec un alpha partiel, ils produisent un liseré. On étale donc les 
 « sûres » (intérieur érodé) vers l'extérieur sur 3 passes **avant** d'appliquer l'alpha
 géométrique.
 
+Les pixels entièrement opaques sont protégés (`keep`) : ils servent de source une fois
+atteints, mais leur couleur n'est jamais remplacée. Ils sont à l'intérieur de la forme,
+donc jamais contaminés, et les remplacer par la moyenne de leurs voisins les éclaircit.
+Au milieu d'un bord droit cela ne se voit pas — les voisins sont eux aussi du liseré —
+mais dans un coin arrondi la moitié du voisinage est du remplissage, et le noir du coin
+est mangé.
+
 ## 4. Contenu incrusté — `content.detect_content`
 
 1. Fond estimé ligne par ligne : médiane + MAD sur le ROI, en excluant le masque de

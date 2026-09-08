@@ -62,6 +62,14 @@ sombre du décor s'arrête bien plus bas. Si la bordure manque encore sur le ré
 c'est ce chiffre qu'il faut regarder ; `--tol` plus bas résout la plupart des cas. Passer
 `border=False` n'est utile que si la récupération déborde sur un décor très contrasté.
 
+**Les coins arrondis sont le point à vérifier en premier.** C'est là que le liseré casse,
+et le défaut est petit — quelques pixels sur un composant de 800 — mais criant à l'usage.
+La planche de contrôle en donne une vignette dédiée : les quatre angles réunis à ×8, sur
+fond clair et sur fond sombre. Le liseré doit y suivre un arc continu de la même
+épaisseur qu'en bord droit ; un éclat de décor, un trou dans le noir ou un escalier
+beige signalent un ajustement raté. `radius_fit_iou` en dessous de ~0,95 pointe le même
+problème avant même de regarder l'image.
+
 ### Retirer un libellé, un placeholder, une valeur
 
 ```bash
@@ -181,8 +189,10 @@ dsimg.py sheet "assets/design-system/button-secondary.png:/chemin/out.png" \
 ```
 
 Chaque entrée est soit un chemin, soit `avant:après`. La planche montre le résultat sur
-damier, fond sombre et fond clair, avec un zoom ×6 — les trois révèlent les défauts qu'un
-seul fond cache (halo de bord, alpha résiduel, texture ratée). Publier ensuite le fichier
+damier, fond sombre et fond clair, avec un zoom ×6, puis une vignette réunissant les
+**quatre coins à ×8** — les fonds révèlent les défauts qu'un seul cache (halo de bord,
+alpha résiduel, texture ratée), la vignette des coins révèle les ruptures de liseré qu'une
+vue d'ensemble noie. Publier ensuite le fichier
 avec l'outil Artifact (le HTML produit est déjà un fragment conforme : `<title>`, `<style>`,
 contenu, images en base64, aucune ressource externe).
 
