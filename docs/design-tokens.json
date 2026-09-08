@@ -24,7 +24,23 @@
   "banner_teal": {
     "gradient_start": "#0C6E80",
     "gradient_end": "#1D8B9C",
-    "title_text": "#FFFFFF"
+    "title_text": "#FFFFFF",
+    "_revision_2026_09_08": "mesure directe sur interface-options-jeu.png : haut #1A6E80, bas #176372 (plus SOMBRE en bas, cf. §9 du design-system.md) — gradient_start/gradient_end ci-dessus conservés tels quels (première mesure, §7 sources 2026-09-05) faute de reprise complète, mais l'ORDRE clair->sombre du haut vers le bas est la valeur à suivre en implémentation, pas gradient_end en tant que tel."
+  },
+  "accent_danger": {
+    "_note": "Bouton \"Annuler\" plein-largeur du pied de page d'une fenêtre modale (Options, voir §9 du design-system.md) — UNIQUEMENT ce pattern : le bouton \"Annuler\"/\"Non\" d'une boîte de dialogue simple reste kaki/gris (accent_warm), pas rouge.",
+    "top": "#C9524A",
+    "bottom": "#AF433C",
+    "border": "#0F1114",
+    "text": "#FFFFFF"
+  },
+  "tab_inactive_fill": "#353633",
+  "tab_inactive_text": "#BBA579",
+  "modal": {
+    "_note": "Gabarits mesurés sur la fenêtre Options réelle (§9 du design-system.md) — à traiter comme des RATIOS relatifs au composant, pas des px absolus (dépendent de l'échelle d'interface du client).",
+    "banner_height_px": 54,
+    "tab_row_height_px": [36, 38],
+    "footer_button_height_px": [41, 42]
   },
   "rarity_borders": {
     "commun": { "light": "#C4C5C5", "dark": "#67696B", "_note": "gris neutre sans teinte, identique au cadre d'un emplacement vide" },
