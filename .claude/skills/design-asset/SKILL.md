@@ -74,7 +74,31 @@ dans le repère de l'image **détourée**, lues dans `analyze`.
 `--roi-inset` (automatique par défaut) exclut une couronne de la détection : sans elle, la
 bordure sombre du composant serait prise pour du contenu incrusté et effacée. Si le JSON
 rend un `removed.bbox` qui couvre tout le composant, c'est exactement ce qui s'est passé —
-augmenter `--roi-inset`.
+augmenter `--roi-inset`. Cette même couronne est exclue de la **zone source** de la
+reconstruction : sinon un décalage recopie le liseré sombre en plein milieu du composant,
+et le résultat porte un fantôme noirâtre à la place du libellé.
+
+### Traiter plusieurs composants d'une même capture
+
+Une barre d'onglets, un groupe de boutons : la capture montre plusieurs composants.
+
+```bash
+dsimg.py genericize IMG -o OUT --components all          # séparés par du décor
+dsimg.py strip IMG -o OUT --parts 0,0,261,44 263,0,521,44 522,0,782,44
+```
+
+- `--components all` ajuste un rectangle arrondi **sur chaque composante** détectée et
+  réunit les alphas. À réserver aux composants réellement séparés par du décor : un seul
+  rectangle englobant les recouvrirait, gouttières comprises.
+- `--parts` donne les zones à la main. C'est ce qu'il faut quand les onglets partagent un
+  cadre commun (séparateurs de 2 px, coins arrondis seulement à l'extérieur) : la
+  propagation ne les sépare pas, et il n'y a de toute façon rien à détourer.
+
+Découper est **obligatoire** dès que les composants n'ont pas le même fond. Le fond est
+estimé ligne par ligne : une ligne qui traverse un onglet actif clair puis deux onglets
+sombres n'a pas de médiane commune, et une passe unique sur toute la barre ne détecte plus
+rien. Le découpage donne aussi à chaque composant sa propre zone source, ce qui interdit à
+la reconstruction d'aller chercher sa texture chez le voisin.
 
 ### Extraire une icône
 
@@ -85,7 +109,9 @@ dsimg.py icon IMG -o OUT --from-button --size 24 [--keep center] [--padding 2]
 `--from-button` détoure d'abord le bouton porteur, puis exclut une couronne de bordure de
 la détection (`--roi-inset`, automatique) ; sans `--size`, la sortie garde la taille native
 du glyphe, ce qui est le meilleur choix par défaut — les glyphes du jeu n'ont pas tous la
-même taille, et cet écart est signifiant.
+même taille, et cet écart est signifiant. **Sans `--from-button`**, le glyphe est cherché
+dans toute l'image : c'est le cas d'une capture prise à même le décor, sans bouton
+porteur.
 
 **L'icône sort blanche.** Toutes les icônes du design system sont monochromes : la couleur
 se met au rendu. La teinte est appliquée en fin de pipeline. `--tint <hex>` pour une autre
@@ -126,8 +152,9 @@ trois fronts — le cerne du glyphe entre dans le masque plein sous un seuil dur
 juger sur la bande « fond sombre » de la planche, jamais sur le damier seul.
 
 Réglages étalonnés icône par icône dans
-[`references/recettes-icones.md`](references/recettes-icones.md) : c'est aussi le jeu
-d'essai à rejouer après toute modification du code de détection.
+[`references/recettes-icones.md`](references/recettes-icones.md), et composant par
+composant dans [`references/recettes-composants.md`](references/recettes-composants.md) :
+c'est aussi le jeu d'essai à rejouer après toute modification du code de détection.
 
 ### Aligner les variantes sur une taille commune
 
@@ -167,14 +194,21 @@ contenu, images en base64, aucune ressource externe).
 - **Contenu incrusté** : le fond d'un composant Wakfu est un dégradé vertical + hachures de
   faible amplitude. On estime le fond ligne par ligne (médiane robuste, recalculée en
   excluant ce qui a déjà été détecté), puis on seuille l'écart à `max(--k × MAD, --floor)`.
-  Une seconde passe récupère le halo/l'ombre du texte. Trop de pixels retirés → monter
-  `--k` ou `--floor` ; libellé incomplet → les baisser, ou augmenter `--grow`.
+  La **première passe s'en tient au plancher** : tant que rien n'est détecté, le MAD est
+  gonflé par ce qu'on cherche, et sur un libellé qui occupe la moitié de la ligne il monte
+  assez haut pour que `--k × MAD` ne soit jamais franchi — la boucle ne démarrerait
+  jamais. Une seconde passe récupère le halo/l'ombre du texte. Trop de pixels retirés →
+  monter `--k` ou `--floor` ; libellé incomplet → les baisser, ou augmenter `--grow`.
 - **Reconstruction du fond** : recherche des meilleurs décalages globaux, puis vote médian
   des 5 meilleurs (parenté : *content-aware fill* par statistiques d'offsets). Sur une
   texture régulière comme les hachures diagonales, cela reconstruit le motif — là où une
   diffusion donnerait un aplat. Le niveau de chaque ligne est recalé sur le fond réel de
-  la même ligne pour préserver le dégradé vertical. `--method diffusion` reste disponible
-  pour un fond lisse ou une zone valide trop petite.
+  la même ligne pour préserver le dégradé vertical. `--max-dy` vaut par défaut la hauteur
+  du masque : un libellé qui court sur toute la largeur ne laisse aucune texture propre à
+  sa gauche ni à sa droite, et le seul décalage qui l'enjambe est vertical. La pénalité
+  sur `dy` garde malgré tout la priorité aux décalages horizontaux quand ils existent.
+  `--method diffusion` reste disponible pour un fond lisse ou une zone valide trop
+  petite.
 
 Détail des modules dans [`references/pipeline.md`](references/pipeline.md).
 
