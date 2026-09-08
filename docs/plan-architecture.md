@@ -702,6 +702,7 @@ DERNIER instantané compte.
 | **Alertes de drop** | toast (carte + confettis, miroir visuel de `loot-alert.component` du dépôt web) + son, sur ramassage à son activé (défaut ou ajouté au compte) ET sur décompte de suivi à 0 | Son configurable par objet (parité web) ; toast ≤ 5 s (minuterie fixe) OU fermé plus tôt par clic (carte ou croix) — les deux cohabitent, pas un réglage exclusif comme `ProfileService.alertManualClose` côté web |
 | **Récap de session** | kamas (combat / ventes HDV / échanges), XP, combats gagnés/perdus | Compact, toujours visible |
 | **État de synchro** | `idle`/`pending`/`syncing`/`error`, nombre en attente, dernière synchro | Discret ; l'erreur réseau ne doit jamais masquer le jeu |
+| **Modale Options** (2026-09-08) | Chemin de `wakfu.log` (champ texte + sélecteur de fichier natif, §5.1) — seul réglage v1 | Ouverte par le bouton "Options" du carré de contrôle Suivi ou `Ctrl+Shift+O` ; fenêtre OS dédiée, centrée sur la fenêtre de jeu, chrome du design system (bannière turquoise, pied de page Annuler/Valider) ; rien n'est pris en compte avant "Valider" |
 
 Raccourcis globaux : bascule interactif/traversable, afficher/masquer, panneau suivant.
 Chaque panneau reste ancré automatiquement sur sa fenêtre de jeu (§6.5), avec opacité réglable.
@@ -722,6 +723,34 @@ proposer une disposition personnalisable comme le ferait un site web.
 > même raison — laisser l'utilisateur repositionner et mémoriser la disposition de chaque panneau
 > est une logique de personnalisation de site web, pas d'overlay. L'ancrage automatique
 > (`App::anchor_position`, §6.5) reste la seule source de position.
+
+### 9.1 Modale Options (2026-09-08)
+
+Premier écran de réglages de l'overlay — voir `docs/design-system.md` §9 pour le chrome (mesuré sur
+`assets/design-system/interfaces/interface-options-*.png`) et `crates/overlay-ui/src/panels/
+options_modal.rs`. Un seul réglage en v1, conforme à §5.1 : le chemin de `wakfu.log` doit être
+« toujours surchargeable par la config et par un sélecteur de fichier dans l'UI » — le fichier est
+figé par la découverte automatique jusqu'ici, ce qui bloque un utilisateur dont l'installation vit
+ailleurs (bêta, tests). Choix retenus :
+
+- **Fenêtre OS dédiée** (`OverlayKind::Options`), pas un panneau dans une fenêtre existante — créée
+  à la demande (bouton "Options" du carré de contrôle Suivi ou `Ctrl+Shift+O`), détruite à la
+  fermeture (Annuler/Valider). Centrée sur la fenêtre de jeu (nouveau cas dans
+  `App::anchor_position`), toujours `AlwaysOnTop`/`HWND_TOPMOST` sans jamais suivre le focus (exclue
+  explicitement de `sync_windows`/`sync_topmost`, contrairement à Combat/Suivi) — une modale
+  ponctuelle n'a pas besoin de la même politique de repli qu'un panneau d'information permanent.
+  Seule fenêtre overlay qui accepte le focus clavier (`WS_EX_NOACTIVATE` omis côté Windows) : il
+  faut pouvoir taper dans le champ de chemin.
+- **Garde-fou de nom de fichier** (`overlay_ingest::discovery::validate_log_path`) : le fichier
+  choisi (dialogue natif `rfd`, dont le filtre ne couvre que l'extension, ou saisie manuelle) doit
+  s'appeler `wakfu.log` (insensible à la casse) ET exister sur le disque — sinon la modale reste
+  ouverte avec un message d'erreur, rien n'est appliqué.
+- **Rien n'est pris en compte avant "Valider"** — un brouillon local (`OptionsModalState`) porte la
+  saisie ; Annuler l'abandonne sans effet.
+- **Persistance** (`overlay_ui::config`, TOML via `directories::ProjectDirs`) + **rechargement à
+  chaud** (`engine_thread::EngineCommand::ChangeLogPath`, respawn du watcher sur le nouveau chemin
+  sans redémarrer l'overlay ni recréer l'`Engine` — roster/watchlist déjà appliqués sont conservés).
+  Priorité de résolution au démarrage : argument CLI > config sauvegardée > découverte automatique.
 
 ---
 

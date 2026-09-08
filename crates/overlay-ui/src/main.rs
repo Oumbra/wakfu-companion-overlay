@@ -43,6 +43,7 @@ use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
+use overlay_ui::config;
 use overlay_ui::engine_thread::{spawn_engine_thread, EngineCommand, EngineHandles, SyncCommand};
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
@@ -50,6 +51,7 @@ use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -279,6 +281,11 @@ struct OverlayWindow {
     /// — état PAR FENÊTRE (donc par personnage), pas global : `Allies` par défaut à chaque
     /// création de fenêtre (demande utilisateur explicite). Sans objet pour une fenêtre `Suivi`.
     combat_side: CombatSide,
+    /// État de la modale Options (2026-09-08, §9 du plan) — `Some` UNIQUEMENT pour `kind ==
+    /// OverlayKind::Options`, voir `App::open_options_modal`. Même remarque que
+    /// `bin/overlay-ui-x11.rs` (code partagé côté `panels::options_modal`, duplication assumée
+    /// côté fenêtrage OS comme le reste de ce fichier).
+    options_state: Option<OptionsModalState>,
     game_hwnd: HWND,
     /// Dernier rectangle connu de la fenêtre de jeu (mis à jour par `sync_windows`/`reposition`,
     /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
@@ -402,6 +409,10 @@ struct App {
     /// actuellement au premier plan — mais SEULEMENT tant qu'au moins un overlay reste
     /// `HWND_NOTOPMOST` (voir son appel), pour ne pas spammer le journal en usage normal.
     last_foreground_heartbeat: Option<std::time::Instant>,
+    /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir `App::start_file_dialog`
+    /// (2026-09-08, §9 du plan). Un seul à la fois (une seule modale Options peut être ouverte),
+    /// sondé sans bloquer à chaque `about_to_wait`.
+    pending_dialog: Option<mpsc::Receiver<Option<PathBuf>>>,
 }
 
 /// Regroupe les paramètres de construction d'`App` au-delà de `log_path` — sinon
@@ -507,6 +518,7 @@ impl App {
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
+            pending_dialog: None,
         }
     }
 
@@ -519,6 +531,13 @@ impl App {
         let found = self.game_window.scan();
 
         self.windows.retain(|_, overlay| {
+            // La modale Options (2026-09-08) n'est PAS rattachée à une fenêtre de jeu précise
+            // (voir la doc de `OverlayWindow::options_state`) — jamais retirée par ce scan, sa
+            // durée de vie est pilotée exclusivement par l'utilisateur (Annuler/Valider), voir
+            // `window_event`.
+            if overlay.kind == OverlayKind::Options {
+                return true;
+            }
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
             if !still_here {
                 tracing::info!(
@@ -582,6 +601,13 @@ impl App {
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
             ),
+            // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
+            // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent ancrés
+            // sur un bord.
+            OverlayKind::Options => PhysicalPosition::new(
+                rect.left + (rect.width - overlay_width) / 2,
+                rect.top + (rect.height - overlay_height) / 2,
+            ),
         }
     }
 
@@ -602,10 +628,15 @@ impl App {
                 watchlist_target_width(0, false, rect.width),
                 watchlist_target_height(false),
             ),
+            OverlayKind::Options => (
+                options_modal::WINDOW_SIZE.0 as f64,
+                options_modal::WINDOW_SIZE.1 as f64,
+            ),
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
             OverlayKind::Watchlist => "Suivi",
+            OverlayKind::Options => "Options",
         };
         let attrs = WindowAttributes::default()
             .with_title(format!(
@@ -627,7 +658,18 @@ impl App {
         let window = Arc::new(window);
 
         let hwnd = Self::hwnd_of(&window);
-        Self::apply_extended_styles(hwnd);
+        // `WS_EX_NOACTIVATE` (voir sa doc) empêcherait la modale Options de recevoir le focus
+        // clavier — inacceptable pour éditer son champ de chemin (2026-09-08, §9 du plan) : SEULE
+        // cette fenêtre garde `WS_EX_TOOLWINDOW` (hors barre des tâches/alt-tab, comme
+        // `with_skip_taskbar` ci-dessus) sans `WS_EX_NOACTIVATE`, contrairement à Combat/Suivi qui
+        // ne doivent JAMAIS voler le focus au jeu.
+        if kind == OverlayKind::Options {
+            Self::apply_extended_styles_focusable(hwnd);
+        } else {
+            Self::apply_extended_styles(hwnd);
+        }
+        // La modale Options force sa propre interactivité (voir `App::open_options_modal`) — voir
+        // aussi le paramètre `interactive` passé explicitement `true` par cet appelant pour ce cas.
         if let Err(err) = window.set_cursor_hittest(interactive) {
             tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
         }
@@ -665,6 +707,9 @@ impl App {
             icons,
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
+            // Renseigné juste après par l'appelant (`open_options_modal`) pour `kind == Options`
+            // — `None` ici pour Combat/Suivi, jamais consulté (voir `RenderContent::options`).
+            options_state: (kind == OverlayKind::Options).then(OptionsModalState::default),
             game_hwnd,
             game_rect: rect,
             character_name,
@@ -700,6 +745,18 @@ impl App {
         unsafe {
             let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             let new_style = current | (WS_EX_NOACTIVATE.0 as isize) | (WS_EX_TOOLWINDOW.0 as isize);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+        }
+    }
+
+    /// Variante SANS `WS_EX_NOACTIVATE` — voir l'appelant (`create_overlay_window`, cas
+    /// `OverlayKind::Options`, 2026-09-08) : cette fenêtre doit pouvoir recevoir le focus clavier
+    /// pour éditer son champ de chemin, contrairement à Combat/Suivi. `WS_EX_TOOLWINDOW` seul
+    /// suffit à la garder hors barre des tâches/alt-tab.
+    fn apply_extended_styles_focusable(hwnd: HWND) {
+        unsafe {
+            let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let new_style = current | (WS_EX_TOOLWINDOW.0 as isize);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
         }
     }
@@ -955,6 +1012,14 @@ impl App {
         }
 
         for overlay in self.windows.values_mut() {
+            // La modale Options (2026-09-08) reste `HWND_TOPMOST` tout du long, posé une seule
+            // fois à sa création (voir `create_overlay_window`) — jamais concernée par le suivi de
+            // focus PAR PERSONNAGE ci-dessus (voir la doc de `OverlayWindow::options_state`), sans
+            // quoi elle serait démotée après le délai de grâce faute de `game_hwnd` correspondant
+            // à une vraie fenêtre de jeu.
+            if overlay.kind == OverlayKind::Options {
+                continue;
+            }
             let relevant = relevant_game_hwnds.contains(&overlay.game_hwnd);
 
             // Retour utilisateur 2026-09-02 : « l'overlay disparaît de manière indéterminée, il
@@ -1093,6 +1158,114 @@ impl App {
             overlay.pending_demote_since = None;
         }
     }
+
+    /// Ouvre la modale Options (2026-09-08, §9 du plan) — bouton "Options" du carré de contrôle
+    /// (`anchor_rect` = `game_rect` de la fenêtre Suivi cliquée) ou raccourci global
+    /// `OPTIONS_HOTKEY_LABEL` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il y
+    /// en a une). Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai
+    /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant
+    /// d'en rouvrir une. Même méthode que `bin/overlay-ui-x11.rs` (dupliquée, voir la doc de
+    /// `lib.rs` pour pourquoi le fenêtrage OS n'est PAS partagé entre les deux binaires).
+    fn open_options_modal(&mut self, event_loop: &ActiveEventLoop, anchor_rect: Option<GameRect>) {
+        if self
+            .windows
+            .values()
+            .any(|w| w.kind == OverlayKind::Options)
+        {
+            return;
+        }
+        let rect = anchor_rect
+            .or_else(|| self.windows.values().next().map(|w| w.game_rect))
+            .unwrap_or(GameRect {
+                left: 0,
+                top: 0,
+                width: 1280,
+                height: 720,
+                client_top: 0,
+            });
+        // `game_hwnd: HWND::default()` (nul) — voir la doc de `OverlayWindow::options_state` pour
+        // pourquoi `sync_windows`/`sync_topmost` excluent explicitement `OverlayKind::Options` de
+        // toute logique basée sur ce champ. Toujours interactive (`true` littéral, PAS
+        // `self.interactive`) : une modale qui doit capter le clavier/la souris pour éditer le
+        // chemin, pas un overlay passif d'information comme Combat/Suivi.
+        let mut overlay = Self::create_overlay_window(
+            event_loop,
+            OverlayKind::Options,
+            HWND::default(),
+            "Options".to_string(),
+            rect,
+            true,
+        );
+        overlay.options_state = Some(OptionsModalState {
+            path_input: self.log_path.display().to_string(),
+            error: None,
+        });
+        overlay.window.request_redraw();
+        self.windows.insert(overlay.window.id(), overlay);
+        tracing::info!("[options] modale ouverte.");
+    }
+
+    /// Lance l'explorateur de fichiers natif (`rfd`) sur un thread dédié — bloquant côté OS, ne
+    /// doit JAMAIS geler la boucle winit (même raison que tous les threads réseau de ce dépôt,
+    /// voir §7.3 du plan pour la justification appliquée à `overlay-sync`). Le résultat (chemin
+    /// choisi, ou `None` si l'utilisateur a annulé le dialogue) revient par `self.pending_dialog`,
+    /// sondé à chaque `about_to_wait`.
+    fn start_file_dialog(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        self.pending_dialog = Some(rx);
+        thread::Builder::new()
+            .name("overlay-ui-file-dialog".into())
+            .spawn(move || {
+                // Filtre par EXTENSION uniquement (`rfd` ne sait pas filtrer par nom de fichier
+                // exact) — le garde-fou du NOM exact (`wakfu.log`) est appliqué après coup par
+                // `App::validate_and_apply_log_path`/`discovery::validate_log_path`, jamais sauté
+                // même si l'utilisateur choisit un `.log` mal nommé dans le dialogue.
+                let picked = rfd::FileDialog::new()
+                    .set_title("Sélectionner le fichier wakfu.log")
+                    .add_filter("wakfu.log", &["log"])
+                    .pick_file();
+                let _ = tx.send(picked);
+            })
+            .expect("échec de création du thread de dialogue de fichier");
+    }
+
+    /// Valide `raw` (contenu du champ texte au moment du clic sur "Valider", ou chemin choisi par
+    /// le dialogue natif) via `discovery::validate_log_path` — voir §5.1 du plan : « il ne peut
+    /// sélectionner qu'un fichier wakfu.log [...] des guards pour éviter de sélectionner n'importe
+    /// quoi ». Sur succès : persiste (`config::save`), recharge l'Engine À CHAUD
+    /// (`EngineCommand::ChangeLogPath`, jamais de redémarrage du binaire) et ferme la modale —
+    /// « lorsqu'il valide [...] c'est ce nouveau fichier qui est lu de manière continue ». Sur
+    /// échec : la modale RESTE ouverte, le message d'erreur est écrit dans son état pour le
+    /// prochain redessin (voir `OptionsModalState::error`) — rien n'est pris en compte tant que la
+    /// validation n'a pas réussi.
+    fn validate_and_apply_log_path(&mut self, options_window_id: WindowId, raw: String) {
+        let candidate = PathBuf::from(raw.trim());
+        match discovery::validate_log_path(&candidate) {
+            Ok(()) => {
+                tracing::info!(
+                    "[options] nouveau fichier de log validé : {}",
+                    candidate.display()
+                );
+                self.log_path = candidate.clone();
+                config::save(&config::OverlayConfig {
+                    log_path: Some(candidate.clone()),
+                });
+                let _ = self
+                    .settings_tx
+                    .send(EngineCommand::ChangeLogPath(candidate));
+                self.windows.remove(&options_window_id);
+            }
+            Err(err) => {
+                tracing::info!("[options] chemin refusé : {}", err.message());
+                if let Some(overlay) = self.windows.get_mut(&options_window_id) {
+                    if let Some(state) = &mut overlay.options_state {
+                        state.error = Some(err.message().to_string());
+                    }
+                    overlay.window.request_redraw();
+                }
+            }
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -1127,6 +1300,21 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        // Renseigné éventuellement PAR l'emprunt de `overlay` ci-dessous (voir la fin de cette
+        // fonction) — regroupé plutôt que de multiples `bool`/`Option` séparés, pour un seul
+        // `match` final au lieu de plusieurs `if` empilés. Ne fait AUCUN appel `&mut self` avant
+        // la fin de cette fonction : `overlay` (obtenu juste après) emprunte `self.windows` pour
+        // toute la durée de son dernier usage (NLL), un appel `&mut self` plus tôt romprait la
+        // compilation.
+        enum PostRedraw {
+            None,
+            OpenOptions(GameRect),
+            CloseOptions,
+            BrowseOptions,
+            ValidateOptions(String),
+        }
+        let mut post_redraw = PostRedraw::None;
+
         let Some(overlay) = self.windows.get_mut(&id) else {
             return; // événement d'une fenêtre déjà retirée (client fermé entre-temps) — ignoré
         };
@@ -1213,7 +1401,13 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 let catalog = self.catalog.load();
                 let auth_status = self.auth_status.load();
-                let (repaint_delay, close_toast) = render(
+                // La modale Options force sa propre interactivité (voir `App::
+                // open_options_modal`) — jamais assujettie à `self.interactive` (mode
+                // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait elle-même
+                // traversable si l'utilisateur avait basculé ce mode juste avant.
+                let interactive = overlay.kind == OverlayKind::Options || self.interactive;
+                let this_game_rect = overlay.game_rect;
+                let (repaint_delay, outcome) = render(
                     &mut overlay.gpu,
                     &overlay.window,
                     RenderContent {
@@ -1231,8 +1425,9 @@ impl ApplicationHandler<UserEvent> for App {
                         remote_icon_textures: &mut overlay.remote_icon_textures,
                         auth_status: &auth_status,
                         auth_command_tx: &self.auth_command_tx,
-                        interactive: self.interactive,
+                        interactive,
                         now,
+                        options: overlay.options_state.as_mut(),
                     },
                 );
                 // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
@@ -1240,8 +1435,23 @@ impl ApplicationHandler<UserEvent> for App {
                 // le toast qu'en lecture, voir `RenderContent::watchlist_toast`). Le clic ayant
                 // déjà fait passer `response.repaint` à `true` plus haut, le prochain redessin
                 // relira `None` et n'affichera plus rien.
-                if close_toast {
+                if outcome.close_toast {
                     self.watchlist_toast.store(Arc::new(None));
+                }
+                // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "Options"
+                // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
+                // Options elle-même — jamais les deux à la fois (branches différentes du `match
+                // kind` de `paint_content`).
+                if outcome.open_options {
+                    post_redraw = PostRedraw::OpenOptions(this_game_rect);
+                }
+                match outcome.options_action {
+                    OptionsModalAction::None => {}
+                    OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
+                    OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
+                    OptionsModalAction::Validate(raw) => {
+                        post_redraw = PostRedraw::ValidateOptions(raw)
+                    }
                 }
                 // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
                 // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -1250,6 +1460,17 @@ impl ApplicationHandler<UserEvent> for App {
                     .then(|| std::time::Instant::now() + repaint_delay);
             }
             _ => {}
+        }
+
+        match post_redraw {
+            PostRedraw::None => {}
+            PostRedraw::OpenOptions(rect) => self.open_options_modal(event_loop, Some(rect)),
+            PostRedraw::CloseOptions => {
+                self.windows.remove(&id);
+                tracing::info!("[options] modale fermée (Annuler).");
+            }
+            PostRedraw::BrowseOptions => self.start_file_dialog(),
+            PostRedraw::ValidateOptions(raw) => self.validate_and_apply_log_path(id, raw),
         }
     }
 
@@ -1276,11 +1497,8 @@ impl ApplicationHandler<UserEvent> for App {
             } else if event.id == self.details_hotkey_id {
                 self.open_details();
             } else if event.id == self.options_hotkey_id {
-                // Voir la doc de `OPTIONS_HOTKEY_LABEL` : aucun panneau à ouvrir pour l'instant,
-                // même no-op que le clic sur le bouton (`panels::combat::bottom_toolbar`).
-                tracing::debug!(
-                    ">>> Options ({OPTIONS_HOTKEY_LABEL}) : aucun panneau à ouvrir pour l'instant."
-                );
+                tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
+                self.open_options_modal(event_loop, None);
             } else if event.id == self.watchlist_add_hotkey_id {
                 // Voir la doc de `WATCHLIST_ADD_HOTKEY_LABEL` : bouton encore inerte.
                 tracing::debug!(">>> Ajouter ({WATCHLIST_ADD_HOTKEY_LABEL}) : encore inerte.");
@@ -1290,6 +1508,42 @@ impl ApplicationHandler<UserEvent> for App {
                 self.toggle_combat_side();
             }
         }
+        // Résultat du dialogue de fichier natif (`App::start_file_dialog`), le cas échéant — sondé
+        // sans bloquer, comme les hotkeys ci-dessus. `try_recv` retourne `Empty` tant que
+        // l'utilisateur n'a pas fini d'interagir avec le dialogue OS (peut prendre plusieurs
+        // secondes) : `self.pending_dialog` n'est vidé QUE sur une réponse effective (`Ok`) ou un
+        // thread mort (`Disconnected`, dialogue en échec) — jamais sur `Empty`, qui doit re-sonder
+        // au prochain tour.
+        if let Some(rx) = &self.pending_dialog {
+            match rx.try_recv() {
+                Ok(picked) => {
+                    self.pending_dialog = None;
+                    if let Some(path) = picked {
+                        // Même garde que "Valider" (voir `validate_and_apply_log_path`) : `rfd` ne
+                        // filtre QUE par extension, un `.log` mal nommé doit être refusé exactement
+                        // pareil qu'une saisie manuelle invalide, jamais silencieusement accepté
+                        // parce qu'il vient du dialogue natif — le champ affiche quand même le
+                        // chemin choisi (l'utilisateur voit ce qu'il a sélectionné) accompagné du
+                        // message d'erreur, plutôt que de l'ignorer en silence.
+                        let validation = discovery::validate_log_path(&path);
+                        if let Some(overlay) = self
+                            .windows
+                            .values_mut()
+                            .find(|w| w.kind == OverlayKind::Options)
+                        {
+                            if let Some(state) = &mut overlay.options_state {
+                                state.path_input = path.display().to_string();
+                                state.error = validation.err().map(|e| e.message().to_string());
+                            }
+                            overlay.window.request_redraw();
+                        }
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => self.pending_dialog = None,
+            }
+        }
+
         // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
         // Win32 pour être notifié d'un déplacement/redimensionnement/apparition d'une fenêtre qui
         // n'est pas la nôtre sans un hook global — un sondage à 20 Hz est largement assez réactif
@@ -1943,11 +2197,15 @@ fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
     }
 }
 
-fn resolve_path() -> PathBuf {
-    if let Some(arg) = env::args().nth(1) {
-        return PathBuf::from(arg);
-    }
-    match discovery::discover() {
+/// Ordre de priorité complet (voir `config::resolve_log_path`) : argument CLI > chemin sauvegardé
+/// par une validation précédente de la modale Options (2026-09-08, §9 du plan) > découverte
+/// automatique. Seule la découverte automatique peut échouer complètement (aucun argument, rien en
+/// config, aucun chemin connu du système) — dans ce cas SEULEMENT, ce binaire refuse encore de
+/// démarrer sans chemin explicite (l'Engine a besoin d'un chemin dès `spawn_engine_thread`, voir
+/// `main`).
+fn resolve_path(config: &config::OverlayConfig) -> PathBuf {
+    let cli_arg = env::args().nth(1).map(PathBuf::from);
+    match config::resolve_log_path(cli_arg, config) {
         Some(path) => path,
         None => {
             tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
@@ -1970,7 +2228,8 @@ fn main() {
         tracing::info!("journal de session : {}", dir.display());
     }
 
-    let log_path = resolve_path();
+    let saved_config = config::load();
+    let log_path = resolve_path(&saved_config);
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));

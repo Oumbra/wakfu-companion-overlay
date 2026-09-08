@@ -160,7 +160,12 @@ fn normalize_icon_content(img: &image::RgbaImage, target: f32) -> image::RgbaIma
     }
     let new_w = (bbox_w as f32 * scale).round().max(1.0) as u32;
     let new_h = (bbox_h as f32 * scale).round().max(1.0) as u32;
-    image::imageops::resize(&cropped, new_w, new_h, image::imageops::FilterType::CatmullRom)
+    image::imageops::resize(
+        &cropped,
+        new_w,
+        new_h,
+        image::imageops::FilterType::CatmullRom,
+    )
 }
 
 pub struct UiIcons {
@@ -200,12 +205,8 @@ impl UiIcons {
             OPTIONS_ICON_BYTES,
             OPTIONS_ICON_CONTENT_REFERENCE,
         );
-        let (icon_plus, icon_plus_hover) = load_texture_recolored_pair(
-            ctx,
-            "icon-plus",
-            ICON_PLUS_BYTES,
-            ICON_CONTENT_REFERENCE,
-        );
+        let (icon_plus, icon_plus_hover) =
+            load_texture_recolored_pair(ctx, "icon-plus", ICON_PLUS_BYTES, ICON_CONTENT_REFERENCE);
         let (icon_minus, icon_minus_hover) = load_texture_recolored_pair(
             ctx,
             "icon-minus",

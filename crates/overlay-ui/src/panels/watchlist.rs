@@ -560,13 +560,19 @@ pub struct WatchlistAssets<'a> {
 ///
 /// `now` : voir la doc de `is_active` — même horloge injectable, propagée jusqu'à `toast_card`
 /// (fondu d'entrée, chute des confettis).
+///
+/// **2026-09-08 (modale Options)** : `show` renvoie désormais [`WatchlistOutcome`] plutôt qu'un
+/// simple `bool` — le clic sur "Options" (`control_button_row`) doit remonter jusqu'à
+/// `render_content::paint_content`, qui seul peut déclencher l'ouverture d'une fenêtre OS dédiée
+/// (`main.rs`/`bin/overlay-ui-x11.rs`, nouveau cas `OverlayKind::Options`) ; `close_toast` garde
+/// exactement son rôle d'avant (fermeture du toast, voir plus bas).
 pub fn show(
     ui: &mut egui::Ui,
     assets: WatchlistAssets<'_>,
     entries: &[WatchlistEntry],
     toast: Option<&WatchlistToast>,
     now: std::time::Instant,
-) -> bool {
+) -> WatchlistOutcome {
     let WatchlistAssets {
         icons,
         catalog,
@@ -583,6 +589,11 @@ pub fn show(
     let mut style = (**ui.style()).clone();
     style_thin_scrollbar(&mut style);
     ui.set_style(style);
+
+    // Renseigné par `control_button_row` dans la fermeture ci-dessous (voir la doc de `show`) —
+    // `false` par défaut : aucune raison de rouvrir la modale si elle l'est déjà tant que
+    // l'utilisateur n'a pas recliqué sur "Options".
+    let mut open_options = false;
 
     egui::ScrollArea::horizontal()
         .id_salt("watchlist-strip")
@@ -601,7 +612,7 @@ pub fn show(
                 // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                control_button_row(ui, icons, entries.is_empty());
+                open_options = control_button_row(ui, icons, entries.is_empty());
                 ui.add_space(TILE_GAP);
 
                 for (i, entry) in entries.iter().enumerate() {
@@ -622,7 +633,7 @@ pub fn show(
 
     ui.add_space(6.0);
 
-    match toast.filter(|t| t.hide_at > now) {
+    let close_toast = match toast.filter(|t| t.hide_at > now) {
         Some(toast) => toast_card(
             ui,
             icons,
@@ -633,7 +644,20 @@ pub fn show(
             now,
         ),
         None => false,
+    };
+
+    WatchlistOutcome {
+        close_toast,
+        open_options,
     }
+}
+
+/// Ce que `show` a produit CETTE frame — voir sa doc pour pourquoi un simple `bool` (juste
+/// `close_toast`, avant le 2026-09-08) ne suffit plus.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WatchlistOutcome {
+    pub close_toast: bool,
+    pub open_options: bool,
 }
 
 /// Barre de défilement fine, flottante et sombre plutôt que le style natif par défaut (épais, pris
@@ -980,7 +1004,9 @@ enum TooltipSide {
 /// activés. Infobulle par COLONNE (voir `TooltipSide` et doc de module) : GAUCHE pour "+"/"Détails",
 /// DROITE pour "−"/"Options" — jamais l'inverse du rôle inerte/cliquable du bouton, qui ne pilotait
 /// le côté qu'AVANT cette refonte.
-fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool) {
+/// Renvoie `true` UNIQUEMENT à la frame où "Options" vient d'être cliqué — voir
+/// `WatchlistOutcome::open_options` et la doc de `show`.
+fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool) -> bool {
     let row_rect = ui
         .allocate_exact_size(
             egui::vec2(control_row_width(), control_row_height()),
@@ -1060,10 +1086,7 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool)
         true,
         TooltipSide::Right,
     );
-    if options_response.clicked() {
-        // TODO: ouvrir le panneau d'options une fois qu'il existera (même TODO que dans
-        // `combat::bottom_toolbar` avant son déplacement ici, voir doc de module).
-    }
+    options_response.clicked()
 }
 
 /// Bouton du carré de contrôle — socle `button_background`/`button_background_hover` (même socle

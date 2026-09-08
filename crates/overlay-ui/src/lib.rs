@@ -21,11 +21,16 @@
 //! `logging` (initialisation `tracing`, gestionnaire Ctrl+C) est également générique — exposé pour
 //! la même raison.
 //!
+//! `config` (2026-09-08, modale Options — §9 du plan) : persistance du chemin de `wakfu.log`
+//! choisi par l'utilisateur, même raison que le paragraphe ci-dessus (aucun appel Windows,
+//! `resolve_log_path`/`save` appelés à l'identique par `main.rs` et `bin/overlay-ui-x11.rs`).
+//!
 //! Modules volontairement absents d'ici (restent privés à `main.rs`, spécifiques au fenêtrage
 //! Win32/aux threads compte lié L4-L5, sans intérêt pour un harnais de rendu offscreen NI pour le
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
 
 pub mod alert_sound;
+pub mod config;
 pub mod engine_thread;
 pub mod frame;
 pub mod game_window;

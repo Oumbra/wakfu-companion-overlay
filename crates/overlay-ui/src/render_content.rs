@@ -11,6 +11,7 @@ use overlay_engine::{CatalogIndex, FightSnapshot, WatchlistEntry};
 use crate::panels;
 use crate::panels::combat::CombatSide;
 use crate::panels::combat_frame::CombatFrame;
+use crate::panels::options_modal::{OptionsModalAction, OptionsModalState};
 use crate::panels::watchlist::{WatchlistAssets, WatchlistToast};
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -65,6 +66,12 @@ pub enum UserEvent {
 pub enum OverlayKind {
     Combat,
     Watchlist,
+    /// Modale "Options" (2026-09-08, §9 du plan) — voir `panels::options_modal`. Contrairement à
+    /// `Combat`/`Watchlist`, jamais créée automatiquement par `sync_windows` (une par fenêtre de
+    /// jeu trouvée) : cette fenêtre OS est ouverte/fermée à la demande (clic sur le bouton
+    /// "Options" du carré de contrôle, ou raccourci `Ctrl+Shift+O`), voir
+    /// `main.rs::App::open_options_modal`/`bin/overlay-ui-x11.rs` (même méthode dupliquée).
+    Options,
 }
 
 /// État de la connexion au compte (lot L4, §7.2 du plan) — publié par le thread Auth
@@ -175,6 +182,32 @@ pub struct RenderContent<'a> {
     /// `Instant::now()` : un même rendu doit utiliser une seule référence de temps cohérente, et
     /// cette même valeur devient reproductible pour un harnais de rendu offscreen qui la fige.
     pub now: std::time::Instant,
+    /// État de la modale Options (2026-09-08, §9 du plan) — `Some` UNIQUEMENT pour
+    /// `kind == OverlayKind::Options` (voir `paint_content`) ; `None` pour Combat/Watchlist ET pour
+    /// tout appelant (`overlay-testkit`) qui n'exerce pas encore ce panneau. `&mut` : la frappe
+    /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
+    /// `panels::options_modal::OptionsModalState`.
+    pub options: Option<&'a mut OptionsModalState>,
+}
+
+/// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
+/// `bool` (`close_toast` seul) depuis le 2026-09-08 : la modale Options ajoute deux autres
+/// signaux que `paint_content` doit remonter à l'appelant réel (`main.rs`/`bin/overlay-ui-x11.rs`,
+/// seuls capables de créer une fenêtre OS ou de lancer un dialogue de fichier natif) SANS que
+/// `paint_content`/`build_ui` eux-mêmes en dépendent — voir la doc de tête du module pour pourquoi
+/// ces deux fonctions restent PURES.
+#[derive(Debug, Default)]
+pub struct RenderOutcome {
+    /// Voir la doc historique de `build_ui` : fermeture du toast de suivi (clic sur la carte ou sa
+    /// croix, `panels::watchlist::toast_card`).
+    pub close_toast: bool,
+    /// `true` UNIQUEMENT à la frame où le bouton "Options" du carré de contrôle
+    /// (`panels::watchlist::control_button_row`) vient d'être cliqué — `kind == Watchlist`
+    /// seulement, jamais émis par Combat/Options eux-mêmes.
+    pub open_options: bool,
+    /// Action déclenchée CETTE frame par la modale Options elle-même (`kind == Options`
+    /// seulement) — voir `panels::options_modal::OptionsModalAction`.
+    pub options_action: OptionsModalAction,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
@@ -209,9 +242,9 @@ pub struct RenderContent<'a> {
 pub fn build_ui(
     ctx: &egui::Context,
     raw_input: egui::RawInput,
-    content: RenderContent<'_>,
-) -> (egui::FullOutput, bool) {
-    let mut close_toast = false;
+    mut content: RenderContent<'_>,
+) -> (egui::FullOutput, RenderOutcome) {
+    let mut outcome = RenderOutcome::default();
     // Reconstruit un `RenderContent` FRAIS à chaque appel de la fermeture plutôt que de déplacer
     // `content` (capturé par la fermeture) directement dans `paint_content` : `ctx.run_ui` exige
     // `FnMut`, et déplacer un agrégat non-`Copy` hors de l'environnement capturé d'une fermeture ne
@@ -223,8 +256,12 @@ pub fn build_ui(
     // C'est le seul rôle de ce petit bloc de recopie ; `paint_content` (ci-dessous) porte toute la
     // vraie logique et reste appelable directement par un futur harnais de rendu offscreen
     // (`overlay-testkit`, §17.1 du plan) sans jamais passer par `build_ui`/`ctx.run_ui`.
+    //
+    // `content.options` (`Option<&mut OptionsModalState>`, 2026-09-08) demande `mut content` en
+    // paramètre (contrairement au reste ci-dessus) : `Option<&mut _>::as_deref_mut` — l'équivalent
+    // du même ré-emprunt pour un champ optionnel — a besoin d'un accès `&mut self`.
     let full_output = ctx.run_ui(raw_input, |ui| {
-        close_toast = paint_content(
+        outcome = paint_content(
             ui,
             RenderContent {
                 kind: content.kind,
@@ -243,10 +280,11 @@ pub fn build_ui(
                 auth_command_tx: content.auth_command_tx,
                 interactive: content.interactive,
                 now: content.now,
+                options: content.options.as_deref_mut(),
             },
         );
     });
-    (full_output, close_toast)
+    (full_output, outcome)
 }
 
 /// Peint le contenu d'UN panneau (Combat ou Suivi) dans `ui` à partir de `content` — extrait de
@@ -257,7 +295,7 @@ pub fn build_ui(
 /// (jamais capturé par une fermeture englobante) : chaque appelant reconstruit un `RenderContent`
 /// frais à chaque invocation (voir `build_ui` ci-dessus et la doc du harnais) plutôt que de tenter
 /// de réutiliser un agrégat capturé, ce qui éviterait toute ambiguïté de capture de fermeture.
-pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
+pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOutcome {
     let RenderContent {
         kind,
         fight,
@@ -275,19 +313,19 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
         auth_command_tx,
         interactive,
         now,
+        options,
     } = content;
 
-    // Vrai quand CETTE frame doit effacer le toast affiché — voir la doc de `build_ui` et
-    // `panels::watchlist::show`, seul endroit qui le renseigne (`OverlayKind::Watchlist`
-    // ci-dessous).
-    let mut close_toast = false;
+    let mut outcome = RenderOutcome::default();
     // Marge interne nulle pour Combat sur trois côtés (refonte 2026-09-04, retour utilisateur :
     // collé au bord de la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui
     // ferait partie du jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même
     // raison) — SEUL le haut gagne `COMBAT_TOP_MARGIN`, voir sa doc, pour que l'infobulle du switch
     // Alliés/Ennemis ait la place de s'afficher au-dessus de lui. Suivi garde sa marge d'origine
     // sur les quatre côtés : non concerné par cette demande, bande de tuiles qui a toujours besoin
-    // d'un peu d'air pour ne pas coller aux boutons d'interface du jeu.
+    // d'un peu d'air pour ne pas coller aux boutons d'interface du jeu. Options (2026-09-08) est
+    // une fenêtre dédiée qui remplit tout son espace elle-même (voir `panels::options_modal::show`,
+    // bannière/corps/pied de page peints jusqu'aux bords) : aucune marge, comme Combat.
     let inner_margin = match kind {
         OverlayKind::Combat => egui::Margin {
             left: 0,
@@ -296,6 +334,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
             bottom: 0,
         },
         OverlayKind::Watchlist => egui::Margin::same(6),
+        OverlayKind::Options => egui::Margin::ZERO,
     };
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.inner_margin(inner_margin))
@@ -459,7 +498,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
                 // tuiles d'entrées, elles, restent absentes tant que `watchlist` est vide — c'est
                 // `panels::watchlist::show` elle-même qui fait cette distinction en interne.
                 OverlayKind::Watchlist => {
-                    close_toast = panels::watchlist::show(
+                    let watchlist_outcome = panels::watchlist::show(
                         ui,
                         WatchlistAssets {
                             icons,
@@ -471,8 +510,21 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
                         watchlist_toast,
                         now,
                     );
+                    outcome.close_toast = watchlist_outcome.close_toast;
+                    outcome.open_options = watchlist_outcome.open_options;
+                }
+                // Modale Options (2026-09-08, §9 du plan) — voir `panels::options_modal`. `options`
+                // est `Some` uniquement pour ce `kind` (voir la doc de `RenderContent::options`) ;
+                // un appelant qui créerait une fenêtre `OverlayKind::Options` sans fournir cet état
+                // ne verrait simplement rien peint ici plutôt que de paniquer — jamais souhaitable
+                // en pratique (voir `main.rs`/`bin/overlay-ui-x11.rs`, qui le fournissent toujours
+                // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
+                OverlayKind::Options => {
+                    if let Some(state) = options {
+                        outcome.options_action = panels::options_modal::show(ui, state);
+                    }
                 }
             }
         });
-    close_toast
+    outcome
 }
