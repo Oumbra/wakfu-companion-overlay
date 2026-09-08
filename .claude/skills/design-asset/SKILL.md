@@ -82,13 +82,28 @@ augmenter `--roi-inset`.
 dsimg.py icon IMG -o OUT --from-button --size 24 [--keep center] [--padding 2]
 ```
 
-`--from-button` détoure d'abord le bouton porteur ; `--size` recadre sur le glyphe et le
-met à l'échelle dans une boîte carrée (16, 24…) en alpha prémultiplié. Le contour sombre
-du glyphe est conservé — c'est ainsi qu'il apparaît en jeu.
+`--from-button` détoure d'abord le bouton porteur, puis exclut une couronne de bordure de
+la détection (`--roi-inset`, automatique) ; sans `--size`, la sortie garde la taille native
+du glyphe, ce qui est le meilleur choix par défaut — les glyphes du jeu n'ont pas tous la
+même taille, et cet écart est signifiant. Le contour sombre du glyphe est conservé : c'est
+ainsi qu'il apparaît en jeu.
 
-Cas connus qui demandent un réglage manuel : capture contenant deux boutons (recadrer via
-`--box`), bouton presque aussi sombre que le décor (`--tol 4`), glyphe peu contrasté
-(`--k 3.5` ou `--polarity dark`).
+Le réglage se déduit du contraste du glyphe sur son bouton, pas de ce que l'icône
+représente :
+
+| Cas | Options |
+| --- | --- |
+| Glyphe clair sur bouton brun | aucune |
+| Bouton sombre, proche du décor | `--tol 4` |
+| Glyphe sombre sur bouton doré | `--polarity dark --keep center --floor 45` |
+
+`--k` est sans effet ici : sur le fond d'un bouton le MAD est trop faible pour peser dans
+`max(k × MAD, floor)`, c'est `--floor` qui pilote. Un `glyph_bbox` qui fait la taille du
+bouton signale que la bordure a été prise pour le glyphe — augmenter `--roi-inset`.
+
+Réglages étalonnés icône par icône dans
+[`references/recettes-icones.md`](references/recettes-icones.md) : c'est aussi le jeu
+d'essai à rejouer après toute modification du code de détection.
 
 ### Aligner les variantes sur une taille commune
 

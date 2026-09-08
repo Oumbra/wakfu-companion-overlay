@@ -54,8 +54,17 @@ def dilate(mask: np.ndarray, radius: int = 1, diamond: bool = False) -> np.ndarr
     return out
 
 
-def erode(mask: np.ndarray, radius: int = 1, diamond: bool = False) -> np.ndarray:
-    return ~dilate(~mask, radius, diamond)
+def erode(mask: np.ndarray, radius: int = 1, diamond: bool = False,
+          outside_is_mask: bool = False) -> np.ndarray:
+    """Érosion. Par défaut, l'extérieur de l'image compte comme du hors-masque : un
+    masque qui touche le bord est donc rétracté là aussi. `outside_is_mask=True` garde
+    l'ancien comportement (bord de l'image neutre)."""
+    if outside_is_mask:
+        return ~dilate(~mask, radius, diamond)
+    if radius <= 0:
+        return mask.copy()
+    pad = np.pad(~mask, radius, constant_values=True)
+    return ~dilate(pad, radius, diamond)[radius:-radius, radius:-radius]
 
 
 # --------------------------------------------------------- composantes connexes
