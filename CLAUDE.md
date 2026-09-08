@@ -51,6 +51,23 @@ conclure, même pour un travail intermédiaire.
 - Un commit = un changement cohérent ; ne pas mélanger documentation et code applicatif.
 - Ne pas ajouter d'attribution IA (pas de "Co-Authored-By: Claude")
 
+## Signature de commit en session cloud
+
+**Décision explicite de l'utilisateur (2026-09-08).** En session cloud, le mécanisme de signature
+géré par l'environnement (`gpg.ssh.program` pointant vers un script temporaire, ex. `/tmp/code-sign`)
+peut être absent ou temporairement indisponible (observé : `fatal: cannot exec '/tmp/code-sign'`,
+probablement lié à l'activité d'une autre session concurrente sur le même conteneur) — `git commit`
+échoue alors avec `failed to write commit object`, sans que la signature soit récupérable en
+attendant (le script ne réapparaît pas toujours de lui-même, même après plusieurs minutes).
+
+**Consigne** : dans ce cas précis, en session cloud, committer **sans signature**
+(`git commit --no-gpg-sign -m "..."`) plutôt que de bloquer le travail ou d'attendre indéfiniment.
+Ne **jamais** modifier `~/.gitconfig`/`commit.gpgsign` pour désactiver la signature globalement —
+`--no-gpg-sign` est un contournement ponctuel par commit, pas un changement de politique de
+l'environnement. Une session locale (terminal de l'utilisateur) n'est normalement pas concernée par
+cette panne d'infrastructure ; si la signature y échoue aussi, diagnostiquer avant de contourner de
+la même façon plutôt que de supposer que ce cas s'applique.
+
 # Contexte projet
 
 Overlay de jeu natif **Rust** pour Wakfu, portage de
