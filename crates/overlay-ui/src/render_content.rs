@@ -447,26 +447,30 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> bool {
                 }
                 // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
                 // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir
-                // `panels::watchlist`. Bande de tuiles absente tant que le compte ne déclare
-                // aucune entrée (fenêtre transparente vide plutôt qu'un cadre vide disgracieux)
-                // — un toast de ramassage à son activé (`overlay_engine::profile`) reste
-                // toutefois possible dans ce cas, INDÉPENDANT de la watchlist (voir
-                // `panels::watchlist::show`), d'où la garde sur les deux conditions ici.
+                // `panels::watchlist`.
+                //
+                // **Refonte 2026-09-08** : `panels::watchlist::show` est désormais appelée
+                // INCONDITIONNELLEMENT (l'ancienne garde `!watchlist.is_empty() || is_active(...)`
+                // est retirée) — le carré de contrôle "+"/"−"/"Options"/"Détails" qu'elle peint doit
+                // rester atteignable même sans aucune entrée suivie, "Options"/"Détails" ayant
+                // rejoint ce carré depuis `combat::bottom_toolbar` (voir doc de
+                // `panels::watchlist`, refonte du même jour) : le panneau Combat n'étant pas
+                // toujours affiché, ces deux boutons ont besoin d'un emplacement permanent. Les
+                // tuiles d'entrées, elles, restent absentes tant que `watchlist` est vide — c'est
+                // `panels::watchlist::show` elle-même qui fait cette distinction en interne.
                 OverlayKind::Watchlist => {
-                    if !watchlist.is_empty() || panels::watchlist::is_active(watchlist_toast, now) {
-                        close_toast = panels::watchlist::show(
-                            ui,
-                            WatchlistAssets {
-                                icons,
-                                catalog,
-                                remote_icons,
-                                remote_icon_textures,
-                            },
-                            watchlist,
-                            watchlist_toast,
-                            now,
-                        );
-                    }
+                    close_toast = panels::watchlist::show(
+                        ui,
+                        WatchlistAssets {
+                            icons,
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                        },
+                        watchlist,
+                        watchlist_toast,
+                        now,
+                    );
                 }
             }
         });

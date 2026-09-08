@@ -102,20 +102,23 @@ const QUIT_HOTKEY_LABEL: &str = "Ctrl+Shift+Q";
 /// l'utilisateur pour celui-ci) — seul raccourci encore sur l'ancien préfixe.
 const DISCONNECT_HOTKEY_LABEL: &str = "Ctrl+Alt+D";
 
-/// Raccourci global pour "Détails" (bouton lien externe, `panels::combat::bottom_toolbar`) — même
-/// action qu'un clic (`open::that(overlay_sync::client::base_url())`, voir `App::open_details`).
-/// Retour utilisateur explicite 2026-09-06 (« à l'image de ce qu'il y a dans le jeu [...] rajoute
-/// les raccourcis [...] pour le détail [...] Ctrl+Shift+D ») : modificateur CTRL+SHIFT, combinaisons
-/// données par l'utilisateur lui-même pour les cinq raccourcis de ce groupe — reflétées entre
-/// parenthèses dans les tooltips correspondants (voir `panels::combat::bottom_toolbar`/
-/// `paint_side_switch`, `panels::watchlist::control_button_row`), à l'image du jeu. `HOTKEY_LABEL`/
+/// Raccourci global pour "Détails" (bouton lien externe, désormais dans le carré de contrôle de
+/// `panels::watchlist::control_button_row` — voir sa doc, refonte 2026-09-08 : déplacé depuis
+/// `panels::combat::bottom_toolbar`, retirée) — même action qu'un clic
+/// (`open::that(overlay_sync::client::base_url())`, voir `App::open_details`). Retour utilisateur
+/// explicite 2026-09-06 (« à l'image de ce qu'il y a dans le jeu [...] rajoute les raccourcis [...]
+/// pour le détail [...] Ctrl+Shift+D ») : modificateur CTRL+SHIFT, combinaisons données par
+/// l'utilisateur lui-même pour les cinq raccourcis de ce groupe — reflétées entre parenthèses dans
+/// les tooltips correspondants (voir `panels::combat::paint_side_switch`,
+/// `panels::watchlist::control_button_row`), à l'image du jeu. `HOTKEY_LABEL`/
 /// `REFRESH_HOTKEY_LABEL`/`QUIT_HOTKEY_LABEL`, initialement en CTRL+ALT, ont rejoint ce même
 /// préfixe CTRL+SHIFT le même jour (voir leur doc) ; seul `DISCONNECT_HOTKEY_LABEL` reste en
 /// CTRL+ALT.
 const DETAILS_HOTKEY_LABEL: &str = "Ctrl+Shift+D";
-/// Raccourci global pour "Options" (`panels::combat::bottom_toolbar`) — n'ouvre encore aucun
-/// panneau, comme le clic sur le bouton lui-même (voir sa doc) : réservé à une future page de
-/// réglages, juste enregistré/journalisé pour l'instant (voir `about_to_wait`).
+/// Raccourci global pour "Options" (`panels::watchlist::control_button_row`, voir sa doc — déplacé
+/// depuis `panels::combat::bottom_toolbar`, refonte 2026-09-08) — n'ouvre encore aucun panneau,
+/// comme le clic sur le bouton lui-même (voir sa doc) : réservé à une future page de réglages,
+/// juste enregistré/journalisé pour l'instant (voir `about_to_wait`).
 const OPTIONS_HOTKEY_LABEL: &str = "Ctrl+Shift+O";
 /// Raccourci global pour "Ajouter" (`panels::watchlist::control_button_row`) — reste INERTE comme
 /// le bouton lui-même (voir doc de module de `watchlist` : aucune sélection/formulaire câblés côté
@@ -859,10 +862,11 @@ impl App {
         tracing::info!(">>> Déconnexion du compte demandée ({DISCONNECT_HOTKEY_LABEL})");
     }
 
-    /// `DETAILS_HOTKEY_LABEL` : même action que le clic sur le bouton "lien externe"
-    /// (`panels::combat::bottom_toolbar`) — voir sa doc pour `base_url()`. `open::that` est
-    /// best-effort (résultat ignoré, même choix que le clic direct) : un navigateur qui ne s'ouvre
-    /// pas n'est pas une raison de faire quoi que ce soit d'autre planter.
+    /// `DETAILS_HOTKEY_LABEL` : même action que le clic sur le bouton "Détails" (lien externe)
+    /// du carré de contrôle (`panels::watchlist::control_button_row`) — voir sa doc pour
+    /// `base_url()`. `open::that` est best-effort (résultat ignoré, même choix que le clic direct) :
+    /// un navigateur qui ne s'ouvre pas n'est pas une raison de faire quoi que ce soit d'autre
+    /// planter.
     fn open_details(&self) {
         let _ = open::that(overlay_sync::client::base_url());
         tracing::info!(">>> Détails ({DETAILS_HOTKEY_LABEL}) : ouverture du site.");
