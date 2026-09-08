@@ -142,7 +142,7 @@ def cmd_analyze(a):
 def cmd_cutout(a):
     rgba = load_rgba(a.image)
     out, meta = cutout(rgba, tol=a.tol, radius=a.radius, crop=not a.no_crop,
-                       feather_inset=a.inset)
+                       feather_inset=a.inset, keep=a.components)
     save_rgba(out, a.output)
     _emit({"input": str(a.image), "output": str(a.output),
            "size": [int(out.shape[1]), int(out.shape[0])], **meta})
@@ -150,10 +150,12 @@ def cmd_cutout(a):
 
 # --------------------------------------------- retrait du contenu + inpainting
 
-def strip(rgba, polarity="auto", grow=2, box=None, method="offsets", max_dy=6,
+def strip(rgba, polarity="auto", grow=2, box=None, method="offsets", max_dy=-1,
           k_offsets=5, min_shift=3, floor=22.0, k=5.0, roi_inset=3):
     # La bordure du composant est sombre et tranche sur le remplissage : sans retrait
-    # de cette couronne, elle serait prise pour du contenu incruste et effacee.
+    # de cette couronne, elle serait prise pour du contenu incruste et effacee. Elle
+    # est aussi exclue de la zone source de la reconstruction, sinon un decalage la
+    # recopie au milieu du composant.
     roi = rgba[..., 3] > 128
     if roi_inset > 0:
         roi = erode(roi, roi_inset)
@@ -161,41 +163,74 @@ def strip(rgba, polarity="auto", grow=2, box=None, method="offsets", max_dy=6,
                           floor=floor, k=k)
     if not mask.any():
         return rgba.copy(), mask, []
+    if max_dy < 0:
+        # Un libelle qui occupe toute la largeur ne laisse aucune texture propre sur sa
+        # gauche ni sa droite : le seul decalage qui l'enjambe est vertical, et il doit
+        # valoir au moins la hauteur du masque. La penalite sur dy garde malgre tout la
+        # priorite aux decalages horizontaux quand ils existent.
+        ys = np.flatnonzero(mask.any(axis=1))
+        max_dy = int(min(rgba.shape[0] // 2, (ys[-1] - ys[0] + 1) + 2))
     if method == "diffusion":
-        filled, offsets = inpaint_diffusion(rgba[..., :3], mask), []
+        filled, offsets = inpaint_diffusion(rgba[..., :3], mask, valid=roi), []
     else:
         filled, offsets = inpaint_offsets(rgba[..., :3], mask, k=k_offsets,
-                                          max_dy=max_dy, min_shift=min_shift)
+                                          max_dy=max_dy, min_shift=min_shift,
+                                          valid=roi)
     out = rgba.copy()
     out[..., :3] = np.round(filled).astype(np.uint8)
     return out, mask, offsets
 
 
+def strip_parts(rgba, boxes, a, roi_inset):
+    """Applique `strip` boite par boite, chacune dans son propre repere.
+
+    Le fond est estime ligne par ligne : une ligne qui traverse un onglet actif clair
+    puis deux onglets sombres n'a pas de fond commun, et une passe unique sur toute la
+    barre melangerait les trois. Decouper d'abord donne a chaque composant sa propre
+    mediane de ligne — et interdit du meme coup a la reconstruction d'aller chercher sa
+    texture chez le voisin."""
+    out = rgba.copy()
+    removed, offsets = [], []
+    for x0, y0, x1, y1 in boxes:
+        sub, mask, offs = strip(rgba[y0:y1, x0:x1], a.polarity, a.grow, _box(a.box),
+                                a.method, a.max_dy, a.offsets, a.min_shift,
+                                a.floor, a.k, roi_inset)
+        out[y0:y1, x0:x1] = sub
+        rep = content_report(mask)
+        rep["part"] = [x0, y0, x1, y1]
+        removed.append(rep)
+        offsets.append([{"dy": int(o[0]), "dx": int(o[1])} for o in offs])
+    one = len(boxes) == 1
+    return out, (removed[0] if one else removed), (offsets[0] if one else offsets)
+
+
+def _parts_of(a, rgba):
+    if getattr(a, "parts", None):
+        return [tuple(int(v) for v in b.split(",")) for b in a.parts]
+    return [(0, 0, rgba.shape[1], rgba.shape[0])]
+
+
 def cmd_strip(a):
     rgba = load_rgba(a.image)
-    out, mask, offsets = strip(rgba, a.polarity, a.grow, _box(a.box), a.method,
-                               a.max_dy, a.offsets, a.min_shift, a.floor, a.k,
-                               a.roi_inset if a.roi_inset >= 0 else 3)
+    inset = a.roi_inset if a.roi_inset >= 0 else 3
+    out, removed, offsets = strip_parts(rgba, _parts_of(a, rgba), a, inset)
     save_rgba(out, a.output)
     _emit({"input": str(a.image), "output": str(a.output),
-           "removed": content_report(mask),
-           "offsets": [{"dy": int(o[0]), "dx": int(o[1]), "err": round(float(o[2]), 1),
-                        "coverage": round(float(o[3]), 3)} for o in offsets]})
+           "removed": removed, "offsets": offsets})
 
 
 def cmd_genericize(a):
     rgba = load_rgba(a.image)
-    cut, meta = cutout(rgba, tol=a.tol, radius=a.radius)
+    cut, meta = cutout(rgba, tol=a.tol, radius=a.radius, keep=a.components)
     inset = a.roi_inset
     if inset < 0:
         inset = int(meta.get("border_recovery", {}).get("rings_kept", 1)) + 2
-    out, mask, offsets = strip(cut, a.polarity, a.grow, _box(a.box), a.method,
-                               a.max_dy, a.offsets, a.min_shift, a.floor, a.k, inset)
+    boxes = [tuple(q["bbox"]) for q in meta.get("parts", [])] or _parts_of(a, cut)
+    out, removed, offsets = strip_parts(cut, boxes, a, inset)
     save_rgba(out, a.output)
     _emit({"input": str(a.image), "output": str(a.output),
            "size": [int(out.shape[1]), int(out.shape[0])], "component": meta,
-           "roi_inset": inset, "removed": content_report(mask),
-           "offsets": [{"dy": int(o[0]), "dx": int(o[1])} for o in offsets]})
+           "roi_inset": inset, "removed": removed, "offsets": offsets})
 
 
 # ----------------------------------------------------------------------- icone
@@ -314,6 +349,10 @@ def main(argv=None):
         p.add_argument("--tol", type=int, default=12,
                        help="tolerance de propagation du decor (defaut 12)")
 
+    def components_opt(p):
+        p.add_argument("--components", choices=["largest", "all"], default="largest",
+                       help="'all' : capture montrant plusieurs composants (onglets)")
+
     def content_opts(p):
         p.add_argument("--polarity", choices=["auto", "light", "dark", "both"],
                        default="auto")
@@ -330,11 +369,15 @@ def main(argv=None):
 
     def inpaint_opts(p):
         p.add_argument("--method", choices=["offsets", "diffusion"], default="offsets")
-        p.add_argument("--max-dy", dest="max_dy", type=int, default=6,
+        p.add_argument("--max-dy", dest="max_dy", type=int, default=-1,
                        help="amplitude verticale de recherche (0 = illimitee)")
         p.add_argument("--offsets", type=int, default=5,
                        help="nombre de decalages votants")
         p.add_argument("--min-shift", dest="min_shift", type=int, default=3)
+
+    def parts_opt(p):
+        p.add_argument("--parts", nargs="+", metavar="x0,y0,x1,y1",
+                       help="traiter separement plusieurs zones (onglets d'une barre)")
 
     p = sub.add_parser("analyze", help="mesures geometriques + contenu detecte (JSON)")
     p.add_argument("image")
@@ -349,6 +392,7 @@ def main(argv=None):
     p.add_argument("--radius", type=float, default=None, help="force le rayon des coins")
     p.add_argument("--inset", type=float, default=0.0, help="retracte le contour (px)")
     p.add_argument("--no-crop", action="store_true")
+    components_opt(p)
     p.set_defaults(func=cmd_cutout)
 
     p = sub.add_parser("strip", help="retire le contenu incruste et reconstruit le fond")
@@ -356,6 +400,7 @@ def main(argv=None):
     p.add_argument("-o", "--output", required=True)
     content_opts(p)
     inpaint_opts(p)
+    parts_opt(p)
     p.set_defaults(func=cmd_strip)
 
     p = sub.add_parser("genericize",
@@ -364,8 +409,10 @@ def main(argv=None):
     p.add_argument("-o", "--output", required=True)
     tol_opt(p)
     p.add_argument("--radius", type=float, default=None)
+    components_opt(p)
     content_opts(p)
     inpaint_opts(p)
+    parts_opt(p)
     p.set_defaults(func=cmd_genericize)
 
     p = sub.add_parser("icon", help="extrait un glyphe et le normalise a une taille")

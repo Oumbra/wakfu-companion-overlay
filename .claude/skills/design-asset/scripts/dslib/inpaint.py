@@ -31,9 +31,10 @@ def _shift_valid(arr: np.ndarray, dy: int, dx: int, fill=0.0):
     return out, ok
 
 
-def inpaint_diffusion(rgb: np.ndarray, hole: np.ndarray, iterations: int = 400) -> np.ndarray:
+def inpaint_diffusion(rgb: np.ndarray, hole: np.ndarray, iterations: int = 400,
+                      valid: np.ndarray | None = None) -> np.ndarray:
     out = rgb.astype(np.float64).copy()
-    known = ~hole
+    known = ~hole if valid is None else (valid & ~hole)
     cur = out.copy()
     cur[hole] = 0.0
     kn = known.astype(np.float64)
@@ -53,13 +54,19 @@ def inpaint_diffusion(rgb: np.ndarray, hole: np.ndarray, iterations: int = 400) 
 
 def find_offsets(rgb: np.ndarray, hole: np.ndarray, k: int = 5, context: int = 6,
                  max_dx: int = 0, max_dy: int = 0, min_shift: int = 3,
-                 dy_penalty: float = 6.0):
-    """Retourne les `k` meilleurs décalages (dy, dx, erreur, couverture)."""
+                 dy_penalty: float = 6.0, valid: np.ndarray | None = None):
+    """Retourne les `k` meilleurs décalages (dy, dx, erreur, couverture).
+
+    `valid` restreint la **zone source** : tout ce qui n'y est pas ne peut ni servir de
+    référence de comparaison ni être recopié. C'est indispensable sur un composant
+    détouré — sans cela le liseré de bordure, sombre et à quelques pixels du contenu à
+    effacer, est un décalage source parfaitement légitime et se retrouve peint au
+    milieu du bouton."""
     h, w = hole.shape
     max_dx = max_dx or w
     max_dy = max_dy or h
     img = rgb.astype(np.float64)
-    valid = ~hole
+    valid = (~hole) if valid is None else (valid & ~hole)
     band = dilate(hole, context) & valid
     n_hole = int(hole.sum())
     results = []
@@ -93,14 +100,16 @@ def find_offsets(rgb: np.ndarray, hole: np.ndarray, k: int = 5, context: int = 6
 
 def inpaint_offsets(rgb: np.ndarray, hole: np.ndarray, k: int = 5, context: int = 6,
                     max_dx: int = 0, max_dy: int = 0, min_shift: int = 3,
-                    dy_penalty: float = 6.0, row_match: bool = True):
+                    dy_penalty: float = 6.0, row_match: bool = True,
+                    valid: np.ndarray | None = None):
     """Remplit `hole` par vote médian sur les `k` meilleurs décalages."""
-    offsets = find_offsets(rgb, hole, k, context, max_dx, max_dy, min_shift, dy_penalty)
+    valid = (~hole) if valid is None else (valid & ~hole)
+    offsets = find_offsets(rgb, hole, k, context, max_dx, max_dy, min_shift, dy_penalty,
+                           valid)
     out = rgb.astype(np.float64).copy()
     if not offsets:
-        return inpaint_diffusion(rgb, hole), []
+        return inpaint_diffusion(rgb, hole, valid=valid), []
     img = rgb.astype(np.float64)
-    valid = ~hole
     stack, weights = [], []
     for dy, dx, _err, _cov in offsets:
         shifted, inb = _shift_valid(img, dy, dx, np.nan)
@@ -133,5 +142,6 @@ def inpaint_offsets(rgb: np.ndarray, hole: np.ndarray, k: int = 5, context: int 
     rest = hole & ~filled
     if rest.any():
         tmp = out.copy()
-        out = inpaint_diffusion(np.clip(tmp, 0, 255).astype(np.uint8), rest)
+        out = inpaint_diffusion(np.clip(tmp, 0, 255).astype(np.uint8), rest,
+                                valid=valid | (hole & ~rest))
     return np.clip(out, 0, 255), offsets

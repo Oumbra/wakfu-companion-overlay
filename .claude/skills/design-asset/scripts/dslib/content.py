@@ -75,9 +75,13 @@ def detect_content(rgba: np.ndarray, roi: np.ndarray | None = None, polarity: st
 
     bg_roi = roi if box is None else (rgba[..., 3] > 128)
     mask = np.zeros((h, w), bool)
-    for _ in range(iterations):
+    for it in range(iterations):
         med, mad = _row_background(lum, bg_roi, mask, side)
-        thr = np.maximum(k * mad, floor)[:, None]
+        # Le MAD n'a de sens qu'une fois le contenu exclu. Tant que rien n'est detecte,
+        # il est gonfle par ce qu'on cherche : sur un libelle qui occupe la moitie de la
+        # ligne il monte a ~35, `k * mad` depasse 190, et plus rien ne franchit le seuil
+        # — la boucle ne demarre jamais. La premiere passe s'en tient donc au plancher.
+        thr = (np.full(h, floor) if it == 0 else np.maximum(k * mad, floor))[:, None]
         d = lum - med[:, None]
         light = roi & (d > thr)
         dark = roi & (-d > thr)
