@@ -46,10 +46,19 @@
 //! normalement pas d'équipe à 7+ joueurs) : `MAX_FRAME_SLOTS` borne ce module, l'appelant
 //! (`panels::combat::show`) est responsable de continuer les lignes excédentaires dans le style
 //! "plat" (portrait + barre, sans cadre) plutôt que de faire échouer l'affichage.
+//!
+//! **Ennemis** (refonte 2026-09-07, vision ennemie) : ce cadre affiche désormais aussi les
+//! ennemis jusqu'à `MAX_FRAME_SLOTS` (auparavant réservé aux alliés). Un ennemi n'a jamais de
+//! `class_name` (`breed` non déterministe côté ennemi) — `show` reçoit donc en plus `catalog`/
+//! `remote_icons`/`remote_icon_textures` pour résoudre son portrait RÉEL via le catalogue (voir
+//! `panels::combat::resolve_fighter_texture`), repli générique tant qu'il n'a pas fini de
+//! télécharger ou si le nom n'est pas reconnu — même mécanisme que la liste "plate" utilisait déjà
+//! pour les ennemis avant cette refonte.
 
-use overlay_engine::FighterDamage;
+use overlay_engine::{CatalogIndex, FighterDamage};
 
 use crate::portraits::{PortraitAtlas, NATIVE_PORTRAIT_SIZE};
+use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
@@ -211,11 +220,20 @@ impl CombatFrame {
     /// D'ABORD (fond, plus de trou à masquer), portraits ENSUITE par-dessus — chacun rogné en
     /// cercle via `PORTRAIT_CORNER_RADIUS`. Infobulle + pourcentage sont peints en DERNIER,
     /// par-dessus les portraits : une zone interactive ou un texte masqués ne serviraient à rien.
+    ///
+    /// **Ennemis** (refonte 2026-09-07, vision ennemie) : `catalog`/`remote_icons`/
+    /// `remote_icon_textures` permettent de résoudre le portrait RÉEL du monstre (voir
+    /// `panels::combat::resolve_fighter_texture`) — un ennemi n'a jamais de `class_name`, sans ces
+    /// paramètres tout ennemi affiché ici retomberait sur le portrait générique.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &self,
         ui: &mut egui::Ui,
         portraits: &PortraitAtlas,
         icons: &UiIcons,
+        catalog: &CatalogIndex,
+        remote_icons: &RemoteIconStore,
+        remote_icon_textures: &mut RemoteIconTextures,
         fighters: &[&FighterDamage],
         total_damage: i64,
     ) {
@@ -245,21 +263,35 @@ impl CombatFrame {
                 pos,
                 egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
             );
-            let texture = fighter.class_name.as_deref().and_then(|class_name| {
-                portraits.texture(class_name, fighter.gender, fighter.is_ko)
-            });
-            match texture {
-                Some(texture) => {
-                    egui::Image::new(texture)
+            let portrait = super::combat::resolve_fighter_texture(
+                ui,
+                portraits,
+                catalog,
+                remote_icons,
+                remote_icon_textures,
+                fighter,
+            );
+            match portrait {
+                Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
+                    egui::Image::new(&texture)
                         .corner_radius(PORTRAIT_CORNER_RADIUS)
                         .paint_at(ui, portrait_rect);
                 }
+                Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
+                    // Portrait RÉEL du monstre (ennemi, voir doc de fonction) — pas de version
+                    // grisée précalculée pour celle-ci, simple tint si KO (voir `grey_tint_if_ko`).
+                    egui::Image::new(&texture)
+                        .corner_radius(PORTRAIT_CORNER_RADIUS)
+                        .tint(super::combat::grey_tint_if_ko(fighter.is_ko))
+                        .paint_at(ui, portrait_rect);
+                }
                 None => {
-                    // Allié pas encore classifié (roster absent, `breed` inconnu de ce combat) :
-                    // repli générique plutôt qu'un trou vide dans le médaillon — voir doc de
-                    // module. Grisé par un tint approximatif si KO (voir `panels::combat::
-                    // grey_tint_if_ko` : pas de version grisée précalculée pour cet asset unique,
-                    // contrairement aux portraits de classe, voir `portraits.rs`).
+                    // Allié pas encore classifié (roster absent, `breed` inconnu de ce combat), ou
+                    // ennemi que le catalogue ne résout pas encore/pas du tout : repli générique
+                    // plutôt qu'un trou vide dans le médaillon — voir doc de module. Grisé par un
+                    // tint approximatif si KO (voir `panels::combat::grey_tint_if_ko` : pas de
+                    // version grisée précalculée pour cet asset unique, contrairement aux
+                    // portraits de classe, voir `portraits.rs`).
                     let image = egui::Image::new(icons.unknown_entity_texture())
                         .corner_radius(PORTRAIT_CORNER_RADIUS)
                         .tint(super::combat::grey_tint_if_ko(fighter.is_ko));

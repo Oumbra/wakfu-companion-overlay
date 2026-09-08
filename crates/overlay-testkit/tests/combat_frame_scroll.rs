@@ -14,10 +14,11 @@
 //! `mesa-vulkan-drivers` sous Linux.
 
 use egui_kittest::Harness;
-use overlay_engine::{FighterDamage, Gender};
+use overlay_engine::{CatalogIndex, FighterDamage, Gender};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::combat_frame_scroll::EnemyFrameScroll;
 use overlay_ui::portraits::PortraitAtlas;
+use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::ui_icons::UiIcons;
 
 /// Ennemi minimal — jamais de classe/portrait (voir la doc de `FighterDamage::class_name` : les
@@ -50,6 +51,13 @@ fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
     let mut portraits: Option<PortraitAtlas> = None;
     let mut combat_frame: Option<CombatFrame> = None;
     let mut icons: Option<UiIcons> = None;
+    // Catalogue vide et store d'icônes sans thread réseau (voir `tests/panels.rs` pour le même
+    // pattern) : ces 14 ennemis synthétiques ne sont résolus par aucun catalogue, le repli
+    // générique (`icons.unknown_entity_texture()`) est donc le rendu attendu ici — ce test vérifie
+    // la géométrie du défilement, pas la résolution d'icône de monstre (couverte ailleurs).
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
@@ -59,14 +67,25 @@ fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
         let portraits = portraits.get_or_insert_with(|| PortraitAtlas::load(&ctx));
         let combat_frame = combat_frame.get_or_insert_with(|| CombatFrame::load(&ctx));
         let icons = icons.get_or_insert_with(|| UiIcons::load(&ctx));
-        EnemyFrameScroll::show(ui, combat_frame, portraits, icons, &refs, total_damage);
+        EnemyFrameScroll::show(
+            ui,
+            combat_frame,
+            portraits,
+            icons,
+            &catalog,
+            &remote_icon_store,
+            &mut remote_icon_textures,
+            &refs,
+            total_damage,
+        );
     });
 
     harness.run();
     harness.snapshot("combat_frame_scroll_14_ennemis");
 
-    // Scrollbar cachée par défaut (voir doc de module d'`EnemyFrameScroll`) : la révéler exige de
-    // survoler le cadre entier — `outer_margin(8.0)` ajouté par `Harness::new_ui` (voir
+    // Scrollbar TOUJOURS visible (voir doc de module d'`EnemyFrameScroll` — revirement 2026-09-08,
+    // plus de condition de survol) : ce second snapshot ne sert donc plus qu'à vérifier la tooltip
+    // au survol d'un portrait précis. `outer_margin(8.0)` ajouté par `Harness::new_ui` (voir
     // `tests/panels.rs` pour le même repère), cadre 70×393 : un point bien à l'intérieur suffit.
     harness.hover_at(egui::pos2(8.0 + 35.0, 8.0 + 150.0));
     harness.run();
