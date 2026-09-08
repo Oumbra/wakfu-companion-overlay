@@ -11,7 +11,8 @@ from collections import deque
 
 import numpy as np
 
-from .core import bbox_of, dilate, erode, largest_component, rgb_of
+from .core import (bbox_of, connected_components, dilate, erode,
+                   largest_component, rgb_of)
 
 
 def flood_background(rgb: np.ndarray, tol: int = 12) -> np.ndarray:
@@ -87,23 +88,44 @@ def recover_border(rgb: np.ndarray, comp: np.ndarray, bg: np.ndarray,
                  "pixels_recovered": int(cur.sum() - comp.sum())}
 
 
+def _keep_significant(fg: np.ndarray, min_ratio: float) -> np.ndarray:
+    """Ne garde que les composantes dont l'aire atteint `min_ratio` × la plus grande.
+
+    Une capture d'onglets contient plusieurs composants de taille comparable ; le décor
+    y ajoute des éclats de quelques pixels. Le rapport à la plus grande composante les
+    sépare sans avoir à fixer un seuil absolu qui dépendrait de l'échelle de la
+    capture."""
+    labels, n = connected_components(fg)
+    if n <= 1:
+        return fg
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    keep = sizes >= max(sizes.max() * min_ratio, 1)
+    keep[0] = False
+    return keep[labels]
+
+
 def component_mask(rgba: np.ndarray, tol: int = 12, keep_largest: bool = True,
-                   border: bool = True, report: dict | None = None) -> np.ndarray:
-    """Masque binaire du composant (décor retiré, plus grande composante conservée)."""
+                   border: bool = True, report: dict | None = None,
+                   min_ratio: float = 0.1) -> np.ndarray:
+    """Masque binaire du composant (décor retiré).
+
+    `keep_largest` conserve la seule plus grande composante ; sinon toutes celles qui
+    atteignent `min_ratio` de son aire — c'est le mode des captures qui montrent
+    plusieurs composants côte à côte (barre d'onglets, groupe de boutons)."""
     rgb = rgb_of(rgba)
     bg = flood_background(rgb, tol)
     fg = ~bg
     # bouche les trous internes (le décor ne peut pas être « à l'intérieur »)
     fg = ~largest_component(~fg, connectivity=4) if (~fg).any() else fg
-    if keep_largest and fg.any():
-        fg = largest_component(fg)
+    if fg.any():
+        fg = largest_component(fg) if keep_largest else _keep_significant(fg, min_ratio)
     if border and fg.any():
         fg, diag = recover_border(rgb, fg, ~fg)
         if report is not None:
             report["border_recovery"] = diag
         fg = ~largest_component(~fg, connectivity=4) if (~fg).any() else fg
-        if keep_largest:
-            fg = largest_component(fg)
+        fg = largest_component(fg) if keep_largest else _keep_significant(fg, min_ratio)
     return fg
 
 
@@ -180,29 +202,62 @@ def bleed_edges(rgba: np.ndarray, solid: np.ndarray, passes: int = 3) -> np.ndar
 
 
 def cutout(rgba: np.ndarray, tol: int = 12, radius: int | None = None,
-           crop: bool = True, feather_inset: float = 0.0, border: bool = True):
+           crop: bool = True, feather_inset: float = 0.0, border: bool = True,
+           keep: str = "largest"):
     """Détoure le composant : alpha géométrique (rectangle arrondi) + recadrage.
+
+    `keep="all"` traite une capture qui montre plusieurs composants côte à côte : un
+    rectangle arrondi est ajusté **sur chacun**, et les alphas sont réunis. Un seul
+    rectangle englobant les recouvrirait avec les gouttières de décor entre eux.
 
     Retourne (image RGBA détourée, métadonnées)."""
     diag: dict = {}
-    mask = component_mask(rgba, tol=tol, border=border, report=diag)
-    x0, y0, x1, y1, r_fit, iou = fit_rounded_rect(mask)
-    r = float(radius) if radius is not None else r_fit
+    mask = component_mask(rgba, tol=tol, border=border, report=diag,
+                          keep_largest=(keep != "all"))
     h, w = mask.shape
-    alpha = rounded_rect_alpha(w, h, x0 + feather_inset, y0 + feather_inset,
-                               x1 - feather_inset, y1 - feather_inset, max(r - feather_inset, 0))
+    if keep == "all":
+        labels, n = connected_components(mask)
+        pieces = [labels == i for i in range(1, n + 1)]
+        pieces.sort(key=lambda m: bbox_of(m)[0])
+    else:
+        pieces = [mask]
+
+    alpha = np.zeros((h, w))
+    parts = []
+    for piece in pieces:
+        px0, py0, px1, py1, r_fit, iou = fit_rounded_rect(piece)
+        r = float(radius) if radius is not None else r_fit
+        a = rounded_rect_alpha(w, h, px0 + feather_inset, py0 + feather_inset,
+                               px1 - feather_inset, py1 - feather_inset,
+                               max(r - feather_inset, 0))
+        alpha = np.maximum(alpha, a)
+        parts.append({"bbox": [int(px0), int(py0), int(px1), int(py1)],
+                      "size": [int(px1 - px0), int(py1 - py0)],
+                      "radius": round(float(r), 2),
+                      "radius_fit_iou": round(iou, 4)})
+
     solid = erode(alpha >= 0.999, 1)
     out = bleed_edges(rgba, solid, passes=3)
     out[..., 3] = np.round(np.clip(alpha, 0, 1) * 255).astype(np.uint8)
+
+    x0 = min(p["bbox"][0] for p in parts)
+    y0 = min(p["bbox"][1] for p in parts)
+    x1 = max(p["bbox"][2] for p in parts)
+    y1 = max(p["bbox"][3] for p in parts)
     meta = {
-        "bbox": [int(x0), int(y0), int(x1), int(y1)],
-        "size": [int(x1 - x0), int(y1 - y0)],
-        "radius": round(float(r), 2),
-        "radius_fit_iou": round(iou, 4),
-        "margins": {"left": int(x0), "top": int(y0),
-                    "right": int(w - x1), "bottom": int(h - y1)},
+        "bbox": [x0, y0, x1, y1],
+        "size": [x1 - x0, y1 - y0],
+        "radius": parts[0]["radius"],
+        "radius_fit_iou": parts[0]["radius_fit_iou"],
+        "margins": {"left": x0, "top": y0, "right": int(w - x1), "bottom": int(h - y1)},
         **diag,
     }
+    if len(parts) > 1:
+        meta["parts"] = parts
     if crop:
-        out = out[int(y0):int(y1), int(x0):int(x1)]
+        out = out[y0:y1, x0:x1]
+        # les parties sont rapportées dans le repère de l'image rendue
+        for p in parts:
+            b = p["bbox"]
+            p["bbox"] = [b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0]
     return out, meta
