@@ -19,3 +19,7 @@ xtask/visual-check.png
 # (seule l'image de référence sous tests/snapshots/*.png l'est).
 crates/overlay-testkit/tests/snapshots/*.diff.png
 crates/overlay-testkit/tests/snapshots/*.old.png
+
+# Caches Python des scripts de skills
+__pycache__/
+*.py[cod]
