@@ -193,16 +193,28 @@ def cmd_genericize(a):
 
 def cmd_icon(a):
     rgba = load_rgba(a.image)
+    meta = {}
     if a.from_button:
-        rgba, _ = cutout(rgba, tol=a.tol)
-    icon, _hard, rep = extract_icon(rgba, polarity=a.polarity, keep=a.keep,
+        rgba, meta = cutout(rgba, tol=a.tol)
+    inset = a.roi_inset
+    if inset < 0:
+        # La bordure du bouton porteur est sombre et tranche sur son remplissage : sans
+        # retrait de cette couronne, elle est prise pour le glyphe et le masque couvre
+        # tout le bouton.
+        inset = (int(meta.get("border_recovery", {}).get("rings_kept", 1)) + 2
+                 if a.from_button else 0)
+    roi = rgba[..., 3] > 128
+    if inset > 0:
+        roi = erode(roi, inset)
+    icon, _hard, rep = extract_icon(rgba, roi=roi, polarity=a.polarity, keep=a.keep,
                                     box=_box(a.box), floor=a.floor, k=a.k)
     if a.size:
         out = fit_box(icon, a.size, a.padding)
     else:
         out, _ = trim(icon)
     save_rgba(out, a.output)
-    _emit({"input": str(a.image), "output": str(a.output),
+    _emit({"input": str(a.image), "output": str(a.output), "roi_inset": inset,
+           "button": meta.get("size"),
            "glyph_bbox": rep["bbox"], "size": [int(out.shape[1]), int(out.shape[0])]})
 
 
