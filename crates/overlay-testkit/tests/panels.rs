@@ -506,12 +506,27 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// 24×24 pour voir le rendu »). Hauteur de colonne `CONTROL_BUTTON_GAP*3+24*2 = 60px`, toujours
 /// PLUS HAUTE que la tuile d'entrée juste à côté (58px, `TILE_SIZE`) — de justesse —, donc encore la
 /// référence de centrage vertical de `ui.horizontal`, sans décalage.
+///
+/// **Recalculée à la refonte 2026-09-08** (déplacement Détails/Options depuis Combat, voir doc de
+/// module) : le carré passe de 1×2 à 2×2 :
+/// ```text
+/// [+] [−]
+/// [Détails] [Options]
+/// ```
+/// "−" vient maintenant à DROITE de "+" (plus en dessous), avec une infobulle à DROITE
+/// (`show_tooltip_right`, colonne droite — voir doc de module « infobulle par colonne, pas par
+/// bouton ») au lieu de GAUCHE : ce test, à l'origine centré sur "+"/"−", couvre donc aussi
+/// "Détails"/"Options" ci-dessous, mêmes abscisses que "+"/"−" (même colonne), une ligne plus bas.
+///
 /// Base commune : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 88 (réserve) +
 /// 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié de 24, centre du bouton) = 118 ;
-/// y = 14 + 4 (même marge, haut du fond) + 12 = 30. Bouton "−" : MÊME x (empilé) = 118 ;
-/// y = 30 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux) = 58.
+/// y = 14 + 4 (même marge, haut du fond) + 12 = 30 — INCHANGÉ, "+" garde sa place. Bouton "−" :
+/// x = 118 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux colonnes)
+/// = 146 ; MÊME y (même ligne) = 30. "Détails" : MÊME x que "+" (même colonne) = 118 ;
+/// y = 30 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 58. "Options" : MÊME x que
+/// "−" (même colonne) = 146 ; MÊME y que "Détails" (même ligne) = 58.
 #[test]
-fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
+fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
     let remote_icon_store = RemoteIconStore::empty();
@@ -565,9 +580,17 @@ fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
     harness.run();
     harness.snapshot("watchlist_tooltip_ajouter_a_gauche");
 
+    harness.hover_at(egui::pos2(146.0, 30.0));
+    harness.run();
+    harness.snapshot("watchlist_tooltip_supprimer_a_droite");
+
     harness.hover_at(egui::pos2(118.0, 58.0));
     harness.run();
-    harness.snapshot("watchlist_tooltip_supprimer_a_gauche");
+    harness.snapshot("watchlist_tooltip_details_a_gauche");
+
+    harness.hover_at(egui::pos2(146.0, 58.0));
+    harness.run();
+    harness.snapshot("watchlist_tooltip_options_a_droite");
 }
 
 /// Reproduit le test utilisateur 2026-09-06 (capture d'écran à l'appui) : deux décomptes à
