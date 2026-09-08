@@ -52,7 +52,7 @@ emportait la texture avec elle. Le symptôme est reconnaissable — une bbox de 
 fait la taille du bouton.
 
 **Les tailles natives sont conservées volontairement.** Les glyphes vont de 8 × 10 à
-19 × 16 : ces écarts sont dans le jeu (un triangle de lecture est plus petit qu'une paire
+16 × 12 : ces écarts sont dans le jeu (un triangle de lecture est plus petit qu'une paire
 de flèches de tri) et les normaliser tous à 24 px détruirait ce rapport tout en
 rééchantillonnant une image de 16 px. Ajouter `--size 24 --padding 2` seulement si une
 grille d'icônes homogène est explicitement voulue.
