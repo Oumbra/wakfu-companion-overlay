@@ -36,6 +36,7 @@ use overlay_ingest::Tailer;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_ui::panels::options_modal::OptionsModalState;
 use overlay_ui::panels::watchlist::{
     build_confetti, WatchlistToast, WatchlistToastReason, TOAST_DURATION,
 };
@@ -160,6 +161,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 auth_command_tx: &auth_sink,
                 interactive: true,
                 now,
+                options: None,
             },
         );
     });
@@ -215,6 +217,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 auth_command_tx: &auth_sink,
                 interactive: true,
                 now,
+                options: None,
             },
         );
     });
@@ -273,6 +276,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 auth_command_tx: &auth_sink,
                 interactive: true,
                 now,
+                options: None,
             },
         );
     });
@@ -416,6 +420,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 auth_command_tx: &auth_sink,
                 interactive: true,
                 now,
+                options: None,
             },
         );
     });
@@ -473,6 +478,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 auth_command_tx: &auth_sink,
                 interactive: true,
                 now,
+                options: None,
             },
         );
     });
@@ -570,6 +576,7 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
                     auth_command_tx: &auth_sink,
                     interactive: true,
                     now,
+                    options: None,
                 },
             );
         });
@@ -650,10 +657,62 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 auth_command_tx: &auth_sink,
                 interactive: true,
                 now,
+                options: None,
             },
         );
     });
 
     harness.run();
     harness.snapshot("watchlist_decompte_grandes_valeurs");
+}
+
+/// Modale Options (2026-09-08, §9 du plan) — chrome pur (`panels::options_modal`), pas de rejeu de
+/// log nécessaire (aucun de ses champs ne dépend d'un `SessionSnapshot`). Couvre les DEUX états
+/// visuels : champ rempli sans erreur, ET message d'erreur affiché (guard de nom de fichier, voir
+/// `overlay_ingest::discovery::validate_log_path`) — les deux chemins de `panels::options_modal::
+/// show` qui peignent réellement des choses différentes.
+#[test]
+fn panneau_options_ne_panique_pas() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let mut options_state = OptionsModalState {
+        path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+        error: Some("Le fichier sélectionné doit s'appeler wakfu.log.".to_string()),
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Options,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+                options: Some(&mut options_state),
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("options_modale_avec_erreur");
 }

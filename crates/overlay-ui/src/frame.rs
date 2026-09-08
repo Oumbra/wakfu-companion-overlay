@@ -6,7 +6,7 @@
 
 use egui_wgpu::wgpu;
 
-use crate::render_content::{build_ui, RenderContent};
+use crate::render_content::{build_ui, RenderContent, RenderOutcome};
 
 /// État GPU/egui d'UNE fenêtre overlay — un par fenêtre, jamais partagé (voir la doc
 /// d'`OverlayWindow` dans chaque binaire).
@@ -41,13 +41,14 @@ pub struct GpuState {
 /// `wgpu::Surface`. Renvoie le délai de redessin demandé par egui pour CETTE fenêtre
 /// (`ViewportOutput::repaint_delay`, ex. le délai d'apparition d'une tooltip) — voir le champ
 /// `next_redraw_at` de chaque binaire pour pourquoi l'appelant doit impérativement en tenir
-/// compte, cette architecture n'ayant pas de boucle de rendu continue — ainsi que si CETTE frame
-/// doit effacer le toast affiché (voir la doc de `build_ui`).
+/// compte, cette architecture n'ayant pas de boucle de rendu continue — ainsi que le
+/// [`RenderOutcome`] produit par cette frame (fermeture du toast, ouverture/action de la modale
+/// Options — voir sa doc et celle de `build_ui`).
 pub fn render(
     gpu: &mut GpuState,
     window: &winit::window::Window,
     content: RenderContent<'_>,
-) -> (std::time::Duration, bool) {
+) -> (std::time::Duration, RenderOutcome) {
     // Copiés hors de `content` (tous deux `Copy`) AVANT qu'il ne soit déplacé dans `build_ui` —
     // réutilisés juste en dessous pour le calcul du délai de redessin, sur la MÊME référence de
     // temps que celle vue par le contenu peint (voir la doc de `RenderContent::now`).
@@ -55,7 +56,7 @@ pub fn render(
     let watchlist_toast = content.watchlist_toast;
 
     let raw_input = gpu.egui_winit.take_egui_input(window);
-    let (mut full_output, close_toast) = build_ui(&gpu.egui_ctx, raw_input, content);
+    let (mut full_output, outcome) = build_ui(&gpu.egui_ctx, raw_input, content);
 
     // Repli `Duration::MAX` ("pas de redessin demandé") si jamais le viewport racine n'a pas
     // d'entrée — ne devrait pas arriver en pratique (une seule fenêtre racine par `egui::Context`,
@@ -143,7 +144,7 @@ pub fn render(
                     OCCLUDED_RETRY_INTERVAL.as_millis()
                 );
             }
-            return (repaint_delay.min(OCCLUDED_RETRY_INTERVAL), close_toast);
+            return (repaint_delay.min(OCCLUDED_RETRY_INTERVAL), outcome);
         }
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             gpu.surface.configure(&gpu.device, &gpu.config);
@@ -154,7 +155,7 @@ pub fn render(
             // `request_redraw` ici force une nouvelle tentative dès le prochain tour de la boucle
             // d'événements, sur la surface qui vient d'être reconfigurée juste au-dessus.
             window.request_redraw();
-            return (repaint_delay, close_toast);
+            return (repaint_delay, outcome);
         }
         wgpu::CurrentSurfaceTexture::Validation => {
             // PAS de `request_redraw` ici, contrairement à Outdated/Lost ci-dessus : cette
@@ -163,7 +164,7 @@ pub fn render(
             // nouveau à chaque tick reviendrait à la boucle de rendu continue que cette
             // architecture évite justement (§6.1). Se contente de journaliser.
             tracing::warn!("get_current_texture: erreur de validation");
-            return (repaint_delay, close_toast);
+            return (repaint_delay, outcome);
         }
     };
     // Sortie de l'occlusion (voir son entrée ci-dessus) : cette frame-ci a réussi
@@ -222,7 +223,7 @@ pub fn render(
 
     gpu.queue.submit(Some(encoder.finish()));
     gpu.queue.present(output_frame);
-    (repaint_delay, close_toast)
+    (repaint_delay, outcome)
 }
 
 /// Recrée `gpu.surface` de zéro à partir de `gpu.instance` (même `device`/`queue` conservés,

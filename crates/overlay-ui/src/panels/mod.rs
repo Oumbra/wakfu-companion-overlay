@@ -4,8 +4,10 @@
 //! récap reste inline dans `main.rs::render` (voir la doc de tête de ce fichier pour le périmètre
 //! exact).
 
+pub mod chamfer;
 pub mod combat;
 pub mod combat_frame;
 pub mod combat_frame_scroll;
 pub mod icon_button;
+pub mod options_modal;
 pub mod watchlist;

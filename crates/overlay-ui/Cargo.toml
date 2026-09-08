@@ -23,7 +23,10 @@ image = { version = "0.25", default-features = false, features = ["png", "webp"]
 open = "5"
 pollster = "1.0.1"
 raw-window-handle = "0.6"
+rfd = "0.15"
 rodio = { version = "0.21", default-features = false, features = ["mp3", "playback"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

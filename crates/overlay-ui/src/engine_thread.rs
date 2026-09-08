@@ -35,6 +35,16 @@ use crate::render_content::UserEvent;
 pub enum EngineCommand {
     ApplySettings(AccountSettings),
     Disconnect,
+    /// Nouveau chemin de `wakfu.log` à suivre, choisi par l'utilisateur via la modale Options
+    /// (2026-09-08, §5.1/§9 du plan) — voir `panels::options_modal`. Traité en respawnant SEULEMENT
+    /// le watcher (`overlay_ingest::watcher::spawn`) sur le nouveau chemin, jamais en recréant
+    /// l'`Engine` : le rattrapage `is_initial_load=true` d'un tailer flambant neuf resynchronise
+    /// déjà le PARSER (§5.3 du plan — vrai à CHAQUE rattrapage, rotation ou changement de chemin,
+    /// pas seulement au premier), et conserver le roster/watchlist/sound_items déjà appliqués évite
+    /// de perdre la configuration du compte lié pour un simple changement d'emplacement de fichier.
+    /// `state` (combats/totaux Rust) suit alors la même règle que pour une rotation classique —
+    /// écart déjà assumé et documenté au §5.3, pas une régression propre à ce nouveau cas.
+    ChangeLogPath(PathBuf),
 }
 
 /// Message transmis au thread Sync (lot L5, §7.3 du plan) — `Activate`/`Deactivate` suivent
@@ -97,7 +107,10 @@ pub fn spawn_engine_thread(
             // révèle (mimique, brèche) confondu à tort avec une invocation.
             let mut last_seen_catalog: Option<Arc<CatalogIndex>> = None;
             let mut last_seen_dungeons: Option<Arc<DungeonIndex>> = None;
-            let rx = overlay_ingest::watcher::spawn(&log_path);
+            // `mut` depuis `EngineCommand::ChangeLogPath` (2026-09-08, voir sa doc) : un nouveau
+            // chemin respawne un tailer flambant neuf sur CE `rx`, remplaçant l'ancien récepteur —
+            // l'ancien thread watcher se termine de lui-même dès que son émetteur est abandonné ici.
+            let mut rx = overlay_ingest::watcher::spawn(&log_path);
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
@@ -129,6 +142,14 @@ pub fn spawn_engine_thread(
                             engine.set_roster(None);
                             engine.set_watchlist_entries(Vec::new());
                             engine.set_sound_items(Vec::new());
+                        }
+                        EngineCommand::ChangeLogPath(new_path) => {
+                            tracing::info!(
+                                "[options] nouveau fichier de log : {} (ancien thread watcher \
+                                 abandonné, rattrapage complet du nouveau fichier)",
+                                new_path.display()
+                            );
+                            rx = overlay_ingest::watcher::spawn(&new_path);
                         }
                     }
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
