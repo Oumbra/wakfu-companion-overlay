@@ -22,7 +22,8 @@ l'icône représente.
 
 ## Réglages retenus
 
-Tous avec `--from-button`, sortie en taille native (pas de `--size`).
+Tous avec `--from-button`, sortie en taille native (pas de `--size`) et teinte blanche
+appliquée en fin de pipeline (défaut).
 
 | Icône | Options supplémentaires | Glyphe |
 | --- | --- | --- |
@@ -57,8 +58,15 @@ de flèches de tri) et les normaliser tous à 24 px détruirait ce rapport tout 
 rééchantillonnant une image de 16 px. Ajouter `--size 24 --padding 2` seulement si une
 grille d'icônes homogène est explicitement voulue.
 
-**Le contour sombre du glyphe est conservé.** Il fait partie du dessin en jeu — c'est lui
-qui rend un glyphe blanc lisible sur fond clair.
+**Le contour sombre du glyphe est conservé pendant l'extraction**, puis absorbé par la
+teinte. Il fait partie du dessin en jeu, et sa présence pendant le détourage est ce qui
+donne la bonne silhouette ; une fois l'icône blanche, il devient du blanc lui aussi.
+
+**La teinte se pose à plat.** Sur les 16 icônes du dossier, `--tint-mode flat` donne le
+meilleur résultat, y compris sur les glyphes à deux tons : le carnet de `icon-save` garde
+sa silhouette parce qu'elle est déjà un creux transparent, pas une zone claire. Les modes
+`holes` / `invert`, qui creusent les tons internes, dégradent au contraire les glyphes
+pleins — le chevron et le plus deviennent des contours vides.
 
 **Une ombre portée n'est pas un contour.** `icon-order` (barres noires sur beige uni) porte
 un halo beige sombre de 2–3 px qui n'appartient pas au dessin : il passait pour une

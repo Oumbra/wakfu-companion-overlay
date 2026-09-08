@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dslib import sheet as sh                                       # noqa: E402
 from dslib.content import content_report, detect_content            # noqa: E402
 from dslib.core import erode, load_rgba, luma, rgb_of, save_rgba    # noqa: E402
-from dslib.icon import extract_icon, fit_box, trim                  # noqa: E402
+from dslib.icon import extract_icon, fit_box, tint, trim            # noqa: E402
 from dslib.inpaint import inpaint_diffusion, inpaint_offsets        # noqa: E402
 from dslib.scale9 import scale9                                     # noqa: E402
 from dslib.segment import component_mask, cutout, fit_rounded_rect  # noqa: E402
@@ -48,6 +48,15 @@ def _insets(s):
     if len(v) != 4:
         raise argparse.ArgumentTypeError("format attendu : l,t,r,b (ou une valeur unique)")
     return tuple(v)
+
+
+def _color(s):
+    s = s.strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6:
+        raise argparse.ArgumentTypeError("couleur attendue en hexadecimal, ex. ffffff")
+    return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
 
 
 def _emit(data):
@@ -210,6 +219,9 @@ def cmd_icon(a):
                                     box=_box(a.box), floor=a.floor, k=a.k, grow=a.grow,
                                     residual=a.residual, alpha_floor=a.alpha_floor,
                                     rim_gain=a.rim_gain)
+    tint_info = None
+    if a.tint:
+        icon, tint_info = tint(icon, a.tint, a.tint_mode, a.tint_contrast)
     if a.size:
         out = fit_box(icon, a.size, a.padding)
     else:
@@ -219,7 +231,15 @@ def cmd_icon(a):
            "button": meta.get("size"), "glyph_bbox": rep["bbox"],
            "core_pixels": rep.get("core_pixels"), "rim_pixels": rep.get("rim_pixels"),
            "band_kept": rep.get("band_kept"), "band_rejected": rep.get("band_rejected"),
+           "tint": tint_info,
            "size": [int(out.shape[1]), int(out.shape[0])]})
+
+
+def cmd_tint(a):
+    rgba = load_rgba(a.image)
+    out, info = tint(rgba, a.color, a.mode, a.min_contrast)
+    save_rgba(out, a.output)
+    _emit({"input": str(a.image), "output": str(a.output), "color": list(a.color), **info})
 
 
 # ------------------------------------------------------------- harmonisation
@@ -360,8 +380,24 @@ def main(argv=None):
                    help="alpha en dessous duquel un pixel est efface")
     p.add_argument("--rim-gain", dest="rim_gain", type=float, default=2.4,
                    help="durete du seuil du cerne, en multiple du seuil du coeur")
+    p.add_argument("--tint", type=_color, default=(255, 255, 255), metavar="HEX",
+                   help="couleur monochrome de sortie (defaut : blanc)")
+    p.add_argument("--no-tint", dest="tint", action="store_const", const=None,
+                   help="garde les couleurs d'origine du glyphe")
+    p.add_argument("--tint-mode", dest="tint_mode",
+                   choices=["flat", "holes", "invert", "auto"], default="flat")
+    p.add_argument("--tint-contrast", dest="tint_contrast", type=float, default=40.0,
+                   help="contraste interne en deca duquel la teinte reste uniforme")
     content_opts(p)
     p.set_defaults(func=cmd_icon)
+
+    p = sub.add_parser("tint", help="rend une icone deja detouree monochrome")
+    p.add_argument("image")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--color", type=_color, default=(255, 255, 255), metavar="HEX")
+    p.add_argument("--mode", choices=["flat", "holes", "invert", "auto"], default="flat")
+    p.add_argument("--min-contrast", dest="min_contrast", type=float, default=40.0)
+    p.set_defaults(func=cmd_tint)
 
     p = sub.add_parser("resize", help="redimensionne en 9-slice (coins preserves)")
     p.add_argument("image")
