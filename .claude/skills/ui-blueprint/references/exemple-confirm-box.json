@@ -1,0 +1,143 @@
+{
+  "title": "Boîte de confirmation",
+  "subtitle": "Fenêtre modale de confirmation destructive du client Wakfu, relevée au pixel pour servir de référence au portage egui.",
+  "source": "assets/design-system/interfaces/interface-confirm-box.png",
+  "canvas": [
+    449,
+    209
+  ],
+  "scale": 1.6,
+  "nodes": [
+    {
+      "id": "crest",
+      "label": "Décor sommital",
+      "box": [
+        170,
+        0,
+        280,
+        44
+      ],
+      "role": "icon",
+      "notes": "Médaillon « ? » débordant du panneau, centré sur l'axe vertical."
+    },
+    {
+      "id": "panel",
+      "label": "Panneau",
+      "box": [
+        10,
+        44,
+        440,
+        196
+      ],
+      "role": "surface",
+      "radius": 6,
+      "fill": "#585958",
+      "padding": [
+        17,
+        27,
+        17,
+        32
+      ],
+      "notes": "Fond uni #585958, ombre portée diffuse sur le décor de jeu.",
+      "children": [
+        {
+          "id": "message",
+          "label": "Message",
+          "box": [
+            27,
+            71,
+            427,
+            102
+          ],
+          "role": "text",
+          "notes": "2 lignes, hauteur d'encre 10 px (≈ 14 px de corps), interligne 13 px, centré."
+        },
+        {
+          "id": "actions",
+          "label": "Barre d'actions",
+          "box": [
+            53,
+            127,
+            395,
+            161
+          ],
+          "role": "group",
+          "notes": "Deux boutons, gouttière 17 px, alignés au centre du panneau.",
+          "children": [
+            {
+              "id": "btn-cancel",
+              "label": "Non",
+              "box": [
+                53,
+                127,
+                219,
+                161
+              ],
+              "role": "control",
+              "radius": 4,
+              "fill": "#6b624d",
+              "notes": "Bouton secondaire : remplissage brun, libellé gris clair."
+            },
+            {
+              "id": "btn-confirm",
+              "label": "Oui",
+              "box": [
+                236,
+                127,
+                395,
+                161
+              ],
+              "role": "control",
+              "radius": 4,
+              "fill": "#e2c77a",
+              "notes": "Bouton primaire : remplissage doré, libellé brun foncé."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tokens": {
+    "color": {
+      "surface": "#585958",
+      "border": "#161717",
+      "primary": "#e2c77a",
+      "primary-light": "#e8d28b",
+      "secondary": "#6b624d",
+      "secondary-light": "#746a53"
+    },
+    "space": [
+      4,
+      8,
+      13,
+      17,
+      27,
+      32
+    ],
+    "radius": {
+      "panel": "6",
+      "control": "4"
+    },
+    "type": [
+      {
+        "name": "message",
+        "size": "14",
+        "weight": "regular",
+        "color": "#d9d5cc",
+        "usage": "corps de la question, centré, 2 lignes maximum"
+      },
+      {
+        "name": "action",
+        "size": "14",
+        "weight": "semibold",
+        "color": "#3a3226",
+        "usage": "libellé de bouton, capitale initiale"
+      }
+    ]
+  },
+  "notes": [
+    "Le médaillon déborde du panneau de 44 px vers le haut : prévoir une zone de dessin plus grande que le panneau lui-même.",
+    "Les deux boutons n'ont pas la même largeur dans la capture (166 et 159 px) — l'écart vient du rendu du libellé, pas d'une règle de mise en page.",
+    "Aucune bordure visible sur le panneau : la séparation avec le décor tient à l'ombre portée."
+  ]
+}
