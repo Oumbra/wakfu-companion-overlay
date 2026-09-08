@@ -38,6 +38,8 @@ appliquée en fin de pipeline (défaut).
 | `icon-triangle-right` | `--tol 4` | 8 × 10 |
 | `icon-chevron-down` | `--polarity dark --keep center --floor 45` | 14 × 8 |
 | `icon-save` | `--tol 4 --polarity dark --keep center --floor 45` | 12 × 12 |
+| `icon-tick` | `--polarity dark --keep center --floor 45` | 12 × 9 |
+| `icon-pin` | *sans* `--from-button` | 14 × 14 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -72,6 +74,12 @@ un gris à mi-chemin devient blanc à moitié transparent.
 luminance médiane classait `icon-plus` comme un glyphe sombre, parce que son cerne couvre
 plus de pixels que la croix qu'il entoure — le résultat était une croix creuse. Comparer
 le cœur de la silhouette à son bord range correctement les 16 icônes.
+
+**Toutes les captures ne sont pas des boutons.** `icon-pin` est un glyphe posé à même le
+décor sombre, sans bouton porteur : `--from-button` n'a rien à détourer et fausse tout.
+Le glyphe est alors cherché dans l'image entière, ce qui marche parce que le décor est
+uniforme. Signe distinctif dans `analyze` : le « composant » détecté fait la taille du
+glyphe (14 × 14 ici) et non celle d'un bouton, et `border` est `null`.
 
 **Après creusage, recadrer.** Le cerne devenu transparent laisse des marges : `dsimg.py
 tint` retrime par défaut (`--no-trim` pour l'éviter). C'est ce qui fait passer `icon-plus`

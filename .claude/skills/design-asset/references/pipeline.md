@@ -11,6 +11,7 @@ intervenir dans le code plutôt qu'avec une option.
 | `dslib/segment.py` | Séparation décor / composant, ajustement du rectangle arrondi, décontamination des bords, `cutout`. |
 | `dslib/content.py` | Détection du contenu incrusté (libellé, valeur, glyphe) et rapport de composantes. |
 | `dslib/inpaint.py` | Reconstruction du fond : moteur `offsets` (défaut) et moteur `diffusion`. |
+| `dsimg.strip_parts` | Applique le retrait zone par zone (`--parts`, `--components all`). |
 | `dslib/icon.py` | Extraction de glyphe avec alpha progressif + démélange, recadrage, mise à l'échelle prémultipliée. |
 | `dslib/scale9.py` | Redimensionnement 9-slice (`stretch` / `tile` / `mirror`). |
 | `dslib/sheet.py` | Fragment HTML de contrôle (thème clair/sombre, damier, base64). |
@@ -71,7 +72,11 @@ géométrique.
 
 1. Fond estimé ligne par ligne : médiane + MAD sur le ROI, en excluant le masque de
    l'itération précédente (3 itérations).
-2. Seuil : `max(k × MAD, floor)` sur l'écart de luminance. Polarité `light` / `dark` /
+2. Seuil : `floor` seul à la première itération, `max(k × MAD, floor)` ensuite. Le MAD
+   n'a de sens qu'une fois le contenu exclu : tant que le masque est vide il est gonflé
+   par le contenu lui-même, et sur un libellé qui occupe la moitié de la ligne il monte
+   assez haut (≈ 39, soit un seuil de 195) pour qu'aucun pixel ne le franchisse — la
+   boucle d'exclusion itérative ne démarre alors jamais. Polarité `light` / `dark` /
    `both` / `auto` (la plus fournie des deux).
 3. Filtrage par aire (`min_area`), dilatation `grow`, puis passe « halo » à seuil abaissé
    au voisinage immédiat pour récupérer contour et ombre du texte.
@@ -81,6 +86,13 @@ un bouton-icône, où le glyphe occupe une trop grande part de chaque ligne pour
 médiane de ligne reste sur le fond. `icon` le calcule automatiquement (≈ largeur / 6).
 
 ## 5. Reconstruction — `inpaint.inpaint_offsets`
+
+La **zone source** (`valid`) délimite ce qui peut servir de référence et être recopié.
+Par défaut c'est tout ce qui n'est pas le trou ; `strip` la restreint au ROI, c'est-à-dire
+au composant privé de sa couronne de bordure. Sans cette restriction, sur un composant
+étroit, les seuls décalages disponibles vont chercher leurs pixels dans le liseré sombre
+et le repeignent au milieu — et `row_match` aggrave le défaut en calculant son niveau de
+référence sur une ligne qui contient ce liseré.
 
 Pour chaque décalage candidat (dy, dx) :
 
@@ -97,6 +109,12 @@ valides de la même ligne. Ce qui reste non couvert part en diffusion.
 
 Sur `button-secondary.png`, les décalages retenus sont horizontaux (`dx` ≈ 38 à 50, `dy` = 0) :
 c'est la période des hachures diagonales, ce qui explique que le motif se prolonge.
+
+`max_dy` vaut par défaut la hauteur du masque plus 2 px. Un libellé qui court sur toute la
+largeur du composant ne laisse aucune texture propre à sa gauche ni à sa droite : le seul
+décalage qui l'enjambe est vertical, et il doit valoir au moins sa hauteur. Sur
+`button-disabled.png` ce sont des `dy` = ±8 qui gagnent, là où l'ancienne borne de 6 px ne
+laissait le choix qu'entre des copies d'autres lettres.
 
 ## 6. Icône — `icon.extract_icon`
 
