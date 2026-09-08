@@ -66,3 +66,22 @@ diagonale claire, plus aucun décalage ne passe le critère de couverture et la
 reconstruction retombe sur la diffusion. La variante `disabled`, elle, est grise et peu
 contrastée : à 45 le manche du marteau échappe au masque et laisse une traînée. Deux
 variantes du même composant, deux seuils.
+
+**Les coins arrondis sont le premier endroit où le détourage casse.** Deux causes, toutes
+deux corrigées, et toutes deux invisibles ailleurs que dans un coin :
+
+- la récupération de bordure absorbait l'anneau *entier* dès que sa continuité était
+  atteinte. La dilatation par un carré ajoute, en diagonale d'un coin arrondi, des pixels
+  qui sont du décor : la boîte gonflait de 2 px, le rayon ajusté tombait à 4 au lieu de 6,
+  et l'alpha laissait passer un éclat de décor à la place du liseré noir. Ce sont
+  désormais les pixels qui tranchent, un à un, qui entrent — la continuité ne décide plus
+  que si l'anneau *est* un liseré. Sur `button-icon`, `radius_fit_iou` passe de 0,93 à
+  0,97 ;
+- la décontamination réécrivait le pixel opaque le plus extérieur avec la moyenne de ses
+  voisins. Sur un bord droit ces voisins sont du liseré, donc rien ne bouge ; dans un coin
+  la moitié du voisinage est du remplissage, et le noir s'éclaircissait.
+
+Le symptôme à reconnaître sur la planche : dans la vignette des coins, un angle beige ou
+gris là où le bord droit est noir, ou un liseré qui s'amincit en approchant de l'arc.
+`icon-tabs` était le cas le plus visible — sa barre de 268 px porte un cadre épais, et le
+coin en perdait la moitié.
