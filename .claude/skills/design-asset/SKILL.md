@@ -87,9 +87,8 @@ la détection (`--roi-inset`, automatique) ; sans `--size`, la sortie garde la t
 du glyphe, ce qui est le meilleur choix par défaut — les glyphes du jeu n'ont pas tous la
 même taille, et cet écart est signifiant.
 
-**L'icône sort blanche.** Toutes les icônes du design system sont monochromes : le dessin
-est porté par la silhouette et par les creux, la couleur se met au rendu. La teinte est
-donc appliquée en fin de pipeline, sans toucher à l'alpha. `--tint <hex>` pour une autre
+**L'icône sort blanche.** Toutes les icônes du design system sont monochromes : la couleur
+se met au rendu. La teinte est appliquée en fin de pipeline. `--tint <hex>` pour une autre
 couleur, `--no-tint` pour garder les couleurs du jeu, et `dsimg.py tint` pour teinter une
 icône déjà détourée :
 
@@ -97,10 +96,13 @@ icône déjà détourée :
 dsimg.py tint assets/design-system/icons/icon-lock.png -o assets/design-system/icons/icon-lock.png
 ```
 
-Le mode `flat` (défaut) peint les pixels visibles sans rien creuser. `--mode holes` ou
-`invert` transforment au contraire un tracé interne en transparence — à réserver au glyphe
-qui deviendrait illisible une fois aplati ; sur les 16 icônes du dossier, aucun n'en avait
-besoin, `flat` les rend toutes plus nettes.
+Le mode `luma` (défaut) **transfère la luminance dans l'alpha** : un pixel gris à mi-chemin
+devient blanc à 50 % d'opacité. C'est indispensable, car sur ces icônes le modelé — la
+flèche dans la bourse, les traits d'un masque, le cerne d'un signe — est porté par la
+couleur et non par l'alpha. Le repeindre à plat l'efface : la flèche disparaît, et le
+cerne, devenu blanc, épaissit le glyphe. La polarité (creuser le sombre ou le clair) vient
+d'une comparaison entre le cœur de la silhouette et son bord ; `luma-light` / `luma-dark`
+la forcent, `flat` désactive le transfert.
 
 Le réglage se déduit du contraste du glyphe sur son bouton, pas de ce que l'icône
 représente :
