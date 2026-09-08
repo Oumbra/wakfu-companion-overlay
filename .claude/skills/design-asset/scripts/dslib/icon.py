@@ -156,52 +156,65 @@ def extract_icon(rgba: np.ndarray, roi: np.ndarray | None = None, polarity: str 
     }
 
 
-def tint(rgba: np.ndarray, color=(255, 255, 255), mode: str = "flat",
-         min_contrast: float = 40.0, gamma: float = 1.0):
+def tint(rgba: np.ndarray, color=(255, 255, 255), mode: str = "luma",
+         min_contrast: float = 30.0, gamma: float = 1.0):
     """Rend l'icône monochrome, prête à être recolorée au rendu.
 
-    `flat`, le défaut, peint tous les pixels visibles sans toucher à l'alpha. C'est le
-    bon choix sur une icône déjà détourée : le dessin y est porté par la silhouette et
-    par les creux, pas par les tons internes.
+    Le mode `luma` **transfère la luminance dans l'alpha** : un pixel gris à mi-chemin
+    devient la couleur cible à 50 % d'opacité. C'est ce qui préserve le dessin, car sur
+    ces icônes le modelé interne — la flèche dans la bourse, le cerne d'un signe, les
+    traits d'un masque — est porté par la couleur, pas par l'alpha. Le repeindre à plat
+    l'effacerait : tout deviendrait un aplat de la couleur cible.
 
-    Les autres modes transforment un tracé interne en **transparence** — utiles seulement
-    si un glyphe reste illisible une fois aplati :
+    La polarité vient de la comparaison entre le cœur de la silhouette et son bord : un
+    dessin clair creuse ses zones sombres, un dessin sombre (chevron noir, barres) creuse
+    ses zones claires. `luma-light` / `luma-dark` la forcent.
 
-    * `holes`  — le dessin est porté par les zones claires, les zones sombres se creusent.
-    * `invert` — l'inverse (glyphe sombre sur intérieur clair).
-    * `auto`   — choisit entre les deux selon la teinte majoritaire.
+    `flat` repeint sans toucher à l'alpha : à réserver à un glyphe d'un seul ton, où il
+    n'y a rien à transférer.
     """
     out = rgba.copy()
     alpha = rgba[..., 3].astype(np.float64) / 255.0
     vis = alpha > 0.02
     col = np.array(color, np.float64)
+    out[..., :3] = np.round(col).astype(np.uint8)
     if not vis.any() or mode == "flat":
-        out[..., :3] = np.round(col).astype(np.uint8)
         return out, {"mode": "flat", "contrast": None}
 
     lum = luma(rgb_of(rgba).astype(np.float64))
     vals = lum[vis]
-    lo, hi = float(np.percentile(vals, 12)), float(np.percentile(vals, 92))
+    lo, hi = float(np.percentile(vals, 2)), float(np.percentile(vals, 98))
     contrast = hi - lo
     if contrast < min_contrast:
-        # Glyphe d'un seul ton : rien à creuser, la nuance ne serait que du bruit.
-        out[..., :3] = np.round(col).astype(np.uint8)
+        # Glyphe d'un seul ton : la nuance restante n'est que du bruit de compression.
         return out, {"mode": "flat", "contrast": round(contrast, 1)}
 
-    mid = (lo + hi) / 2
-    chosen = mode
-    if mode == "auto":
-        light = float((alpha * (lum > mid) * vis).sum())
-        dark = float((alpha * (lum <= mid) * vis).sum())
-        chosen = "holes" if light >= dark else "invert"
+    if mode == "luma-light":
+        dark_glyph = False
+    elif mode == "luma-dark":
+        dark_glyph = True
+    else:
+        # Polarité par comparaison cœur / bord de la silhouette. Le cerne d'un glyphe
+        # borde toujours son corps : c'est plus fiable qu'une luminance médiane, qu'un
+        # cerne large suffit à faire basculer (le cas de `icon-plus`, dont le liseré
+        # sombre couvre plus de pixels que la croix beige qu'il entoure).
+        core = erode(vis, 1)
+        edge = vis & ~core
+        if core.any() and edge.any():
+            dark_glyph = float(lum[core].mean()) < float(lum[edge].mean())
+        else:
+            weights = alpha[vis]
+            order = np.argsort(vals)
+            cum = np.cumsum(weights[order])
+            dark_glyph = float(vals[order][int(np.searchsorted(cum, cum[-1] / 2))]) < 127.0
 
     w = (lum - lo) / max(contrast, 1e-6)
-    if chosen == "invert":
+    if dark_glyph:
         w = 1.0 - w
     w = np.clip(w, 0.0, 1.0) ** gamma
-    out[..., :3] = np.round(col).astype(np.uint8)
     out[..., 3] = np.round(np.clip(alpha * w, 0, 1) * 255).astype(np.uint8)
-    return out, {"mode": chosen, "contrast": round(contrast, 1)}
+    return out, {"mode": "luma-dark" if dark_glyph else "luma-light",
+                 "contrast": round(contrast, 1)}
 
 
 def trim(rgba: np.ndarray, threshold: int = 8):

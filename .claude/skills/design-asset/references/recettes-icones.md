@@ -62,11 +62,20 @@ grille d'icônes homogène est explicitement voulue.
 teinte. Il fait partie du dessin en jeu, et sa présence pendant le détourage est ce qui
 donne la bonne silhouette ; une fois l'icône blanche, il devient du blanc lui aussi.
 
-**La teinte se pose à plat.** Sur les 16 icônes du dossier, `--tint-mode flat` donne le
-meilleur résultat, y compris sur les glyphes à deux tons : le carnet de `icon-save` garde
-sa silhouette parce qu'elle est déjà un creux transparent, pas une zone claire. Les modes
-`holes` / `invert`, qui creusent les tons internes, dégradent au contraire les glyphes
-pleins — le chevron et le plus deviennent des contours vides.
+**La teinte ne se pose pas à plat.** Repeindre tous les pixels visibles en blanc détruit
+le dessin : sur `icon-bag-out` la flèche interne disparaît, sur `icon-pact` les traits du
+masque se referment en pâté, et sur `icon-plus` le cerne sombre — devenu blanc — épaissit
+la croix. Le mode `luma` transfère la luminance dans l'alpha, ce qui préserve le modelé :
+un gris à mi-chemin devient blanc à moitié transparent.
+
+**La polarité se lit sur le bord, pas sur la moyenne.** Un premier critère fondé sur la
+luminance médiane classait `icon-plus` comme un glyphe sombre, parce que son cerne couvre
+plus de pixels que la croix qu'il entoure — le résultat était une croix creuse. Comparer
+le cœur de la silhouette à son bord range correctement les 16 icônes.
+
+**Après creusage, recadrer.** Le cerne devenu transparent laisse des marges : `dsimg.py
+tint` retrime par défaut (`--no-trim` pour l'éviter). C'est ce qui fait passer `icon-plus`
+de 16 × 16 à 14 × 14 sans rien perdre du dessin.
 
 **Une ombre portée n'est pas un contour.** `icon-order` (barres noires sur beige uni) porte
 un halo beige sombre de 2–3 px qui n'appartient pas au dessin : il passait pour une

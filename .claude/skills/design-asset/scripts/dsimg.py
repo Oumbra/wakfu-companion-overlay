@@ -238,8 +238,13 @@ def cmd_icon(a):
 def cmd_tint(a):
     rgba = load_rgba(a.image)
     out, info = tint(rgba, a.color, a.mode, a.min_contrast)
+    if not a.no_trim:
+        # Creuser le cerne libère des marges transparentes : les laisser fausserait la
+        # taille rapportée de l'icone.
+        out, _bb = trim(out, threshold=2)
     save_rgba(out, a.output)
-    _emit({"input": str(a.image), "output": str(a.output), "color": list(a.color), **info})
+    _emit({"input": str(a.image), "output": str(a.output), "color": list(a.color),
+           "size": [int(out.shape[1]), int(out.shape[0])], **info})
 
 
 # ------------------------------------------------------------- harmonisation
@@ -385,8 +390,8 @@ def main(argv=None):
     p.add_argument("--no-tint", dest="tint", action="store_const", const=None,
                    help="garde les couleurs d'origine du glyphe")
     p.add_argument("--tint-mode", dest="tint_mode",
-                   choices=["flat", "holes", "invert", "auto"], default="flat")
-    p.add_argument("--tint-contrast", dest="tint_contrast", type=float, default=40.0,
+                   choices=["luma", "luma-light", "luma-dark", "flat"], default="luma")
+    p.add_argument("--tint-contrast", dest="tint_contrast", type=float, default=30.0,
                    help="contraste interne en deca duquel la teinte reste uniforme")
     content_opts(p)
     p.set_defaults(func=cmd_icon)
@@ -395,8 +400,11 @@ def main(argv=None):
     p.add_argument("image")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--color", type=_color, default=(255, 255, 255), metavar="HEX")
-    p.add_argument("--mode", choices=["flat", "holes", "invert", "auto"], default="flat")
-    p.add_argument("--min-contrast", dest="min_contrast", type=float, default=40.0)
+    p.add_argument("--mode", choices=["luma", "luma-light", "luma-dark", "flat"],
+                   default="luma")
+    p.add_argument("--min-contrast", dest="min_contrast", type=float, default=30.0)
+    p.add_argument("--no-trim", dest="no_trim", action="store_true",
+                   help="garde les marges transparentes liberees par le creusage")
     p.set_defaults(func=cmd_tint)
 
     p = sub.add_parser("resize", help="redimensionne en 9-slice (coins preserves)")
