@@ -314,6 +314,24 @@ def cmd_align(a):
 
 # --------------------------------------------------------------------- planche
 
+def corners_strip(rgba, size=12, gap=2):
+    """Assemble les quatre coins de l'image en une seule vignette.
+
+    C'est le detail que la vue d'ensemble noie : sur une barre de 782 px, un liseré
+    rompu dans un coin ne fait que quelques pixels. Le mettre sur la planche est ce qui
+    permet de le voir sans avoir a le chercher."""
+    h, w = rgba.shape[:2]
+    s = min(size, h, w)
+    tl, tr = rgba[:s, :s], rgba[:s, w - s:]
+    bl, br = rgba[h - s:, :s], rgba[h - s:, w - s:]
+    out = np.zeros((s * 2 + gap, s * 2 + gap, 4), np.uint8)
+    out[:s, :s] = tl
+    out[:s, s + gap:] = tr
+    out[s + gap:, :s] = bl
+    out[s + gap:, s + gap:] = br
+    return out
+
+
 def cmd_sheet(a):
     items = []
     for spec in a.images:
@@ -323,7 +341,9 @@ def cmd_sheet(a):
             cells = [sh.cell("avant", b, a.scale, "dark"),
                      sh.cell("apres", af, a.scale, "checker"),
                      sh.cell("apres x%d clair" % (a.scale * 3), af, a.scale * 3, "light"),
-                     sh.cell("apres x%d sombre" % (a.scale * 3), af, a.scale * 3, "dark")]
+                     sh.cell("apres x%d sombre" % (a.scale * 3), af, a.scale * 3, "dark"),
+                     sh.cell("coins x8", corners_strip(af), 8, "light"),
+                     sh.cell("coins x8 sombre", corners_strip(af), 8, "dark")]
             name = "%s -> %s (%dx%d)" % (Path(before).name, Path(after).name,
                                          af.shape[1], af.shape[0])
         else:
@@ -331,7 +351,8 @@ def cmd_sheet(a):
             cells = [sh.cell("damier", arr, a.scale, "checker"),
                      sh.cell("fond sombre", arr, a.scale, "dark"),
                      sh.cell("fond clair", arr, a.scale, "light"),
-                     sh.cell("x%d" % (a.scale * 3), arr, a.scale * 3, "checker")]
+                     sh.cell("x%d" % (a.scale * 3), arr, a.scale * 3, "checker"),
+                     sh.cell("coins x8", corners_strip(arr), 8, "light")]
             name = "%s - %dx%d" % (Path(spec).name, arr.shape[1], arr.shape[0])
         items.append(sh.item(name, cells))
     Path(a.output).write_text(sh.page(a.title, a.subtitle, items), encoding="utf-8")
