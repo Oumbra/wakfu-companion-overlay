@@ -308,10 +308,71 @@ Captures d'écran fournies par l'utilisateur, analysées le 2026-09-05 :
   le 2026-09-05) — textures de bordure de rareté à fond carré, propres (sans contenu d'objet), voir
   §2.4. Conservées dans le dépôt comme référentiel d'images pour un futur composant "icône d'objet
   + bordure de rareté" ; pas encore consommées par aucun code.
+- `assets/design-system/*.png` (2026-09-08) — deuxième lot d'assets déjà DÉCOUPÉS (boutons dans
+  leurs variantes disabled/hover, inputs nombre/recherche/texte, select, checkbox, scrollbar,
+  tabs…) : recoupe en grande partie `docs/design-reference/` (§7 ci-dessus, lot du 2026-09-05) avec
+  quelques nouveautés (`button-moins`/`button-plus`, `input-number`, `select-multiple`, icônes
+  `icons/icon-hammer.png`/`icon-option.png`/`icon-plus.png`/`icon-minus.png`/
+  `icon-external-link.png` — ces cinq DÉJÀ intégrées ailleurs dans `crates/overlay-ui/assets/ui/`
+  sous d'autres noms de fichier). Décision : **pas de fusion/déduplication des deux dossiers pour
+  l'instant** — `docs/design-reference/` reste la référence pour les composants déjà documentés
+  ci-dessus (§2-§6), `assets/design-system/` sert de source pour les nouveautés de ce lot (§9) ;
+  reconsolider en un seul dossier serait un chantier séparé, sans valeur ajoutée immédiate.
+- `assets/design-system/interfaces/*.png` (2026-09-08, 16 fichiers) — captures PLEINE fenêtre du
+  client réel : fenêtre Options (6 onglets : Jeu/Vidéo/Interface/Son/Commandes/Chat), Hôtel de
+  vente (achat, filtres, historique, vente, options), Personnage (aptitudes, équipement, sorts),
+  boîte de confirmation. Source du §9 (fenêtre modale) ; les autres fenêtres (HDV, Personnage) ne
+  sont pas encore exploitées — conservées pour une future extension de ce document.
 
 ---
 
-## 8. Incertitudes / à vérifier
+## 9. Fenêtre modale (Options) — mesures 2026-09-08
+
+> Source : `assets/design-system/interfaces/interface-options-*.png` (captures réelles de la
+> fenêtre Options du client, onglets Jeu/Vidéo/Interface/Son/Commandes/Chat) et
+> `interface-confirm-box.png` (petite boîte de confirmation, chrome apparenté mais plus simple).
+> Mesures par échantillonnage pixel (script Python/Pillow, même méthode que §2), sur
+> `interface-options-jeu.png` (726×567) sauf mention contraire. Sert de référence directe à la
+> modale Options de l'overlay (`panels::options_modal`), premier composant du design system à
+> reproduire ce chrome complet plutôt que des éléments isolés.
+
+**Chrome général** : bannière turquoise en tête (coins SUPÉRIEURS chanfreinés seulement, corps et
+pied de page à angle droit), corps anthracite, ligne d'onglets texte juste sous la bannière (Jeu/
+Vidéo/Interface/Son/Commandes/Chat), pied de page plein-largeur scindé en deux boutons
+Annuler/Valider (coins inférieurs chanfreinés, un par bouton) — **pas de croix de fermeture** dans
+cette fenêtre précise (contrairement à la règle générale §5.10) : Annuler/Valider en tiennent lieu.
+Un bouton icône « réinitialiser » (flèche circulaire) est présent en haut à droite, hors bannière —
+non repris en v1 overlay (n'a de sens qu'avec plusieurs réglages par onglet).
+
+| Élément | Valeur mesurée | Remarque |
+| --- | --- | --- |
+| Bannière turquoise, haut du dégradé | `#1A6E80` | Légèrement plus saturé/clair que `banner_teal.gradient_start` (`#0C6E80`) déjà documenté — écart mineur, cohérent comme famille de teinte. |
+| Bannière turquoise, bas du dégradé | `#176372` | **Revoit** `banner_teal.gradient_end` (`#1D8B9C`, plus CLAIR que le haut) : sur cette capture, le bas est plus SOMBRE que le haut, conforme à la règle générale §1.3 (clair→sombre) que l'ancienne valeur contredisait. |
+| Onglet actif (fond) | `#635B47` | Confirme `khaki_selected_bottom` (`#675D46`) à quelques valeurs près — même famille. |
+| Onglet inactif (fond) | `#353633` | Proche de `panel_fill` mais légèrement plus chaud/clair — nouvelle valeur, pas de token dédié avant. |
+| Onglet inactif (texte) | `#BBA579` | **Revoit** l'estimation §8 (`#C9A227`, non confirmée) — plus proche d'un kaki-beige désaturé que d'un ambre franc. |
+| Corps (fond) | `#16171C`–`#13171B` | Confirme `panel_fill`/`panel_fill_alt`. |
+| Bouton « Annuler » (pied de page, plein-largeur) | fond quasi plat `#BC4C44`, bord haut légèrement plus clair `#C9524A`, plus sombre en pied `#AF433C`, contour quasi noir `#0F1114` | **Nouveau token** — teinte rouge/terracotta jamais documentée jusqu'ici (§2.2/§5.2 ne couvrent que l'or et le kaki). Réservée à CE pattern (bouton Annuler plein-largeur en pied de fenêtre) : le bouton « Annuler » d'une boîte de dialogue simple (`interface-confirm-box.png`, bouton « Non ») reste kaki/gris standard (§5.2), pas rouge — donc bien un second style de bouton « négatif », pas un remplacement du premier. |
+| Bouton « Valider » (pied de page, plein-largeur) | dégradé `#EAD893`→`#E0C375`, contour `#0E1013` | Confirme `gold_bright_top`/`gold_bright_bottom` (`#F4D89E`/`#E0C880`) à quelques valeurs près — même bouton primaire que §5.1, variante plein-largeur. |
+| Hauteur bannière (mesurée sur ce crop) | ≈ 54 px | Grandeur relative — dépend de la résolution/l'échelle d'interface du client, à traiter comme un RATIO du composant plutôt qu'un px absolu côté overlay. |
+| Hauteur ligne d'onglets | ≈ 36–38 px | Plus compact que `tab_row_height` déjà documenté (57–58 px, mesuré sur un AUTRE style d'onglets, à icônes) — deux tailles de tabs coexistent dans le jeu selon le contexte. |
+| Hauteur bouton de pied de page (Annuler/Valider plein-largeur) | ≈ 41–42 px | Plus compact que `button_text_height` (63–66 px, bouton isolé type « Mettre en vente ») — le pattern plein-largeur scindé est un troisième gabarit de bouton, distinct des deux déjà documentés en §4. |
+
+**Nouveaux tokens ajoutés à `docs/design-tokens.json`** : `banner_teal` corrigé (voir ligne
+ci-dessus), `accent_danger` (rouge « Annuler » plein-largeur), `tab_inactive_fill`/
+`tab_inactive_text`, `modal` (hauteurs bannière/onglets/pied de page).
+
+**Décision d'implémentation (v1 overlay, `panels::options_modal`)** : PAS de ligne d'onglets — la
+modale Options de l'overlay n'a qu'un seul réglage pour l'instant (chemin de `wakfu.log`, voir
+§5.1 du plan d'architecture), simuler une structure à onglets vide n'apporterait rien. Le chrome
+retenu est : bannière + corps + pied de page Annuler/Valider, à l'identique du reste. Les coins
+chanfreinés sont peints à la main (`panels::chamfer`, polygone convexe à sommets colorés
+individuellement pour le dégradé vertical — approche §6.2 option (a) de la version précédente de ce
+document, désormais implémentée).
+
+---
+
+## 10. Incertitudes / à vérifier
 
 - **Pas de police dédiée disponible.** Confirmé par l'utilisateur (2026-09-05) : malgré
   l'intention initiale d'en fournir, aucun fichier de police n'existe côté client. La
