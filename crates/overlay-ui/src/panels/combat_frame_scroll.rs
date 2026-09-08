@@ -21,9 +21,17 @@
 //!   ~1px, coins légèrement arrondis, collée au bord gauche du cadre — entre les deux pointes de
 //!   décoration du gabarit, qui coïncident presque exactement avec la bande de clip des portraits
 //!   (mesuré par analyse pixel du PNG, voir historique de session). Hauteur DYNAMIQUE (proportion
-//!   emplacements visibles/nombre total d'ennemis, comme un ascenseur classique), cachée par défaut,
-//!   visible seulement au survol du cadre ENTIER (pas seulement de la bande) — glissable, cliquable
-//!   pour sauter directement à une position ; la molette fonctionne sur toute la zone.
+//!   emplacements visibles/nombre total d'ennemis, comme un ascenseur classique), glissable,
+//!   cliquable pour sauter directement à une position ; la molette fonctionne sur toute la zone.
+//!   **TOUJOURS visible** (revirement explicite de l'utilisateur après test en jeu réel,
+//!   2026-09-08) — la toute première version la cachait sauf survol du cadre entier, jugée
+//!   finalement inutile une fois testée : la barre, fine et collée au bord, ne gêne pas assez pour
+//!   justifier de la cacher.
+//! - Portraits : chaque ennemi n'a jamais de `class_name` (`breed` non déterministe côté ennemi) —
+//!   son portrait RÉEL est résolu via le catalogue (`panels::combat::resolve_fighter_texture`,
+//!   voir sa doc), repli générique tant qu'il n'a pas fini de télécharger ou si le nom n'est pas
+//!   reconnu, exactement comme la liste "plate" le faisait déjà pour les ennemis avant cette
+//!   refonte.
 //!
 //! **État de scroll** : persisté via `egui::Context::data_mut` (stockage "temp", clé fixe) plutôt
 //! que remonté jusqu'à `OverlayWindow` (voir `main.rs`) au travers de `RenderContent`/`build_ui`/
@@ -33,9 +41,10 @@
 //! OverlayWindow`) a donc son propre décalage, puisque chaque fenêtre porte son propre
 //! `egui::Context`.
 
-use overlay_engine::FighterDamage;
+use overlay_engine::{CatalogIndex, FighterDamage};
 
 use crate::portraits::{PortraitAtlas, NATIVE_PORTRAIT_SIZE};
+use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{largest_frame_geometry, CombatFrame, MAX_FRAME_SLOTS};
@@ -74,11 +83,20 @@ impl EnemyFrameScroll {
     /// c'est `CombatFrame::show` qu'il faut appeler, voir `panels::combat::show`). `total_damage`
     /// sert uniquement au pourcentage peint sur chaque portrait visible, même rôle que dans
     /// `CombatFrame::show`.
+    ///
+    /// `catalog`/`remote_icons`/`remote_icon_textures` résolvent le portrait RÉEL de chaque
+    /// ennemi via le catalogue (voir `panels::combat::resolve_fighter_texture`) — sans eux, tout
+    /// ennemi affiché ici retomberait sur le portrait générique (jamais de `class_name` côté
+    /// ennemi).
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         ui: &mut egui::Ui,
         frame: &CombatFrame,
         portraits: &PortraitAtlas,
         icons: &UiIcons,
+        catalog: &CatalogIndex,
+        remote_icons: &RemoteIconStore,
+        remote_icon_textures: &mut RemoteIconTextures,
         fighters: &[&FighterDamage],
         total_damage: i64,
     ) {
@@ -109,8 +127,8 @@ impl EnemyFrameScroll {
             egui::pos2(frame_rect.max.x, clip_bottom),
         );
 
-        // Survol du cadre ENTIER (pas seulement de la bande de scrollbar) : révèle la barre et
-        // active la molette — voir doc de module.
+        // Survol du cadre ENTIER (pas seulement de la bande de scrollbar) : active la molette —
+        // voir doc de module (la scrollbar, elle, est désormais TOUJOURS visible).
         let hovering_frame = ui
             .interact(
                 frame_rect,
@@ -158,13 +176,26 @@ impl EnemyFrameScroll {
                     egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
                 );
                 let radius = geometry.portrait_radius as u8;
-                let texture = fighter.class_name.as_deref().and_then(|class_name| {
-                    portraits.texture(class_name, fighter.gender, fighter.is_ko)
-                });
-                match texture {
-                    Some(texture) => {
-                        egui::Image::new(texture)
+                let portrait = super::combat::resolve_fighter_texture(
+                    ui,
+                    portraits,
+                    catalog,
+                    remote_icons,
+                    remote_icon_textures,
+                    fighter,
+                );
+                match portrait {
+                    Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
+                        egui::Image::new(&texture)
                             .corner_radius(radius)
+                            .paint_at(ui, portrait_rect);
+                    }
+                    Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
+                        // Portrait RÉEL du monstre — pas de version grisée précalculée pour
+                        // celle-ci, simple tint si KO (voir `grey_tint_if_ko`).
+                        egui::Image::new(&texture)
+                            .corner_radius(radius)
+                            .tint(super::combat::grey_tint_if_ko(fighter.is_ko))
                             .paint_at(ui, portrait_rect);
                     }
                     None => {
@@ -227,19 +258,17 @@ impl EnemyFrameScroll {
             }
         }
 
-        // Cachée par défaut (voir doc de module) : visible seulement au survol du cadre entier, ou
-        // tant que la barre elle-même est survolée/en cours de glissement (pour ne pas disparaître
-        // sous le pointeur pendant un drag qui sortirait légèrement de `frame_rect`).
-        let show_scrollbar = hovering_frame || hit_response.hovered() || hit_response.dragged();
-        if show_scrollbar {
-            ui.painter().rect(
-                thumb_rect,
-                SCROLLBAR_ROUNDING,
-                SCROLLBAR_COLOR,
-                egui::Stroke::new(SCROLLBAR_BORDER_WIDTH, SCROLLBAR_BORDER),
-                egui::StrokeKind::Outside,
-            );
-        }
+        // Toujours visible (revirement explicite de l'utilisateur, 2026-09-07 : la première
+        // version la cachait sauf survol du cadre entier, jugée finalement inutile une fois
+        // testée en jeu — la barre ne gêne pas assez pour justifier de la cacher) — voir doc de
+        // module.
+        ui.painter().rect(
+            thumb_rect,
+            SCROLLBAR_ROUNDING,
+            SCROLLBAR_COLOR,
+            egui::Stroke::new(SCROLLBAR_BORDER_WIDTH, SCROLLBAR_BORDER),
+            egui::StrokeKind::Outside,
+        );
 
         ui.ctx().data_mut(|d| d.insert_temp(scroll_id, offset));
     }

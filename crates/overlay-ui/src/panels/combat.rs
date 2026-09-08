@@ -326,6 +326,20 @@
 //! - Camp Ennemis, au-delà de `MAX_FRAME_SLOTS` : `panels::combat_frame_scroll::EnemyFrameScroll`
 //!   (voir sa doc de module pour l'architecture complète, validée par plusieurs artefacts
 //!   interactifs) — plus de liste plate dans ce cas.
+//!
+//! **Refonte 2026-09-08 (retour utilisateur après test en jeu réel)** — deux régressions
+//! introduites par la refonte ci-dessus, corrigées :
+//! - Les ennemis routés vers `CombatFrame::show`/`EnemyFrameScroll::show` s'affichaient tous avec
+//!   le portrait générique (`UiIcons::unknown_entity_*`) : ces deux fonctions ne résolvaient que
+//!   `PortraitAtlas` (portraits de CLASSE, alliés uniquement — un ennemi n'a jamais de
+//!   `class_name`), contrairement à la liste "plate" qui retombait déjà sur le portrait RÉEL du
+//!   monstre via le catalogue. `resolve_fighter_texture` (voir sa doc) factorise cette résolution
+//!   catalogue/icône distante — désormais partagée par les trois chemins d'affichage d'un
+//!   portrait (liste plate, cadre exact, cadre à défilement).
+//! - Scrollbar d'`EnemyFrameScroll` : la condition « visible seulement au survol du cadre entier »
+//!   (voir doc de module de `combat_frame_scroll`) est retirée — demande explicite de
+//!   l'utilisateur après test en jeu, la barre fine collée au bord ne gênait pas assez pour
+//!   justifier de la cacher. Toujours visible désormais.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -460,7 +474,8 @@ const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// Couleur du fond opacifié de la ligne leader — approximation d'un bandeau translucide du jeu
 /// (captures d'écran de référence sans canal alpha exploitable, voir doc de module) : noir
 /// bleuté, assez opaque pour détacher la ligne du reste sans devenir un pavé plein.
-const LEADER_PANEL_FILL: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
+const LEADER_PANEL_FILL: egui::Color32 =
+    egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
 
 /// Taille cible (largeur ET hauteur) du socle d'un bouton icône (voir
 /// `icon_button::paint_icon_button`) — le socle fourni par l'utilisateur est natif en 36×36 (37×37
@@ -522,8 +537,11 @@ pub fn show(
     // résultat est identique, mais c'est bien le total du camp affiché qui a du sens ici) — seule
     // référence désormais pour le remplissage ET le pourcentage (voir doc de module, correctif de
     // cohérence 2026-09-04).
-    let mut bars: Vec<&FighterDamage> =
-        fighters.iter().copied().filter(|f| f.total_damage > 0).collect();
+    let mut bars: Vec<&FighterDamage> = fighters
+        .iter()
+        .copied()
+        .filter(|f| f.total_damage > 0)
+        .collect();
     bars.sort_by_key(|f| std::cmp::Reverse(f.total_damage));
 
     // Vrai total (0 tant qu'il n'y a pas de combat, ou que le camp affiché est vide — on l'affiche
@@ -558,10 +576,29 @@ pub fn show(
         // module.
         ui.vertical(|ui| {
             if !framed.is_empty() {
-                frame.show(ui, portraits, icons, framed, total_damage);
+                frame.show(
+                    ui,
+                    portraits,
+                    icons,
+                    catalog,
+                    remote_icons,
+                    remote_icon_textures,
+                    framed,
+                    total_damage,
+                );
             }
             if !enemy_scroll.is_empty() {
-                EnemyFrameScroll::show(ui, frame, portraits, icons, enemy_scroll, total_damage);
+                EnemyFrameScroll::show(
+                    ui,
+                    frame,
+                    portraits,
+                    icons,
+                    catalog,
+                    remote_icons,
+                    remote_icon_textures,
+                    enemy_scroll,
+                    total_damage,
+                );
             }
             if !flat_portraits.is_empty() {
                 if !framed.is_empty() {
@@ -758,6 +795,50 @@ fn paint_toolbar_button(
     response
 }
 
+/// Texture résolue pour un combattant — voir `resolve_fighter_texture`. Distingue les deux
+/// origines possibles car elles n'appellent PAS le même traitement KO chez l'appelant : un
+/// portrait de classe est DÉJÀ grisé (précalculé, voir `PortraitAtlas`), une icône de monstre
+/// distante ne l'est jamais (pas de version grisée précalculée pour elle, voir
+/// `grey_tint_if_ko`) et doit être teintée par l'appelant si `fighter.is_ko`.
+pub(crate) enum FighterPortrait {
+    ClassPortrait(egui::TextureHandle),
+    RemoteMonster(egui::TextureHandle),
+}
+
+/// Résout la texture à afficher pour `fighter` : portrait de classe si `class_name` est connu
+/// (allié classifié), sinon icône RÉELLE du monstre si le catalogue la résout par nom (voir
+/// `CatalogIndex::find_monster_icon` — télécharge en arrière-plan au besoin,
+/// `RemoteIconTextures::resolve` renvoie `None` tant que ce n'est pas prêt), sinon `None` (repli
+/// générique laissé à l'appelant, voir `UiIcons::unknown_entity_*`).
+///
+/// **Factorisée** entre `paint_flat_portrait` (liste plate) et les cadres à médaillons
+/// (`combat_frame::CombatFrame::show`, `combat_frame_scroll::EnemyFrameScroll::show`) — ces
+/// derniers n'en avaient PAS besoin avant la refonte 2026-09-07 (vision ennemie, scroll infini,
+/// voir doc de module) : seuls des alliés (toujours classifiés ou jamais) y passaient jusque-là.
+/// Une fois les ennemis routés vers ces mêmes cadres, ils s'y affichaient tous avec le portrait
+/// générique — un ennemi n'a jamais de `class_name` (`breed` non déterministe côté ennemi, voir
+/// `overlay_engine::class_breed`) — d'où cette extraction, plutôt que dupliquer la résolution
+/// catalogue/icône distante dans les deux modules de cadre.
+pub(crate) fn resolve_fighter_texture(
+    ui: &egui::Ui,
+    portraits: &PortraitAtlas,
+    catalog: &CatalogIndex,
+    remote_icons: &RemoteIconStore,
+    remote_icon_textures: &mut RemoteIconTextures,
+    fighter: &FighterDamage,
+) -> Option<FighterPortrait> {
+    if let Some(texture) = fighter
+        .class_name
+        .as_deref()
+        .and_then(|class_name| portraits.texture(class_name, fighter.gender, fighter.is_ko))
+    {
+        return Some(FighterPortrait::ClassPortrait(texture.clone()));
+    }
+    let icon_ref = catalog.find_monster_icon(&fighter.name, None)?;
+    let texture = remote_icon_textures.resolve(ui.ctx(), remote_icons, &icon_ref)?;
+    Some(FighterPortrait::RemoteMonster(texture))
+}
+
 /// Portrait d'une ligne de la liste "plate" (ennemis, ou alliés au-delà de `MAX_FRAME_SLOTS`) —
 /// portrait de classe pour un allié classifié, sinon (ennemi, ou allié pas encore classifié)
 /// portrait RÉEL du monstre si le catalogue le résout par nom, repli générique tant qu'il n'a pas
@@ -774,29 +855,35 @@ fn paint_flat_portrait(
     fighter: &FighterDamage,
     total_damage: i64,
 ) {
-    let class_portrait = fighter
-        .class_name
-        .as_deref()
-        .and_then(|class_name| portraits.image(class_name, fighter.gender, fighter.is_ko));
-    let remote_monster_texture = class_portrait.is_none().then(|| {
-        catalog
-            .find_monster_icon(&fighter.name, None)
-            .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, &icon_ref))
-    });
-    let response = match (class_portrait, remote_monster_texture.flatten()) {
-        (Some(image), _) => ui.add(image),
-        (None, Some(texture)) => ui.add(
+    let portrait = resolve_fighter_texture(
+        ui,
+        portraits,
+        catalog,
+        remote_icons,
+        remote_icon_textures,
+        fighter,
+    );
+    let response = match portrait {
+        Some(FighterPortrait::ClassPortrait(texture)) => ui.add(
+            egui::Image::new(&texture)
+                .fit_to_exact_size(egui::vec2(
+                    crate::portraits::PORTRAIT_SIZE,
+                    crate::portraits::PORTRAIT_SIZE,
+                ))
+                .maintain_aspect_ratio(false),
+        ),
+        Some(FighterPortrait::RemoteMonster(texture)) => ui.add(
             egui::Image::new(&texture)
                 .fit_to_exact_size(egui::vec2(
                     crate::portraits::PORTRAIT_SIZE,
                     crate::portraits::PORTRAIT_SIZE,
                 ))
                 .maintain_aspect_ratio(false)
-                // Pas de version grisée précalculée pour une icône distante (voir doc de module) :
-                // simple tint, approximation acceptée.
+                // Pas de version grisée précalculée pour une icône distante (voir doc de
+                // `FighterPortrait::RemoteMonster`) : simple tint, approximation acceptée.
                 .tint(grey_tint_if_ko(fighter.is_ko)),
         ),
-        (None, None) => ui.add(
+        None => ui.add(
             icons
                 .unknown_entity_image()
                 .tint(grey_tint_if_ko(fighter.is_ko)),
@@ -830,7 +917,12 @@ pub(crate) fn grey_tint_if_ko(is_ko: bool) -> egui::Color32 {
 /// ci-dessus) — demande utilisateur explicite (retour après capture d'écran) : « comme si on
 /// traçait un carré autour du rond et qu'on plaçait le pourcentage tout en bas à droite », donc
 /// légèrement EN DEHORS du disque visible plutôt que dessus, pour ne jamais recouvrir le portrait.
-pub(crate) fn paint_portrait_percent(ui: &egui::Ui, rect: egui::Rect, damage: i64, total_damage: i64) {
+pub(crate) fn paint_portrait_percent(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    damage: i64,
+    total_damage: i64,
+) {
     let ratio = (damage as f32 / total_damage as f32).clamp(0.0, 1.0);
     let percent = (ratio as f64 * 100.0).round() as i64;
     let text = format!("{percent}%");
