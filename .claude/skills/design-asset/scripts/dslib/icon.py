@@ -156,6 +156,54 @@ def extract_icon(rgba: np.ndarray, roi: np.ndarray | None = None, polarity: str 
     }
 
 
+def tint(rgba: np.ndarray, color=(255, 255, 255), mode: str = "flat",
+         min_contrast: float = 40.0, gamma: float = 1.0):
+    """Rend l'icône monochrome, prête à être recolorée au rendu.
+
+    `flat`, le défaut, peint tous les pixels visibles sans toucher à l'alpha. C'est le
+    bon choix sur une icône déjà détourée : le dessin y est porté par la silhouette et
+    par les creux, pas par les tons internes.
+
+    Les autres modes transforment un tracé interne en **transparence** — utiles seulement
+    si un glyphe reste illisible une fois aplati :
+
+    * `holes`  — le dessin est porté par les zones claires, les zones sombres se creusent.
+    * `invert` — l'inverse (glyphe sombre sur intérieur clair).
+    * `auto`   — choisit entre les deux selon la teinte majoritaire.
+    """
+    out = rgba.copy()
+    alpha = rgba[..., 3].astype(np.float64) / 255.0
+    vis = alpha > 0.02
+    col = np.array(color, np.float64)
+    if not vis.any() or mode == "flat":
+        out[..., :3] = np.round(col).astype(np.uint8)
+        return out, {"mode": "flat", "contrast": None}
+
+    lum = luma(rgb_of(rgba).astype(np.float64))
+    vals = lum[vis]
+    lo, hi = float(np.percentile(vals, 12)), float(np.percentile(vals, 92))
+    contrast = hi - lo
+    if contrast < min_contrast:
+        # Glyphe d'un seul ton : rien à creuser, la nuance ne serait que du bruit.
+        out[..., :3] = np.round(col).astype(np.uint8)
+        return out, {"mode": "flat", "contrast": round(contrast, 1)}
+
+    mid = (lo + hi) / 2
+    chosen = mode
+    if mode == "auto":
+        light = float((alpha * (lum > mid) * vis).sum())
+        dark = float((alpha * (lum <= mid) * vis).sum())
+        chosen = "holes" if light >= dark else "invert"
+
+    w = (lum - lo) / max(contrast, 1e-6)
+    if chosen == "invert":
+        w = 1.0 - w
+    w = np.clip(w, 0.0, 1.0) ** gamma
+    out[..., :3] = np.round(col).astype(np.uint8)
+    out[..., 3] = np.round(np.clip(alpha * w, 0, 1) * 255).astype(np.uint8)
+    return out, {"mode": chosen, "contrast": round(contrast, 1)}
+
+
 def trim(rgba: np.ndarray, threshold: int = 8):
     m = rgba[..., 3] > threshold
     bb = bbox_of(m)
