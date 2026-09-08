@@ -660,6 +660,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     auth_command_tx: &auth_sink,
                     interactive: true,
                     now,
+                    options: None,
                 },
             );
         });

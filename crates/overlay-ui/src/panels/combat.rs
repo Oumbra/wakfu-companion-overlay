@@ -948,23 +948,6 @@ fn format_fr_thousands(n: i64) -> String {
     format!("{sign}{grouped}")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::format_fr_thousands;
-
-    #[test]
-    fn format_fr_thousands_insere_une_espace_tous_les_3_chiffres() {
-        assert_eq!(format_fr_thousands(0), "0");
-        assert_eq!(format_fr_thousands(7), "7");
-        assert_eq!(format_fr_thousands(999), "999");
-        assert_eq!(format_fr_thousands(1000), "1 000");
-        assert_eq!(format_fr_thousands(11000), "11 000");
-        assert_eq!(format_fr_thousands(113574), "113 574");
-        assert_eq!(format_fr_thousands(1234567), "1 234 567");
-        assert_eq!(format_fr_thousands(-42000), "-42 000");
-    }
-}
-
 /// Peint `text` avec un VRAI contour (8 copies décalées d'1 px dans chaque direction, en
 /// `TEXT_OUTLINE`, puis le texte plein par-dessus) — nécessaire pour tout texte qui flotte nu
 /// par-dessus le jeu (nom, dégâts, pourcentage, total) : le fond y est arbitraire, une simple
@@ -1131,4 +1114,21 @@ fn draw_centered_icon(ui: &egui::Ui, rect: egui::Rect, texture: &egui::TextureHa
         egui::vec2(SWITCH_ICON_SIZE, SWITCH_ICON_SIZE),
     );
     egui::Image::new(texture).paint_at(ui, icon_rect);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_fr_thousands;
+
+    #[test]
+    fn format_fr_thousands_insere_une_espace_tous_les_3_chiffres() {
+        assert_eq!(format_fr_thousands(0), "0");
+        assert_eq!(format_fr_thousands(7), "7");
+        assert_eq!(format_fr_thousands(999), "999");
+        assert_eq!(format_fr_thousands(1000), "1 000");
+        assert_eq!(format_fr_thousands(11000), "11 000");
+        assert_eq!(format_fr_thousands(113574), "113 574");
+        assert_eq!(format_fr_thousands(1234567), "1 234 567");
+        assert_eq!(format_fr_thousands(-42000), "-42 000");
+    }
 }
