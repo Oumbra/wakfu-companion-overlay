@@ -98,6 +98,36 @@
 //!   PAS la même disposition. `content_width` recalcule `control_row_width` en conséquence (un seul
 //!   bouton de large, pas deux). L'infobulle reste à GAUCHE (`show_tooltip_left`) : la réserve
 //!   `CONTROL_TOOLTIP_RESERVE` protège les deux boutons, empilés à la MÊME abscisse.
+//!
+//! **Refonte 2026-09-08 (déplacement Détails/Options depuis Combat)** — demande utilisateur
+//! explicite : le panneau Combat n'est pas toujours affiché (aucun combat en cours), contrairement
+//! au panneau Suivi qui reste visible en permanence ; les boutons "Détails"/"lien externe" et
+//! "Options" (jusque-là dans `combat::bottom_toolbar`, retirée) rejoignent donc ce bandeau, dans le
+//! carré 2×2 que devient `control_button_row` :
+//! ```text
+//! [+] [−]
+//! [⚙] [🔗]
+//! ```
+//! "+" garde sa place (coin haut-gauche), "−" vient à sa DROITE (au lieu d'en dessous), "Options"
+//! (l'écrou) sous le "+", "Détails" (lien externe) sous le "−" — disposition donnée explicitement
+//! par l'utilisateur, plutôt que devinée. Contrairement à "+"/"−" (restent INERTES, `Sense::
+//! hover()` seul), "Options"/"Détails" restent CLIQUABLES (`Sense::click()`) exactement comme dans
+//! `combat::bottom_toolbar` avant leur déplacement — voir `control_button_click`, seule leur
+//! infobulle change de camp : AU-DESSUS (`combat::show_tooltip_above`, comme dans Combat), pas à
+//! GAUCHE (`show_tooltip_left` reste réservée à "+"/"−", pour lesquels `CONTROL_TOOLTIP_RESERVE` a
+//! été mesurée — les libellés "Options (Ctrl+Shift+O)"/"Détails (Ctrl+Shift+D)" sont nettement plus
+//! longs que "Supprimer", cette réserve ne les couvrirait pas).
+//!
+//! Ce carré est maintenant peint INCONDITIONNELLEMENT (voir `show`, le garde `if !entries.
+//! is_empty()` qui masquait TOUT le bandeau, boutons compris, est retiré) — sans quoi Options/
+//! Détails resteraient inatteignables tant qu'aucun objet n'est suivi, ce que la fenêtre elle-même
+//! ne laissait déjà plus deviner : `content_width(0)` réservait DÉJÀ la largeur du carré de
+//! contrôle avant ce changement (voir sa doc), seul `show` ne peignait rien dans cet espace.
+//!
+//! **Règle supplémentaire** (demande utilisateur explicite) : le bouton "−" est visuellement
+//! DÉSACTIVÉ (`icon_button::paint_icon_button`, paramètre `enabled`) tant qu'aucune entrée n'est
+//! suivie — rien à supprimer dans ce cas. "+"/"Options"/"Détails" restent toujours activés (aucune
+//! des trois actions ne dépend du contenu de la watchlist).
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -255,17 +285,17 @@ const TILE_ROUNDING: f32 = 10.0;
 /// tuiles ENNEMI (voir `entry_tile`), les tuiles OBJET utilisant désormais `ITEM_ICON_SIZE`.
 const ICON_SIZE: f32 = 30.0;
 
-/// Taille (largeur ET hauteur) du socle des boutons "+"/"−" du bandeau (`UiIcons::button_background`,
-/// même socle que Combat, voir doc de module refonte 2026-09-06) — mise à l'échelle du socle NATIF
-/// (36×36), pas une taille fixe indépendante. Ramenée de 34×34 (taille déjà validée par
-/// l'utilisateur avant le passage au design system commun) à 24×24 — même taille que
-/// `combat::ICON_BUTTON_SIZE` — à l'essai, retour utilisateur explicite 2026-09-06 (« essaie
-/// vingt-quatre sur vingt-quatre pour voir le rendu que ça fait »).
+/// Taille (largeur ET hauteur) du socle des 4 boutons du carré de contrôle (`UiIcons::
+/// button_background`, même socle que le design system partagé, voir doc de module refonte
+/// 2026-09-06) — mise à l'échelle du socle NATIF (36×36), pas une taille fixe indépendante. Ramenée
+/// de 34×34 (taille déjà validée par l'utilisateur avant le passage au design system commun) à
+/// 24×24 — à l'essai, retour utilisateur explicite 2026-09-06 (« essaie vingt-quatre sur
+/// vingt-quatre pour voir le rendu que ça fait »).
 const CONTROL_BUTTON_SIZE: f32 = 24.0;
-/// Écart entre le bouton "+" et le bouton "−" (empilés, voir doc de module, refonte 2026-09-06),
-/// réutilisé aussi comme marge du fond translucide sur les quatre côtés (même
-/// convention que `combat::ICON_BUTTON_GAP`) — volontairement plus serré que `TILE_GAP` (les deux
-/// boutons forment un seul groupe visuel "ajouter/supprimer", pas deux entrées indépendantes).
+/// Écart entre deux boutons adjacents du carré de contrôle (voir doc de module, refonte
+/// 2026-09-06 — 1×2 boutons empilés à l'origine, 2×2 depuis la refonte 2026-09-08), réutilisé
+/// aussi comme marge du fond translucide sur les quatre côtés — volontairement plus serré que
+/// `TILE_GAP` (les boutons du carré forment un seul groupe visuel, pas des entrées indépendantes).
 const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// Espace réservé à GAUCHE de la colonne de contrôle, pour que l'infobulle de `control_button`
 /// (`show_tooltip_left`) ait matériellement la place de s'afficher à gauche — retour utilisateur
@@ -371,6 +401,11 @@ const TARGET_FONT_SIZE: f32 = 10.0;
 /// marge de chaque côté), la disposition reste VERTICALE (retour utilisateur explicite : « plus et
 /// moins doivent être verticaux, pas horizontaux comme Combat » — une première tentative les avait
 /// passés en horizontal par erreur, corrigée le même jour).
+///
+/// **Refonte 2026-09-08** : le carré de contrôle passe de 1×2 à 2×2 boutons (voir doc de module,
+/// déplacement Détails/Options depuis Combat) — `control_row_width` gagne une colonne (voir sa
+/// doc), et n'est plus jamais omis même sans entrée (`entry_count == 0` continuait déjà à le
+/// réserver AVANT ce changement, seul `show` ne le peignait pas — voir doc de module).
 pub fn content_width(entry_count: usize) -> f32 {
     let entries_width = if entry_count == 0 {
         0.0
@@ -380,14 +415,15 @@ pub fn content_width(entry_count: usize) -> f32 {
     CONTROL_TOOLTIP_RESERVE + control_row_width() + TILE_GAP + entries_width
 }
 
-/// Largeur du fond translucide derrière les boutons "+"/"−" (voir `control_button_row`) — UN
-/// bouton de large (empilés verticalement, voir doc de module, retour utilisateur 2026-09-06 : «
-/// plus et moins doivent être verticaux, pas horizontaux comme Combat ») plus une marge symétrique
-/// de `CONTROL_BUTTON_GAP` de chaque côté (même convention que `combat::bottom_toolbar`). Fonction
-/// plutôt que constante : combine deux `const f32`, une multiplication de `f32` en contexte `const`
-/// restant plus fragile à faire évoluer ici qu'un simple appel.
+/// Largeur du fond translucide derrière le carré de contrôle (voir `control_button_row`) — DEUX
+/// boutons de large depuis la refonte 2026-09-08 (carré 2×2 : "+"/"−" en haut, "Options"/"Détails"
+/// en dessous, voir doc de module) plus une marge symétrique de `CONTROL_BUTTON_GAP` de chaque côté
+/// et entre les deux colonnes — MÊME formule que `control_row_height` (le carré est, comme son nom
+/// l'indique, un carré : largeur et hauteur coïncident). Fonction plutôt que constante : combine
+/// deux `const f32`, une multiplication de `f32` en contexte `const` restant plus fragile à faire
+/// évoluer ici qu'un simple appel.
 fn control_row_width() -> f32 {
-    CONTROL_BUTTON_GAP * 2.0 + CONTROL_BUTTON_SIZE
+    CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
 }
 
 /// Hauteur du même fond translucide — DEUX boutons empilés (voir `control_row_width`) plus une
@@ -508,55 +544,54 @@ pub fn show(
         remote_icons,
         remote_icon_textures,
     } = assets;
-    // Bande de tuiles absente tant que le compte ne déclare aucune entrée suivie (voir
-    // `main.rs::render`, commentaire de `OverlayKind::Watchlist`) — un ramassage à son activé
-    // (`overlay_engine::profile`, INDÉPENDANT de la watchlist) doit pouvoir déclencher un toast
-    // même dans ce cas, d'où la garde ici plutôt qu'en amont.
-    if !entries.is_empty() {
-        let mut style = (**ui.style()).clone();
-        style_thin_scrollbar(&mut style);
-        ui.set_style(style);
+    // Le carré de contrôle ("+"/"−"/"Options"/"Détails", voir `control_button_row`) est peint
+    // INCONDITIONNELLEMENT depuis la refonte 2026-09-08 (voir doc de module) — Options/Détails
+    // doivent rester atteignables même sans aucune entrée suivie, contrairement aux tuiles
+    // d'entrées elles-mêmes (`entries.iter()` ci-dessous, seule partie encore vide si `entries`
+    // l'est). Un ramassage à son activé (`overlay_engine::profile`, INDÉPENDANT de la watchlist)
+    // doit de toute façon pouvoir déclencher un toast même sans entrée suivie — cette garde ne
+    // s'est donc jamais étendue au toast, peint plus bas hors de ce bloc.
+    let mut style = (**ui.style()).clone();
+    style_thin_scrollbar(&mut style);
+    ui.set_style(style);
 
-        egui::ScrollArea::horizontal()
-            .id_salt("watchlist-strip")
-            .auto_shrink([false, true])
-            // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
-            // flottante une bande dégagée sous les icônes/badges plutôt que de la faire chevaucher
-            // presque entièrement — retour utilisateur 2026-09-02 : « impossible de l'agripper ».
-            .min_scrolled_height(TILE_SIZE + 14.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    // Réserve à GAUCHE de la colonne de contrôle pour que son infobulle ait la
-                    // place de s'afficher à gauche (voir `CONTROL_TOOLTIP_RESERVE`) — zone
-                    // transparente, aucun élément peint ni interactif dedans.
-                    ui.add_space(CONTROL_TOOLTIP_RESERVE);
+    egui::ScrollArea::horizontal()
+        .id_salt("watchlist-strip")
+        .auto_shrink([false, true])
+        // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
+        // flottante une bande dégagée sous les icônes/badges plutôt que de la faire chevaucher
+        // presque entièrement — retour utilisateur 2026-09-02 : « impossible de l'agripper ».
+        .min_scrolled_height(TILE_SIZE + 14.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Réserve à GAUCHE de la colonne de contrôle pour que son infobulle ait la
+                // place de s'afficher à gauche (voir `CONTROL_TOOLTIP_RESERVE`) — zone
+                // transparente, aucun élément peint ni interactif dedans.
+                ui.add_space(CONTROL_TOOLTIP_RESERVE);
 
-                    // Colonne "+"/"−" empilée (voir doc de module, refonte 2026-09-06 — design
-                    // system boutons icône, socle et teinte alignés sur Combat mais PAS
-                    // l'orientation) — `ui.horizontal` centre ses enfants verticalement par défaut,
-                    // ce qui aligne naturellement cette colonne sur le centre des tuiles d'entrée
-                    // (58px) juste à côté.
-                    control_button_row(ui, icons);
-                    ui.add_space(TILE_GAP);
+                // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
+                // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
+                // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
+                control_button_row(ui, icons, entries.is_empty());
+                ui.add_space(TILE_GAP);
 
-                    for (i, entry) in entries.iter().enumerate() {
-                        if i > 0 {
-                            ui.add_space(TILE_GAP);
-                        }
-                        entry_tile(
-                            ui,
-                            icons,
-                            catalog,
-                            remote_icons,
-                            remote_icon_textures,
-                            entry,
-                        );
+                for (i, entry) in entries.iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(TILE_GAP);
                     }
-                });
+                    entry_tile(
+                        ui,
+                        icons,
+                        catalog,
+                        remote_icons,
+                        remote_icon_textures,
+                        entry,
+                    );
+                }
             });
+        });
 
-        ui.add_space(6.0);
-    }
+    ui.add_space(6.0);
 
     match toast.filter(|t| t.hide_at > now) {
         Some(toast) => toast_card(
@@ -861,12 +896,21 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
     tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
 }
 
-/// Colonne des boutons "+"/"−" du bandeau, empilés sur un fond translucide (voir doc de module,
-/// refonte 2026-09-06 — design system boutons icône : même socle et même teinte que Combat, mais
-/// disposition VERTICALE conservée, contrairement à Combat) — même fond que `combat::
-/// bottom_toolbar` (`icon_button::PANEL_BACKDROP_FILL`), marge symétrique de `CONTROL_BUTTON_GAP`
-/// sur les quatre côtés.
-fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
+/// Carré 2×2 de boutons du bandeau, sur un fond translucide (voir doc de module, refonte
+/// 2026-09-08) : "+"/"−" en haut (INERTES, `control_button`), "Options"/"Détails" en dessous
+/// (CLIQUABLES, `control_button_click` — déplacés depuis `combat::bottom_toolbar`) — même fond que
+/// ce dernier utilisait déjà (`icon_button::PANEL_BACKDROP_FILL`), marge symétrique de
+/// `CONTROL_BUTTON_GAP` sur les quatre côtés ET entre les deux colonnes/lignes.
+///
+/// Disposition (donnée explicitement par l'utilisateur, voir doc de module) :
+/// ```text
+/// [+] [−]
+/// [⚙] [🔗]
+/// ```
+/// `watchlist_empty` désactive visuellement "−" (voir `control_button`, paramètre `enabled`) — rien
+/// à supprimer tant qu'aucune entrée n'est suivie ; les trois autres boutons restent toujours
+/// activés.
+fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool) {
     let row_rect = ui
         .allocate_exact_size(
             egui::vec2(control_row_width(), control_row_height()),
@@ -888,9 +932,12 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
         icons.icon_plus_hover(),
         "watchlist-add",
         "Ajouter (Ctrl+Shift+A)",
+        true,
     );
 
-    let remove_top_left = add_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
+    // "−" à DROITE de "+" (pas en dessous, contrairement à l'ancienne disposition 1×2 — voir doc de
+    // module) : désactivé tant que `watchlist_empty`.
+    let remove_top_left = add_top_left + egui::vec2(CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP, 0.0);
     control_button(
         ui,
         remove_top_left,
@@ -899,7 +946,43 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
         icons.icon_minus_hover(),
         "watchlist-remove",
         "Supprimer (Ctrl+Shift+S)",
+        !watchlist_empty,
     );
+
+    // "Options" sous "+" — même icône/action que l'ancien bouton de `combat::bottom_toolbar`.
+    let options_top_left = add_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
+    let options_response = control_button_click(
+        ui,
+        options_top_left,
+        icons,
+        icons.options_icon(),
+        icons.options_icon_hover(),
+        "watchlist-options",
+        "Options (Ctrl+Shift+O)",
+    );
+    if options_response.clicked() {
+        // TODO: ouvrir le panneau d'options une fois qu'il existera (même TODO que dans
+        // `combat::bottom_toolbar` avant son déplacement ici, voir doc de module).
+    }
+
+    // "Détails" sous "−" — même icône/action (ouvrir la web app) que l'ancien bouton "lien externe"
+    // de `combat::bottom_toolbar`.
+    let details_top_left =
+        remove_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
+    let details_response = control_button_click(
+        ui,
+        details_top_left,
+        icons,
+        icons.external_link_icon(),
+        icons.external_link_icon_hover(),
+        "watchlist-details",
+        "Détails (Ctrl+Shift+D)",
+    );
+    if details_response.clicked() {
+        // `base_url()` — jamais une URL codée en dur ici : c'est la même origine que le reste de
+        // l'overlay parle déjà (voir `overlay_sync::client`), dev ou prod selon le déploiement.
+        let _ = open::that(overlay_sync::client::base_url());
+    }
 }
 
 /// Bouton "+"/"−" du bandeau — socle `button_background`/`button_background_hover` (même socle que
@@ -912,7 +995,9 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons) {
 /// 2026-09-06) : affordance visuelle demandée en plus de l'infobulle, en assumant que le risque
 /// d'ambiguïté déjà discuté (voir doc de module) reste acceptable ici tant que le câblage réel
 /// n'existe pas — déjà géré par `icon_button::paint_icon_button` (`on_hover_cursor`), pas besoin de
-/// le refaire ici.
+/// le refaire ici. `enabled: false` (refonte 2026-09-08, « désactiver "−" sans entrée suivie »)
+/// bascule ce curseur sur le curseur par défaut à la place (voir `icon_button::paint_icon_button`).
+#[allow(clippy::too_many_arguments)]
 fn control_button(
     ui: &mut egui::Ui,
     top_left: egui::Pos2,
@@ -921,6 +1006,7 @@ fn control_button(
     icon_hover: &egui::TextureHandle,
     id_source: &str,
     tooltip: &str,
+    enabled: bool,
 ) {
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
     let response = icon_button::paint_icon_button(
@@ -928,12 +1014,46 @@ fn control_button(
         rect,
         id_source,
         egui::Sense::hover(),
+        enabled,
         icons.button_background(),
         icons.button_background_hover(),
         icon,
         icon_hover,
     );
     show_tooltip_left(&response, tooltip);
+}
+
+/// Bouton "Options"/"Détails" du carré de contrôle (refonte 2026-09-08, voir doc de module) —
+/// même socle que `control_button`, mais `Sense::click()` (l'action reste câblée, contrairement à
+/// "+"/"−") et infobulle AU-DESSUS (`combat::show_tooltip_above`, comme du temps de `combat::
+/// bottom_toolbar`) plutôt qu'à GAUCHE : `CONTROL_TOOLTIP_RESERVE` a été mesurée pour "Supprimer",
+/// pas pour ces libellés plus longs ("Options (Ctrl+Shift+O)"/"Détails (Ctrl+Shift+D)"), voir doc
+/// de module. Toujours `enabled: true` — aucune des deux actions ne dépend du contenu de la
+/// watchlist. Renvoie la `Response` : le clic est géré par l'appelant (`control_button_row`), qui
+/// seul connaît l'action associée à chaque bouton.
+fn control_button_click(
+    ui: &mut egui::Ui,
+    top_left: egui::Pos2,
+    icons: &UiIcons,
+    icon: &egui::TextureHandle,
+    icon_hover: &egui::TextureHandle,
+    id_source: &str,
+    tooltip: &str,
+) -> egui::Response {
+    let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
+    let response = icon_button::paint_icon_button(
+        ui,
+        rect,
+        id_source,
+        egui::Sense::click(),
+        true,
+        icons.button_background(),
+        icons.button_background_hover(),
+        icon,
+        icon_hover,
+    );
+    super::combat::show_tooltip_above(&response, tooltip);
+    response
 }
 
 /// Tuile d'une entrée suivie : icône réelle si le catalogue la résout et qu'elle a fini de

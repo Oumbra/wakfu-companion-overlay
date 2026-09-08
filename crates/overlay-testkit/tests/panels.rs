@@ -506,10 +506,14 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// 24×24 pour voir le rendu »). Hauteur de colonne `CONTROL_BUTTON_GAP*3+24*2 = 60px`, toujours
 /// PLUS HAUTE que la tuile d'entrée juste à côté (58px, `TILE_SIZE`) — de justesse —, donc encore la
 /// référence de centrage vertical de `ui.horizontal`, sans décalage.
-/// Base commune : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 88 (réserve) +
-/// 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié de 24, centre du bouton) = 118 ;
-/// y = 14 + 4 (même marge, haut du fond) + 12 = 30. Bouton "−" : MÊME x (empilé) = 118 ;
-/// y = 30 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux) = 58.
+///
+/// **Recalculée à la refonte 2026-09-08** (déplacement Détails/Options depuis Combat, voir doc de
+/// module) : le carré passe de 1×2 à 2×2, "−" vient maintenant à DROITE de "+" (plus en dessous) —
+/// voir le schéma en doc de module. Base commune : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14.
+/// Bouton "+" : x = 14 + 88 (réserve) + 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié
+/// de 24, centre du bouton) = 118 ; y = 14 + 4 (même marge, haut du fond) + 12 = 30 — INCHANGÉ,
+/// "+" garde sa place. Bouton "−" : x = 118 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`,
+/// écart entre les deux colonnes) = 146 ; MÊME y (même ligne) = 30.
 #[test]
 fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
     let mut textures = Textures::new();
@@ -565,7 +569,7 @@ fn panneau_suivi_tooltips_ajouter_supprimer_visibles_a_gauche() {
     harness.run();
     harness.snapshot("watchlist_tooltip_ajouter_a_gauche");
 
-    harness.hover_at(egui::pos2(118.0, 58.0));
+    harness.hover_at(egui::pos2(146.0, 30.0));
     harness.run();
     harness.snapshot("watchlist_tooltip_supprimer_a_gauche");
 }

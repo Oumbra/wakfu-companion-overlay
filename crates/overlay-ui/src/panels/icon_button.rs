@@ -87,28 +87,56 @@ pub(crate) fn paint_tooltip_label(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).color(TOOLTIP_TEXT_COLOR));
 }
 
+/// Assombrissement appliqué au socle ET à l'icône d'un bouton `enabled: false` (voir
+/// `paint_icon_button`) — un simple multiplicateur d'alpha (`Image::tint`) plutôt qu'une variante
+/// de texture dédiée : suffisant pour lire "désactivé" sans redemander un asset supplémentaire à
+/// l'utilisateur. Choisi assez marqué (~43 % d'opacité) pour rester net sur le fond translucide
+/// commun (`PANEL_BACKDROP_FILL`) sans devenir illisible.
+const DISABLED_TINT: egui::Color32 =
+    egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 110);
+
 /// Peint le socle (repos ou survolé selon `response.hovered()`) puis l'icône (repos ou survolée)
 /// centrée dessus, mis à l'échelle de `rect` (doit être carré, comme le socle et l'icône) — voir
 /// doc de module. `id_source` distingue plusieurs boutons icône dans le même conteneur egui (même
 /// mécanisme que `combat::paint_side_switch`).
+///
+/// `enabled: false` (demande utilisateur explicite : le bouton "−" du Suivi doit être désactivé
+/// tant qu'aucun objet n'est suivi, voir `panels::watchlist::control_button_row`) fige le bouton
+/// dans son état "repos" (jamais de variante survolée, quel que soit `response.hovered()`),
+/// l'assombrit (`DISABLED_TINT`) et remplace le curseur "main" par le curseur par défaut — trois
+/// signaux visuels cumulés plutôt qu'un seul, pour qu'un état désactivé reste identifiable même en
+/// aperçu statique (capture d'écran, pas seulement au survol).
 #[allow(clippy::too_many_arguments)]
 pub fn paint_icon_button(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     id_source: &str,
     sense: egui::Sense,
+    enabled: bool,
     background: &egui::TextureHandle,
     background_hover: &egui::TextureHandle,
     icon: &egui::TextureHandle,
     icon_hover: &egui::TextureHandle,
 ) -> egui::Response {
-    let response = ui
-        .interact(rect, ui.id().with(id_source), sense)
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let hovered = response.hovered();
+    let response = ui.interact(rect, ui.id().with(id_source), sense);
+    let response = if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response.on_hover_cursor(egui::CursorIcon::Default)
+    };
+    let hovered = enabled && response.hovered();
+    let tint = if enabled {
+        egui::Color32::WHITE
+    } else {
+        DISABLED_TINT
+    };
 
-    let bg_texture = if hovered { background_hover } else { background };
-    egui::Image::new(bg_texture).paint_at(ui, rect);
+    let bg_texture = if hovered {
+        background_hover
+    } else {
+        background
+    };
+    egui::Image::new(bg_texture).tint(tint).paint_at(ui, rect);
 
     // Ratio commun dérivé de la largeur du socle — appliqué tel quel à l'icône, pour qu'elle reste
     // proportionnée au socle quelle que soit la taille cible du bouton (même logique que l'ancien
@@ -116,7 +144,9 @@ pub fn paint_icon_button(
     let scale = rect.width() / background.size_vec2().x;
     let icon_texture = if hovered { icon_hover } else { icon };
     let icon_rect = egui::Rect::from_center_size(rect.center(), icon_texture.size_vec2() * scale);
-    egui::Image::new(icon_texture).paint_at(ui, icon_rect);
+    egui::Image::new(icon_texture)
+        .tint(tint)
+        .paint_at(ui, icon_rect);
 
     response
 }

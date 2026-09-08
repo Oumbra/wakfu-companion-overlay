@@ -340,6 +340,16 @@
 //!   (voir doc de module de `combat_frame_scroll`) est retirée — demande explicite de
 //!   l'utilisateur après test en jeu, la barre fine collée au bord ne gênait pas assez pour
 //!   justifier de la cacher. Toujours visible désormais.
+//!
+//! **Refonte 2026-09-08 (déplacement Détails/Options vers le Suivi)** : `bottom_toolbar` (boutons
+//! "lien externe"/"Options" en bas de CE panneau, voir l'historique ci-dessus) est retirée —
+//! demande utilisateur explicite : le panneau Combat n'est pas toujours affiché (aucun combat en
+//! cours), contrairement au panneau Suivi qui reste visible en permanence ; ces deux boutons
+//! rejoignent donc `panels::watchlist::control_button_row`, dans le même carré 2×2 que "+"/"−",
+//! plutôt que de rester à un emplacement appelé à disparaître. Les raccourcis clavier globaux
+//! (`DETAILS_HOTKEY_LABEL`/`OPTIONS_HOTKEY_LABEL`, `main.rs`) et les deux actions elles-mêmes
+//! (`open::that(overlay_sync::client::base_url())` / TODO options) sont inchangés, seul leur point
+//! d'entrée visuel bouge.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -476,33 +486,6 @@ const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// bleuté, assez opaque pour détacher la ligne du reste sans devenir un pavé plein.
 const LEADER_PANEL_FILL: egui::Color32 =
     egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
-
-/// Taille cible (largeur ET hauteur) du socle d'un bouton icône (voir
-/// `icon_button::paint_icon_button`) — le socle fourni par l'utilisateur est natif en 36×36 (37×37
-/// pour la première version, 12e retour, voir doc de module), réduit ici à 24×24 (retour
-/// utilisateur, 7e retour : « réduis l'icône bouton en 24×24 ») ; l'icône à fond transparent posée
-/// dessus est mise à l'échelle dans le MÊME ratio (pas une taille fixe indépendante), pour rester
-/// proportionnée au socle quelle que soit sa taille cible.
-const ICON_BUTTON_SIZE: f32 = 24.0;
-/// Marge du fond translucide sur les quatre côtés (voir `bottom_toolbar`, refonte 2026-09-06).
-/// N'est PLUS l'écart entre les deux boutons (voir `ICON_BUTTON_INNER_GAP`, retour utilisateur
-/// 2026-09-06 : « diminue de moitié l'écart entre les boutons » — les deux valeurs, jusque-là
-/// confondues, divergent depuis).
-const ICON_BUTTON_GAP: f32 = 6.0;
-/// Écart entre les boutons "lien externe" et "Options" — d'abord réduit de moitié (3px, retour
-/// utilisateur 2026-09-06 : « diminue de moitié l'écart entre les boutons »), PUIS remonté à 4px au
-/// même jour (retour suivant, capture des deux groupes de boutons à l'appui) : comparée au bandeau
-/// Suivi (`watchlist::CONTROL_BUTTON_GAP`, 4px), cette valeur de 3px donnait un écart visiblement
-/// différent entre les deux groupes — demande explicite d'utiliser le MÊME écart, en alignant
-/// Combat sur Suivi plutôt que l'inverse. `ICON_BUTTON_GAP` (6px, marge du fond translucide) reste
-/// lui inchangé, seul l'écart ENTRE les deux boutons est concerné.
-const ICON_BUTTON_INNER_GAP: f32 = 4.0;
-/// Marge entre le bord GAUCHE du panneau et le fond translucide de `bottom_toolbar` — retour
-/// utilisateur explicite 2026-09-06 (« écarte le groupe de boutons de la bordure, au moins de 5
-/// pixels ») : le panneau Combat garde `inner_margin(0)` dans l'ensemble (voir
-/// `render_content::paint_content`, « collé au bord de la fenêtre de jeu » — décision distincte,
-/// non remise en cause ici), seule cette barre d'outils reçoit une marge locale.
-const BOTTOM_TOOLBAR_LEFT_MARGIN: f32 = 5.0;
 
 #[allow(clippy::too_many_arguments)]
 pub fn show(
@@ -653,15 +636,6 @@ pub fn show(
             }
         });
     });
-
-    ui.add_space(TOTAL_GAP);
-    // Marge à GAUCHE du panneau (voir `BOTTOM_TOOLBAR_LEFT_MARGIN`) — appliquée ici plutôt que
-    // dans `bottom_toolbar` : c'est un décalage de POSITION (avant le premier widget), pas une
-    // dimension du fond translucide lui-même.
-    ui.horizontal(|ui| {
-        ui.add_space(BOTTOM_TOOLBAR_LEFT_MARGIN);
-        bottom_toolbar(ui, icons);
-    });
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
@@ -697,102 +671,6 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, to
         total_font,
         TEXT_COLOR,
     );
-}
-
-/// Barre d'outils en bas du panneau Combat, ajoutée à la refonte 11e retour : bouton "lien externe"
-/// (ouvre la web app — déplacé ici depuis la ligne leader, où le switch Alliés/Ennemis a pris sa
-/// place, voir `show_leader_row`) suivi du bouton "Options", NOUVEAU (icône `nut.png` fournie par
-/// l'utilisateur, voir `UiIcons::options_icon`) — n'ouvre encore aucun panneau : réservé à une
-/// future page de réglages (demande utilisateur explicite : « qui permettrait à l'utilisateur PLUS
-/// TARD d'ouvrir un panneau d'options »), seule l'infobulle "Options" au survol est déjà là.
-/// Toujours peinte, quel que soit l'état du combat affiché : ce ne sont pas des actions liées au
-/// combat, contrairement au reste du panneau.
-///
-/// **Refonte 2026-09-05 (14e retour)** : marge à gauche du premier bouton (lien externe) ajoutée,
-/// de la MÊME valeur que l'écart entre les deux boutons (`ICON_BUTTON_GAP`) — retour utilisateur
-/// explicite (« j'aimerais que tu appliques le même nombre de pixels entre le premier icône bouton
-/// et le bord »). Auparavant collé au bord gauche du panneau, ce qui causait aussi le bug de
-/// tooltip corrigé au même retour (voir `show_tooltip_above`).
-///
-/// **Refonte 2026-09-06** : marge symétrique sur les QUATRE côtés (haut/bas ajoutés, voir doc de
-/// module) + fond translucide (`icon_button::PANEL_BACKDROP_FILL`) peint AVANT les boutons.
-///
-/// **Refonte 2026-09-06 (suite)** : écart entre les deux boutons réduit de moitié
-/// (`ICON_BUTTON_INNER_GAP`, distinct désormais de `ICON_BUTTON_GAP`) + marge à GAUCHE du panneau
-/// ajoutée (`BOTTOM_TOOLBAR_LEFT_MARGIN`, via le `ui.horizontal` de l'appelant, voir `show`) — deux
-/// retours utilisateur explicites distincts, voir la doc de ces constantes.
-fn bottom_toolbar(ui: &mut egui::Ui, icons: &UiIcons) {
-    let (row_rect, _) = ui.allocate_exact_size(
-        egui::vec2(
-            ICON_BUTTON_GAP + ICON_BUTTON_SIZE * 2.0 + ICON_BUTTON_INNER_GAP + ICON_BUTTON_GAP,
-            ICON_BUTTON_GAP + ICON_BUTTON_SIZE + ICON_BUTTON_GAP,
-        ),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(
-        row_rect,
-        icon_button::PANEL_BACKDROP_ROUNDING,
-        icon_button::PANEL_BACKDROP_FILL,
-    );
-    let external_link_top_left = row_rect.min + egui::vec2(ICON_BUTTON_GAP, ICON_BUTTON_GAP);
-
-    let external_link_response = paint_toolbar_button(
-        ui,
-        external_link_top_left,
-        icons,
-        icons.external_link_icon(),
-        icons.external_link_icon_hover(),
-        "combat-open-wakfu-companion",
-        "Détails (Ctrl+Shift+D)",
-    );
-    if external_link_response.clicked() {
-        // `base_url()` — jamais une URL codée en dur ici : c'est la même origine que le reste de
-        // l'overlay parle déjà (voir `overlay_sync::client`), dev ou prod selon le déploiement.
-        let _ = open::that(overlay_sync::client::base_url());
-    }
-
-    let options_top_left =
-        external_link_top_left + egui::vec2(ICON_BUTTON_SIZE + ICON_BUTTON_INNER_GAP, 0.0);
-    let options_response = paint_toolbar_button(
-        ui,
-        options_top_left,
-        icons,
-        icons.options_icon(),
-        icons.options_icon_hover(),
-        "combat-open-options",
-        "Options (Ctrl+Shift+O)",
-    );
-    if options_response.clicked() {
-        // TODO: ouvrir le panneau d'options une fois qu'il existera (voir doc de module).
-    }
-}
-
-/// Enveloppe locale de `icon_button::paint_icon_button` (voir sa doc et celle de module) pour les
-/// boutons de `bottom_toolbar` : socle + icône mis à l'échelle de `ICON_BUTTON_SIZE`, `Sense::
-/// click()`, infobulle AU-DESSUS (`show_tooltip_above`) — propre à Combat (le Suivi reste inerte et
-/// affiche son infobulle à gauche, voir `panels::watchlist::control_button`).
-fn paint_toolbar_button(
-    ui: &mut egui::Ui,
-    top_left: egui::Pos2,
-    icons: &UiIcons,
-    icon: &egui::TextureHandle,
-    icon_hover: &egui::TextureHandle,
-    id_source: &str,
-    tooltip: &str,
-) -> egui::Response {
-    let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(ICON_BUTTON_SIZE));
-    let response = icon_button::paint_icon_button(
-        ui,
-        rect,
-        id_source,
-        egui::Sense::click(),
-        icons.button_background(),
-        icons.button_background_hover(),
-        icon,
-        icon_hover,
-    );
-    show_tooltip_above(&response, tooltip);
-    response
 }
 
 /// Texture résolue pour un combattant — voir `resolve_fighter_texture`. Distingue les deux
