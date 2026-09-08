@@ -59,6 +59,12 @@ def recover_border(rgb: np.ndarray, comp: np.ndarray, bg: np.ndarray,
     c'est ce qui distingue un liseré qui fait le tour du composant d'une simple zone
     sombre du décor, qui n'en toucherait qu'un côté.
 
+    La continuité décide si l'anneau *est* un liseré ; ce sont ensuite les pixels pris
+    un à un qui entrent, et eux seuls. Absorber l'anneau entier carre les coins : la
+    dilatation par un carré ajoute, en diagonale d'un coin arrondi, des pixels qui sont
+    du décor. Le rectangle arrondi s'ajuste alors sur une boîte gonflée de 2 px et son
+    alpha laisse passer un éclat de décor à la place du liseré noir.
+
     Retourne (masque élargi, diagnostic)."""
     ring = dilate(comp, 8) & bg & ~dilate(comp, 2)
     if ring.sum() < 20:
@@ -75,11 +81,12 @@ def recover_border(rgb: np.ndarray, comp: np.ndarray, bg: np.ndarray,
         n = int(cand.sum())
         if n == 0:
             break
-        ratio = float((cand & (dist > thr)).sum()) / n
+        tranche = cand & (dist > thr)
+        ratio = float(tranche.sum()) / n
         rings.append(round(ratio, 3))
         if ratio < continuity:
             break
-        cur |= cand
+        cur |= tranche
     return cur, {"applied": bool(cur.sum() > comp.sum()),
                  "ring_ratios": rings,
                  "rings_kept": sum(1 for r in rings if r >= continuity),
@@ -173,11 +180,18 @@ def fit_rounded_rect(mask: np.ndarray, max_radius: int | None = None):
 
 # -------------------------------------------------------------- décontamination
 
-def bleed_edges(rgba: np.ndarray, solid: np.ndarray, passes: int = 3) -> np.ndarray:
+def bleed_edges(rgba: np.ndarray, solid: np.ndarray, passes: int = 3,
+                keep: np.ndarray | None = None) -> np.ndarray:
     """Étale les couleurs « sûres » (intérieur de `solid`) vers l'extérieur.
 
     Sans cela, les pixels du contour — déjà mélangés avec le gris du décor dans la
-    capture — produisent un halo gris une fois l'asset posé sur un autre fond."""
+    capture — produisent un halo gris une fois l'asset posé sur un autre fond.
+
+    `keep` protège des pixels de la réécriture tout en les laissant servir de source une
+    fois atteints. C'est ce qu'il faut pour un pixel entièrement opaque du liseré : il
+    est à l'intérieur de la forme, donc jamais contaminé, et le remplacer par la moyenne
+    de ses voisins l'éclaircit — au milieu d'un bord c'est invisible, mais dans un coin
+    arrondi la moitié du voisinage est du remplissage, et le noir y est mangé."""
     out = rgba.copy()
     known = solid.copy()
     for _ in range(passes):
@@ -196,7 +210,9 @@ def bleed_edges(rgba: np.ndarray, solid: np.ndarray, passes: int = 3) -> np.ndar
         ok = target & (cnt > 0)
         vals = np.zeros_like(acc)
         np.divide(acc, np.maximum(cnt, 1)[..., None], out=vals)
-        out[..., :3] = np.where(ok[..., None], np.round(vals).astype(np.uint8), out[..., :3])
+        write = ok if keep is None else (ok & ~keep)
+        out[..., :3] = np.where(write[..., None], np.round(vals).astype(np.uint8),
+                                out[..., :3])
         known |= ok
     return out
 
@@ -236,8 +252,9 @@ def cutout(rgba: np.ndarray, tol: int = 12, radius: int | None = None,
                       "radius": round(float(r), 2),
                       "radius_fit_iou": round(iou, 4)})
 
-    solid = erode(alpha >= 0.999, 1)
-    out = bleed_edges(rgba, solid, passes=3)
+    opaque = alpha >= 0.999
+    solid = erode(opaque, 1)
+    out = bleed_edges(rgba, solid, passes=3, keep=opaque)
     out[..., 3] = np.round(np.clip(alpha, 0, 1) * 255).astype(np.uint8)
 
     x0 = min(p["bbox"][0] for p in parts)
