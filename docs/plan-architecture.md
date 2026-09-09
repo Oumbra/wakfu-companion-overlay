@@ -752,6 +752,16 @@ ailleurs (bêta, tests). Choix retenus :
   sans redémarrer l'overlay ni recréer l'`Engine` — roster/watchlist déjà appliqués sont conservés).
   Priorité de résolution au démarrage : argument CLI > config sauvegardée > découverte automatique.
 
+**Révision visuelle 2026-09-09** — voir `docs/design-system.md` §9 bis pour le détail des mesures :
+chrome porté sur les VRAIES textures du jeu (`crates/overlay-ui/assets/ui/options/`, chargées par
+`panels::options_modal::OptionsModalAssets::load`, une fois par fenêtre OS comme
+`panels::combat_frame::CombatFrame`) plutôt que des formes peintes à la main — coins ARRONDIS (pas
+chanfreinés) pour la fenêtre elle-même et son encadré interne, menu à trois entrées (Alertes/
+Personnages/Paramètres, seule la dernière est câblée), et un nouveau module `panels::nine_slice`
+(étirement 9-slice générique, coins/bordure à taille native) pour agrandir le bouton "Sélectionner
+le fichier" sans aplatir son chanfrein — méthode validée au préalable via une simulation HTML/CSS
+avant portage, plutôt que d'itérer directement en Rust/egui.
+
 ---
 
 ## 10. Sécurité, vie privée, conformité
