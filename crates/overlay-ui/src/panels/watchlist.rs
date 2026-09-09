@@ -72,7 +72,7 @@
 //! maintenant que la bordure ne risque plus de la recouvrir.
 //! - Le badge de compteur en pilule (débordant hors du coin bas-droit) est retiré : les captures de
 //!   référence du jeu montrent un simple nombre en texte cerné de noir (même procédé que
-//!   `combat::paint_outlined_text`, réutilisé ici), incrusté DANS le coin bas-droit de la tuile —
+//!   `design::text::paint_outlined_text`, réutilisé ici), incrusté DANS le coin bas-droit de la tuile —
 //!   voir `paint_count_inline`. Plus aucun débordement hors tuile : `content_width` n'a donc plus
 //!   besoin de réserver `BADGE_OVERFLOW` (retiré).
 //!
@@ -1220,7 +1220,7 @@ fn entry_tile(
 /// Compteur incrusté dans le coin bas-droit de la tuile — miroir des captures de référence du jeu
 /// (`docs/design-system.md` §7, ex. `rare-items.png` : un simple nombre cerné de noir, PAS de
 /// pastille/pilule de fond) : remplace l'ancien badge en pilule qui débordait hors de la tuile
-/// (voir doc de module, refonte 2026-09-06). Réutilise `combat::paint_outlined_text` (même procédé
+/// (voir doc de module, refonte 2026-09-06). Réutilise `design::text::paint_outlined_text` (même procédé
 /// que le pourcentage de dégâts sur un portrait) — un contour double (1px + 2px) essayé un temps en
 /// même temps que `COUNT_FONT_SIZE` 15px a été jugé « trop » une fois comparé en jeu (retour
 /// utilisateur, captures d'écran des deux côte à côte) : le contour simple à 1px, déjà validé
@@ -1270,23 +1270,25 @@ fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEnt
         bottom
     };
 
-    super::combat::paint_outlined_text(
+    crate::design::text::paint_outlined_text(
         ui,
         egui::pos2(right, current_bottom),
         egui::Align2::RIGHT_BOTTOM,
         &current_text,
         egui::FontId::monospace(COUNT_FONT_SIZE),
         current_color,
+        crate::design::text::OUTLINE_FULL,
     );
 
     if let Some(target_text) = &target_part {
-        super::combat::paint_outlined_text(
+        crate::design::text::paint_outlined_text(
             ui,
             egui::pos2(right, bottom),
             egui::Align2::RIGHT_BOTTOM,
             target_text,
             egui::FontId::monospace(TARGET_FONT_SIZE),
             TARGET_TEXT_COLOR,
+            crate::design::text::OUTLINE_FULL,
         );
     }
 }

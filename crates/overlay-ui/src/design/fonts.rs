@@ -40,6 +40,24 @@
 //! au-dessus de 0,50 de recouvrement sur les **deux**, d'où le choix — arbitré à la publication de
 //! l'artefact du 2026-09-09, l'autre option défendable étant Regular, plus léger.
 //!
+//! ## Pourquoi PT Serif Bold pour les titres
+//!
+//! Le jeu n'utilise **pas une seule police** : ses libellés de bouton sont dans une linéale, mais
+//! ses titres (« Options » sur la banniere de modale, « Barres de raccourcis » en titre de section)
+//! sont dans une **serif grasse**. Vingt-six serifs libres ou déjà présentes sur le poste ont été
+//! rendues puis comparées aux deux échantillons du jeu (recouvrement de forme au meilleur
+//! décalage, boîtes d'encre alignées). PT Serif Bold est la meilleure **libre** : l'écart de
+//! chasse au mot « Options » n'est que de ~2 % (215 px mesurés dans le jeu, 220 px rendus).
+//!
+//! Publiée sous **SIL Open Font License 1.1**, texte joint dans `assets/fonts/OFL-PTSerif.txt`
+//! comme la licence l'exige. 340 Ko, même ordre de grandeur qu'Ubuntu Medium.
+//!
+//! Le corps retenu est **21**, arbitré par l'utilisateur sur planche de comparaison le 2026-09-09.
+//! À noter, parce que ce n'est pas une erreur mais un choix : le corps 22 colle **exactement** à
+//! l'encre du jeu (21 × 82 px contre 21 × 82) là où le 21 rend 20 × 78. L'utilisateur préfère le
+//! 21, jugé mieux proportionné à la bannière — ne pas le « corriger » à 22 en croyant rattraper un
+//! écart de mesure.
+//!
 //! ## Licence
 //!
 //! Ubuntu est publiée sous **Ubuntu Font Licence 1.0**, libre et redistribuable ; le texte de la
@@ -48,7 +66,7 @@
 //!
 //! ## Portée : les libellés du design system, pas toute l'application
 //!
-//! Seule la famille nommée [`LABEL`] est ajoutée. La proportionnelle par défaut d'`egui`
+//! Seules les familles nommées [`LABEL`] et [`TITLE`] sont ajoutées. La proportionnelle par défaut d'`egui`
 //! (Ubuntu Light) reste celle de tout le reste de l'interface — panneaux Combat et Suivi compris.
 //! Basculer aussi le texte courant demanderait de mesurer la graisse du texte courant du jeu, ce
 //! qui n'a pas été fait ; le faire au passage aurait changé toutes les captures de non-régression
@@ -69,24 +87,34 @@ use std::sync::Arc;
 /// changer la police se fait dans [`install`] seul, aucun composant ne cite un fichier.
 pub const LABEL: &str = "ds-label";
 
+/// Nom de la famille des titres du design system (bannière de modale, titre de section) — la
+/// serif grasse du jeu, distincte de la linéale des libellés. Voir la doc de module.
+pub const TITLE: &str = "ds-title";
+
 /// Fichier embarqué — voir la doc de module pour le pourquoi de cette graisse précise.
 const UBUNTU_MEDIUM: &[u8] = include_bytes!("../../../../assets/fonts/Ubuntu-Medium.ttf");
 
+/// Fichier embarqué des titres — voir la doc de module pour le choix de cette serif.
+const PT_SERIF_BOLD: &[u8] = include_bytes!("../../../../assets/fonts/PTSerif-Bold.ttf");
+
 /// Enregistre les familles du design system sur `ctx`.
 ///
-/// Part des définitions **par défaut** d'`egui` et n'y ajoute qu'une famille : la proportionnelle
-/// et la monospace d'origine restent intactes, aucun texte existant ne change d'apparence.
+/// Part des définitions **par défaut** d'`egui` et n'y ajoute que des familles **nommées** : la
+/// proportionnelle et la monospace d'origine restent intactes, aucun texte existant ne change
+/// d'apparence tant qu'il ne demande pas explicitement l'une des familles du design system.
 ///
 /// À appeler une fois au démarrage. `Context::set_fonts` reconstruit l'atlas de glyphes : l'appeler
 /// à chaque frame le rebâtirait à chaque frame.
 pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        LABEL.to_owned(),
-        Arc::new(egui::FontData::from_static(UBUNTU_MEDIUM)),
-    );
-    fonts
-        .families
-        .insert(egui::FontFamily::Name(LABEL.into()), vec![LABEL.to_owned()]);
+    for (nom, fichier) in [(LABEL, UBUNTU_MEDIUM), (TITLE, PT_SERIF_BOLD)] {
+        fonts.font_data.insert(
+            nom.to_owned(),
+            Arc::new(egui::FontData::from_static(fichier)),
+        );
+        fonts
+            .families
+            .insert(egui::FontFamily::Name(nom.into()), vec![nom.to_owned()]);
+    }
     ctx.set_fonts(fonts);
 }
