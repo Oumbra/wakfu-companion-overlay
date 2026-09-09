@@ -36,7 +36,9 @@ use overlay_ingest::Tailer;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
-use overlay_ui::panels::options_modal::{OptionsModalAssets, OptionsModalState};
+use overlay_ui::panels::options_modal::{
+    OptionsModalAction, OptionsModalAssets, OptionsModalState,
+};
 use overlay_ui::panels::watchlist::{
     build_confetti, WatchlistToast, WatchlistToastReason, TOAST_DURATION,
 };
@@ -788,6 +790,13 @@ fn panneau_options_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
+        // Curseur de saisie FIGÉ (allumé, jamais clignotant) — depuis l'étape 1 du plan de
+        // finalisation (`docs/plan-modale-options.md`), le champ de chemin prend le focus dès la
+        // première frame, et son curseur apparaît donc sur cette capture. Le laisser clignoter
+        // ferait dépendre le résultat du nombre de frames que `Harness::run()` juge nécessaires,
+        // c'est-à-dire d'un détail d'implémentation du harnais. Seul le test est concerné : en
+        // production, le curseur clignote normalement.
+        ui.style_mut().visuals.text_cursor.blink = false;
         let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
         let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
         paint_content(
@@ -817,4 +826,67 @@ fn panneau_options_ne_panique_pas() {
 
     harness.run();
     harness.snapshot("options_modale_avec_erreur");
+}
+
+/// Clavier de la modale Options — étape 1 de `docs/plan-modale-options.md`.
+///
+/// **Le seul test de ce fichier qui ne produit aucune capture** : il ne vérifie pas un rendu mais
+/// l'action remontée à l'hôte (`OptionsModalAction`), et le rendu ne change pas d'un pixel selon la
+/// touche pressée.
+///
+/// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le filet
+/// global des deux hôtes (`main.rs` / `bin/overlay-ui-x11.rs`, `event_loop.exit()`) et **fermait
+/// l'overlay entier** au lieu d'annuler la saisie — la modale étant la seule fenêtre overlay
+/// focalisable (§9.1 du plan), elle était aussi la seule à pouvoir déclencher ce filet.
+///
+/// Le champ de chemin a le focus dès la première frame (`design::input::request_focus`), donc ces
+/// deux touches sont pressées **alors qu'un `TextEdit` est actif** : c'est exactement le cas où
+/// elles pourraient être avalées par le champ. Elles ne le sont pas — `TextEdit` travaille sur une
+/// copie filtrée des événements et laisse l'entrée globale intacte.
+#[test]
+fn modale_options_echap_annule_et_entree_valide() {
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let mut options_state = OptionsModalState {
+        path_input: CHEMIN.to_string(),
+        error: None,
+    };
+    let mut options_assets: Option<OptionsModalAssets> = None;
+    // Les actions sont ACCUMULÉES, pas gardées une par une : `Harness::run()` rejoue plusieurs
+    // frames jusqu'à stabilisation, et seule la PREMIÈRE voit l'événement clavier — retenir la
+    // dernière valeur renvoyée ne verrait donc jamais que le `None` des frames suivantes.
+    //
+    // `RefCell` plutôt qu'un `&mut` capturé : la closure du harnais garde son emprunt pour toute sa
+    // durée de vie, il faut pouvoir relire entre deux `run()` sans le rompre.
+    let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
+
+    let mut harness = Harness::new_ui(|ui| {
+        let ctx = ui.ctx().clone();
+        let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
+        let action = panels::options_modal::show(ui, &mut options_state, assets);
+        if action != OptionsModalAction::None {
+            actions.borrow_mut().push(action);
+        }
+    });
+
+    // Frames de repos : aucune touche, aucune action. Vérifie au passage que le focus initial pris
+    // par le champ ne déclenche à lui seul rien du tout.
+    harness.run();
+    assert_eq!(actions.borrow_mut().drain(..).collect::<Vec<_>>(), vec![]);
+
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Validate(CHEMIN.to_string())],
+        "Entrée doit valider le chemin courant, comme le bouton « Valider » du pied de page"
+    );
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Cancel],
+        "Échap doit annuler la modale, jamais fermer l'overlay"
+    );
 }

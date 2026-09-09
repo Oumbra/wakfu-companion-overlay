@@ -300,7 +300,7 @@ pub struct OptionsModalState {
 /// Ce que l'utilisateur vient de demander CETTE frame — `None` la plupart du temps (aucun bouton
 /// cliqué). Voir doc de module : ne porte aucune garantie de validité, c'est à l'appelant de
 /// vérifier avant d'agir.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum OptionsModalAction {
     #[default]
     None,
@@ -313,6 +313,11 @@ pub enum OptionsModalAction {
     Validate(String),
 }
 
+/// Clé mémoire « le focus initial a déjà été donné » — voir [`show`].
+fn focus_given_id() -> egui::Id {
+    egui::Id::new("options-modal-focus-initial")
+}
+
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
 /// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
 pub fn show(
@@ -322,6 +327,17 @@ pub fn show(
 ) -> OptionsModalAction {
     let mut action = OptionsModalAction::None;
     let rect = ui.max_rect();
+
+    // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
+    // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
+    // a sa propre fenêtre OS, créée à l'ouverture et détruite à la fermeture (voir
+    // `main.rs::open_options_modal` / `PostRedraw::CloseOptions`). Rouvrir la modale redonne donc
+    // bien le focus, refermer et rouvrir n'en garde aucune trace.
+    let first_frame = !ui.data_mut(|d| {
+        let seen = d.get_temp::<bool>(focus_given_id()).unwrap_or(false);
+        d.insert_temp(focus_given_id(), true);
+        seen
+    });
 
     // Fond de la modale — arrondi sur les QUATRE coins (`MODAL_RADIUS`), peint AVANT tout le reste
     // (bannière/section/pied de page viennent par-dessus).
@@ -522,11 +538,16 @@ pub fn show(
             egui::pos2(row_rect.right() - browse_width, row_rect.top()),
             egui::vec2(browse_width, ROW_HEIGHT),
         );
+        // Focus initial dans le champ à l'ouverture : la modale est la SEULE fenêtre overlay
+        // focalisable (§9.1 du plan, `WS_EX_NOACTIVATE` délibérément omis pour elle), et son unique
+        // réglage est ce champ — devoir cliquer dedans avant de pouvoir taper n'a aucune raison
+        // d'être. Une seule frame, sinon le champ reprendrait le focus indéfiniment.
         ui.put(
             field_rect,
             design::input(&mut state.path_input)
                 .placeholder("Chemin vers wakfu.log")
                 .width(field_width)
+                .request_focus(first_frame)
                 .log_name("options-chemin"),
         );
 
@@ -539,6 +560,33 @@ pub fn show(
             ui.label(egui::RichText::new(err).color(ERROR_TEXT).size(13.0));
         }
     });
+
+    // Clavier — lu APRÈS les boutons : un clic de cette frame l'emporte sur une touche de la même
+    // frame (cas de figure théorique, mais l'ordre doit être décidé plutôt que subi).
+    //
+    // Ces deux touches sont traitées ICI, dans le panneau, et non par l'hôte, pour deux raisons.
+    // La première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord,
+    // il remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons
+    // du pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un
+    // Échap destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay
+    // entier (voir `main.rs`/`bin/overlay-ui-x11.rs`, où ce filet exclut désormais cette fenêtre).
+    //
+    // `TextEdit` ne retire pas ces événements de l'entrée globale (il travaille sur une copie
+    // filtrée, `InputState::filtered_events`) : les lire ici reste fiable même quand le champ de
+    // chemin a le focus — ce qui est le cas dès l'ouverture.
+    if matches!(action, OptionsModalAction::None) {
+        let (cancel, validate) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Escape),
+                i.key_pressed(egui::Key::Enter),
+            )
+        });
+        if cancel {
+            action = OptionsModalAction::Cancel;
+        } else if validate {
+            action = OptionsModalAction::Validate(state.path_input.clone());
+        }
+    }
 
     action
 }

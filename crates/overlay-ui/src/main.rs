@@ -1344,13 +1344,23 @@ impl ApplicationHandler<UserEvent> for App {
                 logging::log_session_end("fermeture de fenêtre");
                 event_loop.exit();
             }
-            // Ne se déclenche en pratique JAMAIS (voir la doc de `QUIT_HOTKEY_LABEL`) : ces
-            // fenêtres portent `WS_EX_NOACTIVATE`, donc ne reçoivent jamais le focus clavier quel
-            // que soit le mode — laissé en place au cas où une future fenêtre overlay redeviendrait
-            // focalisable, mais `QUIT_HOTKEY_LABEL` est le SEUL moyen fiable de quitter sans passer
-            // par le terminal.
+            // Filet « Échap quitte l'overlay », **sauf pour la modale Options**.
+            //
+            // Il ne se déclenche en pratique jamais pour les autres fenêtres (voir la doc de
+            // `QUIT_HOTKEY_LABEL`) : elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le
+            // focus clavier, quel que soit le mode. Laissé en place au cas où l'une d'elles
+            // redeviendrait focalisable, mais `QUIT_HOTKEY_LABEL` reste le SEUL moyen fiable de
+            // quitter sans passer par le terminal.
+            //
+            // La modale Options, elle, EST focalisable et délibérément (§9.1 du plan :
+            // `WS_EX_NOACTIVATE` omis pour elle, il faut pouvoir taper dans le champ de chemin).
+            // Sans cette exclusion, taper Échap dedans tuait l'overlay entier au lieu d'annuler la
+            // saisie. Ses deux touches (`Échap` annule, `Entrée` valide) sont traitées par le
+            // panneau lui-même, qui les remonte en `OptionsModalAction` — voir
+            // `panels::options_modal::show`.
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed
+                if overlay.kind != OverlayKind::Options
+                    && event.state == ElementState::Pressed
                     && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                 {
                     event_loop.exit();
