@@ -864,7 +864,9 @@ Trois décisions prises à cette occasion :
   y perdait 3px d'encre sur 13. Voir `panels::options_modal::FOOTER_BUTTON_HEIGHT`.
 
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
-Premier composant livré : le bouton texte. `panels::icon_button::paint_icon_button` reste hors
+Composants livrés : le bouton texte, puis le champ de saisie (`design::input`, 2026-09-10 — hauteur
+native 25px, valeur en or `#f4d89e` et non en blanc, texte indicatif peint à la main parce qu'egui
+impose sa propre couleur à un `hint_text`). `panels::icon_button::paint_icon_button` reste hors
 contrat (quatre `TextureHandle` en paramètres) et est également à migrer.
 
 ---
