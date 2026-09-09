@@ -184,11 +184,12 @@ L'utilisateur travaille en terminal : une image lue en ligne lui est invisible (
 Après tout traitement, produire la planche et **la publier en Artifact** :
 
 ```bash
-dsimg.py sheet "assets/design-system/button-secondary.png:/chemin/out.png" \
+dsimg.py sheet "assets/design-system/button-secondary.png::/chemin/out.png" \
   -o "$SCRATCHPAD/planche.html" --title "Bouton secondaire générique" --scale 2
 ```
 
-Chaque entrée est soit un chemin, soit `avant:après`. La planche montre le résultat sur
+Chaque entrée est soit un chemin, soit `avant::après` (double deux-points : un simple
+`:` couperait les chemins Windows `D:/…`). La planche montre le résultat sur
 damier, fond sombre et fond clair, avec un zoom ×6, puis une vignette réunissant les
 **quatre coins à ×8** — les fonds révèlent les défauts qu'un seul cache (halo de bord,
 alpha résiduel, texture ratée), la vignette des coins révèle les ruptures de liseré qu'une
