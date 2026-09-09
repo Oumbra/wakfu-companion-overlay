@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
+pub use components::input::{input, Input, InputSize, InputState};
 
 /// Identifiant de mémorisation dans `egui::Context` — voir `DesignSystem::get`.
 const MEMO_ID: &str = "wakfu-overlay-design-system";

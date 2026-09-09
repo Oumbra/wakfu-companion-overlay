@@ -19,7 +19,7 @@
 
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
-use overlay_ui::design::{self, ButtonSize, ButtonState, ButtonVariant};
+use overlay_ui::design::{self, ButtonSize, ButtonState, ButtonVariant, InputState};
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
 /// jeu : les textures de bouton sont détourées, elles doivent être jugées sur le fond sur lequel
@@ -38,7 +38,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 900.0))
+        .with_size(Vec2::new(760.0, 1160.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -145,6 +145,59 @@ fn gallery(ui: &mut egui::Ui) {
                 .variant(ButtonVariant::Danger)
                 .size(ButtonSize::Compact)
                 .width(120.0),
+        );
+    });
+    heading(
+        ui,
+        "Champ de saisie — hauteur native 25 px",
+        "Valeur en or, texte indicatif en kaki éteint : les deux couleurs sont relevées, pas choisies. Le survol ne change rien, faute de capture de référence.",
+    );
+    // Des valeurs distinctes par champ : un `&mut String` partagé ferait de la planche une seule
+    // et même donnée affichée quatre fois, ce qui ne montrerait rien.
+    let mut rempli = String::from("/home/joueur/.config/zaap/wakfu.log");
+    let mut vide = String::new();
+    let mut court = String::from("42");
+    let mut desactive = String::from("valeur figée");
+    ui.add(
+        design::input(&mut rempli)
+            .placeholder("Chemin vers wakfu.log")
+            .width(420.0)
+            .log_name("galerie.rempli"),
+    );
+    ui.add(
+        design::input(&mut vide)
+            .placeholder("Chemin vers wakfu.log")
+            .width(420.0)
+            .log_name("galerie.vide"),
+    );
+    ui.horizontal(|ui| {
+        ui.add(
+            design::input(&mut court)
+                .placeholder("Nombre")
+                .width(90.0)
+                .log_name("galerie.court"),
+        );
+        ui.add(
+            design::input(&mut desactive)
+                .width(200.0)
+                .enabled(false)
+                .preview_state(InputState::Disabled)
+                .log_name("galerie.desactive"),
+        );
+    });
+    // Le couple réel de la modale Options : un champ à sa hauteur native, centré sur une ligne que
+    // le bouton fixe à 36 px.
+    ui.horizontal(|ui| {
+        ui.add(
+            design::input(&mut vide)
+                .placeholder("Chemin vers wakfu.log")
+                .width(300.0)
+                .log_name("galerie.couple"),
+        );
+        ui.add(
+            design::button("Parcourir")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Compact),
         );
     });
 }

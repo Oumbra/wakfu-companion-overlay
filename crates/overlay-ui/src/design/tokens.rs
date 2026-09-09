@@ -61,6 +61,49 @@ pub const BUTTON_FONT_SIZE_RATIO: f32 = 17.0 / 36.0;
 /// généreux, ~30-40px de chaque côté » sur des boutons de ~64px de haut, soit ≈ 0,55×hauteur).
 pub const BUTTON_PADDING_X_RATIO: f32 = 0.55;
 
+// ---------------------------------------------------------------------------------------------
+// Champ de saisie — mesuré sur la barre de recherche de l'onglet Commandes
+// (`interface-options-commandes.png`, champ en x 30..500, y 138..163) et recoupé avec les assets
+// isolés (`dsimg.py analyze`). Détail des sources dans `design::components::input`.
+// ---------------------------------------------------------------------------------------------
+
+/// Fond d'un champ — nettement plus sombre que le panneau qui le porte.
+pub const INPUT_FILL: Color32 = Color32::from_rgb(0x0E, 0x11, 0x15);
+
+/// Bord d'un champ — le kaki chaud systématique de tous les champs du jeu
+/// (`accent_warm.input_border` de `design-tokens.json`, retrouvé à l'identique sur les quatre
+/// assets de champ).
+pub const INPUT_BORDER: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
+
+/// Épaisseur du bord, en pixels — mesurée, pas supposée : le bord occupe deux lignes pleines
+/// (y 138-139 et 161-162) et deux colonnes pleines (x 30-31 et 498-499).
+pub const INPUT_BORDER_WIDTH: f32 = 2.0;
+
+/// Rayon d'angle — `dsimg.py analyze` sur `large-input-text-width-placeholder.png` et
+/// `input-search.png`, ajustement parfait (IoU 1,0) dans les deux cas. C'est le seul composant du
+/// jeu à ne pas être à 2.
+pub const INPUT_RADIUS: u8 = 4;
+
+/// Couleur d'une valeur SAISIE — **or, pas blanc**. Le constat le plus contre-intuitif du relevé,
+/// et il tient sur trois assets indépendants : `input-search.png`, `input-number.png` et
+/// `large-input-number.png` donnent tous le même pic `#f4d89e`. Un champ à valeur blanche ne
+/// ressemble pas au jeu.
+pub const INPUT_TEXT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+
+/// Couleur du texte indicatif — un kaki éteint, la même famille chromatique que le bord en plus
+/// sourd (pic `#83775b` sur « Rechercher », `#8a7d60` sur « Min »).
+pub const INPUT_PLACEHOLDER: Color32 = Color32::from_rgb(0x83, 0x77, 0x5B);
+
+/// Corps de police du texte d'un champ, en fraction de sa hauteur. Le texte d'un champ a la même
+/// hauteur d'encre (13px) qu'un libellé de bouton, donc le même corps de 17px — mais sur un champ
+/// de 25px et non un bouton de 36, d'où un ratio différent.
+pub const INPUT_FONT_SIZE_RATIO: f32 = 17.0 / 25.0;
+
+/// Retrait horizontal du texte depuis le bord du champ, en fraction de sa hauteur. Mesuré : le
+/// premier glyphe de « Rechercher » commence à x=36 pour un champ dont le bord est à x=30, soit
+/// 6px sur 25 de hauteur.
+pub const INPUT_PADDING_X_RATIO: f32 = 6.0 / 25.0;
+
 /// Largeur minimale d'un bouton, en fraction de sa hauteur — garde-fou de proportion pour un
 /// libellé très court (« OK »), pour qu'il ne devienne pas un carré. Réglage d'ergonomie, pas une
 /// mesure.
