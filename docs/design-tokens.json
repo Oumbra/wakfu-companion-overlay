@@ -37,10 +37,19 @@
   "tab_inactive_fill": "#353633",
   "tab_inactive_text": "#BBA579",
   "modal": {
-    "_note": "Gabarits mesurés sur la fenêtre Options réelle (§9 du design-system.md) — à traiter comme des RATIOS relatifs au composant, pas des px absolus (dépendent de l'échelle d'interface du client).",
-    "banner_height_px": 54,
-    "tab_row_height_px": [36, 38],
-    "footer_button_height_px": [41, 42]
+    "_note": "Révision 2026-09-09 (§9 bis du design-system.md) — mesures affinées via `.claude/skills/design-asset/scripts/dsimg.py analyze` sur les assets eux-mêmes plutôt qu'un échantillonnage manuel ; valeurs en px utilisées TELLES QUELLES par `panels::options_modal` (fenêtre overlay dédiée 560×436, pas une échelle d'interface du client).",
+    "window_size_px": [560, 436],
+    "corner_radius_modal_px": 12,
+    "corner_radius_section_px": 18,
+    "banner_height_px": 56,
+    "menu_height_px": 31,
+    "footer_button_height_px": [41, 42],
+    "gap_banner_to_menu_px": 14,
+    "gap_menu_to_section_px": 14,
+    "gap_section_to_footer_px": 14,
+    "residual_margin_below_footer_px": 12,
+    "modal_bg": "#1C2023",
+    "section_bg": "#13161B"
   },
   "rarity_borders": {
     "commun": { "light": "#C4C5C5", "dark": "#67696B", "_note": "gris neutre sans teinte, identique au cadre d'un emplacement vide" },

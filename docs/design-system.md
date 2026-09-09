@@ -362,13 +362,41 @@ non repris en v1 overlay (n'a de sens qu'avec plusieurs réglages par onglet).
 ci-dessus), `accent_danger` (rouge « Annuler » plein-largeur), `tab_inactive_fill`/
 `tab_inactive_text`, `modal` (hauteurs bannière/onglets/pied de page).
 
-**Décision d'implémentation (v1 overlay, `panels::options_modal`)** : PAS de ligne d'onglets — la
-modale Options de l'overlay n'a qu'un seul réglage pour l'instant (chemin de `wakfu.log`, voir
-§5.1 du plan d'architecture), simuler une structure à onglets vide n'apporterait rien. Le chrome
-retenu est : bannière + corps + pied de page Annuler/Valider, à l'identique du reste. Les coins
-chanfreinés sont peints à la main (`panels::chamfer`, polygone convexe à sommets colorés
-individuellement pour le dégradé vertical — approche §6.2 option (a) de la version précédente de ce
-document, désormais implémentée).
+**Décision d'implémentation (v1 overlay, `panels::options_modal`, 2026-09-08)** — **remplacée par la
+révision ci-dessous** : PAS de ligne d'onglets, chrome bannière + corps + pied de page peint à la
+main via `panels::chamfer` (coins chanfreinés par polygone convexe à sommets colorés).
+
+### 9 bis. Révision 2026-09-09 — coins ARRONDIS et textures réelles
+
+Corrections apportées après un second passage de mesure (`.claude/skills/design-asset/scripts/
+dsimg.py analyze` sur les assets eux-mêmes plutôt qu'un échantillonnage manuel de captures) et une
+simulation HTML/CSS interactive validée avec l'utilisateur avant portage :
+
+- **La fenêtre Options elle-même a les coins ARRONDIS, pas chanfreinés** — vérifié au pixel sur
+  `assets/design-system/modal-header.png` (`dsimg.py analyze` : `corner_radius≈16` sur cet asset
+  précis, ≈12px une fois ramené à l'échelle 720×561 de la capture pleine fenêtre). **Ceci ne
+  contredit PAS la règle générale §1 point 1** (« coins chanfreinés, pas d'arrondi » pour boutons/
+  bannières/icônes) : cette règle couvre les COMPOSANTS individuels, pas le CONTENEUR fenêtre lui-
+  même — les boutons (`footer-cancel.png`/`footer-validate.png`, `corner_radius≈2`, quasi droits)
+  et le bouton secondaire "Sélectionner le fichier" (`button-secondary.png`, `corner_radius≈4`,
+  léger chanfrein) restent bien dans la famille chanfreinée documentée par ailleurs.
+- **L'encadré interne** ("section", contenant le réglage de chemin) a un rayon PLUS PRONONCÉ
+  (≈18px) que la fenêtre qui le contient (≈12px) — constat direct sur la référence, pas déduit
+  d'une formule commune.
+- **Menu à trois entrées** ajouté au-dessus de la section : "Alertes", "Personnages", "Paramètres"
+  (dernière entrée, celle qui contient le réglage actuel — les deux autres sont des stubs visuels
+  pour de futurs réglages). Texture dérivée de `tabs-with-first-tab-active.png` (miroir horizontal
+  pour que le segment actif tombe sur la dernière entrée), pas de couleurs peintes à la main.
+- **Bannière et pied de page peints avec les vraies textures du jeu** (`modal-header.png`,
+  `footer-cancel.png`/`footer-validate.png` — libellés déjà gravés dans la texture) plutôt qu'un
+  dégradé approximé à la main : `panels::chamfer` reste utilisé ailleurs dans l'overlay (barre de
+  dégâts du panneau Combat) mais plus pour ce panneau.
+- **Bouton "Sélectionner le fichier" en 9-slice** (`panels::nine_slice`, nouveau module) sous le
+  champ de chemin (empilé, pas côte à côte) : seul élément agrandi bien au-delà de la taille native
+  de sa texture (`button-secondary.png`/`button-secondary-hover.png`, déjà génériques — sans
+  libellé gravé — voir `.claude/skills/design-asset`).
+- Fenêtre portée à 560×436 (ratio aligné sur les 720:561 mesurés de la vraie fenêtre Options du
+  jeu, au lieu d'une boîte compacte 560×230 arbitraire) — cohérence visuelle avec le rendu réel.
 
 ---
 
