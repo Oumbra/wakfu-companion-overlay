@@ -51,7 +51,9 @@ use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
-use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+use overlay_ui::panels::options_modal::{
+    self, OptionsModalAction, OptionsModalAssets, OptionsModalState,
+};
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -286,6 +288,11 @@ struct OverlayWindow {
     /// `bin/overlay-ui-x11.rs` (code partagé côté `panels::options_modal`, duplication assumée
     /// côté fenêtrage OS comme le reste de ce fichier).
     options_state: Option<OptionsModalState>,
+    /// Textures du chrome de la modale Options (2026-09-09) — voir
+    /// `render_content::RenderContent::options_assets` — chargées UNE FOIS à la création de cette
+    /// fenêtre (voir `create_overlay_window`), `Some` UNIQUEMENT pour `kind == OverlayKind::Options`,
+    /// comme `options_state`.
+    options_assets: Option<OptionsModalAssets>,
     game_hwnd: HWND,
     /// Dernier rectangle connu de la fenêtre de jeu (mis à jour par `sync_windows`/`reposition`,
     /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
@@ -678,6 +685,10 @@ impl App {
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
         let combat_frame = CombatFrame::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
+        // Uniquement pour la modale Options (voir la doc du champ `OverlayWindow::options_assets`)
+        // — inutile de décoder 6 PNG supplémentaires pour Combat/Suivi.
+        let options_assets =
+            (kind == OverlayKind::Options).then(|| OptionsModalAssets::load(&gpu.egui_ctx));
 
         let outer = window.outer_size();
         let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
@@ -710,6 +721,7 @@ impl App {
             // Renseigné juste après par l'appelant (`open_options_modal`) pour `kind == Options`
             // — `None` ici pour Combat/Suivi, jamais consulté (voir `RenderContent::options`).
             options_state: (kind == OverlayKind::Options).then(OptionsModalState::default),
+            options_assets,
             game_hwnd,
             game_rect: rect,
             character_name,
@@ -1428,6 +1440,7 @@ impl ApplicationHandler<UserEvent> for App {
                         interactive,
                         now,
                         options: overlay.options_state.as_mut(),
+                        options_assets: overlay.options_assets.as_ref(),
                     },
                 );
                 // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul

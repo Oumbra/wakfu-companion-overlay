@@ -36,7 +36,7 @@ use overlay_ingest::Tailer;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
-use overlay_ui::panels::options_modal::OptionsModalState;
+use overlay_ui::panels::options_modal::{OptionsModalAssets, OptionsModalState};
 use overlay_ui::panels::watchlist::{
     build_confetti, WatchlistToast, WatchlistToastReason, TOAST_DURATION,
 };
@@ -162,6 +162,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
+                options_assets: None,
             },
         );
     });
@@ -218,6 +219,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 interactive: true,
                 now,
                 options: None,
+                options_assets: None,
             },
         );
     });
@@ -277,6 +279,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
+                options_assets: None,
             },
         );
     });
@@ -421,6 +424,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
+                options_assets: None,
             },
         );
     });
@@ -479,6 +483,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
+                options_assets: None,
             },
         );
     });
@@ -577,6 +582,7 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
                     interactive: true,
                     now,
                     options: None,
+                    options_assets: None,
                 },
             );
         });
@@ -661,6 +667,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     interactive: true,
                     now,
                     options: None,
+                    options_assets: None,
                 },
             );
         });
@@ -745,6 +752,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 interactive: true,
                 now,
                 options: None,
+                options_assets: None,
             },
         );
     });
@@ -772,10 +780,16 @@ fn panneau_options_ne_panique_pas() {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: Some("Le fichier sélectionné doit s'appeler wakfu.log.".to_string()),
     };
+    // Chargées à part de `Textures` (variable locale dédiée plutôt qu'un champ supplémentaire sur
+    // `Textures`, jamais utilisé par les autres tests) : `get_or_load`/cet emprunt doivent coexister
+    // dans le même appel à `paint_content` sans se marcher dessus (deux emprunts `&mut` distincts,
+    // sur deux variables distinctes).
+    let mut options_assets: Option<OptionsModalAssets> = None;
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
         let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
         paint_content(
             ui,
             RenderContent {
@@ -796,6 +810,7 @@ fn panneau_options_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: Some(&mut options_state),
+                options_assets: Some(assets),
             },
         );
     });
