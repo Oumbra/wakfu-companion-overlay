@@ -176,7 +176,9 @@ wakfu-companion-overlay/
 │   │   └── src/{lib.rs,backend.rs,quickjs.rs,model.rs,snapshot.rs}
 │   ├── overlay-sync/              # API + file persistante + auth
 │   │   └── src/{client.rs,pairing.rs,token_store.rs,queue.rs}  # auth native (L4) fait ; catalogue (L3) fait ; file d'envoi (L5) fait — voir son statut au §12
-│   ├── overlay-ui/                # egui : panneaux, thème, i18n
+│   ├── overlay-ui/                # egui : design system, panneaux, i18n
+│   │   ├── src/design/            # composants réutilisables (§9.2) : assets.rs, nine_slice.rs,
+│   │   │                          #   tokens.rs, components/{button.rs,…}
 │   │   └── src/{app.rs,panels/{damage.rs,tracker.rs,alerts.rs,recap.rs,status.rs},theme.rs}
 │   └── overlay-platform/          # tout le code spécifique OS
 │       └── src/{lib.rs,windows/{layered.rs,dcomp.rs,cursor.rs},linux/{x11.rs,cursor.rs}}
@@ -761,6 +763,52 @@ Personnages/Paramètres, seule la dernière est câblée), et un nouveau module 
 (étirement 9-slice générique, coins/bordure à taille native) pour agrandir le bouton "Sélectionner
 le fichier" sans aplatir son chanfrein — méthode validée au préalable via une simulation HTML/CSS
 avant portage, plutôt que d'itérer directement en Rust/egui.
+
+### 9.2 Design system — composants réutilisables (2026-09-09)
+
+`crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
+constat est le point de départ : « à chaque fois que je demande un bouton, il faut que j'explique
+c'est tel composant, c'est tel label, il faut qu'il fasse telle taille ». Deux symptômes concrets
+dans le dépôt avant cette couche :
+
+- `panels::options_modal` peint ses trois boutons à la main — sept constantes de couleur et un
+  appel `chamfer` chacun ; rien n'est réutilisable, rien ne se corrige en un seul endroit ;
+- `assets/design-system/large-button-cancel.png` / `large-button-validate.png` sont **la même
+  texture que `button-danger.png` / la texture primaire**, redécoupées à la taille du pied de page
+  avec le libellé encore incrusté : un asset par taille **et** par libellé.
+
+Décisions :
+
+- **Une texture générique par variante, toutes les tailles au rendu** — peinture **9-slice**
+  (`design::nine_slice`) : coins et liseré figés, bandes médianes étendues. Mode de remplissage
+  **par axe** : `Stretch` pour le dégradé vertical, `Tile` pour les hachures diagonales
+  (horizontalement périodiques — les étirer donne des traînées dès qu'on dépasse la largeur native).
+- **Manifeste unique** (`design::assets`) : nom logique → fichier + découpage. Seul endroit du crate
+  où un chemin d'asset est écrit ; les fichiers sont référencés **directement dans
+  `assets/design-system/`** (source tenue par le skill `design-asset`), pas recopiés dans le crate.
+- **Chargement paresseux mémorisé par `egui::Context`** (`DesignSystem::get`) : aucun câblage dans
+  `render_content`/`main.rs`, et rien n'est téléversé sur le GPU tant qu'aucun composant n'est
+  utilisé (§8, budget mémoire).
+- **Contrat de composant** uniforme — API paramétrable sans texture en argument, `impl
+  egui::Widget`, trois états (repos/survolé/désactivé, l'appui retirant l'apparence survolée comme
+  pour les boutons icône), écrêtage du contenu, journalisation à l'action et avertissement unique
+  sur défaut de géométrie. Détail :
+  `.claude/skills/ui-component/references/contrat-composant.md`.
+- **Galerie de non-régression** (`crates/overlay-testkit/tests/design_gallery.rs`, §17.1) : toutes
+  les variantes et tous les états sur une capture unique, à publier en Artifact.
+
+**Doublon connu, à résorber** : `panels::nine_slice` (ajouté le même jour par la refonte visuelle
+de la modale Options, ci-dessus) fait le même travail que `design::nine_slice` en plus simple —
+marge unique sur les quatre côtés, étirement seul, pas de répétition. `options_modal` charge par
+ailleurs `footer-cancel.png`/`footer-validate.png`, deux textures de 338×36 **avec le libellé
+incrusté**, exactement le pattern que cette couche supprime. La migration de la modale sur
+`design::button` (et la suppression de `panels::nine_slice` + de ces assets) est le prochain lot ;
+elle n'a pas été faite dans la session qui a introduit `design/` pour ne pas entrer en conflit avec
+celle qui travaillait alors sur la modale.
+
+Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
+Premier composant livré : le bouton texte. `panels::icon_button::paint_icon_button` reste hors
+contrat (quatre `TextureHandle` en paramètres) et est également à migrer.
 
 ---
 
