@@ -85,6 +85,11 @@ que d'être filtré après coup.
   correspond à son fond — `OUTLINE_FULL` si le texte flotte nu par-dessus le jeu (fond arbitraire,
   il faut cerner de tous les côtés), `SHADOW_BOTTOM_RIGHT` si le fond est connu (bannière, encadré) :
   trois décalages suffisent, et un contour complet empâterait le mot.
+- **Aucun effet hors de l'écran.** Un composant (et plus généralement un panneau) ne fait jamais
+  lui-même ce qui déborde de la fenêtre : ouvrir une page, écrire un fichier, émettre une requête.
+  Il **remonte l'intention** à son appelant (`Response`, structure de résultat) et l'appelant agit.
+  Le harnais de capture clique pour de vrai : un composant qui ouvre une page l'ouvre à chaque
+  `cargo test`, sur la machine de qui lance la suite. C'est arrivé — voir §17.3 bis du plan.
 - **La hauteur d'un composant est celle de sa texture**, jamais déduite de sa largeur : un 9-slice
   existe pour qu'on l'étire en largeur *sans* toucher à sa hauteur. Déduire la hauteur d'un rapport
   d'aspect rétrécit le composant — et son libellé avec — dès que le panneau qui le porte est plus
