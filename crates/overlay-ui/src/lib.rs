@@ -31,6 +31,7 @@
 
 pub mod alert_sound;
 pub mod config;
+pub mod design;
 pub mod engine_thread;
 pub mod frame;
 pub mod game_window;
