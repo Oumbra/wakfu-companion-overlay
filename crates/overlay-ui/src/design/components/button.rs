@@ -28,7 +28,7 @@
 //! est réservé au pattern « bouton pleine largeur du pied de page », un « Annuler » de simple boîte
 //! de dialogue reste kaki.
 
-use egui::{Color32, FontId, Response, Sense, Ui, Vec2, Widget};
+use egui::{Color32, Response, Sense, Ui, Vec2, Widget};
 
 use crate::design::{assets::DsTexture, text, tokens, DesignSystem};
 
@@ -244,13 +244,15 @@ impl Button {
         height * tokens::BUTTON_FONT_SIZE_RATIO
     }
 
-    /// Mise en page du libellé. La couleur est `Color32::PLACEHOLDER` et non la couleur finale :
-    /// `design::text::weighted` peint la même galley plusieurs fois, à des opacités différentes,
-    /// et n'y arrive que si la galley laisse la couleur à décider au moment de la peinture.
+    /// Mise en page du libellé, dans la police des libellés du design system
+    /// (`design::text::label_font`, voir `design::fonts`) et non dans la proportionnelle par
+    /// défaut d'egui. La couleur reste `Color32::PLACEHOLDER` : `layout` sert aussi à
+    /// `desired_size`, où l'état du bouton — donc la couleur du texte — n'est pas encore connu ;
+    /// `Painter::galley` la résout à la peinture.
     fn layout(&self, ui: &Ui, height: f32) -> std::sync::Arc<egui::Galley> {
         ui.painter().layout_no_wrap(
             self.text.clone(),
-            FontId::proportional(Self::font_size(height)),
+            text::label_font(ui.ctx(), Self::font_size(height)),
             Color32::PLACEHOLDER,
         )
     }
@@ -321,13 +323,9 @@ impl Widget for Button {
             // Le libellé est écrêté au bouton : un texte trop long déborderait sinon sur le
             // panneau voisin, et le défaut passerait pour un bug de mise en page.
             let text_pos = rect.center() - galley.size() * 0.5;
-            text::weighted(
-                &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
-                text_pos,
-                galley.clone(),
-                text_color,
-                text::label_weight(),
-            );
+            ui.painter()
+                .with_clip_rect(rect.intersect(ui.clip_rect()))
+                .galley(text_pos, galley.clone(), text_color);
         }
 
         let name = self.log_name.as_deref().unwrap_or(self.text.as_str());
