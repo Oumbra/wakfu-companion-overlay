@@ -46,6 +46,7 @@ appliquée en fin de pipeline (défaut).
 | `icon-calendar` | *sans* `--from-button` | 22 × 22 |
 | `icon-kamas` | *sans* `--from-button` | 14 × 12 |
 | `icon-xp` | *sans* `--from-button` | 16 × 11 |
+| `icon-info` | *sans* `--from-button` | 27 × 28 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -121,3 +122,16 @@ l'alpha intermédiaire (livre : 89 → 113 pixels en 20–200, kamas : 43 → 32
 cette « ombre » est en fait le bas de la reliure et les petits éclats du dessin — la retirer
 appauvrirait le glyphe. Régler par défaut, et garder `--floor 45` pour les vraies ombres
 portées sur aplat (`icon-order`).
+
+## `icon-info` (2026-09-10) — une pastille, pas un glyphe
+
+Le « i » d'information est un **disque doré cerclé, posé à même le décor sombre**, pas un
+glyphe sur bouton porteur : `analyze` rend un « composant » de 27 × 26 au rayon 11 — le
+disque lui-même — et `--from-button` n'aurait rien à détourer, comme sur `icon-pin`.
+Réglages par défaut, `luma-light` en polarité automatique : le disque part opaque et le
+« i » sombre est creusé sous alpha 16. C'est exactement la construction d'`icon-help`, la
+même pastille cerclée, extraite d'une capture plus petite (12 × 12).
+
+**`--size 24` testé et écarté.** La capture fait déjà 27 px : normaliser à 24 la
+rééchantillonne pour rien et écrase la barre du « i », dont l'épaisseur ne fait que 4 px.
+Taille native conservée, comme sur le reste du lot.
