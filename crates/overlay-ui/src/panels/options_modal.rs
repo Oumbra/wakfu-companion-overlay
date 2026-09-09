@@ -61,10 +61,17 @@ pub const WINDOW_SIZE: (f32, f32) = (560.0, 436.0);
 /// Rayon d'arrondi de la modale ENTIÈRE (bannière haute + pied de page bas) — mesuré au pixel sur
 /// `modal-header.png` (transition alpha au coin haut-gauche/haut-droit).
 const MODAL_RADIUS: u8 = 12;
-/// Rayon d'arrondi de l'encadré interne ("section", contenant le réglage de chemin) — visiblement
-/// PLUS PRONONCÉ que `MODAL_RADIUS` sur la référence réelle, constat direct plutôt que déduit d'une
-/// formule.
-const SECTION_RADIUS: u8 = 18;
+/// Rayon d'arrondi du panneau de contenu.
+///
+/// **2, pas 18.** La première version lisait « un encadré interne au rayon plus prononcé que la
+/// modale » sur la référence, à l'œil. Le relevé
+/// (`docs/design-system/releve-modale-options.json`, nœud `panel`) mesure 2 — le même rayon que la
+/// fenêtre et que tous les contrôles. Il n'existe aucun rayon prononcé dans cette interface.
+const SECTION_RADIUS: u8 = 2;
+
+/// Épaisseur du bord du panneau de contenu. Le jeu en a un, la première version n'en peignait
+/// aucun.
+const SECTION_BORDER: f32 = 2.0;
 
 const BANNER_HEIGHT: f32 = 56.0;
 /// Marge gauche/droite du contenu (`.body` de la simulation HTML validée) — hors bannière/pied de
@@ -101,12 +108,25 @@ const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(0xF0, 0xF0, 0xF0);
 /// mesure à rattraper, ne pas « corriger » à 22.
 const TITLE_FONT_SIZE: f32 = 21.0;
 
-/// Corps du titre de section, même serif que la bannière.
+/// Corps du titre de section — **le même que le titre de fenêtre**, même serif.
 ///
-/// Déduit du rapport d'encre entre les deux échantillons du jeu : son titre de section (« Barres
-/// de raccourcis ») fait 17 px d'encre contre 21 px pour son titre de fenêtre (« Options »).
-/// Appliqué au corps 21 retenu ci-dessus (qui rend 20 px d'encre), cela donne 21 × 17 / 20 ≈ 17,9.
-const SECTION_TITLE_FONT_SIZE: f32 = 18.0;
+/// La première valeur (18) venait d'un rapport calculé de travers : 17 px d'encre mesurés sur
+/// « Barres de raccourcis », qui n'a aucun jambage, comparés à 21 px sur « Options », qui en a un.
+/// Cap contre cap + jambage — ce ne sont pas les mêmes grandeurs, et le rapport ne voulait rien
+/// dire.
+///
+/// Les relevés tranchent : `releve-modale-options.json` cote le titre de section à ~21 comme le
+/// titre de fenêtre, et `releve-options-interface.json` mesure 25 px d'encre sur « Échelle de
+/// l'interface (100%) » (accent de capitale + parenthèses descendantes) contre 22 px sur « Thème
+/// d'interface personnalisé » (jambage seul) — deux mots du même corps, dont l'encre varie avec ce
+/// qu'ils contiennent. Le relevé de section le dit d'ailleurs en toutes lettres : « c'est la ligne
+/// de base qui est stable, pas la boîte ».
+const SECTION_TITLE_FONT_SIZE: f32 = TITLE_FONT_SIZE;
+
+/// Couleur d'un titre de section — un gris franc, **pas le blanc du titre de fenêtre**. Valeur des
+/// deux relevés (`#b8b9ba`), confirmée au pic de luminance sur l'onglet Interface (`#bababb`). La
+/// hiérarchie entre les deux niveaux de titre passe par la couleur, pas par le corps.
+const SECTION_TITLE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Couleur du libellé d'un onglet INACTIF ("Alertes"/"Personnages") — ambre atténué, mesuré sur la
 /// référence réelle. L'onglet ACTIF ("Paramètres") reprend `TITLE_TEXT` (blanc), comme le kaki
@@ -124,8 +144,24 @@ const ERROR_TEXT: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x60, 0x55);
 /// bords, comme la référence réelle) : valeur donnée par l'utilisateur au colorimètre, remplace la
 /// première mesure automatique (plus sombre).
 const MODAL_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x1C, 0x20, 0x23, 235);
-/// Fond de la section interne (#13161B) — plus sombre que `MODAL_BG`, légèrement translucide.
-const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x13, 0x16, 0x1B, 230);
+/// Fond du panneau de contenu (#15181C) — la valeur du relevé (nœud `panel`), plus sombre que
+/// `MODAL_BG`.
+///
+/// **Ce que nous peignons ici est le PANNEAU DE CONTENU du jeu, pas une « section ».** La
+/// distinction n'est pas cosmétique : le relevé de section est formel, « une section n'a ni fond,
+/// ni bordure, ni filet de séparation — le seul signal de regroupement est l'espacement ». Ce qui
+/// a un fond, un bord et un rayon, c'est le panneau qui contient les sections. Nommer les choses de
+/// travers avait produit un encadré arrondi à 18 qui n'existe nulle part dans le jeu.
+///
+/// L'alpha 230 est une **déviation assumée** : la modale entière est légèrement translucide
+/// (`MODAL_BG`, valeur relevée au colorimètre par l'utilisateur) et le panneau suit, alors que le
+/// jeu est opaque — il n'a pas de jeu derrière lui.
+const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x15, 0x18, 0x1C, 230);
+
+/// Bord du panneau de contenu — presque noir, à peine plus sombre que son fond (relevé : `#131518`
+/// contre `#15181c`). Ce n'est pas un trait qu'on voit, c'est ce qui détache le panneau du fond de
+/// la modale.
+const SECTION_BORDER_COLOR: egui::Color32 = egui::Color32::from_rgb(0x13, 0x15, 0x18);
 
 /// Gouttière entre le champ de chemin et le bouton "Sélectionner le fichier", posés sur la MÊME
 /// ligne (demande utilisateur 2026-09-09 : le bouton ne doit plus prendre toute la largeur).
@@ -384,6 +420,12 @@ pub fn show(
     );
     ui.painter()
         .rect_filled(section_rect, SECTION_RADIUS, SECTION_BG);
+    ui.painter().rect_stroke(
+        section_rect,
+        SECTION_RADIUS,
+        egui::Stroke::new(SECTION_BORDER, SECTION_BORDER_COLOR),
+        egui::StrokeKind::Inside,
+    );
 
     let inner_rect = section_rect.shrink2(egui::vec2(SECTION_PAD_X, SECTION_PAD_Y));
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
@@ -392,9 +434,11 @@ pub fn show(
         // plutôt que via `ui.label` : un libellé egui ne sait pas se cerner, et le procédé doit
         // rester le même que celui de la bannière. L'espace réservé inclut le pixel d'ombre.
         let section_font = design::text::title_font(ui.ctx(), SECTION_TITLE_FONT_SIZE);
-        let section_galley =
-            ui.painter()
-                .layout_no_wrap("Fichier".to_owned(), section_font.clone(), TEXT_PRIMARY);
+        let section_galley = ui.painter().layout_no_wrap(
+            "Fichier".to_owned(),
+            section_font.clone(),
+            SECTION_TITLE_TEXT,
+        );
         let section_title_rect = ui
             .allocate_space(section_galley.size() + egui::vec2(1.0, 1.0))
             .1;
@@ -404,7 +448,7 @@ pub fn show(
             egui::Align2::LEFT_TOP,
             "Fichier",
             section_font,
-            TEXT_PRIMARY,
+            SECTION_TITLE_TEXT,
             design::text::SHADOW_BOTTOM_RIGHT,
         );
         ui.add_space(10.0);
@@ -413,7 +457,7 @@ pub fn show(
         // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
         // le reste. C'est le bouton qui commande, pas l'inverse — une largeur figée pour lui
         // désaccorderait le couple dès que le libellé ou la fenêtre changent.
-        let browse = design::button("Sélectionner le fichier")
+        let browse = design::button("Parcourir")
             .variant(ButtonVariant::Secondary)
             .size(ButtonSize::Height(ROW_HEIGHT))
             .log_name("options-parcourir");
