@@ -121,9 +121,6 @@ const PANEL_PAD_TOP: f32 = 13.0;
 
 const TITLE_TEXT: egui::Color32 = egui::Color32::WHITE;
 
-// `panel_fill`/texte (docs/design-tokens.json::neutrals) — inchangés depuis la première version.
-const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(0xF0, 0xF0, 0xF0);
-
 /// Corps du titre de bannière, en serif grasse (`design::text::title_font`).
 ///
 /// **Choix utilisateur du 2026-09-09**, arbitré sur planche de comparaison. La mesure disait 22 :
@@ -158,10 +155,10 @@ const SECTION_TITLE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xB8, 0xB9, 0x
 /// plein de la référence.
 const TAB_INACTIVE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xC9, 0xA8, 0x60);
 
-// Champ de saisie (§5.4 du design-system) — bordure chaude systématique de tous les inputs.
-const FIELD_FILL: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x1E, 0x23);
-const FIELD_BORDER: egui::Color32 = egui::Color32::from_rgb(0x59, 0x51, 0x40);
-const FIELD_RADIUS: u8 = 2;
+// Le champ de chemin est un composant du design system (`design::input`) depuis le 2026-09-10 :
+// ses couleurs, son rayon et son retrait de texte ne sont plus des constantes de ce panneau. Les
+// trois qui vivaient ici étaient d'ailleurs fausses — fond #1C1E23 au lieu de #0E1115, bord d'1px
+// au lieu de 2, rayon 2 au lieu de 4.
 
 const ERROR_TEXT: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x60, 0x55);
 
@@ -228,6 +225,10 @@ const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 /// Remplace deux valeurs qui ne s'accordaient ni entre elles ni avec le jeu : un champ à 34px et
 /// un bouton à 40px, alors que le pied de page était déjà à 36.
 const ROW_HEIGHT: f32 = 36.0;
+
+/// Hauteur du champ de chemin — sa hauteur NATIVE, plus basse que la ligne qui le porte. Voir
+/// `design::components::input` pour la mesure et pourquoi les deux diffèrent.
+const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 /// Textures embarquées du chrome de la modale — chargées UNE FOIS par fenêtre OS (voir
 /// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`, même principe que
 /// `panels::combat_frame::CombatFrame`/`crate::ui_icons::UiIcons`), jamais rechargées à chaque
@@ -509,31 +510,24 @@ pub fn show(
         // largeur négative serait inversé par egui et peint n'importe où. Zéro le rend invisible,
         // ce qui se voit sur une capture — c'est la règle du contrat de composant.
         let field_width = (row_rect.width() - browse_width - FIELD_TO_BROWSE_GAP).max(0.0);
-        let field_rect =
-            egui::Rect::from_min_size(row_rect.min, egui::vec2(field_width, ROW_HEIGHT));
+        // Le champ garde sa hauteur native (25px) et se centre sur la ligne, que le bouton fixe à
+        // 36 : le jeu compose réellement des lignes où le champ est plus bas que ce qui l'accompagne
+        // (voir `design::components::input`), et la règle du design system est que la hauteur d'un
+        // composant est celle de sa référence — pas celle de son voisin.
+        let field_rect = egui::Rect::from_center_size(
+            egui::pos2(row_rect.left() + field_width / 2.0, row_rect.center().y),
+            egui::vec2(field_width, FIELD_HEIGHT),
+        );
         let browse_rect = egui::Rect::from_min_size(
             egui::pos2(row_rect.right() - browse_width, row_rect.top()),
             egui::vec2(browse_width, ROW_HEIGHT),
         );
-        ui.painter()
-            .rect_filled(field_rect, FIELD_RADIUS, FIELD_FILL);
-        ui.painter().rect_stroke(
+        ui.put(
             field_rect,
-            FIELD_RADIUS,
-            egui::Stroke::new(1.0, FIELD_BORDER),
-            egui::StrokeKind::Inside,
-        );
-        ui.scope_builder(
-            egui::UiBuilder::new().max_rect(field_rect.shrink(8.0)),
-            |ui| {
-                ui.centered_and_justified(|ui| {
-                    let edit = egui::TextEdit::singleline(&mut state.path_input)
-                        .frame(egui::Frame::NONE)
-                        .text_color(TEXT_PRIMARY)
-                        .hint_text("Chemin vers wakfu.log");
-                    ui.add(edit);
-                });
-            },
+            design::input(&mut state.path_input)
+                .placeholder("Chemin vers wakfu.log")
+                .width(field_width)
+                .log_name("options-chemin"),
         );
 
         if ui.put(browse_rect, browse).clicked() {
