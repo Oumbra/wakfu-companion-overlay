@@ -71,12 +71,17 @@ que d'être filtré après coup.
   l'anomalie se voit sur la capture.
 - Le contenu est **écrêté au composant** (`Painter::with_clip_rect`) : un libellé trop long ne
   déborde pas sur le panneau voisin, où il passerait pour un bug de mise en page.
-- **Le libellé passe par `design::text::weighted`**, jamais par `Painter::galley` directement : la
-  police par défaut d'egui est une Light, bien plus maigre que celle du jeu, et egui n'expose aucun
-  réglage de graisse. La galley doit donc être mise en page en `Color32::PLACEHOLDER`. Attention si
-  vous cherchez à régler finement une position de texte : **egui arrondit la position d'un texte au
-  pixel entier** (`Options::round_text_to_pixels`) — un décalage de 0,3px est rigoureusement sans
-  effet, et une mesure qui l'ignore donne des résultats identiques pour des réglages différents.
+- **Le libellé est mis en page avec `design::text::label_font`**, jamais avec
+  `FontId::proportional` : la police par défaut d'egui est une Light, bien plus maigre que celle du
+  jeu ; le design system embarque sa propre graisse (`design::fonts`). Attention si vous cherchez à
+  régler finement une position de texte : **egui arrondit la position d'un texte au pixel entier**
+  (`Options::round_text_to_pixels`) — un décalage de 0,3px est rigoureusement sans effet, et une
+  mesure qui l'ignore donne des résultats identiques pour des réglages différents. C'est ce qui a
+  condamné la première tentative de graisse synthétique par halo.
+- **La hauteur d'un composant est celle de sa texture**, jamais déduite de sa largeur : un 9-slice
+  existe pour qu'on l'étire en largeur *sans* toucher à sa hauteur. Déduire la hauteur d'un rapport
+  d'aspect rétrécit le composant — et son libellé avec — dès que le panneau qui le porte est plus
+  étroit que la fenêtre du jeu.
 
 ## 4. Journalisation
 
