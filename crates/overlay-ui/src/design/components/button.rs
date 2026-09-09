@@ -30,7 +30,7 @@
 
 use egui::{Color32, FontId, Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{assets::DsTexture, tokens, DesignSystem};
+use crate::design::{assets::DsTexture, text, tokens, DesignSystem};
 
 /// Intention d'un bouton — détermine sa paire de textures et sa couleur de libellé.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,14 +44,53 @@ pub enum ButtonVariant {
 }
 
 impl ButtonVariant {
-    fn texture(self, hovered: bool) -> DsTexture {
-        match (self, hovered) {
-            (ButtonVariant::Primary, false) => DsTexture::ButtonPrimary,
-            (ButtonVariant::Primary, true) => DsTexture::ButtonPrimaryHover,
-            (ButtonVariant::Secondary, false) => DsTexture::ButtonSecondary,
-            (ButtonVariant::Secondary, true) => DsTexture::ButtonSecondaryHover,
-            (ButtonVariant::Danger, false) => DsTexture::ButtonDanger,
-            (ButtonVariant::Danger, true) => DsTexture::ButtonDangerHover,
+    /// Textures disponibles pour cette variante : `(hauteur native, repos, survol)`.
+    ///
+    /// Une variante peut en avoir plusieurs parce que le jeu a capturé le même bouton à deux
+    /// hauteurs — et que **l'embout décoratif n'y a pas la même largeur** (52px sur les textures
+    /// de 52px de haut, 34px sur celles de 36px). Ce n'est donc pas une redondance qu'un
+    /// étirement pourrait absorber : rendre un bouton de pied de page avec la texture de fenêtre
+    /// lui donne un embout une fois et demie trop large, visible dès qu'un bouton d'une autre
+    /// variante est posé à côté.
+    fn textures(self) -> &'static [(f32, DsTexture, DsTexture)] {
+        match self {
+            ButtonVariant::Primary => &[
+                (
+                    52.0,
+                    DsTexture::ButtonPrimary,
+                    DsTexture::ButtonPrimaryHover,
+                ),
+                (
+                    36.0,
+                    DsTexture::ButtonPrimaryCompact,
+                    DsTexture::ButtonPrimaryCompactHover,
+                ),
+            ],
+            ButtonVariant::Secondary => &[(
+                52.0,
+                DsTexture::ButtonSecondary,
+                DsTexture::ButtonSecondaryHover,
+            )],
+            ButtonVariant::Danger => {
+                &[(36.0, DsTexture::ButtonDanger, DsTexture::ButtonDangerHover)]
+            }
+        }
+    }
+
+    /// Texture retenue pour un bouton rendu à `height` : celle dont la **hauteur native est la plus
+    /// proche**. C'est à la fois celle qui subira le moins d'étirement vertical du dégradé et celle
+    /// dont l'embout a la bonne largeur pour ce gabarit. Une seule candidate ⇒ elle est prise quelle
+    /// que soit la hauteur, l'étirement restant préférable à un embout inventé.
+    fn texture(self, height: f32, hovered: bool) -> DsTexture {
+        let (_, idle, over) = self
+            .textures()
+            .iter()
+            .min_by(|a, b| (a.0 - height).abs().total_cmp(&(b.0 - height).abs()))
+            .expect("chaque variante déclare au moins une texture");
+        if hovered {
+            *over
+        } else {
+            *idle
         }
     }
 
@@ -197,15 +236,22 @@ impl Button {
     /// place avant (pied de page à deux boutons alignés, par exemple).
     pub fn desired_size(&self, ui: &Ui) -> Vec2 {
         let height = self.size.height();
-        let text_width = self.layout(ui, height, Color32::WHITE).size().x;
+        let text_width = self.layout(ui, height).size().x;
         Vec2::new(self.resolve_width(height, text_width), height)
     }
 
-    fn layout(&self, ui: &Ui, height: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
+    fn font_size(height: f32) -> f32 {
+        height * tokens::BUTTON_FONT_SIZE_RATIO
+    }
+
+    /// Mise en page du libellé. La couleur est `Color32::PLACEHOLDER` et non la couleur finale :
+    /// `design::text::weighted` peint la même galley plusieurs fois, à des opacités différentes,
+    /// et n'y arrive que si la galley laisse la couleur à décider au moment de la peinture.
+    fn layout(&self, ui: &Ui, height: f32) -> std::sync::Arc<egui::Galley> {
         ui.painter().layout_no_wrap(
             self.text.clone(),
-            FontId::proportional(height * tokens::BUTTON_FONT_SIZE_RATIO),
-            color,
+            FontId::proportional(Self::font_size(height)),
+            Color32::PLACEHOLDER,
         )
     }
 
@@ -223,8 +269,6 @@ impl Widget for Button {
         let ds = DesignSystem::get(ui.ctx());
         let height = self.size.height();
 
-        // Couleur résolue AVANT la mise en page : `Galley` porte la couleur de ses glyphes, la
-        // recolorer après coup demanderait de refaire la mise en page.
         let state_for_color = self.forced_state.unwrap_or(if self.enabled {
             ButtonState::Idle
         } else {
@@ -235,7 +279,7 @@ impl Widget for Button {
         } else {
             self.variant.text_color()
         };
-        let galley = self.layout(ui, height, text_color);
+        let galley = self.layout(ui, height);
         let width = self.resolve_width(height, galley.size().x);
 
         // Désactivé, le bouton n'est PAS inerte : il garde `Sense::hover()` pour que son infobulle
@@ -268,8 +312,8 @@ impl Widget for Button {
 
         if ui.is_rect_visible(rect) {
             let (texture, tint) = match state {
-                ButtonState::Idle => (self.variant.texture(false), Color32::WHITE),
-                ButtonState::Hovered => (self.variant.texture(true), Color32::WHITE),
+                ButtonState::Idle => (self.variant.texture(height, false), Color32::WHITE),
+                ButtonState::Hovered => (self.variant.texture(height, true), Color32::WHITE),
                 ButtonState::Disabled => (DsTexture::ButtonDisabled, DISABLED_TINT),
             };
             ds.paint(ui.painter(), rect, texture, tint);
@@ -277,9 +321,13 @@ impl Widget for Button {
             // Le libellé est écrêté au bouton : un texte trop long déborderait sinon sur le
             // panneau voisin, et le défaut passerait pour un bug de mise en page.
             let text_pos = rect.center() - galley.size() * 0.5;
-            ui.painter()
-                .with_clip_rect(rect.intersect(ui.clip_rect()))
-                .galley(text_pos, galley.clone(), text_color);
+            text::weighted(
+                &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
+                text_pos,
+                galley.clone(),
+                text_color,
+                text::label_weight(),
+            );
         }
 
         let name = self.log_name.as_deref().unwrap_or(self.text.as_str());

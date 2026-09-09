@@ -28,24 +28,32 @@ pub const TEXT_DISABLED: Color32 = Color32::from_rgb(0x8A, 0x8A, 0x8A);
 
 /// Corps de police d'un libellé de bouton, en fraction de la hauteur du bouton.
 ///
-/// **Calé sur une comparaison pixel avec le jeu**, pas sur une convention typographique. Démarche
-/// (rejouable — c'est l'étape « comparer au jeu » du skill `ui-component`) :
+/// **Mesuré par balayage, dans egui.** Une planche temporaire (`overlay-testkit`, test
+/// `etalonnage_du_libelle`, supprimé une fois la valeur figée) a rendu « Annuler » et « Valider »
+/// sur leur texture réelle en 338×36 — la taille exacte des captures du jeu qui portent encore ces
+/// libellés gravés — pour trente couples corps × graisse, chaque cellule étant ensuite comparée au
+/// pixel avec `large-button-cancel.png` / `large-button-validate.png`.
 ///
-/// 1. Hauteur d'encre du libellé « Annuler » sur `assets/design-system/large-button-cancel.png`
-///    (bouton de 36px capturé dans le jeu, libellé encore incrusté) : **13px**, mesurée comme la
-///    boîte des pixels quasi blancs (seuil 200).
-/// 2. Même mesure sur le rendu du composant dans `design_gallery.png` à corps 23,6px : **19px**.
-///    La police proportionnelle par défaut d'egui rend donc une hauteur de capitale de
-///    19/23,6 ≈ 0,805 em — la convention « 0,72 » du skill `ui-blueprint` vaut pour la police du
-///    jeu, pas pour celle-ci, d'où l'écart de 45 % constaté au premier passage (libellé
-///    visiblement plus gros que sur la capture).
-/// 3. D'où `corps = 13 / 0,805` pour un bouton de 36px, ramené à une fraction de la hauteur.
+/// Le critère retenu est la **boîte d'encre** du mot (hauteur et largeur des pixels à plus de 50 %
+/// d'opacité), pas sa masse : le halo de graisse ajoute beaucoup de pixels faiblement opaques, que
+/// l'œil ne compte pas et qu'une somme d'alphas surévalue.
 ///
-/// Le rapport est appliqué à **toutes** les hauteurs plutôt que figé par gabarit : un bouton plus
-/// haut porte un libellé proportionnellement plus grand, ce que montrent les captures du jeu.
-/// À revalider si la police de l'overlay change (§6.4 du design-system : une police display de
-/// substitution est prévue) — la valeur dépend de la police, pas seulement du design.
-pub const BUTTON_FONT_SIZE_RATIO: f32 = 13.0 / 0.805 / 36.0;
+/// | corps | « Annuler » | « Valider » |
+/// | --- | --- | --- |
+/// | référence (jeu) | 13 × 63 | 13 × 59 |
+/// | 16px | 12 × 56 | 12 × 50 |
+/// | **17px** | **13 × 60** | **13 × 53** |
+/// | 18px | 14 × 63 | 14 × 56 |
+///
+/// 17px est le seul corps qui retrouve exactement la hauteur d'encre de 13px sur les deux mots.
+/// Le mot reste 3 à 6px plus étroit que dans le jeu : la police du jeu est un peu plus large à
+/// hauteur égale, écart qu'aucun corps ne résout sans casser la hauteur — il disparaîtra avec la
+/// police de substitution prévue au §6.4 du design-system.
+///
+/// La mesure précédente (`13 / 0,805 / 36`, soit 16,1px) déduisait le corps d'un rapport
+/// hauteur-de-capitale supposé ; ce balayage le mesure directement, d'où l'écart d'un pixel.
+/// À revalider si la police de l'overlay change — la valeur dépend de la police, pas du design.
+pub const BUTTON_FONT_SIZE_RATIO: f32 = 17.0 / 36.0;
 
 /// Marge horizontale entre le bord du bouton et son libellé, en fraction de la hauteur du bouton.
 /// **Estimation, pas une mesure** : les deux boutons du pied de page de la modale Options sont
@@ -58,3 +66,20 @@ pub const BUTTON_PADDING_X_RATIO: f32 = 0.55;
 /// libellé très court (« OK »), pour qu'il ne devienne pas un carré. Réglage d'ergonomie, pas une
 /// mesure.
 pub const BUTTON_MIN_ASPECT: f32 = 2.5;
+
+/// Graisse synthétique d'un libellé de composant : l'opacité du halo d'un pixel peint autour du
+/// texte — voir `design::text::weighted` pour le procédé et pourquoi il n'y a pas d'alternative.
+///
+/// **Choisi à l'œil sur la planche de balayage** décrite dans `BUTTON_FONT_SIZE_RATIO`, et
+/// assumé comme tel : la mesure ne pouvait pas trancher, parce que le jeu lui-même n'est pas
+/// cohérent. Ses deux libellés de pied de page n'ont pas la même graisse — le « Valider » sombre
+/// sur or est nettement plus gras que le « Annuler » blanc sur rouge (masse d'encre mesurée :
+/// 411 contre 310, à hauteur d'encre identique), l'asymétrie classique du texte sombre sur fond
+/// clair, probablement accentuée par une ombre incrustée. Aucune valeur unique ne peut coller aux
+/// deux à la fois.
+///
+/// 0,2 place le rendu entre les deux : « Annuler » retrouve exactement la densité du jeu,
+/// « Valider » reste un peu plus léger que sa référence. 0,4 rattrapait « Valider » mais empâtait
+/// « Annuler ». Retour utilisateur à l'origine du réglage : rendre la police « un petit peu plus
+/// grasse » en attendant un vrai fichier de police.
+pub const TEXT_WEIGHT: f32 = 0.2;

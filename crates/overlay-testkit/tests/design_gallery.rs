@@ -86,8 +86,8 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Une seule texture, toutes les tailles",
-        "button-primary.png (200×52 natif) : embouts hachurés figés à 52 px, centre étiré — les croisillons restent aux extrémités quelle que soit la largeur.",
+        "Toutes les tailles, aucun asset dédié",
+        "Largeur libre : embouts figés, centre étiré. La HAUTEUR, elle, choisit la texture — 32/36/40 px prennent la capture 338×36 (embout 36 px), 48/52 px la capture 200×52 (embout 52 px).",
     );
     for (w, h) in [
         (110.0, 32.0),
@@ -107,7 +107,7 @@ fn gallery(ui: &mut egui::Ui) {
     heading(
         ui,
         "Cas réel — pied de page de la modale Options",
-        "Ce que remplacent large-button-cancel.png et large-button-validate.png : mêmes 338×36, sans asset dédié ni libellé incrusté.",
+        "Ce que remplacent large-button-cancel.png et large-button-validate.png : mêmes 338×36, sans asset dédié ni libellé incrusté — et des embouts de même largeur.",
     );
     ui.add(
         design::button("Annuler")
