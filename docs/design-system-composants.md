@@ -81,6 +81,25 @@ Une leçon de cet épisode survit néanmoins à la rustine, parce qu'elle se red
 **egui arrondit la position d'un texte au pixel entier** (`Options::round_text_to_pixels`), donc
 aucun effet visuel ne peut être réglé par un déplacement fractionnaire de texte.
 
+**Police d'un titre** : le jeu n'utilise **pas une seule police**. Ses libellés de bouton sont dans
+une linéale, mais ses titres — « Options » sur la bannière de modale, « Barres de raccourcis » en
+titre de section — sont dans une **serif grasse**. `design::fonts` embarque donc aussi
+`assets/fonts/PTSerif-Bold.ttf` sous la famille nommée `ds-title`, servie par
+`design::text::title_font`. Vingt-six serifs ont été comparées aux deux échantillons du jeu ;
+PT Serif Bold est la meilleure libre (~2 % d'écart de chasse sur « Options »).
+
+**Cerne d'un texte** : `design::text::paint_outlined_text` repeint le texte décalé avant de le
+peindre plein, et prend sa liste de décalages en paramètre. Deux jeux nommés, et le choix entre eux
+n'est pas esthétique — il dépend de ce qu'il y a **derrière** le texte :
+
+| Jeu de décalages | Quand | Pourquoi |
+| --- | --- | --- |
+| `OUTLINE_FULL` | texte flottant nu par-dessus le jeu (Combat, Suivi) | le fond est **arbitraire** : une ombre d'un seul côté devient illisible dès que ce fond est clair de ce côté-là |
+| `SHADOW_BOTTOM_RIGHT` | texte posé sur un fond **connu** (bannière, encadré de section) | trois décalages au lieu de huit ; un contour complet empâte le mot. Le jeu éclaire ses titres depuis le haut-gauche (masse sombre mesurée à +2,6px en x, +1,8px en y) |
+
+Les décalages sont des pixels **entiers** — voir ci-dessus, egui arrondit la position d'un texte au
+pixel.
+
 **Hauteur d'un bouton** : celle de sa texture, jamais déduite de sa largeur. Un 9-slice existe pour
 qu'on l'étire en largeur *sans* toucher à sa hauteur ; le jeu affiche son bouton de pied de page à
 36px quelle que soit la fenêtre (son bandeau de titre fait 56px, chez lui comme chez nous). La
@@ -94,6 +113,7 @@ suivant la hauteur, il y perdait 3px d'encre sur 13.
 | Hauteurs natives | 52px (HDV), 36px (pied de page de modale) | taille des textures |
 | Corps de police | `17/36 × hauteur` | balayage rendu dans egui et comparé au pixel aux libellés gravés du jeu ; 17px est le seul corps qui retrouve les 13px d'encre de « Annuler » ET de « Valider », à hauteur de bouton native |
 | Police du libellé | Ubuntu Medium | onze candidats comparés à la référence : Medium 17 est le seul au-dessus de 0,50 de recouvrement de forme sur les DEUX libellés (0,52/0,52 contre 0,59/0,32 pour Regular). Le jeu n'est pas cohérent entre ses deux boutons, aucune police ne colle aux deux |
+| Police d'un titre | PT Serif Bold | vingt-six serifs comparées aux deux titres du jeu ; meilleure correspondance libre. Corps 21 sur la bannière (choix utilisateur : le 22 colle exactement à l'encre du jeu, 21 × 82, le 21 rend 20 × 78 et est jugé mieux proportionné) et 18 en titre de section, déduit du rapport d'encre du jeu entre ses deux niveaux de titre (17px contre 21px) |
 | Marge horizontale | `0,55 × hauteur` | ordre de grandeur de §4 du design-system — **estimation** |
 | Largeur minimale | `2,5 × hauteur` | garde-fou de proportion — **réglage**, pas une mesure |
 

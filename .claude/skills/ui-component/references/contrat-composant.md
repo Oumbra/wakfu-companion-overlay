@@ -78,6 +78,13 @@ que d'être filtré après coup.
   (`Options::round_text_to_pixels`) — un décalage de 0,3px est rigoureusement sans effet, et une
   mesure qui l'ignore donne des résultats identiques pour des réglages différents. C'est ce qui a
   condamné la première tentative de graisse synthétique par halo.
+- **Un titre passe par `design::text::title_font`**, pas par `label_font` : le jeu utilise deux
+  polices, une linéale pour ses libellés de bouton et une serif grasse pour ses titres. Les deux
+  familles sont embarquées par `design::fonts`.
+- **Un texte cerné passe par `design::text::paint_outlined_text`**, avec le jeu de décalages qui
+  correspond à son fond — `OUTLINE_FULL` si le texte flotte nu par-dessus le jeu (fond arbitraire,
+  il faut cerner de tous les côtés), `SHADOW_BOTTOM_RIGHT` si le fond est connu (bannière, encadré) :
+  trois décalages suffisent, et un contour complet empâterait le mot.
 - **La hauteur d'un composant est celle de sa texture**, jamais déduite de sa largeur : un 9-slice
   existe pour qu'on l'étire en largeur *sans* toucher à sa hauteur. Déduire la hauteur d'un rapport
   d'aspect rétrécit le composant — et son libellé avec — dès que le panneau qui le porte est plus

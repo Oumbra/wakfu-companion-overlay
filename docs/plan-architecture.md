@@ -830,6 +830,18 @@ Trois décisions prises à cette occasion :
   flou. En reste une leçon à ne pas redécouvrir : **egui arrondit la position d'un texte au pixel
   entier** (`Options::round_text_to_pixels`), aucun effet visuel ne se règle par un déplacement
   fractionnaire de texte.
+- **Police des titres** (`design::fonts`, `design::text::title_font`) : le jeu n'a **pas une seule
+  police**. Ses libellés de bouton sont dans une linéale, ses titres dans une **serif grasse**.
+  `assets/fonts/PTSerif-Bold.ttf` (SIL OFL, licence jointe) est enregistrée comme famille nommée
+  `ds-title` — meilleure correspondance libre parmi vingt-six serifs comparées aux deux titres du
+  jeu. Corps 21 sur la bannière de modale, 18 en titre de section.
+- **Cerne d'un texte** (`design::text::paint_outlined_text`) : la liste des décalages est un
+  **paramètre**, avec deux jeux nommés, et le choix dépend du fond. `OUTLINE_FULL` (huit voisins)
+  pour le texte qui flotte nu par-dessus le jeu — fond arbitraire, une ombre d'un seul côté y
+  devient illisible dès que le fond est clair de ce côté-là ; `SHADOW_BOTTOM_RIGHT` (trois voisins)
+  pour un texte posé sur un fond connu, ce que fait le jeu pour ses titres, éclairés depuis le
+  haut-gauche. La fonction était une fonction privée de `panels::combat` avec ses huit décalages en
+  dur ; elle a remonté dans le design system le 2026-09-09.
 - **Hauteur d'un bouton = hauteur de sa texture**, jamais déduite de sa largeur. La modale Options
   écrivait `footer_button_width * (36.0 / 338.0)`, à l'inverse de ce à quoi sert un 9-slice, et
   affichait des boutons de 27px là où le jeu en met 36 — le corps du libellé suivant la hauteur, il
