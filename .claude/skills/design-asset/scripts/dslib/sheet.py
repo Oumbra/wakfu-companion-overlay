@@ -16,7 +16,6 @@ from PIL import Image
 
 CSS = """
 :root{--bg:#f6f5f3;--fg:#1c1a17;--muted:#6b665e;--line:#dcd7cf;--card:#fffdfa;--accent:#8a6d3b}
-:root:not([data-theme="light"]) @media (prefers-color-scheme: dark){}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#161513;--fg:#ece8e1;--muted:#9b948a;--line:#332f2a;--card:#1e1c19;--accent:#d8b878}}
 :root[data-theme="dark"]{--bg:#161513;--fg:#ece8e1;--muted:#9b948a;--line:#332f2a;--card:#1e1c19;--accent:#d8b878}
 body{background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",sans-serif;margin:0;padding:32px}
