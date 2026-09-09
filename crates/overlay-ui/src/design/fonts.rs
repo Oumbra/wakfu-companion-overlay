@@ -18,7 +18,35 @@
 //! la seule option *sans ajouter de fichier au dépôt* — et le fichier coûte moins cher que la
 //! rustine.
 //!
-//! ## Pourquoi Ubuntu Medium
+//! ## Deux graisses de libellé, et pourquoi
+//!
+//! Le jeu n'écrit pas tous ses boutons de la même main. Sur l'onglet Interface de la modale Options
+//! (`assets/design-system/interfaces/interface-options-interface.png`, relevé complet dans
+//! `docs/design-system/releve-options-interface.json`), les quatre boutons de **contenu**
+//! (« Recharger le thème », « Actualiser la liste »…) et les deux boutons du **pied de page**
+//! (« Annuler », « Valider ») ont exactement la même hauteur d'encre — 13 px — et pas la même
+//! graisse.
+//!
+//! | Mesuré sur la même capture | fût moyen | encre par colonne |
+//! | --- | --- | --- |
+//! | quatre boutons de contenu | 1,79 à 1,92 px | 2,77 à 2,89 |
+//! | « Annuler » (pied de page) | 2,02 px | 3,37 |
+//!
+//! Le rapport contenu / pied de page vaut **0,82** en encre par colonne. Rendus dans les mêmes
+//! conditions, Regular/Medium donnent 0,79 et Light/Medium 0,69 : **Regular** est la graisse du
+//! contenu, [`LABEL_STRONG`] (Medium) celle du pied de page.
+//!
+//! Deux précautions sur cette mesure, parce qu'elle est facile à refaire de travers :
+//!
+//! - **Seul le rapport interne à une capture veut dire quelque chose.** Comparer l'épaisseur de fût
+//!   d'un texte clair sur fond kaki à celle d'un rendu blanc sur noir donne des chiffres qui ne se
+//!   correspondent pas : la normalisation et le seuillage ne coupent pas au même endroit.
+//! - **« Valider » n'est pas une troisième graisse** (fût 3,17 px, 5,29 d'encre par colonne) : c'est
+//!   le seul texte sombre sur fond clair de l'interface, et la capture y montre une ombre cuite —
+//!   déjà constaté en calibrant le bouton de pied de page (masse 268 contre 168 pour « Annuler » à
+//!   hauteur d'encre égale).
+//!
+//! ## Pourquoi Ubuntu Medium pour le pied de page
 //!
 //! Onze candidats ont été rendus par `egui` sur les textures réelles 338×36, puis comparés au pixel
 //! aux libellés gravés du jeu (`assets/design-system/large-button-cancel.png` et
@@ -61,12 +89,12 @@
 //! ## Licence
 //!
 //! Ubuntu est publiée sous **Ubuntu Font Licence 1.0**, libre et redistribuable ; le texte de la
-//! licence accompagne le fichier dans `assets/fonts/UFL.txt`, comme elle l'exige. 340 Ko dans le
-//! binaire, à comparer au budget de 300 Mo du §8 du plan : négligeable.
+//! licence accompagne les fichiers dans `assets/fonts/UFL.txt`, comme elle l'exige. Environ 350 Ko
+//! par graisse dans le binaire, à comparer au budget de 300 Mo du §8 du plan : négligeable.
 //!
 //! ## Portée : les libellés du design system, pas toute l'application
 //!
-//! Seules les familles nommées [`LABEL`] et [`TITLE`] sont ajoutées. La proportionnelle par défaut d'`egui`
+//! Seules les familles nommées [`LABEL`], [`LABEL_STRONG`] et [`TITLE`] sont ajoutées. La proportionnelle par défaut d'`egui`
 //! (Ubuntu Light) reste celle de tout le reste de l'interface — panneaux Combat et Suivi compris.
 //! Basculer aussi le texte courant demanderait de mesurer la graisse du texte courant du jeu, ce
 //! qui n'a pas été fait ; le faire au passage aurait changé toutes les captures de non-régression
@@ -85,13 +113,19 @@ use std::sync::Arc;
 
 /// Nom de la famille des libellés du design system. Un identifiant `egui`, pas un nom de fichier :
 /// changer la police se fait dans [`install`] seul, aucun composant ne cite un fichier.
+/// Graisse ORDINAIRE d'un libellé — celle des boutons de contenu, le cas courant.
 pub const LABEL: &str = "ds-label";
+
+/// Graisse APPUYÉE d'un libellé — celle des boutons de pied de page de modale. Voir la doc de
+/// module : ce n'est pas un effet de style, les deux graisses sont mesurées dans le jeu.
+pub const LABEL_STRONG: &str = "ds-label-strong";
 
 /// Nom de la famille des titres du design system (bannière de modale, titre de section) — la
 /// serif grasse du jeu, distincte de la linéale des libellés. Voir la doc de module.
 pub const TITLE: &str = "ds-title";
 
-/// Fichier embarqué — voir la doc de module pour le pourquoi de cette graisse précise.
+/// Fichiers embarqués — voir la doc de module pour le pourquoi de ces deux graisses précises.
+const UBUNTU_REGULAR: &[u8] = include_bytes!("../../../../assets/fonts/Ubuntu-Regular.ttf");
 const UBUNTU_MEDIUM: &[u8] = include_bytes!("../../../../assets/fonts/Ubuntu-Medium.ttf");
 
 /// Fichier embarqué des titres — voir la doc de module pour le choix de cette serif.
@@ -107,7 +141,11 @@ const PT_SERIF_BOLD: &[u8] = include_bytes!("../../../../assets/fonts/PTSerif-Bo
 /// à chaque frame le rebâtirait à chaque frame.
 pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    for (nom, fichier) in [(LABEL, UBUNTU_MEDIUM), (TITLE, PT_SERIF_BOLD)] {
+    for (nom, fichier) in [
+        (LABEL, UBUNTU_REGULAR),
+        (LABEL_STRONG, UBUNTU_MEDIUM),
+        (TITLE, PT_SERIF_BOLD),
+    ] {
         fonts.font_data.insert(
             nom.to_owned(),
             Arc::new(egui::FontData::from_static(fichier)),

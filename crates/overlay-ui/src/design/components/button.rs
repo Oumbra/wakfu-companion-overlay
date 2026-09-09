@@ -22,6 +22,10 @@
 //! (plus leurs variantes survolées), peintes en 9-slice à la taille demandée, libellé rendu par
 //! egui.
 //!
+//! **La variante porte aussi la graisse du libellé** — voir `ButtonVariant::label_strong` : le jeu
+//! écrit ses boutons de pied de page plus gras que ceux posés dans un contenu, à hauteur d'encre
+//! identique. Rien à fournir de plus à l'appel.
+//!
 //! **Variante ≠ couleur, variante = intention.** `Primary` (or) pour l'action qui valide, `Danger`
 //! (rouge) pour celle qui annule/détruit dans un pied de page de modale, `Secondary` (gris-brun)
 //! pour tout le reste. C'est la nuance que §5.2 du design-system signale explicitement : le rouge
@@ -91,6 +95,28 @@ impl ButtonVariant {
             *over
         } else {
             *idle
+        }
+    }
+
+    /// La variante porte-t-elle un libellé **appuyé** (`design::fonts::LABEL_STRONG`) ?
+    ///
+    /// Le jeu écrit ses boutons dans deux graisses, mesurées sur l'onglet Interface de la modale
+    /// Options — voir `design::fonts` : ses deux boutons de pied de page sont plus gras que les
+    /// quatre boutons posés dans le contenu, à hauteur d'encre identique.
+    ///
+    /// La graisse suit donc la **variante**, sans paramètre supplémentaire : `Primary` et `Danger`
+    /// sont précisément les deux intentions du pied de page de modale (voir `ButtonVariant`, et §5.2
+    /// du design-system qui réserve le rouge à ce seul pattern), `Secondary` est « tout le reste »,
+    /// c'est-à-dire le contenu.
+    ///
+    /// **Corrélation observée, pas loi générale** : la seule capture qui montre les deux familles
+    /// côte à côte est celle-là. Si un `Primary` apparaît un jour DANS un panneau de contenu et
+    /// qu'il s'y révèle maigre, c'est ici qu'il faudra couper — probablement en ajoutant un réglage
+    /// explicite plutôt qu'en changeant la règle sous les appelants existants.
+    fn label_strong(self) -> bool {
+        match self {
+            ButtonVariant::Primary | ButtonVariant::Danger => true,
+            ButtonVariant::Secondary => false,
         }
     }
 
@@ -244,17 +270,20 @@ impl Button {
         height * tokens::BUTTON_FONT_SIZE_RATIO
     }
 
-    /// Mise en page du libellé, dans la police des libellés du design system
-    /// (`design::text::label_font`, voir `design::fonts`) et non dans la proportionnelle par
-    /// défaut d'egui. La couleur reste `Color32::PLACEHOLDER` : `layout` sert aussi à
-    /// `desired_size`, où l'état du bouton — donc la couleur du texte — n'est pas encore connu ;
+    /// Mise en page du libellé, dans la police des libellés du design system (voir `design::fonts`)
+    /// et non dans la proportionnelle par défaut d'egui — à la graisse de la variante, voir
+    /// `ButtonVariant::label_strong`. La couleur reste `Color32::PLACEHOLDER` : `layout` sert aussi
+    /// à `desired_size`, où l'état du bouton — donc la couleur du texte — n'est pas encore connu ;
     /// `Painter::galley` la résout à la peinture.
     fn layout(&self, ui: &Ui, height: f32) -> std::sync::Arc<egui::Galley> {
-        ui.painter().layout_no_wrap(
-            self.text.clone(),
-            text::label_font(ui.ctx(), Self::font_size(height)),
-            Color32::PLACEHOLDER,
-        )
+        let size = Self::font_size(height);
+        let font = if self.variant.label_strong() {
+            text::label_strong_font(ui.ctx(), size)
+        } else {
+            text::label_font(ui.ctx(), size)
+        };
+        ui.painter()
+            .layout_no_wrap(self.text.clone(), font, Color32::PLACEHOLDER)
     }
 
     fn resolve_width(&self, height: f32, text_width: f32) -> f32 {
