@@ -90,6 +90,51 @@ def stable_span(rgba: np.ndarray, tol: float) -> tuple[int, int]:
     return left, w - 1 - right
 
 
+def decor_span(rgba: np.ndarray, border: int, quiet_run: int = 10, k: float = 0.25):
+    """Etendue du DECOR d'extremite, en pixels depuis chaque bord.
+
+    Sur les composants Wakfu, les hachures diagonales ne couvrent pas le fond :
+    ce sont des embouts, cantonnes aux premieres dizaines de pixels de chaque
+    cote, le centre restant un degrade lisse. C'est cette etendue — et non le
+    rayon des coins — qui dimensionne les marges 9-slice horizontales : une
+    marge plus courte laisse un bout de motif dans la bande mediane, ou il se
+    retrouve etire (ou repete) sur toute la longueur du composant.
+
+    Mesure : ecart de chaque colonne au degrade vertical de reference (mediane
+    par ligne). Le decor s'arrete la ou cet ecart retombe au niveau du bruit
+    central pendant `quiet_run` colonnes d'affilee.
+
+    ATTENTION : sans objet sur une texture qui porte encore un libelle incruste
+    — le libelle, au centre, fait exploser le niveau de reference et la mesure
+    rend 0. Toujours mesurer sur un asset deja generifie (skill `design-asset`).
+    """
+    a = rgba.astype(np.float32)
+    h, w = a.shape[:2]
+    ref = np.median(a[:, :, :3], axis=1, keepdims=True)
+    dev = np.abs(a[:, :, :3] - ref).mean(axis=2)
+    col = dev[border + 3 : h - border - 3, :].mean(axis=0)
+    inner = col[border : w - border]
+    if inner.size < 8:
+        return 0, 0, 0.0, 0.0
+    lo, hi = int(inner.size * 0.35), int(inner.size * 0.65)
+    base = float(np.percentile(inner[lo:hi], 50))
+    peak = float(np.percentile(inner, 97))
+    threshold = base + k * (peak - base)
+
+    def extent(seq):
+        quiet = 0
+        for i, value in enumerate(seq):
+            if value <= threshold:
+                quiet += 1
+                if quiet >= quiet_run:
+                    return i - quiet + 1
+            else:
+                quiet = 0
+        return len(seq)
+
+    return border + extent(inner), border + extent(inner[::-1]), base, peak
+
+
 def cmd_insets(a):
     src = load_rgba(a.img)
     img, box = trim(src)
@@ -98,8 +143,13 @@ def cmd_insets(a):
     border = border_width(img)
     geometric = max(radius, border) + a.safety
     left, right = stable_span(img, a.tol)
-    recommended = max(geometric, min(left, right, min(w, h) // 3))
-    recommended = min(recommended, (min(w, h) - 1) // 2)
+    d_left, d_right, base, peak = decor_span(img, max(border, 1) + 1)
+    half_w, half_h = (w - 1) // 2, (h - 1) // 2
+
+    # Horizontal : le decor commande. Vertical : la geometrie seule — le decor des
+    # composants Wakfu est lateral, et moins on fige, mieux le degrade suit la hauteur.
+    inset_x = min(max(geometric, d_left, d_right), half_w)
+    inset_y = min(geometric, half_h)
     print(
         json.dumps(
             {
@@ -110,13 +160,20 @@ def cmd_insets(a):
                 "corner_radius": radius,
                 "border_width": border,
                 "stable_span": {"left": int(left), "right": int(right)},
+                "decor_span": {
+                    "left": int(d_left),
+                    "right": int(d_right),
+                    "noise_level": round(base, 2),
+                    "peak": round(peak, 2),
+                },
                 "geometric_minimum": int(geometric),
                 "recommended_insets": {
-                    "left": int(recommended),
-                    "top": int(recommended),
-                    "right": int(recommended),
-                    "bottom": int(recommended),
+                    "left": int(inset_x),
+                    "top": int(inset_y),
+                    "right": int(inset_x),
+                    "bottom": int(inset_y),
                 },
+                "recommended_fill": {"x": "stretch", "y": "stretch"},
             },
             ensure_ascii=False,
             indent=2,

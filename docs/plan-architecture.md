@@ -780,9 +780,11 @@ dans le dépôt avant cette couche :
 Décisions :
 
 - **Une texture générique par variante, toutes les tailles au rendu** — peinture **9-slice**
-  (`design::nine_slice`) : coins et liseré figés, bandes médianes étendues. Mode de remplissage
-  **par axe** : `Stretch` pour le dégradé vertical, `Tile` pour les hachures diagonales
-  (horizontalement périodiques — les étirer donne des traînées dès qu'on dépasse la largeur native).
+  (`design::nine_slice`) : coins, liseré et **décor d'extrémité** figés, bandes médianes étendues.
+  Les marges figées se dimensionnent sur l'étendue du décor (mesurée, ~50px sur un bouton 200×52),
+  pas sur le rayon des coins : les hachures diagonales du jeu sont des embouts, pas une texture de
+  fond, et une marge trop courte les laisse s'étirer sur toute la longueur du bouton (retour
+  utilisateur 2026-09-09).
 - **Manifeste unique** (`design::assets`) : nom logique → fichier + découpage. Seul endroit du crate
   où un chemin d'asset est écrit ; les fichiers sont référencés **directement dans
   `assets/design-system/`** (source tenue par le skill `design-asset`), pas recopiés dans le crate.
