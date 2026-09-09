@@ -127,9 +127,14 @@ const MODAL_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x1C, 0x2
 /// Fond de la section interne (#13161B) — plus sombre que `MODAL_BG`, légèrement translucide.
 const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x13, 0x16, 0x1B, 230);
 
-/// Marge sous le champ de chemin avant le bouton "Sélectionner le fichier" (empilés verticalement
-/// — demande explicite, remplace le côte-à-côte de la première version).
-const FIELD_TO_BROWSE_GAP: f32 = 8.0;
+/// Gouttière entre le champ de chemin et le bouton "Sélectionner le fichier", posés sur la MÊME
+/// ligne (demande utilisateur 2026-09-09 : le bouton ne doit plus prendre toute la largeur).
+///
+/// 10px, la valeur du relevé (`docs/design-system/releve-section-options.json`, nœud `sel-ctrl`) :
+/// c'est l'écart que le jeu laisse entre un libellé et le contrôle posé à sa droite, le seul écart
+/// intra-ligne qu'il ait été possible de mesurer. Elle figure bien à l'échelle d'espacement de la
+/// section (6, 7, 9, **10**, 11, 17, 21, 30, 31), ce n'est pas une valeur inventée pour l'occasion.
+const FIELD_TO_BROWSE_GAP: f32 = 10.0;
 /// Gouttière entre "Annuler" et "Valider" — le jeu en laisse 15px sur une fenêtre de 720
 /// (`interface-options-jeu.png` : boutons en x 18..351 et 367..700), soit ≈12px à l'échelle de
 /// cette modale. La première version les collait l'un à l'autre.
@@ -150,8 +155,18 @@ const FOOTER_GUTTER: f32 = 12.0;
 /// parce qu'il est peint à sa taille native. Le chrome était donc déjà à 100 %, seuls les boutons
 /// rétrécissaient.
 const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
-const FIELD_HEIGHT: f32 = 34.0;
-const BROWSE_BUTTON_HEIGHT: f32 = 40.0;
+/// Hauteur d'une ligne de contrôle — le champ ET le bouton qui l'accompagne.
+///
+/// 36px, relevé sur les six onglets de la modale du jeu : **tout contrôle posé sur une ligne de
+/// contenu y fait 36px de haut**, liste déroulante comme bouton (`releve-section-options.json`,
+/// nœuds `sel-ctrl` 233..269 et `depl-ctrl` 314..350 ; `releve-modale-options.json`, note sur le
+/// rythme vertical : « une ligne portant un contrôle de 36px passe à 39px »). C'est aussi la
+/// hauteur native de la texture de bouton compact, donc la seule hauteur à laquelle un bouton ne
+/// subit aucun étirement vertical.
+///
+/// Remplace deux valeurs qui ne s'accordaient ni entre elles ni avec le jeu : un champ à 34px et
+/// un bouton à 40px, alors que le pied de page était déjà à 36.
+const ROW_HEIGHT: f32 = 36.0;
 /// Textures embarquées du chrome de la modale — chargées UNE FOIS par fenêtre OS (voir
 /// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`, même principe que
 /// `panels::combat_frame::CombatFrame`/`crate::ui_icons::UiIcons`), jamais rechargées à chaque
@@ -394,9 +409,28 @@ pub fn show(
         );
         ui.add_space(10.0);
 
-        let field_rect = ui
-            .allocate_space(egui::vec2(inner_rect.width(), FIELD_HEIGHT))
+        // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
+        // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
+        // le reste. C'est le bouton qui commande, pas l'inverse — une largeur figée pour lui
+        // désaccorderait le couple dès que le libellé ou la fenêtre changent.
+        let browse = design::button("Sélectionner le fichier")
+            .variant(ButtonVariant::Secondary)
+            .size(ButtonSize::Height(ROW_HEIGHT))
+            .log_name("options-parcourir");
+        let browse_width = browse.desired_size(ui).x;
+        let row_rect = ui
+            .allocate_space(egui::vec2(inner_rect.width(), ROW_HEIGHT))
             .1;
+        // Plancher à zéro : si la section devenait plus étroite que le bouton, un rectangle de
+        // largeur négative serait inversé par egui et peint n'importe où. Zéro le rend invisible,
+        // ce qui se voit sur une capture — c'est la règle du contrat de composant.
+        let field_width = (row_rect.width() - browse_width - FIELD_TO_BROWSE_GAP).max(0.0);
+        let field_rect =
+            egui::Rect::from_min_size(row_rect.min, egui::vec2(field_width, ROW_HEIGHT));
+        let browse_rect = egui::Rect::from_min_size(
+            egui::pos2(row_rect.right() - browse_width, row_rect.top()),
+            egui::vec2(browse_width, ROW_HEIGHT),
+        );
         ui.painter()
             .rect_filled(field_rect, FIELD_RADIUS, FIELD_FILL);
         ui.painter().rect_stroke(
@@ -418,20 +452,7 @@ pub fn show(
             },
         );
 
-        ui.add_space(FIELD_TO_BROWSE_GAP);
-
-        // Bouton "Sélectionner le fichier" — SOUS le champ (empilé verticalement, retour
-        // utilisateur explicite), pleine largeur de la section.
-        if ui
-            .add(
-                design::button("Sélectionner le fichier")
-                    .variant(ButtonVariant::Secondary)
-                    .size(ButtonSize::Height(BROWSE_BUTTON_HEIGHT))
-                    .width(inner_rect.width())
-                    .log_name("options-parcourir"),
-            )
-            .clicked()
-        {
+        if ui.put(browse_rect, browse).clicked() {
             action = OptionsModalAction::Browse;
         }
 
