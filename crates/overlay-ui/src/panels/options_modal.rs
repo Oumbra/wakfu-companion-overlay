@@ -1,15 +1,38 @@
-//! Modale "Options" du design system (`docs/design-system.md` §9, mesuré le 2026-09-08 sur
-//! `assets/design-system/interfaces/interface-options-*.png`) — voir §5.1 du plan d'architecture :
-//! premier (et pour l'instant seul) réglage exposé, le chemin de `wakfu.log` à suivre. Ouverte par
-//! le bouton "Options" du carré de contrôle (`panels::watchlist::control_button_row`) ou le
-//! raccourci global `Ctrl+Shift+O` (voir `main.rs`/`bin/overlay-ui-x11.rs`).
+//! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
+//! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
+//! (voir `main.rs`/`bin/overlay-ui-x11.rs`). Premier (et pour l'instant seul) réglage exposé
+//! (onglet "Paramètres") : le chemin de `wakfu.log` à suivre.
 //!
-//! Chrome fidèle à la référence réelle : bannière turquoise dégradée (coins SUPÉRIEURS
-//! chanfreinés), corps anthracite, pied de page plein-largeur scindé Annuler (rouge, nouveau token
-//! `accent_danger`)/Valider (or, coins INFÉRIEURS chanfreinés) — voir `panels::chamfer` pour le
-//! dessin des polygones. Pas de ligne d'onglets (Jeu/Vidéo/Interface/Son/Commandes/Chat existent
-//! dans le jeu réel mais n'ont encore aucun équivalent overlay, voir doc §9 du design-system) ni de
-//! croix de fermeture (Annuler/Valider en tiennent lieu, comme la référence réelle).
+//! **Refonte 2026-09-09 — chrome basé sur les VRAIES textures du jeu, plus des formes peintes à la
+//! main** (voir `panels::chamfer`, toujours utilisé ailleurs pour la barre de dégâts, mais plus
+//! ici) : chaque mesure ci-dessous vient d'une capture d'écran réelle de la fenêtre Options du jeu
+//! (`assets/design-system/interfaces/interface-options-*.png`, six onglets, chrome identique sur
+//! les six), affinée par `.claude/skills/design-asset/scripts/dsimg.py analyze` puis VALIDÉE avec
+//! l'utilisateur via une simulation HTML/CSS interactive avant ce portage (méthode explicitement
+//! demandée : itérer en HTML, moins coûteux qu'itérer directement en Rust/egui, PUIS porter une
+//! fois la maquette acceptée).
+//!
+//! Différences avec la toute première version (chamfrein peint à la main) :
+//! - **Coins ARRONDIS, pas chanfreinés** — vérifié au pixel sur `modal-header.png` (rayon ≈12px) :
+//!   la modale entière ET son encadré interne ("section") sont arrondis, ce dernier avec un rayon
+//!   PLUS PRONONCÉ (18px) que la modale (12px) — constaté directement sur la référence, pas déduit.
+//! - **Bannière/pied de page peints avec les vraies textures du jeu** (`modal-header.png`,
+//!   `footer-cancel.png`/`footer-validate.png`, respectivement `large-button-cancel.png`/
+//!   `large-button-validate.png` du design system) plutôt que des dégradés approximés à la main —
+//!   leurs rayons de coin mesurés (2-4px) sont assez petits pour tolérer un étirement uniforme sans
+//!   déformation perceptible (voir `panels::nine_slice`, doc de module, même raisonnement).
+//! - **Menu à trois entrées** ("Alertes", "Personnages", "Paramètres") au-dessus de la section,
+//!   texture `menu-tabs.png` (dérivée de `tabs-with-first-tab-active.png` du design system, miroir
+//!   horizontal pour que le segment actif kaki tombe sur "Paramètres", dernière entrée) — seule
+//!   "Paramètres" est câblée (contenu de cette modale), "Alertes"/"Personnages" restent des stubs
+//!   visuels en attente d'un futur chantier.
+//! - **Bouton "Sélectionner le fichier" en 9-slice** (`panels::nine_slice`) sous le champ (pas à
+//!   côté) : seul élément ici qui doit s'agrandir bien au-delà de la taille native de sa texture
+//!   (`browse-button.png`/`hover.png`, 169×52) sans aplatir son chanfrein/sa bordure.
+//! - Fenêtre plus haute (`WINDOW_SIZE`, ratio aligné sur les 720:561 mesurés de la vraie fenêtre du
+//!   jeu — demande explicite : « garder une cohérence par rapport au rendu [du jeu] »), section
+//!   renommée "Fichier" (au lieu de "Fichier wakfu.log", redondant avec le contenu du champ), champ
+//!   + bouton empilés verticalement (au lieu de côte à côte).
 //!
 //! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer l'INTENTION
 //! de l'utilisateur (`OptionsModalAction`) — c'est l'appelant (`main.rs`/`bin/overlay-ui-x11.rs`,
@@ -17,52 +40,156 @@
 //! valide via `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`]
 //! en retour pour le prochain redessin.
 
-use crate::panels::chamfer::{self, ChamferCorners};
+use crate::panels::nine_slice;
 
-/// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, nouveau
-/// cas `OverlayKind::Options`) — assez large pour le champ de chemin + le bouton "Sélectionner le
-/// fichier" côte à côte sans compresser le texte, assez haute pour bannière + un seul réglage +
-/// pied de page sans vide excessif.
-pub const WINDOW_SIZE: (f32, f32) = (560.0, 230.0);
+/// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
+/// `OverlayKind::Options`) — largeur inchangée depuis la première version (560pt), hauteur portée
+/// à 436pt pour retrouver le ratio 720:561 de la vraie fenêtre Options du jeu (560 × 561 / 720 ≈
+/// 436), demande explicite de cohérence visuelle avec le rendu réel plutôt qu'une boîte compacte
+/// arbitraire.
+pub const WINDOW_SIZE: (f32, f32) = (560.0, 436.0);
 
-const BANNER_HEIGHT: f32 = 54.0;
-const FOOTER_HEIGHT: f32 = 46.0;
-const CONTENT_MARGIN: f32 = 24.0;
-const CHAMFER: f32 = 10.0;
+/// Rayon d'arrondi de la modale ENTIÈRE (bannière haute + pied de page bas) — mesuré au pixel sur
+/// `modal-header.png` (transition alpha au coin haut-gauche/haut-droit).
+const MODAL_RADIUS: u8 = 12;
+/// Rayon d'arrondi de l'encadré interne ("section", contenant le réglage de chemin) — visiblement
+/// PLUS PRONONCÉ que `MODAL_RADIUS` sur la référence réelle, constat direct plutôt que déduit d'une
+/// formule.
+const SECTION_RADIUS: u8 = 18;
 
-// Voir docs/design-tokens.json (`banner_teal`, révisé 2026-09-08 — §9 du design-system.md).
-const BANNER_TOP: egui::Color32 = egui::Color32::from_rgb(0x1A, 0x6E, 0x80);
-const BANNER_BOTTOM: egui::Color32 = egui::Color32::from_rgb(0x17, 0x63, 0x72);
-const BANNER_BORDER: egui::Color32 = egui::Color32::from_rgb(0x10, 0x12, 0x15);
+const BANNER_HEIGHT: f32 = 56.0;
+/// Marge gauche/droite du contenu (`.body` de la simulation HTML validée) — hors bannière/pied de
+/// page, qui restent pleine largeur.
+const BODY_PAD_SIDE: f32 = 20.0;
+/// Écart bannière → menu à onglets.
+const BODY_PAD_TOP: f32 = 14.0;
+/// Marge résiduelle sous le pied de page (bande sombre mesurée sous les boutons Annuler/Valider
+/// sur la référence réelle, ≈12px/561) — évite que ces boutons touchent directement le bord bas
+/// arrondi de la modale (retour utilisateur explicite : incohérence constatée sur ce point avec le
+/// design system).
+const BODY_PAD_BOTTOM: f32 = 12.0;
+
+const MENU_HEIGHT: f32 = 31.0;
+/// Écart menu → section.
+const MENU_GAP: f32 = 14.0;
+/// Écart section → pied de page.
+const FOOTER_GAP: f32 = 14.0;
+
+const SECTION_PAD_X: f32 = 22.0;
+const SECTION_PAD_Y: f32 = 20.0;
+
 const TITLE_TEXT: egui::Color32 = egui::Color32::WHITE;
 
-// `panel_fill` (docs/design-tokens.json::neutrals).
-const BODY_FILL: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x20);
+// `panel_fill`/texte (docs/design-tokens.json::neutrals) — inchangés depuis la première version.
 const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(0xF0, 0xF0, 0xF0);
 
-// `accent_danger` (docs/design-tokens.json, nouveau 2026-09-08).
-const CANCEL_TOP: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x52, 0x4A);
-const CANCEL_BOTTOM: egui::Color32 = egui::Color32::from_rgb(0xAF, 0x43, 0x3C);
-const CANCEL_BORDER: egui::Color32 = egui::Color32::from_rgb(0x0F, 0x11, 0x14);
-const CANCEL_TEXT: egui::Color32 = egui::Color32::WHITE;
-
-// `accent_warm.gold_bright_*`/`button_text_on_gold` (docs/design-tokens.json).
-const VALIDATE_TOP: egui::Color32 = egui::Color32::from_rgb(0xEA, 0xD8, 0x93);
-const VALIDATE_BOTTOM: egui::Color32 = egui::Color32::from_rgb(0xE0, 0xC3, 0x75);
-const VALIDATE_BORDER: egui::Color32 = egui::Color32::from_rgb(0x0E, 0x10, 0x13);
-const VALIDATE_TEXT: egui::Color32 = egui::Color32::from_rgb(0x3A, 0x35, 0x23);
-
-// Bouton secondaire kaki (§5.2 du design-system) — "Sélectionner le fichier".
-const BROWSE_TOP: egui::Color32 = egui::Color32::from_rgb(0x84, 0x78, 0x5E);
-const BROWSE_BOTTOM: egui::Color32 = egui::Color32::from_rgb(0x60, 0x58, 0x48);
-const BROWSE_BORDER: egui::Color32 = egui::Color32::from_rgb(0x10, 0x10, 0x10);
-const BROWSE_TEXT: egui::Color32 = egui::Color32::WHITE;
+/// Couleur du libellé d'un onglet INACTIF ("Alertes"/"Personnages") — ambre atténué, mesuré sur la
+/// référence réelle. L'onglet ACTIF ("Paramètres") reprend `TITLE_TEXT` (blanc), comme le kaki
+/// plein de la référence.
+const TAB_INACTIVE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xC9, 0xA8, 0x60);
 
 // Champ de saisie (§5.4 du design-system) — bordure chaude systématique de tous les inputs.
 const FIELD_FILL: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x1E, 0x23);
 const FIELD_BORDER: egui::Color32 = egui::Color32::from_rgb(0x59, 0x51, 0x40);
+const FIELD_RADIUS: u8 = 2;
 
 const ERROR_TEXT: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x60, 0x55);
+
+/// Fond de la modale (#1C2023) — légèrement translucide (laisse deviner le jeu derrière sur les
+/// bords, comme la référence réelle) : valeur donnée par l'utilisateur au colorimètre, remplace la
+/// première mesure automatique (plus sombre).
+const MODAL_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x1C, 0x20, 0x23, 235);
+/// Fond de la section interne (#13161B) — plus sombre que `MODAL_BG`, légèrement translucide.
+const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x13, 0x16, 0x1B, 230);
+
+/// Marge sous le champ de chemin avant le bouton "Sélectionner le fichier" (empilés verticalement
+/// — demande explicite, remplace le côte-à-côte de la première version).
+const FIELD_TO_BROWSE_GAP: f32 = 8.0;
+const FIELD_HEIGHT: f32 = 34.0;
+const BROWSE_BUTTON_HEIGHT: f32 = 40.0;
+/// `inset` du 9-slice du bouton "Sélectionner le fichier" (`nine_slice::nine_slice`, voir sa doc) —
+/// dépasse largement le rayon de coin mesuré de `browse-button.png` (`corner_radius≈4`, `dsimg.py
+/// analyze`) et son épaisseur de bordure, sans pour autant réduire à rien la zone étirable centrale
+/// (texture native 169×52).
+const BROWSE_NINE_SLICE_INSET: f32 = 14.0;
+
+/// Textures embarquées du chrome de la modale — chargées UNE FOIS par fenêtre OS (voir
+/// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`, même principe que
+/// `panels::combat_frame::CombatFrame`/`crate::ui_icons::UiIcons`), jamais rechargées à chaque
+/// frame. Fichiers sous `crates/overlay-ui/assets/ui/options/`, copiés depuis les assets validés
+/// (`assets/design-system/`, voir la doc de module pour leur provenance).
+pub struct OptionsModalAssets {
+    /// `modal-header.png` (720×56) — fond de bannière, peint avec arrondi HAUT uniquement
+    /// (`MODAL_RADIUS`) pour épouser le coin de la modale.
+    banner: egui::TextureHandle,
+    /// `footer-cancel.png`/`footer-validate.png` (338×36 chacun, libellé "Annuler"/"Valider"
+    /// gravé dans la texture, comme la référence réelle) — pas de 9-slice ici : rayon de coin
+    /// mesuré quasi nul (`corner_radius≈2`), l'étirement uniforme reste imperceptible.
+    footer_cancel: egui::TextureHandle,
+    footer_validate: egui::TextureHandle,
+    /// `browse-button.png`/`browse-button-hover.png` (169×52 chacun, déjà "génériques" — aucun
+    /// libellé gravé, voir `.claude/skills/design-asset`) — peints en 9-slice
+    /// (`BROWSE_NINE_SLICE_INSET`), le seul élément de cette modale agrandi bien au-delà de sa
+    /// taille native.
+    browse: egui::TextureHandle,
+    browse_hover: egui::TextureHandle,
+    /// `menu-tabs.png` (782×44, dérivée de `tabs-with-first-tab-active.png` du design system par
+    /// miroir horizontal — voir doc de module) — trois segments accolés, celui de droite (kaki)
+    /// correspond à "Paramètres" (dernière entrée du menu, onglet actif).
+    menu_tabs: egui::TextureHandle,
+}
+
+impl OptionsModalAssets {
+    pub fn load(ctx: &egui::Context) -> Self {
+        Self {
+            banner: load_embedded_texture(
+                ctx,
+                "options-banner",
+                include_bytes!("../../assets/ui/options/modal-header.png"),
+            ),
+            footer_cancel: load_embedded_texture(
+                ctx,
+                "options-footer-cancel",
+                include_bytes!("../../assets/ui/options/footer-cancel.png"),
+            ),
+            footer_validate: load_embedded_texture(
+                ctx,
+                "options-footer-validate",
+                include_bytes!("../../assets/ui/options/footer-validate.png"),
+            ),
+            browse: load_embedded_texture(
+                ctx,
+                "options-browse",
+                include_bytes!("../../assets/ui/options/browse-button.png"),
+            ),
+            browse_hover: load_embedded_texture(
+                ctx,
+                "options-browse-hover",
+                include_bytes!("../../assets/ui/options/browse-button-hover.png"),
+            ),
+            menu_tabs: load_embedded_texture(
+                ctx,
+                "options-menu-tabs",
+                include_bytes!("../../assets/ui/options/menu-tabs.png"),
+            ),
+        }
+    }
+}
+
+/// Décode + charge un PNG embarqué en texture egui — même séquence que
+/// `panels::combat_frame::CombatFrame::load`/`crate::ui_icons::UiIcons::load` (`image` crate puis
+/// `egui::ColorImage::from_rgba_unmultiplied`), extraite ici pour ne pas la répéter 6 fois.
+fn load_embedded_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> egui::TextureHandle {
+    let decoded = image::load_from_memory(bytes)
+        .expect("asset PNG embarqué invalide — corrompu au build")
+        .to_rgba8();
+    let (width, height) = decoded.dimensions();
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+        [width as usize, height as usize],
+        decoded.as_raw(),
+    );
+    ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR)
+}
 
 /// État mutable de la modale, propriété de la fenêtre OS qui l'affiche (voir
 /// `main.rs`/`bin/overlay-ui-x11.rs`, nouveau champ `OverlayWindow` réservé au cas
@@ -100,73 +227,102 @@ pub enum OptionsModalAction {
 
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
 /// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
-pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAction {
+pub fn show(
+    ui: &mut egui::Ui,
+    state: &mut OptionsModalState,
+    assets: &OptionsModalAssets,
+) -> OptionsModalAction {
     let mut action = OptionsModalAction::None;
     let rect = ui.max_rect();
-    let painter = ui.painter();
 
-    painter.rect_filled(rect, 0.0, BODY_FILL);
+    // Fond de la modale — arrondi sur les QUATRE coins (`MODAL_RADIUS`), peint AVANT tout le reste
+    // (bannière/section/pied de page viennent par-dessus).
+    ui.painter().rect_filled(rect, MODAL_RADIUS, MODAL_BG);
 
+    // Bannière — vraie texture du jeu (`modal-header.png`), arrondie sur les coins HAUTS
+    // uniquement pour épouser le coin de la modale (les coins bas de la texture ne sont jamais
+    // visibles, masqués par le corps qui la recouvre en dessous). Étirement uniforme : le rayon de
+    // coin natif de cette texture est assez petit (≈12px/720) pour rester imperceptible, voir doc
+    // de module.
     let banner_rect = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), BANNER_HEIGHT));
-    chamfer::chamfered_rect(
-        painter,
-        banner_rect,
-        CHAMFER,
-        ChamferCorners::TOP,
-        BANNER_TOP,
-        BANNER_BOTTOM,
-        Some(BANNER_BORDER),
-    );
-    painter.text(
+    egui::Image::new(&assets.banner)
+        .corner_radius(egui::CornerRadius {
+            nw: MODAL_RADIUS,
+            ne: MODAL_RADIUS,
+            sw: 0,
+            se: 0,
+        })
+        .paint_at(ui, banner_rect);
+    // Titre agrandi + contour noir (retour utilisateur : « le titre "Options" doit être plus grand
+    // et avoir un contour ») — même procédé que le texte flottant du panneau Combat, voir sa doc.
+    super::combat::paint_outlined_text(
+        ui,
         banner_rect.center(),
         egui::Align2::CENTER_CENTER,
         "Options",
-        egui::FontId::proportional(20.0),
+        egui::FontId::proportional(26.0),
         TITLE_TEXT,
     );
 
-    let footer_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left(), rect.bottom() - FOOTER_HEIGHT),
-        egui::vec2(rect.width(), FOOTER_HEIGHT),
+    let content_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            rect.left() + BODY_PAD_SIDE,
+            banner_rect.bottom() + BODY_PAD_TOP,
+        ),
+        egui::pos2(
+            rect.right() - BODY_PAD_SIDE,
+            rect.bottom() - BODY_PAD_BOTTOM,
+        ),
     );
-    let half = footer_rect.width() / 2.0;
-    let cancel_rect = egui::Rect::from_min_size(footer_rect.min, egui::vec2(half, FOOTER_HEIGHT));
+
+    // Menu à trois entrées ("Alertes", "Personnages", "Paramètres") — texture réelle du jeu (trois
+    // segments accolés, séparateur inclus), voir doc de module. Seule "Paramètres" (segment de
+    // droite, actif) est câblée ; les deux autres sont des stubs visuels sans interaction pour
+    // l'instant.
+    let menu_rect = egui::Rect::from_min_size(
+        content_rect.min,
+        egui::vec2(content_rect.width(), MENU_HEIGHT),
+    );
+    egui::Image::new(&assets.menu_tabs).paint_at(ui, menu_rect);
+    let tab_width = menu_rect.width() / 3.0;
+    for (i, (label, color)) in [
+        ("Alertes", TAB_INACTIVE_TEXT),
+        ("Personnages", TAB_INACTIVE_TEXT),
+        ("Paramètres", TITLE_TEXT),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let center =
+            menu_rect.min + egui::vec2(tab_width * (i as f32 + 0.5), menu_rect.height() / 2.0);
+        ui.painter().text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(12.0),
+            color,
+        );
+    }
+
+    // Pied de page — vraies textures du jeu (libellé déjà gravé dedans), rangée pleine largeur du
+    // contenu, chacune la moitié — hauteur dérivée du ratio natif (338×36) pour ne jamais déformer
+    // verticalement l'assise du bouton.
+    let footer_button_width = content_rect.width() / 2.0;
+    let footer_height = footer_button_width * (36.0 / 338.0);
+    let footer_rect = egui::Rect::from_min_max(
+        egui::pos2(content_rect.left(), content_rect.bottom() - footer_height),
+        content_rect.max,
+    );
+    let cancel_rect = egui::Rect::from_min_size(
+        footer_rect.min,
+        egui::vec2(footer_button_width, footer_height),
+    );
     let validate_rect = egui::Rect::from_min_size(
-        footer_rect.min + egui::vec2(half, 0.0),
-        egui::vec2(footer_rect.width() - half, FOOTER_HEIGHT),
+        footer_rect.min + egui::vec2(footer_button_width, 0.0),
+        egui::vec2(footer_rect.width() - footer_button_width, footer_height),
     );
-    chamfer::chamfered_rect(
-        painter,
-        cancel_rect,
-        CHAMFER,
-        ChamferCorners::BOTTOM_LEFT,
-        CANCEL_TOP,
-        CANCEL_BOTTOM,
-        Some(CANCEL_BORDER),
-    );
-    chamfer::chamfered_rect(
-        painter,
-        validate_rect,
-        CHAMFER,
-        ChamferCorners::BOTTOM_RIGHT,
-        VALIDATE_TOP,
-        VALIDATE_BOTTOM,
-        Some(VALIDATE_BORDER),
-    );
-    painter.text(
-        cancel_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "Annuler",
-        egui::FontId::proportional(16.0),
-        CANCEL_TEXT,
-    );
-    painter.text(
-        validate_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "Valider",
-        egui::FontId::proportional(16.0),
-        VALIDATE_TEXT,
-    );
+    egui::Image::new(&assets.footer_cancel).paint_at(ui, cancel_rect);
+    egui::Image::new(&assets.footer_validate).paint_at(ui, validate_rect);
     let cancel_response = ui
         .interact(
             cancel_rect,
@@ -188,79 +344,84 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
         action = OptionsModalAction::Validate(state.path_input.clone());
     }
 
-    // Corps : label + champ de chemin + bouton "Sélectionner le fichier" (§5.1 du plan — renommé
-    // depuis "Ouvrir", voir la référence `interface-options-interface.png`, boutons "Ouvrir le
-    // dossier"/"Ouvrir le thème" du même style secondaire kaki).
-    let content_rect = egui::Rect::from_min_max(
-        rect.min + egui::vec2(CONTENT_MARGIN, BANNER_HEIGHT + CONTENT_MARGIN),
-        egui::pos2(rect.right() - CONTENT_MARGIN, footer_rect.top() - 12.0),
+    // Section "Fichier" — encadré interne au rayon plus prononcé que la modale (`SECTION_RADIUS`),
+    // entre le menu et le pied de page.
+    let section_rect = egui::Rect::from_min_max(
+        egui::pos2(content_rect.left(), menu_rect.bottom() + MENU_GAP),
+        egui::pos2(content_rect.right(), footer_rect.top() - FOOTER_GAP),
     );
-    ui.scope_builder(egui::UiBuilder::new().max_rect(content_rect), |ui| {
+    ui.painter()
+        .rect_filled(section_rect, SECTION_RADIUS, SECTION_BG);
+
+    let inner_rect = section_rect.shrink2(egui::vec2(SECTION_PAD_X, SECTION_PAD_Y));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
         ui.label(
-            egui::RichText::new("Fichier wakfu.log")
+            egui::RichText::new("Fichier")
                 .color(TEXT_PRIMARY)
-                .size(15.0)
+                .size(13.5)
                 .strong(),
         );
-        ui.add_space(8.0);
+        ui.add_space(10.0);
 
-        const BROWSE_BUTTON_WIDTH: f32 = 190.0;
-        const FIELD_HEIGHT: f32 = 34.0;
-        ui.horizontal(|ui| {
-            let field_width = (content_rect.width() - BROWSE_BUTTON_WIDTH - 10.0).max(80.0);
-            let field_rect = ui.allocate_space(egui::vec2(field_width, FIELD_HEIGHT)).1;
-            ui.painter().rect_filled(field_rect, 0.0, FIELD_FILL);
-            ui.painter().rect_stroke(
-                field_rect,
-                0.0,
-                egui::Stroke::new(1.0, FIELD_BORDER),
-                egui::StrokeKind::Inside,
-            );
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(field_rect.shrink(6.0)),
-                |ui| {
-                    ui.centered_and_justified(|ui| {
-                        let edit = egui::TextEdit::singleline(&mut state.path_input)
-                            .frame(egui::Frame::NONE)
-                            .text_color(TEXT_PRIMARY)
-                            .hint_text("Chemin vers wakfu.log");
-                        ui.add(edit);
-                    });
-                },
-            );
+        let field_rect = ui
+            .allocate_space(egui::vec2(inner_rect.width(), FIELD_HEIGHT))
+            .1;
+        ui.painter()
+            .rect_filled(field_rect, FIELD_RADIUS, FIELD_FILL);
+        ui.painter().rect_stroke(
+            field_rect,
+            FIELD_RADIUS,
+            egui::Stroke::new(1.0, FIELD_BORDER),
+            egui::StrokeKind::Inside,
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(field_rect.shrink(8.0)),
+            |ui| {
+                ui.centered_and_justified(|ui| {
+                    let edit = egui::TextEdit::singleline(&mut state.path_input)
+                        .frame(egui::Frame::NONE)
+                        .text_color(TEXT_PRIMARY)
+                        .hint_text("Chemin vers wakfu.log");
+                    ui.add(edit);
+                });
+            },
+        );
 
-            ui.add_space(10.0);
+        ui.add_space(FIELD_TO_BROWSE_GAP);
 
-            let browse_rect = ui
-                .allocate_space(egui::vec2(BROWSE_BUTTON_WIDTH, FIELD_HEIGHT))
-                .1;
-            chamfer::chamfered_rect(
-                ui.painter(),
+        // Bouton "Sélectionner le fichier" — SOUS le champ (empilé verticalement, retour
+        // utilisateur explicite), texture réelle du jeu agrandie en 9-slice (voir doc de module).
+        let browse_rect = ui
+            .allocate_space(egui::vec2(inner_rect.width(), BROWSE_BUTTON_HEIGHT))
+            .1;
+        let browse_response = ui
+            .interact(
                 browse_rect,
-                6.0,
-                ChamferCorners::default(),
-                BROWSE_TOP,
-                BROWSE_BOTTOM,
-                Some(BROWSE_BORDER),
-            );
-            ui.painter().text(
-                browse_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Sélectionner le fichier",
-                egui::FontId::proportional(13.0),
-                BROWSE_TEXT,
-            );
-            let browse_response = ui
-                .interact(
-                    browse_rect,
-                    ui.id().with("options-browse"),
-                    egui::Sense::click(),
-                )
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            if browse_response.clicked() {
-                action = OptionsModalAction::Browse;
-            }
-        });
+                ui.id().with("options-browse"),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let browse_texture = if browse_response.hovered() {
+            &assets.browse_hover
+        } else {
+            &assets.browse
+        };
+        nine_slice::nine_slice(
+            ui.painter(),
+            browse_texture,
+            browse_rect,
+            BROWSE_NINE_SLICE_INSET,
+        );
+        ui.painter().text(
+            browse_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Sélectionner le fichier",
+            egui::FontId::proportional(13.0),
+            TITLE_TEXT,
+        );
+        if browse_response.clicked() {
+            action = OptionsModalAction::Browse;
+        }
 
         if let Some(err) = &state.error {
             ui.add_space(10.0);

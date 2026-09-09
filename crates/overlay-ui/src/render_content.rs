@@ -11,7 +11,7 @@ use overlay_engine::{CatalogIndex, FightSnapshot, WatchlistEntry};
 use crate::panels;
 use crate::panels::combat::CombatSide;
 use crate::panels::combat_frame::CombatFrame;
-use crate::panels::options_modal::{OptionsModalAction, OptionsModalState};
+use crate::panels::options_modal::{OptionsModalAction, OptionsModalAssets, OptionsModalState};
 use crate::panels::watchlist::{WatchlistAssets, WatchlistToast};
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -188,6 +188,12 @@ pub struct RenderContent<'a> {
     /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
     /// `panels::options_modal::OptionsModalState`.
     pub options: Option<&'a mut OptionsModalState>,
+    /// Textures du chrome de la modale Options (2026-09-09) — `Some` UNIQUEMENT pour `kind ==
+    /// OverlayKind::Options`, chargées UNE FOIS par fenêtre OS (voir
+    /// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`) et seulement référencées ici :
+    /// contrairement à `options` (`&mut`, la frappe doit persister), ces textures ne changent
+    /// jamais d'une frame à l'autre, une référence partagée suffit.
+    pub options_assets: Option<&'a OptionsModalAssets>,
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
@@ -281,6 +287,7 @@ pub fn build_ui(
                 interactive: content.interactive,
                 now: content.now,
                 options: content.options.as_deref_mut(),
+                options_assets: content.options_assets,
             },
         );
     });
@@ -314,6 +321,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         interactive,
         now,
         options,
+        options_assets,
     } = content;
 
     let mut outcome = RenderOutcome::default();
@@ -520,8 +528,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // en pratique (voir `main.rs`/`bin/overlay-ui-x11.rs`, qui le fournissent toujours
                 // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
                 OverlayKind::Options => {
-                    if let Some(state) = options {
-                        outcome.options_action = panels::options_modal::show(ui, state);
+                    if let (Some(state), Some(assets)) = (options, options_assets) {
+                        outcome.options_action = panels::options_modal::show(ui, state, assets);
                     }
                 }
             }
