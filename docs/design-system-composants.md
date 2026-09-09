@@ -152,6 +152,52 @@ croisillons tombaient dans la bande médiane et s'y étiraient sur près de 200p
 
 ---
 
+## `design::input` — champ de saisie
+
+**API** : `design::input(&mut valeur)`, plus `.placeholder(...)`, `.width(...)`, `.size(...)`,
+`.enabled(...)`, `.tooltip(...)`, `.log_name(...)`. Rend une `Response` : `changed()` dit à quelle
+frame la valeur a bougé.
+
+**La valeur vit chez l'appelant.** Le composant l'écrit, l'appelant la relit — c'est un champ de
+formulaire, pas un état interne. **Vide = le texte indicatif s'affiche** : une `String` vide *est*
+l'absence de valeur pour un champ texte, une `Option` n'ajouterait aucune information et obligerait
+chaque appelant à trancher entre `None` et `Some("")`.
+
+**Largeur par défaut : toute la place disponible** — l'inverse du bouton, qui se cale sur son
+libellé. Un champ de saisie n'a pas de contenu au moment où on le place ; sa largeur ne peut venir
+que de la mise en page.
+
+**Mesures** (barre de recherche de l'onglet Commandes, x 30..500 × y 138..163, recoupée avec les
+assets isolés via `dsimg.py analyze`) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Hauteur native | 25px | capture ET `large-input-text-width-placeholder.png` (composant 258 × 25) — deux sources indépendantes d'accord |
+| Bord | 2px `#595140` | deux lignes et deux colonnes pleines sur la capture ; même couleur sur les quatre assets de champ |
+| Rayon | 4 | `dsimg.py analyze`, IoU 1,0 sur deux assets — **le seul composant du jeu qui ne soit pas à 2** |
+| Fond | `#0e1115` | capture |
+| Retrait du texte | 6px du bord extérieur | premier glyphe de « Rechercher » à x=36 pour un champ à x=30 |
+| Corps | 17px (encre 13) | même encre qu'un libellé de bouton, donc même corps |
+| Valeur saisie | **`#f4d89e`, or** | pic identique sur `input-search.png`, `input-number.png` et `large-input-number.png` |
+| Texte indicatif | `#83775b`, kaki éteint | pic sur « Rechercher » et « Min » |
+
+**Une valeur saisie est or, pas blanche** — le constat le plus contre-intuitif du relevé, et il
+tient sur trois assets indépendants. Le texte indicatif est peint à la main plutôt que confié à
+`TextEdit::hint_text` : egui écrase la couleur d'un `hint_text` par `Visuals::weak_text_color()`.
+
+**Un champ fait 25px là où un bouton en fait 36**, et ce n'est pas une incohérence à corriger : le
+jeu compose réellement des lignes où le champ est plus bas que ce qui l'accompagne. C'est à la mise
+en page de centrer le plus petit.
+
+**Inventé, faute de capture** — signalé pour ne pas être pris plus tard pour une mesure : l'état
+**survolé** ne change rien (inventer un éclaircissement serait inventer du design), et l'état
+**désactivé** reprend les jetons du bouton désactivé.
+
+**Remplace** : le champ repeint à la main dans `panels::options_modal`, dont les trois constantes
+locales étaient toutes fausses (fond `#1C1E23`, bord 1px, rayon 2, valeur blanche).
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
@@ -159,7 +205,6 @@ Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces
 | Composant | Assets disponibles | Notes |
 | --- | --- | --- |
 | **Bouton icône** | `button-icon[-hover,-disabled].png`, `button-icon-first-plan[-hover].png`, `icons/*.png` | Existe déjà en `panels::icon_button::paint_icon_button`, mais **hors contrat** : prend quatre `TextureHandle` en paramètres. À reprendre en `design::icon_button(icon).context(FirstPlan|Panel)` — deux contextes de socle, une icône, un clic. |
-| **Champ de saisie** | `input-text-width-placeholder.png`, `input-search.png`, `input-number.png`, `empty-input-search.png` | Texte / recherche / nombre ; §5.4 du design-system. |
 | **Case à cocher** | `checkbox-{true,false}.png` | §5.6. |
 | **Onglets** | `tabs-with-first-tab-active[-and-hover-2nd-tab].png`, `icon-tabs.png` | Onglets texte et onglets icône ; §5.7. |
 | **Select / dropdown** | `select-simple.png`, `select-multiple.png` | §5.5. |
