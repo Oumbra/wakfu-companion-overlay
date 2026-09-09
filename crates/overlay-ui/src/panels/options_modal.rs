@@ -92,6 +92,22 @@ const TITLE_TEXT: egui::Color32 = egui::Color32::WHITE;
 // `panel_fill`/texte (docs/design-tokens.json::neutrals) — inchangés depuis la première version.
 const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(0xF0, 0xF0, 0xF0);
 
+/// Corps du titre de bannière, en serif grasse (`design::text::title_font`).
+///
+/// **Choix utilisateur du 2026-09-09**, arbitré sur planche de comparaison. La mesure disait 22 :
+/// c'est le corps qui reproduit **exactement** l'encre du jeu (21 × 82 px, contre 21 × 82 mesurés
+/// sur `interface-options-commandes.png`) ; à 21 on rend 20 × 78, soit un pixel de moins en
+/// hauteur. L'utilisateur préfère cette proportion sur la bannière — ce n'est donc pas un écart de
+/// mesure à rattraper, ne pas « corriger » à 22.
+const TITLE_FONT_SIZE: f32 = 21.0;
+
+/// Corps du titre de section, même serif que la bannière.
+///
+/// Déduit du rapport d'encre entre les deux échantillons du jeu : son titre de section (« Barres
+/// de raccourcis ») fait 17 px d'encre contre 21 px pour son titre de fenêtre (« Options »).
+/// Appliqué au corps 21 retenu ci-dessus (qui rend 20 px d'encre), cela donne 21 × 17 / 20 ≈ 17,9.
+const SECTION_TITLE_FONT_SIZE: f32 = 18.0;
+
 /// Couleur du libellé d'un onglet INACTIF ("Alertes"/"Personnages") — ambre atténué, mesuré sur la
 /// référence réelle. L'onglet ACTIF ("Paramètres") reprend `TITLE_TEXT` (blanc), comme le kaki
 /// plein de la référence.
@@ -248,15 +264,18 @@ pub fn show(
             se: 0,
         })
         .paint_at(ui, banner_rect);
-    // Titre agrandi + contour noir (retour utilisateur : « le titre "Options" doit être plus grand
-    // et avoir un contour ») — même procédé que le texte flottant du panneau Combat, voir sa doc.
-    super::combat::paint_outlined_text(
+    // Titre en serif grasse, cerné d'une ombre portée bas-droite (`SHADOW_BOTTOM_RIGHT`) et non
+    // d'un contour complet : le fond est ici CONNU (la bannière), on peut donc se permettre de ne
+    // cerner qu'un côté — c'est ce que fait le jeu, dont le titre est éclairé depuis le haut-gauche.
+    // Un contour complet (l'état précédent) empâtait le mot. Voir `design::text` et `design::fonts`.
+    design::text::paint_outlined_text(
         ui,
         banner_rect.center(),
         egui::Align2::CENTER_CENTER,
         "Options",
-        egui::FontId::proportional(26.0),
+        design::text::title_font(ui.ctx(), TITLE_FONT_SIZE),
         TITLE_TEXT,
+        design::text::SHADOW_BOTTOM_RIGHT,
     );
 
     let content_rect = egui::Rect::from_min_max(
@@ -353,11 +372,25 @@ pub fn show(
 
     let inner_rect = section_rect.shrink2(egui::vec2(SECTION_PAD_X, SECTION_PAD_Y));
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-        ui.label(
-            egui::RichText::new("Fichier")
-                .color(TEXT_PRIMARY)
-                .size(13.5)
-                .strong(),
+        // Même traitement que le titre de bannière (serif grasse + ombre bas-droite), au corps
+        // dicté par le rapport d'encre du jeu entre ses deux niveaux de titre. Peint à la main
+        // plutôt que via `ui.label` : un libellé egui ne sait pas se cerner, et le procédé doit
+        // rester le même que celui de la bannière. L'espace réservé inclut le pixel d'ombre.
+        let section_font = design::text::title_font(ui.ctx(), SECTION_TITLE_FONT_SIZE);
+        let section_galley =
+            ui.painter()
+                .layout_no_wrap("Fichier".to_owned(), section_font.clone(), TEXT_PRIMARY);
+        let section_title_rect = ui
+            .allocate_space(section_galley.size() + egui::vec2(1.0, 1.0))
+            .1;
+        design::text::paint_outlined_text(
+            ui,
+            section_title_rect.left_top(),
+            egui::Align2::LEFT_TOP,
+            "Fichier",
+            section_font,
+            TEXT_PRIMARY,
+            design::text::SHADOW_BOTTOM_RIGHT,
         );
         ui.add_space(10.0);
 

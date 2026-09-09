@@ -48,7 +48,7 @@
 //!   légèrement à l'EXTÉRIEUR du disque visible, sur l'anneau du cadre) plutôt qu'à l'intérieur —
 //!   pour ne plus jamais recouvrir un bout du portrait (voir `paint_portrait_percent`).
 //! - Tout texte flottant par-dessus le jeu (nom, dégâts, total, pourcentage) utilise désormais un
-//!   VRAI contour (8 passes décalées, voir `paint_outlined_text`) plutôt qu'une simple ombre 1px
+//!   VRAI contour (8 passes décalées, voir `design::text::paint_outlined_text`) plutôt qu'une simple ombre 1px
 //!   décalée — même procédé que les incrustations du jeu lui-même (ex. pourcentage de vie), gardé
 //!   en référence par l'utilisateur (capture d'écran à l'appui). L'ancienne ombre simple restait
 //!   illisible sur certains fonds clairs du décor.
@@ -97,7 +97,7 @@
 //!   rendait un écart trop discret par rapport au jeu (retour utilisateur, capture de comparaison à
 //!   l'appui) — remplacé par une espace ordinaire, plus large dans la police utilisée ici. Sans
 //!   risque de retour à la ligne malvenu : ce texte est toujours peint directement via
-//!   `Painter::text` (voir `paint_outlined_text`), jamais mis en page par un widget qui pourrait le
+//!   `Painter::text` (voir `design::text::paint_outlined_text`), jamais mis en page par un widget qui pourrait le
 //!   scinder.
 //! - Curseur "main" (`CursorIcon::PointingHand`) sur tout élément cliquable de ce panneau (switch
 //!   Alliés/Ennemis, nouveau bouton lien externe) — rien ne l'indiquait visuellement avant (retour
@@ -353,6 +353,7 @@
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
+use crate::design::text;
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -460,10 +461,6 @@ const BAR_END_CAP: egui::Color32 = egui::Color32::from_rgb(191, 191, 191);
 const BAR_HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(0x0d, 0xbe, 0xbe);
 
 const TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
-/// Couleur du contour peint autour de tout texte flottant par-dessus le jeu (voir
-/// `paint_outlined_text`) — noir plein, comme le procédé déjà utilisé par le jeu lui-même pour ses
-/// propres incrustations (référence explicite de l'utilisateur, capture d'écran à l'appui).
-const TEXT_OUTLINE: egui::Color32 = egui::Color32::BLACK;
 
 const TOTAL_FONT_SIZE: f32 = 18.0;
 /// Écart entre la ligne leader et le premier groupe — réduit en cohérence avec `ROW_GAP`.
@@ -663,13 +660,14 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, to
     );
     paint_side_switch(ui, switch_top_left, side, icons);
 
-    paint_outlined_text(
+    text::paint_outlined_text(
         ui,
         egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, row_rect.center().y),
         egui::Align2::RIGHT_CENTER,
         &format_fr_thousands(total_damage),
         total_font,
         TEXT_COLOR,
+        text::OUTLINE_FULL,
     );
 }
 
@@ -811,13 +809,14 @@ pub(crate) fn paint_portrait_percent(
     // revient sur `DAMAGE_ACCENT` du 8e retour (« je préfère la couleur accent qu'il y avait
     // avant »). Résultat assumé : la barre (`DAMAGE_ACCENT`) et ce pourcentage n'ont plus la même
     // couleur — explicitement voulu, pas un oubli de cohérence.
-    paint_outlined_text(
+    text::paint_outlined_text(
         ui,
         pos,
         egui::Align2::RIGHT_BOTTOM,
         &text,
         egui::FontId::proportional(PERCENT_FONT_SIZE),
         ACCENT,
+        text::OUTLINE_FULL,
     );
 }
 
@@ -836,21 +835,23 @@ fn damage_bar_group(ui: &mut egui::Ui, name: &str, damage: i64, total_damage: i6
     let name_height = name_font.size;
     let (name_rect, _) =
         ui.allocate_exact_size(egui::vec2(bar_width, name_height), egui::Sense::hover());
-    paint_outlined_text(
+    text::paint_outlined_text(
         ui,
         name_rect.left_center(),
         egui::Align2::LEFT_CENTER,
         name,
         name_font.clone(),
         TEXT_COLOR,
+        text::OUTLINE_FULL,
     );
-    paint_outlined_text(
+    text::paint_outlined_text(
         ui,
         name_rect.right_center(),
         egui::Align2::RIGHT_CENTER,
         &format_fr_thousands(damage),
         name_font,
         TEXT_COLOR,
+        text::OUTLINE_FULL,
     );
     ui.add_space(GROUP_NAME_BAR_GAP);
     let (bar_rect, _) =
@@ -934,7 +935,8 @@ fn damage_bar(ui: &mut egui::Ui, rect: egui::Rect, damage: i64, total_damage: i6
 /// (U+00A0), jugée trop discrète face au formatage du jeu lui-même (retour utilisateur, capture de
 /// comparaison à l'appui : l'écart entre groupes de chiffres semblait presque absent). Sans risque
 /// de retour à la ligne malvenu ici : ce texte est TOUJOURS peint directement via `Painter::text`
-/// (voir `paint_outlined_text`), jamais mis en page par un widget qui pourrait le scinder.
+/// (voir `design::text::paint_outlined_text`), jamais mis en page par un widget qui pourrait
+/// le scinder.
 fn format_fr_thousands(n: i64) -> String {
     let sign = if n < 0 { "-" } else { "" };
     let digits = n.unsigned_abs().to_string();
@@ -946,37 +948,6 @@ fn format_fr_thousands(n: i64) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!("{sign}{grouped}")
-}
-
-/// Peint `text` avec un VRAI contour (8 copies décalées d'1 px dans chaque direction, en
-/// `TEXT_OUTLINE`, puis le texte plein par-dessus) — nécessaire pour tout texte qui flotte nu
-/// par-dessus le jeu (nom, dégâts, pourcentage, total) : le fond y est arbitraire, une simple
-/// ombre décalée d'un côté (ancienne version) reste illisible dès que ce fond est clair de ce
-/// côté-là. Même procédé que les incrustations du jeu lui-même (référence utilisateur, capture
-/// d'écran à l'appui : pourcentage de vie en blanc cerné de noir).
-pub(crate) fn paint_outlined_text(
-    ui: &egui::Ui,
-    pos: egui::Pos2,
-    align: egui::Align2,
-    text: &str,
-    font: egui::FontId,
-    color: egui::Color32,
-) {
-    const OFFSETS: [egui::Vec2; 8] = [
-        egui::vec2(-1.0, -1.0),
-        egui::vec2(0.0, -1.0),
-        egui::vec2(1.0, -1.0),
-        egui::vec2(-1.0, 0.0),
-        egui::vec2(1.0, 0.0),
-        egui::vec2(-1.0, 1.0),
-        egui::vec2(0.0, 1.0),
-        egui::vec2(1.0, 1.0),
-    ];
-    let painter = ui.painter();
-    for offset in OFFSETS {
-        painter.text(pos + offset, align, text, font.clone(), TEXT_OUTLINE);
-    }
-    painter.text(pos, align, text, font, color);
 }
 
 /// Affiche `text` en infobulle AU-DESSUS de `response` (`RectAlign::TOP`) plutôt qu'en dessous —
