@@ -13,25 +13,47 @@
 //! retraitement d'asset. Le crate n'est pas publié (`publish = false` dans le workspace) : un
 //! `include_bytes!` qui sort du dossier du crate ne pose donc aucun problème d'empaquetage.
 //!
-//! Les marges 9-slice sont **mesurées**, pas choisies :
-//! `component.py insets assets/design-system/button-*.png` rend pour les sept textures de bouton un
-//! arrondi de 3–4px et un liseré de 2px, d'où un minimum géométrique de 6px — la valeur retenue,
-//! identique sur les sept (voir `BUTTON_SLICE`).
+//! Les marges 9-slice sont **mesurées**, pas choisies (`component.py insets`) — et ce sont les
+//! **hachures qui les dimensionnent**, pas les coins : voir `button_slice`.
 
 use crate::design::nine_slice::{Fill, Insets, NineSlice};
 
-/// Découpage commun à **toutes** les textures de bouton texte du design system.
+/// Découpage d'une texture de bouton texte : `cap` pixels figés à gauche et à droite, 6px en haut
+/// et en bas, tout le reste étiré.
 ///
-/// - `insets` 6px : `max(rayon, liseré) + 2` de sécurité, mesuré identique sur les sept fichiers
-///   (`button-{primary,secondary,danger}[-hover].png` et `button-disabled.png` : arrondi 3–4px,
-///   liseré 2px). Une valeur unique plutôt qu'une par fichier — les textures viennent du même
-///   composant du jeu, une divergence de 1px serait du bruit de mesure, pas une intention de design.
-/// - `fill_x = Tile` : les hachures diagonales sont horizontalement périodiques ; les étirer
-///   transforme les croisillons en traînées dès qu'un bouton dépasse sa largeur native (planche de
-///   contrôle du skill `ui-component`, comparaison 500×48 étiré / répété).
-/// - `fill_y = Stretch` : le dégradé vertical (clair en haut, sombre en bas) DOIT suivre la hauteur
-///   du bouton ; le répéter empilerait deux dégradés.
-pub const BUTTON_SLICE: NineSlice = NineSlice::new(Insets::same(6.0), Fill::Tile, Fill::Stretch);
+/// - **`cap` = étendue du décor**, pas le rayon des coins. Retour utilisateur 2026-09-09 : « il faut
+///   que les hachures soient présentes uniquement sur les côtés [...] et que sur le fond central, ce
+///   soit sans hachure ». Les croisillons diagonaux ne sont pas une texture de fond mais un
+///   **embout** : `component.py insets` les trouve cantonnés aux 43–51 premiers pixels de chaque
+///   extrémité sur les cinq textures 200×52/169×52, et aux 29–30 premiers sur les deux textures
+///   338×36 — au-delà, l'écart au dégradé retombe au niveau du bruit (1,0 à 1,6 contre un pic de
+///   3,6 à 7,5). Les marges retenues (52 et 32) arrondissent la plus grande mesure de chaque famille
+///   vers le haut : une marge trop courte laisse un bout de croisillon dans la bande médiane, où il
+///   serait étiré sur toute la longueur du bouton.
+/// - **6px en haut et en bas** : `max(rayon, liseré) + 2` de sécurité, mesuré identique sur les sept
+///   fichiers (arrondi 3–4px, liseré 2px). Le décor ne déborde pas verticalement, rien n'oblige à
+///   figer davantage — et moins on fige, mieux le dégradé suit la hauteur.
+/// - **`Fill::Stretch` sur les deux axes** : la bande médiane est désormais un dégradé lisse dans
+///   les deux directions, il n'y a plus rien de périodique à répéter.
+const fn button_slice(cap: f32) -> NineSlice {
+    NineSlice::new(
+        Insets {
+            left: cap,
+            top: 6.0,
+            right: cap,
+            bottom: 6.0,
+        },
+        Fill::Stretch,
+        Fill::Stretch,
+    )
+}
+
+/// Boutons de fenêtre (textures 200×52 et 169×52) — décor mesuré jusqu'à 51px des bords.
+pub const BUTTON_SLICE: NineSlice = button_slice(52.0);
+
+/// Boutons de pied de page de modale (textures 338×36) — décor mesuré jusqu'à 30px des bords. Un
+/// embout de 52px y couvrirait près du tiers d'un bouton pourtant conçu pour être long.
+pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(32.0);
 
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
@@ -112,12 +134,12 @@ impl DsTexture {
             DsTexture::ButtonDanger => DsTextureSpec {
                 name: "ds-button-danger",
                 bytes: ds_asset!("button-danger.png"),
-                slice: BUTTON_SLICE,
+                slice: BUTTON_SLICE_COMPACT,
             },
             DsTexture::ButtonDangerHover => DsTextureSpec {
                 name: "ds-button-danger-hover",
                 bytes: ds_asset!("button-danger-hover.png"),
-                slice: BUTTON_SLICE,
+                slice: BUTTON_SLICE_COMPACT,
             },
             DsTexture::ButtonDisabled => DsTextureSpec {
                 name: "ds-button-disabled",
