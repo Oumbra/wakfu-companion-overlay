@@ -728,6 +728,9 @@ proposer une disposition personnalisable comme le ferait un site web.
 
 ### 9.1 Modale Options (2026-09-08)
 
+Feuille de route de finalisation : [`plan-modale-options.md`](plan-modale-options.md)
+(2026-09-10) — dix étapes, dont sept créent un composant réutilisable de `overlay_ui::design`.
+
 Premier écran de réglages de l'overlay — voir `docs/design-system.md` §9 pour le chrome (mesuré sur
 `assets/design-system/interfaces/interface-options-*.png`) et `crates/overlay-ui/src/panels/
 options_modal.rs`. Un seul réglage en v1, conforme à §5.1 : le chemin de `wakfu.log` doit être
