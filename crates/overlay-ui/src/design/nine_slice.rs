@@ -14,20 +14,30 @@
 //! algorithme que `dslib.scale9` du skill `design-asset` (qui, lui, produit un PNG hors ligne) —
 //! ici en `egui::Mesh`, donc sans allocation d'image ni retéléversement GPU quand la taille change.
 //!
-//! **Le mode de remplissage est par axe, et ce n'est pas un détail.** Les textures de bouton du jeu
-//! portent deux motifs de natures différentes : un **dégradé vertical** (clair en haut, sombre en
-//! bas) qui doit s'étirer avec la hauteur (`Fill::Stretch`), et des **hachures diagonales**
-//! horizontalement périodiques qui doivent garder leur échelle quand le bouton s'allonge
-//! (`Fill::Tile`). Un étirement horizontal transforme les croisillons en longues traînées —
-//! visible dès 200 → 340px, vérifié sur planche (skill `ui-component`, commande `preview`) avant
-//! d'écrire ce module.
+//! **Les marges ne sont pas seulement géométriques : elles délimitent le décor.** Sur les boutons
+//! du jeu, les hachures diagonales ne couvrent pas le fond — ce sont des **embouts décoratifs**,
+//! cantonnés aux ~50 premiers pixels de chaque extrémité (~30 pour la texture du pied de page de
+//! modale, mesuré par `component.py insets`), le centre restant un dégradé lisse. Les marges
+//! figées sont donc dimensionnées sur l'étendue du décor, pas sur le seul rayon des coins : c'est
+//! ce qui fait qu'un bouton de 500px garde exactement deux embouts, comme un bouton de 200px, au
+//! lieu d'un motif répété ou étiré sur toute sa longueur (retour utilisateur 2026-09-09).
+//!
+//! **Le mode de remplissage reste réglable par axe** : `Fill::Stretch` pour un contenu continu
+//! (le dégradé vertical, et la bande centrale lisse des boutons), `Fill::Tile` pour un motif
+//! périodique qu'il faudrait répéter à l'échelle native. Aucune texture du manifeste n'utilise
+//! `Tile` depuis que le décor des boutons est reconnu comme un embout — la répétition reste
+//! disponible pour une future bande décorative réellement continue.
 
 use egui::{Color32, Mesh, Painter, Rect, Shape, TextureHandle, Vec2};
 
-/// Marges figées d'une texture 9-slice, **en pixels de la texture source**. Doivent couvrir au
-/// moins le rayon d'arrondi + l'épaisseur du liseré (mesurés par
-/// `.claude/skills/ui-component/scripts/component.py insets`) : en dessous, le découpage coupe
-/// dans le coin et la bande étendue recopie un morceau d'arrondi.
+/// Marges figées d'une texture 9-slice, **en pixels de la texture source**. Deux exigences, la
+/// seconde souvent bien plus contraignante que la première (toutes deux mesurées par
+/// `.claude/skills/ui-component/scripts/component.py insets`) :
+///
+/// 1. couvrir le rayon d'arrondi + l'épaisseur du liseré — en dessous, le découpage coupe dans le
+///    coin et la bande étendue recopie un morceau d'arrondi ;
+/// 2. couvrir **toute l'étendue du décor** de l'extrémité (`decor_span`) — en dessous, le motif
+///    déborde dans la bande médiane et se retrouve étiré ou répété sur toute la longueur.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Insets {
     pub left: f32,
@@ -141,9 +151,12 @@ fn split_axis(
 /// d'origine ; un blanc à alpha réduit atténue sans changer la teinte — c'est ainsi qu'est rendu
 /// un état désactivé sans texture dédiée).
 ///
-/// **Rectangle plus petit que ses propres marges** : les marges sont réduites proportionnellement
-/// plutôt que de laisser le découpage produire des zones de longueur négative. Un bouton de 8px de
-/// haut n'a plus ni arrondi ni liseré corrects, mais il est peint — pas de panique, pas de trou
+/// **Rectangle plus petit que ses propres marges** : les marges sont **rognées par l'intérieur**,
+/// jamais compressées — on garde les `n` premiers pixels de la texture, on abandonne le reste de la
+/// marge, et la bande médiane disparaît. Les coins, le liseré et le début du décor restent donc à
+/// l'échelle 1:1 même sur un bouton plus étroit que ses deux embouts réunis ; c'est l'inverse d'un
+/// redimensionnement, qui écraserait justement ce qu'on cherche à préserver. Un bouton de 8px de
+/// haut n'a plus ni arrondi ni liseré complets, mais il est peint — pas de panique, pas de trou
 /// noir à l'écran, et l'anomalie se voit sur la capture.
 pub fn paint(
     painter: &Painter,
@@ -157,53 +170,31 @@ pub fn paint(
         return;
     }
 
-    // Marges source : bornées par la texture elle-même (une inset de 6px sur une texture de 10px
-    // de haut ne laisserait aucune bande médiane).
-    let cap_src = |lo: f32, hi: f32, len: f32| -> (f32, f32) {
-        let total = lo + hi;
-        let max = (len - 1.0).max(0.0);
-        if total > max && total > 0.0 {
-            let k = max / total;
-            (lo * k, hi * k)
-        } else {
-            (lo, hi)
+    // Marges effectives, utilisées à la fois côté source et côté destination : c'est ce qui garantit
+    // le 1:1. Bornées deux fois — par la texture (une marge de 6px sur une texture de 10px de haut
+    // ne laisserait aucune bande médiane) puis par le rectangle cible (voir la doc).
+    let effective = |lo: f32, hi: f32, tex_len: f32, dst_len: f32| -> (f32, f32) {
+        let mut total = lo + hi;
+        if total <= 0.0 {
+            return (0.0, 0.0);
         }
-    };
-    let (l_src, r_src) = cap_src(slice.insets.left, slice.insets.right, tex.x);
-    let (t_src, b_src) = cap_src(slice.insets.top, slice.insets.bottom, tex.y);
-
-    // Marges destination : identiques aux marges source (les coins sont peints à l'échelle 1:1),
-    // sauf si le rectangle est trop petit — voir la doc.
-    let cap_dst = |lo: f32, hi: f32, len: f32| -> (f32, f32) {
-        let total = lo + hi;
-        if total > len && total > 0.0 {
-            let k = len / total;
-            (lo * k, hi * k)
-        } else {
-            (lo, hi)
+        let mut k: f32 = 1.0;
+        let max_src = (tex_len - 1.0).max(0.0);
+        if total > max_src {
+            k = k.min(max_src / total);
         }
+        if total * k > dst_len {
+            k = k.min(dst_len / total);
+        }
+        total *= k;
+        debug_assert!(total <= dst_len + 0.01);
+        (lo * k, hi * k)
     };
-    let (l_dst, r_dst) = cap_dst(l_src, r_src, rect.width());
-    let (t_dst, b_dst) = cap_dst(t_src, b_src, rect.height());
+    let (l, r) = effective(slice.insets.left, slice.insets.right, tex.x, rect.width());
+    let (t, b) = effective(slice.insets.top, slice.insets.bottom, tex.y, rect.height());
 
-    let cols = split_axis(
-        rect.width(),
-        tex.x,
-        l_dst,
-        r_dst,
-        l_src,
-        r_src,
-        slice.fill_x,
-    );
-    let rows = split_axis(
-        rect.height(),
-        tex.y,
-        t_dst,
-        b_dst,
-        t_src,
-        b_src,
-        slice.fill_y,
-    );
+    let cols = split_axis(rect.width(), tex.x, l, r, l, r, slice.fill_x);
+    let rows = split_axis(rect.height(), tex.y, t, b, t, b, slice.fill_y);
 
     let mut mesh = Mesh::with_texture(texture.id());
     for (ry, (y0, y1)) in rows.dst.iter().enumerate() {

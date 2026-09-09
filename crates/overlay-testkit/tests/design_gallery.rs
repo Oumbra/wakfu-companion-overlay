@@ -87,7 +87,7 @@ fn gallery(ui: &mut egui::Ui) {
     heading(
         ui,
         "Une seule texture, toutes les tailles",
-        "button-primary.png (200×52 natif) peint en 9-slice : coins et liseré figés, hachures répétées, dégradé étiré.",
+        "button-primary.png (200×52 natif) : embouts hachurés figés à 52 px, centre étiré — les croisillons restent aux extrémités quelle que soit la largeur.",
     );
     for (w, h) in [
         (110.0, 32.0),
