@@ -842,6 +842,22 @@ Trois décisions prises à cette occasion :
   pour un texte posé sur un fond connu, ce que fait le jeu pour ses titres, éclairés depuis le
   haut-gauche. La fonction était une fonction privée de `panels::combat` avec ses huit décalages en
   dur ; elle a remonté dans le design system le 2026-09-09.
+- **Une « section » n'a ni fond, ni bordure, ni filet** (`docs/design-system/releve-section-options.json`) :
+  dans le jeu, le seul signal de regroupement est l'espacement, et le seul signal de niveau est le
+  retrait de 7px du titre par rapport à ses lignes. Ce qui a un fond, un bord et un rayon, c'est le
+  **panneau de contenu** qui contient les sections (`#15181c`, bord 2px `#131518`, rayon **2**).
+  `panels::options_modal` appelait « section » ce qui est un panneau, et lui avait donné un rayon de
+  18 lu à l'œil — un rayon qui n'existe nulle part dans cette interface.
+- **Un titre de section est gris (`#b8b9ba`), au corps du titre de fenêtre** — la hiérarchie entre
+  les deux niveaux passe par la couleur, pas par le corps. Attention en mesurant : la hauteur
+  d'encre d'un titre varie avec le mot (25px pour « Échelle de l'interface (100%) », accent de
+  capitale et parenthèses descendantes ; 22px pour « Thème d'interface personnalisé », jambage seul ;
+  14px pour « Combat », rien du tout). **C'est la ligne de base qui est stable, pas la boîte** —
+  comparer l'encre de deux mots différents pour en déduire un rapport de corps donne un résultat
+  faux, ce qui est arrivé une fois.
+- **Deux graisses de libellé de bouton**, mesurées sur `interface-options-interface.png` : le pied
+  de page de modale est plus gras que le contenu, à hauteur d'encre identique. Voir
+  `design::fonts` et `ButtonVariant::label_strong`.
 - **Hauteur d'un bouton = hauteur de sa texture**, jamais déduite de sa largeur. La modale Options
   écrivait `footer_button_width * (36.0 / 338.0)`, à l'inverse de ce à quoi sert un 9-slice, et
   affichait des boutons de 27px là où le jeu en met 36 — le corps du libellé suivant la hauteur, il

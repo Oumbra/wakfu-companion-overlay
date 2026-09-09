@@ -78,6 +78,10 @@ que d'être filtré après coup.
   (`Options::round_text_to_pixels`) — un décalage de 0,3px est rigoureusement sans effet, et une
   mesure qui l'ignore donne des résultats identiques pour des réglages différents. C'est ce qui a
   condamné la première tentative de graisse synthétique par halo.
+- **La graisse d'un libellé n'est pas au choix de l'appelant** : elle vient de la variante
+  (`ButtonVariant::label_strong`), parce que le jeu écrit ses boutons de pied de page plus gras que
+  ceux posés dans un contenu, à hauteur d'encre identique. Ne pas la court-circuiter en passant un
+  `FontId` à la main.
 - **Un titre passe par `design::text::title_font`**, pas par `label_font` : le jeu utilise deux
   polices, une linéale pour ses libellés de bouton et une serif grasse pour ses titres. Les deux
   familles sont embarquées par `design::fonts`.

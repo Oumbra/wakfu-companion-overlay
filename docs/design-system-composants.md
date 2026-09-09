@@ -81,6 +81,27 @@ Une leçon de cet épisode survit néanmoins à la rustine, parce qu'elle se red
 **egui arrondit la position d'un texte au pixel entier** (`Options::round_text_to_pixels`), donc
 aucun effet visuel ne peut être réglé par un déplacement fractionnaire de texte.
 
+**Graisse du libellé** : le jeu en utilise **deux**, et la variante décide laquelle.
+`design::fonts` embarque Ubuntu Regular (`ds-label`) et Ubuntu Medium (`ds-label-strong`) ;
+`ButtonVariant::label_strong` sert la seconde à `Primary` et `Danger`, la première à `Secondary`.
+
+La preuve tient dans une seule capture, `interface-options-interface.png` : ses quatre boutons de
+contenu et ses deux boutons de pied de page ont **exactement la même hauteur d'encre — 13px — et pas
+la même graisse**. Fût moyen 1,79 à 1,92px pour le contenu contre 2,02px pour « Annuler », soit un
+rapport de 0,82 en encre par colonne ; Regular/Medium rendent 0,79 dans les mêmes conditions,
+Light/Medium 0,69.
+
+Deux pièges dans cette mesure. **Seul le rapport interne à une capture veut dire quelque chose** :
+comparer un fût mesuré sur fond kaki à un rendu blanc sur noir donne des chiffres qui ne se
+correspondent pas, la normalisation et le seuillage ne coupant pas au même endroit. Et
+**« Valider » n'est pas une troisième graisse** malgré son fût de 3,17px : c'est le seul texte
+sombre sur fond clair de l'interface, et la capture y montre une ombre cuite.
+
+Que la graisse suive la variante est une **corrélation observée**, pas une loi : `Primary`/`Danger`
+sont les deux intentions du pied de page de modale, `Secondary` est le contenu. Si un `Primary`
+maigre apparaît un jour dans un panneau de contenu, c'est `label_strong` qu'il faudra ouvrir à un
+réglage explicite.
+
 **Police d'un titre** : le jeu n'utilise **pas une seule police**. Ses libellés de bouton sont dans
 une linéale, mais ses titres — « Options » sur la bannière de modale, « Barres de raccourcis » en
 titre de section — sont dans une **serif grasse**. `design::fonts` embarque donc aussi
@@ -114,6 +135,7 @@ suivant la hauteur, il y perdait 3px d'encre sur 13.
 | Corps de police | `17/36 × hauteur` | balayage rendu dans egui et comparé au pixel aux libellés gravés du jeu ; 17px est le seul corps qui retrouve les 13px d'encre de « Annuler » ET de « Valider », à hauteur de bouton native |
 | Police du libellé | Ubuntu Medium | onze candidats comparés à la référence : Medium 17 est le seul au-dessus de 0,50 de recouvrement de forme sur les DEUX libellés (0,52/0,52 contre 0,59/0,32 pour Regular). Le jeu n'est pas cohérent entre ses deux boutons, aucune police ne colle aux deux |
 | Police d'un titre | PT Serif Bold | vingt-six serifs comparées aux deux titres du jeu ; meilleure correspondance libre. Corps 21 sur la bannière (choix utilisateur : le 22 colle exactement à l'encre du jeu, 21 × 82, le 21 rend 20 × 78 et est jugé mieux proportionné) et 18 en titre de section, déduit du rapport d'encre du jeu entre ses deux niveaux de titre (17px contre 21px) |
+| Graisse du libellé | Regular (contenu) / Medium (pied de page) | même hauteur d'encre 13px dans les deux cas sur `interface-options-interface.png`, mais fût 1,79–1,92px contre 2,02px — rapport 0,82, quand Regular/Medium donne 0,79 et Light/Medium 0,69 |
 | Marge horizontale | `0,55 × hauteur` | ordre de grandeur de §4 du design-system — **estimation** |
 | Largeur minimale | `2,5 × hauteur` | garde-fou de proportion — **réglage**, pas une mesure |
 
