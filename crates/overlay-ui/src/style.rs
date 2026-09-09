@@ -15,6 +15,12 @@ use crate::panels::icon_button;
 /// `panels::combat::ACCENT`), mais aucun de ces réglages n'a de contrepartie visuelle propre au
 /// thème clair — autant ne pas dépendre de celui qu'egui choisit par défaut.
 pub fn apply(ctx: &egui::Context) {
+    // Polices du design system, AVANT tout le reste : `Context::set_fonts` reconstruit l'atlas de
+    // glyphes, et `epaint` panique sur une famille nommée inconnue — un composant peint avec
+    // `design::text::label_font` sur un contexte qui n'est pas passé par ici ne se rate pas
+    // silencieusement, il s'arrête. Voir `design::fonts` pour le choix de la police.
+    crate::design::fonts::install(ctx);
+
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         ctx.style_mut_of(theme, |style| {
             // Délai de tooltip par défaut d'egui (0,5s, `show_tooltips_only_when_still=true` : le

@@ -118,6 +118,22 @@ const FIELD_TO_BROWSE_GAP: f32 = 8.0;
 /// (`interface-options-jeu.png` : boutons en x 18..351 et 367..700), soit ≈12px à l'échelle de
 /// cette modale. La première version les collait l'un à l'autre.
 const FOOTER_GUTTER: f32 = 12.0;
+/// Hauteur des boutons « Annuler » / « Valider ». **La hauteur native de leur texture** (338×36),
+/// et non une hauteur déduite de leur largeur.
+///
+/// La première version écrivait `footer_button_width * (36.0 / 338.0)`, pour « préserver les
+/// proportions de l'assise ». C'était l'inverse de ce que fait le jeu, et l'inverse de ce à quoi
+/// sert un 9-slice : une texture 9-slice existe précisément pour qu'on l'étire en largeur SANS
+/// toucher à sa hauteur. Le jeu affiche ce bouton à 333×36 dans une fenêtre de 720 ; notre modale
+/// fait 560, ce qui donnait 250×27 — et comme le corps du libellé suit la hauteur
+/// (`design::tokens::BUTTON_FONT_SIZE_RATIO`), le texte rétrécissait avec la fenêtre : 10px
+/// d'encre au lieu de 13.
+///
+/// Que ce soit bien la hauteur, et non une mise à l'échelle générale de la modale, se vérifie sur
+/// la capture : le bandeau de titre mesure 56px chez le jeu comme chez nous (`BANNER_HEIGHT`),
+/// parce qu'il est peint à sa taille native. Le chrome était donc déjà à 100 %, seuls les boutons
+/// rétrécissaient.
+const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 const FIELD_HEIGHT: f32 = 34.0;
 const BROWSE_BUTTON_HEIGHT: f32 = 40.0;
 /// Textures embarquées du chrome de la modale — chargées UNE FOIS par fenêtre OS (voir
@@ -283,11 +299,10 @@ pub fn show(
         );
     }
 
-    // Pied de page — deux boutons du design system, séparés par la gouttière du jeu. La hauteur
-    // reste dérivée du rapport natif de la texture (338×36) pour que l'assise garde ses proportions
-    // quelle que soit la largeur de la fenêtre.
+    // Pied de page — deux boutons du design system, séparés par la gouttière du jeu. Largeur
+    // partagée, hauteur native (voir `FOOTER_BUTTON_HEIGHT`).
     let footer_button_width = (content_rect.width() - FOOTER_GUTTER) / 2.0;
-    let footer_height = footer_button_width * (36.0 / 338.0);
+    let footer_height = FOOTER_BUTTON_HEIGHT;
     let footer_rect = egui::Rect::from_min_max(
         egui::pos2(content_rect.left(), content_rect.bottom() - footer_height),
         content_rect.max,

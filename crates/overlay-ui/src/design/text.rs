@@ -1,78 +1,44 @@
-//! **Libellés du design system** — la peinture du texte, mutualisée entre les composants.
+//! **Libellés du design system** — le corps et la police d'un texte de composant.
 //!
-//! Un seul service pour l'instant, mais il concerne tous les composants qui portent un libellé
-//! (bouton, onglet, en-tête de section, plus tard le panneau Combat) : la **graisse synthétique**.
+//! Un composant ne construit jamais son `FontId` lui-même : il passe par [`label_font`]. Le jour où
+//! la police des libellés change (voir [`super::fonts`]), un seul corps de fonction est à toucher,
+//! et aucun composant ne cite ni un nom de famille ni un nom de fichier.
 //!
-//! Pourquoi synthétique : egui n'embarque qu'une seule graisse de police proportionnelle
-//! (`Ubuntu-Light`, du crate `epaint_default_fonts`), et son API de mise en forme n'expose aucun
-//! réglage de graisse — il n'y a donc rien à *demander*, ni « bold » ni « semibold ». Or les
-//! libellés gravés dans les captures du jeu sont nettement plus gras que cette Light : le
-//! constater a été le point 3 du relevé de la modale Options (« la police du libellé »), et le
-//! retour utilisateur a été de la rendre « un petit peu plus grasse » en attendant un vrai fichier
-//! de police (chantier séparé, §6.4 du design-system).
+//! **Historique — la graisse synthétique a été retirée le 2026-09-09.** Ce module peignait
+//! auparavant chaque galley neuf fois : une passe centrale à pleine opacité et huit voisins
+//! immédiats à opacité réduite, pour épaissir le trait faute de graisse disponible dans `egui`. La
+//! planche de comparaison a tranché sans appel — *un halo est un contour, pas une graisse* : il
+//! épaissit le mot en dégradant son contraste, le libellé devient flou là où celui du jeu est net.
+//! Un vrai fichier de police (`assets/fonts/Ubuntu-Medium.ttf`) fait le travail correctement, pour
+//! neuf fois moins de draw calls. Le raisonnement complet est dans [`super::fonts`].
 //!
-//! Comment : la même galley est repeinte huit fois autour de sa position, à **un pixel exactement**,
-//! avec une opacité réduite ; puis une dernière fois au centre, à pleine opacité. Le trait
-//! s'épaissit d'une fraction de pixel visuelle, réglée par cette opacité.
-//!
-//! Pourquoi l'opacité et pas le rayon — c'est la seule voie praticable : egui arrondit la position
-//! d'un texte au pixel entier (`Options::round_text_to_pixels`, actif par défaut, c'est ce qui rend
-//! le texte net). Un anneau à 0,3px de rayon est donc rigoureusement identique à un anneau à 0 —
-//! mesuré : les corps 17px aux graisses 0,15 / 0,3 / 0,45 rendaient **exactement** la même image.
-//! Le rayon d'un pixel est le plus petit pas possible, et il est déjà trop gros pour une encre de
-//! 13px ; c'est l'opacité du halo qui redonne le réglage fin.
-//!
-//! Conséquence sur l'appelant : la galley doit être mise en page avec `Color32::PLACEHOLDER` pour
-//! que chaque passe puisse imposer sa propre couleur (convention egui). `weighted` s'en charge à
-//! l'appel, mais une galley mise en page avec une couleur en dur ignorerait le halo.
-//!
-//! Ce que ça ne fait **pas** : dessiner une vraie graisse. Les pleins et les déliés s'épaississent
-//! de la même quantité, là où une Bold dessinée redistribue les contrastes. À l'échelle d'un
-//! libellé de bouton (13px d'encre) la différence ne se voit pas ; sur un titre de 30px, elle se
-//! verrait — c'est la limite à garder en tête avant de réutiliser ce module pour du gros texte.
+//! Une conséquence de cet épisode mérite de survivre à la rustine, parce qu'elle se redécouvre
+//! douloureusement : **`egui` arrondit la position d'un texte au pixel entier**
+//! (`Options::round_text_to_pixels`, actif par défaut — c'est ce qui rend le texte net). Tout
+//! décalage sous le pixel appliqué à une galley est donc sans effet ; mesuré à l'époque, les corps
+//! 17px aux graisses 0,15 / 0,3 / 0,45 rendaient **exactement** la même image. Aucun effet visuel
+//! ne peut être réglé par un déplacement fractionnaire de texte.
 
-use std::sync::Arc;
+use egui::{Context, FontFamily, FontId};
 
-use egui::{Color32, Galley, Painter, Pos2, Vec2};
-
-/// Décalages du halo, en pixels — les huit voisins immédiats. Entiers par construction : voir la
-/// doc de module, un décalage fractionnaire serait arrondi et n'aurait aucun effet.
-const HALO: [(f32, f32); 8] = [
-    (-1.0, -1.0),
-    (0.0, -1.0),
-    (1.0, -1.0),
-    (-1.0, 0.0),
-    (1.0, 0.0),
-    (-1.0, 1.0),
-    (0.0, 1.0),
-    (1.0, 1.0),
-];
-
-/// Peint `galley` en `pos` avec une graisse synthétique.
+/// Police d'un libellé de composant, au corps demandé.
 ///
-/// `weight` est l'**opacité du halo**, de 0 (aucune graisse ajoutée : exactement
-/// `Painter::galley`, sans surcoût) à 1 (halo opaque, soit un plein pixel d'épaississement de
-/// chaque côté). Le coût maximal est de neuf draw calls pour un libellé — négligeable devant le
-/// nombre de libellés affichés simultanément par l'overlay, et payé uniquement par les composants
-/// du design system.
+/// **Retombe sur la proportionnelle par défaut si la famille n'est pas encore liée**, plutôt que de
+/// laisser `epaint` paniquer (« FontFamily::Name(…) is not bound to any fonts »). Ce n'est pas de la
+/// prudence gratuite, c'est le cas normal de la toute première passe : `Context::set_fonts` ne prend effet
+/// qu'à la passe suivante, or [`crate::style::apply`] est appelé *depuis* la fermeture d'interface
+/// dans les harnais de test (`overlay-testkit`) — à la toute première passe, un composant peint
+/// donc légitimement avant que la police ne soit disponible. Les passes suivantes l'ont, et une
+/// capture de non-régression est prise après stabilisation.
 ///
-/// `galley` doit avoir été mise en page avec `Color32::PLACEHOLDER` (voir la doc de module).
-pub fn weighted(painter: &Painter, pos: Pos2, galley: Arc<Galley>, color: Color32, weight: f32) {
-    let weight = weight.clamp(0.0, 1.0);
-    if weight > 0.0 {
-        let halo = color.gamma_multiply(weight);
-        for (dx, dy) in HALO {
-            painter.galley(pos + Vec2::new(dx, dy), galley.clone(), halo);
-        }
+/// Le coût est une petite allocation par libellé (`Fonts::families` rend un `Vec` de trois ou
+/// quatre entrées) — négligeable au regard du nombre de libellés affichés simultanément, et payé
+/// uniquement par les composants du design system.
+pub fn label_font(ctx: &Context, size: f32) -> FontId {
+    let family = FontFamily::Name(super::fonts::LABEL.into());
+    if ctx.fonts(|fonts| fonts.families().contains(&family)) {
+        FontId::new(size, family)
+    } else {
+        FontId::proportional(size)
     }
-    painter.galley(pos, galley, color);
-}
-
-/// Graisse d'un libellé de composant — voir `tokens::TEXT_WEIGHT`.
-///
-/// Fonction plutôt que lecture directe du jeton : le jour où la graisse dépendra du corps (un
-/// titre de 40px n'a pas besoin du même halo qu'un libellé de 16px), seul ce corps de fonction
-/// change.
-pub fn label_weight() -> f32 {
-    crate::design::tokens::TEXT_WEIGHT
 }
