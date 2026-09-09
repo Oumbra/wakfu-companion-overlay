@@ -594,6 +594,7 @@ pub fn show(
     // `false` par défaut : aucune raison de rouvrir la modale si elle l'est déjà tant que
     // l'utilisateur n'a pas recliqué sur "Options".
     let mut open_options = false;
+    let mut open_web_app = false;
 
     egui::ScrollArea::horizontal()
         .id_salt("watchlist-strip")
@@ -612,7 +613,9 @@ pub fn show(
                 // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                open_options = control_button_row(ui, icons, entries.is_empty());
+                let clicks = control_button_row(ui, icons, entries.is_empty());
+                open_options = clicks.options;
+                open_web_app = clicks.details;
                 ui.add_space(TILE_GAP);
 
                 for (i, entry) in entries.iter().enumerate() {
@@ -649,6 +652,7 @@ pub fn show(
     WatchlistOutcome {
         close_toast,
         open_options,
+        open_web_app,
     }
 }
 
@@ -658,6 +662,9 @@ pub fn show(
 pub struct WatchlistOutcome {
     pub close_toast: bool,
     pub open_options: bool,
+    /// `true` à la frame où "Détails" vient d'être cliqué : l'appelant ouvre la web app. Le
+    /// panneau ne l'ouvre PAS lui-même — voir `control_button_row`.
+    pub open_web_app: bool,
 }
 
 /// Barre de défilement fine, flottante et sombre plutôt que le style natif par défaut (épais, pris
@@ -1004,9 +1011,12 @@ enum TooltipSide {
 /// activés. Infobulle par COLONNE (voir `TooltipSide` et doc de module) : GAUCHE pour "+"/"Détails",
 /// DROITE pour "−"/"Options" — jamais l'inverse du rôle inerte/cliquable du bouton, qui ne pilotait
 /// le côté qu'AVANT cette refonte.
-/// Renvoie `true` UNIQUEMENT à la frame où "Options" vient d'être cliqué — voir
-/// `WatchlistOutcome::open_options` et la doc de `show`.
-fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool) -> bool {
+/// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
+fn control_button_row(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    watchlist_empty: bool,
+) -> ControlRowClicks {
     let row_rect = ui
         .allocate_exact_size(
             egui::vec2(control_row_width(), control_row_height()),
@@ -1064,11 +1074,17 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool)
         true,
         TooltipSide::Left,
     );
-    if details_response.clicked() {
-        // `base_url()` — jamais une URL codée en dur ici : c'est la même origine que le reste de
-        // l'overlay parle déjà (voir `overlay_sync::client`), dev ou prod selon le déploiement.
-        let _ = open::that(overlay_sync::client::base_url());
-    }
+    // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
+    // `open::that(base_url())` directement, et c'était un vrai défaut : un panneau qui produit un
+    // effet hors de l'écran devient impossible à peindre sans le produire. Les captures de
+    // non-régression cliquent réellement dessus (`panels.rs::
+    // panneau_suivi_clic_maintenu_repasse_en_mode_repos`, `Harness::drop_at`), donc chaque
+    // `cargo test` ouvrait le navigateur de la personne qui lançait la suite — signalé par
+    // l'utilisateur le 2026-09-09, après plusieurs ouvertures dans la journée.
+    //
+    // Un panneau peint et rend compte ; ouvrir une page appartient à l'hôte, comme le bouton
+    // "Options" juste en dessous le faisait déjà.
+    let details = details_response.clicked();
 
     // "Options" sous "−" (colonne DROITE) — même icône/action que l'ancien bouton de `combat::
     // bottom_toolbar`.
@@ -1086,7 +1102,20 @@ fn control_button_row(ui: &mut egui::Ui, icons: &UiIcons, watchlist_empty: bool)
         true,
         TooltipSide::Right,
     );
-    options_response.clicked()
+    ControlRowClicks {
+        options: options_response.clicked(),
+        details,
+    }
+}
+
+/// Ce que la rangée de contrôles a produit CETTE frame. Deux booléens plutôt qu'un, depuis que
+/// "Détails" remonte lui aussi son clic au lieu d'ouvrir le navigateur lui-même.
+#[derive(Debug, Clone, Copy, Default)]
+struct ControlRowClicks {
+    /// Le bouton "Options" vient d'être cliqué.
+    options: bool,
+    /// Le bouton "Détails" vient d'être cliqué — l'hôte ouvre la web app.
+    details: bool,
 }
 
 /// Bouton du carré de contrôle — socle `button_background`/`button_background_hover` (même socle

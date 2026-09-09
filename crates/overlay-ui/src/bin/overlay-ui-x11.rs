@@ -793,6 +793,12 @@ mod linux_main {
                     if outcome.open_options {
                         post_redraw = PostRedraw::OpenOptions(this_game_rect);
                     }
+                    // L'ouverture de page est faite ICI, par l'hôte, jamais par le panneau qui l'a
+                    // demandée : voir `RenderOutcome::open_url`. `open::that` est best-effort, comme
+                    // partout ailleurs — un navigateur qui ne s'ouvre pas ne fait rien planter.
+                    if let Some(url) = &outcome.open_url {
+                        let _ = open::that(url);
+                    }
                     match outcome.options_action {
                         OptionsModalAction::None => {}
                         OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,

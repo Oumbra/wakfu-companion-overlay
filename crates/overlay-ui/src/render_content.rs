@@ -214,6 +214,16 @@ pub struct RenderOutcome {
     /// Action déclenchée CETTE frame par la modale Options elle-même (`kind == Options`
     /// seulement) — voir `panels::options_modal::OptionsModalAction`.
     pub options_action: OptionsModalAction,
+    /// URL que l'hôte doit ouvrir dans le navigateur, le cas échéant : clic sur "Détails" du
+    /// panneau Suivi (la web app) ou sur "Ouvrir la page" de la carte d'appairage (l'URL de
+    /// vérification).
+    ///
+    /// **Aucun panneau n'appelle `open::that` lui-même**, et ce n'est pas un détail de style : les
+    /// captures de non-régression cliquent réellement sur ces boutons, donc un panneau qui ouvre
+    /// une page ouvre le navigateur de la personne qui lance `cargo test`. C'est arrivé, plusieurs
+    /// fois dans la même journée (signalé le 2026-09-09). Faire remonter l'intention rend les
+    /// panneaux inertes par construction, sans qu'aucun test n'ait à s'en préoccuper.
+    pub open_url: Option<String>,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
@@ -431,7 +441,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                                                 ui.ctx().copy_text(pairing_code.clone());
                                             }
                                             if ui.small_button("🌐 Ouvrir la page").clicked() {
-                                                let _ = open::that(verification_url);
+                                                outcome.open_url =
+                                                    Some(verification_url.to_string());
                                             }
                                         });
                                     });
@@ -520,6 +531,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     );
                     outcome.close_toast = watchlist_outcome.close_toast;
                     outcome.open_options = watchlist_outcome.open_options;
+                    if watchlist_outcome.open_web_app {
+                        outcome.open_url = Some(overlay_sync::client::base_url().to_string());
+                    }
                 }
                 // Modale Options (2026-09-08, §9 du plan) — voir `panels::options_modal`. `options`
                 // est `Some` uniquement pour ce `kind` (voir la doc de `RenderContent::options`) ;
