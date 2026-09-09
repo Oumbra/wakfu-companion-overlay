@@ -40,6 +40,12 @@ appliquée en fin de pipeline (défaut).
 | `icon-save` | `--tol 4 --polarity dark --keep center --floor 45` | 12 × 12 |
 | `icon-tick` | `--polarity dark --keep center --floor 45` | 12 × 9 |
 | `icon-pin` | *sans* `--from-button` | 14 × 14 |
+| `icon-trophy` | *sans* `--from-button` | 22 × 22 |
+| `icon-book` | *sans* `--from-button` | 22 × 18 |
+| `icon-repeat` | *sans* `--from-button` | 22 × 22 |
+| `icon-calendar` | *sans* `--from-button` | 22 × 22 |
+| `icon-kamas` | *sans* `--from-button` | 14 × 12 |
+| `icon-xp` | *sans* `--from-button` | 16 × 11 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -91,3 +97,27 @@ transition légitime et donnait un pâté brun autour des barres. Le seuil du c�
 sépare — `--floor 45` — parce que l'ombre est une demi-teinte là où le glyphe est franc.
 Symptôme à reconnaître : le glyphe détouré traîne une masse de la couleur du bouton,
 alors que le contour d'un vrai cerne est fin et régulier.
+
+## Second lot (2026-09-09) — six glyphes sans bouton porteur
+
+`icon-trophy`, `icon-book`, `icon-repeat`, `icon-calendar`, `icon-kamas`, `icon-xp` : aucune
+de ces six captures n'est un bouton-icône. Deux sont posées sur le décor turquoise d'un
+panneau (trophée, livre), quatre sur un socle sombre uni qui touche les bords de la capture
+(répétition, calendrier, kamas, XP). Dans les deux cas `--from-button` n'a rien à détourer :
+`analyze` rend un « composant » qui **fait la taille du glyphe** (22 × 22, 14 × 12…) et non
+celle d'un bouton, exactement comme `icon-pin`. Réglages par défaut, `luma-light` sur les
+six — le glyphe est clair sur son fond dans tous les cas, y compris le « Xp » cyan.
+
+**Ne pas se fier au plateau de `tol_sweep` sur un glyphe clair.** Sur `icon-book` le balayage
+descend de 27 × 25 (`--tol 4`) à un plateau 10 × 16 (`--tol ≥ 12`) : le plateau n'est pas la
+bonne taille ici, c'est la moitié du livre. Le glyphe fait 22 × 18, et c'est la commande
+`icon` — qui cherche le glyphe, pas le composant — qui le trouve, sans `--tol` particulier.
+Le plateau de `tol_sweep` ne renseigne que sur un **composant** noyé dans son décor.
+
+**`--floor 45` testé et écarté sur le livre et le kamas.** Les deux portent une ombre douce
+qui ressemble au cas `icon-order`, mais la mesure ne suit pas : le cœur opaque est identique
+(98 et 64 pixels dans les deux réglages) et le plancher relevé ne fait que redistribuer
+l'alpha intermédiaire (livre : 89 → 113 pixels en 20–200, kamas : 43 → 32). Sur le livre
+cette « ombre » est en fait le bas de la reliure et les petits éclats du dessin — la retirer
+appauvrirait le glyphe. Régler par défaut, et garder `--floor 45` pour les vraies ombres
+portées sur aplat (`icon-order`).
