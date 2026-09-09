@@ -16,23 +16,32 @@
 //! - **Coins ARRONDIS, pas chanfreinés** — vérifié au pixel sur `modal-header.png` (rayon ≈12px) :
 //!   la modale entière ET son encadré interne ("section") sont arrondis, ce dernier avec un rayon
 //!   PLUS PRONONCÉ (18px) que la modale (12px) — constaté directement sur la référence, pas déduit.
-//! - **Bannière/pied de page peints avec les vraies textures du jeu** (`modal-header.png`,
-//!   `footer-cancel.png`/`footer-validate.png`, respectivement `large-button-cancel.png`/
-//!   `large-button-validate.png` du design system) plutôt que des dégradés approximés à la main —
-//!   leurs rayons de coin mesurés (2-4px) sont assez petits pour tolérer un étirement uniforme sans
-//!   déformation perceptible (voir `panels::nine_slice`, doc de module, même raisonnement).
+//! - **Bannière peinte avec la vraie texture du jeu** (`modal-header.png`) plutôt qu'un dégradé
+//!   approximé à la main — son rayon de coin mesuré (2-4px) est assez petit pour tolérer un
+//!   étirement uniforme sans déformation perceptible.
 //! - **Menu à trois entrées** ("Alertes", "Personnages", "Paramètres") au-dessus de la section,
 //!   texture `menu-tabs.png` (dérivée de `tabs-with-first-tab-active.png` du design system, miroir
 //!   horizontal pour que le segment actif kaki tombe sur "Paramètres", dernière entrée) — seule
 //!   "Paramètres" est câblée (contenu de cette modale), "Alertes"/"Personnages" restent des stubs
 //!   visuels en attente d'un futur chantier.
-//! - **Bouton "Sélectionner le fichier" en 9-slice** (`panels::nine_slice`) sous le champ (pas à
-//!   côté) : seul élément ici qui doit s'agrandir bien au-delà de la taille native de sa texture
-//!   (`browse-button.png`/`hover.png`, 169×52) sans aplatir son chanfrein/sa bordure.
+//! - **Bouton "Sélectionner le fichier"** sous le champ (pas à côté).
 //! - Fenêtre plus haute (`WINDOW_SIZE`, ratio aligné sur les 720:561 mesurés de la vraie fenêtre du
 //!   jeu — demande explicite : « garder une cohérence par rapport au rendu [du jeu] »), section
 //!   renommée "Fichier" (au lieu de "Fichier wakfu.log", redondant avec le contenu du champ), champ
 //!   + bouton empilés verticalement (au lieu de côte à côte).
+//!
+//! **Refonte 2026-09-09 (2) — les trois boutons passent sur `design::button`.** Ils étaient peints
+//! ici à la main : deux images taillées sur mesure pour le pied de page (libellé gravé dedans, un
+//! fichier par libellé) et un 9-slice local pour le bouton "Sélectionner le fichier". Ce sont
+//! maintenant trois appels au composant du design system, qui apporte avec lui le survol, l'état
+//! pressé, le curseur, l'écrêtage du libellé et la trace de journal. Ont disparu avec eux : les
+//! quatre PNG de `assets/ui/options/` (tous des copies octet pour octet d'assets déjà déclarés au
+//! manifeste `design::assets`) et le module `panels::nine_slice`, doublon de `design::nine_slice`
+//! sans marges par côté ni mode de remplissage.
+//!
+//! Gain visible : le bouton "Sélectionner le fichier" est rendu à 700px de large depuis une texture
+//! de 169px. L'ancien 9-slice ne figeait que 14px de chaque côté, bien moins que les 52px de décor
+//! mesurés — les croisillons tombaient dans la bande médiane et s'étiraient sur près de 200px.
 //!
 //! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer l'INTENTION
 //! de l'utilisateur (`OptionsModalAction`) — c'est l'appelant (`main.rs`/`bin/overlay-ui-x11.rs`,
@@ -40,7 +49,7 @@
 //! valide via `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`]
 //! en retour pour le prochain redessin.
 
-use crate::panels::nine_slice;
+use crate::design::{self, ButtonSize, ButtonVariant};
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
 /// `OverlayKind::Options`) — largeur inchangée depuis la première version (560pt), hauteur portée
@@ -105,34 +114,24 @@ const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x13, 0
 /// Marge sous le champ de chemin avant le bouton "Sélectionner le fichier" (empilés verticalement
 /// — demande explicite, remplace le côte-à-côte de la première version).
 const FIELD_TO_BROWSE_GAP: f32 = 8.0;
+/// Gouttière entre "Annuler" et "Valider" — le jeu en laisse 15px sur une fenêtre de 720
+/// (`interface-options-jeu.png` : boutons en x 18..351 et 367..700), soit ≈12px à l'échelle de
+/// cette modale. La première version les collait l'un à l'autre.
+const FOOTER_GUTTER: f32 = 12.0;
 const FIELD_HEIGHT: f32 = 34.0;
 const BROWSE_BUTTON_HEIGHT: f32 = 40.0;
-/// `inset` du 9-slice du bouton "Sélectionner le fichier" (`nine_slice::nine_slice`, voir sa doc) —
-/// dépasse largement le rayon de coin mesuré de `browse-button.png` (`corner_radius≈4`, `dsimg.py
-/// analyze`) et son épaisseur de bordure, sans pour autant réduire à rien la zone étirable centrale
-/// (texture native 169×52).
-const BROWSE_NINE_SLICE_INSET: f32 = 14.0;
-
 /// Textures embarquées du chrome de la modale — chargées UNE FOIS par fenêtre OS (voir
 /// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`, même principe que
 /// `panels::combat_frame::CombatFrame`/`crate::ui_icons::UiIcons`), jamais rechargées à chaque
-/// frame. Fichiers sous `crates/overlay-ui/assets/ui/options/`, copiés depuis les assets validés
-/// (`assets/design-system/`, voir la doc de module pour leur provenance).
+/// frame. Fichiers sous `crates/overlay-ui/assets/ui/options/`.
+///
+/// **Ne contient plus aucune texture de bouton** : elles sont au manifeste du design system
+/// (`design::assets`), chargées paresseusement par `DesignSystem::get`, et aucun panneau n'a plus à
+/// les câbler. Ne reste ici que le chrome propre à cette modale.
 pub struct OptionsModalAssets {
     /// `modal-header.png` (720×56) — fond de bannière, peint avec arrondi HAUT uniquement
     /// (`MODAL_RADIUS`) pour épouser le coin de la modale.
     banner: egui::TextureHandle,
-    /// `footer-cancel.png`/`footer-validate.png` (338×36 chacun, libellé "Annuler"/"Valider"
-    /// gravé dans la texture, comme la référence réelle) — pas de 9-slice ici : rayon de coin
-    /// mesuré quasi nul (`corner_radius≈2`), l'étirement uniforme reste imperceptible.
-    footer_cancel: egui::TextureHandle,
-    footer_validate: egui::TextureHandle,
-    /// `browse-button.png`/`browse-button-hover.png` (169×52 chacun, déjà "génériques" — aucun
-    /// libellé gravé, voir `.claude/skills/design-asset`) — peints en 9-slice
-    /// (`BROWSE_NINE_SLICE_INSET`), le seul élément de cette modale agrandi bien au-delà de sa
-    /// taille native.
-    browse: egui::TextureHandle,
-    browse_hover: egui::TextureHandle,
     /// `menu-tabs.png` (782×44, dérivée de `tabs-with-first-tab-active.png` du design system par
     /// miroir horizontal — voir doc de module) — trois segments accolés, celui de droite (kaki)
     /// correspond à "Paramètres" (dernière entrée du menu, onglet actif).
@@ -146,26 +145,6 @@ impl OptionsModalAssets {
                 ctx,
                 "options-banner",
                 include_bytes!("../../assets/ui/options/modal-header.png"),
-            ),
-            footer_cancel: load_embedded_texture(
-                ctx,
-                "options-footer-cancel",
-                include_bytes!("../../assets/ui/options/footer-cancel.png"),
-            ),
-            footer_validate: load_embedded_texture(
-                ctx,
-                "options-footer-validate",
-                include_bytes!("../../assets/ui/options/footer-validate.png"),
-            ),
-            browse: load_embedded_texture(
-                ctx,
-                "options-browse",
-                include_bytes!("../../assets/ui/options/browse-button.png"),
-            ),
-            browse_hover: load_embedded_texture(
-                ctx,
-                "options-browse-hover",
-                include_bytes!("../../assets/ui/options/browse-button-hover.png"),
             ),
             menu_tabs: load_embedded_texture(
                 ctx,
@@ -304,10 +283,10 @@ pub fn show(
         );
     }
 
-    // Pied de page — vraies textures du jeu (libellé déjà gravé dedans), rangée pleine largeur du
-    // contenu, chacune la moitié — hauteur dérivée du ratio natif (338×36) pour ne jamais déformer
-    // verticalement l'assise du bouton.
-    let footer_button_width = content_rect.width() / 2.0;
+    // Pied de page — deux boutons du design system, séparés par la gouttière du jeu. La hauteur
+    // reste dérivée du rapport natif de la texture (338×36) pour que l'assise garde ses proportions
+    // quelle que soit la largeur de la fenêtre.
+    let footer_button_width = (content_rect.width() - FOOTER_GUTTER) / 2.0;
     let footer_height = footer_button_width * (36.0 / 338.0);
     let footer_rect = egui::Rect::from_min_max(
         egui::pos2(content_rect.left(), content_rect.bottom() - footer_height),
@@ -318,29 +297,33 @@ pub fn show(
         egui::vec2(footer_button_width, footer_height),
     );
     let validate_rect = egui::Rect::from_min_size(
-        footer_rect.min + egui::vec2(footer_button_width, 0.0),
-        egui::vec2(footer_rect.width() - footer_button_width, footer_height),
+        egui::pos2(footer_rect.right() - footer_button_width, footer_rect.top()),
+        egui::vec2(footer_button_width, footer_height),
     );
-    egui::Image::new(&assets.footer_cancel).paint_at(ui, cancel_rect);
-    egui::Image::new(&assets.footer_validate).paint_at(ui, validate_rect);
-    let cancel_response = ui
-        .interact(
+    if ui
+        .put(
             cancel_rect,
-            ui.id().with("options-cancel"),
-            egui::Sense::click(),
+            design::button("Annuler")
+                .variant(ButtonVariant::Danger)
+                .size(ButtonSize::Height(footer_height))
+                .width(footer_button_width)
+                .log_name("options-annuler"),
         )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let validate_response = ui
-        .interact(
-            validate_rect,
-            ui.id().with("options-validate"),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    if cancel_response.clicked() {
+        .clicked()
+    {
         action = OptionsModalAction::Cancel;
     }
-    if validate_response.clicked() {
+    if ui
+        .put(
+            validate_rect,
+            design::button("Valider")
+                .variant(ButtonVariant::Primary)
+                .size(ButtonSize::Height(footer_height))
+                .width(footer_button_width)
+                .log_name("options-valider"),
+        )
+        .clicked()
+    {
         action = OptionsModalAction::Validate(state.path_input.clone());
     }
 
@@ -390,36 +373,17 @@ pub fn show(
         ui.add_space(FIELD_TO_BROWSE_GAP);
 
         // Bouton "Sélectionner le fichier" — SOUS le champ (empilé verticalement, retour
-        // utilisateur explicite), texture réelle du jeu agrandie en 9-slice (voir doc de module).
-        let browse_rect = ui
-            .allocate_space(egui::vec2(inner_rect.width(), BROWSE_BUTTON_HEIGHT))
-            .1;
-        let browse_response = ui
-            .interact(
-                browse_rect,
-                ui.id().with("options-browse"),
-                egui::Sense::click(),
+        // utilisateur explicite), pleine largeur de la section.
+        if ui
+            .add(
+                design::button("Sélectionner le fichier")
+                    .variant(ButtonVariant::Secondary)
+                    .size(ButtonSize::Height(BROWSE_BUTTON_HEIGHT))
+                    .width(inner_rect.width())
+                    .log_name("options-parcourir"),
             )
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        let browse_texture = if browse_response.hovered() {
-            &assets.browse_hover
-        } else {
-            &assets.browse
-        };
-        nine_slice::nine_slice(
-            ui.painter(),
-            browse_texture,
-            browse_rect,
-            BROWSE_NINE_SLICE_INSET,
-        );
-        ui.painter().text(
-            browse_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "Sélectionner le fichier",
-            egui::FontId::proportional(13.0),
-            TITLE_TEXT,
-        );
-        if browse_response.clicked() {
+            .clicked()
+        {
             action = OptionsModalAction::Browse;
         }
 
