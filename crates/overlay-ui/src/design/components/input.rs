@@ -106,6 +106,7 @@ pub struct Input<'a> {
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<InputState>,
+    request_focus: bool,
 }
 
 impl<'a> Input<'a> {
@@ -119,6 +120,7 @@ impl<'a> Input<'a> {
             tooltip: None,
             log_name: None,
             forced_state: None,
+            request_focus: false,
         }
     }
 
@@ -156,6 +158,17 @@ impl<'a> Input<'a> {
     /// `overlay-ui.<date>.log` sont indiscernables.
     pub fn log_name(mut self, name: impl Into<String>) -> Self {
         self.log_name = Some(name.into());
+        self
+    }
+
+    /// Demande le focus clavier POUR CETTE FRAME. À n'appeler qu'une fois — sinon le champ
+    /// reprendrait le focus à chaque frame et l'utilisateur ne pourrait plus le quitter.
+    ///
+    /// C'est bien à l'appelant de décider *quand* (voir `panels::options_modal`, qui le fait à la
+    /// première frame de la modale) : le composant n'a aucun moyen de savoir si le formulaire vient
+    /// de s'ouvrir ou s'il est affiché depuis dix minutes.
+    pub fn request_focus(mut self, request: bool) -> Self {
+        self.request_focus = request;
         self
     }
 
@@ -232,6 +245,9 @@ impl Widget for Input<'_> {
                 ui.add_enabled(enabled, edit)
             })
             .inner;
+        if self.request_focus {
+            edit_response.request_focus();
+        }
 
         // Le texte indicatif est peint À LA MAIN plutôt que confié à `TextEdit::hint_text` :
         // egui écrase la couleur d'un `hint_text` par `Visuals::weak_text_color()`

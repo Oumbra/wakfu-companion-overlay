@@ -706,7 +706,14 @@ mod linux_main {
                     // restent `AlwaysOnTop` sans jamais voler l'entrée au jeu), mais Échap reste
                     // câblé par prudence si jamais l'une d'elles l'obtenait malgré tout — même
                     // filet que Windows (`main.rs`, jamais atteint non plus en pratique).
-                    if event.state == ElementState::Pressed
+                    //
+                    // **Sauf la modale Options**, qui est la seule fenêtre overlay focalisable et
+                    // l'est délibérément (§9.1 du plan). Ses deux touches — `Échap` annule,
+                    // `Entrée` valide — sont traitées par le panneau, qui les remonte en
+                    // `OptionsModalAction` (voir `panels::options_modal::show`) ; ce filet les
+                    // court-circuiterait en fermant l'overlay entier.
+                    if overlay.kind != OverlayKind::Options
+                        && event.state == ElementState::Pressed
                         && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                     {
                         event_loop.exit();
