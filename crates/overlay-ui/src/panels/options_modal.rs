@@ -91,8 +91,33 @@ const MENU_GAP: f32 = 14.0;
 /// Écart section → pied de page.
 const FOOTER_GAP: f32 = 14.0;
 
-const SECTION_PAD_X: f32 = 22.0;
-const SECTION_PAD_Y: f32 = 20.0;
+// Rembourrage du panneau de contenu — trois axes, et trois seulement. Le relevé de section est
+// catégorique : « x=29 pour les titres de section, x=36 pour tout contrôle indenté, x=62 pour le
+// texte qui suit une case. Aucun autre alignement n'a été relevé dans les six onglets. » Rapportés
+// au bord du panneau (x=17), cela donne les deux valeurs ci-dessous.
+//
+// La première version mettait 22px partout, titre compris : le titre et ses contrôles étaient donc
+// sur le même axe, ce qui efface le seul signal de niveau que le jeu utilise.
+/// Axe des TITRES de section, depuis le bord du panneau.
+const PANEL_PAD_TITLE_X: f32 = 12.0;
+/// Axe des CONTRÔLES, depuis le bord du panneau. L'écart avec l'axe des titres — 7px — est le
+/// retrait qui marque le niveau (relevé de section : « le seul signal de niveau est le retrait de
+/// 7px du titre par rapport à ses lignes »).
+const PANEL_PAD_CONTROL_X: f32 = 19.0;
+/// Rembourrage haut. **13, pour obtenir les 19 du relevé** — la différence n'est pas une erreur.
+///
+/// Le relevé cote 19px du bord du panneau au **haut d'ENCRE** du titre (`releve-modale-options.json`,
+/// nœud `panel-content` : « Premier titre à y = 143, soit 19px sous le bord du panneau »). Nous, ce
+/// que nous positionnons, c'est une galley, dont le haut est au-dessus de l'encre : la police y
+/// réserve la place des accents de capitale, que « Fichier » n'utilise pas. Cet écart mesure **6px**
+/// pour PT Serif Bold au corps 21 dans notre rendu (galley posée à 142, encre relevée à 148 sur la
+/// capture), d'où 19 − 6.
+///
+/// Conséquence à connaître : cette valeur est liée à la police ET au corps du titre. Si l'un des
+/// deux change, la re-mesurer sur la capture plutôt que la reporter telle quelle. C'est le prix
+/// d'une cote donnée en encre — les cotes horizontales, elles, sont données en bord de boîte et
+/// tombent juste sans correction.
+const PANEL_PAD_TOP: f32 = 13.0;
 
 const TITLE_TEXT: egui::Color32 = egui::Color32::WHITE;
 
@@ -427,7 +452,22 @@ pub fn show(
         egui::StrokeKind::Inside,
     );
 
-    let inner_rect = section_rect.shrink2(egui::vec2(SECTION_PAD_X, SECTION_PAD_Y));
+    // À droite, le jeu réserve 26px pour sa barre de défilement (relevé, nœud `panel`) même quand
+    // elle ne sert pas. Nous n'en avons pas : reprendre 26px laisserait une marge droite
+    // inexpliquée, plus large que la gauche. On reflète donc l'axe des contrôles — **déviation
+    // assumée**, la seule de ce bloc.
+    let inner_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            section_rect.left() + PANEL_PAD_CONTROL_X,
+            section_rect.top() + PANEL_PAD_TOP,
+        ),
+        egui::pos2(
+            section_rect.right() - PANEL_PAD_CONTROL_X,
+            section_rect.bottom() - PANEL_PAD_CONTROL_X,
+        ),
+    );
+    /// Retrait du titre par rapport à ses contrôles — voir `PANEL_PAD_CONTROL_X`.
+    const TITLE_OUTDENT: f32 = PANEL_PAD_CONTROL_X - PANEL_PAD_TITLE_X;
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
         // Même traitement que le titre de bannière (serif grasse + ombre bas-droite), au corps
         // dicté par le rapport d'encre du jeu entre ses deux niveaux de titre. Peint à la main
@@ -444,7 +484,7 @@ pub fn show(
             .1;
         design::text::paint_outlined_text(
             ui,
-            section_title_rect.left_top(),
+            section_title_rect.left_top() - egui::vec2(TITLE_OUTDENT, 0.0),
             egui::Align2::LEFT_TOP,
             "Fichier",
             section_font,
