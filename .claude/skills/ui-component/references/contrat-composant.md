@@ -61,10 +61,22 @@ que d'être filtré après coup.
   sur toute la longueur. `component.py insets` rend cette étendue (`decor_span`).
 - **Mode de remplissage par axe** : `Stretch` pour un contenu continu (dégradé, bande médiane
   lisse), `Tile` pour un motif réellement périodique. Voir la doc de `design::nine_slice`.
+- **Plusieurs textures pour une même variante, choisies par la hauteur.** Quand le jeu a capturé le
+  même composant à deux hauteurs, son décor d'extrémité n'y a pas la même largeur (52px sur un
+  bouton or de 52px, 34px sur le même bouton en 36px). Le 9-slice ne peut pas rattraper ça : il
+  peint l'embout à l'échelle 1:1, fidèlement. Déclarer les deux textures et retenir celle dont la
+  **hauteur native est la plus proche** de la hauteur demandée. Le défaut ne se voit pas sur un
+  composant isolé — il saute aux yeux dès qu'un composant voisin porte le bon embout.
 - **Un rectangle trop petit reste peint**, marges réduites proportionnellement : pas de panique, et
   l'anomalie se voit sur la capture.
 - Le contenu est **écrêté au composant** (`Painter::with_clip_rect`) : un libellé trop long ne
   déborde pas sur le panneau voisin, où il passerait pour un bug de mise en page.
+- **Le libellé passe par `design::text::weighted`**, jamais par `Painter::galley` directement : la
+  police par défaut d'egui est une Light, bien plus maigre que celle du jeu, et egui n'expose aucun
+  réglage de graisse. La galley doit donc être mise en page en `Color32::PLACEHOLDER`. Attention si
+  vous cherchez à régler finement une position de texte : **egui arrondit la position d'un texte au
+  pixel entier** (`Options::round_text_to_pixels`) — un décalage de 0,3px est rigoureusement sans
+  effet, et une mesure qui l'ignore donne des résultats identiques pour des réglages différents.
 
 ## 4. Journalisation
 
