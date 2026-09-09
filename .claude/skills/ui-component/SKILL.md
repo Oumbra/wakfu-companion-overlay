@@ -45,24 +45,35 @@ C=.claude/skills/ui-component/scripts/component.py
 python $C insets assets/design-system/button-primary.png
 ```
 
-Rend la taille utile (marge transparente retirée), le **rayon d'arrondi**, l'**épaisseur du liseré**,
-la zone horizontalement reproductible, et les **marges 9-slice recommandées** — `max(rayon, liseré)
-+ 2`. C'est cette valeur qui va dans le manifeste, pas une estimation.
+Rend la taille utile (marge transparente retirée), le **rayon d'arrondi**, l'**épaisseur du
+liseré**, l'**étendue du décor** (`decor_span`) et les **marges 9-slice recommandées**. Ce sont ces
+valeurs qui vont dans le manifeste, pas une estimation.
+
+**Ce sont les hachures qui dimensionnent les marges horizontales, pas les coins.** Sur les
+composants Wakfu, les croisillons diagonaux ne sont pas une texture de fond : ce sont des **embouts**
+cantonnés aux premières dizaines de pixels de chaque côté (mesuré : ~50px sur les boutons 200×52,
+~30px sur les 338×36), le centre restant un dégradé lisse. Une marge dimensionnée sur le seul rayon
+des coins laisse le motif dans la bande médiane, où il est étiré — ou répété — sur toute la longueur
+du composant. Le résultat est immédiatement faux à l'œil : un bouton large couvert de croisillons au
+lieu d'en porter deux, un à chaque bout (retour utilisateur 2026-09-09).
+
+`decor_span` **n'a aucun sens sur une texture qui porte encore un libellé** : le libellé, au centre,
+fait exploser le niveau de référence et la mesure rend 0. Générifier d'abord (`design-asset`).
 
 Vérifier le réglage **avant** d'écrire du Rust, sur une planche :
 
 ```bash
 python $C preview assets/design-system/button-primary.png \
-  --insets 6,6,6,6 --sizes 110x32,200x52,338x36,520x48 --fill tile -o "$SCRATCHPAD/9slice.html"
+  --insets 52,6,52,6 --sizes 110x32,200x52,338x36,520x48 -o "$SCRATCHPAD/9slice.html"
 ```
 
 La colonne de droite montre l'étirement bilinéaire naïf, pour comparaison : c'est le défaut qu'on
 cherche à ne pas avoir (coins déformés, liseré épaissi d'un côté).
 
-**Le mode de remplissage se choisit par axe, et c'est le piège du 9-slice.** Un dégradé vertical
-doit s'**étirer** avec la hauteur ; une texture périodique (les hachures diagonales des boutons)
-doit se **répéter** horizontalement, sinon les croisillons deviennent des traînées dès qu'on
-dépasse la largeur native. Pour les boutons : `fill_x = Tile`, `fill_y = Stretch`.
+**Le mode de remplissage se choisit par axe.** `Stretch` pour un contenu continu (un dégradé, ou une
+bande médiane lisse), `Tile` pour un motif réellement périodique qu'il faut répéter à son échelle.
+Une fois le décor entièrement contenu dans les marges figées, `Stretch` sur les deux axes suffit —
+c'est le cas des boutons.
 
 ### 3. Déclarer les textures dans le manifeste
 

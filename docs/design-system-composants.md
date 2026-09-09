@@ -51,8 +51,14 @@ survolée, elle revient au relâchement (même règle que les boutons icône).
 **Textures** (manifeste `design/assets.rs`, fichiers de `assets/design-system/`) :
 `button-{primary,secondary,danger}.png` et leurs `-hover`, plus `button-disabled.png` **partagée par
 les trois variantes** (§5.1 : l'état désactivé est une désaturation complète, une seule capture
-existe). Découpage 9-slice commun : marges 6px (arrondi 3–4px + liseré 2px, mesurés sur les sept
-fichiers), `fill_x = Tile` (hachures périodiques), `fill_y = Stretch` (dégradé vertical).
+existe).
+
+**Découpage 9-slice** : les hachures diagonales ne sont pas une texture de fond mais un **embout**
+d'extrémité — mesuré (`component.py insets`) à 43–51px des bords sur les textures 200×52 / 169×52,
+29–30px sur les 338×36, le centre étant un dégradé lisse. Marges figées : **52px** à gauche et à
+droite (32px pour les textures danger), **6px** en haut et en bas (arrondi 3–4px + liseré 2px),
+étirement sur les deux axes. Un bouton de 500px porte donc exactement deux embouts, comme un bouton
+de 200px.
 
 **Mesures** :
 

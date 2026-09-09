@@ -55,8 +55,12 @@ que d'être filtré après coup.
 - **Toute taille est valide.** Les textures sont peintes par `design::nine_slice` : coins et liseré
   figés, bandes médianes étendues. Jamais `egui::Image::paint_at` (qui déforme les coins), jamais un
   asset par taille.
-- **Mode de remplissage par axe** : `Stretch` pour un dégradé, `Tile` pour un motif périodique. Voir
-  la doc de `design::nine_slice`.
+- **Les marges figées se dimensionnent sur le décor**, pas sur le rayon des coins : sur les
+  composants Wakfu, les hachures sont des **embouts** d'extrémité (~50px sur un bouton 200×52), pas
+  une texture de fond. Une marge trop courte laisse le motif dans la bande médiane, où il est étiré
+  sur toute la longueur. `component.py insets` rend cette étendue (`decor_span`).
+- **Mode de remplissage par axe** : `Stretch` pour un contenu continu (dégradé, bande médiane
+  lisse), `Tile` pour un motif réellement périodique. Voir la doc de `design::nine_slice`.
 - **Un rectangle trop petit reste peint**, marges réduites proportionnellement : pas de panique, et
   l'anomalie se voit sur la capture.
 - Le contenu est **écrêté au composant** (`Painter::with_clip_rect`) : un libellé trop long ne
