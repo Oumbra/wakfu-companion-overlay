@@ -817,12 +817,23 @@ Trois décisions prises à cette occasion :
 - **Gouttière de pied de page** : 12pt entre « Annuler » et « Valider », l'échelle des 15px mesurés
   sur `interface-options-jeu.png` (boutons en x 18..351 et 367..700 sur 720). La première version
   les collait l'un à l'autre.
-- **Graisse synthétique du libellé** (`design::text`, `tokens::TEXT_WEIGHT`) : egui n'embarque
-  qu'une Ubuntu Light et n'expose aucun réglage de graisse ; la galley est repeinte sur ses huit
-  voisins immédiats à opacité réduite. Le rayon ne peut pas descendre sous le pixel — egui arrondit
-  la position d'un texte au pixel entier — c'est l'opacité qui donne le réglage fin. Corps et
-  graisse ont été choisis par un balayage rendu dans egui puis comparé au pixel aux libellés gravés
-  du jeu (voir `tokens::BUTTON_FONT_SIZE_RATIO`).
+- **Police des libellés** (`design::fonts`, `design::text`) : egui n'embarque qu'une Ubuntu Light
+  et n'expose aucun réglage de graisse, mais `FontDefinitions` accepte n'importe quel fichier que
+  nous embarquons. `assets/fonts/Ubuntu-Medium.ttf` (Ubuntu Font Licence, licence jointe) est
+  enregistrée comme famille nommée `ds-label` par `style::apply` ; seuls les libellés du design
+  system l'utilisent, la proportionnelle par défaut reste celle du reste de l'interface. Corps et
+  police choisis par un balayage rendu dans egui puis comparé au pixel aux libellés gravés du jeu
+  (voir `tokens::BUTTON_FONT_SIZE_RATIO` et la doc de `design::fonts`).
+
+  La première version fabriquait une graisse **synthétique** (halo d'un pixel à opacité réduite),
+  retirée le 2026-09-09 après-midi : un halo est un contour, pas une graisse, et rend le libellé
+  flou. En reste une leçon à ne pas redécouvrir : **egui arrondit la position d'un texte au pixel
+  entier** (`Options::round_text_to_pixels`), aucun effet visuel ne se règle par un déplacement
+  fractionnaire de texte.
+- **Hauteur d'un bouton = hauteur de sa texture**, jamais déduite de sa largeur. La modale Options
+  écrivait `footer_button_width * (36.0 / 338.0)`, à l'inverse de ce à quoi sert un 9-slice, et
+  affichait des boutons de 27px là où le jeu en met 36 — le corps du libellé suivant la hauteur, il
+  y perdait 3px d'encre sur 13. Voir `panels::options_modal::FOOTER_BUTTON_HEIGHT`.
 
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
 Premier composant livré : le bouton texte. `panels::icon_button::paint_icon_button` reste hors

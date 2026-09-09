@@ -68,19 +68,32 @@ droite sur la famille 52px, **36px** sur la famille 36px, **6px** en haut et en 
 liseré 2px), étirement sur les deux axes. Un bouton de 500px porte donc exactement deux embouts,
 comme un bouton de 200px.
 
-**Graisse du libellé** : egui n'embarque qu'une Ubuntu Light et n'expose aucun réglage de graisse.
-`design::text::weighted` en fabrique une en repeignant la galley sur ses huit voisins immédiats à
-opacité réduite (`tokens::TEXT_WEIGHT`). Le rayon ne peut pas descendre sous le pixel : egui arrondit
-la position d'un texte au pixel entier, un halo à 0,3px est rigoureusement identique à pas de halo —
-c'est l'**opacité** qui donne le réglage fin.
+**Police du libellé** : egui n'embarque qu'une Ubuntu Light et n'expose aucun réglage de graisse,
+mais rien n'oblige à s'en contenter — `design::fonts` embarque `assets/fonts/Ubuntu-Medium.ttf` et
+l'enregistre comme famille nommée `ds-label`, que `design::text::label_font` sert aux composants.
+La proportionnelle par défaut d'egui reste celle du reste de l'interface : seuls les libellés du
+design system changent.
+
+La première version fabriquait une graisse **synthétique** (galley repeinte sur ses huit voisins
+immédiats à opacité réduite). Retirée le 2026-09-09 : un halo est un contour, pas une graisse — il
+épaissit le mot en dégradant son contraste, le libellé devient flou là où celui du jeu est net.
+Une leçon de cet épisode survit néanmoins à la rustine, parce qu'elle se redécouvre douloureusement :
+**egui arrondit la position d'un texte au pixel entier** (`Options::round_text_to_pixels`), donc
+aucun effet visuel ne peut être réglé par un déplacement fractionnaire de texte.
+
+**Hauteur d'un bouton** : celle de sa texture, jamais déduite de sa largeur. Un 9-slice existe pour
+qu'on l'étire en largeur *sans* toucher à sa hauteur ; le jeu affiche son bouton de pied de page à
+36px quelle que soit la fenêtre (son bandeau de titre fait 56px, chez lui comme chez nous). La
+modale Options déduisait la sienne du rapport d'aspect de la texture et tombait à 27px — le libellé
+suivant la hauteur, il y perdait 3px d'encre sur 13.
 
 **Mesures** :
 
 | Grandeur | Valeur | Origine |
 | --- | --- | --- |
 | Hauteurs natives | 52px (HDV), 36px (pied de page de modale) | taille des textures |
-| Corps de police | `17/36 × hauteur` | balayage dans egui de 30 couples corps × graisse comparés au pixel aux libellés gravés du jeu ; 17px est le seul corps qui retrouve les 13px d'encre de « Annuler » ET de « Valider » |
-| Graisse du libellé | halo à 20 % d'opacité | choisi à l'œil sur le même balayage : le jeu lui-même n'est pas cohérent (« Valider » sombre sur or est bien plus gras que « Annuler » blanc sur rouge), aucune valeur ne colle aux deux |
+| Corps de police | `17/36 × hauteur` | balayage rendu dans egui et comparé au pixel aux libellés gravés du jeu ; 17px est le seul corps qui retrouve les 13px d'encre de « Annuler » ET de « Valider », à hauteur de bouton native |
+| Police du libellé | Ubuntu Medium | onze candidats comparés à la référence : Medium 17 est le seul au-dessus de 0,50 de recouvrement de forme sur les DEUX libellés (0,52/0,52 contre 0,59/0,32 pour Regular). Le jeu n'est pas cohérent entre ses deux boutons, aucune police ne colle aux deux |
 | Marge horizontale | `0,55 × hauteur` | ordre de grandeur de §4 du design-system — **estimation** |
 | Largeur minimale | `2,5 × hauteur` | garde-fou de proportion — **réglage**, pas une mesure |
 
