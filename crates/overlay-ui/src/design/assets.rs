@@ -51,9 +51,11 @@ const fn button_slice(cap: f32) -> NineSlice {
 /// Boutons de fenêtre (textures 200×52 et 169×52) — décor mesuré jusqu'à 51px des bords.
 pub const BUTTON_SLICE: NineSlice = button_slice(52.0);
 
-/// Boutons de pied de page de modale (textures 338×36) — décor mesuré jusqu'à 30px des bords. Un
-/// embout de 52px y couvrirait près du tiers d'un bouton pourtant conçu pour être long.
-pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(32.0);
+/// Boutons de pied de page de modale (textures 338×36) — décor mesuré jusqu'à 34px des bords
+/// (29-30px sur les deux textures rouges, 31-34px sur les deux textures or, arrondi à 36 pour
+/// couvrir toute la famille). Un embout de 52px y couvrirait près du tiers d'un bouton pourtant
+/// conçu pour être long.
+pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(36.0);
 
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
@@ -64,6 +66,14 @@ pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(32.0);
 pub enum DsTexture {
     ButtonPrimary,
     ButtonPrimaryHover,
+    /// Or en 338×36 — **même variante que `ButtonPrimary`, autre hauteur native**. Les deux
+    /// existent parce que le décor d'extrémité n'a pas la même largeur selon la hauteur du bouton
+    /// capturé (52px sur le bouton de fenêtre HDV, 34px sur celui de pied de page) : rendre le
+    /// bouton de pied de page avec la texture 200×52 lui donnerait un embout une fois et demie
+    /// trop large, ce qui se voit immédiatement à côté du bouton rouge voisin. Voir
+    /// `components::button::ButtonVariant::texture` pour la règle de choix.
+    ButtonPrimaryCompact,
+    ButtonPrimaryCompactHover,
     ButtonSecondary,
     ButtonSecondaryHover,
     ButtonDanger,
@@ -95,6 +105,8 @@ impl DsTexture {
     pub const ALL: &'static [DsTexture] = &[
         DsTexture::ButtonPrimary,
         DsTexture::ButtonPrimaryHover,
+        DsTexture::ButtonPrimaryCompact,
+        DsTexture::ButtonPrimaryCompactHover,
         DsTexture::ButtonSecondary,
         DsTexture::ButtonSecondaryHover,
         DsTexture::ButtonDanger,
@@ -120,6 +132,16 @@ impl DsTexture {
                 name: "ds-button-primary-hover",
                 bytes: ds_asset!("button-primary-hover.png"),
                 slice: BUTTON_SLICE,
+            },
+            DsTexture::ButtonPrimaryCompact => DsTextureSpec {
+                name: "ds-button-primary-compact",
+                bytes: ds_asset!("button-primary-compact.png"),
+                slice: BUTTON_SLICE_COMPACT,
+            },
+            DsTexture::ButtonPrimaryCompactHover => DsTextureSpec {
+                name: "ds-button-primary-compact-hover",
+                bytes: ds_asset!("button-primary-compact-hover.png"),
+                slice: BUTTON_SLICE_COMPACT,
             },
             DsTexture::ButtonSecondary => DsTextureSpec {
                 name: "ds-button-secondary",

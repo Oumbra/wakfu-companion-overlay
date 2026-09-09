@@ -14,6 +14,7 @@
 //! | --- | --- | --- |
 //! | `design::assets` | manifeste : nom logique → fichier + découpage 9-slice | de la peinture |
 //! | `design::nine_slice` | peindre une texture à n'importe quelle taille | connaître un composant |
+//! | `design::text` | peindre un libellé (graisse synthétique) | choisir quoi écrire |
 //! | `design::tokens` | couleurs et métriques mesurées, partagées | de la mise en page |
 //! | `design::components` | un composant = une API paramétrable + son comportement | de la logique métier |
 //! | `panels::*` | mise en page, état applicatif | dessiner un bouton à la main |
@@ -29,6 +30,7 @@
 pub mod assets;
 pub mod components;
 pub mod nine_slice;
+pub mod text;
 pub mod tokens;
 
 use std::sync::Arc;
