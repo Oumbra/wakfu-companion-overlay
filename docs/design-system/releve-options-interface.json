@@ -1,0 +1,174 @@
+{
+  "title": "Onglet Interface",
+  "subtitle": "Relevé de l'onglet Interface de la modale Options — le seul des six qui montre des BOUTONS dans le contenu et un bloc d'information. C'est donc la référence pour deux choses qu'aucun autre onglet ne donne : la graisse d'un libellé de bouton de contenu (plus maigre que celle du pied de page) et le gabarit d'un texte d'information.",
+  "source": "assets/design-system/interfaces/interface-options-interface.png",
+  "canvas": [720, 561],
+  "scale": 1.6,
+  "nodes": [
+    {
+      "id": "panel",
+      "label": "Panneau de contenu",
+      "box": [17, 124, 705, 499],
+      "role": "surface",
+      "fill": "#15181c",
+      "notes": "Chrome identique aux six onglets, déjà relevé dans releve-modale-options.json — repris ici seulement comme conteneur des blocs mesurés ci-dessous.",
+      "children": [
+        {
+          "id": "h-echelle",
+          "label": "Titre « Échelle de l'interface (100%) »",
+          "box": [29, 138, 336, 163],
+          "role": "text",
+          "notes": "Serif, aligné x=29 comme tous les titres de section. Encre 25 px, mais le mot porte un accent de capitale (É) ET des parenthèses qui descendent sous la ligne de base : ce n'est PAS comparable à l'encre d'un mot sans jambage. Couleur mesurée au pic : #bababb — le gris #b8b9ba du relevé de section est confirmé, un titre de section n'est jamais blanc."
+        },
+        {
+          "id": "bloc-echelle",
+          "label": "Curseur d'échelle + case « mise à l'échelle forcée »",
+          "box": [29, 170, 690, 250],
+          "role": "group",
+          "notes": "NON MESURÉ en détail — hors des cibles de ce relevé. Contient un curseur gradué (Min/Max, valeurs 67 % / 100 % / 233 %), un bouton de réinitialisation 36×36 aligné à droite, et une ligne de case à cocher. À relever le jour où le curseur sera porté."
+        },
+        {
+          "id": "h-theme",
+          "label": "Titre « Thème d'interface personnalisé »",
+          "box": [28, 268, 361, 290],
+          "role": "text",
+          "notes": "Encre 22 px (jambage du « p », pas d'accent de capitale). Même serif, même gris que le titre précédent."
+        },
+        {
+          "id": "select-theme",
+          "label": "Liste déroulante du thème",
+          "box": [36, 295, 596, 331],
+          "role": "control",
+          "fill": "#6e644f",
+          "radius": 2,
+          "notes": "560 × 36. Bord sombre 2 px #0e1015, liseré haut clair 2 px #a59f91, ombre basse 2 px #423b2e, dégradé vertical #7a6f57 → #625946. Aligné x=36, l'axe des contrôles indentés. Sa largeur est LA cote de référence de ce bloc : les quatre boutons en dessous la reproduisent exactement (278 + 4 + 278 = 560)."
+        },
+        {
+          "id": "btn-recharger",
+          "label": "Bouton « Recharger le thème »",
+          "box": [36, 343, 314, 379],
+          "role": "control",
+          "fill": "#6e6550",
+          "radius": 2,
+          "notes": "278 × 36 — MÊME hauteur que la liste au-dessus et que les boutons du pied de page. Bord sombre 2 px #0a0c0e, liseré haut clair 2 px #958d79, dégradé vertical #746a53 → #635947. Libellé blanc #ffffff centré, encre 13 px."
+        },
+        {
+          "id": "btn-actualiser",
+          "label": "Bouton « Actualiser la liste »",
+          "box": [318, 343, 596, 379],
+          "role": "control",
+          "fill": "#6e6550",
+          "radius": 2,
+          "notes": "Identique au précédent. Gouttière horizontale entre les deux : 4 px seulement."
+        },
+        {
+          "id": "btn-dossier",
+          "label": "Bouton « Ouvrir le dossier »",
+          "box": [36, 387, 314, 423],
+          "role": "control",
+          "fill": "#6e6550",
+          "radius": 2,
+          "notes": "Seconde rangée. Gouttière verticale avec la rangée du dessus : 8 px."
+        },
+        {
+          "id": "btn-theme",
+          "label": "Bouton « Ouvrir le thème »",
+          "box": [318, 387, 596, 423],
+          "role": "control",
+          "fill": "#6e6550",
+          "radius": 2
+        },
+        {
+          "id": "info",
+          "label": "Bloc d'information",
+          "box": [38, 436, 628, 477],
+          "role": "group",
+          "notes": "Pastille + texte sur deux lignes. Le bloc commence à x=38, soit l'axe des contrôles indentés (x=36) plus le bord de 2 px : la pastille s'aligne sur le REMPLISSAGE des contrôles, pas sur leur bord.",
+          "children": [
+            {
+              "id": "info-pastille",
+              "label": "Pastille ⓘ",
+              "box": [38, 438, 50, 450],
+              "role": "icon",
+              "fill": "#a69064",
+              "notes": "12 × 12 px, dorée, centrée sur la PREMIÈRE ligne de texte (axe 444, axe d'encre de la ligne 1 à 445) — pas sur le bloc entier."
+            },
+            {
+              "id": "info-l1",
+              "label": "Texte, ligne 1",
+              "box": [57, 436, 628, 454],
+              "role": "text",
+              "notes": "Blanc PUR #ffffff au pic — le texte d'information n'est PAS grisé, contrairement à ce que l'œil croit lire. Ce qui le fait paraître effacé, c'est le contraste avec le fond sombre du panneau et le fait qu'il n'est pas gras : la seule marque « information » est la pastille dorée. Encre 17 px (accents et jambages compris)."
+            },
+            {
+              "id": "info-l2",
+              "label": "Texte, ligne 2",
+              "box": [57, 459, 532, 477],
+              "role": "text",
+              "notes": "Alignée sur la ligne 1 (x=57), PAS sur la pastille : le retour à la ligne est en retrait pendant, la pastille reste seule dans sa colonne. Interligne 23 px (haut d'encre à haut d'encre)."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tokens": {
+    "color": {
+      "content-button-top": "#746a53",
+      "content-button-bottom": "#635947",
+      "content-button-highlight": "#958d79",
+      "content-button-outline": "#0a0c0e",
+      "select-top": "#7a6f57",
+      "select-bottom": "#625946",
+      "select-highlight": "#a59f91",
+      "select-shadow": "#423b2e",
+      "select-outline": "#0e1015",
+      "label-on-khaki": "#ffffff",
+      "info-dot": "#a69064",
+      "info-text": "#ffffff",
+      "heading": "#b8b9ba"
+    },
+    "space": [2, 4, 5, 7, 8, 12, 13, 15, 23],
+    "radius": { "control": "2" },
+    "type": [
+      {
+        "name": "libellé de bouton de CONTENU",
+        "size": "~17",
+        "weight": "regular",
+        "color": "#ffffff",
+        "usage": "sans-serif, centré, encre 13 px — voir la note sur la graisse"
+      },
+      {
+        "name": "libellé de bouton de PIED DE PAGE",
+        "size": "~17",
+        "weight": "medium",
+        "color": "#ffffff / #393220",
+        "usage": "même encre 13 px, mais nettement plus gras — voir la note sur la graisse"
+      },
+      {
+        "name": "texte d'information",
+        "size": "~17",
+        "weight": "regular",
+        "color": "#ffffff",
+        "usage": "sans-serif, deux lignes, interligne 23 px"
+      },
+      {
+        "name": "titre de section",
+        "size": "~21",
+        "weight": "regular",
+        "color": "#b8b9ba",
+        "usage": "serif, x=29"
+      }
+    ]
+  },
+  "notes": [
+    "GRAISSE — le point central de ce relevé. Un libellé de bouton de contenu et un libellé de bouton de pied de page ont EXACTEMENT la même hauteur d'encre (13 px) mais pas la même graisse. Mesuré sur la même capture, avec la même méthode (carte d'encre normalisée, seuil 0,5) : épaisseur de fût moyenne 1,79 à 1,92 px et 2,77 à 2,89 px d'encre par colonne pour les quatre boutons de contenu, contre 2,02 px et 3,37 px/colonne pour « Annuler ». Le rapport contenu/pied de page vaut 0,82 en encre par colonne.",
+    "La comparaison ne vaut QU'À L'INTÉRIEUR de cette capture. Mesurer l'épaisseur de fût d'un texte clair sur fond moyen et la comparer à un rendu blanc sur noir donne des chiffres qui ne veulent rien dire : la normalisation et le seuillage ne coupent pas au même endroit. C'est le RAPPORT entre deux textes de la même image qui est exploitable, pas la valeur absolue.",
+    "« Valider » sort du lot (fût 3,17 px, 5,29 px d'encre par colonne) mais n'est pas un troisième niveau de graisse : c'est le seul texte SOMBRE sur fond clair de l'interface, et la capture y montre une ombre cuite. Déjà constaté en calibrant le bouton du pied de page (masse 268 contre 168 pour « Annuler » à hauteur d'encre égale). Ne pas en déduire une graisse de plus.",
+    "Les deux boutons d'une rangée sont séparés de 4 px, là où les deux boutons du pied de page le sont de 11 px. Ce n'est pas la même gouttière, et ce n'est pas un hasard : la paire de boutons de contenu reproduit exactement la largeur de la liste déroulante qui la coiffe (278 + 4 + 278 = 560), alors que le pied de page occupe la largeur utile de la fenêtre. La gouttière est ici une conséquence de l'alignement, pas une valeur choisie.",
+    "Les rangées de boutons sont séparées de 8 px, et la liste déroulante des boutons de 12 px.",
+    "Toutes les hauteurs de contrôle de cet onglet valent 36 px, bord sombre compris : liste déroulante, quatre boutons, bouton de réinitialisation. Le chiffre de 32 px qu'on lit en mesurant le remplissage est trompeur — il exclut les 2 px de bord haut et bas.",
+    "Le texte d'information est blanc pur, comme un libellé de bouton. L'impression de gris vient du fond et de l'absence de graisse, pas de la couleur. Un portage qui le grise s'écarte de la référence.",
+    "NON MESURÉ : le curseur d'échelle et sa ligne de case à cocher (bloc `bloc-echelle`), hors des cibles demandées."
+  ]
+}
