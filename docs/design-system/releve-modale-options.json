@@ -10,10 +10,10 @@
       "label": "Fenêtre modale",
       "box": [0, 0, 720, 561],
       "role": "surface",
-      "radius": 2,
+      "radius": 12,
       "fill": "#1e2225",
       "padding": [17, 0, 15, 10],
-      "notes": "Bordure extérieure 2 px #2a2e30. Fond texturé (losanges très sombres). Paddings latéraux asymétriques : 17 px à gauche du panneau, 15 px à droite.",
+      "notes": "Coin arrondi à 12 px (corrigé le 2026-09-10 : la première version portait 2, qui est l'épaisseur de la bordure et non le rayon du coin). Profil mesuré sur le coin haut-gauche de la capture ET sur `modal-header.png` : le liseré part de x=12 sur la première ligne et atteint x=0 douze lignes plus bas. C'est le SEUL rayon prononcé de l'interface, tout le reste est à 2. Bordure extérieure 2 px #2a2e30. Fond texturé (losanges très sombres). Paddings latéraux asymétriques : 17 px à gauche du panneau, 15 px à droite.",
       "children": [
         {
           "id": "header",
@@ -187,7 +187,7 @@
     },
     "space": [2, 4, 6, 8, 11, 12, 15, 16, 19, 26, 31, 36],
     "radius": {
-      "window": "2",
+      "window": "12",
       "control": "2",
       "scrollbar": "3",
       "checkbox": "0"
