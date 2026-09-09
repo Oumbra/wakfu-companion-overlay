@@ -1,0 +1,212 @@
+{
+  "title": "Modale Options",
+  "subtitle": "Relevé de la modale Options du client Wakfu, mesuré sur les six onglets (Jeu, Vidéo, Interface, Son, Commandes, Chat) — le chrome est identique dans les six, seul le contenu du panneau change.",
+  "source": "assets/design-system/interfaces/interface-options-video.png",
+  "canvas": [720, 561],
+  "scale": 1.6,
+  "nodes": [
+    {
+      "id": "window",
+      "label": "Fenêtre modale",
+      "box": [0, 0, 720, 561],
+      "role": "surface",
+      "radius": 2,
+      "fill": "#1e2225",
+      "padding": [17, 0, 15, 10],
+      "notes": "Bordure extérieure 2 px #2a2e30. Fond texturé (losanges très sombres). Paddings latéraux asymétriques : 17 px à gauche du panneau, 15 px à droite.",
+      "children": [
+        {
+          "id": "header",
+          "label": "Bandeau de titre",
+          "box": [2, 0, 718, 56],
+          "role": "surface",
+          "fill": "#1c7786",
+          "padding": [0, 21, 0, 12],
+          "notes": "Pleine largeur, collé au bord haut. Liseré supérieur clair #5cb8ca 2 px, dégradé vertical #259cb2 → #1c7786, ligne de base #307a87. Éclairement horizontal centré : #176170 aux bords, #1f8294 au centre.",
+          "children": [
+            {
+              "id": "header-title",
+              "label": "Titre « Options »",
+              "box": [320, 21, 402, 42],
+              "role": "text",
+              "notes": "Serif, blanc #fefefe, centré sur l'axe de la fenêtre (centre d'encre 361 pour un axe à 360). Hauteur d'encre 21 px (capitale + jambage)."
+            }
+          ]
+        },
+        {
+          "id": "tabbar",
+          "label": "Barre d'onglets",
+          "box": [2, 56, 718, 124],
+          "role": "group",
+          "padding": [19, 16, 13, 8],
+          "notes": "Bande sans fond propre. Les six onglets sont collés au bord gauche du panneau ; le bouton de réinitialisation est aligné à droite mais 13 px plus bas que les onglets.",
+          "children": [
+            {
+              "id": "tab-jeu",
+              "label": "Onglet « Jeu » (inactif)",
+              "box": [21, 72, 98, 116],
+              "role": "control",
+              "fill": "#363734",
+              "notes": "Fond gris #363734, libellé doré #f4d89e. Liseré haut #41423e."
+            },
+            {
+              "id": "tab-video",
+              "label": "Onglet « Vidéo » (actif)",
+              "box": [104, 72, 187, 116],
+              "role": "control",
+              "fill": "#625a47",
+              "notes": "Fond beige #625a47, libellé BLANC #ffffff. Liseré haut #8a8374, liseré bas #766e5c."
+            },
+            {
+              "id": "tab-interface",
+              "label": "Onglet « Interface » (survolé)",
+              "box": [193, 72, 296, 116],
+              "role": "control",
+              "fill": "#635a47",
+              "notes": "Fond identique à l'onglet actif ; seul le libellé diffère (doré #f4d89e). L'état survolé ne se distingue donc de l'actif QUE par la couleur du texte."
+            },
+            {
+              "id": "tab-son",
+              "label": "Onglet « Son »",
+              "box": [302, 72, 385, 116],
+              "role": "control",
+              "fill": "#363633"
+            },
+            {
+              "id": "tab-commandes",
+              "label": "Onglet « Commandes »",
+              "box": [391, 72, 524, 116],
+              "role": "control",
+              "fill": "#363633"
+            },
+            {
+              "id": "tab-chat",
+              "label": "Onglet « Chat »",
+              "box": [530, 72, 636, 116],
+              "role": "control",
+              "fill": "#363633",
+              "notes": "Largeurs des six onglets : 77 / 83 / 103 / 83 / 133 / 106. Le libellé est centré (marges gauche et droite égales à 1 px près) mais le padding horizontal n'est pas constant : 15 px pour « Interface » et « Commandes », jusqu'à 35 px pour « Chat ». Les largeurs semblent figées, pas calculées sur le contenu."
+            },
+            {
+              "id": "tab-reset",
+              "label": "Bouton réinitialiser",
+              "box": [669, 85, 705, 121],
+              "role": "control",
+              "fill": "#756b54",
+              "notes": "Carré 36×36, icône flèche circulaire blanche. Aligné sur le bord droit du panneau, mais son axe vertical (103) est 9 px sous celui des onglets (94)."
+            }
+          ]
+        },
+        {
+          "id": "panel",
+          "label": "Panneau de contenu",
+          "box": [17, 124, 705, 499],
+          "role": "surface",
+          "fill": "#15181c",
+          "padding": [12, 19, 26, 0],
+          "notes": "688 × 375. Bord 2 px #131518, fond texturé #15181c. Zone réservée à droite pour la barre de défilement : 26 px (679 → 705). Aucun rembourrage bas relevé : le contenu est coupé net par le bord.",
+          "children": [
+            {
+              "id": "panel-content",
+              "label": "Colonne de contenu (défilable)",
+              "box": [29, 143, 679, 499],
+              "role": "group",
+              "notes": "Origine du contenu : x = 29 pour les titres de section et les contrôles pleine largeur, x = 36 pour les lignes d'option indentées. Premier titre à y = 143, soit 19 px sous le bord du panneau."
+            },
+            {
+              "id": "scrollbar-thumb",
+              "label": "Poignée de défilement",
+              "box": [685, 140, 691, 376],
+              "role": "control",
+              "fill": "#515356",
+              "radius": 3,
+              "notes": "6 px de large seulement, sans rail dessiné : le fond du panneau tient lieu de gouttière. Ombre portée 2 px à droite. Marge de 14 px entre la poignée et le bord droit du panneau."
+            }
+          ]
+        },
+        {
+          "id": "footer",
+          "label": "Pied — actions",
+          "box": [17, 515, 704, 551],
+          "role": "group",
+          "notes": "Deux boutons de largeur strictement égale (338 px), séparés de 11 px. Ils occupent toute la largeur utile. 16 px séparent le bas du panneau du haut des boutons ; 8 px + bordure sous les boutons.",
+          "children": [
+            {
+              "id": "btn-cancel",
+              "label": "Bouton « Annuler » (destructif)",
+              "box": [17, 515, 355, 551],
+              "role": "control",
+              "radius": 2,
+              "fill": "#b84941",
+              "notes": "338 × 36. Dégradé vertical #c8534a → #85322c, liseré haut #d97a72 2 px, bord sombre 2 px #0e1014. Libellé blanc, centré."
+            },
+            {
+              "id": "btn-confirm",
+              "label": "Bouton « Valider » (primaire)",
+              "box": [366, 515, 704, 551],
+              "role": "control",
+              "radius": 2,
+              "fill": "#e3ca7f",
+              "notes": "338 × 36. Dégradé vertical #f1e4b2 → #b09856, bord sombre 2 px. Libellé brun très sombre #393220, centré — seul texte foncé de toute l'interface."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tokens": {
+    "color": {
+      "window-bg": "#1e2225",
+      "window-border": "#2a2e30",
+      "header-top": "#259cb2",
+      "header-bottom": "#1c7786",
+      "header-highlight": "#5cb8ca",
+      "panel-bg": "#15181c",
+      "panel-border": "#131518",
+      "tab-inactive": "#363734",
+      "tab-active": "#625a47",
+      "tab-separator": "#837d70",
+      "control-face-top": "#726852",
+      "control-face-bottom": "#665c49",
+      "control-highlight": "#a59f91",
+      "control-shadow": "#423b2e",
+      "control-outline": "#101215",
+      "accent-gold": "#f4d89e",
+      "accent-gold-dim": "#cea85c",
+      "field-border": "#595140",
+      "field-bg": "#0e1114",
+      "text-primary": "#ffffff",
+      "text-heading": "#b8b9ba",
+      "text-on-primary": "#393220",
+      "danger-top": "#c8534a",
+      "danger-bottom": "#85322c",
+      "primary-top": "#f1e4b2",
+      "primary-bottom": "#b09856",
+      "scrollbar-thumb": "#515356",
+      "info-icon": "#a69064"
+    },
+    "space": [2, 4, 6, 8, 11, 12, 15, 16, 19, 26, 31, 36],
+    "radius": {
+      "window": "2",
+      "control": "2",
+      "scrollbar": "3",
+      "checkbox": "0"
+    },
+    "type": [
+      {"name": "titre modale", "size": "~26", "weight": "regular", "color": "#fefefe", "usage": "serif, centré dans le bandeau, encre 21 px"},
+      {"name": "onglet", "size": "~17", "weight": "regular", "color": "#f4d89e / #ffffff (actif)", "usage": "sans-serif, encre 13 px, centré"},
+      {"name": "titre de section", "size": "~21", "weight": "regular", "color": "#b8b9ba", "usage": "serif, encre 21 px avec jambage, aligné x=29"},
+      {"name": "libellé d'option", "size": "~15", "weight": "regular", "color": "#ffffff décoché / #f4d89e coché", "usage": "sans-serif, encre 10 px, aligné x=64 après la case"},
+      {"name": "libellé de bouton", "size": "~16", "weight": "semibold", "color": "#ffffff / #393220", "usage": "sans-serif, centré dans le bouton"}
+    ]
+  },
+  "notes": [
+    "Le chrome (bandeau, barre d'onglets, panneau, pied) est rigoureusement identique sur les six captures : mêmes arêtes à y = 56, 74, 94, 101, 517, 549 dans les six fichiers. Seule la capture « Chat » est décalée de 1 px vers le haut (artefact de capture, pas une différence de gabarit).",
+    "L'état survolé d'un onglet reprend exactement le fond de l'état actif : la seule différence relevée est la couleur du libellé (blanc pour l'actif, doré pour survolé et inactif). Un portage qui ne distingue que par le fond rendrait les deux états indiscernables.",
+    "Le bouton de réinitialisation de la barre d'onglets n'est pas centré sur la ligne des onglets : son axe est 9 px plus bas. Le même bouton 36×36 réapparaît à l'intérieur du panneau (onglet Interface, à droite du curseur d'échelle) pour réinitialiser un réglage isolé.",
+    "La largeur des contrôles pleine largeur n'est pas unifiée : dans l'onglet Son le sélecteur de périphérique va de x=29 à x=679 (650 px, toute la largeur utile), alors que dans l'onglet Interface le sélecteur de thème s'arrête à x=596 (560 px), aligné sur les boutons secondaires qui le suivent. Il n'existe donc pas de largeur de champ unique à porter — c'est une décision à trancher pour l'overlay.",
+    "L'onglet Commandes est la seule variante structurelle : il insère un champ de recherche (30..500 × 138..163) dans une bande fixe, et le contenu défilable démarre seulement à y=169 dans un cadre propre avec sa propre barre de défilement. Les cinq autres onglets défilent d'un seul bloc.",
+    "Le pas de grille n'est pas régulier. Les écarts relevés entre arêtes se groupent autour de 2, 4, 6, puis 11-12, 15-16, 19, 26, 31 et 36. Postuler un pas de 8 px décalerait tout le contenu.",
+    "Rythme vertical du contenu : 31 px entre deux lignes d'option (case à cocher), constaté à l'identique dans Jeu (181→212), Chat (178→209→240→271) et pour les listes de langues (404→435→466). Une ligne portant un contrôle de 36 px passe à 39 px (Commandes : 204→243)."
+  ]
+}
