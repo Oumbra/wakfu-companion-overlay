@@ -53,31 +53,47 @@ survolée, elle revient au relâchement (même règle que les boutons icône).
 les trois variantes** (§5.1 : l'état désactivé est une désaturation complète, une seule capture
 existe).
 
+**Une variante peut avoir plusieurs textures, choisies par la HAUTEUR.** `Primary` en a deux :
+`button-primary.png` (200×52, bouton de fenêtre HDV) et `button-primary-compact.png` (338×36, pied
+de page de modale, générifiée depuis `large-button-validate.png`). Ce n'est pas une redondance qu'un
+étirement absorberait : l'embout décoratif mesure 52px sur la première et 34px sur la seconde.
+Rendre un bouton de pied de page avec la texture de fenêtre lui donne un embout une fois et demie
+trop large — invisible seul, criant à côté du bouton rouge voisin. Le composant retient la texture
+dont la **hauteur native est la plus proche** de la hauteur demandée.
+
 **Découpage 9-slice** : les hachures diagonales ne sont pas une texture de fond mais un **embout**
 d'extrémité — mesuré (`component.py insets`) à 43–51px des bords sur les textures 200×52 / 169×52,
-29–30px sur les 338×36, le centre étant un dégradé lisse. Marges figées : **52px** à gauche et à
-droite (32px pour les textures danger), **6px** en haut et en bas (arrondi 3–4px + liseré 2px),
-étirement sur les deux axes. Un bouton de 500px porte donc exactement deux embouts, comme un bouton
-de 200px.
+29–34px sur les 338×36, le centre étant un dégradé lisse. Marges figées : **52px** à gauche et à
+droite sur la famille 52px, **36px** sur la famille 36px, **6px** en haut et en bas (arrondi 3–4px +
+liseré 2px), étirement sur les deux axes. Un bouton de 500px porte donc exactement deux embouts,
+comme un bouton de 200px.
+
+**Graisse du libellé** : egui n'embarque qu'une Ubuntu Light et n'expose aucun réglage de graisse.
+`design::text::weighted` en fabrique une en repeignant la galley sur ses huit voisins immédiats à
+opacité réduite (`tokens::TEXT_WEIGHT`). Le rayon ne peut pas descendre sous le pixel : egui arrondit
+la position d'un texte au pixel entier, un halo à 0,3px est rigoureusement identique à pas de halo —
+c'est l'**opacité** qui donne le réglage fin.
 
 **Mesures** :
 
 | Grandeur | Valeur | Origine |
 | --- | --- | --- |
 | Hauteurs natives | 52px (HDV), 36px (pied de page de modale) | taille des textures |
-| Corps de police | `0,449 × hauteur` | hauteur d'encre 13px du libellé « Annuler » de `large-button-cancel.png`, ÷ 0,805 (hauteur de capitale mesurée sur le rendu egui) |
+| Corps de police | `17/36 × hauteur` | balayage dans egui de 30 couples corps × graisse comparés au pixel aux libellés gravés du jeu ; 17px est le seul corps qui retrouve les 13px d'encre de « Annuler » ET de « Valider » |
+| Graisse du libellé | halo à 20 % d'opacité | choisi à l'œil sur le même balayage : le jeu lui-même n'est pas cohérent (« Valider » sombre sur or est bien plus gras que « Annuler » blanc sur rouge), aucune valeur ne colle aux deux |
 | Marge horizontale | `0,55 × hauteur` | ordre de grandeur de §4 du design-system — **estimation** |
 | Largeur minimale | `2,5 × hauteur` | garde-fou de proportion — **réglage**, pas une mesure |
 
 **Remplace** : les assets taillés sur mesure `assets/design-system/large-button-cancel.png` /
 `large-button-validate.png` — un PNG par taille **et** par libellé.
 
-**Migration non faite.** `panels::options_modal` charge encore ses propres copies
-(`crates/overlay-ui/assets/ui/options/footer-cancel.png` / `footer-validate.png`, 338×36, libellé
-incrusté) et s'appuie sur `panels::nine_slice`, une seconde implémentation du 9-slice arrivée le
-même jour (marge unique, étirement seul, pas de répétition). Le prochain lot doit : porter les trois
-boutons de la modale sur `design::button`, supprimer ces quatre assets, et retirer
-`panels::nine_slice` au profit de `design::nine_slice`.
+**Migration faite (2026-09-09).** Les trois boutons de `panels::options_modal` — « Annuler »,
+« Valider », « Sélectionner le fichier » — sont des appels à `design::button`. Ont disparu avec eux
+les quatre PNG de `crates/overlay-ui/assets/ui/options/` (copies octet pour octet d'assets déjà au
+manifeste) et le module `panels::nine_slice`, seconde implémentation du 9-slice (marge unique,
+étirement seul, pas de répétition). Le gain visible est sur « Sélectionner le fichier » : rendu à
+700px depuis une texture de 169px, son ancien 9-slice ne figeait que 14px de chaque côté — les
+croisillons tombaient dans la bande médiane et s'y étiraient sur près de 200px.
 
 ---
 

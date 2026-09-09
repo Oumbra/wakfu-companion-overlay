@@ -177,7 +177,7 @@ wakfu-companion-overlay/
 │   ├── overlay-sync/              # API + file persistante + auth
 │   │   └── src/{client.rs,pairing.rs,token_store.rs,queue.rs}  # auth native (L4) fait ; catalogue (L3) fait ; file d'envoi (L5) fait — voir son statut au §12
 │   ├── overlay-ui/                # egui : design system, panneaux, i18n
-│   │   ├── src/design/            # composants réutilisables (§9.2) : assets.rs, nine_slice.rs,
+│   │   ├── src/design/            # composants réutilisables (§9.2) : assets.rs, nine_slice.rs, text.rs,
 │   │   │                          #   tokens.rs, components/{button.rs,…}
 │   │   └── src/{app.rs,panels/{damage.rs,tracker.rs,alerts.rs,recap.rs,status.rs},theme.rs}
 │   └── overlay-platform/          # tout le code spécifique OS
@@ -799,14 +799,30 @@ Décisions :
 - **Galerie de non-régression** (`crates/overlay-testkit/tests/design_gallery.rs`, §17.1) : toutes
   les variantes et tous les états sur une capture unique, à publier en Artifact.
 
-**Doublon connu, à résorber** : `panels::nine_slice` (ajouté le même jour par la refonte visuelle
-de la modale Options, ci-dessus) fait le même travail que `design::nine_slice` en plus simple —
-marge unique sur les quatre côtés, étirement seul, pas de répétition. `options_modal` charge par
-ailleurs `footer-cancel.png`/`footer-validate.png`, deux textures de 338×36 **avec le libellé
-incrusté**, exactement le pattern que cette couche supprime. La migration de la modale sur
-`design::button` (et la suppression de `panels::nine_slice` + de ces assets) est le prochain lot ;
-elle n'a pas été faite dans la session qui a introduit `design/` pour ne pas entrer en conflit avec
-celle qui travaillait alors sur la modale.
+**Doublon résorbé (2026-09-09)** : `panels::nine_slice` — seconde implémentation du 9-slice
+arrivée le même jour avec la refonte visuelle de la modale Options (marge unique sur les quatre
+côtés, étirement seul, pas de répétition) — est supprimé, ainsi que les quatre PNG de
+`crates/overlay-ui/assets/ui/options/` que la modale chargeait (`footer-cancel.png`,
+`footer-validate.png`, `browse-button[-hover].png`), tous des copies octet pour octet d'assets déjà
+déclarés au manifeste `design::assets`. Les trois boutons de la modale sont maintenant des appels à
+`design::button`.
+
+Trois décisions prises à cette occasion :
+
+- **Plusieurs textures par variante, choisies par la hauteur.** Le jeu capture le même bouton or à
+  deux hauteurs, et son embout décoratif n'y a pas la même largeur (52px sur la texture 200×52,
+  34px sur la 338×36). Le composant retient donc la texture dont la hauteur native est la plus
+  proche de la hauteur demandée. `button-primary-compact[-hover].png` a été générifiée depuis
+  `large-button-validate[-hover].png` par le skill `design-asset`.
+- **Gouttière de pied de page** : 12pt entre « Annuler » et « Valider », l'échelle des 15px mesurés
+  sur `interface-options-jeu.png` (boutons en x 18..351 et 367..700 sur 720). La première version
+  les collait l'un à l'autre.
+- **Graisse synthétique du libellé** (`design::text`, `tokens::TEXT_WEIGHT`) : egui n'embarque
+  qu'une Ubuntu Light et n'expose aucun réglage de graisse ; la galley est repeinte sur ses huit
+  voisins immédiats à opacité réduite. Le rayon ne peut pas descendre sous le pixel — egui arrondit
+  la position d'un texte au pixel entier — c'est l'opacité qui donne le réglage fin. Corps et
+  graisse ont été choisis par un balayage rendu dans egui puis comparé au pixel aux libellés gravés
+  du jeu (voir `tokens::BUTTON_FONT_SIZE_RATIO`).
 
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
 Premier composant livré : le bouton texte. `panels::icon_button::paint_icon_button` reste hors
