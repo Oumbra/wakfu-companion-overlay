@@ -49,6 +49,12 @@ pub fn label_font(ctx: &Context, size: f32) -> FontId {
     famille(ctx, super::fonts::LABEL, size)
 }
 
+/// Police d'un libellé APPUYÉ, au corps demandé — la graisse que le jeu réserve à ses boutons de
+/// pied de page de modale. Voir [`super::fonts`] pour la mesure qui distingue les deux graisses.
+pub fn label_strong_font(ctx: &Context, size: f32) -> FontId {
+    famille(ctx, super::fonts::LABEL_STRONG, size)
+}
+
 /// Police d'un titre (bannière de modale, titre de section), au corps demandé — la serif grasse du
 /// jeu, voir [`super::fonts`]. Même repli que [`label_font`].
 pub fn title_font(ctx: &Context, size: f32) -> FontId {
