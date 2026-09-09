@@ -1406,6 +1406,24 @@ maîtrisée) et pour `ureq`/`tokio` (refus d'un second modèle de concurrence sa
   clippy) est documentée mais absente du disque à ce jour — à écrire d'abord, avant de greffer les
   Niveaux 1/2 dessus, pour disposer d'un signal de référence stable.
 
+### 17.3 bis Un panneau ne produit aucun effet hors de l'écran
+
+**Règle**, établie le 2026-09-09 après un incident : un panneau peint et **rend compte**, il
+n'exécute jamais lui-même un effet observable hors de la fenêtre — ouvrir une page, écrire un
+fichier, émettre une requête. Il remonte l'intention à l'hôte (`RenderOutcome`, `WatchlistOutcome`,
+`OptionsModalAction`), et l'hôte agit.
+
+Ce n'est pas une préférence de style. Le harnais du Niveau 1 **clique réellement** sur les boutons
+(`Harness::hover_at`/`drag_at`/`drop_at`) : un panneau qui produit un effet le produit donc à chaque
+`cargo test`. Le bouton « Détails » du panneau Suivi appelait `open::that(base_url())` directement —
+chaque exécution de la suite ouvrait le navigateur de la personne qui la lançait sur le déploiement
+dev, plusieurs fois dans la journée avant que l'utilisateur ne le signale.
+
+Faire remonter l'intention rend les panneaux inertes **par construction** : aucun test n'a à se
+souvenir de neutraliser quoi que ce soit, et un nouveau panneau ne peut pas réintroduire le problème
+sans que cela se voie dans sa signature. Le seul point du binaire qui appelle `open::that` est
+l'hôte (`main.rs`, `bin/overlay-ui-x11.rs`) — c'est vérifiable d'un `grep`.
+
 ### 17.4 Restitution humaine
 
 - Publication d'un artefact (page HTML avant/après pour le Niveau 1, courte vidéo pour le Niveau 2)
