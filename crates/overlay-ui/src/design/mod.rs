@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
+pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
 
 /// Identifiant de mémorisation dans `egui::Context` — voir `DesignSystem::get`.

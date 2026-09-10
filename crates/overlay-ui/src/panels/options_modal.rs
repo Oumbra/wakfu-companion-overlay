@@ -160,8 +160,6 @@ const TAB_INACTIVE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xC9, 0xA8, 0x6
 // trois qui vivaient ici étaient d'ailleurs fausses — fond #1C1E23 au lieu de #0E1115, bord d'1px
 // au lieu de 2, rayon 2 au lieu de 4.
 
-const ERROR_TEXT: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x60, 0x55);
-
 /// Fond de la modale (#1C2023) — légèrement translucide (laisse deviner le jeu derrière sur les
 /// bords, comme la référence réelle) : valeur donnée par l'utilisateur au colorimètre, remplace la
 /// première mesure automatique (plus sombre).
@@ -225,6 +223,15 @@ const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 /// Remplace deux valeurs qui ne s'accordaient ni entre elles ni avec le jeu : un champ à 34px et
 /// un bouton à 40px, alors que le pied de page était déjà à 36.
 const ROW_HEIGHT: f32 = 36.0;
+
+/// Écart entre la ligne de contrôle et le message d'erreur qui la commente.
+///
+/// **9px, pas 10.** Le relevé de section ne cote pas ce cas précis (le jeu n'a qu'un seul bloc
+/// d'information, en bas de l'onglet Interface, et il suit une grille de boutons, pas un champ) —
+/// c'est donc la valeur de son échelle d'espacement la plus proche du cas « un commentaire collé au
+/// contrôle qu'il commente » : celle qui sépare un titre du contrôle pleine largeur qu'il coiffe
+/// (7 à 9). Le 10 d'avant venait du même geste qu'ailleurs dans ce fichier — une valeur choisie.
+const INFO_GAP: f32 = 9.0;
 
 /// Hauteur du champ de chemin — sa hauteur NATIVE, plus basse que la ligne qui le porte. Voir
 /// `design::components::input` pour la mesure et pourquoi les deux diffèrent.
@@ -555,9 +562,19 @@ pub fn show(
             action = OptionsModalAction::Browse;
         }
 
+        // Message d'erreur — `design::info_text` au ton alerte depuis le 2026-09-10. C'était le
+        // dernier texte de la modale à échapper au design system : un `ui.label` à la police
+        // proportionnelle d'egui, au corps 13 arbitraire, sans pastille ni interligne relevé. Son
+        // rouge (`#e06055`) n'appartenait à aucune capture ; celui du composant est le rouge mesuré
+        // du bouton « Annuler ».
         if let Some(err) = &state.error {
-            ui.add_space(10.0);
-            ui.label(egui::RichText::new(err).color(ERROR_TEXT).size(13.0));
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::info_text(err)
+                    .tone(design::InfoTone::Alert)
+                    .width(inner_rect.width())
+                    .log_name("options-erreur"),
+            );
         }
     });
 

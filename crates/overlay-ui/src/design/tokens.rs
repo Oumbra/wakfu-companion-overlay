@@ -108,3 +108,41 @@ pub const INPUT_PADDING_X_RATIO: f32 = 6.0 / 25.0;
 /// libellé très court (« OK »), pour qu'il ne devienne pas un carré. Réglage d'ergonomie, pas une
 /// mesure.
 pub const BUTTON_MIN_ASPECT: f32 = 2.5;
+
+// ---------------------------------------------------------------------------------------------
+// Texte d'information — mesuré sur le bloc en bas de l'onglet Interface
+// (`releve-options-interface.json`, nœud `info`), le seul de toute la fenêtre Options du jeu.
+// Détail des sources dans `design::components::info_text`.
+// ---------------------------------------------------------------------------------------------
+
+/// Couleur du texte d'information — **blanc pur**, pas un gris. Note du relevé : « l'impression de
+/// gris vient du fond et de l'absence de graisse, pas de la couleur ».
+pub const INFO_TEXT: Color32 = Color32::WHITE;
+
+/// Couleur de la pastille — `info-dot` de `releve-options-interface.json`, mesurée sur le disque
+/// doré du bloc d'information.
+pub const INFO_DOT: Color32 = Color32::from_rgb(0xA6, 0x90, 0x64);
+
+/// Couleur du ton **alerte** — pastille et texte à la fois.
+///
+/// **La composition est une extension assumée**, le jeu n'ayant aucune variante d'alerte relevée
+/// (voir `design::components::info_text`). La couleur, elle, ne l'est pas : c'est
+/// `accent_danger.top` de `design-tokens.json`, le haut du bouton « Annuler » — le seul rouge que
+/// le design system ait mesuré. Un rouge choisi à l'œil (l'ancien `#e06055` peint à la main dans
+/// `panels::options_modal`) n'appartenait à aucune capture.
+pub const INFO_ALERT: Color32 = Color32::from_rgb(0xC9, 0x52, 0x4A);
+
+/// Côté de la pastille, en pixels — boîte `[38, 438, 50, 450]` du relevé.
+pub const INFO_DOT_SIZE: f32 = 12.0;
+
+/// Gouttière entre la pastille et le texte — la pastille finit à x=50, le texte commence à x=57.
+pub const INFO_DOT_GAP: f32 = 7.0;
+
+/// Interligne, en pixels : haut d'encre à haut d'encre (y=436 puis y=459). **Une mesure, pas la
+/// hauteur naturelle de la police** — egui empilerait les lignes plus serré.
+pub const INFO_LINE_HEIGHT: f32 = 23.0;
+
+/// Corps du texte d'information — le même que celui d'un libellé de bouton, pour la même encre de
+/// 13 px. Une valeur absolue et non un ratio : ce bloc n'a pas de hauteur propre dont il pourrait
+/// dériver, sa hauteur est celle de son contenu.
+pub const INFO_FONT_SIZE: f32 = 17.0;

@@ -19,7 +19,7 @@
 
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
-use overlay_ui::design::{self, ButtonSize, ButtonState, ButtonVariant, InputState};
+use overlay_ui::design::{self, ButtonSize, ButtonState, ButtonVariant, InfoTone, InputState};
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
 /// jeu : les textures de bouton sont détourées, elles doivent être jugées sur le fond sur lequel
@@ -38,7 +38,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 1160.0))
+        .with_size(Vec2::new(760.0, 1545.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -200,4 +200,55 @@ fn gallery(ui: &mut egui::Ui) {
                 .size(ButtonSize::Compact),
         );
     });
+
+    heading(
+        ui,
+        "Texte d'information — pastille 12 px, interligne 23 px",
+        "Une ligne et deux lignes, dans les deux tons. La pastille se centre sur la PREMIÈRE ligne, jamais sur le bloc ; le retour à la ligne s'aligne sur le texte, pas sous la pastille.",
+    );
+    // Largeur imposée à 420 px pour que le second message repasse à la ligne de façon
+    // reproductible : sans elle, le bloc prendrait la largeur de la planche et le cas « deux
+    // lignes » — celui que le relevé mesure — ne serait pas couvert.
+    ui.add(
+        design::info_text("Le thème sera appliqué au prochain démarrage.")
+            .width(420.0)
+            .log_name("galerie.info-1"),
+    );
+    ui.add(
+        design::info_text(
+            "Le fichier sélectionné doit s'appeler wakfu.log : c'est le seul journal que le \
+             client écrive en continu.",
+        )
+        .width(420.0)
+        .log_name("galerie.info-2"),
+    );
+    ui.add(
+        design::info_text("Aucun fichier sélectionné.")
+            .tone(InfoTone::Alert)
+            .width(420.0)
+            .log_name("galerie.alerte-1"),
+    );
+    ui.add(
+        design::info_text(
+            "Le fichier sélectionné doit s'appeler wakfu.log. Choisissez-en un autre, ou \
+             corrigez le chemin à la main.",
+        )
+        .tone(InfoTone::Alert)
+        .width(420.0)
+        .log_name("galerie.alerte-2"),
+    );
+
+    heading(
+        ui,
+        "Le cas de référence, aux cotes exactes du jeu",
+        "Le message et la largeur du bloc d'information de l'onglet Interface (590 px, x 38..628) : à comparer directement avec interface-options-interface.png, y 436..477.",
+    );
+    ui.add(
+        design::info_text(
+            "Il peut être nécessaire de relancer le jeu après avoir rechargé le thème pour que \
+             toutes les textures soient correctement chargées.",
+        )
+        .width(590.0)
+        .log_name("galerie.info-reference"),
+    );
 }

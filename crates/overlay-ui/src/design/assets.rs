@@ -57,6 +57,14 @@ pub const BUTTON_SLICE: NineSlice = button_slice(52.0);
 /// conçu pour être long.
 pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(36.0);
 
+/// Découpage d'une **icône** : aucune marge figée, mise à l'échelle uniforme sur les deux axes.
+///
+/// Ce n'est pas un 9-slice dégénéré par paresse — c'est ce qu'une icône demande. Figer des coins
+/// sur un glyphe de 27 px le déformerait dès qu'on le peint à 12, et il n'y a rien de périodique à
+/// répéter. Passer par `DesignSystem::paint` malgré tout garde un seul chemin de peinture pour
+/// toutes les textures du manifeste.
+pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretch, Fill::Stretch);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -84,6 +92,13 @@ pub enum DsTexture {
     /// n'indique que le jeu en ait une par variante. Réutilisée telle quelle plutôt que
     /// d'inventer deux fichiers.
     ButtonDisabled,
+    /// Pastille « i » du bloc d'information (`icons/icon-info.png`, 27 × 28).
+    ///
+    /// **La seule icône du manifeste, et la seule texture qui n'y soit pas un 9-slice** : un
+    /// glyphe n'a ni embout ni bande médiane, ses marges figées sont donc nulles et il est
+    /// simplement mis à l'échelle. Blanche dans le fichier, elle prend sa couleur par teinte —
+    /// c'est ce qui permet au ton `Alert` de `design::info_text` d'exister sans second fichier.
+    IconInfo,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -112,6 +127,7 @@ impl DsTexture {
         DsTexture::ButtonDanger,
         DsTexture::ButtonDangerHover,
         DsTexture::ButtonDisabled,
+        DsTexture::IconInfo,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -167,6 +183,11 @@ impl DsTexture {
                 name: "ds-button-disabled",
                 bytes: ds_asset!("button-disabled.png"),
                 slice: BUTTON_SLICE,
+            },
+            DsTexture::IconInfo => DsTextureSpec {
+                name: "ds-icon-info",
+                bytes: ds_asset!("icons/icon-info.png"),
+                slice: ICON_SLICE,
             },
         }
     }
