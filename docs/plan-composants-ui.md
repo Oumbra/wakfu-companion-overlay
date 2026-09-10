@@ -17,7 +17,7 @@ Les trois décisions préalables sont prises et consignées. **Le lot 0 est fait
 | Lot | Objet | État |
 | --- | --- | --- |
 | 0 | Ménage — sans dépendance, sans décision | ✅ `5ccf0d2`, `2941efd`, `973ead6` |
-| 1 | La couche conteneur (`window`, `panel`, `heading`, `field`) | à faire |
+| 1 | La couche conteneur (`window`, `panel`, `heading`) | ✅ `3becdc7` — 1.3 requalifié, voir ci-dessous |
 | 2 | Icônes et infobulle | à faire, **terrain occupé** |
 | 3 | Tests de géométrie des composants livrés | à faire |
 | 4 | Formulaires — vague 2 du catalogue | à faire |
@@ -203,7 +203,7 @@ contient. Tout ce lot relève de la seconde famille du contrat (§1 bis).
 `panels/options_modal.rs` fait **823 lignes**. `chrome()` en a déjà extrait le décor — c'est ce qui
 rend ce lot sûr : il s'agit d'un **déplacement**, pas d'une réécriture, et le snapshot le vérifie.
 
-## 1.1 — `design::window`
+## 1.1 — `design::window` ✅
 
 Remonter `panels::options_modal::{Chrome, chrome, FooterClick}` dans
 `design/components/window.rs`, en **forme « zone rendue »** — c'est le cas nominal prévu par le
@@ -218,7 +218,7 @@ absence), la taille de bannière.
 supprime ce paramètre — faire 0.1 **avant** 1.1, sinon le composant naîtrait avec une texture en
 paramètre, ce que le contrat interdit (§1).
 
-## 1.2 — `design::panel` et `design::heading`
+## 1.2 — `design::panel` et `design::heading` ✅
 
 - `panel` — le panneau de contenu (`#15181c`, bord 2 px `#131518`, rayon 2), forme closure.
 - `heading` — titre de fenêtre et titre de section : serif, ombre bas-droite, et surtout **l'espace
@@ -228,24 +228,56 @@ paramètre, ce que le contrat interdit (§1).
 Les deux existent déjà en code dans `options_modal` (`section_title`, le bloc de peinture du
 panneau) : même travail de déplacement que 1.1.
 
-## 1.3 — `design::field`
+## 1.3 — `design::field` : **requalifié, pas écrit** (2026-09-10)
 
-La ligne « libellé + contrôle » : gouttière, largeur du contrôle déduite de celle du reste, et la
-règle du design system — **la hauteur d'un composant est celle de sa référence, pas celle de son
-voisin** (le champ garde ses 25 px natifs sur une ligne que le bouton fixe à 36). Le cas réel est
-écrit et validé dans `options_modal`, il s'agit de le généraliser.
+### Ce qui était prévu
 
-## Critère de fin du lot 1
+« La ligne *libellé + contrôle* : gouttière, largeur du contrôle déduite de celle du reste, et la
+règle du design system — la hauteur d'un composant est celle de sa référence, pas celle de son
+voisin. Le cas réel est écrit et validé dans `options_modal`, il s'agit de le généraliser. »
+
+### Ce que l'écriture a révélé
+
+**Ce sont deux composants différents, et le plan les confondait.**
+
+- Le `field` du **jeu** est un *libellé à gauche, un contrôle à droite* : « Prix unitaire », «
+  Quantité », « Durée de publication » (`interfaces/interface-hdv-vente-form.png`). Aucun relevé
+  `ui-blueprint` ne le cote aujourd'hui — l'écrire reviendrait à deviner sa gouttière et son
+  alignement, ce que l'étape 2 du skill `ui-component` interdit explicitement.
+- Le cas réel de la **modale Options** n'a pas de libellé : c'est un contrôle élastique et un
+  bouton d'action à sa droite. C'est une *ligne*, pas un champ de formulaire.
+
+Et ce second motif **n'a qu'un seul usage dans tout le dépôt**. Vérifié : les maquettes de la page
+Alertes ne calculent aucune ligne de ce genre — leurs quatorze rectangles sont des lignes de liste,
+des en-têtes de colonnes et des positions de glyphes, c'est-à-dire la matière du `table` de la
+vague 3, pas celle-ci.
+
+Un composant écrit pour un seul appelant, sur un relevé qui n'existe pas, est un composant à
+refaire. Il n'est donc pas écrit, et le catalogue garde `design::field` en vague 2 avec la mention
+qui manquait : **relevé `ui-blueprint` d'abord**.
+
+### Ce que cela change au critère de fin
+
+Le critère « zéro `egui::Rect::from` dans le panneau » était trop absolu. Répartir deux contrôles
+sur une ligne **est** une décision de mise en page, et §6 du contrat en donne la responsabilité au
+panneau, pas au composant. Deux rectangles y sont légitimes ; onze ne l'étaient pas.
+
+## Critère de fin du lot 1 — atteint
 
 ```bash
-wc -l crates/overlay-ui/src/panels/options_modal.rs          # < 300
-grep -c "egui::Rect::from" crates/overlay-ui/src/panels/options_modal.rs   # 0
+wc -l crates/overlay-ui/src/panels/options_modal.rs          # 823 → 317
+grep -c "egui::Rect::from" …/options_modal.rs                # 11 → 2 (voir 1.3)
+grep -c "^const " …/options_modal.rs                         # 30 → 5
 ```
-Snapshots `options_modale_sur_damier.png` et `options_modale_avec_erreur.png` **inchangés**, et les
-maquettes de la page Alertes rendues à l'identique. La galerie gagne trois entrées, chacune avec du
-contenu débordant pour montrer l'écrêtage.
 
-**Estimation** : 2 à 3 séances.
+Les treize snapshots passent **sans qu'aucun ne bouge d'un pixel** — c'est ce qui prouve que le
+déplacement du décor n'a rien altéré, et c'était le vrai critère. La galerie gagne une entrée : les
+trois conteneurs composés à 640 × 300, avec un contenu qui déborde pour que l'écrêtage se voie.
+
+Artefact publié le 2026-09-10 (« Trois conteneurs de fenêtre »).
+
+**Estimation** : 2 à 3 séances. **Réalisé** : 1 séance, parce que `chrome()` avait déjà fait la
+moitié du chemin la veille.
 
 ---
 
