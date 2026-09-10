@@ -24,4 +24,5 @@
 //!    variante et tout état visibles sur une capture unique, comparée à chaque exécution.
 
 pub mod button;
+pub mod info_text;
 pub mod input;
