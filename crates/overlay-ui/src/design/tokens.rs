@@ -192,3 +192,26 @@ pub const TAB_MIN_WIDTH: f32 = 77.0;
 
 /// Corps du libellé d'onglet — 17px, la même encre de 13px que tous les libellés du jeu.
 pub const TAB_FONT_SIZE: f32 = 17.0;
+
+// ---------------------------------------------------------------------------------------------
+// Case à cocher — mesurée sur `releve-section-options.json` (nœuds `cb1` à `cb3`) et sur les deux
+// assets, qui font exactement la taille relevée. Détail dans `design::components::checkbox`.
+// ---------------------------------------------------------------------------------------------
+
+/// Côté de la case — 20px, `cb1` en `[36, 173, 56, 193]`, confirmé par les deux assets 20 × 20.
+pub const CHECKBOX_SIZE: f32 = 20.0;
+
+/// Écart entre la case et son libellé — la case finit à x=56, le libellé commence à x=62.
+pub const CHECKBOX_LABEL_GAP: f32 = 6.0;
+
+/// Corps du libellé d'une case — **15, pas 17**. Le jeton `libellé d'option` de
+/// `releve-modale-options.json` donne une encre de 10px, plus petite que les 13px d'un libellé de
+/// bouton : une ligne d'option n'est pas un contrôle, elle se lit en continu.
+pub const CHECKBOX_FONT_SIZE: f32 = 15.0;
+
+/// Libellé d'une case DÉCOCHÉE — blanc.
+pub const CHECKBOX_LABEL_OFF: Color32 = Color32::WHITE;
+
+/// Libellé d'une case COCHÉE — l'or du jeu. **Le libellé porte l'état autant que la case** : le jeu
+/// double toujours son signal, comme la barre d'onglets le fait avec le sien.
+pub const CHECKBOX_LABEL_ON: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
