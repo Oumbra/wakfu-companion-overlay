@@ -665,6 +665,91 @@ onglets**.
 
 ---
 
+## `design::window` — chrome de fenêtre (2026-09-10)
+
+`crates/overlay-ui/src/design/components/window.rs` — **composant conteneur**, forme « zone
+rendue » (§1 bis du contrat).
+
+```rust
+let chrome = design::window("Options")
+    .footer("Annuler", "Valider")
+    .log_name("options")
+    .show(ui);
+
+chrome.tabs(ui, design::tabs(&mut state.tab).entry(Tab::Parametres, "Paramètres"));
+match chrome.footer { design::FooterClick::Validate => …, _ => {} }
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `title` (à la construction) | peint dans la bannière, serif grasse cernée d'une ombre bas-droite | — |
+| `tab_bar_height` | hauteur réservée à la barre d'onglets ; `0.0` pour une fenêtre sans onglets | `tokens::TAB_HEIGHT` (44) |
+| `footer` | libellés des deux boutons — annulation à gauche, validation à droite | aucun pied de page |
+| `log_name` | préfixe des deux boutons dans le journal | `fenetre` |
+
+Rend un `WindowChrome` : `tab_bar` (la bande d'onglets), `content` (entre onglets et pied) et
+`footer` (le clic reçu). **`content` n'est pas écrêtée** — c'est le prix de la forme « zone rendue »,
+et la raison pour laquelle le contenu passe normalement par `design::panel`.
+
+**La barre d'onglets n'est pas peinte par le chrome** : `WindowChrome::tabs` la pose à partir du
+`Tabs` que l'appelant construit. Un onglet est du contenu, pas du décor — et c'est aussi ce qui
+évite de rendre la fenêtre générique sur le type d'onglet de son contenu.
+
+**Utilisé en production** : la modale Options (`panels::options_modal`) et les maquettes de la page
+Alertes (`crates/overlay-testkit/examples/alertes-mockups.rs`).
+
+---
+
+## `design::panel` — panneau de contenu (2026-09-10)
+
+`crates/overlay-ui/src/design/components/panel.rs` — **composant conteneur**, forme closure.
+
+```rust
+design::panel().show(ui, chrome.content, |ui, panel| {
+    ui.add(design::heading("Fichier"));
+    ui.add(design::input(&mut state.path));
+    panel.scroll_area(ui, "options-contenu", |ui, width| { … });
+});
+```
+
+**Un panneau n'est pas une section.** Le relevé est catégorique : dans le jeu, une *section* n'a ni
+fond, ni bordure, ni filet — son seul signal de regroupement est l'espacement, et son seul signal de
+niveau le retrait de 7 px de son titre. Ce qui a un fond (`#15181c`), un bord (2 px `#131518`) et un
+rayon (2), c'est le **panneau** qui contient les sections.
+
+Ce qu'il fait pour son contenu, et qu'aucun appelant n'a donc plus à faire : les rembourrages, la
+réserve de barre de défilement à droite (26 px, **toujours posée**, comme le jeu), l'écrêtage — élargi
+à gauche du retrait des titres, sans quoi un titre de section perd sa première lettre —, et la mise à
+zéro de l'espacement implicite d'egui.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+
+---
+
+## `design::heading` — titre de section (2026-09-10)
+
+`crates/overlay-ui/src/design/components/heading.rs` — composant **feuille**.
+
+```rust
+ui.add(design::heading("Fichier"));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `text` (à la construction) | le titre | — |
+| `trailing_gap` | écart réservé sous le titre | `tokens::HEADING_TO_ROW` (7) |
+
+Serif grasse au corps du titre de fenêtre (21), **gris `#b8b9ba` et non blanc** : la hiérarchie
+entre les deux niveaux de titre du jeu passe par la couleur, pas par le corps.
+
+Deux pièges que le composant absorbe : il réserve la hauteur d'**encre** (16) et non celle de sa
+galley — réserver la galley ajoutait ~14 px invisibles sous le titre, sur sept relevés — et il
+applique lui-même le **retrait de 7 px** qui est, dans le jeu, le seul signal qu'une section existe.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -683,9 +768,6 @@ main, soit environ 250 lignes qui ne font que placer des rectangles.
 
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
-| **`design::window`** (conteneur) | Le chrome complet d'`options_modal` : bannière, titre, corps, pied à deux boutons, réserve de barre de défilement. | `modal-header.png`, `flat-template_2-without-decorations.png`, `decoration-{top,right,bottom}.png` ; `releve-modale-options.json` ; §9 / 9 bis / 9 ter du design-system. |
-| **`design::panel` / `design::section`** | Le panneau de contenu (`#15181c`, bord 2px `#131518`, rayon 2) et le regroupement par espacement seul. | `releve-section-options.json` — la distinction panneau/section y est déjà tranchée. |
-| **`design::heading`** | Les deux blocs de titre peints à la main dans la modale, avec le calcul de hauteur d'encre et l'ombre bas-droite. | Corps 21 (bannière) / 18 (section), `#b8b9ba`, `text::SHADOW_BOTTOM_RIGHT`. |
 | **`design::tooltip`** | `panels::tooltip` et ses trois enveloppes (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`/`_right`), placement et replis compris. | `TOOLTIP_MARGIN`, `TOOLTIP_GAP`, `TOOLTIP_BG_FILL` mesurés. |
 | **`design::icon` + `DsIcon`** — *décidé le 2026-09-10, voir ci-dessous* | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
 
