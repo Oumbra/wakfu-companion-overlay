@@ -84,7 +84,7 @@ use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
 use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsTexture, IconContext, InputSize};
-use overlay_ui::panels::options_modal::{self, OptionsModalAssets, OptionsTab};
+use overlay_ui::panels::options_modal::{self, OptionsTab};
 use overlay_ui::ui_icons::UiIcons;
 
 // -------------------------------------------------------------------------------------------
@@ -678,7 +678,6 @@ fn options_harness(
     mut build: impl FnMut(&mut egui::Ui, &UiIcons, &options_modal::Chrome, Rect) + 'static,
 ) -> Harness<'static> {
     let mut icons: Option<UiIcons> = None;
-    let mut assets: Option<OptionsModalAssets> = None;
     let mut tab = OptionsTab::Alertes;
     Harness::builder().with_size(size).build_ui(move |ui| {
         overlay_ui::style::apply(ui.ctx());
@@ -686,15 +685,10 @@ fn options_harness(
         // recharger à chaque frame libérerait les `TextureHandle` du frame précédent en fin de
         // closure, et les emplacements de rareté se peindraient vides.
         let icons = icons.get_or_insert_with(|| UiIcons::load(ui.ctx()));
-        let assets = assets.get_or_insert_with(|| OptionsModalAssets::load(ui.ctx()));
         egui::Frame::NONE.fill(BACKDROP).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
-            let chrome = options_modal::chrome(
-                ui,
-                assets,
-                &mut tab,
-                &[OptionsTab::Alertes, OptionsTab::Parametres],
-            );
+            let chrome =
+                options_modal::chrome(ui, &mut tab, &[OptionsTab::Alertes, OptionsTab::Parametres]);
             let window = ui.max_rect();
             let inner = chrome.inner;
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {

@@ -290,46 +290,6 @@ const INFO_GAP: f32 = 9.0;
 /// Hauteur du champ de chemin — sa hauteur NATIVE, plus basse que la ligne qui le porte. Voir
 /// `design::components::input` pour la mesure et pourquoi les deux diffèrent.
 const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
-/// Textures embarquées du chrome de la modale — chargées UNE FOIS par fenêtre OS (voir
-/// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`, même principe que
-/// `panels::combat_frame::CombatFrame`/`crate::ui_icons::UiIcons`), jamais rechargées à chaque
-/// frame. Fichiers sous `crates/overlay-ui/assets/ui/options/`.
-///
-/// **Ne contient plus aucune texture de bouton** : elles sont au manifeste du design system
-/// (`design::assets`), chargées paresseusement par `DesignSystem::get`, et aucun panneau n'a plus à
-/// les câbler. Ne reste ici que le chrome propre à cette modale.
-pub struct OptionsModalAssets {
-    /// `modal-header.png` (720×56) — fond de bannière, peint avec arrondi HAUT uniquement
-    /// (`MODAL_RADIUS`) pour épouser le coin de la modale.
-    banner: egui::TextureHandle,
-}
-
-impl OptionsModalAssets {
-    pub fn load(ctx: &egui::Context) -> Self {
-        Self {
-            banner: load_embedded_texture(
-                ctx,
-                "options-banner",
-                include_bytes!("../../assets/ui/options/modal-header.png"),
-            ),
-        }
-    }
-}
-
-/// Décode + charge un PNG embarqué en texture egui — même séquence que
-/// `panels::combat_frame::CombatFrame::load`/`crate::ui_icons::UiIcons::load` (`image` crate puis
-/// `egui::ColorImage::from_rgba_unmultiplied`), extraite ici pour ne pas la répéter 6 fois.
-fn load_embedded_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> egui::TextureHandle {
-    let decoded = image::load_from_memory(bytes)
-        .expect("asset PNG embarqué invalide — corrompu au build")
-        .to_rgba8();
-    let (width, height) = decoded.dimensions();
-    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-        [width as usize, height as usize],
-        decoded.as_raw(),
-    );
-    ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR)
-}
 
 /// Onglet affiché par la modale.
 ///
@@ -424,12 +384,7 @@ pub struct Chrome {
 /// `enabled_tabs` dit quels onglets sont cliquables. Ce n'est pas un réglage cosmétique mais
 /// l'état d'avancement du portage : `show` n'en active qu'un, une maquette peut en activer
 /// d'autres pour montrer ce qu'ils contiendront.
-pub fn chrome(
-    ui: &mut egui::Ui,
-    assets: &OptionsModalAssets,
-    tab: &mut OptionsTab,
-    enabled_tabs: &[OptionsTab],
-) -> Chrome {
+pub fn chrome(ui: &mut egui::Ui, tab: &mut OptionsTab, enabled_tabs: &[OptionsTab]) -> Chrome {
     let rect = ui.max_rect();
     let mut footer = FooterClick::None;
 
@@ -459,7 +414,7 @@ pub fn chrome(
     // coin natif de cette texture est assez petit (≈12px/720) pour rester imperceptible, voir doc
     // de module.
     let banner_rect = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), BANNER_HEIGHT));
-    egui::Image::new(&assets.banner)
+    egui::Image::new(design::DesignSystem::get(ui.ctx()).texture(design::DsTexture::ModalHeader))
         .corner_radius(egui::CornerRadius {
             nw: MODAL_RADIUS,
             ne: MODAL_RADIUS,
@@ -693,11 +648,7 @@ pub fn section_title(ui: &mut egui::Ui, text: &str) {
 
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
 /// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
-pub fn show(
-    ui: &mut egui::Ui,
-    state: &mut OptionsModalState,
-    assets: &OptionsModalAssets,
-) -> OptionsModalAction {
+pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAction {
     let mut action = OptionsModalAction::None;
 
     // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
@@ -713,8 +664,7 @@ pub fn show(
 
     // Tout le décor — voir [`chrome`]. « Paramètres » est le seul onglet cliquable : les deux
     // autres n'ont pas encore de contenu porté.
-    let Chrome { inner, footer, .. } =
-        chrome(ui, assets, &mut state.tab, &[OptionsTab::Parametres]);
+    let Chrome { inner, footer, .. } = chrome(ui, &mut state.tab, &[OptionsTab::Parametres]);
     match footer {
         FooterClick::Cancel => action = OptionsModalAction::Cancel,
         FooterClick::Validate => action = OptionsModalAction::Validate(state.path_input.clone()),
