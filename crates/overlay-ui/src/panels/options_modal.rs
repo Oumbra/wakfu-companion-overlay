@@ -110,20 +110,15 @@ const PANEL_PAD_TITLE_X: f32 = 12.0;
 /// retrait qui marque le niveau (relevé de section : « le seul signal de niveau est le retrait de
 /// 7px du titre par rapport à ses lignes »).
 const PANEL_PAD_CONTROL_X: f32 = 19.0;
-/// Rembourrage haut. **13, pour obtenir les 19 du relevé** — la différence n'est pas une erreur.
+/// Rembourrage haut — **19, la valeur du relevé telle quelle** (`releve-modale-options.json`, nœud
+/// `panel-content` : « Premier titre à y = 143, soit 19px sous le bord du panneau »).
 ///
-/// Le relevé cote 19px du bord du panneau au **haut d'ENCRE** du titre (`releve-modale-options.json`,
-/// nœud `panel-content` : « Premier titre à y = 143, soit 19px sous le bord du panneau »). Nous, ce
-/// que nous positionnons, c'est une galley, dont le haut est au-dessus de l'encre : la police y
-/// réserve la place des accents de capitale, que « Fichier » n'utilise pas. Cet écart mesure **6px**
-/// pour PT Serif Bold au corps 21 dans notre rendu (galley posée à 142, encre relevée à 148 sur la
-/// capture), d'où 19 − 6.
-///
-/// Conséquence à connaître : cette valeur est liée à la police ET au corps du titre. Si l'un des
-/// deux change, la re-mesurer sur la capture plutôt que la reporter telle quelle. C'est le prix
-/// d'une cote donnée en encre — les cotes horizontales, elles, sont données en bord de boîte et
-/// tombent juste sans correction.
-const PANEL_PAD_TOP: f32 = 13.0;
+/// Elle a longtemps valu 13, corrigée à la main des 6px que la police réserve au-dessus de l'encre
+/// pour les accents de capitale : le relevé cote une encre, et ce qui était positionné était une
+/// galley. Depuis l'étape 4 du plan de finalisation, c'est **l'encre du titre qui est réservée**
+/// (voir `SECTION_TITLE_INK_HEIGHT`/`SECTION_TITLE_INK_TOP`), et cette cote redevient donc celle du
+/// relevé — comme les cotes horizontales, qui n'ont jamais eu besoin de correction.
+const PANEL_PAD_TOP: f32 = 19.0;
 
 const TITLE_TEXT: egui::Color32 = egui::Color32::WHITE;
 
@@ -224,6 +219,39 @@ const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 /// Remplace deux valeurs qui ne s'accordaient ni entre elles ni avec le jeu : un champ à 34px et
 /// un bouton à 40px, alors que le pied de page était déjà à 36.
 const ROW_HEIGHT: f32 = 36.0;
+
+/// Écart entre le titre de section et la ligne de contrôle **pleine largeur** qu'il coiffe.
+///
+/// 8, la valeur médiane des « 7 à 9 px » relevés (`releve-section-options.json`, note « Rythme »).
+/// Le 10 d'avant était une valeur choisie, pas mesurée.
+///
+/// **Ne pas confondre avec les 30 px du même relevé**, qui séparent un titre de sa première ligne
+/// quand celle-ci est INDENTÉE (une case à cocher, un libellé suivi d'un contrôle). Le cas de cette
+/// modale est l'autre : « Fichier » coiffe une ligne pleine largeur, le rythme y est quatre fois
+/// plus serré. Reprendre 30 décollerait le champ de son titre.
+///
+/// Rappel du même relevé, à ne pas contourner : le pas de grille **n'est pas régulier**. « Les
+/// écarts se groupent autour de 2, 4, 6, puis 11-12, 15-16, 19, 26, 31 et 36. Postuler un pas de
+/// 8 px décalerait tout le contenu. » Que cette constante vaille 8 est une coïncidence de son
+/// intervalle, pas l'application d'une échelle.
+const TITLE_TO_FULL_WIDTH_ROW: f32 = 7.0;
+
+/// Hauteur d'ENCRE du titre de section, pour la serif du design system au corps
+/// [`SECTION_TITLE_FONT_SIZE`] — mesurée sur la capture de non-régression (« Fichier », y 155..170).
+///
+/// Sert à réserver au titre la place de son encre et non celle de sa galley, plus haute des deux
+/// côtés — voir le commentaire à l'endroit de l'allocation.
+///
+/// **Liée à la police ET au corps.** Si l'un des deux change, la re-mesurer sur la capture plutôt
+/// que la reporter telle quelle. C'est aussi vrai que le mot compte : « Fichier » n'a ni accent de
+/// capitale ni jambage ; un titre qui en porterait aurait une encre plus haute, et devrait alors
+/// être mesuré à part.
+const SECTION_TITLE_INK_HEIGHT: f32 = 16.0;
+
+/// Écart entre le haut de la galley du titre et le haut de son encre — **la même mesure que celle
+/// qui donnait autrefois `PANEL_PAD_TOP` à 13 au lieu de 19** : la place que la police réserve aux
+/// accents de capitale au-dessus des minuscules.
+const SECTION_TITLE_INK_TOP: f32 = 6.0;
 
 /// Écart entre la ligne de contrôle et le message d'erreur qui la commente.
 ///
@@ -494,6 +522,12 @@ pub fn show(
     /// Retrait du titre par rapport à ses contrôles — voir `PANEL_PAD_CONTROL_X`.
     const TITLE_OUTDENT: f32 = PANEL_PAD_CONTROL_X - PANEL_PAD_TITLE_X;
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+        // **Aucun espacement implicite dans ce panneau.** egui glisse `item_spacing.y` (3px par
+        // défaut) entre deux widgets empilés : les écarts relevés du jeu s'en trouvaient tous
+        // majorés de 3, et un `add_space` y lisait autre chose que ce qu'il produisait. Tout écart
+        // vertical est désormais une constante nommée de ce fichier, et rien d'autre.
+        ui.spacing_mut().item_spacing.y = 0.0;
+
         // Même traitement que le titre de bannière (serif grasse + ombre bas-droite), au corps
         // dicté par le rapport d'encre du jeu entre ses deux niveaux de titre. Peint à la main
         // plutôt que via `ui.label` : un libellé egui ne sait pas se cerner, et le procédé doit
@@ -504,19 +538,31 @@ pub fn show(
             section_font.clone(),
             SECTION_TITLE_TEXT,
         );
+        // **L'espace réservé est celui de l'ENCRE, pas celui de la galley** (2026-09-10, étape 4 du
+        // plan de finalisation). C'est ce qui permet aux deux cotes verticales du relevé
+        // (`PANEL_PAD_TOP` au-dessus, `TITLE_TO_FULL_WIDTH_ROW` en dessous) d'être ses valeurs
+        // telles quelles, au lieu de valeurs corrigées à la main d'une marge de police.
+        //
+        // Une galley est plus haute que son encre des deux côtés : la police y réserve la place des
+        // accents de capitale au-dessus et des jambages en dessous, que « Fichier » n'utilise ni
+        // l'un ni l'autre. Réserver la galley entière ajoutait donc ~14px invisibles entre le titre
+        // et sa ligne, sur 7 relevés.
         let section_title_rect = ui
-            .allocate_space(section_galley.size() + egui::vec2(1.0, 1.0))
+            .allocate_space(egui::vec2(
+                section_galley.size().x + 1.0,
+                SECTION_TITLE_INK_HEIGHT,
+            ))
             .1;
         design::text::paint_outlined_text(
             ui,
-            section_title_rect.left_top() - egui::vec2(TITLE_OUTDENT, 0.0),
+            section_title_rect.left_top() - egui::vec2(TITLE_OUTDENT, SECTION_TITLE_INK_TOP),
             egui::Align2::LEFT_TOP,
             "Fichier",
             section_font,
             SECTION_TITLE_TEXT,
             design::text::SHADOW_BOTTOM_RIGHT,
         );
-        ui.add_space(10.0);
+        ui.add_space(TITLE_TO_FULL_WIDTH_ROW);
 
         // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
         // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
