@@ -750,6 +750,54 @@ applique lui-même le **retrait de 7 px** qui est, dans le jeu, le seul signal q
 
 ---
 
+## `design::stepper` — pas numérique (2026-09-10)
+
+`crates/overlay-ui/src/design/components/stepper.rs` — composant **feuille**.
+
+```rust
+ui.add(design::stepper(&mut quantite).range(1..=999).log_name("hdv-quantite"));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `value` (à la construction) | `&mut i64`, muté par les deux boutons | — |
+| `range` | domaine autorisé ; la valeur y est **écrêtée à chaque frame**, y compris celle fournie | `i64::MIN..=i64::MAX` |
+| `step` | incrément d'un clic | 1 |
+| `size` | côté des deux boutons, **et donc hauteur du pas** — le socle est carré dans le jeu | `tokens::STEPPER_SIZE` (32) |
+| `field_width` | largeur du champ central ; sans elle, il prend toute la place restante | — |
+| `enabled` · `log_name` | comme partout | — |
+
+**Il ne peint rien lui-même** : deux `design::icon_button` au contexte `Stepper` et un
+`design::input` en lecture seule. Le socle vient du manifeste (`DsTexture::ButtonStepper`), les
+glyphes aussi (`IconPlus`, `IconMinus`).
+
+**Mesures, prises sur les deux captures du jeu** (`input-number.png` 104 × 28 et
+`large-input-number.png` 192 × 34), qui donnent les mêmes rapports — d'où des rapports et non des
+pixels :
+
+| Grandeur | Valeur | Vérification |
+| --- | --- | --- |
+| Gouttière | `STEPPER_GUTTER_RATIO` (0,267) | 26 + 7 + 38 + 7 + 26 = 104 ; 34 + 9 + 106 + 9 + 34 = 192 |
+| Encre du glyphe | `STEPPER_ICON_RATIO` (12/32) | 12 × 12 mesurés dans un socle de 32 |
+| Hauteur du champ | `STEPPER_FIELD_HEIGHT_RATIO` (26/34) | bordure du champ de y=4 à y=29 |
+| Teinte du glyphe | `STEPPER_ICON_TINT` (`#f4d89f`) | mesuré au pixel — **de l'or au repos** |
+
+**Trois choses que la comparaison au jeu a corrigées** (étape 6 du skill, sans laquelle aucune ne se
+serait vue) : le glyphe est **doré au repos**, alors que les deux autres contextes de bouton icône
+le peignent en gris et ne passent à l'or qu'au survol ; le champ **ne garde pas sa hauteur native**
+de 25 px mais suit son pas ; et le champ est en **lecture seule, pas désactivé** — sa valeur compte,
+le jeu l'écrit en or, pas en gris.
+
+**Deux écarts assumés**, faute de capture : aucun socle survolé n'existe pour cette famille (le
+survol ne se signale donc que par le curseur — une teinte egui *multiplie* la texture, elle ne peut
+pas l'éclaircir), et le champ n'est pas éditable au clavier (valider une saisie partielle est une
+spec à part entière, sans référence pour ses états d'erreur).
+
+**Pas encore utilisé en production.** Ses clients naturels : les boutons « + » / « − » du carré de
+contrôle du Suivi, et le couple quantité du formulaire de vente HDV.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -826,7 +874,6 @@ Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options e
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
 | **`input`** — variantes `Number`, `Search`, état d'erreur | *Extension du composant existant*, pas un second composant (skill `ui-component`, étape 1). | `input-number.png`, `input-search.png`, `empty-input-search.png`, `large-input-*.png` |
-| **`design::stepper`** | Les boutons « + » / « − » du carré de contrôle du Suivi ; le couple valeur ± du formulaire de vente. | `button-plus.png`, `button-moins.png` ; `stepper_height` 41–48 et `stepper_button_square` 30 déjà dans `design-tokens.json`. |
 | **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. | `collapse-closed.png`, `collapse-width-5th-opened.png`, `collapse-block.png`, `collapse-block-opened.png` ; `collapse_header_height` 38–45 relevé. §5.8. |
 | **`design::field`** | Rien aujourd'hui — le *libellé à gauche, contrôle à droite* du jeu (« Prix unitaire », « Quantité », « Durée de publication »). **À ne pas confondre** avec la ligne « contrôle élastique + bouton » de la modale Options, qui n'a pas de libellé et n'a qu'un seul usage. | Captures `interface-hdv-vente-form.png` ; **relevé `ui-blueprint` d'abord**, aucune cote n'existe. |
 | **`design::slider`** | Rien aujourd'hui. | Aucun asset découpé — passer par `design-asset` d'abord ; captures dans `interface-options-son.png` et `interface-options-interface.png`. |

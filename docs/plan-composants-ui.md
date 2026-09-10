@@ -21,7 +21,7 @@ lot 2 attend que le terrain se libère, et le lot 4 est le prochain.
 | 1 | La couche conteneur (`window`, `panel`, `heading`) | ✅ `3becdc7` — 1.3 requalifié, voir ci-dessous |
 | 2 | Icônes et infobulle | à faire, **terrain occupé** |
 | 3 | Tests de géométrie des composants livrés | ✅ `a1f24e8` — critère révisé, voir le lot |
-| 4 | Formulaires — vague 2 du catalogue | à faire |
+| 4 | Formulaires — vague 2 du catalogue | en cours — `stepper` fait (`da37c8b`) |
 | 5 | Données — vague 3 du catalogue | à faire |
 | 6 | Finitions — vague 4 du catalogue | à faire |
 
@@ -387,6 +387,25 @@ Deux rappels qui valent pour tout ce lot :
 `stepper` et `collapsible` ont leurs cotes **déjà relevées** dans
 [`design-tokens.json`](design-tokens.json) (`stepper_height` 41–48, `stepper_button_square` 30,
 `collapse_header_height` 38–45).
+
+### Avancement
+
+| Composant | État |
+| --- | --- |
+| `design::stepper` | ✅ `da37c8b` — avec `Input::read_only`, que son champ central a rendu nécessaire |
+| `input` — `Search` | ✅ déjà couvert par `Input::leading_icon` (`0923a45`, session parallèle) |
+| `input` — `read_only` | ✅ `da37c8b` |
+| `design::collapsible` | à faire — 4 assets prêts, cote relevée |
+| `input` — état d'erreur | à faire |
+| `design::slider` | à faire — **`design-asset` d'abord**, aucun asset découpé |
+| `tabs` — variante icône | à faire — dépend de `DsIcon` (lot 2) |
+
+**Ce que le `stepper` a appris, et qui vaut pour la suite du lot** : la taille d'encre d'un glyphe
+n'est **pas une propriété de l'asset seul** mais du couple (asset, contexte) — le même « + » se
+peint à 18 sur un socle de barre et à 12 sur un socle de pas. `IconContext` porte donc désormais sa
+propre grille, sa propre taille native de socle et, quand il en impose une, sa propre teinte de
+glyphe. Les deux contextes existants retombent sur le manifeste : leur rendu est inchangé, ce que
+les snapshots vérifient.
 
 **Critère de fin** : l'onglet Alertes de la modale Options se compose sans qu'aucun panneau ne
 peigne un widget à la main.
