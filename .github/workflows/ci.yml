@@ -11,25 +11,59 @@
 # (`--lib`) compile nativement sous Linux (voir `crates/overlay-ui/src/lib.rs`), tout comme le
 # second binaire du même paquet, `overlay-ui-x11` (§17.2 du plan) — build/clippy/test le ciblent
 # donc explicitement en plus de `--lib`.
+#
+# ⚠ SOURCE DE VÉRITÉ PARTAGÉE : la liste des vérifications ci-dessous est dupliquée dans
+# `scripts/ci-local.sh`, qui les rejoue EN LOCAL avant un push (et que le hook `pre-push` de
+# `.githooks/` lance en mode `--lint`). Toute étape ajoutée/retirée ici doit l'être là-bas aussi —
+# ce script est le garde-fou qui évite de découvrir un `fmt`/`clippy` rouge après coup, et il ne
+# protège que ce qu'il connaît.
+#
+# La version de Rust vient de `rust-toolchain.toml` (épinglée), pas d'un `@stable` flottant : voir
+# la doc de ce fichier — c'est la dérive de version qui a tenu ce CI rouge du 2026-09-01 au
+# 2026-09-10, sur un seul écart de `cargo fmt`.
 name: CI
 
 on:
   push:
     branches: [dev, main, master]
+    # Un commit qui ne touche QUE de la prose ne peut pas casser une compilation Rust : inutile de
+    # dépenser cinq jobs (dont un Windows, facturé double) pour lui. `assets/**` n'est
+    # VOLONTAIREMENT PAS dans cette liste — `assets/design-system/`, `assets/fonts/` et les assets
+    # de `crates/overlay-ui/assets/` sont embarqués par `include_bytes!` (design/assets.rs,
+    # design/fonts.rs, ui_icons.rs…) : les toucher peut casser la compilation ET les snapshots
+    # d'`overlay-testkit`. GitHub n'applique l'exclusion que si TOUS les fichiers du push
+    # correspondent — un push mêlant doc et code déclenche bien le CI.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
   workflow_dispatch:
+
+# Le travail se fait par rafales de petits commits successifs sur `dev` (voir l'historique) : sans
+# ce garde-fou, chaque push d'une rafale lançait cinq jobs complets dont seul le dernier importait.
+# Seul le run le plus récent d'une même branche survit ; les précédents sont annulés.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  # Journal d'erreur exploitable quand un test panique en CI, sans avoir à repousser un commit
+  # « ajoute un backtrace » pour comprendre.
+  RUST_BACKTRACE: 1
 
 jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path xtask/Cargo.toml -- --check
 
@@ -37,15 +71,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
       - name: dépendances système (rendu logiciel egui_kittest + son rodio)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
-      - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
-        run: bash patches/setup-vendor.sh
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            xtask -> target
       - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
       - run: cargo clippy -p overlay-ui --lib --bin overlay-ui-x11 -- -D warnings
       - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
@@ -55,13 +92,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
       - name: dépendances système (rendu logiciel egui_kittest + son rodio)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
-      - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
-        run: bash patches/setup-vendor.sh
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
       - run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
       - run: cargo test -p overlay-ui --lib
       - name: overlay-ui-x11 — compile (pas de tests unitaires, voir bin/overlay-ui-x11.rs)
@@ -74,10 +114,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: vendor wgpu-hal patché (voir Cargo.toml racine, [patch.crates-io])
-        shell: bash
-        run: bash patches/setup-vendor.sh
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
       - run: cargo build --workspace
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
         run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
@@ -86,5 +128,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xtask -> target
       - run: cargo run --manifest-path xtask/Cargo.toml --release -- mem-budget
