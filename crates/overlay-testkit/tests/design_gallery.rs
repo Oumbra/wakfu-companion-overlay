@@ -243,7 +243,7 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Barre d'onglets — hauteur native 44 px, quatre états",
+        "Barre d'onglets — 44 px, pleine largeur à parts égales, quatre états",
         "Le survolé a EXACTEMENT le fond de l'actif : seul le libellé les distingue (blanc pour l'actif, doré pour les autres). Un portage qui ne jouerait que sur le fond les rendrait indiscernables.",
     );
     // Une valeur de sélection par barre : un `&mut` partagé afficherait quatre fois le même état.
@@ -269,9 +269,12 @@ fn gallery(ui: &mut egui::Ui) {
         .log_name("galerie.onglets-options")
         .show(ui);
 
-    // Les six onglets du jeu, pour comparer les largeurs à la barre réelle.
+    // Les six onglets du jeu, en `fit_content()` : c'est LA barre à comparer à
+    // `interface-options-video.png`, donc la seule qui doit garder les largeurs relevées plutôt que
+    // de se partager la planche à égalité. Les deux barres au-dessus montrent le défaut.
     let mut onglet_jeu = 1_u8;
     design::tabs(&mut onglet_jeu)
+        .fit_content()
         .entry(0, "Jeu")
         .entry(1, "Vidéo")
         .entry(2, "Interface")
