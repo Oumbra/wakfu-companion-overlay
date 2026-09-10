@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2592.0))
+        .with_size(Vec2::new(760.0, 2700.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -455,6 +455,33 @@ fn gallery(ui: &mut egui::Ui) {
             );
         });
     }
+
+    // Le champ à ornement — la loupe est posée par le COMPOSANT, dans son clip, et la gouttière
+    // qu'elle impose vaut pour le texte indicatif comme pour la valeur saisie. C'est ce que
+    // vérifie la deuxième ligne, la seule qui porte une valeur.
+    let mut recherche_vide = String::new();
+    let mut recherche_pleine = String::from("pierre");
+    ui.add(
+        design::input(&mut recherche_vide)
+            .leading_icon(DsTexture::IconSearch)
+            .placeholder("Rechercher")
+            .width(420.0)
+            .log_name("galerie.recherche-vide"),
+    );
+    ui.add(
+        design::input(&mut recherche_pleine)
+            .leading_icon(DsTexture::IconSearch)
+            .width(420.0)
+            .log_name("galerie.recherche-pleine"),
+    );
+    ui.add(
+        design::input(&mut recherche_pleine)
+            .leading_icon(DsTexture::IconSearch)
+            .width(200.0)
+            .enabled(false)
+            .preview_state(InputState::Disabled)
+            .log_name("galerie.recherche-off"),
+    );
 
     heading(
         ui,

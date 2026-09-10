@@ -104,6 +104,27 @@ pub const INPUT_FONT_SIZE_RATIO: f32 = 17.0 / 25.0;
 /// 6px sur 25 de hauteur.
 pub const INPUT_PADDING_X_RATIO: f32 = 6.0 / 25.0;
 
+/// Côté de l'encre d'une icône d'ornement posée DANS un champ, en fraction de la hauteur du champ.
+///
+/// **Mesuré sur `empty-input-search.png`** (341 × 32, boîte du champ y 2..29, soit 28 px de haut) :
+/// la loupe y occupe x 9..21 / y 10..22, soit 13 × 13 px. 13/28 ≈ 0,464.
+///
+/// Un ratio et non une valeur absolue, pour la même raison que [`INPUT_FONT_SIZE_RATIO`] : cette
+/// capture est à une échelle d'interface un peu plus grande que les 25 px de `InputSize::Standard`.
+pub const INPUT_LEADING_ICON_RATIO: f32 = 13.0 / 28.0;
+
+/// Retrait entre le bord extérieur du champ et l'icône d'ornement, en fraction de sa hauteur —
+/// 7 px sur les 28 de `empty-input-search.png`.
+pub const INPUT_LEADING_ICON_INSET_RATIO: f32 = 7.0 / 28.0;
+
+/// Écart entre l'icône d'ornement et le premier glyphe du texte, en fraction de la hauteur du
+/// champ — la loupe finit à x=21, le texte commence à x=30, soit 8 px sur 28.
+///
+/// **C'est cette gouttière qui fait que le texte ne passe pas sous l'icône** : la version « six
+/// espaces dans le texte indicatif » qui a précédé ce jeton ne décalait que le texte indicatif, et
+/// laissait une valeur SAISIE démarrer sous la loupe.
+pub const INPUT_LEADING_ICON_GAP_RATIO: f32 = 8.0 / 28.0;
+
 /// Largeur minimale d'un bouton, en fraction de sa hauteur — garde-fou de proportion pour un
 /// libellé très court (« OK »), pour qu'il ne devienne pas un carré. Réglage d'ergonomie, pas une
 /// mesure.

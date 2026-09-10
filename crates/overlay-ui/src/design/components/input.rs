@@ -107,6 +107,7 @@ pub struct Input<'a> {
     log_name: Option<String>,
     forced_state: Option<InputState>,
     request_focus: bool,
+    leading_icon: Option<crate::design::DsTexture>,
 }
 
 impl<'a> Input<'a> {
@@ -121,7 +122,27 @@ impl<'a> Input<'a> {
             log_name: None,
             forced_state: None,
             request_focus: false,
+            leading_icon: None,
         }
+    }
+
+    /// Pose une icône **à l'intérieur** du champ, collée au bord gauche — la loupe d'une barre de
+    /// recherche, telle que le jeu la place partout (`interface-hdv-achat.png` x 27..39,
+    /// `interface-personnage-equiement.png` x 768..780, `interface-options-commandes.png`
+    /// x 36..48). Jamais un bouton icône posé à côté du champ : le jeu ne fait pas ça.
+    ///
+    /// **Le composant, et lui seul, réserve la gouttière** (`tokens::INPUT_LEADING_ICON_*`) en
+    /// avançant le bord gauche du texte — donc pour le texte indicatif ET pour la valeur saisie, et
+    /// l'icône est peinte dans le `clip_rect` du champ. C'est la différence avec le pis-aller qui a
+    /// précédé ce paramètre : des espaces de tête dans le texte indicatif, qui ne décalaient rien
+    /// d'autre et laissaient une valeur saisie démarrer sous l'icône.
+    ///
+    /// L'icône prend `INPUT_PLACEHOLDER` au repos et `TEXT_DISABLED` désactivée. Elle ne change pas
+    /// avec la présence d'une valeur : mesuré sur `empty-input-search.png` et `input-search.png`,
+    /// dont le profil de la colonne de la loupe est rigoureusement identique.
+    pub fn leading_icon(mut self, icon: crate::design::DsTexture) -> Self {
+        self.leading_icon = Some(icon);
+        self
     }
 
     /// Texte affiché tant que la valeur est vide.
@@ -223,13 +244,41 @@ impl Widget for Input<'_> {
             );
         }
 
+        // Ornement de gauche — peint AVANT le texte, et surtout : la place qu'il occupe est
+        // retirée de celle du texte juste après. Voir `Input::leading_icon`.
+        let leading = self.leading_icon.map(|icon| {
+            let side = height * tokens::INPUT_LEADING_ICON_RATIO;
+            let inset = height * tokens::INPUT_LEADING_ICON_INSET_RATIO;
+            let gap = height * tokens::INPUT_LEADING_ICON_GAP_RATIO;
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.left() + inset + side / 2.0, rect.center().y),
+                Vec2::splat(side),
+            );
+            if ui.is_rect_visible(rect) {
+                let tint = match state {
+                    InputState::Disabled => tokens::TEXT_DISABLED,
+                    _ => tokens::INPUT_PLACEHOLDER,
+                };
+                crate::design::DesignSystem::get(ui.ctx()).paint(
+                    &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
+                    icon_rect,
+                    icon,
+                    tint,
+                );
+            }
+            // Ce que le texte perd à gauche : le retrait, l'icône, la gouttière — moins le
+            // rembourrage que le champ lui donnait déjà.
+            (inset + side + gap - pad_x).max(0.0)
+        });
+        let leading_room = leading.unwrap_or(0.0);
+
         // Une seule ligne de texte, centrée verticalement dans le champ. Le rectangle est calculé
         // ici plutôt que laissé à egui : `TextEdit` prend la hauteur d'une ligne et se pose en haut
         // de l'espace qu'on lui donne, ce qui collerait le texte au bord supérieur.
         let row_height = ui.fonts_mut(|f| f.row_height(&font));
         let text_rect = egui::Rect::from_center_size(
-            rect.center(),
-            Vec2::new((width - 2.0 * pad_x).max(0.0), row_height),
+            egui::pos2(rect.center().x + leading_room / 2.0, rect.center().y),
+            Vec2::new((width - 2.0 * pad_x - leading_room).max(0.0), row_height),
         );
 
         let empty = self.text.is_empty();
