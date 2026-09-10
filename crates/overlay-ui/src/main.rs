@@ -1211,6 +1211,9 @@ impl App {
         overlay.options_state = Some(OptionsModalState {
             path_input: self.log_path.display().to_string(),
             error: None,
+            // Toujours « Paramètres » à l'ouverture : c'est le défaut d'`OptionsTab`, et le
+            // seul onglet cliquable pour l'instant.
+            tab: Default::default(),
         });
         overlay.window.request_redraw();
         self.windows.insert(overlay.window.id(), overlay);

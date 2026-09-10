@@ -85,7 +85,13 @@ const BODY_PAD_TOP: f32 = 14.0;
 /// design system).
 const BODY_PAD_BOTTOM: f32 = 12.0;
 
-const MENU_HEIGHT: f32 = 31.0;
+/// Hauteur de la barre d'onglets — **la hauteur native de sa texture**, reprise du composant.
+///
+/// 44, pas 31. La première version étirait la texture de 44px à 31, ce qui aplatissait son décor et
+/// son libellé avec : la même erreur que les boutons du pied de page, dont la hauteur était déduite
+/// du rapport d'aspect (voir `FOOTER_BUTTON_HEIGHT`). La section de contenu perd donc 13px, et c'est
+/// le bon sens de la correction — le jeu donne bien 44px à ses onglets.
+const MENU_HEIGHT: f32 = design::tokens::TAB_HEIGHT;
 /// Écart menu → section.
 const MENU_GAP: f32 = 14.0;
 /// Écart section → pied de page.
@@ -149,11 +155,6 @@ const SECTION_TITLE_FONT_SIZE: f32 = TITLE_FONT_SIZE;
 /// deux relevés (`#b8b9ba`), confirmée au pic de luminance sur l'onglet Interface (`#bababb`). La
 /// hiérarchie entre les deux niveaux de titre passe par la couleur, pas par le corps.
 const SECTION_TITLE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xB8, 0xB9, 0xBA);
-
-/// Couleur du libellé d'un onglet INACTIF ("Alertes"/"Personnages") — ambre atténué, mesuré sur la
-/// référence réelle. L'onglet ACTIF ("Paramètres") reprend `TITLE_TEXT` (blanc), comme le kaki
-/// plein de la référence.
-const TAB_INACTIVE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xC9, 0xA8, 0x60);
 
 // Le champ de chemin est un composant du design system (`design::input`) depuis le 2026-09-10 :
 // ses couleurs, son rayon et son retrait de texte ne sont plus des constantes de ce panneau. Les
@@ -248,10 +249,6 @@ pub struct OptionsModalAssets {
     /// `modal-header.png` (720×56) — fond de bannière, peint avec arrondi HAUT uniquement
     /// (`MODAL_RADIUS`) pour épouser le coin de la modale.
     banner: egui::TextureHandle,
-    /// `menu-tabs.png` (782×44, dérivée de `tabs-with-first-tab-active.png` du design system par
-    /// miroir horizontal — voir doc de module) — trois segments accolés, celui de droite (kaki)
-    /// correspond à "Paramètres" (dernière entrée du menu, onglet actif).
-    menu_tabs: egui::TextureHandle,
 }
 
 impl OptionsModalAssets {
@@ -261,11 +258,6 @@ impl OptionsModalAssets {
                 ctx,
                 "options-banner",
                 include_bytes!("../../assets/ui/options/modal-header.png"),
-            ),
-            menu_tabs: load_embedded_texture(
-                ctx,
-                "options-menu-tabs",
-                include_bytes!("../../assets/ui/options/menu-tabs.png"),
             ),
         }
     }
@@ -286,6 +278,21 @@ fn load_embedded_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> egui:
     ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR)
 }
 
+/// Onglet affiché par la modale.
+///
+/// **Trois entrées, dont deux encore vides.** « Alertes » et « Personnages » sont conservés et
+/// affichés désactivés (décision utilisateur du 2026-09-10) plutôt que masqués : ils le deviendront
+/// peu après ce chantier, et un onglet qui apparaît est un changement de mise en page, pas un
+/// changement d'état.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum OptionsTab {
+    Alertes,
+    Personnages,
+    /// Le seul onglet cliquable pour l'instant, et donc le défaut.
+    #[default]
+    Parametres,
+}
+
 /// État mutable de la modale, propriété de la fenêtre OS qui l'affiche (voir
 /// `main.rs`/`bin/overlay-ui-x11.rs`, nouveau champ `OverlayWindow` réservé au cas
 /// `OverlayKind::Options`) — persiste d'une frame à l'autre, contrairement à [`OptionsModalAction`]
@@ -302,6 +309,9 @@ pub struct OptionsModalState {
     /// ou clic sur "Valider" avec un chemin invalide) — `None` tant qu'aucune tentative n'a encore
     /// échoué. Vidé par l'appelant dès qu'une nouvelle tentative commence.
     pub error: Option<String>,
+    /// Onglet affiché. Ne bouge pas tant que « Alertes » et « Personnages » sont désactivés — le
+    /// champ existe pour que le jour où ils s'activeront ne demande qu'une ligne.
+    pub tab: OptionsTab,
 }
 
 /// Ce que l'utilisateur vient de demander CETTE frame — `None` la plupart du temps (aucun bouton
@@ -389,34 +399,25 @@ pub fn show(
         ),
     );
 
-    // Menu à trois entrées ("Alertes", "Personnages", "Paramètres") — texture réelle du jeu (trois
-    // segments accolés, séparateur inclus), voir doc de module. Seule "Paramètres" (segment de
-    // droite, actif) est câblée ; les deux autres sont des stubs visuels sans interaction pour
-    // l'instant.
+    // Barre d'onglets — `design::tabs` depuis le 2026-09-10. Elle était peinte ici à la main : une
+    // texture unique de trois segments (`menu-tabs.png`) ÉTIRÉE de sa hauteur native de 44px à 31,
+    // des libellés en `FontId::proportional(12.0)` (la police par défaut d'egui, pas celle du design
+    // system), une répartition en trois tiers égaux sans rapport avec les segments réels, et aucun
+    // clic — « Paramètres » était actif en dur.
     let menu_rect = egui::Rect::from_min_size(
         content_rect.min,
         egui::vec2(content_rect.width(), MENU_HEIGHT),
     );
-    egui::Image::new(&assets.menu_tabs).paint_at(ui, menu_rect);
-    let tab_width = menu_rect.width() / 3.0;
-    for (i, (label, color)) in [
-        ("Alertes", TAB_INACTIVE_TEXT),
-        ("Personnages", TAB_INACTIVE_TEXT),
-        ("Paramètres", TITLE_TEXT),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let center =
-            menu_rect.min + egui::vec2(tab_width * (i as f32 + 0.5), menu_rect.height() / 2.0);
-        ui.painter().text(
-            center,
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(12.0),
-            color,
-        );
-    }
+    ui.scope_builder(egui::UiBuilder::new().max_rect(menu_rect), |ui| {
+        design::tabs(&mut state.tab)
+            .entry(OptionsTab::Alertes, "Alertes")
+            .enabled(false)
+            .entry(OptionsTab::Personnages, "Personnages")
+            .enabled(false)
+            .entry(OptionsTab::Parametres, "Paramètres")
+            .log_name("options-onglets")
+            .show(ui);
+    });
 
     // Pied de page — deux boutons du design system, séparés par la gouttière du jeu. Largeur
     // partagée, hauteur native (voir `FOOTER_BUTTON_HEIGHT`).

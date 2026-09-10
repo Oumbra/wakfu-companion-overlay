@@ -41,6 +41,7 @@ pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
+pub use components::tabs::{tabs, TabState, Tabs};
 
 /// Identifiant de mémorisation dans `egui::Context` — voir `DesignSystem::get`.
 const MEMO_ID: &str = "wakfu-overlay-design-system";
