@@ -198,6 +198,77 @@ locales étaient toutes fausses (fond `#1C1E23`, bord 1px, rayon 2, valeur blanc
 
 ---
 
+## `design::info_text` — texte d'information (2026-09-10)
+
+`crates/overlay-ui/src/design/components/info_text.rs`
+
+```rust
+use overlay_ui::design::{self, InfoTone};
+
+ui.add(design::info_text("Le thème sera appliqué au prochain démarrage."));
+
+ui.add(
+    design::info_text("Le fichier sélectionné doit s'appeler wakfu.log.")
+        .tone(InfoTone::Alert)
+        .width(inner_rect.width())
+        .log_name("options-erreur"),
+);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `tone` | `Info` (pastille dorée, texte blanc), `Alert` (tout en rouge) | `Info` |
+| `width` | largeur imposée | toute la place disponible |
+| `tooltip` | texte d'infobulle | aucune |
+| `log_name` | nom d'instance pour le journal | les quatre premiers mots |
+
+**Mesures** (nœud `info` de [`releve-options-interface.json`](design-system/releve-options-interface.json)
+— le bloc en bas de l'onglet Interface, **le seul de toute la fenêtre Options du jeu**) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Pastille | 12 × 12px | boîte `[38, 438, 50, 450]` |
+| Position de la pastille | centrée sur la **première ligne** | axe 444, contre 445 pour l'encre de la ligne 1 |
+| Écart pastille → texte | 7px | la pastille finit à x=50, le texte commence à x=57 |
+| Lignes suivantes | alignées sur le **texte** | seconde ligne à x=57 elle aussi |
+| Interligne | 23px | haut d'encre à haut d'encre (y=436 puis y=459) |
+| Corps | 17px (encre 13) | le même qu'un libellé de bouton |
+| Graisse | regular | pas la Medium du pied de page |
+| Texte | **`#ffffff`, blanc pur** | pic mesuré |
+| Pastille | `#a69064` | jeton `info-dot` du relevé |
+
+**Le texte d'information est blanc pur, pas gris**, et c'est le piège de ce composant. Note du
+relevé : « l'impression de gris vient du fond et de l'absence de graisse, pas de la couleur. Un
+portage qui le grise s'écarte de la référence. »
+
+**La pastille est centrée sur la première ligne, pas sur le bloc** — sur un message de deux lignes,
+un centrage sur le bloc la descendrait de 11px. Le retour à la ligne, lui, s'aligne sur le texte :
+la pastille reste seule dans sa colonne.
+
+**L'interligne est une mesure, pas la hauteur naturelle de la police.** Sans le `line_height` imposé
+à 23px, egui empile les lignes à ~20px et le bloc se resserre par rapport au jeu.
+
+**Inventé, faute de capture** : le ton **`Alert`**. Le jeu n'a aucune variante d'alerte relevée —
+seule sa *composition* est une extension ; sa couleur est `accent_danger.top` (`#c9524a`), le haut
+du bouton « Annuler », le seul rouge que le design system ait mesuré.
+
+**Deux écarts au contrat de composant, assumés** :
+
+- **Pas de trois états, pas de `preview_state`.** Ni survol, ni désactivé, ni clic : ce n'est pas un
+  contrôle, et inventer un survol ici serait inventer du design. Il garde `Sense::hover()` pour
+  pouvoir porter une infobulle.
+- **Pas de 9-slice.** `DsTexture::IconInfo` (`icons/icon-info.png`, 27 × 28) est la première icône du
+  manifeste et la seule texture à marges nulles : figer des coins sur un glyphe de 27px le
+  déformerait dès qu'on le peint à 12, et il n'y a rien de périodique à répéter. Elle passe malgré
+  tout par `DesignSystem::paint`, pour garder un seul chemin de peinture. Blanche dans le fichier,
+  elle prend sa couleur par teinte — c'est ce qui permet au ton `Alert` d'exister sans second
+  fichier.
+
+**Remplace** : le `ui.label(RichText::new(err).color(ERROR_TEXT).size(13.0))` de
+`panels::options_modal` — le dernier texte de la modale à échapper au design system.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
