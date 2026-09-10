@@ -396,6 +396,84 @@ livré prêt ; son premier usage viendra avec le contenu de l'onglet « Paramèt
 
 ---
 
+## `design::select` — liste déroulante (2026-09-10)
+
+`crates/overlay-ui/src/design/components/select.rs`
+
+```rust
+use overlay_ui::design;
+
+ui.add(
+    design::select(&mut state.theme)
+        .option(Theme::Sombre, "Sombre")
+        .option(Theme::Clair, "Clair")
+        .width(560.0),
+);
+
+ui.add(
+    design::select_multi(&mut state.raretes)
+        .option(Rarete::Commun, "Commun")
+        .option(Rarete::Rare, "Rare")
+        .summary("Toutes"),
+);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `option(valeur, libellé)` | une entrée, dans l'ordre d'affichage | — |
+| `width` | largeur imposée | toute la place disponible |
+| `placeholder` | libellé du socle si la valeur ne correspond à aucune option (choix simple) | vide |
+| `summary` | libellé du socle en choix multiple (« Toutes ») | « n sélectionnées » |
+| `enabled` | `bool` | `true` |
+| `log_name` | nom d'instance pour le journal | `"select"` |
+| `preview_state` / `preview_open` / `preview_hovered` | **galerie et captures uniquement** | état réel |
+
+Un choix simple **referme** la liste au clic ; un choix multiple la garde ouverte, pour qu'on puisse
+en cocher plusieurs. Chaque entrée du mode multiple porte la case de `design::checkbox`.
+
+**C'est le seul composant qui peint hors de son rectangle.** La liste dépliée vit dans une
+`egui::Area` au premier plan : sans ça, le widget suivant la recouvrirait, et la place qu'elle occupe
+décalerait la mise en page à chaque ouverture. L'état ouvert/fermé reste dans la mémoire d'egui —
+c'est de l'état d'**interaction**, pas de l'applicatif que le contrat interdit, du même ordre que
+« ce widget a le focus ». `egui::ComboBox` procède de même.
+
+**Mesures** (`select-simple.png` colonne x=60, `select-simple-opened.png` colonne x=100, recoupées
+avec le nœud `select-theme` de `releve-options-interface.json`) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Hauteur du socle | **36px, bord compris** | bord 2 + liseré 2 + dégradé 28 + ombre 2 + bord 2 |
+| Rayon | 2 | comme tout le reste |
+| Chevron | 14 × 8px, à 8px du bord droit | **la taille native d'`icons/icon-chevron-down.png`**, au pixel |
+| Retrait du libellé de socle | 10px | texte à x=17 pour un socle à x=7 |
+| Hauteur d'une entrée | 28px | surbrillance en y 71..98, entrée suivante à y=99 |
+| Retrait du texte d'une entrée | 12px | « Tous » à x=19 pour une liste à x=7 |
+| Fond de liste | `#675d46` | uniforme, aucun dégradé |
+| Entrée mise en avant | `#a58e63` | seul fond de mise en avant relevé |
+
+**Le piège de la hauteur**, énoncé par le relevé : « le chiffre de 32px qu'on lit en mesurant le
+remplissage est trompeur — il exclut les 2px de bord haut et bas. »
+
+**Aucune largeur par défaut.** Le relevé mesure 210, 208, 560 et 650px selon le contrôle : « la
+largeur est décidée contrôle par contrôle ». Le composant prend donc la place disponible, comme
+`design::input`.
+
+**Texture** : `select-face.png` (220 × 36), découpée de `select-simple.png` avec libellé et chevron
+retirés — le socle étant un dégradé purement vertical, une colonne propre répétée le reconstruit
+exactement, sans interpolation.
+
+**Inventé, faute de référence** :
+
+- **La distinction survolée / valeur courante.** Une seule capture montre une entrée sur fond clair,
+  et elle est à la fois la valeur du socle et, probablement, celle que la souris survolait. Le
+  composant applique le même fond aux deux.
+- **Le gabarit du mode multiple.** `select-multiple.png` donne 26px d'entrée contre 28 pour le
+  simple ; les deux captures ne sont pas à la même échelle d'interface. Les cotes du **simple** sont
+  appliquées dans les deux modes.
+- **L'état désactivé** : socle et libellé en `TEXT_DISABLED`, la liste ne s'ouvre pas.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
@@ -404,7 +482,6 @@ Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces
 | --- | --- | --- |
 | **Bouton icône** | `button-icon[-hover,-disabled].png`, `button-icon-first-plan[-hover].png`, `icons/*.png` | Existe déjà en `panels::icon_button::paint_icon_button`, mais **hors contrat** : prend quatre `TextureHandle` en paramètres. À reprendre en `design::icon_button(icon).context(FirstPlan|Panel)` — deux contextes de socle, une icône, un clic. |
 | **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
-| **Select / dropdown** | `select-simple.png`, `select-multiple.png` | §5.5. |
 | **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
 | **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
 | **Scrollbar** | `scrollbar-{active,inactive}.png` | §5.9. |
