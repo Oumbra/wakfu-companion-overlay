@@ -323,6 +323,16 @@ suffisent donc pour quatre états.
 | Profil du dégradé | 11px clair, 19px de rampe, 10px sombre | idem |
 | Corps du libellé | 17px (encre 13) | comme tous les libellés du jeu |
 
+**Le libellé est cerné sur 1px dans les huit directions, d'une version assombrie de sa propre
+couleur** (`TAB_LABEL_OUTLINE_FACTOR` = 0,205). Deux couleurs de libellé de la même capture le
+confirment et écartent les autres lectures : doré `#f4d89e` → cerne `#312c21`, blanc `#ffffff` →
+cerne `#353534`. Un cerne noir translucide donnerait une couleur proportionnelle au *fond*, or le
+fond de l'onglet actif est un kaki chaud et son cerne est gris neutre ; un cerne noir opaque
+donnerait du noir. Ce n'est donc ni le cerne noir de `design::text::paint_outlined_text` (titre de
+modale, dégâts de combat), ni la graisse synthétique retirée en 2026-09-09 — huit copies de la même
+couleur empâtent, huit copies plus sombres détourent. Les boutons du jeu n'ont pas ce cerne (anneau à
+4 % du fond sur les deux captures de pied de page).
+
 **Les trois couleurs relevées pour le séparateur sont un seul dégradé.** `#837d70` (relevé),
 `#6d6657` (asset détouré) et `#595140` (capture de la modale, ligne y=110) ont longtemps semblé se
 contredire, et le jeton tranchait pour la troisième. Aucune n'est fausse : ce sont trois hauteurs du
