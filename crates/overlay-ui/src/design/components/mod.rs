@@ -27,5 +27,6 @@ pub mod button;
 pub mod checkbox;
 pub mod info_text;
 pub mod input;
+pub mod scroll_area;
 pub mod select;
 pub mod tabs;
