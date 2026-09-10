@@ -228,7 +228,7 @@ ui.add(
 | Grandeur | Valeur | Origine |
 | --- | --- | --- |
 | Pastille | 12 × 12px | boîte `[38, 438, 50, 450]` |
-| Position de la pastille | centrée sur la **première ligne** | axe 444, contre 445 pour l'encre de la ligne 1 |
+| Position de la pastille | centrée sur la **boîte de police** de la première ligne | pastille `[438, 450]`, hauteur d'x de la ligne 1 `[441, 449]` |
 | Écart pastille → texte | 7px | la pastille finit à x=50, le texte commence à x=57 |
 | Lignes suivantes | alignées sur le **texte** | seconde ligne à x=57 elle aussi |
 | Interligne | 23px | haut d'encre à haut d'encre (y=436 puis y=459) |
@@ -244,6 +244,19 @@ portage qui le grise s'écarte de la référence. »
 **La pastille est centrée sur la première ligne, pas sur le bloc** — sur un message de deux lignes,
 un centrage sur le bloc la descendrait de 11px. Le retour à la ligne, lui, s'aligne sur le texte :
 la pastille reste seule dans sa colonne.
+
+**Et sur la boîte de police de cette ligne, pas sur son interligne.** Le piège se cache dans le
+`line_height` imposé ci-dessous : l'interligne mesuré (23px) dépasse la hauteur naturelle de la
+police (19,5px à ce corps), et `epaint` ne répartit pas cette différence de part et d'autre du
+texte — il cale la ligne de base sur l'ascendante et laisse les ~3,5px de rabiot **sous la
+descendante**. Diviser les 23px en deux vise donc un axe qui n'est pas celui du texte : la pastille
+descend de 2px et vient se poser sur la ligne de base. L'axe juste est
+`ui.fonts_mut(|f| f.row_height(&font)) / 2.0`, la moitié de la hauteur naturelle.
+
+Le contrôle se fait sur la **hauteur d'x** et non sur l'encre entière, qui dépend des accents et des
+jambages présents dans la phrase : dans le jeu la pastille commence 3px au-dessus du sommet de la
+hauteur d'x (438 contre 441) et finit sur sa dernière ligne d'encre (449) ; le rendu fait 32..43
+contre 35..43, soit la même position au pixel près.
 
 **L'interligne est une mesure, pas la hauteur naturelle de la police.** Sans le `line_height` imposé
 à 23px, egui empile les lignes à ~20px et le bloc se resserre par rapport au jeu.
