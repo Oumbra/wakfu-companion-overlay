@@ -255,6 +255,27 @@ pub enum DsTexture {
     IconExternalLink,
     IconPlus,
     IconMinus,
+    /// Loupe d'un champ de recherche (`icons/icon-search.png`, 24 × 24) — le jeu la pose À
+    /// L'INTÉRIEUR du champ, collée au bord gauche, jamais sur un socle de bouton
+    /// (`interface-hdv-achat.png` x 27..39, `interface-personnage-equiement.png`). Elle n'a donc
+    /// pas de `icon_content_size` : sa taille est celle que lui donne le champ qui la porte.
+    IconSearch,
+    /// Croix de fermeture/retrait (`icons/icon-close.png`, 13 × 14) — le « × » de « Retirer tous
+    /// les filtres » et le bouton de fermeture d'une fenêtre.
+    IconClose,
+    /// Corbeille (`icons/icon-delete.png`, 12 × 14) — la suppression d'un élément d'une liste, sur
+    /// socle de bouton icône (`interface-personnage-equiement.png`, barre d'outils du build).
+    IconDelete,
+    /// Point d'interrogation (`icons/icon-help.png`, 12 × 12) — le bouton d'aide en tête de
+    /// fenêtre (`interface-personnage-equiement.png`, coin haut-droit).
+    IconHelp,
+    /// Coche (`icons/icon-tick.png`, 12 × 9) — le marqueur « actif » du jeu, à côté d'un libellé
+    /// (« ✓ Actif ») plutôt que sur un socle : pas de `icon_content_size` pour la même raison que
+    /// [`DsTexture::IconSearch`].
+    IconTick,
+    /// Flèche de réinitialisation (`icons/icon-undo.png`, 14 × 12) — le bouton « rétablir les
+    /// valeurs par défaut » de la fenêtre Options (`interface-options-son.png`, coin haut-droit).
+    IconUndo,
     /// Corps de la modale Options (`modal-body.png`, 720 × 505) — le fond SOUS la bannière,
     /// découpé des six captures de la fenêtre Options du jeu puis débarrassé de son contenu
     /// (`tools/design-system/build_modal_body.py`, §9 ter du design-system).
@@ -315,6 +336,12 @@ impl DsTexture {
         DsTexture::IconExternalLink,
         DsTexture::IconPlus,
         DsTexture::IconMinus,
+        DsTexture::IconSearch,
+        DsTexture::IconClose,
+        DsTexture::IconDelete,
+        DsTexture::IconHelp,
+        DsTexture::IconTick,
+        DsTexture::IconUndo,
         DsTexture::ModalBody,
     ];
 
@@ -342,7 +369,11 @@ impl DsTexture {
             DsTexture::IconOption
             | DsTexture::IconExternalLink
             | DsTexture::IconPlus
-            | DsTexture::IconMinus => Some(tokens::ICON_BUTTON_CONTENT),
+            | DsTexture::IconMinus
+            | DsTexture::IconClose
+            | DsTexture::IconDelete
+            | DsTexture::IconHelp
+            | DsTexture::IconUndo => Some(tokens::ICON_BUTTON_CONTENT),
             _ => None,
         }
     }
@@ -492,6 +523,36 @@ impl DsTexture {
             DsTexture::IconMinus => DsTextureSpec {
                 name: "ds-icon-minus",
                 bytes: ds_asset!("icons/icon-minus.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconSearch => DsTextureSpec {
+                name: "ds-icon-search",
+                bytes: ds_asset!("icons/icon-search.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconClose => DsTextureSpec {
+                name: "ds-icon-close",
+                bytes: ds_asset!("icons/icon-close.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconDelete => DsTextureSpec {
+                name: "ds-icon-delete",
+                bytes: ds_asset!("icons/icon-delete.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconHelp => DsTextureSpec {
+                name: "ds-icon-help",
+                bytes: ds_asset!("icons/icon-help.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconTick => DsTextureSpec {
+                name: "ds-icon-tick",
+                bytes: ds_asset!("icons/icon-tick.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconUndo => DsTextureSpec {
+                name: "ds-icon-undo",
+                bytes: ds_asset!("icons/icon-undo.png"),
                 slice: ICON_SLICE,
             },
             DsTexture::ModalBody => DsTextureSpec {
