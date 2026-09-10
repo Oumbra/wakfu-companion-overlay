@@ -525,13 +525,62 @@ sombres sur un fond déjà sombre.
 
 ---
 
+## `design::icon_button` — bouton icône (2026-09-10)
+
+`crates/overlay-ui/src/design/components/icon_button.rs`
+
+```rust
+use overlay_ui::design::{self, DsTexture, IconContext};
+
+if ui
+    .add(design::icon_button(DsTexture::IconOption).context(IconContext::FirstPlan))
+    .clicked()
+{ … }
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `context` | `FirstPlan` (par-dessus le jeu), `Panel` (dans un panneau) | `FirstPlan` |
+| `size` | côté du bouton | 36px, la taille native des cinq socles |
+| `enabled` | `bool` | `true` |
+| `tooltip` / `log_name` | infobulle, nom d'instance | aucune / `"icon-button"` |
+| `preview_state` | `Idle` / `Hovered` / `Disabled` — **galerie et captures uniquement** | état réel |
+
+**Textures** : `button-icon.png`, `button-icon-first-plan.png` et leurs `-hover` (36 × 36 toutes les
+quatre), plus `button-icon-disabled.png` **partagée par les deux contextes** — le jeu n'a capturé
+qu'un socle grisé. Les glyphes viennent de `assets/design-system/icons/` ; **le manifeste ne porte
+que ceux qui servent** (le dossier en compte plus de trente, et `DesignSystem::load` les téléverse
+tous dès le premier composant peint).
+
+**Teintes** : `#c5cbcc` au repos, `#f4d89f` au survol, mesurées sur
+`menu-button-icon-first-plan.png`. Les icônes du design system étant blanc pur avec alpha, une
+teinte suffit — là où `ui_icons` charge deux copies recolorées au chargement.
+
+**Repris tel quel de `panels::icon_button`** : le socle et l'icône partagent le même facteur
+d'échelle (dérivé de la largeur du socle), et un appui de souris retire l'apparence survolée, qui
+revient au relâchement — la règle commune à toute l'interface.
+
+**Pas encore utilisé en production.** Les quatre boutons icône de l'overlay (lien externe et Options
+dans Combat, « + » et « − » dans le Suivi) passent toujours par `panels::icon_button`. Leur socle est
+pourtant déjà celui du design system : `assets/ui/button-background.png` est **octet pour octet**
+`assets/design-system/button-icon-first-plan.png`. Ce sont leurs icônes qui diffèrent — normalisées
+par `ui_icons::normalize_icon_content` contre les glyphes détourés bruts ici. Les migrer changerait
+le rendu de deux panneaux hors du périmètre du plan de finalisation de la modale, sans capture de
+référence pour arbitrer. À reprendre quand ces panneaux seront au chantier.
+
+**Le cas « réinitialisation »** attend qu'un réglage réinitialisable existe. Note du relevé à ne pas
+« corriger » le jour venu : dans la barre d'onglets, **l'axe du bouton est 9px plus bas que celui des
+onglets**.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
 
 | Composant | Assets disponibles | Notes |
 | --- | --- | --- |
-| **Bouton icône** | `button-icon[-hover,-disabled].png`, `button-icon-first-plan[-hover].png`, `icons/*.png` | Existe déjà en `panels::icon_button::paint_icon_button`, mais **hors contrat** : prend quatre `TextureHandle` en paramètres. À reprendre en `design::icon_button(icon).context(FirstPlan|Panel)` — deux contextes de socle, une icône, un clic. |
+| **Migration des quatre boutons icône** | — | `design::icon_button` existe (voir sa fiche) ; `panels::combat` et `panels::watchlist` passent encore par `panels::icon_button`. Reste à trancher la normalisation des glyphes. |
 | **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
 | **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
 | **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
