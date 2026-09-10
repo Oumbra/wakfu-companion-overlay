@@ -458,6 +458,46 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
+        "Glyphes du manifeste — teintés, jamais recolorés en amont",
+        "Tous les glyphes déclarés, à leur taille de fichier. Ils sont blancs dans leurs octets et prennent leur couleur par teinte : c'est ce qui permet à une même icône de servir au repos, au survol et désactivée sans second fichier. Ceux qui vivent sur un socle sont normalisés à 18 px par le manifeste (ligne du dessus) ; ceux qui vivent dans un champ ou à côté d'un libellé gardent leur taille propre.",
+    );
+    ui.horizontal(|ui| {
+        for icon in [
+            DsTexture::IconOption,
+            DsTexture::IconExternalLink,
+            DsTexture::IconPlus,
+            DsTexture::IconMinus,
+            DsTexture::IconClose,
+            DsTexture::IconDelete,
+            DsTexture::IconHelp,
+            DsTexture::IconUndo,
+        ] {
+            ui.add(design::icon_button(icon).context(IconContext::Panel));
+        }
+    });
+    // Les glyphes SANS socle — leur taille est celle que leur donne le composant qui les porte,
+    // d'où l'absence de `icon_content_size` (voir sa doc dans `design::assets`).
+    let ds = design::DesignSystem::get(ui.ctx());
+    let (row, _) = ui.allocate_exact_size(Vec2::new(400.0, 28.0), egui::Sense::hover());
+    let mut x = row.left() + 8.0;
+    for (icon, tint) in [
+        (DsTexture::IconSearch, design::tokens::INPUT_PLACEHOLDER),
+        (DsTexture::IconTick, Color32::from_rgb(0x7A, 0xC7, 0x4F)),
+        (DsTexture::IconChevronDown, design::tokens::SELECT_TEXT),
+        (DsTexture::IconInfo, design::tokens::INFO_DOT),
+    ] {
+        let native = design::DesignSystem::get(ui.ctx()).native_size(icon);
+        ds.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(egui::pos2(x + native.x / 2.0, row.center().y), native),
+            icon,
+            tint,
+        );
+        x += native.x + 22.0;
+    }
+
+    heading(
+        ui,
         "Le cas de référence, aux cotes exactes du jeu",
         "Le message et la largeur du bloc d'information de l'onglet Interface (590 px, x 38..628) : à comparer directement avec interface-options-interface.png, y 436..477.",
     );
