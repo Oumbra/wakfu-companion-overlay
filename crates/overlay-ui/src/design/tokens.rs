@@ -222,6 +222,28 @@ pub const TAB_PADDING_X: f32 = 16.0;
 /// proportion pour un libellé court, comme `BUTTON_MIN_ASPECT` pour un bouton. Réglage, pas mesure.
 pub const TAB_MIN_WIDTH: f32 = 77.0;
 
+/// Facteur d'assombrissement du **cerne** d'un libellé d'onglet — `0,205`.
+///
+/// Le libellé du jeu est cerné sur 1px dans les huit directions, et ce cerne n'est **pas noir** : sa
+/// couleur est celle du libellé lui-même, très assombrie. Deux couleurs de texte le confirment sur
+/// la même capture, ce qui exclut les deux autres explications possibles :
+///
+/// | Onglet | Libellé | Cerne mesuré | Rapport |
+/// | --- | --- | --- | --- |
+/// | inactif | `#f4d89e` doré | `#312c21` | 0,201 / 0,204 / 0,209 |
+/// | actif | `#ffffff` blanc | `#353534` gris neutre | 0,208 / 0,208 / 0,204 |
+///
+/// Un cerne **noir translucide** donnerait une couleur proportionnelle au *fond* — or le fond de
+/// l'onglet actif est un kaki chaud `#605844` et son cerne est gris neutre. Et un cerne noir
+/// **opaque** donnerait du noir. C'est donc bien le libellé qui est repeint assombri.
+///
+/// Valeurs prises au 10ᵉ centile des pixels du cerne, le cœur du trait : la médiane est tirée vers
+/// le haut par l'anticrénelage du glyphe, qui occupe les mêmes pixels.
+///
+/// **L'état désactivé n'a pas de mesure** — aucune capture d'onglet grisé n'existe. Son libellé est
+/// cerné par la même règle, faute de mieux.
+pub const TAB_LABEL_OUTLINE_FACTOR: f32 = 0.205;
+
 /// Corps du libellé d'onglet — 17px, la même encre de 13px que tous les libellés du jeu.
 pub const TAB_FONT_SIZE: f32 = 17.0;
 

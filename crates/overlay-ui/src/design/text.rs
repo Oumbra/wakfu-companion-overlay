@@ -116,3 +116,44 @@ pub fn paint_outlined_text(
     }
     painter.text(pos, align, text, font, color);
 }
+
+/// Assombrit une couleur **en conservant sa teinte et son opacité** — ce n'est donc pas
+/// `Color32::gamma_multiply`, qui entamerait aussi l'alpha et rendrait le cerne translucide.
+///
+/// Sert à dériver la couleur d'un cerne de celle de son texte, là où le jeu ne cerne pas de noir.
+pub fn dimmed(color: Color32, factor: f32) -> Color32 {
+    let dim = |c: u8| (c as f32 * factor).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_premultiplied(dim(color.r()), dim(color.g()), dim(color.b()), color.a())
+}
+
+/// Peint une galley cernée d'une couleur **choisie**, sur un painter donné (donc écrêtable).
+///
+/// Deux différences avec [`paint_outlined_text`], et les deux comptent :
+///
+/// - **le cerne n'est pas noir mais paramétrable.** Le jeu ne cerne pas de la même façon partout :
+///   son titre de modale est cerné de noir, mais le libellé d'un onglet est cerné d'une version
+///   très assombrie de **sa propre couleur** (voir `tokens::TAB_LABEL_OUTLINE_FACTOR`), ce qui le
+///   détache sans le salir ;
+/// - **la galley est mise en page une fois** pour les neuf passes, au lieu d'une fois par passe.
+///
+/// La galley doit avoir été mise en page avec [`Color32::PLACEHOLDER`] : c'est le marqueur d'`egui`
+/// pour « la couleur est donnée au moment de peindre », sans quoi les neuf passes sortiraient toutes
+/// de la couleur figée à la mise en page.
+///
+/// **Un cerne n'est pas une graisse** — la mise en garde de la doc de module tient toujours. La
+/// différence tient à la couleur : huit copies de la *même* couleur empâtent le mot, huit copies
+/// nettement plus sombres le détourent. C'est ce second geste qui est mesuré dans le jeu, pas le
+/// premier.
+pub fn paint_outlined_galley(
+    painter: &egui::Painter,
+    pos: Pos2,
+    galley: &std::sync::Arc<egui::Galley>,
+    color: Color32,
+    outline: Color32,
+    offsets: &[Vec2],
+) {
+    for offset in offsets {
+        painter.galley(pos + *offset, galley.clone(), outline);
+    }
+    painter.galley(pos, galley.clone(), color);
+}

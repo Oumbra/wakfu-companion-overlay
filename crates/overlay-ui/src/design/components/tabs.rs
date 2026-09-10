@@ -72,6 +72,22 @@
 //! relevées pour ce seul trait, qui sont trois hauteurs du même dégradé. Voir
 //! [`tokens::TAB_SEPARATOR_TOP`].
 //!
+//! ## Le libellé est cerné, et pas de noir
+//!
+//! Le jeu repeint chaque libellé d'onglet sur **1 px dans les huit directions**, dans une version
+//! très assombrie de **sa propre couleur** — 20,5 % (voir [`tokens::TAB_LABEL_OUTLINE_FACTOR`], qui
+//! porte la mesure et écarte les deux autres explications possibles). C'est ce cerne qui détache le
+//! mot de son fond ; sans lui, le libellé paraît posé à plat à côté de la capture du jeu.
+//!
+//! Ce n'est **pas** le cerne noir de `design::text::paint_outlined_text`, celui du titre de modale et
+//! des dégâts de combat : mesuré ici sur deux couleurs de libellé de la même capture, un doré et un
+//! blanc, il suit la couleur du texte et non le fond. Et ce n'est pas non plus la graisse synthétique
+//! retirée en 2026-09-09 : huit copies de la *même* couleur empâtent le mot, huit copies nettement
+//! plus sombres le détourent.
+//!
+//! Les boutons, eux, n'en ont pas — vérifié sur `large-button-cancel.png` et
+//! `large-button-validate.png`, où l'anneau autour du libellé ne s'écarte du fond que de 4 %.
+//!
 //! ## Largeur : parts égales, sur toute la largeur disponible
 //!
 //! **Par défaut, la barre occupe toute la largeur qu'on lui donne et ses onglets s'y partagent la
@@ -459,15 +475,27 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
                 );
                 // Libellé écrêté à SON onglet : un libellé trop long ne doit pas déborder sur le
                 // voisin, où il passerait pour un défaut de mise en page.
-                ui.painter()
-                    .with_clip_rect(tab_rect.intersect(ui.clip_rect()))
-                    .text(
-                        tab_rect.center(),
-                        Align2::CENTER_CENTER,
-                        &entry.label,
+                let color = state.label_color();
+                let galley = ui.fonts_mut(|f| {
+                    f.layout_no_wrap(
+                        entry.label.clone(),
                         font.clone(),
-                        state.label_color(),
-                    );
+                        // La couleur est donnée au moment de peindre, pas à la mise en page : la
+                        // même galley sert au cerne ET au texte.
+                        egui::Color32::PLACEHOLDER,
+                    )
+                });
+                text::paint_outlined_galley(
+                    &ui.painter()
+                        .with_clip_rect(tab_rect.intersect(ui.clip_rect())),
+                    Align2::CENTER_CENTER
+                        .align_size_within_rect(galley.size(), tab_rect)
+                        .min,
+                    &galley,
+                    color,
+                    text::dimmed(color, tokens::TAB_LABEL_OUTLINE_FACTOR),
+                    text::OUTLINE_FULL,
+                );
             }
 
             if entry.enabled {
