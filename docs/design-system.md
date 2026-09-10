@@ -398,6 +398,55 @@ simulation HTML/CSS interactive validée avec l'utilisateur avant portage :
 - Fenêtre portée à 560×436 (ratio aligné sur les 720:561 mesurés de la vraie fenêtre Options du
   jeu, au lieu d'une boîte compacte 560×230 arbitraire) — cohérence visuelle avec le rendu réel.
 
+### 9 ter. Fond du corps de la modale — découpage 2026-09-10
+
+> Source : les six captures `assets/design-system/interfaces/interface-options-*.png`.
+> Sortie : `assets/design-system/modal-body/modal-body-*.png` (720 × 505, RGBA), produites par
+> `tools/design-system/build_modal_body.py`. Le corps prend la suite exacte de
+> `modal-header.png` : celui-ci couvre y=0..55, le fond démarre à y=56 et court jusqu'à y=560,
+> liseré inférieur compris.
+
+`MODAL_BG` (`#1C2023`, `options_modal.rs`) peint le corps d'un aplat : c'est justement l'écart que
+ce découpage doit combler. Les composants — ligne d'onglets, bouton « réinitialiser », panneau de
+section, boutons Annuler et Valider — sont retirés et les surfaces ainsi libérées rebâties.
+
+| Élément | Valeur mesurée | Remarque |
+| --- | --- | --- |
+| Corps | y=56 → 560, soit 720 × 505 | Aucun recouvrement avec `modal-header.png`. |
+| Fond | `#1E2126` | Moyenne des zones de fond nu. Deux à trois niveaux au-dessus de `MODAL_BG` (`#1C2023`, valeur donnée au colorimètre) : l'écart tient à la zone échantillonnée, pas à un désaccord de méthode. Le dégradé d'un bord à l'autre reste sous 2 niveaux — la surface est quasi plate. |
+| Liseré extérieur | 2 px, `#2A2D30` env. | Confirme le `#2a2e30` du relevé (§9 bis). |
+| Angles inférieurs | arrondis, rayon 12 | Même quart de cercle que les angles supérieurs de `modal-header.png` : sur la dernière ligne (y=560) le premier pixel opaque est à x=12. La transparence est portée par l'alpha du PNG. |
+| Panneau de section | fond − 9 niveaux (`#15181B`) | **Ce n'est pas une surface opaque** : c'est le même fond assombri, la texture le traverse. Confirme `SECTION_BG` (`#15181C`). Côté overlay il peut donc rester peint, pas importé. |
+| Hachures, pente | 1,000 (45° exacts) | Vérifié par projection en testant les pentes de 0,5 à 2,0. |
+| Hachures, amplitude | 2,5 à 5,7 niveaux au-dessus du fond | **Réparties en cadre, pas en trame** : denses sur la bannière, les côtés, le bas et les angles, absentes au centre. C'est le même constat que pour les boutons (`design::assets`, `button_slice` : « les croisillons ne sont pas une texture de fond mais un embout »), ici à l'échelle de la fenêtre. |
+| Grain | σ = 1,45 par canal, corrélation 0,95 entre canaux | Anisotrope : autocorrélation 0,85 à 1 px verticalement contre 0,37 horizontalement — de fines stries verticales, pas un bruit isotrope. |
+| Onglets / Réinitialiser | `16,70 → 639,119` / `663,70 → 707,119` | Zones retirées. |
+| Panneau | `14,122 → 706,500` | Zone retirée. |
+| Annuler / Valider | `13,512 → 357,553` / `363,512 → 707,553` | Zones retirées, ombre portée comprise. Gouttière de 11 px entre les deux, ce qui recoupe l'écart d'un pixel noté à l'étape 9 de `plan-modale-options.md`. |
+
+**Méthode** (détail dans l'en-tête du script) : le contenu est toujours plus clair que le fond,
+donc le **minimum des six captures l'efface** ; une **ouverture morphologique par un segment à 45°**
+relève les hachures, y compris là où un onglet ou un bouton les recouvre ; le **dégradé est
+ré-estimé par diffusion depuis les seules zones de fond nu** — jamais depuis le panneau assombri ni
+depuis la bannière, dont le turquoise déborderait dans la moyenne locale ; le **grain est
+resynthétisé** d'après ses caractéristiques mesurées plutôt que recopié, recoller des morceaux de
+marge produisant un damier visible.
+
+**Variantes livrées, en attente d'arbitrage** : six découpages nommés d'après leur capture d'origine
+(interchangeables, moins d'un niveau d'écart entre eux ; `chat` mis à part, dont la capture est
+cadrée 1 px plus haut, ce qui décale son pied de page d'autant), plus `consolide` (les six
+consolidées, rendu le plus proche du jeu), `trace-net` (hachures redessinées à trait franc, motif
+plus lisible), `plat` (couleur rigoureusement constante, pour un découpage en neuf tranches si la
+modale doit être redimensionnable — les angles gardent leurs hachures, seul le centre s'étire) et
+`uni` (témoin sans hachures, à peu près ce que rend `MODAL_BG` aujourd'hui). **Une fois la variante
+retenue, les autres n'ont pas à rester versionnées.**
+
+**Réserve** : la fenêtre du jeu est légèrement translucide (`MODAL_BG` porte un alpha de 235). Les
+captures contiennent donc un reste du décor de jeu situé derrière — visible en filigrane dans le
+panneau. Les zones rebâties en sont exemptes, `plat` et `uni` entièrement ; les marges conservées
+telles quelles le gardent. Si l'overlay repeint ces textures avec un alpha, ce résidu se cumulera
+au décor réel : `plat` est alors la variante sûre.
+
 ---
 
 ## 10. Incertitudes / à vérifier
