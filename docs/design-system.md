@@ -477,7 +477,7 @@ liseré de 2 px, oui. Le recalage est donc fait au chargement.
 | Fond | `#15191C` | Confirme `SECTION_BG` (`#15181C`) au niveau près. |
 | Écart au fond de la fenêtre | **8,3 niveaux** | Le panneau n'est pas une surface à part : c'est le même fond assombri, et le décor de la fenêtre le traverse. |
 | Liseré | 2 px, ≈ 2,5 niveaux plus sombre que son fond | Confirme `#131518` du relevé. Ce n'est pas un trait qu'on voit, c'est ce qui détache le panneau. |
-| Rayon des angles | **6** | **Revoit le 2 du relevé.** Mesuré par l'aire manquante dans les angles (un quart de disque de rayon r retire (1 − π/4)·r² pixels au carré qui le contient) : 8,2 px par angle en moyenne sur les quatre, quand un rayon 2 n'en retirerait que 0,9. Mesurer une aire est robuste au bruit, contrairement à une lecture d'escalier. |
+| Rayon des angles | **6** | **Revoit le 2 que portait le code** (`tokens::PANEL_RADIUS`, annoncé « valeur du relevé » — mais le nœud `panel` de `releve-modale-options.json` ne porte aucun rayon : le 2 y venait des deux boutons de pied de page, seuls nœuds à en déclarer un). Mesuré par l'aire manquante dans les angles (un quart de disque de rayon r retire (1 − π/4)·r² pixels au carré qui le contient) : 8,2 px par angle en moyenne sur les quatre, quand un rayon 2 n'en retirerait que 0,9. Mesurer une aire est robuste au bruit, contrairement à une lecture d'escalier. |
 | Hachures | 4 977 px de tracé, aux quatre angles | Le même cadre que sur le corps, vu à travers le rectangle du panneau. |
 | Grain | σ = 1,35 | Comme le corps, resynthétisé. |
 | Marges 9-slice | 105 · 50 · 175 · 120 | Gauche, haut, droite, bas — `MODAL_SECTION_SLICE`. Plus courtes que celles du corps : le panneau ne voit qu'une partie du cadre. |

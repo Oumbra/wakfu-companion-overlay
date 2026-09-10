@@ -30,7 +30,10 @@
 //! DsTexture::ModalSection) — une texture découpée des six captures de la fenêtre Options puis
 //! débarrassée de son contenu (§9 quater du design-system). Elle apporte le grain du jeu et les
 //! hachures qui traversent ses quatre angles, et porte dans son alpha l'arrondi de ceux-ci
-//! (rayon 6, mesuré par l'aire manquante — le 2 du relevé était une sous-estimation).
+//! (rayon 6, mesuré par l'aire manquante dans les angles). Ce 6 **revoit le 2 que portait
+//! `tokens::PANEL_RADIUS`** : cette constante l'annonçait comme « la valeur du relevé », mais le
+//! nœud `panel` de `releve-modale-options.json` ne déclare aucun rayon — le 2 y venait des deux
+//! boutons de pied de page, seuls nœuds à en porter un.
 //!
 //! Ne reste ici, du fond, que sa translucidité : [`tokens::PANEL_TINT`].
 //!
