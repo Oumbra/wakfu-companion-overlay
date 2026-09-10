@@ -667,11 +667,16 @@ mod tests {
     fn les_glyphes_d_icone_sont_detoures_au_pixel_pres() {
         /// Écart admis entre le canevas et l'encre, par axe — voir la doc de la fonction.
         const TOLERANCE: u32 = 1;
+        // **Toutes les textures découpées en `ICON_SLICE`**, et non les seules qui portent un
+        // `icon_content_size` : ce filtre-là laissait échapper les glyphes qui ne vivent pas sur
+        // un socle (`IconSearch` dans un champ, `IconTick` à côté d'un libellé, `IconChevronDown`
+        // sur une liste déroulante) — précisément ceux dont une marge transparente passerait
+        // inaperçue, faute d'étalon pour les recadrer. Réserve de la revue du 2026-09-10.
         for texture in DsTexture::ALL.iter().copied() {
-            if texture.icon_content_size().is_none() {
+            let spec = texture.spec();
+            if spec.slice.insets != Insets::same(0.0) {
                 continue;
             }
-            let spec = texture.spec();
             let img = decode(spec.bytes);
             let encre = ink_bbox(&img);
             let (canevas_x, canevas_y) = img.dimensions();
