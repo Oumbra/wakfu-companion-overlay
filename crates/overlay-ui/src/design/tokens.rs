@@ -493,23 +493,23 @@ pub const WINDOW_FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 /// avant que la texture du jeu ne le remplace. La couleur, elle, vient de la texture.
 pub const WINDOW_BODY_TINT: Color32 = Color32::from_rgba_premultiplied(235, 235, 235, 235);
 
-/// Rayon d'arrondi du panneau de contenu — 2, la valeur du relevé (nœud `panel`).
+/// Translucidité du panneau de contenu — **230/255**.
 ///
-/// Une première version lui donnait 18, lu à l'œil : un rayon qui n'existe nulle part dans cette
-/// interface.
-pub const PANEL_RADIUS: u8 = 2;
-
-/// Épaisseur du bord du panneau de contenu. Le jeu en a un ; la première version n'en peignait pas.
-pub const PANEL_BORDER: f32 = 2.0;
-
-/// Fond du panneau de contenu — `#15181c`, la valeur du relevé (nœud `panel`).
+/// Sa couleur, son liseré et l'arrondi de ses angles ne se règlent plus ici : ils sont dans
+/// `DsTexture::ModalSection`, découpée des captures du jeu (§9 quater du design-system). Un blanc
+/// à alpha réduit atténue sans changer la teinte — le mécanisme de teinte de
+/// `design::nine_slice::paint`, déjà celui de l'état désactivé des boutons.
 ///
 /// L'alpha 230 est une **déviation assumée** : la fenêtre entière est légèrement translucide, et
-/// un panneau opaque à l'intérieur d'elle se verrait comme une tache.
-pub const PANEL_FILL: Color32 = Color32::from_rgba_premultiplied(0x15, 0x18, 0x1C, 230);
-
-/// Bord du panneau de contenu — presque noir, à peine plus sombre que son fond (relevé `#131518`).
-pub const PANEL_BORDER_COLOR: Color32 = Color32::from_rgb(0x13, 0x15, 0x18);
+/// un panneau opaque à l'intérieur d'elle se verrait comme une tache. En pratique l'écart ne se
+/// voit pas — les deux alphas se multiplient, et `modale_options_sur_damier` mesure 0,7 de
+/// contraste résiduel sous le panneau contre 9,7 dans les marges.
+///
+/// **Attention au constructeur** : `from_rgba_premultiplied` attend des composantes déjà
+/// multipliées par l'alpha. L'ancien `PANEL_FILL` lui passait les valeurs relevées telles quelles,
+/// et peignait donc le panneau 2,3 niveaux trop clair — 24,5 au rendu contre 22,1 attendus. Une
+/// teinte blanche n'a pas ce piège : ses trois composantes valent son alpha.
+pub const PANEL_TINT: Color32 = Color32::from_rgba_premultiplied(230, 230, 230, 230);
 
 /// Axe des TITRES de section, depuis le bord du panneau.
 pub const PANEL_PAD_TITLE_X: f32 = 12.0;

@@ -438,12 +438,12 @@ est devenue `assets/design-system/modal-body.png`, seul fichier versionné ; le 
 (dix variantes : une par capture d'origine, plus `consolide`, `trace-net`, `plat` et `uni`) se
 régénère à la demande par `build_modal_body.py --variantes <dossier>`.
 
-**Marges 9-slice** (`design::assets::MODAL_BODY_SLICE`) : **gauche 130, haut 110, droite 205, bas
-170**. Quatre valeurs distinctes parce que le décor est franchement asymétrique — c'est encore lui
+**Marges 9-slice** (`design::assets::MODAL_BODY_SLICE`) : **gauche 125, haut 110, droite 195, bas
+180**. Quatre valeurs distinctes parce que le décor est franchement asymétrique — c'est encore lui
 qui dimensionne, comme sur un bouton. Chaque marge est la plus petite qui contienne 90 % du décor de
 son côté, arrondie au multiple de 5 supérieur (sortie `marges du décor` du script) ; le bas en
 demande plus que le haut parce que le pourtour des deux boutons de pied de page y concentre les
-croisillons les plus marqués. Les totaux (335 en X, 280 en Y) laissent une vraie bande médiane à la
+croisillons les plus marqués. Les totaux (320 en X, 290 en Y) laissent une vraie bande médiane à la
 taille où la modale est peinte (560 × 380), et cette bande est un fond quasi uni — rien de
 périodique à répéter, d'où `Fill::Stretch` sur les deux axes.
 
@@ -459,6 +459,44 @@ les marges conservées telles quelles le gardent. Peint avec un alpha, ce résid
 décor réel. Il est faible (moins de deux niveaux) et le rendu sur damier ne le fait pas ressortir,
 mais c'est à ce détail qu'il faudra penser si un fond de jeu très contrasté trahissait un
 fantôme.
+
+### 9 quater. Panneau de contenu — découpage 2026-09-10
+
+> Source : les mêmes six captures. Sortie : `assets/design-system/modal-section.png` (688 × 375,
+> RGBA), produite par `tools/design-system/build_modal_section.py`. Le pipeline commun aux deux
+> textures est dans `tools/design-system/modal_capture.py`.
+
+**Les six captures ne sont pas cadrées au même pixel** — `chat` est décalée d'une ligne vers le
+haut, `son` et `video` d'une colonne vers la droite (mesuré par corrélation sur le chrome, résidu
+nul après recalage). Le corps ne s'en ressentait pas, son fond étant uniforme ; le panneau, avec son
+liseré de 2 px, oui. Le recalage est donc fait au chargement.
+
+| Élément | Valeur mesurée | Remarque |
+| --- | --- | --- |
+| Panneau | x 16→703, y 124→498, soit 688 × 375 | Bornes exclusives 16,124 → 704,499. |
+| Fond | `#15191C` | Confirme `SECTION_BG` (`#15181C`) au niveau près. |
+| Écart au fond de la fenêtre | **8,3 niveaux** | Le panneau n'est pas une surface à part : c'est le même fond assombri, et le décor de la fenêtre le traverse. |
+| Liseré | 2 px, ≈ 2,5 niveaux plus sombre que son fond | Confirme `#131518` du relevé. Ce n'est pas un trait qu'on voit, c'est ce qui détache le panneau. |
+| Rayon des angles | **6** | **Revoit le 2 du relevé.** Mesuré par l'aire manquante dans les angles (un quart de disque de rayon r retire (1 − π/4)·r² pixels au carré qui le contient) : 8,2 px par angle en moyenne sur les quatre, quand un rayon 2 n'en retirerait que 0,9. Mesurer une aire est robuste au bruit, contrairement à une lecture d'escalier. |
+| Hachures | 4 977 px de tracé, aux quatre angles | Le même cadre que sur le corps, vu à travers le rectangle du panneau. |
+| Grain | σ = 1,35 | Comme le corps, resynthétisé. |
+| Marges 9-slice | 105 · 50 · 175 · 120 | Gauche, haut, droite, bas — `MODAL_SECTION_SLICE`. Plus courtes que celles du corps : le panneau ne voit qu'une partie du cadre. |
+
+**Le contenu couvre presque tout le panneau** — les fenêtres de fond nu s'y comptent en quelques
+pixels, contre des bandes entières pour le corps. L'intérieur est donc entièrement rebâti (couleur
+diffusée depuis ces fenêtres, grain resynthétisé, hachures relevées) et non recollé. Ce qui est
+conservé de la capture : le liseré et les angles, dont l'antialiasing ne se resynthétise pas mieux
+qu'il ne se recopie. Les angles sont détourés au **rectangle arrondi ajusté** puis **décontaminés**
+de la couleur du fond de modale qu'ils avaient mélangée — sans quoi l'asset porte un halo clair dès
+qu'on le pose ailleurs (même règle que `dsimg.py cutout`).
+
+**Correction au passage : les deux aplats étaient peints trop clairs.** `SECTION_BG` et l'ancien
+`MODAL_BG` étaient déclarés par `Color32::from_rgba_premultiplied(…, 230)` avec les valeurs
+**relevées** — or ce constructeur attend des composantes *déjà multipliées par l'alpha*. La couleur
+effectivement demandée était donc `valeur / 0,902`, soit **2,3 à 2,4 niveaux de trop**, ce que le
+rendu sur damier confirmait (panneau à 24,5 au lieu de 22,1). Peindre depuis une texture teintée
+d'un blanc à alpha réduit fait la multiplication dans le bon sens : le panneau rend maintenant
+exactement la couleur de la capture.
 
 ---
 

@@ -22,7 +22,17 @@
 //! un bord et un rayon, c'est le **panneau** qui contient les sections : ce composant.
 //!
 //! `panels::options_modal` appelait « section » ce qui est un panneau, et lui avait donné un rayon
-//! de 18 lu à l'œil — un rayon qui n'existe nulle part dans cette interface. Le relevé en donne 2.
+//! de 18 lu à l'œil — un rayon qui n'existe nulle part dans cette interface.
+//!
+//! ## Le fond vient du jeu, pas d'un aplat
+//!
+//! Depuis le 2026-09-10, le panneau est peint depuis [`DsTexture::ModalSection`](crate::design::
+//! DsTexture::ModalSection) — une texture découpée des six captures de la fenêtre Options puis
+//! débarrassée de son contenu (§9 quater du design-system). Elle apporte le grain du jeu et les
+//! hachures qui traversent ses quatre angles, et porte dans son alpha l'arrondi de ceux-ci
+//! (rayon 6, mesuré par l'aire manquante — le 2 du relevé était une sous-estimation).
+//!
+//! Ne reste ici, du fond, que sa translucidité : [`tokens::PANEL_TINT`].
 //!
 //! ## La réserve de barre de défilement, toujours posée
 //!
@@ -60,13 +70,11 @@ impl Panel {
         rect: Rect,
         add_contents: impl FnOnce(&mut Ui, &PanelZones) -> R,
     ) -> InnerResponse<R> {
-        ui.painter()
-            .rect_filled(rect, tokens::PANEL_RADIUS, tokens::PANEL_FILL);
-        ui.painter().rect_stroke(
+        crate::design::DesignSystem::get(ui.ctx()).paint(
+            ui.painter(),
             rect,
-            tokens::PANEL_RADIUS,
-            egui::Stroke::new(tokens::PANEL_BORDER, tokens::PANEL_BORDER_COLOR),
-            egui::StrokeKind::Inside,
+            crate::design::DsTexture::ModalSection,
+            tokens::PANEL_TINT,
         );
 
         let zones = zones(rect);
