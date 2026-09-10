@@ -653,12 +653,91 @@ onglets**.
 
 ## À faire — composants identifiés, pas encore écrits
 
-Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
+Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
+ne sont pas encore au manifeste, dont 28 icônes), des captures d'interfaces du jeu
+(`assets/design-system/interfaces/`) et du code des panneaux. Classement **par vague** et non par
+fréquence : chaque vague fournit ce dont la suivante a besoin.
 
-| Composant | Assets disponibles | Notes |
+Les mesures citées comme « déjà relevées » existent dans [`design-tokens.json`](design-tokens.json)
+ou dans `docs/design-system/releve-*.json` — c'est du relevé fait, pas du travail à refaire.
+
+### Vague 1 — la structure
+
+Fait disparaître la mise en page absolue. Rien d'autre ne devrait être écrit avant : aujourd'hui,
+`panels::options_modal` porte 30 constantes de mise en page et 10 `egui::Rect::from_*` calculés à la
+main, soit environ 250 lignes qui ne font que placer des rectangles.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
-| **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
-| **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
-| **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
-| **Tuile de portrait / d'ennemi** | `crates/overlay-ui/assets/templates/*.png`, planche d'avatars | Panneau Combat — aujourd'hui entièrement dans `panels::combat` et `panels::combat_frame`. |
-| **Barre de dégâts** | aucun (dessiné à la main) | Total, noms, barres proportionnelles — aujourd'hui dans `panels::combat`. |
+| **`design::window`** (conteneur) | Le chrome complet d'`options_modal` : bannière, titre, corps, pied à deux boutons, réserve de barre de défilement. | `modal-header.png`, `flat-template_2-without-decorations.png`, `decoration-{top,right,bottom}.png` ; `releve-modale-options.json` ; §9 / 9 bis / 9 ter du design-system. |
+| **`design::panel` / `design::section`** | Le panneau de contenu (`#15181c`, bord 2px `#131518`, rayon 2) et le regroupement par espacement seul. | `releve-section-options.json` — la distinction panneau/section y est déjà tranchée. |
+| **`design::heading`** | Les deux blocs de titre peints à la main dans la modale, avec le calcul de hauteur d'encre et l'ombre bas-droite. | Corps 21 (bannière) / 18 (section), `#b8b9ba`, `text::SHADOW_BOTTOM_RIGHT`. |
+| **`design::tooltip`** | `panels::tooltip` et ses trois enveloppes (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`/`_right`), placement et replis compris. | `TOOLTIP_MARGIN`, `TOOLTIP_GAP`, `TOOLTIP_BG_FILL` mesurés. |
+| **`design::icon` + `DsIcon`** | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
+
+**Un composant conteneur ne peut pas implémenter `egui::Widget`** (qui rend une `Response` à partir
+de rien) : `scroll_area` a déjà dû y déroger, et `window`/`panel`/`collapsible`/`table`/`dialog`
+devront aussi. Cinq dérogations ne sont plus une exception — trancher, avant d'écrire la vague 1, si
+le contrat gagne une seconde forme « conteneur » (closure de contenu) ou si sa clause 2 est élargie.
+
+### Vague 2 — les formulaires
+
+Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options existent.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
+| --- | --- | --- |
+| **`input`** — variantes `Number`, `Search`, état d'erreur | *Extension du composant existant*, pas un second composant (skill `ui-component`, étape 1). | `input-number.png`, `input-search.png`, `empty-input-search.png`, `large-input-*.png` |
+| **`design::stepper`** | Les boutons « + » / « − » du carré de contrôle du Suivi ; le couple valeur ± du formulaire de vente. | `button-plus.png`, `button-moins.png` ; `stepper_height` 41–48 et `stepper_button_square` 30 déjà dans `design-tokens.json`. |
+| **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. | `collapse-closed.png`, `collapse-width-5th-opened.png`, `collapse-block.png`, `collapse-block-opened.png` ; `collapse_header_height` 38–45 relevé. §5.8. |
+| **`design::field`** | Le calcul `row_rect`/`field_rect`/`browse_rect` d'`options_modal`, avec la règle « la hauteur d'un composant est celle de sa référence, pas celle de son voisin ». | Le cas réel est écrit et validé dans `options_modal` ; il s'agit de le généraliser. |
+| **`design::slider`** | Rien aujourd'hui. | Aucun asset découpé — passer par `design-asset` d'abord ; captures dans `interface-options-son.png` et `interface-options-interface.png`. |
+| **`tabs`** — variante icône | Onglets à pictogrammes. | `icon-tabs.png` ; dépend du registre `DsIcon` (vague 1). §5.7. |
+
+### Vague 3 — les données
+
+Les composants qui portent ce que l'overlay affiche réellement. **Conditionnés par un arbitrage** :
+les panneaux Combat et Suivi parlent encore le langage du portage web (cyan `#00d2ff`, gris
+`#1e1e1e` — 34 constantes de couleur en dur dans `panels::watchlist` et `panels::combat`), pas celui
+du jeu. Tant que la migration n'est pas décidée, une tuile d'objet ou une jauge de dégâts ne sait
+pas de quel côté elle tombe.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
+| --- | --- | --- |
+| **`design::item_slot`** | `watchlist::entry_tile` — bordure de rareté, icône, compteur incrusté, et l'ordre de peinture dont l'inversion a déjà produit un bug. | 7 `Border-*.webp`, `rarity_borders` (7 raretés), `item_slot_square` 63–64 / `gap` 2 / `border` 2 relevés. |
+| **`design::badge`** | `watchlist::paint_count_inline`, les étiquettes de rareté, la pastille d'état. | `status_pill_active` ; `text::OUTLINE_FULL` existe. §5.12, §5.13. |
+| **`design::meter`** | `combat::damage_bar` — 68 lignes de rectangles empilés (bord externe, bord interne, piste, remplissage, reflet, curseur de fin, arrondis conditionnels). | Six couleurs mesurées dans `combat.rs`, à promouvoir en jetons. |
+| **`design::portrait`** | `combat::paint_flat_portrait`, `panels::combat_frame` et son gabarit à six emplacements. | `crates/overlay-ui/assets/templates/*.png`, atlas de classes, portrait de repli. |
+| **`design::table` + `design::pagination`** | Rien aujourd'hui — mais l'historique HDV, les ventes et les échanges (§9 du plan) sont exactement cela : colonnes triables, lignes alternées, état vide, « Page 0 / 0 » et ses deux flèches. | Quatre captures complètes dans `interfaces/` ; passer par `ui-blueprint` d'abord. |
+
+### Vague 4 — les finitions
+
+Ni urgent ni structurant, mais chacun retire du code d'un panneau.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
+| --- | --- | --- |
+| **`design::toolbar`** | Le carré de contrôle du Suivi : fond translucide, gouttière, groupement de boutons icône. | `watchlist::PANEL_BACKDROP_FILL`, `menu-button-icon-first-plan.png` |
+| **`design::segmented`** | Le bascule « Objets mis en vente / Offres d'achat » ; le switch Alliés/Ennemis du panneau Combat en est une variante maison. | `tabs-with-first-tab-active.png` |
+| **`design::toast`** | `watchlist::toast_card` et ses confettis — ~300 lignes, avec son générateur pseudo-aléatoire maison. | Portage du web ; aucun asset de jeu correspondant. |
+| **`design::dialog`** | Rien — la boîte de confirmation qui manquera à la première action destructrice de l'overlay. | `interfaces/interface-confirm-box.png` |
+| **`design::separator`** | Les filets de séparation des formulaires du jeu. | Captures d'interface. |
+
+### Doublons à résorber avant d'ajouter quoi que ce soit
+
+Trois écarts constatés le 2026-09-10, indépendants de toute décision :
+
+- **`modal-header.png` est dupliqué octet pour octet** (`md5 fcddb015…`) entre
+  `assets/design-system/` et `crates/overlay-ui/assets/ui/options/` ; `options_modal.rs:293` charge
+  la copie par `include_bytes!` local au lieu du manifeste — exactement le cas résorbé le 2026-09-09
+  pour quatre autres PNG (§9.2 du plan).
+- **Deux barres de défilement** : `design::scroll_area` (poignée 6px, `#515356` / `#c1ad83`, aucun
+  rail) et `panels::combat_frame_scroll` (barre 5px, `#998a6c`, bordure noire alpha 217, rayon 2).
+- **Six chemins de chargement de texture** — `DesignSystem::load`, `ui_icons`, `portraits`,
+  `remote_icons`, `combat_frame`, `options_modal` — dont cinq copies de la même fonction
+  décoder → `ColorImage` → `load_texture`. Le budget mémoire (§8 du plan, 300 Mo) n'a donc aucun
+  point de mesure unique.
+
+### Ce que ce catalogue devrait porter en plus
+
+Une colonne **« qui le consomme en production »** par composant. La fiche du bouton icône la porte
+déjà (« les quatre boutons du carré de contrôle du Suivi ») ; les autres non. C'est cette colonne
+qui répond, dans six mois, à « puis-je changer ce jeton sans rien casser ? ».
