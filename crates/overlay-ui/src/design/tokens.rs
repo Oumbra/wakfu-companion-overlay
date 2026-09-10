@@ -380,6 +380,21 @@ pub const ICON_TINT: Color32 = Color32::from_rgb(0xC5, 0xCB, 0xCC);
 /// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
 pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 
+/// Assombrissement d'un bouton icône désactivé **en contexte premier plan**, où le socle grisé du
+/// jeu ne convient pas (voir `IconContext::disabled`) — un multiplicateur d'alpha appliqué au socle
+/// de repos, ~43 % d'opacité.
+///
+/// Valeur reprise telle quelle de `panels::icon_button::DISABLED_TINT`, qui la portait depuis le
+/// 2026-09-06 : assez marquée pour lire « désactivé » sur le fond translucide commun d'une barre de
+/// premier plan, sans devenir illisible. Elle n'a jamais été reprochée sur les deux ans de vie de
+/// ce bouton ; la migration vers le design system n'était pas le moment de la rejuger.
+pub const DISABLED_DIM: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 110);
+
+/// Teinte d'une icône désactivée en contexte premier plan — [`ICON_TINT`] à l'opacité de
+/// [`DISABLED_DIM`], pour que l'icône s'efface exactement autant que son socle.
+pub const ICON_TINT_DISABLED: Color32 =
+    Color32::from_rgba_unmultiplied_const(0xC5, 0xCB, 0xCC, 110);
+
 /// Plus grande dimension d'encre d'une icône posée sur un socle de [`ICON_BUTTON_SIZE`] — **18px,
 /// mesuré sur `menu-button-icon-first-plan.png`** (2026-09-10), pas estimé.
 ///

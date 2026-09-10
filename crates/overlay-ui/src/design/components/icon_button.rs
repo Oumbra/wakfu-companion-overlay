@@ -94,6 +94,37 @@ impl IconContext {
             (IconContext::Panel, true) => DsTexture::ButtonIconHover,
         }
     }
+
+    /// Socle désactivé, sa teinte, et celle de l'icône — **pas la même mécanique selon le
+    /// contexte**, et c'est mesuré, pas arbitraire.
+    ///
+    /// Le jeu n'a capturé qu'une texture de socle grisé, `button-icon-disabled.png`, et elle
+    /// appartient au contexte `Panel` : sa luminance moyenne est de 60, contre 81 pour
+    /// `button-icon.png`, le socle actif du même contexte. Un bouton désactivé y est donc plus
+    /// sombre que ses voisins, ce qu'on attend.
+    ///
+    /// Posée sur une barre de premier plan, cette même texture s'inverse : 60 contre 41 pour
+    /// `button-icon-first-plan.png`. Le bouton désactivé devient le plus lumineux du carré et
+    /// attire l'œil avant les boutons actifs — constaté sur la capture de migration du carré de
+    /// contrôle du Suivi (2026-09-10), qui est exactement ce cas.
+    ///
+    /// En `FirstPlan`, on garde donc le socle de repos et on l'assombrit, comme le faisait
+    /// `panels::icon_button` faute d'asset dédié. Ce n'est pas un repli : c'est la seule des deux
+    /// mécaniques qui dit « désactivé » sur ce fond-là.
+    fn disabled(self) -> (DsTexture, egui::Color32, egui::Color32) {
+        match self {
+            IconContext::FirstPlan => (
+                DsTexture::ButtonIconFirstPlan,
+                tokens::DISABLED_DIM,
+                tokens::ICON_TINT_DISABLED,
+            ),
+            IconContext::Panel => (
+                DsTexture::ButtonIconDisabled,
+                egui::Color32::WHITE,
+                tokens::TEXT_DISABLED,
+            ),
+        }
+    }
 }
 
 /// État visuel — les trois du contrat.
@@ -193,16 +224,20 @@ impl Widget for IconButton {
 
         if ui.is_rect_visible(rect) {
             let design = DesignSystem::get(ui.ctx());
-            let (background, icon_tint) = match state {
-                IconButtonState::Idle => (self.context.background(false), tokens::ICON_TINT),
-                IconButtonState::Hovered => {
-                    (self.context.background(true), tokens::ICON_TINT_HOVER)
-                }
-                // Une seule texture de socle grisé pour les deux contextes : le jeu n'en a capturé
-                // qu'une, comme pour le bouton texte.
-                IconButtonState::Disabled => (DsTexture::ButtonIconDisabled, tokens::TEXT_DISABLED),
+            let (background, background_tint, icon_tint) = match state {
+                IconButtonState::Idle => (
+                    self.context.background(false),
+                    egui::Color32::WHITE,
+                    tokens::ICON_TINT,
+                ),
+                IconButtonState::Hovered => (
+                    self.context.background(true),
+                    egui::Color32::WHITE,
+                    tokens::ICON_TINT_HOVER,
+                ),
+                IconButtonState::Disabled => self.context.disabled(),
             };
-            design.paint(ui.painter(), rect, background, egui::Color32::WHITE);
+            design.paint(ui.painter(), rect, background, background_tint);
 
             let icon_size = icon_draw_size(
                 design.native_size(self.icon),
