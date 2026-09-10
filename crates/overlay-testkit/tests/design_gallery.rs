@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2800.0))
+        .with_size(Vec2::new(760.0, 3480.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -538,4 +538,54 @@ fn gallery(ui: &mut egui::Ui) {
         .width(590.0)
         .log_name("galerie.info-reference"),
     );
+
+    heading(
+        ui,
+        "Chrome de fenêtre — bannière, onglets, panneau, pied de page",
+        "Les trois conteneurs à l'échelle réduite : design::window pose le décor et rend ses zones, design::panel écrête son contenu, design::heading titre une section. Le dernier item de la liste est volontairement hors du panneau — l'écrêtage doit le couper net.",
+    );
+    {
+        // Rendu à 640 × 300 plutôt qu'aux 720 × 561 de la vraie fenêtre : ce qui est vérifié ici
+        // est la COMPOSITION des trois conteneurs, pas la cote de la fenêtre Options — celle-là a
+        // ses propres snapshots (`options_modale_sur_damier.png`). Une fenêtre à ces dimensions
+        // montre au passage que le décor tient à n'importe quelle taille, ce qu'un 9-slice promet.
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(640.0, 300.0), egui::Sense::hover());
+        let mut tab = GalleryTab::Reglages;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            let chrome = design::window("Fenêtre")
+                .footer("Annuler", "Valider")
+                .log_name("galerie.fenetre")
+                .show(ui);
+            chrome.tabs(
+                ui,
+                design::tabs(&mut tab)
+                    .entry(GalleryTab::Reglages, "Réglages")
+                    .entry(GalleryTab::Avance, "Avancé")
+                    .entry(GalleryTab::Indisponible, "Indisponible")
+                    .enabled(false)
+                    .log_name("galerie.fenetre-onglets"),
+            );
+            design::panel().show(ui, chrome.content, |ui, _panel| {
+                ui.add(design::heading("Section"));
+                for n in 1..=6 {
+                    ui.label(
+                        egui::RichText::new(format!("Ligne de contenu n° {n}"))
+                            .color(design::tokens::INFO_TEXT)
+                            .size(14.0),
+                    );
+                    ui.add_space(6.0);
+                }
+            });
+        });
+    }
+}
+
+/// Onglets de la fenêtre de démonstration ci-dessus — un type à part, parce qu'une barre d'onglets
+/// est générique sur ce que l'appelant lui donne à sélectionner et qu'une galerie ne doit pas
+/// emprunter celui d'un panneau réel pour l'illustrer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GalleryTab {
+    Reglages,
+    Avance,
+    Indisponible,
 }
