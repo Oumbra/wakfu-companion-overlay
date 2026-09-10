@@ -782,10 +782,14 @@ coïncide avec l'asset isolé `button-moins.png` :
 | Hauteur du champ | `STEPPER_FIELD_HEIGHT_RATIO` (**1,0**) | **écart assumé** — le jeu met 26 pour 32 |
 | Teinte du glyphe | `STEPPER_ICON_TINT` (`#f4d89f`) | mesuré au pixel — **de l'or au repos** |
 
-**Le champ fait la hauteur de ses boutons** (décision utilisateur, 2026-09-10). Le jeu, lui, met un
-champ de 26 px pour un socle de 32 : un champ plus court que ses boutons a été jugé peu soigné, et
-l'uniformité l'emporte ici sur la fidélité. C'est le seul écart volontaire du composant, et il tient
-dans un jeton.
+**La BOÎTE du champ fait la hauteur de ses boutons — son texte, non** (décision utilisateur,
+2026-09-10). Le jeu met un champ de 26 px pour un socle de 32 : un champ plus court que ses boutons
+a été jugé peu soigné, et l'uniformité l'emporte ici sur la fidélité.
+
+Mais étirer la boîte ne doit **pas** étirer son contenu. Le champ est donc posé avec
+`Input::box_height`, ajouté pour ce cas, et non avec `size(InputSize::Height(...))` qui met tout à
+l'échelle — cette première version écrivait la valeur en corps 22 au lieu de 17, soit un tiers trop
+gros. Vérifié après correction : **12 px d'encre, exactement comme le jeu**.
 
 **La petite capture (`input-number.png`) n'est pas une source.** Sa gouttière concorde à un pixel
 près, mais son glyphe fait 12 px dans un socle de 24 — le même que dans un socle de 32. Les deux
