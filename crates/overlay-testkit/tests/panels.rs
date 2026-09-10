@@ -37,7 +37,7 @@ use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::options_modal::{
-    OptionsModalAction, OptionsModalAssets, OptionsModalState,
+    OptionsModalAction, OptionsModalAssets, OptionsModalState, OptionsTab,
 };
 use overlay_ui::panels::watchlist::{
     build_confetti, WatchlistToast, WatchlistToastReason, TOAST_DURATION,
@@ -781,6 +781,7 @@ fn panneau_options_ne_panique_pas() {
     let mut options_state = OptionsModalState {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: Some("Le fichier sélectionné doit s'appeler wakfu.log.".to_string()),
+        tab: OptionsTab::default(),
     };
     // Chargées à part de `Textures` (variable locale dédiée plutôt qu'un champ supplémentaire sur
     // `Textures`, jamais utilisé par les autres tests) : `get_or_load`/cet emprunt doivent coexister
@@ -850,6 +851,7 @@ fn modale_options_echap_annule_et_entree_valide() {
     let mut options_state = OptionsModalState {
         path_input: CHEMIN.to_string(),
         error: None,
+        tab: OptionsTab::default(),
     };
     let mut options_assets: Option<OptionsModalAssets> = None;
     // Les actions sont ACCUMULÉES, pas gardées une par une : `Harness::run()` rejoue plusieurs

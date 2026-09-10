@@ -65,6 +65,17 @@ pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(36.0);
 /// toutes les textures du manifeste.
 pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage d'un onglet : **4px figés sur les quatre côtés**, tout le reste étiré.
+///
+/// Pas de long embout ici, contrairement aux boutons : un onglet n'a pas de hachures d'extrémité,
+/// juste un bord sombre de 2px doublé d'un liseré. 4px = ce bord plus deux pixels de sécurité, la
+/// même règle que le haut et le bas d'un bouton.
+///
+/// `Fill::Stretch` sur les deux axes. En Y, la question ne se pose pas : un onglet est toujours
+/// peint à sa hauteur native de 44px. En X, le décor du corps est un motif très sourd, dont
+/// l'étirement se voit moins qu'un raccord de tuilage au milieu d'un onglet.
+pub const TAB_SLICE: NineSlice = NineSlice::new(Insets::same(4.0), Fill::Stretch, Fill::Stretch);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -99,6 +110,14 @@ pub enum DsTexture {
     /// simplement mis à l'échelle. Blanche dans le fichier, elle prend sa couleur par teinte —
     /// c'est ce qui permet au ton `Alert` de `design::info_text` d'exister sans second fichier.
     IconInfo,
+    /// Onglet ACTIF — et survolé, les deux partageant exactement le même fond (voir
+    /// `design::components::tabs`). Découpé du premier segment de
+    /// `tabs-with-first-tab-active.png`, coin gauche redressé : ce coin arrondi appartient à
+    /// l'extrémité de la BARRE, pas à l'onglet, et les segments du milieu sont bien droits.
+    TabActive,
+    /// Onglet inactif — et désactivé, dont seul le libellé change. Découpé du segment du MILIEU du
+    /// même fichier, le seul dont les deux coins sont droits.
+    TabInactive,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -128,6 +147,8 @@ impl DsTexture {
         DsTexture::ButtonDangerHover,
         DsTexture::ButtonDisabled,
         DsTexture::IconInfo,
+        DsTexture::TabActive,
+        DsTexture::TabInactive,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -188,6 +209,16 @@ impl DsTexture {
                 name: "ds-icon-info",
                 bytes: ds_asset!("icons/icon-info.png"),
                 slice: ICON_SLICE,
+            },
+            DsTexture::TabActive => DsTextureSpec {
+                name: "ds-tab-active",
+                bytes: ds_asset!("tab-active.png"),
+                slice: TAB_SLICE,
+            },
+            DsTexture::TabInactive => DsTextureSpec {
+                name: "ds-tab-inactive",
+                bytes: ds_asset!("tab-inactive.png"),
+                slice: TAB_SLICE,
             },
         }
     }

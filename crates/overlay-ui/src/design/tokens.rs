@@ -146,3 +146,49 @@ pub const INFO_LINE_HEIGHT: f32 = 23.0;
 /// 13 px. Une valeur absolue et non un ratio : ce bloc n'a pas de hauteur propre dont il pourrait
 /// dériver, sa hauteur est celle de son contenu.
 pub const INFO_FONT_SIZE: f32 = 17.0;
+
+// ---------------------------------------------------------------------------------------------
+// Barre d'onglets — mesurée sur `releve-modale-options.json` (nœuds `tabbar` et `tab-*`) et
+// recoupée au pixel sur `interface-options-video.png`, ligne y=110. Détail des sources dans
+// `design::components::tabs`.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur native d'un onglet — `[72, 116]` dans une bande `[56, 124]`.
+///
+/// **La hauteur d'un composant est celle de sa texture**, jamais déduite de sa largeur : la modale
+/// écrasait cette texture de 44 px à 31, ce qui aplatissait le décor et le libellé avec.
+pub const TAB_HEIGHT: f32 = 44.0;
+
+/// Libellé de l'onglet ACTIF — blanc pur. C'est la seule chose qui le distingue d'un onglet
+/// survolé, dont le fond est identique (voir `design::components::tabs`).
+pub const TAB_LABEL_ACTIVE: Color32 = Color32::WHITE;
+
+/// Libellé d'un onglet inactif **et** survolé — l'or du jeu.
+pub const TAB_LABEL_IDLE: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+
+/// Trait clair entre deux onglets.
+///
+/// **`#595140`, la valeur de la capture de la modale** (x 100-101 sur `interface-options-video.png`,
+/// ligne 110) — le même kaki que le bord d'un champ de saisie. Deux autres valeurs traînent pour ce
+/// même trait : `#837d70` dans le relevé et `#6d6657` dans l'asset détouré. La capture de la fenêtre
+/// qu'on reproduit l'emporte sur les deux.
+pub const TAB_SEPARATOR: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
+
+/// Largeur du trait séparateur, et donc gouttière entre deux onglets : chacun porte déjà ses deux
+/// bords sombres de 2px, ce qui donne les 6px que le relevé mesure entre deux remplissages.
+pub const TAB_SEPARATOR_WIDTH: f32 = 2.0;
+
+/// Marge horizontale entre le bord d'un onglet et son libellé.
+///
+/// **La seule valeur stable des six onglets relevés** : 15px sur « Interface » (encre 73, onglet
+/// 103) et 16 sur « Commandes » (encre 100, onglet 133). Les quatre libellés courts ont un padding
+/// bien plus large (jusqu'à 35px sur « Chat »), sans règle retrouvable — voir
+/// `design::components::tabs`.
+pub const TAB_PADDING_X: f32 = 16.0;
+
+/// Largeur plancher d'un onglet — le plus petit onglet relevé (« Jeu », 77px). Garde-fou de
+/// proportion pour un libellé court, comme `BUTTON_MIN_ASPECT` pour un bouton. Réglage, pas mesure.
+pub const TAB_MIN_WIDTH: f32 = 77.0;
+
+/// Corps du libellé d'onglet — 17px, la même encre de 13px que tous les libellés du jeu.
+pub const TAB_FONT_SIZE: f32 = 17.0;

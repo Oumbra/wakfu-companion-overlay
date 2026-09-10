@@ -19,7 +19,9 @@
 
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
-use overlay_ui::design::{self, ButtonSize, ButtonState, ButtonVariant, InfoTone, InputState};
+use overlay_ui::design::{
+    self, ButtonSize, ButtonState, ButtonVariant, InfoTone, InputState, TabState,
+};
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
 /// jeu : les textures de bouton sont détourées, elles doivent être jugées sur le fond sur lequel
@@ -38,7 +40,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 1545.0))
+        .with_size(Vec2::new(760.0, 1760.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -237,6 +239,47 @@ fn gallery(ui: &mut egui::Ui) {
         .width(420.0)
         .log_name("galerie.alerte-2"),
     );
+
+    heading(
+        ui,
+        "Barre d'onglets — hauteur native 44 px, quatre états",
+        "Le survolé a EXACTEMENT le fond de l'actif : seul le libellé les distingue (blanc pour l'actif, doré pour les autres). Un portage qui ne jouerait que sur le fond les rendrait indiscernables.",
+    );
+    // Une valeur de sélection par barre : un `&mut` partagé afficherait quatre fois le même état.
+    let mut onglet_demo = 1_u8;
+    design::tabs(&mut onglet_demo)
+        .entry(0, "Inactif")
+        .entry(1, "Actif")
+        .entry(2, "Survolé")
+        .preview_state(TabState::Hovered)
+        .entry(3, "Désactivé")
+        .enabled(false)
+        .log_name("galerie.onglets")
+        .show(ui);
+
+    // Le cas réel de la modale Options : trois entrées, deux encore désactivées.
+    let mut onglet_options = 2_u8;
+    design::tabs(&mut onglet_options)
+        .entry(0, "Alertes")
+        .enabled(false)
+        .entry(1, "Personnages")
+        .enabled(false)
+        .entry(2, "Paramètres")
+        .log_name("galerie.onglets-options")
+        .show(ui);
+
+    // Les six onglets du jeu, pour comparer les largeurs à la barre réelle.
+    let mut onglet_jeu = 1_u8;
+    design::tabs(&mut onglet_jeu)
+        .entry(0, "Jeu")
+        .entry(1, "Vidéo")
+        .entry(2, "Interface")
+        .preview_state(TabState::Hovered)
+        .entry(3, "Son")
+        .entry(4, "Commandes")
+        .entry(5, "Chat")
+        .log_name("galerie.onglets-jeu")
+        .show(ui);
 
     heading(
         ui,

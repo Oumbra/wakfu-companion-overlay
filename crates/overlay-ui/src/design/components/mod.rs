@@ -26,3 +26,4 @@
 pub mod button;
 pub mod info_text;
 pub mod input;
+pub mod tabs;
