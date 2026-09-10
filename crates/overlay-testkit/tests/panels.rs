@@ -907,9 +907,17 @@ fn modale_options_echap_annule_et_entree_valide() {
 ///
 /// - **les quatre coins arrondis** — le damier apparaît à pleine intensité dans chaque quart de
 ///   cercle : mesuré, le pixel (8, 8) porte la couleur exacte du damier, celui de (14, 14) celle de
-///   la bannière ;
-/// - **la translucidité du fond de modale** (`MODAL_BG`, alpha 235) : dans les marges latérales, le
-///   contraste du damier retombe de 128 à **9,7**, soit les 8 % que cet alpha laisse passer.
+///   la bannière. Les deux coins BAS ne viennent plus d'un `corner_radius` mais de l'alpha de
+///   `modal-body.png`, qui porte le même quart de cercle de rayon 12 ;
+/// - **la translucidité du fond de modale** (`MODAL_BODY_TINT`, alpha 235) : dans les marges
+///   latérales, le contraste du damier retombe de 128 à **9,7**, soit les 8 % que cet alpha laisse
+///   passer. Cette valeur n'a pas bougé quand le fond est passé de l'aplat `MODAL_BG` à la texture
+///   `DsTexture::ModalBody` (2026-09-10) : la teinte de peinture reprend exactement l'alpha que
+///   portait la couleur.
+///
+/// Il montre aussi le **grain et les hachures d'angle** que la texture de corps apporte depuis le
+/// 2026-09-10 : dans les marges, l'écart au fond nu passe de 0 à environ 6 niveaux là où un
+/// croisillon court.
 ///
 /// Et il montre une chose qu'aucune mesure d'alpha isolée ne dit : **sous le panneau de contenu, il
 /// ne reste rien du damier** (contraste 0,7). Le panneau est peint PAR-DESSUS le fond de modale, les
