@@ -10,6 +10,9 @@ widget** : si un composant existe, on l'étend, on n'en écrit pas un second (sk
   [`.claude/skills/ui-component/references/contrat-composant.md`](../.claude/skills/ui-component/references/contrat-composant.md).
 - La planche de contrôle : `crates/overlay-testkit/tests/snapshots/design_gallery.png`, régénérée
   par `UPDATE_SNAPSHOTS=1 cargo test -p overlay-testkit --test design_gallery`.
+- L'ordre de construction de ce qui manque, avec ses critères de fin :
+  [`plan-composants-ui.md`](plan-composants-ui.md). Ce catalogue dit *ce qui existe*, ce plan dit
+  *dans quel ordre construire la suite*.
 
 ---
 
