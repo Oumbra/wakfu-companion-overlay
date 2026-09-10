@@ -166,13 +166,36 @@ pub const TAB_LABEL_ACTIVE: Color32 = Color32::WHITE;
 /// Libellé d'un onglet inactif **et** survolé — l'or du jeu.
 pub const TAB_LABEL_IDLE: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
 
-/// Trait clair entre deux onglets.
+/// Haut du trait entre deux onglets — **`#837d70`**.
 ///
-/// **`#595140`, la valeur de la capture de la modale** (x 100-101 sur `interface-options-video.png`,
-/// ligne 110) — le même kaki que le bord d'un champ de saisie. Deux autres valeurs traînent pour ce
-/// même trait : `#837d70` dans le relevé et `#6d6657` dans l'asset détouré. La capture de la fenêtre
-/// qu'on reproduit l'emporte sur les deux.
-pub const TAB_SEPARATOR: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
+/// Le trait n'est pas d'une seule couleur : c'est un **dégradé vertical**, clair en haut, sombre en
+/// bas. Ce qui règle une incohérence qui traînait — trois valeurs avaient été relevées pour ce même
+/// trait (`#837d70` au relevé, `#6d6657` sur l'asset détouré, `#595140` sur la capture de la
+/// modale), et aucune n'était fausse : ce sont **trois points du même dégradé**, échantillonnés à
+/// trois hauteurs. Le profil complet est colonne x=261 de `tabs-with-first-tab-active.png`.
+pub const TAB_SEPARATOR_TOP: Color32 = Color32::from_rgb(0x83, 0x7D, 0x70);
+
+/// Bas du trait entre deux onglets — **`#595140`**, le même kaki que le bord d'un champ de saisie.
+///
+/// Voir [`TAB_SEPARATOR_TOP`] pour le dégradé dont c'est l'autre extrémité.
+pub const TAB_SEPARATOR_BOTTOM: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
+
+/// Début de la rampe du dégradé, en fraction de la hauteur du trait.
+///
+/// Le dégradé n'est pas linéaire de bout en bout : **11 px de clair constant**, puis 19 px de rampe,
+/// puis **10 px de sombre constant** (mesurés sur les 40 px du trait). 11/40 = 0,275.
+pub const TAB_SEPARATOR_RAMP_START: f32 = 0.275;
+
+/// Fin de la rampe du dégradé, en fraction de la hauteur du trait — 30/40, voir
+/// [`TAB_SEPARATOR_RAMP_START`].
+pub const TAB_SEPARATOR_RAMP_END: f32 = 0.75;
+
+/// Épaisseur du bord sombre qui cerne un onglet en haut et en bas.
+///
+/// **Le trait séparateur s'arrête dessus** : il court de y=2 à y=41 sur les 44 px de la barre, soit
+/// 40 px, jamais sur toute la hauteur. Le peindre de bord à bord le fait dépasser de deux pixels
+/// au-dessus et en dessous des corps d'onglets — un défaut qui saute aux yeux à côté du jeu.
+pub const TAB_BORDER_Y: f32 = 2.0;
 
 /// Largeur du trait séparateur, et donc gouttière entre deux onglets : chacun porte déjà ses deux
 /// bords sombres de 2px, ce qui donne les 6px que le relevé mesure entre deux remplissages.

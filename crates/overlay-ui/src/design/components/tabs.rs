@@ -50,6 +50,49 @@
 //! onglets à 2 px l'un de l'autre — chacun portant ses deux bords — et peint le séparateur dans
 //! cette gouttière.
 //!
+//! ## Le séparateur : ni pleine hauteur, ni d'une seule couleur
+//!
+//! Profil vertical de la colonne x=261 de `tabs-with-first-tab-active.png`, la première gouttière :
+//!
+//! | y (sur 44) | Ce qu'on y trouve |
+//! | --- | --- |
+//! | 0..2 | **rien** — le bord sombre de la barre, le trait ne commence pas là |
+//! | 2..13 | `#837d70`, plateau clair de 11 px |
+//! | 13..32 | rampe linéaire d'un plateau à l'autre, 19 px |
+//! | 32..42 | `#595140`, plateau sombre de 10 px |
+//! | 42..44 | **rien** — bord sombre |
+//!
+//! Deux conséquences, et les deux se voient à l'œil nu à côté d'une capture du jeu :
+//!
+//! - le trait fait **40 px, pas 44** : il s'arrête au corps de l'onglet, entre ses deux bords
+//!   sombres ([`tokens::TAB_BORDER_Y`]). Peint de bord à bord, il dépasse en haut et en bas ;
+//! - il **descend du clair au sombre**. Un aplat est plat là où le jeu a du relief.
+//!
+//! Le dégradé règle au passage une incohérence qui traînait dans les jetons — trois couleurs
+//! relevées pour ce seul trait, qui sont trois hauteurs du même dégradé. Voir
+//! [`tokens::TAB_SEPARATOR_TOP`].
+//!
+//! ## Largeur : parts égales, sur toute la largeur disponible
+//!
+//! **Par défaut, la barre occupe toute la largeur qu'on lui donne et ses onglets s'y partagent la
+//! place à égalité**, gouttières déduites. C'est un choix de l'overlay, pas un relevé, et il
+//! s'écarte du jeu en connaissance de cause.
+//!
+//! Le jeu dimensionne chaque onglet sur son libellé : ses six onglets font 77, 83, 103, 83, 133 et
+//! 106 px pour des encres de 26, 44, 73, 28, 100 et 35 px. **La règle qui produit ces largeurs
+//! n'est pas retrouvable** — ni un padding constant, ni le nombre de caractères, ni une largeur
+//! minimale unique n'en rendent compte. Et sa barre ne remplit pas la fenêtre : elle s'arrête à
+//! x=636 sur 705, parce que le **bouton de réinitialisation** occupe la droite.
+//!
+//! Appliquer une règle qu'on n'a pas mesurée à trois onglets qui n'ont pas ce bouton donnerait une
+//! barre courte, calée à gauche, sous un panneau pleine largeur. Les parts égales remplissent le
+//! panneau, restent stables quand un libellé change, et ne prétendent pas mesurer ce qui ne l'est
+//! pas.
+//!
+//! [`Tabs::fit_content`] rend l'autre comportement — chaque onglet à la largeur de son libellé
+//! ([`tokens::TAB_PADDING_X`], plancher [`tokens::TAB_MIN_WIDTH`]). C'est ce qu'il faut pour
+//! comparer à une capture du jeu, ou pour une barre qui ne doit pas s'étirer.
+//!
 //! ## Le rayon n'est pas sur l'onglet, il est sur la barre
 //!
 //! Vérifié sur l'asset : le premier segment a un coin arrondi (rayon 4, escalier d'alpha sur quatre
@@ -63,13 +106,10 @@
 //!
 //! ## Ce qui n'a PAS de référence, et est donc inventé
 //!
-//! - **La règle de largeur du jeu n'est pas retrouvable.** Ses six onglets font 77, 83, 103, 83, 133
-//!   et 106 px pour des encres de 26, 44, 73, 28, 100 et 35 px : ni un padding constant, ni le
-//!   nombre de caractères, ni une largeur minimale unique n'en rendent compte. Le composant retient
-//!   le padding **stable sur les deux libellés longs** — 15 px sur « Interface », 16 sur
+//! - **Le padding de [`Tabs::fit_content`].** Faute de règle retrouvable (ci-dessus), il retient le
+//!   padding **stable sur les deux libellés longs** — 15 px sur « Interface », 16 sur
 //!   « Commandes », d'où [`tokens::TAB_PADDING_X`] — et un plancher au plus petit onglet relevé
-//!   ([`tokens::TAB_MIN_WIDTH`]). Les libellés courts ressortent donc plus étroits que dans le jeu ;
-//!   c'est le prix d'une règle qu'on n'a pas.
+//!   ([`tokens::TAB_MIN_WIDTH`]). Les libellés courts ressortent donc plus étroits que dans le jeu.
 //! - **L'état désactivé.** Aucune capture d'onglet grisé. Fond inactif et libellé `TEXT_DISABLED`,
 //!   par cohérence avec le bouton désactivé — à remplacer par une mesure dès qu'une capture existe.
 //!   Il existe dès maintenant parce que « Alertes » et « Personnages » sont exactement ce cas :
@@ -125,6 +165,7 @@ pub struct Tabs<'a, T> {
     selected: &'a mut T,
     entries: Vec<Entry<T>>,
     log_name: Option<String>,
+    fit_content: bool,
 }
 
 impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
@@ -133,6 +174,7 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
             selected,
             entries: Vec::new(),
             log_name: None,
+            fit_content: false,
         }
     }
 
@@ -167,6 +209,16 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
         self
     }
 
+    /// Dimensionne chaque onglet sur son libellé au lieu de partager la largeur à égalité.
+    ///
+    /// **L'inverse du défaut**, qui étire la barre sur toute la largeur disponible — voir la doc de
+    /// module pour pourquoi les parts égales l'emportent dans l'overlay. À réserver aux barres qui
+    /// ne doivent pas s'étirer, et aux planches de comparaison avec une capture du jeu.
+    pub fn fit_content(mut self) -> Self {
+        self.fit_content = true;
+        self
+    }
+
     /// Nom d'instance pour la journalisation (défaut : `"tabs"`). À renseigner dès que deux barres
     /// coexistent, sinon les lignes d'`overlay-ui.<date>.log` sont indiscernables.
     pub fn log_name(mut self, name: impl Into<String>) -> Self {
@@ -183,29 +235,105 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
     /// Largeur de chaque onglet, dans l'ordre. Séparée du rendu pour que la taille totale soit
     /// connue avant d'allouer quoi que ce soit.
     fn widths(&self, ui: &mut Ui) -> Vec<f32> {
-        let font = text::label_font(ui.ctx(), tokens::TAB_FONT_SIZE);
-        self.entries
-            .iter()
-            .map(|entry| {
-                let ink = ui
-                    .fonts_mut(|f| {
-                        f.layout_no_wrap(
-                            entry.label.clone(),
-                            font.clone(),
-                            tokens::TAB_LABEL_ACTIVE,
-                        )
-                    })
-                    .size()
-                    .x;
-                (ink + 2.0 * tokens::TAB_PADDING_X).max(tokens::TAB_MIN_WIDTH)
+        let count = self.entries.len();
+        if count == 0 {
+            return Vec::new();
+        }
+
+        if self.fit_content {
+            let font = text::label_font(ui.ctx(), tokens::TAB_FONT_SIZE);
+            return self
+                .entries
+                .iter()
+                .map(|entry| {
+                    let ink = ui
+                        .fonts_mut(|f| {
+                            f.layout_no_wrap(
+                                entry.label.clone(),
+                                font.clone(),
+                                tokens::TAB_LABEL_ACTIVE,
+                            )
+                        })
+                        .size()
+                        .x;
+                    (ink + 2.0 * tokens::TAB_PADDING_X).max(tokens::TAB_MIN_WIDTH)
+                })
+                .collect();
+        }
+
+        // Parts égales sur la largeur disponible, gouttières déduites. Les bords sont arrondis **en
+        // cumulé** plutôt que chaque largeur séparément : sinon les arrondis s'additionnent et la
+        // barre finit un ou deux pixels avant — ou après — le bord du panneau. Ici la somme des
+        // largeurs vaut exactement la place utile, et les onglets ne diffèrent au plus que d'un
+        // pixel entre eux.
+        let gutters = tokens::TAB_SEPARATOR_WIDTH * (count - 1) as f32;
+        let usable = (ui.available_width() - gutters).max(0.0);
+        (0..count)
+            .map(|index| {
+                let start = (usable * index as f32 / count as f32).round();
+                let end = (usable * (index + 1) as f32 / count as f32).round();
+                end - start
             })
             .collect()
     }
 }
 
+/// Peint le trait entre deux onglets : un **dégradé vertical**, sur le seul corps de l'onglet.
+///
+/// egui ne sait pas remplir un rectangle en dégradé — `rect_filled` prend une couleur unique. Le
+/// maillage est le chemin normal pour ça : quatre paires de sommets, la couleur interpolée entre
+/// elles par le GPU, ce qui reste exact à n'importe quelle hauteur de barre. Les deux plateaux sont
+/// des bandes à couleur constante, la rampe la bande du milieu — voir la doc de module pour le
+/// profil mesuré.
+fn paint_separator(painter: &egui::Painter, rect: egui::Rect) {
+    let ramp_start = rect.top() + rect.height() * tokens::TAB_SEPARATOR_RAMP_START;
+    let ramp_end = rect.top() + rect.height() * tokens::TAB_SEPARATOR_RAMP_END;
+    let stops = [
+        (rect.top(), tokens::TAB_SEPARATOR_TOP),
+        (ramp_start, tokens::TAB_SEPARATOR_TOP),
+        (ramp_end, tokens::TAB_SEPARATOR_BOTTOM),
+        (rect.bottom(), tokens::TAB_SEPARATOR_BOTTOM),
+    ];
+
+    let mut mesh = egui::Mesh::default();
+    for (y, color) in stops {
+        mesh.colored_vertex(egui::pos2(rect.left(), y), color);
+        mesh.colored_vertex(egui::pos2(rect.right(), y), color);
+    }
+    for band in 0..stops.len() as u32 - 1 {
+        let top_left = band * 2;
+        mesh.add_triangle(top_left, top_left + 1, top_left + 2);
+        mesh.add_triangle(top_left + 1, top_left + 3, top_left + 2);
+    }
+    painter.add(mesh);
+}
+
 impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
     fn ui(self, ui: &mut Ui) -> Response {
+        let name = self.log_name.clone().unwrap_or_else(|| "tabs".to_owned());
         let widths = self.widths(ui);
+
+        // Une barre sans entrée n'est pas un cas de mise en page, c'est un appel oublié : elle
+        // n'occupe rien et ne peint rien, ce qui laisse un trou muet dans le panneau. On le dit —
+        // une fois, sinon la ligne reviendrait à chaque frame.
+        if widths.is_empty() {
+            let (_, response) = ui.allocate_exact_size(Vec2::ZERO, Sense::hover());
+            let warned_id = response.id.with("ds-tabs-vide");
+            let already = ui.data_mut(|d| {
+                let seen = d.get_temp::<bool>(warned_id).unwrap_or(false);
+                d.insert_temp(warned_id, true);
+                seen
+            });
+            if !already {
+                tracing::warn!(
+                    component = "tabs",
+                    name,
+                    "barre d'onglets sans aucune entrée"
+                );
+            }
+            return response;
+        }
+
         let total = widths.iter().sum::<f32>()
             + tokens::TAB_SEPARATOR_WIDTH * (widths.len().saturating_sub(1)) as f32;
 
@@ -217,7 +345,6 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
         // que `design::button` et `panels::icon_button`, sans quoi deux familles de contrôles se
         // comporteraient différemment sous la même souris.
         let pointer_down = ui.input(|i| i.pointer.any_down());
-        let name = self.log_name.clone().unwrap_or_else(|| "tabs".to_owned());
 
         let mut x = rect.left();
         let mut clicked: Option<(usize, T)> = None;
@@ -274,14 +401,17 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
                 }
             }
 
-            // Séparateur clair, dans la gouttière de 2px qui suit — jamais après le dernier onglet.
+            // Séparateur, dans la gouttière de 2px qui suit — jamais après le dernier onglet, et
+            // jamais sur les bords sombres de la barre : il tient dans le corps de l'onglet.
             if index + 1 < widths.len() {
                 let separator = egui::Rect::from_min_size(
-                    egui::pos2(tab_rect.right(), rect.top()),
-                    Vec2::new(tokens::TAB_SEPARATOR_WIDTH, tokens::TAB_HEIGHT),
+                    egui::pos2(tab_rect.right(), rect.top() + tokens::TAB_BORDER_Y),
+                    Vec2::new(
+                        tokens::TAB_SEPARATOR_WIDTH,
+                        tokens::TAB_HEIGHT - 2.0 * tokens::TAB_BORDER_Y,
+                    ),
                 );
-                ui.painter()
-                    .rect_filled(separator, 0, tokens::TAB_SEPARATOR);
+                paint_separator(ui.painter(), separator);
             }
 
             x = tab_rect.right() + tokens::TAB_SEPARATOR_WIDTH;
