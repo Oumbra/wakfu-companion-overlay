@@ -406,17 +406,9 @@ pub struct Chrome {
     /// Rectangle intérieur du panneau de section — la seule zone où un onglet écrit son contenu.
     /// Réserve de barre de défilement déjà déduite à droite (voir [`chrome`]).
     pub inner: egui::Rect,
-    /// [`Chrome::inner`] **élargi de la réserve de barre de défilement**, c'est-à-dire la zone à
-    /// donner à une `design::scroll_area`.
-    ///
-    /// Sans ce rectangle, un onglet qui pose sa zone de défilement dans `inner` **cumule deux
-    /// retraits** : celui de l'axe des contrôles (19 px) et la réserve de barre (26). La poignée
-    /// finit alors à 39 px du bord du panneau, là où le jeu la met à 15
-    /// (`interface-options-son.png`, y=300 : poignée x 685..690 pour un panneau à 705 — c'est le
-    /// jeton `SCROLLBAR_OUTER_MARGIN`, 14). La réserve se prend sur le **bord du panneau**, jamais
-    /// sur l'axe des contrôles ; c'est la condition pour que les trois marges de `scroll_area`
-    /// (6 + 6 + 14) tombent où le jeu les met.
-    pub scroll: egui::Rect,
+    /// [`Chrome::inner`] **élargi de la réserve de barre de défilement** — privé : passer par
+    /// [`Chrome::scroll_area`], qui pose la géométrie ET le clip ensemble.
+    scroll: egui::Rect,
     pub footer: FooterClick,
 }
 
@@ -609,6 +601,46 @@ pub fn chrome(
         inner,
         scroll,
         footer,
+    }
+}
+
+impl Chrome {
+    /// Zone de défilement de l'onglet — [`Chrome::inner`] élargi **jusqu'au bord du panneau**,
+    /// clip compris.
+    ///
+    /// **Une méthode et non un rectangle public**, et l'écart est ce qui a motivé la correction :
+    /// la première version exposait les deux `Rect` côte à côte, et son tout premier appelant a
+    /// pris le large pour la mise en page en gardant le clip de l'étroit. `Ui::new_child` hérite
+    /// du `clip_rect` de son parent : la géométrie suivait un rectangle, l'écrêtage un autre, et
+    /// les 26 px d'écart tombaient pile sur la dernière colonne — le bouton de retrait d'une
+    /// liste s'y est retrouvé tranché à 16 px sur 36, avec une demi-croix qui se lisait comme un
+    /// chevron. Deux rectangles publics dont l'un est un piège silencieux ne sont pas un contrat.
+    ///
+    /// Pourquoi la réserve se prend sur le **bord du panneau** et jamais sur l'axe des contrôles :
+    /// les trois marges de `design::scroll_area` (6 entre contenu et poignée, 6 de poignée, 14
+    /// jusqu'au bord) valent exactement `RESERVE_X`, et le jeu pose sa poignée à 15 px du bord
+    /// intérieur (`interface-options-son.png`, y=300 : poignée x 685..690, panneau à 705). Les
+    /// cumuler avec le retrait des contrôles la repousse à 39.
+    ///
+    /// La largeur utile au contenu — réserve déduite — est passée à la closure, pour que l'appelant
+    /// n'ait plus à refaire cette soustraction (trois copies s'en étaient déjà glissées dans les
+    /// maquettes).
+    pub fn scroll_area<R>(
+        &self,
+        ui: &mut egui::Ui,
+        id_salt: &str,
+        add_contents: impl FnOnce(&mut egui::Ui, f32) -> R,
+    ) -> R {
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(self.scroll.left(), ui.cursor().min.y),
+            self.scroll.max,
+        );
+        let content_width = rect.width() - design::components::scroll_area::RESERVE_X;
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        child.set_clip_rect(rect);
+        design::scroll_area(id_salt)
+            .auto_shrink(false)
+            .show(&mut child, |ui| add_contents(ui, content_width))
     }
 }
 
