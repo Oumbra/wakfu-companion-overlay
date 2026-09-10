@@ -23,11 +23,31 @@ use egui::{Color32, Context, FontFamily, FontId, Pos2, Vec2};
 
 /// Police de la famille nommée `nom`, au corps demandé, **avec repli** sur la proportionnelle par
 /// défaut si la famille n'est pas encore liée — voir [`label_font`] pour le pourquoi de ce repli.
+///
+/// **Le repli est légitime à la première passe, et à elle seule.** Au-delà, il ne signale plus une
+/// police en cours de chargement mais un contexte qui n'est jamais passé par [`crate::style::apply`]
+/// — et le rendu part alors dans la police par défaut d'`egui` **sans rien dire**. C'est arrivé le
+/// 2026-09-10 : un harnais de rendu écrit à la main pour produire un aperçu avait omis cet appel,
+/// et le titre de section est sorti dans une autre police, hampes tronquées. Rien dans la capture
+/// ne disait pourquoi ; il a fallu comparer avec le snapshot de non-régression pour le comprendre.
+///
+/// L'assertion ci-dessous ne coûte rien en release (le repli continue d'y protéger l'utilisateur
+/// d'un `panic` d'`epaint`) et fait échouer immédiatement, en debug, tout harnais qui oublierait
+/// l'appel — tests et outils de rendu compris.
 fn famille(ctx: &Context, nom: &str, size: f32) -> FontId {
     let family = FontFamily::Name(nom.into());
     if ctx.fonts(|fonts| fonts.families().contains(&family)) {
         FontId::new(size, family)
     } else {
+        debug_assert!(
+            ctx.cumulative_pass_nr() == 0,
+            "la famille « {nom} » du design system n'est pas liée à la passe {} : ce contexte \
+             egui n'est pas passé par `overlay_ui::style::apply`, qui installe les polices. Le \
+             rendu retomberait silencieusement sur la proportionnelle par défaut d'egui. \
+             Corriger l'appelant (harnais de test, outil de rendu, binaire) plutôt que cette \
+             assertion.",
+            ctx.cumulative_pass_nr()
+        );
         FontId::proportional(size)
     }
 }
@@ -156,4 +176,59 @@ pub fn paint_outlined_galley(
         painter.galley(pos + *offset, galley.clone(), outline);
     }
     painter.galley(pos, galley.clone(), color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fait tourner `passes` passes d'interface sur un contexte neuf et rend le `FontId` que
+    /// [`title_font`] a donné à la DERNIÈRE — sans GPU : `Context::run` suffit à faire avancer le
+    /// compteur de passes, ce qui est tout ce dont le repli dépend.
+    fn font_a_la_passe(passes: u32, applique_le_style: bool) -> FontId {
+        let ctx = Context::default();
+        let mut dernier = FontId::proportional(1.0);
+        for _ in 0..passes {
+            let mut sortie = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                if applique_le_style {
+                    crate::style::apply(ctx);
+                }
+                dernier = title_font(ctx, 18.0);
+            });
+            // Personne ne peint ici : `epaint` refuse qu'on jette un `TexturesDelta` non traité,
+            // et l'atlas de glyphes en produit un dès que `set_fonts` le reconstruit.
+            sortie.textures_delta.clear();
+        }
+        dernier
+    }
+
+    #[test]
+    fn premiere_passe_sans_polices_retombe_sans_broncher() {
+        // `Context::set_fonts` ne prend effet qu'à la passe suivante : un composant peint
+        // légitimement avant que la police n'existe, et le repli est là pour ça.
+        assert_eq!(
+            font_a_la_passe(1, true).family,
+            FontFamily::Proportional,
+            "la première passe doit encore retomber sur la proportionnelle"
+        );
+    }
+
+    #[test]
+    fn passe_suivante_prend_la_police_du_design_system() {
+        assert_eq!(
+            font_a_la_passe(2, true).family,
+            FontFamily::Name(super::super::fonts::TITLE.into()),
+            "dès la deuxième passe, la serif des titres doit être liée"
+        );
+    }
+
+    /// Le garde-fou : un contexte qui ne passe jamais par `style::apply` rendrait tous ses textes
+    /// dans la police par défaut d'egui **sans rien dire**. C'est la panne qui a produit un aperçu
+    /// trompeur le 2026-09-10 (voir la doc de [`famille`]).
+    #[test]
+    #[should_panic(expected = "n'est pas passé par `overlay_ui::style::apply`")]
+    #[cfg(debug_assertions)]
+    fn sans_style_apply_le_repli_devient_une_erreur() {
+        font_a_la_passe(2, false);
+    }
 }
