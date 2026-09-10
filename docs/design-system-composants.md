@@ -618,19 +618,32 @@ tous dès le premier composant peint).
 
 **Teintes** : `#c5cbcc` au repos, `#f4d89f` au survol, mesurées sur
 `menu-button-icon-first-plan.png`. Les icônes du design system étant blanc pur avec alpha, une
-teinte suffit — là où `ui_icons` charge deux copies recolorées au chargement.
+teinte appliquée au moment de peindre suffit — pas de copie recolorée à charger.
 
-**Repris tel quel de `panels::icon_button`** : le socle et l'icône partagent le même facteur
-d'échelle (dérivé de la largeur du socle), et un appui de souris retire l'apparence survolée, qui
-revient au relâchement — la règle commune à toute l'interface.
+**Taille d'encre** : les glyphes sont détourés au pixel près, donc de tailles inégales d'un fichier
+à l'autre (13, 14, 16). Le jeu les cale sur une grille commune — **18px d'encre pour un socle de
+36**, médiane des huit icônes de `menu-button-icon-first-plan.png` (plage 16–20, seuil de luminance
+140, invariant de 120 à 180). C'est `tokens::ICON_BUTTON_CONTENT`, appliqué par
+`DsTexture::icon_content_size` : **le manifeste, pas l'appelant** — la taille d'encre est une
+propriété de l'asset. Trois tests l'ancrent : la médiane remesurée sur la capture du jeu, le
+détourage des glyphes, et le calcul de `icon_draw_size` (dont le cas du « − », qu'un mauvais facteur
+transformerait en barre).
 
-**Pas encore utilisé en production.** Les quatre boutons icône de l'overlay (lien externe et Options
-dans Combat, « + » et « − » dans le Suivi) passent toujours par `panels::icon_button`. Leur socle est
-pourtant déjà celui du design system : `assets/ui/button-background.png` est **octet pour octet**
-`assets/design-system/button-icon-first-plan.png`. Ce sont leurs icônes qui diffèrent — normalisées
-par `ui_icons::normalize_icon_content` contre les glyphes détourés bruts ici. Les migrer changerait
-le rendu de deux panneaux hors du périmètre du plan de finalisation de la modale, sans capture de
-référence pour arbitrer. À reprendre quand ces panneaux seront au chantier.
+**Échelle et survol** : le socle et l'icône partagent le même facteur d'échelle (dérivé de la
+largeur du socle), et un appui de souris retire l'apparence survolée, qui revient au relâchement —
+la règle commune à toute l'interface.
+
+**État désactivé — deux mécaniques, une par contexte.** `button-icon-disabled.png` est le socle
+grisé du jeu, et il appartient au contexte `Panel` : luminance moyenne 60, contre 81 pour
+`button-icon.png`, le socle actif du même contexte. Posé sur une barre de premier plan (41), il
+s'inverse — le bouton désactivé devient le plus lumineux de la barre. En `FirstPlan`, le composant
+garde donc le socle de repos et l'assombrit (`tokens::DISABLED_DIM`, ~43 % d'opacité).
+
+**Utilisé en production** depuis le 2026-09-10 : les quatre boutons du carré de contrôle du panneau
+Suivi (« + », « − », Détails, Options — `panels::watchlist::control_button`). Ce qui reste à la
+charge du panneau : le **placement de l'infobulle** par colonne (à gauche pour « + » et Détails, à
+droite pour « − » et Options), que le `.tooltip()` du composant ne sait pas reproduire — il retombe
+sur le placement par défaut d'egui.
 
 **Le cas « réinitialisation »** attend qu'un réglage réinitialisable existe. Note du relevé à ne pas
 « corriger » le jour venu : dans la barre d'onglets, **l'axe du bouton est 9px plus bas que celui des
@@ -644,7 +657,6 @@ Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces
 
 | Composant | Assets disponibles | Notes |
 | --- | --- | --- |
-| **Migration des quatre boutons icône** | — | `design::icon_button` existe (voir sa fiche) ; `panels::combat` et `panels::watchlist` passent encore par `panels::icon_button`. Reste à trancher la normalisation des glyphes. |
 | **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
 | **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
 | **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
