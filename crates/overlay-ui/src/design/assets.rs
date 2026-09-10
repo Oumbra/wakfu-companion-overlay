@@ -137,6 +137,35 @@ pub const SELECT_SLICE: NineSlice = NineSlice::new(
 pub const ICON_BUTTON_SLICE: NineSlice =
     NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage du corps de modale (`modal-body.png`, 720 × 505) : **130px figés à gauche, 205 à
+/// droite, 110 en haut, 170 en bas**.
+///
+/// Quatre valeurs distinctes, contrairement à tout le reste du manifeste, parce que le décor de
+/// cette texture est franchement asymétrique — et c'est encore lui qui dimensionne, comme sur un
+/// bouton (`button_slice`). Les hachures de la fenêtre Options ne sont pas une trame de fond mais
+/// un **cadre** : denses dans les angles et le long des bords, absentes de la bande centrale.
+/// Chaque marge est la plus petite qui contienne 90 % du décor de son côté, arrondie au multiple
+/// de 5 supérieur (`tools/design-system/build_modal_body.py`, sortie `marges du décor`) ; le bas en
+/// demande plus que le haut parce que le pourtour des deux boutons de pied de page y concentre les
+/// croisillons les plus marqués.
+///
+/// Les deux totaux (335 en X, 280 en Y) laissent une vraie bande médiane à la taille où la modale
+/// est peinte aujourd'hui (560 × 380) : c'est elle qui absorbe le changement de dimensions, sans
+/// toucher au décor.
+///
+/// `Fill::Stretch` sur les deux axes : cette bande médiane est un fond quasi uni — moins de deux
+/// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
+pub const MODAL_BODY_SLICE: NineSlice = NineSlice::new(
+    Insets {
+        left: 130.0,
+        top: 110.0,
+        right: 205.0,
+        bottom: 170.0,
+    },
+    Fill::Stretch,
+    Fill::Stretch,
+);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -225,6 +254,18 @@ pub enum DsTexture {
     IconExternalLink,
     IconPlus,
     IconMinus,
+    /// Corps de la modale Options (`modal-body.png`, 720 × 505) — le fond SOUS la bannière,
+    /// découpé des six captures de la fenêtre Options du jeu puis débarrassé de son contenu
+    /// (`tools/design-system/build_modal_body.py`, §9 ter du design-system).
+    ///
+    /// **Les deux angles inférieurs sont portés par l'alpha de la texture** (arrondi de rayon 12,
+    /// le même que les angles hauts de `modal-header.png`), comme pour un bouton : un `Mesh` egui
+    /// ne sait pas découper un coin.
+    ///
+    /// Remplace l'aplat `MODAL_BG` qui peignait ce fond jusqu'ici. La translucidité de la fenêtre,
+    /// elle, ne vient plus de la couleur mais de la teinte passée à la peinture — voir
+    /// `panels::options_modal`.
+    ModalBody,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -273,6 +314,7 @@ impl DsTexture {
         DsTexture::IconExternalLink,
         DsTexture::IconPlus,
         DsTexture::IconMinus,
+        DsTexture::ModalBody,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -428,6 +470,11 @@ impl DsTexture {
                 name: "ds-icon-minus",
                 bytes: ds_asset!("icons/icon-minus.png"),
                 slice: ICON_SLICE,
+            },
+            DsTexture::ModalBody => DsTextureSpec {
+                name: "ds-modal-body",
+                bytes: ds_asset!("modal-body.png"),
+                slice: MODAL_BODY_SLICE,
             },
         }
     }
