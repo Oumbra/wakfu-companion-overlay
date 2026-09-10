@@ -406,6 +406,17 @@ pub struct Chrome {
     /// Rectangle intérieur du panneau de section — la seule zone où un onglet écrit son contenu.
     /// Réserve de barre de défilement déjà déduite à droite (voir [`chrome`]).
     pub inner: egui::Rect,
+    /// [`Chrome::inner`] **élargi de la réserve de barre de défilement**, c'est-à-dire la zone à
+    /// donner à une `design::scroll_area`.
+    ///
+    /// Sans ce rectangle, un onglet qui pose sa zone de défilement dans `inner` **cumule deux
+    /// retraits** : celui de l'axe des contrôles (19 px) et la réserve de barre (26). La poignée
+    /// finit alors à 39 px du bord du panneau, là où le jeu la met à 15
+    /// (`interface-options-son.png`, y=300 : poignée x 685..690 pour un panneau à 705 — c'est le
+    /// jeton `SCROLLBAR_OUTER_MARGIN`, 14). La réserve se prend sur le **bord du panneau**, jamais
+    /// sur l'axe des contrôles ; c'est la condition pour que les trois marges de `scroll_area`
+    /// (6 + 6 + 14) tombent où le jeu les met.
+    pub scroll: egui::Rect,
     pub footer: FooterClick,
 }
 
@@ -589,7 +600,16 @@ pub fn chrome(
         ),
     );
 
-    Chrome { inner, footer }
+    // La zone de défilement part du même axe de contrôles, mais va jusqu'au bord du panneau : sa
+    // propre réserve y remplace le retrait de droite, au lieu de s'y ajouter.
+    let scroll =
+        egui::Rect::from_min_max(inner.min, egui::pos2(section_rect.right(), inner.bottom()));
+
+    Chrome {
+        inner,
+        scroll,
+        footer,
+    }
 }
 
 /// Peint un titre de section dans le panneau, et avance le curseur jusqu'à sa ligne suivante.
@@ -649,7 +669,8 @@ pub fn show(
 
     // Tout le décor — voir [`chrome`]. « Paramètres » est le seul onglet cliquable : les deux
     // autres n'ont pas encore de contenu porté.
-    let Chrome { inner, footer } = chrome(ui, assets, &mut state.tab, &[OptionsTab::Parametres]);
+    let Chrome { inner, footer, .. } =
+        chrome(ui, assets, &mut state.tab, &[OptionsTab::Parametres]);
     match footer {
         FooterClick::Cancel => action = OptionsModalAction::Cancel,
         FooterClick::Validate => action = OptionsModalAction::Validate(state.path_input.clone()),
