@@ -190,6 +190,15 @@ pub const TAB_SEPARATOR_RAMP_START: f32 = 0.275;
 /// [`TAB_SEPARATOR_RAMP_START`].
 pub const TAB_SEPARATOR_RAMP_END: f32 = 0.75;
 
+/// Bord sombre qui cerne toute la barre — **`#1a1d1f`**.
+///
+/// Moyenne des 774 pixels opaques de la ligne y=0 de `tabs-with-first-tab-active.png`, retrouvée à
+/// l'identique sur les trois autres côtés. Il vient de la texture de chaque onglet, sauf **dans les
+/// gouttières**, que le composant peint lui-même : sans quoi le fond du panneau y traverse la barre
+/// de part en part, et le cerne se retrouve entaillé de deux encoches au droit de chaque
+/// séparateur.
+pub const TAB_BORDER: Color32 = Color32::from_rgb(0x1A, 0x1D, 0x1F);
+
 /// Épaisseur du bord sombre qui cerne un onglet en haut et en bas.
 ///
 /// **Le trait séparateur s'arrête dessus** : il court de y=2 à y=41 sur les 44 px de la barre, soit

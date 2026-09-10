@@ -95,14 +95,25 @@
 //!
 //! ## Le rayon n'est pas sur l'onglet, il est sur la barre
 //!
-//! Vérifié sur l'asset : le premier segment a un coin arrondi (rayon 4, escalier d'alpha sur quatre
-//! colonnes), **les segments du milieu ont des coins parfaitement droits**. L'arrondi appartient donc
-//! aux deux extrémités de la barre, pas à chaque onglet.
+//! Vérifié sur l'asset : le premier segment a ses deux coins gauches arrondis, le dernier ses deux
+//! coins droits, **les segments du milieu ont des coins parfaitement droits**. L'arrondi appartient
+//! donc aux deux extrémités de la barre, pas à chaque onglet.
 //!
-//! **Ce rayon n'est pas reproduit** — écart assumé, quatre pixels sur deux coins. Le bord d'un
-//! onglet est quasi noir (`#1c1e21`) et le fond de la modale qui l'entoure l'est tout autant
-//! (`#1c2023`) : l'arrondi y est invisible à l'échelle 1:1. Le reproduire demanderait deux textures
-//! de plus par état (extrémité gauche, extrémité droite) pour un pixel que personne ne voit.
+//! L'escalier d'alpha, mesuré aux quatre angles, retire `4, 2, 1` pixels sur les trois premières
+//! lignes et `1, 2, 3` sur les trois dernières — le haut est creusé d'un pixel de plus que le bas,
+//! sur les deux côtés. Ce n'est donc pas du bruit de détourage mais la forme du jeu, et elle est
+//! conservée telle quelle.
+//!
+//! **L'arrondi est porté par l'alpha de la texture**, comme celui d'un bouton, ce qui coûte quatre
+//! fichiers de plus ([`DsTexture::TabActiveFirst`] et ses trois voisins). Les deux autres voies n'en
+//! sont pas : un `Mesh` egui ne sait pas découper un coin, et peindre un patch arrondi par-dessus
+//! n'efface pas le coin carré qui est dessous — l'alpha compose, il ne soustrait pas. Deux des
+//! quatre fichiers sont des **miroirs horizontaux** des deux autres, faute de capture d'onglet actif
+//! en fin de barre ; le corps d'un onglet étant un dégradé vertical, le miroir ne change rien.
+//!
+//! Une barre à **un seul onglet** n'existe pas dans le jeu, donc aucune texture n'a ses quatre coins
+//! arrondis. Le composant peint alors les deux extrémités l'une sur l'autre, chacune écrêtée à sa
+//! moitié.
 //!
 //! ## Ce qui n'a PAS de référence, et est donc inventé
 //!
@@ -129,12 +140,44 @@ pub enum TabState {
     Disabled,
 }
 
+/// Où l'onglet se trouve dans la barre — c'est ce qui décide de ses coins arrondis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Position {
+    First,
+    Middle,
+    Last,
+    /// Seul onglet de la barre : il porte les deux extrémités à la fois.
+    Only,
+}
+
+impl Position {
+    fn of(index: usize, count: usize) -> Self {
+        match (index == 0, index + 1 == count) {
+            (true, true) => Position::Only,
+            (true, false) => Position::First,
+            (false, true) => Position::Last,
+            (false, false) => Position::Middle,
+        }
+    }
+}
+
 impl TabState {
-    /// Fond : **le survolé reprend celui de l'actif**, c'est le piège documenté en tête de module.
-    fn texture(self) -> DsTexture {
+    /// Fonds de l'état, dans l'ordre `(première position, milieu, dernière position)`.
+    ///
+    /// **Le survolé reprend ceux de l'actif**, c'est le piège documenté en tête de module : deux
+    /// familles de textures pour quatre états.
+    fn textures(self) -> (DsTexture, DsTexture, DsTexture) {
         match self {
-            TabState::Active | TabState::Hovered => DsTexture::TabActive,
-            TabState::Idle | TabState::Disabled => DsTexture::TabInactive,
+            TabState::Active | TabState::Hovered => (
+                DsTexture::TabActiveFirst,
+                DsTexture::TabActive,
+                DsTexture::TabActiveLast,
+            ),
+            TabState::Idle | TabState::Disabled => (
+                DsTexture::TabInactiveFirst,
+                DsTexture::TabInactive,
+                DsTexture::TabInactiveLast,
+            ),
         }
     }
 
@@ -278,6 +321,37 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
     }
 }
 
+/// Peint le fond d'un onglet, coins arrondis compris.
+///
+/// L'arrondi est porté par **l'alpha de la texture**, comme celui d'un bouton : un `Mesh` egui ne
+/// sait pas découper un coin, et peindre un patch par-dessus n'efface pas le coin carré du dessous.
+/// D'où quatre textures d'extrémité en plus des deux du milieu — voir la doc de module.
+fn paint_face(
+    design: &DesignSystem,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    state: TabState,
+    position: Position,
+) {
+    let (first, middle, last) = state.textures();
+    let tint = egui::Color32::WHITE;
+    match position {
+        Position::First => design.paint(painter, rect, first, tint),
+        Position::Middle => design.paint(painter, rect, middle, tint),
+        Position::Last => design.paint(painter, rect, last, tint),
+        // Aucune texture n'a ses quatre coins arrondis : le jeu n'a pas de barre à un seul onglet.
+        // On peint les deux extrémités l'une sur l'autre, chacune écrêtée à sa moitié — leurs corps
+        // sont identiques, seuls leurs coins diffèrent.
+        Position::Only => {
+            let (left, right) = rect.split_left_right_at_fraction(0.5);
+            for (half, texture) in [(left, first), (right, last)] {
+                let clipped = painter.with_clip_rect(half.intersect(painter.clip_rect()));
+                design.paint(&clipped, rect, texture, tint);
+            }
+        }
+    }
+}
+
 /// Peint le trait entre deux onglets : un **dégradé vertical**, sur le seul corps de l'onglet.
 ///
 /// egui ne sait pas remplir un rectangle en dégradé — `rect_filled` prend une couleur unique. Le
@@ -348,6 +422,7 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
 
         let mut x = rect.left();
         let mut clicked: Option<(usize, T)> = None;
+        let count = widths.len();
         for (index, (entry, width)) in self.entries.iter().zip(&widths).enumerate() {
             let tab_rect = egui::Rect::from_min_size(
                 egui::pos2(x, rect.top()),
@@ -375,11 +450,12 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
             });
 
             if ui.is_rect_visible(tab_rect) {
-                design.paint(
+                paint_face(
+                    &design,
                     ui.painter(),
                     tab_rect,
-                    state.texture(),
-                    egui::Color32::WHITE,
+                    state,
+                    Position::of(index, count),
                 );
                 // Libellé écrêté à SON onglet : un libellé trop long ne doit pas déborder sur le
                 // voisin, où il passerait pour un défaut de mise en page.
@@ -401,17 +477,19 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
                 }
             }
 
-            // Séparateur, dans la gouttière de 2px qui suit — jamais après le dernier onglet, et
-            // jamais sur les bords sombres de la barre : il tient dans le corps de l'onglet.
+            // La gouttière de 2px qui suit — jamais après le dernier onglet. Elle porte deux
+            // choses : le bord de la barre, qui la traverse de part en part, et le séparateur, qui
+            // n'occupe que le corps entre ces deux bords.
             if index + 1 < widths.len() {
-                let separator = egui::Rect::from_min_size(
-                    egui::pos2(tab_rect.right(), rect.top() + tokens::TAB_BORDER_Y),
-                    Vec2::new(
-                        tokens::TAB_SEPARATOR_WIDTH,
-                        tokens::TAB_HEIGHT - 2.0 * tokens::TAB_BORDER_Y,
-                    ),
+                let gutter = egui::Rect::from_min_size(
+                    egui::pos2(tab_rect.right(), rect.top()),
+                    Vec2::new(tokens::TAB_SEPARATOR_WIDTH, tokens::TAB_HEIGHT),
                 );
-                paint_separator(ui.painter(), separator);
+                ui.painter().rect_filled(gutter, 0, tokens::TAB_BORDER);
+                paint_separator(
+                    ui.painter(),
+                    gutter.shrink2(Vec2::new(0.0, tokens::TAB_BORDER_Y)),
+                );
             }
 
             x = tab_rect.right() + tokens::TAB_SEPARATOR_WIDTH;

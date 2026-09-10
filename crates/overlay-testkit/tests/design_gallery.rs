@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2540.0))
+        .with_size(Vec2::new(760.0, 2592.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -283,6 +283,16 @@ fn gallery(ui: &mut egui::Ui) {
         .entry(4, "Commandes")
         .entry(5, "Chat")
         .log_name("galerie.onglets-jeu")
+        .show(ui);
+
+    // Barre à UN SEUL onglet : le seul cas où les quatre coins sont arrondis, et le seul que le jeu
+    // n'ait jamais produit. Le composant y superpose ses deux textures d'extrémité, chacune écrêtée
+    // à sa moitié — ce chemin de peinture n'a pas d'autre couverture.
+    let mut onglet_seul = 0_u8;
+    design::tabs(&mut onglet_seul)
+        .fit_content()
+        .entry(0, "Seul")
+        .log_name("galerie.onglet-seul")
         .show(ui);
 
     heading(
