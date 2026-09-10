@@ -388,26 +388,47 @@ fn focus_given_id() -> egui::Id {
     egui::Id::new("options-modal-focus-initial")
 }
 
-/// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
-/// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
-pub fn show(
-    ui: &mut egui::Ui,
-    state: &mut OptionsModalState,
-    assets: &OptionsModalAssets,
-) -> OptionsModalAction {
-    let mut action = OptionsModalAction::None;
-    let rect = ui.max_rect();
+/// Ce que le pied de page vient de recevoir — voir [`chrome`].
+///
+/// Distinct d'[`OptionsModalAction`] : le chrome ne sait pas ce qu'il y a à valider, seulement
+/// qu'on a cliqué. C'est l'appelant qui attache la charge utile (`Validate(path)` pour l'onglet
+/// Paramètres, autre chose pour un autre onglet).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum FooterClick {
+    #[default]
+    None,
+    Cancel,
+    Validate,
+}
 
-    // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
-    // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
-    // a sa propre fenêtre OS, créée à l'ouverture et détruite à la fermeture (voir
-    // `main.rs::open_options_modal` / `PostRedraw::CloseOptions`). Rouvrir la modale redonne donc
-    // bien le focus, refermer et rouvrir n'en garde aucune trace.
-    let first_frame = !ui.data_mut(|d| {
-        let seen = d.get_temp::<bool>(focus_given_id()).unwrap_or(false);
-        d.insert_temp(focus_given_id(), true);
-        seen
-    });
+/// Ce que [`chrome`] rend à son appelant : où écrire, et ce que le pied de page a reçu.
+pub struct Chrome {
+    /// Rectangle intérieur du panneau de section — la seule zone où un onglet écrit son contenu.
+    /// Réserve de barre de défilement déjà déduite à droite (voir [`chrome`]).
+    pub inner: egui::Rect,
+    pub footer: FooterClick,
+}
+
+/// Peint TOUT le décor de la fenêtre Options — bannière, corps, barre d'onglets, pied de page,
+/// panneau de section — et rend la zone où l'onglet actif écrit son contenu.
+///
+/// **Extrait de [`show`] le 2026-09-10**, sur réserve d'une revue à trois experts des maquettes de
+/// la page Alertes : maquetter un second onglet demandait ce décor, et le recopier en aurait fait
+/// une deuxième implémentation — celle qui diverge en quelques semaines. Le découpage est à
+/// pixel constant, ce que le snapshot `options_modale_sur_damier.png` vérifie à chaque exécution :
+/// c'est ce qui rend l'extraction sûre.
+///
+/// `enabled_tabs` dit quels onglets sont cliquables. Ce n'est pas un réglage cosmétique mais
+/// l'état d'avancement du portage : `show` n'en active qu'un, une maquette peut en activer
+/// d'autres pour montrer ce qu'ils contiendront.
+pub fn chrome(
+    ui: &mut egui::Ui,
+    assets: &OptionsModalAssets,
+    tab: &mut OptionsTab,
+    enabled_tabs: &[OptionsTab],
+) -> Chrome {
+    let rect = ui.max_rect();
+    let mut footer = FooterClick::None;
 
     // Corps de la modale — vraie texture du jeu (`modal-body.png`) depuis le 2026-09-10, à la
     // place de l'aplat qui le peignait jusque-là. Elle porte le grain et les hachures d'angle
@@ -478,12 +499,13 @@ pub fn show(
         egui::vec2(content_rect.width(), MENU_HEIGHT),
     );
     ui.scope_builder(egui::UiBuilder::new().max_rect(menu_rect), |ui| {
-        design::tabs(&mut state.tab)
+        design::tabs(tab)
             .entry(OptionsTab::Alertes, "Alertes")
-            .enabled(false)
+            .enabled(enabled_tabs.contains(&OptionsTab::Alertes))
             .entry(OptionsTab::Personnages, "Personnages")
-            .enabled(false)
+            .enabled(enabled_tabs.contains(&OptionsTab::Personnages))
             .entry(OptionsTab::Parametres, "Paramètres")
+            .enabled(enabled_tabs.contains(&OptionsTab::Parametres))
             .log_name("options-onglets")
             .show(ui);
     });
@@ -515,7 +537,7 @@ pub fn show(
         )
         .clicked()
     {
-        action = OptionsModalAction::Cancel;
+        footer = FooterClick::Cancel;
     }
     if ui
         .put(
@@ -528,10 +550,10 @@ pub fn show(
         )
         .clicked()
     {
-        action = OptionsModalAction::Validate(state.path_input.clone());
+        footer = FooterClick::Validate;
     }
 
-    // Section "Fichier" — encadré interne au rayon plus prononcé que la modale (`SECTION_RADIUS`),
+    // Section — encadré interne au rayon plus prononcé que la modale (`SECTION_RADIUS`),
     // entre le menu et le pied de page.
     let section_rect = egui::Rect::from_min_max(
         egui::pos2(content_rect.left(), menu_rect.bottom() + MENU_GAP),
@@ -556,7 +578,7 @@ pub fn show(
     // `RESERVE_X`. Le jour où le contenu de l'onglet débordera, il suffira de l'envelopper dans une
     // `design::scroll_area` : la barre tombera pile dans cette réserve, sans qu'un seul pixel de
     // contenu ne bouge. C'est tout l'intérêt de la réserver dès maintenant.
-    let inner_rect = egui::Rect::from_min_max(
+    let inner = egui::Rect::from_min_max(
         egui::pos2(
             section_rect.left() + PANEL_PAD_CONTROL_X,
             section_rect.top() + PANEL_PAD_TOP,
@@ -566,8 +588,75 @@ pub fn show(
             section_rect.bottom() - PANEL_PAD_CONTROL_X,
         ),
     );
-    /// Retrait du titre par rapport à ses contrôles — voir `PANEL_PAD_CONTROL_X`.
+
+    Chrome { inner, footer }
+}
+
+/// Peint un titre de section dans le panneau, et avance le curseur jusqu'à sa ligne suivante.
+///
+/// **Deux choses le distinguent d'un `ui.label`, et aucune n'est cosmétique.** Le titre est peint
+/// à la main parce qu'un libellé egui ne sait pas se cerner, et le procédé doit rester celui de la
+/// bannière (serif grasse + ombre bas-droite). Et l'espace réservé est celui de l'**encre**, pas
+/// celui de la galley : une galley réserve la place des accents de capitale et des jambages que le
+/// mot n'utilise pas, ce qui ajoutait ~14px invisibles sous le titre et faussait les sept cotes
+/// verticales relevées.
+///
+/// La couleur n'est pas négociable : `SECTION_TITLE_TEXT`, **le gris `#b8b9ba` du jeu** — mesuré
+/// sur « Musique », « Sons - Ambiance », « Équipements », « Types », qui donnent tous la même
+/// valeur à un pas près. Le jeu ne dore JAMAIS un titre : son or est réservé aux états (case
+/// cochée, onglet inactif, valeur saisie). Dorer une hiérarchie de titres est le réflexe qui fait
+/// lire une fenêtre comme une page web repeinte — réserve explicite de la revue du 2026-09-10.
+pub fn section_title(ui: &mut egui::Ui, text: &str) {
     const TITLE_OUTDENT: f32 = PANEL_PAD_CONTROL_X - PANEL_PAD_TITLE_X;
+    let font = design::text::title_font(ui.ctx(), SECTION_TITLE_FONT_SIZE);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), SECTION_TITLE_TEXT);
+    let title_rect = ui
+        .allocate_space(egui::vec2(galley.size().x + 1.0, SECTION_TITLE_INK_HEIGHT))
+        .1;
+    design::text::paint_outlined_text(
+        ui,
+        title_rect.left_top() - egui::vec2(TITLE_OUTDENT, SECTION_TITLE_INK_TOP),
+        egui::Align2::LEFT_TOP,
+        text,
+        font,
+        SECTION_TITLE_TEXT,
+        design::text::SHADOW_BOTTOM_RIGHT,
+    );
+    ui.add_space(TITLE_TO_FULL_WIDTH_ROW);
+}
+
+/// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
+/// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
+pub fn show(
+    ui: &mut egui::Ui,
+    state: &mut OptionsModalState,
+    assets: &OptionsModalAssets,
+) -> OptionsModalAction {
+    let mut action = OptionsModalAction::None;
+
+    // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
+    // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
+    // a sa propre fenêtre OS, créée à l'ouverture et détruite à la fermeture (voir
+    // `main.rs::open_options_modal` / `PostRedraw::CloseOptions`). Rouvrir la modale redonne donc
+    // bien le focus, refermer et rouvrir n'en garde aucune trace.
+    let first_frame = !ui.data_mut(|d| {
+        let seen = d.get_temp::<bool>(focus_given_id()).unwrap_or(false);
+        d.insert_temp(focus_given_id(), true);
+        seen
+    });
+
+    // Tout le décor — voir [`chrome`]. « Paramètres » est le seul onglet cliquable : les deux
+    // autres n'ont pas encore de contenu porté.
+    let Chrome { inner, footer } = chrome(ui, assets, &mut state.tab, &[OptionsTab::Parametres]);
+    match footer {
+        FooterClick::Cancel => action = OptionsModalAction::Cancel,
+        FooterClick::Validate => action = OptionsModalAction::Validate(state.path_input.clone()),
+        FooterClick::None => {}
+    }
+
+    let inner_rect = inner;
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
         // **Aucun espacement implicite dans ce panneau.** egui glisse `item_spacing.y` (3px par
         // défaut) entre deux widgets empilés : les écarts relevés du jeu s'en trouvaient tous
@@ -575,41 +664,7 @@ pub fn show(
         // vertical est désormais une constante nommée de ce fichier, et rien d'autre.
         ui.spacing_mut().item_spacing.y = 0.0;
 
-        // Même traitement que le titre de bannière (serif grasse + ombre bas-droite), au corps
-        // dicté par le rapport d'encre du jeu entre ses deux niveaux de titre. Peint à la main
-        // plutôt que via `ui.label` : un libellé egui ne sait pas se cerner, et le procédé doit
-        // rester le même que celui de la bannière. L'espace réservé inclut le pixel d'ombre.
-        let section_font = design::text::title_font(ui.ctx(), SECTION_TITLE_FONT_SIZE);
-        let section_galley = ui.painter().layout_no_wrap(
-            "Fichier".to_owned(),
-            section_font.clone(),
-            SECTION_TITLE_TEXT,
-        );
-        // **L'espace réservé est celui de l'ENCRE, pas celui de la galley** (2026-09-10, étape 4 du
-        // plan de finalisation). C'est ce qui permet aux deux cotes verticales du relevé
-        // (`PANEL_PAD_TOP` au-dessus, `TITLE_TO_FULL_WIDTH_ROW` en dessous) d'être ses valeurs
-        // telles quelles, au lieu de valeurs corrigées à la main d'une marge de police.
-        //
-        // Une galley est plus haute que son encre des deux côtés : la police y réserve la place des
-        // accents de capitale au-dessus et des jambages en dessous, que « Fichier » n'utilise ni
-        // l'un ni l'autre. Réserver la galley entière ajoutait donc ~14px invisibles entre le titre
-        // et sa ligne, sur 7 relevés.
-        let section_title_rect = ui
-            .allocate_space(egui::vec2(
-                section_galley.size().x + 1.0,
-                SECTION_TITLE_INK_HEIGHT,
-            ))
-            .1;
-        design::text::paint_outlined_text(
-            ui,
-            section_title_rect.left_top() - egui::vec2(TITLE_OUTDENT, SECTION_TITLE_INK_TOP),
-            egui::Align2::LEFT_TOP,
-            "Fichier",
-            section_font,
-            SECTION_TITLE_TEXT,
-            design::text::SHADOW_BOTTOM_RIGHT,
-        );
-        ui.add_space(TITLE_TO_FULL_WIDTH_ROW);
+        section_title(ui, "Fichier");
 
         // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
         // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
