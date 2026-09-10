@@ -17,6 +17,7 @@
 //! **hachures qui les dimensionnent**, pas les coins : voir `button_slice`.
 
 use crate::design::nine_slice::{Fill, Insets, NineSlice};
+use crate::design::tokens;
 
 /// Découpage d'une texture de bouton texte : `cap` pixels figés à gauche et à droite, 6px en haut
 /// et en bas, tout le reste étiré.
@@ -137,6 +138,85 @@ pub const SELECT_SLICE: NineSlice = NineSlice::new(
 pub const ICON_BUTTON_SLICE: NineSlice =
     NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage du corps de modale (`modal-body.png`, 720 × 505) : **125px figés à gauche, 195 à
+/// droite, 110 en haut, 180 en bas**.
+///
+/// Quatre valeurs distinctes, contrairement à tout le reste du manifeste, parce que le décor de
+/// cette texture est franchement asymétrique — et c'est encore lui qui dimensionne, comme sur un
+/// bouton (`button_slice`). Les hachures de la fenêtre Options ne sont pas une trame de fond mais
+/// un **cadre** : denses dans les angles et le long des bords, absentes de la bande centrale.
+/// Chaque marge est la plus petite qui contienne 90 % du décor de son côté, arrondie au multiple
+/// de 5 supérieur (`tools/design-system/build_modal_body.py`, sortie `marges du décor`) ; le bas en
+/// demande plus que le haut parce que le pourtour des deux boutons de pied de page y concentre les
+/// croisillons les plus marqués.
+///
+/// Les deux totaux (320 en X, 290 en Y) laissent une vraie bande médiane à la taille où la modale
+/// est peinte aujourd'hui (560 × 380) : c'est elle qui absorbe le changement de dimensions, sans
+/// toucher au décor.
+///
+/// `Fill::Stretch` sur les deux axes : cette bande médiane est un fond quasi uni — moins de deux
+/// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
+/// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — **aucun décor à figer**.
+///
+/// Mesuré (`component.py insets`) : rayon d'angle 3, aucun liseré, bruit de décor 0,05 sur 255 —
+/// c'est un aplat, contrairement aux socles de bouton icône qui portent un liseré kaki. Six pixels
+/// de marge, soit deux fois le rayon, suffisent donc à figer les angles ; vérifié sur une planche
+/// 9-slice à 24 × 24, 32 × 32, 48 × 32 et 64 × 32 avant d'écrire la moindre ligne de Rust.
+pub const STEPPER_SLICE: NineSlice =
+    NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
+
+/// Bannière de la modale Options (`modal-header.png`, 720 × 56) — **aucune marge figée**.
+///
+/// Son motif de losanges est réparti sur toute la largeur : ce ne sont pas des embouts d'extrémité
+/// comme sur un bouton, il n'y a donc rien à figer. Étirer la texture entière est ce que le rendu
+/// fait depuis l'origine, et la comparaison au jeu l'a validé — le rayon de coin natif (≈ 12 px sur
+/// 720) reste imperceptible à l'échelle où la bannière est peinte.
+///
+/// Ce découpage n'est de toute façon pas emprunté aujourd'hui : `panels::options_modal` peint la
+/// bannière par `egui::Image` pour lui appliquer un arrondi de coins HAUTS, ce qu'un `Mesh`
+/// 9-slice ne sait pas faire. Il est déclaré pour que la texture entre au manifeste comme les
+/// autres, et il sera juste le jour où quelqu'un l'empruntera.
+///
+/// Même valeur qu'[`ICON_SLICE`] à ce jour, et ce n'est pas un oubli : les deux disent des choses
+/// différentes — un glyphe n'a rien à figer parce qu'il n'a pas de décor, cette bannière parce que
+/// le sien est réparti. Le jour où l'un des deux gagne une marge mesurée, l'autre ne doit pas
+/// bouger avec lui.
+pub const BANNER_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretch, Fill::Stretch);
+
+pub const MODAL_BODY_SLICE: NineSlice = NineSlice::new(
+    Insets {
+        left: 125.0,
+        top: 110.0,
+        right: 195.0,
+        bottom: 180.0,
+    },
+    Fill::Stretch,
+    Fill::Stretch,
+);
+
+/// Découpage du panneau de contenu (`modal-section.png`, 688 × 375) : **105px figés à gauche,
+/// 175 à droite, 50 en haut, 120 en bas**.
+///
+/// Même règle que [`MODAL_BODY_SLICE`], appliquée au même décor : le cadre de hachures de la
+/// fenêtre traverse le panneau et se concentre dans ses quatre angles. Les marges sont les plus
+/// petites qui contiennent 90 % du décor de chaque côté
+/// (`tools/design-system/build_modal_section.py`). Elles sont plus courtes que celles du corps,
+/// parce que le panneau ne voit qu'une partie du cadre — celle qui tombe dans son rectangle.
+///
+/// Totaux 280 en X et 170 en Y : le panneau est peint à 520 × 253 dans la modale actuelle, la
+/// bande médiane existe donc sur les deux axes. Et c'est un fond encore plus plat que celui du
+/// corps — moins de deux niveaux d'un bord à l'autre — donc rien à répéter, `Fill::Stretch`.
+pub const MODAL_SECTION_SLICE: NineSlice = NineSlice::new(
+    Insets {
+        left: 105.0,
+        top: 50.0,
+        right: 175.0,
+        bottom: 120.0,
+    },
+    Fill::Stretch,
+    Fill::Stretch,
+);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -225,6 +305,80 @@ pub enum DsTexture {
     IconExternalLink,
     IconPlus,
     IconMinus,
+    /// Loupe d'un champ de recherche (`icons/icon-search.png`, 24 × 24) — le jeu la pose À
+    /// L'INTÉRIEUR du champ, collée au bord gauche, jamais sur un socle de bouton
+    /// (`interface-hdv-achat.png` x 27..39, `interface-personnage-equiement.png`). Elle n'a donc
+    /// pas de `icon_content_size` : sa taille est celle que lui donne le champ qui la porte.
+    IconSearch,
+    /// Croix de fermeture/retrait (`icons/icon-close.png`, 13 × 14) — le « × » de « Retirer tous
+    /// les filtres » et le bouton de fermeture d'une fenêtre.
+    IconClose,
+    /// Corbeille (`icons/icon-delete.png`, 12 × 14) — la suppression d'un élément d'une liste, sur
+    /// socle de bouton icône (`interface-personnage-equiement.png`, barre d'outils du build).
+    IconDelete,
+    /// Point d'interrogation (`icons/icon-help.png`, 12 × 12) — le bouton d'aide en tête de
+    /// fenêtre (`interface-personnage-equiement.png`, coin haut-droit).
+    IconHelp,
+    /// Coche (`icons/icon-tick.png`, 12 × 9) — le marqueur « actif » du jeu, à côté d'un libellé
+    /// (« ✓ Actif ») plutôt que sur un socle : pas de `icon_content_size` pour la même raison que
+    /// [`DsTexture::IconSearch`].
+    IconTick,
+    /// Flèche de réinitialisation (`icons/icon-undo.png`, 14 × 12) — le bouton « rétablir les
+    /// valeurs par défaut » de la fenêtre Options (`interface-options-son.png`, coin haut-droit).
+    IconUndo,
+    /// Corps de la modale Options (`modal-body.png`, 720 × 505) — le fond SOUS la bannière,
+    /// découpé des six captures de la fenêtre Options du jeu puis débarrassé de son contenu
+    /// (`tools/design-system/build_modal_body.py`, §9 ter du design-system).
+    ///
+    /// **Les deux angles inférieurs sont portés par l'alpha de la texture** (arrondi de rayon 12,
+    /// le même que les angles hauts de `modal-header.png`), comme pour un bouton : un `Mesh` egui
+    /// ne sait pas découper un coin.
+    ///
+    /// Remplace l'aplat `MODAL_BG` qui peignait ce fond jusqu'ici. La translucidité de la fenêtre,
+    /// elle, ne vient plus de la couleur mais de la teinte passée à la peinture — voir
+    /// `panels::options_modal`.
+    ModalBody,
+    /// Panneau de contenu de la modale Options (`modal-section.png`, 688 × 375) — l'encadré qui
+    /// tient les sections, découpé des mêmes six captures que [`DsTexture::ModalBody`]
+    /// (`tools/design-system/build_modal_section.py`, §9 quater du design-system).
+    ///
+    /// **Ce n'est pas une surface à part** : c'est le fond de la fenêtre assombri de huit à neuf
+    /// niveaux (`#1E2126` → `#15191C`), que le décor de la fenêtre traverse — les hachures s'y
+    /// retrouvent, aux quatre angles. La texture porte ce fond, son liseré de 2px et l'arrondi de
+    /// rayon 6 de ses angles, celui-ci dans son alpha comme pour un bouton.
+    ///
+    /// Remplace l'aplat `SECTION_BG` + `rect_stroke` qui le peignaient jusqu'ici.
+    ModalSection,
+    /// Bannière de la modale Options (`modal-header.png`, 720 × 56) — le bandeau turquoise qui
+    /// porte le titre de la fenêtre, au-dessus de [`DsTexture::ModalBody`], avec lequel elle se
+    /// juxtapose sans recouvrement (elle s'arrête où l'autre commence).
+    ///
+    /// **Ses deux angles hauts sont portés par l'alpha de la texture** (rayon 12), comme les angles
+    /// bas de `ModalBody`.
+    ///
+    /// Entrée au manifeste le 2026-09-10 (lot 0.1 de `docs/plan-composants-ui.md`). Le fichier
+    /// existait jusque-là **en double** — `crates/overlay-ui/assets/ui/options/modal-header.png`
+    /// en était une copie octet pour octet, chargée par un `include_bytes!` local. C'était la
+    /// dernière raison d'exister de `OptionsModalAssets`, de sa fonction de décodage et du champ
+    /// `options_assets` que `RenderContent` promenait jusqu'au panneau.
+    ModalHeader,
+    /// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — le carré sombre qui porte le
+    /// « − » et le « + » d'un pas numérique (`design::stepper`).
+    ///
+    /// **Ce n'est pas le socle d'un bouton icône** : le jeu en a deux familles distinctes, et
+    /// celle-ci est un aplat gris-bleu sans liseré (`#2b2d33`), plus discrète, faite pour être
+    /// encastrée à côté d'un champ — là où `button-icon.png` porte un liseré kaki et vit dans un
+    /// panneau.
+    ///
+    /// **Générifiée le 2026-09-10** depuis `button-moins.png`, qui portait son glyphe incrusté —
+    /// exactement l'« asset par libellé » que le skill `ui-component` interdit. Reconstruction par
+    /// diffusion (`dsimg.py genericize --method diffusion`) : résidu maximal de 4/255 dans la zone
+    /// du glyphe, imperceptible. `button-plus.png` en diffère de 70 pixels, tous dans son glyphe :
+    /// c'est bien un seul socle pour les deux boutons.
+    ///
+    /// Les glyphes, eux, viennent du manifeste ([`DsTexture::IconPlus`], [`DsTexture::IconMinus`])
+    /// et sont posés par `design::icon_button` — un socle, deux glyphes, jamais deux textures.
+    ButtonStepper,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -273,6 +427,16 @@ impl DsTexture {
         DsTexture::IconExternalLink,
         DsTexture::IconPlus,
         DsTexture::IconMinus,
+        DsTexture::IconSearch,
+        DsTexture::IconClose,
+        DsTexture::IconDelete,
+        DsTexture::IconHelp,
+        DsTexture::IconTick,
+        DsTexture::IconUndo,
+        DsTexture::ModalBody,
+        DsTexture::ModalSection,
+        DsTexture::ModalHeader,
+        DsTexture::ButtonStepper,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -280,6 +444,32 @@ impl DsTexture {
             .iter()
             .position(|t| *t == self)
             .expect("toute variante de DsTexture est listée dans ALL")
+    }
+
+    /// Plus grande dimension d'encre à laquelle cette texture est peinte quand elle sert d'icône
+    /// sur un socle de [`tokens::ICON_BUTTON_SIZE`] — `None` pour tout ce qui n'est pas une icône
+    /// de bouton, ou dont la taille est déjà celle du composant qui la porte.
+    ///
+    /// Les glyphes de `assets/design-system/icons/` sont détourés au pixel près : leur fichier fait
+    /// exactement la taille de leur encre, qui varie d'un glyphe à l'autre (13 pour le lien
+    /// externe, 16 pour le rouage). Peints tels quels, ils donneraient trois hauteurs d'encre
+    /// différentes dans une même barre — le jeu, lui, les cale tous sur une grille commune. Cette
+    /// grille est [`tokens::ICON_BUTTON_CONTENT`], mesurée sur le jeu ; sa doc porte la mesure.
+    ///
+    /// C'est le manifeste qui la porte, et pas l'appelant : la taille d'encre d'un glyphe est une
+    /// propriété de l'asset, au même titre que son découpage 9-slice.
+    pub fn icon_content_size(self) -> Option<f32> {
+        match self {
+            DsTexture::IconOption
+            | DsTexture::IconExternalLink
+            | DsTexture::IconPlus
+            | DsTexture::IconMinus
+            | DsTexture::IconClose
+            | DsTexture::IconDelete
+            | DsTexture::IconHelp
+            | DsTexture::IconUndo => Some(tokens::ICON_BUTTON_CONTENT),
+            _ => None,
+        }
     }
 
     pub fn spec(self) -> DsTextureSpec {
@@ -429,6 +619,205 @@ impl DsTexture {
                 bytes: ds_asset!("icons/icon-minus.png"),
                 slice: ICON_SLICE,
             },
+            DsTexture::IconSearch => DsTextureSpec {
+                name: "ds-icon-search",
+                bytes: ds_asset!("icons/icon-search.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconClose => DsTextureSpec {
+                name: "ds-icon-close",
+                bytes: ds_asset!("icons/icon-close.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconDelete => DsTextureSpec {
+                name: "ds-icon-delete",
+                bytes: ds_asset!("icons/icon-delete.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconHelp => DsTextureSpec {
+                name: "ds-icon-help",
+                bytes: ds_asset!("icons/icon-help.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconTick => DsTextureSpec {
+                name: "ds-icon-tick",
+                bytes: ds_asset!("icons/icon-tick.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconUndo => DsTextureSpec {
+                name: "ds-icon-undo",
+                bytes: ds_asset!("icons/icon-undo.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ModalBody => DsTextureSpec {
+                name: "ds-modal-body",
+                bytes: ds_asset!("modal-body.png"),
+                slice: MODAL_BODY_SLICE,
+            },
+            DsTexture::ModalSection => DsTextureSpec {
+                name: "ds-modal-section",
+                bytes: ds_asset!("modal-section.png"),
+                slice: MODAL_SECTION_SLICE,
+            },
+            DsTexture::ModalHeader => DsTextureSpec {
+                name: "ds-modal-header",
+                bytes: ds_asset!("modal-header.png"),
+                slice: BANNER_SLICE,
+            },
+            DsTexture::ButtonStepper => DsTextureSpec {
+                name: "ds-button-stepper",
+                bytes: ds_asset!("button-stepper.png"),
+                slice: STEPPER_SLICE,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Seuil d'opacité au-delà duquel un pixel compte comme de l'encre — le même que celui du skill
+    /// `design-asset`, pour que les mesures se comparent d'un outil à l'autre.
+    const ALPHA_THRESHOLD: u8 = 10;
+
+    /// Boîte englobante des pixels opaques : `(largeur, hauteur)`.
+    fn ink_bbox(img: &image::RgbaImage) -> (u32, u32) {
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0_u32, 0_u32);
+        let mut vu = false;
+        for (x, y, pixel) in img.enumerate_pixels() {
+            if pixel.0[3] > ALPHA_THRESHOLD {
+                vu = true;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+        assert!(vu, "texture entièrement transparente");
+        (max_x - min_x + 1, max_y - min_y + 1)
+    }
+
+    fn decode(bytes: &[u8]) -> image::RgbaImage {
+        image::load_from_memory(bytes)
+            .expect("texture du manifeste décodable")
+            .to_rgba8()
+    }
+
+    /// **La mesure qui a débloqué la migration, transformée en garde-fou.**
+    ///
+    /// `tokens::ICON_BUTTON_CONTENT` vaut 18 parce que le jeu cale les icônes de cette famille sur
+    /// une grille commune — mesuré sur les huit icônes de `menu-button-icon-first-plan.png`. Tant
+    /// que cette valeur n'était qu'un paragraphe de documentation, rien n'empêchait de la changer
+    /// « à l'œil ». Ce test la rattache à la capture : retraiter l'asset ou poser un autre étalon
+    /// le fait tomber.
+    ///
+    /// Découpage de la capture : socles de 36 × 36, cadence verticale de 38 (2 px de gouttière),
+    /// premier socle en (4, 5). L'échelle 1 est vérifiée séparément — `button-icon-first-plan.png`
+    /// s'y recale avec un écart moyen de 2,3/255, contre 4,5 et plus dès 35 ou 37.
+    #[test]
+    fn l_etalon_d_icone_est_celui_mesure_sur_le_jeu() {
+        const SOCLE: u32 = 36;
+        const CADENCE: u32 = 38;
+        const ORIGINE: (u32, u32) = (4, 5);
+        /// Seuil de luminance séparant l'encre claire de l'icône du socle sombre — le résultat ne
+        /// bouge pas entre 120 et 180, ce n'est donc pas un réglage critique.
+        const SEUIL_LUMINANCE: u32 = 140;
+
+        let barre = decode(ds_asset!("menu-button-icon-first-plan.png"));
+        let mut mesures = Vec::new();
+        for i in 0..8 {
+            let (x0, y0) = (ORIGINE.0, ORIGINE.1 + CADENCE * i);
+            let socle = image::imageops::crop_imm(&barre, x0, y0, SOCLE, SOCLE).to_image();
+            let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0_u32, 0_u32);
+            for (x, y, pixel) in socle.enumerate_pixels() {
+                let luminance =
+                    (pixel.0[0] as u32 + pixel.0[1] as u32 + pixel.0[2] as u32).div_ceil(3);
+                if luminance > SEUIL_LUMINANCE {
+                    min_x = min_x.min(x);
+                    min_y = min_y.min(y);
+                    max_x = max_x.max(x);
+                    max_y = max_y.max(y);
+                }
+            }
+            mesures.push((max_x - min_x + 1).max(max_y - min_y + 1));
+        }
+        mesures.sort_unstable();
+
+        let mediane = mesures[mesures.len() / 2] as f32;
+        assert_eq!(
+            mediane,
+            tokens::ICON_BUTTON_CONTENT,
+            "médiane mesurée {mediane}, étalon {} — mesures : {mesures:?}",
+            tokens::ICON_BUTTON_CONTENT,
+        );
+        let (min, max) = (mesures[0] as f32, mesures[mesures.len() - 1] as f32);
+        assert!(
+            (16.0..=20.0).contains(&min) && (16.0..=20.0).contains(&max),
+            "l'encre du jeu sort de la plage 16–20 : {mesures:?}",
+        );
+    }
+
+    /// Les glyphes d'icône du manifeste sont **détourés au pixel près** : leur canevas est
+    /// exactement leur encre.
+    ///
+    /// C'est l'hypothèse sur laquelle repose `icon_draw_size` : il ramène la plus grande dimension
+    /// du FICHIER à l'étalon. Une marge transparente autour d'un glyphe rétrécirait donc son encre
+    /// en silence, d'autant plus que la marge est large — précisément le défaut qu'`ui_icons`
+    /// corrigeait à la volée avant la migration du 2026-09-10, ses fichiers sources laissant des
+    /// canevas de 18 et 22 px pour des encres de 13 et 16. Ce test l'attrape au retraitement de
+    /// l'asset, pas au retour utilisateur.
+    ///
+    /// **Un pixel de tolérance** sur chaque axe : la frange d'antialiasing d'un détourage peut
+    /// tomber sous [`ALPHA_THRESHOLD`] sur la dernière rangée — c'est le cas de
+    /// `icon-external-link.png`, dont la dernière ligne plafonne à un alpha de 6. Ce n'est pas une
+    /// marge, et ce test vise les marges (plusieurs pixels), pas la frange.
+    #[test]
+    fn les_glyphes_d_icone_sont_detoures_au_pixel_pres() {
+        /// Écart admis entre le canevas et l'encre, par axe — voir la doc de la fonction.
+        const TOLERANCE: u32 = 1;
+        // **Toutes les textures découpées en `ICON_SLICE`**, et non les seules qui portent un
+        // `icon_content_size` : ce filtre-là laissait échapper les glyphes qui ne vivent pas sur
+        // un socle (`IconSearch` dans un champ, `IconTick` à côté d'un libellé, `IconChevronDown`
+        // sur une liste déroulante) — précisément ceux dont une marge transparente passerait
+        // inaperçue, faute d'étalon pour les recadrer. Réserve de la revue du 2026-09-10.
+        for texture in DsTexture::ALL.iter().copied() {
+            let spec = texture.spec();
+            if spec.slice.insets != Insets::same(0.0) {
+                continue;
+            }
+            let img = decode(spec.bytes);
+            let encre = ink_bbox(&img);
+            let (canevas_x, canevas_y) = img.dimensions();
+            assert!(
+                canevas_x - encre.0 <= TOLERANCE && canevas_y - encre.1 <= TOLERANCE,
+                "{} : canevas {:?}, encre {encre:?} — marge transparente à retirer",
+                spec.name,
+                img.dimensions(),
+            );
+        }
+    }
+
+    /// Les cinq socles de bouton icône font la taille native que le composant suppose.
+    #[test]
+    fn les_socles_de_bouton_icone_font_la_taille_native() {
+        for texture in [
+            DsTexture::ButtonIcon,
+            DsTexture::ButtonIconHover,
+            DsTexture::ButtonIconFirstPlan,
+            DsTexture::ButtonIconFirstPlanHover,
+            DsTexture::ButtonIconDisabled,
+        ] {
+            let spec = texture.spec();
+            let img = decode(spec.bytes);
+            let attendu = tokens::ICON_BUTTON_SIZE as u32;
+            assert_eq!(
+                img.dimensions(),
+                (attendu, attendu),
+                "{} : {:?} au lieu de {attendu} × {attendu}",
+                spec.name,
+                img.dimensions(),
+            );
         }
     }
 }

@@ -320,21 +320,32 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
                 .collect();
         }
 
-        // Parts égales sur la largeur disponible, gouttières déduites. Les bords sont arrondis **en
-        // cumulé** plutôt que chaque largeur séparément : sinon les arrondis s'additionnent et la
-        // barre finit un ou deux pixels avant — ou après — le bord du panneau. Ici la somme des
-        // largeurs vaut exactement la place utile, et les onglets ne diffèrent au plus que d'un
-        // pixel entre eux.
-        let gutters = tokens::TAB_SEPARATOR_WIDTH * (count - 1) as f32;
-        let usable = (ui.available_width() - gutters).max(0.0);
-        (0..count)
-            .map(|index| {
-                let start = (usable * index as f32 / count as f32).round();
-                let end = (usable * (index + 1) as f32 / count as f32).round();
-                end - start
-            })
-            .collect()
+        equal_widths(ui.available_width(), count)
     }
+}
+
+/// Largeurs d'onglets **à parts égales** sur `available`, gouttières déduites.
+///
+/// Les bords sont arrondis **en cumulé** plutôt que chaque largeur séparément : sinon les arrondis
+/// s'additionnent et la barre finit un ou deux pixels avant — ou après — le bord du panneau. Ici la
+/// somme des largeurs vaut exactement la place utile, et les onglets ne diffèrent au plus que d'un
+/// pixel entre eux.
+///
+/// Fonction libre plutôt que corps de [`Tabs::widths`] : c'est le calcul qui peut se tromper en
+/// silence, et il s'éprouve sans contexte egui (voir les tests en bas de ce fichier).
+fn equal_widths(available: f32, count: usize) -> Vec<f32> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let gutters = tokens::TAB_SEPARATOR_WIDTH * (count - 1) as f32;
+    let usable = (available - gutters).max(0.0);
+    (0..count)
+        .map(|index| {
+            let start = (usable * index as f32 / count as f32).round();
+            let end = (usable * (index + 1) as f32 / count as f32).round();
+            end - start
+        })
+        .collect()
 }
 
 /// Peint le fond d'un onglet, coins arrondis compris.
@@ -432,7 +443,7 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
         let font = text::label_font(ui.ctx(), tokens::TAB_FONT_SIZE);
         let design = DesignSystem::get(ui.ctx());
         // Un appui de souris retire l'apparence survolée partout dans l'overlay — même condition
-        // que `design::button` et `panels::icon_button`, sans quoi deux familles de contrôles se
+        // que `design::button` et `design::icon_button`, sans quoi deux familles de contrôles se
         // comporteraient différemment sous la même souris.
         let pointer_down = ui.input(|i| i.pointer.any_down());
 
@@ -535,5 +546,64 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
         }
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tolérance de comparaison — voir `window::tests`.
+    const EPS: f32 = 0.01;
+
+    /// **Le bug que ce test verrouille** : arrondir chaque largeur séparément fait dériver la somme,
+    /// et la barre d'onglets finit un ou deux pixels avant — ou après — le bord de son panneau. Le
+    /// jeu, lui, la fait tomber pile. Trois onglets sur 520 px est le cas de la modale Options.
+    #[test]
+    fn la_somme_des_largeurs_vaut_exactement_la_place_utile() {
+        for (available, count) in [(520.0, 3), (520.0, 2), (333.0, 3), (777.0, 6), (100.0, 7)] {
+            let widths = equal_widths(available, count);
+            let gutters = tokens::TAB_SEPARATOR_WIDTH * (count - 1) as f32;
+            let total: f32 = widths.iter().sum::<f32>() + gutters;
+            assert!(
+                (total - available).abs() < EPS,
+                "{count} onglets sur {available} px : la barre fait {total}",
+            );
+        }
+    }
+
+    /// Deux onglets voisins ne peuvent pas différer de plus d'un pixel : c'est la contrepartie de
+    /// l'arrondi cumulé, et ce qui rend la barre régulière à l'œil.
+    #[test]
+    fn deux_onglets_ne_different_au_plus_que_d_un_pixel() {
+        for (available, count) in [(520.0, 3), (333.0, 3), (777.0, 6), (101.0, 4)] {
+            let widths = equal_widths(available, count);
+            let min = widths.iter().cloned().fold(f32::INFINITY, f32::min);
+            let max = widths.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                max - min <= 1.0 + EPS,
+                "{count} onglets sur {available} px : de {min} à {max}",
+            );
+        }
+    }
+
+    /// Une barre plus étroite que ses gouttières ne produit aucune largeur négative — un rectangle
+    /// inversé se peindrait n'importe où.
+    #[test]
+    fn une_barre_trop_etroite_ne_produit_pas_de_largeur_negative() {
+        for width in [0.0, 1.0, 3.0] {
+            for widths in [equal_widths(width, 3), equal_widths(width, 8)] {
+                assert!(
+                    widths.iter().all(|w| *w >= 0.0),
+                    "largeur négative sur {width} px : {widths:?}",
+                );
+            }
+        }
+    }
+
+    /// Aucune entrée : aucune largeur, et surtout pas une division par zéro.
+    #[test]
+    fn une_barre_sans_onglet_ne_rend_aucune_largeur() {
+        assert!(equal_widths(520.0, 0).is_empty());
     }
 }

@@ -104,6 +104,27 @@ pub const INPUT_FONT_SIZE_RATIO: f32 = 17.0 / 25.0;
 /// 6px sur 25 de hauteur.
 pub const INPUT_PADDING_X_RATIO: f32 = 6.0 / 25.0;
 
+/// Côté de l'encre d'une icône d'ornement posée DANS un champ, en fraction de la hauteur du champ.
+///
+/// **Mesuré sur `empty-input-search.png`** (341 × 32, boîte du champ y 2..29, soit 28 px de haut) :
+/// la loupe y occupe x 9..21 / y 10..22, soit 13 × 13 px. 13/28 ≈ 0,464.
+///
+/// Un ratio et non une valeur absolue, pour la même raison que [`INPUT_FONT_SIZE_RATIO`] : cette
+/// capture est à une échelle d'interface un peu plus grande que les 25 px de `InputSize::Standard`.
+pub const INPUT_LEADING_ICON_RATIO: f32 = 13.0 / 28.0;
+
+/// Retrait entre le bord extérieur du champ et l'icône d'ornement, en fraction de sa hauteur —
+/// 7 px sur les 28 de `empty-input-search.png`.
+pub const INPUT_LEADING_ICON_INSET_RATIO: f32 = 7.0 / 28.0;
+
+/// Écart entre l'icône d'ornement et le premier glyphe du texte, en fraction de la hauteur du
+/// champ — la loupe finit à x=21, le texte commence à x=30, soit 8 px sur 28.
+///
+/// **C'est cette gouttière qui fait que le texte ne passe pas sous l'icône** : la version « six
+/// espaces dans le texte indicatif » qui a précédé ce jeton ne décalait que le texte indicatif, et
+/// laissait une valeur SAISIE démarrer sous la loupe.
+pub const INPUT_LEADING_ICON_GAP_RATIO: f32 = 8.0 / 28.0;
+
 /// Largeur minimale d'un bouton, en fraction de sa hauteur — garde-fou de proportion pour un
 /// libellé très court (« OK »), pour qu'il ne devienne pas un carré. Réglage d'ergonomie, pas une
 /// mesure.
@@ -379,3 +400,209 @@ pub const ICON_TINT: Color32 = Color32::from_rgb(0xC5, 0xCB, 0xCC);
 
 /// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
 pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
+/// Assombrissement d'un bouton icône désactivé **en contexte premier plan**, où le socle grisé du
+/// jeu ne convient pas (voir `IconContext::disabled`) — un multiplicateur d'alpha appliqué au socle
+/// de repos, ~43 % d'opacité.
+///
+/// Valeur reprise telle quelle du prédécesseur maison de ce composant, qui la portait depuis le
+/// 2026-09-06 : assez marquée pour lire « désactivé » sur le fond translucide commun d'une barre de
+/// premier plan, sans devenir illisible. Elle n'a jamais été reprochée ; la migration vers le
+/// design system n'était pas le moment de la rejuger.
+pub const DISABLED_DIM: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 110);
+
+/// Teinte d'une icône désactivée en contexte premier plan — [`ICON_TINT`] à l'opacité de
+/// [`DISABLED_DIM`], pour que l'icône s'efface exactement autant que son socle.
+pub const ICON_TINT_DISABLED: Color32 =
+    Color32::from_rgba_unmultiplied_const(0xC5, 0xCB, 0xCC, 110);
+
+/// Plus grande dimension d'encre d'une icône posée sur un socle de [`ICON_BUTTON_SIZE`] — **18px,
+/// mesuré sur `menu-button-icon-first-plan.png`** (2026-09-10), pas estimé.
+///
+/// Le jeu cale les icônes de cette famille sur une grille commune : bbox opaque de 16 à 20px sur
+/// les huit icônes de cette barre, **médiane 18**, toutes centrées au pixel près sur l'axe du
+/// socle (seuil de luminance 140, résultat invariant de 120 à 180). La capture est bien à l'échelle
+/// 1 : `button-icon-first-plan.png` s'y recale à 36 × 36 avec un écart moyen de 2,3/255 sur les
+/// pixels de socle, contre 4,5 et plus dès 35 ou 37.
+///
+/// Sans cet étalon, une icône serait peinte à sa taille de fichier — 13, 14 ou 16px selon le glyphe
+/// détouré, donc trois hauteurs d'encre différentes dans une même barre, toutes en dessous du jeu.
+/// `ui_icons` normalisait déjà à 16, et à 18 pour le seul rouage après un retour utilisateur
+/// « encore trop petite » (2026-09-06) : la mesure dit que ce 18-là valait pour les quatre. Il ne
+/// reste rien de cette machinerie depuis la migration du 2026-09-10 — le recadrage est fait en
+/// amont par le skill `design-asset`, l'étalon est ici.
+///
+/// Appliqué par le manifeste (`DsTexture::icon_content_size`), jamais par l'appelant : c'est une
+/// propriété de l'asset.
+pub const ICON_BUTTON_CONTENT: f32 = 18.0;
+
+// ---------------------------------------------------------------------------------------------
+// Fenêtre — `design::window`, `design::panel`, `design::heading`
+//
+// Toutes ces valeurs viennent du relevé de la fenêtre Options du jeu
+// (`docs/design-system/releve-modale-options.json`, six captures d'`interface-options-*.png` au
+// chrome identique), affiné par `dsimg.py analyze` puis validé avec l'utilisateur sur une
+// simulation HTML avant portage. Elles vivaient dans `panels::options_modal` jusqu'au 2026-09-10
+// (lot 1 de `docs/plan-composants-ui.md`) — leur provenance est reprise telle quelle, c'est elle
+// qui interdit de les « ajuster à l'œil ».
+// ---------------------------------------------------------------------------------------------
+
+/// Rayon d'arrondi de la fenêtre entière — mesuré au pixel sur `modal-header.png`.
+///
+/// Ne s'applique en pratique qu'aux angles HAUTS : les angles bas sont portés par l'alpha de
+/// `modal-body.png`, un `Mesh` egui ne sachant de toute façon pas découper un coin.
+pub const WINDOW_RADIUS: u8 = 12;
+
+/// Hauteur de la bannière de titre — la hauteur native de `modal-header.png` (720 × 56).
+pub const WINDOW_BANNER_HEIGHT: f32 = 56.0;
+
+/// Corps du titre de bannière, en serif grasse ([`text::title_font`](super::text::title_font)).
+pub const WINDOW_TITLE_FONT_SIZE: f32 = 21.0;
+
+/// Couleur du titre de bannière — blanc pur, contre le gris des titres de section.
+pub const WINDOW_TITLE_TEXT: Color32 = Color32::WHITE;
+
+/// Marge gauche et droite du contenu, hors bannière et pied de page.
+pub const WINDOW_PAD_SIDE: f32 = 20.0;
+
+/// Écart bannière → premier élément de contenu.
+pub const WINDOW_PAD_TOP: f32 = 14.0;
+
+/// Marge résiduelle sous le pied de page — la bande sombre mesurée sous « Annuler »/« Valider ».
+pub const WINDOW_PAD_BOTTOM: f32 = 12.0;
+
+/// Écart barre d'onglets → panneau de contenu.
+pub const WINDOW_TAB_GAP: f32 = 14.0;
+
+/// Écart panneau de contenu → pied de page.
+pub const WINDOW_FOOTER_GAP: f32 = 14.0;
+
+/// Gouttière entre les deux boutons du pied de page — **11 px, la valeur du relevé telle quelle**.
+///
+/// Elle a valu 12 : une mise à l'échelle des 15 px lus à l'œil sur `interface-options-jeu.png`.
+/// Le relevé, lui, les cote directement.
+pub const WINDOW_FOOTER_GUTTER: f32 = 11.0;
+
+/// Hauteur des boutons du pied de page — **la hauteur native de leur texture** (338 × 36).
+///
+/// Jamais déduite de la largeur : une première version écrivait `largeur * (36 / 338)` et
+/// affichait des boutons de 27 px là où le jeu en met 36, le corps du libellé suivant la hauteur.
+pub const WINDOW_FOOTER_BUTTON_HEIGHT: f32 = 36.0;
+
+/// Translucidité du corps de la fenêtre — 235/255, la valeur qu'avait l'aplat qui le peignait
+/// avant que la texture du jeu ne le remplace. La couleur, elle, vient de la texture.
+pub const WINDOW_BODY_TINT: Color32 = Color32::from_rgba_premultiplied(235, 235, 235, 235);
+
+/// Translucidité du panneau de contenu — **230/255**.
+///
+/// Sa couleur, son liseré et l'arrondi de ses angles ne se règlent plus ici : ils sont dans
+/// `DsTexture::ModalSection`, découpée des captures du jeu (§9 quater du design-system). Un blanc
+/// à alpha réduit atténue sans changer la teinte — le mécanisme de teinte de
+/// `design::nine_slice::paint`, déjà celui de l'état désactivé des boutons.
+///
+/// L'alpha 230 est une **déviation assumée** : la fenêtre entière est légèrement translucide, et
+/// un panneau opaque à l'intérieur d'elle se verrait comme une tache. En pratique l'écart ne se
+/// voit pas — les deux alphas se multiplient, et `modale_options_sur_damier` mesure 0,7 de
+/// contraste résiduel sous le panneau contre 9,7 dans les marges.
+///
+/// **Attention au constructeur** : `from_rgba_premultiplied` attend des composantes déjà
+/// multipliées par l'alpha. L'ancien `PANEL_FILL` lui passait les valeurs relevées telles quelles,
+/// et peignait donc le panneau 2,3 niveaux trop clair — 24,5 au rendu contre 22,1 attendus. Une
+/// teinte blanche n'a pas ce piège : ses trois composantes valent son alpha.
+pub const PANEL_TINT: Color32 = Color32::from_rgba_premultiplied(230, 230, 230, 230);
+
+/// Axe des TITRES de section, depuis le bord du panneau.
+pub const PANEL_PAD_TITLE_X: f32 = 12.0;
+
+/// Axe des CONTRÔLES, depuis le bord du panneau.
+///
+/// L'écart avec l'axe des titres — 7 px — est le seul signal de niveau du jeu : une section n'a ni
+/// fond, ni bordure, ni filet, seul son titre est en retrait.
+pub const PANEL_PAD_CONTROL_X: f32 = 19.0;
+
+/// Rembourrage haut du panneau — **19, la valeur du relevé telle quelle**.
+///
+/// Elle a longtemps valu 13, corrigée à la main des 6 px que la police réserve au-dessus de
+/// l'encre d'un titre. Cette correction n'a plus lieu d'être depuis que le titre réserve sa
+/// hauteur d'ENCRE et non celle de sa galley — voir [`HEADING_INK_HEIGHT`].
+pub const PANEL_PAD_TOP: f32 = 19.0;
+
+/// Corps d'un titre de section — **le même que le titre de fenêtre**, même serif.
+///
+/// La hiérarchie entre les deux niveaux passe par la COULEUR, pas par le corps. Une première
+/// valeur (18) venait d'un rapport calculé de travers : 17 px d'encre mesurés sur un mot sans
+/// jambage comparés à 21 px sur un mot qui en a un. C'est la ligne de base qui est stable, pas la
+/// boîte — comparer l'encre de deux mots différents pour en déduire un rapport donne un faux.
+pub const HEADING_FONT_SIZE: f32 = WINDOW_TITLE_FONT_SIZE;
+
+/// Couleur d'un titre de section — un gris franc, **pas le blanc du titre de fenêtre**.
+pub const HEADING_TEXT: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
+
+/// Hauteur d'ENCRE réservée par un titre de section, et non la hauteur de sa galley.
+///
+/// Une galley est plus haute que son encre des deux côtés : la police y réserve la place des
+/// accents de capitale au-dessus et des jambages en dessous, que la plupart des titres n'utilisent
+/// ni l'un ni l'autre. Réserver la galley entière ajoutait ~14 px invisibles sous le titre, sur
+/// sept relevés.
+pub const HEADING_INK_HEIGHT: f32 = 16.0;
+
+/// Décalage du haut de la galley au haut de l'encre — voir [`HEADING_INK_HEIGHT`].
+pub const HEADING_INK_TOP: f32 = 6.0;
+
+/// Écart entre un titre de section et la première ligne qui le suit.
+pub const HEADING_TO_ROW: f32 = 7.0;
+
+// ---------------------------------------------------------------------------------------------
+// Pas numérique — `design::stepper`
+//
+// Mesuré le 2026-09-10 sur les DEUX captures du jeu, `input-number.png` (104 × 28) et
+// `large-input-number.png` (192 × 34), segmentées par la couleur de bordure du champ. Les deux
+// donnent les mêmes rapports, ce qui est la seule raison de les écrire en rapports plutôt qu'en
+// pixels : le pas du jeu existe à deux échelles, et il se met à l'échelle sans se déformer.
+// ---------------------------------------------------------------------------------------------
+
+/// Côté natif du socle d'un bouton de pas — la taille utile de `button-stepper.png`, détourée.
+///
+/// L'asset source (`button-moins.png`) fait 34 × 34 avec un pixel transparent tout autour ; le
+/// socle lui-même fait 32 × 32. C'est cette valeur-là qui est l'étalon, pas celle du fichier.
+///
+/// **Écart assumé avec `design-tokens.json`**, qui cote `stepper_button_square` à 30 : cette
+/// valeur-là a été lue à l'œil sur une capture d'écran en 2026-09-05, celle-ci est mesurée sur
+/// l'asset détouré. La mesure sur l'asset l'emporte.
+pub const STEPPER_SIZE: f32 = 32.0;
+
+/// Gouttière entre un bouton de pas et le champ, **en rapport de la taille du socle**.
+///
+/// Mesuré sur les deux captures : 7 px pour un socle de 26 (`input-number.png`, 26 + 7 + 38 + 7 +
+/// 26 = 104) et 9 px pour un socle de 34 (`large-input-number.png`, 34 + 9 + 106 + 9 + 34 = 192).
+/// Soit 0,269 et 0,265 — la moyenne, arrondie au millième.
+pub const STEPPER_GUTTER_RATIO: f32 = 0.267;
+
+/// Plus grande dimension d'encre d'un glyphe de pas, **en rapport de la taille du socle**.
+///
+/// Mesuré : l'encre du « + » incrusté fait 12 × 12 et celle du « − » 12 × 2, dans un socle de 32.
+///
+/// **Ce n'est pas la grille des boutons icône** ([`ICON_BUTTON_CONTENT`], 18 pour un socle de 36,
+/// soit 0,5). Le jeu a deux grilles distinctes pour ses deux familles de socles, et un même glyphe
+/// — le « + » — s'y peint à 18 dans une barre de premier plan et à 12 dans un pas. La taille
+/// d'encre est donc une propriété du **couple (asset, contexte)**, pas de l'asset seul : c'est
+/// pourquoi `IconContext` la porte pour ce contexte-là, plutôt que le manifeste.
+pub const STEPPER_ICON_RATIO: f32 = 12.0 / 32.0;
+
+/// Teinte des glyphes d'un pas — **l'or du jeu, au repos comme au survol**.
+///
+/// Mesuré au pixel sur `large-input-number.png` : le « − » y est uniformément `#f4d89f`. C'est un
+/// troisième comportement, distinct des deux autres contextes de bouton icône, qui peignent leur
+/// glyphe en gris clair ([`ICON_TINT`]) et ne passent à l'or qu'au survol ([`ICON_TINT_HOVER`]).
+///
+/// Même valeur qu'`ICON_TINT_HOVER` à ce jour, et ce n'est pas un oubli : les deux disent des
+/// choses différentes — l'un est un état, l'autre une couleur de repos. Le jour où une capture
+/// survolée d'un pas existera, seul celui-ci bougera.
+pub const STEPPER_ICON_TINT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
+/// Hauteur du champ central d'un pas, **en rapport de la hauteur du pas**.
+///
+/// Mesuré sur `large-input-number.png` : la bordure du champ court de y=4 à y=29, soit 26 px dans
+/// un pas de 34. Le champ ne garde donc PAS sa hauteur native de 25 px comme ailleurs — il suit son
+/// pas, et un pas rendu plus grand a un champ plus grand.
+pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 26.0 / 34.0;

@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2592.0))
+        .with_size(Vec2::new(760.0, 3660.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -458,6 +458,75 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
+        "Champ à ornement — la loupe DANS le champ",
+        "Le jeu pose toujours sa loupe à l'intérieur du champ, jamais sur un socle à côté. Le composant réserve lui-même la gouttière : la deuxième ligne, la seule qui porte une valeur, est celle qui le vérifie — le texte y démarre après l'icône, pas dessous.",
+    );
+    let mut recherche_vide = String::new();
+    let mut recherche_pleine = String::from("pierre");
+    ui.add(
+        design::input(&mut recherche_vide)
+            .leading_icon(DsTexture::IconSearch)
+            .placeholder("Rechercher")
+            .width(420.0)
+            .log_name("galerie.recherche-vide"),
+    );
+    ui.add(
+        design::input(&mut recherche_pleine)
+            .leading_icon(DsTexture::IconSearch)
+            .width(420.0)
+            .log_name("galerie.recherche-pleine"),
+    );
+    ui.add(
+        design::input(&mut recherche_pleine)
+            .leading_icon(DsTexture::IconSearch)
+            .width(200.0)
+            .enabled(false)
+            .preview_state(InputState::Disabled)
+            .log_name("galerie.recherche-off"),
+    );
+
+    heading(
+        ui,
+        "Glyphes du manifeste — teintés, jamais recolorés en amont",
+        "Tous les glyphes déclarés, à leur taille de fichier. Ils sont blancs dans leurs octets et prennent leur couleur par teinte : c'est ce qui permet à une même icône de servir au repos, au survol et désactivée sans second fichier. Ceux qui vivent sur un socle sont normalisés à 18 px par le manifeste (ligne du dessus) ; ceux qui vivent dans un champ ou à côté d'un libellé gardent leur taille propre.",
+    );
+    ui.horizontal(|ui| {
+        for icon in [
+            DsTexture::IconOption,
+            DsTexture::IconExternalLink,
+            DsTexture::IconPlus,
+            DsTexture::IconMinus,
+            DsTexture::IconClose,
+            DsTexture::IconDelete,
+            DsTexture::IconHelp,
+            DsTexture::IconUndo,
+        ] {
+            ui.add(design::icon_button(icon).context(IconContext::Panel));
+        }
+    });
+    // Les glyphes SANS socle — leur taille est celle que leur donne le composant qui les porte,
+    // d'où l'absence de `icon_content_size` (voir sa doc dans `design::assets`).
+    let ds = design::DesignSystem::get(ui.ctx());
+    let (row, _) = ui.allocate_exact_size(Vec2::new(400.0, 28.0), egui::Sense::hover());
+    let mut x = row.left() + 8.0;
+    for (icon, tint) in [
+        (DsTexture::IconSearch, design::tokens::INPUT_PLACEHOLDER),
+        (DsTexture::IconTick, Color32::from_rgb(0x7A, 0xC7, 0x4F)),
+        (DsTexture::IconChevronDown, design::tokens::SELECT_TEXT),
+        (DsTexture::IconInfo, design::tokens::INFO_DOT),
+    ] {
+        let native = design::DesignSystem::get(ui.ctx()).native_size(icon);
+        ds.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(egui::pos2(x + native.x / 2.0, row.center().y), native),
+            icon,
+            tint,
+        );
+        x += native.x + 22.0;
+    }
+
+    heading(
+        ui,
         "Le cas de référence, aux cotes exactes du jeu",
         "Le message et la largeur du bloc d'information de l'onglet Interface (590 px, x 38..628) : à comparer directement avec interface-options-interface.png, y 436..477.",
     );
@@ -469,4 +538,100 @@ fn gallery(ui: &mut egui::Ui) {
         .width(590.0)
         .log_name("galerie.info-reference"),
     );
+
+    heading(
+        ui,
+        "Pas numérique — socle 32 px, gouttière et encre au rapport",
+        "Deux boutons icône au contexte Stepper et un champ entre eux. Aux trois tailles : la gouttière et le glyphe suivent le socle. Le dernier est aux cotes exactes de large-input-number.png (192 x 34) — à comparer directement avec la capture du jeu.",
+    );
+    for (cote, champ, valeur, borne) in [
+        (26.0_f32, 38.0_f32, 1_i64, 1_i64..=99),
+        (32.0, 70.0, 12, 1..=99),
+        (34.0, 106.0, 7, 1..=99),
+    ] {
+        let mut v = valeur;
+        ui.add(
+            design::stepper(&mut v)
+                .size(cote)
+                .field_width(champ)
+                .range(borne)
+                .log_name("galerie.pas"),
+        );
+    }
+    // Les deux bornes : à la borne basse le « − » est désactivé, à la haute le « + ».
+    ui.horizontal(|ui| {
+        let mut bas = 1_i64;
+        ui.add(
+            design::stepper(&mut bas)
+                .field_width(70.0)
+                .range(1..=99)
+                .log_name("galerie.pas-borne-basse"),
+        );
+        ui.add_space(18.0);
+        let mut haut = 99_i64;
+        ui.add(
+            design::stepper(&mut haut)
+                .field_width(70.0)
+                .range(1..=99)
+                .log_name("galerie.pas-borne-haute"),
+        );
+        ui.add_space(18.0);
+        let mut off = 42_i64;
+        ui.add(
+            design::stepper(&mut off)
+                .field_width(70.0)
+                .enabled(false)
+                .log_name("galerie.pas-desactive"),
+        );
+    });
+
+    heading(
+        ui,
+        "Chrome de fenêtre — bannière, onglets, panneau, pied de page",
+        "Les trois conteneurs à l'échelle réduite : design::window pose le décor et rend ses zones, design::panel écrête son contenu, design::heading titre une section. Le dernier item de la liste est volontairement hors du panneau — l'écrêtage doit le couper net.",
+    );
+    {
+        // Rendu à 640 × 300 plutôt qu'aux 720 × 561 de la vraie fenêtre : ce qui est vérifié ici
+        // est la COMPOSITION des trois conteneurs, pas la cote de la fenêtre Options — celle-là a
+        // ses propres snapshots (`options_modale_sur_damier.png`). Une fenêtre à ces dimensions
+        // montre au passage que le décor tient à n'importe quelle taille, ce qu'un 9-slice promet.
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(640.0, 300.0), egui::Sense::hover());
+        let mut tab = GalleryTab::Reglages;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            let chrome = design::window("Fenêtre")
+                .footer("Annuler", "Valider")
+                .log_name("galerie.fenetre")
+                .show(ui);
+            chrome.tabs(
+                ui,
+                design::tabs(&mut tab)
+                    .entry(GalleryTab::Reglages, "Réglages")
+                    .entry(GalleryTab::Avance, "Avancé")
+                    .entry(GalleryTab::Indisponible, "Indisponible")
+                    .enabled(false)
+                    .log_name("galerie.fenetre-onglets"),
+            );
+            design::panel().show(ui, chrome.content, |ui, _panel| {
+                ui.add(design::heading("Section"));
+                for n in 1..=6 {
+                    ui.label(
+                        egui::RichText::new(format!("Ligne de contenu n° {n}"))
+                            .color(design::tokens::INFO_TEXT)
+                            .size(14.0),
+                    );
+                    ui.add_space(6.0);
+                }
+            });
+        });
+    }
+}
+
+/// Onglets de la fenêtre de démonstration ci-dessus — un type à part, parce qu'une barre d'onglets
+/// est générique sur ce que l'appelant lui donne à sélectionner et qu'une galerie ne doit pas
+/// emprunter celui d'un panneau réel pour l'illustrer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GalleryTab {
+    Reglages,
+    Avance,
+    Indisponible,
 }

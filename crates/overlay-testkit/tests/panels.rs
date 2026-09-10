@@ -36,9 +36,7 @@ use overlay_ingest::Tailer;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
-use overlay_ui::panels::options_modal::{
-    OptionsModalAction, OptionsModalAssets, OptionsModalState, OptionsTab,
-};
+use overlay_ui::panels::options_modal::{OptionsModalAction, OptionsModalState, OptionsTab};
 use overlay_ui::panels::watchlist::{
     build_confetti, WatchlistToast, WatchlistToastReason, TOAST_DURATION,
 };
@@ -164,7 +162,6 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
-                options_assets: None,
             },
         );
     });
@@ -221,7 +218,6 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 interactive: true,
                 now,
                 options: None,
-                options_assets: None,
             },
         );
     });
@@ -281,7 +277,6 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
-                options_assets: None,
             },
         );
     });
@@ -426,7 +421,6 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
-                options_assets: None,
             },
         );
     });
@@ -485,7 +479,6 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: None,
-                options_assets: None,
             },
         );
     });
@@ -584,7 +577,6 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
                     interactive: true,
                     now,
                     options: None,
-                    options_assets: None,
                 },
             );
         });
@@ -610,8 +602,9 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
 
 /// Retour utilisateur explicite 2026-09-08 : « je veux que tous les boutons se comportent EXACT de
 /// la même façon que ajouter et supprimer [...] quand on clique, il repasse en mode normal et quand
-/// on relâche, ils redeviennent en mode over ». Avant le correctif de `icon_button::
-/// paint_icon_button` (voir sa doc), ce n'était vrai que pour "+"/"−" (`Sense::hover()`) : un clic
+/// on relâche, ils redeviennent en mode over ». Avant le correctif du 2026-09-08 (alors dans
+/// `panels::icon_button::paint_icon_button`, depuis remplacé par `design::icon_button`), ce
+/// n'était vrai que pour "+"/"−" (`Sense::hover()`) : un clic
 /// maintenu sur "Détails"/"Options" (`Sense::click()`) gardait l'apparence "survolée" tout du long
 /// (`response.hovered()` reste `true` pendant un clic pour un widget `Sense::click()`, contrairement
 /// à `Sense::hover()` — comportement NATIF d'egui, voir la doc du correctif), sans jamais repasser
@@ -669,7 +662,6 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     interactive: true,
                     now,
                     options: None,
-                    options_assets: None,
                 },
             );
         });
@@ -754,7 +746,6 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 interactive: true,
                 now,
                 options: None,
-                options_assets: None,
             },
         );
     });
@@ -787,7 +778,6 @@ fn panneau_options_ne_panique_pas() {
     // `Textures`, jamais utilisé par les autres tests) : `get_or_load`/cet emprunt doivent coexister
     // dans le même appel à `paint_content` sans se marcher dessus (deux emprunts `&mut` distincts,
     // sur deux variables distinctes).
-    let mut options_assets: Option<OptionsModalAssets> = None;
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
@@ -799,7 +789,6 @@ fn panneau_options_ne_panique_pas() {
         // production, le curseur clignote normalement.
         ui.style_mut().visuals.text_cursor.blink = false;
         let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
-        let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
         paint_content(
             ui,
             RenderContent {
@@ -820,7 +809,6 @@ fn panneau_options_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: Some(&mut options_state),
-                options_assets: Some(assets),
             },
         );
     });
@@ -853,7 +841,6 @@ fn modale_options_echap_annule_et_entree_valide() {
         error: None,
         tab: OptionsTab::default(),
     };
-    let mut options_assets: Option<OptionsModalAssets> = None;
     // Les actions sont ACCUMULÉES, pas gardées une par une : `Harness::run()` rejoue plusieurs
     // frames jusqu'à stabilisation, et seule la PREMIÈRE voit l'événement clavier — retenir la
     // dernière valeur renvoyée ne verrait donc jamais que le `None` des frames suivantes.
@@ -863,9 +850,7 @@ fn modale_options_echap_annule_et_entree_valide() {
     let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
 
     let mut harness = Harness::new_ui(|ui| {
-        let ctx = ui.ctx().clone();
-        let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
-        let action = panels::options_modal::show(ui, &mut options_state, assets);
+        let action = panels::options_modal::show(ui, &mut options_state);
         if action != OptionsModalAction::None {
             actions.borrow_mut().push(action);
         }
@@ -906,9 +891,17 @@ fn modale_options_echap_annule_et_entree_valide() {
 ///
 /// - **les quatre coins arrondis** — le damier apparaît à pleine intensité dans chaque quart de
 ///   cercle : mesuré, le pixel (8, 8) porte la couleur exacte du damier, celui de (14, 14) celle de
-///   la bannière ;
-/// - **la translucidité du fond de modale** (`MODAL_BG`, alpha 235) : dans les marges latérales, le
-///   contraste du damier retombe de 128 à **9,7**, soit les 8 % que cet alpha laisse passer.
+///   la bannière. Les deux coins BAS ne viennent plus d'un `corner_radius` mais de l'alpha de
+///   `modal-body.png`, qui porte le même quart de cercle de rayon 12 ;
+/// - **la translucidité du fond de modale** (`MODAL_BODY_TINT`, alpha 235) : dans les marges
+///   latérales, le contraste du damier retombe de 128 à **9,7**, soit les 8 % que cet alpha laisse
+///   passer. Cette valeur n'a pas bougé quand le fond est passé de l'aplat `MODAL_BG` à la texture
+///   `DsTexture::ModalBody` (2026-09-10) : la teinte de peinture reprend exactement l'alpha que
+///   portait la couleur.
+///
+/// Il montre aussi le **grain et les hachures d'angle** que la texture de corps apporte depuis le
+/// 2026-09-10 : dans les marges, l'écart au fond nu passe de 0 à environ 6 niveaux là où un
+/// croisillon court.
 ///
 /// Et il montre une chose qu'aucune mesure d'alpha isolée ne dit : **sous le panneau de contenu, il
 /// ne reste rien du damier** (contraste 0,7). Le panneau est peint PAR-DESSUS le fond de modale, les
@@ -942,7 +935,6 @@ fn modale_options_sur_damier_ne_panique_pas() {
         error: None,
         tab: OptionsTab::default(),
     };
-    let mut options_assets: Option<OptionsModalAssets> = None;
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
@@ -977,7 +969,6 @@ fn modale_options_sur_damier_ne_panique_pas() {
         }
 
         let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
-        let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
         paint_content(
             ui,
             RenderContent {
@@ -998,7 +989,6 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 interactive: true,
                 now,
                 options: Some(&mut options_state),
-                options_assets: Some(assets),
             },
         );
     });

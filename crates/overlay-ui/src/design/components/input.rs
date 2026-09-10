@@ -103,10 +103,12 @@ pub struct Input<'a> {
     size: InputSize,
     width: Option<f32>,
     enabled: bool,
+    read_only: bool,
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<InputState>,
     request_focus: bool,
+    leading_icon: Option<crate::design::DsTexture>,
 }
 
 impl<'a> Input<'a> {
@@ -117,11 +119,32 @@ impl<'a> Input<'a> {
             size: InputSize::Standard,
             width: None,
             enabled: true,
+            read_only: false,
             tooltip: None,
             log_name: None,
             forced_state: None,
             request_focus: false,
+            leading_icon: None,
         }
+    }
+
+    /// Pose une icône **à l'intérieur** du champ, collée au bord gauche — la loupe d'une barre de
+    /// recherche, telle que le jeu la place partout (`interface-hdv-achat.png` x 27..39,
+    /// `interface-personnage-equiement.png` x 768..780, `interface-options-commandes.png`
+    /// x 36..48). Jamais un bouton icône posé à côté du champ : le jeu ne fait pas ça.
+    ///
+    /// **Le composant, et lui seul, réserve la gouttière** (`tokens::INPUT_LEADING_ICON_*`) en
+    /// avançant le bord gauche du texte — donc pour le texte indicatif ET pour la valeur saisie, et
+    /// l'icône est peinte dans le `clip_rect` du champ. C'est la différence avec le pis-aller qui a
+    /// précédé ce paramètre : des espaces de tête dans le texte indicatif, qui ne décalaient rien
+    /// d'autre et laissaient une valeur saisie démarrer sous l'icône.
+    ///
+    /// L'icône prend `INPUT_PLACEHOLDER` au repos et `TEXT_DISABLED` désactivée. Elle ne change pas
+    /// avec la présence d'une valeur : mesuré sur `empty-input-search.png` et `input-search.png`,
+    /// dont le profil de la colonne de la loupe est rigoureusement identique.
+    pub fn leading_icon(mut self, icon: crate::design::DsTexture) -> Self {
+        self.leading_icon = Some(icon);
+        self
     }
 
     /// Texte affiché tant que la valeur est vide.
@@ -140,6 +163,17 @@ impl<'a> Input<'a> {
     /// contenu au moment où on le place, sa largeur ne peut venir que de la mise en page.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Champ **non éditable, mais d'apparence normale** — à ne pas confondre avec
+    /// `enabled(false)`, qui grise la valeur pour dire « ce réglage ne s'applique pas ».
+    ///
+    /// Un champ en lecture seule affiche une valeur qui compte, et que l'utilisateur change par un
+    /// autre moyen : c'est le cas du champ central d'un [`design::stepper`](super::stepper), dont
+    /// la valeur se règle aux deux boutons. Le jeu l'écrit dans son or habituel, pas en gris.
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
         self
     }
 
@@ -223,22 +257,59 @@ impl Widget for Input<'_> {
             );
         }
 
+        // Ornement de gauche — peint AVANT le texte, et surtout : la place qu'il occupe est
+        // retirée de celle du texte juste après. Voir `Input::leading_icon`.
+        let leading = self.leading_icon.map(|icon| {
+            let side = height * tokens::INPUT_LEADING_ICON_RATIO;
+            let inset = height * tokens::INPUT_LEADING_ICON_INSET_RATIO;
+            let gap = height * tokens::INPUT_LEADING_ICON_GAP_RATIO;
+            // `glyph_fit` et non `Vec2::splat` : le paramètre accepte n'importe quel
+            // `DsTexture`, et un carré déformerait tout glyphe qui n'en est pas un. La règle est
+            // celle du design system, partagée avec le bouton icône — il ne doit y en avoir
+            // qu'une.
+            let native = crate::design::DesignSystem::get(ui.ctx()).native_size(icon);
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.left() + inset + side / 2.0, rect.center().y),
+                super::icon_button::glyph_fit(native, side),
+            );
+            if ui.is_rect_visible(rect) {
+                let tint = match state {
+                    InputState::Disabled => tokens::TEXT_DISABLED,
+                    _ => tokens::INPUT_PLACEHOLDER,
+                };
+                crate::design::DesignSystem::get(ui.ctx()).paint(
+                    &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
+                    icon_rect,
+                    icon,
+                    tint,
+                );
+            }
+            // Ce que le texte perd à gauche : le retrait, l'icône, la gouttière — moins le
+            // rembourrage que le champ lui donnait déjà.
+            (inset + side + gap - pad_x).max(0.0)
+        });
+        let leading_room = leading.unwrap_or(0.0);
+
         // Une seule ligne de texte, centrée verticalement dans le champ. Le rectangle est calculé
         // ici plutôt que laissé à egui : `TextEdit` prend la hauteur d'une ligne et se pose en haut
         // de l'espace qu'on lui donne, ce qui collerait le texte au bord supérieur.
         let row_height = ui.fonts_mut(|f| f.row_height(&font));
         let text_rect = egui::Rect::from_center_size(
-            rect.center(),
-            Vec2::new((width - 2.0 * pad_x).max(0.0), row_height),
+            egui::pos2(rect.center().x + leading_room / 2.0, rect.center().y),
+            Vec2::new((width - 2.0 * pad_x - leading_room).max(0.0), row_height),
         );
 
         let empty = self.text.is_empty();
         let enabled = self.enabled;
+        // `interactive(false)` et non `add_enabled(false)` : le premier retire la saisie et le
+        // focus en laissant la valeur peinte de sa couleur normale, le second la grise. Un champ en
+        // lecture seule n'est pas un champ désactivé — voir `Input::read_only`.
         let edit = egui::TextEdit::singleline(self.text)
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO)
             .font(font.clone())
             .text_color(value_color)
+            .interactive(!self.read_only)
             .desired_width(text_rect.width());
         let edit_response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
@@ -306,7 +377,7 @@ impl Widget for Input<'_> {
         }
 
         let response = frame_response.union(edit_response);
-        let response = if enabled {
+        let response = if enabled && !self.read_only {
             response.on_hover_cursor(egui::CursorIcon::Text)
         } else {
             response
@@ -315,5 +386,61 @@ impl Widget for Input<'_> {
             Some(tooltip) => response.on_hover_text(tooltip),
             None => response,
         }
+    }
+}
+
+#[cfg(test)]
+mod geometrie_tests {
+    use super::*;
+
+    /// 25 px est **la hauteur relevée de tous les champs du jeu**, pas un palier choisi. Le corps
+    /// de police et le retrait du texte en dérivent (`tokens::INPUT_FONT_SIZE_RATIO`,
+    /// `INPUT_PADDING_X_RATIO`) : la changer désaccorde le champ entier.
+    #[test]
+    fn le_gabarit_standard_est_la_hauteur_relevee() {
+        assert_eq!(InputSize::Standard.height(), 25.0);
+        assert_eq!(InputSize::Height(36.0).height(), 36.0);
+    }
+
+    /// La largeur n'est connue qu'au rendu quand elle n'est pas imposée — c'est ce que dit le
+    /// `None`, et c'est ce qui permet à un appelant de mesurer un champ avant de le poser.
+    #[test]
+    fn la_largeur_desiree_n_existe_que_si_elle_est_imposee() {
+        let mut valeur = String::new();
+        assert_eq!(input(&mut valeur).desired_size(), (None, 25.0));
+
+        let mut valeur = String::new();
+        assert_eq!(
+            input(&mut valeur).width(320.0).desired_size(),
+            (Some(320.0), 25.0),
+        );
+
+        let mut valeur = String::new();
+        assert_eq!(
+            input(&mut valeur)
+                .size(InputSize::Height(36.0))
+                .desired_size(),
+            (None, 36.0),
+        );
+    }
+}
+
+#[cfg(test)]
+mod leading_icon_tests {
+    use crate::design::tokens;
+
+    /// **Les trois ratios de l'ornement somment à 1** : le texte d'un champ à ornement démarre
+    /// exactement à une hauteur de champ de son bord extérieur (`empty-input-search.png` : bord
+    /// x=2, premier glyphe x=30, champ de 28 px). Sans ce garde-fou, ajuster un ratio à l'œil
+    /// ferait cesser aux deux autres de dire ce que la capture dit.
+    #[test]
+    fn les_trois_ratios_de_l_ornement_somment_a_une_hauteur_de_champ() {
+        let somme = tokens::INPUT_LEADING_ICON_INSET_RATIO
+            + tokens::INPUT_LEADING_ICON_RATIO
+            + tokens::INPUT_LEADING_ICON_GAP_RATIO;
+        assert!(
+            (somme - 1.0).abs() < 1e-6,
+            "les ratios de l'ornement somment à {somme}, pas à 1 — voir empty-input-search.png"
+        );
     }
 }

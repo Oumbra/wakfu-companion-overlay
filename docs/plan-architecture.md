@@ -866,11 +866,33 @@ Trois décisions prises à cette occasion :
   affichait des boutons de 27px là où le jeu en met 36 — le corps du libellé suivant la hauteur, il
   y perdait 3px d'encre sur 13. Voir `panels::options_modal::FOOTER_BUTTON_HEIGHT`.
 
+**Deux décisions structurantes prises le 2026-09-10**, après un diagnostic complet de la couche :
+
+- **Le contrat de composant a deux familles.** Une *feuille* implémente `egui::Widget` ; un
+  *conteneur* — celui qui encadre du contenu fourni par l'appelant — expose un `show` générique sur
+  le retour de ce contenu, parce que `fn ui(self, ui) -> Response` n'a de place ni pour ce contenu
+  ni pour ce qu'il rend. egui a tranché de la même façon : aucun de ses conteneurs n'implémente
+  `Widget`. `design::scroll_area`, jusque-là documenté comme « seul écart au contrat », en devient
+  le premier cas nominal. Voir `.claude/skills/ui-component/references/contrat-composant.md` §1 bis.
+- **Le vocabulaire visuel des panneaux flottants est fixé.** Combat et Suivi prennent les *formes*
+  et la *typographie* du jeu, et **gardent leur accent cyan** (`#00d2ff`), promu en jeton nommé
+  `tokens::OVERLAY_ACCENT`. Motif : un overlay se lit par-dessus le jeu, sur un fond arbitraire ;
+  le cyan n'existe nulle part dans l'interface Wakfu, ce qui est exactement ce qui l'empêche de s'y
+  confondre. Conséquence pour §9.2 : **un seul jeu de composants**, dont la teinte vient d'un jeton
+  (`OVERLAY_ACCENT` pour ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre) — jamais
+  d'un paramètre de thème par composant.
+
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
+Feuille de route de la suite (couche conteneur, ménage, composants de données) :
+[`docs/plan-composants-ui.md`](plan-composants-ui.md).
 Composants livrés : le bouton texte, puis le champ de saisie (`design::input`, 2026-09-10 — hauteur
 native 25px, valeur en or `#f4d89e` et non en blanc, texte indicatif peint à la main parce qu'egui
-impose sa propre couleur à un `hint_text`). `panels::icon_button::paint_icon_button` reste hors
-contrat (quatre `TextureHandle` en paramètres) et est également à migrer.
+impose sa propre couleur à un `hint_text`). `panels::icon_button::paint_icon_button`, hors contrat
+(quatre `TextureHandle` en paramètres), **a été migré et supprimé le 2026-09-10** : les quatre
+boutons du carré de contrôle du Suivi passent par `design::icon_button`, la taille d'encre des
+glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 36, mesuré sur
+`menu-button-icon-first-plan.png`), et le module résiduel — une infobulle et un fond de barre — a
+été renommé `panels::tooltip`.
 
 ---
 
@@ -904,6 +926,23 @@ contrat (quatre `TextureHandle` en paramètres) et est également à migrer.
   version du binaire (asset versionné + signature) — c'est ce qui permet de suivre une correction de
   parsing du dépôt web sans republier l'overlay.
 - CI GitHub Actions : build Windows + Linux, tests de parité, budget mémoire, lint `clippy -D warnings`.
+- **Version de Rust épinglée** par `rust-toolchain.toml` (décision du 2026-09-10), et non plus
+  suivie sur `stable`. Motif : `cargo fmt --check` et `clippy -D warnings` sont des gates dont le
+  verdict dépend de la version de l'outil — tant que le CI suivait `stable`, la sortie d'une
+  nouvelle version de Rust suffisait à le faire rougir sur du code inchangé, sans qu'un poste de
+  dev à une autre version puisse le reproduire (c'est ce qui a tenu le CI rouge du 2026-09-01 au
+  2026-09-10, sur un seul écart de format dans `session.rs`). Monter Rust devient un changement
+  explicite, dans son propre commit. Plancher : `rust-version = 1.95` déclaré par egui 0.36.1.
+- **Garde-fou local** : `scripts/ci-local.sh` rejoue les vérifications du CI pour la plateforme
+  courante, et le hook `pre-push` de `.githooks/` (activé par `scripts/install-hooks.sh`) le lance
+  en mode `--lint` avant chaque push. Le script double volontairement le workflow — les deux listes
+  d'étapes doivent être maintenues ensemble.
+- **Dépôt privé, minutes Actions comptées** (jobs Windows facturés au double) : le workflow met en
+  cache `~/.cargo`/`target` (`Swatinem/rust-cache`) et le `vendor/wgpu-hal` patché, annule les runs
+  obsolètes d'une même branche (`concurrency`), et ignore les pushs purement documentaires
+  (`paths-ignore` : `docs/**`, `**/*.md`, `.claude/**` — jamais `assets/**`, embarqué par
+  `include_bytes!`). Symptôme d'un quota épuisé, à ne pas confondre avec une régression : tous les
+  jobs échouent en quelques secondes, sans log ni runner assigné.
 
 ---
 

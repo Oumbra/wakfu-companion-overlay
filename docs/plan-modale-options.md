@@ -74,7 +74,7 @@ et elle est explicitement « à ne faire que sur demande ».
 
 | Acquis | Où |
 | --- | --- |
-| Chrome sur les vraies textures du jeu : bannière 56 px, fond de modale `#1C2023`, panneau `#15181C` bordé `#131518` au rayon 2 | `options_modal.rs` |
+| Chrome sur les vraies textures du jeu : bannière 56 px, **corps sur `DsTexture::ModalBody`** (texture découpée des captures, translucidité 235 portée par la teinte de peinture), panneau `#15181C` bordé `#131518` au rayon 2 | `options_modal.rs` |
 | Les trois axes de contenu : titre à +12, contrôles à +19, rembourrage haut de 13 pour poser l'encre à +19 | `options_modal.rs` |
 | `design::button` — trois variantes, deux graisses de libellé, hauteur native 36, 9-slice à embouts | `design/components/button.rs` |
 | `design::input` — 25 px, bord 2 px `#595140`, rayon 4, valeur en or `#f4d89e` | `design/components/input.rs` |
@@ -466,8 +466,23 @@ deux alphas se multiplient — 8 % de 10 % — et sa propre translucidité (`SEC
 pourtant plus transparent que le fond) n'y change rien. Ce qu'on prendrait pour un panneau
 translucide est en pratique opaque.
 
+### Le fond du corps : fait, 2026-09-10
+
+Le corps était peint d'un aplat (`MODAL_BG`, `#1C2023`) sous une bannière qui, elle, venait du jeu.
+Il est maintenant peint depuis `DsTexture::ModalBody` — `modal-body.png`, découpée des six captures
+de la fenêtre Options puis débarrassée de son contenu (§9 ter du design-system). Elle apporte le
+grain et les hachures d'angle, et porte l'arrondi de ses deux angles bas dans son alpha. La
+translucidité relevée au colorimètre (alpha 235) est conservée telle quelle, désormais comme teinte
+de peinture : `modale_options_sur_damier` mesure le même contraste résiduel de 9,7 qu'avant.
+
 ### Reste à faire
 
+- ~~**Le panneau de section sur sa propre texture.**~~ Fait le 2026-09-10 :
+  `DsTexture::ModalSection` (`modal-section.png`, §9 quater du design-system). Le découpage a
+  confirmé ce que le corps laissait deviner — non pas une surface à part mais **le même fond
+  assombri de huit à neuf niveaux**, que le décor traverse — et corrigé au passage une erreur de
+  prémultiplication qui peignait l'aplat 2,3 niveaux trop clair. L'alpha 230 reste une déviation
+  assumée, sans effet mesurable (0,7 de contraste résiduel sous le panneau).
 - **Gouttière du pied de page** : 12 px chez nous, 11 px relevés entre `btn-cancel` (finit à x=355)
   et `btn-confirm` (commence à x=366). Écart d'un pixel, à reprendre pour la forme.
 

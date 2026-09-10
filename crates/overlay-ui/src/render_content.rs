@@ -11,7 +11,7 @@ use overlay_engine::{CatalogIndex, FightSnapshot, WatchlistEntry};
 use crate::panels;
 use crate::panels::combat::CombatSide;
 use crate::panels::combat_frame::CombatFrame;
-use crate::panels::options_modal::{OptionsModalAction, OptionsModalAssets, OptionsModalState};
+use crate::panels::options_modal::{OptionsModalAction, OptionsModalState};
 use crate::panels::watchlist::{WatchlistAssets, WatchlistToast};
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -35,9 +35,9 @@ pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 /// jamais s'attaquer à la cause : l'absence de place elle-même).
 ///
 /// Valeur choisie par observation du rendu offscreen (`overlay-testkit`, §17.1 du plan) : le popup
-/// par défaut d'egui (`icon_button::paint_tooltip_label`, fond plein, `inner_margin` 8px) contenant
+/// par défaut d'egui (`panels::tooltip::paint_tooltip_label`, fond plein, `inner_margin` 8px) contenant
 /// une étiquette courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
-/// `icon_button::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
+/// `panels::tooltip::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
 /// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite :
 /// « agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
 /// jeu, décision non remise en cause ici (voir `main.rs::GAME_EDGE_MARGIN_PX`) — `main.rs`/`bin/
@@ -188,12 +188,6 @@ pub struct RenderContent<'a> {
     /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
     /// `panels::options_modal::OptionsModalState`.
     pub options: Option<&'a mut OptionsModalState>,
-    /// Textures du chrome de la modale Options (2026-09-09) — `Some` UNIQUEMENT pour `kind ==
-    /// OverlayKind::Options`, chargées UNE FOIS par fenêtre OS (voir
-    /// `main.rs`/`bin/overlay-ui-x11.rs`, `create_overlay_window`) et seulement référencées ici :
-    /// contrairement à `options` (`&mut`, la frappe doit persister), ces textures ne changent
-    /// jamais d'une frame à l'autre, une référence partagée suffit.
-    pub options_assets: Option<&'a OptionsModalAssets>,
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
@@ -297,7 +291,6 @@ pub fn build_ui(
                 interactive: content.interactive,
                 now: content.now,
                 options: content.options.as_deref_mut(),
-                options_assets: content.options_assets,
             },
         );
     });
@@ -331,7 +324,6 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         interactive,
         now,
         options,
-        options_assets,
     } = content;
 
     let mut outcome = RenderOutcome::default();
@@ -542,8 +534,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // en pratique (voir `main.rs`/`bin/overlay-ui-x11.rs`, qui le fournissent toujours
                 // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
                 OverlayKind::Options => {
-                    if let (Some(state), Some(assets)) = (options, options_assets) {
-                        outcome.options_action = panels::options_modal::show(ui, state, assets);
+                    if let Some(state) = options {
+                        outcome.options_action = panels::options_modal::show(ui, state);
                     }
                 }
             }

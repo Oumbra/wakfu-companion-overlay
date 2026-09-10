@@ -10,6 +10,9 @@ widget** : si un composant existe, on l'étend, on n'en écrit pas un second (sk
   [`.claude/skills/ui-component/references/contrat-composant.md`](../.claude/skills/ui-component/references/contrat-composant.md).
 - La planche de contrôle : `crates/overlay-testkit/tests/snapshots/design_gallery.png`, régénérée
   par `UPDATE_SNAPSHOTS=1 cargo test -p overlay-testkit --test design_gallery`.
+- L'ordre de construction de ce qui manque, avec ses critères de fin :
+  [`plan-composants-ui.md`](plan-composants-ui.md). Ce catalogue dit *ce qui existe*, ce plan dit
+  *dans quel ordre construire la suite*.
 
 ---
 
@@ -555,9 +558,20 @@ design::scroll_area("options-contenu").show(ui, |ui| {
 | `id_salt` (à la construction) | distingue deux zones du même panneau ; porte la position de défilement | — |
 | `auto_shrink` | laisse la zone se rétrécir à son contenu | `false` — un panneau du jeu occupe toute sa hauteur |
 
-**Ce n'est pas un `Widget`, et c'est le seul écart au contrat** : il prend une closure de contenu, il
-ne peut donc pas rendre une `Response` à partir de rien. `egui::ScrollArea` n'en est pas un non plus,
-pour la même raison.
+**Ce n'est pas un `Widget`**, et depuis le 2026-09-10 ce n'est plus un écart : c'est le premier
+**composant conteneur** du design system (§1 bis du contrat, *forme closure*). Il prend une closure
+de contenu, il ne peut donc pas rendre une `Response` à partir de rien — `egui::ScrollArea` n'en est
+pas un non plus, pour la même raison.
+
+**Variante « cadre » — hors de ce composant, et c'est délibéré.** La barre du cadre ennemi du
+panneau Combat (`panels::combat_frame_scroll`) ne ressemble pas à celle-ci : barre dessinée de 5 px,
+couleur unie `#998a6c`, bordure noire, toujours visible. Ce n'est **pas** une divergence à
+« corriger » — chacun de ces écarts est une demande explicite de l'utilisateur, et les assets du jeu
+(`scrollbar-active.png` / `scrollbar-inactive.png`) y ont été essayés puis **rejetés** (« trop
+large, cachait les portraits »), voir l'en-tête de module de ce fichier. Le contexte diffère du tout
+au tout : une barre posée *sur* un décor de cadre, pas dans la gouttière d'un panneau. Elle reste
+locale au panneau tant qu'elle n'a qu'un utilisateur ; si un second apparaît, elle remonte ici en
+paramètre plutôt qu'en second composant.
 
 **Aucun rail.** Le relevé est catégorique : « le fond du panneau tient lieu de gouttière ». C'est ce
 qui rend ce composant particulier — `egui::ScrollArea` peint par défaut un rail derrière sa poignée,
@@ -618,19 +632,32 @@ tous dès le premier composant peint).
 
 **Teintes** : `#c5cbcc` au repos, `#f4d89f` au survol, mesurées sur
 `menu-button-icon-first-plan.png`. Les icônes du design system étant blanc pur avec alpha, une
-teinte suffit — là où `ui_icons` charge deux copies recolorées au chargement.
+teinte appliquée au moment de peindre suffit — pas de copie recolorée à charger.
 
-**Repris tel quel de `panels::icon_button`** : le socle et l'icône partagent le même facteur
-d'échelle (dérivé de la largeur du socle), et un appui de souris retire l'apparence survolée, qui
-revient au relâchement — la règle commune à toute l'interface.
+**Taille d'encre** : les glyphes sont détourés au pixel près, donc de tailles inégales d'un fichier
+à l'autre (13, 14, 16). Le jeu les cale sur une grille commune — **18px d'encre pour un socle de
+36**, médiane des huit icônes de `menu-button-icon-first-plan.png` (plage 16–20, seuil de luminance
+140, invariant de 120 à 180). C'est `tokens::ICON_BUTTON_CONTENT`, appliqué par
+`DsTexture::icon_content_size` : **le manifeste, pas l'appelant** — la taille d'encre est une
+propriété de l'asset. Trois tests l'ancrent : la médiane remesurée sur la capture du jeu, le
+détourage des glyphes, et le calcul de `icon_draw_size` (dont le cas du « − », qu'un mauvais facteur
+transformerait en barre).
 
-**Pas encore utilisé en production.** Les quatre boutons icône de l'overlay (lien externe et Options
-dans Combat, « + » et « − » dans le Suivi) passent toujours par `panels::icon_button`. Leur socle est
-pourtant déjà celui du design system : `assets/ui/button-background.png` est **octet pour octet**
-`assets/design-system/button-icon-first-plan.png`. Ce sont leurs icônes qui diffèrent — normalisées
-par `ui_icons::normalize_icon_content` contre les glyphes détourés bruts ici. Les migrer changerait
-le rendu de deux panneaux hors du périmètre du plan de finalisation de la modale, sans capture de
-référence pour arbitrer. À reprendre quand ces panneaux seront au chantier.
+**Échelle et survol** : le socle et l'icône partagent le même facteur d'échelle (dérivé de la
+largeur du socle), et un appui de souris retire l'apparence survolée, qui revient au relâchement —
+la règle commune à toute l'interface.
+
+**État désactivé — deux mécaniques, une par contexte.** `button-icon-disabled.png` est le socle
+grisé du jeu, et il appartient au contexte `Panel` : luminance moyenne 60, contre 81 pour
+`button-icon.png`, le socle actif du même contexte. Posé sur une barre de premier plan (41), il
+s'inverse — le bouton désactivé devient le plus lumineux de la barre. En `FirstPlan`, le composant
+garde donc le socle de repos et l'assombrit (`tokens::DISABLED_DIM`, ~43 % d'opacité).
+
+**Utilisé en production** depuis le 2026-09-10 : les quatre boutons du carré de contrôle du panneau
+Suivi (« + », « − », Détails, Options — `panels::watchlist::control_button`). Ce qui reste à la
+charge du panneau : le **placement de l'infobulle** par colonne (à gauche pour « + » et Détails, à
+droite pour « − » et Options), que le `.tooltip()` du composant ne sait pas reproduire — il retombe
+sur le placement par défaut d'egui.
 
 **Le cas « réinitialisation »** attend qu'un réglage réinitialisable existe. Note du relevé à ne pas
 « corriger » le jour venu : dans la barre d'onglets, **l'axe du bouton est 9px plus bas que celui des
@@ -638,15 +665,297 @@ onglets**.
 
 ---
 
+## `design::window` — chrome de fenêtre (2026-09-10)
+
+`crates/overlay-ui/src/design/components/window.rs` — **composant conteneur**, forme « zone
+rendue » (§1 bis du contrat).
+
+```rust
+let chrome = design::window("Options")
+    .footer("Annuler", "Valider")
+    .log_name("options")
+    .show(ui);
+
+chrome.tabs(ui, design::tabs(&mut state.tab).entry(Tab::Parametres, "Paramètres"));
+match chrome.footer { design::FooterClick::Validate => …, _ => {} }
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `title` (à la construction) | peint dans la bannière, serif grasse cernée d'une ombre bas-droite | — |
+| `tab_bar_height` | hauteur réservée à la barre d'onglets ; `0.0` pour une fenêtre sans onglets | `tokens::TAB_HEIGHT` (44) |
+| `footer` | libellés des deux boutons — annulation à gauche, validation à droite | aucun pied de page |
+| `log_name` | préfixe des deux boutons dans le journal | `fenetre` |
+
+Rend un `WindowChrome` : `tab_bar` (la bande d'onglets), `content` (entre onglets et pied) et
+`footer` (le clic reçu). **`content` n'est pas écrêtée** — c'est le prix de la forme « zone rendue »,
+et la raison pour laquelle le contenu passe normalement par `design::panel`.
+
+**La barre d'onglets n'est pas peinte par le chrome** : `WindowChrome::tabs` la pose à partir du
+`Tabs` que l'appelant construit. Un onglet est du contenu, pas du décor — et c'est aussi ce qui
+évite de rendre la fenêtre générique sur le type d'onglet de son contenu.
+
+**Utilisé en production** : la modale Options (`panels::options_modal`) et les maquettes de la page
+Alertes (`crates/overlay-testkit/examples/alertes-mockups.rs`).
+
+---
+
+## `design::panel` — panneau de contenu (2026-09-10)
+
+`crates/overlay-ui/src/design/components/panel.rs` — **composant conteneur**, forme closure.
+
+```rust
+design::panel().show(ui, chrome.content, |ui, panel| {
+    ui.add(design::heading("Fichier"));
+    ui.add(design::input(&mut state.path));
+    panel.scroll_area(ui, "options-contenu", |ui, width| { … });
+});
+```
+
+**Un panneau n'est pas une section.** Le relevé est catégorique : dans le jeu, une *section* n'a ni
+fond, ni bordure, ni filet — son seul signal de regroupement est l'espacement, et son seul signal de
+niveau le retrait de 7 px de son titre. Ce qui a un fond (`#15181c`), un bord (2 px `#131518`) et un
+rayon (2), c'est le **panneau** qui contient les sections.
+
+Ce qu'il fait pour son contenu, et qu'aucun appelant n'a donc plus à faire : les rembourrages, la
+réserve de barre de défilement à droite (26 px, **toujours posée**, comme le jeu), l'écrêtage — élargi
+à gauche du retrait des titres, sans quoi un titre de section perd sa première lettre —, et la mise à
+zéro de l'espacement implicite d'egui.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+
+---
+
+## `design::heading` — titre de section (2026-09-10)
+
+`crates/overlay-ui/src/design/components/heading.rs` — composant **feuille**.
+
+```rust
+ui.add(design::heading("Fichier"));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `text` (à la construction) | le titre | — |
+| `trailing_gap` | écart réservé sous le titre | `tokens::HEADING_TO_ROW` (7) |
+
+Serif grasse au corps du titre de fenêtre (21), **gris `#b8b9ba` et non blanc** : la hiérarchie
+entre les deux niveaux de titre du jeu passe par la couleur, pas par le corps.
+
+Deux pièges que le composant absorbe : il réserve la hauteur d'**encre** (16) et non celle de sa
+galley — réserver la galley ajoutait ~14 px invisibles sous le titre, sur sept relevés — et il
+applique lui-même le **retrait de 7 px** qui est, dans le jeu, le seul signal qu'une section existe.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+
+---
+
+## `design::stepper` — pas numérique (2026-09-10)
+
+`crates/overlay-ui/src/design/components/stepper.rs` — composant **feuille**.
+
+```rust
+ui.add(design::stepper(&mut quantite).range(1..=999).log_name("hdv-quantite"));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `value` (à la construction) | `&mut i64`, muté par les deux boutons | — |
+| `range` | domaine autorisé ; la valeur y est **écrêtée à chaque frame**, y compris celle fournie | `i64::MIN..=i64::MAX` |
+| `step` | incrément d'un clic | 1 |
+| `size` | côté des deux boutons, **et donc hauteur du pas** — le socle est carré dans le jeu | `tokens::STEPPER_SIZE` (32) |
+| `field_width` | largeur du champ central ; sans elle, il prend toute la place restante | — |
+| `enabled` · `log_name` | comme partout | — |
+
+**Il ne peint rien lui-même** : deux `design::icon_button` au contexte `Stepper` et un
+`design::input` en lecture seule. Le socle vient du manifeste (`DsTexture::ButtonStepper`), les
+glyphes aussi (`IconPlus`, `IconMinus`).
+
+**Mesures, prises sur les deux captures du jeu** (`input-number.png` 104 × 28 et
+`large-input-number.png` 192 × 34), qui donnent les mêmes rapports — d'où des rapports et non des
+pixels :
+
+| Grandeur | Valeur | Vérification |
+| --- | --- | --- |
+| Gouttière | `STEPPER_GUTTER_RATIO` (0,267) | 26 + 7 + 38 + 7 + 26 = 104 ; 34 + 9 + 106 + 9 + 34 = 192 |
+| Encre du glyphe | `STEPPER_ICON_RATIO` (12/32) | 12 × 12 mesurés dans un socle de 32 |
+| Hauteur du champ | `STEPPER_FIELD_HEIGHT_RATIO` (26/34) | bordure du champ de y=4 à y=29 |
+| Teinte du glyphe | `STEPPER_ICON_TINT` (`#f4d89f`) | mesuré au pixel — **de l'or au repos** |
+
+**Trois choses que la comparaison au jeu a corrigées** (étape 6 du skill, sans laquelle aucune ne se
+serait vue) : le glyphe est **doré au repos**, alors que les deux autres contextes de bouton icône
+le peignent en gris et ne passent à l'or qu'au survol ; le champ **ne garde pas sa hauteur native**
+de 25 px mais suit son pas ; et le champ est en **lecture seule, pas désactivé** — sa valeur compte,
+le jeu l'écrit en or, pas en gris.
+
+**Deux écarts assumés**, faute de capture : aucun socle survolé n'existe pour cette famille (le
+survol ne se signale donc que par le curseur — une teinte egui *multiplie* la texture, elle ne peut
+pas l'éclaircir), et le champ n'est pas éditable au clavier (valider une saisie partielle est une
+spec à part entière, sans référence pour ses états d'erreur).
+
+**Pas encore utilisé en production, et son seul client identifié n'est pas encore porté** : le
+couple quantité du formulaire de vente HDV (`interfaces/interface-hdv-vente-form.png`).
+
+**Le carré de contrôle du Suivi n'en est PAS un** — une première rédaction de cette fiche l'annonçait
+comme tel, à tort (corrigé le 2026-09-10 sur retour utilisateur). Ses quatre boutons sont une grille
+2 × 2 d'actions **indépendantes** (`panels::watchlist::control_button_row`) : « + » ajoute un objet
+au suivi, « − » en retire un. Ce ne sont pas l'incrément et le décrément d'une valeur affichée entre
+eux, il n'y a aucun champ au milieu, et leur socle est celui du premier plan (`IconContext::FirstPlan`,
+36 px, bleu-vert) et non celui d'un pas (32 px, gris-bleu). Ils sont déjà sur `design::icon_button`,
+qui est le bon composant pour eux.
+
+Conséquence à assumer : ce composant est écrit **en avance de son usage**. Ce qui le distingue de
+`design::field`, écarté pour cette même raison deux chantiers plus tôt, c'est que le jeu le **cote à
+deux échelles** — les valeurs sont mesurées, pas devinées, et ses assets existaient déjà. La règle
+reste la même pour la suite : sans relevé, on n'écrit pas.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
-Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
+Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
+ne sont pas encore au manifeste, dont 28 icônes), des captures d'interfaces du jeu
+(`assets/design-system/interfaces/`) et du code des panneaux. Classement **par vague** et non par
+fréquence : chaque vague fournit ce dont la suivante a besoin.
 
-| Composant | Assets disponibles | Notes |
+Les mesures citées comme « déjà relevées » existent dans [`design-tokens.json`](design-tokens.json)
+ou dans `docs/design-system/releve-*.json` — c'est du relevé fait, pas du travail à refaire.
+
+### Vague 1 — la structure
+
+Fait disparaître la mise en page absolue. Rien d'autre ne devrait être écrit avant : aujourd'hui,
+`panels::options_modal` porte 30 constantes de mise en page et 10 `egui::Rect::from_*` calculés à la
+main, soit environ 250 lignes qui ne font que placer des rectangles.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
-| **Migration des quatre boutons icône** | — | `design::icon_button` existe (voir sa fiche) ; `panels::combat` et `panels::watchlist` passent encore par `panels::icon_button`. Reste à trancher la normalisation des glyphes. |
-| **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
-| **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
-| **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
-| **Tuile de portrait / d'ennemi** | `crates/overlay-ui/assets/templates/*.png`, planche d'avatars | Panneau Combat — aujourd'hui entièrement dans `panels::combat` et `panels::combat_frame`. |
-| **Barre de dégâts** | aucun (dessiné à la main) | Total, noms, barres proportionnelles — aujourd'hui dans `panels::combat`. |
+| **`design::tooltip`** | `panels::tooltip` et ses trois enveloppes (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`/`_right`), placement et replis compris. | `TOOLTIP_MARGIN`, `TOOLTIP_GAP`, `TOOLTIP_BG_FILL` mesurés. |
+| **`design::icon` + `DsIcon`** — *décidé le 2026-09-10, voir ci-dessous* | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
+
+**`DsIcon` est un type distinct de `DsTexture`** (décision utilisateur, 2026-09-10).
+
+**Motif révisé le même jour**, après les commits `0923a45`, `a372320` et `4762cee` d'une session
+parallèle. L'argument d'origine — « chaque glyphe a une taille d'encre propre, un fond 9-slice n'en
+a pas, et peindre `icon-minus` (14×2) dans un carré l'étirerait » — **ne tient plus** :
+`icon_button::glyph_fit(native, box_side)` met désormais tout glyphe à l'échelle **en préservant son
+ratio natif**, et `Input::leading_icon` partage la même règle. Le problème d'échelle est réglé.
+
+Ce qui reste, et qui justifie encore la séparation :
+
+- **`TextureSpec` est un type à deux visages.** Il porte un `slice: NineSlice` dont aucun glyphe ne
+  se sert (tous prennent `ICON_SLICE`, marges nulles — un 9-slice dégénéré), et
+  `icon_content_size()` est un `match` qui énumère à la main les variantes qui se trouvent être des
+  icônes. Déclarer une icône demande donc de penser à un champ qui ne la concerne pas, et d'ajouter
+  une ligne à une liste qui n'a pas de garde-fou.
+- **12 icônes au manifeste sur 34 disponibles** dans `assets/design-system/icons/`.
+
+Ce qui a changé dans l'appréciation : c'est désormais un **nettoyage de typage**, pas un déblocage.
+Rien n'en dépend — ni la vague 1, ni la vague 2. À faire quand le terrain est libre, et **pas en
+parallèle** d'une session qui travaille sur `assets.rs` / `icon_button.rs` / la galerie : le
+refactor touche exactement ces trois fichiers.
+
+Note sur le rythme : ajouter une icône au manifeste **quand un composant en a besoin** — ce que fait
+la session parallèle — est sain, et vaut mieux que déclarer les 34 d'un coup. Un manifeste ne doit
+rien contenir de mort.
+
+Exécution, le jour venu :
+
+1. `design/icons.rs` — `enum DsIcon` et sa table (fichier, taille d'encre, nom de texture).
+2. Retrait des variantes d'icône de `DsTexture` et de `icon_content_size` avec elles — `DsTexture`
+   ne décrit plus que des fonds 9-slice.
+3. `design::icon` — une **feuille** au sens du contrat, qui réutilise `glyph_fit` tel quel.
+4. `icon_button` et `Input::leading_icon` prennent un `DsIcon`.
+5. La galerie des glyphes (`a372320`) suit le nouveau type ; snapshots régénérés.
+
+Coût mémoire, mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
+sans effet sur le budget de 300 Mo (§8 du plan).
+
+**Le contrat de composant a désormais deux familles** (décision utilisateur, 2026-09-10) : une
+**feuille** implémente `egui::Widget` ; un **conteneur** — celui qui encadre du contenu fourni par
+l'appelant — expose un `show` générique sur le retour de ce contenu. Toute la vague 1 relève de la
+seconde famille. Le critère de choix et les deux formes admises sont dans
+[`contrat-composant.md`](../.claude/skills/ui-component/references/contrat-composant.md) §1 bis.
+
+`panels::options_modal::chrome` (extrait le 2026-09-10) est déjà un conteneur au sens de ce
+contrat, écrit dans un panneau faute d'endroit où le mettre : c'est lui qui remonte dans
+`design::window`, sans changer de forme.
+
+### Vague 2 — les formulaires
+
+Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options existent.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
+| --- | --- | --- |
+| **`input`** — variantes `Number`, `Search`, état d'erreur | *Extension du composant existant*, pas un second composant (skill `ui-component`, étape 1). | `input-number.png`, `input-search.png`, `empty-input-search.png`, `large-input-*.png` |
+| **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. | `collapse-closed.png`, `collapse-width-5th-opened.png`, `collapse-block.png`, `collapse-block-opened.png` ; `collapse_header_height` 38–45 relevé. §5.8. |
+| **`design::field`** | Rien aujourd'hui — le *libellé à gauche, contrôle à droite* du jeu (« Prix unitaire », « Quantité », « Durée de publication »). **À ne pas confondre** avec la ligne « contrôle élastique + bouton » de la modale Options, qui n'a pas de libellé et n'a qu'un seul usage. | Captures `interface-hdv-vente-form.png` ; **relevé `ui-blueprint` d'abord**, aucune cote n'existe. |
+| **`design::slider`** | Rien aujourd'hui. | Aucun asset découpé — passer par `design-asset` d'abord ; captures dans `interface-options-son.png` et `interface-options-interface.png`. |
+| **`tabs`** — variante icône | Onglets à pictogrammes. | `icon-tabs.png` ; dépend du registre `DsIcon` (vague 1). §5.7. |
+
+### Vague 3 — les données
+
+Les composants qui portent ce que l'overlay affiche réellement.
+
+**Le vocabulaire visuel de ces panneaux est tranché** (décision utilisateur, 2026-09-10) : les
+panneaux Combat et Suivi **prennent les formes et la typographie du jeu, et gardent leur accent
+cyan**. Ce n'est pas un compromis mou, c'est le seul point où l'overlay a une contrainte que le
+jeu n'a pas : il se lit **par-dessus** le jeu, sur un fond arbitraire et mouvant. Le cyan
+`#00d2ff` n'existe nulle part dans l'interface Wakfu — c'est précisément ce qui l'empêche de s'y
+confondre. Une jauge de dégâts or posée sur un décor or se cherche.
+
+Concrètement, trois familles à reprendre, et rien d'autre :
+
+| Ce qui migre | Aujourd'hui | Cible |
+| --- | --- | --- |
+| **Les polices** | la proportionnelle par défaut d'egui — une Ubuntu *Light*, plus maigre que tout ce que le jeu écrit. Neuf appels `FontId::proportional`, plus deux `FontId::monospace` sur les compteurs de tuile. | `design::text::label_font` / `title_font` |
+| **Les formes** | rayons hérités du CSS : tuile 10 px, carte de toast 12 px, bandeau 6 px. | emplacement du jeu — carré, bordure 2 px, rayon 0–2 |
+| **L'accent — reste** | cyan `#00d2ff` dispersé en constantes locales de `panels::combat` et `panels::watchlist`. | **un jeton nommé**, `tokens::OVERLAY_ACCENT`, documenté comme le vocabulaire du contenu flottant — plus un vestige du portage |
+
+Ce qui est **déjà** au langage du jeu et qu'il ne faut pas toucher : les cadres de portraits
+(gabarits du jeu), les quatre boutons du carré de contrôle (`design::icon_button`, socle
+`button-icon-first-plan.png` du jeu), les infobulles, les sept bordures de rareté.
+
+La conséquence pour les composants ci-dessous : **un seul jeu de composants, une seule dimension de
+galerie**. `meter`, `badge` et `item_slot` prennent leur teinte d'un jeton — `OVERLAY_ACCENT` pour
+ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre — jamais d'un paramètre de thème.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
+| --- | --- | --- |
+| **`design::item_slot`** | `watchlist::entry_tile` — bordure de rareté, icône, compteur incrusté, et l'ordre de peinture dont l'inversion a déjà produit un bug. | 7 `Border-*.webp`, `rarity_borders` (7 raretés), `item_slot_square` 63–64 / `gap` 2 / `border` 2 relevés. |
+| **`design::badge`** | `watchlist::paint_count_inline`, les étiquettes de rareté, la pastille d'état. | `status_pill_active` ; `text::OUTLINE_FULL` existe. §5.12, §5.13. |
+| **`design::meter`** | `combat::damage_bar` — 68 lignes de rectangles empilés (bord externe, bord interne, piste, remplissage, reflet, curseur de fin, arrondis conditionnels). | Six couleurs mesurées dans `combat.rs`, à promouvoir en jetons. |
+| **`design::portrait`** | `combat::paint_flat_portrait`, `panels::combat_frame` et son gabarit à six emplacements. | `crates/overlay-ui/assets/templates/*.png`, atlas de classes, portrait de repli. |
+| **`design::table` + `design::pagination`** | Rien aujourd'hui — mais l'historique HDV, les ventes et les échanges (§9 du plan) sont exactement cela : colonnes triables, lignes alternées, état vide, « Page 0 / 0 » et ses deux flèches. | Quatre captures complètes dans `interfaces/` ; passer par `ui-blueprint` d'abord. |
+
+### Vague 4 — les finitions
+
+Ni urgent ni structurant, mais chacun retire du code d'un panneau.
+
+| Composant | Ce qu'il absorbe | Matière disponible |
+| --- | --- | --- |
+| **`design::toolbar`** | Le carré de contrôle du Suivi : fond translucide, gouttière, groupement de boutons icône. | `watchlist::PANEL_BACKDROP_FILL`, `menu-button-icon-first-plan.png` |
+| **`design::segmented`** | Le bascule « Objets mis en vente / Offres d'achat » ; le switch Alliés/Ennemis du panneau Combat en est une variante maison. | `tabs-with-first-tab-active.png` |
+| **`design::toast`** | `watchlist::toast_card` et ses confettis — ~300 lignes, avec son générateur pseudo-aléatoire maison. | Portage du web ; aucun asset de jeu correspondant. |
+| **`design::dialog`** | Rien — la boîte de confirmation qui manquera à la première action destructrice de l'overlay. | `interfaces/interface-confirm-box.png` |
+| **`design::separator`** | Les filets de séparation des formulaires du jeu. | Captures d'interface. |
+
+### Doublons à résorber avant d'ajouter quoi que ce soit
+
+Trois écarts constatés le 2026-09-10, indépendants de toute décision :
+
+- **`modal-header.png` est dupliqué octet pour octet** (`md5 fcddb015…`) entre
+  `assets/design-system/` et `crates/overlay-ui/assets/ui/options/` ; `options_modal.rs:293` charge
+  la copie par `include_bytes!` local au lieu du manifeste — exactement le cas résorbé le 2026-09-09
+  pour quatre autres PNG (§9.2 du plan).
+- **Deux barres de défilement** : `design::scroll_area` (poignée 6px, `#515356` / `#c1ad83`, aucun
+  rail) et `panels::combat_frame_scroll` (barre 5px, `#998a6c`, bordure noire alpha 217, rayon 2).
+- **Six chemins de chargement de texture** — `DesignSystem::load`, `ui_icons`, `portraits`,
+  `remote_icons`, `combat_frame`, `options_modal` — dont cinq copies de la même fonction
+  décoder → `ColorImage` → `load_texture`. Le budget mémoire (§8 du plan, 300 Mo) n'a donc aucun
+  point de mesure unique.
+
+### Ce que ce catalogue devrait porter en plus
+
+Une colonne **« qui le consomme en production »** par composant. La fiche du bouton icône la porte
+déjà (« les quatre boutons du carré de contrôle du Suivi ») ; les autres non. C'est cette colonne
+qui répond, dans six mois, à « puis-je changer ce jeton sans rien casser ? ».
