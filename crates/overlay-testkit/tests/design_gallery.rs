@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2160.0))
+        .with_size(Vec2::new(760.0, 2320.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -384,6 +384,28 @@ fn gallery(ui: &mut egui::Ui) {
     });
     // La place que les deux listes occupent hors du flux, pour que la planche ne les tronque pas.
     ui.add_space(4.0 * 28.0 + 10.0);
+
+    heading(
+        ui,
+        "Barre de défilement — poignée 6 px, aucun rail",
+        "Le fond du panneau tient lieu de gouttière : la barre ne peint qu'une poignée. Réserve totale à droite : 26 px (6 + 6 + 14), la même que le jeu garde même quand la barre ne sert pas.",
+    );
+    // Un cadre au fond du panneau, pour juger la poignée sur la surface où elle vivra vraiment.
+    egui::Frame::NONE
+        .fill(Color32::from_rgb(0x15, 0x18, 0x1C))
+        .show(ui, |ui| {
+            ui.set_width(360.0);
+            ui.set_height(120.0);
+            design::scroll_area("galerie.scroll").show(ui, |ui| {
+                for i in 1..=12 {
+                    ui.label(
+                        RichText::new(format!("Ligne de contenu n° {i}"))
+                            .color(Color32::WHITE)
+                            .size(15.0),
+                    );
+                }
+            });
+        });
 
     heading(
         ui,

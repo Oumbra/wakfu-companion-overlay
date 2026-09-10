@@ -277,3 +277,33 @@ pub const SELECT_TEXT: Color32 = Color32::WHITE;
 
 /// Corps du texte d'une liste — 17px, la même encre de 13px que tous les libellés de contrôle.
 pub const SELECT_FONT_SIZE: f32 = 17.0;
+
+// ---------------------------------------------------------------------------------------------
+// Barre de défilement — mesurée sur `releve-modale-options.json` (nœuds `scrollbar-thumb` et
+// `panel`) et sur les deux assets, ligne y=150. Détail dans `design::components::scroll_area`.
+// ---------------------------------------------------------------------------------------------
+
+/// Largeur de la poignée — 6px, et rien d'autre : **il n'y a pas de rail**. Relevé : « le fond du
+/// panneau tient lieu de gouttière ». Confirmé par les deux assets, larges de 14 dont 6 de poignée
+/// (x 5..10) et 4 de fond de chaque côté.
+pub const SCROLLBAR_WIDTH: f32 = 6.0;
+
+/// Rayon de la poignée.
+pub const SCROLLBAR_RADIUS: u8 = 3;
+
+/// Poignée au repos.
+///
+/// `#515356`, la valeur du relevé de la modale. `scrollbar-inactive.png` donne `#5e5f62` et §5.9 du
+/// design-system `#5c5e61` — trois mesures à quelques valeurs près, et c'est celle de la fenêtre
+/// qu'on reproduit qui l'emporte, comme pour le séparateur d'onglets.
+pub const SCROLLBAR_THUMB: Color32 = Color32::from_rgb(0x51, 0x53, 0x56);
+
+/// Poignée survolée ou tirée — l'or de `scrollbar-active.png` (`#c1ad83`, mesuré à la ligne y=150).
+/// §5.9 le donne à `#c0ac83`, à une valeur près.
+pub const SCROLLBAR_THUMB_ACTIVE: Color32 = Color32::from_rgb(0xC1, 0xAD, 0x83);
+
+/// Marge entre le contenu et la poignée — 679 → 685 sur la modale du jeu.
+pub const SCROLLBAR_CONTENT_MARGIN: f32 = 6.0;
+
+/// Marge entre la poignée et le bord du panneau — 691 → 705.
+pub const SCROLLBAR_OUTER_MARGIN: f32 = 14.0;

@@ -505,17 +505,23 @@ pub fn show(
         egui::StrokeKind::Inside,
     );
 
-    // À droite, le jeu réserve 26px pour sa barre de défilement (relevé, nœud `panel`) même quand
-    // elle ne sert pas. Nous n'en avons pas : reprendre 26px laisserait une marge droite
-    // inexpliquée, plus large que la gauche. On reflète donc l'axe des contrôles — **déviation
-    // assumée**, la seule de ce bloc.
+    // À droite, le jeu réserve 26px pour sa barre de défilement (relevé, nœud `panel`) **même quand
+    // elle ne sert pas**. Cette réserve était autrefois une déviation assumée — nous reflétions
+    // l'axe des contrôles (19px), faute de barre à y mettre : « reprendre 26px laisserait une marge
+    // droite inexpliquée, plus large que la gauche ».
+    //
+    // Elle ne l'est plus depuis que `design::scroll_area` existe (2026-09-10). Ses trois marges —
+    // 6 entre le contenu et la poignée, 6 pour la poignée, 14 jusqu'au bord — font exactement
+    // `RESERVE_X`. Le jour où le contenu de l'onglet débordera, il suffira de l'envelopper dans une
+    // `design::scroll_area` : la barre tombera pile dans cette réserve, sans qu'un seul pixel de
+    // contenu ne bouge. C'est tout l'intérêt de la réserver dès maintenant.
     let inner_rect = egui::Rect::from_min_max(
         egui::pos2(
             section_rect.left() + PANEL_PAD_CONTROL_X,
             section_rect.top() + PANEL_PAD_TOP,
         ),
         egui::pos2(
-            section_rect.right() - PANEL_PAD_CONTROL_X,
+            section_rect.right() - design::components::scroll_area::RESERVE_X,
             section_rect.bottom() - PANEL_PAD_CONTROL_X,
         ),
     );
