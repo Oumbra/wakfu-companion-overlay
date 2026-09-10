@@ -74,17 +74,6 @@ pub const WINDOW_SIZE: (f32, f32) = (560.0, 436.0);
 /// Rayon d'arrondi de la modale ENTIÈRE (bannière haute + pied de page bas) — mesuré au pixel sur
 /// `modal-header.png` (transition alpha au coin haut-gauche/haut-droit).
 const MODAL_RADIUS: u8 = 12;
-/// Rayon d'arrondi du panneau de contenu.
-///
-/// **2, pas 18.** La première version lisait « un encadré interne au rayon plus prononcé que la
-/// modale » sur la référence, à l'œil. Le relevé
-/// (`docs/design-system/releve-modale-options.json`, nœud `panel`) mesure 2 — le même rayon que la
-/// fenêtre et que tous les contrôles. Il n'existe aucun rayon prononcé dans cette interface.
-const SECTION_RADIUS: u8 = 2;
-
-/// Épaisseur du bord du panneau de contenu. Le jeu en a un, la première version n'en peignait
-/// aucun.
-const SECTION_BORDER: f32 = 2.0;
 
 const BANNER_HEIGHT: f32 = 56.0;
 /// Marge gauche/droite du contenu (`.body` de la simulation HTML validée) — hors bannière/pied de
@@ -178,26 +167,19 @@ const SECTION_TITLE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xB8, 0xB9, 0x
 /// déjà celui de l'état désactivé des boutons. La fenêtre laisse donc toujours deviner le jeu
 /// derrière elle, comme la référence réelle.
 const MODAL_BODY_TINT: egui::Color32 = egui::Color32::from_rgba_premultiplied(235, 235, 235, 235);
-/// Fond du panneau de contenu (#15181C) — la valeur du relevé (nœud `panel`), neuf niveaux plus
-/// sombre que le fond de la modale, ce que le découpage du corps confirme : le panneau n'est pas
-/// une surface à part mais le même fond assombri, que la texture de fond traverse (§9 ter du
-/// design-system). Il reste peint tant qu'il n'a pas sa propre texture.
+/// Translucidité du panneau de contenu — **230/255, la valeur qu'avait l'aplat `SECTION_BG` qui le
+/// peignait jusqu'au 2026-09-10.**
 ///
-/// **Ce que nous peignons ici est le PANNEAU DE CONTENU du jeu, pas une « section ».** La
-/// distinction n'est pas cosmétique : le relevé de section est formel, « une section n'a ni fond,
-/// ni bordure, ni filet de séparation — le seul signal de regroupement est l'espacement ». Ce qui
-/// a un fond, un bord et un rayon, c'est le panneau qui contient les sections. Nommer les choses de
-/// travers avait produit un encadré arrondi à 18 qui n'existe nulle part dans le jeu.
+/// Sa couleur ne se règle plus ici : le panneau est peint depuis `DsTexture::ModalSection`, une
+/// texture découpée des captures du jeu (§9 quater du design-system). Elle a confirmé ce que le
+/// relevé laissait deviner — **le panneau n'est pas une surface à part, c'est le fond de la fenêtre
+/// assombri de huit à neuf niveaux**, que le décor traverse.
 ///
-/// L'alpha 230 est une **déviation assumée** : la modale entière est légèrement translucide
-/// (`MODAL_BODY_TINT`) et le panneau suit, alors que le jeu est opaque — il n'a pas de jeu
-/// derrière lui.
-const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x15, 0x18, 0x1C, 230);
-
-/// Bord du panneau de contenu — presque noir, à peine plus sombre que son fond (relevé : `#131518`
-/// contre `#15181c`). Ce n'est pas un trait qu'on voit, c'est ce qui détache le panneau du fond de
-/// la modale.
-const SECTION_BORDER_COLOR: egui::Color32 = egui::Color32::from_rgb(0x13, 0x15, 0x18);
+/// L'alpha 230 reste une **déviation assumée** : la modale entière est légèrement translucide et le
+/// panneau suit, alors que le jeu est opaque à cet endroit — il n'a pas de jeu derrière lui. En
+/// pratique l'écart ne se voit pas : les deux alphas se multiplient, et `modale_options_sur_damier`
+/// mesure 0,7 de contraste résiduel sous le panneau, contre 9,7 dans les marges.
+const SECTION_TINT: egui::Color32 = egui::Color32::from_rgba_premultiplied(230, 230, 230, 230);
 
 /// Gouttière entre le champ de chemin et le bouton "Sélectionner le fichier", posés sur la MÊME
 /// ligne (demande utilisateur 2026-09-09 : le bouton ne doit plus prendre toute la largeur).
@@ -556,19 +538,19 @@ pub fn chrome(
         footer = FooterClick::Validate;
     }
 
-    // Section — encadré interne au rayon plus prononcé que la modale (`SECTION_RADIUS`),
-    // entre le menu et le pied de page.
+    // Section — encadré interne, entre le menu et le pied de page. Peint depuis
+    // `DsTexture::ModalSection` (vraie texture du jeu) depuis le 2026-09-10 : son liseré de 2px et
+    // l'arrondi de ses angles viennent de la texture, plus d'un `rect_stroke` ni d'un
+    // `corner_radius`.
     let section_rect = egui::Rect::from_min_max(
         egui::pos2(content_rect.left(), menu_rect.bottom() + MENU_GAP),
         egui::pos2(content_rect.right(), footer_rect.top() - FOOTER_GAP),
     );
-    ui.painter()
-        .rect_filled(section_rect, SECTION_RADIUS, SECTION_BG);
-    ui.painter().rect_stroke(
+    design::DesignSystem::get(ui.ctx()).paint(
+        ui.painter(),
         section_rect,
-        SECTION_RADIUS,
-        egui::Stroke::new(SECTION_BORDER, SECTION_BORDER_COLOR),
-        egui::StrokeKind::Inside,
+        design::DsTexture::ModalSection,
+        SECTION_TINT,
     );
 
     // À droite, le jeu réserve 26px pour sa barre de défilement (relevé, nœud `panel`) **même quand
