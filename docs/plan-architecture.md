@@ -869,8 +869,12 @@ Trois décisions prises à cette occasion :
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
 Composants livrés : le bouton texte, puis le champ de saisie (`design::input`, 2026-09-10 — hauteur
 native 25px, valeur en or `#f4d89e` et non en blanc, texte indicatif peint à la main parce qu'egui
-impose sa propre couleur à un `hint_text`). `panels::icon_button::paint_icon_button` reste hors
-contrat (quatre `TextureHandle` en paramètres) et est également à migrer.
+impose sa propre couleur à un `hint_text`). `panels::icon_button::paint_icon_button`, hors contrat
+(quatre `TextureHandle` en paramètres), **a été migré et supprimé le 2026-09-10** : les quatre
+boutons du carré de contrôle du Suivi passent par `design::icon_button`, la taille d'encre des
+glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 36, mesuré sur
+`menu-button-icon-first-plan.png`), et le module résiduel — une infobulle et un fond de barre — a
+été renommé `panels::tooltip`.
 
 ---
 

@@ -17,6 +17,7 @@
 //! **hachures qui les dimensionnent**, pas les coins : voir `button_slice`.
 
 use crate::design::nine_slice::{Fill, Insets, NineSlice};
+use crate::design::tokens;
 
 /// Découpage d'une texture de bouton texte : `cap` pixels figés à gauche et à droite, 6px en haut
 /// et en bas, tout le reste étiré.
@@ -324,6 +325,28 @@ impl DsTexture {
             .expect("toute variante de DsTexture est listée dans ALL")
     }
 
+    /// Plus grande dimension d'encre à laquelle cette texture est peinte quand elle sert d'icône
+    /// sur un socle de [`tokens::ICON_BUTTON_SIZE`] — `None` pour tout ce qui n'est pas une icône
+    /// de bouton, ou dont la taille est déjà celle du composant qui la porte.
+    ///
+    /// Les glyphes de `assets/design-system/icons/` sont détourés au pixel près : leur fichier fait
+    /// exactement la taille de leur encre, qui varie d'un glyphe à l'autre (13 pour le lien
+    /// externe, 16 pour le rouage). Peints tels quels, ils donneraient trois hauteurs d'encre
+    /// différentes dans une même barre — le jeu, lui, les cale tous sur une grille commune. Cette
+    /// grille est [`tokens::ICON_BUTTON_CONTENT`], mesurée sur le jeu ; sa doc porte la mesure.
+    ///
+    /// C'est le manifeste qui la porte, et pas l'appelant : la taille d'encre d'un glyphe est une
+    /// propriété de l'asset, au même titre que son découpage 9-slice.
+    pub fn icon_content_size(self) -> Option<f32> {
+        match self {
+            DsTexture::IconOption
+            | DsTexture::IconExternalLink
+            | DsTexture::IconPlus
+            | DsTexture::IconMinus => Some(tokens::ICON_BUTTON_CONTENT),
+            _ => None,
+        }
+    }
+
     pub fn spec(self) -> DsTextureSpec {
         match self {
             DsTexture::ButtonPrimary => DsTextureSpec {
@@ -476,6 +499,150 @@ impl DsTexture {
                 bytes: ds_asset!("modal-body.png"),
                 slice: MODAL_BODY_SLICE,
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Seuil d'opacité au-delà duquel un pixel compte comme de l'encre — le même que celui du skill
+    /// `design-asset`, pour que les mesures se comparent d'un outil à l'autre.
+    const ALPHA_THRESHOLD: u8 = 10;
+
+    /// Boîte englobante des pixels opaques : `(largeur, hauteur)`.
+    fn ink_bbox(img: &image::RgbaImage) -> (u32, u32) {
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0_u32, 0_u32);
+        let mut vu = false;
+        for (x, y, pixel) in img.enumerate_pixels() {
+            if pixel.0[3] > ALPHA_THRESHOLD {
+                vu = true;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+        assert!(vu, "texture entièrement transparente");
+        (max_x - min_x + 1, max_y - min_y + 1)
+    }
+
+    fn decode(bytes: &[u8]) -> image::RgbaImage {
+        image::load_from_memory(bytes)
+            .expect("texture du manifeste décodable")
+            .to_rgba8()
+    }
+
+    /// **La mesure qui a débloqué la migration, transformée en garde-fou.**
+    ///
+    /// `tokens::ICON_BUTTON_CONTENT` vaut 18 parce que le jeu cale les icônes de cette famille sur
+    /// une grille commune — mesuré sur les huit icônes de `menu-button-icon-first-plan.png`. Tant
+    /// que cette valeur n'était qu'un paragraphe de documentation, rien n'empêchait de la changer
+    /// « à l'œil ». Ce test la rattache à la capture : retraiter l'asset ou poser un autre étalon
+    /// le fait tomber.
+    ///
+    /// Découpage de la capture : socles de 36 × 36, cadence verticale de 38 (2 px de gouttière),
+    /// premier socle en (4, 5). L'échelle 1 est vérifiée séparément — `button-icon-first-plan.png`
+    /// s'y recale avec un écart moyen de 2,3/255, contre 4,5 et plus dès 35 ou 37.
+    #[test]
+    fn l_etalon_d_icone_est_celui_mesure_sur_le_jeu() {
+        const SOCLE: u32 = 36;
+        const CADENCE: u32 = 38;
+        const ORIGINE: (u32, u32) = (4, 5);
+        /// Seuil de luminance séparant l'encre claire de l'icône du socle sombre — le résultat ne
+        /// bouge pas entre 120 et 180, ce n'est donc pas un réglage critique.
+        const SEUIL_LUMINANCE: u32 = 140;
+
+        let barre = decode(ds_asset!("menu-button-icon-first-plan.png"));
+        let mut mesures = Vec::new();
+        for i in 0..8 {
+            let (x0, y0) = (ORIGINE.0, ORIGINE.1 + CADENCE * i);
+            let socle = image::imageops::crop_imm(&barre, x0, y0, SOCLE, SOCLE).to_image();
+            let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0_u32, 0_u32);
+            for (x, y, pixel) in socle.enumerate_pixels() {
+                let luminance =
+                    (pixel.0[0] as u32 + pixel.0[1] as u32 + pixel.0[2] as u32).div_ceil(3);
+                if luminance > SEUIL_LUMINANCE {
+                    min_x = min_x.min(x);
+                    min_y = min_y.min(y);
+                    max_x = max_x.max(x);
+                    max_y = max_y.max(y);
+                }
+            }
+            mesures.push((max_x - min_x + 1).max(max_y - min_y + 1));
+        }
+        mesures.sort_unstable();
+
+        let mediane = mesures[mesures.len() / 2] as f32;
+        assert_eq!(
+            mediane,
+            tokens::ICON_BUTTON_CONTENT,
+            "médiane mesurée {mediane}, étalon {} — mesures : {mesures:?}",
+            tokens::ICON_BUTTON_CONTENT,
+        );
+        let (min, max) = (mesures[0] as f32, mesures[mesures.len() - 1] as f32);
+        assert!(
+            (16.0..=20.0).contains(&min) && (16.0..=20.0).contains(&max),
+            "l'encre du jeu sort de la plage 16–20 : {mesures:?}",
+        );
+    }
+
+    /// Les glyphes d'icône du manifeste sont **détourés au pixel près** : leur canevas est
+    /// exactement leur encre.
+    ///
+    /// C'est l'hypothèse sur laquelle repose `icon_draw_size` : il ramène la plus grande dimension
+    /// du FICHIER à l'étalon. Une marge transparente autour d'un glyphe rétrécirait donc son encre
+    /// en silence, d'autant plus que la marge est large — précisément le défaut qu'`ui_icons`
+    /// corrigeait à la volée avant la migration du 2026-09-10, ses fichiers sources laissant des
+    /// canevas de 18 et 22 px pour des encres de 13 et 16. Ce test l'attrape au retraitement de
+    /// l'asset, pas au retour utilisateur.
+    ///
+    /// **Un pixel de tolérance** sur chaque axe : la frange d'antialiasing d'un détourage peut
+    /// tomber sous [`ALPHA_THRESHOLD`] sur la dernière rangée — c'est le cas de
+    /// `icon-external-link.png`, dont la dernière ligne plafonne à un alpha de 6. Ce n'est pas une
+    /// marge, et ce test vise les marges (plusieurs pixels), pas la frange.
+    #[test]
+    fn les_glyphes_d_icone_sont_detoures_au_pixel_pres() {
+        /// Écart admis entre le canevas et l'encre, par axe — voir la doc de la fonction.
+        const TOLERANCE: u32 = 1;
+        for texture in DsTexture::ALL.iter().copied() {
+            if texture.icon_content_size().is_none() {
+                continue;
+            }
+            let spec = texture.spec();
+            let img = decode(spec.bytes);
+            let encre = ink_bbox(&img);
+            let (canevas_x, canevas_y) = img.dimensions();
+            assert!(
+                canevas_x - encre.0 <= TOLERANCE && canevas_y - encre.1 <= TOLERANCE,
+                "{} : canevas {:?}, encre {encre:?} — marge transparente à retirer",
+                spec.name,
+                img.dimensions(),
+            );
+        }
+    }
+
+    /// Les cinq socles de bouton icône font la taille native que le composant suppose.
+    #[test]
+    fn les_socles_de_bouton_icone_font_la_taille_native() {
+        for texture in [
+            DsTexture::ButtonIcon,
+            DsTexture::ButtonIconHover,
+            DsTexture::ButtonIconFirstPlan,
+            DsTexture::ButtonIconFirstPlanHover,
+            DsTexture::ButtonIconDisabled,
+        ] {
+            let spec = texture.spec();
+            let img = decode(spec.bytes);
+            let attendu = tokens::ICON_BUTTON_SIZE as u32;
+            assert_eq!(
+                img.dimensions(),
+                (attendu, attendu),
+                "{} : {:?} au lieu de {attendu} × {attendu}",
+                spec.name,
+                img.dimensions(),
+            );
         }
     }
 }
