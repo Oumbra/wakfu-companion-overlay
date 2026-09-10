@@ -250,9 +250,14 @@ impl Widget for Input<'_> {
             let side = height * tokens::INPUT_LEADING_ICON_RATIO;
             let inset = height * tokens::INPUT_LEADING_ICON_INSET_RATIO;
             let gap = height * tokens::INPUT_LEADING_ICON_GAP_RATIO;
+            // `glyph_fit` et non `Vec2::splat` : le paramètre accepte n'importe quel
+            // `DsTexture`, et un carré déformerait tout glyphe qui n'en est pas un. La règle est
+            // celle du design system, partagée avec le bouton icône — il ne doit y en avoir
+            // qu'une.
+            let native = crate::design::DesignSystem::get(ui.ctx()).native_size(icon);
             let icon_rect = egui::Rect::from_center_size(
                 egui::pos2(rect.left() + inset + side / 2.0, rect.center().y),
-                Vec2::splat(side),
+                super::icon_button::glyph_fit(native, side),
             );
             if ui.is_rect_visible(rect) {
                 let tint = match state {

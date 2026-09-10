@@ -268,6 +268,22 @@ impl Widget for IconButton {
     }
 }
 
+/// Met un glyphe à l'échelle **en conservant ses proportions**, pour tenir dans un carré de côté
+/// `box_side`.
+///
+/// C'est la règle de mise à l'échelle d'un glyphe du design system, et il ne doit y en avoir
+/// qu'une : peindre dans un carré (`Vec2::splat`) déforme tout glyphe qui n'en est pas un — le
+/// trait du moins (14 × 2) devient un pavé, un chevron (14 × 8) un carré. Trois occurrences de ce
+/// défaut ont été relevées pendant la revue des maquettes de la page Alertes, dont une **dans le
+/// design system** : `Input::leading_icon` peignait son ornement en `Vec2::splat`, sans effet
+/// visible tant que la loupe (24 × 24) était le seul glyphe passé, mais faux pour tout autre.
+///
+/// Extraite d'[`icon_draw_size`] pour cette raison — elle en est le cœur, et le seul appelant
+/// n'était plus le bouton icône.
+pub fn glyph_fit(native: Vec2, box_side: f32) -> Vec2 {
+    native * (box_side / native.x.max(native.y))
+}
+
 /// Taille à laquelle peindre l'icône sur un bouton de côté `button_size`.
 ///
 /// Le socle et l'icône partagent le **même facteur d'échelle**, dérivé de la largeur du socle : une
@@ -283,7 +299,7 @@ fn icon_draw_size(native: Vec2, content: Option<f32>, button_size: f32) -> Vec2 
     let scale = button_size / tokens::ICON_BUTTON_SIZE;
     match content {
         // Rapport commun aux deux axes : une icône normalisée garde ses proportions.
-        Some(target) => native * (target / native.x.max(native.y)) * scale,
+        Some(target) => glyph_fit(native, target) * scale,
         None => native * scale,
     }
 }
