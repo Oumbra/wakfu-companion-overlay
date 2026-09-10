@@ -88,8 +88,13 @@ C'est le seul endroit du crate où un chemin d'asset est écrit. Un composant ne
 
 Un fichier par composant dans `crates/overlay-ui/src/design/components/`. Le **contrat** (API,
 états, journalisation, ce qui est interdit) est dans
-[`references/contrat-composant.md`](references/contrat-composant.md) — le lire, il est court, et
-`button.rs` en est l'implémentation de référence.
+[`references/contrat-composant.md`](references/contrat-composant.md) — le lire, il est court.
+
+**Feuille ou conteneur ?** C'est la première chose à trancher, et le critère est mécanique :
+*l'appelant fournit-il du contenu à encadrer ?* Non → **feuille**, `impl egui::Widget`, référence
+`button.rs`. Oui → **conteneur**, un `show` générique sur le retour du contenu, référence
+`scroll_area.rs`. §1 et §1 bis du contrat. Le reste — états, géométrie, journalisation, galerie —
+est commun aux deux.
 
 Les valeurs numériques (corps de police, marges, proportions) vont dans `design/tokens.rs`, avec
 **la provenance de chaque valeur** : mesure pixel, capture de référence, ou aveu explicite qu'il
