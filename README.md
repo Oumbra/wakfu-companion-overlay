@@ -16,6 +16,28 @@ cours — deux panneaux réels (dégâts du combat, récap de session) tournent 
 ingestion du log, rendu et click-through par OS, synchronisation serveur, budget mémoire,
 feuille de route et revue d'experts.
 
+## Mise en route (développement)
+
+Après un clone, dans l'ordre :
+
+```bash
+bash patches/setup-vendor.sh    # vendor/wgpu-hal patché, requis par [patch.crates-io] (voir Cargo.toml)
+bash scripts/install-hooks.sh   # hook pre-push : rejoue les lints du CI avant chaque push
+```
+
+La version de Rust est **épinglée** par [`rust-toolchain.toml`](rust-toolchain.toml) : `rustup`
+installe et sélectionne la bonne toolchain tout seul dès la première commande `cargo` lancée depuis
+le dépôt. C'est ce qui garantit que `cargo fmt` et `clippy` rendent ici le même verdict qu'en CI —
+sans cet épinglage, la sortie d'une nouvelle version de Rust suffit à faire rougir le CI sur du
+code que personne n'a touché.
+
+Avant de pousser (le hook `pre-push` le fait pour les lints) :
+
+```bash
+bash scripts/ci-local.sh          # tout : format, clippy, tests
+bash scripts/ci-local.sh --lint   # format + clippy seulement (rapide)
+```
+
 ## Crates (`crates/`)
 
 | Crate | Lot | Contenu |

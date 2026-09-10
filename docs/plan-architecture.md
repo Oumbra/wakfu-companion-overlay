@@ -908,6 +908,23 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   version du binaire (asset versionné + signature) — c'est ce qui permet de suivre une correction de
   parsing du dépôt web sans republier l'overlay.
 - CI GitHub Actions : build Windows + Linux, tests de parité, budget mémoire, lint `clippy -D warnings`.
+- **Version de Rust épinglée** par `rust-toolchain.toml` (décision du 2026-09-10), et non plus
+  suivie sur `stable`. Motif : `cargo fmt --check` et `clippy -D warnings` sont des gates dont le
+  verdict dépend de la version de l'outil — tant que le CI suivait `stable`, la sortie d'une
+  nouvelle version de Rust suffisait à le faire rougir sur du code inchangé, sans qu'un poste de
+  dev à une autre version puisse le reproduire (c'est ce qui a tenu le CI rouge du 2026-09-01 au
+  2026-09-10, sur un seul écart de format dans `session.rs`). Monter Rust devient un changement
+  explicite, dans son propre commit. Plancher : `rust-version = 1.95` déclaré par egui 0.36.1.
+- **Garde-fou local** : `scripts/ci-local.sh` rejoue les vérifications du CI pour la plateforme
+  courante, et le hook `pre-push` de `.githooks/` (activé par `scripts/install-hooks.sh`) le lance
+  en mode `--lint` avant chaque push. Le script double volontairement le workflow — les deux listes
+  d'étapes doivent être maintenues ensemble.
+- **Dépôt privé, minutes Actions comptées** (jobs Windows facturés au double) : le workflow met en
+  cache `~/.cargo`/`target` (`Swatinem/rust-cache`) et le `vendor/wgpu-hal` patché, annule les runs
+  obsolètes d'une même branche (`concurrency`), et ignore les pushs purement documentaires
+  (`paths-ignore` : `docs/**`, `**/*.md`, `.claude/**` — jamais `assets/**`, embarqué par
+  `include_bytes!`). Symptôme d'un quota épuisé, à ne pas confondre avec une régression : tous les
+  jobs échouent en quelques secondes, sans log ni runner assigné.
 
 ---
 
