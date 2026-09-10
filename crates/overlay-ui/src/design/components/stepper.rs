@@ -30,6 +30,17 @@
 //! | Gouttière | [`tokens::STEPPER_GUTTER_RATIO`] | 26 + 7 + 38 + 7 + 26 = 104 ; 34 + 9 + 106 + 9 + 34 = 192 |
 //! | Encre du glyphe | [`tokens::STEPPER_ICON_RATIO`] | 12 × 12 mesurés dans un socle de 32 |
 //!
+//! ## Ce qui n'est pas un pas
+//!
+//! **Le carré de contrôle du panneau Suivi**, malgré son « + » et son « − »
+//! (`panels::watchlist::control_button_row`) : c'est une grille 2 × 2 d'actions indépendantes —
+//! « + » ajoute un objet au suivi, « − » en retire un — sans champ au milieu, sur le socle de
+//! premier plan (36 px) et non sur celui d'un pas (32 px). Il est déjà sur
+//! [`design::icon_button`](super::icon_button), qui est le bon composant pour lui.
+//!
+//! La distinction n'est pas cosmétique : un pas **incrémente une valeur qu'il affiche**. Sans
+//! valeur affichée entre les deux boutons, ce n'est pas un pas.
+//!
 //! ## Ce qu'il ne fait pas
 //!
 //! Il ne décide pas de ce qu'une valeur hors bornes doit devenir : il **écrête** au domaine donné
