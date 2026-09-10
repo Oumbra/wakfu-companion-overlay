@@ -456,10 +456,12 @@ de peinture : `modale_options_sur_damier` mesure le même contraste résiduel de
 
 ### Reste à faire
 
-- **Le panneau de section sur sa propre texture.** Il est encore peint (`SECTION_BG`, alpha 230
-  déviant du jeu qui est opaque). Le découpage du corps a montré ce qu'il est réellement : non pas
-  une surface à part mais **le même fond assombri de neuf niveaux**, que la texture traverse. Le
-  produire suit exactement la méthode du corps — c'est le prochain chantier.
+- ~~**Le panneau de section sur sa propre texture.**~~ Fait le 2026-09-10 :
+  `DsTexture::ModalSection` (`modal-section.png`, §9 quater du design-system). Le découpage a
+  confirmé ce que le corps laissait deviner — non pas une surface à part mais **le même fond
+  assombri de huit à neuf niveaux**, que le décor traverse — et corrigé au passage une erreur de
+  prémultiplication qui peignait l'aplat 2,3 niveaux trop clair. L'alpha 230 reste une déviation
+  assumée, sans effet mesurable (0,7 de contraste résiduel sous le panneau).
 - **Gouttière du pied de page** : 12 px chez nous, 11 px relevés entre `btn-cancel` (finit à x=355)
   et `btn-confirm` (commence à x=366). Écart d'un pixel, à reprendre pour la forme.
 - ~~**Une capture qui montre enfin le chrome.**~~ Faite : `options_modale_sur_damier` peint un

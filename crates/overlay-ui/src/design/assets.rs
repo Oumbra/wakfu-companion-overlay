@@ -138,8 +138,8 @@ pub const SELECT_SLICE: NineSlice = NineSlice::new(
 pub const ICON_BUTTON_SLICE: NineSlice =
     NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
 
-/// Découpage du corps de modale (`modal-body.png`, 720 × 505) : **130px figés à gauche, 205 à
-/// droite, 110 en haut, 170 en bas**.
+/// Découpage du corps de modale (`modal-body.png`, 720 × 505) : **125px figés à gauche, 195 à
+/// droite, 110 en haut, 180 en bas**.
 ///
 /// Quatre valeurs distinctes, contrairement à tout le reste du manifeste, parce que le décor de
 /// cette texture est franchement asymétrique — et c'est encore lui qui dimensionne, comme sur un
@@ -150,7 +150,7 @@ pub const ICON_BUTTON_SLICE: NineSlice =
 /// demande plus que le haut parce que le pourtour des deux boutons de pied de page y concentre les
 /// croisillons les plus marqués.
 ///
-/// Les deux totaux (335 en X, 280 en Y) laissent une vraie bande médiane à la taille où la modale
+/// Les deux totaux (320 en X, 290 en Y) laissent une vraie bande médiane à la taille où la modale
 /// est peinte aujourd'hui (560 × 380) : c'est elle qui absorbe le changement de dimensions, sans
 /// toucher au décor.
 ///
@@ -158,10 +158,33 @@ pub const ICON_BUTTON_SLICE: NineSlice =
 /// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
 pub const MODAL_BODY_SLICE: NineSlice = NineSlice::new(
     Insets {
-        left: 130.0,
+        left: 125.0,
         top: 110.0,
-        right: 205.0,
-        bottom: 170.0,
+        right: 195.0,
+        bottom: 180.0,
+    },
+    Fill::Stretch,
+    Fill::Stretch,
+);
+
+/// Découpage du panneau de contenu (`modal-section.png`, 688 × 375) : **105px figés à gauche,
+/// 175 à droite, 50 en haut, 120 en bas**.
+///
+/// Même règle que [`MODAL_BODY_SLICE`], appliquée au même décor : le cadre de hachures de la
+/// fenêtre traverse le panneau et se concentre dans ses quatre angles. Les marges sont les plus
+/// petites qui contiennent 90 % du décor de chaque côté
+/// (`tools/design-system/build_modal_section.py`). Elles sont plus courtes que celles du corps,
+/// parce que le panneau ne voit qu'une partie du cadre — celle qui tombe dans son rectangle.
+///
+/// Totaux 280 en X et 170 en Y : le panneau est peint à 520 × 253 dans la modale actuelle, la
+/// bande médiane existe donc sur les deux axes. Et c'est un fond encore plus plat que celui du
+/// corps — moins de deux niveaux d'un bord à l'autre — donc rien à répéter, `Fill::Stretch`.
+pub const MODAL_SECTION_SLICE: NineSlice = NineSlice::new(
+    Insets {
+        left: 105.0,
+        top: 50.0,
+        right: 175.0,
+        bottom: 120.0,
     },
     Fill::Stretch,
     Fill::Stretch,
@@ -288,6 +311,17 @@ pub enum DsTexture {
     /// elle, ne vient plus de la couleur mais de la teinte passée à la peinture — voir
     /// `panels::options_modal`.
     ModalBody,
+    /// Panneau de contenu de la modale Options (`modal-section.png`, 688 × 375) — l'encadré qui
+    /// tient les sections, découpé des mêmes six captures que [`DsTexture::ModalBody`]
+    /// (`tools/design-system/build_modal_section.py`, §9 quater du design-system).
+    ///
+    /// **Ce n'est pas une surface à part** : c'est le fond de la fenêtre assombri de huit à neuf
+    /// niveaux (`#1E2126` → `#15191C`), que le décor de la fenêtre traverse — les hachures s'y
+    /// retrouvent, aux quatre angles. La texture porte ce fond, son liseré de 2px et l'arrondi de
+    /// rayon 6 de ses angles, celui-ci dans son alpha comme pour un bouton.
+    ///
+    /// Remplace l'aplat `SECTION_BG` + `rect_stroke` qui le peignaient jusqu'ici.
+    ModalSection,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -343,6 +377,7 @@ impl DsTexture {
         DsTexture::IconTick,
         DsTexture::IconUndo,
         DsTexture::ModalBody,
+        DsTexture::ModalSection,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -559,6 +594,11 @@ impl DsTexture {
                 name: "ds-modal-body",
                 bytes: ds_asset!("modal-body.png"),
                 slice: MODAL_BODY_SLICE,
+            },
+            DsTexture::ModalSection => DsTextureSpec {
+                name: "ds-modal-section",
+                bytes: ds_asset!("modal-section.png"),
+                slice: MODAL_SECTION_SLICE,
             },
         }
     }
