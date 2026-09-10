@@ -156,6 +156,15 @@ pub const ICON_BUTTON_SLICE: NineSlice =
 ///
 /// `Fill::Stretch` sur les deux axes : cette bande médiane est un fond quasi uni — moins de deux
 /// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
+/// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — **aucun décor à figer**.
+///
+/// Mesuré (`component.py insets`) : rayon d'angle 3, aucun liseré, bruit de décor 0,05 sur 255 —
+/// c'est un aplat, contrairement aux socles de bouton icône qui portent un liseré kaki. Six pixels
+/// de marge, soit deux fois le rayon, suffisent donc à figer les angles ; vérifié sur une planche
+/// 9-slice à 24 × 24, 32 × 32, 48 × 32 et 64 × 32 avant d'écrire la moindre ligne de Rust.
+pub const STEPPER_SLICE: NineSlice =
+    NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
+
 /// Bannière de la modale Options (`modal-header.png`, 720 × 56) — **aucune marge figée**.
 ///
 /// Son motif de losanges est réparti sur toute la largeur : ce ne sont pas des embouts d'extrémité
@@ -353,6 +362,23 @@ pub enum DsTexture {
     /// dernière raison d'exister de `OptionsModalAssets`, de sa fonction de décodage et du champ
     /// `options_assets` que `RenderContent` promenait jusqu'au panneau.
     ModalHeader,
+    /// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — le carré sombre qui porte le
+    /// « − » et le « + » d'un pas numérique (`design::stepper`).
+    ///
+    /// **Ce n'est pas le socle d'un bouton icône** : le jeu en a deux familles distinctes, et
+    /// celle-ci est un aplat gris-bleu sans liseré (`#2b2d33`), plus discrète, faite pour être
+    /// encastrée à côté d'un champ — là où `button-icon.png` porte un liseré kaki et vit dans un
+    /// panneau.
+    ///
+    /// **Générifiée le 2026-09-10** depuis `button-moins.png`, qui portait son glyphe incrusté —
+    /// exactement l'« asset par libellé » que le skill `ui-component` interdit. Reconstruction par
+    /// diffusion (`dsimg.py genericize --method diffusion`) : résidu maximal de 4/255 dans la zone
+    /// du glyphe, imperceptible. `button-plus.png` en diffère de 70 pixels, tous dans son glyphe :
+    /// c'est bien un seul socle pour les deux boutons.
+    ///
+    /// Les glyphes, eux, viennent du manifeste ([`DsTexture::IconPlus`], [`DsTexture::IconMinus`])
+    /// et sont posés par `design::icon_button` — un socle, deux glyphes, jamais deux textures.
+    ButtonStepper,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -410,6 +436,7 @@ impl DsTexture {
         DsTexture::ModalBody,
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
+        DsTexture::ButtonStepper,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -636,6 +663,11 @@ impl DsTexture {
                 name: "ds-modal-header",
                 bytes: ds_asset!("modal-header.png"),
                 slice: BANNER_SLICE,
+            },
+            DsTexture::ButtonStepper => DsTextureSpec {
+                name: "ds-button-stepper",
+                bytes: ds_asset!("button-stepper.png"),
+                slice: STEPPER_SLICE,
             },
         }
     }

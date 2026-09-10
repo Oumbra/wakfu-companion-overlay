@@ -103,6 +103,7 @@ pub struct Input<'a> {
     size: InputSize,
     width: Option<f32>,
     enabled: bool,
+    read_only: bool,
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<InputState>,
@@ -118,6 +119,7 @@ impl<'a> Input<'a> {
             size: InputSize::Standard,
             width: None,
             enabled: true,
+            read_only: false,
             tooltip: None,
             log_name: None,
             forced_state: None,
@@ -161,6 +163,17 @@ impl<'a> Input<'a> {
     /// contenu au moment où on le place, sa largeur ne peut venir que de la mise en page.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Champ **non éditable, mais d'apparence normale** — à ne pas confondre avec
+    /// `enabled(false)`, qui grise la valeur pour dire « ce réglage ne s'applique pas ».
+    ///
+    /// Un champ en lecture seule affiche une valeur qui compte, et que l'utilisateur change par un
+    /// autre moyen : c'est le cas du champ central d'un [`design::stepper`](super::stepper), dont
+    /// la valeur se règle aux deux boutons. Le jeu l'écrit dans son or habituel, pas en gris.
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
         self
     }
 
@@ -288,11 +301,15 @@ impl Widget for Input<'_> {
 
         let empty = self.text.is_empty();
         let enabled = self.enabled;
+        // `interactive(false)` et non `add_enabled(false)` : le premier retire la saisie et le
+        // focus en laissant la valeur peinte de sa couleur normale, le second la grise. Un champ en
+        // lecture seule n'est pas un champ désactivé — voir `Input::read_only`.
         let edit = egui::TextEdit::singleline(self.text)
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO)
             .font(font.clone())
             .text_color(value_color)
+            .interactive(!self.read_only)
             .desired_width(text_rect.width());
         let edit_response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
@@ -360,7 +377,7 @@ impl Widget for Input<'_> {
         }
 
         let response = frame_response.union(edit_response);
-        let response = if enabled {
+        let response = if enabled && !self.read_only {
             response.on_hover_cursor(egui::CursorIcon::Text)
         } else {
             response

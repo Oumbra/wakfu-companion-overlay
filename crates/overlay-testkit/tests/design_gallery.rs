@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 3480.0))
+        .with_size(Vec2::new(760.0, 3660.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -538,6 +538,52 @@ fn gallery(ui: &mut egui::Ui) {
         .width(590.0)
         .log_name("galerie.info-reference"),
     );
+
+    heading(
+        ui,
+        "Pas numérique — socle 32 px, gouttière et encre au rapport",
+        "Deux boutons icône au contexte Stepper et un champ entre eux. Aux trois tailles : la gouttière et le glyphe suivent le socle. Le dernier est aux cotes exactes de large-input-number.png (192 x 34) — à comparer directement avec la capture du jeu.",
+    );
+    for (cote, champ, valeur, borne) in [
+        (26.0_f32, 38.0_f32, 1_i64, 1_i64..=99),
+        (32.0, 70.0, 12, 1..=99),
+        (34.0, 106.0, 7, 1..=99),
+    ] {
+        let mut v = valeur;
+        ui.add(
+            design::stepper(&mut v)
+                .size(cote)
+                .field_width(champ)
+                .range(borne)
+                .log_name("galerie.pas"),
+        );
+    }
+    // Les deux bornes : à la borne basse le « − » est désactivé, à la haute le « + ».
+    ui.horizontal(|ui| {
+        let mut bas = 1_i64;
+        ui.add(
+            design::stepper(&mut bas)
+                .field_width(70.0)
+                .range(1..=99)
+                .log_name("galerie.pas-borne-basse"),
+        );
+        ui.add_space(18.0);
+        let mut haut = 99_i64;
+        ui.add(
+            design::stepper(&mut haut)
+                .field_width(70.0)
+                .range(1..=99)
+                .log_name("galerie.pas-borne-haute"),
+        );
+        ui.add_space(18.0);
+        let mut off = 42_i64;
+        ui.add(
+            design::stepper(&mut off)
+                .field_width(70.0)
+                .enabled(false)
+                .log_name("galerie.pas-desactive"),
+        );
+    });
 
     heading(
         ui,

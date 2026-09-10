@@ -551,3 +551,58 @@ pub const HEADING_INK_TOP: f32 = 6.0;
 
 /// Écart entre un titre de section et la première ligne qui le suit.
 pub const HEADING_TO_ROW: f32 = 7.0;
+
+// ---------------------------------------------------------------------------------------------
+// Pas numérique — `design::stepper`
+//
+// Mesuré le 2026-09-10 sur les DEUX captures du jeu, `input-number.png` (104 × 28) et
+// `large-input-number.png` (192 × 34), segmentées par la couleur de bordure du champ. Les deux
+// donnent les mêmes rapports, ce qui est la seule raison de les écrire en rapports plutôt qu'en
+// pixels : le pas du jeu existe à deux échelles, et il se met à l'échelle sans se déformer.
+// ---------------------------------------------------------------------------------------------
+
+/// Côté natif du socle d'un bouton de pas — la taille utile de `button-stepper.png`, détourée.
+///
+/// L'asset source (`button-moins.png`) fait 34 × 34 avec un pixel transparent tout autour ; le
+/// socle lui-même fait 32 × 32. C'est cette valeur-là qui est l'étalon, pas celle du fichier.
+///
+/// **Écart assumé avec `design-tokens.json`**, qui cote `stepper_button_square` à 30 : cette
+/// valeur-là a été lue à l'œil sur une capture d'écran en 2026-09-05, celle-ci est mesurée sur
+/// l'asset détouré. La mesure sur l'asset l'emporte.
+pub const STEPPER_SIZE: f32 = 32.0;
+
+/// Gouttière entre un bouton de pas et le champ, **en rapport de la taille du socle**.
+///
+/// Mesuré sur les deux captures : 7 px pour un socle de 26 (`input-number.png`, 26 + 7 + 38 + 7 +
+/// 26 = 104) et 9 px pour un socle de 34 (`large-input-number.png`, 34 + 9 + 106 + 9 + 34 = 192).
+/// Soit 0,269 et 0,265 — la moyenne, arrondie au millième.
+pub const STEPPER_GUTTER_RATIO: f32 = 0.267;
+
+/// Plus grande dimension d'encre d'un glyphe de pas, **en rapport de la taille du socle**.
+///
+/// Mesuré : l'encre du « + » incrusté fait 12 × 12 et celle du « − » 12 × 2, dans un socle de 32.
+///
+/// **Ce n'est pas la grille des boutons icône** ([`ICON_BUTTON_CONTENT`], 18 pour un socle de 36,
+/// soit 0,5). Le jeu a deux grilles distinctes pour ses deux familles de socles, et un même glyphe
+/// — le « + » — s'y peint à 18 dans une barre de premier plan et à 12 dans un pas. La taille
+/// d'encre est donc une propriété du **couple (asset, contexte)**, pas de l'asset seul : c'est
+/// pourquoi `IconContext` la porte pour ce contexte-là, plutôt que le manifeste.
+pub const STEPPER_ICON_RATIO: f32 = 12.0 / 32.0;
+
+/// Teinte des glyphes d'un pas — **l'or du jeu, au repos comme au survol**.
+///
+/// Mesuré au pixel sur `large-input-number.png` : le « − » y est uniformément `#f4d89f`. C'est un
+/// troisième comportement, distinct des deux autres contextes de bouton icône, qui peignent leur
+/// glyphe en gris clair ([`ICON_TINT`]) et ne passent à l'or qu'au survol ([`ICON_TINT_HOVER`]).
+///
+/// Même valeur qu'`ICON_TINT_HOVER` à ce jour, et ce n'est pas un oubli : les deux disent des
+/// choses différentes — l'un est un état, l'autre une couleur de repos. Le jour où une capture
+/// survolée d'un pas existera, seul celui-ci bougera.
+pub const STEPPER_ICON_TINT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
+/// Hauteur du champ central d'un pas, **en rapport de la hauteur du pas**.
+///
+/// Mesuré sur `large-input-number.png` : la bordure du champ court de y=4 à y=29, soit 26 px dans
+/// un pas de 34. Le champ ne garde donc PAS sa hauteur native de 25 px comme ailleurs — il suit son
+/// pas, et un pas rendu plus grand a un champ plus grand.
+pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 26.0 / 34.0;
