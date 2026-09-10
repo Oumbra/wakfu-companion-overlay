@@ -610,8 +610,9 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
 
 /// Retour utilisateur explicite 2026-09-08 : « je veux que tous les boutons se comportent EXACT de
 /// la même façon que ajouter et supprimer [...] quand on clique, il repasse en mode normal et quand
-/// on relâche, ils redeviennent en mode over ». Avant le correctif de `icon_button::
-/// paint_icon_button` (voir sa doc), ce n'était vrai que pour "+"/"−" (`Sense::hover()`) : un clic
+/// on relâche, ils redeviennent en mode over ». Avant le correctif du 2026-09-08 (alors dans
+/// `panels::icon_button::paint_icon_button`, depuis remplacé par `design::icon_button`), ce
+/// n'était vrai que pour "+"/"−" (`Sense::hover()`) : un clic
 /// maintenu sur "Détails"/"Options" (`Sense::click()`) gardait l'apparence "survolée" tout du long
 /// (`response.hovered()` reste `true` pendant un clic pour un widget `Sense::click()`, contrairement
 /// à `Sense::hover()` — comportement NATIF d'egui, voir la doc du correctif), sans jamais repasser

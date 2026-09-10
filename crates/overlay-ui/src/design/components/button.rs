@@ -161,8 +161,8 @@ impl ButtonSize {
 /// **Il n'y a délibérément pas d'état « pressé » distinct** (décision utilisateur 2026-09-09) :
 /// dans le jeu, appuyer fait *disparaître* l'apparence survolée — le bouton retombe au repos tant
 /// que le bouton de souris est enfoncé, et repasse en survol au relâchement. C'est exactement la
-/// règle déjà appliquée aux boutons icône (`panels::icon_button::paint_icon_button`, correctif
-/// 2026-09-08), reprise ici pour que les deux familles de boutons se comportent à l'identique.
+/// règle déjà appliquée aux boutons icône (correctif 2026-09-08, alors dans le prédécesseur maison
+/// de `design::icon_button`), reprise ici pour que les deux familles se comportent à l'identique.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonState {
     Idle,
@@ -170,9 +170,10 @@ pub enum ButtonState {
     Disabled,
 }
 
-/// Atténuation appliquée à la texture désactivée. Même principe (et même intensité) que
-/// `panels::icon_button::DISABLED_TINT` : un multiplicateur d'alpha, pour que l'état désactivé se
-/// lise aussi sur une capture statique, en plus de la texture grise et du libellé gris.
+/// Atténuation appliquée à la texture désactivée. Même principe que
+/// [`crate::design::tokens::DISABLED_DIM`], en plus léger : un multiplicateur d'alpha, pour que
+/// l'état désactivé se lise aussi sur une capture statique, en plus de la texture grise et du
+/// libellé gris.
 const DISABLED_TINT: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 190);
 
 /// Construit un bouton du design system. Point d'entrée unique — voir la doc de module.
