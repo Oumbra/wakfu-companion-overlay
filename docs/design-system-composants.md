@@ -474,6 +474,57 @@ exactement, sans interpolation.
 
 ---
 
+## `design::scroll_area` — zone défilable (2026-09-10)
+
+`crates/overlay-ui/src/design/components/scroll_area.rs`
+
+```rust
+use overlay_ui::design;
+
+design::scroll_area("options-contenu").show(ui, |ui| {
+    // le contenu qui peut déborder
+});
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `id_salt` (à la construction) | distingue deux zones du même panneau ; porte la position de défilement | — |
+| `auto_shrink` | laisse la zone se rétrécir à son contenu | `false` — un panneau du jeu occupe toute sa hauteur |
+
+**Ce n'est pas un `Widget`, et c'est le seul écart au contrat** : il prend une closure de contenu, il
+ne peut donc pas rendre une `Response` à partir de rien. `egui::ScrollArea` n'en est pas un non plus,
+pour la même raison.
+
+**Aucun rail.** Le relevé est catégorique : « le fond du panneau tient lieu de gouttière ». C'est ce
+qui rend ce composant particulier — `egui::ScrollArea` peint par défaut un rail derrière sa poignée,
+et `extreme_bg_color` est le seul jeton qu'elle consulte pour ce fond. Il est mis à transparent dans
+un `scope`, pour ne pas fuir vers le reste du panneau.
+
+**Mesures** (`releve-modale-options.json`, nœuds `scrollbar-thumb` et `panel`, recoupés avec les deux
+assets ligne y=150) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Poignée | 6px de large | x 685..691 sur la modale, x 5..10 sur les assets |
+| Rayon | 3 | relevé |
+| Poignée au repos | `#515356` | relevé de la modale (l'asset donne `#5e5f62`, §5.9 `#5c5e61`) |
+| Poignée survolée / tirée | `#c1ad83` | `scrollbar-active.png` |
+| Marge contenu → poignée | 6px | 679 → 685 |
+| Marge poignée → bord | 14px | 691 → 705 |
+| **Réserve totale** | **26px** | 679 → 705, « même quand la barre ne sert pas » |
+
+**`design::components::scroll_area::RESERVE_X` vaut ces 26px**, et c'est la somme des trois marges.
+Une mise en page peut donc réserver la place **avant** que la barre existe, sans qu'un pixel de
+contenu ne bouge le jour où elle apparaît — c'est ce que fait `panels::options_modal`, ce qui lève la
+déviation qu'il documentait (19px au lieu de 26, faute de barre à y mettre).
+
+**Non reproduit** : l'**ombre portée de 2px** à droite de la poignée. `egui::ScrollArea` peint sa
+poignée elle-même et n'expose aucun point d'accroche pour l'ombrer ; la reproduire demanderait de
+recalculer sa position hors d'egui — un doublon fragile de son propre calcul, pour deux pixels
+sombres sur un fond déjà sombre.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
@@ -484,6 +535,5 @@ Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces
 | **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
 | **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
 | **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
-| **Scrollbar** | `scrollbar-{active,inactive}.png` | §5.9. |
 | **Tuile de portrait / d'ennemi** | `crates/overlay-ui/assets/templates/*.png`, planche d'avatars | Panneau Combat — aujourd'hui entièrement dans `panels::combat` et `panels::combat_frame`. |
 | **Barre de dégâts** | aucun (dessiné à la main) | Total, noms, barres proportionnelles — aujourd'hui dans `panels::combat`. |
