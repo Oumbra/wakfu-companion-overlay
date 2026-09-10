@@ -432,7 +432,7 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
         let font = text::label_font(ui.ctx(), tokens::TAB_FONT_SIZE);
         let design = DesignSystem::get(ui.ctx());
         // Un appui de souris retire l'apparence survolée partout dans l'overlay — même condition
-        // que `design::button` et `panels::icon_button`, sans quoi deux familles de contrôles se
+        // que `design::button` et `design::icon_button`, sans quoi deux familles de contrôles se
         // comporteraient différemment sous la même souris.
         let pointer_down = ui.input(|i| i.pointer.any_down());
 

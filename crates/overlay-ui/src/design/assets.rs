@@ -461,7 +461,7 @@ mod tests {
     use super::*;
 
     /// Seuil d'opacité au-delà duquel un pixel compte comme de l'encre — le même que celui du skill
-    /// `design-asset` et de `ui_icons::normalize_icon_content`, pour que les mesures se comparent.
+    /// `design-asset`, pour que les mesures se comparent d'un outil à l'autre.
     const ALPHA_THRESHOLD: u8 = 10;
 
     /// Boîte englobante des pixels opaques : `(largeur, hauteur)`.
@@ -546,9 +546,10 @@ mod tests {
     ///
     /// C'est l'hypothèse sur laquelle repose `icon_draw_size` : il ramène la plus grande dimension
     /// du FICHIER à l'étalon. Une marge transparente autour d'un glyphe rétrécirait donc son encre
-    /// en silence, d'autant plus que la marge est large — précisément le défaut qui avait motivé
-    /// `ui_icons::normalize_icon_content` à l'époque (canevas de 18 et 22 px pour des encres de 13
-    /// et 16). Ce test l'attrape au retraitement de l'asset, pas au retour utilisateur.
+    /// en silence, d'autant plus que la marge est large — précisément le défaut qu'`ui_icons`
+    /// corrigeait à la volée avant la migration du 2026-09-10, ses fichiers sources laissant des
+    /// canevas de 18 et 22 px pour des encres de 13 et 16. Ce test l'attrape au retraitement de
+    /// l'asset, pas au retour utilisateur.
     ///
     /// **Un pixel de tolérance** sur chaque axe : la frange d'antialiasing d'un détourage peut
     /// tomber sous [`ALPHA_THRESHOLD`] sur la dernière rangée — c'est le cas de

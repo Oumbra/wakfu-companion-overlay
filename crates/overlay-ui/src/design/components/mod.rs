@@ -12,8 +12,8 @@
 //!    à partir de sa variante — l'appelant nomme une intention (`Primary`), pas un fichier.
 //! 4. **États uniformes** : repos / survolé / désactivé, et la règle d'appui commune à toute
 //!    l'UI — *tant qu'un bouton de souris est enfoncé, l'apparence retombe au repos ; elle
-//!    revient au survol au relâchement* (voir `ButtonState`, même règle que
-//!    `panels::icon_button::paint_icon_button`).
+//!    revient au survol au relâchement* (voir `ButtonState`, la même règle dans tous les
+//!    composants qui réagissent au survol).
 //! 5. **Toute taille est valide.** Les textures sont peintes en 9-slice
 //!    (`design::nine_slice`) : jamais un asset par taille.
 //! 6. **Journalisation** : un `tracing::debug!` à l'action (clic), un `tracing::warn!` une seule
