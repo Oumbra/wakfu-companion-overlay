@@ -102,6 +102,15 @@ pub const SELECT_SLICE: NineSlice = NineSlice::new(
     Fill::Stretch,
 );
 
+/// Découpage du socle d'un bouton icône : **6px figés sur les quatre côtés**, comme le haut et le
+/// bas d'un bouton texte.
+///
+/// Un socle carré de 36px n'a pas d'embout décoratif à préserver — juste un bord et un liseré. En
+/// pratique il est presque toujours peint à sa taille native, ce découpage n'existe donc que pour
+/// honorer la règle « toute taille est valide ».
+pub const ICON_BUTTON_SLICE: NineSlice =
+    NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -155,6 +164,24 @@ pub enum DsTexture {
     /// Chevron `⌄` d'une liste déroulante (`icons/icon-chevron-down.png`, 14 × 8) — la taille à
     /// laquelle le jeu le peint, au pixel près.
     IconChevronDown,
+    /// Socle d'un bouton icône posé DANS un panneau (`button-icon.png`, 36 × 36).
+    ButtonIcon,
+    ButtonIconHover,
+    /// Socle d'un bouton icône posé par-dessus le jeu (`button-icon-first-plan.png`, 36 × 36) —
+    /// octet pour octet le `button-background.png` que `ui_icons` charge déjà de son côté.
+    ButtonIconFirstPlan,
+    ButtonIconFirstPlanHover,
+    /// Socle grisé — **une seule texture pour les deux contextes**, le jeu n'en ayant capturé
+    /// qu'une (même parti pris que `ButtonDisabled` pour le bouton texte).
+    ButtonIconDisabled,
+    /// Glyphes des boutons icône de l'overlay. La table ne porte que les icônes réellement
+    /// utilisées : `assets/design-system/icons/` en compte plus de trente, toutes chargées sur le
+    /// GPU dès le premier composant peint (voir `DesignSystem::load`), et il n'y a aucune raison de
+    /// payer celles que personne n'affiche.
+    IconOption,
+    IconExternalLink,
+    IconPlus,
+    IconMinus,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -190,6 +217,15 @@ impl DsTexture {
         DsTexture::CheckboxUnchecked,
         DsTexture::SelectFace,
         DsTexture::IconChevronDown,
+        DsTexture::ButtonIcon,
+        DsTexture::ButtonIconHover,
+        DsTexture::ButtonIconFirstPlan,
+        DsTexture::ButtonIconFirstPlanHover,
+        DsTexture::ButtonIconDisabled,
+        DsTexture::IconOption,
+        DsTexture::IconExternalLink,
+        DsTexture::IconPlus,
+        DsTexture::IconMinus,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -279,6 +315,51 @@ impl DsTexture {
             DsTexture::IconChevronDown => DsTextureSpec {
                 name: "ds-icon-chevron-down",
                 bytes: ds_asset!("icons/icon-chevron-down.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ButtonIcon => DsTextureSpec {
+                name: "ds-button-icon",
+                bytes: ds_asset!("button-icon.png"),
+                slice: ICON_BUTTON_SLICE,
+            },
+            DsTexture::ButtonIconHover => DsTextureSpec {
+                name: "ds-button-icon-hover",
+                bytes: ds_asset!("button-icon-hover.png"),
+                slice: ICON_BUTTON_SLICE,
+            },
+            DsTexture::ButtonIconFirstPlan => DsTextureSpec {
+                name: "ds-button-icon-first-plan",
+                bytes: ds_asset!("button-icon-first-plan.png"),
+                slice: ICON_BUTTON_SLICE,
+            },
+            DsTexture::ButtonIconFirstPlanHover => DsTextureSpec {
+                name: "ds-button-icon-first-plan-hover",
+                bytes: ds_asset!("button-icon-first-plan-hover.png"),
+                slice: ICON_BUTTON_SLICE,
+            },
+            DsTexture::ButtonIconDisabled => DsTextureSpec {
+                name: "ds-button-icon-disabled",
+                bytes: ds_asset!("button-icon-disabled.png"),
+                slice: ICON_BUTTON_SLICE,
+            },
+            DsTexture::IconOption => DsTextureSpec {
+                name: "ds-icon-option",
+                bytes: ds_asset!("icons/icon-option.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconExternalLink => DsTextureSpec {
+                name: "ds-icon-external-link",
+                bytes: ds_asset!("icons/icon-external-link.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconPlus => DsTextureSpec {
+                name: "ds-icon-plus",
+                bytes: ds_asset!("icons/icon-plus.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconMinus => DsTextureSpec {
+                name: "ds-icon-minus",
+                bytes: ds_asset!("icons/icon-minus.png"),
                 slice: ICON_SLICE,
             },
         }

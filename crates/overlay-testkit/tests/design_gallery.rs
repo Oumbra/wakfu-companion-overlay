@@ -20,8 +20,8 @@
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
-    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, InfoTone, InputState, SelectState,
-    TabState,
+    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsTexture, IconButtonState,
+    IconContext, InfoTone, InputState, SelectState, TabState,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2320.0))
+        .with_size(Vec2::new(760.0, 2540.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -406,6 +406,42 @@ fn gallery(ui: &mut egui::Ui) {
                 }
             });
         });
+
+    heading(
+        ui,
+        "Bouton icône — socle 36 px, deux contextes",
+        "L'appelant nomme une intention (FirstPlan ou Panel, IconOption ou IconPlus) : les cinq socles et les glyphes sont résolus par le manifeste, plus par lui. Les icônes sont blanches dans leurs fichiers et prennent leur couleur par teinte.",
+    );
+    for context in [IconContext::FirstPlan, IconContext::Panel] {
+        ui.horizontal(|ui| {
+            for (icon, name) in [
+                (DsTexture::IconOption, "option"),
+                (DsTexture::IconExternalLink, "lien"),
+                (DsTexture::IconPlus, "plus"),
+                (DsTexture::IconMinus, "moins"),
+            ] {
+                ui.add(
+                    design::icon_button(icon)
+                        .context(context)
+                        .log_name(format!("galerie.{name}")),
+                );
+            }
+            ui.add_space(20.0);
+            ui.add(
+                design::icon_button(DsTexture::IconOption)
+                    .context(context)
+                    .preview_state(IconButtonState::Hovered)
+                    .log_name("galerie.icone-survol"),
+            );
+            ui.add(
+                design::icon_button(DsTexture::IconOption)
+                    .context(context)
+                    .enabled(false)
+                    .preview_state(IconButtonState::Disabled)
+                    .log_name("galerie.icone-off"),
+            );
+        });
+    }
 
     heading(
         ui,
