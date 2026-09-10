@@ -541,13 +541,13 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Pas numérique — socle 32 px, gouttière et encre au rapport",
-        "Deux boutons icône au contexte Stepper et un champ entre eux. Aux trois tailles : la gouttière et le glyphe suivent le socle. Le dernier est aux cotes exactes de large-input-number.png (192 x 34) — à comparer directement avec la capture du jeu.",
+        "Pas numérique — socle 32 px, champ à la hauteur de ses boutons",
+        "Deux boutons icône au contexte Stepper et un champ entre eux, tous de la même hauteur. Aux trois tailles : la gouttière et le glyphe suivent le socle. Le deuxième est aux cotes du jeu (socle 32, champ 106) — le jeu, lui, y met un champ de 26 px, écart assumé au profit de l'uniformité.",
     );
     for (cote, champ, valeur, borne) in [
         (26.0_f32, 38.0_f32, 1_i64, 1_i64..=99),
-        (32.0, 70.0, 12, 1..=99),
-        (34.0, 106.0, 7, 1..=99),
+        (32.0, 106.0, 12, 1..=99),
+        (40.0, 140.0, 7, 1..=99),
     ] {
         let mut v = valeur;
         ui.add(
