@@ -20,15 +20,19 @@
 //!
 //! ## Mesures
 //!
-//! Les deux captures du jeu — `input-number.png` (104 × 28) et `large-input-number.png` (192 × 34) —
-//! donnent les **mêmes rapports**, ce qui est la seule raison de les écrire en rapports plutôt qu'en
-//! pixels : le pas existe à deux échelles dans le jeu, et il s'y met à l'échelle sans se déformer.
+//! Tout vient de `large-input-number.png` (192 × 34), la seule capture dont le socle (32 px, y=1..32,
+//! deux boutons symétriques) coïncide avec l'asset isolé `button-moins.png`. La petite capture
+//! (`input-number.png`, 104 × 28) sert de contrôle : sa gouttière concorde à un pixel près, mais son
+//! glyphe fait 12 px dans un socle de 24 — le même que dans un socle de 32. Les deux ne sont donc pas
+//! le même composant à deux échelles (le jeu règle son interface de 67 % à 233 %), et une seule fait
+//! foi. Voir [`tokens::STEPPER_GUTTER_RATIO`].
 //!
 //! | Grandeur | Rapport | Vérification |
 //! | --- | --- | --- |
-//! | Socle | carré, côté = hauteur du pas | 26 sur la petite capture, 34 sur la grande |
-//! | Gouttière | [`tokens::STEPPER_GUTTER_RATIO`] | 26 + 7 + 38 + 7 + 26 = 104 ; 34 + 9 + 106 + 9 + 34 = 192 |
+//! | Socle | carré, côté = hauteur du pas | 32 sur la grande capture (y=1..32), boutons symétriques |
+//! | Gouttière | [`tokens::STEPPER_GUTTER_RATIO`] | 1 + 32 + **10** + 106 + **10** + 32 + 1 = 192 |
 //! | Encre du glyphe | [`tokens::STEPPER_ICON_RATIO`] | 12 × 12 mesurés dans un socle de 32 |
+//! | Hauteur du champ | [`tokens::STEPPER_FIELD_HEIGHT_RATIO`] | **1,0 — écart assumé** : le jeu met 26 pour 32 |
 //!
 //! ## Ce qu'il ne fait pas
 //!
@@ -155,10 +159,10 @@ impl Widget for Stepper<'_> {
         let plus_rect =
             egui::Rect::from_min_size(egui::pos2(rect.right() - size, rect.top()), square);
 
-        // **Le champ d'un pas ne garde pas sa hauteur native**, contrairement à un champ posé sur
-        // une ligne de formulaire : mesuré sur `large-input-number.png`, il fait 26 px dans un pas
-        // de 34, et il suit donc son pas. C'est le jeu qui le dit — le premier jet lui avait laissé
-        // ses 25 px natifs, ce qui le rendait visiblement trop court entre ses deux boutons.
+        // **Le champ fait la hauteur de ses boutons** — il ne garde donc pas sa hauteur native de
+        // 25 px, contrairement à un champ posé sur une ligne de formulaire. Décision utilisateur, et
+        // écart assumé avec le jeu, qui met 26 px de champ pour 32 px de socle : voir
+        // `tokens::STEPPER_FIELD_HEIGHT_RATIO`, qui porte la mesure et la raison.
         let field_height = size * tokens::STEPPER_FIELD_HEIGHT_RATIO;
         let field_rect =
             egui::Rect::from_center_size(rect.center(), Vec2::new(field, field_height));
@@ -223,37 +227,59 @@ mod tests {
     /// Tolérance de comparaison — voir `window::tests`.
     const EPS: f32 = 0.01;
 
-    /// **Le rapport que les deux captures du jeu donnent**, et la seule raison d'écrire la
-    /// gouttière en rapport plutôt qu'en pixels : le pas existe à deux échelles.
+    /// **Le découpage complet de `large-input-number.png`**, la capture de référence :
+    /// 1 + 32 + 10 + 106 + 10 + 32 + 1 = 192.
     #[test]
-    fn la_gouttiere_reproduit_les_deux_captures_du_jeu() {
-        // 26 + 7 + 38 + 7 + 26 = 104 (`input-number.png`)
+    fn la_gouttiere_reproduit_la_capture_de_reference() {
         assert!(
-            (gutter(26.0) - 7.0).abs() < 0.3,
-            "petite capture : {}",
-            gutter(26.0)
-        );
-        // 34 + 9 + 106 + 9 + 34 = 192 (`large-input-number.png`)
-        assert!(
-            (gutter(34.0) - 9.0).abs() < 0.3,
-            "grande capture : {}",
-            gutter(34.0)
+            (gutter(32.0) - 10.0).abs() < EPS,
+            "gouttière de {} au lieu de 10 pour un socle de 32",
+            gutter(32.0),
         );
     }
 
+    /// La petite capture n'est pas la source (voir la doc du jeton), mais elle doit rester
+    /// cohérente à un pixel près — sans quoi le rapport serait à revoir.
+    #[test]
+    fn la_petite_capture_reste_coherente_a_un_pixel() {
+        assert!(
+            (gutter(24.0) - 7.0).abs() <= 1.0,
+            "gouttière de {} pour un socle de 24, la capture en montre 7",
+            gutter(24.0),
+        );
+    }
+
+    /// Aux cotes du jeu : un socle de 32 et un champ de 106 donnent 190 px de large.
+    ///
+    /// La capture, elle, fait 192 : elle inclut **un pixel de fond de chaque côté** (le composant
+    /// y commence à x=1 et finit à x=190). Un composant ne peint pas la marge de son panneau.
     #[test]
     fn la_largeur_desiree_somme_les_deux_boutons_leurs_gouttieres_et_le_champ() {
         let mut valeur = 1;
         let (width, height) = stepper(&mut valeur)
-            .size(34.0)
+            .size(32.0)
             .field_width(106.0)
             .desired_size();
-        assert!((height - 34.0).abs() < EPS);
+        assert!((height - 32.0).abs() < EPS);
         let width = width.expect("champ dimensionné");
         assert!(
-            (width - 192.0).abs() < 1.0,
-            "{width} au lieu des 192 px de large-input-number.png",
+            (width - 190.0).abs() < 1.0,
+            "{width} au lieu des 190 px du composant dans large-input-number.png",
         );
+    }
+
+    /// **Le champ fait la hauteur de ses boutons** — décision utilisateur, écart assumé avec le jeu
+    /// qui met 26 px de champ pour 32 px de socle. Un pas dont le champ serait plus court se
+    /// remarque immédiatement, et c'est ce qui a motivé le changement.
+    #[test]
+    fn le_champ_fait_la_hauteur_des_boutons() {
+        for cote in [24.0_f32, 32.0, 40.0] {
+            assert!(
+                (cote * tokens::STEPPER_FIELD_HEIGHT_RATIO - cote).abs() < EPS,
+                "socle {cote} : champ {}",
+                cote * tokens::STEPPER_FIELD_HEIGHT_RATIO,
+            );
+        }
     }
 
     /// Sans largeur de champ, la largeur totale n'est pas connue avant le rendu — c'est ce que dit

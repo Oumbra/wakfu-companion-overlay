@@ -561,26 +561,47 @@ pub const HEADING_TO_ROW: f32 = 7.0;
 // pixels : le pas du jeu existe à deux échelles, et il se met à l'échelle sans se déformer.
 // ---------------------------------------------------------------------------------------------
 
-/// Côté natif du socle d'un bouton de pas — la taille utile de `button-stepper.png`, détourée.
+/// Côté natif du socle d'un bouton de pas — **32 px**, mesuré deux fois plutôt qu'une.
 ///
-/// L'asset source (`button-moins.png`) fait 34 × 34 avec un pixel transparent tout autour ; le
-/// socle lui-même fait 32 × 32. C'est cette valeur-là qui est l'étalon, pas celle du fichier.
+/// Sur l'asset isolé (`button-moins.png`, 34 × 34) : un pixel transparent tout autour, socle utile
+/// 32 × 32. Sur la capture composée (`large-input-number.png`, 34 de haut) : le socle court de y=1
+/// à y=32, et les deux boutons y sont symétriques (x 1..32 et x 159..190). Le fichier fait donc 34,
+/// le bouton 32 — et c'est le bouton qui est l'étalon.
+///
+/// **La confusion des deux a produit un défaut visible** (corrigé le 2026-09-10) : la galerie
+/// rendait ses pas à `size(34.0)`, la hauteur du FICHIER, ce qui donnait des boutons deux pixels
+/// trop hauts et creusait l'écart avec leur champ.
 ///
 /// **Écart assumé avec `design-tokens.json`**, qui cote `stepper_button_square` à 30 : cette
 /// valeur-là a été lue à l'œil sur une capture d'écran en 2026-09-05, celle-ci est mesurée sur
-/// l'asset détouré. La mesure sur l'asset l'emporte.
+/// l'asset ET sur la capture composée. La mesure l'emporte.
 pub const STEPPER_SIZE: f32 = 32.0;
 
 /// Gouttière entre un bouton de pas et le champ, **en rapport de la taille du socle**.
 ///
-/// Mesuré sur les deux captures : 7 px pour un socle de 26 (`input-number.png`, 26 + 7 + 38 + 7 +
-/// 26 = 104) et 9 px pour un socle de 34 (`large-input-number.png`, 34 + 9 + 106 + 9 + 34 = 192).
-/// Soit 0,269 et 0,265 — la moyenne, arrondie au millième.
-pub const STEPPER_GUTTER_RATIO: f32 = 0.267;
+/// **10 px pour un socle de 32**, mesuré sur `large-input-number.png` : le découpage complet y est
+/// 1 + 32 + 10 + 106 + 10 + 32 + 1 = 192, le bouton allant de x=1 à x=32 et son symétrique de
+/// x=159 à x=190, la bordure du champ de x=43 à x=148.
+///
+/// **La petite capture donne 7 pour un socle de 24** (0,292 contre 0,3125) — un pixel d'écart une
+/// fois remise à l'échelle, ce qui passerait. Mais elle diverge franchement sur un autre point :
+/// son glyphe fait **12 px comme celui de la grande**, alors que son socle est d'un quart plus
+/// petit. Les deux captures ne sont donc PAS le même composant à deux échelles — le jeu règle son
+/// interface de 67 % à 233 % (`interface-options-interface.png`), et elles ont vraisemblablement
+/// été prises à deux réglages différents, ce qui ne met pas tout à l'échelle de la même façon.
+///
+/// Tout est donc calé sur la **grande capture**, la seule dont le socle (32) coïncide avec l'asset
+/// isolé `button-moins.png`. La petite reste une vérification de cohérence, pas une source.
+///
+/// Une première version donnait 0,267 : elle divisait par la hauteur du FICHIER (34) au lieu de
+/// celle du socle (32), et par une hauteur de bouton fausse sur la petite capture.
+pub const STEPPER_GUTTER_RATIO: f32 = 10.0 / 32.0;
 
 /// Plus grande dimension d'encre d'un glyphe de pas, **en rapport de la taille du socle**.
 ///
-/// Mesuré : l'encre du « + » incrusté fait 12 × 12 et celle du « − » 12 × 2, dans un socle de 32.
+/// Mesuré : l'encre du « + » incrusté fait 12 × 12 et celle du « − » 12 × 2, dans un socle de 32
+/// (`large-input-number.png`). La petite capture donne la même encre de 12 dans un socle de 24 —
+/// voir [`STEPPER_GUTTER_RATIO`], qui explique pourquoi elle n'est pas retenue comme source.
 ///
 /// **Ce n'est pas la grille des boutons icône** ([`ICON_BUTTON_CONTENT`], 18 pour un socle de 36,
 /// soit 0,5). Le jeu a deux grilles distinctes pour ses deux familles de socles, et un même glyphe
@@ -600,9 +621,15 @@ pub const STEPPER_ICON_RATIO: f32 = 12.0 / 32.0;
 /// survolée d'un pas existera, seul celui-ci bougera.
 pub const STEPPER_ICON_TINT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 
-/// Hauteur du champ central d'un pas, **en rapport de la hauteur du pas**.
+/// Hauteur du champ central d'un pas, **en rapport de la hauteur des boutons**.
 ///
-/// Mesuré sur `large-input-number.png` : la bordure du champ court de y=4 à y=29, soit 26 px dans
-/// un pas de 34. Le champ ne garde donc PAS sa hauteur native de 25 px comme ailleurs — il suit son
-/// pas, et un pas rendu plus grand a un champ plus grand.
-pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 26.0 / 34.0;
+/// **1,0 — le champ fait exactement la hauteur de ses boutons.** C'est une décision utilisateur
+/// (2026-09-10) et un **écart assumé avec le jeu**, dit ici plutôt que masqué : mesuré sur
+/// `large-input-number.png`, le jeu met un socle de 32 px (y=1..32) et un champ de 26 px (bordure
+/// kaki y=4..29), soit un rapport de 0,81. Un champ plus court que ses boutons a été jugé
+/// « pas très joli » ; l'uniformité l'emporte ici sur la fidélité.
+///
+/// Le jeton reste parce que le rapport reste une question ouverte : si une capture d'une autre
+/// interface montre un jour un pas mieux proportionné, c'est cette valeur-là qui bougera, en un
+/// seul endroit.
+pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 1.0;
