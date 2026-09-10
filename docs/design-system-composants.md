@@ -318,8 +318,16 @@ suffisent donc pour quatre états.
 | --- | --- | --- |
 | Hauteur | **44px**, native | `[72, 116]` dans une bande `[56, 124]` |
 | Séquence entre deux onglets | bord 2px + séparateur 2px + bord 2px | identique sur la capture et sur l'asset |
-| Séparateur | `#595140` | capture de la modale (x 100-101) — le relevé dit `#837d70`, l'asset `#6d6657` ; la capture de la fenêtre qu'on reproduit l'emporte |
+| Hauteur du séparateur | **40px, pas 44** | y 2..41 : le corps de l'onglet, entre ses deux bords sombres |
+| Séparateur | **dégradé vertical `#837d70` → `#595140`** | profil de la colonne x=261 de `tabs-with-first-tab-active.png` |
+| Profil du dégradé | 11px clair, 19px de rampe, 10px sombre | idem |
 | Corps du libellé | 17px (encre 13) | comme tous les libellés du jeu |
+
+**Les trois couleurs relevées pour le séparateur sont un seul dégradé.** `#837d70` (relevé),
+`#6d6657` (asset détouré) et `#595140` (capture de la modale, ligne y=110) ont longtemps semblé se
+contredire, et le jeton tranchait pour la troisième. Aucune n'est fausse : ce sont trois hauteurs du
+même trait. egui ne remplissant pas un rectangle en dégradé, le trait est peint en maillage — deux
+plateaux constants et une rampe interpolée par le GPU, exact à n'importe quelle hauteur de barre.
 
 **Les 6px de gouttière du relevé sont ceux du remplissage**, pas de la boîte : chaque onglet porte
 ses deux bords de 2px, le composant les pose donc à 2px l'un de l'autre et peint le séparateur dans
@@ -332,18 +340,27 @@ premier segment **coin gauche redressé** (reconstruit par le miroir du bord dro
 reproduit** : le bord d'un onglet (`#1c1e21`) et le fond de modale qui l'entoure (`#1c2023`) sont de
 la même valeur, l'arrondi y est invisible.
 
+**Largeur : parts égales sur toute la largeur disponible, et c'est un choix, pas un relevé.** Le jeu
+dimensionne chaque onglet sur son libellé — ses six onglets font 77, 83, 103, 83, 133 et 106px pour
+des encres de 26, 44, 73, 28, 100 et 35 : ni un padding constant, ni le nombre de caractères, ni une
+largeur minimale unique n'en rendent compte. Sa barre ne remplit d'ailleurs pas la fenêtre (elle
+s'arrête à x=636 sur 705) parce que le **bouton de réinitialisation** occupe la droite. Appliquer une
+règle qu'on n'a pas mesurée à trois onglets qui n'ont pas ce bouton laissait la barre à 337px sur les
+743 du panneau, calée à gauche. `fit_content()` rend l'autre comportement, pour comparer à une
+capture du jeu ou pour une barre qui ne doit pas s'étirer.
+
 **Inventé, faute de référence** :
 
-- **La règle de largeur.** Les six onglets du jeu font 77, 83, 103, 83, 133 et 106px pour des encres
-  de 26, 44, 73, 28, 100 et 35 : ni un padding constant, ni le nombre de caractères, ni une largeur
-  minimale unique n'en rendent compte. Le composant retient le padding stable sur les deux libellés
-  longs (`TAB_PADDING_X` = 16) et un plancher au plus petit onglet relevé (`TAB_MIN_WIDTH` = 77). Les
-  libellés longs tombent à 1 et 6px de la référence, les courts ressortent plus étroits.
+- **Le padding de `fit_content()`.** Faute de règle retrouvable (ci-dessus) : le padding stable sur
+  les deux libellés longs (`TAB_PADDING_X` = 16) et un plancher au plus petit onglet relevé
+  (`TAB_MIN_WIDTH` = 77). Les libellés longs tombent à 1 et 6px de la référence, les courts
+  ressortent plus étroits.
 - **L'état désactivé.** Aucune capture d'onglet grisé ; fond inactif et libellé `TEXT_DISABLED`, par
   cohérence avec le bouton désactivé.
 
 **Remplace** : la barre peinte à la main de `panels::options_modal` — texture `menu-tabs.png` de
-44px étirée à 31, libellés en `FontId::proportional(12.0)`, trois tiers égaux, aucun clic.
+44px étirée à 31, libellés en `FontId::proportional(12.0)`, aucun clic. Elle partageait déjà la
+largeur en trois tiers égaux ; c'est le composant qui s'en était écarté, le temps de deux captures.
 
 ---
 
