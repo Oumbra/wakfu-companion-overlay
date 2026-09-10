@@ -76,6 +76,32 @@ pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretc
 /// l'étirement se voit moins qu'un raccord de tuilage au milieu d'un onglet.
 pub const TAB_SLICE: NineSlice = NineSlice::new(Insets::same(4.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage d'un onglet d'**extrémité de barre** : **8px figés du côté arrondi**, 4 des trois
+/// autres.
+///
+/// L'arrondi appartient aux deux bouts de la barre, pas à chaque onglet — et il est porté par
+/// l'alpha de la texture, comme celui d'un bouton, parce qu'un `Mesh` egui ne sait pas découper un
+/// coin. 8 = les 2px de bord + les 4px d'escalier d'alpha + 2 de sécurité, la même règle que
+/// [`SELECT_SLICE`]. Le côté intérieur reste à 4 : il est droit, comme celui d'un onglet du milieu.
+const fn tab_end_slice(left: f32, right: f32) -> NineSlice {
+    NineSlice::new(
+        Insets {
+            left,
+            top: 4.0,
+            right,
+            bottom: 4.0,
+        },
+        Fill::Stretch,
+        Fill::Stretch,
+    )
+}
+
+/// Premier onglet de la barre — arrondi à gauche.
+pub const TAB_SLICE_FIRST: NineSlice = tab_end_slice(8.0, 4.0);
+
+/// Dernier onglet de la barre — arrondi à droite.
+pub const TAB_SLICE_LAST: NineSlice = tab_end_slice(4.0, 8.0);
+
 /// Découpage d'une case à cocher : **5px figés sur les quatre côtés**.
 ///
 /// Mesuré : 2px de fond sombre puis 2px de cadre, plus un pixel de sécurité. Une case est toujours
@@ -153,6 +179,23 @@ pub enum DsTexture {
     /// Onglet inactif — et désactivé, dont seul le libellé change. Découpé du segment du MILIEU du
     /// même fichier, le seul dont les deux coins sont droits.
     TabInactive,
+    /// Onglet actif en PREMIÈRE position — les deux coins gauches arrondis.
+    ///
+    /// Découpé du premier segment de `tabs-with-first-tab-active.png` **sans redresser son coin**,
+    /// contrairement à [`DsTexture::TabActive`] : c'est la même capture, gardée telle quelle. Un
+    /// seul pixel opaque isolé a été retiré de l'angle bas-gauche, résidu du détourage d'origine.
+    TabActiveFirst,
+    /// Onglet actif en DERNIÈRE position — miroir horizontal de [`DsTexture::TabActiveFirst`].
+    ///
+    /// Le jeu n'a pas de capture d'onglet actif en fin de barre. Le miroir est légitime ici : le
+    /// corps d'un onglet est un dégradé **vertical**, ses deux bords sont identiques, et c'est déjà
+    /// la technique qui avait servi à redresser le coin de `tab-active.png`.
+    TabActiveLast,
+    /// Onglet inactif en DERNIÈRE position — les deux coins droits arrondis. Découpé du **dernier**
+    /// segment de la même capture, le seul onglet inactif dont un côté soit arrondi.
+    TabInactiveLast,
+    /// Onglet inactif en PREMIÈRE position — miroir horizontal de [`DsTexture::TabInactiveLast`].
+    TabInactiveFirst,
     /// Case à cocher COCHÉE (`checkbox-true.png`, 20 × 20) — cadre doré vif, carré blanc plein.
     CheckboxChecked,
     /// Case à cocher DÉCOCHÉE (`checkbox-false.png`, 20 × 20) — cadre kaki sombre, intérieur noir.
@@ -213,6 +256,10 @@ impl DsTexture {
         DsTexture::IconInfo,
         DsTexture::TabActive,
         DsTexture::TabInactive,
+        DsTexture::TabActiveFirst,
+        DsTexture::TabActiveLast,
+        DsTexture::TabInactiveFirst,
+        DsTexture::TabInactiveLast,
         DsTexture::CheckboxChecked,
         DsTexture::CheckboxUnchecked,
         DsTexture::SelectFace,
@@ -296,6 +343,26 @@ impl DsTexture {
                 name: "ds-tab-inactive",
                 bytes: ds_asset!("tab-inactive.png"),
                 slice: TAB_SLICE,
+            },
+            DsTexture::TabActiveFirst => DsTextureSpec {
+                name: "ds-tab-active-first",
+                bytes: ds_asset!("tab-active-first.png"),
+                slice: TAB_SLICE_FIRST,
+            },
+            DsTexture::TabActiveLast => DsTextureSpec {
+                name: "ds-tab-active-last",
+                bytes: ds_asset!("tab-active-last.png"),
+                slice: TAB_SLICE_LAST,
+            },
+            DsTexture::TabInactiveFirst => DsTextureSpec {
+                name: "ds-tab-inactive-first",
+                bytes: ds_asset!("tab-inactive-first.png"),
+                slice: TAB_SLICE_FIRST,
+            },
+            DsTexture::TabInactiveLast => DsTextureSpec {
+                name: "ds-tab-inactive-last",
+                bytes: ds_asset!("tab-inactive-last.png"),
+                slice: TAB_SLICE_LAST,
             },
             DsTexture::CheckboxChecked => DsTextureSpec {
                 name: "ds-checkbox-checked",
