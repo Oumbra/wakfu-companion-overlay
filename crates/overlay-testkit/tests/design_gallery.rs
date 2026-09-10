@@ -20,7 +20,8 @@
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
-    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, InfoTone, InputState, TabState,
+    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, InfoTone, InputState, SelectState,
+    TabState,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -40,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 1880.0))
+        .with_size(Vec2::new(760.0, 2160.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -317,6 +318,72 @@ fn gallery(ui: &mut egui::Ui) {
         )
         .log_name("galerie.cb-reference"),
     );
+
+    heading(
+        ui,
+        "Liste déroulante — socle 36 px, entrées 28 px",
+        "Le socle fait 36 px BORD COMPRIS : les 32 px qu'on lit en mesurant le remplissage excluent les deux bords. Le chevron est peint à 14 × 8, sa taille native.",
+    );
+    let mut theme = 1_u8;
+    let mut theme_desactive = 0_u8;
+    ui.horizontal(|ui| {
+        ui.add(
+            design::select(&mut theme)
+                .option(0, "Sombre")
+                .option(1, "Thème d'interface personnalisé")
+                .width(300.0)
+                .log_name("galerie.select"),
+        );
+        ui.add_space(20.0);
+        ui.add(
+            design::select(&mut theme_desactive)
+                .option(0, "Indisponible")
+                .width(200.0)
+                .enabled(false)
+                .preview_state(SelectState::Disabled)
+                .log_name("galerie.select-off"),
+        );
+    });
+
+    // Les deux états dépliés. `preview_open` les force : en rendu offscreen, personne ne clique sur
+    // le socle. Ils sont posés en DERNIER sur la planche parce que leur liste sort du flux — elle
+    // recouvrirait ce qui suit, ce qui est exactement le comportement voulu en production.
+    let mut filtre = 1_u8;
+    let mut raretes: Vec<u8> = vec![1, 3];
+    ui.add_space(10.0);
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(230.0);
+            ui.add(
+                design::select(&mut filtre)
+                    .option(0, "Tous")
+                    .option(1, "À faire")
+                    .option(2, "Terminées")
+                    .option(3, "Masquées")
+                    .width(220.0)
+                    .preview_open(true)
+                    .log_name("galerie.select-ouvert"),
+            );
+        });
+        ui.add_space(30.0);
+        ui.vertical(|ui| {
+            ui.set_width(230.0);
+            ui.add(
+                design::select_multi(&mut raretes)
+                    .option(0, "Commun")
+                    .option(1, "Rare")
+                    .option(2, "Mythique")
+                    .option(3, "Légendaire")
+                    .summary("Toutes")
+                    .width(220.0)
+                    .preview_open(true)
+                    .preview_hovered(0)
+                    .log_name("galerie.select-multi"),
+            );
+        });
+    });
+    // La place que les deux listes occupent hors du flux, pour que la planche ne les tronque pas.
+    ui.add_space(4.0 * 28.0 + 10.0);
 
     heading(
         ui,

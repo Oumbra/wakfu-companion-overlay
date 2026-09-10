@@ -42,6 +42,7 @@ pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVari
 pub use components::checkbox::{checkbox, Checkbox, CheckboxState};
 pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
+pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::tabs::{tabs, TabState, Tabs};
 
 /// Identifiant de mémorisation dans `egui::Context` — voir `DesignSystem::get`.
