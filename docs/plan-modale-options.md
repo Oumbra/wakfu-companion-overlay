@@ -74,7 +74,7 @@ et elle est explicitement « à ne faire que sur demande ».
 
 | Acquis | Où |
 | --- | --- |
-| Chrome sur les vraies textures du jeu : bannière 56 px, fond de modale `#1C2023`, panneau `#15181C` bordé `#131518` au rayon 2 | `options_modal.rs` |
+| Chrome sur les vraies textures du jeu : bannière 56 px, **corps sur `DsTexture::ModalBody`** (texture découpée des captures, translucidité 235 portée par la teinte de peinture), panneau `#15181C` bordé `#131518` au rayon 2 | `options_modal.rs` |
 | Les trois axes de contenu : titre à +12, contrôles à +19, rembourrage haut de 13 pour poser l'encre à +19 | `options_modal.rs` |
 | `design::button` — trois variantes, deux graisses de libellé, hauteur native 36, 9-slice à embouts | `design/components/button.rs` |
 | `design::input` — 25 px, bord 2 px `#595140`, rayon 4, valeur en or `#f4d89e` | `design/components/input.rs` |
@@ -445,15 +445,26 @@ reportée par erreur sur le coin. `releve-modale-options.json` est corrigé, ave
 la confusion. **Le coin de fenêtre est le seul rayon prononcé de toute l'interface ; tout le reste
 est à 2.**
 
+### Le fond du corps : fait, 2026-09-10
+
+Le corps était peint d'un aplat (`MODAL_BG`, `#1C2023`) sous une bannière qui, elle, venait du jeu.
+Il est maintenant peint depuis `DsTexture::ModalBody` — `modal-body.png`, découpée des six captures
+de la fenêtre Options puis débarrassée de son contenu (§9 ter du design-system). Elle apporte le
+grain et les hachures d'angle, et porte l'arrondi de ses deux angles bas dans son alpha. La
+translucidité relevée au colorimètre (alpha 235) est conservée telle quelle, désormais comme teinte
+de peinture : `modale_options_sur_damier` mesure le même contraste résiduel de 9,7 qu'avant.
+
 ### Reste à faire
 
+- **Le panneau de section sur sa propre texture.** Il est encore peint (`SECTION_BG`, alpha 230
+  déviant du jeu qui est opaque). Le découpage du corps a montré ce qu'il est réellement : non pas
+  une surface à part mais **le même fond assombri de neuf niveaux**, que la texture traverse. Le
+  produire suit exactement la méthode du corps — c'est le prochain chantier.
 - **Gouttière du pied de page** : 12 px chez nous, 11 px relevés entre `btn-cancel` (finit à x=355)
   et `btn-confirm` (commence à x=366). Écart d'un pixel, à reprendre pour la forme.
-- **Une capture qui montre enfin le chrome.** `options_modale_avec_erreur.png` ne peut pas servir à
-  vérifier le coin ni la translucidité : le harnais `egui_kittest` peint un panneau gris opaque
-  derrière la modale, qui remplit le quart de cercle. Il faut une capture sur fond damier ou sur une
-  imitation de scène de jeu — sans quoi le seul rayon prononcé de l'interface n'est vérifié par
-  aucun test.
+- ~~**Une capture qui montre enfin le chrome.**~~ Faite : `options_modale_sur_damier` peint un
+  damier contrasté à la place du fond gris du harnais, ce qui rend vérifiables les quatre coins
+  arrondis ET la translucidité (contraste du damier retombé de 128 à 9,7 dans les marges).
 
 ---
 
