@@ -333,12 +333,36 @@ plateaux constants et une rampe interpolée par le GPU, exact à n'importe quell
 ses deux bords de 2px, le composant les pose donc à 2px l'un de l'autre et peint le séparateur dans
 cet intervalle.
 
-**Le rayon n'est pas sur l'onglet, il est sur la barre.** Le premier segment de l'asset a un coin
-arrondi (rayon 4) ; les segments du milieu sont parfaitement droits. `tab-active.png` est découpée du
-premier segment **coin gauche redressé** (reconstruit par le miroir du bord droit, plat),
-`tab-inactive.png` du segment du milieu. Le rayon des deux extrémités de la barre **n'est pas
-reproduit** : le bord d'un onglet (`#1c1e21`) et le fond de modale qui l'entoure (`#1c2023`) sont de
-la même valeur, l'arrondi y est invisible.
+**Le rayon n'est pas sur l'onglet, il est sur la barre.** Le premier segment de l'asset a ses deux
+coins gauches arrondis, le dernier ses deux coins droits ; les segments du milieu sont parfaitement
+droits. L'escalier d'alpha retire `4, 2, 1` pixels sur les trois premières lignes et `1, 2, 3` sur
+les trois dernières — le haut est creusé d'un pixel de plus que le bas, sur les deux côtés, de façon
+cohérente aux quatre angles : c'est la forme du jeu, pas du bruit de détourage, et elle est conservée
+telle quelle.
+
+**L'arrondi est porté par l'alpha de la texture**, comme celui d'un bouton, d'où quatre fichiers
+d'extrémité en plus des deux du milieu. Les deux autres voies n'en sont pas : un `Mesh` egui ne sait
+pas découper un coin, et peindre un patch arrondi par-dessus n'efface pas le coin carré du dessous —
+l'alpha compose, il ne soustrait pas.
+
+| Fichier | Origine | Coins arrondis |
+| --- | --- | --- |
+| `tab-active-first.png` | 1er segment de la capture, **coin gardé** (un pixel opaque isolé retiré de l'angle bas-gauche) | gauche |
+| `tab-active-last.png` | miroir horizontal du précédent | droite |
+| `tab-inactive-last.png` | dernier segment de la capture | droite |
+| `tab-inactive-first.png` | miroir horizontal du précédent | gauche |
+| `tab-active.png` / `tab-inactive.png` | 1er segment coin redressé / segment du milieu | aucun (onglets du milieu) |
+
+Le jeu n'a pas de capture d'onglet actif en fin de barre, d'où deux miroirs — le corps d'un onglet
+étant un dégradé **vertical** et ses deux bords identiques, le miroir ne change rien. Une barre à
+**un seul onglet** n'existe pas dans le jeu : aucune texture n'a ses quatre coins arrondis, le
+composant y superpose ses deux extrémités, chacune écrêtée à sa moitié.
+
+**Le cerne de la barre est continu, gouttières comprises** (`TAB_BORDER` = `#1a1d1f`, moyenne des 774
+pixels opaques de la ligne y=0 de l'asset). Il vient de la texture de chaque onglet sauf dans les
+gouttières de 2px, qui n'appartiennent à aucun onglet : sans peinture explicite, le fond du panneau y
+traverse la barre de part en part, et le cerne se retrouve entaillé de deux encoches au droit de
+chaque séparateur.
 
 **Largeur : parts égales sur toute la largeur disponible, et c'est un choix, pas un relevé.** Le jeu
 dimensionne chaque onglet sur son libellé — ses six onglets font 77, 83, 103, 83, 133 et 106px pour
