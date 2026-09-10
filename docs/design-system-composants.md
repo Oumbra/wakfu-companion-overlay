@@ -269,6 +269,84 @@ du bouton « Annuler », le seul rouge que le design system ait mesuré.
 
 ---
 
+## `design::tabs` — barre d'onglets (2026-09-10)
+
+`crates/overlay-ui/src/design/components/tabs.rs`
+
+```rust
+use overlay_ui::design::{self, TabState};
+
+design::tabs(&mut state.tab)
+    .entry(OptionsTab::Alertes, "Alertes")
+    .enabled(false)
+    .entry(OptionsTab::Personnages, "Personnages")
+    .enabled(false)
+    .entry(OptionsTab::Parametres, "Paramètres")
+    .log_name("options-onglets")
+    .show(ui);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `entry(valeur, libellé)` | une entrée, dans l'ordre d'affichage | — |
+| `enabled` | **s'applique à la dernière entrée déclarée** | `true` |
+| `preview_state` | `Idle` / `Hovered` / `Active` / `Disabled`, sur la dernière entrée — **galerie et captures uniquement** | état réel |
+| `log_name` | nom d'instance pour le journal | `"tabs"` |
+
+La valeur sélectionnée vit chez l'appelant, comme celle de `design::input` ; `Response::changed()`
+dit à quelle frame elle a bougé. `show(ui)` est un alias d'`ui.add(...)`, plus lisible quand le
+composant porte une liste d'entrées chaînées.
+
+**Quatre états, pas trois** — un onglet porte en plus la notion d'être *celui qui est sélectionné* :
+
+| État | Fond | Libellé |
+| --- | --- | --- |
+| Inactif | sombre `#363734` | doré `#f4d89e` |
+| Survolé | **kaki, celui de l'actif** | doré `#f4d89e` |
+| Actif | kaki `#625a47` | **blanc `#ffffff`** |
+| Désactivé | sombre | `TEXT_DISABLED` — inventé |
+
+**Le piège de ce composant**, énoncé tel quel par le relevé : « l'état survolé d'un onglet reprend
+exactement le fond de l'état actif ; la seule différence relevée est la couleur du libellé. Un
+portage qui ne distingue que par le fond rendrait les deux états indiscernables. » Deux textures
+suffisent donc pour quatre états.
+
+**Mesures** (`releve-modale-options.json`, nœuds `tabbar` et `tab-*`, recoupées au pixel sur
+`interface-options-video.png` ligne y=110) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Hauteur | **44px**, native | `[72, 116]` dans une bande `[56, 124]` |
+| Séquence entre deux onglets | bord 2px + séparateur 2px + bord 2px | identique sur la capture et sur l'asset |
+| Séparateur | `#595140` | capture de la modale (x 100-101) — le relevé dit `#837d70`, l'asset `#6d6657` ; la capture de la fenêtre qu'on reproduit l'emporte |
+| Corps du libellé | 17px (encre 13) | comme tous les libellés du jeu |
+
+**Les 6px de gouttière du relevé sont ceux du remplissage**, pas de la boîte : chaque onglet porte
+ses deux bords de 2px, le composant les pose donc à 2px l'un de l'autre et peint le séparateur dans
+cet intervalle.
+
+**Le rayon n'est pas sur l'onglet, il est sur la barre.** Le premier segment de l'asset a un coin
+arrondi (rayon 4) ; les segments du milieu sont parfaitement droits. `tab-active.png` est découpée du
+premier segment **coin gauche redressé** (reconstruit par le miroir du bord droit, plat),
+`tab-inactive.png` du segment du milieu. Le rayon des deux extrémités de la barre **n'est pas
+reproduit** : le bord d'un onglet (`#1c1e21`) et le fond de modale qui l'entoure (`#1c2023`) sont de
+la même valeur, l'arrondi y est invisible.
+
+**Inventé, faute de référence** :
+
+- **La règle de largeur.** Les six onglets du jeu font 77, 83, 103, 83, 133 et 106px pour des encres
+  de 26, 44, 73, 28, 100 et 35 : ni un padding constant, ni le nombre de caractères, ni une largeur
+  minimale unique n'en rendent compte. Le composant retient le padding stable sur les deux libellés
+  longs (`TAB_PADDING_X` = 16) et un plancher au plus petit onglet relevé (`TAB_MIN_WIDTH` = 77). Les
+  libellés longs tombent à 1 et 6px de la référence, les courts ressortent plus étroits.
+- **L'état désactivé.** Aucune capture d'onglet grisé ; fond inactif et libellé `TEXT_DISABLED`, par
+  cohérence avec le bouton désactivé.
+
+**Remplace** : la barre peinte à la main de `panels::options_modal` — texture `menu-tabs.png` de
+44px étirée à 31, libellés en `FontId::proportional(12.0)`, trois tiers égaux, aucun clic.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
@@ -277,7 +355,7 @@ Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces
 | --- | --- | --- |
 | **Bouton icône** | `button-icon[-hover,-disabled].png`, `button-icon-first-plan[-hover].png`, `icons/*.png` | Existe déjà en `panels::icon_button::paint_icon_button`, mais **hors contrat** : prend quatre `TextureHandle` en paramètres. À reprendre en `design::icon_button(icon).context(FirstPlan|Panel)` — deux contextes de socle, une icône, un clic. |
 | **Case à cocher** | `checkbox-{true,false}.png` | §5.6. |
-| **Onglets** | `tabs-with-first-tab-active[-and-hover-2nd-tab].png`, `icon-tabs.png` | Onglets texte et onglets icône ; §5.7. |
+| **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
 | **Select / dropdown** | `select-simple.png`, `select-multiple.png` | §5.5. |
 | **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
 | **Chrome de fenêtre** | `modal-header.png`, `decoration-{top,right,bottom}.png`, `flat-template_2-without-decorations.png` | Bannière turquoise + corps + décorations ; §5.10 et §9. |
