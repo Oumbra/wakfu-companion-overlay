@@ -371,3 +371,23 @@ impl Widget for Input<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod leading_icon_tests {
+    use crate::design::tokens;
+
+    /// **Les trois ratios de l'ornement somment à 1** : le texte d'un champ à ornement démarre
+    /// exactement à une hauteur de champ de son bord extérieur (`empty-input-search.png` : bord
+    /// x=2, premier glyphe x=30, champ de 28 px). Sans ce garde-fou, ajuster un ratio à l'œil
+    /// ferait cesser aux deux autres de dire ce que la capture dit.
+    #[test]
+    fn les_trois_ratios_de_l_ornement_somment_a_une_hauteur_de_champ() {
+        let somme = tokens::INPUT_LEADING_ICON_INSET_RATIO
+            + tokens::INPUT_LEADING_ICON_RATIO
+            + tokens::INPUT_LEADING_ICON_GAP_RATIO;
+        assert!(
+            (somme - 1.0).abs() < 1e-6,
+            "les ratios de l'ornement somment à {somme}, pas à 1 — voir empty-input-search.png"
+        );
+    }
+}

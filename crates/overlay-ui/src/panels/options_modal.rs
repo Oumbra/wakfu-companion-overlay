@@ -637,10 +637,22 @@ impl Chrome {
         );
         let content_width = rect.width() - design::components::scroll_area::RESERVE_X;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        child.set_clip_rect(rect);
-        design::scroll_area(id_salt)
+        // `intersect` et non un `set` sec : `Ui::set_clip_rect` REMPLACE le clip de l'ancêtre, et
+        // la zone déborderait si le panneau se retrouvait un jour dans un clip plus étroit. C'est
+        // l'idiome déjà retenu par `design::components::input` pour la même intention.
+        child.set_clip_rect(rect.intersect(ui.clip_rect()));
+        let out = design::scroll_area(id_salt)
             .auto_shrink(false)
-            .show(&mut child, |ui| add_contents(ui, content_width))
+            .show(&mut child, |ui| add_contents(ui, content_width));
+        // **Le curseur du parent avance jusqu'au bas de la zone.** `new_child` sur un rectangle
+        // absolu ne le fait pas, et c'est exactement le mécanisme qui a fait peindre un message
+        // d'erreur PAR-DESSUS la première ligne d'une liste : l'appelant croyait écrire sous elle.
+        // Sans cette ligne, la méthode possède la géométrie et le clip mais laisse la faute
+        // joignable — un contenu posé après la liste redevient superposé. Avec elle, il devient
+        // invisible, et une mise en page qui ne s'affiche pas vaut infiniment mieux que deux
+        // textes l'un sur l'autre.
+        ui.advance_cursor_after_rect(rect);
+        out
     }
 }
 

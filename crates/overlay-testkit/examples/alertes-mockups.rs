@@ -811,10 +811,14 @@ fn alerts_tab(
 
     ui.add_space(6.0);
     options_modal::section_title(ui, &format!("Objets suivis ({})", state.order.len()));
-    // Champ grisé quand l'ajout est impossible : sans jeton, l'écriture (`PATCH
-    // /api/v1/settings`) n'a nulle part où aller, et un champ d'apparence active inviterait au
-    // geste que le message vient précisément de retirer.
-    let can_add = state.empty_state != EmptyState::SignedOut;
+    // Champ grisé quand l'ajout est impossible — deux cas, pas un : sans jeton, l'écriture
+    // (`PATCH /api/v1/settings`) n'a nulle part où aller ; et pendant une lecture en vol, ce qu'on
+    // ajouterait serait écrasé par la liste qui arrive. Dans les deux cas un champ d'apparence
+    // active inviterait au geste que le message vient précisément de retirer.
+    let can_add = !matches!(
+        state.empty_state,
+        EmptyState::SignedOut | EmptyState::Loading
+    );
     search_field(
         ui,
         state.search,
