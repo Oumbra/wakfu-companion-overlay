@@ -673,7 +673,30 @@ main, soit environ 250 lignes qui ne font que placer des rectangles.
 | **`design::panel` / `design::section`** | Le panneau de contenu (`#15181c`, bord 2px `#131518`, rayon 2) et le regroupement par espacement seul. | `releve-section-options.json` — la distinction panneau/section y est déjà tranchée. |
 | **`design::heading`** | Les deux blocs de titre peints à la main dans la modale, avec le calcul de hauteur d'encre et l'ombre bas-droite. | Corps 21 (bannière) / 18 (section), `#b8b9ba`, `text::SHADOW_BOTTOM_RIGHT`. |
 | **`design::tooltip`** | `panels::tooltip` et ses trois enveloppes (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`/`_right`), placement et replis compris. | `TOOLTIP_MARGIN`, `TOOLTIP_GAP`, `TOOLTIP_BG_FILL` mesurés. |
-| **`design::icon` + `DsIcon`** | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
+| **`design::icon` + `DsIcon`** — *décidé le 2026-09-10, voir ci-dessous* | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
+
+**`DsIcon` est un type distinct de `DsTexture`** (décision utilisateur, 2026-09-10). La raison est
+mesurable : **chaque icône a une taille d'encre propre, un fond 9-slice n'en a pas**. Les 34 fichiers
+d'`icons/` vont de 7×10 (`icon-triangle-right`) à 27×28 (`icon-info`), et `icon-minus` fait **14×2** —
+peint dans un carré de 18 px sans connaître sa boîte d'encre, le trait du « moins » est étiré neuf
+fois en hauteur. Symétriquement, un `NineSlice` et un mode de remplissage par axe n'ont aucun sens
+pour un glyphe. Les deux types cohabitaient tant qu'il n'y avait que six icônes au manifeste ; à
+trente-quatre, ce serait un type dont la moitié des champs ne s'applique jamais.
+
+Exécution, dans cet ordre :
+
+1. `design/icons.rs` — `enum DsIcon` et sa table (fichier, taille d'encre native, nom de texture),
+   les 34 fichiers d'un coup.
+2. Retrait des six variantes d'icône de `DsTexture` (`IconInfo`, `IconChevronDown`, `IconOption`,
+   `IconExternalLink`, `IconPlus`, `IconMinus`) et de `icon_content_size` avec elles — `DsTexture`
+   ne décrit plus que des fonds 9-slice.
+3. `design::icon` — une **feuille** au sens du contrat (`impl Widget`), qui centre le glyphe sur sa
+   boîte d'encre au lieu de l'étirer.
+4. `icon_button` prend un `DsIcon` : quatre glyphes disponibles deviennent trente-quatre.
+5. Planche d'icônes dans la galerie, snapshots régénérés.
+
+Coût mémoire mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
+sans effet sur le budget de 300 Mo (§8 du plan).
 
 **Un composant conteneur ne peut pas implémenter `egui::Widget`** (qui rend une `Response` à partir
 de rien) : `scroll_area` a déjà dû y déroger, et `window`/`panel`/`collapsible`/`table`/`dialog`
