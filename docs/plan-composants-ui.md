@@ -12,11 +12,11 @@ comment savoir que c'est fini*. Les deux ne se recopient pas.
 
 ## Où en est ce plan (2026-09-10)
 
-Rien n'est commencé. Les trois décisions préalables sont prises et consignées.
+Les trois décisions préalables sont prises et consignées. **Le lot 0 est fait.**
 
 | Lot | Objet | État |
 | --- | --- | --- |
-| 0 | Ménage — sans dépendance, sans décision | à faire |
+| 0 | Ménage — sans dépendance, sans décision | ✅ `5ccf0d2`, `2941efd`, `973ead6` |
 | 1 | La couche conteneur (`window`, `panel`, `heading`, `field`) | à faire |
 | 2 | Icônes et infobulle | à faire, **terrain occupé** |
 | 3 | Tests de géométrie des composants livrés | à faire |
@@ -90,7 +90,7 @@ failli se produire pendant le diagnostic. Règle de conduite, avant de démarrer
 Trois points sans dépendance et sans décision préalable. Le premier a un gain net qui dépasse
 largement son coût.
 
-## 0.1 — La bannière de modale au manifeste
+## 0.1 — La bannière de modale au manifeste ✅
 
 ### État actuel
 
@@ -130,9 +130,13 @@ grep -c "pub .*:" <(sed -n '/pub struct RenderContent/,/^}/p' crates/overlay-ui/
 Et le snapshot `options_modale_sur_damier.png` **inchangé** — c'est ce qui prouve que le
 déplacement n'a rien altéré.
 
-**Estimation** : ½ séance.
+**Résultat mesuré** (`5ccf0d2`) : 51 lignes ajoutées, 123 retirées ; `RenderContent` passe de 18 à
+17 champs ; les 12 tests d'`overlay-testkit` passent sans qu'aucun snapshot ne bouge. La copie du
+PNG et le dossier `assets/ui/options/` ont disparu.
 
-## 0.2 — L'écart de barre de défilement : à confirmer, pas à corriger
+**Estimation** : ½ séance. **Réalisé** : conforme.
+
+## 0.2 — L'écart de barre de défilement : à confirmer, pas à corriger ✅
 
 ### État actuel — et correction du diagnostic
 
@@ -165,7 +169,7 @@ Tant qu'elle n'a qu'un seul utilisateur, rester locale est le bon choix.
 
 **Estimation** : ¼ séance (documentation seule).
 
-## 0.3 — Un hook `SessionStart` pour l'environnement cloud
+## 0.3 — Un hook `SessionStart` pour l'environnement cloud ✅
 
 ### État actuel
 
