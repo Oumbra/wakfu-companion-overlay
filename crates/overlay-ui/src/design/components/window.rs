@@ -105,22 +105,14 @@ impl Window {
 
     /// Peint le décor dans **tout le rectangle disponible** de `ui` et rend les zones de contenu.
     pub fn show(self, ui: &mut Ui) -> WindowChrome {
-        let rect = ui.max_rect();
+        let zones = layout(ui.max_rect(), self.tab_bar_height, self.footer.is_some());
         let ds = DesignSystem::get(ui.ctx());
 
         // Corps — texture du jeu, ses DEUX ANGLES BAS portés par son alpha : inutile de leur
         // passer un `corner_radius`, un `Mesh` egui ne saurait de toute façon pas découper un coin.
-        //
-        // Peint sous la bannière et non sur tout le rectangle : la texture commence exactement là
-        // où celle de la bannière s'arrête, les deux se juxtaposent sans recouvrement. Les angles
-        // HAUTS restent donc portés par la bannière seule.
-        let body_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.left(), rect.top() + tokens::WINDOW_BANNER_HEIGHT),
-            rect.max,
-        );
         ds.paint(
             ui.painter(),
-            body_rect,
+            zones.body,
             DsTexture::ModalBody,
             tokens::WINDOW_BODY_TINT,
         );
@@ -128,10 +120,6 @@ impl Window {
         // Bannière — arrondie sur les coins HAUTS uniquement pour épouser le coin de la fenêtre
         // (ses coins bas ne sont jamais visibles, masqués par le corps qui la recouvre en dessous).
         // Peinte par `egui::Image` et non par le 9-slice : un `Mesh` ne sait pas arrondir un coin.
-        let banner_rect = Rect::from_min_size(
-            rect.min,
-            egui::vec2(rect.width(), tokens::WINDOW_BANNER_HEIGHT),
-        );
         egui::Image::new(ds.texture(DsTexture::ModalHeader))
             .corner_radius(egui::CornerRadius {
                 nw: tokens::WINDOW_RADIUS,
@@ -139,14 +127,14 @@ impl Window {
                 sw: 0,
                 se: 0,
             })
-            .paint_at(ui, banner_rect);
+            .paint_at(ui, zones.banner);
 
         // Titre — serif grasse, cerné d'une ombre portée bas-droite et non d'un contour complet :
         // le fond est ici CONNU (la bannière), on peut donc ne cerner qu'un côté, comme le jeu le
         // fait pour ses titres, éclairés depuis le haut-gauche. Un contour complet empâte le mot.
         text::paint_outlined_text(
             ui,
-            banner_rect.center(),
+            zones.banner.center(),
             egui::Align2::CENTER_CENTER,
             &self.title,
             text::title_font(ui.ctx(), tokens::WINDOW_TITLE_FONT_SIZE),
@@ -154,82 +142,45 @@ impl Window {
             text::SHADOW_BOTTOM_RIGHT,
         );
 
-        let content_rect = Rect::from_min_max(
-            egui::pos2(
-                rect.left() + tokens::WINDOW_PAD_SIDE,
-                banner_rect.bottom() + tokens::WINDOW_PAD_TOP,
-            ),
-            egui::pos2(
-                rect.right() - tokens::WINDOW_PAD_SIDE,
-                rect.bottom() - tokens::WINDOW_PAD_BOTTOM,
-            ),
-        );
-
-        let tab_bar = Rect::from_min_size(
-            content_rect.min,
-            egui::vec2(content_rect.width(), self.tab_bar_height),
-        );
-
-        // Pied de page — deux boutons du design system, séparés par la gouttière du jeu. Largeur
-        // partagée, hauteur native (jamais déduite de la largeur, voir le jeton).
-        let (footer, footer_top) = match &self.footer {
-            None => (FooterClick::None, content_rect.bottom()),
-            Some((cancel_label, validate_label)) => {
-                let height = tokens::WINDOW_FOOTER_BUTTON_HEIGHT;
-                let width = (content_rect.width() - tokens::WINDOW_FOOTER_GUTTER) / 2.0;
-                let top = content_rect.bottom() - height;
+        // Pied de page — deux boutons du design system, séparés par la gouttière du jeu.
+        let footer = match (&self.footer, zones.footer) {
+            (Some((cancel_label, validate_label)), Some((cancel_rect, validate_rect))) => {
                 let prefix = self.log_name.as_deref().unwrap_or("fenetre");
-
                 let mut click = FooterClick::None;
-                let cancel_rect = Rect::from_min_size(
-                    egui::pos2(content_rect.left(), top),
-                    egui::vec2(width, height),
-                );
                 if ui
                     .put(
                         cancel_rect,
                         button::button(cancel_label.clone())
                             .variant(button::ButtonVariant::Danger)
-                            .size(button::ButtonSize::Height(height))
-                            .width(width)
+                            .size(button::ButtonSize::Height(cancel_rect.height()))
+                            .width(cancel_rect.width())
                             .log_name(format!("{prefix}-annuler")),
                     )
                     .clicked()
                 {
                     click = FooterClick::Cancel;
                 }
-
-                let validate_rect = Rect::from_min_size(
-                    egui::pos2(content_rect.right() - width, top),
-                    egui::vec2(width, height),
-                );
                 if ui
                     .put(
                         validate_rect,
                         button::button(validate_label.clone())
                             .variant(button::ButtonVariant::Primary)
-                            .size(button::ButtonSize::Height(height))
-                            .width(width)
+                            .size(button::ButtonSize::Height(validate_rect.height()))
+                            .width(validate_rect.width())
                             .log_name(format!("{prefix}-valider")),
                     )
                     .clicked()
                 {
                     click = FooterClick::Validate;
                 }
-
-                (click, top - tokens::WINDOW_FOOTER_GAP)
+                click
             }
+            _ => FooterClick::None,
         };
 
         WindowChrome {
-            tab_bar,
-            content: Rect::from_min_max(
-                egui::pos2(
-                    content_rect.left(),
-                    tab_bar.bottom() + tokens::WINDOW_TAB_GAP,
-                ),
-                egui::pos2(content_rect.right(), footer_top),
-            ),
+            tab_bar: zones.tab_bar,
+            content: zones.content,
             footer,
         }
     }
@@ -260,5 +211,178 @@ impl WindowChrome {
             tabs.show(ui)
         })
         .inner
+    }
+}
+
+/// Découpage du rectangle d'une fenêtre en zones.
+///
+/// **Fonction libre plutôt que corps de [`Window::show`]**, pour la même raison qu'
+/// `icon_button::glyph_fit` : c'est le calcul du composant qui peut se tromper en silence, et il
+/// s'éprouve sans contexte egui ni GPU (voir les tests en bas de ce fichier). Un décalage de
+/// quelques pixels sur la gouttière du pied de page ou sur l'écart sous les onglets ne se voit sur
+/// une capture qu'une fois comparée au jeu, côte à côte.
+fn layout(rect: Rect, tab_bar_height: f32, has_footer: bool) -> WindowLayout {
+    // La bannière porte les angles hauts ; le corps commence exactement là où elle s'arrête, les
+    // deux se juxtaposent sans recouvrement.
+    let banner = Rect::from_min_size(
+        rect.min,
+        egui::vec2(rect.width(), tokens::WINDOW_BANNER_HEIGHT),
+    );
+    let body = Rect::from_min_max(egui::pos2(rect.left(), banner.bottom()), rect.max);
+
+    let content_rect = Rect::from_min_max(
+        egui::pos2(
+            rect.left() + tokens::WINDOW_PAD_SIDE,
+            banner.bottom() + tokens::WINDOW_PAD_TOP,
+        ),
+        egui::pos2(
+            rect.right() - tokens::WINDOW_PAD_SIDE,
+            rect.bottom() - tokens::WINDOW_PAD_BOTTOM,
+        ),
+    );
+
+    let tab_bar = Rect::from_min_size(
+        content_rect.min,
+        egui::vec2(content_rect.width(), tab_bar_height),
+    );
+
+    let (footer, content_bottom) = if has_footer {
+        let height = tokens::WINDOW_FOOTER_BUTTON_HEIGHT;
+        // Plancher à zéro : une fenêtre plus étroite que sa gouttière donnerait deux rectangles de
+        // largeur négative, qu'egui inverserait et peindrait n'importe où. Zéro les rend
+        // invisibles, ce qui se voit sur une capture — c'est la règle du contrat.
+        let width = ((content_rect.width() - tokens::WINDOW_FOOTER_GUTTER) / 2.0).max(0.0);
+        let top = content_rect.bottom() - height;
+        (
+            Some((
+                Rect::from_min_size(
+                    egui::pos2(content_rect.left(), top),
+                    egui::vec2(width, height),
+                ),
+                Rect::from_min_size(
+                    egui::pos2(content_rect.right() - width, top),
+                    egui::vec2(width, height),
+                ),
+            )),
+            top - tokens::WINDOW_FOOTER_GAP,
+        )
+    } else {
+        (None, content_rect.bottom())
+    };
+
+    WindowLayout {
+        banner,
+        body,
+        tab_bar,
+        content: Rect::from_min_max(
+            egui::pos2(
+                content_rect.left(),
+                tab_bar.bottom() + tokens::WINDOW_TAB_GAP,
+            ),
+            egui::pos2(content_rect.right(), content_bottom),
+        ),
+        footer,
+    }
+}
+
+/// Ce que [`layout`] découpe — voir sa doc.
+struct WindowLayout {
+    banner: Rect,
+    body: Rect,
+    tab_bar: Rect,
+    content: Rect,
+    /// `(annuler, valider)`, ou `None` pour une fenêtre sans pied de page.
+    footer: Option<(Rect, Rect)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tolérance de comparaison — ces cotes finissent en coordonnées de peinture flottantes, pas en
+    /// pixels entiers ; un centième suffit à attraper une erreur de formule.
+    const EPS: f32 = 0.01;
+
+    /// Les cotes exactes de la fenêtre Options telle que l'overlay la crée
+    /// (`panels::options_modal::WINDOW_SIZE`), à l'origine — le cas que les snapshots vérifient.
+    fn fenetre_options() -> Rect {
+        Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(560.0, 436.0))
+    }
+
+    #[test]
+    fn la_banniere_et_le_corps_se_juxtaposent_sans_recouvrement() {
+        let z = layout(fenetre_options(), tokens::TAB_HEIGHT, true);
+        assert!((z.banner.height() - tokens::WINDOW_BANNER_HEIGHT).abs() < EPS);
+        // Le corps commence EXACTEMENT où la bannière finit : un pixel de recouvrement ferait
+        // baver la texture du corps sur l'angle arrondi de la bannière, un pixel de vide y
+        // laisserait voir le jeu au travers.
+        assert!((z.body.top() - z.banner.bottom()).abs() < EPS);
+        assert!((z.body.bottom() - fenetre_options().bottom()).abs() < EPS);
+    }
+
+    #[test]
+    fn les_deux_boutons_de_pied_partagent_la_largeur_moins_la_gouttiere() {
+        let z = layout(fenetre_options(), tokens::TAB_HEIGHT, true);
+        let (cancel, validate) = z.footer.expect("pied de page demandé");
+        assert!(
+            (cancel.width() - validate.width()).abs() < EPS,
+            "largeurs inégales"
+        );
+        // La gouttière est ce qui les sépare, et rien d'autre.
+        assert!((validate.left() - cancel.right() - tokens::WINDOW_FOOTER_GUTTER).abs() < EPS);
+        // Hauteur NATIVE de la texture, jamais déduite de la largeur — la faute qui affichait des
+        // boutons de 27 px là où le jeu en met 36.
+        assert!((cancel.height() - tokens::WINDOW_FOOTER_BUTTON_HEIGHT).abs() < EPS);
+        // Et les deux bords extérieurs tombent sur les marges de contenu de la fenêtre.
+        assert!((cancel.left() - tokens::WINDOW_PAD_SIDE).abs() < EPS);
+        assert!(
+            (fenetre_options().right() - validate.right() - tokens::WINDOW_PAD_SIDE).abs() < EPS
+        );
+    }
+
+    #[test]
+    fn sans_pied_de_page_le_contenu_descend_jusqu_a_la_marge_basse() {
+        let avec = layout(fenetre_options(), tokens::TAB_HEIGHT, true);
+        let sans = layout(fenetre_options(), tokens::TAB_HEIGHT, false);
+        assert!(sans.footer.is_none());
+        assert!(
+            sans.content.bottom() > avec.content.bottom(),
+            "le contenu doit gagner la place du pied"
+        );
+        assert!(
+            (fenetre_options().bottom() - sans.content.bottom() - tokens::WINDOW_PAD_BOTTOM).abs()
+                < EPS
+        );
+    }
+
+    #[test]
+    fn une_barre_d_onglets_de_hauteur_nulle_ne_laisse_que_sa_gouttiere() {
+        let sans = layout(fenetre_options(), 0.0, true);
+        let avec = layout(fenetre_options(), tokens::TAB_HEIGHT, true);
+        assert!((sans.tab_bar.height()).abs() < EPS);
+        // Le contenu remonte exactement de la hauteur de la barre — l'écart sous elle, lui, reste.
+        assert!((avec.content.top() - sans.content.top() - tokens::TAB_HEIGHT).abs() < EPS);
+    }
+
+    #[test]
+    fn une_fenetre_plus_etroite_que_sa_gouttiere_ne_produit_pas_de_rectangle_inverse() {
+        // 20 px de large : moins que les deux marges latérales, donc une largeur de contenu
+        // négative. Rien ne doit s'inverser — un rectangle inversé se peint n'importe où.
+        let z = layout(
+            Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(20.0, 200.0)),
+            tokens::TAB_HEIGHT,
+            true,
+        );
+        let (cancel, validate) = z.footer.expect("pied de page demandé");
+        assert!(
+            cancel.width() >= 0.0,
+            "largeur négative : {}",
+            cancel.width()
+        );
+        assert!(
+            validate.width() >= 0.0,
+            "largeur négative : {}",
+            validate.width()
+        );
     }
 }

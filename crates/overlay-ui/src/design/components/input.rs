@@ -373,6 +373,42 @@ impl Widget for Input<'_> {
 }
 
 #[cfg(test)]
+mod geometrie_tests {
+    use super::*;
+
+    /// 25 px est **la hauteur relevée de tous les champs du jeu**, pas un palier choisi. Le corps
+    /// de police et le retrait du texte en dérivent (`tokens::INPUT_FONT_SIZE_RATIO`,
+    /// `INPUT_PADDING_X_RATIO`) : la changer désaccorde le champ entier.
+    #[test]
+    fn le_gabarit_standard_est_la_hauteur_relevee() {
+        assert_eq!(InputSize::Standard.height(), 25.0);
+        assert_eq!(InputSize::Height(36.0).height(), 36.0);
+    }
+
+    /// La largeur n'est connue qu'au rendu quand elle n'est pas imposée — c'est ce que dit le
+    /// `None`, et c'est ce qui permet à un appelant de mesurer un champ avant de le poser.
+    #[test]
+    fn la_largeur_desiree_n_existe_que_si_elle_est_imposee() {
+        let mut valeur = String::new();
+        assert_eq!(input(&mut valeur).desired_size(), (None, 25.0));
+
+        let mut valeur = String::new();
+        assert_eq!(
+            input(&mut valeur).width(320.0).desired_size(),
+            (Some(320.0), 25.0),
+        );
+
+        let mut valeur = String::new();
+        assert_eq!(
+            input(&mut valeur)
+                .size(InputSize::Height(36.0))
+                .desired_size(),
+            (None, 36.0),
+        );
+    }
+}
+
+#[cfg(test)]
 mod leading_icon_tests {
     use crate::design::tokens;
 

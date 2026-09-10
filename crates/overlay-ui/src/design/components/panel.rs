@@ -69,22 +69,8 @@ impl Panel {
             egui::StrokeKind::Inside,
         );
 
-        let inner = Rect::from_min_max(
-            egui::pos2(
-                rect.left() + tokens::PANEL_PAD_CONTROL_X,
-                rect.top() + tokens::PANEL_PAD_TOP,
-            ),
-            egui::pos2(
-                rect.right() - scroll_area::RESERVE_X,
-                rect.bottom() - tokens::PANEL_PAD_CONTROL_X,
-            ),
-        );
-        // La zone de défilement part du même axe de contrôles, mais va jusqu'au bord du panneau :
-        // sa propre réserve y remplace le retrait de droite, au lieu de s'y ajouter.
-        let zones = PanelZones {
-            inner,
-            scroll: Rect::from_min_max(inner.min, egui::pos2(rect.right(), inner.bottom())),
-        };
+        let zones = zones(rect);
+        let inner = zones.inner;
 
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
         // Clip élargi à GAUCHE du retrait des titres, et de rien d'autre : un titre de section se
@@ -113,6 +99,34 @@ impl Panel {
             inner_result,
             ui.interact(rect, ui.id().with("ds-panel"), egui::Sense::hover()),
         )
+    }
+}
+
+/// Découpage du rectangle d'un panneau en zones.
+///
+/// **Fonction libre plutôt que corps de [`Panel::show`]** : c'est le calcul qui peut se tromper en
+/// silence, et il s'éprouve sans contexte egui ni GPU (voir les tests en bas de ce fichier).
+fn zones(rect: Rect) -> PanelZones {
+    let inner = Rect::from_min_max(
+        egui::pos2(
+            rect.left() + tokens::PANEL_PAD_CONTROL_X,
+            rect.top() + tokens::PANEL_PAD_TOP,
+        ),
+        egui::pos2(
+            // Plancher à la gauche du contenu : un panneau plus étroit que ses rembourrages
+            // donnerait un rectangle inversé, qu'egui peindrait n'importe où.
+            (rect.right() - scroll_area::RESERVE_X).max(rect.left() + tokens::PANEL_PAD_CONTROL_X),
+            (rect.bottom() - tokens::PANEL_PAD_CONTROL_X).max(rect.top() + tokens::PANEL_PAD_TOP),
+        ),
+    );
+    // La zone de défilement part du même axe de contrôles, mais va jusqu'au bord du panneau : sa
+    // propre réserve y remplace le retrait de droite, au lieu de s'y ajouter.
+    PanelZones {
+        inner,
+        scroll: Rect::from_min_max(
+            inner.min,
+            egui::pos2(rect.right().max(inner.left()), inner.bottom()),
+        ),
     }
 }
 
@@ -149,5 +163,76 @@ impl PanelZones {
         scroll_area::scroll_area(id_salt)
             .auto_shrink(false)
             .show(&mut child, |ui| add_contents(ui, content_width))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tolérance de comparaison — voir `window::tests`.
+    const EPS: f32 = 0.01;
+
+    /// Le panneau de la modale Options, aux cotes que `design::window` lui donne.
+    fn panneau_options() -> Rect {
+        Rect::from_min_size(egui::pos2(20.0, 114.0), egui::vec2(520.0, 230.0))
+    }
+
+    #[test]
+    fn la_reserve_de_barre_de_defilement_est_toujours_deduite() {
+        let z = zones(panneau_options());
+        // Le jeu réserve cette largeur MÊME QUAND la barre ne sert pas : c'est ce qui permet à une
+        // barre d'apparaître un jour sans décaler un seul pixel de contenu.
+        assert!(
+            (panneau_options().right() - z.inner.right() - scroll_area::RESERVE_X).abs() < EPS,
+            "réserve de {} au lieu de {}",
+            panneau_options().right() - z.inner.right(),
+            scroll_area::RESERVE_X,
+        );
+    }
+
+    #[test]
+    fn la_zone_de_defilement_va_jusqu_au_bord_du_panneau() {
+        let z = zones(panneau_options());
+        // Sa propre réserve REMPLACE le retrait de droite du contenu au lieu de s'y ajouter :
+        // sans quoi la poignée tomberait à 40 px du bord au lieu des 14 du jeu.
+        assert!((z.scroll.right() - panneau_options().right()).abs() < EPS);
+        assert!((z.scroll.left() - z.inner.left()).abs() < EPS);
+    }
+
+    #[test]
+    fn les_rembourrages_sont_ceux_du_releve() {
+        let z = zones(panneau_options());
+        assert!(
+            (z.inner.left() - panneau_options().left() - tokens::PANEL_PAD_CONTROL_X).abs() < EPS
+        );
+        assert!((z.inner.top() - panneau_options().top() - tokens::PANEL_PAD_TOP).abs() < EPS);
+        assert!(
+            (panneau_options().bottom() - z.inner.bottom() - tokens::PANEL_PAD_CONTROL_X).abs()
+                < EPS
+        );
+    }
+
+    #[test]
+    fn un_panneau_plus_petit_que_ses_rembourrages_ne_produit_pas_de_rectangle_inverse() {
+        let z = zones(Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(10.0, 10.0),
+        ));
+        assert!(
+            z.inner.width() >= 0.0,
+            "largeur négative : {}",
+            z.inner.width()
+        );
+        assert!(
+            z.inner.height() >= 0.0,
+            "hauteur négative : {}",
+            z.inner.height()
+        );
+        assert!(
+            z.scroll.width() >= 0.0,
+            "largeur négative : {}",
+            z.scroll.width()
+        );
     }
 }
