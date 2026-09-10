@@ -19,7 +19,7 @@ Les trois décisions préalables sont prises et consignées. **Le lot 0 est fait
 | 0 | Ménage — sans dépendance, sans décision | ✅ `5ccf0d2`, `2941efd`, `973ead6` |
 | 1 | La couche conteneur (`window`, `panel`, `heading`) | ✅ `3becdc7` — 1.3 requalifié, voir ci-dessous |
 | 2 | Icônes et infobulle | à faire, **terrain occupé** |
-| 3 | Tests de géométrie des composants livrés | à faire |
+| 3 | Tests de géométrie des composants livrés | ✅ `a1f24e8` — critère révisé, voir le lot |
 | 4 | Formulaires — vague 2 du catalogue | à faire |
 | 5 | Données — vague 3 du catalogue | à faire |
 | 6 | Finitions — vague 4 du catalogue | à faire |
@@ -340,14 +340,32 @@ Trois tests par composant, sans GPU, sur le modèle de `icon_button::tests` :
 3. **Le cas dégénéré** ne panique pas et ne produit pas de rectangle inversé (largeur imposée
    inférieure aux marges, libellé vide, rectangle plus petit que le contenu).
 
-## Critère de fin
+## Critère de fin — révisé
 
 ```bash
-grep -rc "#\[test\]" crates/overlay-ui/src/design/components/*.rs   # ≥ 3 partout
-cargo test -p overlay-ui --lib
+cargo test -p overlay-ui --lib        # 17 → 36 tests
 ```
 
-**Estimation** : 1 séance. **À faire avant le lot 4** : c'est le filet qui rendra les extensions de
+| Composant | Tests | Ce qu'ils verrouillent |
+| --- | --- | --- |
+| `window` | 5 | juxtaposition bannière/corps, gouttière du pied, contenu sans pied, barre nulle, fenêtre dégénérée |
+| `icon_button` | 5 | étalon d'encre, ratio préservé, glyphe non carré (déjà là avant ce lot) |
+| `panel` | 4 | réserve de défilement, zone élargie, rembourrages du relevé, panneau dégénéré |
+| `tabs` | 4 | somme des largeurs = place utile, écart max d'un pixel, barre trop étroite, zéro onglet |
+| `button` | 4 | choix de texture par hauteur, survol assorti, variante à texture unique, gabarits natifs |
+| `input` | 3 | gabarit natif, largeur désirée, ornement (déjà là) |
+
+**Le « ≥ 3 partout » du premier jet ne tient pas, et ne doit pas être forcé.** Les cinq composants
+restants — `checkbox`, `heading`, `info_text`, `scroll_area`, `select` — n'ont **aucun calcul en
+dehors de leur `Widget::ui`** : leur géométrie est soit une constante de jeton (la case fait
+`CHECKBOX_SIZE`), soit une mise en page de texte qui n'existe pas sans contexte egui. Extraire une
+fonction artificiellement pour atteindre un chiffre produirait un test qui ne verrouille rien. Ils
+restent couverts par la galerie, qui est le bon outil pour eux.
+
+Le vrai critère est donc : **tout calcul qui peut se tromper en silence est une fonction libre et a
+son test**. C'est vérifiable à la relecture, pas par un `grep -c`.
+
+**Estimation** : 1 séance. **Réalisé** : conforme. **À faire avant le lot 4** : c'est le filet qui rendra les extensions de
 `input` sûres.
 
 ---
