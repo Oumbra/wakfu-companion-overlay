@@ -793,8 +793,21 @@ survol ne se signale donc que par le curseur — une teinte egui *multiplie* la 
 pas l'éclaircir), et le champ n'est pas éditable au clavier (valider une saisie partielle est une
 spec à part entière, sans référence pour ses états d'erreur).
 
-**Pas encore utilisé en production.** Ses clients naturels : les boutons « + » / « − » du carré de
-contrôle du Suivi, et le couple quantité du formulaire de vente HDV.
+**Pas encore utilisé en production, et son seul client identifié n'est pas encore porté** : le
+couple quantité du formulaire de vente HDV (`interfaces/interface-hdv-vente-form.png`).
+
+**Le carré de contrôle du Suivi n'en est PAS un** — une première rédaction de cette fiche l'annonçait
+comme tel, à tort (corrigé le 2026-09-10 sur retour utilisateur). Ses quatre boutons sont une grille
+2 × 2 d'actions **indépendantes** (`panels::watchlist::control_button_row`) : « + » ajoute un objet
+au suivi, « − » en retire un. Ce ne sont pas l'incrément et le décrément d'une valeur affichée entre
+eux, il n'y a aucun champ au milieu, et leur socle est celui du premier plan (`IconContext::FirstPlan`,
+36 px, bleu-vert) et non celui d'un pas (32 px, gris-bleu). Ils sont déjà sur `design::icon_button`,
+qui est le bon composant pour eux.
+
+Conséquence à assumer : ce composant est écrit **en avance de son usage**. Ce qui le distingue de
+`design::field`, écarté pour cette même raison deux chantiers plus tôt, c'est que le jeu le **cote à
+deux échelles** — les valeurs sont mesurées, pas devinées, et ses assets existaient déjà. La règle
+reste la même pour la suite : sans relevé, on n'écrit pas.
 
 ---
 
