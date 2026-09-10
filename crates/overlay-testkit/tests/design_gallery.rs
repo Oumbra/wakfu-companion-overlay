@@ -20,7 +20,7 @@
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
-    self, ButtonSize, ButtonState, ButtonVariant, InfoTone, InputState, TabState,
+    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, InfoTone, InputState, TabState,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -40,7 +40,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 1760.0))
+        .with_size(Vec2::new(760.0, 1880.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -280,6 +280,43 @@ fn gallery(ui: &mut egui::Ui) {
         .entry(5, "Chat")
         .log_name("galerie.onglets-jeu")
         .show(ui);
+
+    heading(
+        ui,
+        "Case à cocher — 20 px, rayon 0, le seul élément carré",
+        "Le LIBELLÉ porte l'état autant que la case : blanc décoché, doré coché. Le jeu double toujours son signal ; ne changer que la case perdrait la moitié de l'information.",
+    );
+    // Une valeur par case : un `&mut bool` partagé afficherait quatre fois le même état.
+    let (mut coche, mut decoche) = (true, false);
+    let (mut survole, mut desactive) = (false, true);
+    ui.horizontal(|ui| {
+        ui.add(design::checkbox(&mut coche, "Cochée").log_name("galerie.cb-on"));
+        ui.add_space(24.0);
+        ui.add(design::checkbox(&mut decoche, "Décochée").log_name("galerie.cb-off"));
+    });
+    ui.horizontal(|ui| {
+        ui.add(
+            design::checkbox(&mut survole, "Survolée")
+                .preview_state(CheckboxState::Hovered)
+                .log_name("galerie.cb-hover"),
+        );
+        ui.add_space(24.0);
+        ui.add(
+            design::checkbox(&mut desactive, "Désactivée")
+                .enabled(false)
+                .preview_state(CheckboxState::Disabled)
+                .log_name("galerie.cb-off-disabled"),
+        );
+    });
+    // Une ligne réelle du jeu, au libellé complet — le cas qui montre le corps de 15 px.
+    let mut interactions = false;
+    ui.add(
+        design::checkbox(
+            &mut interactions,
+            "Autoriser les interactions au clic gauche",
+        )
+        .log_name("galerie.cb-reference"),
+    );
 
     heading(
         ui,

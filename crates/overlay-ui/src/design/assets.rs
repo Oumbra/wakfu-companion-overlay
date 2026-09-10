@@ -76,6 +76,14 @@ pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretc
 /// l'étirement se voit moins qu'un raccord de tuilage au milieu d'un onglet.
 pub const TAB_SLICE: NineSlice = NineSlice::new(Insets::same(4.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage d'une case à cocher : **5px figés sur les quatre côtés**.
+///
+/// Mesuré : 2px de fond sombre puis 2px de cadre, plus un pixel de sécurité. Une case est toujours
+/// peinte à sa taille native de 20px — ce découpage n'existe donc que pour honorer la règle « toute
+/// taille est valide » sans déformer le cadre si un panneau en demandait une autre.
+pub const CHECKBOX_SLICE: NineSlice =
+    NineSlice::new(Insets::same(5.0), Fill::Stretch, Fill::Stretch);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -118,6 +126,10 @@ pub enum DsTexture {
     /// Onglet inactif — et désactivé, dont seul le libellé change. Découpé du segment du MILIEU du
     /// même fichier, le seul dont les deux coins sont droits.
     TabInactive,
+    /// Case à cocher COCHÉE (`checkbox-true.png`, 20 × 20) — cadre doré vif, carré blanc plein.
+    CheckboxChecked,
+    /// Case à cocher DÉCOCHÉE (`checkbox-false.png`, 20 × 20) — cadre kaki sombre, intérieur noir.
+    CheckboxUnchecked,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -149,6 +161,8 @@ impl DsTexture {
         DsTexture::IconInfo,
         DsTexture::TabActive,
         DsTexture::TabInactive,
+        DsTexture::CheckboxChecked,
+        DsTexture::CheckboxUnchecked,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -219,6 +233,16 @@ impl DsTexture {
                 name: "ds-tab-inactive",
                 bytes: ds_asset!("tab-inactive.png"),
                 slice: TAB_SLICE,
+            },
+            DsTexture::CheckboxChecked => DsTextureSpec {
+                name: "ds-checkbox-checked",
+                bytes: ds_asset!("checkbox-true.png"),
+                slice: CHECKBOX_SLICE,
+            },
+            DsTexture::CheckboxUnchecked => DsTextureSpec {
+                name: "ds-checkbox-unchecked",
+                bytes: ds_asset!("checkbox-false.png"),
+                slice: CHECKBOX_SLICE,
             },
         }
     }
