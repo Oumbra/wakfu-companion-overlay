@@ -558,9 +558,20 @@ design::scroll_area("options-contenu").show(ui, |ui| {
 | `id_salt` (à la construction) | distingue deux zones du même panneau ; porte la position de défilement | — |
 | `auto_shrink` | laisse la zone se rétrécir à son contenu | `false` — un panneau du jeu occupe toute sa hauteur |
 
-**Ce n'est pas un `Widget`, et c'est le seul écart au contrat** : il prend une closure de contenu, il
-ne peut donc pas rendre une `Response` à partir de rien. `egui::ScrollArea` n'en est pas un non plus,
-pour la même raison.
+**Ce n'est pas un `Widget`**, et depuis le 2026-09-10 ce n'est plus un écart : c'est le premier
+**composant conteneur** du design system (§1 bis du contrat, *forme closure*). Il prend une closure
+de contenu, il ne peut donc pas rendre une `Response` à partir de rien — `egui::ScrollArea` n'en est
+pas un non plus, pour la même raison.
+
+**Variante « cadre » — hors de ce composant, et c'est délibéré.** La barre du cadre ennemi du
+panneau Combat (`panels::combat_frame_scroll`) ne ressemble pas à celle-ci : barre dessinée de 5 px,
+couleur unie `#998a6c`, bordure noire, toujours visible. Ce n'est **pas** une divergence à
+« corriger » — chacun de ces écarts est une demande explicite de l'utilisateur, et les assets du jeu
+(`scrollbar-active.png` / `scrollbar-inactive.png`) y ont été essayés puis **rejetés** (« trop
+large, cachait les portraits »), voir l'en-tête de module de ce fichier. Le contexte diffère du tout
+au tout : une barre posée *sur* un décor de cadre, pas dans la gouttière d'un panneau. Elle reste
+locale au panneau tant qu'elle n'a qu'un utilisateur ; si un second apparaît, elle remonte ici en
+paramètre plutôt qu'en second composant.
 
 **Aucun rail.** Le relevé est catégorique : « le fond du panneau tient lieu de gouttière ». C'est ce
 qui rend ce composant particulier — `egui::ScrollArea` peint par défaut un rail derrière sa poignée,
@@ -654,6 +665,91 @@ onglets**.
 
 ---
 
+## `design::window` — chrome de fenêtre (2026-09-10)
+
+`crates/overlay-ui/src/design/components/window.rs` — **composant conteneur**, forme « zone
+rendue » (§1 bis du contrat).
+
+```rust
+let chrome = design::window("Options")
+    .footer("Annuler", "Valider")
+    .log_name("options")
+    .show(ui);
+
+chrome.tabs(ui, design::tabs(&mut state.tab).entry(Tab::Parametres, "Paramètres"));
+match chrome.footer { design::FooterClick::Validate => …, _ => {} }
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `title` (à la construction) | peint dans la bannière, serif grasse cernée d'une ombre bas-droite | — |
+| `tab_bar_height` | hauteur réservée à la barre d'onglets ; `0.0` pour une fenêtre sans onglets | `tokens::TAB_HEIGHT` (44) |
+| `footer` | libellés des deux boutons — annulation à gauche, validation à droite | aucun pied de page |
+| `log_name` | préfixe des deux boutons dans le journal | `fenetre` |
+
+Rend un `WindowChrome` : `tab_bar` (la bande d'onglets), `content` (entre onglets et pied) et
+`footer` (le clic reçu). **`content` n'est pas écrêtée** — c'est le prix de la forme « zone rendue »,
+et la raison pour laquelle le contenu passe normalement par `design::panel`.
+
+**La barre d'onglets n'est pas peinte par le chrome** : `WindowChrome::tabs` la pose à partir du
+`Tabs` que l'appelant construit. Un onglet est du contenu, pas du décor — et c'est aussi ce qui
+évite de rendre la fenêtre générique sur le type d'onglet de son contenu.
+
+**Utilisé en production** : la modale Options (`panels::options_modal`) et les maquettes de la page
+Alertes (`crates/overlay-testkit/examples/alertes-mockups.rs`).
+
+---
+
+## `design::panel` — panneau de contenu (2026-09-10)
+
+`crates/overlay-ui/src/design/components/panel.rs` — **composant conteneur**, forme closure.
+
+```rust
+design::panel().show(ui, chrome.content, |ui, panel| {
+    ui.add(design::heading("Fichier"));
+    ui.add(design::input(&mut state.path));
+    panel.scroll_area(ui, "options-contenu", |ui, width| { … });
+});
+```
+
+**Un panneau n'est pas une section.** Le relevé est catégorique : dans le jeu, une *section* n'a ni
+fond, ni bordure, ni filet — son seul signal de regroupement est l'espacement, et son seul signal de
+niveau le retrait de 7 px de son titre. Ce qui a un fond (`#15181c`), un bord (2 px `#131518`) et un
+rayon (2), c'est le **panneau** qui contient les sections.
+
+Ce qu'il fait pour son contenu, et qu'aucun appelant n'a donc plus à faire : les rembourrages, la
+réserve de barre de défilement à droite (26 px, **toujours posée**, comme le jeu), l'écrêtage — élargi
+à gauche du retrait des titres, sans quoi un titre de section perd sa première lettre —, et la mise à
+zéro de l'espacement implicite d'egui.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+
+---
+
+## `design::heading` — titre de section (2026-09-10)
+
+`crates/overlay-ui/src/design/components/heading.rs` — composant **feuille**.
+
+```rust
+ui.add(design::heading("Fichier"));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `text` (à la construction) | le titre | — |
+| `trailing_gap` | écart réservé sous le titre | `tokens::HEADING_TO_ROW` (7) |
+
+Serif grasse au corps du titre de fenêtre (21), **gris `#b8b9ba` et non blanc** : la hiérarchie
+entre les deux niveaux de titre du jeu passe par la couleur, pas par le corps.
+
+Deux pièges que le composant absorbe : il réserve la hauteur d'**encre** (16) et non celle de sa
+galley — réserver la galley ajoutait ~14 px invisibles sous le titre, sur sept relevés — et il
+applique lui-même le **retrait de 7 px** qui est, dans le jeu, le seul signal qu'une section existe.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -672,9 +768,6 @@ main, soit environ 250 lignes qui ne font que placer des rectangles.
 
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
-| **`design::window`** (conteneur) | Le chrome complet d'`options_modal` : bannière, titre, corps, pied à deux boutons, réserve de barre de défilement. | `modal-header.png`, `flat-template_2-without-decorations.png`, `decoration-{top,right,bottom}.png` ; `releve-modale-options.json` ; §9 / 9 bis / 9 ter du design-system. |
-| **`design::panel` / `design::section`** | Le panneau de contenu (`#15181c`, bord 2px `#131518`, rayon 2) et le regroupement par espacement seul. | `releve-section-options.json` — la distinction panneau/section y est déjà tranchée. |
-| **`design::heading`** | Les deux blocs de titre peints à la main dans la modale, avec le calcul de hauteur d'encre et l'ombre bas-droite. | Corps 21 (bannière) / 18 (section), `#b8b9ba`, `text::SHADOW_BOTTOM_RIGHT`. |
 | **`design::tooltip`** | `panels::tooltip` et ses trois enveloppes (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`/`_right`), placement et replis compris. | `TOOLTIP_MARGIN`, `TOOLTIP_GAP`, `TOOLTIP_BG_FILL` mesurés. |
 | **`design::icon` + `DsIcon`** — *décidé le 2026-09-10, voir ci-dessous* | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
 
@@ -735,7 +828,7 @@ Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options e
 | **`input`** — variantes `Number`, `Search`, état d'erreur | *Extension du composant existant*, pas un second composant (skill `ui-component`, étape 1). | `input-number.png`, `input-search.png`, `empty-input-search.png`, `large-input-*.png` |
 | **`design::stepper`** | Les boutons « + » / « − » du carré de contrôle du Suivi ; le couple valeur ± du formulaire de vente. | `button-plus.png`, `button-moins.png` ; `stepper_height` 41–48 et `stepper_button_square` 30 déjà dans `design-tokens.json`. |
 | **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. | `collapse-closed.png`, `collapse-width-5th-opened.png`, `collapse-block.png`, `collapse-block-opened.png` ; `collapse_header_height` 38–45 relevé. §5.8. |
-| **`design::field`** | Le calcul `row_rect`/`field_rect`/`browse_rect` d'`options_modal`, avec la règle « la hauteur d'un composant est celle de sa référence, pas celle de son voisin ». | Le cas réel est écrit et validé dans `options_modal` ; il s'agit de le généraliser. |
+| **`design::field`** | Rien aujourd'hui — le *libellé à gauche, contrôle à droite* du jeu (« Prix unitaire », « Quantité », « Durée de publication »). **À ne pas confondre** avec la ligne « contrôle élastique + bouton » de la modale Options, qui n'a pas de libellé et n'a qu'un seul usage. | Captures `interface-hdv-vente-form.png` ; **relevé `ui-blueprint` d'abord**, aucune cote n'existe. |
 | **`design::slider`** | Rien aujourd'hui. | Aucun asset découpé — passer par `design-asset` d'abord ; captures dans `interface-options-son.png` et `interface-options-interface.png`. |
 | **`tabs`** — variante icône | Onglets à pictogrammes. | `icon-tabs.png` ; dépend du registre `DsIcon` (vague 1). §5.7. |
 
