@@ -771,16 +771,31 @@ ui.add(design::stepper(&mut quantite).range(1..=999).log_name("hdv-quantite"));
 `design::input` en lecture seule. Le socle vient du manifeste (`DsTexture::ButtonStepper`), les
 glyphes aussi (`IconPlus`, `IconMinus`).
 
-**Mesures, prises sur les deux captures du jeu** (`input-number.png` 104 × 28 et
-`large-input-number.png` 192 × 34), qui donnent les mêmes rapports — d'où des rapports et non des
-pixels :
+**Mesures, prises sur `large-input-number.png`** (192 × 34), la seule capture dont le socle
+coïncide avec l'asset isolé `button-moins.png` :
 
 | Grandeur | Valeur | Vérification |
 | --- | --- | --- |
-| Gouttière | `STEPPER_GUTTER_RATIO` (0,267) | 26 + 7 + 38 + 7 + 26 = 104 ; 34 + 9 + 106 + 9 + 34 = 192 |
+| Socle | `STEPPER_SIZE` (32) | y=1..32 ; deux boutons symétriques, x 1..32 et x 159..190 |
+| Gouttière | `STEPPER_GUTTER_RATIO` (10/32) | 1 + 32 + 10 + 106 + 10 + 32 + 1 = 192 |
 | Encre du glyphe | `STEPPER_ICON_RATIO` (12/32) | 12 × 12 mesurés dans un socle de 32 |
-| Hauteur du champ | `STEPPER_FIELD_HEIGHT_RATIO` (26/34) | bordure du champ de y=4 à y=29 |
+| Hauteur du champ | `STEPPER_FIELD_HEIGHT_RATIO` (**1,0**) | **écart assumé** — le jeu met 26 pour 32 |
 | Teinte du glyphe | `STEPPER_ICON_TINT` (`#f4d89f`) | mesuré au pixel — **de l'or au repos** |
+
+**Le champ fait la hauteur de ses boutons** (décision utilisateur, 2026-09-10). Le jeu, lui, met un
+champ de 26 px pour un socle de 32 : un champ plus court que ses boutons a été jugé peu soigné, et
+l'uniformité l'emporte ici sur la fidélité. C'est le seul écart volontaire du composant, et il tient
+dans un jeton.
+
+**La petite capture (`input-number.png`) n'est pas une source.** Sa gouttière concorde à un pixel
+près, mais son glyphe fait 12 px dans un socle de 24 — le même que dans un socle de 32. Les deux
+captures ne sont donc pas le même composant à deux échelles : le jeu règle son interface de 67 % à
+233 %, et elles ont été prises à deux réglages différents. Elle sert de contrôle de cohérence, rien
+de plus.
+
+**Une erreur de mesure corrigée le jour même** : la première version divisait par la hauteur du
+**fichier** (34) au lieu de celle du **socle** (32). Elle donnait une gouttière de 0,267 au lieu de
+0,3125 et des boutons deux pixels trop hauts.
 
 **Trois choses que la comparaison au jeu a corrigées** (étape 6 du skill, sans laquelle aucune ne se
 serait vue) : le glyphe est **doré au repos**, alors que les deux autres contextes de bouton icône
