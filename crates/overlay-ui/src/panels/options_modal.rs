@@ -187,10 +187,15 @@ const SECTION_BORDER_COLOR: egui::Color32 = egui::Color32::from_rgb(0x13, 0x15, 
 /// intra-ligne qu'il ait été possible de mesurer. Elle figure bien à l'échelle d'espacement de la
 /// section (6, 7, 9, **10**, 11, 17, 21, 30, 31), ce n'est pas une valeur inventée pour l'occasion.
 const FIELD_TO_BROWSE_GAP: f32 = 10.0;
-/// Gouttière entre "Annuler" et "Valider" — le jeu en laisse 15px sur une fenêtre de 720
-/// (`interface-options-jeu.png` : boutons en x 18..351 et 367..700), soit ≈12px à l'échelle de
-/// cette modale. La première version les collait l'un à l'autre.
-const FOOTER_GUTTER: f32 = 12.0;
+/// Gouttière entre "Annuler" et "Valider" — **11px, la valeur du relevé telle quelle**
+/// (`releve-modale-options.json` : `btn-cancel` finit à x=355, `btn-confirm` commence à x=366).
+///
+/// Elle valait 12 : une mise à l'échelle des 15px lus à l'œil sur `interface-options-jeu.png`
+/// (boutons en x 18..351 et 367..700) rapportés à la largeur de cette modale. Le relevé a mesuré
+/// depuis, et il n'y a plus de raison de garder un chiffre dérivé — pas plus qu'il n'y en avait de
+/// mettre le chrome à l'échelle, puisqu'il est peint à sa taille native (voir `BANNER_HEIGHT` et
+/// `FOOTER_BUTTON_HEIGHT`, deux fois la même leçon).
+const FOOTER_GUTTER: f32 = 11.0;
 /// Hauteur des boutons « Annuler » / « Valider ». **La hauteur native de leur texture** (338×36),
 /// et non une hauteur déduite de leur largeur.
 ///

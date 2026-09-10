@@ -892,3 +892,117 @@ fn modale_options_echap_annule_et_entree_valide() {
         "Échap doit annuler la modale, jamais fermer l'overlay"
     );
 }
+
+/// Modale Options **sur damier** — étape 9 de `docs/plan-modale-options.md`.
+///
+/// La capture `options_modale_avec_erreur` ne peut vérifier ni le coin arrondi de la fenêtre ni sa
+/// translucidité : le harnais peint un panneau gris opaque derrière la modale, qui remplit le quart
+/// de cercle et masque tout ce qui transparaît. Le seul rayon prononcé de toute l'interface (12,
+/// tranché à la mesure le 2026-09-10 — voir `panels::options_modal::MODAL_RADIUS`) n'était donc
+/// vérifié par aucun test.
+///
+/// Ce test peint un damier contrasté à la place de ce fond. Il y rend visibles, et donc
+/// vérifiables :
+///
+/// - **les quatre coins arrondis** — le damier apparaît à pleine intensité dans chaque quart de
+///   cercle : mesuré, le pixel (8, 8) porte la couleur exacte du damier, celui de (14, 14) celle de
+///   la bannière ;
+/// - **la translucidité du fond de modale** (`MODAL_BG`, alpha 235) : dans les marges latérales, le
+///   contraste du damier retombe de 128 à **9,7**, soit les 8 % que cet alpha laisse passer.
+///
+/// Et il montre une chose qu'aucune mesure d'alpha isolée ne dit : **sous le panneau de contenu, il
+/// ne reste rien du damier** (contraste 0,7). Le panneau est peint PAR-DESSUS le fond de modale, les
+/// deux alphas se multiplient — 8 % de 10 % — et sa propre translucidité (`SECTION_BG`, alpha 230,
+/// pourtant plus transparent que le fond) n'y change rien. Ce qu'on prendrait pour un panneau
+/// translucide est en pratique opaque.
+///
+/// Le damier est peint **dans le `Ui` du harnais**, avant `paint_content` : c'est la seule façon
+/// d'imiter ce qui se passe en production, où la fenêtre OS est transparente et laisse voir le jeu.
+#[test]
+fn modale_options_sur_damier_ne_panique_pas() {
+    /// Côté d'une case. 12px : assez grand pour qu'un quart de cercle de rayon 12 en recouvre
+    /// plusieurs — donc pour que la forme du coin se lise sans ambiguïté sur la capture.
+    const CASE: f32 = 12.0;
+    /// Deux teintes franchement contrastées : c'est ce contraste qui rend la translucidité
+    /// mesurable. Prises dans la famille chromatique du jeu plutôt qu'en noir et blanc, pour que la
+    /// planche reste comparable à une vraie scène.
+    const SOMBRE: egui::Color32 = egui::Color32::from_rgb(0x24, 0x2E, 0x22);
+    const CLAIR: egui::Color32 = egui::Color32::from_rgb(0xC2, 0xAE, 0x84);
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let mut options_state = OptionsModalState {
+        path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+        error: None,
+        tab: OptionsTab::default(),
+    };
+    let mut options_assets: Option<OptionsModalAssets> = None;
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        ui.style_mut().visuals.text_cursor.blink = false;
+        let rect = ui.max_rect();
+        let painter = ui.painter().clone();
+        let mut y = rect.top();
+        let mut ligne = 0;
+        while y < rect.bottom() {
+            let mut x = rect.left();
+            let mut colonne = 0;
+            while x < rect.right() {
+                let case = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(CASE, CASE))
+                    .intersect(rect);
+                // La case du coin haut-gauche est CLAIRE : c'est elle que le quart de cercle
+                // découpe, et un coin creusé dans une case sombre serait indiscernable du fond de
+                // modale, qui est sombre lui aussi.
+                painter.rect_filled(
+                    case,
+                    0,
+                    if (ligne + colonne) % 2 == 0 {
+                        CLAIR
+                    } else {
+                        SOMBRE
+                    },
+                );
+                x += CASE;
+                colonne += 1;
+            }
+            y += CASE;
+            ligne += 1;
+        }
+
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let assets = options_assets.get_or_insert_with(|| OptionsModalAssets::load(&ctx));
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Options,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+                options: Some(&mut options_state),
+                options_assets: Some(assets),
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("options_modale_sur_damier");
+}
