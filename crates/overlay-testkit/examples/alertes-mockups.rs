@@ -53,6 +53,31 @@
 //!    est un, et l'onglet Son du jeu règle son volume sans jamais en dessiner. À extraire du client
 //!    (skill `design-asset`) si l'on veut le pictogramme du web.
 //!
+//! ## Le contrat transactionnel — ce que le portage doit écrire
+//!
+//! La page vit dans la fenêtre Options, **transactionnelle par contrat** (§5.1 du plan : « rien
+//! n'est pris en compte tant que Valider n'a pas été renvoyé ET jugé valide »), et son pied de
+//! page est partagé par tous les onglets. Un onglet qui appliquerait ses changements
+//! immédiatement à côté d'un onglet qui commit produirait le pire cas : un pied de page dont
+//! l'effet dépend de l'onglet où l'on se trouve. Le transactionnel n'est donc pas un choix libre,
+//! c'est une conséquence — mais il a un prix, et ces quatre points sont ce prix. Aucun n'est
+//! maquettable : ce sont des comportements, pas des écrans.
+//!
+//! 1. **Une garde de fermeture.** Échap, clic hors fenêtre et croix de la fenêtre OS doivent
+//!    demander confirmation tant que des modifications sont en attente — sans elle, un joueur qui
+//!    ajoute trois objets puis ferme par réflexe perd tout, en silence. Le **changement d'onglet**,
+//!    lui, n'intercepte rien : le brouillon lui survit.
+//! 2. **« Annuler » restaure le brouillon ENTIER, tous onglets confondus** — `soundItems`,
+//!    `alertDurationSeconds`, `alertManualClose` *et* le chemin de `wakfu.log`. Un « Annuler » qui
+//!    n'annulerait qu'une partie de ce que l'utilisateur a touché serait imprévisible.
+//! 3. **Pendant qu'un dialogue de confirmation est ouvert, le pied de page est inerte.** C'est ce
+//!    que dit le voile du jeu, et c'est pourquoi il couvre la fenêtre entière (voir [`confirm_box`]).
+//! 4. **« Valider » réécrit TOUTE la clé `profile.soundItems`** via un `PATCH /api/v1/settings`,
+//!    en *dernier écrivain gagne*. Une fenêtre laissée ouverte pendant qu'on modifie la liste
+//!    depuis la page web écrasera la modification web au moment du commit. C'est le prix assumé du
+//!    transactionnel : l'application immédiate ne supprimerait pas ce risque, elle réduirait la
+//!    fenêtre de conflit de quelques minutes à quelques secondes.
+//!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
@@ -251,13 +276,20 @@ fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: WakfuRarity) {
 /// gouttière qu'elle impose vaut pour le texte indicatif comme pour la valeur saisie. La v2
 /// simulait ce retrait par six espaces de tête, ce qui laissait la valeur saisie démarrer sous la
 /// loupe — visible sur sa capture des suggestions, où la loupe couvrait le « p » de « pierre ».
-fn search_field(ui: &mut egui::Ui, text: &mut String, placeholder: &str, width: f32) {
+fn search_field(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    placeholder: &str,
+    width: f32,
+    enabled: bool,
+) {
     ui.add(
         design::input(text)
             .leading_icon(DsTexture::IconSearch)
             .placeholder(placeholder)
             .size(InputSize::Standard)
             .width(width)
+            .enabled(enabled)
             .log_name("maquette.recherche"),
     );
 }
@@ -374,20 +406,28 @@ fn sound_settings(ui: &mut egui::Ui, auto: &mut bool, seconds: &mut String, widt
                 .enabled(*auto)
                 .log_name("maquette.duree"),
         );
-        *seconds = clamp_duration(seconds);
         ui.label(RichText::new("sec.").color(SUBDUED).size(15.0));
     });
 }
 
-/// Borne la durée saisie — `MIN_ALERT_DURATION_SECONDS` du web (0,5 s). Une saisie non numérique
-/// retombe sur le défaut du web (3,5 s) plutôt que d'être effacée sous les doigts.
-fn clamp_duration(raw: &str) -> String {
-    match raw.replace(',', ".").parse::<f32>() {
-        Ok(v) if v >= 0.5 => raw.to_string(),
-        Ok(_) => "0.5".to_string(),
-        Err(_) if raw.is_empty() => raw.to_string(),
-        Err(_) => "3.5".to_string(),
-    }
+/// Borne la durée saisie — `MIN_ALERT_DURATION_SECONDS` du web (0,5 s), défaut 3,5 s.
+///
+/// **À appeler à la VALIDATION, jamais à la frappe.** La v3 l'appliquait à chaque frame, ce qui
+/// rendait le champ inutilisable : taper `0.75` donnait `"0"` → borné à `"0.5"` sous les doigts,
+/// puis `"0.5."` → non parsable → `"3.5"` ; et `1,5` en disposition française tombait sur le même
+/// écueil. Toute saisie décimale passe par un état transitoire non parsable, et l'écraser avant
+/// qu'elle soit finie interdit d'écrire la valeur voulue.
+///
+/// Le web ne fait pas ça : il borne la valeur **stockée** (`setAlertDuration` → `Math.max`) et
+/// laisse le champ tranquille pendant la frappe. Côté overlay, l'appel appartient au moment où
+/// l'appelant lit la valeur — perte de focus, ou clic sur « Valider ».
+///
+/// Le besoin, lui, reste entier : « 0 » ou « abc » validé rendrait le message d'alerte invisible
+/// sans le moindre signal, d'autant plus que la fenêtre est transactionnelle et se ferme derrière
+/// le clic.
+#[allow(dead_code)]
+fn clamp_duration(raw: &str) -> f32 {
+    raw.replace(',', ".").parse::<f32>().unwrap_or(3.5).max(0.5)
 }
 
 /// En-tête des colonnes de la liste — même gris que les titres de section, voir [`SUBDUED`].
@@ -429,18 +469,21 @@ fn suggestion_list(ui: &egui::Ui, icons: &UiIcons, inner: Rect, field_bottom: f3
     );
     ui.painter()
         .rect_filled(list, 2, design::tokens::SELECT_LIST_FILL);
-    // Liseré clair d'un pixel en tête de liste — ce qui la détache de son champ. Jeton mesuré que
-    // la v2 déclarait sans l'appliquer.
-    ui.painter().hline(
-        list.x_range(),
-        list.top() + 1.0,
-        Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
-    );
     ui.painter().rect_stroke(
         list,
         2,
         Stroke::new(2.0, design::tokens::SELECT_LIST_BORDER),
         StrokeKind::Inside,
+    );
+    // Liseré clair d'un pixel en tête de liste — ce qui la détache de son champ. Peint **après**
+    // le bord, jamais avant : le `rect_stroke` de 2 px en `StrokeKind::Inside` le recouvrait
+    // intégralement, et la v3 le déclarait appliqué alors qu'aucun pixel n'en restait. Le jeu
+    // l'empile dans cet ordre — `select-simple-opened.png`, colonne x=100 : bord `#101215` en
+    // y 41-42, liseré `#7e7562` en y=43, fond dès y=44.
+    ui.painter().hline(
+        list.x_range(),
+        list.top() + 2.5,
+        Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
     );
     for (i, (name, rarity, already)) in SUGGESTIONS.iter().enumerate() {
         let row = Rect::from_min_size(
@@ -516,7 +559,14 @@ fn suggestion_list(ui: &egui::Ui, icons: &UiIcons, inner: Rect, field_bottom: f3
 /// elle n'est pas encore au manifeste. C'est le dernier asset que ce portage demande au skill
 /// `design-asset`, avec le haut-parleur.
 fn confirm_box(ui: &mut egui::Ui, parent: Rect, item_name: &str) {
-    // Voile sombre sur la fenêtre — une boîte modale du jeu assombrit ce qu'elle interrompt.
+    // Voile sombre sur **toute** la fenêtre, pied de page compris — une boîte modale du jeu
+    // assombrit ce qu'elle interrompt, et ce voile porte une information : tant que le dialogue
+    // est ouvert, « Annuler » et « Valider » sont inertes. La v3 le peignait dans le scope du
+    // panneau de section, dont le clip le rognait : bannière, onglets et pied restaient à pleine
+    // luminosité, ce qui laissait croire qu'on pouvait encore les cliquer.
+    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(parent));
+    ui.set_clip_rect(Rect::EVERYTHING);
+    let ui = &mut ui;
     ui.painter()
         .rect_filled(parent, 0, Color32::from_black_alpha(0x88));
 
@@ -625,7 +675,7 @@ fn write_mockup(harness: &mut Harness<'static>, name: &str) {
 /// quelques semaines.
 fn options_harness(
     size: Vec2,
-    mut build: impl FnMut(&mut egui::Ui, &UiIcons, Rect, Rect, Rect) + 'static,
+    mut build: impl FnMut(&mut egui::Ui, &UiIcons, &options_modal::Chrome, Rect) + 'static,
 ) -> Harness<'static> {
     let mut icons: Option<UiIcons> = None;
     let mut assets: Option<OptionsModalAssets> = None;
@@ -647,14 +697,13 @@ fn options_harness(
             );
             let window = ui.max_rect();
             let inner = chrome.inner;
-            let scroll = chrome.scroll;
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
                 // Clip élargi à gauche : un titre de section se peint EN RETRAIT de son axe de
                 // contrôles (`PANEL_PAD_CONTROL_X - PANEL_PAD_TITLE_X`, 7 px), et un clip calé sur
                 // `inner` lui mangeait sa première lettre — « Alerte » rendait « lerte ».
                 ui.set_clip_rect(inner.expand2(egui::vec2(8.0, 0.0)));
                 ui.spacing_mut().item_spacing.y = 0.0;
-                build(ui, icons, inner, window, scroll);
+                build(ui, icons, &chrome, window);
             });
         });
     })
@@ -675,6 +724,13 @@ struct AlertsTab<'a> {
     /// Rang (et non index d'objet) de la ligne survolée.
     hovered_rank: Option<usize>,
     empty_state: EmptyState,
+    /// Message d'échec du dernier enregistrement, le cas échéant.
+    ///
+    /// **Au-dessus de la liste, jamais dessous** : un message qu'il faut faire défiler pour voir
+    /// n'est pas un message d'échec. La v3 le peignait après `alerts_tab`, dont la liste vit dans
+    /// un enfant posé sur un rectangle absolu — qui n'avance pas le curseur du parent : le texte
+    /// retombait sur la première ligne et les deux devenaient illisibles.
+    error: Option<&'a str>,
 }
 
 /// Pourquoi la liste est vide — **trois situations distinctes, trois messages**.
@@ -718,10 +774,10 @@ impl EmptyState {
 fn alerts_tab(
     ui: &mut egui::Ui,
     icons: &UiIcons,
-    inner: Rect,
-    scroll: Rect,
+    chrome: &options_modal::Chrome,
     state: &mut AlertsTab<'_>,
 ) -> f32 {
+    let inner = chrome.inner;
     let width = inner.width();
 
     // Le bouton d'aide remplace le bloc d'explication permanent de la v2 — deux gains d'un même
@@ -732,22 +788,53 @@ fn alerts_tab(
     ui.horizontal(|ui| {
         options_modal::section_title(ui, "Alerte sonore");
         ui.add_space(6.0);
-        ui.add(
-            design::icon_button(DsTexture::IconHelp)
-                .context(IconContext::Panel)
-                .size(24.0)
-                .tooltip(DESC)
-                .log_name("maquette.aide"),
+        // **Glyphe nu, sans socle** : le jeu pose son `?` de tête de fenêtre exactement ainsi
+        // (`interface-personnage-equiement.png`, y=28, x 1040..1051 — de l'or `#f4d89f` à même la
+        // bannière, aucun socle). La v3 le mettait sur un socle de bouton icône **écrasé à 24 px**
+        // alors que `ICON_BUTTON_SIZE` vaut 36 et que c'est une mesure : le 9-slice s'aplatissait
+        // à 67 % de sa taille native. Entre rendre le socle à 36, trop haut à côté d'un titre de
+        // section, et suivre le précédent du jeu, c'est le précédent qui tranche.
+        let (help_rect, help) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
+        let native = design::DesignSystem::get(ui.ctx()).native_size(DsTexture::IconHelp);
+        design::DesignSystem::get(ui.ctx()).paint(
+            ui.painter(),
+            Rect::from_center_size(
+                help_rect.center(),
+                design::components::icon_button::glyph_fit(native, 14.0),
+            ),
+            DsTexture::IconHelp,
+            design::tokens::TAB_LABEL_IDLE,
         );
+        help.on_hover_text(DESC);
     });
     sound_settings(ui, state.auto, state.seconds, width);
 
     ui.add_space(6.0);
     options_modal::section_title(ui, &format!("Objets suivis ({})", state.order.len()));
-    search_field(ui, state.search, "Ajouter un objet à surveiller…", width);
+    // Champ grisé quand l'ajout est impossible : sans jeton, l'écriture (`PATCH
+    // /api/v1/settings`) n'a nulle part où aller, et un champ d'apparence active inviterait au
+    // geste que le message vient précisément de retirer.
+    let can_add = state.empty_state != EmptyState::SignedOut;
+    search_field(
+        ui,
+        state.search,
+        "Ajouter un objet à surveiller…",
+        width,
+        can_add,
+    );
     // Bas du champ : l'ancre du panneau de suggestions, rendue à l'appelant.
     let field_bottom = ui.cursor().min.y;
     ui.add_space(6.0);
+
+    if let Some(message) = state.error {
+        ui.add(
+            design::info_text(message)
+                .tone(design::InfoTone::Alert)
+                .width(width)
+                .log_name("maquette.echec"),
+        );
+        ui.add_space(6.0);
+    }
 
     if let Some(message) = state.empty_state.message() {
         ui.add_space(10.0);
@@ -760,29 +847,25 @@ fn alerts_tab(
     }
 
     column_header(ui, width);
-    // La liste occupe `Chrome::scroll` — `inner` élargi jusqu'au bord du panneau — pour que la
-    // poignée tombe à 14 px de ce bord, comme dans le jeu, au lieu de cumuler deux retraits.
-    let list_rect = Rect::from_min_max(egui::pos2(scroll.left(), ui.cursor().min.y), scroll.max);
-    let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list_rect));
-    let ui = &mut list_ui;
-    design::scroll_area("maquette.liste")
-        .auto_shrink(false)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let row_width = scroll.width() - design::components::scroll_area::RESERVE_X;
-            for (rank, &i) in state.order.iter().enumerate() {
-                item_row(
-                    ui,
-                    icons,
-                    &ITEMS[i],
-                    &mut state.sounds[i],
-                    row_width,
-                    state.hovered_rank == Some(rank),
-                    i,
-                    true,
-                );
-            }
-        });
+    // `Chrome::scroll_area` pose la géométrie ET le clip : la liste va jusqu'au bord du panneau,
+    // pour que la poignée tombe à 14 px de ce bord comme dans le jeu, et rien n'est écrêté à une
+    // autre abscisse que celle de sa mise en page. La largeur utile — réserve de barre déduite —
+    // vient de la méthode, plus d'une soustraction recopiée à chaque appelant.
+    chrome.scroll_area(ui, "maquette.liste", |ui, row_width| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (rank, &i) in state.order.iter().enumerate() {
+            item_row(
+                ui,
+                icons,
+                &ITEMS[i],
+                &mut state.sounds[i],
+                row_width,
+                state.hovered_rank == Some(rank),
+                i,
+                true,
+            );
+        }
+    });
     field_bottom
 }
 
@@ -808,12 +891,11 @@ fn alertes_options_taille_actuelle() {
 
     let mut harness = options_harness(
         Vec2::new(560.0, 436.0),
-        move |ui, icons, inner, _window, scroll| {
+        move |ui, icons, chrome, _window| {
             alerts_tab(
                 ui,
                 icons,
-                inner,
-                scroll,
+                chrome,
                 &mut AlertsTab {
                     order: &ORDER_NATUREL,
                     sounds: &mut sounds,
@@ -822,6 +904,7 @@ fn alertes_options_taille_actuelle() {
                     seconds: &mut seconds,
                     hovered_rank: None,
                     empty_state: EmptyState::NotEmpty,
+                    error: None,
                 },
             );
         },
@@ -856,12 +939,11 @@ fn alertes_options_taille_jeu() {
 
     let mut harness = options_harness(
         Vec2::new(720.0, 561.0),
-        move |ui, icons, inner, _window, scroll| {
+        move |ui, icons, chrome, _window| {
             alerts_tab(
                 ui,
                 icons,
-                inner,
-                scroll,
+                chrome,
                 &mut AlertsTab {
                     order: &order,
                     sounds: &mut sounds,
@@ -870,6 +952,7 @@ fn alertes_options_taille_jeu() {
                     seconds: &mut seconds,
                     hovered_rank: Some(1),
                     empty_state: EmptyState::NotEmpty,
+                    error: None,
                 },
             );
         },
@@ -895,7 +978,7 @@ fn alertes_options_etats_vides() {
     for (state, nom) in [
         (EmptyState::Loading, "chargement"),
         (EmptyState::SignedOut, "deconnecte"),
-        (EmptyState::NoItems, "aucun-objet"),
+        (EmptyState::NoItems, "aucun_objet"),
     ] {
         let mut sounds: Vec<bool> = Vec::new();
         let mut search = String::new();
@@ -906,12 +989,11 @@ fn alertes_options_etats_vides() {
 
         let mut harness = options_harness(
             Vec2::new(720.0, 561.0),
-            move |ui, icons, inner, _window, scroll| {
+            move |ui, icons, chrome, _window| {
                 alerts_tab(
                     ui,
                     icons,
-                    inner,
-                    scroll,
+                    chrome,
                     &mut AlertsTab {
                         order: &[],
                         sounds: &mut sounds,
@@ -920,6 +1002,7 @@ fn alertes_options_etats_vides() {
                         seconds: &mut seconds,
                         hovered_rank: None,
                         empty_state: state,
+                        error: None,
                     },
                 );
             },
@@ -946,32 +1029,25 @@ fn alertes_options_echec_enregistrement() {
 
     let mut harness = options_harness(
         Vec2::new(720.0, 561.0),
-        move |ui, icons, inner, _window, scroll| {
+        move |ui, icons, chrome, _window| {
             alerts_tab(
                 ui,
                 icons,
-                inner,
-                scroll,
+                chrome,
                 &mut AlertsTab {
-                    order: &ORDER_NATUREL[..3],
+                    order: &ORDER_NATUREL,
                     sounds: &mut sounds,
                     search: &mut search,
                     auto: &mut auto,
                     seconds: &mut seconds,
                     hovered_rank: None,
                     empty_state: EmptyState::NotEmpty,
+                    error: Some(
+                        "Vos alertes n'ont pas pu être enregistrées sur le compte. Réessayez, ou \
+                         vérifiez votre connexion.",
+                    ),
                 },
             );
-            ui.add_space(8.0);
-            ui.add(
-            design::info_text(
-                "Vos alertes n'ont pas pu être enregistrées sur le compte. Réessayez, ou vérifiez \
-                 votre connexion.",
-            )
-            .tone(design::InfoTone::Alert)
-            .width(inner.width())
-            .log_name("maquette.echec"),
-        );
         },
     );
     harness.run();
@@ -999,27 +1075,25 @@ fn alertes_options_ajout_suggestions() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(
-        Vec2::new(720.0, 561.0),
-        move |ui, icons, inner, _w, scroll| {
-            let field_bottom = alerts_tab(
-                ui,
-                icons,
-                inner,
-                scroll,
-                &mut AlertsTab {
-                    order: &ORDER_NATUREL,
-                    sounds: &mut sounds,
-                    search: &mut search,
-                    auto: &mut auto,
-                    seconds: &mut seconds,
-                    hovered_rank: None,
-                    empty_state: EmptyState::NotEmpty,
-                },
-            );
-            suggestion_list(&*ui, icons, inner, field_bottom);
-        },
-    );
+    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, chrome, _w| {
+        let inner = chrome.inner;
+        let field_bottom = alerts_tab(
+            ui,
+            icons,
+            chrome,
+            &mut AlertsTab {
+                order: &ORDER_NATUREL,
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                hovered_rank: None,
+                empty_state: EmptyState::NotEmpty,
+                error: None,
+            },
+        );
+        suggestion_list(&*ui, icons, inner, field_bottom);
+    });
     harness.run();
     write_mockup(&mut harness, "alertes_options_ajout_suggestions");
 }
@@ -1042,27 +1116,24 @@ fn alertes_options_confirmation_retrait() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(
-        Vec2::new(720.0, 561.0),
-        move |ui, icons, inner, window, scroll| {
-            alerts_tab(
-                ui,
-                icons,
-                inner,
-                scroll,
-                &mut AlertsTab {
-                    order: &SHOWN,
-                    sounds: &mut sounds,
-                    search: &mut search,
-                    auto: &mut auto,
-                    seconds: &mut seconds,
-                    hovered_rank: Some(2),
-                    empty_state: EmptyState::NotEmpty,
-                },
-            );
-            confirm_box(ui, window, ITEMS[10].name);
-        },
-    );
+    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, chrome, window| {
+        alerts_tab(
+            ui,
+            icons,
+            chrome,
+            &mut AlertsTab {
+                order: &SHOWN,
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                hovered_rank: Some(2),
+                empty_state: EmptyState::NotEmpty,
+                error: None,
+            },
+        );
+        confirm_box(ui, window, ITEMS[10].name);
+    });
     harness.run();
     write_mockup(&mut harness, "alertes_options_confirmation_retrait");
 }
@@ -1147,7 +1218,13 @@ fn alertes_bandeau_ingame() {
                         );
                     });
 
-                    ui.add_space(8.0);
+                    // En-tête de colonne, comme dans la fenêtre : une case à cocher sans libellé
+                    // au bout d'une ligne portant un nom d'objet se lit spontanément
+                    // « sélectionné ». Dans les Options c'est l'en-tête qui lève l'ambiguïté ;
+                    // sans lui, le bandeau la rouvrait — la même ambiguïté que le badge puis la
+                    // coche verte des versions précédentes.
+                    ui.add_space(6.0);
+                    column_header(ui, width);
                     design::scroll_area("maquette.bandeau")
                         .auto_shrink(false)
                         .show(ui, |ui| {
@@ -1203,5 +1280,10 @@ fn main() {
     println!("  alertes_options_confirmation_retrait");
     alertes_bandeau_ingame();
     println!("  alertes_bandeau_ingame");
-    println!("7 planches écrites dans {}", mockup_dir().display());
+    // Le compte des FICHIERS, pas celui des fonctions : `alertes_options_etats_vides` en produit
+    // trois à lui seul, et ce compteur est le seul index du dossier qu'on publiera en Artifact.
+    let dir = mockup_dir();
+    let ecrites = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+    let affiche = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    println!("{ecrites} planches écrites dans {}", affiche.display());
 }
