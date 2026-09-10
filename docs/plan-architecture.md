@@ -866,6 +866,22 @@ Trois décisions prises à cette occasion :
   affichait des boutons de 27px là où le jeu en met 36 — le corps du libellé suivant la hauteur, il
   y perdait 3px d'encre sur 13. Voir `panels::options_modal::FOOTER_BUTTON_HEIGHT`.
 
+**Deux décisions structurantes prises le 2026-09-10**, après un diagnostic complet de la couche :
+
+- **Le contrat de composant a deux familles.** Une *feuille* implémente `egui::Widget` ; un
+  *conteneur* — celui qui encadre du contenu fourni par l'appelant — expose un `show` générique sur
+  le retour de ce contenu, parce que `fn ui(self, ui) -> Response` n'a de place ni pour ce contenu
+  ni pour ce qu'il rend. egui a tranché de la même façon : aucun de ses conteneurs n'implémente
+  `Widget`. `design::scroll_area`, jusque-là documenté comme « seul écart au contrat », en devient
+  le premier cas nominal. Voir `.claude/skills/ui-component/references/contrat-composant.md` §1 bis.
+- **Le vocabulaire visuel des panneaux flottants est fixé.** Combat et Suivi prennent les *formes*
+  et la *typographie* du jeu, et **gardent leur accent cyan** (`#00d2ff`), promu en jeton nommé
+  `tokens::OVERLAY_ACCENT`. Motif : un overlay se lit par-dessus le jeu, sur un fond arbitraire ;
+  le cyan n'existe nulle part dans l'interface Wakfu, ce qui est exactement ce qui l'empêche de s'y
+  confondre. Conséquence pour §9.2 : **un seul jeu de composants**, dont la teinte vient d'un jeton
+  (`OVERLAY_ACCENT` pour ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre) — jamais
+  d'un paramètre de thème par composant.
+
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
 Composants livrés : le bouton texte, puis le champ de saisie (`design::input`, 2026-09-10 — hauteur
 native 25px, valeur en or `#f4d89e` et non en blanc, texte indicatif peint à la main parce qu'egui

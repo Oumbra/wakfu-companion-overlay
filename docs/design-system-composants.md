@@ -723,11 +723,30 @@ Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options e
 
 ### Vague 3 — les données
 
-Les composants qui portent ce que l'overlay affiche réellement. **Conditionnés par un arbitrage** :
-les panneaux Combat et Suivi parlent encore le langage du portage web (cyan `#00d2ff`, gris
-`#1e1e1e` — 34 constantes de couleur en dur dans `panels::watchlist` et `panels::combat`), pas celui
-du jeu. Tant que la migration n'est pas décidée, une tuile d'objet ou une jauge de dégâts ne sait
-pas de quel côté elle tombe.
+Les composants qui portent ce que l'overlay affiche réellement.
+
+**Le vocabulaire visuel de ces panneaux est tranché** (décision utilisateur, 2026-09-10) : les
+panneaux Combat et Suivi **prennent les formes et la typographie du jeu, et gardent leur accent
+cyan**. Ce n'est pas un compromis mou, c'est le seul point où l'overlay a une contrainte que le
+jeu n'a pas : il se lit **par-dessus** le jeu, sur un fond arbitraire et mouvant. Le cyan
+`#00d2ff` n'existe nulle part dans l'interface Wakfu — c'est précisément ce qui l'empêche de s'y
+confondre. Une jauge de dégâts or posée sur un décor or se cherche.
+
+Concrètement, trois familles à reprendre, et rien d'autre :
+
+| Ce qui migre | Aujourd'hui | Cible |
+| --- | --- | --- |
+| **Les polices** | la proportionnelle par défaut d'egui — une Ubuntu *Light*, plus maigre que tout ce que le jeu écrit. Neuf appels `FontId::proportional`, plus deux `FontId::monospace` sur les compteurs de tuile. | `design::text::label_font` / `title_font` |
+| **Les formes** | rayons hérités du CSS : tuile 10 px, carte de toast 12 px, bandeau 6 px. | emplacement du jeu — carré, bordure 2 px, rayon 0–2 |
+| **L'accent — reste** | cyan `#00d2ff` dispersé en constantes locales de `panels::combat` et `panels::watchlist`. | **un jeton nommé**, `tokens::OVERLAY_ACCENT`, documenté comme le vocabulaire du contenu flottant — plus un vestige du portage |
+
+Ce qui est **déjà** au langage du jeu et qu'il ne faut pas toucher : les cadres de portraits
+(gabarits du jeu), les quatre boutons du carré de contrôle (`design::icon_button`, socle
+`button-icon-first-plan.png` du jeu), les infobulles, les sept bordures de rareté.
+
+La conséquence pour les composants ci-dessous : **un seul jeu de composants, une seule dimension de
+galerie**. `meter`, `badge` et `item_slot` prennent leur teinte d'un jeton — `OVERLAY_ACCENT` pour
+ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre — jamais d'un paramètre de thème.
 
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
