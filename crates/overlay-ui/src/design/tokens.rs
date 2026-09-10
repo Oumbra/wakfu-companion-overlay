@@ -384,10 +384,10 @@ pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 /// jeu ne convient pas (voir `IconContext::disabled`) — un multiplicateur d'alpha appliqué au socle
 /// de repos, ~43 % d'opacité.
 ///
-/// Valeur reprise telle quelle de `panels::icon_button::DISABLED_TINT`, qui la portait depuis le
+/// Valeur reprise telle quelle du prédécesseur maison de ce composant, qui la portait depuis le
 /// 2026-09-06 : assez marquée pour lire « désactivé » sur le fond translucide commun d'une barre de
-/// premier plan, sans devenir illisible. Elle n'a jamais été reprochée sur les deux ans de vie de
-/// ce bouton ; la migration vers le design system n'était pas le moment de la rejuger.
+/// premier plan, sans devenir illisible. Elle n'a jamais été reprochée ; la migration vers le
+/// design system n'était pas le moment de la rejuger.
 pub const DISABLED_DIM: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 110);
 
 /// Teinte d'une icône désactivée en contexte premier plan — [`ICON_TINT`] à l'opacité de
@@ -407,7 +407,9 @@ pub const ICON_TINT_DISABLED: Color32 =
 /// Sans cet étalon, une icône serait peinte à sa taille de fichier — 13, 14 ou 16px selon le glyphe
 /// détouré, donc trois hauteurs d'encre différentes dans une même barre, toutes en dessous du jeu.
 /// `ui_icons` normalisait déjà à 16, et à 18 pour le seul rouage après un retour utilisateur
-/// « encore trop petite » (2026-09-06) : la mesure dit que ce 18-là valait pour les quatre.
+/// « encore trop petite » (2026-09-06) : la mesure dit que ce 18-là valait pour les quatre. Il ne
+/// reste rien de cette machinerie depuis la migration du 2026-09-10 — le recadrage est fait en
+/// amont par le skill `design-asset`, l'étalon est ici.
 ///
 /// Appliqué par le manifeste (`DsTexture::icon_content_size`), jamais par l'appelant : c'est une
 /// propriété de l'asset.

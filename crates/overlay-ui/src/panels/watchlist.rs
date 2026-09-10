@@ -153,7 +153,7 @@ use crate::design::{self, DsTexture, IconContext};
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-use super::icon_button;
+use super::tooltip;
 
 /// Durée d'affichage du toast d'alerte avant fermeture automatique (§9 du plan : « toast ≤ 5 s,
 /// non bloquant ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
@@ -303,6 +303,22 @@ const TILE_ROUNDING: f32 = 10.0;
 /// `app-item-icon [size]="30"` dans le template web — mêmes proportions ; ne s'applique plus qu'aux
 /// tuiles ENNEMI (voir `entry_tile`), les tuiles OBJET utilisant désormais `ITEM_ICON_SIZE`.
 const ICON_SIZE: f32 = 30.0;
+
+/// Fond translucide peint sous le carré de contrôle, AVANT ses boutons.
+///
+/// La planche de référence fournie par l'utilisateur (2026-09-06) montre un léger fond noir
+/// semi-opaque derrière la bande de boutons de premier plan du jeu, visible dans le petit écart
+/// entre deux boutons adjacents et sur les bords. Même teinte que `panels::combat::
+/// LEADER_PANEL_FILL`, un bandeau translucide déjà validé ailleurs dans cette interface — pas une
+/// nouvelle valeur d'opacité inventée pour l'occasion.
+///
+/// Vivait dans `panels::icon_button` jusqu'au 2026-09-10, du temps où `combat::bottom_toolbar` en
+/// avait besoin elle aussi ; ce carré en est le seul utilisateur depuis que les quatre boutons y
+/// ont été regroupés.
+const PANEL_BACKDROP_FILL: egui::Color32 =
+    egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
+/// Rayon d'angle du fond translucide — voir [`PANEL_BACKDROP_FILL`].
+const PANEL_BACKDROP_ROUNDING: f32 = 6.0;
 
 /// Taille (largeur ET hauteur) du socle des 4 boutons du carré de contrôle
 /// (`DsTexture::ButtonIconFirstPlan`, voir doc de module, migration 2026-09-10) — mise à l'échelle
@@ -947,7 +963,7 @@ fn toast_card(
 /// egui retomber sur son défaut `BOTTOM_START` (« sous la souris », déjà jugé désagréable ailleurs).
 ///
 /// **Refonte 2026-09-06 (design system tooltip)** : écart au widget porté à
-/// `icon_button::TOOLTIP_GAP` et contenu peint par `icon_button::paint_tooltip_label` — même
+/// `tooltip::TOOLTIP_GAP` et contenu peint par `tooltip::paint_tooltip_label` — même
 /// changement, mêmes raisons que `combat::show_tooltip_above` (voir sa doc).
 fn show_tooltip_left(response: &egui::Response, text: &str) {
     let mut tooltip = egui::Tooltip::for_enabled(response);
@@ -961,8 +977,8 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
             egui::RectAlign::RIGHT_START,
             egui::RectAlign::RIGHT_END,
         ])
-        .gap(icon_button::TOOLTIP_GAP);
-    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
+        .gap(tooltip::TOOLTIP_GAP);
+    tooltip.show(|ui| tooltip::paint_tooltip_label(ui, text));
 }
 
 /// Symétrique de `show_tooltip_left` — affiche `text` en infobulle à DROITE de `response`
@@ -987,8 +1003,8 @@ fn show_tooltip_right(response: &egui::Response, text: &str) {
             egui::RectAlign::LEFT_START,
             egui::RectAlign::LEFT_END,
         ])
-        .gap(icon_button::TOOLTIP_GAP);
-    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
+        .gap(tooltip::TOOLTIP_GAP);
+    tooltip.show(|ui| tooltip::paint_tooltip_label(ui, text));
 }
 
 /// Côté d'infobulle d'un bouton du carré de contrôle — voir `control_button` et doc de module
@@ -1006,8 +1022,8 @@ enum TooltipSide {
 /// Carré 2×2 de boutons du bandeau, sur un fond translucide (voir doc de module, refonte
 /// 2026-09-08) : "+"/"−" en haut (INERTES, `Sense::hover()`), "Détails"/"Options" en dessous
 /// (CLIQUABLES, `Sense::click()` — déplacés depuis `combat::bottom_toolbar`), tous peints par
-/// `control_button` — même fond que `bottom_toolbar` utilisait déjà (`icon_button::
-/// PANEL_BACKDROP_FILL`), marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET entre
+/// `control_button` — même fond que `bottom_toolbar` utilisait déjà ([`PANEL_BACKDROP_FILL`]),
+/// marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET entre
 /// les deux colonnes/lignes.
 ///
 /// Disposition (donnée explicitement par l'utilisateur, voir doc de module) :
@@ -1028,11 +1044,8 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
             egui::Sense::hover(),
         )
         .0;
-    ui.painter().rect_filled(
-        row_rect,
-        icon_button::PANEL_BACKDROP_ROUNDING,
-        icon_button::PANEL_BACKDROP_FILL,
-    );
+    ui.painter()
+        .rect_filled(row_rect, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
 
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
     control_button(
