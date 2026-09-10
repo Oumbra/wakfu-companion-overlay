@@ -40,6 +40,7 @@ use std::sync::Arc;
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::checkbox::{checkbox, Checkbox, CheckboxState};
+pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
 pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
 pub use components::scroll_area::{scroll_area, ScrollArea};

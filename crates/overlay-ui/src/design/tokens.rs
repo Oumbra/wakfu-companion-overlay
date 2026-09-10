@@ -307,3 +307,21 @@ pub const SCROLLBAR_CONTENT_MARGIN: f32 = 6.0;
 
 /// Marge entre la poignée et le bord du panneau — 691 → 705.
 pub const SCROLLBAR_OUTER_MARGIN: f32 = 14.0;
+
+// ---------------------------------------------------------------------------------------------
+// Bouton icône — teintes mesurées sur `menu-button-icon-first-plan.png`, taille native des cinq
+// socles. Détail dans `design::components::icon_button`.
+// ---------------------------------------------------------------------------------------------
+
+/// Côté d'un bouton icône — **36px, la taille native des cinq socles** (`button-icon.png`,
+/// `button-icon-first-plan.png`, leurs `-hover` et `button-icon-disabled.png`, toutes 36 × 36).
+/// C'est aussi la taille à laquelle le jeu pose son bouton de réinitialisation.
+pub const ICON_BUTTON_SIZE: f32 = 36.0;
+
+/// Teinte d'une icône au repos — `#c5cbcc`, mesurée sur `menu-button-icon-first-plan.png`, pas
+/// devinée. Les icônes du design system étant blanc pur avec alpha, une simple teinte suffit à les
+/// reproduire — là où `ui_icons` en charge deux copies recolorées au chargement.
+pub const ICON_TINT: Color32 = Color32::from_rgb(0xC5, 0xCB, 0xCC);
+
+/// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
+pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);

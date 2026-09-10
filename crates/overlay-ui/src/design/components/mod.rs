@@ -25,6 +25,7 @@
 
 pub mod button;
 pub mod checkbox;
+pub mod icon_button;
 pub mod info_text;
 pub mod input;
 pub mod scroll_area;
