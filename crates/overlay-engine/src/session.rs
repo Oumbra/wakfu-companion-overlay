@@ -1179,7 +1179,9 @@ impl SessionState {
                 .entry(fighter.name.clone())
                 .or_default()
                 .push(idx);
-            *pending_restored_joins.entry(fighter.name.clone()).or_insert(0) += 1;
+            *pending_restored_joins
+                .entry(fighter.name.clone())
+                .or_insert(0) += 1;
         }
         self.fights.insert(
             fight_id,
@@ -2783,7 +2785,11 @@ mod tests {
         // Rejeu, en rattrapage, des mêmes lignes `[_FL_]` que celles qui avaient déjà produit les
         // deux combattants restaurés ci-dessus (exactement ce qu'un `wakfu.log` non rotaté rejoue
         // au redémarrage).
-        state.apply(&fighter_joined(7, "Oumbra", 9, false), sweep_ctx, &mut events);
+        state.apply(
+            &fighter_joined(7, "Oumbra", 9, false),
+            sweep_ctx,
+            &mut events,
+        );
         state.apply(&fighter_joined(7, "Bwork", 0, true), sweep_ctx, &mut events);
 
         assert_eq!(
@@ -2900,7 +2906,11 @@ mod tests {
             sweep_ctx,
             &mut restarted_events,
         );
-        restarted.apply(&combat_end(7, FightResult::Won), sweep_ctx, &mut restarted_events);
+        restarted.apply(
+            &combat_end(7, FightResult::Won),
+            sweep_ctx,
+            &mut restarted_events,
+        );
         let restarted_signature = fight_signature_of(&restarted_events);
 
         assert_eq!(
