@@ -3,7 +3,17 @@
 Ce que tout fichier de `crates/overlay-ui/src/design/components/` doit respecter. `button.rs` en est
 l'implémentation de référence : en cas de doute, l'ouvrir plutôt que d'improviser.
 
-## 1. API
+**Deux familles de composants**, décidé le 2026-09-10 après cinq dérogations d'affilée à la clause
+« `impl egui::Widget` ». Le critère est mécanique, il ne laisse aucune place au jugement :
+
+> **L'appelant fournit-il du contenu à encadrer ?**
+> Non → **feuille** (§1) : bouton, champ, case, onglets, icône.
+> Oui → **conteneur** (§1 bis) : fenêtre, panneau, repliable, tableau, zone défilable.
+
+Tout le reste du contrat — états, géométrie, journalisation, vérification, interdits — s'applique
+**à l'identique aux deux familles**. Seule la forme de l'API change.
+
+## 1. API — composant feuille
 
 ```rust
 // Construction : une fonction libre, aucun paramètre obligatoire hors le contenu.
@@ -28,6 +38,64 @@ design::button("Valider")
   libre (`Height(f32)`), qui reste proportionnée (police et marges suivent la hauteur).
 - **Une méthode d'aperçu** (`preview_state`) forçant l'état peint, documentée comme réservée à la
   galerie et aux captures : en rendu offscreen aucun pointeur ne survole quoi que ce soit.
+
+## 1 bis. API — composant conteneur
+
+`egui::Widget` ne peut pas décrire un conteneur. Sa signature est `fn ui(self, ui: &mut Ui) ->
+Response` : elle n'a de place **ni pour le contenu** que l'appelant fournit, **ni pour ce que ce
+contenu rend** — `Response` ne décrit qu'une interaction avec la souris, alors que la modale Options
+rend un `OptionsModalAction`. Le ressortir par un `&mut` en paramètre serait exactement la
+maladresse que §6 interdit ailleurs.
+
+egui a rencontré la même limite et l'a tranchée pareil : **aucun de ses conteneurs**
+(`ScrollArea`, `CollapsingHeader`, `Window`, `Frame`) n'implémente `Widget`, tous exposent un `show`
+générique sur le retour du contenu.
+
+Deux formes, et **la première est le défaut**.
+
+### Forme closure
+
+Le conteneur pose la géométrie, appelle le contenu, puis reprend la main :
+
+```rust
+pub fn panel() -> Panel;
+
+impl Panel {
+    pub fn show<R>(
+        self,
+        ui: &mut egui::Ui,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<R>;
+}
+```
+
+**Obligatoire** dès que le conteneur doit écrêter son contenu (§3) ou peindre quoi que ce soit
+**après** lui. `design::scroll_area` en est l'exemplaire de référence — jusqu'ici documenté comme
+« seul écart au contrat », il en est désormais le premier cas nominal.
+
+### Forme « zone rendue »
+
+Le conteneur peint tout son décor, puis rend le ou les rectangles où l'appelant écrira :
+
+```rust
+pub fn window(ui: &mut egui::Ui, …) -> Window;   // Window { inner: Rect, footer: FooterClick }
+```
+
+Admise **seulement** quand les deux conditions tiennent : le conteneur ne peint rien après le
+contenu, **et** il rend plusieurs sorties indépendantes qu'un `InnerResponse<R>` n'empaquetterait
+qu'artificiellement. Le décor de la modale Options est ce cas : il rend à la fois sa zone de contenu
+et le clic de son pied de page (`panels::options_modal::chrome`, à remonter dans `design::window`).
+
+Le prix est explicite : **cette forme ne garantit pas l'écrêtage**, l'appelant peint dans un
+rectangle sans clip. C'est pour cela qu'elle n'est pas le défaut, et qu'un conteneur de cette forme
+expose une méthode dédiée (`Window::scroll_area`, forme closure) pour les zones qui, elles, doivent
+être écrêtées.
+
+### Ce qui change pour la galerie
+
+Un conteneur n'a pas d'« états » au sens de §2, et il ne se rend pas seul : son entrée dans
+`design_gallery.rs` le montre **avec du contenu factice**, choisi pour exercer sa géométrie — au
+moins un contenu qui déborde, pour que l'écrêtage se voie sur la capture.
 
 ## 2. États
 

@@ -698,10 +698,15 @@ Exécution, dans cet ordre :
 Coût mémoire mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
 sans effet sur le budget de 300 Mo (§8 du plan).
 
-**Un composant conteneur ne peut pas implémenter `egui::Widget`** (qui rend une `Response` à partir
-de rien) : `scroll_area` a déjà dû y déroger, et `window`/`panel`/`collapsible`/`table`/`dialog`
-devront aussi. Cinq dérogations ne sont plus une exception — trancher, avant d'écrire la vague 1, si
-le contrat gagne une seconde forme « conteneur » (closure de contenu) ou si sa clause 2 est élargie.
+**Le contrat de composant a désormais deux familles** (décision utilisateur, 2026-09-10) : une
+**feuille** implémente `egui::Widget` ; un **conteneur** — celui qui encadre du contenu fourni par
+l'appelant — expose un `show` générique sur le retour de ce contenu. Toute la vague 1 relève de la
+seconde famille. Le critère de choix et les deux formes admises sont dans
+[`contrat-composant.md`](../.claude/skills/ui-component/references/contrat-composant.md) §1 bis.
+
+`panels::options_modal::chrome` (extrait le 2026-09-10) est déjà un conteneur au sens de ce
+contrat, écrit dans un panneau faute d'endroit où le mettre : c'est lui qui remonte dans
+`design::window`, sans changer de forme.
 
 ### Vague 2 — les formulaires
 
