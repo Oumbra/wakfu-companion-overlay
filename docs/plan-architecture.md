@@ -883,6 +883,8 @@ Trois décisions prises à cette occasion :
   d'un paramètre de thème par composant.
 
 Catalogue et état d'avancement : [`docs/design-system-composants.md`](design-system-composants.md).
+Feuille de route de la suite (couche conteneur, ménage, composants de données) :
+[`docs/plan-composants-ui.md`](plan-composants-ui.md).
 Composants livrés : le bouton texte, puis le champ de saisie (`design::input`, 2026-09-10 — hauteur
 native 25px, valeur en or `#f4d89e` et non en blanc, texte indicatif peint à la main parce qu'egui
 impose sa propre couleur à un `hint_text`). `panels::icon_button::paint_icon_button`, hors contrat
