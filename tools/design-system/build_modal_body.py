@@ -20,7 +20,7 @@ Ce que disent les captures
 Composants retirés : ligne d'onglets, bouton « réinitialiser », panneau de
 section, boutons Annuler et Valider.
 """
-import numpy as np, glob, os, sys
+import argparse, numpy as np, glob, os
 from PIL import Image
 from scipy.ndimage import (gaussian_filter, gaussian_filter1d, median_filter,
                            grey_opening, binary_erosion, binary_dilation, label)
@@ -196,26 +196,85 @@ def build(src_img, hatch, amp, flat=False, grain_seed=5):
     return np.clip(out, 0, 255)
 
 
+def clean_alpha(alpha):
+    """Efface les pixels semi-transparents isolés des angles.
+
+    La capture d'origine en porte trois, détachés du bord par au moins un pixel
+    transparent : de l'antialiasing du client resté accroché au détourage, pas
+    la courbe elle-même. Peints tels quels, ils apparaissent en points clairs
+    dans le quart de cercle.
+    """
+    a = alpha.copy()
+    for y in range(a.shape[0]):
+        row = a[y]
+        opaque = np.nonzero(row >= 128)[0]
+        if len(opaque) == 0:
+            continue
+        lo, hi = opaque[0], opaque[-1]
+        left = row[:lo]
+        if len(left) and (left == 0).any():
+            cut = np.nonzero(left == 0)[0][-1]
+            row[:cut + 1] = 0
+        right = row[hi + 1:]
+        if len(right) and (right == 0).any():
+            cut = np.nonzero(right == 0)[0][0]
+            row[hi + 1 + cut:] = 0
+    return a
+
+
 def save(arr, alpha, outdir, name):
     """Sortie RGBA : les deux angles inférieurs sont arrondis au rayon 12, comme
     les angles supérieurs de `modal-header.png` — leur transparence fait partie
     de l'asset."""
-    rgba = np.dstack([arr, alpha])[BODY_Y0:H].astype(np.uint8)
+    rgba = np.dstack([arr, clean_alpha(alpha)])[BODY_Y0:H].astype(np.uint8)
     Image.fromarray(rgba, 'RGBA').save(os.path.join(outdir, name), optimize=True)
     return name
 
 
-if __name__ == '__main__':
-    outdir = sys.argv[1]
-    os.makedirs(outdir, exist_ok=True)
+def measure_insets(support, share=0.90, step=5):
+    """Marges à figer en 9-slice : de chaque côté, la plus petite marge qui
+    contienne `share` du décor de sa moitié.
+
+    Même intention que les marges de bouton du manifeste (`design::assets`) —
+    ce sont les hachures qui dimensionnent, pas les coins — mais le décor est
+    ici franchement asymétrique, d'où quatre valeurs distinctes.
+    """
+    m = support[BODY_Y0:] > 0.05
+    out = {}
+    for axis, lo_name, hi_name in ((1, 'left', 'right'), (0, 'top', 'bottom')):
+        prof = m.sum(axis=1 - axis).astype(float)
+        n = len(prof)
+        half = n // 2
+        lo_total = prof[:half].sum()
+        hi_total = prof[half:].sum()
+        cum = np.cumsum(prof)
+        cum_r = np.cumsum(prof[::-1])
+        lo = next((i + 1 for i in range(half) if cum[i] >= lo_total * share), half)
+        hi = next((i + 1 for i in range(half) if cum_r[i] >= hi_total * share), half)
+        out[lo_name] = int(np.ceil(lo / step) * step)
+        out[hi_name] = int(np.ceil(hi / step) * step)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument('sortie', nargs='?', default='assets/design-system/modal-body.png',
+                    help="fichier de l'asset retenu (défaut : assets/design-system/modal-body.png)")
+    ap.add_argument('--variantes', metavar='DOSSIER',
+                    help="écrit aussi le lot d'arbitrage complet (dix fichiers) dans DOSSIER")
+    args = ap.parse_args()
+
     files = sorted(glob.glob(os.path.join(SRC, 'interface-options-*.png')))
     raw = [np.asarray(Image.open(f).convert('RGBA')).astype(np.float64) for f in files]
     imgs = [r[:, :, :3] for r in raw]
-    alpha = np.median(np.stack([r[:, :, 3] for r in raw]), 0)
+    # L'alpha vient d'UNE capture, pas de la médiane des six : `interface-options-chat.png` est
+    # cadrée un pixel plus haut que les autres, et mélanger deux escaliers décalés déchiquetait
+    # l'arrondi des angles inférieurs. `jeu` est la capture de référence du §9 du design-system.
+    ref_alpha = next(i for i, f in enumerate(files) if f.endswith('-jeu.png'))
+    alpha = raw[ref_alpha][:, :, 3]
     stack = np.stack(imgs)
-    mn = np.sort(stack, 0)[0]                 # min-stack : le contenu clair s'efface
-    # le minimum de 6 échantillons bruités sous-estime le fond d'environ 1
-    # niveau : pour les zones de fond nu, on prend la médiane des captures
+    # le minimum de 6 échantillons bruités sous-estime le fond d'environ 1 niveau :
+    # pour les zones de fond nu, c'est la médiane des captures qui fait foi
     med = np.median(stack, 0)
 
     body = body_mask()
@@ -224,16 +283,33 @@ if __name__ == '__main__':
     drawn = hatching_drawn(imgs, body)
 
     hf = med.mean(2) - median_filter(med.mean(2), 9)
-    amp_ref = float(np.percentile(hf[keep & (relief > 0.2)], 80)) if (keep & (relief > 0.2)).any() else 2.5
-    print('amplitude de trait retenue : %.2f niveau' % amp_ref)
-
-    for f, im in zip(files, imgs):
-        tag = os.path.basename(f)[len('interface-options-'):-len('.png')]
-        save(build(im, relief, 1.0), alpha, outdir, 'modal-body-%s.png' % tag)
-    save(build(med, relief, 1.0), alpha, outdir, 'modal-body-consolide.png')
-    save(build(med, drawn, amp_ref), alpha, outdir, 'modal-body-trace-net.png')
-    save(build(med, relief, 1.0, flat=True), alpha, outdir, 'modal-body-plat.png')
-    save(build(med, relief * 0.0, 1.0, flat=True), alpha, outdir, 'modal-body-uni.png')
-
+    sel = keep & (relief > 0.2)
+    amp = float(np.percentile(hf[sel], 80)) if sel.any() else 2.5
+    print('amplitude de trait : %.2f niveau' % amp)
+    print('marges du décor    : %s' % measure_insets(drawn))
     c = med[rect_mask(KEEP_LF)].reshape(-1, 3).mean(0)
-    print('couleur de fond : #%02X%02X%02X' % tuple(np.round(c).astype(int)))
+    print('couleur de fond    : #%02X%02X%02X' % tuple(np.round(c).astype(int)))
+
+    # Variante retenue par l'utilisateur le 2026-09-10 : hachures redessinées à
+    # trait franc, interruptions comblées — le motif se lit sur le corps sans
+    # attendre que l'œil s'y accroche.
+    os.makedirs(os.path.dirname(args.sortie) or '.', exist_ok=True)
+    save(build(med, drawn, amp), alpha, os.path.dirname(args.sortie) or '.',
+         os.path.basename(args.sortie))
+    print('écrit :', args.sortie)
+
+    if args.variantes:
+        d = args.variantes
+        os.makedirs(d, exist_ok=True)
+        for f, im in zip(files, imgs):
+            tag = os.path.basename(f)[len('interface-options-'):-len('.png')]
+            save(build(im, relief, 1.0), alpha, d, 'modal-body-%s.png' % tag)
+        save(build(med, relief, 1.0), alpha, d, 'modal-body-consolide.png')
+        save(build(med, drawn, amp), alpha, d, 'modal-body-trace-net.png')
+        save(build(med, relief, 1.0, flat=True), alpha, d, 'modal-body-plat.png')
+        save(build(med, relief * 0.0, 1.0, flat=True), alpha, d, 'modal-body-uni.png')
+        print('lot d\'arbitrage écrit dans', d)
+
+
+if __name__ == '__main__':
+    main()

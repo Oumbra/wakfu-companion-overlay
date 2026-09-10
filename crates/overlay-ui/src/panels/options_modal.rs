@@ -43,6 +43,19 @@
 //! de 169px. L'ancien 9-slice ne figeait que 14px de chaque côté, bien moins que les 52px de décor
 //! mesurés — les croisillons tombaient dans la bande médiane et s'étiraient sur près de 200px.
 //!
+//! **Refonte 2026-09-10 — le CORPS passe sur une texture du jeu** (`DsTexture::ModalBody`,
+//! `modal-body.png`). Il était peint d'un aplat (`MODAL_BG`, `#1C2023`) : la bannière venait du
+//! jeu, le fond sous elle non, et l'écart se voyait. La texture est découpée des six captures de
+//! la fenêtre Options puis débarrassée de son contenu — onglets, bouton de réinitialisation,
+//! panneau de section, boutons de pied de page (`tools/design-system/build_modal_body.py`, §9 ter
+//! du design-system). Elle apporte le grain du jeu et ses hachures d'angle, qui ne sont pas une
+//! trame de fond mais un CADRE : denses dans les angles et le long des bords, absentes du centre —
+//! le même constat que pour les boutons, à l'échelle de la fenêtre.
+//!
+//! Deux conséquences sur ce fichier : la couleur du fond ne s'y règle plus (seule sa translucidité
+//! reste ici, `MODAL_BODY_TINT`), et les deux angles BAS sont désormais portés par l'alpha de la
+//! texture, plus par un `corner_radius`.
+//!
 //! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer l'INTENTION
 //! de l'utilisateur (`OptionsModalAction`) — c'est l'appelant (`main.rs`/`bin/overlay-ui-x11.rs`,
 //! qui seuls savent comment déclencher un dialogue de fichier natif et parler au thread Engine) qui
@@ -156,12 +169,19 @@ const SECTION_TITLE_TEXT: egui::Color32 = egui::Color32::from_rgb(0xB8, 0xB9, 0x
 // trois qui vivaient ici étaient d'ailleurs fausses — fond #1C1E23 au lieu de #0E1115, bord d'1px
 // au lieu de 2, rayon 2 au lieu de 4.
 
-/// Fond de la modale (#1C2023) — légèrement translucide (laisse deviner le jeu derrière sur les
-/// bords, comme la référence réelle) : valeur donnée par l'utilisateur au colorimètre, remplace la
-/// première mesure automatique (plus sombre).
-const MODAL_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x1C, 0x20, 0x23, 235);
-/// Fond du panneau de contenu (#15181C) — la valeur du relevé (nœud `panel`), plus sombre que
-/// `MODAL_BG`.
+/// Translucidité du corps de la modale — **235/255, la valeur qu'avait l'aplat `MODAL_BG` qui
+/// peignait ce fond jusqu'au 2026-09-10.**
+///
+/// La couleur, elle, ne se règle plus ici : le corps est peint depuis `DsTexture::ModalBody`, une
+/// texture découpée des captures du jeu (§9 ter du design-system). Un blanc à alpha réduit atténue
+/// sans changer la teinte — c'est le mécanisme de teinte documenté par `design::nine_slice::paint`,
+/// déjà celui de l'état désactivé des boutons. La fenêtre laisse donc toujours deviner le jeu
+/// derrière elle, comme la référence réelle.
+const MODAL_BODY_TINT: egui::Color32 = egui::Color32::from_rgba_premultiplied(235, 235, 235, 235);
+/// Fond du panneau de contenu (#15181C) — la valeur du relevé (nœud `panel`), neuf niveaux plus
+/// sombre que le fond de la modale, ce que le découpage du corps confirme : le panneau n'est pas
+/// une surface à part mais le même fond assombri, que la texture de fond traverse (§9 ter du
+/// design-system). Il reste peint tant qu'il n'a pas sa propre texture.
 ///
 /// **Ce que nous peignons ici est le PANNEAU DE CONTENU du jeu, pas une « section ».** La
 /// distinction n'est pas cosmétique : le relevé de section est formel, « une section n'a ni fond,
@@ -170,8 +190,8 @@ const MODAL_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x1C, 0x2
 /// travers avait produit un encadré arrondi à 18 qui n'existe nulle part dans le jeu.
 ///
 /// L'alpha 230 est une **déviation assumée** : la modale entière est légèrement translucide
-/// (`MODAL_BG`, valeur relevée au colorimètre par l'utilisateur) et le panneau suit, alors que le
-/// jeu est opaque — il n'a pas de jeu derrière lui.
+/// (`MODAL_BODY_TINT`) et le panneau suit, alors que le jeu est opaque — il n'a pas de jeu
+/// derrière lui.
 const SECTION_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x15, 0x18, 0x1C, 230);
 
 /// Bord du panneau de contenu — presque noir, à peine plus sombre que son fond (relevé : `#131518`
@@ -389,9 +409,25 @@ pub fn show(
         seen
     });
 
-    // Fond de la modale — arrondi sur les QUATRE coins (`MODAL_RADIUS`), peint AVANT tout le reste
-    // (bannière/section/pied de page viennent par-dessus).
-    ui.painter().rect_filled(rect, MODAL_RADIUS, MODAL_BG);
+    // Corps de la modale — vraie texture du jeu (`modal-body.png`) depuis le 2026-09-10, à la
+    // place de l'aplat qui le peignait jusque-là. Elle porte le grain et les hachures d'angle
+    // relevés sur les six captures de la fenêtre Options, et ses DEUX ANGLES BAS sont arrondis
+    // dans son alpha — inutile de leur passer un `corner_radius`, un `Mesh` egui ne saurait de
+    // toute façon pas découper un coin.
+    //
+    // Peint sous la bannière et non sur tout le rectangle : la texture commence exactement là où
+    // `modal-header.png` s'arrête (y=56 sur la capture d'origine), les deux se juxtaposent sans
+    // recouvrement. Les angles HAUTS restent donc portés par la bannière seule.
+    let body_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), rect.top() + BANNER_HEIGHT),
+        rect.max,
+    );
+    design::DesignSystem::get(ui.ctx()).paint(
+        ui.painter(),
+        body_rect,
+        design::DsTexture::ModalBody,
+        MODAL_BODY_TINT,
+    );
 
     // Bannière — vraie texture du jeu (`modal-header.png`), arrondie sur les coins HAUTS
     // uniquement pour épouser le coin de la modale (les coins bas de la texture ne sont jamais

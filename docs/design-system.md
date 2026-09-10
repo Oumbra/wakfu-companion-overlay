@@ -432,20 +432,33 @@ depuis la bannière, dont le turquoise déborderait dans la moyenne locale ; le 
 resynthétisé** d'après ses caractéristiques mesurées plutôt que recopié, recoller des morceaux de
 marge produisant un damier visible.
 
-**Variantes livrées, en attente d'arbitrage** : six découpages nommés d'après leur capture d'origine
-(interchangeables, moins d'un niveau d'écart entre eux ; `chat` mis à part, dont la capture est
-cadrée 1 px plus haut, ce qui décale son pied de page d'autant), plus `consolide` (les six
-consolidées, rendu le plus proche du jeu), `trace-net` (hachures redessinées à trait franc, motif
-plus lisible), `plat` (couleur rigoureusement constante, pour un découpage en neuf tranches si la
-modale doit être redimensionnable — les angles gardent leurs hachures, seul le centre s'étire) et
-`uni` (témoin sans hachures, à peu près ce que rend `MODAL_BG` aujourd'hui). **Une fois la variante
-retenue, les autres n'ont pas à rester versionnées.**
+**Variante retenue (utilisateur, 2026-09-10) : `trace-net`** — hachures relevées puis redessinées à
+trait franc, interruptions comblées, le motif se lit sur le corps sans qu'il faille chercher. Elle
+est devenue `assets/design-system/modal-body.png`, seul fichier versionné ; le lot d'arbitrage
+(dix variantes : une par capture d'origine, plus `consolide`, `trace-net`, `plat` et `uni`) se
+régénère à la demande par `build_modal_body.py --variantes <dossier>`.
 
-**Réserve** : la fenêtre du jeu est légèrement translucide (`MODAL_BG` porte un alpha de 235). Les
-captures contiennent donc un reste du décor de jeu situé derrière — visible en filigrane dans le
-panneau. Les zones rebâties en sont exemptes, `plat` et `uni` entièrement ; les marges conservées
-telles quelles le gardent. Si l'overlay repeint ces textures avec un alpha, ce résidu se cumulera
-au décor réel : `plat` est alors la variante sûre.
+**Marges 9-slice** (`design::assets::MODAL_BODY_SLICE`) : **gauche 130, haut 110, droite 205, bas
+170**. Quatre valeurs distinctes parce que le décor est franchement asymétrique — c'est encore lui
+qui dimensionne, comme sur un bouton. Chaque marge est la plus petite qui contienne 90 % du décor de
+son côté, arrondie au multiple de 5 supérieur (sortie `marges du décor` du script) ; le bas en
+demande plus que le haut parce que le pourtour des deux boutons de pied de page y concentre les
+croisillons les plus marqués. Les totaux (335 en X, 280 en Y) laissent une vraie bande médiane à la
+taille où la modale est peinte (560 × 380), et cette bande est un fond quasi uni — rien de
+périodique à répéter, d'où `Fill::Stretch` sur les deux axes.
+
+**Translucidité** : la fenêtre du jeu est légèrement translucide, ce que l'aplat `MODAL_BG` portait
+dans son alpha (235). La couleur ayant migré dans la texture, cet alpha est devenu la teinte de
+peinture (`MODAL_BODY_TINT`) — un blanc à alpha réduit atténue sans changer la teinte. Vérifié par
+`modale_options_sur_damier` : le contraste du damier de fond retombe de 128 à **9,7** dans les
+marges, exactement comme avant la bascule.
+
+**Réserve** : les captures étant elles-mêmes translucides, elles contiennent un reste du décor de
+jeu situé derrière — visible en filigrane dans le panneau. Les zones rebâties en sont exemptes ;
+les marges conservées telles quelles le gardent. Peint avec un alpha, ce résidu se cumule donc au
+décor réel. Il est faible (moins de deux niveaux) et le rendu sur damier ne le fait pas ressortir,
+mais c'est à ce détail qu'il faudra penser si un fond de jeu très contrasté trahissait un
+fantôme.
 
 ---
 
