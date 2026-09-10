@@ -558,9 +558,20 @@ design::scroll_area("options-contenu").show(ui, |ui| {
 | `id_salt` (à la construction) | distingue deux zones du même panneau ; porte la position de défilement | — |
 | `auto_shrink` | laisse la zone se rétrécir à son contenu | `false` — un panneau du jeu occupe toute sa hauteur |
 
-**Ce n'est pas un `Widget`, et c'est le seul écart au contrat** : il prend une closure de contenu, il
-ne peut donc pas rendre une `Response` à partir de rien. `egui::ScrollArea` n'en est pas un non plus,
-pour la même raison.
+**Ce n'est pas un `Widget`**, et depuis le 2026-09-10 ce n'est plus un écart : c'est le premier
+**composant conteneur** du design system (§1 bis du contrat, *forme closure*). Il prend une closure
+de contenu, il ne peut donc pas rendre une `Response` à partir de rien — `egui::ScrollArea` n'en est
+pas un non plus, pour la même raison.
+
+**Variante « cadre » — hors de ce composant, et c'est délibéré.** La barre du cadre ennemi du
+panneau Combat (`panels::combat_frame_scroll`) ne ressemble pas à celle-ci : barre dessinée de 5 px,
+couleur unie `#998a6c`, bordure noire, toujours visible. Ce n'est **pas** une divergence à
+« corriger » — chacun de ces écarts est une demande explicite de l'utilisateur, et les assets du jeu
+(`scrollbar-active.png` / `scrollbar-inactive.png`) y ont été essayés puis **rejetés** (« trop
+large, cachait les portraits »), voir l'en-tête de module de ce fichier. Le contexte diffère du tout
+au tout : une barre posée *sur* un décor de cadre, pas dans la gouttière d'un panneau. Elle reste
+locale au panneau tant qu'elle n'a qu'un utilisateur ; si un second apparaît, elle remonte ici en
+paramètre plutôt qu'en second composant.
 
 **Aucun rail.** Le relevé est catégorique : « le fond du panneau tient lieu de gouttière ». C'est ce
 qui rend ce composant particulier — `egui::ScrollArea` peint par défaut un rail derrière sa poignée,
