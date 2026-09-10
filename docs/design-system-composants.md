@@ -347,6 +347,55 @@ la même valeur, l'arrondi y est invisible.
 
 ---
 
+## `design::checkbox` — case à cocher (2026-09-10)
+
+`crates/overlay-ui/src/design/components/checkbox.rs`
+
+```rust
+use overlay_ui::design;
+
+if ui.add(design::checkbox(&mut state.alertes_sonores, "Alertes sonores")).changed() {
+    // la frame où la case vient d'être basculée
+}
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `enabled` | `bool` | `true` |
+| `tooltip` | texte d'infobulle | aucune |
+| `log_name` | nom d'instance pour le journal | le libellé |
+| `preview_state` | `Idle` / `Hovered` / `Disabled` — **galerie et captures uniquement** | état réel |
+
+**Le libellé porte l'état autant que la case** : blanc décoché, doré `#f4d89e` coché. C'est le même
+principe que la barre d'onglets — le jeu ne se repose jamais sur un seul signal visuel. Un portage
+qui ne changerait que la case perdrait la moitié de l'information.
+
+**Toute la ligne est cliquable**, case et libellé : c'est ce que fait le jeu, et viser un carré de
+20px à la souris est une punition.
+
+**Mesures** (`releve-section-options.json`, nœuds `cb1` à `cb3` et leurs libellés) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Case | 20 × 20px | `cb1` en `[36, 173, 56, 193]`, confirmé par les deux assets 20 × 20 |
+| Rayon | **0** | **le seul élément carré de l'interface** — tout le reste est à 2, le champ à 4 |
+| Case → libellé | 6px | la case finit à x=56, le libellé commence à x=62 |
+| Corps du libellé | 15px (encre 10) | jeton `libellé d'option` — plus petit qu'un libellé de bouton |
+| Libellé décoché / coché | `#ffffff` / `#f4d89e` | relevé |
+
+**Textures** : `checkbox-true.png` et `checkbox-false.png`, 20 × 20 toutes les deux — la taille
+relevée exactement. Leur découpage 9-slice (5px figés) n'existe que pour honorer la règle « toute
+taille est valide » : en pratique une case est toujours peinte à sa taille native.
+
+**Inventé, faute de capture** : l'état **survolé** ne change rien (seul le curseur change), et
+l'état **désactivé** teinte la case et le libellé de `TEXT_DISABLED`, par cohérence avec le bouton
+désactivé.
+
+**Pas encore utilisé** : la modale Options n'a aujourd'hui aucun réglage booléen. Le composant est
+livré prêt ; son premier usage viendra avec le contenu de l'onglet « Paramètres ».
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces du jeu relevées :
@@ -354,7 +403,6 @@ Par ordre de fréquence d'usage constatée dans l'overlay et dans les interfaces
 | Composant | Assets disponibles | Notes |
 | --- | --- | --- |
 | **Bouton icône** | `button-icon[-hover,-disabled].png`, `button-icon-first-plan[-hover].png`, `icons/*.png` | Existe déjà en `panels::icon_button::paint_icon_button`, mais **hors contrat** : prend quatre `TextureHandle` en paramètres. À reprendre en `design::icon_button(icon).context(FirstPlan|Panel)` — deux contextes de socle, une icône, un clic. |
-| **Case à cocher** | `checkbox-{true,false}.png` | §5.6. |
 | **Onglets icône** | `icon-tabs.png` | Les onglets TEXTE sont faits (`design::tabs`) ; la variante à pictogrammes reste à écrire. §5.7. |
 | **Select / dropdown** | `select-simple.png`, `select-multiple.png` | §5.5. |
 | **En-tête repliable** | `collapse-closed.png`, `collapse-width-5th-opened.png` | §5.8. |
