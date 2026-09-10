@@ -12,7 +12,8 @@ comment savoir que c'est fini*. Les deux ne se recopient pas.
 
 ## Où en est ce plan (2026-09-10)
 
-Les trois décisions préalables sont prises et consignées. **Le lot 0 est fait.**
+Les trois décisions préalables sont prises et consignées. **Les lots 0, 1 et 3 sont faits** ; le
+lot 2 attend que le terrain se libère, et le lot 4 est le prochain.
 
 | Lot | Objet | État |
 | --- | --- | --- |
