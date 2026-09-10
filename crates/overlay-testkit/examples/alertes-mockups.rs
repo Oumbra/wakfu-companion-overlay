@@ -18,7 +18,7 @@
 //! | `TEXT_MUTED` `#9AA0A6` annoncé « mesuré » | La mesure donne `#b8b9ba` : le jeu n'a pas de troisième gris, ses en-têtes de colonne ont la couleur de ses titres de section |
 //! | Trois jetons citant `panels::watchlist` avec **d'autres valeurs** | `TILE_GAP` 6 → **12**, `PANEL_BG` translucide → **`#1e1e1e` opaque**, `TEXT` inventé → **blanc**. La densité de grille et le fond du bandeau — ce que la v1 donnait précisément à juger — étaient faux |
 //! | `ROW_HEIGHT` 40 « mesuré sur le HDV » | Le pas réel du zébrage HDV est **60**, sur trois captures. Et le zébrage n'est de toute façon pas l'idiome retenu (voir [`ROW_HEIGHT`]) |
-//! | Fenêtre **sans bannière ni panneau de section** | Le chrome est désormais celui de `panels::options_modal`, **appelé** et non recopié (voir `options_modal::chrome`) |
+//! | Fenêtre **sans bannière ni panneau de section** | Le chrome est celui du design system, **appelé** et non recopié (`design::window` + `design::panel`) |
 //! | Grille de tuiles **à libellés tronqués** | Liste en lignes. Le jeu n'écrit jamais le nom sous un emplacement d'inventaire ; et 104 px ne distinguaient pas « Plan "Epée de Bonta" » de « … Brâkmar » |
 //! | Badges de coin sur **plaque noire**, case à cocher écrasée de 20 à 16 px | Le jeu pose des marqueurs **plats, sans plaque, qui débordent le liseré**, et n'y met que des ÉTATS, jamais des commandes |
 //! | Croix de retrait sur les **onze** objets | Les **dix premiers sont les défauts** (`DEFAULT_SOUND_ITEM_NAMES`), que le web refuse structurellement de supprimer |
@@ -84,7 +84,7 @@ use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
 use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsTexture, IconContext, InputSize};
-use overlay_ui::panels::options_modal::{self, OptionsTab};
+use overlay_ui::panels::options_modal::OptionsTab;
 use overlay_ui::ui_icons::UiIcons;
 
 // -------------------------------------------------------------------------------------------
@@ -668,14 +668,14 @@ fn write_mockup(harness: &mut Harness<'static>, name: &str) {
 
 /// Ouvre le harnais et rend la fenêtre Options avec son chrome réel, l'onglet « Alertes » actif.
 ///
-/// **Le décor n'est pas recopié : c'est `options_modal::chrome` qui le peint**, la même fonction
-/// que la vraie modale — extraite pour ces maquettes, à pixel constant (le snapshot
-/// `options_modale_sur_damier.png` le vérifie à chaque exécution). C'était la réserve la plus
-/// lourde de la revue d'architecture : une deuxième implémentation du chrome aurait divergé en
-/// quelques semaines.
+/// **Le décor n'est pas recopié : ce sont `design::window` et `design::panel` qui le peignent**,
+/// les mêmes composants que la vraie modale. C'était la réserve la plus lourde de la revue
+/// d'architecture : une deuxième implémentation du chrome aurait divergé en quelques semaines.
+/// Extrait d'abord dans `options_modal::chrome` le 2026-09-10, puis remonté au design system le
+/// jour même quand le contrat a gagné sa famille « conteneur ».
 fn options_harness(
     size: Vec2,
-    mut build: impl FnMut(&mut egui::Ui, &UiIcons, &options_modal::Chrome, Rect) + 'static,
+    mut build: impl FnMut(&mut egui::Ui, &UiIcons, &design::PanelZones, Rect) + 'static,
 ) -> Harness<'static> {
     let mut icons: Option<UiIcons> = None;
     let mut tab = OptionsTab::Alertes;
@@ -687,17 +687,22 @@ fn options_harness(
         let icons = icons.get_or_insert_with(|| UiIcons::load(ui.ctx()));
         egui::Frame::NONE.fill(BACKDROP).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
-            let chrome =
-                options_modal::chrome(ui, &mut tab, &[OptionsTab::Alertes, OptionsTab::Parametres]);
             let window = ui.max_rect();
-            let inner = chrome.inner;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                // Clip élargi à gauche : un titre de section se peint EN RETRAIT de son axe de
-                // contrôles (`PANEL_PAD_CONTROL_X - PANEL_PAD_TITLE_X`, 7 px), et un clip calé sur
-                // `inner` lui mangeait sa première lettre — « Alerte » rendait « lerte ».
-                ui.set_clip_rect(inner.expand2(egui::vec2(8.0, 0.0)));
-                ui.spacing_mut().item_spacing.y = 0.0;
-                build(ui, icons, &chrome, window);
+            let chrome = design::window("Options")
+                .footer("Annuler", "Valider")
+                .log_name("maquette")
+                .show(ui);
+            chrome.tabs(
+                ui,
+                design::tabs(&mut tab)
+                    .entry(OptionsTab::Alertes, "Alertes")
+                    .entry(OptionsTab::Personnages, "Personnages")
+                    .enabled(false)
+                    .entry(OptionsTab::Parametres, "Paramètres")
+                    .log_name("maquette-onglets"),
+            );
+            design::panel().show(ui, chrome.content, |ui, panel| {
+                build(ui, icons, panel, window);
             });
         });
     })
@@ -768,10 +773,10 @@ impl EmptyState {
 fn alerts_tab(
     ui: &mut egui::Ui,
     icons: &UiIcons,
-    chrome: &options_modal::Chrome,
+    panel: &design::PanelZones,
     state: &mut AlertsTab<'_>,
 ) -> f32 {
-    let inner = chrome.inner;
+    let inner = panel.inner;
     let width = inner.width();
 
     // Le bouton d'aide remplace le bloc d'explication permanent de la v2 — deux gains d'un même
@@ -780,7 +785,7 @@ fn alerts_tab(
     // pourquoi dix objets n'ont pas de croix**. Sans elle, un joueur lit dix lignes sans croix et
     // une avec, et ça se lit comme un bug.
     ui.horizontal(|ui| {
-        options_modal::section_title(ui, "Alerte sonore");
+        ui.add(design::heading("Alerte sonore"));
         ui.add_space(6.0);
         // **Glyphe nu, sans socle** : le jeu pose son `?` de tête de fenêtre exactement ainsi
         // (`interface-personnage-equiement.png`, y=28, x 1040..1051 — de l'or `#f4d89f` à même la
@@ -804,7 +809,10 @@ fn alerts_tab(
     sound_settings(ui, state.auto, state.seconds, width);
 
     ui.add_space(6.0);
-    options_modal::section_title(ui, &format!("Objets suivis ({})", state.order.len()));
+    ui.add(design::heading(format!(
+        "Objets suivis ({})",
+        state.order.len()
+    )));
     // Champ grisé quand l'ajout est impossible — deux cas, pas un : sans jeton, l'écriture
     // (`PATCH /api/v1/settings`) n'a nulle part où aller ; et pendant une lecture en vol, ce qu'on
     // ajouterait serait écrasé par la liste qui arrive. Dans les deux cas un champ d'apparence
@@ -849,7 +857,7 @@ fn alerts_tab(
     // pour que la poignée tombe à 14 px de ce bord comme dans le jeu, et rien n'est écrêté à une
     // autre abscisse que celle de sa mise en page. La largeur utile — réserve de barre déduite —
     // vient de la méthode, plus d'une soustraction recopiée à chaque appelant.
-    chrome.scroll_area(ui, "maquette.liste", |ui, row_width| {
+    panel.scroll_area(ui, "maquette.liste", |ui, row_width| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for (rank, &i) in state.order.iter().enumerate() {
             item_row(
@@ -887,26 +895,23 @@ fn alertes_options_taille_actuelle() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(
-        Vec2::new(560.0, 436.0),
-        move |ui, icons, chrome, _window| {
-            alerts_tab(
-                ui,
-                icons,
-                chrome,
-                &mut AlertsTab {
-                    order: &ORDER_NATUREL,
-                    sounds: &mut sounds,
-                    search: &mut search,
-                    auto: &mut auto,
-                    seconds: &mut seconds,
-                    hovered_rank: None,
-                    empty_state: EmptyState::NotEmpty,
-                    error: None,
-                },
-            );
-        },
-    );
+    let mut harness = options_harness(Vec2::new(560.0, 436.0), move |ui, icons, panel, _window| {
+        alerts_tab(
+            ui,
+            icons,
+            panel,
+            &mut AlertsTab {
+                order: &ORDER_NATUREL,
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                hovered_rank: None,
+                empty_state: EmptyState::NotEmpty,
+                error: None,
+            },
+        );
+    });
     harness.run();
     write_mockup(&mut harness, "alertes_options_taille_actuelle");
 }
@@ -935,26 +940,23 @@ fn alertes_options_taille_jeu() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(
-        Vec2::new(720.0, 561.0),
-        move |ui, icons, chrome, _window| {
-            alerts_tab(
-                ui,
-                icons,
-                chrome,
-                &mut AlertsTab {
-                    order: &order,
-                    sounds: &mut sounds,
-                    search: &mut search,
-                    auto: &mut auto,
-                    seconds: &mut seconds,
-                    hovered_rank: Some(1),
-                    empty_state: EmptyState::NotEmpty,
-                    error: None,
-                },
-            );
-        },
-    );
+    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _window| {
+        alerts_tab(
+            ui,
+            icons,
+            panel,
+            &mut AlertsTab {
+                order: &order,
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                hovered_rank: Some(1),
+                empty_state: EmptyState::NotEmpty,
+                error: None,
+            },
+        );
+    });
     harness.run();
     write_mockup(&mut harness, "alertes_options_taille_jeu");
 }
@@ -985,13 +987,12 @@ fn alertes_options_etats_vides() {
         let mut seconds = String::from("3.5");
         let mut auto = true;
 
-        let mut harness = options_harness(
-            Vec2::new(720.0, 561.0),
-            move |ui, icons, chrome, _window| {
+        let mut harness =
+            options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _window| {
                 alerts_tab(
                     ui,
                     icons,
-                    chrome,
+                    panel,
                     &mut AlertsTab {
                         order: &[],
                         sounds: &mut sounds,
@@ -1003,8 +1004,7 @@ fn alertes_options_etats_vides() {
                         error: None,
                     },
                 );
-            },
-        );
+            });
         harness.run();
         write_mockup(&mut harness, &format!("alertes_options_vide_{nom}"));
     }
@@ -1025,29 +1025,26 @@ fn alertes_options_echec_enregistrement() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(
-        Vec2::new(720.0, 561.0),
-        move |ui, icons, chrome, _window| {
-            alerts_tab(
-                ui,
-                icons,
-                chrome,
-                &mut AlertsTab {
-                    order: &ORDER_NATUREL,
-                    sounds: &mut sounds,
-                    search: &mut search,
-                    auto: &mut auto,
-                    seconds: &mut seconds,
-                    hovered_rank: None,
-                    empty_state: EmptyState::NotEmpty,
-                    error: Some(
-                        "Vos alertes n'ont pas pu être enregistrées sur le compte. Réessayez, ou \
+    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _window| {
+        alerts_tab(
+            ui,
+            icons,
+            panel,
+            &mut AlertsTab {
+                order: &ORDER_NATUREL,
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                hovered_rank: None,
+                empty_state: EmptyState::NotEmpty,
+                error: Some(
+                    "Vos alertes n'ont pas pu être enregistrées sur le compte. Réessayez, ou \
                          vérifiez votre connexion.",
-                    ),
-                },
-            );
-        },
-    );
+                ),
+            },
+        );
+    });
     harness.run();
     write_mockup(&mut harness, "alertes_options_echec_enregistrement");
 }
@@ -1073,12 +1070,12 @@ fn alertes_options_ajout_suggestions() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, chrome, _w| {
-        let inner = chrome.inner;
+    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _w| {
+        let inner = panel.inner;
         let field_bottom = alerts_tab(
             ui,
             icons,
-            chrome,
+            panel,
             &mut AlertsTab {
                 order: &ORDER_NATUREL,
                 sounds: &mut sounds,
@@ -1114,11 +1111,11 @@ fn alertes_options_confirmation_retrait() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, chrome, window| {
+    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, window| {
         alerts_tab(
             ui,
             icons,
-            chrome,
+            panel,
             &mut AlertsTab {
                 order: &SHOWN,
                 sounds: &mut sounds,

@@ -40,12 +40,15 @@ use std::sync::Arc;
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::checkbox::{checkbox, Checkbox, CheckboxState};
+pub use components::heading::{heading, Heading};
 pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
 pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
+pub use components::panel::{panel, Panel, PanelZones};
 pub use components::scroll_area::{scroll_area, ScrollArea};
 pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::tabs::{tabs, TabState, Tabs};
+pub use components::window::{window, FooterClick, Window, WindowChrome};
 
 /// Identifiant de mémorisation dans `egui::Context` — voir `DesignSystem::get`.
 const MEMO_ID: &str = "wakfu-overlay-design-system";
