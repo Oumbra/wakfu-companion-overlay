@@ -48,7 +48,7 @@ use egui::{Response, Ui, Vec2, Widget};
 use crate::design::{
     assets::DsTexture,
     components::icon_button::{icon_button, IconContext},
-    components::input::{input, InputSize},
+    components::input::input,
     tokens,
 };
 
@@ -159,9 +159,9 @@ impl Widget for Stepper<'_> {
         let plus_rect =
             egui::Rect::from_min_size(egui::pos2(rect.right() - size, rect.top()), square);
 
-        // **Le champ fait la hauteur de ses boutons** — il ne garde donc pas sa hauteur native de
-        // 25 px, contrairement à un champ posé sur une ligne de formulaire. Décision utilisateur, et
-        // écart assumé avec le jeu, qui met 26 px de champ pour 32 px de socle : voir
+        // **La BOÎTE du champ fait la hauteur des boutons**, son texte non : le corps reste celui
+        // du gabarit standard (voir l'appel plus bas). Décision utilisateur, et écart assumé avec le
+        // jeu, qui met 26 px de champ pour 32 px de socle : voir
         // `tokens::STEPPER_FIELD_HEIGHT_RATIO`, qui porte la mesure et la raison.
         let field_height = size * tokens::STEPPER_FIELD_HEIGHT_RATIO;
         let field_rect =
@@ -195,7 +195,12 @@ impl Widget for Stepper<'_> {
         ui.put(
             field_rect,
             input(&mut texte)
-                .size(InputSize::Height(field_height))
+                // `box_height` et NON `size(Height(...))` : la boîte prend la hauteur des boutons,
+                // le texte garde le corps du gabarit standard. Mettre le champ à l'échelle ferait
+                // grossir sa valeur d'un tiers (corps 22 au lieu de 17) — le jeu, lui, écrit 12 px
+                // d'encre dans un champ de 26, et rien ne justifie de s'en écarter parce qu'on a
+                // étiré la boîte. Retour utilisateur du 2026-09-10.
+                .box_height(field_height)
                 .width(field)
                 .read_only(true)
                 .enabled(enabled)

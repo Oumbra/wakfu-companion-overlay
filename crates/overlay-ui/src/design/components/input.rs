@@ -104,6 +104,7 @@ pub struct Input<'a> {
     width: Option<f32>,
     enabled: bool,
     read_only: bool,
+    box_height: Option<f32>,
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<InputState>,
@@ -120,6 +121,7 @@ impl<'a> Input<'a> {
             width: None,
             enabled: true,
             read_only: false,
+            box_height: None,
             tooltip: None,
             log_name: None,
             forced_state: None,
@@ -163,6 +165,20 @@ impl<'a> Input<'a> {
     /// contenu au moment où on le place, sa largeur ne peut venir que de la mise en page.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// **Étire la boîte en hauteur sans toucher à son contenu** — le corps du texte, les marges et
+    /// l'ornement restent ceux du gabarit choisi par [`Input::size`].
+    ///
+    /// À ne pas confondre avec `size(InputSize::Height(h))`, qui met tout à l'échelle : un champ de
+    /// 32 px y écrit en corps 22 au lieu de 17, et le texte grossit d'un tiers.
+    ///
+    /// Sert à aligner un champ sur un voisin plus haut. C'est le cas du champ central d'un
+    /// [`design::stepper`](super::stepper), qui prend la hauteur de ses boutons — mais dont le texte
+    /// doit rester celui que le jeu écrit : 12 px d'encre, mesurés sur `large-input-number.png`.
+    pub fn box_height(mut self, height: f32) -> Self {
+        self.box_height = Some(height);
         self
     }
 
@@ -217,19 +233,24 @@ impl<'a> Input<'a> {
     /// Taille que le champ occupera, sans le dessiner. `None` en largeur si elle n'est pas imposée :
     /// elle dépend alors de la place disponible, que seul `ui` connaît au moment du rendu.
     pub fn desired_size(&self) -> (Option<f32>, f32) {
-        (self.width, self.size.height())
+        (self.width, self.box_height.unwrap_or(self.size.height()))
     }
 }
 
 impl Widget for Input<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
+        // Deux hauteurs, et c'est tout l'objet de `box_height` : `height` est le **gabarit**, dont
+        // dérivent le corps du texte, les marges et l'ornement ; `box_height` est la **boîte**
+        // réellement peinte. Elles ne diffèrent que lorsqu'un appelant étire le champ pour l'aligner
+        // sur un voisin plus haut, et alors le contenu ne doit pas grossir avec elle.
         let height = self.size.height();
+        let box_height = self.box_height.unwrap_or(height);
         let width = self.width.unwrap_or_else(|| ui.available_width());
         let font = text::label_font(ui.ctx(), height * tokens::INPUT_FONT_SIZE_RATIO);
         let pad_x = height * tokens::INPUT_PADDING_X_RATIO;
 
         let (rect, frame_response) =
-            ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+            ui.allocate_exact_size(Vec2::new(width, box_height), Sense::hover());
 
         let state = self.forced_state.unwrap_or({
             if !self.enabled {
