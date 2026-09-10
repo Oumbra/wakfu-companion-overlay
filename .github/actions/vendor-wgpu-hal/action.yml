@@ -1,0 +1,27 @@
+# Prépare `vendor/wgpu-hal-30.0.1/` (source crates.io + patch DirectComposition), requis par le
+# `[patch.crates-io]` du Cargo.toml racine dès qu'une commande cargo touche `overlay-ui`.
+#
+# Extrait ici en action composite parce que trois jobs du CI en ont besoin à l'identique, et
+# surtout pour pouvoir CACHER le résultat : `patches/setup-vendor.sh` télécharge le crate depuis
+# crates.io à chaque exécution — un aléa réseau chez un tiers suffisait à faire échouer un job qui
+# n'avait rien à voir. Le cache supprime aussi bien le téléchargement que ce risque.
+name: 'vendor wgpu-hal patché'
+description: 'Restaure ou reconstruit vendor/wgpu-hal-30.0.1 (patch DirectComposition), avec cache.'
+
+runs:
+  using: composite
+  steps:
+    - name: cache du vendor patché
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: vendor
+        # La clé couvre les DEUX entrées qui déterminent le contenu produit : le script (numéro de
+        # version du crate compris) et le patch appliqué. Modifier l'un ou l'autre invalide le
+        # cache tout seul — jamais de vendor périmé restauré silencieusement.
+        key: vendor-wgpu-hal-${{ runner.os }}-${{ hashFiles('patches/setup-vendor.sh', 'patches/wgpu-hal-30.0.1-directcomposition.patch') }}
+
+    - name: reconstruire le vendor (cache absent)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash patches/setup-vendor.sh
