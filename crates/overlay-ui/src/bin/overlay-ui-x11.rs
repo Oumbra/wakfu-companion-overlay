@@ -68,9 +68,7 @@ mod linux_main {
     use overlay_ui::panels;
     use overlay_ui::panels::combat::CombatSide;
     use overlay_ui::panels::combat_frame::CombatFrame;
-    use overlay_ui::panels::options_modal::{
-        self, OptionsModalAction, OptionsModalAssets, OptionsModalState,
-    };
+    use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -143,11 +141,6 @@ mod linux_main {
         /// État de la modale Options (2026-09-08) — `Some` UNIQUEMENT pour `kind ==
         /// OverlayKind::Options`, voir `App::open_options_modal`.
         options_state: Option<OptionsModalState>,
-        /// Textures du chrome de la modale Options (2026-09-09) — voir
-        /// `render_content::RenderContent::options_assets` — chargées UNE FOIS à la création de
-        /// cette fenêtre (voir `create_overlay_window`), `Some` UNIQUEMENT pour `kind ==
-        /// OverlayKind::Options`, comme `options_state`.
-        options_assets: Option<OptionsModalAssets>,
         /// XID X11 de la fenêtre de jeu — équivalent du `hwnd` côté Windows (voir
         /// `overlay_platform::linux::x11::GameWindowInfo`). `0` (aucune XID valide) pour
         /// `OverlayKind::Options` : cette fenêtre n'est pas rattachée à une fenêtre de jeu précise
@@ -393,10 +386,6 @@ mod linux_main {
             let portraits = PortraitAtlas::load(&gpu.egui_ctx);
             let combat_frame = CombatFrame::load(&gpu.egui_ctx);
             let icons = UiIcons::load(&gpu.egui_ctx);
-            // Uniquement pour la modale Options (voir la doc du champ `OverlayWindow::
-            // options_assets`) — inutile de décoder 6 PNG supplémentaires pour Combat/Suivi.
-            let options_assets =
-                (kind == OverlayKind::Options).then(|| OptionsModalAssets::load(&gpu.egui_ctx));
 
             let outer = window.outer_size();
             let position =
@@ -416,7 +405,6 @@ mod linux_main {
                 // Options` — `None` ici pour Combat/Suivi, jamais consulté (voir
                 // `RenderContent::options`).
                 options_state: (kind == OverlayKind::Options).then(OptionsModalState::default),
-                options_assets,
                 game_window,
                 game_rect: rect,
                 character_name,
@@ -794,7 +782,6 @@ mod linux_main {
                             interactive,
                             now,
                             options: overlay.options_state.as_mut(),
-                            options_assets: overlay.options_assets.as_ref(),
                         },
                     );
                     if outcome.close_toast {

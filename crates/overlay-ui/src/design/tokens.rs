@@ -435,3 +435,119 @@ pub const ICON_TINT_DISABLED: Color32 =
 /// Appliqué par le manifeste (`DsTexture::icon_content_size`), jamais par l'appelant : c'est une
 /// propriété de l'asset.
 pub const ICON_BUTTON_CONTENT: f32 = 18.0;
+
+// ---------------------------------------------------------------------------------------------
+// Fenêtre — `design::window`, `design::panel`, `design::heading`
+//
+// Toutes ces valeurs viennent du relevé de la fenêtre Options du jeu
+// (`docs/design-system/releve-modale-options.json`, six captures d'`interface-options-*.png` au
+// chrome identique), affiné par `dsimg.py analyze` puis validé avec l'utilisateur sur une
+// simulation HTML avant portage. Elles vivaient dans `panels::options_modal` jusqu'au 2026-09-10
+// (lot 1 de `docs/plan-composants-ui.md`) — leur provenance est reprise telle quelle, c'est elle
+// qui interdit de les « ajuster à l'œil ».
+// ---------------------------------------------------------------------------------------------
+
+/// Rayon d'arrondi de la fenêtre entière — mesuré au pixel sur `modal-header.png`.
+///
+/// Ne s'applique en pratique qu'aux angles HAUTS : les angles bas sont portés par l'alpha de
+/// `modal-body.png`, un `Mesh` egui ne sachant de toute façon pas découper un coin.
+pub const WINDOW_RADIUS: u8 = 12;
+
+/// Hauteur de la bannière de titre — la hauteur native de `modal-header.png` (720 × 56).
+pub const WINDOW_BANNER_HEIGHT: f32 = 56.0;
+
+/// Corps du titre de bannière, en serif grasse ([`text::title_font`](super::text::title_font)).
+pub const WINDOW_TITLE_FONT_SIZE: f32 = 21.0;
+
+/// Couleur du titre de bannière — blanc pur, contre le gris des titres de section.
+pub const WINDOW_TITLE_TEXT: Color32 = Color32::WHITE;
+
+/// Marge gauche et droite du contenu, hors bannière et pied de page.
+pub const WINDOW_PAD_SIDE: f32 = 20.0;
+
+/// Écart bannière → premier élément de contenu.
+pub const WINDOW_PAD_TOP: f32 = 14.0;
+
+/// Marge résiduelle sous le pied de page — la bande sombre mesurée sous « Annuler »/« Valider ».
+pub const WINDOW_PAD_BOTTOM: f32 = 12.0;
+
+/// Écart barre d'onglets → panneau de contenu.
+pub const WINDOW_TAB_GAP: f32 = 14.0;
+
+/// Écart panneau de contenu → pied de page.
+pub const WINDOW_FOOTER_GAP: f32 = 14.0;
+
+/// Gouttière entre les deux boutons du pied de page — **11 px, la valeur du relevé telle quelle**.
+///
+/// Elle a valu 12 : une mise à l'échelle des 15 px lus à l'œil sur `interface-options-jeu.png`.
+/// Le relevé, lui, les cote directement.
+pub const WINDOW_FOOTER_GUTTER: f32 = 11.0;
+
+/// Hauteur des boutons du pied de page — **la hauteur native de leur texture** (338 × 36).
+///
+/// Jamais déduite de la largeur : une première version écrivait `largeur * (36 / 338)` et
+/// affichait des boutons de 27 px là où le jeu en met 36, le corps du libellé suivant la hauteur.
+pub const WINDOW_FOOTER_BUTTON_HEIGHT: f32 = 36.0;
+
+/// Translucidité du corps de la fenêtre — 235/255, la valeur qu'avait l'aplat qui le peignait
+/// avant que la texture du jeu ne le remplace. La couleur, elle, vient de la texture.
+pub const WINDOW_BODY_TINT: Color32 = Color32::from_rgba_premultiplied(235, 235, 235, 235);
+
+/// Translucidité du panneau de contenu — **230/255**.
+///
+/// Sa couleur, son liseré et l'arrondi de ses angles ne se règlent plus ici : ils sont dans
+/// `DsTexture::ModalSection`, découpée des captures du jeu (§9 quater du design-system). Un blanc
+/// à alpha réduit atténue sans changer la teinte — le mécanisme de teinte de
+/// `design::nine_slice::paint`, déjà celui de l'état désactivé des boutons.
+///
+/// L'alpha 230 est une **déviation assumée** : la fenêtre entière est légèrement translucide, et
+/// un panneau opaque à l'intérieur d'elle se verrait comme une tache. En pratique l'écart ne se
+/// voit pas — les deux alphas se multiplient, et `modale_options_sur_damier` mesure 0,7 de
+/// contraste résiduel sous le panneau contre 9,7 dans les marges.
+///
+/// **Attention au constructeur** : `from_rgba_premultiplied` attend des composantes déjà
+/// multipliées par l'alpha. L'ancien `PANEL_FILL` lui passait les valeurs relevées telles quelles,
+/// et peignait donc le panneau 2,3 niveaux trop clair — 24,5 au rendu contre 22,1 attendus. Une
+/// teinte blanche n'a pas ce piège : ses trois composantes valent son alpha.
+pub const PANEL_TINT: Color32 = Color32::from_rgba_premultiplied(230, 230, 230, 230);
+
+/// Axe des TITRES de section, depuis le bord du panneau.
+pub const PANEL_PAD_TITLE_X: f32 = 12.0;
+
+/// Axe des CONTRÔLES, depuis le bord du panneau.
+///
+/// L'écart avec l'axe des titres — 7 px — est le seul signal de niveau du jeu : une section n'a ni
+/// fond, ni bordure, ni filet, seul son titre est en retrait.
+pub const PANEL_PAD_CONTROL_X: f32 = 19.0;
+
+/// Rembourrage haut du panneau — **19, la valeur du relevé telle quelle**.
+///
+/// Elle a longtemps valu 13, corrigée à la main des 6 px que la police réserve au-dessus de
+/// l'encre d'un titre. Cette correction n'a plus lieu d'être depuis que le titre réserve sa
+/// hauteur d'ENCRE et non celle de sa galley — voir [`HEADING_INK_HEIGHT`].
+pub const PANEL_PAD_TOP: f32 = 19.0;
+
+/// Corps d'un titre de section — **le même que le titre de fenêtre**, même serif.
+///
+/// La hiérarchie entre les deux niveaux passe par la COULEUR, pas par le corps. Une première
+/// valeur (18) venait d'un rapport calculé de travers : 17 px d'encre mesurés sur un mot sans
+/// jambage comparés à 21 px sur un mot qui en a un. C'est la ligne de base qui est stable, pas la
+/// boîte — comparer l'encre de deux mots différents pour en déduire un rapport donne un faux.
+pub const HEADING_FONT_SIZE: f32 = WINDOW_TITLE_FONT_SIZE;
+
+/// Couleur d'un titre de section — un gris franc, **pas le blanc du titre de fenêtre**.
+pub const HEADING_TEXT: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
+
+/// Hauteur d'ENCRE réservée par un titre de section, et non la hauteur de sa galley.
+///
+/// Une galley est plus haute que son encre des deux côtés : la police y réserve la place des
+/// accents de capitale au-dessus et des jambages en dessous, que la plupart des titres n'utilisent
+/// ni l'un ni l'autre. Réserver la galley entière ajoutait ~14 px invisibles sous le titre, sur
+/// sept relevés.
+pub const HEADING_INK_HEIGHT: f32 = 16.0;
+
+/// Décalage du haut de la galley au haut de l'encre — voir [`HEADING_INK_HEIGHT`].
+pub const HEADING_INK_TOP: f32 = 6.0;
+
+/// Écart entre un titre de section et la première ligne qui le suit.
+pub const HEADING_TO_ROW: f32 = 7.0;

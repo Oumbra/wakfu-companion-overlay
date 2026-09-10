@@ -156,6 +156,24 @@ pub const ICON_BUTTON_SLICE: NineSlice =
 ///
 /// `Fill::Stretch` sur les deux axes : cette bande médiane est un fond quasi uni — moins de deux
 /// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
+/// Bannière de la modale Options (`modal-header.png`, 720 × 56) — **aucune marge figée**.
+///
+/// Son motif de losanges est réparti sur toute la largeur : ce ne sont pas des embouts d'extrémité
+/// comme sur un bouton, il n'y a donc rien à figer. Étirer la texture entière est ce que le rendu
+/// fait depuis l'origine, et la comparaison au jeu l'a validé — le rayon de coin natif (≈ 12 px sur
+/// 720) reste imperceptible à l'échelle où la bannière est peinte.
+///
+/// Ce découpage n'est de toute façon pas emprunté aujourd'hui : `panels::options_modal` peint la
+/// bannière par `egui::Image` pour lui appliquer un arrondi de coins HAUTS, ce qu'un `Mesh`
+/// 9-slice ne sait pas faire. Il est déclaré pour que la texture entre au manifeste comme les
+/// autres, et il sera juste le jour où quelqu'un l'empruntera.
+///
+/// Même valeur qu'[`ICON_SLICE`] à ce jour, et ce n'est pas un oubli : les deux disent des choses
+/// différentes — un glyphe n'a rien à figer parce qu'il n'a pas de décor, cette bannière parce que
+/// le sien est réparti. Le jour où l'un des deux gagne une marge mesurée, l'autre ne doit pas
+/// bouger avec lui.
+pub const BANNER_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretch, Fill::Stretch);
+
 pub const MODAL_BODY_SLICE: NineSlice = NineSlice::new(
     Insets {
         left: 125.0,
@@ -322,6 +340,19 @@ pub enum DsTexture {
     ///
     /// Remplace l'aplat `SECTION_BG` + `rect_stroke` qui le peignaient jusqu'ici.
     ModalSection,
+    /// Bannière de la modale Options (`modal-header.png`, 720 × 56) — le bandeau turquoise qui
+    /// porte le titre de la fenêtre, au-dessus de [`DsTexture::ModalBody`], avec lequel elle se
+    /// juxtapose sans recouvrement (elle s'arrête où l'autre commence).
+    ///
+    /// **Ses deux angles hauts sont portés par l'alpha de la texture** (rayon 12), comme les angles
+    /// bas de `ModalBody`.
+    ///
+    /// Entrée au manifeste le 2026-09-10 (lot 0.1 de `docs/plan-composants-ui.md`). Le fichier
+    /// existait jusque-là **en double** — `crates/overlay-ui/assets/ui/options/modal-header.png`
+    /// en était une copie octet pour octet, chargée par un `include_bytes!` local. C'était la
+    /// dernière raison d'exister de `OptionsModalAssets`, de sa fonction de décodage et du champ
+    /// `options_assets` que `RenderContent` promenait jusqu'au panneau.
+    ModalHeader,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -378,6 +409,7 @@ impl DsTexture {
         DsTexture::IconUndo,
         DsTexture::ModalBody,
         DsTexture::ModalSection,
+        DsTexture::ModalHeader,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -599,6 +631,11 @@ impl DsTexture {
                 name: "ds-modal-section",
                 bytes: ds_asset!("modal-section.png"),
                 slice: MODAL_SECTION_SLICE,
+            },
+            DsTexture::ModalHeader => DsTextureSpec {
+                name: "ds-modal-header",
+                bytes: ds_asset!("modal-header.png"),
+                slice: BANNER_SLICE,
             },
         }
     }
