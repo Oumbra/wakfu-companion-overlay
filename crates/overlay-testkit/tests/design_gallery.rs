@@ -456,9 +456,11 @@ fn gallery(ui: &mut egui::Ui) {
         });
     }
 
-    // Le champ à ornement — la loupe est posée par le COMPOSANT, dans son clip, et la gouttière
-    // qu'elle impose vaut pour le texte indicatif comme pour la valeur saisie. C'est ce que
-    // vérifie la deuxième ligne, la seule qui porte une valeur.
+    heading(
+        ui,
+        "Champ à ornement — la loupe DANS le champ",
+        "Le jeu pose toujours sa loupe à l'intérieur du champ, jamais sur un socle à côté. Le composant réserve lui-même la gouttière : la deuxième ligne, la seule qui porte une valeur, est celle qui le vérifie — le texte y démarre après l'icône, pas dessous.",
+    );
     let mut recherche_vide = String::new();
     let mut recherche_pleine = String::from("pierre");
     ui.add(
