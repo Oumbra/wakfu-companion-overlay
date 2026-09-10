@@ -445,15 +445,31 @@ reportée par erreur sur le coin. `releve-modale-options.json` est corrigé, ave
 la confusion. **Le coin de fenêtre est le seul rayon prononcé de toute l'interface ; tout le reste
 est à 2.**
 
+### La capture qui montre le chrome : faite
+
+`options_modale_avec_erreur.png` ne pouvait vérifier ni le coin ni la translucidité — le harnais
+peint un panneau gris opaque derrière la modale, qui remplit le quart de cercle et masque tout ce
+qui transparaît. `modale_options_sur_damier_ne_panique_pas` (`crates/overlay-testkit/tests/panels.rs`)
+peint à la place un damier contrasté **dans le `Ui` du harnais**, avant `paint_content` : la seule
+façon d'imiter la production, où la fenêtre OS est transparente et laisse voir le jeu.
+
+`options_modale_sur_damier.png` vérifie donc désormais :
+
+- **les quatre coins arrondis** — le pixel (8, 8) porte la couleur exacte du damier, celui de
+  (14, 14) celle de la bannière ;
+- **la translucidité du fond de modale** (`MODAL_BG`, alpha 235) — dans les marges latérales, le
+  contraste du damier retombe de 128 à 9,7, soit les 8 % que cet alpha laisse passer.
+
+Elle a aussi montré ce qu'aucune mesure d'alpha isolée ne disait : **sous le panneau de contenu, il
+ne reste rien du damier** (contraste 0,7). Le panneau est peint par-dessus le fond de modale, les
+deux alphas se multiplient — 8 % de 10 % — et sa propre translucidité (`SECTION_BG`, alpha 230,
+pourtant plus transparent que le fond) n'y change rien. Ce qu'on prendrait pour un panneau
+translucide est en pratique opaque.
+
 ### Reste à faire
 
 - **Gouttière du pied de page** : 12 px chez nous, 11 px relevés entre `btn-cancel` (finit à x=355)
   et `btn-confirm` (commence à x=366). Écart d'un pixel, à reprendre pour la forme.
-- **Une capture qui montre enfin le chrome.** `options_modale_avec_erreur.png` ne peut pas servir à
-  vérifier le coin ni la translucidité : le harnais `egui_kittest` peint un panneau gris opaque
-  derrière la modale, qui remplit le quart de cercle. Il faut une capture sur fond damier ou sur une
-  imitation de scène de jeu — sans quoi le seul rayon prononcé de l'interface n'est vérifié par
-  aucun test.
 
 ---
 
