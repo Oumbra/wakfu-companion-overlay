@@ -675,27 +675,42 @@ main, soit environ 250 lignes qui ne font que placer des rectangles.
 | **`design::tooltip`** | `panels::tooltip` et ses trois enveloppes (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`/`_right`), placement et replis compris. | `TOOLTIP_MARGIN`, `TOOLTIP_GAP`, `TOOLTIP_BG_FILL` mesurés. |
 | **`design::icon` + `DsIcon`** — *décidé le 2026-09-10, voir ci-dessous* | Le registre des 34 glyphes, séparé des fonds 9-slice : taille d'encre au manifeste, teinte par jeton. | 28 icônes détourées et inutilisées dans `icons/` ; `tokens::ICON_TINT`/`ICON_TINT_HOVER` et `DsTexture::icon_content_size` existent. |
 
-**`DsIcon` est un type distinct de `DsTexture`** (décision utilisateur, 2026-09-10). La raison est
-mesurable : **chaque icône a une taille d'encre propre, un fond 9-slice n'en a pas**. Les 34 fichiers
-d'`icons/` vont de 7×10 (`icon-triangle-right`) à 27×28 (`icon-info`), et `icon-minus` fait **14×2** —
-peint dans un carré de 18 px sans connaître sa boîte d'encre, le trait du « moins » est étiré neuf
-fois en hauteur. Symétriquement, un `NineSlice` et un mode de remplissage par axe n'ont aucun sens
-pour un glyphe. Les deux types cohabitaient tant qu'il n'y avait que six icônes au manifeste ; à
-trente-quatre, ce serait un type dont la moitié des champs ne s'applique jamais.
+**`DsIcon` est un type distinct de `DsTexture`** (décision utilisateur, 2026-09-10).
 
-Exécution, dans cet ordre :
+**Motif révisé le même jour**, après les commits `0923a45`, `a372320` et `4762cee` d'une session
+parallèle. L'argument d'origine — « chaque glyphe a une taille d'encre propre, un fond 9-slice n'en
+a pas, et peindre `icon-minus` (14×2) dans un carré l'étirerait » — **ne tient plus** :
+`icon_button::glyph_fit(native, box_side)` met désormais tout glyphe à l'échelle **en préservant son
+ratio natif**, et `Input::leading_icon` partage la même règle. Le problème d'échelle est réglé.
 
-1. `design/icons.rs` — `enum DsIcon` et sa table (fichier, taille d'encre native, nom de texture),
-   les 34 fichiers d'un coup.
-2. Retrait des six variantes d'icône de `DsTexture` (`IconInfo`, `IconChevronDown`, `IconOption`,
-   `IconExternalLink`, `IconPlus`, `IconMinus`) et de `icon_content_size` avec elles — `DsTexture`
+Ce qui reste, et qui justifie encore la séparation :
+
+- **`TextureSpec` est un type à deux visages.** Il porte un `slice: NineSlice` dont aucun glyphe ne
+  se sert (tous prennent `ICON_SLICE`, marges nulles — un 9-slice dégénéré), et
+  `icon_content_size()` est un `match` qui énumère à la main les variantes qui se trouvent être des
+  icônes. Déclarer une icône demande donc de penser à un champ qui ne la concerne pas, et d'ajouter
+  une ligne à une liste qui n'a pas de garde-fou.
+- **12 icônes au manifeste sur 34 disponibles** dans `assets/design-system/icons/`.
+
+Ce qui a changé dans l'appréciation : c'est désormais un **nettoyage de typage**, pas un déblocage.
+Rien n'en dépend — ni la vague 1, ni la vague 2. À faire quand le terrain est libre, et **pas en
+parallèle** d'une session qui travaille sur `assets.rs` / `icon_button.rs` / la galerie : le
+refactor touche exactement ces trois fichiers.
+
+Note sur le rythme : ajouter une icône au manifeste **quand un composant en a besoin** — ce que fait
+la session parallèle — est sain, et vaut mieux que déclarer les 34 d'un coup. Un manifeste ne doit
+rien contenir de mort.
+
+Exécution, le jour venu :
+
+1. `design/icons.rs` — `enum DsIcon` et sa table (fichier, taille d'encre, nom de texture).
+2. Retrait des variantes d'icône de `DsTexture` et de `icon_content_size` avec elles — `DsTexture`
    ne décrit plus que des fonds 9-slice.
-3. `design::icon` — une **feuille** au sens du contrat (`impl Widget`), qui centre le glyphe sur sa
-   boîte d'encre au lieu de l'étirer.
-4. `icon_button` prend un `DsIcon` : quatre glyphes disponibles deviennent trente-quatre.
-5. Planche d'icônes dans la galerie, snapshots régénérés.
+3. `design::icon` — une **feuille** au sens du contrat, qui réutilise `glyph_fit` tel quel.
+4. `icon_button` et `Input::leading_icon` prennent un `DsIcon`.
+5. La galerie des glyphes (`a372320`) suit le nouveau type ; snapshots régénérés.
 
-Coût mémoire mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
+Coût mémoire, mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
 sans effet sur le budget de 300 Mo (§8 du plan).
 
 **Le contrat de composant a désormais deux familles** (décision utilisateur, 2026-09-10) : une
