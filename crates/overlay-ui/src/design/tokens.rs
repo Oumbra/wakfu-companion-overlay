@@ -215,3 +215,65 @@ pub const CHECKBOX_LABEL_OFF: Color32 = Color32::WHITE;
 /// Libellé d'une case COCHÉE — l'or du jeu. **Le libellé porte l'état autant que la case** : le jeu
 /// double toujours son signal, comme la barre d'onglets le fait avec le sien.
 pub const CHECKBOX_LABEL_ON: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+
+// ---------------------------------------------------------------------------------------------
+// Liste déroulante — mesurée sur `select-simple.png` (socle, colonne x=60) et
+// `select-simple-opened.png` (liste, colonne x=100), recoupées avec le nœud `select-theme` de
+// `releve-options-interface.json`. Détail dans `design::components::select`.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur du socle — **36px, BORD COMPRIS**.
+///
+/// Piège du relevé : « le chiffre de 32px qu'on lit en mesurant le remplissage est trompeur — il
+/// exclut les 2px de bord haut et bas. » Vérifié au pixel sur l'asset : bord 2 + liseré 2 +
+/// dégradé 28 + ombre 2 + bord 2.
+pub const SELECT_HEIGHT: f32 = 36.0;
+
+/// Rayon du socle et de la liste — 2, comme tout le reste de l'interface.
+pub const SELECT_RADIUS: u8 = 2;
+
+/// Retrait du libellé de socle — le texte commence à x=17 pour un socle dont le bord est à x=7.
+pub const SELECT_PADDING_X: f32 = 10.0;
+
+/// Marge entre le chevron et le bord droit du socle.
+pub const SELECT_CHEVRON_MARGIN: f32 = 8.0;
+
+/// Taille du chevron — **exactement la taille native d'`icons/icon-chevron-down.png`**. Ce n'est pas
+/// une coïncidence : l'icône a été détourée de cette capture, et le chevron y mesure 14 × 8 (x
+/// 201..214, y 19..26), centré sur le socle.
+pub const SELECT_CHEVRON_SIZE: egui::Vec2 = egui::vec2(14.0, 8.0);
+
+/// Hauteur d'une entrée de la liste dépliée — surbrillance en y 71..98, entrée suivante à y=99.
+///
+/// `select-multiple.png` donne 26 pour la même chose ; les deux captures ne sont pas à la même
+/// échelle d'interface. C'est la mesure du select **simple** qui fait foi, celui dont ce composant
+/// reproduit toutes les autres cotes.
+pub const SELECT_ROW_HEIGHT: f32 = 28.0;
+
+/// Retrait du texte d'une entrée — « Tous » commence à x=19 pour une liste dont le bord est à x=7.
+/// Deux pixels de plus que sur le socle, et c'est bien ce que la capture montre.
+pub const SELECT_ROW_PADDING_X: f32 = 12.0;
+
+/// Fond de la liste dépliée — uniforme, aucun dégradé (contrairement au socle).
+pub const SELECT_LIST_FILL: Color32 = Color32::from_rgb(0x67, 0x5D, 0x46);
+
+/// Fond d'une entrée mise en avant.
+///
+/// **Survolée ou valeur courante, indistinctement** : une seule capture montre une entrée sur fond
+/// clair, et elle est à la fois la valeur du socle et, très probablement, celle que la souris
+/// survolait. Rien ne départage les deux lectures — voir `design::components::select`.
+pub const SELECT_ROW_HIGHLIGHT: Color32 = Color32::from_rgb(0xA5, 0x8E, 0x63);
+
+/// Liseré clair d'un pixel en haut de la liste — ce qui la détache du socle, dont l'ombre basse
+/// appartient à la même famille chromatique.
+pub const SELECT_LIST_TOP_LINE: Color32 = Color32::from_rgb(0x7E, 0x75, 0x62);
+
+/// Bord de la liste — le même noir que celui du socle.
+pub const SELECT_LIST_BORDER: Color32 = Color32::from_rgb(0x0E, 0x10, 0x15);
+
+/// Texte du socle comme des entrées — blanc. Le texte d'une entrée mise en avant ne change pas :
+/// c'est son fond qui porte le signal.
+pub const SELECT_TEXT: Color32 = Color32::WHITE;
+
+/// Corps du texte d'une liste — 17px, la même encre de 13px que tous les libellés de contrôle.
+pub const SELECT_FONT_SIZE: f32 = 17.0;

@@ -84,6 +84,24 @@ pub const TAB_SLICE: NineSlice = NineSlice::new(Insets::same(4.0), Fill::Stretch
 pub const CHECKBOX_SLICE: NineSlice =
     NineSlice::new(Insets::same(5.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage du socle d'une liste déroulante : **8px figés à gauche et à droite, 6 en haut et en
+/// bas**.
+///
+/// 8 en horizontal : les deux pixels de bord, plus le coin arrondi, plus une marge. C'est aussi
+/// exactement la largeur des colonnes que la génération de `select-face.png` a conservées telles
+/// quelles — au-delà, la texture est une seule colonne propre répétée, un étirement n'y perd donc
+/// rien. 6 en vertical : le bord, le liseré et deux pixels de sécurité, comme sur un bouton.
+pub const SELECT_SLICE: NineSlice = NineSlice::new(
+    Insets {
+        left: 8.0,
+        top: 6.0,
+        right: 8.0,
+        bottom: 6.0,
+    },
+    Fill::Stretch,
+    Fill::Stretch,
+);
+
 /// Une texture du design system, désignée par son rôle et non par son chemin.
 ///
 /// Les variantes `*Hover` sont des **fichiers distincts capturés dans le jeu**, pas un
@@ -130,6 +148,13 @@ pub enum DsTexture {
     CheckboxChecked,
     /// Case à cocher DÉCOCHÉE (`checkbox-false.png`, 20 × 20) — cadre kaki sombre, intérieur noir.
     CheckboxUnchecked,
+    /// Socle d'une liste déroulante (`select-face.png`, 220 × 36) — dégradé, liseré haut, ombre
+    /// basse et bords, **libellé et chevron retirés** : ce sont le composant et le manifeste qui
+    /// les remettent, l'un depuis l'appelant, l'autre depuis `IconChevronDown`.
+    SelectFace,
+    /// Chevron `⌄` d'une liste déroulante (`icons/icon-chevron-down.png`, 14 × 8) — la taille à
+    /// laquelle le jeu le peint, au pixel près.
+    IconChevronDown,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -163,6 +188,8 @@ impl DsTexture {
         DsTexture::TabInactive,
         DsTexture::CheckboxChecked,
         DsTexture::CheckboxUnchecked,
+        DsTexture::SelectFace,
+        DsTexture::IconChevronDown,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -243,6 +270,16 @@ impl DsTexture {
                 name: "ds-checkbox-unchecked",
                 bytes: ds_asset!("checkbox-false.png"),
                 slice: CHECKBOX_SLICE,
+            },
+            DsTexture::SelectFace => DsTextureSpec {
+                name: "ds-select-face",
+                bytes: ds_asset!("select-face.png"),
+                slice: SELECT_SLICE,
+            },
+            DsTexture::IconChevronDown => DsTextureSpec {
+                name: "ds-icon-chevron-down",
+                bytes: ds_asset!("icons/icon-chevron-down.png"),
+                slice: ICON_SLICE,
             },
         }
     }
