@@ -42,33 +42,29 @@
 //! Les deux font **36 × 36**, la taille native. `button-icon-disabled.png` est partagée par les deux
 //! contextes — le jeu n'a qu'une capture de socle grisé, comme pour le bouton texte.
 //!
-//! ## Pas encore utilisé en production, et où en est la migration
+//! ## La taille d'encre vient du manifeste
 //!
-//! Les quatre boutons icône de l'overlay — « + », « − », Détails et Options, **tous les quatre dans
-//! le carré de contrôle du Suivi** depuis la refonte 2026-09-08 (`watchlist::control_button_row`) —
-//! **continuent de passer par `panels::icon_button`**. Leur socle est pourtant déjà celui du design
-//! system : `crates/overlay-ui/assets/ui/button-background.png` est octet pour octet
-//! `assets/design-system/button-icon-first-plan.png`, et de même pour la variante survolée.
+//! Les glyphes de `assets/design-system/icons/` sont détourés au pixel près : leur fichier fait
+//! exactement la taille de leur encre, et celle-ci varie d'un glyphe à l'autre (13 pour le lien
+//! externe, 16 pour le rouage). Peints tels quels, ils donneraient trois hauteurs d'encre
+//! différentes dans une même barre.
 //!
-//! Ce sont leurs **icônes** qui diffèrent : celles d'`ui_icons` sont recadrées et normalisées à une
-//! taille de référence (`ui_icons::normalize_icon_content`), les nôtres sont les glyphes détourés
-//! bruts.
+//! Le jeu, lui, les cale sur une grille commune. Mesuré le 2026-09-10 sur
+//! `menu-button-icon-first-plan.png` — déjà la source des deux teintes ci-dessus, mais personne n'y
+//! avait mesuré la taille d'encre : **bbox de 16 à 20 px pour un socle de 36**, médiane 18, toutes
+//! centrées au pixel près sur l'axe du socle (seuil de luminance 140, résultat invariant de 120 à
+//! 180). La capture est bien à l'échelle 1 : `button-icon-first-plan.png` s'y recale à 36 × 36 avec
+//! un écart moyen de 2,3/255 sur les pixels de socle, contre 4,5 et plus dès 35 ou 37.
+//!
+//! C'est [`tokens::ICON_BUTTON_CONTENT`], appliqué par `DsTexture::icon_content_size` — donc par
+//! **le manifeste, jamais par l'appelant** : la taille d'encre est une propriété de l'asset.
+//! `icon_draw_size` en bas de ce fichier fait le calcul, et ses tests l'éprouvent sans GPU.
 //!
 //! Cette doc a longtemps dit qu'« aucune capture de référence ne permet d'arbitrer laquelle des
-//! deux normalisations est la bonne ». **C'est faux depuis le 2026-09-10** :
-//! `assets/design-system/menu-button-icon-first-plan.png` — déjà la source des deux teintes
-//! d'icône ci-dessus — porte huit icônes de la même famille, et personne n'y avait mesuré la taille
-//! d'encre. Mesuré (seuil de luminance 140, résultat invariant de 120 à 180) : **bbox de 16 à 20 px
-//! pour un socle de 36**, médiane 18, toutes centrées au pixel près sur l'axe du socle ; le socle de
-//! cette capture est bien à l'échelle 1 (`button-icon-first-plan.png` s'y recale à 36 × 36 avec un
-//! écart moyen de 2,3/255, contre 4,5 et plus dès 35 ou 37). Autrement dit **le principe de
-//! normalisation d'`ui_icons` est le bon, et son étalon de 18 — celui du rouage — est la bonne
-//! valeur pour toutes les icônes**, pas seulement pour le rouage.
-//!
-//! Les candidats sont peints côte à côte par `overlay-testkit/tests/icon_button_arbitrage.rs`
-//! (`icon_button_arbitrage.png`), et [`IconButton::icon_content`] porte la normalisation le temps
-//! de l'arbitrage. La migration elle-même attend un choix de l'utilisateur : elle change le rendu
-//! d'un panneau visible en permanence et fait bouger neuf captures de non-régression.
+//! deux normalisations est la bonne », et c'est pour cette raison que les quatre boutons icône de
+//! l'overlay ne passaient pas encore par ce composant. La mesure ci-dessus a tranché : le principe
+//! de normalisation d'`ui_icons` était le bon, et son étalon de 18 — réservé au seul rouage après un
+//! retour « encore trop petite » — valait pour les quatre.
 //!
 //! Le cas que le plan appelle « réinitialisation » — le bouton 36 × 36 que le jeu pose à droite de
 //! la barre d'onglets et à droite d'un réglage isolé — attend qu'un réglage réinitialisable existe.
@@ -121,7 +117,6 @@ pub struct IconButton {
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<IconButtonState>,
-    icon_content: Option<f32>,
 }
 
 impl IconButton {
@@ -134,7 +129,6 @@ impl IconButton {
             tooltip: None,
             log_name: None,
             forced_state: None,
-            icon_content: None,
         }
     }
 
@@ -147,25 +141,6 @@ impl IconButton {
     /// met le socle ET l'icône à l'échelle dans le même rapport.
     pub fn size(mut self, size: f32) -> Self {
         self.size = size;
-        self
-    }
-
-    /// **Banc d'arbitrage uniquement (2026-09-10), pas encore un choix figé.** Ramène la plus
-    /// grande dimension de l'icône à `px`, exprimé dans le repère du socle natif (36) — le rapport
-    /// est ensuite mis à l'échelle avec le bouton, comme la taille native l'est déjà.
-    ///
-    /// Sans ce réglage, une icône est peinte à sa taille de fichier : les glyphes du design system
-    /// étant détourés au pixel près, deux glyphes voisins n'ont alors pas la même hauteur d'encre
-    /// (13 pour le lien externe, 16 pour le rouage) là où le jeu, lui, les cale sur une grille
-    /// commune (mesuré : 16 à 20 px de bbox pour un socle de 36 sur les huit icônes de
-    /// `menu-button-icon-first-plan.png`, médiane 18). C'est le seul écart de rendu entre ce
-    /// composant et `panels::icon_button`, qui normalise la même chose au chargement
-    /// (`ui_icons::normalize_icon_content`).
-    ///
-    /// Si cette normalisation est retenue, sa place définitive est le **manifeste** (une taille de
-    /// contenu par texture d'icône), pas l'appelant : c'est une propriété de l'asset.
-    pub fn icon_content(mut self, px: f32) -> Self {
-        self.icon_content = Some(px);
         self
     }
 
@@ -229,15 +204,11 @@ impl Widget for IconButton {
             };
             design.paint(ui.painter(), rect, background, egui::Color32::WHITE);
 
-            // Le socle et l'icône partagent le MÊME facteur d'échelle, dérivé de la largeur du
-            // socle : l'icône reste proportionnée à son bouton à n'importe quelle taille.
-            let scale = rect.width() / tokens::ICON_BUTTON_SIZE;
-            let native = design.native_size(self.icon);
-            let icon_size = match self.icon_content {
-                // Rapport commun aux deux axes : une icône normalisée garde ses proportions.
-                Some(target) => native * (target / native.x.max(native.y)) * scale,
-                None => native * scale,
-            };
+            let icon_size = icon_draw_size(
+                design.native_size(self.icon),
+                self.icon.icon_content_size(),
+                rect.width(),
+            );
             let icon_rect = egui::Rect::from_center_size(rect.center(), icon_size);
             design.paint(ui.painter(), icon_rect, self.icon, icon_tint);
         }
@@ -259,5 +230,110 @@ impl Widget for IconButton {
             Some(tooltip) => response.on_hover_text(tooltip),
             None => response,
         }
+    }
+}
+
+/// Taille à laquelle peindre l'icône sur un bouton de côté `button_size`.
+///
+/// Le socle et l'icône partagent le **même facteur d'échelle**, dérivé de la largeur du socle : une
+/// icône reste proportionnée à son bouton à n'importe quelle taille.
+///
+/// `content` — la taille d'encre du manifeste (`DsTexture::icon_content_size`) — ramène en plus la
+/// plus grande dimension du glyphe à l'étalon du jeu **avant** cette mise à l'échelle. Sans elle,
+/// une icône est peinte à sa taille de fichier, qui varie d'un glyphe détouré à l'autre.
+///
+/// Fonction libre plutôt que corps de `Widget::ui` : c'est le seul calcul du composant qui peut se
+/// tromper en silence, et il s'éprouve sans GPU (voir les tests en bas de ce fichier).
+fn icon_draw_size(native: Vec2, content: Option<f32>, button_size: f32) -> Vec2 {
+    let scale = button_size / tokens::ICON_BUTTON_SIZE;
+    match content {
+        // Rapport commun aux deux axes : une icône normalisée garde ses proportions.
+        Some(target) => native * (target / native.x.max(native.y)) * scale,
+        None => native * scale,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tolérance de comparaison — ces tailles finissent en coordonnées de peinture flottantes, pas
+    /// en pixels entiers ; un centième suffit à attraper une erreur de formule.
+    const EPS: f32 = 0.01;
+
+    /// Les quatre glyphes du carré de contrôle du Suivi, à leur taille de fichier (détourés au
+    /// pixel près par le skill `design-asset`, donc canevas = encre). Recopiés ici plutôt que lus
+    /// par `DesignSystem` : ce test ne doit dépendre d'aucun contexte egui ni d'aucun GPU.
+    const GLYPHES: [(&str, Vec2); 4] = [
+        ("icon-plus", Vec2::new(14.0, 14.0)),
+        ("icon-minus", Vec2::new(14.0, 2.0)),
+        ("icon-external-link", Vec2::new(13.0, 13.0)),
+        ("icon-option", Vec2::new(16.0, 15.0)),
+    ];
+
+    #[test]
+    fn une_icone_normalisee_atteint_l_etalon_du_jeu() {
+        for (nom, native) in GLYPHES {
+            let peinte = icon_draw_size(native, Some(tokens::ICON_BUTTON_CONTENT), 24.0);
+            let attendu = tokens::ICON_BUTTON_CONTENT * 24.0 / tokens::ICON_BUTTON_SIZE;
+            assert!(
+                (peinte.x.max(peinte.y) - attendu).abs() < EPS,
+                "{nom} : plus grande dimension {} au lieu de {attendu}",
+                peinte.x.max(peinte.y),
+            );
+        }
+    }
+
+    #[test]
+    fn une_icone_normalisee_garde_ses_proportions() {
+        for (nom, native) in GLYPHES {
+            let peinte = icon_draw_size(native, Some(tokens::ICON_BUTTON_CONTENT), 24.0);
+            assert!(
+                (peinte.x / peinte.y - native.x / native.y).abs() < EPS,
+                "{nom} : rapport d'aspect {} au lieu de {}",
+                peinte.x / peinte.y,
+                native.x / native.y,
+            );
+        }
+    }
+
+    /// Le « − » est le cas qui se serait cassé en silence : 2 px de haut à l'origine, il ne survit
+    /// à la normalisation que si le facteur s'applique aux DEUX axes. Une normalisation qui
+    /// n'agirait que sur la plus grande dimension en ferait une barre.
+    #[test]
+    fn le_trait_du_moins_reste_un_trait() {
+        let peinte = icon_draw_size(Vec2::new(14.0, 2.0), Some(18.0), 24.0);
+        assert!((peinte.x - 12.0).abs() < EPS, "largeur {}", peinte.x);
+        assert!(
+            (peinte.y - 12.0 * 2.0 / 14.0).abs() < EPS,
+            "hauteur {}",
+            peinte.y
+        );
+    }
+
+    /// Sans étalon, on retombe exactement sur la taille de fichier mise à l'échelle du socle — le
+    /// comportement de toutes les textures qui ne sont pas des icônes de bouton.
+    #[test]
+    fn sans_etalon_l_icone_garde_sa_taille_de_fichier() {
+        for (nom, native) in GLYPHES {
+            let peinte = icon_draw_size(native, None, 24.0);
+            let attendu = native * (24.0 / tokens::ICON_BUTTON_SIZE);
+            assert!(
+                (peinte - attendu).length() < EPS,
+                "{nom} : {peinte:?} au lieu de {attendu:?}",
+            );
+        }
+    }
+
+    /// À la taille native du socle, l'étalon est la taille peinte, sans conversion.
+    #[test]
+    fn au_socle_natif_l_etalon_est_la_taille_peinte() {
+        let peinte = icon_draw_size(
+            Vec2::new(13.0, 13.0),
+            Some(tokens::ICON_BUTTON_CONTENT),
+            tokens::ICON_BUTTON_SIZE,
+        );
+        assert!((peinte.x - tokens::ICON_BUTTON_CONTENT).abs() < EPS);
+        assert!((peinte.y - tokens::ICON_BUTTON_CONTENT).abs() < EPS);
     }
 }
