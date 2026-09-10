@@ -21,7 +21,7 @@
 //! | Grandeur | Valeur | Détail |
 //! | --- | --- | --- |
 //! | Pastille | **12 × 12 px** | boîte `[38, 438, 50, 450]` |
-//! | Position de la pastille | centrée sur la **première ligne** | ligne 1 en `[57, 436, 628, 454]`, axe 445 ; pastille d'axe 444 |
+//! | Position de la pastille | centrée sur la **boîte de police** de la première ligne | ligne 1 en `[57, 436, 628, 454]`, axe 445 ; pastille d'axe 443,5 |
 //! | Écart pastille → texte | **7 px** | la pastille finit à x=50, le texte commence à x=57 |
 //! | Lignes suivantes | alignées sur le **texte** | la seconde ligne est à x=57 elle aussi, pas sous la pastille |
 //! | Interligne | **23 px** | haut d'encre à haut d'encre, y=436 puis y=459 |
@@ -32,6 +32,30 @@
 //! **Le texte d'information est blanc pur, pas gris.** Note du relevé, à ne pas contourner :
 //! « l'impression de gris vient du fond et de l'absence de graisse, pas de la couleur. Un portage
 //! qui le grise s'écarte de la référence. »
+//!
+//! **Ni sur le bloc, ni sur l'interligne : la pastille se centre sur la boîte de police.** Deux
+//! pièges se suivent ici, et le second n'est visible qu'en agrandissant.
+//!
+//! Le premier est le bloc : sur un message de deux lignes, centrer la pastille sur le bloc entier
+//! la descendrait de 11 px. Elle appartient à la première ligne.
+//!
+//! Le second est l'interligne. L'interligne mesuré (23 px) est plus grand que la hauteur naturelle
+//! de la police (19,5 px à ce corps), et `epaint` ne répartit **pas** cette différence de part et
+//! d'autre : il cale la ligne de base sur l'ascendante (`galley_from_rows`, `glyph.pos.y =
+//! font_face_ascent`) et laisse les ~3,5 px de rabiot **sous la descendante**. Diviser les 23 px en
+//! deux vise donc un axe qui n'est pas celui du texte, et pose la pastille sur la ligne de base.
+//! C'est `ui.fonts_mut(|f| f.row_height(&font)) / 2.0` qui donne le bon axe.
+//!
+//! La vérification est faite sur la capture, en repérant la hauteur d'x plutôt que l'encre entière
+//! (l'encre entière dépend des accents et des jambages présents dans la phrase, la hauteur d'x
+//! non) :
+//!
+//! | | Jeu | Rendu |
+//! | --- | --- | --- |
+//! | Hauteur d'x de la ligne 1 | y 441..449 | y 35..43 |
+//! | Pastille | y 438..449 | y 32..43 |
+//! | Écart au sommet de la hauteur d'x | **3 px au-dessus** | **3 px au-dessus** |
+//! | Bas de la pastille | sur la dernière ligne d'encre | sur la dernière ligne d'encre |
 //!
 //! **La pastille n'est pas un rond plein** : c'est `icons/icon-info.png`, le disque doré cerclé
 //! détouré de la capture du jeu, dont le « i » est creusé en alpha (recette
@@ -146,6 +170,10 @@ impl Widget for InfoText {
         let font = text::label_font(ui.ctx(), tokens::INFO_FONT_SIZE);
         let color = self.tone.color();
 
+        // Hauteur NATURELLE de la police (ascendante + descendante), à ne pas confondre avec
+        // l'interligne mesuré : c'est elle qui donne l'axe de la pastille, voir plus bas.
+        let font_box_height = ui.fonts_mut(|f| f.row_height(&font));
+
         // Le retour à la ligne se fait sur la largeur RESTANTE, pas sur la largeur du bloc : les
         // lignes suivantes s'alignent sur le texte (x=57 dans le relevé), jamais sous la pastille.
         // Plancher à zéro pour la même raison que partout ailleurs — un bloc plus étroit que sa
@@ -173,7 +201,13 @@ impl Widget for InfoText {
             // Pastille centrée sur la PREMIÈRE ligne, pas sur le bloc — c'est la cote la plus
             // facile à rater : sur un message de deux lignes, un centrage sur le bloc la
             // descendrait de 11 px.
-            let dot_center_y = rect.top() + tokens::INFO_LINE_HEIGHT / 2.0;
+            //
+            // Et centrée sur la boîte de POLICE de cette ligne, pas sur sa boîte d'INTERLIGNE.
+            // `epaint` cale la ligne de base sur l'ascendante (`galley_from_rows`) : tout le
+            // supplément d'interligne — 23 - 19,5 ≈ 3,5 px ici — tombe SOUS la descendante, il
+            // n'est pas réparti de part et d'autre. Diviser les 23 px en deux descendrait donc la
+            // pastille de ~2 px et la collerait à la ligne de base, ce que le jeu ne fait pas.
+            let dot_center_y = rect.top() + font_box_height / 2.0;
             let dot_rect = egui::Rect::from_center_size(
                 egui::pos2(
                     rect.left() + tokens::INFO_DOT_SIZE / 2.0,
