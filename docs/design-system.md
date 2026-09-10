@@ -398,6 +398,106 @@ simulation HTML/CSS interactive validée avec l'utilisateur avant portage :
 - Fenêtre portée à 560×436 (ratio aligné sur les 720:561 mesurés de la vraie fenêtre Options du
   jeu, au lieu d'une boîte compacte 560×230 arbitraire) — cohérence visuelle avec le rendu réel.
 
+### 9 ter. Fond du corps de la modale — découpage 2026-09-10
+
+> Source : les six captures `assets/design-system/interfaces/interface-options-*.png`.
+> Sortie : `assets/design-system/modal-body/modal-body-*.png` (720 × 505, RGBA), produites par
+> `tools/design-system/build_modal_body.py`. Le corps prend la suite exacte de
+> `modal-header.png` : celui-ci couvre y=0..55, le fond démarre à y=56 et court jusqu'à y=560,
+> liseré inférieur compris.
+
+`MODAL_BG` (`#1C2023`, `options_modal.rs`) peint le corps d'un aplat : c'est justement l'écart que
+ce découpage doit combler. Les composants — ligne d'onglets, bouton « réinitialiser », panneau de
+section, boutons Annuler et Valider — sont retirés et les surfaces ainsi libérées rebâties.
+
+| Élément | Valeur mesurée | Remarque |
+| --- | --- | --- |
+| Corps | y=56 → 560, soit 720 × 505 | Aucun recouvrement avec `modal-header.png`. |
+| Fond | `#1E2126` | Moyenne des zones de fond nu. Deux à trois niveaux au-dessus de `MODAL_BG` (`#1C2023`, valeur donnée au colorimètre) : l'écart tient à la zone échantillonnée, pas à un désaccord de méthode. Le dégradé d'un bord à l'autre reste sous 2 niveaux — la surface est quasi plate. |
+| Liseré extérieur | 2 px, `#2A2D30` env. | Confirme le `#2a2e30` du relevé (§9 bis). |
+| Angles inférieurs | arrondis, rayon 12 | Même quart de cercle que les angles supérieurs de `modal-header.png` : sur la dernière ligne (y=560) le premier pixel opaque est à x=12. La transparence est portée par l'alpha du PNG. |
+| Panneau de section | fond − 9 niveaux (`#15181B`) | **Ce n'est pas une surface opaque** : c'est le même fond assombri, la texture le traverse. Confirme `SECTION_BG` (`#15181C`). Côté overlay il peut donc rester peint, pas importé. |
+| Hachures, pente | 1,000 (45° exacts) | Vérifié par projection en testant les pentes de 0,5 à 2,0. |
+| Hachures, amplitude | 2,5 à 5,7 niveaux au-dessus du fond | **Réparties en cadre, pas en trame** : denses sur la bannière, les côtés, le bas et les angles, absentes au centre. C'est le même constat que pour les boutons (`design::assets`, `button_slice` : « les croisillons ne sont pas une texture de fond mais un embout »), ici à l'échelle de la fenêtre. |
+| Grain | σ = 1,45 par canal, corrélation 0,95 entre canaux | Anisotrope : autocorrélation 0,85 à 1 px verticalement contre 0,37 horizontalement — de fines stries verticales, pas un bruit isotrope. |
+| Onglets / Réinitialiser | `16,70 → 639,119` / `663,70 → 707,119` | Zones retirées. |
+| Panneau | `14,122 → 706,500` | Zone retirée. |
+| Annuler / Valider | `13,512 → 357,553` / `363,512 → 707,553` | Zones retirées, ombre portée comprise. Gouttière de 11 px entre les deux, ce qui recoupe l'écart d'un pixel noté à l'étape 9 de `plan-modale-options.md`. |
+
+**Méthode** (détail dans l'en-tête du script) : le contenu est toujours plus clair que le fond,
+donc le **minimum des six captures l'efface** ; une **ouverture morphologique par un segment à 45°**
+relève les hachures, y compris là où un onglet ou un bouton les recouvre ; le **dégradé est
+ré-estimé par diffusion depuis les seules zones de fond nu** — jamais depuis le panneau assombri ni
+depuis la bannière, dont le turquoise déborderait dans la moyenne locale ; le **grain est
+resynthétisé** d'après ses caractéristiques mesurées plutôt que recopié, recoller des morceaux de
+marge produisant un damier visible.
+
+**Variante retenue (utilisateur, 2026-09-10) : `trace-net`** — hachures relevées puis redessinées à
+trait franc, interruptions comblées, le motif se lit sur le corps sans qu'il faille chercher. Elle
+est devenue `assets/design-system/modal-body.png`, seul fichier versionné ; le lot d'arbitrage
+(dix variantes : une par capture d'origine, plus `consolide`, `trace-net`, `plat` et `uni`) se
+régénère à la demande par `build_modal_body.py --variantes <dossier>`.
+
+**Marges 9-slice** (`design::assets::MODAL_BODY_SLICE`) : **gauche 125, haut 110, droite 195, bas
+180**. Quatre valeurs distinctes parce que le décor est franchement asymétrique — c'est encore lui
+qui dimensionne, comme sur un bouton. Chaque marge est la plus petite qui contienne 90 % du décor de
+son côté, arrondie au multiple de 5 supérieur (sortie `marges du décor` du script) ; le bas en
+demande plus que le haut parce que le pourtour des deux boutons de pied de page y concentre les
+croisillons les plus marqués. Les totaux (320 en X, 290 en Y) laissent une vraie bande médiane à la
+taille où la modale est peinte (560 × 380), et cette bande est un fond quasi uni — rien de
+périodique à répéter, d'où `Fill::Stretch` sur les deux axes.
+
+**Translucidité** : la fenêtre du jeu est légèrement translucide, ce que l'aplat `MODAL_BG` portait
+dans son alpha (235). La couleur ayant migré dans la texture, cet alpha est devenu la teinte de
+peinture (`MODAL_BODY_TINT`) — un blanc à alpha réduit atténue sans changer la teinte. Vérifié par
+`modale_options_sur_damier` : le contraste du damier de fond retombe de 128 à **9,7** dans les
+marges, exactement comme avant la bascule.
+
+**Réserve** : les captures étant elles-mêmes translucides, elles contiennent un reste du décor de
+jeu situé derrière — visible en filigrane dans le panneau. Les zones rebâties en sont exemptes ;
+les marges conservées telles quelles le gardent. Peint avec un alpha, ce résidu se cumule donc au
+décor réel. Il est faible (moins de deux niveaux) et le rendu sur damier ne le fait pas ressortir,
+mais c'est à ce détail qu'il faudra penser si un fond de jeu très contrasté trahissait un
+fantôme.
+
+### 9 quater. Panneau de contenu — découpage 2026-09-10
+
+> Source : les mêmes six captures. Sortie : `assets/design-system/modal-section.png` (688 × 375,
+> RGBA), produite par `tools/design-system/build_modal_section.py`. Le pipeline commun aux deux
+> textures est dans `tools/design-system/modal_capture.py`.
+
+**Les six captures ne sont pas cadrées au même pixel** — `chat` est décalée d'une ligne vers le
+haut, `son` et `video` d'une colonne vers la droite (mesuré par corrélation sur le chrome, résidu
+nul après recalage). Le corps ne s'en ressentait pas, son fond étant uniforme ; le panneau, avec son
+liseré de 2 px, oui. Le recalage est donc fait au chargement.
+
+| Élément | Valeur mesurée | Remarque |
+| --- | --- | --- |
+| Panneau | x 16→703, y 124→498, soit 688 × 375 | Bornes exclusives 16,124 → 704,499. |
+| Fond | `#15191C` | Confirme `SECTION_BG` (`#15181C`) au niveau près. |
+| Écart au fond de la fenêtre | **8,3 niveaux** | Le panneau n'est pas une surface à part : c'est le même fond assombri, et le décor de la fenêtre le traverse. |
+| Liseré | 2 px, ≈ 2,5 niveaux plus sombre que son fond | Confirme `#131518` du relevé. Ce n'est pas un trait qu'on voit, c'est ce qui détache le panneau. |
+| Rayon des angles | **6** | **Revoit le 2 du relevé.** Mesuré par l'aire manquante dans les angles (un quart de disque de rayon r retire (1 − π/4)·r² pixels au carré qui le contient) : 8,2 px par angle en moyenne sur les quatre, quand un rayon 2 n'en retirerait que 0,9. Mesurer une aire est robuste au bruit, contrairement à une lecture d'escalier. |
+| Hachures | 4 977 px de tracé, aux quatre angles | Le même cadre que sur le corps, vu à travers le rectangle du panneau. |
+| Grain | σ = 1,35 | Comme le corps, resynthétisé. |
+| Marges 9-slice | 105 · 50 · 175 · 120 | Gauche, haut, droite, bas — `MODAL_SECTION_SLICE`. Plus courtes que celles du corps : le panneau ne voit qu'une partie du cadre. |
+
+**Le contenu couvre presque tout le panneau** — les fenêtres de fond nu s'y comptent en quelques
+pixels, contre des bandes entières pour le corps. L'intérieur est donc entièrement rebâti (couleur
+diffusée depuis ces fenêtres, grain resynthétisé, hachures relevées) et non recollé. Ce qui est
+conservé de la capture : le liseré et les angles, dont l'antialiasing ne se resynthétise pas mieux
+qu'il ne se recopie. Les angles sont détourés au **rectangle arrondi ajusté** puis **décontaminés**
+de la couleur du fond de modale qu'ils avaient mélangée — sans quoi l'asset porte un halo clair dès
+qu'on le pose ailleurs (même règle que `dsimg.py cutout`).
+
+**Correction au passage : les deux aplats étaient peints trop clairs.** `SECTION_BG` et l'ancien
+`MODAL_BG` étaient déclarés par `Color32::from_rgba_premultiplied(…, 230)` avec les valeurs
+**relevées** — or ce constructeur attend des composantes *déjà multipliées par l'alpha*. La couleur
+effectivement demandée était donc `valeur / 0,902`, soit **2,3 à 2,4 niveaux de trop**, ce que le
+rendu sur damier confirmait (panneau à 24,5 au lieu de 22,1). Peindre depuis une texture teintée
+d'un blanc à alpha réduit fait la multiplication dans le bon sens : le panneau rend maintenant
+exactement la couleur de la capture.
+
 ---
 
 ## 10. Incertitudes / à vérifier

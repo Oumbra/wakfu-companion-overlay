@@ -360,7 +360,7 @@ use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
 use super::combat_frame_scroll::EnemyFrameScroll;
-use super::icon_button;
+use super::tooltip;
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
 /// (`paint_side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
@@ -991,8 +991,8 @@ fn format_fr_thousands(n: i64) -> String {
 /// au-dessus, sur aucun alignement.
 ///
 /// **Refonte 2026-09-06 (design system tooltip)** : écart au widget porté à
-/// `icon_button::TOOLTIP_GAP` (défaut egui 4px jugé trop proche de la référence mesurée, voir sa
-/// doc) et contenu peint par `icon_button::paint_tooltip_label` (couleur/fond/ombre du design
+/// `tooltip::TOOLTIP_GAP` (défaut egui 4px jugé trop proche de la référence mesurée, voir sa
+/// doc) et contenu peint par `tooltip::paint_tooltip_label` (couleur/fond/ombre du design
 /// system, voir sa doc) au lieu d'un `ui.label` brut hérité du thème par défaut d'egui.
 ///
 /// **Refonte 2026-09-06 (marge du panneau, 15e retour)** : tous les replis ci-dessus ne changent
@@ -1013,8 +1013,8 @@ pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
             egui::RectAlign::BOTTOM_START,
             egui::RectAlign::BOTTOM_END,
         ])
-        .gap(icon_button::TOOLTIP_GAP);
-    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
+        .gap(tooltip::TOOLTIP_GAP);
+    tooltip.show(|ui| tooltip::paint_tooltip_label(ui, text));
 }
 
 /// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du

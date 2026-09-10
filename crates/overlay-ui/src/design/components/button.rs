@@ -161,8 +161,8 @@ impl ButtonSize {
 /// **Il n'y a délibérément pas d'état « pressé » distinct** (décision utilisateur 2026-09-09) :
 /// dans le jeu, appuyer fait *disparaître* l'apparence survolée — le bouton retombe au repos tant
 /// que le bouton de souris est enfoncé, et repasse en survol au relâchement. C'est exactement la
-/// règle déjà appliquée aux boutons icône (`panels::icon_button::paint_icon_button`, correctif
-/// 2026-09-08), reprise ici pour que les deux familles de boutons se comportent à l'identique.
+/// règle déjà appliquée aux boutons icône (correctif 2026-09-08, alors dans le prédécesseur maison
+/// de `design::icon_button`), reprise ici pour que les deux familles se comportent à l'identique.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonState {
     Idle,
@@ -170,9 +170,10 @@ pub enum ButtonState {
     Disabled,
 }
 
-/// Atténuation appliquée à la texture désactivée. Même principe (et même intensité) que
-/// `panels::icon_button::DISABLED_TINT` : un multiplicateur d'alpha, pour que l'état désactivé se
-/// lise aussi sur une capture statique, en plus de la texture grise et du libellé gris.
+/// Atténuation appliquée à la texture désactivée. Même principe que
+/// [`crate::design::tokens::DISABLED_DIM`], en plus léger : un multiplicateur d'alpha, pour que
+/// l'état désactivé se lise aussi sur une capture statique, en plus de la texture grise et du
+/// libellé gris.
 const DISABLED_TINT: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 190);
 
 /// Construit un bouton du design system. Point d'entrée unique — voir la doc de module.
@@ -388,5 +389,77 @@ impl Widget for Button {
             Some(tooltip) => response.on_hover_text(tooltip),
             None => response,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Le bug que ce test verrouille** (2026-09-09) : le jeu capture le même bouton or à deux
+    /// hauteurs, et son embout décoratif n'y a pas la même largeur — 52 px sur la texture de 52 px
+    /// de haut, 34 px sur celle de 36. Le 9-slice ne peut pas rattraper ça : il peint l'embout à
+    /// l'échelle 1:1, fidèlement. Rendre un bouton de pied de page avec la texture de fenêtre lui
+    /// donnait donc un embout une fois et demie trop large — invisible sur le composant isolé,
+    /// évident dès qu'un bouton voisin porte le bon.
+    #[test]
+    fn la_texture_retenue_est_celle_dont_la_hauteur_native_est_la_plus_proche() {
+        assert_eq!(
+            ButtonVariant::Primary.texture(36.0, false),
+            DsTexture::ButtonPrimaryCompact,
+        );
+        assert_eq!(
+            ButtonVariant::Primary.texture(52.0, false),
+            DsTexture::ButtonPrimary,
+        );
+        // Le basculement se fait à mi-chemin, pas au hasard.
+        assert_eq!(
+            ButtonVariant::Primary.texture(43.0, false),
+            DsTexture::ButtonPrimaryCompact,
+        );
+        assert_eq!(
+            ButtonVariant::Primary.texture(45.0, false),
+            DsTexture::ButtonPrimary,
+        );
+    }
+
+    #[test]
+    fn le_survol_choisit_la_texture_survolee_de_la_meme_hauteur() {
+        assert_eq!(
+            ButtonVariant::Primary.texture(36.0, true),
+            DsTexture::ButtonPrimaryCompactHover,
+        );
+        assert_eq!(
+            ButtonVariant::Primary.texture(52.0, true),
+            DsTexture::ButtonPrimaryHover,
+        );
+    }
+
+    /// Une variante qui n'a qu'une seule texture la prend quelle que soit la hauteur demandée :
+    /// l'étirement reste préférable à un embout inventé.
+    #[test]
+    fn une_variante_a_texture_unique_la_prend_a_toute_hauteur() {
+        for hauteur in [12.0, 36.0, 52.0, 200.0] {
+            assert_eq!(
+                ButtonVariant::Secondary.texture(hauteur, false),
+                DsTexture::ButtonSecondary,
+                "hauteur {hauteur}",
+            );
+            assert_eq!(
+                ButtonVariant::Danger.texture(hauteur, false),
+                DsTexture::ButtonDanger,
+                "hauteur {hauteur}",
+            );
+        }
+    }
+
+    /// Les deux gabarits nommés sont des **mesures**, pas des paliers inventés : ce sont les
+    /// hauteurs natives des textures du jeu. Les changer désaccorde le libellé, dont le corps suit
+    /// la hauteur (`tokens::BUTTON_FONT_SIZE_RATIO`).
+    #[test]
+    fn les_gabarits_nommes_sont_les_hauteurs_natives_du_jeu() {
+        assert_eq!(ButtonSize::Standard.height(), 52.0);
+        assert_eq!(ButtonSize::Compact.height(), 36.0);
+        assert_eq!(ButtonSize::Height(41.5).height(), 41.5);
     }
 }

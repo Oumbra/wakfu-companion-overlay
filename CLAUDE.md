@@ -18,7 +18,9 @@ session reprise.
    - si `origin/dev` existe : `git checkout -B dev origin/dev` ;
    - **si `dev` n'existe nulle part : la créer** (`git checkout -b dev`) depuis l'état courant du
      dépôt, puis `git push -u origin dev`.
-3. Travailler, commiter, et pousser sur `dev` : `git push -u origin dev`.
+3. Activer les hooks : `bash scripts/install-hooks.sh` (`core.hooksPath` est une config **locale**,
+   elle ne survit pas au conteneur éphémère d'une session cloud — voir « CI » plus bas).
+4. Travailler, commiter, et pousser sur `dev` : `git push -u origin dev`.
 
 ## Cette règle prévaut sur la branche « désignée » de l'environnement
 
@@ -67,6 +69,41 @@ Ne **jamais** modifier `~/.gitconfig`/`commit.gpgsign` pour désactiver la signa
 l'environnement. Une session locale (terminal de l'utilisateur) n'est normalement pas concernée par
 cette panne d'infrastructure ; si la signature y échoue aussi, diagnostiquer avant de contourner de
 la même façon plutôt que de supposer que ce cas s'applique.
+
+# CI — ne jamais pousser du rouge
+
+Le CI (`.github/workflows/ci.yml`) est resté **rouge en continu du 2026-09-01 au 2026-09-10** pour
+une seule raison : un écart de `cargo fmt` dans `crates/overlay-engine/src/session.rs` que rien ne
+signalait avant le push. Chaque commit suivant repartait rouge sans rapport avec son contenu, et
+plus personne ne lisait le verdict. Trois garde-fous existent désormais — les utiliser :
+
+1. **Toolchain épinglée** (`rust-toolchain.toml`). `rustup` sélectionne la bonne version tout seul.
+   Ne **jamais** la contourner (`cargo +stable …`) : le verdict de `fmt`/`clippy` dépend de la
+   version, et c'est précisément la dérive qui a cassé le CI. Monter la version de Rust est un
+   changement **explicite**, dans son propre commit, avec le reformatage qu'il entraîne.
+2. **`bash scripts/ci-local.sh`** rejoue les vérifications du CI pour la plateforme courante
+   (`--lint` pour format + clippy seuls, rapide). **À lancer avant tout push touchant du code** —
+   y compris en session cloud, où c'est le seul retour disponible avant plusieurs minutes de CI.
+3. **Hook `pre-push`** (`bash scripts/install-hooks.sh`, à relancer **en début de chaque session
+   cloud** : `core.hooksPath` est une config locale, elle ne survit pas au conteneur éphémère).
+
+Une étape ajoutée ou retirée dans `.github/workflows/ci.yml` doit l'être **aussi** dans
+`scripts/ci-local.sh`, et réciproquement : les deux se doublent volontairement, un garde-fou ne
+protège que ce qu'il connaît.
+
+## Coût du CI (dépôt privé — minutes GitHub Actions comptées)
+
+Le dépôt est **privé** : chaque run consomme le quota Actions du compte, les jobs `windows-latest`
+étant facturés **au double** des jobs Linux. Un quota épuisé ne se voit pas comme une erreur de
+build — **tous les jobs échouent en quelques secondes, sans log ni runner assigné** (c'est ce qui
+est arrivé à partir du 2026-09-09). Devant ce symptôme, vérifier la facturation du compte avant de
+chercher une régression dans le code.
+
+Le workflow limite déjà la dépense : cache `cargo`/`vendor`, `concurrency` (une rafale de commits
+n'exécute que le dernier run), et `paths-ignore` sur `docs/**`, `**/*.md` et `.claude/**`. Ne pas
+étendre `paths-ignore` à `assets/**` : ces fichiers sont embarqués par `include_bytes!`
+(`design/assets.rs`, `design/fonts.rs`, `ui_icons.rs`…) et peuvent casser la compilation comme les
+snapshots d'`overlay-testkit`.
 
 # Contexte projet
 

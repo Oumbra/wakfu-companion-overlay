@@ -135,16 +135,25 @@
 //! contrôle avant ce changement (voir sa doc), seul `show` ne peignait rien dans cet espace.
 //!
 //! **Règle supplémentaire** (demande utilisateur explicite) : le bouton "−" est visuellement
-//! DÉSACTIVÉ (`icon_button::paint_icon_button`, paramètre `enabled`) tant qu'aucune entrée n'est
-//! suivie — rien à supprimer dans ce cas. "+"/"Options"/"Détails" restent toujours activés (aucune
-//! des trois actions ne dépend du contenu de la watchlist).
+//! DÉSACTIVÉ (`design::icon_button`, paramètre `enabled`) tant qu'aucune entrée n'est suivie — rien
+//! à supprimer dans ce cas. "+"/"Options"/"Détails" restent toujours activés (aucune des trois
+//! actions ne dépend du contenu de la watchlist).
+//!
+//! **Migration 2026-09-10 (décision utilisateur, captures à l'appui)** : les quatre boutons du
+//! carré de contrôle passent de `panels::icon_button::paint_icon_button` — qui prenait quatre
+//! `egui::TextureHandle` en paramètres, à charge de l'appelant de les câbler — au composant
+//! `design::icon_button`, qui résout ses textures par le manifeste. Ce panneau ne connaît plus
+//! aucune texture de bouton, seulement quatre `DsTexture`. Détail des écarts de rendu et de ce qui
+//! reste à la charge du panneau (le placement des infobulles) dans la doc de `control_button` ;
+//! avant/après dans `overlay-testkit/tests/icon_button_migration.rs`.
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
+use crate::design::{self, DsTexture, IconContext};
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-use super::icon_button;
+use super::tooltip;
 
 /// Durée d'affichage du toast d'alerte avant fermeture automatique (§9 du plan : « toast ≤ 5 s,
 /// non bloquant ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
@@ -295,9 +304,25 @@ const TILE_ROUNDING: f32 = 10.0;
 /// tuiles ENNEMI (voir `entry_tile`), les tuiles OBJET utilisant désormais `ITEM_ICON_SIZE`.
 const ICON_SIZE: f32 = 30.0;
 
-/// Taille (largeur ET hauteur) du socle des 4 boutons du carré de contrôle (`UiIcons::
-/// button_background`, même socle que le design system partagé, voir doc de module refonte
-/// 2026-09-06) — mise à l'échelle du socle NATIF (36×36), pas une taille fixe indépendante. Ramenée
+/// Fond translucide peint sous le carré de contrôle, AVANT ses boutons.
+///
+/// La planche de référence fournie par l'utilisateur (2026-09-06) montre un léger fond noir
+/// semi-opaque derrière la bande de boutons de premier plan du jeu, visible dans le petit écart
+/// entre deux boutons adjacents et sur les bords. Même teinte que `panels::combat::
+/// LEADER_PANEL_FILL`, un bandeau translucide déjà validé ailleurs dans cette interface — pas une
+/// nouvelle valeur d'opacité inventée pour l'occasion.
+///
+/// Vivait dans `panels::icon_button` jusqu'au 2026-09-10, du temps où `combat::bottom_toolbar` en
+/// avait besoin elle aussi ; ce carré en est le seul utilisateur depuis que les quatre boutons y
+/// ont été regroupés.
+const PANEL_BACKDROP_FILL: egui::Color32 =
+    egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
+/// Rayon d'angle du fond translucide — voir [`PANEL_BACKDROP_FILL`].
+const PANEL_BACKDROP_ROUNDING: f32 = 6.0;
+
+/// Taille (largeur ET hauteur) du socle des 4 boutons du carré de contrôle
+/// (`DsTexture::ButtonIconFirstPlan`, voir doc de module, migration 2026-09-10) — mise à l'échelle
+/// du socle NATIF (`design::tokens::ICON_BUTTON_SIZE`, 36×36), pas une taille fixe indépendante. Ramenée
 /// de 34×34 (taille déjà validée par l'utilisateur avant le passage au design system commun) à
 /// 24×24 — à l'essai, retour utilisateur explicite 2026-09-06 (« essaie vingt-quatre sur
 /// vingt-quatre pour voir le rendu que ça fait »).
@@ -613,7 +638,7 @@ pub fn show(
                 // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                let clicks = control_button_row(ui, icons, entries.is_empty());
+                let clicks = control_button_row(ui, entries.is_empty());
                 open_options = clicks.options;
                 open_web_app = clicks.details;
                 ui.add_space(TILE_GAP);
@@ -938,7 +963,7 @@ fn toast_card(
 /// egui retomber sur son défaut `BOTTOM_START` (« sous la souris », déjà jugé désagréable ailleurs).
 ///
 /// **Refonte 2026-09-06 (design system tooltip)** : écart au widget porté à
-/// `icon_button::TOOLTIP_GAP` et contenu peint par `icon_button::paint_tooltip_label` — même
+/// `tooltip::TOOLTIP_GAP` et contenu peint par `tooltip::paint_tooltip_label` — même
 /// changement, mêmes raisons que `combat::show_tooltip_above` (voir sa doc).
 fn show_tooltip_left(response: &egui::Response, text: &str) {
     let mut tooltip = egui::Tooltip::for_enabled(response);
@@ -952,8 +977,8 @@ fn show_tooltip_left(response: &egui::Response, text: &str) {
             egui::RectAlign::RIGHT_START,
             egui::RectAlign::RIGHT_END,
         ])
-        .gap(icon_button::TOOLTIP_GAP);
-    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
+        .gap(tooltip::TOOLTIP_GAP);
+    tooltip.show(|ui| tooltip::paint_tooltip_label(ui, text));
 }
 
 /// Symétrique de `show_tooltip_left` — affiche `text` en infobulle à DROITE de `response`
@@ -978,8 +1003,8 @@ fn show_tooltip_right(response: &egui::Response, text: &str) {
             egui::RectAlign::LEFT_START,
             egui::RectAlign::LEFT_END,
         ])
-        .gap(icon_button::TOOLTIP_GAP);
-    tooltip.show(|ui| icon_button::paint_tooltip_label(ui, text));
+        .gap(tooltip::TOOLTIP_GAP);
+    tooltip.show(|ui| tooltip::paint_tooltip_label(ui, text));
 }
 
 /// Côté d'infobulle d'un bouton du carré de contrôle — voir `control_button` et doc de module
@@ -997,8 +1022,8 @@ enum TooltipSide {
 /// Carré 2×2 de boutons du bandeau, sur un fond translucide (voir doc de module, refonte
 /// 2026-09-08) : "+"/"−" en haut (INERTES, `Sense::hover()`), "Détails"/"Options" en dessous
 /// (CLIQUABLES, `Sense::click()` — déplacés depuis `combat::bottom_toolbar`), tous peints par
-/// `control_button` — même fond que `bottom_toolbar` utilisait déjà (`icon_button::
-/// PANEL_BACKDROP_FILL`), marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET entre
+/// `control_button` — même fond que `bottom_toolbar` utilisait déjà ([`PANEL_BACKDROP_FILL`]),
+/// marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET entre
 /// les deux colonnes/lignes.
 ///
 /// Disposition (donnée explicitement par l'utilisateur, voir doc de module) :
@@ -1012,33 +1037,23 @@ enum TooltipSide {
 /// DROITE pour "−"/"Options" — jamais l'inverse du rôle inerte/cliquable du bouton, qui ne pilotait
 /// le côté qu'AVANT cette refonte.
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
-fn control_button_row(
-    ui: &mut egui::Ui,
-    icons: &UiIcons,
-    watchlist_empty: bool,
-) -> ControlRowClicks {
+fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowClicks {
     let row_rect = ui
         .allocate_exact_size(
             egui::vec2(control_row_width(), control_row_height()),
             egui::Sense::hover(),
         )
         .0;
-    ui.painter().rect_filled(
-        row_rect,
-        icon_button::PANEL_BACKDROP_ROUNDING,
-        icon_button::PANEL_BACKDROP_FILL,
-    );
+    ui.painter()
+        .rect_filled(row_rect, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
 
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
     control_button(
         ui,
         add_top_left,
-        icons,
-        icons.icon_plus(),
-        icons.icon_plus_hover(),
+        DsTexture::IconPlus,
         "watchlist-add",
         "Ajouter (Ctrl+Shift+A)",
-        egui::Sense::hover(),
         true,
         TooltipSide::Left,
     );
@@ -1049,12 +1064,9 @@ fn control_button_row(
     control_button(
         ui,
         remove_top_left,
-        icons,
-        icons.icon_minus(),
-        icons.icon_minus_hover(),
+        DsTexture::IconMinus,
         "watchlist-remove",
         "Supprimer (Ctrl+Shift+S)",
-        egui::Sense::hover(),
         !watchlist_empty,
         TooltipSide::Right,
     );
@@ -1065,12 +1077,9 @@ fn control_button_row(
     let details_response = control_button(
         ui,
         details_top_left,
-        icons,
-        icons.external_link_icon(),
-        icons.external_link_icon_hover(),
+        DsTexture::IconExternalLink,
         "watchlist-details",
         "Détails (Ctrl+Shift+D)",
-        egui::Sense::click(),
         true,
         TooltipSide::Left,
     );
@@ -1093,12 +1102,9 @@ fn control_button_row(
     let options_response = control_button(
         ui,
         options_top_left,
-        icons,
-        icons.options_icon(),
-        icons.options_icon_hover(),
+        DsTexture::IconOption,
         "watchlist-options",
         "Options (Ctrl+Shift+O)",
-        egui::Sense::click(),
         true,
         TooltipSide::Right,
     );
@@ -1118,48 +1124,59 @@ struct ControlRowClicks {
     details: bool,
 }
 
-/// Bouton du carré de contrôle — socle `button_background`/`button_background_hover` (même socle
-/// que Combat, voir doc de module) et glyphe `icon`/`icon_hover` centré dessus, composés par
-/// `icon_button::paint_icon_button` (voir sa doc). Un seul point d'entrée pour les 4 boutons depuis
-/// la refonte 2026-09-08 (avant : deux fonctions séparées, `control_button`/`control_button_click`,
-/// qui codaient chacune EN DUR à la fois le `Sense` ET le côté de tooltip — devenu faux dès que
-/// "−"/"Options", de `Sense` différent, ont eu besoin du MÊME côté de tooltip, voir `TooltipSide`) :
-/// `sense` (`Sense::hover()` pour "+"/"−", restent INERTES — voir doc de module ; `Sense::click()`
-/// pour "Détails"/"Options", dont l'action reste câblée) et `side` (voir `TooltipSide`) varient
-/// maintenant INDÉPENDAMMENT l'un de l'autre.
+/// Bouton du carré de contrôle — un [`design::icon_button`] posé dans un rect que ce panneau
+/// calcule, plus le placement de son infobulle.
 ///
-/// Curseur "main" affiché au survol même pour "+"/"−" malgré leur inertie (retour utilisateur
-/// explicite 2026-09-06) : affordance visuelle demandée en plus de l'infobulle, en assumant que le
-/// risque d'ambiguïté déjà discuté (voir doc de module) reste acceptable ici tant que le câblage
-/// réel n'existe pas — déjà géré par `icon_button::paint_icon_button` (`on_hover_cursor`), pas
-/// besoin de le refaire ici. `enabled: false` (refonte 2026-09-08, « désactiver "−" sans entrée
-/// suivie ») bascule ce curseur sur le curseur par défaut à la place (voir `icon_button::
-/// paint_icon_button`). Renvoie la `Response` : le clic (pour "Détails"/"Options") est géré par
-/// l'appelant (`control_button_row`), qui seul connaît l'action associée à chaque bouton.
-#[allow(clippy::too_many_arguments)]
+/// **Migration 2026-09-10 (décision utilisateur).** Ces quatre boutons passaient par
+/// `panels::icon_button::paint_icon_button`, qui prenait quatre `egui::TextureHandle` en
+/// paramètres : chaque appelant devait connaître et câbler ses textures. Ils nomment maintenant une
+/// intention (`DsTexture::IconPlus`), et le manifeste résout les fichiers. Ce qui change à l'écran,
+/// captures à l'appui (`overlay-testkit/tests/icon_button_migration.rs`) :
+///
+/// - les glyphes sont ceux du design system, calés sur l'étalon mesuré dans le jeu
+///   (`tokens::ICON_BUTTON_CONTENT`) — le « − » redevient le trait fin du jeu au lieu d'une barre
+///   pleine, les trois autres grossissent d'un dixième ;
+/// - l'état désactivé peint `button-icon-disabled.png`, le socle grisé du jeu, au lieu d'assombrir
+///   le socle de repos faute d'asset dédié à l'époque ;
+/// - les socles de repos et de survol ne bougent pas d'un pixel : les fichiers d'`assets/ui/`
+///   étaient déjà, octet pour octet, ceux du design system.
+///
+/// **Ce que le composant ne prend pas en charge, et pourquoi ça reste ici.** Le placement de
+/// l'infobulle (`side`, voir [`TooltipSide`]) est une décision de mise en page : « + » et
+/// « Détails » l'ouvrent à gauche, « − » et « Options » à droite, pour qu'elle ne recouvre jamais
+/// l'autre colonne. `design::icon_button` expose bien un `.tooltip()`, mais il retombe sur le
+/// placement par défaut d'egui — l'utiliser casserait cette règle, que
+/// `panneau_suivi_tooltips_par_colonne_gauche_ou_droite` vérifie. Le composant peint et rend une
+/// `Response` ; le panneau décide où poser l'infobulle.
+///
+/// Le paramètre `sense` disparaît en revanche : le composant sait qu'un bouton actif se clique et
+/// qu'un bouton désactivé ne réagit qu'au survol. « + » et « − » restent INERTES (voir doc de
+/// module) — c'est leur appelant qui ignore leur clic, pas leur `Sense` qui l'empêche. Cela ne
+/// change rien à l'apparence : depuis le correctif du 2026-09-08, la règle « un appui retire le
+/// survol » est écrite `response.hovered() && !pointer.any_down()`, identique pour les deux
+/// `Sense`.
+///
+/// Curseur "main" au survol même pour "+"/"−" malgré leur inertie (retour utilisateur explicite
+/// 2026-09-06) : porté par le composant, comme le curseur par défaut d'un bouton désactivé.
+/// Renvoie la `Response` : le clic (pour "Détails"/"Options") est géré par l'appelant
+/// (`control_button_row`), qui seul connaît l'action associée à chaque bouton.
 fn control_button(
     ui: &mut egui::Ui,
     top_left: egui::Pos2,
-    icons: &UiIcons,
-    icon: &egui::TextureHandle,
-    icon_hover: &egui::TextureHandle,
-    id_source: &str,
+    glyph: DsTexture,
+    log_name: &str,
     tooltip: &str,
-    sense: egui::Sense,
     enabled: bool,
     side: TooltipSide,
 ) -> egui::Response {
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
-    let response = icon_button::paint_icon_button(
-        ui,
+    let response = ui.put(
         rect,
-        id_source,
-        sense,
-        enabled,
-        icons.button_background(),
-        icons.button_background_hover(),
-        icon,
-        icon_hover,
+        design::icon_button(glyph)
+            .context(IconContext::FirstPlan)
+            .size(CONTROL_BUTTON_SIZE)
+            .enabled(enabled)
+            .log_name(log_name),
     );
     match side {
         TooltipSide::Left => show_tooltip_left(&response, tooltip),

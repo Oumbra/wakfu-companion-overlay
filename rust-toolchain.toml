@@ -1,0 +1,21 @@
+# Toolchain Rust ÉPINGLÉE — lue automatiquement par rustup (donc par `cargo` et `rustc`) dès qu'une
+# commande est lancée depuis ce dépôt, en local comme en CI.
+#
+# Pourquoi épingler plutôt que suivre `stable` : `cargo fmt --check` et `clippy -D warnings` sont
+# des gates du CI (.github/workflows/ci.yml) dont le VERDICT DÉPEND DE LA VERSION de l'outil.
+# rustfmt réécrit certains appels différemment d'une version à l'autre, et chaque édition de clippy
+# ajoute des lints ; tant que le CI suivait `stable` (`dtolnay/rust-toolchain@stable`), la sortie
+# d'une nouvelle version de Rust suffisait à faire rougir le CI sur du code que personne n'avait
+# touché — impossible à reproduire en local si le poste de dev n'avait pas exactement la même
+# version. C'est ce qui a rendu le job `fmt` rouge en continu (session.rs, corrigé le 2026-09-10).
+#
+# Conséquence voulue : la mise à jour de Rust devient un CHANGEMENT EXPLICITE, dans son propre
+# commit — relever `channel` ci-dessous, relancer `cargo run -p xtask -- ci` (ou
+# `cargo run --manifest-path xtask/Cargo.toml -- ci`), committer le reformatage éventuel AVEC le
+# changement de version. Plus jamais une régression surprise sur un push sans rapport.
+#
+# Plancher : egui 0.36.1 et ses satellites (ecolor, emath, epaint, egui-wgpu, egui-winit,
+# egui_kittest) déclarent `rust-version = 1.95` — ne pas descendre sous cette valeur.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
