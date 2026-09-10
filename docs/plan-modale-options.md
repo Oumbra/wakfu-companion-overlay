@@ -8,6 +8,39 @@ réutilisable dans `overlay_ui::design`, pas un morceau de modale. La modale est
 ces composants, elle n'en est pas la destination : chacun sera repris par les futurs onglets
 (Alertes, Personnages), par le panneau Combat et par le Suivi.
 
+## Où en est ce plan (2026-09-10)
+
+**Les neuf étapes non optionnelles sont faites.** Seule l'étape 10 (décorations de fenêtre) reste,
+et elle est explicitement « à ne faire que sur demande ».
+
+| # | Étape | État | Ce qui l'a close |
+| --- | --- | --- | --- |
+| 1 | Clavier (Échap / Entrée) | ✅ | `fix: Échap annule la modale, Entrée valide` |
+| 2 | `design::info_text` | ✅ | `feat: composant texte d'information` |
+| 3 | `design::tabs` | ✅ | `feat: composant barre d'onglets` |
+| 4 | Rythme vertical | ✅ | `fix: rythme vertical du panneau sur ses cotes` |
+| 5 | `design::checkbox` | ✅ | `feat: composant case à cocher` |
+| 6 | `design::select` | ✅ | `feat: composant liste déroulante` |
+| 7 | `design::scroll_area` | ✅ | `feat: composant barre de défilement` |
+| 8 | `design::icon_button` | ✅ | `feat: composant bouton icône` |
+| 9 | Finitions de chrome | ✅ | `fix: finitions de chrome de la modale` |
+| 10 | Décorations | — | optionnel, sur demande |
+
+**Ce qui reste ouvert, et qui n'était pas du périmètre :**
+
+- **La migration des quatre boutons icône** de `panels::combat` et `panels::watchlist` vers
+  `design::icon_button`. Leur socle est déjà celui du design system — `assets/ui/button-background.png`
+  est *octet pour octet* `assets/design-system/button-icon-first-plan.png` — mais leurs glyphes sont
+  normalisés autrement (`ui_icons::normalize_icon_content`). Trancher demande une capture de
+  référence qui n'existe pas, et changerait deux panneaux hors de cette feuille de route.
+- **Le contenu de l'onglet « Paramètres »**, qui n'apparaît dans aucune ligne du tableau ci-dessous
+  et c'est volontaire : il s'alimentera maintenant que les composants existent.
+- **Le bouton de réinitialisation** (étape 8), qui attend qu'un réglage réinitialisable existe.
+- **L'ombre portée de 2 px de la poignée de défilement** (étape 7), qu'egui n'expose pas.
+- Les onglets **Alertes** et **Personnages**, présents et désactivés, prêts à être câblés.
+
+---
+
 ## Comment lire ce document
 
 - Les étapes s'enchaînent sans coupure, mais **chacune peut être rouverte** : un écart au design
