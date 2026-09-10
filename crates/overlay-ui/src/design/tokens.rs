@@ -379,3 +379,21 @@ pub const ICON_TINT: Color32 = Color32::from_rgb(0xC5, 0xCB, 0xCC);
 
 /// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
 pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
+/// Plus grande dimension d'encre d'une icône posée sur un socle de [`ICON_BUTTON_SIZE`] — **18px,
+/// mesuré sur `menu-button-icon-first-plan.png`** (2026-09-10), pas estimé.
+///
+/// Le jeu cale les icônes de cette famille sur une grille commune : bbox opaque de 16 à 20px sur
+/// les huit icônes de cette barre, **médiane 18**, toutes centrées au pixel près sur l'axe du
+/// socle (seuil de luminance 140, résultat invariant de 120 à 180). La capture est bien à l'échelle
+/// 1 : `button-icon-first-plan.png` s'y recale à 36 × 36 avec un écart moyen de 2,3/255 sur les
+/// pixels de socle, contre 4,5 et plus dès 35 ou 37.
+///
+/// Sans cet étalon, une icône serait peinte à sa taille de fichier — 13, 14 ou 16px selon le glyphe
+/// détouré, donc trois hauteurs d'encre différentes dans une même barre, toutes en dessous du jeu.
+/// `ui_icons` normalisait déjà à 16, et à 18 pour le seul rouage après un retour utilisateur
+/// « encore trop petite » (2026-09-06) : la mesure dit que ce 18-là valait pour les quatre.
+///
+/// Appliqué par le manifeste (`DsTexture::icon_content_size`), jamais par l'appelant : c'est une
+/// propriété de l'asset.
+pub const ICON_BUTTON_CONTENT: f32 = 18.0;

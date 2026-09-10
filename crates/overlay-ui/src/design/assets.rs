@@ -17,6 +17,7 @@
 //! **hachures qui les dimensionnent**, pas les coins : voir `button_slice`.
 
 use crate::design::nine_slice::{Fill, Insets, NineSlice};
+use crate::design::tokens;
 
 /// Découpage d'une texture de bouton texte : `cap` pixels figés à gauche et à droite, 6px en haut
 /// et en bas, tout le reste étiré.
@@ -280,6 +281,28 @@ impl DsTexture {
             .iter()
             .position(|t| *t == self)
             .expect("toute variante de DsTexture est listée dans ALL")
+    }
+
+    /// Plus grande dimension d'encre à laquelle cette texture est peinte quand elle sert d'icône
+    /// sur un socle de [`tokens::ICON_BUTTON_SIZE`] — `None` pour tout ce qui n'est pas une icône
+    /// de bouton, ou dont la taille est déjà celle du composant qui la porte.
+    ///
+    /// Les glyphes de `assets/design-system/icons/` sont détourés au pixel près : leur fichier fait
+    /// exactement la taille de leur encre, qui varie d'un glyphe à l'autre (13 pour le lien
+    /// externe, 16 pour le rouage). Peints tels quels, ils donneraient trois hauteurs d'encre
+    /// différentes dans une même barre — le jeu, lui, les cale tous sur une grille commune. Cette
+    /// grille est [`tokens::ICON_BUTTON_CONTENT`], mesurée sur le jeu ; sa doc porte la mesure.
+    ///
+    /// C'est le manifeste qui la porte, et pas l'appelant : la taille d'encre d'un glyphe est une
+    /// propriété de l'asset, au même titre que son découpage 9-slice.
+    pub fn icon_content_size(self) -> Option<f32> {
+        match self {
+            DsTexture::IconOption
+            | DsTexture::IconExternalLink
+            | DsTexture::IconPlus
+            | DsTexture::IconMinus => Some(tokens::ICON_BUTTON_CONTENT),
+            _ => None,
+        }
     }
 
     pub fn spec(self) -> DsTextureSpec {
