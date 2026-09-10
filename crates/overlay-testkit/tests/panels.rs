@@ -850,6 +850,12 @@ fn modale_options_echap_annule_et_entree_valide() {
     let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
 
     let mut harness = Harness::new_ui(|ui| {
+        // Même style que les binaires et que les autres harnais de ce fichier : c'est lui qui
+        // installe les polices du design system. Ce test ne compare pas d'image, l'oubli n'y
+        // avait donc aucun symptôme visible — il peignait la modale entière dans la
+        // proportionnelle par défaut d'egui. Repéré le 2026-09-10 par l'assertion que
+        // `design::text::famille` porte désormais.
+        overlay_ui::style::apply(ui.ctx());
         let action = panels::options_modal::show(ui, &mut options_state);
         if action != OptionsModalAction::None {
             actions.borrow_mut().push(action);
