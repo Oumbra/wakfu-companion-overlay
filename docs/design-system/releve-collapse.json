@@ -1,0 +1,168 @@
+{
+  "title": "En-tête repliable",
+  "subtitle": "La colonne « Types » de l'Hôtel de Vente : une liste de familles repliables, chacune pouvant contenir des sous-familles. Relevé des deux états, replié et déplié, pour porter design::collapsible.",
+  "source": "assets/design-system/collapse-closed.png et collapse-width-5th-opened.png",
+  "canvas": [350, 460],
+  "scale": 1.8,
+  "nodes": [
+    {
+      "id": "colonne",
+      "label": "Colonne « Types »",
+      "box": [0, 0, 350, 460],
+      "role": "surface",
+      "fill": "#16181c",
+      "padding": [19, 22, 32, 0],
+      "notes": "Réserve permanente de 32 px à droite pour la barre de défilement, occupée ou non — même principe que le panneau de la fenêtre Options.",
+      "children": [
+        {
+          "id": "titre",
+          "label": "Titre « Types »",
+          "box": [19, 22, 90, 43],
+          "role": "text",
+          "notes": "Serif grasse, 21 px d'encre — le titre de section du design system, déjà porté par design::heading."
+        },
+        {
+          "id": "filet-titre",
+          "label": "Filet sous le titre",
+          "box": [19, 66, 330, 67],
+          "role": "surface",
+          "fill": "#2e3033",
+          "notes": "1 px. Même filet que celui qui sépare deux en-têtes."
+        },
+        {
+          "id": "entete-1",
+          "label": "En-tête replié « Ressources »",
+          "box": [19, 90, 330, 136],
+          "role": "group",
+          "notes": "Hauteur de 46 px, filet à filet. Aucun fond propre, aucune bordure : la ligne n'existe visuellement que par son filet inférieur et son contenu.",
+          "children": [
+            {
+              "id": "icone-famille",
+              "label": "Icône de famille",
+              "box": [19, 105, 35, 121],
+              "role": "icon",
+              "notes": "16 x 16, centrée sur l'axe vertical de la ligne. Une icône par famille, hors design system (elles viennent du catalogue d'objets)."
+            },
+            {
+              "id": "case",
+              "label": "Case à cocher",
+              "box": [47, 105, 63, 121],
+              "role": "control",
+              "notes": "16 x 16. Sélectionne la famille entière comme filtre. C'est design::checkbox, dont le gabarit du design system fait 20 px — écart à trancher."
+            },
+            {
+              "id": "libelle",
+              "label": "Libellé de famille",
+              "box": [71, 108, 169, 121],
+              "role": "text",
+              "notes": "Serif grasse, 13 px d'encre, blanc cassé. Plus petit que le titre de colonne (21 px) et plus gras qu'un libellé d'enfant."
+            },
+            {
+              "id": "chevron",
+              "label": "Chevron",
+              "box": [307, 111, 319, 118],
+              "role": "icon",
+              "notes": "12 x 8, aligné à droite sur le bord intérieur de la colonne. Pointe vers le bas replié, vers le haut déplié. C'est DsTexture::IconChevronDown, déjà au manifeste."
+            }
+          ]
+        },
+        {
+          "id": "filet-1",
+          "label": "Filet séparateur",
+          "box": [19, 136, 330, 137],
+          "role": "surface",
+          "fill": "#2e3033",
+          "notes": "1 px, #2e3033 sur fond #16181c. Il ferme chaque ligne, y compris la dernière."
+        },
+        {
+          "id": "entete-2",
+          "label": "En-tête déplié « Créatures »",
+          "box": [19, 137, 330, 183],
+          "role": "group",
+          "notes": "Identique au replié à une chose près : le chevron pointe vers le haut. L'en-tête ne change ni de fond, ni de graisse, ni de couleur.",
+          "children": []
+        },
+        {
+          "id": "enfants",
+          "label": "Sous-familles (état déplié)",
+          "box": [41, 183, 330, 356],
+          "role": "group",
+          "notes": "Quatre lignes au pas de 43 a 45 px, indentées de 22 px par rapport aux en-têtes. AUCUN filet entre elles : le filet ne réapparaît qu'après la dernière, ce qui fait lire le groupe comme un bloc.",
+          "children": [
+            {
+              "id": "enfant-icone",
+              "label": "Icône",
+              "box": [41, 275, 57, 291],
+              "role": "icon",
+              "notes": "Même gabarit de 16 px que l'en-tête, décalée de l'indentation."
+            },
+            {
+              "id": "enfant-case",
+              "label": "Case à cocher",
+              "box": [69, 275, 85, 291],
+              "role": "control"
+            },
+            {
+              "id": "enfant-libelle",
+              "label": "Libellé de sous-famille",
+              "box": [93, 277, 186, 291],
+              "role": "text",
+              "notes": "Linéale, pas serif, et sans graisse appuyée : c'est ce qui distingue un enfant de son en-tête, bien plus que l'indentation."
+            }
+          ]
+        },
+        {
+          "id": "filet-groupe",
+          "label": "Filet de fermeture du groupe",
+          "box": [19, 356, 330, 357],
+          "role": "surface",
+          "fill": "#2e3033",
+          "notes": "Le seul filet du groupe déplié — il le ferme, il ne le découpe pas."
+        }
+      ]
+    }
+  ],
+  "tokens": {
+    "color": {
+      "fond": "#16181c",
+      "filet": "#2e3033",
+      "libelle-entete": "#e8e4d8",
+      "libelle-enfant": "#c9c6bd"
+    },
+    "space": [8, 12, 16, 19, 22, 32, 46],
+    "radius": {
+      "ligne": "0"
+    },
+    "type": [
+      {
+        "name": "titre de colonne",
+        "size": "21 px d'encre",
+        "weight": "serif grasse",
+        "color": "#e8e4d8",
+        "usage": "« Types » — déjà couvert par design::heading"
+      },
+      {
+        "name": "libellé d'en-tête",
+        "size": "13 px d'encre",
+        "weight": "serif grasse",
+        "color": "#e8e4d8",
+        "usage": "nom de famille, sur la ligne repliable"
+      },
+      {
+        "name": "libellé d'enfant",
+        "size": "13 px d'encre",
+        "weight": "linéale, graisse normale",
+        "color": "#c9c6bd",
+        "usage": "nom de sous-famille, indenté"
+      }
+    ]
+  },
+  "notes": [
+    "Le pas de 46 px est régulier sur les huit en-têtes : filets mesurés à y = 90, 136, 182, 228, 274, 320, 366 et 412. Ce n'est pas une moyenne, c'est une constante.",
+    "Une ligne n'a NI fond, NI bordure, NI rayon. Son seul décor est le filet d'un pixel qui la ferme en bas. C'est le même parti que les sections de la fenêtre Options : dans ce jeu, un regroupement se signale par l'espacement et un filet, jamais par un cadre.",
+    "L'état déplié ne change QUE le sens du chevron. Ni la graisse, ni la couleur, ni le fond de l'en-tête ne bougent — un portage qui les changerait inventerait un état que le jeu n'a pas.",
+    "Les enfants ne sont pas séparés par des filets. Le filet ne revient qu'après le dernier. C'est ce qui fait lire les sous-familles comme un bloc appartenant à leur en-tête, et non comme des lignes de même niveau.",
+    "La case à cocher fait 16 px ici, contre 20 px pour le gabarit de design::checkbox (mesuré sur la fenêtre Options). Deux relevés, deux tailles : soit le jeu a deux gabarits de case, soit les deux captures sont à deux échelles d'interface différentes — le même piège que celui rencontré sur le pas numérique. À trancher avant d'écrire le composant.",
+    "L'icône de famille ne vient PAS du design system : c'est une icône de catalogue d'objets, fournie par la donnée. Le composant doit donc l'accepter en paramètre plutôt que la résoudre lui-même — seule exception documentée à la règle « aucune texture en paramètre »."
+  ]
+}

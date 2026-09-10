@@ -893,7 +893,7 @@ Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options e
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
 | **`input`** — variantes `Number`, `Search`, état d'erreur | *Extension du composant existant*, pas un second composant (skill `ui-component`, étape 1). | `input-number.png`, `input-search.png`, `empty-input-search.png`, `large-input-*.png` |
-| **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. | `collapse-closed.png`, `collapse-width-5th-opened.png`, `collapse-block.png`, `collapse-block-opened.png` ; `collapse_header_height` 38–45 relevé. §5.8. |
+| **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. **Relevé fait** : [`releve-collapse.json`](design-system/releve-collapse.json), pas de 46 px, filet d'un pixel, deux niveaux de libellé. Deux questions ouvertes avant d'écrire (taille de case, spec fonctionnelle). | 4 assets ; §5.8. |
 | **`design::field`** | Rien aujourd'hui — le *libellé à gauche, contrôle à droite* du jeu (« Prix unitaire », « Quantité », « Durée de publication »). **À ne pas confondre** avec la ligne « contrôle élastique + bouton » de la modale Options, qui n'a pas de libellé et n'a qu'un seul usage. | Captures `interface-hdv-vente-form.png` ; **relevé `ui-blueprint` d'abord**, aucune cote n'existe. |
 | **`design::slider`** | Rien aujourd'hui. | Aucun asset découpé — passer par `design-asset` d'abord ; captures dans `interface-options-son.png` et `interface-options-interface.png`. |
 | **`tabs`** — variante icône | Onglets à pictogrammes. | `icon-tabs.png` ; dépend du registre `DsIcon` (vague 1). §5.7. |
