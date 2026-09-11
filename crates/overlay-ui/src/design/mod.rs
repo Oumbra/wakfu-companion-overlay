@@ -57,7 +57,10 @@ pub use components::panel::{panel, Panel, PanelZones};
 pub use components::scroll_area::{scroll_area, ScrollArea};
 pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::separator::{separator, Separator};
-pub use components::slider::{slider, track_travel as slider_track_travel, Slider, SliderState};
+pub use components::slider::{
+    slider, snap_to_step as slider_snap_to_step, track_travel as slider_track_travel, Slider,
+    SliderState,
+};
 pub use components::stepper::{stepper, Stepper};
 pub use components::tabs::{tabs, TabState, Tabs};
 pub use components::window::{window, FooterClick, Window, WindowChrome};

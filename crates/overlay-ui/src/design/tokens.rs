@@ -858,3 +858,29 @@ pub const SLIDER_TRACK_WIDTH_REF: f32 = 200.0;
 /// pas à une échelle d'interface qui dirait « 50 % »/« 200 % ». C'est l'appelant qui les pose, et
 /// cette cote lui dit à quelle distance.
 pub const SLIDER_LABEL_GAP: f32 = 12.0;
+
+/// Couleur d'une graduation — `#e2ddd7`, un blanc cassé très légèrement chaud.
+///
+/// **Mesurée** sur le curseur d'échelle d'interface
+/// (`interfaces/interface-options-interface.png`, y=182), identique sur les 26 graduations.
+pub const SLIDER_TICK: Color32 = Color32::from_rgb(0xE2, 0xDD, 0xD7);
+
+/// Largeur d'une graduation — 1 px, mesurée sur 26 graduations dont 26 font exactement un pixel.
+pub const SLIDER_TICK_WIDTH: f32 = 1.0;
+
+/// De combien une graduation **dépasse** la rainure, en haut comme en bas — 2 px.
+///
+/// Mesuré : la graduation occupe y 181..183 au-dessus d'une rainure qui court de 183 à 190, et
+/// y 190..192 en dessous. Elle **recouvre donc le premier pixel du liseré** et déborde de deux, ce
+/// qui lui donne 3 px visibles de chaque côté. Elle ne traverse jamais l'intérieur de la rainure :
+/// au milieu, les pixels d'une colonne graduée sont identiques à ceux d'une colonne nue.
+pub const SLIDER_TICK_OVERHANG: f32 = 2.0;
+
+/// De combien une graduation **mord sur le liseré** de la rainure — 1 px, soit la moitié du liseré.
+///
+/// Mesuré : le liseré haut occupe y 183..184 et la graduation s'arrête à 183. Mordre les deux px
+/// donnerait un segment de 4 px là où le jeu en montre 3, et ne laisserait que 4 px de rainure nue
+/// entre les deux segments au lieu de 6 — assez pour que la marque se lise comme un trait presque
+/// continu plutôt que comme deux repères. C'est le défaut qu'a rattrapé la comparaison au jeu, la
+/// seconde fois sur ce composant.
+pub const SLIDER_TICK_BITE: f32 = 1.0;
