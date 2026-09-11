@@ -637,7 +637,7 @@ pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 1.0;
 // ---------------------------------------------------------------------------------------------
 // Bloc repliable — `design::collapsible`
 //
-// Mesuré le 2026-09-11 sur `collapse-block.png` (état fermé, cadre y 7..66) et
+// Mesuré le 2026-09-11 sur `collapse-block-closed.png` (état fermé, cadre y 7..66) et
 // `collapse-block-opened.png` (état ouvert, cadre y 8..299). Les deux captures concordent : l'en-tête
 // y occupe la même bande, à quatorze pixels du bord haut dans l'une comme dans l'autre.
 // ---------------------------------------------------------------------------------------------

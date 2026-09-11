@@ -29,7 +29,8 @@
 //!
 //! ## Ce qui a été mesuré, et sur quoi
 //!
-//! `collapse-block.png` (fermé) et `collapse-block-opened.png` (ouvert) — le bloc de quête du jeu.
+//! `collapse-block-closed.png` (fermé) et `collapse-block-opened.png` (ouvert) — le bloc de quête
+//! du jeu.
 //! Les deux captures concordent : l'en-tête occupe la même bande dans l'une et dans l'autre, à
 //! quatorze pixels du bord haut.
 //!
@@ -276,7 +277,7 @@ mod tests {
     const EPS: f32 = 0.01;
 
     /// À l'état fermé, le bloc du jeu fait exactement la hauteur de son en-tête : son cadre court de
-    /// y=7 à y=66 sur `collapse-block.png`, et ne contient rien d'autre.
+    /// y=7 à y=66 sur `collapse-block-closed.png`, et ne contient rien d'autre.
     #[test]
     fn un_bloc_ferme_fait_la_hauteur_de_son_entete() {
         assert!((closed_height() - 60.0).abs() < EPS);
