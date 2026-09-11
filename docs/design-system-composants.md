@@ -1110,6 +1110,7 @@ ui.horizontal(|ui| {
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
 | `range` | `RangeInclusive<f32>` | `0.0..=1.0` |
+| `steps` | nombre de valeurs sélectionnables — **grade le curseur** | aucun, curseur continu |
 | `width` | largeur imposée | toute la largeur disponible |
 | `enabled` | `bool` | `true` |
 | `tooltip` / `log_name` | | aucune / `"slider"` |
@@ -1134,6 +1135,34 @@ cotes.
 | Largeur relevée | 200 px (x 75..274) — un ordre de grandeur, pas un gabarit |
 | Gouttière du libellé | 12 px à gauche, 10 à droite |
 
+### Les graduations
+
+Un curseur gradué annonce **où la poignée peut s'immobiliser** ; sans `steps`, il est continu et nu.
+La distinction est mesurée, pas choisie : le curseur d'échelle d'interface
+(`interfaces/interface-options-interface.png`) porte **26 graduations**, celui du volume **aucune**
+— pas un pixel clair le long de sa rainure.
+
+Et elles tombent bien sur les arrêts de la poignée : les trois libellés de la capture sont centrés
+à x = 114, 199,5 et 539,5, pour des graduations à 111, 196 et 536 — la première, la sixième et la
+vingt-sixième. Le disque, lui, est exactement sur la sixième.
+
+| Grandeur | Valeur |
+| --- | --- |
+| Largeur | 1 px (26 graduations sur 26) |
+| Couleur | `#e2ddd7` |
+| Débord au-delà de la rainure | 2 px, en haut comme en bas |
+| Morsure sur le liseré | **1 px** sur les 2 du liseré |
+| Segment visible | 3 px de chaque côté, 6 px de rainure nue entre les deux |
+
+**Une graduation ne traverse pas la rainure**, elle la coupe : entre les deux segments, les pixels
+d'une colonne graduée sont identiques à ceux d'une colonne nue.
+
+**Un écart assumé avec la capture** : dans le jeu les graduations s'arrêtent à 37 px des bords de la
+rainure (x 111..536 pour une rainure de 74 à 573), soit 28 px de plus que le rayon de la poignée. Le
+composant ne reproduit pas ce retrait — une seule capture d'un curseur gradué ne dit pas si ces
+37 px sont absolus ou proportionnels, et les extrapoler ferait 74 px de retrait sur une rainure de
+120. Trancher demande une seconde capture, à une autre largeur.
+
 ### Quatre choses à savoir
 
 1. **La rainure est un creux, pas une barre.** Elle n'a pas de couleur propre : elle assombrit le
@@ -1153,13 +1182,24 @@ cotes.
    volume, pas à une échelle d'interface qui dirait « 50 % »/« 200 % ». Le jeton donne la gouttière,
    l'appelant pose les mots.
 
-### Ce que la comparaison au jeu a rattrapé
+### Ce que la comparaison au jeu a rattrapé — trois fois
 
-La première version peignait le liseré sur toute la hauteur puis l'intérieur par-dessus — deux
-rectangles au lieu de trois. Les alphas se composent : 0,733 × 0,851 = **0,624**, et l'intérieur
-sortait plus sombre que le liseré au lieu d'être plus clair. Un creux à l'envers, que personne
-n'aurait vu en relisant le code. Trois bandes disjointes ramènent les rapports à 0,75 et 0,83,
-contre 0,74 et 0,85 dans le jeu. La poignée, elle, est identique au pixel.
+1. **Le creux à l'envers.** La première version peignait le liseré sur toute la hauteur puis
+   l'intérieur par-dessus. Les alphas se composent : 0,733 × 0,851 = **0,624**, et l'intérieur
+   sortait plus sombre que son propre liseré. Trois bandes disjointes ramènent les rapports à 0,75
+   et 0,83, contre 0,74 et 0,85 dans le jeu.
+
+2. **La graduation trop longue.** Elle mordait les 2 px du liseré au lieu d'un seul : 4 px de
+   segment et 4 px de rainure nue, au lieu de 3 et 6. Assez pour que le repère se lise comme un
+   trait presque continu.
+
+3. **Le demi-pixel.** Le `Ui` appelant peut allouer à un y non entier, et un creux de 8 px posé à
+   y,5 s'étale sur 9 lignes — les graduations repassaient à 4 px. La rainure est désormais calée sur
+   la grille (`.round()`).
+
+Après les trois, le profil vertical d'une graduation est **identique au jeu**, ligne par ligne
+(`TTT......TTT..`), et la poignée l'est au pixel. Aucune relecture de code n'aurait vu ces trois
+défauts.
 
 ## À faire — composants identifiés, pas encore écrits
 

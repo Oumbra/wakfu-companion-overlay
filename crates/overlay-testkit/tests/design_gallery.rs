@@ -52,9 +52,10 @@ fn galerie_du_design_system() {
         // plus, et les ~75 px de marge basse que le réglage précédent gardait déjà.
         // 5570 -> 5680 le 2026-09-11 : état d'erreur d'`input` (champ refusé, son message, et le
         // cas « désactivé ET en erreur » où `Disabled` l'emporte).
-        // 5680 -> 5860 le 2026-09-11 : section « Curseur de réglage » (cinq positions, le motif à
+        // 5680 -> 5860 le 2026-09-11 : section « Curseur de réglage » (trois positions, le motif à
         // libellés, le désactivé et le cas dégénéré).
-        .with_size(Vec2::new(760.0, 5860.0))
+        // 5860 -> 5900 le 2026-09-11 : rangée des curseurs gradués (26, 11 et 3 crans).
+        .with_size(Vec2::new(760.0, 5900.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -798,8 +799,8 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Curseur de réglage — une rainure creusée, un disque posé dessus",
-        "La rainure n'a pas de couleur : elle assombrit le fond, mesuré comme un rapport et non comme deux teintes. La portion parcourue n'est PAS remplie — les deux curseurs du jeu sont au minimum, rien n'en montre le remplissage, et l'inventer serait inventer du design.",
+        "Curseur de réglage — gradué ou continu, selon ce qu'il y a à choisir",
+        "Un curseur gradué annonce où la poignée peut s'immobiliser ; un curseur continu n'a rien à annoncer. La distinction est mesurée : l'échelle d'interface du jeu porte 26 graduations, le volume aucune. La rainure, elle, n'a pas de couleur — elle assombrit le fond.",
     );
     {
         let mut volume = 0.0_f32;
@@ -814,6 +815,20 @@ fn gallery(ui: &mut egui::Ui) {
                         .width(design::tokens::SLIDER_TRACK_WIDTH_REF)
                         .preview_fraction(fraction)
                         .log_name(format!("galerie.slider-{fraction}")),
+                );
+                ui.add_space(12.0);
+            }
+        });
+        // Gradué — les 26 crans de l'échelle d'interface du jeu, puis deux comptes plus courts
+        // pour que le pas se lise. La poignée ne s'immobilise que sur une graduation.
+        ui.horizontal(|ui| {
+            for (steps, fraction) in [(26_usize, 0.2_f32), (11, 0.5), (3, 1.0)] {
+                ui.add(
+                    design::slider(&mut volume)
+                        .width(design::tokens::SLIDER_TRACK_WIDTH_REF)
+                        .steps(steps)
+                        .preview_fraction(fraction)
+                        .log_name(format!("galerie.slider-{steps}-crans")),
                 );
                 ui.add_space(12.0);
             }

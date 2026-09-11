@@ -25,6 +25,32 @@
 //! les trois canaux). Deux constantes opaques auraient reproduit la capture et rien d'autre : elles
 //! seraient fausses dès qu'un panneau change de teinte. Voir [`tokens::SLIDER_TRACK_EDGE_SHADE`].
 //!
+//! ## Les graduations, et pourquoi elles ne sont pas systématiques
+//!
+//! Un curseur gradué annonce **où la poignée peut s'immobiliser** ; c'est ce que
+//! [`Slider::steps`] déclare, et sans lui le curseur est continu et nu. La distinction n'est pas
+//! une commodité d'API : elle est mesurée. Le curseur d'échelle d'interface
+//! (`interfaces/interface-options-interface.png`) porte **26 graduations**, celui du volume
+//! (`interface-options-son.png`) **aucune** — pas un pixel clair le long de sa rainure.
+//!
+//! Et les graduations tombent bien sur les arrêts de la poignée : les trois libellés de la capture
+//! (« 67 % », « 100 % », « 233 % ») sont centrés à x = 114, 199,5 et 539,5, pour des graduations à
+//! 111, 196 et 536 — la première, la sixième et la vingt-sixième. Le disque, lui, est exactement
+//! sur la sixième.
+//!
+//! **Une graduation ne traverse pas la rainure.** Elle la coupe : 3 px visibles au-dessus, 3 en
+//! dessous — 2 de débord et **1 seul** de morsure sur un liseré qui en fait 2 — et entre les deux,
+//! les pixels d'une colonne graduée sont identiques à ceux d'une colonne nue. D'où deux segments
+//! peints, jamais un trait. Mordre le liseré entier donnerait 4 px de segment et 4 px de rainure
+//! nue au lieu de 3 et 6 : assez pour que le repère se lise comme un trait presque continu.
+//!
+//! **Un écart assumé avec la capture** : dans le jeu, les graduations s'arrêtent à 37 px des bords
+//! de la rainure (elles courent de x=111 à 536 pour une rainure de 74 à 573), soit 28 px de plus
+//! que le rayon de la poignée. Ce composant ne reproduit pas ce retrait : les graduations occupent
+//! toute la course du centre. Une seule capture d'un curseur gradué ne permet pas de savoir si ces
+//! 37 px sont une valeur absolue ou une fraction de la largeur, et les extrapoler ferait un retrait
+//! de 74 px sur une rainure de 120. Trancher demande une seconde capture, à une autre largeur.
+//!
 //! ## Ce que la capture ne dit pas, et qu'on n'invente donc pas
 //!
 //! **Les deux curseurs du jeu sont au minimum.** Rien ne montre ce que devient la portion
@@ -72,6 +98,23 @@ pub fn track_travel(width: f32) -> f32 {
     (width - tokens::SLIDER_HANDLE_SIZE).max(0.0)
 }
 
+/// Ramène une fraction sur le cran le plus proche, pour `steps` valeurs sélectionnables.
+///
+/// Fonction libre et testée pour la même raison que [`track_travel`] : une erreur d'unité ici — le
+/// nombre de crans au lieu du nombre d'intervalles — décale toutes les graduations sauf la
+/// première, d'un peu plus à chaque cran, et la dernière tombe alors *avant* le bout de la course.
+/// Avec 26 crans il y a **25** intervalles.
+///
+/// Moins de deux crans rend la fraction inchangée : il n'y a rien à quantifier, et surtout pas de
+/// division par zéro.
+pub fn snap_to_step(fraction: f32, steps: usize) -> f32 {
+    if steps < 2 {
+        return fraction;
+    }
+    let intervals = (steps - 1) as f32;
+    (fraction * intervals).round() / intervals
+}
+
 /// État visuel d'un curseur — les trois états du design system, `Hovered` étant identique à `Idle`
 /// faute de référence (doc de module).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +133,7 @@ pub fn slider(value: &mut f32) -> Slider<'_> {
         enabled: true,
         tooltip: None,
         log_name: None,
+        steps: None,
         forced_state: None,
         forced_fraction: None,
     }
@@ -103,6 +147,7 @@ pub struct Slider<'a> {
     enabled: bool,
     tooltip: Option<String>,
     log_name: Option<String>,
+    steps: Option<usize>,
     forced_state: Option<SliderState>,
     forced_fraction: Option<f32>,
 }
@@ -119,6 +164,21 @@ impl<'a> Slider<'a> {
     /// la même raison : un curseur n'a pas de contenu qui puisse dicter sa largeur.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Nombre de **valeurs sélectionnables**, graduations comprises. Sans cet appel, le curseur est
+    /// continu et n'affiche aucune graduation.
+    ///
+    /// C'est la distinction que fait le jeu, et elle est mesurée : le curseur d'échelle
+    /// d'interface porte 26 graduations, celui du volume **aucune**. Un curseur gradué annonce ses
+    /// arrêts ; un curseur continu n'en a pas à annoncer.
+    ///
+    /// La valeur est quantifiée sur ces crans — la poignée ne s'immobilise que sur une graduation,
+    /// jamais entre deux. Moins de deux crans n'a pas de sens (il n'y aurait rien à choisir) et est
+    /// traité comme un curseur continu, avec une ligne dans le journal.
+    pub fn steps(mut self, steps: usize) -> Self {
+        self.steps = Some(steps);
         self
     }
 
@@ -185,6 +245,30 @@ impl Widget for Slider<'_> {
         let travel = track_travel(rect.width());
         let radius = tokens::SLIDER_HANDLE_SIZE / 2.0;
 
+        // Moins de deux crans : il n'y aurait rien à choisir. Traité comme un curseur continu
+        // plutôt que comme une erreur — mais dit une fois, parce que c'est presque sûrement un
+        // `steps` calculé qui est tombé à zéro.
+        let steps = self.steps.filter(|&n| {
+            if n >= 2 {
+                return true;
+            }
+            let warned_id = response.id.with("ds-slider-steps");
+            let already = ui.ctx().data_mut(|d| {
+                let seen = d.get_temp::<bool>(warned_id).unwrap_or(false);
+                d.insert_temp(warned_id, true);
+                seen
+            });
+            if !already {
+                tracing::warn!(
+                    component = "slider",
+                    name = self.log_name.as_deref().unwrap_or("slider"),
+                    crans = n,
+                    "moins de deux crans, le curseur reste continu et sans graduation"
+                );
+            }
+            false
+        });
+
         // Interaction — lue AVANT la peinture, pour que la frame où l'on saisit montre déjà la
         // nouvelle position plutôt que l'ancienne.
         let mut fraction = self.fraction();
@@ -197,6 +281,10 @@ impl Widget for Slider<'_> {
                     ((pos.x - rect.left() - radius) / travel).clamp(0.0, 1.0)
                 } else {
                     0.0
+                };
+                let x = match steps {
+                    Some(steps) => snap_to_step(x, steps),
+                    None => x,
                 };
                 if (x - fraction).abs() > f32::EPSILON {
                     fraction = x;
@@ -230,9 +318,14 @@ impl Widget for Slider<'_> {
         }
 
         if ui.is_rect_visible(rect) {
-            // La rainure, centrée dans la hauteur que la poignée impose.
-            let track = egui::Rect::from_center_size(
-                rect.center(),
+            // La rainure, centrée dans la hauteur que la poignée impose — et **calée sur la grille
+            // de pixels**. Le `Ui` qui nous alloue peut tomber sur un demi-pixel (les espacements
+            // d'egui sont des `f32`), et un creux de 8 px posé à y,5 s'étale alors sur 9 lignes,
+            // débord des graduations compris : mesuré, cela donnait des repères de 4 px là où le
+            // jeu en montre 3, et 5 px de rainure nue au lieu de 6.
+            let track_top = (rect.center().y - tokens::SLIDER_TRACK_HEIGHT / 2.0).round();
+            let track = egui::Rect::from_min_size(
+                egui::pos2(rect.left(), track_top),
                 Vec2::new(rect.width(), tokens::SLIDER_TRACK_HEIGHT),
             );
             let painter = ui.painter();
@@ -256,6 +349,34 @@ impl Widget for Slider<'_> {
                 painter.rect_filled(band, 0.0, tokens::SLIDER_TRACK_EDGE_SHADE);
             }
             painter.rect_filled(inner, 0.0, tokens::SLIDER_TRACK_SHADE);
+
+            // Les graduations, peintes APRÈS la rainure et JAMAIS dans son intérieur : sur la
+            // capture, les pixels d'une colonne graduée sont identiques à ceux d'une colonne nue
+            // entre les deux liserés. Chaque graduation est donc deux segments, pas un trait.
+            if let Some(steps) = steps {
+                let over = tokens::SLIDER_TICK_OVERHANG;
+                let half = tokens::SLIDER_TICK_WIDTH / 2.0;
+                let intervals = (steps - 1) as f32;
+                for i in 0..steps {
+                    // Les graduations marquent **les arrêts de la poignée**, donc la course de son
+                    // centre — c'est ce qui leur donne leur sens : l'utilisateur voit où elle peut
+                    // s'immobiliser. Vérifié sur la capture, où le disque est exactement sur la
+                    // sixième.
+                    let x = rect.left() + radius + (i as f32 / intervals) * travel;
+                    for band in [
+                        egui::Rect::from_min_max(
+                            egui::pos2(x - half, track.top() - over),
+                            egui::pos2(x + half, track.top() + tokens::SLIDER_TICK_BITE),
+                        ),
+                        egui::Rect::from_min_max(
+                            egui::pos2(x - half, track.bottom() - tokens::SLIDER_TICK_BITE),
+                            egui::pos2(x + half, track.bottom() + over),
+                        ),
+                    ] {
+                        painter.rect_filled(band, 0.0, tokens::SLIDER_TICK);
+                    }
+                }
+            }
 
             let center_x = rect.left() + radius + fraction * travel;
             let handle = egui::Rect::from_center_size(
@@ -307,6 +428,54 @@ mod tests {
                 "à {fraction}, le disque sort de la rainure",
             );
         }
+    }
+
+    #[test]
+    fn la_quantification_compte_les_intervalles_pas_les_crans() {
+        // 26 crans, donc 25 intervalles : la dernière graduation tombe à 1,0 exactement. Compter
+        // 26 intervalles la ferait tomber à 25/26 = 0,96, avant le bout de la course.
+        assert_eq!(snap_to_step(1.0, 26), 1.0);
+        assert_eq!(snap_to_step(0.0, 26), 0.0);
+        assert!((snap_to_step(0.5, 3) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn la_quantification_prend_le_cran_le_plus_proche() {
+        // 3 crans : 0, 0,5, 1. Juste au-dessus du quart, on bascule sur le cran du milieu.
+        assert_eq!(snap_to_step(0.24, 3), 0.0);
+        assert!((snap_to_step(0.26, 3) - 0.5).abs() < 1e-6);
+        assert_eq!(snap_to_step(0.99, 3), 1.0);
+    }
+
+    #[test]
+    fn moins_de_deux_crans_ne_quantifie_rien_et_ne_divise_pas_par_zero() {
+        for steps in [0, 1] {
+            assert_eq!(snap_to_step(0.37, steps), 0.37);
+        }
+    }
+
+    #[test]
+    fn une_graduation_fait_trois_pixels_et_en_laisse_six() {
+        // Les deux cotes du jeu, verrouillées ensemble parce que c'est leur RAPPORT qui fait lire
+        // deux repères plutôt qu'un trait presque continu : segment visible de 3 px (2 de débord
+        // plus 1 de morsure), et 6 px de rainure nue entre les deux.
+        let visible = tokens::SLIDER_TICK_OVERHANG + tokens::SLIDER_TICK_BITE;
+        let nue = tokens::SLIDER_TRACK_HEIGHT - tokens::SLIDER_TICK_BITE * 2.0;
+        assert_eq!(visible, 3.0, "segment visible");
+        assert_eq!(nue, 6.0, "rainure nue entre les deux segments");
+        assert!(
+            tokens::SLIDER_TICK_BITE < tokens::SLIDER_TRACK_EDGE,
+            "la graduation mord le liseré, elle ne le remplace pas",
+        );
+    }
+
+    #[test]
+    fn les_graduations_tiennent_dans_la_hauteur_du_composant() {
+        assert!(
+            tokens::SLIDER_TRACK_HEIGHT + tokens::SLIDER_TICK_OVERHANG * 2.0
+                <= tokens::SLIDER_HANDLE_SIZE,
+            "c'est la poignée qui fixe la hauteur, les graduations doivent y tenir",
+        );
     }
 
     #[test]
