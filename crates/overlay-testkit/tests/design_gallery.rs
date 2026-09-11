@@ -50,7 +50,9 @@ fn galerie_du_design_system() {
         // 4900 -> 5570 le 2026-09-11 : section « Filet de séparation » (deux blocs repliables
         // portant le motif intitulé/filet/corps, plus deux filets nus) — 661 px de contenu de
         // plus, et les ~75 px de marge basse que le réglage précédent gardait déjà.
-        .with_size(Vec2::new(760.0, 5570.0))
+        // 5570 -> 5680 le 2026-09-11 : état d'erreur d'`input` (champ refusé, son message, et le
+        // cas « désactivé ET en erreur » où `Disabled` l'emporte).
+        .with_size(Vec2::new(760.0, 5680.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -197,6 +199,33 @@ fn gallery(ui: &mut egui::Ui) {
                 .log_name("galerie.desactive"),
         );
     });
+    // Le motif complet d'une valeur refusée : le bord du champ et le message portent le MÊME rouge
+    // — un seul signal, en deux endroits. Le champ reste éditable, c'est tout l'objet de l'état.
+    {
+        let mut fautif = String::from("C:/Wakfu/introuvable.log");
+        ui.add(
+            design::input(&mut fautif)
+                .width(420.0)
+                .error(true)
+                .log_name("galerie.errone"),
+        );
+        ui.add(
+            design::info_text("Fichier introuvable à ce chemin.")
+                .tone(InfoTone::Alert)
+                .width(420.0)
+                .log_name("galerie.errone-message"),
+        );
+        // Désactivé ET en erreur : `Disabled` l'emporte, le bord reste gris. On ne corrige pas ce
+        // qu'on ne peut pas éditer.
+        let mut inerte = String::from("les deux à la fois");
+        ui.add(
+            design::input(&mut inerte)
+                .width(420.0)
+                .error(true)
+                .enabled(false)
+                .log_name("galerie.errone-desactive"),
+        );
+    }
     // Le couple réel de la modale Options : un champ à sa hauteur native, centré sur une ligne que
     // le bouton fixe à 36 px.
     ui.horizontal(|ui| {
