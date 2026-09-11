@@ -15,8 +15,8 @@
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
-#[path = "shared/rarity_gems.rs"]
-mod rarity_gems;
+#[path = "shared/wakassets_fixtures.rs"]
+mod wakassets_fixtures;
 
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
@@ -24,7 +24,7 @@ use overlay_engine::WakfuRarity;
 use overlay_ui::design::{self, DsTexture, IconContext, InputSize};
 use overlay_ui::ui_icons::UiIcons;
 
-use rarity_gems::{RarityGems, GEM_BOX};
+use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_BOX};
 
 // -------------------------------------------------------------------------------------------
 // Jetons communs aux planches — repris de la maquette de la page Alertes, mêmes sources.
@@ -85,15 +85,19 @@ const SUGGESTION_PAD_X: f32 = 6.0;
 const SUGGESTION_GAP: f32 = 6.0;
 /// Côté de l'image d'objet d'une rangée.
 const SUGGESTION_SLOT: f32 = 22.0;
-/// Hauteur de la bande de filtres par catégorie.
-const CATEGORY_BAR_HEIGHT: f32 = 28.0;
-/// Côté d'un bouton de catégorie.
-const CATEGORY_BUTTON: f32 = 20.0;
-/// Écart entre deux boutons de catégorie.
+/// Hauteur de la bande de filtres — bouton 26 + 2 × 6 de marge, comme
+/// `.wakfu-autocomplete-categories` (padding 6) côté web.
+const CATEGORY_BAR_HEIGHT: f32 = 38.0;
+/// Côté d'un bouton de catégorie — `.wakfu-autocomplete-category-btn`, 26 × 26.
+const CATEGORY_BUTTON: f32 = 26.0;
+/// Marge intérieure du bouton : l'icône occupe 20 des 26 (`padding: 3px` côté web).
+const CATEGORY_ICON_PAD: f32 = 3.0;
+/// Écart entre deux boutons.
 const CATEGORY_GAP: f32 = 4.0;
-/// Nombre de filtres : « Tout » + les huit catégories d'objets + les monstres (voir
-/// `wakfu-item-category.data.ts`).
-const CATEGORY_COUNT: usize = 10;
+/// Marge gauche de la bande.
+const CATEGORY_PAD: f32 = 6.0;
+/// Rayon d'angle d'un bouton.
+const CATEGORY_RADIUS: u8 = 4;
 
 /// Les sept raretés du référentiel, dans l'ordre du jeu.
 const RARITIES: &[(WakfuRarity, &str)] = &[
@@ -883,8 +887,10 @@ fn planche_autocomplete() {
     let mut saisi = String::from("pierre");
 
     let mut gems: Option<RarityGems> = None;
+    let mut cats: Option<CategoryIcons> = None;
     let (mut harness, bottom) = planche(SHEET_WIDTH, move |ui, icons| {
         let gems = gems.get_or_insert_with(|| RarityGems::load(ui.ctx()));
+        let cats = cats.get_or_insert_with(|| CategoryIcons::load(ui.ctx()));
         bande(ui, "design::autocomplete");
         let width = 560.0;
 
@@ -906,7 +912,51 @@ fn planche_autocomplete() {
                 .leading_icon(DsTexture::IconSearch)
                 .width(width),
         );
-        suggestions(ui, icons, gems, field.rect);
+        suggestions(ui, icons, gems, cats, field.rect);
+
+        ui.add_space(16.0);
+        legende(ui, "Un filtre actif — le recliquer le relâche");
+        bande_filtres(
+            ui,
+            cats,
+            width,
+            &[
+                CategoryFilter::All,
+                CategoryFilter::Equipment,
+                CategoryFilter::Resources,
+                CategoryFilter::Craft,
+            ],
+            CategoryFilter::Resources,
+        );
+
+        ui.add_space(16.0);
+        legende(
+            ui,
+            "Les dix filtres possibles — seuls ceux présents dans les résultats sont affichés",
+        );
+        let tous: Vec<CategoryFilter> = std::iter::once(CategoryFilter::All)
+            .chain(CategoryFilter::ITEM_CATEGORIES)
+            .chain(std::iter::once(CategoryFilter::Enemy))
+            .collect();
+        bande_filtres(ui, cats, width, &tous, CategoryFilter::All);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = CATEGORY_GAP;
+            ui.add_space(CATEGORY_PAD);
+            for filtre in &tous {
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(CATEGORY_BUTTON, 14.0), egui::Sense::hover());
+                ui.painter().text(
+                    rect.center_top(),
+                    egui::Align2::CENTER_TOP,
+                    // Élidé : « Sublimations » fait trois fois la largeur d'un bouton. Par
+                    // CARACTÈRES, jamais par octets : `label()[..4]` couperait « Récoltes » au
+                    // milieu du « é » et paniquerait.
+                    filtre.label().chars().take(4).collect::<String>(),
+                    design::text::label_font(ui.ctx(), 9.0),
+                    CAPTION,
+                );
+            }
+        });
     });
     harness.run();
     write(&mut harness, &bottom, "composant_autocomplete");
@@ -919,13 +969,43 @@ fn planche_autocomplete() {
 /// son **nom**. Une entrée déjà suivie est grisée, **non cliquable, et ne réagit pas au survol** —
 /// les trois ensemble : une ligne grisée qui s'allume quand même au passage de la souris promet un
 /// clic qui n'arrivera pas.
-fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, gems: &RarityGems, field: Rect) {
-    // (nom, rareté, déjà suivi, survolée)
-    const ENTREES: &[(&str, WakfuRarity, bool, bool)] = &[
-        ("Pierre d'aventure", WakfuRarity::Mythical, true, true),
-        ("Pierre de dolomite", WakfuRarity::Common, false, true),
-        ("Pierre de lune", WakfuRarity::Rare, false, false),
-        ("Pierre ponce", WakfuRarity::Common, false, false),
+fn suggestions(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    gems: &RarityGems,
+    cats: &CategoryIcons,
+    field: Rect,
+) {
+    // (nom, rareté, catégorie, déjà suivi, survolée)
+    const ENTREES: &[(&str, WakfuRarity, CategoryFilter, bool, bool)] = &[
+        (
+            "Pierre d'aventure",
+            WakfuRarity::Mythical,
+            CategoryFilter::Resources,
+            true,
+            true,
+        ),
+        (
+            "Pierre de dolomite",
+            WakfuRarity::Common,
+            CategoryFilter::Resources,
+            false,
+            true,
+        ),
+        (
+            "Pierre de lune",
+            WakfuRarity::Rare,
+            CategoryFilter::Equipment,
+            false,
+            false,
+        ),
+        (
+            "Pierre ponce",
+            WakfuRarity::Common,
+            CategoryFilter::Craft,
+            false,
+            false,
+        ),
     ];
     let row_h = SUGGESTION_ROW_HEIGHT;
     let list = Rect::from_min_size(
@@ -946,15 +1026,28 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, gems: &RarityGems, field: Rec
         StrokeKind::Inside,
     );
 
+    // **Uniquement les catégories présentes dans les résultats**, « Tout » en tête — la règle du
+    // web, pas une bande figée. Ici : Équipements, Ressources et Craft, dans l'ordre des
+    // catégories, jamais dans celui d'apparition des résultats.
+    let mut filtres = vec![CategoryFilter::All];
+    filtres.extend(
+        CategoryFilter::ITEM_CATEGORIES
+            .iter()
+            .copied()
+            .filter(|c| ENTREES.iter().any(|(_, _, categorie, _, _)| categorie == c)),
+    );
     category_bar(
         ui,
+        cats,
         Rect::from_min_size(
             egui::pos2(list.left() + 2.0, list.top() + 2.0),
             Vec2::new(list.width() - 4.0, CATEGORY_BAR_HEIGHT),
         ),
+        &filtres,
+        CategoryFilter::All,
     );
 
-    for (i, (name, rarity, deja, survolee)) in ENTREES.iter().enumerate() {
+    for (i, (name, rarity, _categorie, deja, survolee)) in ENTREES.iter().enumerate() {
         let row = Rect::from_min_size(
             egui::pos2(
                 list.left() + 2.0,
@@ -1027,29 +1120,72 @@ fn rarity_gem(ui: &egui::Ui, gems: &RarityGems, rect: Rect, rarity: WakfuRarity)
     gems.paint(ui, rect, rarity);
 }
 
-/// La bande de filtres par catégorie, en tête du panneau — présente sur les deux captures du web
-/// fournies par l'utilisateur, et portée côté web par `filterButtons()`.
+/// Une bande de filtres posée seule sur la planche, hors panneau — pour montrer ses états.
+fn bande_filtres(
+    ui: &mut egui::Ui,
+    cats: &CategoryIcons,
+    width: f32,
+    filtres: &[CategoryFilter],
+    actif: CategoryFilter,
+) {
+    let rect = ui.allocate_space(Vec2::new(width, CATEGORY_BAR_HEIGHT)).1;
+    ui.painter()
+        .rect_filled(rect, 2, design::tokens::SELECT_LIST_FILL);
+    category_bar(&*ui, cats, rect, filtres, actif);
+}
+
+/// La bande de filtres par catégorie, en tête du panneau — **relevée sur le web**
+/// (`wakfu-autocomplete.component.ts`/`.css`).
 ///
-/// Icônes également distantes (`wakassets/itemTypes/{n}.png`, voir `wakfuItemCategoryIconUrl`) :
-/// mêmes emplacements réservés que la gemme, pour la même raison.
-fn category_bar(ui: &egui::Ui, rect: Rect) {
-    for i in 0..CATEGORY_COUNT {
+/// Trois règles qui ne se devinent pas en regardant une capture :
+///
+/// 1. **Seules les catégories PRÉSENTES dans les résultats ont un bouton** (`filterButtons`) —
+///    afficher un filtre qui viderait la liste n'aurait aucun sens. La bande disparaît entièrement
+///    s'il n'y en a aucune.
+/// 2. **« Tout » n'est pas une catégorie** : c'est le bouton de remise à zéro, toujours en tête, et
+///    il est actif tant qu'aucun filtre ne l'est.
+/// 3. **Pas de filtre « Monstres » ici** : il n'existe qu'en domaine `both`, et la page Alertes est
+///    en domaine `item` (`profile-page.component.html`). Une première version de cette planche en
+///    dessinait dix, monstres compris — faux sur ce point comme sur le premier.
+///
+/// Un clic sur le filtre déjà actif le relâche (retour à « Tout ») : `toggleCategoryFilter`.
+fn category_bar(
+    ui: &egui::Ui,
+    icons: &CategoryIcons,
+    rect: Rect,
+    filtres: &[CategoryFilter],
+    actif: CategoryFilter,
+) {
+    for (i, filtre) in filtres.iter().enumerate() {
         let cell = Rect::from_min_size(
             egui::pos2(
-                rect.left() + SUGGESTION_PAD_X + i as f32 * (CATEGORY_BUTTON + CATEGORY_GAP),
+                rect.left() + CATEGORY_PAD + i as f32 * (CATEGORY_BUTTON + CATEGORY_GAP),
                 rect.center().y - CATEGORY_BUTTON / 2.0,
             ),
             Vec2::splat(CATEGORY_BUTTON),
         );
-        // La première est active : un cadre, pas un aplat — c'est ce que montrent les captures.
-        let stroke = if i == 0 {
-            Stroke::new(1.0, ACCENT)
-        } else {
-            Stroke::new(1.0, design::tokens::TEXT_DISABLED)
-        };
-        ui.painter()
-            .rect_stroke(cell, 2, stroke, StrokeKind::Inside);
+        let est_actif = *filtre == actif;
+        if est_actif {
+            // Aplat + cadre, les deux jetons de la famille `select` — pas l'accent cyan de la
+            // tuile d'alerte, qui jurerait sur un panneau doré.
+            ui.painter()
+                .rect_filled(cell, CATEGORY_RADIUS, design::tokens::SELECT_ROW_HIGHLIGHT);
+            ui.painter().rect_stroke(
+                cell,
+                CATEGORY_RADIUS,
+                Stroke::new(1.0, design::tokens::STEPPER_ICON_TINT),
+                StrokeKind::Inside,
+            );
+        }
+        icons.paint(ui, cell.shrink(CATEGORY_ICON_PAD), *filtre, est_actif);
     }
+    // Le filet qui sépare la bande des suggestions — `border-bottom` côté web, et le jeton de
+    // liseré que la liste dépliée du jeu utilise déjà.
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
+    );
 }
 
 fn main() {
