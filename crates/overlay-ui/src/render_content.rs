@@ -35,9 +35,9 @@ pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 /// jamais s'attaquer à la cause : l'absence de place elle-même).
 ///
 /// Valeur choisie par observation du rendu offscreen (`overlay-testkit`, §17.1 du plan) : le popup
-/// par défaut d'egui (`panels::tooltip::paint_tooltip_label`, fond plein, `inner_margin` 8px) contenant
+/// par défaut d'egui (`design::tooltip`, fond plein, `inner_margin` 8px) contenant
 /// une étiquette courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
-/// `panels::tooltip::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
+/// `design::tokens::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
 /// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite :
 /// « agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
 /// jeu, décision non remise en cause ici (voir `main.rs::GAME_EDGE_MARGIN_PX`) — `main.rs`/`bin/
@@ -385,13 +385,10 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                                         // `combat::show_tooltip_above` plutôt qu'un `on_hover_text`
                                         // brut (refonte 2026-09-06, design system tooltip) — voir
                                         // sa doc.
-                                        panels::combat::show_tooltip_above(
-                                            &retry,
-                                            &format!(
-                                                "Connecter le compte (relance l'appairage, ouvre \
+                                        crate::design::tooltip(&retry).text(format!(
+                                            "Connecter le compte (relance l'appairage, ouvre \
                                                  le navigateur).\nDernier échec : {reason}"
-                                            ),
-                                        );
+                                        ));
                                         if retry.clicked() {
                                             auth_command_tx.send(AuthCommand::Retry);
                                         }
@@ -471,8 +468,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                                     // brut (refonte 2026-09-06, design system tooltip) — voir sa
                                     // doc.
                                     let warning = ui.label("📦⚠");
-                                    panels::combat::show_tooltip_above(
-                                        &warning,
+                                    crate::design::tooltip(&warning).text(
                                         "Catalogue hors ligne : réseau et cache local tous deux \
                                          indisponibles au démarrage, repli sur la base embarquée \
                                          dans l'overlay (peut être datée).",

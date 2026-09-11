@@ -63,6 +63,7 @@ pub use components::slider::{
 };
 pub use components::stepper::{stepper, Stepper};
 pub use components::tabs::{tabs, TabState, Tabs};
+pub use components::tooltip::{tooltip, Tooltip, TooltipSide};
 pub use components::window::{window, FooterClick, Window, WindowChrome};
 
 /// Identifiant de mémorisation dans `egui::Context` — voir `DesignSystem::get`.

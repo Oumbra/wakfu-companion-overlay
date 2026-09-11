@@ -1201,6 +1201,72 @@ Après les trois, le profil vertical d'une graduation est **identique au jeu**, 
 (`TTT......TTT..`), et la poignée l'est au pixel. Aucune relecture de code n'aurait vu ces trois
 défauts.
 
+---
+
+## `design::tooltip` — infobulle (2026-09-11)
+
+`crates/overlay-ui/src/design/components/tooltip.rs`
+
+```rust
+use overlay_ui::design::{self, TooltipSide};
+
+design::tooltip(&response).text("Ajouter à la liste");            // au-dessus, le défaut
+design::tooltip(&response).side(TooltipSide::Right).text("Options");
+design::tooltip(&response).show(|ui| { /* contenu libre */ });
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `side` | `Above` / `Left` / `Right` | `Above` |
+| `gap` | écart au widget | `TOOLTIP_GAP` = 5 px |
+| `text` / `show` | texte simple / contenu libre | — |
+
+Aucune texture : le fond, la marge et l'ombre viennent du **thème** (`style::apply`), parce que
+`window_fill`/`menu_margin`/`popup_shadow` ne servent qu'aux infobulles dans cette interface. Un seul
+réglage couvre donc aussi les `on_hover_text` ponctuels.
+
+### Ce qu'il absorbe
+
+Les **trois enveloppes maison** — `combat::show_tooltip_above`, `watchlist::show_tooltip_left` et
+`_right` — rigoureusement identiques à un alignement près, chacune avec sa liste de replis recopiée.
+`panels/tooltip.rs` disparaît avec elles ; ses quatre constantes mesurées sont remontées dans
+`design::tokens`.
+
+### Les replis, qui sont le composant
+
+Un alignement qui ne tient pas ne doit pas retomber n'importe où. L'ordre est le résultat de trois
+bugs rapportés, pas une préférence :
+
+1. le côté demandé, centré ;
+2. **le même côté, réaligné** (`_START`, `_END`) — ajoutés avant les replis opposés le 2026-09-06 :
+   un widget proche d'un bord reste du bon côté, simplement décalé ;
+3. le côté opposé, en dernier recours — et jamais `BOTTOM_START`, le défaut d'egui (« sous la
+   souris »), qui est précisément ce qu'on fuit.
+
+Le cas qui a fait ajouter l'étape 2 : le bouton Détails du panneau Combat, collé au bord droit,
+débordait en `TOP` centré et retombait sous le curseur ; son voisin Options, un peu plus loin du
+bord, ne révélait jamais le problème.
+
+**Un repli ne crée pas de la place.** Le switch Alliés/Ennemis, premier widget du panneau Combat,
+n'avait réellement aucune place au-dessus de lui : la réponse est `render_content::
+COMBAT_TOP_MARGIN`, pas un alignement.
+
+**Le côté se choisit par colonne, pas par bouton** (retour du 2026-09-08) : dans le carré de
+contrôle du Suivi, un bouton de droite dont l'infobulle partirait à gauche la poserait par-dessus
+son voisin, gênant le survol de ce dernier.
+
+### Un écart au contrat, assumé et daté
+
+**La police reste celle du thème**, là où le contrat veut `design::text::label_font`. La corriger est
+un changement visuel : elle déplacerait les six captures d'infobulle de la suite de rendu, que le
+plan demande justement **inchangées** pour prouver que cette migration ne change rien. Les deux ne
+peuvent pas tenir dans le même commit — la police attend sa propre décision.
+
+**Pas d'entrée de galerie** : une infobulle a besoin d'un survol, qui n'existe pas en rendu
+offscreen statique. Sa vérification visuelle est ailleurs et existait déjà — les six tests dédiés
+`watchlist_tooltip_*` et `combat_tooltip_*`, qui simulent le pointeur. Ils sont restés **identiques
+au pixel** à travers la migration, ce qui est le critère de fin que le plan fixait.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85

@@ -9,5 +9,4 @@ pub mod combat;
 pub mod combat_frame;
 pub mod combat_frame_scroll;
 pub mod options_modal;
-pub mod tooltip;
 pub mod watchlist;

@@ -314,12 +314,27 @@ Un composant avec **placement paramétrable** (`Above` / `Left` / `Right` / `Aut
 absorbant les trois enveloppes. L'historique des replis `RectAlign` est déjà écrit dans `combat.rs`
 — le lire avant, il porte trois retours utilisateur successifs.
 
-### Critère de fin
+### Critère de fin — atteint le 2026-09-11
 
-`grep -rn "show_tooltip_" crates/overlay-ui/src/panels/` ne rend plus rien, et les quatre snapshots
-d'infobulle du Suivi (`watchlist_tooltip_*.png`) sont **inchangés**.
+`grep -rn "show_tooltip_" crates/overlay-ui/src/panels/` ne rend plus **aucun code** (seule subsiste
+une ligne de commentaire qui date leur retrait et renvoie au composant), et **aucun PNG de snapshot
+n'a bougé** — les six captures d'infobulle, quatre du Suivi et deux du Combat, sont identiques au
+pixel.
 
-**Estimation** : 1 à 1½ séance.
+Un écart au contrat est resté, délibérément : l'infobulle écrit toujours avec la police du thème et
+non `design::text::label_font`. La corriger déplacerait justement ces six captures, ce que ce
+critère de fin interdit — elle attend donc sa propre décision, dans son propre commit.
+
+**Estimation** : 1 à 1½ séance. **Réalisé** : conforme.
+
+## 2.3 — `DsIcon` : reporté, terrain occupé
+
+Vérification du 2026-09-11 : une session parallèle travaille **en ce moment** sur les icônes (une
+trentaine de SVG poussés dans `assets/design-system/icons-svg/`, commit `dbf8c3b`). La règle de
+coordination de ce plan interdit de démarrer un lot dont les fichiers sont en refonte ailleurs, et
+2.1 touche exactement `assets.rs`, `icon_button.rs` et la galerie des glyphes.
+
+Conséquence pour le lot 4 : sa variante icône de `tabs` reste bloquée, comme elle l'était déjà.
 
 ---
 
