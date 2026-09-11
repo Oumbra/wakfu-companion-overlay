@@ -82,8 +82,8 @@
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
-#[path = "shared/rarity_gems.rs"]
-mod rarity_gems;
+#[path = "shared/wakassets_fixtures.rs"]
+mod wakassets_fixtures;
 
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
@@ -92,7 +92,7 @@ use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsTexture, IconContext
 use overlay_ui::panels::options_modal::OptionsTab;
 use overlay_ui::ui_icons::UiIcons;
 
-use rarity_gems::{RarityGems, GEM_BOX};
+use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_BOX};
 
 // -------------------------------------------------------------------------------------------
 // Jetons propres aux maquettes.
@@ -322,19 +322,52 @@ const DESC: &str = "Objets qui déclenchent une alerte sonore et un message à l
                     sont ramassés.";
 
 /// Ce que le panneau de suggestions afficherait pour la saisie « pierre » — le troisième champ dit
-/// si l'objet est DÉJÀ suivi (grisé, non sélectionnable, comme côté web).
+/// sa catégorie (elle décide des filtres affichés, voir `category_bar`) et le dernier s'il est
+/// DÉJÀ suivi (grisé, non sélectionnable, comme côté web).
 /// Marge gauche d'une rangée de suggestion.
 const ROW_PAD_X: f32 = 6.0;
+/// Hauteur de la bande de filtres — bouton 26 + 2 × 6 de marge (`padding: 6px` côté web).
+const CATEGORY_BAR_HEIGHT: f32 = 38.0;
+/// Côté d'un bouton de catégorie (`.wakfu-autocomplete-category-btn`, 26 × 26).
+const CATEGORY_BUTTON: f32 = 26.0;
+/// Marge intérieure du bouton : l'icône occupe 20 des 26 (`padding: 3px`).
+const CATEGORY_ICON_PAD: f32 = 3.0;
+/// Écart entre deux boutons de catégorie.
+const CATEGORY_GAP: f32 = 4.0;
+/// Marge gauche de la bande.
+const CATEGORY_PAD: f32 = 6.0;
+/// Rayon d'angle d'un bouton de catégorie.
+const CATEGORY_RADIUS: u8 = 4;
 /// Écart entre la gemme, l'image et le nom d'une rangée.
 const ROW_GAP: f32 = 6.0;
 /// Côté de l'image d'objet d'une rangée — tient dans les 28 px de `SELECT_ROW_HEIGHT`.
 const ROW_IMAGE: f32 = 22.0;
 
-const SUGGESTIONS: &[(&str, WakfuRarity, bool)] = &[
-    ("Pierre d'aventure", WakfuRarity::Mythical, true),
-    ("Pierre de dolomite", WakfuRarity::Common, false),
-    ("Pierre de lune", WakfuRarity::Rare, false),
-    ("Pierre ponce", WakfuRarity::Common, false),
+const SUGGESTIONS: &[(&str, WakfuRarity, CategoryFilter, bool)] = &[
+    (
+        "Pierre d'aventure",
+        WakfuRarity::Mythical,
+        CategoryFilter::Resources,
+        true,
+    ),
+    (
+        "Pierre de dolomite",
+        WakfuRarity::Common,
+        CategoryFilter::Resources,
+        false,
+    ),
+    (
+        "Pierre de lune",
+        WakfuRarity::Rare,
+        CategoryFilter::Equipment,
+        false,
+    ),
+    (
+        "Pierre ponce",
+        WakfuRarity::Common,
+        CategoryFilter::Craft,
+        false,
+    ),
 ];
 
 // -------------------------------------------------------------------------------------------
@@ -671,6 +704,55 @@ fn rarity_gem(ui: &egui::Ui, gems: &RarityGems, rect: Rect, rarity: WakfuRarity)
     gems.paint(ui, rect, rarity);
 }
 
+/// La bande de filtres par catégorie, en tête du panneau — **relevée sur le web**
+/// (`wakfu-autocomplete.component.ts`/`.css`).
+///
+/// Trois règles qui ne se devinent pas sur une capture :
+///
+/// 1. **Seules les catégories PRÉSENTES dans les résultats ont un bouton** (`filterButtons`) —
+///    afficher un filtre qui viderait la liste n'aurait aucun sens ; la bande disparaît
+///    entièrement s'il n'y en a aucune.
+/// 2. **« Tout » n'est pas une catégorie** : c'est la remise à zéro, toujours en tête, active tant
+///    qu'aucun filtre ne l'est.
+/// 3. **Pas de filtre « Monstres »** : il n'existe qu'en domaine `both`, et cette page est en
+///    domaine `item` (`profile-page.component.html`).
+///
+/// Un clic sur le filtre déjà actif le relâche (`toggleCategoryFilter`).
+fn category_bar(
+    ui: &egui::Ui,
+    icons: &CategoryIcons,
+    rect: Rect,
+    filtres: &[CategoryFilter],
+    actif: CategoryFilter,
+) {
+    for (i, filtre) in filtres.iter().enumerate() {
+        let cell = Rect::from_min_size(
+            egui::pos2(
+                rect.left() + CATEGORY_PAD + i as f32 * (CATEGORY_BUTTON + CATEGORY_GAP),
+                rect.center().y - CATEGORY_BUTTON / 2.0,
+            ),
+            Vec2::splat(CATEGORY_BUTTON),
+        );
+        let est_actif = *filtre == actif;
+        if est_actif {
+            ui.painter()
+                .rect_filled(cell, CATEGORY_RADIUS, design::tokens::SELECT_ROW_HIGHLIGHT);
+            ui.painter().rect_stroke(
+                cell,
+                CATEGORY_RADIUS,
+                Stroke::new(1.0, design::tokens::STEPPER_ICON_TINT),
+                StrokeKind::Inside,
+            );
+        }
+        icons.paint(ui, cell.shrink(CATEGORY_ICON_PAD), *filtre, est_actif);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
+    );
+}
+
 /// Le panneau de suggestions du champ d'ajout — voir [`alertes_options_ajout_suggestions`].
 ///
 /// **À la largeur exacte de son champ**, comme toute liste dépliée du jeu : `select-simple.png`
@@ -686,13 +768,17 @@ fn suggestion_list(
     ui: &egui::Ui,
     icons: &UiIcons,
     gems: &RarityGems,
+    cats: &CategoryIcons,
     inner: Rect,
     field_bottom: f32,
 ) {
     let row_h = design::tokens::SELECT_ROW_HEIGHT;
     let list = Rect::from_min_size(
         egui::pos2(inner.left(), field_bottom + 2.0),
-        Vec2::new(inner.width(), 4.0 + SUGGESTIONS.len() as f32 * row_h),
+        Vec2::new(
+            inner.width(),
+            4.0 + CATEGORY_BAR_HEIGHT + SUGGESTIONS.len() as f32 * row_h,
+        ),
     );
     ui.painter()
         .rect_filled(list, 2, design::tokens::SELECT_LIST_FILL);
@@ -712,9 +798,31 @@ fn suggestion_list(
         list.top() + 2.5,
         Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
     );
-    for (i, (name, rarity, already)) in SUGGESTIONS.iter().enumerate() {
+    // **La bande de filtres par catégorie**, en tête du panneau — elle ne porte QUE les catégories
+    // présentes dans les résultats, « Tout » en tête (voir `category_bar`).
+    let mut filtres = vec![CategoryFilter::All];
+    filtres.extend(CategoryFilter::ITEM_CATEGORIES.iter().copied().filter(|c| {
+        SUGGESTIONS
+            .iter()
+            .any(|(_, _, categorie, _)| categorie == c)
+    }));
+    category_bar(
+        ui,
+        cats,
+        Rect::from_min_size(
+            egui::pos2(list.left() + 2.0, list.top() + 2.0),
+            Vec2::new(list.width() - 4.0, CATEGORY_BAR_HEIGHT),
+        ),
+        &filtres,
+        CategoryFilter::All,
+    );
+
+    for (i, (name, rarity, _categorie, already)) in SUGGESTIONS.iter().enumerate() {
         let row = Rect::from_min_size(
-            egui::pos2(list.left() + 2.0, list.top() + 2.0 + i as f32 * row_h),
+            egui::pos2(
+                list.left() + 2.0,
+                list.top() + 2.0 + CATEGORY_BAR_HEIGHT + i as f32 * row_h,
+            ),
             Vec2::new(list.width() - 4.0, row_h),
         );
         // Une seule entrée en surbrillance : celle que le clavier désignerait — et **jamais une
@@ -1286,9 +1394,11 @@ fn alertes_options_ajout_suggestions() {
     let mut seconds = String::from("4");
     let mut auto = true;
     let mut gems: Option<RarityGems> = None;
+    let mut cats: Option<CategoryIcons> = None;
 
     let mut harness = options_harness(WINDOW, move |ui, icons, panel, _w| {
         let gems = gems.get_or_insert_with(|| RarityGems::load(ui.ctx()));
+        let cats = cats.get_or_insert_with(|| CategoryIcons::load(ui.ctx()));
         let inner = panel.inner;
         let field_bottom = alerts_tab(
             ui,
@@ -1304,7 +1414,7 @@ fn alertes_options_ajout_suggestions() {
                 error: None,
             },
         );
-        suggestion_list(&*ui, icons, gems, inner, field_bottom);
+        suggestion_list(&*ui, icons, gems, cats, inner, field_bottom);
     });
     harness.run();
     write_mockup(&mut harness, "alertes_options_ajout_suggestions");
