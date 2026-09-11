@@ -1084,6 +1084,83 @@ faveur de la mesure :
 Comparaison au jeu : les huit lignes de pixels (quatre par état) sont **identiques au rendu**, sans
 dérive de gamma.
 
+---
+
+## `design::slider` — curseur de réglage (2026-09-11)
+
+`crates/overlay-ui/src/design/components/slider.rs`
+
+```rust
+use overlay_ui::design;
+
+if ui.add(design::slider(&mut state.volume)).changed() {
+    audio.set_volume(state.volume);
+}
+
+// Le motif du jeu : un libellé de chaque côté, à la gouttière relevée.
+ui.horizontal(|ui| {
+    ui.label("Min");
+    ui.add_space(design::tokens::SLIDER_LABEL_GAP);
+    ui.add(design::slider(&mut state.volume).width(200.0));
+    ui.add_space(design::tokens::SLIDER_LABEL_GAP);
+    ui.label("Max");
+});
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `range` | `RangeInclusive<f32>` | `0.0..=1.0` |
+| `width` | largeur imposée | toute la largeur disponible |
+| `enabled` | `bool` | `true` |
+| `tooltip` / `log_name` | | aucune / `"slider"` |
+| `preview_state` | `Idle` / `Hovered` / `Disabled` — **galerie uniquement** | état réel |
+| `preview_fraction` | position forcée, 0..1 — **galerie uniquement** | la valeur |
+
+Textures : `DsTexture::SliderHandle` (`slider-handle.png`, 18 × 18). La rainure, elle, est peinte.
+
+### Les mesures
+
+Relevées au pixel sur les deux curseurs de volume de `interfaces/interface-options-son.png`
+(« Musique », rainure y 335..342 ; « Sons - Ambiance », y 430..437), qui concordent sur toutes les
+cotes.
+
+| Grandeur | Valeur |
+| --- | --- |
+| Rainure | 8 px de haut, 2 de liseré en haut et en bas |
+| Liseré | assombrit le fond dans le rapport **0,735** |
+| Intérieur | rapport **0,853** |
+| Poignée | 18 × 18, cercle (`radius_fit_iou` 1,0) |
+| Poignée — teintes | `#c6b187` clair, `#635944` sillon, `#817358` ombre bas-droite |
+| Largeur relevée | 200 px (x 75..274) — un ordre de grandeur, pas un gabarit |
+| Gouttière du libellé | 12 px à gauche, 10 à droite |
+
+### Quatre choses à savoir
+
+1. **La rainure est un creux, pas une barre.** Elle n'a pas de couleur propre : elle assombrit le
+   fond. C'est une mesure et non un choix de rendu — sur deux fonds qui diffèrent de deux niveaux,
+   le rapport au fond reste le même sur les trois canaux. Deux constantes opaques auraient
+   reproduit la capture et rien d'autre.
+
+2. **La portion parcourue n'est pas remplie.** Les deux curseurs du jeu sont au minimum : rien ne
+   montre ce que devient la rainure derrière la poignée. Peindre un remplissage doré serait
+   inventer du design — ce que `design::input` refuse déjà pour son état survolé.
+
+3. **La poignée est un asset alors que ses teintes sont plates**, parce que son relief est
+   *directionnel* : liseré clair en haut à gauche, mi-ton en bas à droite, sillon sombre entre les
+   deux. Le peindre demanderait deux arcs partiels pour dix-huit pixels.
+
+4. **Les libellés d'extrémité n'appartiennent pas au composant.** « Min »/« Max » conviennent à un
+   volume, pas à une échelle d'interface qui dirait « 50 % »/« 200 % ». Le jeton donne la gouttière,
+   l'appelant pose les mots.
+
+### Ce que la comparaison au jeu a rattrapé
+
+La première version peignait le liseré sur toute la hauteur puis l'intérieur par-dessus — deux
+rectangles au lieu de trois. Les alphas se composent : 0,733 × 0,851 = **0,624**, et l'intérieur
+sortait plus sombre que le liseré au lieu d'être plus clair. Un creux à l'envers, que personne
+n'aurait vu en relisant le code. Trois bandes disjointes ramènent les rapports à 0,75 et 0,83,
+contre 0,74 et 0,85 dans le jeu. La poignée, elle, est identique au pixel.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85

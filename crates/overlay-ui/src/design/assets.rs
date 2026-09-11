@@ -581,6 +581,18 @@ pub enum DsTexture {
     /// une cellule par `DesignSystem::paint_region` ; le découpage 9-slice déclaré n'est jamais
     /// utilisé (voir [`LOADER_SLICE`]).
     LoaderSheet,
+    /// Poignée d'un **curseur de réglage** (`slider-handle.png`, 18 × 18) — le disque beige doré
+    /// qu'on fait glisser sur la rainure.
+    ///
+    /// **Un asset plutôt que trois cercles peints**, alors que ses teintes sont plates : le relief
+    /// est *directionnel*. Le liseré extérieur est clair en haut et à gauche (`#c6b187`), mi-ton en
+    /// bas et à droite (`#817358`), et un sillon sombre (`#635944`) les sépare du cœur. Peindre ça
+    /// en code demanderait deux arcs partiels (`Shape::Path`) pour dix-huit pixels — la texture le
+    /// dit mieux, et le dira encore si le jeu affine son relief.
+    ///
+    /// Découpée en [`ICON_SLICE`] : c'est un glyphe, il se met à l'échelle uniformément, il n'a ni
+    /// coin ni liseré à figer.
+    SliderHandle,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -668,6 +680,7 @@ impl DsTexture {
         DsTexture::CollapseBlock,
         DsTexture::CollapseBlockHover,
         DsTexture::LoaderSheet,
+        DsTexture::SliderHandle,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -1081,6 +1094,11 @@ impl DsTexture {
                 name: "ds-loader-sheet",
                 bytes: ds_asset!("loader-sheet.png"),
                 slice: LOADER_SLICE,
+            },
+            DsTexture::SliderHandle => DsTextureSpec {
+                name: "ds-slider-handle",
+                bytes: ds_asset!("slider-handle.png"),
+                slice: ICON_SLICE,
             },
         }
     }

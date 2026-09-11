@@ -21,7 +21,7 @@ use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsTexture, IconButtonState,
-    IconContext, InfoTone, InputState, LoaderSize, SelectState, TabState,
+    IconContext, InfoTone, InputState, LoaderSize, SelectState, SliderState, TabState,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -52,7 +52,9 @@ fn galerie_du_design_system() {
         // plus, et les ~75 px de marge basse que le réglage précédent gardait déjà.
         // 5570 -> 5680 le 2026-09-11 : état d'erreur d'`input` (champ refusé, son message, et le
         // cas « désactivé ET en erreur » où `Disabled` l'emporte).
-        .with_size(Vec2::new(760.0, 5680.0))
+        // 5680 -> 5860 le 2026-09-11 : section « Curseur de réglage » (cinq positions, le motif à
+        // libellés, le désactivé et le cas dégénéré).
+        .with_size(Vec2::new(760.0, 5860.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -792,6 +794,64 @@ fn gallery(ui: &mut egui::Ui) {
                     .size(14.0),
                 );
             });
+    }
+
+    heading(
+        ui,
+        "Curseur de réglage — une rainure creusée, un disque posé dessus",
+        "La rainure n'a pas de couleur : elle assombrit le fond, mesuré comme un rapport et non comme deux teintes. La portion parcourue n'est PAS remplie — les deux curseurs du jeu sont au minimum, rien n'en montre le remplissage, et l'inventer serait inventer du design.",
+    );
+    {
+        let mut volume = 0.0_f32;
+        // Trois positions sur la largeur du jeu (200 px) — les deux extrémités et le milieu, ce
+        // que trois curseurs de 200 laissent tenir sur une ligne de 744. Aux extrémités, le disque
+        // doit affleurer le bord de la rainure sans le dépasser : c'est ce que `track_travel`
+        // garantit, et c'est là qu'on regarde le moins.
+        ui.horizontal(|ui| {
+            for fraction in [0.0, 0.5, 1.0] {
+                ui.add(
+                    design::slider(&mut volume)
+                        .width(design::tokens::SLIDER_TRACK_WIDTH_REF)
+                        .preview_fraction(fraction)
+                        .log_name(format!("galerie.slider-{fraction}")),
+                );
+                ui.add_space(12.0);
+            }
+        });
+        // Le motif du jeu : un libellé de chaque côté, à la gouttière relevée. Les mots
+        // appartiennent à l'appelant — « Min »/« Max » pour un volume, « 50 % »/« 200 % » pour une
+        // échelle d'interface.
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Min").color(CAPTION).size(13.0));
+            ui.add_space(design::tokens::SLIDER_LABEL_GAP);
+            ui.add(
+                design::slider(&mut volume)
+                    .width(design::tokens::SLIDER_TRACK_WIDTH_REF)
+                    .preview_fraction(0.35)
+                    .log_name("galerie.slider-libelles"),
+            );
+            ui.add_space(design::tokens::SLIDER_LABEL_GAP);
+            ui.label(RichText::new("Max").color(CAPTION).size(13.0));
+        });
+        ui.horizontal(|ui| {
+            ui.add(
+                design::slider(&mut volume)
+                    .width(design::tokens::SLIDER_TRACK_WIDTH_REF)
+                    .preview_fraction(0.6)
+                    .enabled(false)
+                    .preview_state(SliderState::Disabled)
+                    .log_name("galerie.slider-desactive"),
+            );
+            ui.add_space(12.0);
+            // Dégénéré : plus étroit que la poignée. La course tombe à zéro, le disque reste posé
+            // à gauche au lieu de reculer quand la valeur monte.
+            ui.add(
+                design::slider(&mut volume)
+                    .width(10.0)
+                    .preview_fraction(1.0)
+                    .log_name("galerie.slider-degenere"),
+            );
+        });
     }
 
     heading(
