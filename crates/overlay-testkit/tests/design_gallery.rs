@@ -842,11 +842,23 @@ fn gallery(ui: &mut egui::Ui) {
                     .frame(SlotFrame::Rarity(ItemRarity::Epic))
                     .log_name("galerie.slot-vide"),
             );
+            ui.add_space(8.0);
+            // **Sous le minimum** : peint quand même — un rectangle trop petit doit se voir sur la
+            // capture, pas paniquer — et signalé une fois au journal (clause 4 du contrat).
+            ui.add(
+                design::item_slot()
+                    .size(6.0)
+                    .frame(SlotFrame::Plain)
+                    .icon(faux_icone)
+                    .log_name("galerie.slot-minuscule"),
+            );
         });
         ui.label(
-            RichText::new("cadre simple · compteur simple · fraction · sans icône")
-                .color(CAPTION)
-                .size(12.0),
+            RichText::new(
+                "cadre simple · compteur simple · fraction · sans icône · 6 px, sous le minimum",
+            )
+            .color(CAPTION)
+            .size(12.0),
         );
     }
 

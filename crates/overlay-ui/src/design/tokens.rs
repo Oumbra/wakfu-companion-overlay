@@ -1106,6 +1106,16 @@ pub const ITEM_SLOT_PLAIN_ICON_FILL: f32 = 30.0 / 58.0;
 /// Épaisseur du trait d'un emplacement **sans rareté** — 2 px, celui des tuiles d'ennemi.
 pub const ITEM_SLOT_PLAIN_STROKE: f32 = 2.0;
 
+/// En dessous de ce côté, un emplacement ne peut plus rien montrer — et le dit une fois au journal
+/// (clause 4 du contrat de composant).
+///
+/// **Seuil choisi, pas mesuré**, et la raison est arithmétique : un liseré de
+/// [`ITEM_SLOT_PLAIN_STROKE`] mange 2 px de chaque côté, et une bordure de rareté réserve déjà
+/// 2 × 52/512 de son carré. À 8 px, il ne reste que 4 px au milieu — moins que le rayon des coins.
+/// Personne ne demande sciemment un emplacement de cette taille : c'est le signe d'une largeur
+/// calculée qui est tombée à rien, exactement ce qu'un journal doit rattraper.
+pub const ITEM_SLOT_MIN_SIZE: f32 = 4.0 * ITEM_SLOT_PLAIN_STROKE;
+
 /// Fond d'un emplacement — `#1e1e1e`, repris du portage web (`--surface`).
 ///
 /// Sous une bordure de rareté, il n'est visible que par les coins arrondis de la texture, dont
