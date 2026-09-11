@@ -224,11 +224,10 @@ impl EnemyFrameScroll {
             let response = ui.interact(portrait_rect, id, egui::Sense::hover());
             crate::design::tooltip(&response).text(fighter.name.as_str());
             if fighter.total_damage > 0 {
-                super::combat::paint_portrait_percent(
+                crate::design::paint_portrait_percent(
                     ui,
                     portrait_rect,
-                    fighter.total_damage,
-                    total_damage,
+                    crate::design::portrait_percent(fighter.total_damage, total_damage),
                 );
             }
         }

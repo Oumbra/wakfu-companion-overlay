@@ -68,7 +68,9 @@ fn galerie_du_design_system() {
         // simple, les deux formes de compteur).
         // 7180 -> 7400 le 2026-09-11 : section « Jauge » (cinq taux, quatre teintes, un cas
         // dégénéré).
-        .with_size(Vec2::new(760.0, 7400.0))
+        // 7400 -> 7530 le 2026-09-11 : section « Portrait » (deux formes, le grisé, le
+        // pourcentage).
+        .with_size(Vec2::new(760.0, 7530.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -690,6 +692,42 @@ fn gallery(ui: &mut egui::Ui) {
             );
         }
     });
+
+    heading(
+        ui,
+        "Portrait — carré ou rond, grisé sur décision de l'appelant",
+        "Le gabarit de combat loge ses portraits dans des médaillons ronds, la liste plate les pose carrés : c'est la forme des cadres du jeu, pas une préférence. Le pourcentage déborde du carré englobant vers l'EXTÉRIEUR — sur un rond, ce coin est hors du disque, et c'est ce qui l'empêche de recouvrir le visage.",
+    );
+    {
+        use overlay_ui::design::PortraitShape;
+        // Un glyphe du manifeste tient lieu de portrait : la galerie n'a ni atlas de classes ni
+        // catalogue distant. Ce qu'on vérifie ici est la FORME, le grisé et le pourcentage.
+        let faux = design::DesignSystem::get(ui.ctx())
+            .icon(DsIcon::Characters)
+            .id();
+        ui.horizontal(|ui| {
+            for (shape, dimmed, percent, nom) in [
+                (PortraitShape::Square, false, None, "carré"),
+                (PortraitShape::Round, false, None, "rond"),
+                (PortraitShape::Round, true, None, "rond, KO"),
+                (PortraitShape::Round, false, Some(42), "avec %"),
+                (PortraitShape::Round, true, Some(7), "KO + %"),
+                (PortraitShape::Square, false, Some(100), "carré, 100 %"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(
+                        design::portrait(faux)
+                            .shape(shape)
+                            .size(48.0)
+                            .dimmed(dimmed)
+                            .percent(percent),
+                    );
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(14.0);
+            }
+        });
+    }
 
     heading(
         ui,

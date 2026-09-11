@@ -473,7 +473,7 @@ captures d'interfaces — il n'existe pas encore.
 | `design::item_slot` | ✅ 2026-09-11 — absorbe `watchlist::entry_tile`, sept bordures au manifeste |
 | `design::meter` | ✅ 2026-09-11 — absorbe `combat::damage_bar`, six couches et l'arrondi conditionnel |
 | `design::badge` | **bloqué** — ni cotes, ni capture, ni appelant, voir ci-dessous |
-| `design::portrait` | à faire |
+| `design::portrait` | ✅ 2026-09-11 — absorbe `paint_flat_portrait` et les deux boucles du gabarit |
 | `design::table` + `pagination` | à faire — **`ui-blueprint` d'abord** |
 
 ### Pourquoi `badge` est bloqué (constat du 2026-09-11)

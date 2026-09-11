@@ -67,6 +67,10 @@ pub use components::meter::{
     fill_corners as meter_fill_corners, meter, paint as paint_meter, Meter,
 };
 pub use components::panel::{panel, Panel, PanelZones};
+pub use components::portrait::{
+    paint as paint_portrait, paint_percent as paint_portrait_percent,
+    percent_of as portrait_percent, portrait, Portrait, PortraitShape,
+};
 pub use components::scroll_area::{scroll_area, ScrollArea};
 pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::separator::{separator, Separator};
