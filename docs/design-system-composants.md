@@ -993,6 +993,77 @@ même boucle existe en `loader.apng` (alpha 8 bits, 24 i/s) et `loader.gif` (tra
 **Pas de comparaison au jeu à la même taille** : le rouage n'y existe qu'à 1×, et c'est précisément
 la capture dont il est tiré.
 
+---
+
+## `design::separator` — filet de séparation (2026-09-11)
+
+`crates/overlay-ui/src/design/components/separator.rs`
+
+```rust
+use overlay_ui::design;
+
+ui.label("Description");          // l'intitulé de section
+ui.add_space(10.0);               // la cote du dessus appartient à l'appelant
+ui.add(design::separator());      // le filet, qui réserve 12 px sous lui
+ui.label("le corps de la section");
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `width` | largeur imposée | toute la largeur disponible |
+| `on_hovered_surface` | `bool` — la **surface porteuse** est survolée | `false` |
+| `trailing_gap` | écart réservé sous le filet | `SEPARATOR_GAP_BELOW` = 12 px |
+| `log_name` | nom d'instance pour le journal | `"separator"` |
+
+Aucune texture : quatre lignes de pixels sur deux teintes plates, un PNG n'aurait rien à porter.
+
+### Les mesures
+
+Relevées au pixel sur `collapse-block-opened.png` et `collapse-block-opened-hover.png` — les
+captures **source**, pas les génériques, qui ont justement été nettoyées de leur contenu, filet
+compris. Le filet y apparaît deux fois (y=82..85 et y=152..155), identique dans les deux occurrences
+et dans les deux textures.
+
+| | fond | ligne claire (2 px) | ligne sombre (2 px) |
+| --- | --- | --- | --- |
+| repos | `#28292b` | `#323335` (+10) | `#222325` (−6) |
+| survol | `#323436` | `#3c3e3f` (+10) | `#2b2c2e` (−7) |
+
+### Quatre choses à savoir
+
+1. **C'est un bevel, pas un trait.** Deux lignes plates empilées, sans dégradé : les quatre lignes
+   de pixels ne portent que deux teintes, sans valeur intermédiaire. Rendu en un `hline` gris, le
+   filet paraît posé *sur* le fond au lieu d'y être creusé.
+
+2. **Le bevel suit son fond**, d'où `on_hovered_surface`. Le jeu recalcule les deux lignes quand la
+   surface s'éclaircit. Sans ce paramètre, la ligne claire du repos (`#323335`) se retrouve à **un
+   niveau** du fond survolé (`#323436`) et disparaît — la galerie montre les deux cas côte à côte
+   pour que l'écart se voie plutôt que d'être affirmé ici.
+
+3. **Le paramètre ne s'appelle pas `hovered`** parce que le filet ne se survole pas lui-même : il
+   n'est pas cliquable, et `response.hovered()` sur ses 4 px ne renseignerait sur rien. Ce qu'on lui
+   dit, c'est l'état de la surface qui le porte.
+
+4. **Il ne pose aucune marge latérale.** Dans la capture le filet court de x=16 à x=719 sur un cadre
+   de 732 — 16 à gauche, 12 à droite. Cette asymétrie est celle du **bloc**, pas du filet : le
+   chevron de l'en-tête s'arrête au même x=719. Le composant remplit la largeur qu'on lui donne
+   (§6 du contrat) ; dans un `design::collapsible` cela donne les 17 px de `COLLAPSE_PAD_X` des deux
+   côtés.
+
+### Deux corrections au relevé
+
+`docs/design-system/collapse-block.json` est en écart avec la texture sur deux points, tranchés en
+faveur de la mesure :
+
+- la note de `sep-1` donne la ligne claire à `#323436` — la texture donne `#323335`. `#323436` est
+  la teinte du *fond survolé*, vraisemblablement relevée à sa place.
+- la palette déclare `border-bevel-dark: #28292b`, qui est exactement le fond au repos : une ligne
+  sombre de cette teinte serait invisible. La texture donne `#222325`, valeur que la note de `sep-1`
+  portait déjà. C'est la palette qui est fautive, pas la note.
+
+Comparaison au jeu : les huit lignes de pixels (quatre par état) sont **identiques au rendu**, sans
+dérive de gamma.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -1118,7 +1189,6 @@ Ni urgent ni structurant, mais chacun retire du code d'un panneau.
 | **`design::segmented`** | Le bascule « Objets mis en vente / Offres d'achat » ; le switch Alliés/Ennemis du panneau Combat en est une variante maison. | `tabs-with-first-tab-active.png` |
 | **`design::toast`** | `watchlist::toast_card` et ses confettis — ~300 lignes, avec son générateur pseudo-aléatoire maison. | Portage du web ; aucun asset de jeu correspondant. |
 | **`design::dialog`** | Rien — la boîte de confirmation qui manquera à la première action destructrice de l'overlay. | `interfaces/interface-confirm-box.png` |
-| **`design::separator`** | Les filets de séparation des formulaires du jeu. | Captures d'interface. |
 
 ### Doublons à résorber avant d'ajouter quoi que ce soit
 
