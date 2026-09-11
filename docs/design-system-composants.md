@@ -939,6 +939,60 @@ Ils restent au dépôt comme référence de contrôle.
 
 ---
 
+## `design::loader` — rouage de chargement (2026-09-11)
+
+`crates/overlay-ui/src/design/components/loader.rs`
+
+```rust
+use overlay_ui::design::{self, LoaderSize};
+
+ui.add(design::loader());                                   // 124 px, taille native (1×)
+ui.add(design::loader().size(LoaderSize::Small));           // 48 px, le plancher
+ui.add(design::loader().size(LoaderSize::Px(80.0)).tooltip("Synchronisation…"));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `size` | `Small` (48) / `Medium` (72) / `Large` (96) / `Native` (124) / `Px(f32)` ramené dans `[48, 124]` | `Native` |
+| `tooltip` | texte d'infobulle | aucune |
+| `log_name` | nom d'instance pour le journal | `loader` |
+| `preview_frame` | image de la boucle (`0..16`) — **galerie et captures uniquement** | horloge egui |
+
+**Toujours carré, toujours animé, aucun état** : un indicateur de chargement ne se clique pas et ne
+se désactive pas. `LoaderSize::px()` rend le côté effectivement peint, pour un panneau qui réserve
+la place avant d'ajouter le composant.
+
+**L'animation ne coûte que 24 réveils par seconde** : le composant demande à egui un
+rafraîchissement au prochain changement d'image (`request_repaint_after`), pas un rendu continu.
+Hors écran (galerie), `preview_frame` fige l'image et aucun réveil n'est demandé.
+
+**Origine** : enregistrement du client du 2026-09-11 (`Enregistrement 2026-09-11 142031.mp4`,
+158 × 156 px, 30 i/s, sept écrans de chargement), isolé image par image — fond retiré par
+estimation du fond sur toute la plage, blanc conservé avec alpha 8 bits.
+
+**Mesures** :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Image | 124 × 124 px | 118 px d'encre (rayon 58,5) + 3 px de marge transparente |
+| Dents | 16 | profil angulaire au rayon des dents |
+| Rotation | 2,8° par image, une dent toutes les 8 images | corrélation angulaire image à image |
+| Boucle | **16 images** | image 386 ≡ 409, pas 399 : la tête a une période double de celle des dents |
+| Cadence | 24 i/s | 4 images nouvelles sur 5 enregistrées |
+
+**Choisi, pas mesuré** : le plancher de 48 px est une décision utilisateur (en dessous, les seize
+dents se confondent) ; `Medium` et `Large` découpent l'intervalle en marches d'environ 25 px. Une
+taille hors de l'intervalle est ramenée à la borne, avec un `warn!` unique par instance.
+
+**Textures** : `loader-sheet.png` (496 × 496, grille 4 × 4 lue ligne par ligne), **une planche et
+non seize textures** — peinte par `DesignSystem::paint_region`, le seul chemin du manifeste qui
+lit une région par ses UV. Le 9-slice déclaré (`LOADER_SLICE` = `ICON_SLICE`) ne sert pas. La
+même boucle existe en `loader.apng` (alpha 8 bits, 24 i/s) et `loader.gif` (transparence 1 bit,
+25 i/s faute de granularité GIF) pour tout ce qui n'est pas egui.
+
+**Pas de comparaison au jeu à la même taille** : le rouage n'y existe qu'à 1×, et c'est précisément
+la capture dont il est tiré.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
