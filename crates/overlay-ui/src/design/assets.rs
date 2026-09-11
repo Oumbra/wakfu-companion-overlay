@@ -346,6 +346,19 @@ pub enum DsTexture {
     /// Flèche de réinitialisation (`icons/icon-undo.png`, 14 × 12) — le bouton « rétablir les
     /// valeurs par défaut » de la fenêtre Options (`interface-options-son.png`, coin haut-droit).
     IconUndo,
+    /// Haut-parleur (`icons/icon-volume.png`, 26 × 22) — glyphe de volume actif, détouré le
+    /// 2026-09-11 (skill `design-asset`) depuis une capture du jeu sans socle porteur : le glyphe
+    /// est directement posé sur le décor, contrairement aux icônes prélevées sur un bouton.
+    ///
+    /// **Pas encore d'appelant** : aucun réglage de son n'est câblé dans l'overlay à ce jour —
+    /// `alert_sound` ne fait que jouer les sons, jamais les couper. Entrée au manifeste comme
+    /// [`DsTexture::ModalHeader`] avant sa bannière : préparée pour le futur bouton muet/actif de
+    /// la fenêtre Options (`interface-options-son.png`), posée sur un socle de bouton icône —
+    /// d'où `icon_content_size`, comme les glyphes de la même famille.
+    IconVolume,
+    /// Haut-parleur barré (`icons/icon-volume-mute.png`, 26 × 26) — pendant coupé de
+    /// [`DsTexture::IconVolume`], même provenance et même statut (pas encore d'appelant).
+    IconVolumeMute,
     /// Corps de la modale Options (`modal-body.png`, 720 × 505) — le fond SOUS la bannière,
     /// découpé des six captures de la fenêtre Options du jeu puis débarrassé de son contenu
     /// (`tools/design-system/build_modal_body.py`, §9 ter du design-system).
@@ -471,6 +484,8 @@ impl DsTexture {
         DsTexture::IconHelp,
         DsTexture::IconTick,
         DsTexture::IconUndo,
+        DsTexture::IconVolume,
+        DsTexture::IconVolumeMute,
         DsTexture::ModalBody,
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
@@ -506,7 +521,9 @@ impl DsTexture {
             | DsTexture::IconClose
             | DsTexture::IconDelete
             | DsTexture::IconHelp
-            | DsTexture::IconUndo => Some(tokens::ICON_BUTTON_CONTENT),
+            | DsTexture::IconUndo
+            | DsTexture::IconVolume
+            | DsTexture::IconVolumeMute => Some(tokens::ICON_BUTTON_CONTENT),
             _ => None,
         }
     }
@@ -686,6 +703,16 @@ impl DsTexture {
             DsTexture::IconUndo => DsTextureSpec {
                 name: "ds-icon-undo",
                 bytes: ds_asset!("icons/icon-undo.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconVolume => DsTextureSpec {
+                name: "ds-icon-volume",
+                bytes: ds_asset!("icons/icon-volume.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconVolumeMute => DsTextureSpec {
+                name: "ds-icon-volume-mute",
+                bytes: ds_asset!("icons/icon-volume-mute.png"),
                 slice: ICON_SLICE,
             },
             DsTexture::ModalBody => DsTextureSpec {
