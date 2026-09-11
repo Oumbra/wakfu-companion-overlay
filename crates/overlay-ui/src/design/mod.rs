@@ -45,6 +45,9 @@ pub use icons::DsIcon;
 // Les trois fonctions de géométrie du repliable sont préfixées à la réexportation : `design::
 // closed_height` ne dirait pas de quoi, et le jour où un second conteneur en aura une, le nom nu
 // serait déjà pris.
+pub use components::autocomplete::{
+    autocomplete, Autocomplete, AutocompleteEntry, AutocompleteFilter, AutocompleteOutcome,
+};
 pub use components::collapsible::{
     closed_height as collapsible_closed_height, collapsible,
     content_width as collapsible_content_width, open_height as collapsible_open_height,

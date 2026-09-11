@@ -13,6 +13,13 @@
 //! Le fichier est choisi par `IconRef::for_rarity(rarité).gfx_id`, pas par une seconde table écrite
 //! ici : c'est la MÊME correspondance rareté → numéro que celle qui construira l'URL au runtime,
 //! donc une planche fausse voudrait dire que le code de production l'est aussi.
+//!
+//! **Pourquoi des `allow(dead_code)` ici** : ce fichier est compilé dans TROIS cibles — les deux
+//! exemples de maquette et le test de galerie — et chacune n'en emploie qu'une partie. Les
+//! exemples peignent eux-mêmes (`paint`, `label`, `ITEM_CATEGORIES`), la galerie passe les images
+//! à `design::autocomplete` (`texture_id`) et n'a besoin ni de l'une ni de l'autre. Un membre
+//! signalé mort dans une cible est donc vivant dans une autre : le supprimer casserait la cible
+//! d'en face.
 
 use std::collections::HashMap;
 
@@ -26,9 +33,19 @@ pub const GEM_NATIVE: Vec2 = Vec2::new(13.0, 20.0);
 /// (`.wakfu-autocomplete-item-rarity`, 14 × 14 en `object-fit: contain`) : une image 13 × 20 y
 /// entre donc en 9,1 × 14, limitée par la hauteur. Jamais un `Vec2::splat` sur la boîte, qui
 /// écraserait la gemme en carré.
+///
+/// `allow(dead_code)` : employé par les exemples, pas par la galerie (voir la doc du module) — le
+/// composant `design::autocomplete` porte son propre jeton `AUTOCOMPLETE_GEM_BOX`, de même valeur
+/// et de même provenance.
+#[allow(dead_code)]
 pub const GEM_BOX: f32 = 14.0;
 
 /// Les huit gemmes, chargées une fois.
+///
+/// `Clone` pour pouvoir vivre dans la mémoire d'egui : un `TextureHandle` LIBÈRE sa texture quand
+/// le dernier exemplaire tombe, donc un chargement par frame peint des cases vides — piège déjà
+/// rencontré sur `UiIcons` en début de session.
+#[derive(Clone)]
 pub struct RarityGems {
     par_numero: HashMap<String, TextureHandle>,
 }
@@ -63,7 +80,25 @@ impl RarityGems {
         Self { par_numero }
     }
 
+    /// L'identifiant de texture d'une gemme — ce que `design::autocomplete` attend, puisque ces
+    /// images sont du CONTENU et non du décor (voir la doc du composant).
+    ///
+    /// Rend l'identifiant de la gemme « Commun » plutôt que de paniquer si la rareté est absente :
+    /// une fixture manquante est un défaut de planche, pas une raison de faire échouer un rendu.
+    ///
+    /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
+    #[allow(dead_code)]
+    pub fn texture_id(&self, rarity: WakfuRarity) -> egui::TextureId {
+        self.par_numero
+            .get(&IconRef::for_rarity(rarity).gfx_id)
+            .or_else(|| self.par_numero.get("1"))
+            .map_or(egui::TextureId::default(), |texture| texture.id())
+    }
+
     /// Peint la gemme d'une rareté, centrée dans `box_rect` et **à son rapport natif**.
+    ///
+    /// `allow(dead_code)` : employé par les exemples, pas par la galerie (voir la doc du module).
+    #[allow(dead_code)]
     pub fn paint(&self, ui: &egui::Ui, box_rect: Rect, rarity: WakfuRarity) {
         let Some(texture) = self.par_numero.get(&IconRef::for_rarity(rarity).gfx_id) else {
             return;
@@ -109,6 +144,8 @@ impl CategoryFilter {
     /// Les huit catégories d'OBJET, dans l'ordre du web. Ni « Tout » ni « Monstres » : le premier
     /// n'est pas une catégorie, le second n'existe qu'en domaine `both` — et la page Alertes est en
     /// domaine `item` (voir `profile-page.component.html`, `domain="item"`).
+    /// `allow(dead_code)` : employé par les exemples, pas par la galerie (voir la doc du module).
+    #[allow(dead_code)]
     pub const ITEM_CATEGORIES: [CategoryFilter; 8] = [
         CategoryFilter::Equipment,
         CategoryFilter::Resources,
@@ -166,7 +203,9 @@ impl CategoryFilter {
     }
 }
 
-/// Les dix icônes de catégorie, chargées une fois.
+/// Les dix icônes de catégorie, chargées une fois. `Clone` pour la même raison que
+/// [`RarityGems`].
+#[derive(Clone)]
 pub struct CategoryIcons {
     par_numero: HashMap<String, TextureHandle>,
 }
@@ -203,11 +242,25 @@ impl CategoryIcons {
         Self { par_numero }
     }
 
+    /// L'identifiant de texture d'une icône de filtre — même raison que
+    /// [`RarityGems::texture_id`].
+    ///
+    /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
+    #[allow(dead_code)]
+    pub fn texture_id(&self, filtre: CategoryFilter) -> egui::TextureId {
+        self.par_numero
+            .get(&filtre.icon_ref().gfx_id)
+            .map_or(egui::TextureId::default(), |texture| texture.id())
+    }
+
     /// Peint l'icône d'un filtre dans `rect`, avec l'opacité que le web donne à son état.
     ///
     /// `actif` : pleine opacité. Sinon 0,6, comme `.wakfu-autocomplete-category-btn` au repos —
     /// c'est cette différence d'encre, pas seulement le cadre, qui fait ressortir le filtre en
     /// cours.
+    ///
+    /// `allow(dead_code)` : employé par les exemples, pas par la galerie (voir la doc du module).
+    #[allow(dead_code)]
     pub fn paint(&self, ui: &egui::Ui, rect: Rect, filtre: CategoryFilter, actif: bool) {
         let Some(texture) = self.par_numero.get(&filtre.icon_ref().gfx_id) else {
             return;
@@ -218,5 +271,55 @@ impl CategoryIcons {
             egui::Color32::from_white_alpha(153)
         };
         egui::Image::new(texture).tint(teinte).paint_at(ui, rect);
+    }
+}
+
+// -------------------------------------------------------------------------------------------
+// Les icônes d'objet des rangées de suggestion
+// -------------------------------------------------------------------------------------------
+
+/// Deux icônes d'objet, chargées une fois. `Clone` pour la même raison que [`RarityGems`].
+///
+/// **Ce sont deux fixtures arbitraires** (`items/21000.png` et `items/21001.png` du CDN), pas les
+/// icônes des objets que la galerie nomme : au runtime, `RemoteIconStore` résout l'icône par le
+/// `gfxId` du catalogue, que le harnais n'a pas. Ce qu'elles vérifient est la **colonne image**
+/// d'une rangée — sa taille, sa position entre la gemme et le libellé — pas une correspondance
+/// nom → image que rien ici ne peut établir.
+#[derive(Clone)]
+pub struct ItemIcons {
+    textures: Vec<TextureHandle>,
+}
+
+impl ItemIcons {
+    /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
+    #[allow(dead_code)]
+    pub fn load(ctx: &Context) -> Self {
+        const FIXTURES: &[(&str, &[u8])] = &[
+            ("21000", include_bytes!("../../fixtures/items/21000.png")),
+            ("21001", include_bytes!("../../fixtures/items/21001.png")),
+        ];
+        let textures = FIXTURES
+            .iter()
+            .map(|(numero, bytes)| {
+                let image = image::load_from_memory(bytes)
+                    .expect("icône d'objet décodable")
+                    .to_rgba8();
+                let taille = [image.width() as usize, image.height() as usize];
+                ctx.load_texture(
+                    format!("maquette.objet-{numero}"),
+                    egui::ColorImage::from_rgba_unmultiplied(taille, image.as_raw()),
+                    TextureOptions::LINEAR,
+                )
+            })
+            .collect();
+        Self { textures }
+    }
+
+    /// L'identifiant de texture de la `rang`-ième fixture, en boucle.
+    ///
+    /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
+    #[allow(dead_code)]
+    pub fn texture_id(&self, rang: usize) -> egui::TextureId {
+        self.textures[rang % self.textures.len()].id()
     }
 }

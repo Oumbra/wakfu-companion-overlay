@@ -376,6 +376,61 @@ pub const SELECT_LIST_BORDER: Color32 = Color32::from_rgb(0x0E, 0x10, 0x15);
 /// c'est son fond qui porte le signal.
 pub const SELECT_TEXT: Color32 = Color32::WHITE;
 
+// -------------------------------------------------------------------------------------------
+// Autocomplétion — `design::autocomplete`
+// -------------------------------------------------------------------------------------------
+//
+// Le composant **reprend les jetons de `select` déplié** pour tout ce qui les concerne (fond de
+// liste, bord, surbrillance, filet de tête, cadence de rangée) : c'est la même liste du jeu, il n'y
+// a pas de second relevé à faire. Les jetons ci-dessous ne couvrent que ce que `select` n'a pas —
+// la bande de filtres et le contenu d'une rangée.
+//
+// Provenance : `shared/wakfu-autocomplete/wakfu-autocomplete.component.css` du dépôt
+// `Oumbra/wakfu-companion`, relevé le 2026-09-11. Ce sont des valeurs de la version WEB, portées
+// telles quelles faute de capture du jeu montrant une autocomplétion — le jeu n'en a pas. Ce n'est
+// donc PAS une mesure sur asset : c'est un portage assumé, et c'est dit ici plutôt que laissé à
+// deviner.
+
+/// Hauteur de la bande de filtres : bouton 26 + 2 × 6 de marge (`padding: 6px`).
+pub const AUTOCOMPLETE_FILTER_BAR_HEIGHT: f32 = 38.0;
+/// Côté d'un bouton de filtre — `.wakfu-autocomplete-category-btn`, 26 × 26.
+pub const AUTOCOMPLETE_FILTER_BUTTON: f32 = 26.0;
+/// Marge intérieure d'un bouton de filtre : l'icône occupe 20 des 26 (`padding: 3px`).
+pub const AUTOCOMPLETE_FILTER_ICON_PAD: f32 = 3.0;
+/// Écart entre deux boutons de filtre (`gap: 4px`).
+pub const AUTOCOMPLETE_FILTER_GAP: f32 = 4.0;
+/// Rayon d'angle d'un bouton de filtre (`border-radius: 4px`).
+pub const AUTOCOMPLETE_FILTER_RADIUS: u8 = 4;
+/// Opacité d'un filtre au repos (`opacity: 0.6`), appliquée en alpha de teinte.
+pub const AUTOCOMPLETE_FILTER_IDLE_ALPHA: u8 = 153;
+/// Marge gauche d'une rangée et de la bande de filtres.
+pub const AUTOCOMPLETE_ROW_PADDING_X: f32 = 6.0;
+/// Écart entre la gemme, l'image et le nom d'une rangée.
+pub const AUTOCOMPLETE_ROW_GAP: f32 = 6.0;
+/// Côté de la boîte de la gemme de rareté — `.wakfu-autocomplete-item-rarity`, 14 × 14 en
+/// `object-fit: contain` : une image 13 × 20 y entre donc en 9,1 × 14, limitée par la hauteur.
+pub const AUTOCOMPLETE_GEM_BOX: f32 = 14.0;
+/// Côté de l'image d'objet d'une rangée — tient dans les 28 px de [`SELECT_ROW_HEIGHT`].
+pub const AUTOCOMPLETE_IMAGE_SIZE: f32 = 22.0;
+/// Écart entre le champ et le panneau déplié.
+pub const AUTOCOMPLETE_PANEL_GAP: f32 = 2.0;
+/// Marge intérieure du panneau, sur les quatre côtés.
+pub const AUTOCOMPLETE_PANEL_PAD: f32 = 2.0;
+/// Hauteur de la bande « Aucun résultat dans cette catégorie ».
+pub const AUTOCOMPLETE_EMPTY_HEIGHT: f32 = 34.0;
+/// Nombre de rangées visibles avant que la liste ne défile — `max-height: 175px` côté web, soit
+/// cinq rangées.
+pub const AUTOCOMPLETE_MAX_VISIBLE_ROWS: usize = 5;
+/// Longueur minimale de la requête avant toute recherche — `MIN_QUERY_LENGTH`
+/// (`wakfu-search.service.ts`), comptée sur la requête NORMALISÉE, pas sur la frappe brute.
+pub const AUTOCOMPLETE_MIN_QUERY_LEN: usize = 3;
+/// Corps du nom d'une entrée.
+pub const AUTOCOMPLETE_ENTRY_FONT_SIZE: f32 = 15.0;
+/// Corps de la mention de droite (« déjà suivi »), et du message de catégorie vide.
+pub const AUTOCOMPLETE_MENTION_FONT_SIZE: f32 = 13.0;
+/// Marge droite de la mention.
+pub const AUTOCOMPLETE_MENTION_MARGIN: f32 = 10.0;
+
 /// Corps du texte d'une liste — 17px, la même encre de 13px que tous les libellés de contrôle.
 pub const SELECT_FONT_SIZE: f32 = 17.0;
 
