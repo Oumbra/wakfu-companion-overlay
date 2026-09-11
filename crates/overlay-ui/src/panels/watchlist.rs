@@ -147,9 +147,10 @@
 //! reste à la charge du panneau (le placement des infobulles) dans la doc de `control_button` ;
 //! avant/après dans `overlay-testkit/tests/icon_button_migration.rs`.
 
-use overlay_engine::{CatalogIndex, WakfuRarity, WatchlistEntry, WatchlistKind, WatchlistMode};
+use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::design::{self, text, DsIcon, IconContext};
+use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
@@ -1127,24 +1128,6 @@ fn entry_tile(
     // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
     // 2026-09-06, design system tooltip).
     design::tooltip(&response).text(&entry.name);
-}
-
-/// Traduit la rareté du moteur vers celle du design system.
-///
-/// Les deux énumérations coexistent **volontairement** : un composant n'accède pas à
-/// `overlay_engine` (§6 du contrat), et c'est le rôle d'un panneau de faire le pont. `WakfuRarity::
-/// Old` retombe sur `Common`, faute d'asset dédié — elle n'est de toute façon jamais résolue au
-/// catalogue.
-fn to_slot_rarity(rarity: WakfuRarity) -> design::ItemRarity {
-    match rarity {
-        WakfuRarity::Old | WakfuRarity::Common => design::ItemRarity::Common,
-        WakfuRarity::Rare => design::ItemRarity::Rare,
-        WakfuRarity::Mythical => design::ItemRarity::Mythical,
-        WakfuRarity::Legendary => design::ItemRarity::Legendary,
-        WakfuRarity::Memory => design::ItemRarity::Memory,
-        WakfuRarity::Epic => design::ItemRarity::Epic,
-        WakfuRarity::Relic => design::ItemRarity::Relic,
-    }
 }
 
 /// Traduit une entrée de suivi en compteur du design system.

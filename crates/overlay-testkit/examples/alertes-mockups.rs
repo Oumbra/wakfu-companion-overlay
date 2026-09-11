@@ -87,8 +87,11 @@ mod wakassets_fixtures;
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
-use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize};
+use overlay_ui::design::{
+    self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize, SlotFrame,
+};
 use overlay_ui::panels::options_modal::OptionsTab;
+use overlay_ui::rarity_bridge::to_slot_rarity;
 use overlay_ui::ui_icons::UiIcons;
 
 use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_NATIVE};
@@ -123,13 +126,9 @@ const TEXT: Color32 = Color32::WHITE;
 /// neutre — crée un niveau de hiérarchie qui n'existe pas.
 const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
-/// Fenêtre intérieure de `Border-<RARETÉ>.webp` — `ITEM_BORDER_INNER_MARGIN_RATIO` de
-/// `panels::watchlist`, mesurée une fois pour toutes sur les sept fichiers (52/512).
-const BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
-
-/// Part de la fenêtre intérieure occupée par l'icône — `ITEM_ICON_FILL_RATIO` de
-/// `panels::watchlist`, réglé sur retour utilisateur (« les objets doivent être plus gros »).
-const ICON_FILL_RATIO: f32 = 0.96;
+// Les ratios de l'emplacement (fenêtre intérieure de la bordure, part occupée par l'icône) sont
+// dans `design::tokens` depuis que `design::item_slot` existe — cette maquette n'en garde plus de
+// copie.
 
 /// **Taille de la fenêtre Options telle que cette page la demande.**
 ///
@@ -359,33 +358,6 @@ const SUGGESTIONS: &[(&str, WakfuRarity, CategoryFilter, bool)] = &[
 // Briques partagées
 // -------------------------------------------------------------------------------------------
 
-/// Peint l'emplacement d'objet du jeu dans `rect` — **bordure de rareté optionnelle**.
-///
-/// `Some(rareté)` : la tuile d'alerte et celle du Suivi, où le cadre coloré EST le porteur de la
-/// rareté. `None` : le panneau de suggestions, où la rareté est déjà dite par la gemme qui précède
-/// l'image — la bordure ferait doublon (demande explicite de l'utilisateur, 2026-09-11 : « tu ne
-/// dois garder que la gemme et l'image »). C'est aussi ce que fait le web, dont `app-item-icon`
-/// est une image nue.
-///
-/// **La bordure se peint AVANT l'icône**, jamais après : la fenêtre intérieure de
-/// `Border-<RARETÉ>.webp` n'est pas transparente mais un aplat semi-opaque teinté par la rareté —
-/// peinte après, elle voile l'icône entière. C'est un bug réel corrigé le 2026-09-06 dans
-/// `panels::watchlist`, et la première chose que la doc du futur composant devra porter.
-///
-/// L'icône est le repli générique : les vraies viennent du CDN (`remote_icons`), inaccessible
-/// depuis le harnais. C'est aussi ce que l'overlay affiche tant qu'un téléchargement n'a pas
-/// abouti — ce qui est jugé ici est l'emplacement, pas le dessin de l'objet.
-fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<WakfuRarity>) {
-    if let Some(rarity) = rarity {
-        egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
-    }
-    let inner = rect.width() * (1.0 - 2.0 * BORDER_INNER_RATIO) * ICON_FILL_RATIO;
-    egui::Image::new(icons.unknown_entity_texture()).paint_at(
-        ui,
-        Rect::from_center_size(rect.center(), Vec2::splat(inner)),
-    );
-}
-
 /// Ce que la maquette fournit au composant : les entrées et les filtres, rien d'autre.
 ///
 /// Le composant ne cherche rien et ne connaît ni catalogue ni rareté — il reçoit des suggestions
@@ -538,7 +510,17 @@ fn alert_item(
         ),
         Vec2::splat(TILE_SLOT),
     );
-    item_slot(ui, icons, slot, Some(item.rarity));
+    // **`design::item_slot`**, pas une peinture locale : l'aplat, la bordure de rareté et leur
+    // ordre (bordure SOUS l'icône) sont au composant depuis le 2026-09-11. L'icône reste le repli
+    // générique — les vraies viennent du CDN, hors de portée du harnais.
+    ui.put(
+        slot,
+        design::item_slot()
+            .size(TILE_SLOT)
+            .frame(SlotFrame::Rarity(to_slot_rarity(item.rarity)))
+            .icon(icons.unknown_entity_texture().id())
+            .log_name(item.name),
+    );
 
     // Le nom, élidé à la largeur de la tuile. `name_rect` est la zone de survol de l'infobulle
     // du nom : le libellé seul, pas la tuile entière (demande explicite de l'utilisateur).
