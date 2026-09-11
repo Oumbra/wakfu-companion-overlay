@@ -149,7 +149,7 @@
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
-use crate::design::{self, DsIcon, IconContext};
+use crate::design::{self, text, DsIcon, IconContext};
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
@@ -792,11 +792,14 @@ fn toast_card(
         _ => toast.name.clone(),
     };
 
+    // Police du design system, et non la proportionnelle par défaut d'egui — une Ubuntu *Light*,
+    // plus maigre que tout ce que le jeu écrit. Les corps, eux, ne bougent pas : ce sont des cotes
+    // du portage web, pas des mesures du client.
+    let title_font = text::label_font(ui.ctx(), 11.0);
+    let name_font = text::label_font(ui.ctx(), 14.0);
     let painter = ui.painter();
-    let title_galley =
-        painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(11.0), ACCENT);
-    let name_galley =
-        painter.layout_no_wrap(name_text, egui::FontId::proportional(14.0), TEXT_BRIGHT);
+    let title_galley = painter.layout_no_wrap(title.to_string(), title_font, ACCENT);
+    let name_galley = painter.layout_no_wrap(name_text, name_font, TEXT_BRIGHT);
 
     let text_width = title_galley.size().x.max(name_galley.size().x);
     let text_height = title_galley.size().y + CARD_TEXT_GAP + name_galley.size().y;
@@ -936,7 +939,7 @@ fn toast_card(
         close_rect.center(),
         egui::Align2::CENTER_CENTER,
         "×",
-        egui::FontId::proportional(12.0),
+        text::label_font(ui.ctx(), 12.0),
         with_alpha(close_glyph, card_alpha),
     );
     // `design::tooltip` plutôt qu'un `on_hover_text` brut (refonte 2026-09-06, design
