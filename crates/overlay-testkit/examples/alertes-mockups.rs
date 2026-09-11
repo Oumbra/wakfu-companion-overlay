@@ -318,6 +318,15 @@ const DESC: &str = "Objets qui déclenchent une alerte sonore et un message à l
 
 /// Ce que le panneau de suggestions afficherait pour la saisie « pierre » — le troisième champ dit
 /// si l'objet est DÉJÀ suivi (grisé, non sélectionnable, comme côté web).
+/// Marge gauche d'une rangée de suggestion.
+const ROW_PAD_X: f32 = 6.0;
+/// Écart entre la gemme, l'image et le nom d'une rangée.
+const ROW_GAP: f32 = 6.0;
+/// Côté de la gemme de rareté.
+const GEM_SIDE: f32 = 14.0;
+/// Côté de l'image d'objet d'une rangée — tient dans les 28 px de `SELECT_ROW_HEIGHT`.
+const ROW_IMAGE: f32 = 22.0;
+
 const SUGGESTIONS: &[(&str, WakfuRarity, bool)] = &[
     ("Pierre d'aventure", WakfuRarity::Mythical, true),
     ("Pierre de dolomite", WakfuRarity::Common, false),
@@ -329,7 +338,13 @@ const SUGGESTIONS: &[(&str, WakfuRarity, bool)] = &[
 // Briques partagées
 // -------------------------------------------------------------------------------------------
 
-/// Peint l'emplacement d'objet du jeu (bordure de rareté + icône) dans `rect`.
+/// Peint l'emplacement d'objet du jeu dans `rect` — **bordure de rareté optionnelle**.
+///
+/// `Some(rareté)` : la tuile d'alerte et celle du Suivi, où le cadre coloré EST le porteur de la
+/// rareté. `None` : le panneau de suggestions, où la rareté est déjà dite par la gemme qui précède
+/// l'image — la bordure ferait doublon (demande explicite de l'utilisateur, 2026-09-11 : « tu ne
+/// dois garder que la gemme et l'image »). C'est aussi ce que fait le web, dont `app-item-icon`
+/// est une image nue.
 ///
 /// **La bordure se peint AVANT l'icône**, jamais après : la fenêtre intérieure de
 /// `Border-<RARETÉ>.webp` n'est pas transparente mais un aplat semi-opaque teinté par la rareté —
@@ -339,8 +354,10 @@ const SUGGESTIONS: &[(&str, WakfuRarity, bool)] = &[
 /// L'icône est le repli générique : les vraies viennent du CDN (`remote_icons`), inaccessible
 /// depuis le harnais. C'est aussi ce que l'overlay affiche tant qu'un téléchargement n'a pas
 /// abouti — ce qui est jugé ici est l'emplacement, pas le dessin de l'objet.
-fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: WakfuRarity) {
-    egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<WakfuRarity>) {
+    if let Some(rarity) = rarity {
+        egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+    }
     let inner = rect.width() * (1.0 - 2.0 * BORDER_INNER_RATIO) * ICON_FILL_RATIO;
     egui::Image::new(icons.unknown_entity_texture()).paint_at(
         ui,
@@ -416,7 +433,7 @@ fn alert_item(
         ),
         Vec2::splat(TILE_SLOT),
     );
-    item_slot(ui, icons, slot, item.rarity);
+    item_slot(ui, icons, slot, Some(item.rarity));
 
     // Le nom, élidé à la largeur de la tuile. `name_rect` est la zone de survol de l'infobulle
     // du nom : le libellé seul, pas la tuile entière (demande explicite de l'utilisateur).
@@ -641,6 +658,25 @@ fn clamp_duration(raw: &str) -> f32 {
     raw.replace(',', ".").parse::<f32>().unwrap_or(3.5).max(0.5)
 }
 
+/// La gemme de rareté d'une rangée de suggestion — **place réservée, pas un dessin**.
+///
+/// Le web la sert depuis `wakassets/rarities/{n}.png` (`wakfuRarityIconUrl`) : ce n'est pas un
+/// asset du design system mais une **image distante**, du même CDN et du même genre que les icônes
+/// d'objets. L'overlay sait déjà chercher ce CDN (`RemoteIconStore`) — il lui manque une variante
+/// `IconKind::Rarity` dans `overlay_engine::catalog`. Le harnais n'y accède pas (politique réseau
+/// de la session), d'où l'emplacement réservé.
+fn rarity_gem(ui: &egui::Ui, rect: Rect, _rarity: WakfuRarity) {
+    // La rareté est déjà au paramètre : c'est elle qui choisira `rarities/{n}.png` une fois la
+    // variante `IconKind::Rarity` en place. Le harnais n'a pas l'image, il n'en réserve que la
+    // place — d'où le préfixe `_`, qui dit « pas encore utilisé », pas « inutile ».
+    ui.painter().rect_stroke(
+        rect,
+        2,
+        Stroke::new(1.0, design::tokens::TEXT_DISABLED),
+        StrokeKind::Inside,
+    );
+}
+
 /// Le panneau de suggestions du champ d'ajout — voir [`alertes_options_ajout_suggestions`].
 ///
 /// **À la largeur exacte de son champ**, comme toute liste dépliée du jeu : `select-simple.png`
@@ -681,22 +717,35 @@ fn suggestion_list(ui: &egui::Ui, icons: &UiIcons, inner: Rect, field_bottom: f3
             egui::pos2(list.left() + 2.0, list.top() + 2.0 + i as f32 * row_h),
             Vec2::new(list.width() - 4.0, row_h),
         );
-        // Une seule entrée en surbrillance : celle que le clavier désignerait.
-        if i == 1 {
+        // Une seule entrée en surbrillance : celle que le clavier désignerait — et **jamais une
+        // entrée déjà suivie**, qui n'est pas sélectionnable. Une ligne grisée qui s'allume quand
+        // même promet un clic qui n'arrivera pas.
+        if i == 1 && !*already {
             ui.painter()
                 .rect_filled(row, 0, design::tokens::SELECT_ROW_HIGHLIGHT);
         }
+        // **Gemme de rareté, puis image NUE** — l'ordre du web (`wakfu-autocomplete`). Pas de
+        // bordure de rareté ici : la gemme la porte déjà, le cadre coloré ferait doublon.
+        rarity_gem(
+            ui,
+            Rect::from_center_size(
+                egui::pos2(row.left() + ROW_PAD_X + GEM_SIDE / 2.0, row.center().y),
+                Vec2::splat(GEM_SIDE),
+            ),
+            *rarity,
+        );
+        let image_x = row.left() + ROW_PAD_X + GEM_SIDE + ROW_GAP;
         item_slot(
             ui,
             icons,
             Rect::from_center_size(
-                egui::pos2(row.left() + 16.0, row.center().y),
-                Vec2::splat(22.0),
+                egui::pos2(image_x + ROW_IMAGE / 2.0, row.center().y),
+                Vec2::splat(ROW_IMAGE),
             ),
-            *rarity,
+            None,
         );
         ui.painter().text(
-            egui::pos2(row.left() + 34.0, row.center().y),
+            egui::pos2(image_x + ROW_IMAGE + ROW_GAP, row.center().y),
             egui::Align2::LEFT_CENTER,
             *name,
             design::text::label_font(ui.ctx(), 15.0),
