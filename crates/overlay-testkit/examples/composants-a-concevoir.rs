@@ -98,6 +98,8 @@ const CATEGORY_GAP: f32 = 4.0;
 const CATEGORY_PAD: f32 = 6.0;
 /// Rayon d'angle d'un bouton.
 const CATEGORY_RADIUS: u8 = 4;
+/// Hauteur du message « Aucun résultat dans cette catégorie », sous la bande de filtres.
+const VIDE_HEIGHT: f32 = 34.0;
 
 /// Les sept raretés du référentiel, dans l'ordre du jeu.
 const RARITIES: &[(WakfuRarity, &str)] = &[
@@ -879,9 +881,32 @@ fn confirm(ui: &mut egui::Ui, question: &str) {
 /// **Le vrai mécanisme d'ajout d'un objet** : une alerte a besoin d'un identifiant résolu par le
 /// catalogue, pas d'un nom tapé librement.
 ///
-/// Le vocabulaire est déjà celui de `design::select` déplié (mêmes jetons de fond, de bord, de
+/// Le vocabulaire visuel est celui de `design::select` déplié (mêmes jetons de fond, de bord, de
 /// surbrillance et de cadence) : c'est une **extension de `select`** plutôt qu'un composant neuf,
-/// avec une icône par entrée et une entrée désactivable.
+/// avec une bande de filtres, une icône par entrée et une entrée désactivable.
+///
+/// # Les règles de comportement, relevées sur `shared/wakfu-autocomplete`
+///
+/// Elles ne se voient sur aucune capture, et ce sont elles qui feront le composant :
+///
+/// 1. **Rien avant trois caractères** (`MIN_QUERY_LENGTH = 3`, `wakfu-search.service.ts`), comptés
+///    sur la requête NORMALISÉE — pas sur la frappe brute. En dessous, la recherche rend une liste
+///    vide et le panneau ne s'ouvre pas du tout.
+/// 2. **Une entrée déjà suivie n'est pas sélectionnable** — grisée, sans surbrillance au survol.
+///    L'égalité se fait **par identifiant** quand il est connu, par nom seulement à défaut : deux
+///    objets homonymes de raretés différentes ne se désactivent pas l'un l'autre.
+/// 3. **Un filtre actif RESTREINT la liste** à sa seule catégorie (`results` = `rawResults` filtré).
+///    Sélectionner « Équipements » ne laisse que des équipements, et rien d'autre.
+/// 4. **La bande de filtres se calcule sur la liste NON filtrée.** C'est la subtilité du composant :
+///    elle reste entière même quand le filtre actif ne laisse rien passer — sinon le bouton qui
+///    permettrait de le relâcher disparaîtrait avec les résultats, et l'utilisateur serait coincé
+///    devant une liste vide. Dans ce cas le panneau affiche « Aucun résultat dans cette catégorie »
+///    à la place des rangées, la bande toujours en place.
+/// 5. **Le domaine est un paramètre du composant, pas une propriété de la page** — `item`,
+///    `enemy` ou `both`. Il décide de ce que la recherche interroge ET de la présence du filtre
+///    « Monstres ». La page Alertes est en `item` ; le formulaire d'ajout au Suivi voudra `both`,
+///    monstres compris. Le composant doit donc porter ce drapeau dès sa première version, sous
+///    peine d'être à réécrire pour son deuxième appelant.
 fn planche_autocomplete() {
     let mut vide = String::new();
     let mut saisi = String::from("pierre");
@@ -913,6 +938,13 @@ fn planche_autocomplete() {
                 .width(width),
         );
         suggestions(ui, icons, gems, cats, field.rect);
+
+        ui.add_space(16.0);
+        legende(
+            ui,
+            "Filtre sans résultat — la bande RESTE, sinon on ne pourrait plus la relâcher",
+        );
+        panneau_vide(ui, cats, width);
 
         ui.add_space(16.0);
         legende(ui, "Un filtre actif — le recliquer le relâche");
@@ -1134,6 +1166,52 @@ fn bande_filtres(
     category_bar(&*ui, cats, rect, filtres, actif);
 }
 
+/// Le panneau quand le filtre actif ne laisse passer aucun résultat.
+///
+/// **Le cas qui justifie que la bande se calcule sur la liste non filtrée** : si elle se
+/// calculait sur la liste affichée, elle disparaîtrait ici avec les rangées — et le bouton qui
+/// permettrait de relâcher le filtre partirait avec, laissant l'utilisateur devant un panneau vide
+/// sans issue. Le web le dit dans la doc de `rawResults` ; c'est la règle la moins visible du
+/// composant, et celle qu'on casse en la réimplémentant de mémoire.
+fn panneau_vide(ui: &mut egui::Ui, cats: &CategoryIcons, width: f32) {
+    let hauteur = CATEGORY_BAR_HEIGHT + VIDE_HEIGHT;
+    let rect = ui.allocate_space(Vec2::new(width, hauteur)).1;
+    ui.painter()
+        .rect_filled(rect, 2, design::tokens::SELECT_LIST_FILL);
+    ui.painter().rect_stroke(
+        rect,
+        2,
+        Stroke::new(2.0, design::tokens::SELECT_LIST_BORDER),
+        StrokeKind::Inside,
+    );
+    category_bar(
+        &*ui,
+        cats,
+        Rect::from_min_size(
+            rect.min + Vec2::splat(2.0),
+            Vec2::new(rect.width() - 4.0, CATEGORY_BAR_HEIGHT),
+        ),
+        &[
+            CategoryFilter::All,
+            CategoryFilter::Equipment,
+            CategoryFilter::Resources,
+            CategoryFilter::Craft,
+        ],
+        CategoryFilter::Equipment,
+    );
+    ui.painter().text(
+        egui::pos2(
+            rect.center().x,
+            rect.top() + CATEGORY_BAR_HEIGHT + VIDE_HEIGHT / 2.0,
+        ),
+        egui::Align2::CENTER_CENTER,
+        // `wakfuAutocomplete.noResultInCategory` — le libellé exact du web.
+        "Aucun résultat dans cette catégorie",
+        design::text::label_font(ui.ctx(), 13.0),
+        design::tokens::TEXT_DISABLED,
+    );
+}
+
 /// La bande de filtres par catégorie, en tête du panneau — **relevée sur le web**
 /// (`wakfu-autocomplete.component.ts`/`.css`).
 ///
@@ -1149,6 +1227,10 @@ fn bande_filtres(
 ///    dessinait dix, monstres compris — faux sur ce point comme sur le premier.
 ///
 /// Un clic sur le filtre déjà actif le relâche (retour à « Tout ») : `toggleCategoryFilter`.
+///
+/// **La bande se calcule sur la liste NON filtrée** (`rawResults`), jamais sur la liste affichée :
+/// elle doit rester entière quand le filtre actif ne laisse rien passer, sinon le bouton qui
+/// permettrait de le relâcher disparaîtrait avec les résultats.
 fn category_bar(
     ui: &egui::Ui,
     icons: &CategoryIcons,
