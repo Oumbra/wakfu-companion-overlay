@@ -6,11 +6,11 @@
 //! `show_tooltips_only_when_still`/`tooltip_delay`) — exactement le risque qu'une fonction PARTAGÉE
 //! élimine plutôt qu'un réglage recopié à chaque nouveau point d'entrée.
 
-use crate::panels::tooltip;
+use crate::design::tokens;
 
 /// Applique le style global de l'overlay à `ctx` : délai/persistance des tooltips, curseur "main"
 /// au survol de tout élément cliquable, et le design system tooltip (fond/bordure/ombre, voir
-/// `panels::tooltip::TOOLTIP_BG_FILL` et sa doc). Appliqué aux DEUX thèmes (`style_mut_of`,
+/// `panels::tokens::TOOLTIP_BG_FILL` et sa doc). Appliqué aux DEUX thèmes (`style_mut_of`,
 /// egui 0.36) : seul le thème sombre est par ailleurs reproduit dans cette UI (voir
 /// `panels::combat::ACCENT`), mais aucun de ces réglages n'a de contrepartie visuelle propre au
 /// thème clair — autant ne pas dépendre de celui qu'egui choisit par défaut.
@@ -45,7 +45,7 @@ pub fn apply(ctx: &egui::Context) {
             style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
 
             // Design system tooltip (retour utilisateur 2026-09-06, voir
-            // `panels::tooltip::TOOLTIP_BG_FILL` et sa doc pour la mesure sur les captures de
+            // `panels::tokens::TOOLTIP_BG_FILL` et sa doc pour la mesure sur les captures de
             // référence) : fond translucide (~82 % d'opacité, PAS opaque comme un premier passage
             // l'avait posé) sans bordure ni ombre portée, à la place du thème PAR DÉFAUT d'egui
             // (gris `#1b1b1b` flouté sur 8px) jugé « pas très joli [...] ça rend flou ».
@@ -53,14 +53,14 @@ pub fn apply(ctx: &egui::Context) {
             // servent QUE de socle aux tooltips dans cette UI (aucun `egui::Window` ni menu/combobox
             // ailleurs, voir la doc de `TOOLTIP_BG_FILL`) : ce réglage global couvre donc TOUS les
             // tooltips de l'overlay en un seul endroit, plutôt qu'un style dupliqué à chaque appel.
-            style.visuals.window_fill = tooltip::TOOLTIP_BG_FILL;
+            style.visuals.window_fill = tokens::TOOLTIP_BG_FILL;
             style.visuals.window_stroke = egui::Stroke::NONE;
             style.visuals.popup_shadow = egui::Shadow::NONE;
             style.visuals.menu_corner_radius = egui::CornerRadius::same(6);
             // Marge interne (retour utilisateur 2026-09-06, second passage : « plus de marge
             // latérale et surtout plus de marge top et bottom » que le 6px uniforme d'egui) — voir
             // la doc de `TOOLTIP_MARGIN` pour la mesure.
-            style.spacing.menu_margin = tooltip::TOOLTIP_MARGIN;
+            style.spacing.menu_margin = tokens::TOOLTIP_MARGIN;
         });
     }
 }

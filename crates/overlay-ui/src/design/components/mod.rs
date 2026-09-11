@@ -38,4 +38,5 @@ pub mod separator;
 pub mod slider;
 pub mod stepper;
 pub mod tabs;
+pub mod tooltip;
 pub mod window;

@@ -53,7 +53,7 @@
 //!   en référence par l'utilisateur (capture d'écran à l'appui). L'ancienne ombre simple restait
 //!   illisible sur certains fonds clairs du décor.
 //! - Infobulles repositionnées AU-DESSUS de l'élément survolé (`RectAlign::TOP`, voir
-//!   `show_tooltip_above`) — par défaut egui les place en dessous, jugé désagréable par
+//!   `design::tooltip`, côté `Above`) — par défaut egui les place en dessous, jugé désagréable par
 //!   l'utilisateur (la tooltip apparaît sous le curseur, pas au-dessus du portrait).
 //!
 //! **Refonte 2026-09-04 (2e retour, après capture du rendu ci-dessus)** :
@@ -61,7 +61,7 @@
 //!   qu'un léger arrondi, pas une forme en stade — voir `BAR_ROUNDING`, remesuré sur une nouvelle
 //!   capture de comparaison fournie par l'utilisateur. Hauteur ramenée à 16 px (mesure d'origine,
 //!   la précédente l'avait agrandie à 18 sans nécessité).
-//! - `show_tooltip_above` ne suffisait pas : par défaut, une tooltip qui ne "tient" pas au-dessus
+//! - le seul `RectAlign::TOP` ne suffisait pas : par défaut, une tooltip qui ne "tient" pas au-dessus
 //!   (pas assez de place) retombe automatiquement en dessous (`Popup::align_alternatives`) — or
 //!   c'est justement ce qui arrivait ici pour les portraits proches du haut du panneau. Repli
 //!   désactivé (`align_alternatives(&[])`) : au-dessus, TOUJOURS, comme demandé explicitement.
@@ -135,7 +135,7 @@
 //!   external_link` pour le chargement (même mécanisme que les icônes `allies`/`enemies`
 //!   existantes). Le libellé "Détails" peint en clair à côté est retiré : c'était en réalité le
 //!   texte de l'infobulle au survol (l'utilisateur l'avait mal compris comme un libellé permanent),
-//!   corrigé en conséquence — voir `show_tooltip_above(&response, "Détails")`.
+//!   corrigé en conséquence — voir `design::tooltip` et son placement `Above`.
 //! - Palette des templates : premier essai rejeté (« ne correspond pas du tout ») — cible recalée
 //!   sur une nouvelle capture de comparaison, avec des points de mesure MULTIPLES cette fois (corps
 //!   du panneau, anneaux de médaillon, décorations) plutôt qu'un seul point pris au hasard : la
@@ -217,7 +217,7 @@
 //!   en 6e retour après rejet du magenta du 5e retour ; nouvelle couleur cette fois, pas un retour
 //!   à l'ancienne).
 //! - Tooltip du switch Alliés/Ennemis qui s'affichait SUR les boutons (les rendant incliquables,
-//!   retour utilisateur avec capture) — voir `show_tooltip_above` : repli `RectAlign::BOTTOM` ajouté
+//!   retour utilisateur avec capture) — voir `design::tooltip` : repli `RectAlign::BOTTOM` ajouté
 //!   pour le seul cas où `TOP` ne tient RÉELLEMENT aucune place (le switch, collé au bord supérieur
 //!   de la fenêtre, `inner_margin` nul).
 //! - Palette des templates, 5e passe, méthode encore changée (4e passe jugée insuffisante :
@@ -259,7 +259,7 @@
 //! gauche (x négatif) et `find_best_align` (voir sa doc — exige un rectangle ENTIÈREMENT contenu)
 //! rejette aussi ce repli, retombant sur `TOP` (le tout premier choix, donc écrasé). Deux replis
 //! supplémentaires (`BOTTOM_START`, `BOTTOM_END`, bord aligné au lieu de centré) couvrent ce cas —
-//! voir `show_tooltip_above`, dont la doc corrige aussi une erreur d'un retour précédent sur ce que
+//! voir `design::tooltip`, dont la doc corrige aussi une erreur d'un retour précédent sur ce que
 //! fait réellement `RectAlign::BOTTOM_START`.
 //!
 //! **Refonte 2026-09-05 (11e retour)** : nouveau bouton "Options" (icône `nut.png` fournie par
@@ -308,7 +308,7 @@
 //! entre les boutons de la planche de référence.
 //!
 //! **Refonte 2026-09-06 (marge du panneau, 15e retour)** : les refontes précédentes du 8e au 10e
-//! retour n'avaient corrigé que les REPLIS de `show_tooltip_above` (quel `RectAlign::BOTTOM*`
+//! retour n'avaient corrigé que les REPLIS du placement (aujourd'hui dans `design::tooltip`) (quel `RectAlign::BOTTOM*`
 //! choisir une fois `TOP` rejeté) sans jamais s'attaquer à la cause — le switch Alliés/Ennemis reste
 //! collé au bord SUPÉRIEUR du panneau (`inner_margin` nul), donc `TOP` échoue TOUJOURS pour lui,
 //! quel que soit le repli disponible : les deux infobulles s'affichaient en dessous plutôt qu'au-
@@ -353,14 +353,13 @@
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
-use crate::design::text;
+use crate::design::{self, text};
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
 use super::combat_frame_scroll::EnemyFrameScroll;
-use super::tooltip;
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
 /// (`paint_side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
@@ -766,7 +765,7 @@ fn paint_flat_portrait(
         ),
     };
     let rect = response.rect;
-    show_tooltip_above(&response, fighter.name.as_str());
+    design::tooltip(&response).text(fighter.name.as_str());
     if fighter.total_damage > 0 {
         paint_portrait_percent(ui, rect, fighter.total_damage, total_damage);
     }
@@ -950,72 +949,11 @@ fn format_fr_thousands(n: i64) -> String {
     format!("{sign}{grouped}")
 }
 
-/// Affiche `text` en infobulle AU-DESSUS de `response` (`RectAlign::TOP`) plutôt qu'en dessous —
-/// c'est le comportement PAR DÉFAUT d'egui pour une tooltip (`RectAlign::BOTTOM_START`, voir
-/// `egui::Tooltip`/`egui::Popup`) que l'utilisateur juge désagréable ici (« la tooltip apparaît en
-/// bas de la souris ») : le standard qu'il attend est une tooltip au-dessus de l'élément survolé.
-///
-/// Repli 2026-09-05 (8e retour, corrigé au 10e) : `align_alternatives` n'est plus vide. Le switch
-/// Alliés/Ennemis (`side_switch`) est le tout premier widget du panneau Combat, collé au bord
-/// supérieur de la fenêtre (`inner_margin` nul pour ce panneau, voir `render_content::
-/// paint_content`) — il n'y a donc RIGOUREUSEMENT AUCUNE place au-dessus de lui. Avec un repli vide,
-/// egui ne peut pas honorer `TOP` et l'unique position calculée se retrouve contrainte au bord de
-/// la fenêtre, ÉCRASÉE sur le switch lui-même (bug rapporté, capture à l'appui).
-///
-/// `egui::RectAlign::find_best_align` (voir sa doc) exige que le rectangle de la tooltip tienne
-/// ENTIÈREMENT dans la fenêtre pour retenir un repli — sur LES DEUX AXES, pas seulement en hauteur.
-/// Un seul repli `RectAlign::BOTTOM` (centré sous l'élément) suffisait pour "Ennemis" (assez de
-/// marge des deux côtés) mais PAS pour "Alliés" : ce bouton est collé au bord GAUCHE de la fenêtre,
-/// et centrer une tooltip plus large que lui la fait déborder à gauche (x négatif) — repli rejeté,
-/// egui retombait alors sur le tout premier choix (`TOP`), d'où le bug qui ne touchait QUE ce
-/// bouton (retour utilisateur avec capture, 10e retour). `BOTTOM_START`/`BOTTOM_END` couvrent ce
-/// cas (bord gauche aligné au lieu de centré, la tooltip ne peut alors déborder que du CÔTÉ
-/// opposé au bord de fenêtre le plus proche) — au passage, `BOTTOM_START` n'est PAS "suit le
-/// curseur" comme documenté par erreur ici auparavant : c'est un alignement ancré au rectangle du
-/// widget (coin bas-gauche), au même titre que `BOTTOM` ; seul l'ancien réglage PAR DÉFAUT d'egui
-/// pour une tooltip combine cet alignement à un anchor "widget entier" sans jamais essayer `TOP`
-/// en premier, ce qui donnait l'impression d'un simple "en dessous" désagréable pour l'utilisateur.
-///
-/// **Refonte 2026-09-05 (14e retour)** : bug analogue rapporté sur le bouton lien externe
-/// (`bottom_toolbar`, capture à l'appui) une fois celui-ci déplacé au 11e retour dans la barre
-/// d'outils du bas, collée au bord GAUCHE — exactement la même cause que ci-dessus ("Alliés"),
-/// mais l'ancien repli ne la couvrait pas : TOP échoue (déborde à gauche), et TOUS les replis
-/// listés (`BOTTOM*`) sont des variantes EN DESSOUS — dès que TOP échoue pour n'importe quelle
-/// raison, la tooltip finit toujours en dessous, jamais au-dessus, même quand `TOP_START` (aligné
-/// au bord au lieu de centré, comme `BOTTOM_START` mais AU-DESSUS) aurait parfaitement tenu. Le
-/// bouton Options, juste à côté mais plus loin du bord (voir `ICON_BUTTON_GAP` dans
-/// `bottom_toolbar`), ne débordait pas et gardait donc `TOP` sans jamais révéler le problème.
-/// `TOP_START`/`TOP_END` ajoutés AVANT les replis `BOTTOM*` : un widget proche d'un bord horizontal
-/// reste maintenant au-dessus (juste réaligné) tant qu'il reste de la place au-dessus tout court —
-/// les replis `BOTTOM*` ne restent un dernier recours que s'il n'y a RÉELLEMENT aucune place
-/// au-dessus, sur aucun alignement.
-///
-/// **Refonte 2026-09-06 (design system tooltip)** : écart au widget porté à
-/// `tooltip::TOOLTIP_GAP` (défaut egui 4px jugé trop proche de la référence mesurée, voir sa
-/// doc) et contenu peint par `tooltip::paint_tooltip_label` (couleur/fond/ombre du design
-/// system, voir sa doc) au lieu d'un `ui.label` brut hérité du thème par défaut d'egui.
-///
-/// **Refonte 2026-09-06 (marge du panneau, 15e retour)** : tous les replis ci-dessus ne changent
-/// RIEN pour un widget qui n'a RÉELLEMENT aucune place au-dessus de lui, comme le switch Alliés/
-/// Ennemis (`paint_side_switch`, tout premier widget peint dans le panneau Combat, collé au bord
-/// supérieur de la fenêtre) — `TOP` échouait alors systématiquement, retombant sur un repli
-/// `BOTTOM*` (bug rapporté explicitement). La vraie cause n'était pas ici : voir `render_content::
-/// COMBAT_TOP_MARGIN`, qui réserve désormais cette place manquante dans le panneau lui-même.
-pub(crate) fn show_tooltip_above(response: &egui::Response, text: &str) {
-    let mut tooltip = egui::Tooltip::for_enabled(response);
-    tooltip.popup = tooltip
-        .popup
-        .align(egui::RectAlign::TOP)
-        .align_alternatives(&[
-            egui::RectAlign::TOP_START,
-            egui::RectAlign::TOP_END,
-            egui::RectAlign::BOTTOM,
-            egui::RectAlign::BOTTOM_START,
-            egui::RectAlign::BOTTOM_END,
-        ])
-        .gap(tooltip::TOOLTIP_GAP);
-    tooltip.show(|ui| tooltip::paint_tooltip_label(ui, text));
-}
+// La doc de `show_tooltip_above` tenait ici : quatre retours utilisateur sur le placement d'une
+// infobulle et l'ordre de ses replis. Elle est partie avec la fonction le 2026-09-11, dans
+// `design::tooltip`, qui la porte intégralement — y compris le cas du switch ci-dessous, seul
+// widget de l'interface à n'avoir RÉELLEMENT aucune place au-dessus de lui, et dont la réponse
+// n'est pas un repli mais `render_content::COMBAT_TOP_MARGIN`.
 
 /// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du
 /// dépôt web (`styles.css`), portée en dessin egui direct (peintre + zones cliquables) puisqu'il
@@ -1062,7 +1000,7 @@ fn paint_side_switch(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    show_tooltip_above(&allies_response, "Alliés (Ctrl+Shift+E)");
+    design::tooltip(&allies_response).text("Alliés (Ctrl+Shift+E)");
     let enemies_response = ui
         .interact(
             enemies_rect,
@@ -1070,7 +1008,7 @@ fn paint_side_switch(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    show_tooltip_above(&enemies_response, "Ennemis (Ctrl+Shift+E)");
+    design::tooltip(&enemies_response).text("Ennemis (Ctrl+Shift+E)");
     if allies_response.clicked() {
         *side = CombatSide::Allies;
     }
