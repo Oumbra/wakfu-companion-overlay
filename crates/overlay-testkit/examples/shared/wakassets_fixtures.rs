@@ -181,6 +181,21 @@ impl CategoryFilter {
         }
     }
 
+    /// La clé de catégorie telle que `design::autocomplete` l'attend — `None` pour « Tout », qui
+    /// n'est pas une catégorie mais la remise à zéro du filtre.
+    ///
+    /// **Le composant ne donne aucun sens à cette clé** : il ne s'en sert que pour comparer une
+    /// entrée à un filtre. La maquette prend donc le numéro d'icône, déjà unique par catégorie et
+    /// déjà produit par le moteur — plutôt qu'une numérotation inventée ici, qui n'aurait aucune
+    /// source.
+    #[allow(dead_code)]
+    pub fn category_key(self) -> Option<u16> {
+        match self {
+            CategoryFilter::All => None,
+            autre => autre.icon_ref().gfx_id.parse().ok(),
+        }
+    }
+
     /// Libellé d'infobulle — les clés `itemCategory.*` et `wakfuAutocomplete.allCategories` de
     /// `translations.ts`, en français.
     ///
