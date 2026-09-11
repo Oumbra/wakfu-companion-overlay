@@ -133,8 +133,22 @@ const BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
 /// `panels::watchlist`, réglé sur retour utilisateur (« les objets doivent être plus gros »).
 const ICON_FILL_RATIO: f32 = 0.96;
 
-/// Largeur d'une tuile d'objet suivi. **Choix de mise en page** : elle doit tenir le nom d'un
-/// objet sans le réduire à trois lettres — « Plan "Epée de Bonta" » et « … Brâkmar » ne doivent
+/// **Taille de la fenêtre Options telle que cette page la demande.**
+///
+/// `panels::options_modal::WINDOW_SIZE` vaut aujourd'hui 560 × 436, un rapport d'aspect aligné sur
+/// les 720 × 561 de la vraie fenêtre du jeu (demande utilisateur du 2026-09-09). Cette page n'y
+/// tient pas : à 560 de large, la grille n'a la place que de trois tuiles, et à 561 de haut, d'une
+/// seule rangée.
+///
+/// Les deux dimensions sont donc portées à ce qu'il faut pour **cinq tuiles par rangée et trois
+/// rangées visibles** — demande explicite du 2026-09-11, qui autorise l'agrandissement en largeur
+/// comme en hauteur. Le rapport d'aspect du jeu n'est plus conservé : c'est un arbitrage assumé au
+/// profit du contenu, à confirmer avant portage.
+const WINDOW: Vec2 = Vec2::new(760.0, 720.0);
+
+/// Largeur d'une tuile d'objet suivi — calée pour que **cinq tiennent sur une rangée** (demande
+/// explicite) dans la fenêtre de [`WINDOW`]. **Choix de mise en page** : elle doit tenir le nom
+/// d'un objet sans le réduire à trois lettres — « Plan "Epée de Bonta" » et « … Brâkmar » ne doivent
 /// pas rendre la même chaîne, défaut mesuré sur une version précédente. La grille du dépôt web
 /// tient le même raisonnement avec son `minmax(140px, 1fr)`.
 const TILE_WIDTH: f32 = 118.0;
@@ -291,10 +305,6 @@ const ITEMS: &[Item] = &[
     Item::added("Combinaison Lardante", WakfuRarity::Epic, true),
 ];
 
-/// La phrase d'explication de la page web (clé i18n `profile.alertsDesc`).
-const DESC: &str = "Objets qui déclenchent une alerte sonore et un message à l'écran lorsqu'ils \
-                    sont ramassés.";
-
 /// Ce que le panneau de suggestions afficherait pour la saisie « pierre » — le troisième champ dit
 /// si l'objet est DÉJÀ suivi (grisé, non sélectionnable, comme côté web).
 const SUGGESTIONS: &[(&str, WakfuRarity, bool)] = &[
@@ -425,7 +435,11 @@ fn alert_item(
             design::components::icon_button::glyph_fit(native, TILE_BADGE),
         ),
         icon,
-        state_color,
+        // **Pas la couleur de la bordure** : demande explicite. À l'identique, l'icône de coupure
+        // se fondait dans son propre liseré gris et devenait illisible. Elle prend donc la teinte
+        // de la croix de retrait — la bordure porte seule le signal de couleur, l'icône dit
+        // seulement lequel des deux pictogrammes s'applique.
+        SUBDUED,
     );
 
     // Croix de retrait — **absente sur un objet par défaut**, que le dépôt web refuse
@@ -893,49 +907,27 @@ fn alerts_tab(
     // rétablit l'affordance du web (`?` → `help.profileAlerts`), **le seul endroit qui explique
     // pourquoi dix objets n'ont pas de croix**. Sans elle, un joueur lit dix lignes sans croix et
     // une avec, et ça se lit comme un bug.
-    // Titre de page et bouton d'aide. Le `?` porte la description (`help.profileAlerts` côté web),
-    // **le seul endroit qui explique pourquoi dix objets n'ont pas de croix** — sans elle, un
-    // joueur lit dix tuiles sans croix et une avec, et ça se lit comme un bug.
-    //
-    // **Glyphe nu, sans socle** : le jeu pose son `?` de tête de fenêtre exactement ainsi
-    // (`interface-personnage-equiement.png`, y=28, x 1040..1051 — de l'or `#f4d89f` à même la
-    // bannière, aucun socle).
-    ui.horizontal(|ui| {
-        ui.add(design::heading("Alerte"));
-        ui.add_space(6.0);
-        let (help_rect, help) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
-        let native = design::DesignSystem::get(ui.ctx()).native_size(DsTexture::IconHelp);
-        design::DesignSystem::get(ui.ctx()).paint(
-            ui.painter(),
-            Rect::from_center_size(
-                help_rect.center(),
-                design::components::icon_button::glyph_fit(native, 14.0),
-            ),
-            DsTexture::IconHelp,
-            design::tokens::TAB_LABEL_IDLE,
-        );
-        help.on_hover_text(DESC);
-    });
-
-    // **L'aération demandée** : une douzaine de pixels entre un titre et son contenu, et autant
-    // avant le titre suivant. Les versions précédentes collaient tout, là où les fenêtres
-    // d'options du jeu laissent respirer leurs blocs.
-    //
-    // La description n'est plus un bloc permanent : elle vit dans l'infobulle du `?`. Deux lignes
-    // qu'on lit une fois valent moins, dans un panneau court, qu'une rangée de tuiles de plus.
-    ui.add_space(SECTION_GAP);
+    // Pas de bouton d'aide ici : le `?` du dépôt web ouvre une modale d'explication, un idiome
+    // de page web. Le jeu, lui, n'en pose jamais à côté d'un titre de section — celui de
+    // `interface-personnage-equiement.png` est en tête de FENÊTRE, ce qui est un autre objet.
+    // Retiré sur demande explicite (2026-09-11).
+    ui.add(design::heading("Alerte").trailing_gap(SECTION_GAP));
 
     // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite — voir `test_sound_row` et
     // `close_settings_row`.
     test_sound_row(ui, width);
-    ui.add_space(SECTION_GAP * 0.5);
+    ui.add_space(SECTION_GAP);
     close_settings_row(ui, state.auto, state.seconds, width);
 
+    // **Un seul écart, partout** : `SECTION_GAP` sépare chaque bloc de son voisin, et un titre a
+    // exactement le même espace au-dessus qu'en dessous (`trailing_gap`). Les versions
+    // précédentes mélangeaient `SECTION_GAP`, sa moitié et des littéraux, ce qui donnait un titre
+    // collé à son champ et un autre décollé — et l'écart ne s'ouvrait que lorsqu'un message
+    // d'erreur s'intercalait, donc au hasard de l'état.
     ui.add_space(SECTION_GAP);
     // **Sans compteur** : demande explicite. « (11) » n'apprend rien qu'un coup d'œil à la grille
     // ne donne déjà.
-    ui.add(design::heading("Objets suivis"));
-    ui.add_space(SECTION_GAP * 0.5);
+    ui.add(design::heading("Objets suivis").trailing_gap(SECTION_GAP));
 
     // Champ grisé quand l'ajout est impossible — deux cas, pas un : sans jeton, l'écriture
     // (`PATCH /api/v1/settings`) n'a nulle part où aller ; et pendant une lecture en vol, ce qu'on
@@ -954,7 +946,7 @@ fn alerts_tab(
     );
     // Bas du champ : l'ancre du panneau de suggestions, rendue à l'appelant.
     let field_bottom = ui.cursor().min.y;
-    ui.add_space(6.0);
+    ui.add_space(SECTION_GAP);
 
     if let Some(message) = state.error {
         ui.add(
@@ -963,11 +955,10 @@ fn alerts_tab(
                 .width(width)
                 .log_name("maquette.echec"),
         );
-        ui.add_space(6.0);
+        ui.add_space(SECTION_GAP);
     }
 
     if let Some(message) = state.empty_state.message() {
-        ui.add_space(10.0);
         ui.add(
             design::info_text(message)
                 .width(width)
@@ -976,11 +967,8 @@ fn alerts_tab(
         return field_bottom;
     }
 
-    // `Chrome::scroll_area` pose la géométrie ET le clip : la liste va jusqu'au bord du panneau,
-    // pour que la poignée tombe à 14 px de ce bord comme dans le jeu, et rien n'est écrêté à une
-    // autre abscisse que celle de sa mise en page. La largeur utile — réserve de barre déduite —
-    // vient de la méthode, plus d'une soustraction recopiée à chaque appelant.
-    // La grille de tuiles, dans la zone défilable du panneau — autant de tuiles par rangée que la
+    // La grille de tuiles, dans la zone défilable du panneau (géométrie ET clip posés ensemble,
+    // largeur utile déduite de la réserve de barre) — autant de tuiles par rangée que la
     // largeur le permet, et une barre dès que la liste déborde.
     panel.scroll_area(ui, "maquette.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -1005,58 +993,12 @@ fn alerts_tab(
 // 1 & 2 — L'onglet « Alertes » de la fenêtre Options, à deux tailles
 // -------------------------------------------------------------------------------------------
 
-/// **À la taille ACTUELLE de la fenêtre Options de l'overlay (560 × 436).**
+/// **L'onglet « Alertes », à la taille que cette page demande** — voir [`WINDOW`].
 ///
-/// C'est le constat, pas la proposition : le panneau de section n'offre alors qu'environ 220 px de
-/// haut, dont les réglages sonores et les deux titres consomment l'essentiel. **Une seule ligne
-/// d'objet reste visible sur onze, et encore, coupée** — la v2 annonçait deux lignes là où sa
-/// propre capture n'en montrait qu'une, exactement le défaut qu'elle reprochait à la v1. La liste
-/// est bien défilante, rien n'est perdu ; mais consulter onze objets par une fenêtre d'une ligne
-/// n'est pas utilisable.
-///
-/// C'est l'argument, en image, de la maquette suivante.
-fn alertes_options_taille_actuelle() {
-    let mut sounds: Vec<bool> = ITEMS.iter().map(|i| i.sound_on).collect();
-    let mut search = String::new();
-    let mut seconds = String::from("4");
-    let mut auto = true;
-
-    let mut harness = options_harness(Vec2::new(560.0, 436.0), move |ui, icons, panel, _window| {
-        alerts_tab(
-            ui,
-            icons,
-            panel,
-            &mut AlertsTab {
-                order: &ORDER_NATUREL,
-                sounds: &mut sounds,
-                search: &mut search,
-                auto: &mut auto,
-                seconds: &mut seconds,
-                empty_state: EmptyState::NotEmpty,
-                error: None,
-            },
-        );
-    });
-    harness.run();
-    write_mockup(&mut harness, "alertes_options_taille_actuelle");
-}
-
-/// **À la taille de la fenêtre Options DU JEU (720 × 561).**
-///
-/// Le redimensionnement que la maquette précédente rend nécessaire, et il ne demande aucune
-/// invention : `WINDOW_SIZE` de l'overlay (560 × 436) a été choisi en alignant son rapport
-/// d'aspect sur les 720 × 561 mesurés de la vraie fenêtre du jeu (demande utilisateur du
-/// 2026-09-09 : « garder une cohérence par rapport au rendu du jeu »). Reprendre la taille native
-/// garde ce rapport **exactement**, et c'est celle à laquelle toutes les cotes du design system
-/// ont été relevées.
-///
-/// **La deuxième ligne est montrée SURVOLÉE, et l'objet retirable figure parmi les lignes
-/// visibles** — la v2 posait le survol sur la onzième ligne et la croix sur le onzième objet,
-/// tous deux hors du viewport de défilement, qui n'en montre que quatre : la capture censée
-/// démontrer le survol, la croix et la protection des défauts n'en montrait aucun. La liste est
-/// donc réordonnée ici pour que les trois soient visibles à la fois, comme le fait déjà la
-/// maquette de confirmation.
-fn alertes_options_taille_jeu() {
+/// Cinq tuiles par rangée, trois rangées visibles : les onze objets tiennent sans défiler, et la
+/// barre apparaît dès qu'il y en a davantage. L'objet ajouté par le joueur est remonté en
+/// troisième position pour que sa croix de retrait — la seule de la grille — soit dans le champ.
+fn alertes_options_onglet() {
     // L'objet ajouté par le joueur remonte en troisième position : c'est le seul qui porte une
     // croix, il doit être dans le champ pour que la capture montre la règle.
     let order: [usize; 11] = [0, 1, 10, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -1065,7 +1007,7 @@ fn alertes_options_taille_jeu() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _window| {
+    let mut harness = options_harness(WINDOW, move |ui, icons, panel, _window| {
         alerts_tab(
             ui,
             icons,
@@ -1082,7 +1024,7 @@ fn alertes_options_taille_jeu() {
         );
     });
     harness.run();
-    write_mockup(&mut harness, "alertes_options_taille_jeu");
+    write_mockup(&mut harness, "alertes_options_onglet");
 }
 
 /// **Les trois états sans objet** — sur une seule planche, parce que c'est leur différence qui
@@ -1111,23 +1053,22 @@ fn alertes_options_etats_vides() {
         let mut seconds = String::from("3.5");
         let mut auto = true;
 
-        let mut harness =
-            options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _window| {
-                alerts_tab(
-                    ui,
-                    icons,
-                    panel,
-                    &mut AlertsTab {
-                        order: &[],
-                        sounds: &mut sounds,
-                        search: &mut search,
-                        auto: &mut auto,
-                        seconds: &mut seconds,
-                        empty_state: state,
-                        error: None,
-                    },
-                );
-            });
+        let mut harness = options_harness(WINDOW, move |ui, icons, panel, _window| {
+            alerts_tab(
+                ui,
+                icons,
+                panel,
+                &mut AlertsTab {
+                    order: &[],
+                    sounds: &mut sounds,
+                    search: &mut search,
+                    auto: &mut auto,
+                    seconds: &mut seconds,
+                    empty_state: state,
+                    error: None,
+                },
+            );
+        });
         harness.run();
         write_mockup(&mut harness, &format!("alertes_options_vide_{nom}"));
     }
@@ -1148,7 +1089,7 @@ fn alertes_options_echec_enregistrement() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _window| {
+    let mut harness = options_harness(WINDOW, move |ui, icons, panel, _window| {
         alerts_tab(
             ui,
             icons,
@@ -1192,7 +1133,7 @@ fn alertes_options_ajout_suggestions() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, _w| {
+    let mut harness = options_harness(WINDOW, move |ui, icons, panel, _w| {
         let inner = panel.inner;
         let field_bottom = alerts_tab(
             ui,
@@ -1232,7 +1173,7 @@ fn alertes_options_confirmation_retrait() {
     let mut seconds = String::from("4");
     let mut auto = true;
 
-    let mut harness = options_harness(Vec2::new(720.0, 561.0), move |ui, icons, panel, window| {
+    let mut harness = options_harness(WINDOW, move |ui, icons, panel, window| {
         alerts_tab(
             ui,
             icons,
@@ -1381,10 +1322,8 @@ fn alertes_bandeau_ingame() {
 /// cargo run -p overlay-testkit --example alertes-mockups
 /// ```
 fn main() {
-    alertes_options_taille_actuelle();
-    println!("  alertes_options_taille_actuelle");
-    alertes_options_taille_jeu();
-    println!("  alertes_options_taille_jeu");
+    alertes_options_onglet();
+    println!("  alertes_options_onglet");
     alertes_options_etats_vides();
     println!("  alertes_options_etats_vides");
     alertes_options_echec_enregistrement();
