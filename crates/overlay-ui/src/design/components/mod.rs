@@ -34,6 +34,7 @@ pub mod info_text;
 pub mod input;
 pub mod item_slot;
 pub mod loader;
+pub mod meter;
 pub mod panel;
 pub mod scroll_area;
 pub mod select;
