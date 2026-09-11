@@ -123,7 +123,7 @@ impl<'a> Collapsible<'a> {
         let header_rect = Rect::from_min_size(start, Vec2::new(width, header_height));
         let header_response = ui.allocate_rect(header_rect, egui::Sense::click());
 
-        let inner = if *open {
+        let (inner, frame_bottom) = if *open {
             // Le contenu commence sous l'en-tête, en retrait des marges latérales. Sa hauteur est
             // libre : c'est lui qui la décide, et le cadre s'y ajuste.
             let content_top = header_rect.bottom();
@@ -143,24 +143,25 @@ impl<'a> Collapsible<'a> {
             let used = child.min_rect().height();
             // La marge basse est réservée APRÈS le contenu : c'est elle qui donne au cadre sa
             // hauteur finale.
-            ui.allocate_rect(
-                Rect::from_min_size(
-                    egui::pos2(start.x, content_top),
-                    Vec2::new(width, used + tokens::COLLAPSE_PAD_BOTTOM),
-                ),
-                egui::Sense::hover(),
+            let body = Rect::from_min_size(
+                egui::pos2(start.x, content_top),
+                Vec2::new(width, used + tokens::COLLAPSE_PAD_BOTTOM),
             );
-            Some(result)
+            ui.allocate_rect(body, egui::Sense::hover());
+            (Some(result), body.bottom())
         } else {
-            None
+            (None, header_rect.bottom())
         };
 
+        // **Le bas du cadre est celui que ce bloc a alloué, pas `ui.min_rect().bottom()`.** Ce
+        // dernier est le rectangle occupé du `Ui` APPELANT : il ne coïncide avec le bas du bloc
+        // que si celui-ci est le dernier élément posé, et la galerie a montré ce que coûte cette
+        // supposition — le cadre courait jusque sous le bloc suivant, qui le recouvrait, et
+        // *aucun des blocs sauf le dernier n'avait de bord bas*. Le liseré, les deux motifs
+        // d'angle du bas et l'espacement qui sépare deux blocs disparaissaient avec lui.
         let frame_rect = Rect::from_min_max(
             start,
-            egui::pos2(
-                start.x + width,
-                ui.min_rect().bottom().max(header_rect.bottom()),
-            ),
+            egui::pos2(start.x + width, frame_bottom.max(header_rect.bottom())),
         );
 
         if ui.is_rect_visible(frame_rect) {

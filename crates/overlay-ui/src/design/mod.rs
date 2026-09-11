@@ -40,7 +40,14 @@ use std::sync::Arc;
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::checkbox::{checkbox, Checkbox, CheckboxState};
-pub use components::collapsible::{collapsible, Collapsible};
+// Les trois fonctions de géométrie du repliable sont préfixées à la réexportation : `design::
+// closed_height` ne dirait pas de quoi, et le jour où un second conteneur en aura une, le nom nu
+// serait déjà pris.
+pub use components::collapsible::{
+    closed_height as collapsible_closed_height, collapsible,
+    content_width as collapsible_content_width, open_height as collapsible_open_height,
+    Collapsible,
+};
 pub use components::heading::{heading, Heading};
 pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
 pub use components::info_text::{info_text, InfoText, InfoTone};
