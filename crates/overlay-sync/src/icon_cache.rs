@@ -1,4 +1,4 @@
-//! Cache disque des icônes réelles d'objets/monstres/raretés (`wakassets`, voir
+//! Cache disque des icônes réelles d'objets/monstres/raretés/catégories (`wakassets`, voir
 //! `overlay_engine::IconRef::image_url`) — évite de retélécharger la même image à chaque
 //! lancement. Un fichier PNG par icône plutôt qu'une base : le contenu ne change jamais pour un
 //! `gfx_id` donné (image statique d'un CDN tiers), donc pas de notion d'expiration/`ETag` à gérer
@@ -25,6 +25,10 @@ fn file_path(kind: IconKind, gfx_id: &str) -> Option<PathBuf> {
         // reste plutôt que d'être retéléchargées à chaque lancement. Même nom de dossier que le
         // sous-dossier du CDN (`IconRef::image_url`), pour que le cache se lise comme l'URL.
         IconKind::Rarity => "rarities",
+        // Même dossier que le CDN. Attention au garde-fou juste en dessous : le bouton « Tout »
+        // porte le numéro `-1`, qui ne contient aucun séparateur de chemin — il passe, et doit
+        // continuer à passer si ce filtre est un jour resserré.
+        IconKind::ItemCategory => "itemTypes",
     };
     // `gfx_id` vient du catalogue serveur, jamais construit à partir d'une entrée non fiable —
     // mais un id qui contiendrait par accident un séparateur de chemin ne doit quand même jamais
@@ -75,6 +79,15 @@ mod tests {
             })
             .unwrap();
         handle.join().unwrap();
+    }
+
+    /// Le bouton « Tout » de la bande de filtres porte le numéro `-1` : un identifiant
+    /// parfaitement légitime, que le garde-fou anti-traversée ne doit pas confondre avec un
+    /// chemin suspect. C'est le seul gfx_id négatif du référentiel.
+    #[test]
+    fn le_numero_moins_un_reste_un_identifiant_valide() {
+        let chemin = file_path(IconKind::ItemCategory, "-1").expect("« -1 » est un id valide");
+        assert!(chemin.ends_with("itemTypes/-1.png"));
     }
 
     #[test]

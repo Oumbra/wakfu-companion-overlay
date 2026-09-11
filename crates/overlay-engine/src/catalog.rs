@@ -35,6 +35,18 @@ pub enum IconKind {
     /// d'embarqué. Le `gfx_id` porte ici le **numéro d'icône** de la rareté — voir
     /// [`rarity_icon_number`], et surtout sa mise en garde.
     Rarity,
+    /// Icône de catégorie (`wakassets/itemTypes/{n}.png`) — les pictogrammes de la bande de
+    /// filtres en tête de l'autocomplétion, miroir de `wakfuItemCategoryIconUrl`
+    /// (`wakfu-item-category.data.ts`).
+    ///
+    /// Même nature que [`IconKind::Rarity`] : une image distante, pas un asset embarqué. Le nom du
+    /// sous-dossier (`itemTypes`) est celui d'Ankama ; le web, lui, parle de « catégorie » partout
+    /// — d'où le nom de la variante, qui suit le vocabulaire du produit plutôt que celui du CDN.
+    ///
+    /// Le `gfx_id` porte le numéro d'icône : celui d'une catégorie ([`WakfuItemCategory::
+    /// icon_number`]), ou l'un des deux numéros à part que le filtre utilise sans qu'ils soient des
+    /// catégories — voir [`IconRef::for_all_categories`] et [`IconRef::for_monster_category`].
+    ItemCategory,
 }
 
 /// Référence suffisante pour construire l'URL de l'icône réelle — voir `image_url`. `gfx_id` est
@@ -59,6 +71,7 @@ impl IconRef {
             IconKind::Item => "items",
             IconKind::Monster => "monsters",
             IconKind::Rarity => "rarities",
+            IconKind::ItemCategory => "itemTypes",
         };
         format!(
             "https://vertylo.github.io/wakassets/{folder}/{}.png",
@@ -74,6 +87,78 @@ impl IconRef {
         Self {
             kind: IconKind::Rarity,
             gfx_id: rarity_icon_number(rarity).to_string(),
+        }
+    }
+
+    /// L'icône d'une catégorie d'objet — `wakassets/itemTypes/{n}.png`, comme
+    /// `wakfuItemCategoryIconUrl` côté web.
+    pub fn for_item_category(category: WakfuItemCategory) -> Self {
+        Self {
+            kind: IconKind::ItemCategory,
+            gfx_id: category.icon_number().to_string(),
+        }
+    }
+
+    /// L'icône du bouton « Tout » de la bande de filtres — miroir de
+    /// `WAKFU_ALL_CATEGORY_ICON_URL`.
+    ///
+    /// **Ce n'est pas une catégorie** : c'est la remise à zéro du filtre, d'où un constructeur à
+    /// part plutôt qu'une variante de plus dans [`WakfuItemCategory`]. Son numéro est `-1`, qui
+    /// n'appartient à aucun objet.
+    pub fn for_all_categories() -> Self {
+        Self {
+            kind: IconKind::ItemCategory,
+            gfx_id: "-1".to_string(),
+        }
+    }
+
+    /// L'icône du filtre « Monstres » — miroir de `WAKFU_MONSTER_CATEGORY_ICON_URL`.
+    ///
+    /// **Pas une catégorie d'objet non plus** : le web filtre par `kind === 'enemy'`, pas par la
+    /// catégorie d'un objet, et ce filtre n'existe que dans le domaine qui mélange les deux.
+    pub fn for_monster_category() -> Self {
+        Self {
+            kind: IconKind::ItemCategory,
+            gfx_id: "282".to_string(),
+        }
+    }
+}
+
+/// Catégorie large d'un objet — miroir de `WakfuItemCategory` (`wakfu-item-category.data.ts`).
+///
+/// **L'ordre de déclaration est celui de `WAKFU_ITEM_CATEGORIES`**, donc celui dans lequel le web
+/// range les boutons de sa bande de filtres. Il coïncide avec `ITEM_CATEGORY_SORT_ORDER`, l'entier
+/// par lequel l'index compact encode la catégorie d'un objet (`categorySortOrder`, 9ᵉ champ de
+/// [`RawItemRow`]).
+///
+/// Aucune variante « Monstres » : un monstre n'est pas un objet — le web filtre dessus par `kind`,
+/// pas par catégorie (voir [`IconRef::for_monster_category`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WakfuItemCategory {
+    Equipment,
+    Resources,
+    Sublimations,
+    Harvests,
+    HavenBag,
+    Cosmetics,
+    Craft,
+    Misc,
+}
+
+impl WakfuItemCategory {
+    /// Numéro d'icône `itemTypes` — miroir d'`ITEM_CATEGORY_ICON_NUMBER`. Ce sont les ids de
+    /// l'arbre de filtre « Types » de l'encyclopédie officielle, sans rapport avec l'ordre de tri :
+    /// ne pas les dériver de la position dans l'énumération.
+    pub fn icon_number(self) -> i32 {
+        match self {
+            WakfuItemCategory::Equipment => 109,
+            WakfuItemCategory::Resources => 226,
+            WakfuItemCategory::Sublimations => 602,
+            WakfuItemCategory::Harvests => 237,
+            WakfuItemCategory::HavenBag => 295,
+            WakfuItemCategory::Cosmetics => 525,
+            WakfuItemCategory::Craft => 761,
+            WakfuItemCategory::Misc => 385,
         }
     }
 }
@@ -581,6 +666,60 @@ mod tests {
             IconRef::for_rarity(WakfuRarity::Mythical).image_url(),
             "https://vertylo.github.io/wakassets/rarities/3.png"
         );
+        assert_eq!(
+            IconRef::for_item_category(WakfuItemCategory::Resources).image_url(),
+            "https://vertylo.github.io/wakassets/itemTypes/226.png"
+        );
+    }
+
+    /// Les huit numéros de catégorie, la table entière — même raison que pour les gemmes : ce sont
+    /// des ids recopiés de l'encyclopédie, une ligne fausse affiche le mauvais pictogramme sans
+    /// rien casser.
+    #[test]
+    fn chaque_categorie_a_son_numero_dicone() {
+        for (categorie, attendu) in [
+            (WakfuItemCategory::Equipment, 109),
+            (WakfuItemCategory::Resources, 226),
+            (WakfuItemCategory::Sublimations, 602),
+            (WakfuItemCategory::Harvests, 237),
+            (WakfuItemCategory::HavenBag, 295),
+            (WakfuItemCategory::Cosmetics, 525),
+            (WakfuItemCategory::Craft, 761),
+            (WakfuItemCategory::Misc, 385),
+        ] {
+            assert_eq!(categorie.icon_number(), attendu, "catégorie {categorie:?}");
+        }
+    }
+
+    /// « Tout » et « Monstres » vivent dans le même dossier que les catégories sans en être :
+    /// leurs numéros ne doivent donc jamais entrer en collision avec l'un des huit.
+    #[test]
+    fn tout_et_monstres_ne_sont_pas_des_categories() {
+        let hors_categorie = ["-1", "282"];
+        assert_eq!(
+            IconRef::for_all_categories().image_url(),
+            "https://vertylo.github.io/wakassets/itemTypes/-1.png"
+        );
+        assert_eq!(
+            IconRef::for_monster_category().image_url(),
+            "https://vertylo.github.io/wakassets/itemTypes/282.png"
+        );
+        for categorie in [
+            WakfuItemCategory::Equipment,
+            WakfuItemCategory::Resources,
+            WakfuItemCategory::Sublimations,
+            WakfuItemCategory::Harvests,
+            WakfuItemCategory::HavenBag,
+            WakfuItemCategory::Cosmetics,
+            WakfuItemCategory::Craft,
+            WakfuItemCategory::Misc,
+        ] {
+            let numero = categorie.icon_number().to_string();
+            assert!(
+                !hors_categorie.contains(&numero.as_str()),
+                "{categorie:?} réutilise un numéro réservé"
+            );
+        }
     }
 
     /// Les huit gemmes, une par rareté — la table entière plutôt qu'un échantillon : c'est une
