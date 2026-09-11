@@ -159,11 +159,14 @@ impl Loader {
         Duration::from_secs_f64((next - time).max(period / 8.0))
     }
 
-    /// Région de la planche qui porte l'image `frame` : une grille de `LOADER_SHEET_COLUMNS`
-    /// colonnes, lue ligne par ligne.
+    /// Région de la planche qui porte l'image `frame`, lue ligne par ligne.
+    ///
+    /// La grille vient du **manifeste** (`DsTexture::grid`), qui décrit le fichier, et non d'un
+    /// jeton : une découpe de planche n'est pas une mesure de design, et la dupliquer des deux
+    /// côtés laisserait les deux dériver. Le repli à 4 × 4 ne peut se produire que si quelqu'un
+    /// retire la grille du manifeste en laissant ce composant en place.
     fn frame_uv(frame: usize) -> Rect {
-        let cols = tokens::LOADER_SHEET_COLUMNS;
-        let rows = tokens::LOADER_FRAMES.div_ceil(cols);
+        let (cols, rows) = DsTexture::LoaderSheet.grid().unwrap_or((4, 4));
         let (col, row) = (frame % cols, frame / cols);
         let (cw, rh) = (1.0 / cols as f32, 1.0 / rows as f32);
         Rect::from_min_max(

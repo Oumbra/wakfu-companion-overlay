@@ -722,6 +722,24 @@ impl DsTexture {
         }
     }
 
+    /// Grille d'une **planche d'atlas** : `(colonnes, lignes)` de cellules carrées, lues ligne par
+    /// ligne. `None` pour toute texture peinte entière, ce qui est le cas général.
+    ///
+    /// Une planche n'est pas une grande icône, et la différence est visible à l'œil nu : ses
+    /// cellules portent une **marge transparente délibérée** (3 px sur `loader-sheet.png`) pour que
+    /// le lissage des bords ne soit pas coupé. Sur un rouage qui tourne, la dent balaie un disque
+    /// et le coin du carré la trancherait en diagonale. Cette marge est aussi ce qui a fait
+    /// échouer `les_glyphes_d_icone_sont_detoures_au_pixel_pres` à partir du 2026-09-11 : ce test
+    /// balayait toute texture découpée en [`ICON_SLICE`], et [`LOADER_SLICE`] en est un alias.
+    /// C'est donc le manifeste qui doit dire ce qu'une texture *est*, plutôt que le test le deviner
+    /// à son découpage — un découpage que la planche déclare sans jamais s'en servir.
+    pub const fn grid(self) -> Option<(usize, usize)> {
+        match self {
+            DsTexture::LoaderSheet => Some((4, 4)),
+            _ => None,
+        }
+    }
+
     pub fn spec(self) -> DsTextureSpec {
         match self {
             DsTexture::ButtonPrimary => DsTextureSpec {
@@ -1178,7 +1196,10 @@ mod tests {
         // inaperçue, faute d'étalon pour les recadrer. Réserve de la revue du 2026-09-10.
         for texture in DsTexture::ALL.iter().copied() {
             let spec = texture.spec();
-            if spec.slice.insets != Insets::same(0.0) {
+            // Une planche d'atlas n'est pas un glyphe : ses cellules portent une marge
+            // transparente délibérée (voir `DsTexture::grid`). Elle a son propre test, juste
+            // en dessous — l'exemption n'est pas une dispense.
+            if spec.slice.insets != Insets::same(0.0) || texture.grid().is_some() {
                 continue;
             }
             let img = decode(spec.bytes);
@@ -1189,6 +1210,46 @@ mod tests {
                 "{} : canevas {:?}, encre {encre:?} — marge transparente à retirer",
                 spec.name,
                 img.dimensions(),
+            );
+        }
+    }
+
+    /// Une planche d'atlas mesure exactement sa grille : `colonnes × côté` sur chaque axe.
+    ///
+    /// C'est l'invariant dont dépend le calcul des UV (`Loader::frame_uv` divise 1,0 par le nombre
+    /// de colonnes) : un pixel de trop sur la planche décale toutes les cellules sauf la première,
+    /// d'un peu plus à chaque colonne. Le défaut ne se verrait pas sur une image figée — seulement
+    /// sur l'animation, comme un rouage qui tremble.
+    ///
+    /// Ce test remplace, pour les planches, celui du détourage au pixel près : leurs cellules
+    /// portent une marge voulue, mais la grille, elle, ne tolère rien.
+    #[test]
+    fn les_planches_mesurent_exactement_leur_grille() {
+        for texture in DsTexture::ALL.iter().copied() {
+            let Some((cols, rows)) = texture.grid() else {
+                continue;
+            };
+            let spec = texture.spec();
+            let (w, h) = decode(spec.bytes).dimensions();
+            assert_eq!(
+                w % cols as u32,
+                0,
+                "{} : largeur {w} indivisible par {cols} colonnes",
+                spec.name,
+            );
+            assert_eq!(
+                h % rows as u32,
+                0,
+                "{} : hauteur {h} indivisible par {rows} lignes",
+                spec.name,
+            );
+            assert_eq!(
+                w / cols as u32,
+                h / rows as u32,
+                "{} : cellules non carrées ({}×{})",
+                spec.name,
+                w / cols as u32,
+                h / rows as u32,
             );
         }
     }

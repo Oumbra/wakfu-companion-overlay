@@ -738,9 +738,6 @@ pub const LOADER_FPS: f64 = 24.0;
 /// à la 409, pas à la 399).
 pub const LOADER_FRAMES: usize = 16;
 
-/// Colonnes de `loader-sheet.png` — grille 4 × 4, lue ligne par ligne.
-pub const LOADER_SHEET_COLUMNS: usize = 4;
-
 // ---------------------------------------------------------------------------------------------
 // Filet de séparation — `design::separator`
 //
