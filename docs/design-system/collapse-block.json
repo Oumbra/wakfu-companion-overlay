@@ -1,0 +1,165 @@
+{
+  "title": "Bloc repliable",
+  "subtitle": "Bloc de quête du client Wakfu (en-tête cliquable + contenu), relevé au pixel sur les captures détourées et recadrées — libellé et icônes encore visibles — pour servir de référence au portage egui de design::collapsible.",
+  "source": "assets/design-system/collapse-block-opened-source.png",
+  "canvas": [732, 210],
+  "scale": 1.4,
+  "nodes": [
+    {
+      "id": "frame",
+      "label": "Cadre",
+      "box": [0, 0, 732, 210],
+      "role": "surface",
+      "radius": 8,
+      "fill": "#28292b",
+      "padding": [17, 15, 15, 23],
+      "notes": "Fond plat uni, sans dégradé (contrairement aux boutons du design system). Liseré fin (~2 px) plus clair sur les bords, #323436 en crête / #28292b en creux — bevel discret, pas une vraie bordure épaisse. Rayon de coin 8 px (radius_fit_iou ≈ 0,94 au détourage). État survol : tout le fond passe à #323436 (même teinte que la crête du liseré — le survol réutilise la couleur du bevel plutôt qu'une teinte propre).",
+      "children": [
+        {
+          "id": "header",
+          "label": "En-tête (icône + titre + chevron)",
+          "box": [0, 7, 732, 55],
+          "role": "group",
+          "notes": "Identique en fermé (hauteur totale du cadre 732×60, seul état où le cadre ne contient que l'en-tête) et en ouvert (732×210) : même bande à 7 px du bord haut dans les deux captures.",
+          "children": [
+            {
+              "id": "icon",
+              "label": "Icône (parchemin de quête)",
+              "box": [17, 15, 50, 47],
+              "role": "icon",
+              "notes": "≈33×32 px. Dégradé crème/doré (#dad6c7 → #e6e3da → #cbc6b6) avec reflet quasi blanc (#fcfcfb) — PAS la même teinte que le chevron (#a69064, plus terne/olive). Deux accents dorés distincts, pas un seul jeton de couleur."
+            },
+            {
+              "id": "title",
+              "label": "Titre",
+              "box": [60, 23, 234, 37],
+              "role": "text",
+              "notes": "Hauteur d'encre 14 px (≈19 px de corps), quasi blanc #fefefe, graisse forte / serif. Indenté à x=60, soit 10 px après le bord droit de l'icône (x=50) — pas aligné sur la marge intérieure de 17 px utilisée par le reste du contenu."
+            },
+            {
+              "id": "chevron",
+              "label": "Chevron",
+              "box": [705, 25, 719, 35],
+              "role": "icon",
+              "notes": "Glyphe cœur ≈12×8 px, couleur #a69064. Pointe vers le bas fermé, vers le haut ouvert — même boîte enveloppe dans les deux états (rotation sur place, pas de déplacement). Marge droite au bord du cadre : 732-719=13 px."
+            }
+          ]
+        },
+        {
+          "id": "section-description",
+          "label": "Section « Description »",
+          "box": [0, 62, 732, 113],
+          "role": "group",
+          "notes": "Motif répété par section : intitulé, filet de séparation, corps. Le même motif porte « Objectifs » plus bas.",
+          "children": [
+            {
+              "id": "desc-heading",
+              "label": "Intitulé « Description »",
+              "box": [17, 62, 121, 72],
+              "role": "text",
+              "notes": "Hauteur d'encre 10 px (≈14 px de corps), gras, #bdbdbe (gris clair — PAS doré malgré l'apparence à l'œil sur la vignette compressée ; mesuré au pixel). Aligné sur la marge intérieure de 17 px, pas sur le titre (x=60)."
+            },
+            {
+              "id": "sep-1",
+              "label": "Séparateur 1",
+              "box": [2, 82, 730, 86],
+              "role": "surface",
+              "notes": "Filet plein largeur utile (2 px de marge de chaque côté). Bevel 2 px : ligne claire #323436 puis ligne sombre #222325. Pas un dégradé — deux teintes plates empilées."
+            },
+            {
+              "id": "desc-body",
+              "label": "Corps (italique)",
+              "box": [20, 98, 380, 113],
+              "role": "text",
+              "notes": "Hauteur d'encre 13 px, italique, gris clair proche du blanc en crête (#fbfbfb). Un seul paragraphe dans cette capture — largeur réelle dépend du texte, pas un point de mesure fiable pour une largeur de colonne."
+            }
+          ]
+        },
+        {
+          "id": "section-objectifs",
+          "label": "Section « Objectifs »",
+          "box": [0, 128, 732, 188],
+          "role": "group",
+          "notes": "Même motif que la section Description : intitulé, filet, corps.",
+          "children": [
+            {
+              "id": "obj-heading",
+              "label": "Intitulé « Objectifs »",
+              "box": [17, 128, 97, 144],
+              "role": "text",
+              "notes": "Même style que desc-heading (10 px d'encre, gras, #bdbdbe), aligné sur la même marge de 17 px."
+            },
+            {
+              "id": "sep-2",
+              "label": "Séparateur 2",
+              "box": [2, 152, 730, 156],
+              "role": "surface",
+              "notes": "Identique à sep-1 au pixel près (même bevel, même largeur)."
+            },
+            {
+              "id": "list-item",
+              "label": "Item de liste",
+              "box": [41, 176, 175, 187],
+              "role": "text",
+              "notes": "Hauteur d'encre ≈9-11 px (≈13-15 px de corps), non gras, non italique. Indenté à x=41 — 24 px de plus que la marge de 17 px des intitulés : une réserve pour une puce/case à cocher, invisible sur cette capture (objectif non complété, aucun marqueur rendu ou marqueur hors du recadrage détouré)."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tokens": {
+    "color": {
+      "surface": "#28292b",
+      "surface-hover": "#323436",
+      "border-bevel-light": "#323436",
+      "border-bevel-dark": "#28292b",
+      "accent-icon": "#dad6c7",
+      "accent-chevron": "#a69064",
+      "text-title": "#fefefe",
+      "text-heading": "#bdbdbe",
+      "text-body": "#e8e8e8"
+    },
+    "space": [7, 8, 10, 12, 13, 15, 17, 20, 23, 24],
+    "radius": {
+      "frame": "8"
+    },
+    "type": [
+      {
+        "name": "title",
+        "size": "19",
+        "weight": "bold",
+        "color": "#fefefe",
+        "usage": "titre du bloc, à côté de l'icône, jamais tronqué observé"
+      },
+      {
+        "name": "section-heading",
+        "size": "14",
+        "weight": "bold",
+        "color": "#bdbdbe",
+        "usage": "intitulé de section (« Description », « Objectifs »), aligné sur la marge intérieure"
+      },
+      {
+        "name": "body",
+        "size": "18",
+        "weight": "regular-italic",
+        "color": "#e8e8e8",
+        "usage": "paragraphe de description, italique"
+      },
+      {
+        "name": "list-item",
+        "size": "14",
+        "weight": "regular",
+        "color": "#e8e8e8",
+        "usage": "ligne d'objectif, indentée sous une réserve de puce non observée"
+      }
+    ]
+  },
+  "notes": [
+    "Deux captures utilisées : collapse-block.png (fermé, 732×60) et collapse-block-opened-source.png (ouvert, 732×210) — l'en-tête concorde au pixel près entre les deux, seule la hauteur totale change.",
+    "Le fond du cadre est TRANSLUCIDE dans le jeu (l'overlay-ui confirme ce point pour collapse-frame.png) : la couleur plate #28292b/#323436 mesurée ici est le résultat de la capture sur le fond de jeu précis au moment de la prise de vue, pas la vraie teinte du cadre seul. Deux captures sur deux fonds de jeu différents seraient nécessaires pour en déduire l'alpha réel.",
+    "Le corps de texte (18 px estimé) mesure plus grand que l'intitulé de section (14 px) alors que visuellement il paraît plus discret — c'est l'italique et le gris qui donnent cette impression, pas la taille. À vérifier sur une police réelle avant de figer la constante.",
+    "Le filet de séparation (sep-1, sep-2) est un motif à part entière : bevel 2 px clair + 2 px sombre, jamais un simple trait 1 px plat. Les deux occurrences sont identiques au pixel près.",
+    "Le motif « intitulé + filet + corps » se répète deux fois — candidat à un sous-composant `collapse::section` plutôt qu'à du contenu libre non structuré si d'autres blocs de quête confirment le même patron."
+  ]
+}
