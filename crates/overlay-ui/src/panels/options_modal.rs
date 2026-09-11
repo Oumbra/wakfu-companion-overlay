@@ -262,6 +262,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
             design::input(&mut state.path_input)
                 .placeholder("Chemin vers wakfu.log")
                 .width(field_width)
+                // Le champ porte l'alerte en même temps que le message ci-dessous : celui-ci est
+                // sous le bouton « Parcourir » et hors du regard de qui vient de taper.
+                .error(state.error.is_some())
                 .request_focus(first_frame)
                 .log_name("options-chemin"),
         );

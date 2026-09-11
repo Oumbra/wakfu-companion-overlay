@@ -75,6 +75,15 @@ pub const INPUT_FILL: Color32 = Color32::from_rgb(0x0E, 0x11, 0x15);
 /// assets de champ).
 pub const INPUT_BORDER: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
 
+/// Bord d'un champ dont la valeur a été refusée — **le même rouge que [`INFO_ALERT`]**, et c'est
+/// délibérément un alias plutôt qu'une seconde valeur.
+///
+/// Un champ en erreur et le message qui l'accompagne sont un seul signal, en deux endroits : les
+/// voir dans deux rouges voisins mais distincts se lirait comme deux alertes différentes. Le jour
+/// où le jeu fournira une capture d'un champ refusé, c'est cette constante qui prendra la mesure —
+/// et elle se détachera alors d'`INFO_ALERT` d'elle-même.
+pub const INPUT_BORDER_ERROR: Color32 = INFO_ALERT;
+
 /// Épaisseur du bord, en pixels — mesurée, pas supposée : le bord occupe deux lignes pleines
 /// (y 138-139 et 161-162) et deux colonnes pleines (x 30-31 et 498-499).
 pub const INPUT_BORDER_WIDTH: f32 = 2.0;

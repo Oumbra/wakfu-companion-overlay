@@ -158,8 +158,8 @@ croisillons tombaient dans la bande médiane et s'y étiraient sur près de 200p
 ## `design::input` — champ de saisie
 
 **API** : `design::input(&mut valeur)`, plus `.placeholder(...)`, `.width(...)`, `.size(...)`,
-`.enabled(...)`, `.tooltip(...)`, `.log_name(...)`. Rend une `Response` : `changed()` dit à quelle
-frame la valeur a bougé.
+`.enabled(...)`, `.error(...)`, `.read_only(...)`, `.leading_icon(...)`, `.tooltip(...)`,
+`.log_name(...)`. Rend une `Response` : `changed()` dit à quelle frame la valeur a bougé.
 
 **La valeur vit chez l'appelant.** Le composant l'écrit, l'appelant la relit — c'est un champ de
 formulaire, pas un état interne. **Vide = le texte indicatif s'affiche** : une `String` vide *est*
@@ -195,6 +195,26 @@ en page de centrer le plus petit.
 **Inventé, faute de capture** — signalé pour ne pas être pris plus tard pour une mesure : l'état
 **survolé** ne change rien (inventer un éclaircissement serait inventer du design), et l'état
 **désactivé** reprend les jetons du bouton désactivé.
+
+**L'état d'erreur** (2026-09-11) est le quatrième, et il est propre au champ : les trois états du
+design system décrivent ce que l'interface *permet*, or une valeur peut être refusée alors que le
+champ reste parfaitement actif. `Error` n'est donc pas une nuance de `Disabled` mais son contraire —
+il faut justement revenir dans le champ.
+
+- **Seul le bord change** (`INPUT_BORDER_ERROR`). La valeur reste or : la teindre en rouge la
+  donnerait à lire comme un message plutôt que comme une saisie, et lui ferait perdre le contraste
+  voulu sur le fond très sombre.
+- **Le rouge est celui d'`INFO_ALERT`**, délibérément par alias et non par seconde valeur : le champ
+  et son message sont un seul signal en deux endroits, deux rouges voisins se liraient comme deux
+  alertes. Le jour où le jeu fournira une capture, c'est ce jeton qui prendra la mesure et se
+  détachera de lui-même.
+- **Le composant ne valide rien** — il ne sait pas ce qu'est un chemin correct. La validation
+  appartient à l'appelant, qui la possède déjà, et le champ la reflète.
+- **`Disabled` l'emporte sur `Error`** : on ne corrige pas ce qu'on ne peut pas éditer.
+
+Consommé en production par `panels::options_modal`, dont le champ de chemin porte désormais
+l'alerte en même temps que son message — celui-ci est sous le bouton « Parcourir », hors du regard
+de qui vient de taper.
 
 **Remplace** : le champ repeint à la main dans `panels::options_modal`, dont les trois constantes
 locales étaient toutes fausses (fond `#1C1E23`, bord 1px, rayon 2, valeur blanche).

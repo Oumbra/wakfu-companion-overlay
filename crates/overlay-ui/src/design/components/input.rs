@@ -56,6 +56,23 @@
 //!   esthétique.
 //! - **Désactivé** : aucune capture non plus. Le bord et le texte passent à `TEXT_DISABLED`, par
 //!   cohérence avec le bouton désactivé. À remplacer par une mesure dès qu'une capture existe.
+//! - **Erreur** : aucune capture non plus — le client Wakfu ne refuse pas de saisie dans les écrans
+//!   relevés. La couleur, elle, n'est **pas** inventée : c'est [`tokens::INFO_ALERT`] (`#c9524a`),
+//!   le rouge mesuré du bouton « Annuler », déjà le seul rouge du design system et déjà celui du
+//!   message qui accompagne le champ (`InfoTone::Alert`). Ce qui est décidé ici, c'est *où* il se
+//!   pose : **sur le bord, et nulle part ailleurs**.
+//!
+//! ## Pourquoi un quatrième état plutôt qu'un ton
+//!
+//! Les trois états du design system décrivent ce que l'**interface** permet — repos, survol,
+//! désactivé — et un bouton les épuise. Un champ a quelque chose qu'un bouton n'a pas : une
+//! **valeur**, qui peut être refusée alors que le champ reste parfaitement actif. `Error` n'est donc
+//! pas une variante de `Disabled` mais son contraire : le champ est éditable, il faut justement
+//! qu'on y revienne.
+//!
+//! Le composant **ne valide rien** : il ne sait pas ce qu'est un chemin correct, un nombre dans les
+//! bornes, un nom déjà pris. La validation appartient à l'appelant, qui la possède déjà (la modale
+//! Options porte son `state.error`), et le champ se contente de la refléter.
 
 use egui::{Align2, Response, Sense, Ui, Vec2, Widget};
 
@@ -83,13 +100,16 @@ impl InputSize {
     }
 }
 
-/// État visuel d'un champ — mêmes trois états que le bouton (voir `components`), à ceci près que
-/// `Hovered` est visuellement identique à `Idle` faute de référence (doc de module).
+/// État visuel d'un champ — les trois états communs du design system (voir `components`), plus
+/// `Error`. `Hovered` est visuellement identique à `Idle` faute de référence (doc de module).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputState {
     Idle,
     Hovered,
     Disabled,
+    /// Valeur refusée par l'appelant. **Quatrième état, propre au champ** : un bouton n'a pas de
+    /// valeur à invalider. Voir [`Input::error`] et la doc de module.
+    Error,
 }
 
 /// Construit un champ de saisie sur `text`. Point d'entrée unique — voir la doc de module.
@@ -103,6 +123,7 @@ pub struct Input<'a> {
     size: InputSize,
     width: Option<f32>,
     enabled: bool,
+    error: bool,
     read_only: bool,
     box_height: Option<f32>,
     tooltip: Option<String>,
@@ -120,6 +141,7 @@ impl<'a> Input<'a> {
             size: InputSize::Standard,
             width: None,
             enabled: true,
+            error: false,
             read_only: false,
             box_height: None,
             tooltip: None,
@@ -193,6 +215,26 @@ impl<'a> Input<'a> {
         self
     }
 
+    /// Signale que la valeur a été **refusée par l'appelant** : le bord passe au rouge d'alerte.
+    ///
+    /// Le composant ne valide rien lui-même et ne porte aucun message — il ne sait pas ce qu'est une
+    /// valeur correcte, et le message appartient à [`design::info_text`](super::info_text), qui
+    /// sait le mettre en page. Le motif complet est celui de la modale Options :
+    ///
+    /// ```ignore
+    /// ui.add(design::input(&mut state.path_input).error(state.error.is_some()));
+    /// if let Some(err) = &state.error {
+    ///     ui.add(design::info_text(err).tone(design::InfoTone::Alert));
+    /// }
+    /// ```
+    ///
+    /// Un champ désactivé reste désactivé même en erreur — voir la résolution d'état dans
+    /// `Widget::ui`.
+    pub fn error(mut self, error: bool) -> Self {
+        self.error = error;
+        self
+    }
+
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
@@ -253,8 +295,13 @@ impl Widget for Input<'_> {
             ui.allocate_exact_size(Vec2::new(width, box_height), Sense::hover());
 
         let state = self.forced_state.unwrap_or({
+            // **`Disabled` passe avant `Error`** : on ne corrige pas ce qu'on ne peut pas éditer,
+            // et un bord rouge sur un champ grisé promettrait une saisie qui n'aura pas lieu.
+            // `Error` passe avant `Hovered` — le survol ne doit pas masquer l'alerte.
             if !self.enabled {
                 InputState::Disabled
+            } else if self.error {
+                InputState::Error
             } else if frame_response.hovered() {
                 InputState::Hovered
             } else {
@@ -265,6 +312,10 @@ impl Widget for Input<'_> {
             // `Hovered` est délibérément identique à `Idle` — voir la doc de module.
             InputState::Idle | InputState::Hovered => (tokens::INPUT_BORDER, tokens::INPUT_TEXT),
             InputState::Disabled => (tokens::TEXT_DISABLED, tokens::TEXT_DISABLED),
+            // **Seul le bord change.** La valeur reste or : c'est ce que l'utilisateur a tapé, et
+            // la teindre en rouge la donnerait à lire comme un message plutôt que comme une
+            // saisie — en plus de perdre le contraste voulu sur le fond très sombre du champ.
+            InputState::Error => (tokens::INPUT_BORDER_ERROR, tokens::INPUT_TEXT),
         };
 
         if ui.is_rect_visible(rect) {
