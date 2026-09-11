@@ -434,6 +434,8 @@ fn gallery(ui: &mut egui::Ui) {
                 (DsTexture::IconMinus, "moins"),
                 (DsTexture::IconVolume, "volume"),
                 (DsTexture::IconVolumeMute, "volume-muet"),
+                (DsTexture::IconEye, "oeil"),
+                (DsTexture::IconEyeOff, "oeil-barre"),
             ] {
                 ui.add(
                     design::icon_button(icon)
@@ -504,6 +506,8 @@ fn gallery(ui: &mut egui::Ui) {
             DsTexture::IconUndo,
             DsTexture::IconVolume,
             DsTexture::IconVolumeMute,
+            DsTexture::IconEye,
+            DsTexture::IconEyeOff,
         ] {
             ui.add(design::icon_button(icon).context(IconContext::Panel));
         }

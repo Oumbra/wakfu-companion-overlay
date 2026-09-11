@@ -671,6 +671,12 @@ bannière : préparées pour le futur bouton muet/actif de la fenêtre Options
 (`interface-options-son.png`), aucun réglage de son n'étant câblé dans l'overlay à ce jour
 (`alert_sound` ne fait que jouer les sons, jamais les couper).
 
+**Paire œil/œil barré (2026-09-11)** : `DsTexture::IconEye` et `DsTexture::IconEyeOff` (16 × 14
+toutes les deux), même provenance et même statut que la paire volume/muet — détourées par le skill
+`design-asset` depuis deux crops sans socle porteur, entrées au manifeste et à la galerie avant tout
+appelant réel. Candidat naturel pour un futur toggle de visibilité (masquer une entrée du panneau
+Suivi, ou un champ de jeton dans la fenêtre Options) ; aucun des deux n'est câblé aujourd'hui.
+
 ---
 
 ## `design::window` — chrome de fenêtre (2026-09-10)
