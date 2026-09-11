@@ -156,21 +156,38 @@ pub const ICON_BUTTON_SLICE: NineSlice =
 ///
 /// `Fill::Stretch` sur les deux axes : cette bande médiane est un fond quasi uni — moins de deux
 /// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
-/// Cadre d'un bloc repliable (`collapse-frame.png`, 722 × 28) — **marges figées sur le décor
-/// d'angle**, comme pour un bouton.
+/// Cadre d'un bloc repliable (`collapse-block-opened-generic.png` et son jumeau survolé,
+/// 732 × 210) — **marges franchement asymétriques**, et elles le sont parce que le décor l'est.
 ///
-/// 20 px à gauche et à droite : l'étendue du motif en équerre qui marque les quatre angles, mesurée
-/// sur le profil du coin haut-gauche. 13 px en haut et en bas : la hauteur des deux bandes
-/// prélevées sur la capture, liseré compris.
+/// Ce cadre porte une gravure en circuit **du seul côté gauche** : un grand motif à l'angle
+/// haut-gauche, un petit à l'angle bas-gauche, et rien du tout à droite, où il n'y a qu'un liseré
+/// en biseau de 2 px. Mesuré sur la capture générique, fond de référence `#28292b` :
 ///
-/// `Stretch` sur les deux axes — entre les angles, le cadre n'est qu'un liseré d'un pixel sur un
-/// fond uni, il n'y a rien de périodique à répéter.
-pub const COLLAPSE_FRAME_SLICE: NineSlice = NineSlice::new(
+/// | Côté | Marge | Ce qu'elle couvre |
+/// | --- | --- | --- |
+/// | Gauche | 30 | la gravure s'étend jusqu'à x=29 |
+/// | Haut | 36 | elle descend jusqu'à y=35 ; au-delà, plus que le liseré |
+/// | Bas | 16 | le petit motif occupe les seize dernières lignes |
+/// | Droite | 10 | pas de gravure : le liseré, l'arrondi de rayon 8, deux pixels de marge |
+///
+/// **Les quatre valeurs sont figées sur l'étendue du décor, jamais sur le rayon des coins** — la
+/// règle du design system, et ici elle se voit : un découpage symétrique à 10 px, essayé d'abord,
+/// étirait la gravure haut-gauche sur toute la hauteur du bloc.
+///
+/// **La même texture rend les deux états.** 36 + 16 = 52 px tiennent dans les 60 px d'un bloc
+/// fermé, et les deux captures génériques — fermée et ouverte — y concordent au pixel. Un asset par
+/// état serait un asset de trop.
+///
+/// `Stretch` sur les deux axes : entre les bords, le fond est uni à deux niveaux près, il n'y a
+/// rien de périodique à répéter. La source retenue est **l'état ouvert** parce que sa bande médiane
+/// fait 158 px : peindre un bloc fermé la comprime (un moyennage), là où partir de la capture
+/// fermée l'étirerait (une interpolation, donc du flou).
+pub const COLLAPSE_BLOCK_SLICE: NineSlice = NineSlice::new(
     Insets {
-        left: 20.0,
-        top: 13.0,
-        right: 20.0,
-        bottom: 13.0,
+        left: 30.0,
+        top: 36.0,
+        right: 10.0,
+        bottom: 16.0,
     },
     Fill::Stretch,
     Fill::Stretch,
@@ -522,24 +539,32 @@ pub enum DsTexture {
     /// Les glyphes, eux, viennent du manifeste ([`DsTexture::IconPlus`], [`DsTexture::IconMinus`])
     /// et sont posés par `design::icon_button` — un socle, deux glyphes, jamais deux textures.
     ButtonStepper,
-    /// Cadre d'un bloc repliable (`collapse-frame.png`, 722 × 28) — le décor de
-    /// [`design::collapsible`](crate::design::collapsible), ses quatre angles et son liseré.
+    /// Cadre d'un bloc repliable au repos (`collapse-block-opened-generic.png`, 732 × 210) — le
+    /// décor de [`design::collapsible`](crate::design::collapsible) : fond plat, liseré en biseau
+    /// de 2 px, angles arrondis de rayon 8 portés par l'alpha.
     ///
-    /// **Assemblée le 2026-09-11 à partir de `collapse-block-opened.png`**, faute d'asset détouré :
-    /// treize lignes prélevées en haut du cadre (au-dessus de son en-tête), deux lignes de fond uni
-    /// prises entre deux blocs de contenu, treize lignes prélevées en bas (sous le dernier texte).
-    /// Les bandes sont ensuite nettoyées — hors des angles et du liseré, tout est ramené au fond uni
-    /// `#1f2227`.
+    /// **Asset détouré par le mainteneur** (2026-09-11), fourni en huit fichiers : les quatre états
+    /// du jeu (fermé/ouvert × repos/survolé) en capture source, et les quatre mêmes débarrassés de
+    /// leur contenu — ce sont ces derniers, suffixés `-generic`, que le manifeste embarque.
     ///
-    /// Ce nettoyage n'est pas cosmétique : **le cadre du jeu est translucide**, et la capture avait
-    /// donc figé le décor du jeu vu au travers. Le garder aurait collé un fragment de paysage dans
-    /// tout bloc repliable de l'overlay.
+    /// Il remplace `collapse-frame.png`, une texture que cette session avait assemblée à la main
+    /// faute d'asset détouré, et dont les 722 × 28 pixels étaient **opaques d'un bord à l'autre** :
+    /// aucun coin arrondi, et un fragment du décor de jeu figé dans les quatre angles.
     ///
-    /// **Ce qui n'est PAS reproduit** : cette translucidité elle-même. Il faudrait deux captures du
-    /// même cadre sur deux fonds différents pour en déduire l'alpha, comme
-    /// `tools/design-system/build_modal_body.py` le fait pour la modale. Le cadre est donc opaque —
-    /// écart assumé, et le seul de cet asset.
-    CollapseFrame,
+    /// **Ce qui n'est toujours PAS reproduit** : la translucidité du cadre. Le relevé
+    /// (`docs/design-system/collapse-block.json`) la signale, et la déduire demanderait deux
+    /// captures du même cadre sur deux fonds de jeu différents, comme
+    /// `tools/design-system/build_modal_body.py` le fait pour la modale. `#28292b` est donc la
+    /// couleur du cadre *tel qu'il était posé* sur ce fond-là — écart assumé, et le seul qui reste.
+    CollapseBlock,
+    /// Le même cadre **survolé** (`collapse-block-opened-hover-generic.png`, 732 × 210).
+    ///
+    /// **Une seconde texture plutôt qu'une teinte**, et ce n'est pas un choix de confort : le
+    /// survol du jeu *éclaircit* le fond de dix niveaux sur chaque canal (`#28292b` → `#323436`,
+    /// vérifié sur 25 000 pixels de la paire générique), or une teinte egui **multiplie** — elle ne
+    /// peut que foncer. Le contrat autorise l'asset par état quand l'état n'est pas atteignable
+    /// autrement ; c'en est le cas.
+    CollapseBlockHover,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -624,7 +649,8 @@ impl DsTexture {
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
         DsTexture::ButtonStepper,
-        DsTexture::CollapseFrame,
+        DsTexture::CollapseBlock,
+        DsTexture::CollapseBlockHover,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -1006,10 +1032,15 @@ impl DsTexture {
                 bytes: ds_asset!("button-stepper.png"),
                 slice: STEPPER_SLICE,
             },
-            DsTexture::CollapseFrame => DsTextureSpec {
-                name: "ds-collapse-frame",
-                bytes: ds_asset!("collapse-frame.png"),
-                slice: COLLAPSE_FRAME_SLICE,
+            DsTexture::CollapseBlock => DsTextureSpec {
+                name: "ds-collapse-block",
+                bytes: ds_asset!("collapse-block-opened-generic.png"),
+                slice: COLLAPSE_BLOCK_SLICE,
+            },
+            DsTexture::CollapseBlockHover => DsTextureSpec {
+                name: "ds-collapse-block-hover",
+                bytes: ds_asset!("collapse-block-opened-hover-generic.png"),
+                slice: COLLAPSE_BLOCK_SLICE,
             },
         }
     }

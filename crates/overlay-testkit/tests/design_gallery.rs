@@ -728,6 +728,23 @@ fn gallery(ui: &mut egui::Ui) {
             });
         ui.add_space(10.0);
 
+        // Survolé — état forcé, aucun pointeur ne survole quoi que ce soit hors écran. Le jeu
+        // éclaircit le CADRE ENTIER, pas seulement l'en-tête : c'est pour le montrer que ce
+        // troisième bloc est ouvert plutôt que fermé.
+        let mut survole = true;
+        design::collapsible("Bloc survolé", &mut survole)
+            .icon(DsTexture::IconInfo)
+            .preview_hovered(true)
+            .log_name("galerie.repliable-survole")
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("le fond s'éclaircit de dix niveaux, contenu compris")
+                        .color(design::tokens::INFO_TEXT)
+                        .size(14.0),
+                );
+            });
+        ui.add_space(10.0);
+
         // Sans icône, et avec un contenu qui déborde : l'écrêtage doit se voir.
         let mut sans_icone = true;
         design::collapsible("Sans icône, contenu écrêté", &mut sans_icone)

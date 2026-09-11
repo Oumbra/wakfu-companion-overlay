@@ -874,6 +874,7 @@ design::collapsible("Le Village", &mut ouvert)
 | `open` (à la construction) | `&mut bool`, basculé par le clic sur l'en-tête | — |
 | `icon` | icône d'en-tête | aucune |
 | `log_name` | nom d'instance au journal | le titre |
+| `preview_hovered` | force l'état survolé — planches de contrôle seules | l'interaction |
 
 **Deux états, et c'est toute sa définition fonctionnelle.** Fermé, le bloc n'est que son en-tête.
 Ouvert, il montre son contenu et on peut interagir avec. **Le contenu est entièrement libre** — le
@@ -882,30 +883,57 @@ composant n'en sait rien, il lui garantit un cadre, des marges et un écrêtage.
 `show` rend un `InnerResponse<Option<R>>` : `None` dit que **la closure n'a pas tourné** parce que
 le bloc est fermé, ce qui n'est pas la même chose qu'un contenu vide.
 
-**Mesures** (`releve-collapse.json`, sur `collapse-block-closed.png` et `collapse-block-opened.png`) :
+**Mesures** — source unique : [`collapse-block.json`](design-system/collapse-block.json), le relevé
+outillé du mainteneur sur les captures **détourées** `collapse-block-closed.png` (732 × 60) et
+`collapse-block-opened.png` (732 × 210).
 
 | Grandeur | Valeur | Vérification |
 | --- | --- | --- |
-| En-tête | `COLLAPSE_HEADER_HEIGHT` (60) | cadre fermé y 7..66 — il ne contient rien d'autre |
-| Marge latérale | `COLLAPSE_PAD_X` (16) | contenu à x=23, cadre à x=7 |
-| Marge basse | `COLLAPSE_PAD_BOTTOM` (20) | dernier texte y=279, cadre y=299 |
-| Titre | `COLLAPSE_TITLE_FONT_SIZE` (22) | 18 px d'encre, divisés par le rapport d'egui |
-| Icône | `COLLAPSE_ICON_RATIO` (35/60) | 35 px dans un en-tête de 60 |
+| En-tête | `COLLAPSE_HEADER_HEIGHT` (60) | cadre fermé 732 × 60 — il ne contient rien d'autre |
+| Marge latérale | `COLLAPSE_PAD_X` (17) | icône et intitulés de section à x=17 |
+| Marge basse | `COLLAPSE_PAD_BOTTOM` (23) | `padding` du nœud `frame` |
+| Marge du chevron | `COLLAPSE_CHEVRON_PAD_X` (13) | glyphe x 705..719, cadre large de 732 |
+| Titre | `COLLAPSE_TITLE_FONT_SIZE` (18) | 14 px d'encre, `#fefefe`, vérifié au rendu |
+| Icône | `COLLAPSE_ICON_RATIO` (32/60) | 33 × 32 dans un en-tête de 60 |
+| Gouttière icône–titre | `COLLAPSE_ICON_GAP` (10) | icône finit à x=50, titre à x=60 |
+| Chevron | `COLLAPSE_CHEVRON_TINT` (`#a69064`) | doré olive, **pas** `ICON_TINT` |
 
-**Trois choses à savoir avant de le modifier :**
+Le relevé qui précédait celui-ci portait sur les **mêmes captures non détourées** : l'ombre portée et
+le fond de jeu y comptaient comme de l'encre, d'où un titre annoncé à 18 px au lieu de 14, une icône
+à 35 au lieu de 33 et des marges de 16/20 au lieu de 17/23. `releve-collapse.json` a donc été retiré
+— deux relevés qui se contredisent valent moins qu'un seul.
+
+**Le survol éclaircit le cadre entier** (`#28292b` → `#323436`, dix niveaux sur chaque canal) quand
+le pointeur est sur l'en-tête. Survoler le contenu ne l'éclaircit pas : rien n'y est cliquable.
+
+**Quatre choses à savoir avant de le modifier :**
 
 - **Le cadre est peint APRÈS le contenu**, dans un emplacement réservé au préalable
   (`DesignSystem::paint_to_slot`) : sa hauteur dépend de ce que le contenu a pris. C'est la raison
   d'être de la forme closure pour ce composant.
 - **Le chevron est retourné, pas dupliqué** (`DesignSystem::paint_flipped_y`). Un second asset pour
   l'état ouvert serait un asset par état, aussi interdit qu'un asset par taille.
+- **Le cadre survolé, lui, EST un second asset**, et c'est la seule exception du composant : le jeu
+  *éclaircit* son fond, or une teinte egui multiplie — elle ne sait que foncer. Quand l'état n'est
+  pas atteignable par la teinte, l'asset par état est la bonne réponse.
+- **Les marges 9-slice du cadre sont asymétriques** (`COLLAPSE_BLOCK_SLICE` : 30 à gauche, 36 en
+  haut, 10 à droite, 16 en bas) parce que son décor l'est : une gravure en circuit marque les deux
+  angles **gauches** et rien à droite. Un découpage symétrique à 10 px, essayé d'abord, étirait cette
+  gravure sur toute la hauteur du bloc.
 - **`icon` est le seul paramètre-texture du design system**, et c'est assumé : cette icône appartient
   au contenu (une quête, un lieu), elle vient de la donnée. Le composant ne peut pas la résoudre
   depuis une intention.
 
-**Deux écarts assumés** : le cadre du jeu est **translucide** et ne l'est pas ici (il faudrait deux
-captures sur deux fonds pour en déduire l'alpha), et le composant **ne rend pas son contenu
-défilable** — un contenu qui peut déborder s'enveloppe dans une `design::scroll_area`.
+**Deux écarts assumés** : le cadre du jeu est **translucide** et ne l'est pas ici — les huit
+captures fournies sont toutes sur le même fond de jeu, il en faudrait deux sur des fonds différents
+pour en déduire l'alpha, comme `tools/design-system/build_modal_body.py` le fait pour la modale —, et
+le composant **ne rend pas son contenu défilable** : un contenu qui peut déborder s'enveloppe dans
+une `design::scroll_area`.
+
+**Deux des huit assets fournis ne sont pas embarqués** : `collapse-block-closed-generic.png` et son
+jumeau survolé. Le 9-slice tiré de l'état ouvert rend les deux états (36 + 16 = 52 px tiennent dans
+les 60 d'un bloc fermé, et les deux génériques concordent au pixel sur leurs bandes haute et basse).
+Ils restent au dépôt comme référence de contrôle.
 
 **Pas encore utilisé en production.**
 
