@@ -97,6 +97,47 @@ Un conteneur n'a pas d'« états » au sens de §2, et il ne se rend pas seul : 
 `design_gallery.rs` le montre **avec du contenu factice**, choisi pour exercer sa géométrie — au
 moins un contenu qui déborde, pour que l'écrêtage se voie sur la capture.
 
+## 1 ter. Nommer — la règle se lit dans le code existant
+
+**Décidée le 2026-09-11**, après que deux sessions parallèles ont écrit le même composant et lui ont
+donné deux noms de type différents pour la même chose : `DsRarity` et `ItemRarity`. Les deux se
+défendaient en raisonnement ; un seul se défend en **cohérence**, et c'est le seul argument qui
+compte, puisqu'un nom ne se lit jamais seul mais à côté de ses quarante voisins.
+
+| Ce qu'on nomme | Forme | Exemples |
+| --- | --- | --- |
+| **Clé d'un registre d'assets** | `Ds…` | `DsTexture`, `DsIcon`, `DsTextureSpec`, `DsIconSpec` |
+| Constructeur libre | `snake_case` du composant | `button()`, `item_slot()`, `scroll_area()` |
+| Struct du composant | `PascalCase` du même mot | `Button`, `ItemSlot`, `ScrollArea` |
+| Paramètre propre à UN composant | `<Composant><Rôle>` | `ButtonVariant`, `ButtonSize`, `InputSize`, `LoaderSize`, `TooltipSide` |
+| Paramètre d'un **vocabulaire visuel** partagé | le nom du vocabulaire | `ItemRarity`, `SlotFrame`, `SlotCount`, `InfoTone`, `IconContext` |
+| État de rendu | `<Composant>State` | `ButtonState`, `InputState`, `SelectState`, `SliderState` |
+| Sortie autre qu'une `Response` | `<Composant><ce que c'est>` | `AutocompleteOutcome`, `PanelZones`, `FooterClick` |
+| Jeton | `SCREAMING_SNAKE`, **un seul préfixe par composant** | `AUTOCOMPLETE_*`, `SELECT_*`, `SLIDER_*` |
+
+**`Ds…` ne veut pas dire « appartient au design system ».** Tout ce qui vit dans `design::` y
+appartient : le préfixe n'apprendrait rien. Il veut dire **« ceci nomme un fichier du manifeste »** —
+une variante de `DsTexture` *est* un asset. C'est pour ça que `DsRarity` était le mauvais nom : une
+rareté ne nomme pas un asset, elle en **choisit** un (`ItemRarity::border() -> DsTexture`). Sur les
+cinquante types publics de `design::`, quatre seulement portent ce préfixe, et ce sont les deux
+registres avec leurs specs.
+
+**Un composant, un préfixe de jetons.** `design::item_slot` en a eu deux pendant une demi-journée —
+`ITEM_SLOT_*` (7 jetons) et `SLOT_*` (10), pour une seule et même chose, parce qu'ils sont arrivés
+en deux fois. Personne ne pouvait deviner de quel côté chercher `SLOT_BACKGROUND` plutôt que
+`ITEM_SLOT_ROUNDING`. Les dix ont été renommés le jour même où cette règle a été écrite : une règle
+qu'on énonce sans l'appliquer au cas qui l'a fait naître ne survit pas à la semaine.
+
+**Comment trancher un nom en trois minutes** : lister les voisins avant d'inventer.
+
+```bash
+grep -rh "^pub enum \|^pub struct " crates/overlay-ui/src/design/components/*.rs | sort
+grep -o "^pub const [A-Z_]*" crates/overlay-ui/src/design/tokens.rs | sed 's/pub const //;s/_.*//' | sort | uniq -c
+```
+
+Si le nom envisagé n'a aucun frère dans cette liste, ce n'est pas qu'il est original : c'est
+presque toujours qu'il suit une règle que ce dépôt n'a pas.
+
 ## 2. États
 
 Trois états, les mêmes pour tous les composants :

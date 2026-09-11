@@ -96,6 +96,11 @@ Un fichier par composant dans `crates/overlay-ui/src/design/components/`. Le **c
 `scroll_area.rs`. §1 et §1 bis du contrat. Le reste — états, géométrie, journalisation, galerie —
 est commun aux deux.
 
+**Les noms se lisent dans le code existant, ils ne s'inventent pas** : §1 ter du contrat donne la
+table (`Ds…` pour ce qui nomme un asset, `<Composant><Rôle>` pour un paramètre, un seul préfixe de
+jetons par composant) et les deux `grep` qui la vérifient en trois minutes. Deux sessions ont donné
+deux noms au même type le 2026-09-11 faute de cette table.
+
 Les valeurs numériques (corps de police, marges, proportions) vont dans `design/tokens.rs`, avec
 **la provenance de chaque valeur** : mesure pixel, capture de référence, ou aveu explicite qu'il
 s'agit d'une estimation. Une valeur devinée qui n'annonce pas qu'elle est devinée est le pire cas.
