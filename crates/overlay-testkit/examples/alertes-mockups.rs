@@ -5,10 +5,12 @@
 //! **Version 2, après une revue à trois experts qui a refusé la version 1 à l'unanimité.** Les
 //! trois premières maquettes proposaient un choix de contenant (fenêtre Options / liste HDV /
 //! bandeau in-game) ; les trois revues ont convergé sur la même réponse, et ce n'était aucune des
-//! trois : **la page se scinde par fréquence d'usage**. Ce qu'on règle une fois (le son, la durée,
-//! la liste des objets) va dans l'onglet « Alertes » de la fenêtre Options — qui existe déjà,
-//! `OptionsTab::Alertes`, et n'attend que son contenu. Ce qu'on consulte en jouant va dans un
-//! bandeau, comme les panneaux Combat et Suivi.
+//! trois : les réglages vont dans l'onglet « Alertes » de la fenêtre Options — qui existe déjà,
+//! `OptionsTab::Alertes`, et n'attend que son contenu.
+//!
+//! Un bandeau in-game, proposé un temps pour couper un son sans ouvrir la fenêtre, a été **retiré
+//! sur décision de l'utilisateur** (2026-09-11) : la page d'alertes est un écran de réglages, elle
+//! n'a pas de pendant posé par-dessus le jeu.
 //!
 //! ## Ce que la version 1 a fait de faux, et qui est corrigé ici
 //!
@@ -100,14 +102,6 @@ use overlay_ui::ui_icons::UiIcons;
 /// Fond derrière une fenêtre — le même sombre que `tests/panels.rs` pose sous la modale Options,
 /// pour qu'un bord translucide se voie.
 const BACKDROP: Color32 = Color32::from_rgb(0x0B, 0x0D, 0x10);
-
-/// Fond d'un bandeau posé sur le jeu — **`PANEL_BG` de `panels::watchlist:492`, à sa valeur
-/// exacte** : `#1e1e1e`, et **opaque**. La v1 annonçait cette source en peignant un translucide
-/// `#14161AE0` qui n'existe nulle part.
-const PANEL_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-
-/// Bord d'un bandeau — `BORDER_STRONG` de `panels::watchlist:496`.
-const BORDER_STRONG: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
 
 /// Texte courant — **`TEXT_COLOR` de `panels::watchlist:510`, c'est-à-dire blanc**. La v1 déclarait
 /// reprendre ce jeton et peignait `#E4E6E8`.
@@ -1194,121 +1188,6 @@ fn alertes_options_confirmation_retrait() {
     write_mockup(&mut harness, "alertes_options_confirmation_retrait");
 }
 
-// -------------------------------------------------------------------------------------------
-// 4 — Le bandeau in-game
-// -------------------------------------------------------------------------------------------
-
-/// **Le pendant in-game — et il porte la seule action qu'on fait en jouant : couper un son.**
-///
-/// La v2 l'avait vidé de toute commande, ce qui lui a valu un refus argumenté : réduit à la
-/// consultation, il devenait une fenêtre overlay de plus (donc un `OverlayKind`, sur un budget de
-/// 300 Mo) affichant une liste **qui ne change jamais** — là où les deux bandeaux existants
-/// montrent des compteurs qui bougent (Suivi) ou des dégâts en direct (Combat). Les alertes sont
-/// un mécanisme *push* : le toast et le son font le travail, la liste n'a rien à annoncer.
-///
-/// Ce qui le justifie est donc l'action, pas l'affichage : « cet objet tombe toutes les trente
-/// secondes, coupe-le » est un geste qu'on fait **pendant** qu'on joue, et aller ouvrir la fenêtre
-/// Options pour ça casse la partie. Un clic, réversible, non destructif.
-///
-/// **En lignes et non en tuiles**, pour la même raison que l'onglet Options : quatre plans d'épée
-/// partagent rareté et icône, une grille sans libellé ne dit pas sur quoi on clique. C'est aussi
-/// ce qui fait disparaître le marqueur en coche verte de la v2 — dont le vert déclaré (`#7ac74f`)
-/// ne se trouvait pas dans la zone que son jeton citait (mesure : `#509f35`), et dont la boîte
-/// de 16 × 11 déformait un glyphe de 12 × 9. Une case à cocher de 20 px dit « son actif » sans
-/// ambiguïté, là où une coche verte veut d'abord dire « équipé » dans le vocabulaire du jeu.
-///
-/// Le retrait, lui, n'est PAS ici : c'est l'action destructrice, elle reste dans la fenêtre
-/// Options avec sa confirmation. Le rouage y mène.
-fn alertes_bandeau_ingame() {
-    let mut icons_slot: Option<UiIcons> = None;
-    let mut sounds: Vec<bool> = ITEMS.iter().map(|i| i.sound_on).collect();
-
-    let mut harness = Harness::builder()
-        .with_size(Vec2::new(420.0, 320.0))
-        .build_ui(move |ui| {
-            overlay_ui::style::apply(ui.ctx());
-            let icons = icons_slot.get_or_insert_with(|| UiIcons::load(ui.ctx()));
-            egui::Frame::NONE.fill(BACKDROP).show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-
-                let panel = Rect::from_min_size(
-                    ui.max_rect().min + Vec2::splat(16.0),
-                    Vec2::new(388.0, 288.0),
-                );
-                ui.painter().rect_filled(panel, 2, PANEL_BG);
-                ui.painter().rect_stroke(
-                    panel,
-                    2,
-                    Stroke::new(1.0, BORDER_STRONG),
-                    StrokeKind::Inside,
-                );
-
-                let inner = panel.shrink(12.0);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                    ui.set_clip_rect(inner);
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let width = ui.available_width();
-
-                    // Titre de bandeau : BLANC, pas doré. Le jeu réserve le blanc pur au titre
-                    // d'un panneau (« Bibliothèque de sorts », `interface-personnage-sorts.png`,
-                    // mesuré `#ffffff`) et son or aux états.
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("Alertes")
-                                .color(Color32::WHITE)
-                                .font(design::text::title_font(ui.ctx(), 18.0)),
-                        );
-                        ui.label(
-                            RichText::new(format!("({})", ITEMS.len()))
-                                .color(SUBDUED)
-                                .size(14.0),
-                        );
-                        ui.add_space(width - 190.0);
-                        // Le rouage à son sens du jeu : ouvrir les réglages — ici l'onglet
-                        // « Alertes » de la fenêtre Options.
-                        ui.add(
-                            design::icon_button(DsTexture::IconOption)
-                                .context(IconContext::FirstPlan)
-                                .tooltip("Régler les alertes")
-                                .log_name("maquette.ouvrir-options"),
-                        );
-                    });
-
-                    ui.add_space(10.0);
-                    // **Les mêmes tuiles que la fenêtre**, et la même bascule : un clic coupe ou
-                    // rétablit le son d'un objet. C'est le seul geste qu'on fait en jouant, et il
-                    // est ici sans confirmation parce qu'il est réversible d'un second clic.
-                    //
-                    // Pas de croix : le retrait est l'action destructrice, elle reste dans la
-                    // fenêtre Options avec sa confirmation — d'où `removable: false`.
-                    design::scroll_area("maquette.bandeau")
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
-                            let content = width - design::components::scroll_area::RESERVE_X;
-                            let per_row = (((content + TILE_GAP) / (TILE_WIDTH + TILE_GAP)).floor()
-                                as usize)
-                                .max(1);
-                            for chunk in ORDER_NATUREL.chunks(per_row) {
-                                ui.horizontal(|ui| {
-                                    for &i in chunk {
-                                        if alert_item(ui, icons, &ITEMS[i], sounds[i], false)
-                                            .clicked()
-                                        {
-                                            sounds[i] = !sounds[i];
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                });
-            });
-        });
-
-    harness.run();
-    write_mockup(&mut harness, "alertes_bandeau_ingame");
-}
-
 /// Génère les 7 planches dans `target/mockups/` et les liste.
 ///
 /// **Un exemple et non des `#[test]`** — réserve de la revue d'architecture, et elle est juste :
@@ -1332,8 +1211,6 @@ fn main() {
     println!("  alertes_options_ajout_suggestions");
     alertes_options_confirmation_retrait();
     println!("  alertes_options_confirmation_retrait");
-    alertes_bandeau_ingame();
-    println!("  alertes_bandeau_ingame");
     // Le compte des FICHIERS, pas celui des fonctions : `alertes_options_etats_vides` en produit
     // trois à lui seul, et ce compteur est le seul index du dossier qu'on publiera en Artifact.
     let dir = mockup_dir();
