@@ -1562,6 +1562,68 @@ testkit qui peignent encore leur propre tuile. Coût mesuré : **7,3 Mo** décod
 4,9 % du budget. À résorber en migrant ces maquettes — pas fait ici, elles étaient en cours de
 modification par une session parallèle.
 
+---
+
+## `design::meter` — jauge (2026-09-11)
+
+`crates/overlay-ui/src/design/components/meter.rs`
+
+```rust
+ui.add(design::meter(0.42).width(190.0));
+ui.add(design::meter(ratio).fill(couleur).width(190.0));
+
+// Pour un appelant qui pose déjà sa géométrie :
+design::paint_meter(ui, rect, ratio, couleur);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `fill` | teinte du remplissage | `METER_FILL` = `#077982` |
+| `width` | largeur imposée | toute la largeur disponible |
+| `height` | hauteur | `METER_HEIGHT` = 16 |
+
+### Six couches, et le piège est géométrique
+
+Là où `item_slot` avait un piège d'**ordre**, la jauge en a un de **géométrie** : chaque couche se
+déduit de la précédente par un `shrink`, et son arrondi doit décroître d'autant. Écrire les rayons à
+la main donne des coins non concentriques — visible sur un arrondi de 4 px.
+
+| Couche | Rectangle | Arrondi |
+| --- | --- | --- |
+| bordure extérieure | le rectangle donné | 4 |
+| bordure intérieure | `shrink(2)` | 2 |
+| piste | `shrink(2)` encore | 0 |
+| remplissage | fraction de la piste | conditionnel |
+| reflet | tiers supérieur du remplissage | coins hauts seulement |
+| curseur de fin | 2 px à l'extrémité | 1 |
+
+### L'arrondi conditionnel
+
+**Les coins droits du remplissage ne s'arrondissent que s'il atteint le bout de la piste.** Sinon
+son bord tombe au milieu et un coin arrondi y suggérerait un bord qui n'existe pas. C'est
+`fill_corners`, fonction libre testée : le défaut est invisible sur une jauge pleine ou vide —
+c'est-à-dire dans les deux cas qu'on regarde en premier.
+
+Le seuil de « pleine » est **0,999 et non 1,0** : une fraction calculée en `f32` peut sortir à
+0,9999998 pour un rapport qui vaut exactement un, et la jauge du premier combattant du classement —
+le cas le plus fréquent — afficherait alors un curseur collé au bord droit et deux coins carrés.
+
+### Les teintes
+
+Le **remplissage** vient de l'appelant : le panneau Combat fait varier la couleur de sa barre selon
+la part de dégâts. Le **reflet** est fixe (`#0dbebe`), demandé comme un ton précis plutôt que comme
+une dérivation du remplissage — un éclaircissement automatique a existé, il ne donnait pas ce ton.
+
+Les six couleurs ont été **mesurées pixel par pixel** sur une maquette fournie, après une première
+tentative approximée à l'œil qui « dénotait du jeu ». Contre-intuitif et conservé tel quel : la
+bordure *extérieure* est un gris moyen, c'est l'*intérieure* qui est presque noire.
+
+### Vérification
+
+**Aucun snapshot n'a bougé** : la migration de `combat::damage_bar` est équivalente au pixel. Sept
+constantes disparaissent du panneau, qui ne garde que le calcul de la part de dégâts et sa teinte —
+du métier, que le composant ne saurait pas faire.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85

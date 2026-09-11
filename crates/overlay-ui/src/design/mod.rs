@@ -63,6 +63,9 @@ pub use components::item_slot::{
     SlotLayer,
 };
 pub use components::loader::{loader, Loader, LoaderSize};
+pub use components::meter::{
+    fill_corners as meter_fill_corners, meter, paint as paint_meter, Meter,
+};
 pub use components::panel::{panel, Panel, PanelZones};
 pub use components::scroll_area::{scroll_area, ScrollArea};
 pub use components::select::{select, select_multi, Select, SelectState};

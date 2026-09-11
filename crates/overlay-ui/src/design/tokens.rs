@@ -1147,3 +1147,68 @@ pub const SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00);
 /// Couleur de la fraction cible — `#b0b0b0`, éclairci le 2026-09-06 par rapport au gris sourd
 /// qu'elle portait avant.
 pub const SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
+
+// ---------------------------------------------------------------------------------------------
+// Jauge — `design::meter`
+//
+// Ces valeurs viennent de `panels::combat`, où elles décrivaient la barre de dégâts. Elles ont été
+// **mesurées pixel par pixel** sur une maquette fournie par l'utilisateur (capture du 2026-09-02),
+// après une première tentative approximée à l'œil qui « dénotait du jeu ». Elles remontent ici
+// telles quelles le 2026-09-11 : ce commit déplace du code.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur d'une jauge — 16 px, mesurée sur la maquette. Une itération l'avait portée à 18 sans
+/// nécessité (« elle est plus haute que celle que je t'ai fournie »), revenue à la mesure.
+pub const METER_HEIGHT: f32 = 16.0;
+
+/// Arrondi des coins — 4 px, et **pas `hauteur / 2`**.
+///
+/// Une première itération en avait fait un stade complet : « le border radius est beaucoup trop
+/// rond dans ce que tu as produit », capture de comparaison à l'appui. La maquette n'a qu'un
+/// arrondi léger.
+pub const METER_ROUNDING: f32 = 4.0;
+
+/// Épaisseur de **chacune** des deux bordures concentriques — 2 px sur une jauge de 16.
+pub const METER_BORDER_WIDTH: f32 = 2.0;
+
+/// Bordure extérieure — gris moyen `(72,72,74)`, **pas noir**.
+///
+/// Contre-intuitif : l'utilisateur la décrivait comme sombre, la mesure dit l'inverse. C'est la
+/// bordure *intérieure* qui est presque noire.
+pub const METER_OUTER_BORDER: Color32 = Color32::from_rgb(72, 72, 74);
+
+/// Bordure intérieure — `(34,35,39)`, presque noire. C'est elle qui donne l'effet de double
+/// bordure.
+pub const METER_INNER_BORDER: Color32 = Color32::from_rgb(34, 35, 39);
+
+/// Piste vide — `(22,23,27)`.
+pub const METER_TRACK: Color32 = Color32::from_rgb(22, 23, 27);
+
+/// Curseur de fin de remplissage — `(191,191,191)`.
+///
+/// Le petit trait clair vertical à l'extrémité du remplissage, décrit comme « une petite barre
+/// blanche pour dire c'est ici que je suis ». Il manquait entièrement à la première tentative.
+/// Couleur **fixe** : c'est un repère de position, pas une donnée à lire.
+pub const METER_END_CAP: Color32 = Color32::from_rgb(191, 191, 191);
+
+/// Largeur du curseur de fin — 2 px.
+pub const METER_END_CAP_WIDTH: f32 = 2.0;
+
+/// Reflet du haut du remplissage — `#0dbebe`, une **couleur explicite**.
+///
+/// Demandée telle quelle (retour du 2026-09-05) plutôt que dérivée du remplissage par
+/// éclaircissement : l'utilisateur veut ce ton précis, pas « n'importe quel bleu-vert plus clair ».
+/// C'est aussi pourquoi il ne suit pas la teinte de remplissage quand celle-ci varie.
+pub const METER_HIGHLIGHT: Color32 = Color32::from_rgb(0x0D, 0xBE, 0xBE);
+
+/// Fraction de la hauteur du remplissage qu'occupe le reflet — le tiers supérieur, 0,35.
+pub const METER_HIGHLIGHT_RATIO: f32 = 0.35;
+
+/// Teinte de remplissage par défaut — `#077982`, un sarcelle plus sombre que
+/// [`OVERLAY_ACCENT`].
+///
+/// **Délibérément distincte de l'accent**, après un aller-retour : les deux ont été fusionnées au
+/// 6e retour (le magenta `#ff02ff` du 5e ayant été rejeté), puis re-séparées au 8e. Le pourcentage
+/// sur le portrait, lui, est revenu à l'accent au 9e — barre et pourcentage n'ont donc plus la
+/// même couleur, et c'est voulu.
+pub const METER_FILL: Color32 = Color32::from_rgb(0x07, 0x79, 0x82);

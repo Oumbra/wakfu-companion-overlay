@@ -66,7 +66,9 @@ fn galerie_du_design_system() {
         // dont le panneau est peint hors flux et demande donc sa réserve explicite).
         // 6885 -> 7180 le 2026-09-11 : section « Emplacement d'objet » (les sept raretés, le cadre
         // simple, les deux formes de compteur).
-        .with_size(Vec2::new(760.0, 7180.0))
+        // 7180 -> 7400 le 2026-09-11 : section « Jauge » (cinq taux, quatre teintes, un cas
+        // dégénéré).
+        .with_size(Vec2::new(760.0, 7400.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -688,6 +690,53 @@ fn gallery(ui: &mut egui::Ui) {
             );
         }
     });
+
+    heading(
+        ui,
+        "Jauge — six couches concentriques, et un arrondi conditionnel",
+        "Les coins DROITS du remplissage ne s'arrondissent que s'il atteint le bout de la piste : sinon son bord tombe au milieu, et un coin arrondi y suggérerait un bord qui n'existe pas. Le curseur de fin disparaît à 100 % pour la même raison — il se confondrait avec le bord droit.",
+    );
+    {
+        let mut valeur = 0.0_f32;
+        ui.horizontal(|ui| {
+            for f in [0.0_f32, 0.08, 0.5, 0.999, 1.0] {
+                ui.vertical(|ui| {
+                    ui.add(design::meter(f).width(130.0));
+                    ui.label(
+                        RichText::new(format!("{:.0} %", f * 100.0))
+                            .color(CAPTION)
+                            .size(11.0),
+                    );
+                });
+                ui.add_space(8.0);
+            }
+            valeur += 1.0;
+        });
+        // Teintes : le remplissage vient de l'appelant, le reflet reste fixe — c'est ce qui se voit
+        // ici, les quatre barres partageant le même liseré clair.
+        ui.horizontal(|ui| {
+            for (couleur, nom) in [
+                (design::tokens::METER_FILL, "défaut"),
+                (design::tokens::OVERLAY_ACCENT, "accent"),
+                (design::tokens::INFO_ALERT, "alerte"),
+                (design::tokens::TEXT_DISABLED, "grisé"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(design::meter(0.62).fill(couleur).width(130.0));
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(8.0);
+            }
+        });
+        // Dégénérée : plus fine que ses deux bordures. Les rayons tombent à zéro plutôt que de
+        // passer sous zéro, et la jauge reste peinte.
+        ui.add(design::meter(0.5).width(130.0).height(6.0));
+        ui.label(
+            RichText::new("hauteur 6 — plus fine que ses deux bordures de 2")
+                .color(CAPTION)
+                .size(12.0),
+        );
+    }
 
     heading(
         ui,
