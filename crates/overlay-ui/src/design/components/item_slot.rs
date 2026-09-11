@@ -234,7 +234,7 @@ impl Widget for ItemSlot {
                     ui.painter().rect_filled(
                         rect,
                         tokens::ITEM_SLOT_ROUNDING,
-                        tokens::SLOT_BACKGROUND,
+                        tokens::ITEM_SLOT_BACKGROUND,
                     );
                 }
                 SlotLayer::Border => match self.frame {
@@ -247,7 +247,7 @@ impl Widget for ItemSlot {
                             tokens::ITEM_SLOT_ROUNDING,
                             egui::Stroke::new(
                                 tokens::ITEM_SLOT_PLAIN_STROKE,
-                                tokens::SLOT_PLAIN_BORDER,
+                                tokens::ITEM_SLOT_PLAIN_BORDER,
                             ),
                             egui::StrokeKind::Inside,
                         );
@@ -275,8 +275,8 @@ impl Widget for ItemSlot {
 /// badge en pilule qui débordait de la tuile a été retiré pour cette raison. Le cerne est simple
 /// (1 px) — un double contour essayé un temps a été jugé « trop » en conditions réelles.
 fn paint_count(ui: &Ui, rect: egui::Rect, count: SlotCount) {
-    let right = rect.right() - tokens::SLOT_COUNT_INSET_RIGHT;
-    let bottom = rect.bottom() - tokens::SLOT_COUNT_INSET_BOTTOM;
+    let right = rect.right() - tokens::ITEM_SLOT_COUNT_INSET_RIGHT;
+    let bottom = rect.bottom() - tokens::ITEM_SLOT_COUNT_INSET_BOTTOM;
     match count {
         SlotCount::Simple(value) => {
             text::paint_outlined_text(
@@ -284,8 +284,8 @@ fn paint_count(ui: &Ui, rect: egui::Rect, count: SlotCount) {
                 egui::pos2(right, bottom),
                 egui::Align2::RIGHT_BOTTOM,
                 &value.to_string(),
-                egui::FontId::monospace(tokens::SLOT_COUNT_FONT_SIZE),
-                tokens::SLOT_COUNT_TEXT,
+                egui::FontId::monospace(tokens::ITEM_SLOT_COUNT_FONT_SIZE),
+                tokens::ITEM_SLOT_COUNT_TEXT,
                 text::OUTLINE_FULL,
             );
         }
@@ -298,17 +298,17 @@ fn paint_count(ui: &Ui, rect: egui::Rect, count: SlotCount) {
                 egui::pos2(right, bottom),
                 egui::Align2::RIGHT_BOTTOM,
                 &format!("/{target}"),
-                egui::FontId::monospace(tokens::SLOT_TARGET_FONT_SIZE),
-                tokens::SLOT_TARGET_TEXT,
+                egui::FontId::monospace(tokens::ITEM_SLOT_TARGET_FONT_SIZE),
+                tokens::ITEM_SLOT_TARGET_TEXT,
                 text::OUTLINE_FULL,
             );
             text::paint_outlined_text(
                 ui,
-                egui::pos2(right, bottom - tokens::SLOT_TARGET_LINE_OFFSET),
+                egui::pos2(right, bottom - tokens::ITEM_SLOT_TARGET_LINE_OFFSET),
                 egui::Align2::RIGHT_BOTTOM,
                 &current.to_string(),
-                egui::FontId::monospace(tokens::SLOT_COUNT_FONT_SIZE),
-                tokens::SLOT_COUNT_CURRENT,
+                egui::FontId::monospace(tokens::ITEM_SLOT_COUNT_FONT_SIZE),
+                tokens::ITEM_SLOT_COUNT_CURRENT,
                 text::OUTLINE_FULL,
             );
         }

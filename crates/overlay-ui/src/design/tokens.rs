@@ -1120,43 +1120,43 @@ pub const ITEM_SLOT_MIN_SIZE: f32 = 4.0 * ITEM_SLOT_PLAIN_STROKE;
 ///
 /// Sous une bordure de rareté, il n'est visible que par les coins arrondis de la texture, dont
 /// l'alpha est dégradé ; sur un emplacement sans rareté, c'est le seul fond.
-pub const SLOT_BACKGROUND: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
+pub const ITEM_SLOT_BACKGROUND: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
 
 /// Trait d'un emplacement sans rareté — `#4d4d4d` (`--border-strong` du web).
-pub const SLOT_PLAIN_BORDER: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
+pub const ITEM_SLOT_PLAIN_BORDER: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
 
 /// Corps du compteur — 14 px.
 ///
 /// **Trois retours pour y arriver** : 11 px était « pas du tout lisible », 15 px « beaucoup trop
 /// élevé » une fois comparé en jeu, 13 px un palier intermédiaire, 14 px la valeur retenue après
 /// test en conditions réelles.
-pub const SLOT_COUNT_FONT_SIZE: f32 = 14.0;
+pub const ITEM_SLOT_COUNT_FONT_SIZE: f32 = 14.0;
 
 /// Corps de la fraction cible — 10 px, plus petite que le nombre courant (« on la mettrait en onze
 /// ou en dix »).
-pub const SLOT_TARGET_FONT_SIZE: f32 = 10.0;
+pub const ITEM_SLOT_TARGET_FONT_SIZE: f32 = 10.0;
 
 /// Marge du compteur au bord droit — 6 px, assez pour rester lisible par-dessus le liseré d'une
 /// bordure de rareté sans empiéter dessus.
-pub const SLOT_COUNT_INSET_RIGHT: f32 = 6.0;
+pub const ITEM_SLOT_COUNT_INSET_RIGHT: f32 = 6.0;
 
 /// Marge du compteur au bord bas — 4 px. **Distincte de la marge droite** depuis le retour du
 /// 2026-09-06 (« décale d'un pixel vers la gauche et descends-le d'un pixel vers le bas ») : les
 /// deux n'ont plus de raison d'être égales.
-pub const SLOT_COUNT_INSET_BOTTOM: f32 = 4.0;
+pub const ITEM_SLOT_COUNT_INSET_BOTTOM: f32 = 4.0;
 
 /// De combien le nombre courant remonte au-dessus de la fraction cible — 12 px.
-pub const SLOT_TARGET_LINE_OFFSET: f32 = 12.0;
+pub const ITEM_SLOT_TARGET_LINE_OFFSET: f32 = 12.0;
 
 /// Couleur d'un compteur simple — blanc.
-pub const SLOT_COUNT_TEXT: Color32 = Color32::WHITE;
+pub const ITEM_SLOT_COUNT_TEXT: Color32 = Color32::WHITE;
 
 /// Couleur du nombre **courant** d'une fraction — l'or des kamas (`--kama-color` du web).
-pub const SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00);
+pub const ITEM_SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00);
 
 /// Couleur de la fraction cible — `#b0b0b0`, éclairci le 2026-09-06 par rapport au gris sourd
 /// qu'elle portait avant.
-pub const SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
+pub const ITEM_SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
 
 // ---------------------------------------------------------------------------------------------
 // Jauge — `design::meter`
