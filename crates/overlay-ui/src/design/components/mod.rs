@@ -27,6 +27,7 @@ pub mod button;
 pub mod checkbox;
 pub mod collapsible;
 pub mod heading;
+pub mod icon;
 pub mod icon_button;
 pub mod info_text;
 pub mod input;

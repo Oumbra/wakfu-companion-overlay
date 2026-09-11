@@ -17,7 +17,6 @@
 //! **hachures qui les dimensionnent**, pas les coins : voir `button_slice`.
 
 use crate::design::nine_slice::{Fill, Insets, NineSlice};
-use crate::design::tokens;
 
 /// Découpage d'une texture de bouton texte : `cap` pixels figés à gauche et à droite, 6px en haut
 /// et en bas, tout le reste étiré.
@@ -289,13 +288,6 @@ pub enum DsTexture {
     /// n'indique que le jeu en ait une par variante. Réutilisée telle quelle plutôt que
     /// d'inventer deux fichiers.
     ButtonDisabled,
-    /// Pastille « i » du bloc d'information (`icons/icon-info.png`, 27 × 28).
-    ///
-    /// **La seule icône du manifeste, et la seule texture qui n'y soit pas un 9-slice** : un
-    /// glyphe n'a ni embout ni bande médiane, ses marges figées sont donc nulles et il est
-    /// simplement mis à l'échelle. Blanche dans le fichier, elle prend sa couleur par teinte —
-    /// c'est ce qui permet au ton `Alert` de `design::info_text` d'exister sans second fichier.
-    IconInfo,
     /// Onglet ACTIF — et survolé, les deux partageant exactement le même fond (voir
     /// `design::components::tabs`). Découpé du premier segment de
     /// `tabs-with-first-tab-active.png`, coin gauche redressé : ce coin arrondi appartient à
@@ -327,11 +319,8 @@ pub enum DsTexture {
     CheckboxUnchecked,
     /// Socle d'une liste déroulante (`select-face.png`, 220 × 36) — dégradé, liseré haut, ombre
     /// basse et bords, **libellé et chevron retirés** : ce sont le composant et le manifeste qui
-    /// les remettent, l'un depuis l'appelant, l'autre depuis `IconChevronDown`.
+    /// les remettent, l'un depuis l'appelant, l'autre depuis [`DsIcon::ChevronDown`](super::icons::DsIcon::ChevronDown).
     SelectFace,
-    /// Chevron `⌄` d'une liste déroulante (`icons/icon-chevron-down.png`, 14 × 8) — la taille à
-    /// laquelle le jeu le peint, au pixel près.
-    IconChevronDown,
     /// Socle d'un bouton icône posé DANS un panneau (`button-icon.png`, 36 × 36).
     ButtonIcon,
     ButtonIconHover,
@@ -342,158 +331,6 @@ pub enum DsTexture {
     /// Socle grisé — **une seule texture pour les deux contextes**, le jeu n'en ayant capturé
     /// qu'une (même parti pris que `ButtonDisabled` pour le bouton texte).
     ButtonIconDisabled,
-    /// Glyphes des boutons icône de l'overlay. La table ne porte que les icônes réellement
-    /// utilisées : `assets/design-system/icons/` en compte plus de trente, toutes chargées sur le
-    /// GPU dès le premier composant peint (voir `DesignSystem::load`), et il n'y a aucune raison de
-    /// payer celles que personne n'affiche.
-    IconOption,
-    IconExternalLink,
-    IconPlus,
-    IconMinus,
-    /// Loupe d'un champ de recherche (`icons/icon-search.png`, 24 × 24) — le jeu la pose À
-    /// L'INTÉRIEUR du champ, collée au bord gauche, jamais sur un socle de bouton
-    /// (`interface-hdv-achat.png` x 27..39, `interface-personnage-equiement.png`). Elle n'a donc
-    /// pas de `icon_content_size` : sa taille est celle que lui donne le champ qui la porte.
-    IconSearch,
-    /// Croix de fermeture/retrait (`icons/icon-close.png`, 13 × 14) — le « × » de « Retirer tous
-    /// les filtres » et le bouton de fermeture d'une fenêtre.
-    IconClose,
-    /// Corbeille (`icons/icon-delete.png`, 12 × 14) — la suppression d'un élément d'une liste, sur
-    /// socle de bouton icône (`interface-personnage-equiement.png`, barre d'outils du build).
-    IconDelete,
-    /// Point d'interrogation (`icons/icon-help.png`, 12 × 12) — le bouton d'aide en tête de
-    /// fenêtre (`interface-personnage-equiement.png`, coin haut-droit).
-    IconHelp,
-    /// Coche (`icons/icon-tick.png`, 12 × 9) — le marqueur « actif » du jeu, à côté d'un libellé
-    /// (« ✓ Actif ») plutôt que sur un socle : pas de `icon_content_size` pour la même raison que
-    /// [`DsTexture::IconSearch`].
-    IconTick,
-    /// Flèche de réinitialisation (`icons/icon-undo.png`, 14 × 12) — le bouton « rétablir les
-    /// valeurs par défaut » de la fenêtre Options (`interface-options-son.png`, coin haut-droit).
-    IconUndo,
-    /// Haut-parleur (`icons/icon-volume.png`, 26 × 22) — glyphe de volume actif, détouré le
-    /// 2026-09-11 (skill `design-asset`) depuis une capture du jeu sans socle porteur : le glyphe
-    /// est directement posé sur le décor, contrairement aux icônes prélevées sur un bouton.
-    ///
-    /// **Pas encore d'appelant** : aucun réglage de son n'est câblé dans l'overlay à ce jour —
-    /// `alert_sound` ne fait que jouer les sons, jamais les couper. Entrée au manifeste comme
-    /// [`DsTexture::ModalHeader`] avant sa bannière : préparée pour le futur bouton muet/actif de
-    /// la fenêtre Options (`interface-options-son.png`), posée sur un socle de bouton icône —
-    /// d'où `icon_content_size`, comme les glyphes de la même famille.
-    IconVolume,
-    /// Haut-parleur barré (`icons/icon-volume-mute.png`, 26 × 26) — pendant coupé de
-    /// [`DsTexture::IconVolume`], même provenance et même statut (pas encore d'appelant).
-    IconVolumeMute,
-    /// Œil ouvert (`icons/icon-eye.png`, 16 × 14) — glyphe SOMBRE, détouré le 2026-09-11 (skill
-    /// `design-asset`, `--polarity dark --keep center --floor 45`) depuis un crop du jeu sans
-    /// socle porteur, contrairement aux icônes prélevées sur un bouton.
-    ///
-    /// **Pas encore d'appelant** : aucun bascule affiché/masqué n'existe dans l'overlay à ce jour.
-    /// Entrée au manifeste comme [`DsTexture::IconVolume`] avant son futur bouton — préparée pour
-    /// un toggle de visibilité (candidat naturel : masquer une entrée du panneau Suivi, ou un champ
-    /// de jeton dans la fenêtre Options). Posée sur un socle de bouton icône, d'où
-    /// `icon_content_size`.
-    IconEye,
-    /// Œil barré (`icons/icon-eye-off.png`, 16 × 14) — pendant coupé de [`DsTexture::IconEye`],
-    /// même provenance et même statut (pas encore d'appelant).
-    IconEyeOff,
-    /// Sac plein, flèche vers l'intérieur (`icons/icon-bag-in.png`, 10 × 16) — dépôt/réception
-    /// d'objets. Détouré `--from-button` (voir `references/recettes-icones.md` du skill
-    /// `design-asset`, commit `chore: renomme les captures d'icônes`) : vivait sur un socle de
-    /// bouton icône dans le jeu, d'où `icon_content_size`.
-    ///
-    /// **Pas encore d'appelant**, comme les 21 icônes suivantes de ce lot : détourées avant tout
-    /// composant qui les consomme, à la différence des icônes plus anciennes du manifeste,
-    /// entrées en même temps que leur premier usage. Rattachées au manifeste le 2026-09-11 en
-    /// réponse à un écart relevé par l'utilisateur (« pas tous les icônes du répertoire dans le
-    /// manifeste ») — voir le delta `assets/design-system/icons/` vs `DsTexture::ALL` qui a guidé
-    /// cet ajout.
-    IconBagIn,
-    /// Sac, flèches de retrait (`icons/icon-bag-out.png`, 12 × 12) — retrait/échange d'objets.
-    /// Détouré `--from-button`, même provenance et même statut que [`DsTexture::IconBagIn`].
-    IconBagOut,
-    /// Livre ouvert (`icons/icon-book.png`, 22 × 18) — encyclopédie/recette. Détouré SANS
-    /// `--from-button` : posé sur le décor turquoise d'un panneau, pas sur un socle de bouton
-    /// icône — pas de `icon_content_size`, comme [`DsTexture::IconSearch`]. Même statut que
-    /// [`DsTexture::IconBagIn`] (pas encore d'appelant).
-    IconBook,
-    /// Calendrier (`icons/icon-calendar.png`, 22 × 22) — grille à cases. Détouré SANS
-    /// `--from-button`, sur socle sombre uni. Pas de `icon_content_size`. Même statut que
-    /// [`DsTexture::IconBagIn`].
-    IconCalendar,
-    /// Emplacement de cartes (`icons/icon-cards.png`, 12 × 12) — deux rectangles superposés.
-    /// Provenance : commit `feat: huit icones et variante hover du bouton valider` (2026-09-09),
-    /// sans mesure `--from-button` consignée — pas de `icon_content_size` par prudence, faute de
-    /// certitude sur le socle porteur. Même statut que [`DsTexture::IconBagIn`].
-    IconCards,
-    /// Trois silhouettes (`icons/icon-characters.png`, 20 × 14) — bascule de personnage.
-    /// Provenance : commit `feat: icone des personnages (traitement retenu)` (2026-09-09), teinte
-    /// blanche par luma retenue après comparatif de cinq traitements. Pas de `icon_content_size`,
-    /// même raison que [`DsTexture::IconCards`]. Même statut que [`DsTexture::IconBagIn`].
-    IconCharacters,
-    /// Entonnoir (`icons/icon-filter.png`, 12 × 12) — filtre. Détouré `--from-button`, d'où
-    /// `icon_content_size`. Même statut que [`DsTexture::IconBagIn`].
-    IconFilter,
-    /// Grille de neuf points (`icons/icon-grid.png`, 18 × 18) — vue en grille. Même provenance et
-    /// la même prudence sur `icon_content_size` que [`DsTexture::IconCards`] (pas de mesure
-    /// `--from-button` consignée). Même statut que [`DsTexture::IconBagIn`].
-    IconGrid,
-    /// Marteau (`icons/icon-hammer.png`, 16 × 16) — artisanat/métier. Provenance : commit `style:
-    /// ajout d'assets pour le design system en vu de la modélisation de la modal d'options`
-    /// (2026-09-08), sans mesure `--from-button` consignée — pas de `icon_content_size` par la
-    /// même prudence que [`DsTexture::IconCards`]. Même statut que [`DsTexture::IconBagIn`].
-    IconHammer,
-    /// Pile de kamas (`icons/icon-kamas.png`, 14 × 12) — monnaie du jeu. Détouré SANS
-    /// `--from-button`, sur socle sombre uni. Pas de `icon_content_size`. Même statut que
-    /// [`DsTexture::IconBagIn`].
-    IconKamas,
-    /// Cadenas fermé (`icons/icon-lock.png`, 12 × 14) — verrouillé. Détouré `--from-button`, d'où
-    /// `icon_content_size`. Même statut que [`DsTexture::IconBagIn`].
-    IconLock,
-    /// Histogramme croissant (`icons/icon-order.png`, 14 × 14) — tri par valeur. Détouré
-    /// `--from-button --floor 45` (ombre portée du glyphe sur aplat, voir
-    /// `references/recettes-icones.md`), d'où `icon_content_size`. Même statut que
-    /// [`DsTexture::IconBagIn`].
-    IconOrder,
-    /// Masque à cornes (`icons/icon-pact.png`, 14 × 13) — pacte. Détouré `--from-button`, d'où
-    /// `icon_content_size`. Même statut que [`DsTexture::IconBagIn`].
-    IconPact,
-    /// Punaise (`icons/icon-pin.png`, 14 × 14) — épingler/favori. Détouré SANS `--from-button` :
-    /// glyphe posé à même le décor sombre, sans socle de bouton — pas de `icon_content_size`.
-    /// Même statut que [`DsTexture::IconBagIn`].
-    IconPin,
-    /// Deux flèches en boucle (`icons/icon-repeat.png`, 22 × 22) — répétition/rafraîchissement.
-    /// Détouré SANS `--from-button`, sur socle sombre uni. Pas de `icon_content_size`. Même statut
-    /// que [`DsTexture::IconBagIn`].
-    IconRepeat,
-    /// Disquette (`icons/icon-save.png`, 12 × 12) — enregistrer. Détouré `--tol 4 --polarity dark
-    /// --keep center --floor 45` `--from-button` (voir `references/recettes-icones.md`), d'où
-    /// `icon_content_size`. Même statut que [`DsTexture::IconBagIn`].
-    IconSave,
-    /// Engrenage, première variante (`icons/icon-settings-1.png`, 14 × 14) — paramètres.
-    /// Provenance : commit `feat: huit icones et variante hover du bouton valider` (2026-09-09,
-    /// « deux variantes d'engrenage »), sans mesure `--from-button` consignée — pas de
-    /// `icon_content_size` par la même prudence que [`DsTexture::IconCards`]. Même statut que
-    /// [`DsTexture::IconBagIn`].
-    IconSettings1,
-    /// Engrenage, seconde variante (`icons/icon-settings-2.png`, 14 × 14) — pendant de
-    /// [`DsTexture::IconSettings1`], même provenance, même prudence, même statut.
-    IconSettings2,
-    /// Flèches haut/bas (`icons/icon-sort.png`, 16 × 12) — tri. Détouré `--from-button`, d'où
-    /// `icon_content_size`. Même statut que [`DsTexture::IconBagIn`].
-    IconSort,
-    /// Triangle vers la droite (`icons/icon-triangle-right.png`, 7 × 10) — déplier/lire. Détouré
-    /// `--from-button --tol 4` (bouton sombre proche du décor, voir
-    /// `references/recettes-icones.md`), d'où `icon_content_size`. Même statut que
-    /// [`DsTexture::IconBagIn`].
-    IconTriangleRight,
-    /// Coupe (`icons/icon-trophy.png`, 22 × 22) — trophée/haut fait. Détouré SANS `--from-button`,
-    /// sur socle sombre uni. Pas de `icon_content_size`. Même statut que [`DsTexture::IconBagIn`].
-    IconTrophy,
-    /// « Xp » barré d'une croix (`icons/icon-xp.png`, 16 × 11) — points d'expérience. Détouré SANS
-    /// `--from-button`, sur socle sombre uni. Pas de `icon_content_size`. Même statut que
-    /// [`DsTexture::IconBagIn`].
-    IconXp,
     /// Corps de la modale Options (`modal-body.png`, 720 × 505) — le fond SOUS la bannière,
     /// découpé des six captures de la fenêtre Options du jeu puis débarrassé de son contenu
     /// (`tools/design-system/build_modal_body.py`, §9 ter du design-system).
@@ -544,7 +381,8 @@ pub enum DsTexture {
     /// du glyphe, imperceptible. `button-plus.png` en diffère de 70 pixels, tous dans son glyphe :
     /// c'est bien un seul socle pour les deux boutons.
     ///
-    /// Les glyphes, eux, viennent du manifeste ([`DsTexture::IconPlus`], [`DsTexture::IconMinus`])
+    /// Les glyphes, eux, viennent du registre ([`DsIcon::Plus`](super::icons::DsIcon::Plus),
+    /// [`DsIcon::Minus`](super::icons::DsIcon::Minus))
     /// et sont posés par `design::icon_button` — un socle, deux glyphes, jamais deux textures.
     ButtonStepper,
     /// Cadre d'un bloc repliable au repos (`collapse-block-opened-generic.png`, 732 × 210) — le
@@ -621,7 +459,6 @@ impl DsTexture {
         DsTexture::ButtonDanger,
         DsTexture::ButtonDangerHover,
         DsTexture::ButtonDisabled,
-        DsTexture::IconInfo,
         DsTexture::TabActive,
         DsTexture::TabInactive,
         DsTexture::TabActiveFirst,
@@ -631,48 +468,11 @@ impl DsTexture {
         DsTexture::CheckboxChecked,
         DsTexture::CheckboxUnchecked,
         DsTexture::SelectFace,
-        DsTexture::IconChevronDown,
         DsTexture::ButtonIcon,
         DsTexture::ButtonIconHover,
         DsTexture::ButtonIconFirstPlan,
         DsTexture::ButtonIconFirstPlanHover,
         DsTexture::ButtonIconDisabled,
-        DsTexture::IconOption,
-        DsTexture::IconExternalLink,
-        DsTexture::IconPlus,
-        DsTexture::IconMinus,
-        DsTexture::IconSearch,
-        DsTexture::IconClose,
-        DsTexture::IconDelete,
-        DsTexture::IconHelp,
-        DsTexture::IconTick,
-        DsTexture::IconUndo,
-        DsTexture::IconVolume,
-        DsTexture::IconVolumeMute,
-        DsTexture::IconEye,
-        DsTexture::IconEyeOff,
-        DsTexture::IconBagIn,
-        DsTexture::IconBagOut,
-        DsTexture::IconBook,
-        DsTexture::IconCalendar,
-        DsTexture::IconCards,
-        DsTexture::IconCharacters,
-        DsTexture::IconFilter,
-        DsTexture::IconGrid,
-        DsTexture::IconHammer,
-        DsTexture::IconKamas,
-        DsTexture::IconLock,
-        DsTexture::IconOrder,
-        DsTexture::IconPact,
-        DsTexture::IconPin,
-        DsTexture::IconRepeat,
-        DsTexture::IconSave,
-        DsTexture::IconSettings1,
-        DsTexture::IconSettings2,
-        DsTexture::IconSort,
-        DsTexture::IconTriangleRight,
-        DsTexture::IconTrophy,
-        DsTexture::IconXp,
         DsTexture::ModalBody,
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
@@ -688,51 +488,6 @@ impl DsTexture {
             .iter()
             .position(|t| *t == self)
             .expect("toute variante de DsTexture est listée dans ALL")
-    }
-
-    /// Plus grande dimension d'encre à laquelle cette texture est peinte quand elle sert d'icône
-    /// sur un socle de [`tokens::ICON_BUTTON_SIZE`] — `None` pour tout ce qui n'est pas une icône
-    /// de bouton, ou dont la taille est déjà celle du composant qui la porte.
-    ///
-    /// Les glyphes de `assets/design-system/icons/` sont détourés au pixel près : leur fichier fait
-    /// exactement la taille de leur encre, qui varie d'un glyphe à l'autre (13 pour le lien
-    /// externe, 16 pour le rouage). Peints tels quels, ils donneraient trois hauteurs d'encre
-    /// différentes dans une même barre — le jeu, lui, les cale tous sur une grille commune. Cette
-    /// grille est [`tokens::ICON_BUTTON_CONTENT`], mesurée sur le jeu ; sa doc porte la mesure.
-    ///
-    /// C'est le manifeste qui la porte, et pas l'appelant : la taille d'encre d'un glyphe est une
-    /// propriété de l'asset, au même titre que son découpage 9-slice.
-    pub fn icon_content_size(self) -> Option<f32> {
-        match self {
-            DsTexture::IconOption
-            | DsTexture::IconExternalLink
-            | DsTexture::IconPlus
-            | DsTexture::IconMinus
-            | DsTexture::IconClose
-            | DsTexture::IconDelete
-            | DsTexture::IconHelp
-            | DsTexture::IconUndo
-            | DsTexture::IconVolume
-            | DsTexture::IconVolumeMute
-            | DsTexture::IconEye
-            | DsTexture::IconEyeOff
-            // Les sept qui suivent viennent d'un socle de bouton icône dans le jeu (détourées
-            // `--from-button`, voir `references/recettes-icones.md` du skill `design-asset`) :
-            // c'est ce qui justifie la normalisation, contrairement aux icônes du même lot
-            // détourées sans bouton porteur (`IconBook`, `IconCalendar`, `IconKamas`… ci-dessous)
-            // ou sans mesure consignée (`IconCards`, `IconGrid`, `IconHammer`,
-            // `IconCharacters`, `IconSettings1`, `IconSettings2` — prudence faute de certitude).
-            | DsTexture::IconBagIn
-            | DsTexture::IconBagOut
-            | DsTexture::IconFilter
-            | DsTexture::IconLock
-            | DsTexture::IconOrder
-            | DsTexture::IconPact
-            | DsTexture::IconSave
-            | DsTexture::IconSort
-            | DsTexture::IconTriangleRight => Some(tokens::ICON_BUTTON_CONTENT),
-            _ => None,
-        }
     }
 
     /// Grille d'une **planche d'atlas** : `(colonnes, lignes)` de cellules carrées, lues ligne par
@@ -800,11 +555,6 @@ impl DsTexture {
                 bytes: ds_asset!("button-disabled.png"),
                 slice: BUTTON_SLICE,
             },
-            DsTexture::IconInfo => DsTextureSpec {
-                name: "ds-icon-info",
-                bytes: ds_asset!("icons/icon-info.png"),
-                slice: ICON_SLICE,
-            },
             DsTexture::TabActive => DsTextureSpec {
                 name: "ds-tab-active",
                 bytes: ds_asset!("tab-active.png"),
@@ -850,11 +600,6 @@ impl DsTexture {
                 bytes: ds_asset!("select-face.png"),
                 slice: SELECT_SLICE,
             },
-            DsTexture::IconChevronDown => DsTextureSpec {
-                name: "ds-icon-chevron-down",
-                bytes: ds_asset!("icons/icon-chevron-down.png"),
-                slice: ICON_SLICE,
-            },
             DsTexture::ButtonIcon => DsTextureSpec {
                 name: "ds-button-icon",
                 bytes: ds_asset!("button-icon.png"),
@@ -879,186 +624,6 @@ impl DsTexture {
                 name: "ds-button-icon-disabled",
                 bytes: ds_asset!("button-icon-disabled.png"),
                 slice: ICON_BUTTON_SLICE,
-            },
-            DsTexture::IconOption => DsTextureSpec {
-                name: "ds-icon-option",
-                bytes: ds_asset!("icons/icon-option.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconExternalLink => DsTextureSpec {
-                name: "ds-icon-external-link",
-                bytes: ds_asset!("icons/icon-external-link.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconPlus => DsTextureSpec {
-                name: "ds-icon-plus",
-                bytes: ds_asset!("icons/icon-plus.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconMinus => DsTextureSpec {
-                name: "ds-icon-minus",
-                bytes: ds_asset!("icons/icon-minus.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconSearch => DsTextureSpec {
-                name: "ds-icon-search",
-                bytes: ds_asset!("icons/icon-search.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconClose => DsTextureSpec {
-                name: "ds-icon-close",
-                bytes: ds_asset!("icons/icon-close.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconDelete => DsTextureSpec {
-                name: "ds-icon-delete",
-                bytes: ds_asset!("icons/icon-delete.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconHelp => DsTextureSpec {
-                name: "ds-icon-help",
-                bytes: ds_asset!("icons/icon-help.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconTick => DsTextureSpec {
-                name: "ds-icon-tick",
-                bytes: ds_asset!("icons/icon-tick.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconUndo => DsTextureSpec {
-                name: "ds-icon-undo",
-                bytes: ds_asset!("icons/icon-undo.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconVolume => DsTextureSpec {
-                name: "ds-icon-volume",
-                bytes: ds_asset!("icons/icon-volume.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconVolumeMute => DsTextureSpec {
-                name: "ds-icon-volume-mute",
-                bytes: ds_asset!("icons/icon-volume-mute.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconEye => DsTextureSpec {
-                name: "ds-icon-eye",
-                bytes: ds_asset!("icons/icon-eye.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconEyeOff => DsTextureSpec {
-                name: "ds-icon-eye-off",
-                bytes: ds_asset!("icons/icon-eye-off.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconBagIn => DsTextureSpec {
-                name: "ds-icon-bag-in",
-                bytes: ds_asset!("icons/icon-bag-in.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconBagOut => DsTextureSpec {
-                name: "ds-icon-bag-out",
-                bytes: ds_asset!("icons/icon-bag-out.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconBook => DsTextureSpec {
-                name: "ds-icon-book",
-                bytes: ds_asset!("icons/icon-book.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconCalendar => DsTextureSpec {
-                name: "ds-icon-calendar",
-                bytes: ds_asset!("icons/icon-calendar.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconCards => DsTextureSpec {
-                name: "ds-icon-cards",
-                bytes: ds_asset!("icons/icon-cards.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconCharacters => DsTextureSpec {
-                name: "ds-icon-characters",
-                bytes: ds_asset!("icons/icon-characters.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconFilter => DsTextureSpec {
-                name: "ds-icon-filter",
-                bytes: ds_asset!("icons/icon-filter.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconGrid => DsTextureSpec {
-                name: "ds-icon-grid",
-                bytes: ds_asset!("icons/icon-grid.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconHammer => DsTextureSpec {
-                name: "ds-icon-hammer",
-                bytes: ds_asset!("icons/icon-hammer.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconKamas => DsTextureSpec {
-                name: "ds-icon-kamas",
-                bytes: ds_asset!("icons/icon-kamas.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconLock => DsTextureSpec {
-                name: "ds-icon-lock",
-                bytes: ds_asset!("icons/icon-lock.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconOrder => DsTextureSpec {
-                name: "ds-icon-order",
-                bytes: ds_asset!("icons/icon-order.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconPact => DsTextureSpec {
-                name: "ds-icon-pact",
-                bytes: ds_asset!("icons/icon-pact.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconPin => DsTextureSpec {
-                name: "ds-icon-pin",
-                bytes: ds_asset!("icons/icon-pin.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconRepeat => DsTextureSpec {
-                name: "ds-icon-repeat",
-                bytes: ds_asset!("icons/icon-repeat.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconSave => DsTextureSpec {
-                name: "ds-icon-save",
-                bytes: ds_asset!("icons/icon-save.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconSettings1 => DsTextureSpec {
-                name: "ds-icon-settings-1",
-                bytes: ds_asset!("icons/icon-settings-1.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconSettings2 => DsTextureSpec {
-                name: "ds-icon-settings-2",
-                bytes: ds_asset!("icons/icon-settings-2.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconSort => DsTextureSpec {
-                name: "ds-icon-sort",
-                bytes: ds_asset!("icons/icon-sort.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconTriangleRight => DsTextureSpec {
-                name: "ds-icon-triangle-right",
-                bytes: ds_asset!("icons/icon-triangle-right.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconTrophy => DsTextureSpec {
-                name: "ds-icon-trophy",
-                bytes: ds_asset!("icons/icon-trophy.png"),
-                slice: ICON_SLICE,
-            },
-            DsTexture::IconXp => DsTextureSpec {
-                name: "ds-icon-xp",
-                bytes: ds_asset!("icons/icon-xp.png"),
-                slice: ICON_SLICE,
             },
             DsTexture::ModalBody => DsTextureSpec {
                 name: "ds-modal-body",
@@ -1107,6 +672,8 @@ impl DsTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::design::icons::DsIcon;
+    use crate::design::tokens;
 
     /// Seuil d'opacité au-delà duquel un pixel compte comme de l'encre — le même que celui du skill
     /// `design-asset`, pour que les mesures se comparent d'un outil à l'autre.
@@ -1207,19 +774,13 @@ mod tests {
     fn les_glyphes_d_icone_sont_detoures_au_pixel_pres() {
         /// Écart admis entre le canevas et l'encre, par axe — voir la doc de la fonction.
         const TOLERANCE: u32 = 1;
-        // **Toutes les textures découpées en `ICON_SLICE`**, et non les seules qui portent un
-        // `icon_content_size` : ce filtre-là laissait échapper les glyphes qui ne vivent pas sur
-        // un socle (`IconSearch` dans un champ, `IconTick` à côté d'un libellé, `IconChevronDown`
-        // sur une liste déroulante) — précisément ceux dont une marge transparente passerait
-        // inaperçue, faute d'étalon pour les recadrer. Réserve de la revue du 2026-09-10.
-        for texture in DsTexture::ALL.iter().copied() {
-            let spec = texture.spec();
-            // Une planche d'atlas n'est pas un glyphe : ses cellules portent une marge
-            // transparente délibérée (voir `DsTexture::grid`). Elle a son propre test, juste
-            // en dessous — l'exemption n'est pas une dispense.
-            if spec.slice.insets != Insets::same(0.0) || texture.grid().is_some() {
-                continue;
-            }
+        // **Tous les glyphes**, sans filtre ni exemption — c'est ce que le second registre a
+        // apporté le 2026-09-11. Ce test sélectionnait jusque-là ses cibles par leur DÉCOUPAGE
+        // (`insets == 0`), faute de pouvoir dire « les icônes » : il ratait ce qu'il visait dans
+        // les deux sens, laissant passer les glyphes sans socle et attrapant `loader-sheet.png`,
+        // une planche d'atlas qui n'est pas un glyphe et qu'il a fallu exempter à la main.
+        for icon in DsIcon::ALL.iter().copied() {
+            let spec = icon.spec();
             let img = decode(spec.bytes);
             let encre = ink_bbox(&img);
             let (canevas_x, canevas_y) = img.dimensions();

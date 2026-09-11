@@ -407,6 +407,15 @@ pub const ICON_BUTTON_SIZE: f32 = 36.0;
 /// reproduire — là où `ui_icons` en charge deux copies recolorées au chargement.
 pub const ICON_TINT: Color32 = Color32::from_rgb(0xC5, 0xCB, 0xCC);
 
+/// Côté par défaut d'un glyphe posé seul — 16 px.
+///
+/// **Choisi, pas mesuré**, et il faut le dire : le jeu ne peint aucun glyphe hors socle dans les
+/// captures relevées, il n'y a donc pas de taille de référence à reprendre. 16 est la taille d'un
+/// glyphe accolé à une ligne de texte de corps 17, celle des libellés du design system — assez
+/// grand pour se lire, assez petit pour ne pas dépasser de la ligne. À remplacer par une mesure
+/// dès qu'une capture en montrera un.
+pub const ICON_SIZE: f32 = 16.0;
+
 /// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
 pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 

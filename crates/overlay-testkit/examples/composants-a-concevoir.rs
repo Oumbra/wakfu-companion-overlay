@@ -21,7 +21,7 @@ mod wakassets_fixtures;
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
-use overlay_ui::design::{self, DsTexture, IconContext, InputSize};
+use overlay_ui::design::{self, DsIcon, IconContext, InputSize};
 use overlay_ui::ui_icons::UiIcons;
 
 use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_BOX};
@@ -267,12 +267,12 @@ fn alert_item(
 
     let ds = design::DesignSystem::get(ui.ctx());
     let icon = if sound_on {
-        DsTexture::IconVolume
+        DsIcon::Volume
     } else {
-        DsTexture::IconVolumeMute
+        DsIcon::VolumeMute
     };
-    let native = ds.native_size(icon);
-    ds.paint(
+    let native = ds.icon_native_size(icon);
+    ds.paint_icon(
         ui.painter(),
         Rect::from_center_size(
             egui::pos2(
@@ -286,8 +286,8 @@ fn alert_item(
     );
 
     if removable {
-        let native = ds.native_size(DsTexture::IconClose);
-        ds.paint(
+        let native = ds.icon_native_size(DsIcon::Close);
+        ds.paint_icon(
             ui.painter(),
             Rect::from_center_size(
                 egui::pos2(
@@ -296,7 +296,7 @@ fn alert_item(
                 ),
                 design::components::icon_button::glyph_fit(native, TILE_BADGE - 2.0),
             ),
-            DsTexture::IconClose,
+            DsIcon::Close,
             SUBDUED,
         );
     }
@@ -683,7 +683,7 @@ fn alert_management(ui: &mut egui::Ui, auto: &mut bool, seconds: &mut String) {
 
 /// **Les deux boutons existent déjà** : le socle de pas est au manifeste
 /// ([`DsTexture::ButtonStepper`], générifié depuis `button-moins.png`) et les glyphes aussi
-/// ([`DsTexture::IconPlus`], [`DsTexture::IconMinus`]) — `design::icon_button` en contexte
+/// ([`DsIcon::Plus`], [`DsIcon::Minus`]) — `design::icon_button` en contexte
 /// `Stepper` les compose, c'est ce que peint cette planche. Ce qui manque est **le champ**
 /// (`input-number.png`, 104 × 28, toujours hors manifeste) et **l'assemblage borné** des trois.
 ///
@@ -724,7 +724,7 @@ fn stepper_row(ui: &mut egui::Ui, value: &mut String, minus_enabled: bool, enabl
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         ui.add(
-            design::icon_button(DsTexture::IconMinus)
+            design::icon_button(DsIcon::Minus)
                 .context(IconContext::Stepper)
                 // Taille NATIVE du socle. Le défaut du bouton icône est 36 (celui des cinq socles
                 // de panneau) : laissé tel quel, il agrandit le socle de pas de 32 à 36.
@@ -738,7 +738,7 @@ fn stepper_row(ui: &mut egui::Ui, value: &mut String, minus_enabled: bool, enabl
                 .enabled(enabled),
         );
         ui.add(
-            design::icon_button(DsTexture::IconPlus)
+            design::icon_button(DsIcon::Plus)
                 .context(IconContext::Stepper)
                 .size(design::tokens::STEPPER_SIZE)
                 .enabled(enabled),
@@ -830,14 +830,14 @@ fn confirm(ui: &mut egui::Ui, question: &str) {
         Stroke::new(2.0, CONFIRM_BORDER),
     );
     let ds = design::DesignSystem::get(ui.ctx());
-    let native = ds.native_size(DsTexture::IconHelp);
-    ds.paint(
+    let native = ds.icon_native_size(DsIcon::Help);
+    ds.paint_icon(
         ui.painter(),
         Rect::from_center_size(
             crest,
             design::components::icon_button::glyph_fit(native, 13.0),
         ),
-        DsTexture::IconHelp,
+        DsIcon::Help,
         design::tokens::BUTTON_TEXT_ON_GOLD,
     );
 
@@ -961,7 +961,7 @@ fn planche_autocomplete() {
         legende(ui, "Replié, vide");
         ui.add(
             design::input(&mut vide)
-                .leading_icon(DsTexture::IconSearch)
+                .leading_icon(DsIcon::Search)
                 .placeholder("Ajouter un objet à surveiller…")
                 .width(width),
         );
@@ -973,7 +973,7 @@ fn planche_autocomplete() {
         );
         let field = ui.add(
             design::input(&mut saisi)
-                .leading_icon(DsTexture::IconSearch)
+                .leading_icon(DsIcon::Search)
                 .width(width),
         );
         suggestions(ui, icons, gems, cats, field.rect);

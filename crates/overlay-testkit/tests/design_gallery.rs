@@ -20,7 +20,7 @@
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
-    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsTexture, IconButtonState,
+    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, IconButtonState,
     IconContext, InfoTone, InputState, LoaderSize, SelectState, SliderState, TabState,
 };
 
@@ -55,7 +55,9 @@ fn galerie_du_design_system() {
         // 5680 -> 5860 le 2026-09-11 : section « Curseur de réglage » (trois positions, le motif à
         // libellés, le désactivé et le cas dégénéré).
         // 5860 -> 5900 le 2026-09-11 : rangée des curseurs gradués (26, 11 et 3 crans).
-        .with_size(Vec2::new(760.0, 5900.0))
+        // 5900 -> 5990 le 2026-09-11 : section « Glyphe seul » (`design::icon`, quatre tailles,
+        // trois glyphes non carrés, deux teintes).
+        .with_size(Vec2::new(760.0, 5990.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -471,23 +473,23 @@ fn gallery(ui: &mut egui::Ui) {
         // (2026-09-11) a fait dépasser la largeur fixe du canevas (760px) à une seule ligne.
         ui.horizontal_wrapped(|ui| {
             for (icon, name) in [
-                (DsTexture::IconOption, "option"),
-                (DsTexture::IconExternalLink, "lien"),
-                (DsTexture::IconPlus, "plus"),
-                (DsTexture::IconMinus, "moins"),
-                (DsTexture::IconVolume, "volume"),
-                (DsTexture::IconVolumeMute, "volume-muet"),
-                (DsTexture::IconEye, "oeil"),
-                (DsTexture::IconEyeOff, "oeil-barre"),
-                (DsTexture::IconBagIn, "sac-entree"),
-                (DsTexture::IconBagOut, "sac-sortie"),
-                (DsTexture::IconFilter, "filtre"),
-                (DsTexture::IconLock, "cadenas"),
-                (DsTexture::IconOrder, "classement"),
-                (DsTexture::IconPact, "pacte"),
-                (DsTexture::IconSave, "enregistrer"),
-                (DsTexture::IconSort, "tri"),
-                (DsTexture::IconTriangleRight, "triangle"),
+                (DsIcon::Option, "option"),
+                (DsIcon::ExternalLink, "lien"),
+                (DsIcon::Plus, "plus"),
+                (DsIcon::Minus, "moins"),
+                (DsIcon::Volume, "volume"),
+                (DsIcon::VolumeMute, "volume-muet"),
+                (DsIcon::Eye, "oeil"),
+                (DsIcon::EyeOff, "oeil-barre"),
+                (DsIcon::BagIn, "sac-entree"),
+                (DsIcon::BagOut, "sac-sortie"),
+                (DsIcon::Filter, "filtre"),
+                (DsIcon::Lock, "cadenas"),
+                (DsIcon::Order, "classement"),
+                (DsIcon::Pact, "pacte"),
+                (DsIcon::Save, "enregistrer"),
+                (DsIcon::Sort, "tri"),
+                (DsIcon::TriangleRight, "triangle"),
             ] {
                 ui.add(
                     design::icon_button(icon)
@@ -497,13 +499,13 @@ fn gallery(ui: &mut egui::Ui) {
             }
             ui.add_space(20.0);
             ui.add(
-                design::icon_button(DsTexture::IconOption)
+                design::icon_button(DsIcon::Option)
                     .context(context)
                     .preview_state(IconButtonState::Hovered)
                     .log_name("galerie.icone-survol"),
             );
             ui.add(
-                design::icon_button(DsTexture::IconOption)
+                design::icon_button(DsIcon::Option)
                     .context(context)
                     .enabled(false)
                     .preview_state(IconButtonState::Disabled)
@@ -521,20 +523,20 @@ fn gallery(ui: &mut egui::Ui) {
     let mut recherche_pleine = String::from("pierre");
     ui.add(
         design::input(&mut recherche_vide)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .placeholder("Rechercher")
             .width(420.0)
             .log_name("galerie.recherche-vide"),
     );
     ui.add(
         design::input(&mut recherche_pleine)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .width(420.0)
             .log_name("galerie.recherche-pleine"),
     );
     ui.add(
         design::input(&mut recherche_pleine)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .width(200.0)
             .enabled(false)
             .preview_state(InputState::Disabled)
@@ -548,27 +550,27 @@ fn gallery(ui: &mut egui::Ui) {
     );
     ui.horizontal_wrapped(|ui| {
         for icon in [
-            DsTexture::IconOption,
-            DsTexture::IconExternalLink,
-            DsTexture::IconPlus,
-            DsTexture::IconMinus,
-            DsTexture::IconClose,
-            DsTexture::IconDelete,
-            DsTexture::IconHelp,
-            DsTexture::IconUndo,
-            DsTexture::IconVolume,
-            DsTexture::IconVolumeMute,
-            DsTexture::IconEye,
-            DsTexture::IconEyeOff,
-            DsTexture::IconBagIn,
-            DsTexture::IconBagOut,
-            DsTexture::IconFilter,
-            DsTexture::IconLock,
-            DsTexture::IconOrder,
-            DsTexture::IconPact,
-            DsTexture::IconSave,
-            DsTexture::IconSort,
-            DsTexture::IconTriangleRight,
+            DsIcon::Option,
+            DsIcon::ExternalLink,
+            DsIcon::Plus,
+            DsIcon::Minus,
+            DsIcon::Close,
+            DsIcon::Delete,
+            DsIcon::Help,
+            DsIcon::Undo,
+            DsIcon::Volume,
+            DsIcon::VolumeMute,
+            DsIcon::Eye,
+            DsIcon::EyeOff,
+            DsIcon::BagIn,
+            DsIcon::BagOut,
+            DsIcon::Filter,
+            DsIcon::Lock,
+            DsIcon::Order,
+            DsIcon::Pact,
+            DsIcon::Save,
+            DsIcon::Sort,
+            DsIcon::TriangleRight,
         ] {
             ui.add(design::icon_button(icon).context(IconContext::Panel));
         }
@@ -579,13 +581,13 @@ fn gallery(ui: &mut egui::Ui) {
     let (row, _) = ui.allocate_exact_size(Vec2::new(400.0, 28.0), egui::Sense::hover());
     let mut x = row.left() + 8.0;
     for (icon, tint) in [
-        (DsTexture::IconSearch, design::tokens::INPUT_PLACEHOLDER),
-        (DsTexture::IconTick, Color32::from_rgb(0x7A, 0xC7, 0x4F)),
-        (DsTexture::IconChevronDown, design::tokens::SELECT_TEXT),
-        (DsTexture::IconInfo, design::tokens::INFO_DOT),
+        (DsIcon::Search, design::tokens::INPUT_PLACEHOLDER),
+        (DsIcon::Tick, Color32::from_rgb(0x7A, 0xC7, 0x4F)),
+        (DsIcon::ChevronDown, design::tokens::SELECT_TEXT),
+        (DsIcon::Info, design::tokens::INFO_DOT),
     ] {
-        let native = design::DesignSystem::get(ui.ctx()).native_size(icon);
-        ds.paint(
+        let native = design::DesignSystem::get(ui.ctx()).icon_native_size(icon);
+        ds.paint_icon(
             ui.painter(),
             egui::Rect::from_center_size(egui::pos2(x + native.x / 2.0, row.center().y), native),
             icon,
@@ -597,34 +599,71 @@ fn gallery(ui: &mut egui::Ui) {
     heading(
         ui,
         "Glyphes sans socle connu — lot sans appelant (2026-09-11)",
-        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (voir `DsTexture::icon_content_size`, doc de chaque variante) : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
+        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (marquées `libre` dans `design::icons`, voir la doc de chaque variante) : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
     );
     ui.horizontal_wrapped(|ui| {
         for icon in [
-            DsTexture::IconBook,
-            DsTexture::IconCalendar,
-            DsTexture::IconCards,
-            DsTexture::IconCharacters,
-            DsTexture::IconGrid,
-            DsTexture::IconHammer,
-            DsTexture::IconKamas,
-            DsTexture::IconPin,
-            DsTexture::IconRepeat,
-            DsTexture::IconSettings1,
-            DsTexture::IconSettings2,
-            DsTexture::IconTrophy,
-            DsTexture::IconXp,
+            DsIcon::Book,
+            DsIcon::Calendar,
+            DsIcon::Cards,
+            DsIcon::Characters,
+            DsIcon::Grid,
+            DsIcon::Hammer,
+            DsIcon::Kamas,
+            DsIcon::Pin,
+            DsIcon::Repeat,
+            DsIcon::Settings1,
+            DsIcon::Settings2,
+            DsIcon::Trophy,
+            DsIcon::Xp,
         ] {
-            let native = ds.native_size(icon);
+            let native = ds.icon_native_size(icon);
             let (rect, _) =
                 ui.allocate_exact_size(native + Vec2::splat(14.0), egui::Sense::hover());
-            ds.paint(
+            ds.paint_icon(
                 ui.painter(),
                 egui::Rect::from_center_size(rect.center(), native),
                 icon,
                 design::tokens::ICON_TINT,
             );
         }
+    });
+
+    heading(
+        ui,
+        "Glyphe seul — `design::icon`, sans socle ni clic",
+        "Le composant qui manquait pour poser une icône dans une ligne : il alloue un CARRÉ et y inscrit le glyphe en gardant son rapport. Le chevron (14 × 8) le montre — il ne devient jamais carré, quelle que soit la taille demandée.",
+    );
+    ui.horizontal(|ui| {
+        for size in [12.0_f32, 16.0, 24.0, 32.0] {
+            ui.vertical(|ui| {
+                ui.add(design::icon(DsIcon::Kamas).size(size));
+                ui.label(
+                    RichText::new(format!("{size:.0}"))
+                        .color(CAPTION)
+                        .size(11.0),
+                );
+            });
+            ui.add_space(10.0);
+        }
+        ui.add_space(20.0);
+        // Deux glyphes NON carrés à la même taille demandée : c'est le rapport préservé qui se
+        // voit, pas la taille. Un `Vec2::splat` les aplatirait tous les deux à l'identique.
+        for icon in [DsIcon::ChevronDown, DsIcon::Info, DsIcon::TriangleRight] {
+            ui.add(design::icon(icon).size(24.0));
+            ui.add_space(10.0);
+        }
+        ui.add_space(20.0);
+        ui.add(
+            design::icon(DsIcon::Lock)
+                .size(24.0)
+                .tint(design::tokens::TEXT_DISABLED),
+        );
+        ui.add(
+            design::icon(DsIcon::Tick)
+                .size(24.0)
+                .tint(design::tokens::INFO_ALERT),
+        );
     });
 
     heading(
@@ -735,7 +774,7 @@ fn gallery(ui: &mut egui::Ui) {
     {
         let mut ferme = false;
         design::collapsible("Bloc fermé", &mut ferme)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .log_name("galerie.repliable-ferme")
             .show(ui, |ui| {
                 ui.label("jamais rendu tant que le bloc est fermé");
@@ -744,7 +783,7 @@ fn gallery(ui: &mut egui::Ui) {
 
         let mut ouvert = true;
         design::collapsible("Bloc ouvert", &mut ouvert)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .log_name("galerie.repliable-ouvert")
             .show(ui, |ui| {
                 for ligne in [
@@ -770,7 +809,7 @@ fn gallery(ui: &mut egui::Ui) {
         // troisième bloc est ouvert plutôt que fermé.
         let mut survole = true;
         design::collapsible("Bloc survolé", &mut survole)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .preview_hovered(true)
             .log_name("galerie.repliable-survole")
             .show(ui, |ui| {
@@ -886,7 +925,7 @@ fn gallery(ui: &mut egui::Ui) {
         ];
         let mut motif = true;
         design::collapsible("Le motif du jeu", &mut motif)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .log_name("galerie.filet-motif")
             .show(ui, |ui| {
                 // L'espacement par défaut de la galerie (8 px) s'ajouterait aux cotes du relevé
@@ -917,7 +956,7 @@ fn gallery(ui: &mut egui::Ui) {
         // d'écart. Les deux blocs se comparent ligne à ligne sur la capture.
         let mut survole = true;
         design::collapsible("Le même, surface survolée", &mut survole)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .preview_hovered(true)
             .log_name("galerie.filet-survole")
             .show(ui, |ui| {
