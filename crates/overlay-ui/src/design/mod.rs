@@ -52,6 +52,7 @@ pub use components::heading::{heading, Heading};
 pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
 pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
+pub use components::loader::{loader, Loader, LoaderSize};
 pub use components::panel::{panel, Panel, PanelZones};
 pub use components::scroll_area::{scroll_area, ScrollArea};
 pub use components::select::{select, select_multi, Select, SelectState};
@@ -174,6 +175,26 @@ impl DesignSystem {
             egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
             tint,
         );
+        painter.add(egui::Shape::mesh(mesh));
+    }
+
+    /// Peint une **région** de la texture (`uv`, en coordonnées `0..1`) dans `rect`, à l'échelle
+    /// uniforme.
+    ///
+    /// C'est le chemin d'une planche d'images (`DsTexture::LoaderSheet`) : le manifeste porte une
+    /// texture par rôle, et une animation est un rôle — seize variantes `LoaderFrame00…15` seraient
+    /// seize lignes pour dire la même chose. Le 9-slice ne s'applique pas : une cellule de planche
+    /// n'a ni coin ni liseré à figer, elle se réduit comme un glyphe.
+    pub fn paint_region(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        texture: DsTexture,
+        uv: egui::Rect,
+        tint: egui::Color32,
+    ) {
+        let mut mesh = egui::Mesh::with_texture(self.texture(texture).id());
+        mesh.add_rect_with_uv(rect, uv, tint);
         painter.add(egui::Shape::mesh(mesh));
     }
 

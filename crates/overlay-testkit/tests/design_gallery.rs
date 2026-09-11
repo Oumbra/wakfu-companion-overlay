@@ -21,7 +21,7 @@ use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsTexture, IconButtonState,
-    IconContext, InfoTone, InputState, SelectState, TabState,
+    IconContext, InfoTone, InputState, LoaderSize, SelectState, TabState,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -45,7 +45,9 @@ fn galerie_du_design_system() {
         // « Bouton icône » et « Glyphes du manifeste » sur deux lignes (`horizontal_wrapped`,
         // la largeur fixe ne les contient plus sur une seule) et ajoute la section « Glyphes
         // sans socle connu » — sans cette hauteur, le bas de la galerie sortait du canevas.
-        .with_size(Vec2::new(760.0, 4500.0))
+        // 4500 -> 4900 le 2026-09-11 : section « Rouage de chargement » (une rangée de quatre
+        // tailles, une rangée d'images figées, un cas hors intervalle).
+        .with_size(Vec2::new(760.0, 4900.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -759,6 +761,45 @@ fn gallery(ui: &mut egui::Ui) {
                 );
             });
     }
+
+    heading(
+        ui,
+        "Rouage de chargement — de 48 à 124 px, toujours carré",
+        "Une planche de 16 images peinte par région, 24 i/s. Small 48 est le plancher (décision utilisateur), Native 124 la taille du jeu ; Medium et Large sont des paliers choisis. Image figée par preview_frame : hors écran, l'horloge ne tourne pas.",
+    );
+    ui.horizontal(|ui| {
+        for (size, label) in [
+            (LoaderSize::Small, "Small · 48"),
+            (LoaderSize::Medium, "Medium · 72"),
+            (LoaderSize::Large, "Large · 96"),
+            (LoaderSize::Native, "Native · 124"),
+        ] {
+            ui.vertical(|ui| {
+                ui.add(design::loader().size(size).preview_frame(0).log_name(label));
+                ui.label(RichText::new(label).color(CAPTION).size(12.0));
+            });
+            ui.add_space(14.0);
+        }
+    });
+    // La boucle, une image sur deux : un tour de dent (8 images) sur la ligne, et la tête qui
+    // se balance d'une image à l'autre — c'est ce qui distingue la boucle de 16 d'une boucle de 8.
+    ui.horizontal(|ui| {
+        for frame in (0..16).step_by(2) {
+            ui.add(
+                design::loader()
+                    .size(LoaderSize::Small)
+                    .preview_frame(frame)
+                    .log_name(format!("galerie.loader-{frame:02}")),
+            );
+        }
+    });
+    // Hors intervalle : 20 px demandés, 48 peints — et un `warn!` unique dans le journal.
+    ui.add(
+        design::loader()
+            .size(LoaderSize::Px(20.0))
+            .preview_frame(0)
+            .log_name("galerie.loader-hors-intervalle"),
+    );
 }
 
 /// Onglets de la fenêtre de démonstration ci-dessus — un type à part, parce qu'une barre d'onglets

@@ -30,6 +30,7 @@ pub mod heading;
 pub mod icon_button;
 pub mod info_text;
 pub mod input;
+pub mod loader;
 pub mod panel;
 pub mod scroll_area;
 pub mod select;
