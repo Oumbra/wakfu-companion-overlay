@@ -1557,10 +1557,21 @@ appartient — résoudre l'icône distante, lire la rareté au catalogue, tradui
 `item_slot_gap` 2, `item_slot_border` 2). Basculer est la suite du lot 5 et se valide sur captures :
 ce commit déplace du code, il ne change pas une apparence.
 
-**Un doublon daté** : les sept textures sont aussi chargées par `ui_icons`, pour deux maquettes du
-testkit qui peignent encore leur propre tuile. Coût mesuré : **7,3 Mo** décodés payés deux fois,
-4,9 % du budget. À résorber en migrant ces maquettes — pas fait ici, elles étaient en cours de
-modification par une session parallèle.
+~~**Un doublon daté**~~ — **résorbé le 2026-09-11** : les deux maquettes du testkit
+(`alertes-mockups`, `composants-a-concevoir`) appellent le composant, `UiIcons::item_border` a
+perdu son dernier appelant et les sept textures ne sont plus chargées qu'une fois. Les **7,3 Mo**
+payés deux fois (4,9 % du budget) sont rendus. La traduction `WakfuRarity → ItemRarity` a suivi le
+même chemin : elle est passée de `panels::watchlist` à `crate::rarity_bridge`, parce qu'un exemple
+n'a pas à traverser un panneau pour convertir une rareté.
+
+### Journalisation (clause 4)
+
+Sous `tokens::ITEM_SLOT_MIN_SIZE` (8 px = 4 × le liseré), le cadre et sa marge mangent tout le
+carré. L'emplacement est **peint quand même** — §3 veut qu'un rectangle trop petit se voie sur la
+capture plutôt que de paniquer — et un `warn!` part **une fois par instance**, mémorisé sur l'id de
+la réponse comme le fait `design::slider` pour ses crans. Le seuil est **choisi, pas mesuré**, et sa
+doc le dit : personne ne demande sciemment un emplacement de 6 px, c'est le signe d'une largeur
+calculée tombée à rien. La galerie en montre un, à droite de la rangée des cas.
 
 ---
 
