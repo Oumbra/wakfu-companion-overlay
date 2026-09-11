@@ -663,6 +663,14 @@ sur le placement par défaut d'egui.
 « corriger » le jour venu : dans la barre d'onglets, **l'axe du bouton est 9px plus bas que celui des
 onglets**.
 
+**Paire volume/muet (2026-09-11)** : `DsTexture::IconVolume` (26 × 22) et `DsTexture::IconVolumeMute`
+(26 × 26), détourées par le skill `design-asset` depuis deux captures du jeu sans socle porteur —
+contrairement aux autres glyphes de la table, prélevés sur un bouton. Entrées au manifeste et à la
+galerie de contrôle avant tout appelant réel, comme `DsTexture::ModalHeader` l'avait été pour sa
+bannière : préparées pour le futur bouton muet/actif de la fenêtre Options
+(`interface-options-son.png`), aucun réglage de son n'étant câblé dans l'overlay à ce jour
+(`alert_sound` ne fait que jouer les sons, jamais les couper).
+
 ---
 
 ## `design::window` — chrome de fenêtre (2026-09-10)

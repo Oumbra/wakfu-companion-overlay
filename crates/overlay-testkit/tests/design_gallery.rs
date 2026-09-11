@@ -432,6 +432,8 @@ fn gallery(ui: &mut egui::Ui) {
                 (DsTexture::IconExternalLink, "lien"),
                 (DsTexture::IconPlus, "plus"),
                 (DsTexture::IconMinus, "moins"),
+                (DsTexture::IconVolume, "volume"),
+                (DsTexture::IconVolumeMute, "volume-muet"),
             ] {
                 ui.add(
                     design::icon_button(icon)
@@ -500,6 +502,8 @@ fn gallery(ui: &mut egui::Ui) {
             DsTexture::IconDelete,
             DsTexture::IconHelp,
             DsTexture::IconUndo,
+            DsTexture::IconVolume,
+            DsTexture::IconVolumeMute,
         ] {
             ui.add(design::icon_button(icon).context(IconContext::Panel));
         }
