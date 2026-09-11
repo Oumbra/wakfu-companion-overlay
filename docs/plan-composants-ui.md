@@ -420,7 +420,7 @@ Deux rappels qui valent pour tout ce lot :
 | `design::collapsible` | ✅ — relevé refait sur le bon asset, voir ci-dessous |
 | `input` — état d'erreur | ✅ `41791df` — quatrième état, branché sur la modale Options |
 | `design::slider` | ✅ — `slider-handle.png` extrait de `interface-options-son.png`, rainure peinte |
-| `tabs` — variante icône | **bloqué** — dépend de `DsIcon` (lot 2), voir ci-dessous |
+| `tabs` — variante icône | ✅ 2026-09-11, après le lot 2 — `.icon()` sur une entrée, le libellé devient l'infobulle |
 
 **Ce que le `collapsible` a appris** : un asset nommé « collapse » n'est pas forcément *le*
 composant. Le premier relevé a porté sur `collapse-closed.png` — la colonne « Types » de l'Hôtel de
@@ -436,15 +436,14 @@ propre grille, sa propre taille native de socle et, quand il en impose une, sa p
 glyphe. Les deux contextes existants retombent sur le manifeste : leur rendu est inchangé, ce que
 les snapshots vérifient.
 
-**La variante icône de `tabs` ne peut pas être faite dans ce lot**, et ce n'est pas un oubli
-d'ordonnancement : elle a besoin de `DsIcon` pour nommer l'icône d'un onglet, et `DsIcon` est le
-lot 2. La faire quand même signifierait passer un `DsTexture` brut en paramètre — exactement ce que
-le contrat interdit (« une texture en paramètre de composant »), et qu'il faudrait défaire au lot
-suivant. Elle est donc reportée **au lot 2**, dont elle devient le premier consommateur : c'est
-aussi ce qui vérifiera que `DsIcon` tient ses promesses sur un cas réel.
+**La variante icône de `tabs` a attendu le lot 2**, et ce n'était pas un défaut d'ordonnancement :
+elle avait besoin de `DsIcon` pour le glyphe — passer un `DsTexture` brut aurait violé le contrat
+(« une texture en paramètre de composant ») — **et** de `design::tooltip` pour le mot, puisque son
+libellé devient une infobulle. Elle a donc été le premier consommateur du lot 2, et c'est ce qui a
+vérifié que les deux tenaient leurs promesses sur un cas réel.
 
 **Critère de fin** : l'onglet Alertes de la modale Options se compose sans qu'aucun panneau ne
-peigne un widget à la main. **Atteint pour tout ce qui ne dépend pas du lot 2.**
+peigne un widget à la main. **Atteint.**
 
 **Estimation** : 4 à 5 séances.
 

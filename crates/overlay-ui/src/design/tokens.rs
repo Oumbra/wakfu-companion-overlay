@@ -252,6 +252,23 @@ pub const TAB_PADDING_X: f32 = 16.0;
 /// proportion pour un libellé court, comme `BUTTON_MIN_ASPECT` pour un bouton. Réglage, pas mesure.
 pub const TAB_MIN_WIDTH: f32 = 77.0;
 
+/// Largeur d'un onglet **à pictogramme**, quand la barre ne s'étire pas — 66 px.
+///
+/// **Mesurée** sur `assets/design-system/icon-tabs.png` (268 × 44) : les crêtes de séparation y
+/// tombent à x=65-66, 133-134 et 201-202, soit un pas de 68 px dont 2 de gouttière. Un onglet à
+/// pictogramme est donc plus étroit qu'un onglet texte ([`TAB_MIN_WIDTH`], 77) — il n'a pas de mot
+/// à contenir.
+pub const TAB_ICON_WIDTH: f32 = 66.0;
+
+/// Côté de l'encre d'un pictogramme d'onglet, **en fraction de la hauteur de la barre**.
+///
+/// **Dérivé, pas mesuré**, et il faut le dire : `icon-tabs.png` est un gabarit vide — le jeu n'y a
+/// laissé aucun pictogramme à mesurer. La valeur reprend le rapport du bouton icône
+/// ([`ICON_BUTTON_CONTENT`] sur [`ICON_BUTTON_SIZE`], soit 0,5), seul rapport glyphe/socle que le
+/// design system ait mesuré. Sur une barre de 44 px cela donne 22 px d'encre. À remplacer par une
+/// mesure dès qu'une capture d'onglets à pictogrammes existera.
+pub const TAB_ICON_RATIO: f32 = ICON_BUTTON_CONTENT / ICON_BUTTON_SIZE;
+
 /// Facteur d'assombrissement du **cerne** d'un libellé d'onglet — `0,205`.
 ///
 /// Le libellé du jeu est cerné sur 1px dans les huit directions, et ce cerne n'est **pas noir** : sa
