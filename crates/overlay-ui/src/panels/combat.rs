@@ -441,9 +441,6 @@ const TOTAL_FONT_SIZE: f32 = 18.0;
 /// Écart entre la ligne leader et le premier groupe — réduit en cohérence avec `ROW_GAP`.
 const TOTAL_GAP: f32 = 3.0;
 const NAME_FONT_SIZE: f32 = 13.0;
-/// Taille du pourcentage sur le portrait — agrandie une 1re fois (retour utilisateur, 7e retour :
-/// « ça a l'air compliqué à lire, il en manque un ou deux pixels »).
-const PERCENT_FONT_SIZE: f32 = 12.0;
 
 /// Marge intérieure du fond opacifié de la ligne leader (voir `show_leader_row`) entre son bord et
 /// le bouton/le total qu'il contient — la MÊME valeur des deux côtés (le bouton à gauche a un bord
@@ -714,37 +711,25 @@ fn paint_flat_portrait(
         remote_icon_textures,
         fighter,
     );
-    let response = match portrait {
-        Some(FighterPortrait::ClassPortrait(texture)) => ui.add(
-            egui::Image::new(&texture)
-                .fit_to_exact_size(egui::vec2(
-                    crate::portraits::PORTRAIT_SIZE,
-                    crate::portraits::PORTRAIT_SIZE,
-                ))
-                .maintain_aspect_ratio(false),
-        ),
-        Some(FighterPortrait::RemoteMonster(texture)) => ui.add(
-            egui::Image::new(&texture)
-                .fit_to_exact_size(egui::vec2(
-                    crate::portraits::PORTRAIT_SIZE,
-                    crate::portraits::PORTRAIT_SIZE,
-                ))
-                .maintain_aspect_ratio(false)
-                // Pas de version grisée précalculée pour une icône distante (voir doc de
-                // `FighterPortrait::RemoteMonster`) : simple tint, approximation acceptée.
-                .tint(grey_tint_if_ko(fighter.is_ko)),
-        ),
-        None => ui.add(
-            icons
-                .unknown_entity_image()
-                .tint(grey_tint_if_ko(fighter.is_ko)),
-        ),
+    // La forme, le grisé et le pourcentage vivent dans `design::portrait` depuis le 2026-09-11.
+    // Ce qui reste ici est le choix de la TEXTURE et celui de teinter ou non : seul ce panneau sait
+    // qu'un portrait de classe a sa version grise précalculée dans l'atlas, et qu'une icône
+    // distante ou le repli n'en ont pas.
+    let (texture, dimmed) = match &portrait {
+        Some(FighterPortrait::ClassPortrait(texture)) => (texture.id(), false),
+        Some(FighterPortrait::RemoteMonster(texture)) => (texture.id(), fighter.is_ko),
+        None => (icons.unknown_entity_texture().id(), fighter.is_ko),
     };
-    let rect = response.rect;
+    let response = ui.add(
+        design::portrait(texture)
+            .size(crate::portraits::PORTRAIT_SIZE)
+            .dimmed(dimmed)
+            .percent(
+                (fighter.total_damage > 0)
+                    .then(|| design::portrait_percent(fighter.total_damage, total_damage)),
+            ),
+    );
     design::tooltip(&response).text(fighter.name.as_str());
-    if fighter.total_damage > 0 {
-        paint_portrait_percent(ui, rect, fighter.total_damage, total_damage);
-    }
 }
 
 /// Tint à appliquer à une icône de repli/distante pour approximer un grisé KO — voir la doc de
@@ -760,39 +745,6 @@ pub(crate) fn grey_tint_if_ko(is_ko: bool) -> egui::Color32 {
     } else {
         egui::Color32::WHITE
     }
-}
-
-/// Pourcentage de dégâts d'un combattant par rapport au total du camp affiché, incrusté au coin
-/// bas-droit du carré ENGLOBANT `rect` (portrait de classe, monstre, ou repli générique — appelé
-/// aussi bien par `panels::combat_frame::CombatFrame::show` que par `paint_flat_portrait`
-/// ci-dessus) — demande utilisateur explicite (retour après capture d'écran) : « comme si on
-/// traçait un carré autour du rond et qu'on plaçait le pourcentage tout en bas à droite », donc
-/// légèrement EN DEHORS du disque visible plutôt que dessus, pour ne jamais recouvrir le portrait.
-pub(crate) fn paint_portrait_percent(
-    ui: &egui::Ui,
-    rect: egui::Rect,
-    damage: i64,
-    total_damage: i64,
-) {
-    let ratio = (damage as f32 / total_damage as f32).clamp(0.0, 1.0);
-    let percent = (ratio as f64 * 100.0).round() as i64;
-    let text = format!("{percent}%");
-    // Décalage vers l'EXTÉRIEUR du coin (pas vers l'intérieur) — demande utilisateur : « encore un
-    // peu plus sur la droite [...] pour qu'il mange un peu moins sur le portrait ».
-    let pos = rect.right_bottom() + egui::vec2(2.0, 1.0);
-    // `ACCENT` (bleu Wakfu, même que le switch) — retour utilisateur 2026-09-05 (9e retour) :
-    // revient sur `DAMAGE_ACCENT` du 8e retour (« je préfère la couleur accent qu'il y avait
-    // avant »). Résultat assumé : la barre (`DAMAGE_ACCENT`) et ce pourcentage n'ont plus la même
-    // couleur — explicitement voulu, pas un oubli de cohérence.
-    text::paint_outlined_text(
-        ui,
-        pos,
-        egui::Align2::RIGHT_BOTTOM,
-        &text,
-        text::label_font(ui.ctx(), PERCENT_FONT_SIZE),
-        ACCENT,
-        text::OUTLINE_FULL,
-    );
 }
 
 /// Un "groupe" nom + dégâts + barre de la colonne de droite — nom à gauche et dégâts chiffrés à

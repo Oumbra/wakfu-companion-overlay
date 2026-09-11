@@ -1212,3 +1212,30 @@ pub const METER_HIGHLIGHT_RATIO: f32 = 0.35;
 /// sur le portrait, lui, est revenu à l'accent au 9e — barre et pourcentage n'ont donc plus la
 /// même couleur, et c'est voulu.
 pub const METER_FILL: Color32 = Color32::from_rgb(0x07, 0x79, 0x82);
+
+// ---------------------------------------------------------------------------------------------
+// Portrait — `design::portrait`
+// ---------------------------------------------------------------------------------------------
+
+/// Teinte d'un portrait de combattant **KO** — un gris moyen.
+///
+/// **C'est une approximation, et elle n'est pas toujours utilisée.** Une teinte egui *multiplie* :
+/// elle assombrit uniformément sans désaturer, là où un vrai niveau de gris désature. Les portraits
+/// de classe ont leur version grise **précalculée** dans l'atlas et n'en ont donc pas besoin ; cette
+/// teinte ne sert qu'aux portraits sans équivalent gris — une icône de monstre téléchargée, le
+/// repli générique. C'est à l'appelant de savoir dans quel cas il est, lui seul a la texture.
+pub const PORTRAIT_KO_TINT: Color32 = Color32::from_gray(130);
+
+/// Corps du pourcentage incrusté sur un portrait — 12 px.
+///
+/// Agrandi une fois sur retour : « ça a l'air compliqué à lire, il en manque un ou deux pixels ».
+pub const PORTRAIT_PERCENT_FONT_SIZE: f32 = 12.0;
+
+/// De combien le pourcentage déborde **vers l'extérieur** du coin bas-droit — 2 px à droite, 1 en
+/// bas.
+///
+/// Vers l'extérieur et non vers l'intérieur : « comme si on traçait un carré autour du rond et
+/// qu'on plaçait le pourcentage tout en bas à droite », puis « encore un peu plus sur la droite
+/// pour qu'il mange un peu moins sur le portrait ». Sur un portrait rond, ce coin du carré
+/// englobant est de toute façon hors du disque.
+pub const PORTRAIT_PERCENT_OFFSET: egui::Vec2 = egui::Vec2::new(2.0, 1.0);

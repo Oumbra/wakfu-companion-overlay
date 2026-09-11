@@ -1624,6 +1624,71 @@ bordure *extérieure* est un gris moyen, c'est l'*intérieure* qui est presque n
 constantes disparaissent du panneau, qui ne garde que le calcul de la part de dégâts et sa teinte —
 du métier, que le composant ne saurait pas faire.
 
+---
+
+## `design::portrait` — portrait de combattant (2026-09-11)
+
+`crates/overlay-ui/src/design/components/portrait.rs`
+
+```rust
+use overlay_ui::design::{self, PortraitShape};
+
+ui.add(
+    design::portrait(texture_id)
+        .shape(PortraitShape::Round)
+        .size(48.0)
+        .dimmed(fighter.is_ko)
+        .percent(Some(42)),
+);
+
+// Pour le gabarit à six emplacements, qui pose déjà ses centres :
+design::paint_portrait(ui, rect, texture_id, PortraitShape::Round, dimmed);
+design::paint_portrait_percent(ui, rect, design::portrait_percent(dmg, total));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `shape` | `Square` / `Round` | `Square` |
+| `size` | côté du carré englobant | 40 (la liste plate) |
+| `dimmed` | applique le grisé KO | `false` |
+| `percent` | `Option<i64>` incrusté au coin | aucun |
+
+### Deux formes, parce que le jeu en a deux
+
+Le gabarit de combat loge ses portraits dans des **médaillons ronds**, la liste plate — celle qui
+prend le relais au-delà de six alliés — les pose **carrés**. `PortraitShape::corner_radius(size)`
+porte le calcul plutôt que de le laisser à chaque appelant : `taille / 2` écrit à deux endroits finit
+par diverger d'un pixel.
+
+### Le grisé est une approximation, et c'est l'appelant qui décide
+
+Une teinte egui **multiplie** : elle assombrit sans désaturer, là où un vrai niveau de gris
+désature. Les portraits de classe ont leur version grise **précalculée** dans l'atlas et n'ont donc
+pas besoin de la teinte — la leur serait moins bonne. Une icône de monstre téléchargée ou le repli
+générique n'ont pas d'équivalent gris et s'en contentent.
+
+Le composant ne peut pas trancher : seul l'appelant sait laquelle des trois textures il tient. D'où
+`dimmed` en paramètre plutôt qu'une déduction depuis un `is_ko` que le composant ne verrait pas.
+
+### Le pourcentage déborde du carré, volontairement
+
+Il se pose au coin bas-droit du **carré englobant**, décalé encore de 2 px à droite et 1 en bas :
+« comme si on traçait un carré autour du rond et qu'on plaçait le pourcentage tout en bas à
+droite », puis « encore un peu plus sur la droite pour qu'il mange un peu moins sur le portrait ».
+Sur un portrait rond, ce coin est hors du disque — c'est précisément ce qu'on veut.
+
+Il prend `OVERLAY_ACCENT` et **non la teinte de la jauge**, après un aller-retour : les deux ont été
+alignées un temps, puis re-séparées (« je préfère la couleur accent qu'il y avait avant »).
+
+`portrait_percent(damage, total)` est une fonction libre testée : **un total nul est le cas réel du
+tout début d'un combat**, et une division par zéro y produirait un `NaN` qui se propage jusqu'au
+texte peint — « NaN% » sur un portrait.
+
+### Vérification
+
+**Aucun snapshot n'a bougé** : la migration de `combat::paint_flat_portrait` et des deux boucles du
+gabarit est équivalente au pixel.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85

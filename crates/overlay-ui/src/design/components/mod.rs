@@ -36,6 +36,7 @@ pub mod item_slot;
 pub mod loader;
 pub mod meter;
 pub mod panel;
+pub mod portrait;
 pub mod scroll_area;
 pub mod select;
 pub mod separator;
