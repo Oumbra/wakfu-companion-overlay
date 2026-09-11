@@ -47,10 +47,10 @@ fn galerie_du_design_system() {
         // sans socle connu » — sans cette hauteur, le bas de la galerie sortait du canevas.
         // 4500 -> 4900 le 2026-09-11 : section « Rouage de chargement » (une rangée de quatre
         // tailles, une rangée d'images figées, un cas hors intervalle).
-        // 4900 -> 5660 le 2026-09-11 : section « Filet de séparation » (deux blocs repliables
-        // portant le motif intitulé/filet/corps, plus deux filets nus) — 757 px de contenu de
+        // 4900 -> 5570 le 2026-09-11 : section « Filet de séparation » (deux blocs repliables
+        // portant le motif intitulé/filet/corps, plus deux filets nus) — 661 px de contenu de
         // plus, et les ~75 px de marge basse que le réglage précédent gardait déjà.
-        .with_size(Vec2::new(760.0, 5660.0))
+        .with_size(Vec2::new(760.0, 5570.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -785,6 +785,10 @@ fn gallery(ui: &mut egui::Ui) {
             .icon(DsTexture::IconInfo)
             .log_name("galerie.filet-motif")
             .show(ui, |ui| {
+                // L'espacement par défaut de la galerie (8 px) s'ajouterait aux cotes du relevé
+                // et on verrait 18 px là où le jeu en met 10. Il est neutralisé pour que cette
+                // section montre les vraies cotes — c'est aussi l'exemple d'usage de référence.
+                ui.spacing_mut().item_spacing.y = 0.0;
                 for (titre, corps) in sections {
                     ui.label(
                         RichText::new(titre)
@@ -813,6 +817,7 @@ fn gallery(ui: &mut egui::Ui) {
             .preview_hovered(true)
             .log_name("galerie.filet-survole")
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 ui.label(
                     RichText::new("Description")
                         .color(Color32::from_rgb(0xBD, 0xBD, 0xBE))
