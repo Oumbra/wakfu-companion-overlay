@@ -70,15 +70,16 @@ const PANEL_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
 const ICON_FILL_RATIO: f32 = 0.96;
 const SHEET_MARGIN: f32 = 18.0;
 const SHEET_WIDTH: f32 = 620.0;
-/// Hauteur d'une rangée de suggestion — plus haute que `SELECT_ROW_HEIGHT` (28) : une rangée
-/// porte ici un emplacement d'objet complet, pas seulement du texte.
-const SUGGESTION_ROW_HEIGHT: f32 = 32.0;
+/// Hauteur d'une rangée de suggestion — `SELECT_ROW_HEIGHT`, la cadence du select simple du jeu.
+/// Une image nue de 22 px y tient sans forcer ; c'est la bordure de rareté, retirée depuis, qui
+/// avait fait passer cette valeur à 32.
+const SUGGESTION_ROW_HEIGHT: f32 = design::tokens::SELECT_ROW_HEIGHT;
 /// Marge gauche d'une rangée, et de la bande de catégories.
 const SUGGESTION_PAD_X: f32 = 6.0;
 /// Écart entre la gemme, l'image et le nom.
 const SUGGESTION_GAP: f32 = 6.0;
-/// Côté de l'emplacement d'objet d'une rangée.
-const SUGGESTION_SLOT: f32 = 24.0;
+/// Côté de l'image d'objet d'une rangée.
+const SUGGESTION_SLOT: f32 = 22.0;
 /// Côté de la gemme de rareté.
 const GEM_SIDE: f32 = 14.0;
 /// Hauteur de la bande de filtres par catégorie.
@@ -193,14 +194,24 @@ fn bande(ui: &mut egui::Ui, text: &str) {
 /// 3. **l'icône réelle** téléchargée du CDN wakassets, **repli générique** si le catalogue ne la
 ///    résout pas ou si le téléchargement n'a pas abouti.
 ///
+/// **La bordure est optionnelle.** `Some(rareté)` : la tuile d'alerte et celle du Suivi, où le
+/// cadre coloré EST le porteur de la rareté. `None` : le panneau de suggestions, où la gemme qui
+/// précède l'image dit déjà la rareté — le cadre ferait doublon (demande explicite de
+/// l'utilisateur, 2026-09-11). C'est aussi ce que fait le web, dont `app-item-icon` est une image
+/// nue. La chaîne de résolution de l'image, elle, ne change pas d'un cas à l'autre.
+///
 /// Le harnais n'atteint pas le CDN : toutes les planches montrent donc le repli générique. Le
 /// dimensionnement, lui, est bien celui du Suivi — `ITEM_BORDER_INNER_MARGIN_RATIO` (52/512) et
 /// `ITEM_ICON_FILL_RATIO` (0,96) sont les constantes de `panels::watchlist`, pas des valeurs
 /// recopiées à l'œil.
-fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: WakfuRarity) {
-    ui.painter()
-        .rect_filled(rect, rect.width() * SLOT_ROUNDING_RATIO, PANEL_BG);
-    egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<WakfuRarity>) {
+    // L'aplat sombre ne sert que de filet sous les coins arrondis de la bordure : sans bordure,
+    // il n'a plus rien à combler et deviendrait un fond que le web n'a pas.
+    if let Some(rarity) = rarity {
+        ui.painter()
+            .rect_filled(rect, rect.width() * SLOT_ROUNDING_RATIO, PANEL_BG);
+        egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+    }
     let inner = rect.width() * (1.0 - 2.0 * BORDER_INNER_RATIO) * ICON_FILL_RATIO;
     egui::Image::new(icons.unknown_entity_texture()).paint_at(
         ui,
@@ -235,7 +246,7 @@ fn alert_item(
         ),
         Vec2::splat(TILE_SLOT),
     );
-    item_slot(ui, icons, slot, rarity);
+    item_slot(ui, icons, slot, Some(rarity));
 
     ui.painter().text(
         egui::pos2(rect.center().x, slot.bottom() + 5.0),
@@ -363,7 +374,7 @@ fn planche_item_slot() {
             ui.spacing_mut().item_spacing.x = 10.0;
             for (rarity, _) in RARITIES {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
-                item_slot(ui, icons, rect, *rarity);
+                item_slot(ui, icons, rect, Some(*rarity));
             }
         });
         ui.horizontal(|ui| {
@@ -389,7 +400,20 @@ fn planche_item_slot() {
             ui.spacing_mut().item_spacing.x = 10.0;
             for side in [28.0_f32, 44.0, 58.0] {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), egui::Sense::hover());
-                item_slot(ui, icons, rect, WakfuRarity::Legendary);
+                item_slot(ui, icons, rect, Some(WakfuRarity::Legendary));
+            }
+        });
+
+        ui.add_space(16.0);
+        legende(
+            ui,
+            "Sans bordure — le cas du panneau de suggestions, où la gemme porte la rareté",
+        );
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            for side in [22.0_f32, 44.0] {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), egui::Sense::hover());
+                item_slot(ui, icons, rect, None);
             }
         });
 
@@ -949,7 +973,10 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
                 ),
                 Vec2::splat(GEM_SIDE),
             ),
+            *rarity,
         );
+        // **Image NUE** : la gemme porte déjà la rareté, un cadre coloré ferait doublon —
+        // exactement ce que fait le web (`app-item-icon`, sans bordure).
         let slot_x = row.left() + SUGGESTION_PAD_X + GEM_SIDE + SUGGESTION_GAP;
         item_slot(
             ui,
@@ -958,7 +985,7 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
                 egui::pos2(slot_x + SUGGESTION_SLOT / 2.0, row.center().y),
                 Vec2::splat(SUGGESTION_SLOT),
             ),
-            *rarity,
+            None,
         );
         ui.painter().text(
             egui::pos2(slot_x + SUGGESTION_SLOT + SUGGESTION_GAP, row.center().y),
@@ -994,7 +1021,10 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
 ///
 /// Ce harnais n'atteint pas le CDN (politique réseau de la session) : la gemme est donc figurée
 /// par son emplacement, comme l'a été le loader avant d'exister.
-fn rarity_gem(ui: &egui::Ui, rect: Rect) {
+fn rarity_gem(ui: &egui::Ui, rect: Rect, _rarity: WakfuRarity) {
+    // La rareté est déjà au paramètre : c'est elle qui choisira `rarities/{n}.png` une fois la
+    // variante `IconKind::Rarity` en place. Le harnais n'a pas l'image, il n'en réserve que la
+    // place — d'où le préfixe `_`, qui dit « pas encore utilisé », pas « inutile ».
     ui.painter().rect_stroke(
         rect,
         2,
