@@ -82,12 +82,17 @@
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
+#[path = "shared/rarity_gems.rs"]
+mod rarity_gems;
+
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
 use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsTexture, IconContext, InputSize};
 use overlay_ui::panels::options_modal::OptionsTab;
 use overlay_ui::ui_icons::UiIcons;
+
+use rarity_gems::{RarityGems, GEM_BOX};
 
 // -------------------------------------------------------------------------------------------
 // Jetons propres aux maquettes.
@@ -322,8 +327,6 @@ const DESC: &str = "Objets qui déclenchent une alerte sonore et un message à l
 const ROW_PAD_X: f32 = 6.0;
 /// Écart entre la gemme, l'image et le nom d'une rangée.
 const ROW_GAP: f32 = 6.0;
-/// Côté de la gemme de rareté.
-const GEM_SIDE: f32 = 14.0;
 /// Côté de l'image d'objet d'une rangée — tient dans les 28 px de `SELECT_ROW_HEIGHT`.
 const ROW_IMAGE: f32 = 22.0;
 
@@ -658,23 +661,14 @@ fn clamp_duration(raw: &str) -> f32 {
     raw.replace(',', ".").parse::<f32>().unwrap_or(3.5).max(0.5)
 }
 
-/// La gemme de rareté d'une rangée de suggestion — **place réservée, pas un dessin**.
+/// La gemme de rareté d'une rangée de suggestion — **la vraie image du jeu**.
 ///
-/// Le web la sert depuis `wakassets/rarities/{n}.png` (`wakfuRarityIconUrl`) : ce n'est pas un
-/// asset du design system mais une **image distante**, du même CDN et du même genre que les icônes
-/// d'objets. L'overlay sait déjà chercher ce CDN (`RemoteIconStore`) — il lui manque une variante
-/// `IconKind::Rarity` dans `overlay_engine::catalog`. Le harnais n'y accède pas (politique réseau
-/// de la session), d'où l'emplacement réservé.
-fn rarity_gem(ui: &egui::Ui, rect: Rect, _rarity: WakfuRarity) {
-    // La rareté est déjà au paramètre : c'est elle qui choisira `rarities/{n}.png` une fois la
-    // variante `IconKind::Rarity` en place. Le harnais n'a pas l'image, il n'en réserve que la
-    // place — d'où le préfixe `_`, qui dit « pas encore utilisé », pas « inutile ».
-    ui.painter().rect_stroke(
-        rect,
-        2,
-        Stroke::new(1.0, design::tokens::TEXT_DISABLED),
-        StrokeKind::Inside,
-    );
+/// Elle vient des fixtures du harnais (voir `shared/rarity_gems.rs`), qui tiennent lieu de ce que
+/// `RemoteIconStore` télécharge au runtime : le fichier est choisi par
+/// `IconRef::for_rarity(rarité).gfx_id`, donc par la même correspondance que celle qui construira
+/// l'URL en vrai.
+fn rarity_gem(ui: &egui::Ui, gems: &RarityGems, rect: Rect, rarity: WakfuRarity) {
+    gems.paint(ui, rect, rarity);
 }
 
 /// Le panneau de suggestions du champ d'ajout — voir [`alertes_options_ajout_suggestions`].
@@ -688,7 +682,13 @@ fn rarity_gem(ui: &egui::Ui, rect: Rect, _rarity: WakfuRarity) {
 ///
 /// Cadence des entrées : `tokens::SELECT_ROW_HEIGHT` (28), la mesure du select simple qui fait foi
 /// — la v2 écrivait 30, qui n'est aucune des deux mesures du jeu.
-fn suggestion_list(ui: &egui::Ui, icons: &UiIcons, inner: Rect, field_bottom: f32) {
+fn suggestion_list(
+    ui: &egui::Ui,
+    icons: &UiIcons,
+    gems: &RarityGems,
+    inner: Rect,
+    field_bottom: f32,
+) {
     let row_h = design::tokens::SELECT_ROW_HEIGHT;
     let list = Rect::from_min_size(
         egui::pos2(inner.left(), field_bottom + 2.0),
@@ -728,13 +728,14 @@ fn suggestion_list(ui: &egui::Ui, icons: &UiIcons, inner: Rect, field_bottom: f3
         // bordure de rareté ici : la gemme la porte déjà, le cadre coloré ferait doublon.
         rarity_gem(
             ui,
+            gems,
             Rect::from_center_size(
-                egui::pos2(row.left() + ROW_PAD_X + GEM_SIDE / 2.0, row.center().y),
-                Vec2::splat(GEM_SIDE),
+                egui::pos2(row.left() + ROW_PAD_X + GEM_BOX / 2.0, row.center().y),
+                Vec2::splat(GEM_BOX),
             ),
             *rarity,
         );
-        let image_x = row.left() + ROW_PAD_X + GEM_SIDE + ROW_GAP;
+        let image_x = row.left() + ROW_PAD_X + GEM_BOX + ROW_GAP;
         item_slot(
             ui,
             icons,
@@ -999,11 +1000,17 @@ enum EmptyState {
 ///
 /// `preview_frame` fige l'image de la boucle : sans elle, deux rendus du même écran ne donneraient
 /// pas le même pixel, et une planche qui bouge d'un rendu à l'autre ne se compare plus.
-fn loading_row(ui: &mut egui::Ui, width: f32) {
+///
+/// **Centré dans les DEUX axes de la zone restée vide** (demande de l'utilisateur, 2026-09-11) :
+/// cette zone va du curseur — juste sous le champ d'ajout — jusqu'au bas du panneau, c'est-à-dire
+/// exactement la place qu'occuperait la grille. Posé juste sous le champ comme avant, le rouage
+/// laissait tout le bas du panneau désert et se lisait comme un élément de plus dans le flux, pas
+/// comme l'état d'une zone entière.
+fn loading_row(ui: &mut egui::Ui, inner: Rect) {
     let side = design::LoaderSize::Medium.px();
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, side + 32.0), egui::Sense::hover());
+    let zone = Rect::from_min_max(egui::pos2(inner.left(), ui.cursor().min.y), inner.max);
     let mut cell = ui.new_child(
-        egui::UiBuilder::new().max_rect(Rect::from_center_size(rect.center(), Vec2::splat(side))),
+        egui::UiBuilder::new().max_rect(Rect::from_center_size(zone.center(), Vec2::splat(side))),
     );
     cell.add(
         design::loader()
@@ -1086,7 +1093,7 @@ fn alerts_tab(
     }
 
     if state.empty_state == EmptyState::Loading {
-        loading_row(ui, width);
+        loading_row(ui, inner);
         return field_bottom;
     }
 
@@ -1278,8 +1285,10 @@ fn alertes_options_ajout_suggestions() {
     let mut search = String::from("pierre");
     let mut seconds = String::from("4");
     let mut auto = true;
+    let mut gems: Option<RarityGems> = None;
 
     let mut harness = options_harness(WINDOW, move |ui, icons, panel, _w| {
+        let gems = gems.get_or_insert_with(|| RarityGems::load(ui.ctx()));
         let inner = panel.inner;
         let field_bottom = alerts_tab(
             ui,
@@ -1295,7 +1304,7 @@ fn alertes_options_ajout_suggestions() {
                 error: None,
             },
         );
-        suggestion_list(&*ui, icons, inner, field_bottom);
+        suggestion_list(&*ui, icons, gems, inner, field_bottom);
     });
     harness.run();
     write_mockup(&mut harness, "alertes_options_ajout_suggestions");
