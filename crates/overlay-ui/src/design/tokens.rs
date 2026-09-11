@@ -808,3 +808,53 @@ pub const SEPARATOR_SURFACE_HOVER: Color32 = Color32::from_rgb(0x32, 0x34, 0x36)
 /// même répartition que [`HEADING_TO_ROW`], pour que deux composants voisins ne doublent pas
 /// l'espace à leur jonction.
 pub const SEPARATOR_GAP_BELOW: f32 = 12.0;
+
+// ---------------------------------------------------------------------------------------------
+// Curseur de réglage — `design::slider`
+//
+// **Mesuré au pixel** le 2026-09-11 sur les deux curseurs de volume de
+// `assets/design-system/interfaces/interface-options-son.png` (« Musique », rainure y 335..342 ;
+// « Sons - Ambiance », y 430..437). Les deux concordent sur toutes les cotes.
+//
+// **Les deux curseurs de la capture sont au minimum.** Rien n'y montre donc ce que devient la
+// portion parcourue de la rainure — voir `design::slider`, qui ne la remplit pas.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur de la rainure — 8 px, dont 2 de liseré en haut et 2 en bas.
+pub const SLIDER_TRACK_HEIGHT: f32 = 8.0;
+
+/// Épaisseur du liseré de la rainure, en haut comme en bas — 2 px.
+pub const SLIDER_TRACK_EDGE: f32 = 2.0;
+
+/// Assombrissement du **liseré** de la rainure, en noir translucide.
+///
+/// La rainure n'a pas de couleur propre : c'est un **creux**, et c'est une mesure, pas un choix de
+/// rendu. Sur deux fonds différents (`#131b16` sous « Musique », `#151c17` sous « Ambiance ») le
+/// rapport au fond reste le même — 0,735 sur les trois canaux — alors que les valeurs absolues
+/// diffèrent de deux niveaux. Un noir à 27 % reproduit ce rapport ; deux constantes opaques
+/// seraient fausses dès que le panneau qui porte le curseur change de teinte.
+pub const SLIDER_TRACK_EDGE_SHADE: Color32 = Color32::from_black_alpha(68);
+
+/// Assombrissement de l'**intérieur** de la rainure — noir à 15 %, rapport 0,853 mesuré.
+pub const SLIDER_TRACK_SHADE: Color32 = Color32::from_black_alpha(38);
+
+/// Côté de la poignée — 18 px, la taille native de `slider-handle.png`.
+///
+/// C'est **elle** qui fixe la hauteur du composant : la poignée déborde la rainure de 5 px de
+/// chaque côté, et un curseur haut de 8 px lui couperait le disque.
+pub const SLIDER_HANDLE_SIZE: f32 = 18.0;
+
+/// Largeur relevée de la rainure — 200 px (x 75..274).
+///
+/// **Ce n'est pas un gabarit**, seulement l'ordre de grandeur du jeu : la largeur d'un curseur
+/// vient de sa mise en page, comme celle d'un champ de saisie. Conservée pour qu'une galerie ou un
+/// panneau puisse retrouver les proportions de la capture.
+pub const SLIDER_TRACK_WIDTH_REF: f32 = 200.0;
+
+/// Gouttière entre un libellé d'extrémité et la rainure — 12 px à gauche (« Min » finit à x=65, la
+/// rainure commence à 75), 10 px à droite (elle finit à 274, « Max » commence à 284).
+///
+/// Les libellés **n'appartiennent pas au composant** : « Min »/« Max » conviennent à un volume,
+/// pas à une échelle d'interface qui dirait « 50 % »/« 200 % ». C'est l'appelant qui les pose, et
+/// cette cote lui dit à quelle distance.
+pub const SLIDER_LABEL_GAP: f32 = 12.0;
