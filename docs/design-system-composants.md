@@ -882,7 +882,7 @@ composant n'en sait rien, il lui garantit un cadre, des marges et un écrêtage.
 `show` rend un `InnerResponse<Option<R>>` : `None` dit que **la closure n'a pas tourné** parce que
 le bloc est fermé, ce qui n'est pas la même chose qu'un contenu vide.
 
-**Mesures** (`releve-collapse.json`, sur `collapse-block.png` et `collapse-block-opened.png`) :
+**Mesures** (`releve-collapse.json`, sur `collapse-block-closed.png` et `collapse-block-opened.png`) :
 
 | Grandeur | Valeur | Vérification |
 | --- | --- | --- |

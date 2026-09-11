@@ -1,7 +1,7 @@
 {
   "title": "Bloc repliable",
   "subtitle": "Le bloc de quête du jeu, mesuré dans ses deux états. Ce qui est relevé est le CADRE et ses marges — jamais le contenu, qui est libre.",
-  "source": "assets/design-system/collapse-block.png (fermé) et collapse-block-opened.png (ouvert)",
+  "source": "assets/design-system/collapse-block-closed.png (fermé) et collapse-block-opened.png (ouvert)",
   "canvas": [
     735,
     305

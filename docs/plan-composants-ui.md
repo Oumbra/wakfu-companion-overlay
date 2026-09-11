@@ -403,7 +403,7 @@ Deux rappels qui valent pour tout ce lot :
 **Ce que le `collapsible` a appris** : un asset nommé « collapse » n'est pas forcément *le*
 composant. Le premier relevé a porté sur `collapse-closed.png` — la colonne « Types » de l'Hôtel de
 Vente — qui est **un cas d'usage** du repliable, une liste de cases à cocher. Le relevé décrivait
-donc son contenu, c'est-à-dire rien de réutilisable. La bonne paire était `collapse-block.png` /
+donc son contenu, c'est-à-dire rien de réutilisable. La bonne paire était `collapse-block-closed.png` /
 `collapse-block-opened.png`, et la bonne question : *qu'est-ce que ce composant garantit à
 n'importe quel contenu ?* — un cadre, des marges, un écrêtage, deux états.
 

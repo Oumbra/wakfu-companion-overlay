@@ -1,7 +1,7 @@
 {
   "title": "Bloc repliable",
   "subtitle": "Bloc de quête du client Wakfu (en-tête cliquable + contenu), relevé au pixel sur les captures détourées et recadrées — libellé et icônes encore visibles — pour servir de référence au portage egui de design::collapsible.",
-  "source": "assets/design-system/collapse-block-opened-source.png",
+  "source": "assets/design-system/collapse-block-opened.png",
   "canvas": [732, 210],
   "scale": 1.4,
   "nodes": [
@@ -156,7 +156,7 @@
     ]
   },
   "notes": [
-    "Deux captures utilisées : collapse-block.png (fermé, 732×60) et collapse-block-opened-source.png (ouvert, 732×210) — l'en-tête concorde au pixel près entre les deux, seule la hauteur totale change.",
+    "Deux captures utilisées : collapse-block-closed.png (fermé, 732×60) et collapse-block-opened.png (ouvert, 732×210) — l'en-tête concorde au pixel près entre les deux, seule la hauteur totale change.",
     "Le fond du cadre est TRANSLUCIDE dans le jeu (l'overlay-ui confirme ce point pour collapse-frame.png) : la couleur plate #28292b/#323436 mesurée ici est le résultat de la capture sur le fond de jeu précis au moment de la prise de vue, pas la vraie teinte du cadre seul. Deux captures sur deux fonds de jeu différents seraient nécessaires pour en déduire l'alpha réel.",
     "Le corps de texte (18 px estimé) mesure plus grand que l'intitulé de section (14 px) alors que visuellement il paraît plus discret — c'est l'italique et le gris qui donnent cette impression, pas la taille. À vérifier sur une police réelle avant de figer la constante.",
     "Le filet de séparation (sep-1, sep-2) est un motif à part entière : bevel 2 px clair + 2 px sombre, jamais un simple trait 1 px plat. Les deux occurrences sont identiques au pixel près.",
