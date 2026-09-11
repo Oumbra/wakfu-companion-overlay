@@ -41,7 +41,11 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 4160.0))
+        // 4160 -> 4500 le 2026-09-11 : le lot d'icônes sans appelant fait passer les rangées
+        // « Bouton icône » et « Glyphes du manifeste » sur deux lignes (`horizontal_wrapped`,
+        // la largeur fixe ne les contient plus sur une seule) et ajoute la section « Glyphes
+        // sans socle connu » — sans cette hauteur, le bas de la galerie sortait du canevas.
+        .with_size(Vec2::new(760.0, 4500.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -426,7 +430,9 @@ fn gallery(ui: &mut egui::Ui) {
         "L'appelant nomme une intention (FirstPlan ou Panel, IconOption ou IconPlus) : les cinq socles et les glyphes sont résolus par le manifeste, plus par lui. Les icônes sont blanches dans leurs fichiers et prennent leur couleur par teinte.",
     );
     for context in [IconContext::FirstPlan, IconContext::Panel] {
-        ui.horizontal(|ui| {
+        // `horizontal_wrapped` plutôt que `horizontal` : le lot d'icônes sans appelant
+        // (2026-09-11) a fait dépasser la largeur fixe du canevas (760px) à une seule ligne.
+        ui.horizontal_wrapped(|ui| {
             for (icon, name) in [
                 (DsTexture::IconOption, "option"),
                 (DsTexture::IconExternalLink, "lien"),
@@ -434,6 +440,17 @@ fn gallery(ui: &mut egui::Ui) {
                 (DsTexture::IconMinus, "moins"),
                 (DsTexture::IconVolume, "volume"),
                 (DsTexture::IconVolumeMute, "volume-muet"),
+                (DsTexture::IconEye, "oeil"),
+                (DsTexture::IconEyeOff, "oeil-barre"),
+                (DsTexture::IconBagIn, "sac-entree"),
+                (DsTexture::IconBagOut, "sac-sortie"),
+                (DsTexture::IconFilter, "filtre"),
+                (DsTexture::IconLock, "cadenas"),
+                (DsTexture::IconOrder, "classement"),
+                (DsTexture::IconPact, "pacte"),
+                (DsTexture::IconSave, "enregistrer"),
+                (DsTexture::IconSort, "tri"),
+                (DsTexture::IconTriangleRight, "triangle"),
             ] {
                 ui.add(
                     design::icon_button(icon)
@@ -492,7 +509,7 @@ fn gallery(ui: &mut egui::Ui) {
         "Glyphes du manifeste — teintés, jamais recolorés en amont",
         "Tous les glyphes déclarés, à leur taille de fichier. Ils sont blancs dans leurs octets et prennent leur couleur par teinte : c'est ce qui permet à une même icône de servir au repos, au survol et désactivée sans second fichier. Ceux qui vivent sur un socle sont normalisés à 18 px par le manifeste (ligne du dessus) ; ceux qui vivent dans un champ ou à côté d'un libellé gardent leur taille propre.",
     );
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for icon in [
             DsTexture::IconOption,
             DsTexture::IconExternalLink,
@@ -504,6 +521,17 @@ fn gallery(ui: &mut egui::Ui) {
             DsTexture::IconUndo,
             DsTexture::IconVolume,
             DsTexture::IconVolumeMute,
+            DsTexture::IconEye,
+            DsTexture::IconEyeOff,
+            DsTexture::IconBagIn,
+            DsTexture::IconBagOut,
+            DsTexture::IconFilter,
+            DsTexture::IconLock,
+            DsTexture::IconOrder,
+            DsTexture::IconPact,
+            DsTexture::IconSave,
+            DsTexture::IconSort,
+            DsTexture::IconTriangleRight,
         ] {
             ui.add(design::icon_button(icon).context(IconContext::Panel));
         }
@@ -528,6 +556,39 @@ fn gallery(ui: &mut egui::Ui) {
         );
         x += native.x + 22.0;
     }
+
+    heading(
+        ui,
+        "Glyphes sans socle connu — lot sans appelant (2026-09-11)",
+        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (voir `DsTexture::icon_content_size`, doc de chaque variante) : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
+    );
+    ui.horizontal_wrapped(|ui| {
+        for icon in [
+            DsTexture::IconBook,
+            DsTexture::IconCalendar,
+            DsTexture::IconCards,
+            DsTexture::IconCharacters,
+            DsTexture::IconGrid,
+            DsTexture::IconHammer,
+            DsTexture::IconKamas,
+            DsTexture::IconPin,
+            DsTexture::IconRepeat,
+            DsTexture::IconSettings1,
+            DsTexture::IconSettings2,
+            DsTexture::IconTrophy,
+            DsTexture::IconXp,
+        ] {
+            let native = ds.native_size(icon);
+            let (rect, _) =
+                ui.allocate_exact_size(native + Vec2::splat(14.0), egui::Sense::hover());
+            ds.paint(
+                ui.painter(),
+                egui::Rect::from_center_size(rect.center(), native),
+                icon,
+                design::tokens::ICON_TINT,
+            );
+        }
+    });
 
     heading(
         ui,
