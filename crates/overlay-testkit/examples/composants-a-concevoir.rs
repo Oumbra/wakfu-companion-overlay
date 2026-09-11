@@ -224,7 +224,7 @@ fn alert_item(
 }
 
 // -------------------------------------------------------------------------------------------
-// 1 — `design::body` : un paragraphe de texte courant
+// 1 — `design::text` : un paragraphe de texte courant
 // -------------------------------------------------------------------------------------------
 
 /// **Le manque le plus élémentaire.** Le design system sait peindre un titre (`heading`), une
@@ -233,9 +233,14 @@ fn alert_item(
 ///
 /// Détourner `info_text` pour ça donne à une description le poids d'une remarque : c'est ce que
 /// faisait la page Alertes, et c'est ce que l'utilisateur a fait retirer.
-fn planche_body() {
+///
+/// **Nommé `design::text` sur demande de l'utilisateur** (2026-09-11) : le nom dit ce que le
+/// composant rend. Il coexistera avec le module `design::text` déjà là (`text::label_font`) —
+/// Rust range les modules et les fonctions dans deux espaces de noms distincts, donc
+/// `design::text("…")` et `design::text::label_font(…)` se résolvent tous les deux.
+fn planche_text() {
     let (mut harness, bottom) = planche(SHEET_WIDTH, |ui, _icons| {
-        bande(ui, "design::body");
+        bande(ui, "design::text");
 
         legende(ui, "Une ligne");
         ui.add(
@@ -277,7 +282,7 @@ fn planche_body() {
         ui.add(design::info_text("Objets qui déclenchent une alerte sonore.").width(560.0));
     });
     harness.run();
-    write(&mut harness, &bottom, "composant_body");
+    write(&mut harness, &bottom, "composant_text");
 }
 
 // -------------------------------------------------------------------------------------------
@@ -785,8 +790,8 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
 }
 
 fn main() {
-    planche_body();
-    println!("  composant_body");
+    planche_text();
+    println!("  composant_text");
     planche_item_slot();
     println!("  composant_item_slot");
     planche_alert_item();

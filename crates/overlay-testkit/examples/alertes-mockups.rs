@@ -507,10 +507,15 @@ fn elide(ui: &egui::Ui, text: &str, max_width: f32) -> String {
 /// Un paragraphe de texte courant — **la brique qui manque au design system**.
 ///
 /// Même police et même corps que les libellés de ligne (« Tester le son de l'alerte »), replié sur
-/// la largeur donnée. C'est ce que `design::body` devra faire ; en attendant, la maquette le pose
+/// la largeur donnée. C'est ce que `design::text` devra faire ; en attendant, la maquette le pose
 /// à la main plutôt que de détourner `design::info_text`, dont la pastille et le ton disent
 /// « remarque » là où il ne s'agit que d'une description.
-fn body_text(ui: &mut egui::Ui, text: &str, width: f32) {
+///
+/// **`design::text` coexistera avec le module `design::text` déjà là** (`text::label_font`) :
+/// Rust range les modules et les fonctions dans deux espaces de noms distincts, donc
+/// `design::text("…")` et `design::text::label_font(…)` se résolvent tous les deux. Légal, mais à
+/// savoir avant d'écrire le composant.
+fn text_paragraph(ui: &mut egui::Ui, text: &str, width: f32) {
     ui.add(
         egui::Label::new(
             RichText::new(text)
@@ -889,41 +894,47 @@ struct AlertsTab<'a> {
     error: Option<&'a str>,
 }
 
-/// Pourquoi la liste est vide — **trois situations distinctes, trois messages**.
+/// Pourquoi la liste serait vide — **et pourquoi il ne reste qu'un seul cas**.
 ///
-/// La v2 n'en rendait qu'un (« Connectez-vous à votre compte… ») pour les trois, ce qui le rendait
-/// **faux dans deux cas sur trois** : dire « connectez-vous » à quelqu'un qui est déjà connecté et
-/// attend sa synchronisation ne se contente pas de ne rien apprendre, ça l'envoie chercher un
-/// problème de connexion qui n'existe pas.
+/// Deux des trois situations que rendait la version précédente sont **impossibles ici**, l'un
+/// comme l'autre relevés par l'utilisateur (2026-09-11) :
+///
+/// - *aucun compte connecté* — l'overlay ne s'adresse qu'à des utilisateurs connectés ; il n'y a
+///   pas d'état « déconnecté » à peindre ;
+/// - *compte connecté, liste réellement vide* — une liste d'objets par défaut est toujours
+///   réinjectée et le joueur ne peut pas la retirer, donc la grille n'est jamais vide.
+///
+/// Reste la synchronisation en vol, qui n'est **pas un message d'information** mais un loader —
+/// voir [`loading_placeholder`].
 #[derive(Clone, Copy, PartialEq)]
 enum EmptyState {
-    /// La liste a des objets — aucun message.
+    /// La liste a des objets — le cas courant.
     NotEmpty,
-    /// `GET /api/v1/settings` en vol.
+    /// `GET /api/v1/settings` en vol : rien à afficher tant que la réponse n'est pas là.
     Loading,
-    /// Aucun jeton : l'overlay ne peut ni lire ni écrire la liste du compte.
-    SignedOut,
-    /// Compte connecté, liste réellement vide.
-    NoItems,
 }
 
-impl EmptyState {
-    fn message(self) -> Option<&'static str> {
-        match self {
-            EmptyState::NotEmpty => None,
-            EmptyState::Loading => Some("Récupération de vos alertes…"),
-            // Pas de « ajoutez un objet ci-dessus » ici : côté overlay la liste est lue depuis le
-            // compte et l'écriture passe par un `PATCH /api/v1/settings` qui **exige un jeton**.
-            // Proposer une action qui n'a nulle part où aller est pire que de n'en proposer
-            // aucune.
-            EmptyState::SignedOut => {
-                Some("Connectez-vous à votre compte pour retrouver vos alertes.")
-            }
-            EmptyState::NoItems => {
-                Some("Aucun objet suivi. Ajoutez-en un dans le champ ci-dessus.")
-            }
-        }
-    }
+/// **L'emplacement du loader, pas un loader.**
+///
+/// Une synchronisation en vol se signale par un loader, pas par un bloc d'information : c'est un
+/// état transitoire, pas une remarque à lire. La version précédente y mettait
+/// `design::info_text` — requalifié par l'utilisateur (2026-09-11).
+///
+/// `design::loader` est **en cours de conception de son côté** : tant qu'il n'existe pas, la
+/// maquette réserve sa place plutôt que d'en inventer un dessin qui serait à jeter.
+fn loading_placeholder(ui: &mut egui::Ui, width: f32) {
+    const BOX: Vec2 = Vec2::new(200.0, 56.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BOX.y + 28.0), egui::Sense::hover());
+    let slot = Rect::from_center_size(rect.center(), BOX);
+    ui.painter()
+        .rect_stroke(slot, 4, Stroke::new(1.0, MUTED_BORDER), StrokeKind::Inside);
+    ui.painter().text(
+        slot.center(),
+        egui::Align2::CENTER_CENTER,
+        "design::loader",
+        design::text::label_font(ui.ctx(), 13.0),
+        SUBDUED,
+    );
 }
 
 /// Le contenu de l'onglet, commun à tous les rendus.
@@ -954,7 +965,7 @@ fn alerts_tab(
     // et le poids d'une remarque, ce qui donnait à cette phrase une importance qu'elle n'a pas.
     // C'est une description de section, au même corps et à la même couleur que « Tester le son de
     // l'alerte ».
-    body_text(ui, DESC, width);
+    text_paragraph(ui, DESC, width);
     ui.add_space(SECTION_GAP);
 
     // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite — voir `test_sound_row` et
@@ -973,14 +984,10 @@ fn alerts_tab(
     // ne donne déjà.
     ui.add(design::heading("Objets suivis").trailing_gap(SECTION_GAP));
 
-    // Champ grisé quand l'ajout est impossible — deux cas, pas un : sans jeton, l'écriture
-    // (`PATCH /api/v1/settings`) n'a nulle part où aller ; et pendant une lecture en vol, ce qu'on
-    // ajouterait serait écrasé par la liste qui arrive. Dans les deux cas un champ d'apparence
-    // active inviterait au geste que le message vient précisément de retirer.
-    let can_add = !matches!(
-        state.empty_state,
-        EmptyState::SignedOut | EmptyState::Loading
-    );
+    // Champ grisé pendant une lecture en vol : ce qu'on ajouterait serait écrasé par la liste
+    // qui arrive. Un champ d'apparence active inviterait au geste que le chargement vient
+    // précisément de retirer.
+    let can_add = state.empty_state != EmptyState::Loading;
     search_field(
         ui,
         state.search,
@@ -1002,12 +1009,8 @@ fn alerts_tab(
         ui.add_space(SECTION_GAP);
     }
 
-    if let Some(message) = state.empty_state.message() {
-        ui.add(
-            design::info_text(message)
-                .width(width)
-                .log_name("maquette.etat-vide"),
-        );
+    if state.empty_state == EmptyState::Loading {
+        loading_placeholder(ui, width);
         return field_bottom;
     }
 
@@ -1104,51 +1107,41 @@ fn alertes_options_fermeture_manuelle() {
     write_mockup(&mut harness, "alertes_options_fermeture_manuelle");
 }
 
-/// **Les trois états sans objet** — sur une seule planche, parce que c'est leur différence qui
-/// compte.
+/// **La synchronisation en vol** — le seul état où la grille n'a rien à montrer.
 ///
-/// Aucune maquette de la v1 ne les rendait ; la v2 n'en rendait qu'un, dont le message était faux
-/// dans les deux autres cas. Trois situations mènent à une liste vide côté overlay, et le web n'en
-/// connaît aucune (il réinjecte toujours dix objets par défaut) :
+/// Les deux autres que rendait la version précédente sont **impossibles**, l'un comme l'autre
+/// écartés par l'utilisateur (2026-09-11) : l'overlay ne s'adresse qu'à des utilisateurs
+/// connectés, donc pas d'état « déconnecté » ; et une liste d'objets par défaut que le joueur ne
+/// peut pas retirer est toujours réinjectée, donc jamais de grille réellement vide.
 ///
-/// 1. **la synchronisation est en cours** — `GET /api/v1/settings` en vol ;
-/// 2. **aucun compte connecté** — `fetch_settings` exige un jeton, la liste reste vide ;
-/// 3. **compte connecté, liste réellement vide** — la clé `profile` n'existe pas encore.
-///
-/// Le troisième est le seul où proposer un ajout a un sens : l'écriture passe par un
-/// `PATCH /api/v1/settings` qui exige lui aussi un jeton.
-fn alertes_options_etats_vides() {
-    for (state, nom) in [
-        (EmptyState::Loading, "chargement"),
-        (EmptyState::SignedOut, "deconnecte"),
-        (EmptyState::NoItems, "aucun_objet"),
-    ] {
-        let mut sounds: Vec<bool> = Vec::new();
-        let mut search = String::new();
-        // 3,5 s : le défaut réel du web (`DEFAULT_ALERT_DURATION_SECONDS`). Les autres maquettes
-        // montrent 4, la valeur réglée sur la capture fournie par l'utilisateur.
-        let mut seconds = String::from("3.5");
-        let mut auto = true;
+/// Reste `GET /api/v1/settings` en vol. Le champ d'ajout est grisé le temps de la lecture — ce
+/// qu'on y ajouterait serait écrasé par la liste qui arrive.
+fn alertes_options_chargement() {
+    let mut sounds: Vec<bool> = Vec::new();
+    let mut search = String::new();
+    // 3,5 s : le défaut réel du web (`DEFAULT_ALERT_DURATION_SECONDS`). Les autres maquettes
+    // montrent 4, la valeur réglée sur la capture fournie par l'utilisateur.
+    let mut seconds = String::from("3.5");
+    let mut auto = true;
 
-        let mut harness = options_harness(WINDOW, move |ui, icons, panel, _window| {
-            alerts_tab(
-                ui,
-                icons,
-                panel,
-                &mut AlertsTab {
-                    order: &[],
-                    sounds: &mut sounds,
-                    search: &mut search,
-                    auto: &mut auto,
-                    seconds: &mut seconds,
-                    empty_state: state,
-                    error: None,
-                },
-            );
-        });
-        harness.run();
-        write_mockup(&mut harness, &format!("alertes_options_vide_{nom}"));
-    }
+    let mut harness = options_harness(WINDOW, move |ui, icons, panel, _window| {
+        alerts_tab(
+            ui,
+            icons,
+            panel,
+            &mut AlertsTab {
+                order: &[],
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                empty_state: EmptyState::Loading,
+                error: None,
+            },
+        );
+    });
+    harness.run();
+    write_mockup(&mut harness, "alertes_options_chargement");
 }
 
 /// **L'échec de l'enregistrement — le corollaire obligatoire du modèle transactionnel.**
@@ -1288,16 +1281,15 @@ fn main() {
     println!("  alertes_options_onglet");
     alertes_options_fermeture_manuelle();
     println!("  alertes_options_fermeture_manuelle");
-    alertes_options_etats_vides();
-    println!("  alertes_options_etats_vides");
+    alertes_options_chargement();
+    println!("  alertes_options_chargement");
     alertes_options_echec_enregistrement();
     println!("  alertes_options_echec_enregistrement");
     alertes_options_ajout_suggestions();
     println!("  alertes_options_ajout_suggestions");
     alertes_options_confirmation_retrait();
     println!("  alertes_options_confirmation_retrait");
-    // Le compte des FICHIERS, pas celui des fonctions : `alertes_options_etats_vides` en produit
-    // trois à lui seul, et ce compteur est le seul index du dossier qu'on publiera en Artifact.
+    // Le compte des FICHIERS : c'est le seul index du dossier qu'on publiera en Artifact.
     let dir = mockup_dir();
     let ecrites = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
     let affiche = dir.canonicalize().unwrap_or_else(|_| dir.clone());
