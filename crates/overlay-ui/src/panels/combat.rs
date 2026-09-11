@@ -645,7 +645,7 @@ pub fn show(
 /// cas, y compris combat vide ou camp affiché sans combattant — voir sa doc — pour que le switch
 /// reste accessible en toute circonstance.
 fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, total_damage: i64) {
-    let total_font = egui::FontId::proportional(TOTAL_FONT_SIZE);
+    let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
     let content_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
     let row_height = content_height + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
@@ -814,7 +814,7 @@ pub(crate) fn paint_portrait_percent(
         pos,
         egui::Align2::RIGHT_BOTTOM,
         &text,
-        egui::FontId::proportional(PERCENT_FONT_SIZE),
+        text::label_font(ui.ctx(), PERCENT_FONT_SIZE),
         ACCENT,
         text::OUTLINE_FULL,
     );
@@ -828,7 +828,7 @@ pub(crate) fn paint_portrait_percent(
 /// reste lisible.
 fn damage_bar_group(ui: &mut egui::Ui, name: &str, damage: i64, total_damage: i64) {
     let bar_width = ui.available_width().min(BAR_MAX_WIDTH);
-    let name_font = egui::FontId::proportional(NAME_FONT_SIZE);
+    let name_font = text::label_font(ui.ctx(), NAME_FONT_SIZE);
     // Pas de rembourrage supplémentaire sous le texte (retour utilisateur, 6e retour : « l'écart
     // entre la barre et la ligne du dessus », déjà réduit une 1re fois via `GROUP_NAME_BAR_GAP` —
     // le reste venait de cette marge, retirée).
