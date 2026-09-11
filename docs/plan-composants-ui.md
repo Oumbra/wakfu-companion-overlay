@@ -466,6 +466,41 @@ leur teinte à ce jeton, et l'écrire après reviendrait à les reprendre tous.
 et code absorbé : catalogue, vague 3. `table` demande un relevé `ui-blueprint` préalable sur les
 captures d'interfaces — il n'existe pas encore.
 
+### Avancement
+
+| Composant | État |
+| --- | --- |
+| `design::item_slot` | ✅ 2026-09-11 — absorbe `watchlist::entry_tile`, sept bordures au manifeste |
+| `design::meter` | ✅ 2026-09-11 — absorbe `combat::damage_bar`, six couches et l'arrondi conditionnel |
+| `design::badge` | **bloqué** — ni cotes, ni capture, ni appelant, voir ci-dessous |
+| `design::portrait` | à faire |
+| `design::table` + `pagination` | à faire — **`ui-blueprint` d'abord** |
+
+### Pourquoi `badge` est bloqué (constat du 2026-09-11)
+
+Trois raisons, et aucune n'est un manque de temps :
+
+1. **Aucune cote mesurée.** `design-tokens.json` ne porte que deux couleurs
+   (`status_pill_active.fill` `#E6D290`, `.text` `#101215`) — pas de hauteur, pas de padding, pas de
+   rayon, pas de corps de police. §5.12 (étiquettes de rareté) n'a même pas de couleur : « fond dans
+   la teinte de la rareté mais désaturé/assombri », sans valeur.
+2. **Aucune capture de référence.** Un balayage des seize captures d'interface cherchant `#E6D290`
+   ne trouve que des **boutons or** (`button-primary.png`, `large-button-validate.png` et les
+   pieds de page des fenêtres) : cette teinte est celle du bouton primaire, pas d'une pastille
+   existante. §5.13 décrit d'ailleurs « un pattern réutilisable pour tout indicateur futur » — une
+   projection, pas le relevé d'un élément du jeu.
+3. **Aucun appelant.** `watchlist::paint_count_inline`, que le catalogue lui destinait, a migré dans
+   `design::item_slot` sous la forme de `SlotCount`. Rien d'autre dans l'overlay n'affiche
+   d'étiquette ni de pastille aujourd'hui.
+
+L'écrire maintenant reviendrait à inventer sa géométrie entière — ce que le skill `ui-component`
+proscrit (« un composant écrit sur des valeurs devinées est un composant à refaire »), et à le
+livrer sans consommateur, ce que le projet évite déjà pour les icônes du manifeste.
+
+**Pour le débloquer** : une capture du jeu montrant une pastille d'état ou une étiquette de rareté,
+puis un passage `ui-blueprint` dessus. À défaut, un besoin réel dans l'overlay — c'est lui qui
+dirait quelle forme le composant doit prendre.
+
 **Critère de fin** : `panels/watchlist.rs` et `panels/combat.rs` ne contiennent plus aucun
 `Color32::from_rgb` ni `FontId::proportional`.
 

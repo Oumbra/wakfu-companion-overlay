@@ -47,8 +47,9 @@
 //!   dynamique, voir sa doc). Infobulle à GAUCHE désormais (`design::tooltip`, côté `Left`), pas au-dessus
 //!   comme le reste du panneau — demande explicite pour CES deux boutons précisément.
 //! - Les tuiles OBJET (`WatchlistKind::Item`) n'utilisent plus le dégradé diagonal dessiné à la
-//!   main du point précédent : la texture `Border-<RARETÉ>.webp` correspondante (`UiIcons::
-//!   item_border`, voir sa doc et `docs/design-system.md` §2.4/§7), exactement l'asset
+//!   main du point précédent : la texture `Border-<RARETÉ>.webp` correspondante (aujourd'hui
+//!   `DsTexture::ItemBorder*`, résolue par `design::item_slot` ; voir `docs/design-system.md`
+//!   §2.4/§7), exactement l'asset
 //!   d'emplacement d'objet du jeu, sert de fond de la tuile — plus fidèle qu'une approximation de
 //!   dégradé mesurée au pixel. Géométrie mesurée une fois par script Python/Pillow sur les 7
 //!   fichiers (identique sur les 7) : fenêtre intérieure = pixels 52..460 d'un canevas 512×512,
@@ -1072,7 +1073,7 @@ fn control_button(
 /// télécharger (voir doc de module), repli générique sinon.
 ///
 /// Deux styles de cadre selon `entry.kind` :
-/// - OBJET : la texture `Border-<RARETÉ>.webp` (`UiIcons::item_border`) sert de FOND de la tuile,
+/// - OBJET : la texture `Border-<RARETÉ>.webp` (`DsTexture::ItemBorder*`) sert de FOND de la tuile,
 ///   peinte AVANT l'icône (voir doc de module, correctif same-day) — sa fenêtre intérieure n'est
 ///   pas un trou transparent mais un aplat teinté par la rareté, l'icône (opaque) peinte par-dessus
 ///   en recouvre l'essentiel, ne laissant dépasser que l'anneau de rareté et un mince liseré.
