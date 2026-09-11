@@ -135,10 +135,10 @@ const ICON_FILL_RATIO: f32 = 0.96;
 /// seule rangée.
 ///
 /// Les deux dimensions sont donc portées à ce qu'il faut pour **cinq tuiles par rangée et trois
-/// rangées visibles** — demande explicite du 2026-09-11, qui autorise l'agrandissement en largeur
+/// rangées visibles**, phrase d'explication et aération comprises — demande explicite du 2026-09-11, qui autorise l'agrandissement en largeur
 /// comme en hauteur. Le rapport d'aspect du jeu n'est plus conservé : c'est un arbitrage assumé au
 /// profit du contenu, à confirmer avant portage.
-const WINDOW: Vec2 = Vec2::new(760.0, 720.0);
+const WINDOW: Vec2 = Vec2::new(760.0, 810.0);
 
 /// Largeur d'une tuile d'objet suivi — calée pour que **cinq tiennent sur une rangée** (demande
 /// explicite) dans la fenêtre de [`WINDOW`]. **Choix de mise en page** : elle doit tenir le nom
@@ -206,9 +206,16 @@ const SETTING_ROW_HEIGHT: f32 = 40.0;
 
 /// Aération autour d'un titre de section — **demande explicite de l'utilisateur**, et elle est
 /// juste : les interfaces d'options du jeu laissent respirer leurs blocs, là où les maquettes
-/// précédentes collaient le contenu à son titre. Mesuré sur `interface-personnage-aptitudes.png` :
-/// le bas d'encre d'« Intelligence » est à y=205, la première ligne commence à y=216 — 11 px.
-const SECTION_GAP: f32 = 12.0;
+/// précédentes collaient le contenu à son titre.
+///
+/// **Porté de 12 à 18 après un second retour** (« je ne vois pas de changement ») : à 12, le
+/// calcul était pourtant exact — 12 px au-dessus du rectangle réservé par `design::heading`, 12 en
+/// dessous. Mais ce rectangle vaut `HEADING_INK_HEIGHT`, la boîte d'encre d'un mot SANS jambage,
+/// et « Objets suivis » en a un : le « j » descend 3 px plus bas, si bien que l'œil voit 12 px
+/// au-dessus du titre et 9 en dessous. Un écart plus large absorbe cette asymétrie et donne l'air
+/// demandé ; corriger le jambage lui-même demanderait de mesurer l'encre réelle titre par titre,
+/// ce qui ferait dépendre la mise en page du libellé.
+const SECTION_GAP: f32 = 18.0;
 
 /// Hauteur d'une ligne de réglage — **mesurée sur `interface-options-commandes.png`**, la liste de
 /// raccourcis du jeu : ses champs tombent à y = 202, 241, 280, 319, 358, soit un pas constant de
@@ -298,6 +305,10 @@ const ITEMS: &[Item] = &[
     Item::preset("Plan \"Epée d'Amakna\"", WakfuRarity::Legendary, true),
     Item::added("Combinaison Lardante", WakfuRarity::Epic, true),
 ];
+
+/// La phrase d'explication de la page — clé i18n `profile.alertsDesc` du dépôt web.
+const DESC: &str = "Objets qui déclenchent une alerte sonore et un message à l'écran lorsqu'ils \
+                    sont ramassés.";
 
 /// Ce que le panneau de suggestions afficherait pour la saisie « pierre » — le troisième champ dit
 /// si l'objet est DÉJÀ suivi (grisé, non sélectionnable, comme côté web).
@@ -905,7 +916,17 @@ fn alerts_tab(
     // de page web. Le jeu, lui, n'en pose jamais à côté d'un titre de section — celui de
     // `interface-personnage-equiement.png` est en tête de FENÊTRE, ce qui est un autre objet.
     // Retiré sur demande explicite (2026-09-11).
-    ui.add(design::heading("Alerte").trailing_gap(SECTION_GAP));
+    ui.add(design::heading("Alerte").trailing_gap(SECTION_GAP * 0.5));
+    // La phrase d'explication de la page (`profile.alertsDesc` côté web) — remise sous le titre à
+    // la demande de l'utilisateur, après que le retrait du `?` qui la portait en infobulle l'ait
+    // fait disparaître. Elle vaut un demi-écart sous son titre, et un écart plein avant le bloc
+    // suivant : c'est un sous-titre de la section, pas une section à elle seule.
+    ui.add(
+        design::info_text(DESC)
+            .width(width)
+            .log_name("maquette.desc"),
+    );
+    ui.add_space(SECTION_GAP);
 
     // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite — voir `test_sound_row` et
     // `close_settings_row`.
