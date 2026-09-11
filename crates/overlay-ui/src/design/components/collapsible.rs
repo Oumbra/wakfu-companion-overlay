@@ -29,23 +29,34 @@
 //!
 //! ## Ce qui a été mesuré, et sur quoi
 //!
-//! `collapse-block-closed.png` (fermé) et `collapse-block-opened.png` (ouvert) — le bloc de quête
-//! du jeu.
-//! Les deux captures concordent : l'en-tête occupe la même bande dans l'une et dans l'autre, à
-//! quatorze pixels du bord haut.
+//! Source unique : **`docs/design-system/collapse-block.json`**, le relevé outillé du bloc de quête
+//! du jeu, établi sur les captures détourées `collapse-block-closed.png` (732 × 60) et
+//! `collapse-block-opened.png` (732 × 210). Les deux concordent au pixel sur l'en-tête — même bande
+//! à 7 px du bord haut, seule la hauteur totale change.
 //!
 //! | Grandeur | Valeur | Vérification |
 //! | --- | --- | --- |
-//! | En-tête | [`tokens::COLLAPSE_HEADER_HEIGHT`] | cadre fermé y 7..66, il ne contient que lui |
-//! | Marge latérale | [`tokens::COLLAPSE_PAD_X`] | contenu à x=23, cadre à x=7 |
-//! | Marge basse | [`tokens::COLLAPSE_PAD_BOTTOM`] | dernier texte y=279, cadre y=299 |
-//! | Titre | [`tokens::COLLAPSE_TITLE_FONT_SIZE`] | 18 px d'encre sur « Le Village » |
-//! | Chevron | 12 × 8, à [`tokens::COLLAPSE_PAD_X`] du bord | mesuré x 702..713, cadre à 728 |
+//! | En-tête | [`tokens::COLLAPSE_HEADER_HEIGHT`] | cadre fermé 732 × 60, il ne contient que lui |
+//! | Marge latérale | [`tokens::COLLAPSE_PAD_X`] | icône et intitulés à x=17 |
+//! | Marge basse | [`tokens::COLLAPSE_PAD_BOTTOM`] | `padding` du nœud `frame` |
+//! | Titre | [`tokens::COLLAPSE_TITLE_FONT_SIZE`] | 14 px d'encre, `#fefefe` |
+//! | Icône | [`tokens::COLLAPSE_ICON_RATIO`] | 33 × 32 dans un en-tête de 60 |
+//! | Gouttière icône–titre | [`tokens::COLLAPSE_ICON_GAP`] | icône finit à x=50, titre à x=60 |
+//! | Chevron | 14 × 8, à [`tokens::COLLAPSE_CHEVRON_PAD_X`] du bord | glyphe x 705..719, cadre 732 |
 //!
-//! **Une première tentative a mesuré le mauvais asset** (`collapse-closed.png`, la colonne « Types »
-//! de l'Hôtel de Vente). C'en est bien un, mais c'est *un cas d'usage* du repliable — une liste de
-//! cases à cocher —, pas le composant. Le relevé qui en sortait décrivait son contenu, donc rien de
-//! réutilisable.
+//! **Deux relevés ont été écartés en chemin**, et les deux pour la même raison : ils décrivaient
+//! autre chose que le composant. Le premier portait sur `collapse-closed.png`, la colonne « Types »
+//! de l'Hôtel de Vente — *un cas d'usage* du repliable, dont le relevé détaillait la liste de cases
+//! à cocher. Le second portait sur les bonnes captures mais **non détourées** : l'ombre portée et le
+//! fond de jeu y comptaient comme de l'encre, d'où un titre annoncé à 18 px au lieu de 14 et une
+//! icône à 35 au lieu de 33.
+//!
+//! ## Les deux états du survol
+//!
+//! Le jeu **éclaircit le cadre entier** quand le pointeur est sur l'en-tête : `#28292b` → `#323436`,
+//! dix niveaux sur chaque canal. Une teinte egui multiplie et ne peut donc que foncer — d'où une
+//! seconde texture, [`DsTexture::CollapseBlockHover`], et c'est le seul asset par état de ce
+//! composant. Le chevron, lui, se retourne sans second fichier.
 //!
 //! ## Ce qu'il ne fait pas
 //!
@@ -66,6 +77,7 @@ pub fn collapsible<'a>(title: impl Into<String>, open: &'a mut bool) -> Collapsi
         open,
         icon: None,
         log_name: None,
+        forced_hover: None,
     }
 }
 
@@ -75,6 +87,7 @@ pub struct Collapsible<'a> {
     open: &'a mut bool,
     icon: Option<DsTexture>,
     log_name: Option<String>,
+    forced_hover: Option<bool>,
 }
 
 impl<'a> Collapsible<'a> {
@@ -95,6 +108,15 @@ impl<'a> Collapsible<'a> {
         self
     }
 
+    /// Force l'état survolé, **sans passer par l'interaction** — même rôle et mêmes réserves que
+    /// [`Button::preview_state`](super::button::Button::preview_state) : aucun pointeur ne survole
+    /// quoi que ce soit dans un rendu offscreen, et c'est le seul moyen de montrer les deux états
+    /// côte à côte sur une planche de contrôle. En usage normal, ne pas l'appeler.
+    pub fn preview_hovered(mut self, hovered: bool) -> Self {
+        self.forced_hover = Some(hovered);
+        self
+    }
+
     /// Peint le bloc sur toute la largeur disponible et, **s'il est ouvert**, appelle
     /// `add_contents` sur un `Ui` réduit à sa zone de contenu — marges appliquées, contenu écrêté.
     ///
@@ -109,6 +131,7 @@ impl<'a> Collapsible<'a> {
             open,
             icon,
             log_name,
+            forced_hover,
         } = self;
 
         let width = ui.available_width();
@@ -165,13 +188,22 @@ impl<'a> Collapsible<'a> {
             egui::pos2(start.x + width, frame_bottom.max(header_rect.bottom())),
         );
 
+        // Le survol de l'EN-TÊTE éclaircit le cadre ENTIER — c'est ce que font les deux captures
+        // survolées du jeu, contenu compris. Survoler le contenu, lui, ne l'éclaircit pas : rien
+        // n'y est cliquable, et le faire promettrait une action qui n'existe pas.
+        let hovered = forced_hover.unwrap_or_else(|| header_response.hovered());
+
         if ui.is_rect_visible(frame_rect) {
             let ds = DesignSystem::get(ui.ctx());
             ds.paint_to_slot(
                 ui.painter(),
                 frame_slot,
                 frame_rect,
-                DsTexture::CollapseFrame,
+                if hovered {
+                    DsTexture::CollapseBlockHover
+                } else {
+                    DsTexture::CollapseBlock
+                },
                 egui::Color32::WHITE,
             );
             paint_header(ui, header_rect, &title, icon, *open);
@@ -215,7 +247,7 @@ fn paint_header(ui: &Ui, rect: Rect, title: &str, icon: Option<DsTexture>, open:
         egui::Align2::LEFT_CENTER,
         title,
         text::title_font(ui.ctx(), tokens::COLLAPSE_TITLE_FONT_SIZE),
-        tokens::WINDOW_TITLE_TEXT,
+        tokens::COLLAPSE_TITLE_TEXT,
         text::SHADOW_BOTTOM_RIGHT,
     );
 
@@ -224,26 +256,27 @@ fn paint_header(ui: &Ui, rect: Rect, title: &str, icon: Option<DsTexture>, open:
     let native = ds.native_size(DsTexture::IconChevronDown);
     let chevron = Rect::from_center_size(
         egui::pos2(
-            rect.right() - tokens::COLLAPSE_PAD_X - native.x / 2.0,
+            rect.right() - tokens::COLLAPSE_CHEVRON_PAD_X - native.x / 2.0,
             rect.center().y,
         ),
         native,
     );
     if open {
         // Retournement vertical : le manifeste n'a qu'un chevron, et en fabriquer un second serait
-        // un asset par état — ce que le contrat interdit.
+        // un asset par état — ce que le contrat interdit. (Le cadre survolé, lui, en est un : voir
+        // `DsTexture::CollapseBlockHover`, où la teinte ne pouvait pas faire le travail.)
         ds.paint_flipped_y(
             ui.painter(),
             chevron,
             DsTexture::IconChevronDown,
-            tokens::ICON_TINT,
+            tokens::COLLAPSE_CHEVRON_TINT,
         );
     } else {
         ds.paint(
             ui.painter(),
             chevron,
             DsTexture::IconChevronDown,
-            tokens::ICON_TINT,
+            tokens::COLLAPSE_CHEVRON_TINT,
         );
     }
 }
@@ -287,9 +320,9 @@ mod tests {
     /// qui donne au cadre sa respiration sous le dernier élément.
     #[test]
     fn un_bloc_ouvert_ajoute_le_contenu_et_la_marge_basse() {
-        assert!((open_height(100.0) - (60.0 + 100.0 + 20.0)).abs() < EPS);
+        assert!((open_height(100.0) - (60.0 + 100.0 + 23.0)).abs() < EPS);
         // Un contenu vide laisse quand même la marge : le cadre ne se referme pas sur son en-tête.
-        assert!((open_height(0.0) - 80.0).abs() < EPS);
+        assert!((open_height(0.0) - 83.0).abs() < EPS);
     }
 
     /// Un contenu de hauteur négative n'existe pas, mais un calcul qui en produirait une ne doit pas
@@ -303,7 +336,7 @@ mod tests {
     /// se peindrait n'importe où.
     #[test]
     fn la_largeur_utile_retire_les_deux_marges_sans_devenir_negative() {
-        assert!((content_width(722.0) - (722.0 - 32.0)).abs() < EPS);
+        assert!((content_width(732.0) - (732.0 - 34.0)).abs() < EPS);
         assert!(content_width(10.0) >= 0.0);
         assert!(content_width(0.0) >= 0.0);
     }

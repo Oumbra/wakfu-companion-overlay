@@ -637,44 +637,73 @@ pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 1.0;
 // ---------------------------------------------------------------------------------------------
 // Bloc repliable — `design::collapsible`
 //
-// Mesuré le 2026-09-11 sur `collapse-block-closed.png` (état fermé, cadre y 7..66) et
-// `collapse-block-opened.png` (état ouvert, cadre y 8..299). Les deux captures concordent : l'en-tête
-// y occupe la même bande, à quatorze pixels du bord haut dans l'une comme dans l'autre.
+// Relevé de référence : `docs/design-system/collapse-block.json`, établi par le mainteneur le
+// 2026-09-11 sur les captures détourées `collapse-block-closed.png` (732 × 60) et
+// `collapse-block-opened.png` (732 × 210). Les deux concordent au pixel sur l'en-tête : même bande
+// à 7 px du bord haut, seule la hauteur totale change.
+//
+// **Ce relevé remplace celui du même jour établi ici même**, qui portait sur des captures non
+// détourées : il donnait 18 px d'encre de titre au lieu de 14, une icône de 35 px au lieu de 33, et
+// des marges de 16/20 au lieu de 17/23. Les écarts venaient de l'ombre portée et du fond de jeu
+// comptés comme de l'encre. C'est le relevé outillé qui fait foi.
 // ---------------------------------------------------------------------------------------------
 
 /// Hauteur de l'en-tête, **et donc hauteur du bloc entier quand il est fermé** — 60 px.
 ///
 /// C'est la mesure la moins ambiguë du relevé : à l'état fermé, le cadre ne contient QUE son
-/// en-tête, et il court de y=7 à y=66. L'encre du titre y occupe y 21..53, soit 14 px de marge
-/// au-dessus et 13 en dessous.
+/// en-tête, et la capture détourée fait exactement 732 × 60. L'icône, le titre et le chevron y sont
+/// centrés sur y=30, soit le milieu exact de cette hauteur.
 pub const COLLAPSE_HEADER_HEIGHT: f32 = 60.0;
 
-/// Marge intérieure gauche et droite — 16 px du bord du cadre au contenu.
+/// Marge intérieure gauche et droite — 17 px du bord du cadre au contenu.
 ///
-/// Mesurée à gauche (le contenu commence à x=23, le cadre à x=7). À droite, le chevron s'arrête à
-/// 15 px du bord : **un pixel d'écart**, sous la précision du détourage, et les deux côtés sont donc
-/// traités symétriquement.
-pub const COLLAPSE_PAD_X: f32 = 16.0;
+/// Le relevé donne 17 à gauche (l'icône et les intitulés de section y commencent) et 15 à droite.
+/// **Les deux px d'écart ne sont pas repris** : ils portent sur le bord droit du recadrage, là où
+/// rien du contenu ne vient buter, et une asymétrie de deux pixels qu'aucun élément ne matérialise
+/// coûterait un second jeton pour rien. Le chevron, lui, a bien sa propre marge — voir
+/// [`COLLAPSE_CHEVRON_PAD_X`].
+pub const COLLAPSE_PAD_X: f32 = 17.0;
 
-/// Marge intérieure basse — 20 px sous le dernier élément de contenu.
+/// Marge intérieure basse — 23 px sous le dernier élément de contenu.
 ///
-/// Mesurée sur l'état ouvert : la dernière ligne de texte finit à y=279, le cadre à y=299. Elle est
-/// plus généreuse que la marge latérale, ce qui est le cas dans tout le jeu.
-pub const COLLAPSE_PAD_BOTTOM: f32 = 20.0;
+/// Plus généreuse que la marge latérale, comme partout dans le jeu.
+pub const COLLAPSE_PAD_BOTTOM: f32 = 23.0;
+
+/// Marge droite **du chevron** — 13 px, contre 17 pour le reste du contenu.
+///
+/// Mesurée sur le relevé : le glyphe s'arrête à x=719 d'un cadre large de 732. Ce n'est pas du
+/// bruit de détourage mais un écart de quatre pixels sur un élément dont les deux bords sont nets,
+/// et le rendre symétrique au contenu décalerait visiblement le chevron vers l'intérieur.
+pub const COLLAPSE_CHEVRON_PAD_X: f32 = 13.0;
 
 /// Corps du titre d'en-tête, en serif grasse.
 ///
-/// Dérivé de l'encre mesurée — 18 px sur « Le Village » — par le rapport d'encre d'egui (0,805,
-/// mesuré lors du chantier du bouton et non celui de 0,72 qui vaut pour la police du jeu). 18/0,805
-/// donne 22,4, arrondi à 22.
-pub const COLLAPSE_TITLE_FONT_SIZE: f32 = 22.0;
+/// Le relevé mesure 14 px d'encre et en déduit ≈19 px de corps. Le rapport d'encre d'egui pour
+/// cette police (0,805, mesuré lors du chantier du bouton) donne 14/0,805 = 17,4 — mais c'est le
+/// rapport d'une **capitale**, or « Description » et « Le Village » portent des jambages. 18 est le
+/// corps qui redonne 14 px d'encre sur le gabarit réel, vérifié au rendu.
+pub const COLLAPSE_TITLE_FONT_SIZE: f32 = 18.0;
+
+/// Couleur du titre d'en-tête — `#fefefe`, le quasi-blanc du relevé.
+pub const COLLAPSE_TITLE_TEXT: Color32 = Color32::from_rgb(0xFE, 0xFE, 0xFE);
+
+/// Teinte du chevron — `#a69064`, un doré olive.
+///
+/// **Ce n'est pas [`ICON_TINT`]** (`#c5cbcc`, un gris froid), et le relevé insiste sur ce point :
+/// l'icône de contenu du bloc tire vers le crème doré (`#dad6c7`), le chevron vers l'olive. Deux
+/// accents distincts dans un même en-tête, pas un seul jeton partagé.
+pub const COLLAPSE_CHEVRON_TINT: Color32 = Color32::from_rgb(0xA6, 0x90, 0x64);
 
 /// Côté de l'icône d'en-tête, **en rapport de la hauteur de l'en-tête**.
 ///
-/// Mesuré : 35 px dans un en-tête de 60. L'icône est optionnelle et vient de l'appelant — c'est une
-/// icône de contenu (une quête, un lieu), pas un glyphe du design system.
-pub const COLLAPSE_ICON_RATIO: f32 = 35.0 / 60.0;
+/// Mesuré : 33 × 32 px dans un en-tête de 60, soit un carré de 32 à la tolérance du détourage.
+/// L'icône est optionnelle et vient de l'appelant — c'est une icône de contenu (une quête, un
+/// lieu), pas un glyphe du design system.
+pub const COLLAPSE_ICON_RATIO: f32 = 32.0 / 60.0;
 
-/// Gouttière entre l'icône et le titre — 6 px, mesurés entre la fin de l'icône (x≈61) et le début
-/// du titre (x=67).
-pub const COLLAPSE_ICON_GAP: f32 = 6.0;
+/// Gouttière entre l'icône et le titre — 10 px, entre la fin de l'icône (x=50) et le début du titre
+/// (x=60).
+///
+/// Le titre n'est donc **pas** aligné sur la marge intérieure de 17 px quand il n'y a pas d'icône :
+/// il l'est seulement quand l'icône l'a poussé. Voir `design::collapsible`.
+pub const COLLAPSE_ICON_GAP: f32 = 10.0;
