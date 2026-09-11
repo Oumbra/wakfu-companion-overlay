@@ -40,6 +40,7 @@ use std::sync::Arc;
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::checkbox::{checkbox, Checkbox, CheckboxState};
+pub use components::collapsible::{collapsible, Collapsible};
 pub use components::heading::{heading, Heading};
 pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
 pub use components::info_text::{info_text, InfoText, InfoTone};
@@ -126,6 +127,49 @@ impl DesignSystem {
     /// Peint une texture du manifeste dans `rect`, en 9-slice, avec le découpage déclaré pour elle.
     /// C'est le seul chemin que doivent emprunter les composants — jamais `egui::Image::paint_at`,
     /// qui déformerait les coins.
+    /// Pose la texture dans un emplacement **réservé plus tôt** par `Painter::add`.
+    ///
+    /// Un conteneur dont le cadre enveloppe un contenu de hauteur inconnue ne peut pas peindre son
+    /// décor au moment où il le rencontre : il le poserait par-dessus son propre contenu. L'idiome
+    /// egui est de réserver un emplacement, de mesurer, puis d'y écrire — c'est ce que fait
+    /// `design::collapsible`.
+    pub fn paint_to_slot(
+        &self,
+        painter: &egui::Painter,
+        slot: egui::layers::ShapeIdx,
+        rect: egui::Rect,
+        texture: DsTexture,
+        tint: egui::Color32,
+    ) {
+        painter.set(
+            slot,
+            nine_slice::shape(rect, self.texture(texture), &texture.spec().slice, tint),
+        );
+    }
+
+    /// Peint la texture **retournée verticalement**.
+    ///
+    /// Sert aux glyphes dont le jeu n'a qu'une orientation : le chevron d'un bloc repliable pointe
+    /// vers le bas fermé et vers le haut ouvert, et le manifeste n'en porte qu'un. En fabriquer un
+    /// second serait un asset par état, ce que le contrat interdit au même titre qu'un asset par
+    /// taille.
+    pub fn paint_flipped_y(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        texture: DsTexture,
+        tint: egui::Color32,
+    ) {
+        let mut mesh = egui::Mesh::with_texture(self.texture(texture).id());
+        // UV inversées sur l'axe vertical : v0 en bas, v1 en haut.
+        mesh.add_rect_with_uv(
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
+            tint,
+        );
+        painter.add(egui::Shape::mesh(mesh));
+    }
+
     pub fn paint(
         &self,
         painter: &egui::Painter,

@@ -395,10 +395,17 @@ Deux rappels qui valent pour tout ce lot :
 | `design::stepper` | ✅ `da37c8b` — avec `Input::read_only`, que son champ central a rendu nécessaire |
 | `input` — `Search` | ✅ déjà couvert par `Input::leading_icon` (`0923a45`, session parallèle) |
 | `input` — `read_only` | ✅ `da37c8b` |
-| `design::collapsible` | à faire — 4 assets prêts, cote relevée |
+| `design::collapsible` | ✅ — relevé refait sur le bon asset, voir ci-dessous |
 | `input` — état d'erreur | à faire |
 | `design::slider` | à faire — **`design-asset` d'abord**, aucun asset découpé |
 | `tabs` — variante icône | à faire — dépend de `DsIcon` (lot 2) |
+
+**Ce que le `collapsible` a appris** : un asset nommé « collapse » n'est pas forcément *le*
+composant. Le premier relevé a porté sur `collapse-closed.png` — la colonne « Types » de l'Hôtel de
+Vente — qui est **un cas d'usage** du repliable, une liste de cases à cocher. Le relevé décrivait
+donc son contenu, c'est-à-dire rien de réutilisable. La bonne paire était `collapse-block.png` /
+`collapse-block-opened.png`, et la bonne question : *qu'est-ce que ce composant garantit à
+n'importe quel contenu ?* — un cadre, des marges, un écrêtage, deux états.
 
 **Ce que le `stepper` a appris, et qui vaut pour la suite du lot** : la taille d'encre d'un glyphe
 n'est **pas une propriété de l'asset seul** mais du couple (asset, contexte) — le même « + » se

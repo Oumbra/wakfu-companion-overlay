@@ -817,6 +817,61 @@ contrôle du Suivi, et le couple quantité du formulaire de vente HDV.
 
 ---
 
+## `design::collapsible` — bloc repliable (2026-09-11)
+
+`crates/overlay-ui/src/design/components/collapsible.rs` — **composant conteneur**, forme closure.
+
+```rust
+design::collapsible("Le Village", &mut ouvert)
+    .icon(icone_de_quete)
+    .show(ui, |ui| {
+        // n'importe quoi : du texte, un formulaire, un tableau, des cases à cocher…
+    });
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `title` (à la construction) | peint dans l'en-tête, serif grasse | — |
+| `open` (à la construction) | `&mut bool`, basculé par le clic sur l'en-tête | — |
+| `icon` | icône d'en-tête | aucune |
+| `log_name` | nom d'instance au journal | le titre |
+
+**Deux états, et c'est toute sa définition fonctionnelle.** Fermé, le bloc n'est que son en-tête.
+Ouvert, il montre son contenu et on peut interagir avec. **Le contenu est entièrement libre** — le
+composant n'en sait rien, il lui garantit un cadre, des marges et un écrêtage.
+
+`show` rend un `InnerResponse<Option<R>>` : `None` dit que **la closure n'a pas tourné** parce que
+le bloc est fermé, ce qui n'est pas la même chose qu'un contenu vide.
+
+**Mesures** (`releve-collapse.json`, sur `collapse-block.png` et `collapse-block-opened.png`) :
+
+| Grandeur | Valeur | Vérification |
+| --- | --- | --- |
+| En-tête | `COLLAPSE_HEADER_HEIGHT` (60) | cadre fermé y 7..66 — il ne contient rien d'autre |
+| Marge latérale | `COLLAPSE_PAD_X` (16) | contenu à x=23, cadre à x=7 |
+| Marge basse | `COLLAPSE_PAD_BOTTOM` (20) | dernier texte y=279, cadre y=299 |
+| Titre | `COLLAPSE_TITLE_FONT_SIZE` (22) | 18 px d'encre, divisés par le rapport d'egui |
+| Icône | `COLLAPSE_ICON_RATIO` (35/60) | 35 px dans un en-tête de 60 |
+
+**Trois choses à savoir avant de le modifier :**
+
+- **Le cadre est peint APRÈS le contenu**, dans un emplacement réservé au préalable
+  (`DesignSystem::paint_to_slot`) : sa hauteur dépend de ce que le contenu a pris. C'est la raison
+  d'être de la forme closure pour ce composant.
+- **Le chevron est retourné, pas dupliqué** (`DesignSystem::paint_flipped_y`). Un second asset pour
+  l'état ouvert serait un asset par état, aussi interdit qu'un asset par taille.
+- **`icon` est le seul paramètre-texture du design system**, et c'est assumé : cette icône appartient
+  au contenu (une quête, un lieu), elle vient de la donnée. Le composant ne peut pas la résoudre
+  depuis une intention.
+
+**Deux écarts assumés** : le cadre du jeu est **translucide** et ne l'est pas ici (il faudrait deux
+captures sur deux fonds pour en déduire l'alpha), et le composant **ne rend pas son contenu
+défilable** — un contenu qui peut déborder s'enveloppe dans une `design::scroll_area`.
+
+**Pas encore utilisé en production.**
+
+---
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -893,7 +948,6 @@ Ce qu'il faut pour que les onglets Alertes et Personnages de la modale Options e
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
 | **`input`** — variantes `Number`, `Search`, état d'erreur | *Extension du composant existant*, pas un second composant (skill `ui-component`, étape 1). | `input-number.png`, `input-search.png`, `empty-input-search.png`, `large-input-*.png` |
-| **`design::collapsible`** | Rien aujourd'hui — structure de toute liste de filtres du jeu. **Relevé fait** : [`releve-collapse.json`](design-system/releve-collapse.json), pas de 46 px, filet d'un pixel, deux niveaux de libellé. Deux questions ouvertes avant d'écrire (taille de case, spec fonctionnelle). | 4 assets ; §5.8. |
 | **`design::field`** | Rien aujourd'hui — le *libellé à gauche, contrôle à droite* du jeu (« Prix unitaire », « Quantité », « Durée de publication »). **À ne pas confondre** avec la ligne « contrôle élastique + bouton » de la modale Options, qui n'a pas de libellé et n'a qu'un seul usage. | Captures `interface-hdv-vente-form.png` ; **relevé `ui-blueprint` d'abord**, aucune cote n'existe. |
 | **`design::slider`** | Rien aujourd'hui. | Aucun asset découpé — passer par `design-asset` d'abord ; captures dans `interface-options-son.png` et `interface-options-interface.png`. |
 | **`tabs`** — variante icône | Onglets à pictogrammes. | `icon-tabs.png` ; dépend du registre `DsIcon` (vague 1). §5.7. |

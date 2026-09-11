@@ -633,3 +633,48 @@ pub const STEPPER_ICON_TINT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 /// interface montre un jour un pas mieux proportionné, c'est cette valeur-là qui bougera, en un
 /// seul endroit.
 pub const STEPPER_FIELD_HEIGHT_RATIO: f32 = 1.0;
+
+// ---------------------------------------------------------------------------------------------
+// Bloc repliable — `design::collapsible`
+//
+// Mesuré le 2026-09-11 sur `collapse-block.png` (état fermé, cadre y 7..66) et
+// `collapse-block-opened.png` (état ouvert, cadre y 8..299). Les deux captures concordent : l'en-tête
+// y occupe la même bande, à quatorze pixels du bord haut dans l'une comme dans l'autre.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur de l'en-tête, **et donc hauteur du bloc entier quand il est fermé** — 60 px.
+///
+/// C'est la mesure la moins ambiguë du relevé : à l'état fermé, le cadre ne contient QUE son
+/// en-tête, et il court de y=7 à y=66. L'encre du titre y occupe y 21..53, soit 14 px de marge
+/// au-dessus et 13 en dessous.
+pub const COLLAPSE_HEADER_HEIGHT: f32 = 60.0;
+
+/// Marge intérieure gauche et droite — 16 px du bord du cadre au contenu.
+///
+/// Mesurée à gauche (le contenu commence à x=23, le cadre à x=7). À droite, le chevron s'arrête à
+/// 15 px du bord : **un pixel d'écart**, sous la précision du détourage, et les deux côtés sont donc
+/// traités symétriquement.
+pub const COLLAPSE_PAD_X: f32 = 16.0;
+
+/// Marge intérieure basse — 20 px sous le dernier élément de contenu.
+///
+/// Mesurée sur l'état ouvert : la dernière ligne de texte finit à y=279, le cadre à y=299. Elle est
+/// plus généreuse que la marge latérale, ce qui est le cas dans tout le jeu.
+pub const COLLAPSE_PAD_BOTTOM: f32 = 20.0;
+
+/// Corps du titre d'en-tête, en serif grasse.
+///
+/// Dérivé de l'encre mesurée — 18 px sur « Le Village » — par le rapport d'encre d'egui (0,805,
+/// mesuré lors du chantier du bouton et non celui de 0,72 qui vaut pour la police du jeu). 18/0,805
+/// donne 22,4, arrondi à 22.
+pub const COLLAPSE_TITLE_FONT_SIZE: f32 = 22.0;
+
+/// Côté de l'icône d'en-tête, **en rapport de la hauteur de l'en-tête**.
+///
+/// Mesuré : 35 px dans un en-tête de 60. L'icône est optionnelle et vient de l'appelant — c'est une
+/// icône de contenu (une quête, un lieu), pas un glyphe du design system.
+pub const COLLAPSE_ICON_RATIO: f32 = 35.0 / 60.0;
+
+/// Gouttière entre l'icône et le titre — 6 px, mesurés entre la fin de l'icône (x≈61) et le début
+/// du titre (x=67).
+pub const COLLAPSE_ICON_GAP: f32 = 6.0;

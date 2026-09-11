@@ -156,6 +156,26 @@ pub const ICON_BUTTON_SLICE: NineSlice =
 ///
 /// `Fill::Stretch` sur les deux axes : cette bande médiane est un fond quasi uni — moins de deux
 /// niveaux d'écart d'un bord à l'autre — il n'y a rien de périodique à répéter.
+/// Cadre d'un bloc repliable (`collapse-frame.png`, 722 × 28) — **marges figées sur le décor
+/// d'angle**, comme pour un bouton.
+///
+/// 20 px à gauche et à droite : l'étendue du motif en équerre qui marque les quatre angles, mesurée
+/// sur le profil du coin haut-gauche. 13 px en haut et en bas : la hauteur des deux bandes
+/// prélevées sur la capture, liseré compris.
+///
+/// `Stretch` sur les deux axes — entre les angles, le cadre n'est qu'un liseré d'un pixel sur un
+/// fond uni, il n'y a rien de périodique à répéter.
+pub const COLLAPSE_FRAME_SLICE: NineSlice = NineSlice::new(
+    Insets {
+        left: 20.0,
+        top: 13.0,
+        right: 20.0,
+        bottom: 13.0,
+    },
+    Fill::Stretch,
+    Fill::Stretch,
+);
+
 /// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — **aucun décor à figer**.
 ///
 /// Mesuré (`component.py insets`) : rayon d'angle 3, aucun liseré, bruit de décor 0,05 sur 255 —
@@ -379,6 +399,24 @@ pub enum DsTexture {
     /// Les glyphes, eux, viennent du manifeste ([`DsTexture::IconPlus`], [`DsTexture::IconMinus`])
     /// et sont posés par `design::icon_button` — un socle, deux glyphes, jamais deux textures.
     ButtonStepper,
+    /// Cadre d'un bloc repliable (`collapse-frame.png`, 722 × 28) — le décor de
+    /// [`design::collapsible`](crate::design::collapsible), ses quatre angles et son liseré.
+    ///
+    /// **Assemblée le 2026-09-11 à partir de `collapse-block-opened.png`**, faute d'asset détouré :
+    /// treize lignes prélevées en haut du cadre (au-dessus de son en-tête), deux lignes de fond uni
+    /// prises entre deux blocs de contenu, treize lignes prélevées en bas (sous le dernier texte).
+    /// Les bandes sont ensuite nettoyées — hors des angles et du liseré, tout est ramené au fond uni
+    /// `#1f2227`.
+    ///
+    /// Ce nettoyage n'est pas cosmétique : **le cadre du jeu est translucide**, et la capture avait
+    /// donc figé le décor du jeu vu au travers. Le garder aurait collé un fragment de paysage dans
+    /// tout bloc repliable de l'overlay.
+    ///
+    /// **Ce qui n'est PAS reproduit** : cette translucidité elle-même. Il faudrait deux captures du
+    /// même cadre sur deux fonds différents pour en déduire l'alpha, comme
+    /// `tools/design-system/build_modal_body.py` le fait pour la modale. Le cadre est donc opaque —
+    /// écart assumé, et le seul de cet asset.
+    CollapseFrame,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -437,6 +475,7 @@ impl DsTexture {
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
         DsTexture::ButtonStepper,
+        DsTexture::CollapseFrame,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -668,6 +707,11 @@ impl DsTexture {
                 name: "ds-button-stepper",
                 bytes: ds_asset!("button-stepper.png"),
                 slice: STEPPER_SLICE,
+            },
+            DsTexture::CollapseFrame => DsTextureSpec {
+                name: "ds-collapse-frame",
+                bytes: ds_asset!("collapse-frame.png"),
+                slice: COLLAPSE_FRAME_SLICE,
             },
         }
     }
