@@ -204,6 +204,10 @@ const SETTING_ROW_RADIUS: u8 = 4;
 /// à cocher de 20 px et un champ de 25, qu'un fond de 32 serrerait contre ses bords.
 const SETTING_ROW_HEIGHT: f32 = 40.0;
 
+/// Corps du texte courant — celui des libellés de ligne du panneau, pour qu'une description et un
+/// libellé se lisent sur le même plan.
+const BODY_FONT_SIZE: f32 = 15.0;
+
 /// Aération autour d'un titre de section — **demande explicite de l'utilisateur**, et elle est
 /// juste : les interfaces d'options du jeu laissent respirer leurs blocs, là où les maquettes
 /// précédentes collaient le contenu à son titre.
@@ -467,6 +471,9 @@ fn alert_item(
         );
     }
 
+    // Curseur main : la tuile entière est cliquable, et rien d'autre ne le dit — demande
+    // explicite de l'utilisateur.
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     response.on_hover_text(format!(
         "{} — {}",
         item.name,
@@ -495,6 +502,24 @@ fn elide(ui: &egui::Ui, text: &str, max_width: f32) -> String {
         cut.pop();
     }
     format!("{}…", cut.trim_end())
+}
+
+/// Un paragraphe de texte courant — **la brique qui manque au design system**.
+///
+/// Même police et même corps que les libellés de ligne (« Tester le son de l'alerte »), replié sur
+/// la largeur donnée. C'est ce que `design::body` devra faire ; en attendant, la maquette le pose
+/// à la main plutôt que de détourner `design::info_text`, dont la pastille et le ton disent
+/// « remarque » là où il ne s'agit que d'une description.
+fn body_text(ui: &mut egui::Ui, text: &str, width: f32) {
+    ui.add(
+        egui::Label::new(
+            RichText::new(text)
+                .color(TEXT)
+                .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
+        )
+        .wrap_mode(egui::TextWrapMode::Wrap),
+    );
+    let _ = width;
 }
 
 /// La ligne « Tester le son de l'alerte » — **l'alerte SONORE, et rien d'autre**.
@@ -545,6 +570,10 @@ fn close_settings_row(ui: &mut egui::Ui, auto: &mut bool, seconds: &mut String, 
     cell.horizontal_centered(|ui| {
         ui.add(design::checkbox(auto, "Fermeture automatique").log_name("maquette.auto"));
         ui.add_space(12.0);
+        // **Le champ suit la case** : décochée, la fermeture est manuelle, donc il n'y a plus de
+        // délai avant fermeture et la valeur n'a plus d'effet — le champ est grisé et non
+        // modifiable. La logique était déjà là (`.enabled`), mais aucun rendu ne la montrait.
+        //
         // `design::input` est du texte libre — il n'existe pas encore de champ numérique borné
         // dans le design system, alors que le jeu en a un (`input-number.png`, `button-plus.png`,
         // `button-moins.png`). En attendant, la borne se pose **à la validation**, voir
@@ -919,13 +948,13 @@ fn alerts_tab(
     ui.add(design::heading("Alerte").trailing_gap(SECTION_GAP * 0.5));
     // La phrase d'explication de la page (`profile.alertsDesc` côté web) — remise sous le titre à
     // la demande de l'utilisateur, après que le retrait du `?` qui la portait en infobulle l'ait
-    // fait disparaître. Elle vaut un demi-écart sous son titre, et un écart plein avant le bloc
-    // suivant : c'est un sous-titre de la section, pas une section à elle seule.
-    ui.add(
-        design::info_text(DESC)
-            .width(width)
-            .log_name("maquette.desc"),
-    );
+    // fait disparaître.
+    //
+    // **Un paragraphe, pas un bloc d'information** : `design::info_text` porte une pastille dorée
+    // et le poids d'une remarque, ce qui donnait à cette phrase une importance qu'elle n'a pas.
+    // C'est une description de section, au même corps et à la même couleur que « Tester le son de
+    // l'alerte ».
+    body_text(ui, DESC, width);
     ui.add_space(SECTION_GAP);
 
     // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite — voir `test_sound_row` et
@@ -1040,6 +1069,39 @@ fn alertes_options_onglet() {
     });
     harness.run();
     write_mockup(&mut harness, "alertes_options_onglet");
+}
+
+/// **La fermeture manuelle** — le cas où la case est décochée.
+///
+/// Le champ de durée y est grisé et non modifiable, et c'est la logique fonctionnelle qui
+/// l'impose : si la fermeture n'est pas automatique, elle est manuelle, donc il n'y a plus de
+/// délai avant fermeture et la valeur n'a plus d'effet. Un champ resté actif inviterait à régler
+/// quelque chose qui ne sert à rien.
+#[allow(clippy::too_many_lines)]
+fn alertes_options_fermeture_manuelle() {
+    let mut sounds: Vec<bool> = ITEMS.iter().map(|i| i.sound_on).collect();
+    let mut search = String::new();
+    let mut seconds = String::from("4");
+    let mut auto = false;
+
+    let mut harness = options_harness(WINDOW, move |ui, icons, panel, _window| {
+        alerts_tab(
+            ui,
+            icons,
+            panel,
+            &mut AlertsTab {
+                order: &ORDER_NATUREL,
+                sounds: &mut sounds,
+                search: &mut search,
+                auto: &mut auto,
+                seconds: &mut seconds,
+                empty_state: EmptyState::NotEmpty,
+                error: None,
+            },
+        );
+    });
+    harness.run();
+    write_mockup(&mut harness, "alertes_options_fermeture_manuelle");
 }
 
 /// **Les trois états sans objet** — sur une seule planche, parce que c'est leur différence qui
@@ -1224,6 +1286,8 @@ fn alertes_options_confirmation_retrait() {
 fn main() {
     alertes_options_onglet();
     println!("  alertes_options_onglet");
+    alertes_options_fermeture_manuelle();
+    println!("  alertes_options_fermeture_manuelle");
     alertes_options_etats_vides();
     println!("  alertes_options_etats_vides");
     alertes_options_echec_enregistrement();
