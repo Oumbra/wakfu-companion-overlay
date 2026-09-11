@@ -740,3 +740,65 @@ pub const LOADER_FRAMES: usize = 16;
 
 /// Colonnes de `loader-sheet.png` — grille 4 × 4, lue ligne par ligne.
 pub const LOADER_SHEET_COLUMNS: usize = 4;
+
+// ---------------------------------------------------------------------------------------------
+// Filet de séparation — `design::separator`
+//
+// **Mesuré au pixel** le 2026-09-11 sur `assets/design-system/collapse-block-opened.png` et
+// `collapse-block-opened-hover.png` (les captures *source*, non générifiées : les génériques ont
+// justement été nettoyés de leur contenu, filet compris). Le filet y apparaît deux fois, aux lignes
+// y=82..85 et y=152..155, identiques au pixel près dans les deux occurrences et dans les deux
+// textures.
+//
+// Deux écarts avec `docs/design-system/collapse-block.json`, tranchés en faveur de la mesure :
+//
+// - la note de `sep-1` donne la ligne claire à `#323436` — la texture donne `#323335`. L'écart est
+//   d'un niveau sur le vert et deux sur le bleu ; `#323436` est la teinte du *fond survolé*, qui a
+//   vraisemblablement été relevée à sa place.
+// - la palette du relevé déclare `border-bevel-dark: #28292b` — or `#28292b` est exactement le fond
+//   au repos, et une ligne sombre de cette teinte serait invisible. La texture donne `#222325`,
+//   valeur que la note de `sep-1` portait déjà : c'est la palette qui est fautive, pas la note.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur totale du filet — 4 px, soit deux lignes de [`SEPARATOR_BEVEL_HEIGHT`].
+pub const SEPARATOR_HEIGHT: f32 = 4.0;
+
+/// Hauteur de **chacune** des deux lignes du bevel — 2 px.
+///
+/// Deux lignes plates empilées, pas un dégradé : les quatre lignes de pixels mesurées ne portent
+/// que deux teintes, sans valeur intermédiaire.
+pub const SEPARATOR_BEVEL_HEIGHT: f32 = 2.0;
+
+/// Ligne claire, au repos — `#323335`, dix niveaux au-dessus du fond.
+pub const SEPARATOR_LIGHT: Color32 = Color32::from_rgb(0x32, 0x33, 0x35);
+
+/// Ligne sombre, au repos — `#222325`, six niveaux sous le fond.
+pub const SEPARATOR_DARK: Color32 = Color32::from_rgb(0x22, 0x23, 0x25);
+
+/// Ligne claire quand la surface porteuse est survolée — `#3c3e3f`.
+///
+/// Le jeu **recalcule le bevel** avec le fond au lieu de le laisser en place : voir
+/// [`SEPARATOR_SURFACE_HOVER`] et la doc de `design::separator`.
+pub const SEPARATOR_LIGHT_HOVER: Color32 = Color32::from_rgb(0x3C, 0x3E, 0x3F);
+
+/// Ligne sombre quand la surface porteuse est survolée — `#2b2c2e`.
+pub const SEPARATOR_DARK_HOVER: Color32 = Color32::from_rgb(0x2B, 0x2C, 0x2E);
+
+/// Fond sur lequel le filet de repos a été mesuré — `#28292b`, la surface du bloc repliable.
+///
+/// Aucun composant ne peint cette couleur (le repliable pose une texture), mais c'est la référence
+/// qui donne son sens aux deux teintes du bevel : elles ne valent que *relativement* à elle. Un
+/// test de `design::separator` s'en sert pour vérifier que la claire est bien au-dessus et la
+/// sombre en dessous.
+pub const SEPARATOR_SURFACE_REST: Color32 = Color32::from_rgb(0x28, 0x29, 0x2B);
+
+/// Fond sur lequel le filet survolé a été mesuré — `#323436`.
+pub const SEPARATOR_SURFACE_HOVER: Color32 = Color32::from_rgb(0x32, 0x34, 0x36);
+
+/// Écart réservé **sous** le filet, avant le corps de la section — 12 px.
+///
+/// Mesuré entre le bas du filet (y=86) et le haut de l'encre du corps (y=98). L'écart *au-dessus*
+/// du filet vaut 10 px (bas de l'encre de l'intitulé, y=72) et appartient à l'élément précédent —
+/// même répartition que [`HEADING_TO_ROW`], pour que deux composants voisins ne doublent pas
+/// l'espace à leur jonction.
+pub const SEPARATOR_GAP_BELOW: f32 = 12.0;
