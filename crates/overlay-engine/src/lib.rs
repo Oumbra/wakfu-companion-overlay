@@ -18,7 +18,9 @@ pub mod roster;
 pub mod session;
 pub mod watchlist;
 
-pub use catalog::{CatalogIndex, IconKind, IconRef, MonsterClassification, WakfuRarity};
+pub use catalog::{
+    CatalogIndex, IconKind, IconRef, MonsterClassification, WakfuItemCategory, WakfuRarity,
+};
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
     fight_signature, purchase_signature, trade_signature, FightLootPayload,
