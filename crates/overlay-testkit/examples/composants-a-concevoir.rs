@@ -15,11 +15,16 @@
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
+#[path = "shared/rarity_gems.rs"]
+mod rarity_gems;
+
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
 use overlay_ui::design::{self, DsTexture, IconContext, InputSize};
 use overlay_ui::ui_icons::UiIcons;
+
+use rarity_gems::{RarityGems, GEM_BOX};
 
 // -------------------------------------------------------------------------------------------
 // Jetons communs aux planches — repris de la maquette de la page Alertes, mêmes sources.
@@ -80,8 +85,6 @@ const SUGGESTION_PAD_X: f32 = 6.0;
 const SUGGESTION_GAP: f32 = 6.0;
 /// Côté de l'image d'objet d'une rangée.
 const SUGGESTION_SLOT: f32 = 22.0;
-/// Côté de la gemme de rareté.
-const GEM_SIDE: f32 = 14.0;
 /// Hauteur de la bande de filtres par catégorie.
 const CATEGORY_BAR_HEIGHT: f32 = 28.0;
 /// Côté d'un bouton de catégorie.
@@ -879,7 +882,9 @@ fn planche_autocomplete() {
     let mut vide = String::new();
     let mut saisi = String::from("pierre");
 
+    let mut gems: Option<RarityGems> = None;
     let (mut harness, bottom) = planche(SHEET_WIDTH, move |ui, icons| {
+        let gems = gems.get_or_insert_with(|| RarityGems::load(ui.ctx()));
         bande(ui, "design::autocomplete");
         let width = 560.0;
 
@@ -901,7 +906,7 @@ fn planche_autocomplete() {
                 .leading_icon(DsTexture::IconSearch)
                 .width(width),
         );
-        suggestions(ui, icons, field.rect);
+        suggestions(ui, icons, gems, field.rect);
     });
     harness.run();
     write(&mut harness, &bottom, "composant_autocomplete");
@@ -914,7 +919,7 @@ fn planche_autocomplete() {
 /// son **nom**. Une entrée déjà suivie est grisée, **non cliquable, et ne réagit pas au survol** —
 /// les trois ensemble : une ligne grisée qui s'allume quand même au passage de la souris promet un
 /// clic qui n'arrivera pas.
-fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
+fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, gems: &RarityGems, field: Rect) {
     // (nom, rareté, déjà suivi, survolée)
     const ENTREES: &[(&str, WakfuRarity, bool, bool)] = &[
         ("Pierre d'aventure", WakfuRarity::Mythical, true, true),
@@ -966,18 +971,19 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
 
         rarity_gem(
             ui,
+            gems,
             Rect::from_center_size(
                 egui::pos2(
-                    row.left() + SUGGESTION_PAD_X + GEM_SIDE / 2.0,
+                    row.left() + SUGGESTION_PAD_X + GEM_BOX / 2.0,
                     row.center().y,
                 ),
-                Vec2::splat(GEM_SIDE),
+                Vec2::splat(GEM_BOX),
             ),
             *rarity,
         );
         // **Image NUE** : la gemme porte déjà la rareté, un cadre coloré ferait doublon —
         // exactement ce que fait le web (`app-item-icon`, sans bordure).
-        let slot_x = row.left() + SUGGESTION_PAD_X + GEM_SIDE + SUGGESTION_GAP;
+        let slot_x = row.left() + SUGGESTION_PAD_X + GEM_BOX + SUGGESTION_GAP;
         item_slot(
             ui,
             icons,
@@ -1010,27 +1016,15 @@ fn suggestions(ui: &mut egui::Ui, icons: &UiIcons, field: Rect) {
     }
 }
 
-/// La gemme de rareté — **place réservée, pas un dessin**.
+/// La gemme de rareté d'une rangée — **la vraie image du jeu**.
 ///
-/// Le web la sert depuis `wakassets/rarities/{n}.png` (voir `wakfuRarityIconUrl`,
-/// `wakfu-item-rarity.data.ts`) : ce n'est pas un asset du design system mais une **image
-/// distante**, du même CDN et du même genre que les icônes d'objets. L'overlay sait déjà les
-/// chercher (`RemoteIconStore`) — il lui manque seulement une variante `IconKind::Rarity` dans
-/// `overlay_engine::catalog`, qui construirait `wakassets/rarities/{n}.png` comme
-/// `IconKind::Item` construit `wakassets/items/{gfx}.png`.
-///
-/// Ce harnais n'atteint pas le CDN (politique réseau de la session) : la gemme est donc figurée
-/// par son emplacement, comme l'a été le loader avant d'exister.
-fn rarity_gem(ui: &egui::Ui, rect: Rect, _rarity: WakfuRarity) {
-    // La rareté est déjà au paramètre : c'est elle qui choisira `rarities/{n}.png` une fois la
-    // variante `IconKind::Rarity` en place. Le harnais n'a pas l'image, il n'en réserve que la
-    // place — d'où le préfixe `_`, qui dit « pas encore utilisé », pas « inutile ».
-    ui.painter().rect_stroke(
-        rect,
-        2,
-        Stroke::new(1.0, design::tokens::TEXT_DISABLED),
-        StrokeKind::Inside,
-    );
+/// Elle vient des fixtures du harnais (voir `shared/rarity_gems.rs`), qui tiennent lieu de ce que
+/// `RemoteIconStore` télécharge au runtime : le fichier est choisi par
+/// `IconRef::for_rarity(rarité).gfx_id`, donc par la même correspondance que celle qui construira
+/// l'URL en vrai. `IconKind::Rarity` est arrivé côté `overlay-engine` depuis que cette planche
+/// n'en réservait que la place.
+fn rarity_gem(ui: &egui::Ui, gems: &RarityGems, rect: Rect, rarity: WakfuRarity) {
+    gems.paint(ui, rect, rarity);
 }
 
 /// La bande de filtres par catégorie, en tête du panneau — présente sur les deux captures du web
