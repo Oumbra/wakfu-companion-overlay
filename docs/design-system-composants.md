@@ -671,6 +671,37 @@ bannière : préparées pour le futur bouton muet/actif de la fenêtre Options
 (`interface-options-son.png`), aucun réglage de son n'étant câblé dans l'overlay à ce jour
 (`alert_sound` ne fait que jouer les sons, jamais les couper).
 
+**Paire œil/œil barré (2026-09-11)** : `DsTexture::IconEye` et `DsTexture::IconEyeOff` (16 × 14
+toutes les deux), même provenance et même statut que la paire volume/muet — détourées par le skill
+`design-asset` depuis deux crops sans socle porteur, entrées au manifeste et à la galerie avant tout
+appelant réel. Candidat naturel pour un futur toggle de visibilité (masquer une entrée du panneau
+Suivi, ou un champ de jeton dans la fenêtre Options) ; aucun des deux n'est câblé aujourd'hui.
+
+**Lot complet du répertoire `icons/` (2026-09-11)** : delta entre `assets/design-system/icons/*.png`
+(38 fichiers) et `DsTexture::ALL` demandé par l'utilisateur (« pas tous les icônes du répertoire
+dans le manifeste ») — 22 fichiers manquaient, tous ajoutés d'un coup : `IconBagIn`, `IconBagOut`,
+`IconBook`, `IconCalendar`, `IconCards`, `IconCharacters`, `IconFilter`, `IconGrid`, `IconHammer`,
+`IconKamas`, `IconLock`, `IconOrder`, `IconPact`, `IconPin`, `IconRepeat`, `IconSave`,
+`IconSettings1`, `IconSettings2`, `IconSort`, `IconTriangleRight`, `IconTrophy`, `IconXp`. Aucun n'a
+d'appelant réel, comme les deux paires ci-dessus.
+
+`icon_content_size` n'est posé QUE sur les neuf dont l'extraction `--from-button` est consignée dans
+`references/recettes-icones.md` du skill `design-asset` (preuve qu'ils vivaient sur un socle de
+bouton icône dans le jeu) : `IconBagIn`, `IconBagOut`, `IconFilter`, `IconLock`, `IconOrder`,
+`IconPact`, `IconSave`, `IconSort`, `IconTriangleRight`. Les treize autres (`IconBook`,
+`IconCalendar`, `IconCards`, `IconCharacters`, `IconGrid`, `IconHammer`, `IconKamas`, `IconPin`,
+`IconRepeat`, `IconSettings1`, `IconSettings2`, `IconTrophy`, `IconXp`) n'ont pas cette preuve — soit
+détourés sans bouton porteur (documenté), soit sans mesure consignée (provenance retrouvée dans
+l'historique git, pas dans le jeu d'essai du skill) — et restent donc sans normalisation, par la
+même prudence que `IconSearch`/`IconTick`/`IconChevronDown` : une taille d'encre est une propriété
+mesurée de l'asset, jamais devinée. Peints dans la galerie à leur taille de fichier plutôt que par
+`icon_button`, faute de socle à leur donner (nouvelle section « Glyphes sans socle connu »).
+
+`crates/overlay-testkit/tests/design_gallery.rs` : les deux rangées d'icônes sur socle sont passées
+de `ui.horizontal` à `ui.horizontal_wrapped`, la largeur fixe de 760px ne contenant plus tous les
+glyphes sur une seule ligne — et la hauteur du canevas de test est passée de 4160 à 4500px pour la
+même raison (le bas de la galerie sortait sinon du cadre).
+
 ---
 
 ## `design::window` — chrome de fenêtre (2026-09-10)
