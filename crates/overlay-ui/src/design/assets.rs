@@ -359,6 +359,19 @@ pub enum DsTexture {
     /// Haut-parleur barré (`icons/icon-volume-mute.png`, 26 × 26) — pendant coupé de
     /// [`DsTexture::IconVolume`], même provenance et même statut (pas encore d'appelant).
     IconVolumeMute,
+    /// Œil ouvert (`icons/icon-eye.png`, 16 × 14) — glyphe SOMBRE, détouré le 2026-09-11 (skill
+    /// `design-asset`, `--polarity dark --keep center --floor 45`) depuis un crop du jeu sans
+    /// socle porteur, contrairement aux icônes prélevées sur un bouton.
+    ///
+    /// **Pas encore d'appelant** : aucun bascule affiché/masqué n'existe dans l'overlay à ce jour.
+    /// Entrée au manifeste comme [`DsTexture::IconVolume`] avant son futur bouton — préparée pour
+    /// un toggle de visibilité (candidat naturel : masquer une entrée du panneau Suivi, ou un champ
+    /// de jeton dans la fenêtre Options). Posée sur un socle de bouton icône, d'où
+    /// `icon_content_size`.
+    IconEye,
+    /// Œil barré (`icons/icon-eye-off.png`, 16 × 14) — pendant coupé de [`DsTexture::IconEye`],
+    /// même provenance et même statut (pas encore d'appelant).
+    IconEyeOff,
     /// Corps de la modale Options (`modal-body.png`, 720 × 505) — le fond SOUS la bannière,
     /// découpé des six captures de la fenêtre Options du jeu puis débarrassé de son contenu
     /// (`tools/design-system/build_modal_body.py`, §9 ter du design-system).
@@ -486,6 +499,8 @@ impl DsTexture {
         DsTexture::IconUndo,
         DsTexture::IconVolume,
         DsTexture::IconVolumeMute,
+        DsTexture::IconEye,
+        DsTexture::IconEyeOff,
         DsTexture::ModalBody,
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
@@ -523,7 +538,9 @@ impl DsTexture {
             | DsTexture::IconHelp
             | DsTexture::IconUndo
             | DsTexture::IconVolume
-            | DsTexture::IconVolumeMute => Some(tokens::ICON_BUTTON_CONTENT),
+            | DsTexture::IconVolumeMute
+            | DsTexture::IconEye
+            | DsTexture::IconEyeOff => Some(tokens::ICON_BUTTON_CONTENT),
             _ => None,
         }
     }
@@ -713,6 +730,16 @@ impl DsTexture {
             DsTexture::IconVolumeMute => DsTextureSpec {
                 name: "ds-icon-volume-mute",
                 bytes: ds_asset!("icons/icon-volume-mute.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconEye => DsTextureSpec {
+                name: "ds-icon-eye",
+                bytes: ds_asset!("icons/icon-eye.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::IconEyeOff => DsTextureSpec {
+                name: "ds-icon-eye-off",
+                bytes: ds_asset!("icons/icon-eye-off.png"),
                 slice: ICON_SLICE,
             },
             DsTexture::ModalBody => DsTextureSpec {
