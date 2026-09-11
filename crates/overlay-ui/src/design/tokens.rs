@@ -1030,3 +1030,26 @@ pub const TOOLTIP_MARGIN: egui::Margin = egui::Margin {
     top: 10,
     bottom: 8,
 };
+
+// ---------------------------------------------------------------------------------------------
+// Le contenu flottant — `tokens::OVERLAY_ACCENT`
+// ---------------------------------------------------------------------------------------------
+
+/// Accent du **contenu qui flotte par-dessus le jeu** — le cyan `#00d2ff`.
+///
+/// **Décision utilisateur du 2026-09-10**, et le seul point où l'overlay a une contrainte que le
+/// jeu n'a pas : les panneaux Combat et Suivi prennent les formes et la typographie du jeu, mais
+/// **gardent leur accent cyan**. Ce n'est pas un compromis mou. Ces panneaux se lisent *par-dessus*
+/// le jeu, sur un fond arbitraire et mouvant ; `#00d2ff` n'existe nulle part dans l'interface
+/// Wakfu, et c'est précisément ce qui l'empêche de s'y confondre. Une jauge de dégâts or posée sur
+/// un décor or se cherche.
+///
+/// La valeur vient du thème sombre du dépôt web (`styles.css`, `:root --accent`) — elle était
+/// jusqu'ici recopiée en deux constantes locales, `panels::combat::ACCENT` et
+/// `panels::watchlist::ACCENT`, identiques au pixel et sans lien déclaré entre elles. Deux copies
+/// d'une même décision dérivent à la première retouche.
+///
+/// **À ne pas confondre avec les jetons du jeu.** Ce qui vit *dans* une fenêtre — un bouton, un
+/// champ, un onglet — prend les teintes mesurées du client. `OVERLAY_ACCENT` est réservé à ce qui
+/// n'a pas de fenêtre : les jauges, les compteurs et les bandeaux qui se posent sur l'écran de jeu.
+pub const OVERLAY_ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);

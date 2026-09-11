@@ -401,9 +401,10 @@ const ROW_GAP: f32 = 1.0;
 /// la première version de cette refonte (12 px).
 const COLUMN_GAP: f32 = 6.0;
 
-// Charte reprise telle quelle du thème sombre par défaut du dépôt web (`styles.css` `:root`, voir
-// `.icon-switch`/`.icon-switch-highlight`) — pas de palette propre à l'overlay pour ce composant.
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
+// L'accent du contenu flottant, repris du jeton partagé plutôt que recopié : ce panneau et le
+// panneau Suivi portaient la même valeur en deux constantes locales sans lien déclaré entre elles.
+// Voir `tokens::OVERLAY_ACCENT`, qui porte la décision et sa raison.
+use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
 // Couleur dédiée au remplissage de la barre de dégâts UNIQUEMENT (retour utilisateur 2026-09-05,
 // 8e retour : `#077982`, un sarcelle plus sombre que `ACCENT`) — DE NOUVEAU distincte de `ACCENT`
 // (fusionnées en 6e retour après rejet du magenta `#ff02ff` du 5e retour). Le pourcentage sur le
