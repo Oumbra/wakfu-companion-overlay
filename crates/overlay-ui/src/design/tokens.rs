@@ -1053,3 +1053,97 @@ pub const TOOLTIP_MARGIN: egui::Margin = egui::Margin {
 /// champ, un onglet — prend les teintes mesurées du client. `OVERLAY_ACCENT` est réservé à ce qui
 /// n'a pas de fenêtre : les jauges, les compteurs et les bandeaux qui se posent sur l'écran de jeu.
 pub const OVERLAY_ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
+
+// ---------------------------------------------------------------------------------------------
+// Emplacement d'objet — `design::item_slot`
+//
+// Ces valeurs viennent de `panels::watchlist`, où elles décrivaient la tuile du bandeau Suivi.
+// Elles y ont été affinées par plusieurs retours utilisateur, et remontent ici **telles quelles**
+// le 2026-09-11 : ce commit déplace du code, il ne change pas une apparence.
+//
+// **Le jeu, lui, mesure autrement** — `docs/design-tokens.json` donne `item_slot_square` 63-64,
+// `item_slot_gap` 2 et `item_slot_border` 2, contre 58 / 12 / rayon 10 ici. Basculer sur les cotes
+// du client est la suite du lot 5 (vague 3 du catalogue : « les formes migrent au langage du jeu »),
+// et c'est un changement visuel qui se valide sur des captures — pas un effet de bord de ce
+// déplacement.
+// ---------------------------------------------------------------------------------------------
+
+/// Côté d'un emplacement d'objet — 58 px, la cote du portage web (`.kpi` de
+/// `tracker-strip.component.css`).
+pub const ITEM_SLOT_SIZE: f32 = 58.0;
+
+/// Rayon des coins — 10 px, hérité du CSS. À ramener à 0-2 quand les formes migreront.
+pub const ITEM_SLOT_ROUNDING: f32 = 10.0;
+
+/// Marge intérieure des textures `Border-*.webp`, en fraction de leur canevas.
+///
+/// **Mesurée** : la fenêtre où l'icône se peint commence à 52 px et finit à 460 px sur un canevas
+/// de 512, à l'identique sur les sept fichiers. `1 - 2 × ce ratio` donne donc la fraction du côté
+/// occupée par cette fenêtre, soit ≈ 0,797.
+pub const ITEM_SLOT_BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
+
+/// Fraction de la fenêtre intérieure qu'occupe réellement l'icône — 0,96, et pas 1.
+///
+/// Les captures du jeu montrent toujours une petite marge entre l'icône et son cadre, jamais un
+/// remplissage au pixel. Relevé de 0,9 à 0,96 sur retour utilisateur (« les objets doivent être
+/// plus gros ») une fois la bordure repeinte SOUS l'icône — plus aucun risque qu'elle recouvre un
+/// débord.
+pub const ITEM_SLOT_ICON_FILL: f32 = 0.96;
+
+/// Fraction du carré qu'occupe l'icône d'un emplacement **sans rareté** — 30 px sur 58, soit
+/// ≈ 0,517.
+///
+/// **Un cadre simple ne mange pas de marge**, contrairement à une bordure de rareté dont la fenêtre
+/// intérieure impose la sienne. Rien ne contraint donc l'icône, et il a fallu une cote propre :
+/// `app-item-icon [size]="30"` du template web, sur une tuile de 58.
+///
+/// Découvert en migrant `watchlist::entry_tile` : la première version du composant faisait occuper
+/// tout le carré à l'icône d'un cadre simple, et le snapshot du décompte l'a montré — un monstre
+/// deux fois trop gros dans sa tuile. Une bordure de rareté masquait le défaut sur les objets,
+/// c'est l'ennemi qui l'a révélé.
+pub const ITEM_SLOT_PLAIN_ICON_FILL: f32 = 30.0 / 58.0;
+
+/// Épaisseur du trait d'un emplacement **sans rareté** — 2 px, celui des tuiles d'ennemi.
+pub const ITEM_SLOT_PLAIN_STROKE: f32 = 2.0;
+
+/// Fond d'un emplacement — `#1e1e1e`, repris du portage web (`--surface`).
+///
+/// Sous une bordure de rareté, il n'est visible que par les coins arrondis de la texture, dont
+/// l'alpha est dégradé ; sur un emplacement sans rareté, c'est le seul fond.
+pub const SLOT_BACKGROUND: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
+
+/// Trait d'un emplacement sans rareté — `#4d4d4d` (`--border-strong` du web).
+pub const SLOT_PLAIN_BORDER: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
+
+/// Corps du compteur — 14 px.
+///
+/// **Trois retours pour y arriver** : 11 px était « pas du tout lisible », 15 px « beaucoup trop
+/// élevé » une fois comparé en jeu, 13 px un palier intermédiaire, 14 px la valeur retenue après
+/// test en conditions réelles.
+pub const SLOT_COUNT_FONT_SIZE: f32 = 14.0;
+
+/// Corps de la fraction cible — 10 px, plus petite que le nombre courant (« on la mettrait en onze
+/// ou en dix »).
+pub const SLOT_TARGET_FONT_SIZE: f32 = 10.0;
+
+/// Marge du compteur au bord droit — 6 px, assez pour rester lisible par-dessus le liseré d'une
+/// bordure de rareté sans empiéter dessus.
+pub const SLOT_COUNT_INSET_RIGHT: f32 = 6.0;
+
+/// Marge du compteur au bord bas — 4 px. **Distincte de la marge droite** depuis le retour du
+/// 2026-09-06 (« décale d'un pixel vers la gauche et descends-le d'un pixel vers le bas ») : les
+/// deux n'ont plus de raison d'être égales.
+pub const SLOT_COUNT_INSET_BOTTOM: f32 = 4.0;
+
+/// De combien le nombre courant remonte au-dessus de la fraction cible — 12 px.
+pub const SLOT_TARGET_LINE_OFFSET: f32 = 12.0;
+
+/// Couleur d'un compteur simple — blanc.
+pub const SLOT_COUNT_TEXT: Color32 = Color32::WHITE;
+
+/// Couleur du nombre **courant** d'une fraction — l'or des kamas (`--kama-color` du web).
+pub const SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00);
+
+/// Couleur de la fraction cible — `#b0b0b0`, éclairci le 2026-09-06 par rapport au gris sourd
+/// qu'elle portait avant.
+pub const SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);

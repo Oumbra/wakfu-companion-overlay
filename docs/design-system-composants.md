@@ -1483,6 +1483,85 @@ s'agit d'un **portage du CSS web** et non d'une mesure sur asset : bande 38, bou
 (icône 20), opacité de repos 0,6 → alpha 153, boîte de gemme 14 (une gemme 13 × 20 y entre en
 9,1 × 14, jamais un `splat`), image d'objet 22, écarts 6, message vide 34.
 
+---
+
+## `design::item_slot` — emplacement d'objet (2026-09-11)
+
+`crates/overlay-ui/src/design/components/item_slot.rs`
+
+```rust
+use overlay_ui::design::{self, ItemRarity, SlotCount, SlotFrame};
+
+ui.add(
+    design::item_slot()
+        .frame(SlotFrame::Rarity(ItemRarity::Legendary))
+        .icon(texture_id)
+        .count(SlotCount::Fraction { current: 137, target: 500 }),
+);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `frame` | `Rarity(ItemRarity)` / `Plain` | `Plain` |
+| `icon` | `egui::TextureId` déjà résolu | aucune, l'emplacement est peint vide |
+| `count` | `Simple(i64)` / `Fraction { current, target }` | aucun |
+| `size` | côté du carré | `ITEM_SLOT_SIZE` = 58 |
+
+Textures : les sept `DsTexture::ItemBorder*`, entrées au manifeste avec ce composant.
+
+### L'ordre de peinture EST le composant
+
+**La bordure de rareté se peint SOUS l'icône. Le cadre simple, PAR-DESSUS.** Ce n'est pas une
+préférence :
+
+- la fenêtre intérieure des `Border-*.webp` **n'est pas un trou transparent** — c'est un aplat
+  semi-transparent (~70 %) teinté par la rareté, vérifié sur les octets décodés. Peinte après
+  l'icône, elle la recouvre entièrement : « j'ai l'impression que tu as mis les objets en opacité »,
+  rapporté le jour même de leur arrivée, flagrant sur le jaune-olive du légendaire ;
+- un cadre simple est au contraire un **liseré net**, qui doit rester visible si l'icône déborde.
+
+Cet ordre est décrit en **données** (`paint_order`, une fonction libre) plutôt qu'en suite
+d'instructions, et deux tests le verrouillent. Un bug qu'on rattrape à l'œil une fois ne se rattrape
+pas à chaque relecture.
+
+### Ce que l'appelant fournit, et ce qu'il ne fournit pas
+
+L'icône arrive en `TextureId` **déjà résolu**, et ce n'est pas une entorse à « aucune texture en
+paramètre » : cette règle vise les assets du design system, que le composant doit résoudre depuis
+une intention. Une icône d'objet est du **contenu** — téléchargée, mise en cache, indexée par le
+catalogue, tout cela hors du design system.
+
+La **rareté**, elle, est une intention : `ItemRarity` est un type du design system, et c'est au
+panneau de traduire son `WakfuRarity` métier (`watchlist::to_slot_rarity`) — un composant n'accède
+pas à `overlay_engine`.
+
+### Deux tailles d'icône, indépendantes
+
+| Cadre | Icône |
+| --- | --- |
+| `Rarity` | la fenêtre intérieure de la texture (≈ 0,797 du côté), réduite de 4 % |
+| `Plain` | `ITEM_SLOT_PLAIN_ICON_FILL` = 30/58, la cote du template web |
+
+**Aucune ne se déduit de l'autre**, et les confondre a produit un défaut réel : la première version
+faisait occuper tout le carré à l'icône d'un cadre simple. La bordure de rareté masquait le problème
+sur les objets — c'est le snapshot d'une tuile d'**ennemi** qui l'a révélé, avec un monstre deux
+fois trop gros.
+
+### Vérification
+
+**Aucun snapshot n'a bougé** : la migration de `watchlist::entry_tile` est équivalente au pixel,
+compteur compris. Quatorze constantes locales ont disparu du panneau, qui ne garde que ce qui lui
+appartient — résoudre l'icône distante, lire la rareté au catalogue, traduire vers le design system.
+
+**Les cotes restent celles du web** (58 px, rayon 10), pas celles du jeu (`item_slot_square` 63-64,
+`item_slot_gap` 2, `item_slot_border` 2). Basculer est la suite du lot 5 et se valide sur captures :
+ce commit déplace du code, il ne change pas une apparence.
+
+**Un doublon daté** : les sept textures sont aussi chargées par `ui_icons`, pour deux maquettes du
+testkit qui peignent encore leur propre tuile. Coût mesuré : **7,3 Mo** décodés payés deux fois,
+4,9 % du budget. À résorber en migrant ces maquettes — pas fait ici, elles étaient en cours de
+modification par une session parallèle.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85

@@ -431,6 +431,22 @@ pub enum DsTexture {
     /// Découpée en [`ICON_SLICE`] : c'est un glyphe, il se met à l'échelle uniformément, il n'a ni
     /// coin ni liseré à figer.
     SliderHandle,
+    /// Les **sept bordures de rareté** d'un emplacement d'objet (`Border-*.webp`, 512 × 512
+    /// chacune), reprises telles quelles du jeu.
+    ///
+    /// **Leur fenêtre intérieure n'est PAS un trou transparent** : c'est un aplat semi-transparent
+    /// (~70 % d'opacité) teinté par la rareté, vérifié sur les octets décodés. D'où l'ordre de
+    /// peinture que `design::item_slot` verrouille — la bordure AVANT l'icône, jamais après.
+    /// Peinte par-dessus, elle recouvre l'icône entière d'un voile coloré : c'est le bug corrigé
+    /// le jour même de leur arrivée (« j'ai l'impression que tu as mis les objets en opacité »),
+    /// flagrant sur les raretés à teinte franche.
+    ItemBorderCommon,
+    ItemBorderRare,
+    ItemBorderMythical,
+    ItemBorderLegendary,
+    ItemBorderMemory,
+    ItemBorderEpic,
+    ItemBorderRelic,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -443,6 +459,22 @@ pub struct DsTextureSpec {
 macro_rules! ds_asset {
     ($file:literal) => {
         include_bytes!(concat!("../../../../assets/design-system/", $file))
+    };
+}
+
+/// Chemin d'un asset qui vit **dans le crate** et non dans `assets/design-system/`.
+///
+/// Une seconde racine, et elle se justifie : `assets/design-system/` réunit ce qui a été **relevé
+/// sur des captures du client** — boutons, champs, onglets, glyphes détourés. Les bordures de
+/// rareté, elles, sont des **fichiers du jeu repris tels quels** (`Border-COMMON.webp` et ses six
+/// sœurs, 512 × 512), arrivées avec le portage web et jamais retouchées. Les déplacer pour
+/// uniformiser un chemin les ferait passer pour des relevés, ce qu'elles ne sont pas.
+///
+/// Le manifeste reste le **seul endroit du crate où un chemin d'asset est écrit** — c'est ce qui
+/// compte. Deux racines nommées valent mieux qu'un `include_bytes!` égaré dans un composant.
+macro_rules! ds_crate_asset {
+    ($file:literal) => {
+        include_bytes!(concat!("../../assets/", $file))
     };
 }
 
@@ -481,6 +513,13 @@ impl DsTexture {
         DsTexture::CollapseBlockHover,
         DsTexture::LoaderSheet,
         DsTexture::SliderHandle,
+        DsTexture::ItemBorderCommon,
+        DsTexture::ItemBorderRare,
+        DsTexture::ItemBorderMythical,
+        DsTexture::ItemBorderLegendary,
+        DsTexture::ItemBorderMemory,
+        DsTexture::ItemBorderEpic,
+        DsTexture::ItemBorderRelic,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -663,6 +702,41 @@ impl DsTexture {
             DsTexture::SliderHandle => DsTextureSpec {
                 name: "ds-slider-handle",
                 bytes: ds_asset!("slider-handle.png"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderCommon => DsTextureSpec {
+                name: "ds-item-border-common",
+                bytes: ds_crate_asset!("items/Border-COMMON.webp"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderRare => DsTextureSpec {
+                name: "ds-item-border-rare",
+                bytes: ds_crate_asset!("items/Border-RARE.webp"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderMythical => DsTextureSpec {
+                name: "ds-item-border-mythical",
+                bytes: ds_crate_asset!("items/Border-MYTHICAL.webp"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderLegendary => DsTextureSpec {
+                name: "ds-item-border-legendary",
+                bytes: ds_crate_asset!("items/Border-LEGENDARY.webp"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderMemory => DsTextureSpec {
+                name: "ds-item-border-memory",
+                bytes: ds_crate_asset!("items/Border-MEMORY.webp"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderEpic => DsTextureSpec {
+                name: "ds-item-border-epic",
+                bytes: ds_crate_asset!("items/Border-EPIC.webp"),
+                slice: ICON_SLICE,
+            },
+            DsTexture::ItemBorderRelic => DsTextureSpec {
+                name: "ds-item-border-relic",
+                bytes: ds_crate_asset!("items/Border-RELIC.webp"),
                 slice: ICON_SLICE,
             },
         }
