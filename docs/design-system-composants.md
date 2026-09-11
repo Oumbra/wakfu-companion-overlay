@@ -1383,6 +1383,106 @@ pixel. C'est ce qu'on attend d'un changement de typage.
 Coût mémoire, mesuré avant décision : les 38 icônes décodées en RGBA pèsent **31 Ko** — sans effet
 sur le budget de 300 Mo (§8 du plan).
 
+## `design::autocomplete` — champ d'autocomplétion (2026-09-11)
+
+`crates/overlay-ui/src/design/components/autocomplete.rs`
+
+```rust
+use overlay_ui::design::{self, AutocompleteEntry, AutocompleteFilter};
+
+let issue = design::autocomplete(&mut state.saisie)
+    .placeholder("Ajouter un objet à surveiller…")
+    .width(560.0)
+    .filters(&filtres)   // « Tout » en tête, puis les catégories PRÉSENTES
+    .entries(&entrees)
+    .log_name("alertes.ajout")
+    .show(ui);
+if let Some(index) = issue.selected {
+    ajouter(&entrees[index]);
+}
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `entries` | `&[AutocompleteEntry]` — libellé, catégorie, gemme, image, désactivé, mention | vide |
+| `filters` | `&[AutocompleteFilter]` — `all(…)` et `category(id, …)` | vide (pas de bande) |
+| `placeholder` / `empty_filter_label` | textes | `""` / « Aucun résultat dans cette catégorie » |
+| `width` | largeur imposée | largeur disponible |
+| `min_query_len` | seuil de déclenchement | `AUTOCOMPLETE_MIN_QUERY_LEN` = 3 |
+| `max_visible_rows` | au-delà, la liste défile | `AUTOCOMPLETE_MAX_VISIBLE_ROWS` = 5 |
+| `enabled` | `bool` | `true` |
+| `preview_open` / `preview_active` / `preview_filter` | aperçu de galerie | fermé / 0 / aucun |
+
+Rend un **`AutocompleteOutcome`** : la `Response` du champ **et** `selected: Option<usize>`, l'indice
+dans `entries` de l'entrée choisie.
+
+Décor résolu en interne (socle et loupe d'`InputSize::Standard`) ; **panneau déplié entièrement
+repris de `design::select`** — fond, bord, filet de tête, surbrillance, cadence de rangée de 28 px.
+C'est la même liste du jeu, il n'y avait pas de second relevé à faire. Ce que ce composant ajoute :
+la bande de filtres, une image par entrée, des entrées désactivées, et un seuil de déclenchement.
+
+### Les cinq règles de comportement, portées du web
+
+Le jeu n'a **pas** d'autocomplétion : aucune capture ne peut servir de référence, donc rien de tout
+ceci ne se vérifie à l'œil. Relevé sur `shared/wakfu-autocomplete` (`Oumbra/wakfu-companion`) le
+2026-09-11.
+
+1. **Rien avant trois caractères** — comptés en *caractères*, pas en octets.
+2. **Une entrée désactivée n'est pas sélectionnable** : grisée, sans surbrillance au survol, sautée
+   par le clavier, et refusée par `show` même si un clic l'atteignait. Trois barrières, parce
+   qu'une seule finit toujours par être contournée.
+3. **Un filtre actif restreint la liste** à sa seule catégorie.
+4. **La bande se calcule sur la liste NON filtrée** — l'appelant construit `filters` sans tenir
+   compte du filtre actif. Sinon le bouton qui permettrait de relâcher un filtre sans résultat
+   disparaîtrait avec les rangées, et l'utilisateur resterait coincé devant une liste vide.
+5. **Après une sélection** : le champ se vide, le panneau se ferme, l'entrée active repart à la
+   première, et **le filtre revient à « Tout »**.
+
+Clavier : `↓`/`↑` sautent les entrées désactivées et bouclent, `Entrée` valide, `Échap` ferme. Les
+touches sont consommées **avant** le champ de saisie, sinon la flèche déplacerait le curseur de
+texte. Une liste entièrement désactivée termine quand même — la recherche s'arrête après un tour
+complet (test `toutes_desactivees_ne_boucle_pas_indefiniment`).
+
+### Deux écarts au contrat, assumés
+
+**`show` plutôt que `impl Widget`** (§1) : une `Response` ne peut pas dire *quelle* entrée a été
+choisie, et la ressortir par un `&mut` en paramètre est la maladresse que §6 reproche ailleurs.
+Même raison que pour les conteneurs (§1 bis), sur un composant qui n'en est pas un.
+
+**Des textures en paramètre** (§1) : la gemme de rareté et l'image d'un objet sont du **contenu**,
+pas du décor — elles viennent du CDN `wakassets` par `RemoteIconStore`, le design system ne les
+possède pas. Elles arrivent donc par `AutocompleteEntry`, au même titre que le libellé. Leur absence
+n'est pas une erreur : la colonne reste réservée, les libellés restent alignés, et la rangée se
+peint sans elles (c'est l'état normal tant que le CDN n'a pas répondu).
+
+### Ce que le composant ne fait pas
+
+Il ne cherche rien. L'appelant lui passe des entrées déjà trouvées, déjà triées, déjà marquées
+« déjà suivi ». Le domaine n'est **pas** un paramètre : la page Alertes ne lui donne que des objets,
+le futur formulaire d'ajout au Suivi lui donnera objets **et** monstres — le composant ne fait pas
+la différence. Les objets à recette (évolution demandée pour ce même formulaire) suivront de la même
+façon, par l'appelant.
+
+### Ce que la capture a rattrapé
+
+- **La quatrième rangée sortait du panneau.** La hauteur du panneau vaut `rangées × 28`, sans
+  interligne — mais `allocate_exact_size` ajoutait les 3 px d'`item_spacing` hérités du thème entre
+  chaque rangée. Neuf pixels de trop sur quatre rangées : le libellé de la dernière était coupé en
+  deux par le bord. Invisible à la relecture, évident sur la planche.
+- **La `ScrollArea` n'est instanciée que si la liste déborde vraiment** : toujours présente, elle
+  demande un repeint tant que son décalage s'anime, et `Harness::run` tourne alors jusqu'à sa limite
+  d'étapes sans converger.
+- **Les identifiants dérivent de la `Response` du champ**, jamais du `Ui` parent : trois instances
+  dans le même parent partageaient sinon le même id d'`Area` et de rangées — egui l'écrit en rouge
+  par-dessus le rendu.
+
+### Les jetons
+
+Tous préfixés `AUTOCOMPLETE_*` dans `design/tokens.rs`, sous un en-tête qui dit explicitement qu'il
+s'agit d'un **portage du CSS web** et non d'une mesure sur asset : bande 38, bouton de filtre 26
+(icône 20), opacité de repos 0,6 → alpha 153, boîte de gemme 14 (une gemme 13 × 20 y entre en
+9,1 × 14, jamais un `splat`), image d'objet 22, écarts 6, message vide 34.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
