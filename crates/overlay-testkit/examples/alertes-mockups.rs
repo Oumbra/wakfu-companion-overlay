@@ -33,12 +33,10 @@
 //!
 //! Une maquette sert à chiffrer un portage. Voici ce qu'il faudra, par ordre de nécessité :
 //!
-//! 1. **`Input::leading_icon(DsTexture)`** — le jeu pose systématiquement la loupe DANS le champ
-//!    (`interface-hdv-achat.png` x 27..39, `interface-personnage-equiement.png` x 768..780,
-//!    `interface-options-commandes.png` x 36..48). `Input` ne sait pas le faire ; ces maquettes
-//!    peignent la loupe par-dessus, ce qui la laisse hors du `clip_rect` du champ et masquerait
-//!    une valeur saisie. Mesuré sur `empty-input-search.png` (341 × 32, champ y 2..29) : encre
-//!    13 × 13, 7 px du bord, 8 px avant le premier glyphe du texte.
+//! 1. ~~**`Input::leading_icon`**~~ — **fait** (`DsIcon::Search`, jetons mesurés sur
+//!    `empty-input-search.png` : encre 13 × 13, 7 px du bord, 8 px avant le premier glyphe). La
+//!    loupe est peinte dans le clip du champ, et la gouttière vaut pour le texte indicatif comme
+//!    pour la valeur saisie.
 //! 2. **Un composant « tuile d'objet »** — déjà dupliqué entre `panels::watchlist::entry_tile` et
 //!    ce fichier ; un portage en ferait une troisième copie. À trancher avant : les bordures de
 //!    rareté font 512 × 512 pour des tuiles peintes à 58, et `DesignSystem::load` téléverse tout
@@ -48,9 +46,10 @@
 //!    web a `ConfirmDeleteService` (popover ancrée au bouton).
 //! 5. **`SoundItemEntry::is_default`** — le miroir Rust (`overlay_engine::profile`) n'a pas ce
 //!    champ, la protection des dix objets par défaut est donc aujourd'hui impossible à appliquer.
-//! 6. **Un panneau de suggestions** sur le champ d'ajout — c'est le vrai mécanisme d'ajout (une
-//!    alerte a besoin d'un `catalogId` résolu par le catalogue, pas d'un nom libre).
-//!    `design::select` sait déjà peindre une liste par-dessus le contenu suivant.
+//! 6. ~~**Un panneau de suggestions**~~ — **fait** : `design::autocomplete` (2026-09-11). Le champ
+//!    d'ajout de ces maquettes EST le composant, bande de filtres et panneau compris ; ce fichier
+//!    n'en peint plus une ligne. Il ne fournit que le contenu — entrées, gemmes, images — comme le
+//!    fera le vrai panneau avec le catalogue à la place de [`SUGGESTIONS`].
 //! 7. **Une icône « haut-parleur »** — aucun des 34 glyphes de `assets/design-system/icons/` n'en
 //!    est un, et l'onglet Son du jeu règle son volume sans jamais en dessiner. À extraire du client
 //!    (skill `design-asset`) si l'on veut le pictogramme du web.
@@ -92,7 +91,7 @@ use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, I
 use overlay_ui::panels::options_modal::OptionsTab;
 use overlay_ui::ui_icons::UiIcons;
 
-use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_BOX};
+use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_NATIVE};
 
 // -------------------------------------------------------------------------------------------
 // Jetons propres aux maquettes.
@@ -321,28 +320,14 @@ const ITEMS: &[Item] = &[
 const DESC: &str = "Objets qui déclenchent une alerte sonore et un message à l'écran lorsqu'ils \
                     sont ramassés.";
 
-/// Ce que le panneau de suggestions afficherait pour la saisie « pierre » — le troisième champ dit
-/// sa catégorie (elle décide des filtres affichés, voir `category_bar`) et le dernier s'il est
-/// DÉJÀ suivi (grisé, non sélectionnable, comme côté web).
-/// Marge gauche d'une rangée de suggestion.
-const ROW_PAD_X: f32 = 6.0;
-/// Hauteur de la bande de filtres — bouton 26 + 2 × 6 de marge (`padding: 6px` côté web).
-const CATEGORY_BAR_HEIGHT: f32 = 38.0;
-/// Côté d'un bouton de catégorie (`.wakfu-autocomplete-category-btn`, 26 × 26).
-const CATEGORY_BUTTON: f32 = 26.0;
-/// Marge intérieure du bouton : l'icône occupe 20 des 26 (`padding: 3px`).
-const CATEGORY_ICON_PAD: f32 = 3.0;
-/// Écart entre deux boutons de catégorie.
-const CATEGORY_GAP: f32 = 4.0;
-/// Marge gauche de la bande.
-const CATEGORY_PAD: f32 = 6.0;
-/// Rayon d'angle d'un bouton de catégorie.
-const CATEGORY_RADIUS: u8 = 4;
-/// Écart entre la gemme, l'image et le nom d'une rangée.
-const ROW_GAP: f32 = 6.0;
-/// Côté de l'image d'objet d'une rangée — tient dans les 28 px de `SELECT_ROW_HEIGHT`.
-const ROW_IMAGE: f32 = 22.0;
-
+/// Ce que le panneau de suggestions affiche pour la saisie « pierre » — le troisième champ dit sa
+/// catégorie (elle décide des filtres affichés) et le dernier s'il est DÉJÀ suivi (grisé, non
+/// sélectionnable).
+///
+/// **Les jetons de géométrie qui vivaient ici ont disparu** (marge de rangée, hauteur de bande,
+/// côté de bouton de filtre, écarts, taille d'image) : ils sont dans `design::tokens`, sous le
+/// préfixe `AUTOCOMPLETE_*`, avec la même provenance web. Une maquette qui garderait sa copie
+/// finirait par diverger du composant qu'elle est censée montrer.
 const SUGGESTIONS: &[(&str, WakfuRarity, CategoryFilter, bool)] = &[
     (
         "Pierre d'aventure",
@@ -401,29 +386,113 @@ fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<WakfuRar
     );
 }
 
-/// Champ de recherche — le champ du design system, avec l'ornement du jeu.
+/// Ce que la maquette fournit au composant : les entrées et les filtres, rien d'autre.
 ///
-/// **`Input::leading_icon` existe désormais** (implémenté avec ces maquettes, jetons mesurés sur
-/// `empty-input-search.png`) : la loupe est peinte par le composant, dans son clip, et la
-/// gouttière qu'elle impose vaut pour le texte indicatif comme pour la valeur saisie. La v2
-/// simulait ce retrait par six espaces de tête, ce qui laissait la valeur saisie démarrer sous la
-/// loupe — visible sur sa capture des suggestions, où la loupe couvrait le « p » de « pierre ».
-fn search_field(
+/// Le composant ne cherche rien et ne connaît ni catalogue ni rareté — il reçoit des suggestions
+/// déjà trouvées, déjà triées, déjà marquées « déjà suivi ». C'est exactement ce que fera le vrai
+/// panneau, avec le catalogue à la place de [`SUGGESTIONS`].
+struct SuggestionPreview {
+    entries: Vec<design::AutocompleteEntry>,
+    filters: Vec<design::AutocompleteFilter>,
+    /// L'entrée que le clavier désignerait — forcée ici, faute de clavier en rendu offscreen.
+    active: usize,
+    /// **Les jeux de textures doivent SURVIVRE à la construction.** Un `TextureHandle` libère sa
+    /// texture quand son dernier exemplaire tombe : construire les entrées à partir d'un
+    /// `RarityGems` temporaire laisse des `TextureId` qui ne désignent plus rien, et la planche
+    /// sort avec des gemmes et des filtres invisibles — constaté sur le premier rendu de cette
+    /// intégration. Ils sont donc gardés ici, pour la durée de vie de l'aperçu.
+    _gems: RarityGems,
+    _cats: CategoryIcons,
+}
+
+impl SuggestionPreview {
+    /// **Les images sont du CONTENU**, fourni par l'appelant : la gemme vient des fixtures du
+    /// harnais (au runtime, `RemoteIconStore` la télécharge), et l'image d'objet est le repli
+    /// générique du Suivi — ce que l'overlay affiche lui aussi tant que le CDN n'a pas répondu.
+    fn new(ctx: &egui::Context, icons: &UiIcons) -> Self {
+        let gems = RarityGems::load(ctx);
+        let cats = CategoryIcons::load(ctx);
+        let entries = SUGGESTIONS
+            .iter()
+            .map(|(name, rarity, categorie, deja)| {
+                let mut entry = design::AutocompleteEntry::new(
+                    *name,
+                    categorie.category_key().unwrap_or_default(),
+                );
+                entry.gem = Some(gems.texture_id(*rarity));
+                entry.gem_size = GEM_NATIVE;
+                entry.image = Some(icons.unknown_entity_texture().id());
+                entry.disabled = *deja;
+                if *deja {
+                    entry.mention = Some("déjà suivi".to_owned());
+                }
+                entry
+            })
+            .collect();
+
+        // **Seules les catégories PRÉSENTES dans les résultats ont un bouton**, « Tout » en tête :
+        // un filtre qui viderait la liste n'aurait aucun sens. C'est l'appelant qui en décide — le
+        // composant se contente d'afficher ce qu'on lui donne, et garde la bande entière même
+        // quand le filtre actif ne laisse rien passer (sinon le bouton qui le relâcherait
+        // disparaîtrait avec les rangées).
+        let mut filters = vec![design::AutocompleteFilter::all(
+            CategoryFilter::All.label(),
+            Some(cats.texture_id(CategoryFilter::All)),
+        )];
+        filters.extend(
+            CategoryFilter::ITEM_CATEGORIES
+                .iter()
+                .filter(|c| SUGGESTIONS.iter().any(|(_, _, cat, _)| cat == *c))
+                .filter_map(|c| {
+                    Some(design::AutocompleteFilter::category(
+                        c.category_key()?,
+                        c.label(),
+                        Some(cats.texture_id(*c)),
+                    ))
+                }),
+        );
+
+        Self {
+            entries,
+            filters,
+            // La deuxième : la première est « déjà suivi », donc pas sélectionnable.
+            active: 1,
+            _gems: gems,
+            _cats: cats,
+        }
+    }
+}
+
+/// Le champ d'ajout — **`design::autocomplete`**, pas un `Input` nu.
+///
+/// C'est le point qui a fait écrire le composant : le champ n'accepte pas un nom libre, une alerte
+/// a besoin d'un `catalogId` résolu par le catalogue. Le champ, la bande de filtres et le panneau
+/// de suggestions viennent donc du design system, et cette maquette ne peint plus rien de tout
+/// cela elle-même (elle en avait ~150 lignes en v3, toutes supprimées avec le composant).
+///
+/// Ce qu'elle fournit encore, parce que c'est du CONTENU et non du décor : les entrées, leurs
+/// gemmes de rareté et leurs images. Voir [`suggestion_entries`].
+fn add_field(
     ui: &mut egui::Ui,
-    text: &mut String,
-    placeholder: &str,
+    state: &mut AlertsTab<'_>,
     width: f32,
     enabled: bool,
-) {
-    ui.add(
-        design::input(text)
-            .leading_icon(DsIcon::Search)
-            .placeholder(placeholder)
-            .size(InputSize::Standard)
-            .width(width)
-            .enabled(enabled)
-            .log_name("maquette.recherche"),
-    );
+) -> design::AutocompleteOutcome {
+    let apercu = state.suggestions;
+    let mut champ = design::autocomplete(state.search)
+        .placeholder("Ajouter un objet à surveiller…")
+        .width(width)
+        .enabled(enabled)
+        .log_name("maquette.ajout");
+    if let Some(apercu) = apercu {
+        champ = champ
+            .entries(&apercu.entries)
+            .filters(&apercu.filters)
+            // L'état déplié est FORCÉ : en rendu offscreen, aucun champ n'a le focus.
+            .preview_open(true)
+            .preview_active(apercu.active);
+    }
+    champ.show(ui)
 }
 
 /// **La tuile d'un objet suivi — le composant « item alerte ».**
@@ -694,191 +763,6 @@ fn clamp_duration(raw: &str) -> f32 {
     raw.replace(',', ".").parse::<f32>().unwrap_or(3.5).max(0.5)
 }
 
-/// La gemme de rareté d'une rangée de suggestion — **la vraie image du jeu**.
-///
-/// Elle vient des fixtures du harnais (voir `shared/rarity_gems.rs`), qui tiennent lieu de ce que
-/// `RemoteIconStore` télécharge au runtime : le fichier est choisi par
-/// `IconRef::for_rarity(rarité).gfx_id`, donc par la même correspondance que celle qui construira
-/// l'URL en vrai.
-fn rarity_gem(ui: &egui::Ui, gems: &RarityGems, rect: Rect, rarity: WakfuRarity) {
-    gems.paint(ui, rect, rarity);
-}
-
-/// La bande de filtres par catégorie, en tête du panneau — **relevée sur le web**
-/// (`wakfu-autocomplete.component.ts`/`.css`).
-///
-/// Trois règles qui ne se devinent pas sur une capture :
-///
-/// 1. **Seules les catégories PRÉSENTES dans les résultats ont un bouton** (`filterButtons`) —
-///    afficher un filtre qui viderait la liste n'aurait aucun sens ; la bande disparaît
-///    entièrement s'il n'y en a aucune.
-/// 2. **« Tout » n'est pas une catégorie** : c'est la remise à zéro, toujours en tête, active tant
-///    qu'aucun filtre ne l'est.
-/// 3. **Pas de filtre « Monstres »** : il n'existe qu'en domaine `both`, et cette page est en
-///    domaine `item` (`profile-page.component.html`).
-///
-/// Un clic sur le filtre déjà actif le relâche (`toggleCategoryFilter`).
-fn category_bar(
-    ui: &egui::Ui,
-    icons: &CategoryIcons,
-    rect: Rect,
-    filtres: &[CategoryFilter],
-    actif: CategoryFilter,
-) {
-    for (i, filtre) in filtres.iter().enumerate() {
-        let cell = Rect::from_min_size(
-            egui::pos2(
-                rect.left() + CATEGORY_PAD + i as f32 * (CATEGORY_BUTTON + CATEGORY_GAP),
-                rect.center().y - CATEGORY_BUTTON / 2.0,
-            ),
-            Vec2::splat(CATEGORY_BUTTON),
-        );
-        let est_actif = *filtre == actif;
-        if est_actif {
-            ui.painter()
-                .rect_filled(cell, CATEGORY_RADIUS, design::tokens::SELECT_ROW_HIGHLIGHT);
-            ui.painter().rect_stroke(
-                cell,
-                CATEGORY_RADIUS,
-                Stroke::new(1.0, design::tokens::STEPPER_ICON_TINT),
-                StrokeKind::Inside,
-            );
-        }
-        icons.paint(ui, cell.shrink(CATEGORY_ICON_PAD), *filtre, est_actif);
-    }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
-    );
-}
-
-/// Le panneau de suggestions du champ d'ajout — voir [`alertes_options_ajout_suggestions`].
-///
-/// **À la largeur exacte de son champ**, comme toute liste dépliée du jeu : `select-simple.png`
-/// (220 × 36) et `select-simple-opened.png` se superposent au pixel, ce qui est précisément la
-/// raison d'être de `SELECT_LIST_TOP_LINE` — un liseré qui n'aurait aucun sens si la liste était
-/// plus étroite que son socle. La v2 la posait à 62 % de la largeur du champ, une convention web,
-/// et les cases « Son » des lignes du dessous réapparaissaient à sa droite : on lisait des
-/// suggestions dotées d'une bascule sonore.
-///
-/// Cadence des entrées : `tokens::SELECT_ROW_HEIGHT` (28), la mesure du select simple qui fait foi
-/// — la v2 écrivait 30, qui n'est aucune des deux mesures du jeu.
-fn suggestion_list(
-    ui: &egui::Ui,
-    icons: &UiIcons,
-    gems: &RarityGems,
-    cats: &CategoryIcons,
-    inner: Rect,
-    field_bottom: f32,
-) {
-    let row_h = design::tokens::SELECT_ROW_HEIGHT;
-    let list = Rect::from_min_size(
-        egui::pos2(inner.left(), field_bottom + 2.0),
-        Vec2::new(
-            inner.width(),
-            4.0 + CATEGORY_BAR_HEIGHT + SUGGESTIONS.len() as f32 * row_h,
-        ),
-    );
-    ui.painter()
-        .rect_filled(list, 2, design::tokens::SELECT_LIST_FILL);
-    ui.painter().rect_stroke(
-        list,
-        2,
-        Stroke::new(2.0, design::tokens::SELECT_LIST_BORDER),
-        StrokeKind::Inside,
-    );
-    // Liseré clair d'un pixel en tête de liste — ce qui la détache de son champ. Peint **après**
-    // le bord, jamais avant : le `rect_stroke` de 2 px en `StrokeKind::Inside` le recouvrait
-    // intégralement, et la v3 le déclarait appliqué alors qu'aucun pixel n'en restait. Le jeu
-    // l'empile dans cet ordre — `select-simple-opened.png`, colonne x=100 : bord `#101215` en
-    // y 41-42, liseré `#7e7562` en y=43, fond dès y=44.
-    ui.painter().hline(
-        list.x_range(),
-        list.top() + 2.5,
-        Stroke::new(1.0, design::tokens::SELECT_LIST_TOP_LINE),
-    );
-    // **La bande de filtres par catégorie**, en tête du panneau — elle ne porte QUE les catégories
-    // présentes dans les résultats, « Tout » en tête (voir `category_bar`).
-    let mut filtres = vec![CategoryFilter::All];
-    filtres.extend(CategoryFilter::ITEM_CATEGORIES.iter().copied().filter(|c| {
-        SUGGESTIONS
-            .iter()
-            .any(|(_, _, categorie, _)| categorie == c)
-    }));
-    category_bar(
-        ui,
-        cats,
-        Rect::from_min_size(
-            egui::pos2(list.left() + 2.0, list.top() + 2.0),
-            Vec2::new(list.width() - 4.0, CATEGORY_BAR_HEIGHT),
-        ),
-        &filtres,
-        CategoryFilter::All,
-    );
-
-    for (i, (name, rarity, _categorie, already)) in SUGGESTIONS.iter().enumerate() {
-        let row = Rect::from_min_size(
-            egui::pos2(
-                list.left() + 2.0,
-                list.top() + 2.0 + CATEGORY_BAR_HEIGHT + i as f32 * row_h,
-            ),
-            Vec2::new(list.width() - 4.0, row_h),
-        );
-        // Une seule entrée en surbrillance : celle que le clavier désignerait — et **jamais une
-        // entrée déjà suivie**, qui n'est pas sélectionnable. Une ligne grisée qui s'allume quand
-        // même promet un clic qui n'arrivera pas.
-        if i == 1 && !*already {
-            ui.painter()
-                .rect_filled(row, 0, design::tokens::SELECT_ROW_HIGHLIGHT);
-        }
-        // **Gemme de rareté, puis image NUE** — l'ordre du web (`wakfu-autocomplete`). Pas de
-        // bordure de rareté ici : la gemme la porte déjà, le cadre coloré ferait doublon.
-        rarity_gem(
-            ui,
-            gems,
-            Rect::from_center_size(
-                egui::pos2(row.left() + ROW_PAD_X + GEM_BOX / 2.0, row.center().y),
-                Vec2::splat(GEM_BOX),
-            ),
-            *rarity,
-        );
-        let image_x = row.left() + ROW_PAD_X + GEM_BOX + ROW_GAP;
-        item_slot(
-            ui,
-            icons,
-            Rect::from_center_size(
-                egui::pos2(image_x + ROW_IMAGE / 2.0, row.center().y),
-                Vec2::splat(ROW_IMAGE),
-            ),
-            None,
-        );
-        ui.painter().text(
-            egui::pos2(image_x + ROW_IMAGE + ROW_GAP, row.center().y),
-            egui::Align2::LEFT_CENTER,
-            *name,
-            design::text::label_font(ui.ctx(), 15.0),
-            if *already {
-                design::tokens::TEXT_DISABLED
-            } else {
-                design::tokens::SELECT_TEXT
-            },
-        );
-        // « déjà suivi » aligné à DROITE, en second run de texte — la v2 le concaténait au nom
-        // dans une seule chaîne séparée par des espaces, la même famille de rustine que les six
-        // espaces du champ de recherche.
-        if *already {
-            ui.painter().text(
-                egui::pos2(row.right() - 10.0, row.center().y),
-                egui::Align2::RIGHT_CENTER,
-                "déjà suivi",
-                design::text::label_font(ui.ctx(), 13.0),
-                design::tokens::TEXT_DISABLED,
-            );
-        }
-    }
-}
-
 /// La boîte de confirmation du jeu — voir [`alertes_options_confirmation_retrait`].
 ///
 /// **Ce n'est pas une popover ancrée au bouton, contrairement au web** (`ConfirmDeleteService`) et
@@ -1077,6 +961,8 @@ struct AlertsTab<'a> {
     /// un enfant posé sur un rectangle absolu — qui n'avance pas le curseur du parent : le texte
     /// retombait sur la première ligne et les deux devenaient illisibles.
     error: Option<&'a str>,
+    /// Le panneau de suggestions, déplié — `None` dans tous les rendus où le champ est au repos.
+    suggestions: Option<&'a SuggestionPreview>,
 }
 
 /// Pourquoi la liste serait vide — **et pourquoi il ne reste qu'un seul cas**.
@@ -1134,7 +1020,7 @@ fn alerts_tab(
     icons: &UiIcons,
     panel: &design::PanelZones,
     state: &mut AlertsTab<'_>,
-) -> f32 {
+) {
     let inner = panel.inner;
     let width = inner.width();
 
@@ -1179,15 +1065,11 @@ fn alerts_tab(
     // qui arrive. Un champ d'apparence active inviterait au geste que le chargement vient
     // précisément de retirer.
     let can_add = state.empty_state != EmptyState::Loading;
-    search_field(
-        ui,
-        state.search,
-        "Ajouter un objet à surveiller…",
-        width,
-        can_add,
-    );
-    // Bas du champ : l'ancre du panneau de suggestions, rendue à l'appelant.
-    let field_bottom = ui.cursor().min.y;
+    // Le panneau déplié sort du flux (`egui::Area`, comme la liste de `design::select`) : il ne
+    // décale donc rien sous lui et passe par-dessus la grille, exactement comme côté web. Rien
+    // n'est à réserver ici, et l'appelant n'a plus d'ancre à recevoir — la v3 lui rendait le bas
+    // du champ pour y peindre sa propre liste.
+    add_field(ui, state, width, can_add);
     ui.add_space(SECTION_GAP);
 
     if let Some(message) = state.error {
@@ -1202,7 +1084,7 @@ fn alerts_tab(
 
     if state.empty_state == EmptyState::Loading {
         loading_row(ui, inner);
-        return field_bottom;
+        return;
     }
 
     // La grille de tuiles, dans la zone défilable du panneau (géométrie ET clip posés ensemble,
@@ -1224,7 +1106,6 @@ fn alerts_tab(
             });
         }
     });
-    field_bottom
 }
 
 // -------------------------------------------------------------------------------------------
@@ -1258,6 +1139,7 @@ fn alertes_options_onglet() {
                 seconds: &mut seconds,
                 empty_state: EmptyState::NotEmpty,
                 error: None,
+                suggestions: None,
             },
         );
     });
@@ -1291,6 +1173,7 @@ fn alertes_options_fermeture_manuelle() {
                 seconds: &mut seconds,
                 empty_state: EmptyState::NotEmpty,
                 error: None,
+                suggestions: None,
             },
         );
     });
@@ -1328,6 +1211,7 @@ fn alertes_options_chargement() {
                 seconds: &mut seconds,
                 empty_state: EmptyState::Loading,
                 error: None,
+                suggestions: None,
             },
         );
     });
@@ -1366,6 +1250,7 @@ fn alertes_options_echec_enregistrement() {
                     "Vos alertes n'ont pas pu être enregistrées sur le compte. Réessayez, ou \
                          vérifiez votre connexion.",
                 ),
+                suggestions: None,
             },
         );
     });
@@ -1385,22 +1270,22 @@ fn alertes_options_echec_enregistrement() {
 /// en silence sur un doublon, ce qui laisse sinon le joueur retenter cinq fois un ajout qui ne
 /// fait rien.
 ///
-/// La liste est peinte APRÈS le contenu, donc par-dessus, comme le fait `design::select` avec sa
-/// liste dépliée. Un portage passerait par lui (`egui::Area`), pour qu'elle survive aussi au clip
-/// du panneau.
+/// **Le panneau est celui de `design::autocomplete`**, peint dans une `egui::Area` au premier
+/// plan : il sort du flux, passe par-dessus la grille et survit au clip du panneau de section —
+/// ce que la v3 obtenait en peignant sa propre liste après le contenu, avec une ancre que
+/// `alerts_tab` devait lui rendre.
 fn alertes_options_ajout_suggestions() {
     let mut sounds: Vec<bool> = ITEMS.iter().map(|i| i.sound_on).collect();
     let mut search = String::from("pierre");
     let mut seconds = String::from("4");
     let mut auto = true;
-    let mut gems: Option<RarityGems> = None;
-    let mut cats: Option<CategoryIcons> = None;
+    // Chargées une seule fois : un `TextureHandle` libère sa texture quand le dernier exemplaire
+    // tombe, et les recharger à chaque image peindrait des cases vides.
+    let mut apercu: Option<SuggestionPreview> = None;
 
     let mut harness = options_harness(WINDOW, move |ui, icons, panel, _w| {
-        let gems = gems.get_or_insert_with(|| RarityGems::load(ui.ctx()));
-        let cats = cats.get_or_insert_with(|| CategoryIcons::load(ui.ctx()));
-        let inner = panel.inner;
-        let field_bottom = alerts_tab(
+        let apercu = apercu.get_or_insert_with(|| SuggestionPreview::new(ui.ctx(), icons));
+        alerts_tab(
             ui,
             icons,
             panel,
@@ -1412,9 +1297,9 @@ fn alertes_options_ajout_suggestions() {
                 seconds: &mut seconds,
                 empty_state: EmptyState::NotEmpty,
                 error: None,
+                suggestions: Some(apercu),
             },
         );
-        suggestion_list(&*ui, icons, gems, cats, inner, field_bottom);
     });
     harness.run();
     write_mockup(&mut harness, "alertes_options_ajout_suggestions");
@@ -1451,6 +1336,7 @@ fn alertes_options_confirmation_retrait() {
                 seconds: &mut seconds,
                 empty_state: EmptyState::NotEmpty,
                 error: None,
+                suggestions: None,
             },
         );
         confirm_box(ui, window, ITEMS[10].name);
