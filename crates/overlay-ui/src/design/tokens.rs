@@ -707,3 +707,36 @@ pub const COLLAPSE_ICON_RATIO: f32 = 32.0 / 60.0;
 /// Le titre n'est donc **pas** aligné sur la marge intérieure de 17 px quand il n'y a pas d'icône :
 /// il l'est seulement quand l'icône l'a poussé. Voir `design::collapsible`.
 pub const COLLAPSE_ICON_GAP: f32 = 10.0;
+
+// ---------------------------------------------------------------------------------------------
+// Rouage de chargement — `design::loader`
+// ---------------------------------------------------------------------------------------------
+
+/// Côté du rouage à sa taille native (1×), en pixels : **mesuré** sur l'enregistrement du client
+/// du 2026-09-11 — 118 px d'encre (rayon extérieur 58,5) plus 3 px de marge transparente de chaque
+/// côté, marge conservée pour que le lissage des bords ne soit pas coupé. C'est aussi la cellule de
+/// `loader-sheet.png` et la borne haute de [`LOADER_MIN_SIZE`] : au-delà, le bitmap serait flouté.
+pub const LOADER_NATIVE_SIZE: f32 = 124.0;
+
+/// Plus petit côté admis — **décision utilisateur** (2026-09-11) : « le minimum ce serait
+/// quarante-huit sur quarante-huit ». Cohérent avec la géométrie : à 48 px le pas d'une dent vaut
+/// ≈ 9 px de circonférence, à 32 px ≈ 6 px et les seize dents se confondent.
+pub const LOADER_MIN_SIZE: f32 = 48.0;
+
+/// Paliers nommés de `LoaderSize`. `Small` est le plancher ; `Medium` et `Large` sont **choisis,
+/// pas mesurés** (le jeu n'affiche ce rouage qu'à une taille) : ils découpent l'intervalle 48–124
+/// en marches d'environ 25 px, assez espacées pour se distinguer à l'œil.
+pub const LOADER_SIZE_SMALL: f32 = LOADER_MIN_SIZE;
+pub const LOADER_SIZE_MEDIUM: f32 = 72.0;
+pub const LOADER_SIZE_LARGE: f32 = 96.0;
+
+/// Cadence de l'animation — **mesurée** : 4 images nouvelles sur 5 enregistrées à 30 i/s.
+pub const LOADER_FPS: f64 = 24.0;
+
+/// Longueur de la boucle — **mesurée** : le rouage avance d'une dent toutes les 8 images, mais la
+/// tête ne revient à sa position que toutes les 16 (l'image 386 de l'enregistrement est identique
+/// à la 409, pas à la 399).
+pub const LOADER_FRAMES: usize = 16;
+
+/// Colonnes de `loader-sheet.png` — grille 4 × 4, lue ligne par ligne.
+pub const LOADER_SHEET_COLUMNS: usize = 4;

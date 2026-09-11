@@ -66,6 +66,14 @@ pub const BUTTON_SLICE_COMPACT: NineSlice = button_slice(36.0);
 /// toutes les textures du manifeste.
 pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretch, Fill::Stretch);
 
+/// Découpage de la planche du rouage de chargement : **le même qu'une icône**, et il ne sert pas.
+///
+/// La planche n'est jamais peinte entière : `design::loader` en découpe une cellule par ses UV
+/// (`DesignSystem::paint_region`), à l'échelle uniforme — un rouage se réduit comme un glyphe, il
+/// n'a ni coin ni liseré à figer. Le champ `slice` du manifeste est obligatoire, celui-ci est le
+/// seul qui ne déforme rien si un jour quelqu'un peint la planche par `DesignSystem::paint`.
+pub const LOADER_SLICE: NineSlice = ICON_SLICE;
+
 /// Découpage d'un onglet : **4px figés sur les quatre côtés**, tout le reste étiré.
 ///
 /// Pas de long embout ici, contrairement aux boutons : un onglet n'a pas de hachures d'extrémité,
@@ -565,6 +573,14 @@ pub enum DsTexture {
     /// peut que foncer. Le contrat autorise l'asset par état quand l'état n'est pas atteignable
     /// autrement ; c'en est le cas.
     CollapseBlockHover,
+    /// Planche des seize images du **rouage de chargement** (`loader-sheet.png`, 496 × 496 :
+    /// grille 4 × 4 de cellules de 124 px, lue ligne par ligne).
+    ///
+    /// **Une planche, pas seize textures** : le manifeste relie un rôle à un fichier, et le rôle
+    /// ici est « l'animation », pas « sa neuvième image ». Le composant `design::loader` en peint
+    /// une cellule par `DesignSystem::paint_region` ; le découpage 9-slice déclaré n'est jamais
+    /// utilisé (voir [`LOADER_SLICE`]).
+    LoaderSheet,
 }
 
 /// Description statique d'une texture : nom de cache egui, octets PNG embarqués, découpage.
@@ -651,6 +667,7 @@ impl DsTexture {
         DsTexture::ButtonStepper,
         DsTexture::CollapseBlock,
         DsTexture::CollapseBlockHover,
+        DsTexture::LoaderSheet,
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -1041,6 +1058,11 @@ impl DsTexture {
                 name: "ds-collapse-block-hover",
                 bytes: ds_asset!("collapse-block-opened-hover-generic.png"),
                 slice: COLLAPSE_BLOCK_SLICE,
+            },
+            DsTexture::LoaderSheet => DsTextureSpec {
+                name: "ds-loader-sheet",
+                bytes: ds_asset!("loader-sheet.png"),
+                slice: LOADER_SLICE,
             },
         }
     }
