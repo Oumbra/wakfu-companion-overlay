@@ -1190,20 +1190,25 @@ Ni urgent ni structurant, mais chacun retire du code d'un panneau.
 | **`design::toast`** | `watchlist::toast_card` et ses confettis — ~300 lignes, avec son générateur pseudo-aléatoire maison. | Portage du web ; aucun asset de jeu correspondant. |
 | **`design::dialog`** | Rien — la boîte de confirmation qui manquera à la première action destructrice de l'overlay. | `interfaces/interface-confirm-box.png` |
 
-### Doublons à résorber avant d'ajouter quoi que ce soit
+### Écarts restants
 
-Trois écarts constatés le 2026-09-10, indépendants de toute décision :
+Trois écarts avaient été constatés le 2026-09-10. Revérifiés le 2026-09-11, il en reste **un et
+demi** :
 
-- **`modal-header.png` est dupliqué octet pour octet** (`md5 fcddb015…`) entre
-  `assets/design-system/` et `crates/overlay-ui/assets/ui/options/` ; `options_modal.rs:293` charge
-  la copie par `include_bytes!` local au lieu du manifeste — exactement le cas résorbé le 2026-09-09
-  pour quatre autres PNG (§9.2 du plan).
-- **Deux barres de défilement** : `design::scroll_area` (poignée 6px, `#515356` / `#c1ad83`, aucun
-  rail) et `panels::combat_frame_scroll` (barre 5px, `#998a6c`, bordure noire alpha 217, rayon 2).
-- **Six chemins de chargement de texture** — `DesignSystem::load`, `ui_icons`, `portraits`,
-  `remote_icons`, `combat_frame`, `options_modal` — dont cinq copies de la même fonction
-  décoder → `ColorImage` → `load_texture`. Le budget mémoire (§8 du plan, 300 Mo) n'a donc aucun
-  point de mesure unique.
+- ~~**`modal-header.png` dupliqué octet pour octet**~~ — **résolu** par `5ccf0d2` (« refactor :
+  bannière de modale au manifeste »). La copie `crates/overlay-ui/assets/ui/options/` n'existe plus,
+  `options_modal` passe par `DsTexture::ModalHeader`, et le manifeste documente la résorption.
+- **Deux barres de défilement**, mais ce n'est **pas un doublon accidentel** :
+  `design::scroll_area` (poignée 6 px, `#515356` / `#c1ad83`, aucun rail) et
+  `panels::combat_frame_scroll` (barre 5 px, `#998a6c`, bordure noire alpha 217, rayon 2). La
+  seconde est une **divergence assumée** : sa finesse et sa couleur unie viennent d'un retour
+  utilisateur explicite (la texture étirée cachait les portraits, voir la doc de module). Les
+  unifier demanderait donc une variante du composant, pas une suppression — et cette variante
+  attend une décision, pas un nettoyage.
+- **Cinq chemins de chargement de texture** (et non six : `options_modal` est passé au manifeste) —
+  `DesignSystem::load`, `ui_icons`, `portraits`, `remote_icons`, `combat_frame` — dont quatre copies
+  de la même fonction décoder → `ColorImage` → `load_texture`. Le budget mémoire (§8 du plan,
+  300 Mo) n'a donc toujours aucun point de mesure unique. C'est l'écart qui reste entier.
 
 ### Ce que ce catalogue devrait porter en plus
 
