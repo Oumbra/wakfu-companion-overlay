@@ -432,6 +432,49 @@ capture du jeu ou pour une barre qui ne doit pas s'étirer.
 44px étirée à 31, libellés en `FontId::proportional(12.0)`, aucun clic. Elle partageait déjà la
 largeur en trois tiers égaux ; c'est le composant qui s'en était écarté, le temps de deux captures.
 
+### La variante pictogramme (2026-09-11)
+
+```rust
+design::tabs(&mut vue)
+    .entry(Vue::Combat, "Combat").icon(DsIcon::Cards)
+    .entry(Vue::Suivi, "Suivi").icon(DsIcon::Trophy)
+    .show(ui);
+```
+
+`.icon(...)` s'applique à la **dernière entrée déclarée**, comme `.enabled(...)`. Le pictogramme
+**remplace le libellé au rendu** — et le libellé reste, ce qui n'est pas une commodité d'API :
+
+- il devient l'**infobulle** de l'onglet (`design::tooltip`), sans quoi une barre de pictogrammes
+  n'apprend à personne ce que fait chaque onglet ;
+- il reste la **ligne de journal**, sans quoi on ne saurait plus nommer ce qui a été cliqué.
+
+C'est aussi pourquoi cette variante attendait le lot 2 : elle a besoin de `DsIcon` pour le glyphe
+**et** de `design::tooltip` pour le mot.
+
+**Mesures** — `assets/design-system/icon-tabs.png` (268 × 44), un gabarit à quatre onglets :
+
+| Grandeur | Valeur |
+| --- | --- |
+| Largeur d'un onglet | **66 px** (`TAB_ICON_WIDTH`) — crêtes de séparation à x=65, 133, 201, soit un pas de 68 dont 2 de gouttière |
+| Hauteur | 44 px, la même que la variante texte — les deux partagent leurs textures |
+| Encre du pictogramme | **dérivée**, `TAB_ICON_RATIO` = 18/36 → 22 px sur 44 |
+
+Un onglet à pictogramme est donc **plus étroit** qu'un onglet texte (77 px de plancher) : il n'a pas
+de mot à contenir. En mode étiré (le défaut), il suit la même règle de parts égales que la variante
+texte ; `fit_content` lui donne les 66 px du jeu.
+
+**Le ratio d'encre est dérivé, pas mesuré**, et c'est dit dans le jeton : `icon-tabs.png` est un
+gabarit **vide** — le jeu n'y a laissé aucun pictogramme. La valeur reprend le rapport du bouton
+icône (`ICON_BUTTON_CONTENT` sur `ICON_BUTTON_SIZE`), le seul rapport glyphe/socle que le design
+system ait mesuré. À remplacer dès qu'une capture d'onglets à pictogrammes existera.
+
+**Le pictogramme prend la teinte du libellé**, pas une teinte propre : il dit la même chose qu'un
+mot d'onglet, il doit changer avec l'état de la même façon — blanc quand l'onglet est actif, doré
+sinon, gris quand il est désactivé.
+
+Vérifié au rendu : les crêtes de séparation de la galerie tombent à un pas de 68 px, crête de 2 —
+**la cote du jeu au pixel**.
+
 ---
 
 ## `design::checkbox` — case à cocher (2026-09-10)

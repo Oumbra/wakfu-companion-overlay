@@ -57,7 +57,9 @@ fn galerie_du_design_system() {
         // 5860 -> 5900 le 2026-09-11 : rangée des curseurs gradués (26, 11 et 3 crans).
         // 5900 -> 5990 le 2026-09-11 : section « Glyphe seul » (`design::icon`, quatre tailles,
         // trois glyphes non carrés, deux teintes).
-        .with_size(Vec2::new(760.0, 5990.0))
+        // 5990 -> 6225 le 2026-09-11 : section « Onglets à pictogramme » (une barre aux 66 px du
+        // jeu, une barre étirée).
+        .with_size(Vec2::new(760.0, 6225.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -337,6 +339,57 @@ fn gallery(ui: &mut egui::Ui) {
         .entry(0, "Seul")
         .log_name("galerie.onglet-seul")
         .show(ui);
+
+    heading(
+        ui,
+        "Onglets à pictogramme — le libellé devient l'infobulle",
+        "La variante icône du jeu (icon-tabs.png, 268 × 44) : 66 px par onglet, 2 de gouttière. Le pictogramme REMPLACE le libellé au rendu, mais le libellé reste — sans lui, une barre de pictogrammes n'apprend à personne ce que fait chaque onglet, et le journal n'aurait que des indices pour nommer ce qu'on a cliqué.",
+    );
+    {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Vue {
+            Combat,
+            Suivi,
+            Objets,
+            Reglages,
+        }
+        let mut vue = Vue::Combat;
+        design::tabs(&mut vue)
+            .entry(Vue::Combat, "Combat")
+            .icon(DsIcon::Cards)
+            .entry(Vue::Suivi, "Suivi")
+            .icon(DsIcon::Trophy)
+            .entry(Vue::Objets, "Objets")
+            .icon(DsIcon::BagIn)
+            .entry(Vue::Reglages, "Réglages")
+            .icon(DsIcon::Settings1)
+            .enabled(false)
+            .fit_content()
+            .log_name("galerie.onglets-icone")
+            .show(ui);
+        ui.label(
+            RichText::new("fit_content — les 66 px du jeu ; le dernier est désactivé")
+                .color(CAPTION)
+                .size(12.0),
+        );
+        // Étirée : la variante icône suit la même règle de largeur que la variante texte, les
+        // pictogrammes restent centrés dans des onglets plus larges.
+        let mut etiree = Vue::Suivi;
+        design::tabs(&mut etiree)
+            .entry(Vue::Combat, "Combat")
+            .icon(DsIcon::Cards)
+            .entry(Vue::Suivi, "Suivi")
+            .icon(DsIcon::Trophy)
+            .entry(Vue::Objets, "Objets")
+            .icon(DsIcon::BagIn)
+            .log_name("galerie.onglets-icone-etires")
+            .show(ui);
+        ui.label(
+            RichText::new("par défaut — parts égales sur la largeur disponible")
+                .color(CAPTION)
+                .size(12.0),
+        );
+    }
 
     heading(
         ui,
