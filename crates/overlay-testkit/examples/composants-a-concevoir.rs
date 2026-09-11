@@ -907,6 +907,45 @@ fn confirm(ui: &mut egui::Ui, question: &str) {
 ///    « Monstres ». La page Alertes est en `item` ; le formulaire d'ajout au Suivi voudra `both`,
 ///    monstres compris. Le composant doit donc porter ce drapeau dès sa première version, sous
 ///    peine d'être à réécrire pour son deuxième appelant.
+///
+/// # Le clavier
+///
+/// Quatre touches, et une subtilité par touche :
+///
+/// - **↓ / ↑** parcourent la liste AFFICHÉE (donc filtrée), **en sautant les entrées
+///   désactivées** et **en bouclant** (modulo) : depuis la dernière, ↓ revient à la première. La
+///   rangée atteinte est ramenée dans la zone visible (`scrollIntoView`, `block: 'nearest'`), ce
+///   qui compte dès que la liste défile — au-delà de cinq rangées côté web. Liste vide : la touche
+///   ne fait rien.
+/// - **Entrée** valide l'entrée active, **et seulement si elle n'est pas désactivée** — la
+///   navigation les saute déjà, c'est une seconde barrière.
+/// - **Échap** ferme le panneau **sans vider le champ** : la saisie reste, le panneau se rouvre à
+///   la frappe suivante.
+/// - **Frappe** : la requête change, le panneau s'ouvre, et **l'entrée active repart à la
+///   première** — sinon la touche Entrée validerait un objet que la nouvelle recherche n'affiche
+///   peut-être plus. Changer de filtre la réinitialise aussi, pour la même raison.
+///
+/// # Ce qui suit une sélection
+///
+/// `select` fait cinq choses, dont deux qui ne se devinent pas :
+///
+/// 1. refuse une entrée désactivée (troisième barrière, après le survol inerte et le clavier) ;
+/// 2. émet l'objet choisi vers l'appelant ;
+/// 3. **vide le champ** — prêt pour un nouvel ajout, sans avoir à effacer la saisie précédente ;
+/// 4. ferme le panneau et remet l'entrée active à la première ;
+/// 5. **remet le filtre par catégorie à « Tout »** : la recherche suivante repart sans filtre.
+///    C'est le détail le plus facile à oublier — le garder actif ferait disparaître des résultats
+///    d'une recherche sans rapport, sans que rien n'explique pourquoi.
+///
+/// # Hors périmètre, et pourquoi
+///
+/// Le web pose un **bouton « suivre les objets de la recette »** au bout des rangées dont l'objet
+/// est craftable (`openRecipe`, indépendant de la sélection : il n'ajoute jamais l'objet lui-même).
+/// La page Alertes le désactive explicitement (`[showRecipeButton]="false"`) — suivre une recette
+/// n'a de sens que pour le SUIVI, pas pour une alerte sonore. Le composant devra donc l'accueillir
+/// un jour, mais **la spécification en est reportée au formulaire d'ajout au Suivi** (décision de
+/// l'utilisateur, 2026-09-11) : le concevoir maintenant, sans son cas d'usage sous les yeux,
+/// reviendrait à deviner.
 fn planche_autocomplete() {
     let mut vide = String::new();
     let mut saisi = String::from("pierre");
