@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use egui::{Context, Rect, TextureHandle, TextureOptions, Vec2};
-use overlay_engine::{IconRef, WakfuRarity};
+use overlay_engine::{IconRef, WakfuItemCategory, WakfuRarity};
 
 /// Taille native d'une gemme — mesurée sur les fichiers du CDN, identique pour les huit.
 pub const GEM_NATIVE: Vec2 = Vec2::new(13.0, 20.0);
@@ -120,21 +120,27 @@ impl CategoryFilter {
         CategoryFilter::Misc,
     ];
 
-    /// Numéro d'icône `itemTypes` — miroir d'`ITEM_CATEGORY_ICON_NUMBER`,
-    /// `WAKFU_ALL_CATEGORY_ICON_URL` et `WAKFU_MONSTER_CATEGORY_ICON_URL`
-    /// (`wakfu-item-category.data.ts`).
-    pub fn icon_number(self) -> &'static str {
+    /// La référence d'icône du filtre — **construite par le moteur**, jamais par une table
+    /// recopiée ici.
+    ///
+    /// C'est le même principe que pour les gemmes : la planche choisit son fichier par le `gfx_id`
+    /// que produira l'URL au runtime, donc une planche fausse voudrait dire que le code de
+    /// production l'est aussi. « Tout » et « Monstres » ont leurs propres constructeurs côté
+    /// moteur — ce ne sont pas des catégories d'objet.
+    pub fn icon_ref(self) -> IconRef {
         match self {
-            CategoryFilter::All => "-1",
-            CategoryFilter::Equipment => "109",
-            CategoryFilter::Resources => "226",
-            CategoryFilter::Sublimations => "602",
-            CategoryFilter::Harvests => "237",
-            CategoryFilter::HavenBag => "295",
-            CategoryFilter::Cosmetics => "525",
-            CategoryFilter::Craft => "761",
-            CategoryFilter::Misc => "385",
-            CategoryFilter::Enemy => "282",
+            CategoryFilter::All => IconRef::for_all_categories(),
+            CategoryFilter::Enemy => IconRef::for_monster_category(),
+            CategoryFilter::Equipment => IconRef::for_item_category(WakfuItemCategory::Equipment),
+            CategoryFilter::Resources => IconRef::for_item_category(WakfuItemCategory::Resources),
+            CategoryFilter::Sublimations => {
+                IconRef::for_item_category(WakfuItemCategory::Sublimations)
+            }
+            CategoryFilter::Harvests => IconRef::for_item_category(WakfuItemCategory::Harvests),
+            CategoryFilter::HavenBag => IconRef::for_item_category(WakfuItemCategory::HavenBag),
+            CategoryFilter::Cosmetics => IconRef::for_item_category(WakfuItemCategory::Cosmetics),
+            CategoryFilter::Craft => IconRef::for_item_category(WakfuItemCategory::Craft),
+            CategoryFilter::Misc => IconRef::for_item_category(WakfuItemCategory::Misc),
         }
     }
 
@@ -162,7 +168,7 @@ impl CategoryFilter {
 
 /// Les dix icônes de catégorie, chargées une fois.
 pub struct CategoryIcons {
-    par_numero: HashMap<&'static str, TextureHandle>,
+    par_numero: HashMap<String, TextureHandle>,
 }
 
 impl CategoryIcons {
@@ -191,7 +197,7 @@ impl CategoryIcons {
                     egui::ColorImage::from_rgba_unmultiplied(taille, image.as_raw()),
                     TextureOptions::LINEAR,
                 );
-                (*numero, texture)
+                ((*numero).to_string(), texture)
             })
             .collect();
         Self { par_numero }
@@ -203,7 +209,7 @@ impl CategoryIcons {
     /// c'est cette différence d'encre, pas seulement le cadre, qui fait ressortir le filtre en
     /// cours.
     pub fn paint(&self, ui: &egui::Ui, rect: Rect, filtre: CategoryFilter, actif: bool) {
-        let Some(texture) = self.par_numero.get(filtre.icon_number()) else {
+        let Some(texture) = self.par_numero.get(&filtre.icon_ref().gfx_id) else {
             return;
         };
         let teinte = if actif {
