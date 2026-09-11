@@ -121,6 +121,12 @@ def _measure_lines(nodes, scale):
     return out
 
 
+def _num(v):
+    """Nombre lisible : 33.599999999999994 se lit 33.6, 44.0 se lit 44."""
+    v = round(float(v), 2)
+    return str(int(v)) if v == int(v) else str(v)
+
+
 def _svg(spec):
     w, h = spec.get("canvas", [800, 600])
     s = float(spec.get("scale", 1))
@@ -158,24 +164,18 @@ def _svg(spec):
             parts.append(f'<line x1="{pad + a * s:.1f}" y1="{y:.1f}" x2="{pad + b * s:.1f}" '
                          f'y2="{y:.1f}" stroke="{c}" stroke-width="1" />')
             parts.append(f'<text x="{pad + (a + b) / 2 * s:.1f}" y="{y - 3:.1f}" fill="{c}" '
-                         f'text-anchor="middle">{gap}</text>')
+                         f'text-anchor="middle">{_num(gap)}</text>')
         else:
             x = pad + pos * s
             parts.append(f'<line x1="{x:.1f}" y1="{pad + a * s:.1f}" x2="{x:.1f}" '
                          f'y2="{pad + b * s:.1f}" stroke="{c}" stroke-width="1" />')
             parts.append(f'<text x="{x + 3:.1f}" y="{pad + (a + b) / 2 * s:.1f}" fill="{c}">'
-                         f'{gap}</text>')
+                         f'{_num(gap)}</text>')
 
     parts.append(f'<text x="{pad}" y="{pad - 12}" fill="var(--ink-soft)">'
                  f'{w} × {h} px</text>')
     parts.append("</svg>")
     return "".join(parts)
-
-
-def _num(v):
-    """Nombre lisible : 33.599999999999994 se lit 33.6, 44.0 se lit 44."""
-    v = round(float(v), 2)
-    return str(int(v)) if v == int(v) else str(v)
 
 
 def _inventory(spec):
