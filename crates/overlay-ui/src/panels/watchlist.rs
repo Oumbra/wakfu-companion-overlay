@@ -149,7 +149,7 @@
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
-use crate::design::{self, DsTexture, IconContext};
+use crate::design::{self, DsIcon, IconContext};
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
@@ -997,7 +997,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     control_button(
         ui,
         add_top_left,
-        DsTexture::IconPlus,
+        DsIcon::Plus,
         "watchlist-add",
         "Ajouter (Ctrl+Shift+A)",
         true,
@@ -1010,7 +1010,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     control_button(
         ui,
         remove_top_left,
-        DsTexture::IconMinus,
+        DsIcon::Minus,
         "watchlist-remove",
         "Supprimer (Ctrl+Shift+S)",
         !watchlist_empty,
@@ -1023,7 +1023,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     let details_response = control_button(
         ui,
         details_top_left,
-        DsTexture::IconExternalLink,
+        DsIcon::ExternalLink,
         "watchlist-details",
         "Détails (Ctrl+Shift+D)",
         true,
@@ -1048,7 +1048,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     let options_response = control_button(
         ui,
         options_top_left,
-        DsTexture::IconOption,
+        DsIcon::Option,
         "watchlist-options",
         "Options (Ctrl+Shift+O)",
         true,
@@ -1076,7 +1076,7 @@ struct ControlRowClicks {
 /// **Migration 2026-09-10 (décision utilisateur).** Ces quatre boutons passaient par
 /// `panels::icon_button::paint_icon_button`, qui prenait quatre `egui::TextureHandle` en
 /// paramètres : chaque appelant devait connaître et câbler ses textures. Ils nomment maintenant une
-/// intention (`DsTexture::IconPlus`), et le manifeste résout les fichiers. Ce qui change à l'écran,
+/// intention (`DsIcon::Plus`), et le manifeste résout les fichiers. Ce qui change à l'écran,
 /// captures à l'appui (`overlay-testkit/tests/icon_button_migration.rs`) :
 ///
 /// - les glyphes sont ceux du design system, calés sur l'étalon mesuré dans le jeu
@@ -1109,7 +1109,7 @@ struct ControlRowClicks {
 fn control_button(
     ui: &mut egui::Ui,
     top_left: egui::Pos2,
-    glyph: DsTexture,
+    glyph: design::DsIcon,
     log_name: &str,
     tooltip: &str,
     enabled: bool,

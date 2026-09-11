@@ -1267,6 +1267,79 @@ offscreen statique. Sa vérification visuelle est ailleurs et existait déjà �
 `watchlist_tooltip_*` et `combat_tooltip_*`, qui simulent le pointeur. Ils sont restés **identiques
 au pixel** à travers la migration, ce qui est le critère de fin que le plan fixait.
 
+---
+
+## `design::icon` et le registre `DsIcon` (2026-09-11)
+
+`crates/overlay-ui/src/design/icons.rs`, `components/icon.rs`
+
+```rust
+use overlay_ui::design::{self, DsIcon};
+
+ui.add(design::icon(DsIcon::Kamas));                  // 16 px par défaut
+ui.add(design::icon(DsIcon::Lock).size(24.0).tint(tokens::TEXT_DISABLED));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `size` | côté du **carré englobant** | `ICON_SIZE` = 16 px |
+| `tint` | teinte | `ICON_TINT` |
+
+### Deux registres, et pourquoi
+
+`DsTexture` et `DsIcon` étaient une seule énumération, ce qui obligeait chacun à porter les
+propriétés de l'autre :
+
+- **Un glyphe n'a pas de 9-slice.** Les 38 icônes déclaraient toutes `ICON_SLICE`, un 9-slice
+  dégénéré présent parce que le champ était obligatoire. Il ne décrivait rien et masquait ce que la
+  texture *est*.
+- **Un fond n'a pas d'étalon d'encre.** `icon_content_size` énumérait à la main, dans un `match` de
+  vingt lignes, les variantes qui sont des icônes normalisées — liste tenue en parallèle de
+  l'énumération, que rien ne vérifiait.
+
+Le défaut que cette confusion a produit est daté : le test `les_glyphes_d_icone_sont_detoures_au_
+pixel_pres` sélectionnait ses cibles **par leur découpage** (`insets == 0`), faute de mieux. Il
+ratait sa cible dans les deux sens — laissant passer les glyphes sans socle, et attrapant
+`loader-sheet.png`, une planche d'atlas qu'il a fallu exempter en ajoutant `DsTexture::grid`.
+Aujourd'hui il balaie `DsIcon::ALL`, sans filtre ni exemption.
+
+### La table est la source unique
+
+Nom de cache egui, chemin du fichier et présence d'un étalon viennent d'**un seul littéral** par
+icône, assemblés par la macro `ds_icons!`. Il n'y a plus de façon d'écrire `ds-icon-eye` en face de
+`icon-eye-off.png` — c'était possible tant que les trois étaient recopiés à la main dans `spec()`.
+
+Deux catégories d'étalon, marquées dans la table :
+
+- **`socle`** (21 icônes) — détourée depuis un socle de bouton du jeu, taille d'encre connue et
+  comparable, donc normalisable sur `ICON_BUTTON_CONTENT` ;
+- **`libre`** (17) — détourée sans bouton porteur ou sans mesure consignée. La normaliser sur un
+  étalon qu'elle ne partage pas la rendrait fausse ; elle garde sa taille native.
+
+### Ce que `design::icon` fait, et ce que fait `icon_button`
+
+`icon_button` peint un glyphe **sur un socle**, avec ses états et son clic. `design::icon` ne peint
+que le glyphe : une icône dans une ligne, un en-tête de colonne, à côté d'un compteur. Il n'est pas
+cliquable — qui veut un clic prend `icon_button`, qui a le socle que ce clic mérite.
+
+**Le rapport d'aspect est préservé** : les glyphes du jeu ne sont pas carrés (chevron 14 × 8,
+pastille d'info 27 × 28). Le composant réutilise `glyph_fit`, le seul endroit du crate qui calcule
+ce rapport, plutôt qu'un `Vec2::splat` — exactement le défaut qu'`Input::leading_icon` portait
+jusqu'au 2026-09-10. `size` donne donc le côté du **carré englobant**, pas la largeur : un chevron
+demandé à 16 px sera peint 16 × 9, centré dans un carré de 16.
+
+**L'étalon ne s'applique pas hors socle** : `content_size` sert à accorder deux glyphes voisins sur
+deux boutons. Sans voisin, le glyphe occupe le carré qu'on lui donne.
+
+### Vérification
+
+Le refactor touche 223 usages et **aucun snapshot n'a bougé**, hormis celui de la galerie où une
+section a été *ajoutée*. Les six captures d'infobulle, les panneaux, la modale : identiques au
+pixel. C'est ce qu'on attend d'un changement de typage.
+
+Coût mémoire, mesuré avant décision : les 38 icônes décodées en RGBA pèsent **31 Ko** — sans effet
+sur le budget de 300 Mo (§8 du plan).
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85

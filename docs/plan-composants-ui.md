@@ -327,14 +327,21 @@ critère de fin interdit — elle attend donc sa propre décision, dans son prop
 
 **Estimation** : 1 à 1½ séance. **Réalisé** : conforme.
 
-## 2.3 — `DsIcon` : reporté, terrain occupé
+## 2.1 — fait le 2026-09-11
 
-Vérification du 2026-09-11 : une session parallèle travaille **en ce moment** sur les icônes (une
-trentaine de SVG poussés dans `assets/design-system/icons-svg/`, commit `dbf8c3b`). La règle de
-coordination de ce plan interdit de démarrer un lot dont les fichiers sont en refonte ailleurs, et
-2.1 touche exactement `assets.rs`, `icon_button.rs` et la galerie des glyphes.
+Reporté une première fois le même jour, terrain occupé : une session parallèle poussait alors une
+trentaine de SVG dans `assets/design-system/icons-svg/`. Elle les a retirés (`6bffdc5 revert: retire
+les ébauches SVG des icônes`), le terrain s'est libéré, le refactor a suivi.
 
-Conséquence pour le lot 4 : sa variante icône de `tabs` reste bloquée, comme elle l'était déjà.
+Les cinq étapes du catalogue sont faites : `design/icons.rs` et sa table, retrait des 38 variantes
+d'icône de `DsTexture` et d'`icon_content_size` avec elles, `design::icon`, `icon_button` et
+`Input::leading_icon` sur `DsIcon`, galerie à jour.
+
+**Le critère de non-régression est le même que pour 2.2** : 223 usages déplacés et **aucun snapshot
+n'a bougé**, sauf celui de la galerie où une section a été ajoutée.
+
+**Conséquence pour le lot 4** : sa variante icône de `tabs` n'est plus bloquée — `DsIcon` existe et
+c'est ce qu'elle attendait.
 
 ---
 

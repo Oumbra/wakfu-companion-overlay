@@ -130,7 +130,7 @@ pub struct Input<'a> {
     log_name: Option<String>,
     forced_state: Option<InputState>,
     request_focus: bool,
-    leading_icon: Option<crate::design::DsTexture>,
+    leading_icon: Option<crate::design::DsIcon>,
 }
 
 impl<'a> Input<'a> {
@@ -166,7 +166,7 @@ impl<'a> Input<'a> {
     /// L'icône prend `INPUT_PLACEHOLDER` au repos et `TEXT_DISABLED` désactivée. Elle ne change pas
     /// avec la présence d'une valeur : mesuré sur `empty-input-search.png` et `input-search.png`,
     /// dont le profil de la colonne de la loupe est rigoureusement identique.
-    pub fn leading_icon(mut self, icon: crate::design::DsTexture) -> Self {
+    pub fn leading_icon(mut self, icon: crate::design::DsIcon) -> Self {
         self.leading_icon = Some(icon);
         self
     }
@@ -339,7 +339,7 @@ impl Widget for Input<'_> {
             // `DsTexture`, et un carré déformerait tout glyphe qui n'en est pas un. La règle est
             // celle du design system, partagée avec le bouton icône — il ne doit y en avoir
             // qu'une.
-            let native = crate::design::DesignSystem::get(ui.ctx()).native_size(icon);
+            let native = crate::design::DesignSystem::get(ui.ctx()).icon_native_size(icon);
             let icon_rect = egui::Rect::from_center_size(
                 egui::pos2(rect.left() + inset + side / 2.0, rect.center().y),
                 super::icon_button::glyph_fit(native, side),
@@ -349,7 +349,7 @@ impl Widget for Input<'_> {
                     InputState::Disabled => tokens::TEXT_DISABLED,
                     _ => tokens::INPUT_PLACEHOLDER,
                 };
-                crate::design::DesignSystem::get(ui.ctx()).paint(
+                crate::design::DesignSystem::get(ui.ctx()).paint_icon(
                     &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
                     icon_rect,
                     icon,

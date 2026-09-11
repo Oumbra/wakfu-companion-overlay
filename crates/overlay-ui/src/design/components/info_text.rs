@@ -76,7 +76,7 @@
 
 use egui::{Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{assets::DsTexture, text, tokens, DesignSystem};
+use crate::design::{icons::DsIcon, text, tokens, DesignSystem};
 
 /// Registre du message. Le jeu n'a relevé que le premier — voir la doc de module.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -218,10 +218,10 @@ impl Widget for InfoText {
             // La texture fait 27 × 28 (le détourage a pris un pixel de plus en hauteur) et est
             // peinte dans un carré de 12 : l'écrasement d'un vingt-huitième est sous le pixel. La
             // cote du relevé est 12 × 12, c'est elle qui fait foi.
-            DesignSystem::get(ui.ctx()).paint(
+            DesignSystem::get(ui.ctx()).paint_icon(
                 ui.painter(),
                 dot_rect,
-                DsTexture::IconInfo,
+                DsIcon::Info,
                 self.tone.dot_color(),
             );
             ui.painter()

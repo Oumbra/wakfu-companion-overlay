@@ -88,7 +88,7 @@ mod wakassets_fixtures;
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
-use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsTexture, IconContext, InputSize};
+use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize};
 use overlay_ui::panels::options_modal::OptionsTab;
 use overlay_ui::ui_icons::UiIcons;
 
@@ -417,7 +417,7 @@ fn search_field(
 ) {
     ui.add(
         design::input(text)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .placeholder(placeholder)
             .size(InputSize::Standard)
             .width(width)
@@ -487,12 +487,12 @@ fn alert_item(
     // rouage (qui veut dire « options »), l'autre une coche verte (qui veut dire « équipé »).
     let ds = design::DesignSystem::get(ui.ctx());
     let icon = if sound_on {
-        DsTexture::IconVolume
+        DsIcon::Volume
     } else {
-        DsTexture::IconVolumeMute
+        DsIcon::VolumeMute
     };
-    let native = ds.native_size(icon);
-    ds.paint(
+    let native = ds.icon_native_size(icon);
+    ds.paint_icon(
         ui.painter(),
         Rect::from_center_size(
             egui::pos2(
@@ -514,8 +514,8 @@ fn alert_item(
     // bandeau in-game, où le retrait n'a pas sa place : c'est l'action destructrice, elle vit dans
     // la fenêtre Options avec sa confirmation.
     if removable && !item.is_default {
-        let native = ds.native_size(DsTexture::IconClose);
-        ds.paint(
+        let native = ds.icon_native_size(DsIcon::Close);
+        ds.paint_icon(
             ui.painter(),
             Rect::from_center_size(
                 egui::pos2(
@@ -524,7 +524,7 @@ fn alert_item(
                 ),
                 design::components::icon_button::glyph_fit(native, TILE_BADGE - 2.0),
             ),
-            DsTexture::IconClose,
+            DsIcon::Close,
             SUBDUED,
         );
     }
@@ -625,7 +625,7 @@ fn test_sound_row(ui: &mut egui::Ui, width: f32) {
         );
         ui.add_space(12.0);
         ui.add(
-            design::icon_button(DsTexture::IconVolume)
+            design::icon_button(DsIcon::Volume)
                 .context(IconContext::Panel)
                 .tooltip("Jouer le son d'alerte")
                 .log_name("maquette.tester"),
@@ -939,10 +939,10 @@ fn confirm_box(ui: &mut egui::Ui, parent: Rect, item_name: &str) {
     ui.painter().circle_filled(crest, 20.0, CONFIRM_CREST);
     ui.painter()
         .circle_stroke(crest, 20.0, Stroke::new(2.0, CONFIRM_BORDER));
-    design::DesignSystem::get(ui.ctx()).paint(
+    design::DesignSystem::get(ui.ctx()).paint_icon(
         ui.painter(),
         Rect::from_center_size(crest, Vec2::new(14.0, 14.0)),
-        DsTexture::IconHelp,
+        DsIcon::Help,
         design::tokens::BUTTON_TEXT_ON_GOLD,
     );
 

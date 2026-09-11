@@ -4,7 +4,7 @@
 //! use overlay_ui::design::{self, DsTexture, IconContext};
 //!
 //! if ui
-//!     .add(design::icon_button(DsTexture::IconOption).context(IconContext::FirstPlan))
+//!     .add(design::icon_button(DsIcon::Option).context(IconContext::FirstPlan))
 //!     .clicked()
 //! {
 //!     // l'appelant décide de l'action — jamais le composant
@@ -18,7 +18,7 @@
 //! `egui::TextureHandle` en paramètres**, ce qui oblige chaque appelant à connaître et à câbler les
 //! textures. C'est exactement le symptôme qui a motivé la création du design system.
 //!
-//! Ici, l'appelant nomme une **intention** (`IconContext::FirstPlan`, `DsTexture::IconPlus`) et le
+//! Ici, l'appelant nomme une **intention** (`IconContext::FirstPlan`, `DsIcon::Plus`) et le
 //! manifeste résout les fichiers.
 //!
 //! Ce qui est repris tel quel, parce que c'est mesuré ou déjà arbitré :
@@ -73,7 +73,7 @@
 
 use egui::{Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{assets::DsTexture, tokens, DesignSystem};
+use crate::design::{assets::DsTexture, icons::DsIcon, tokens, DesignSystem};
 
 /// Sur quoi le bouton est posé — c'est ce qui choisit son socle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -138,10 +138,10 @@ impl IconContext {
     /// glyphe à deux tailles d'encre selon la famille de socle qui le porte (voir
     /// [`tokens::STEPPER_ICON_RATIO`]). Les deux autres contextes retombent sur le manifeste : leur
     /// rendu est inchangé.
-    fn content_size(self, icon: DsTexture) -> Option<f32> {
+    fn content_size(self, icon: DsIcon) -> Option<f32> {
         match self {
             IconContext::Stepper => Some(tokens::STEPPER_SIZE * tokens::STEPPER_ICON_RATIO),
-            _ => icon.icon_content_size(),
+            _ => icon.content_size(),
         }
     }
 
@@ -193,12 +193,12 @@ pub enum IconButtonState {
 }
 
 /// Construit un bouton icône. `icon` est une texture du manifeste, jamais un fichier.
-pub fn icon_button(icon: DsTexture) -> IconButton {
+pub fn icon_button(icon: DsIcon) -> IconButton {
     IconButton::new(icon)
 }
 
 pub struct IconButton {
-    icon: DsTexture,
+    icon: DsIcon,
     context: IconContext,
     size: f32,
     enabled: bool,
@@ -208,7 +208,7 @@ pub struct IconButton {
 }
 
 impl IconButton {
-    pub fn new(icon: DsTexture) -> Self {
+    pub fn new(icon: DsIcon) -> Self {
         Self {
             icon,
             context: IconContext::default(),
@@ -297,13 +297,13 @@ impl Widget for IconButton {
             design.paint(ui.painter(), rect, background, background_tint);
 
             let icon_size = icon_draw_size(
-                design.native_size(self.icon),
+                design.icon_native_size(self.icon),
                 self.context.content_size(self.icon),
                 rect.width(),
                 self.context.native_size(),
             );
             let icon_rect = egui::Rect::from_center_size(rect.center(), icon_size);
-            design.paint(ui.painter(), icon_rect, self.icon, icon_tint);
+            design.paint_icon(ui.painter(), icon_rect, self.icon, icon_tint);
         }
 
         if response.clicked() {
