@@ -26,6 +26,15 @@ use crate::roster::normalize_wakfu_name;
 pub enum IconKind {
     Item,
     Monster,
+    /// Gemme de rareté (`wakassets/rarities/{n}.png`) — le pictogramme qui précède le nom d'un
+    /// objet dans le panneau de suggestions, miroir de `wakfuRarityIconUrl`
+    /// (`wakfu-item-rarity.data.ts`).
+    ///
+    /// Ce n'est **pas** un asset du design system mais une image distante, du même CDN et du même
+    /// genre que les icônes d'objets : elle passe donc par le même `RemoteIconStore`, sans rien
+    /// d'embarqué. Le `gfx_id` porte ici le **numéro d'icône** de la rareté — voir
+    /// [`rarity_icon_number`], et surtout sa mise en garde.
+    Rarity,
 }
 
 /// Référence suffisante pour construire l'URL de l'icône réelle — voir `image_url`. `gfx_id` est
@@ -49,11 +58,45 @@ impl IconRef {
         let folder = match self.kind {
             IconKind::Item => "items",
             IconKind::Monster => "monsters",
+            IconKind::Rarity => "rarities",
         };
         format!(
             "https://vertylo.github.io/wakassets/{folder}/{}.png",
             self.gfx_id
         )
+    }
+
+    /// La gemme d'une rareté — `wakassets/rarities/{n}.png`, comme `wakfuRarityIconUrl` côté web.
+    ///
+    /// Rien à résoudre dans le catalogue : la rareté suffit, contrairement à l'icône d'un objet
+    /// qui a besoin de son `gfxId`. D'où un constructeur plutôt qu'une méthode de `CatalogIndex`.
+    pub fn for_rarity(rarity: WakfuRarity) -> Self {
+        Self {
+            kind: IconKind::Rarity,
+            gfx_id: rarity_icon_number(rarity).to_string(),
+        }
+    }
+}
+
+/// Numéro d'icône de rareté Ankama — miroir de `RARITY_ICON_NUMBER` (`wakfu-item-rarity.data.ts`),
+/// c'est-à-dire la rareté numérique BRUTE d'Ankama (`definition.rarity` des gamedata).
+///
+/// **À ne pas confondre avec l'ordre de tri** ([`rarity_from_sort_order`]) : les deux tables
+/// coïncident jusqu'à `Legendary` puis divergent — le tri classe souvenir 5, épique 6, relique 7,
+/// alors que le jeu numérote relique 5, souvenir 6, épique 7. Prendre l'une pour l'autre affiche
+/// la gemme d'une autre rareté pour ces trois-là, sans rien casser par ailleurs : exactement le
+/// genre d'écart qu'on ne voit pas à la relecture, d'où le test `les_deux_tables_de_rarete_
+/// divergent_bien`.
+fn rarity_icon_number(rarity: WakfuRarity) -> u8 {
+    match rarity {
+        WakfuRarity::Old => 0,
+        WakfuRarity::Common => 1,
+        WakfuRarity::Rare => 2,
+        WakfuRarity::Mythical => 3,
+        WakfuRarity::Legendary => 4,
+        WakfuRarity::Relic => 5,
+        WakfuRarity::Memory => 6,
+        WakfuRarity::Epic => 7,
     }
 }
 
@@ -534,5 +577,49 @@ mod tests {
             monster.image_url(),
             "https://vertylo.github.io/wakassets/monsters/5421.png"
         );
+        assert_eq!(
+            IconRef::for_rarity(WakfuRarity::Mythical).image_url(),
+            "https://vertylo.github.io/wakassets/rarities/3.png"
+        );
+    }
+
+    /// Les huit gemmes, une par rareté — la table entière plutôt qu'un échantillon : c'est une
+    /// correspondance recopiée d'un autre dépôt, une seule ligne fausse suffit à afficher la
+    /// mauvaise gemme.
+    #[test]
+    fn chaque_rarete_a_son_numero_de_gemme() {
+        for (rarity, attendu) in [
+            (WakfuRarity::Old, 0),
+            (WakfuRarity::Common, 1),
+            (WakfuRarity::Rare, 2),
+            (WakfuRarity::Mythical, 3),
+            (WakfuRarity::Legendary, 4),
+            (WakfuRarity::Relic, 5),
+            (WakfuRarity::Memory, 6),
+            (WakfuRarity::Epic, 7),
+        ] {
+            assert_eq!(rarity_icon_number(rarity), attendu, "rareté {rarity:?}");
+        }
+    }
+
+    /// **Le piège**, verrouillé : ordre de tri et numéro de gemme coïncident jusqu'à
+    /// `Legendary` puis se croisent. Écrire l'un à la place de l'autre ne casse rien — ça affiche
+    /// simplement la gemme d'une autre rareté pour ces trois-là.
+    #[test]
+    fn les_deux_tables_de_rarete_divergent_bien() {
+        for (ordre, rarity) in [
+            (5, WakfuRarity::Memory),
+            (6, WakfuRarity::Epic),
+            (7, WakfuRarity::Relic),
+        ] {
+            assert_eq!(rarity_from_sort_order(ordre), rarity);
+            assert_ne!(
+                u8::try_from(ordre).unwrap(),
+                rarity_icon_number(rarity),
+                "l'ordre de tri {ordre} et le numéro de gemme de {rarity:?} ne doivent PAS \
+                 coïncider — si cette table change côté web, les deux doivent être remises à jour \
+                 ensemble"
+            );
+        }
     }
 }
