@@ -21,7 +21,8 @@ mod wakassets_fixtures;
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::WakfuRarity;
-use overlay_ui::design::{self, DsIcon, IconContext, InputSize};
+use overlay_ui::design::{self, DsIcon, IconContext, InputSize, SlotFrame};
+use overlay_ui::rarity_bridge::to_slot_rarity;
 use overlay_ui::ui_icons::UiIcons;
 
 use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_BOX};
@@ -66,12 +67,8 @@ const TILE_BADGE_INSET: f32 = 5.0;
 const TILE_GAP: f32 = 10.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 const BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
-/// Rayon d'angle de l'aplat sombre, en fraction du côté — le couple `TILE_ROUNDING` (10) /
-/// `TILE_SIZE` (58) du Suivi, gardé en rapport pour qu'un emplacement de 22 ou de 58 se coupe les
-/// angles de la même façon.
-const SLOT_ROUNDING_RATIO: f32 = 10.0 / 58.0;
-/// Le fond sombre sous la bordure — `panels::watchlist::PANEL_BG`.
-const PANEL_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
+// Le rayon de l'aplat et son fond sombre sont dans `design::tokens` depuis que le composant
+// existe (`ITEM_SLOT_RADIUS_RATIO`, `ITEM_SLOT_BACKDROP`) — plus de copie ici.
 const ICON_FILL_RATIO: f32 = 0.96;
 const SHEET_MARGIN: f32 = 18.0;
 const SHEET_WIDTH: f32 = 620.0;
@@ -189,43 +186,39 @@ fn bande(ui: &mut egui::Ui, text: &str) {
     ui.add(design::heading(text).trailing_gap(8.0));
 }
 
-/// L'emplacement d'objet du jeu — **la chaîne de la tuile du Suivi, à l'identique**.
+/// L'emplacement d'objet du jeu — **`design::item_slot` depuis le 2026-09-11**.
 ///
-/// Reprise trait pour trait de `panels::watchlist::entry_tile` (demande explicite de
-/// l'utilisateur : l'affichage d'une image d'objet doit être le même partout), dans cet ordre,
-/// qui n'est pas interchangeable :
+/// Cette fonction ne peint plus rien : elle place le composant dans un rectangle absolu
+/// (`Ui::put`, les planches posent leur géométrie elles-mêmes) et traduit la rareté du moteur.
+/// L'aplat, la bordure, l'ordre de peinture et les ratios sont partis dans le composant avec
+/// leurs jetons — c'était tout l'objet de cette planche.
 ///
-/// 1. **un aplat sombre** (`PANEL_BG`, coins arrondis) — pour un objet, il ne sert que de filet
-///    visible sous les coins arrondis de la texture de bordure ;
-/// 2. **la texture `Border-<RARETÉ>.webp` peinte AVANT l'icône** — sa fenêtre intérieure n'est pas
-///    un trou transparent mais un aplat teinté par la rareté ; peinte après, elle voilerait
-///    l'icône entière (bug corrigé le jour même côté Suivi, voir sa doc de module) ;
-/// 3. **l'icône réelle** téléchargée du CDN wakassets, **repli générique** si le catalogue ne la
-///    résout pas ou si le téléchargement n'a pas abouti.
+/// `rarity: None` n'est pas une variante du composant : sans bordure, ce n'est plus un
+/// emplacement, c'est une image. Le cas est peint ici tel quel, deux lignes, pour que la planche
+/// montre encore ce que le relevé demandait — c'est d'ailleurs ce que fait `design::autocomplete`
+/// pour ses rangées de suggestion.
 ///
-/// **La bordure est optionnelle.** `Some(rareté)` : la tuile d'alerte et celle du Suivi, où le
-/// cadre coloré EST le porteur de la rareté. `None` : le panneau de suggestions, où la gemme qui
-/// précède l'image dit déjà la rareté — le cadre ferait doublon (demande explicite de
-/// l'utilisateur, 2026-09-11). C'est aussi ce que fait le web, dont `app-item-icon` est une image
-/// nue. La chaîne de résolution de l'image, elle, ne change pas d'un cas à l'autre.
-///
-/// Le harnais n'atteint pas le CDN : toutes les planches montrent donc le repli générique. Le
-/// dimensionnement, lui, est bien celui du Suivi — `ITEM_BORDER_INNER_MARGIN_RATIO` (52/512) et
-/// `ITEM_ICON_FILL_RATIO` (0,96) sont les constantes de `panels::watchlist`, pas des valeurs
-/// recopiées à l'œil.
-fn item_slot(ui: &egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<WakfuRarity>) {
-    // L'aplat sombre ne sert que de filet sous les coins arrondis de la bordure : sans bordure,
-    // il n'a plus rien à combler et deviendrait un fond que le web n'a pas.
-    if let Some(rarity) = rarity {
-        ui.painter()
-            .rect_filled(rect, rect.width() * SLOT_ROUNDING_RATIO, PANEL_BG);
-        egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
+/// Le harnais n'atteint pas le CDN : toutes les planches montrent donc le repli générique. C'est
+/// aussi ce que l'overlay affiche tant qu'un téléchargement n'a pas abouti.
+fn item_slot(ui: &mut egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<WakfuRarity>) {
+    match rarity {
+        Some(rarity) => {
+            ui.put(
+                rect,
+                design::item_slot()
+                    .size(rect.width())
+                    .frame(SlotFrame::Rarity(to_slot_rarity(rarity)))
+                    .icon(icons.unknown_entity_texture().id()),
+            );
+        }
+        None => {
+            let taille = rect.width() * (1.0 - 2.0 * BORDER_INNER_RATIO) * ICON_FILL_RATIO;
+            egui::Image::new(icons.unknown_entity_texture()).paint_at(
+                ui,
+                Rect::from_center_size(rect.center(), Vec2::splat(taille)),
+            );
+        }
     }
-    let inner = rect.width() * (1.0 - 2.0 * BORDER_INNER_RATIO) * ICON_FILL_RATIO;
-    egui::Image::new(icons.unknown_entity_texture()).paint_at(
-        ui,
-        Rect::from_center_size(rect.center(), Vec2::splat(inner)),
-    );
 }
 
 /// La tuile d'alerte, dans l'état demandé.
