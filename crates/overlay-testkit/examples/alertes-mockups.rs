@@ -176,6 +176,8 @@ const TILE_BADGE: f32 = 14.0;
 
 /// Retrait d'un badge depuis le coin de la tuile.
 const TILE_BADGE_INSET: f32 = 5.0;
+/// Marge du nom de chaque côté de la tuile — ce qui reste est la largeur utile avant ellipse.
+const TILE_NAME_INSET: f32 = 5.0;
 
 /// Bleu d'accent — `ACCENT` de `panels::watchlist:516`, lui-même repris de `--accent` du dépôt web
 /// (`#00d2ff`). C'est la bordure d'une tuile dont le son est ACTIF.
@@ -416,10 +418,13 @@ fn alert_item(
     );
     item_slot(ui, icons, slot, item.rarity);
 
-    ui.painter().text(
+    // Le nom, élidé à la largeur de la tuile. `name_rect` est la zone de survol de l'infobulle
+    // du nom : le libellé seul, pas la tuile entière (demande explicite de l'utilisateur).
+    let (shown, elided) = elide(ui, item.name, rect.width() - 2.0 * TILE_NAME_INSET);
+    let name_rect = ui.painter().text(
         egui::pos2(rect.center().x, slot.bottom() + 5.0),
         egui::Align2::CENTER_TOP,
-        elide(ui, item.name, rect.width() - 10.0),
+        shown,
         design::text::label_font(ui.ctx(), 13.0),
         TEXT,
     );
@@ -471,9 +476,26 @@ fn alert_item(
         );
     }
 
+    // **Infobulle du nom : seulement si le nom est coupé, et seulement sur le libellé.** Un nom
+    // qui tient en entier n'a rien à révéler — une infobulle qui répète ce qui est déjà lisible
+    // est du bruit. Même règle que le web (`[tooltipOnlyIfTruncated]="true"` sur le nom, voir
+    // `wakfu-autocomplete.component.html`).
+    //
+    // Les deux infobulles s'excluent : sans ça, survoler le nom en déclencherait deux, l'une
+    // par-dessus l'autre. Celle du nom gagne sur sa propre zone, celle de la tuile couvre le
+    // reste.
+    let sur_le_nom = elided && {
+        let zone = ui.interact(name_rect, response.id.with("nom"), egui::Sense::hover());
+        zone.clone().on_hover_text(item.name);
+        zone.hovered()
+    };
+
     // Curseur main : la tuile entière est cliquable, et rien d'autre ne le dit — demande
     // explicite de l'utilisateur.
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if sur_le_nom {
+        return response;
+    }
     response.on_hover_text(format!(
         "{} — {}",
         item.name,
@@ -486,7 +508,12 @@ fn alert_item(
 }
 
 /// Tronque un nom à la largeur d'une tuile, avec une ellipse.
-fn elide(ui: &egui::Ui, text: &str, max_width: f32) -> String {
+///
+/// Rend **aussi** le fait d'avoir coupé : c'est cette information qui décide de l'infobulle du
+/// nom (voir `alert_item`). La déduire après coup en comparant les deux chaînes marcherait, mais
+/// obligerait chaque appelant à y penser — et un nom qui finit déjà par « … » la mettrait en
+/// défaut.
+fn elide(ui: &egui::Ui, text: &str, max_width: f32) -> (String, bool) {
     let font = design::text::label_font(ui.ctx(), 13.0);
     let measure = |s: &str| {
         ui.painter()
@@ -495,13 +522,13 @@ fn elide(ui: &egui::Ui, text: &str, max_width: f32) -> String {
             .width()
     };
     if measure(text) <= max_width {
-        return text.to_string();
+        return (text.to_string(), false);
     }
     let mut cut = text.to_string();
     while !cut.is_empty() && measure(&format!("{cut}…")) > max_width {
         cut.pop();
     }
-    format!("{}…", cut.trim_end())
+    (format!("{}…", cut.trim_end()), true)
 }
 
 /// Un paragraphe de texte courant — **la brique qui manque au design system**.
@@ -914,26 +941,26 @@ enum EmptyState {
     Loading,
 }
 
-/// **L'emplacement du loader, pas un loader.**
+/// Le rouage de chargement, centré dans la zone que la grille occuperait.
 ///
 /// Une synchronisation en vol se signale par un loader, pas par un bloc d'information : c'est un
-/// état transitoire, pas une remarque à lire. La version précédente y mettait
-/// `design::info_text` — requalifié par l'utilisateur (2026-09-11).
+/// état transitoire, pas une remarque à lire (requalification de l'utilisateur, 2026-09-11). Le
+/// tour précédent en réservait seulement la place, `design::loader` n'existant pas encore ; il est
+/// arrivé sur `dev` depuis, et la maquette l'utilise.
 ///
-/// `design::loader` est **en cours de conception de son côté** : tant qu'il n'existe pas, la
-/// maquette réserve sa place plutôt que d'en inventer un dessin qui serait à jeter.
-fn loading_placeholder(ui: &mut egui::Ui, width: f32) {
-    const BOX: Vec2 = Vec2::new(200.0, 56.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BOX.y + 28.0), egui::Sense::hover());
-    let slot = Rect::from_center_size(rect.center(), BOX);
-    ui.painter()
-        .rect_stroke(slot, 4, Stroke::new(1.0, MUTED_BORDER), StrokeKind::Inside);
-    ui.painter().text(
-        slot.center(),
-        egui::Align2::CENTER_CENTER,
-        "design::loader",
-        design::text::label_font(ui.ctx(), 13.0),
-        SUBDUED,
+/// `preview_frame` fige l'image de la boucle : sans elle, deux rendus du même écran ne donneraient
+/// pas le même pixel, et une planche qui bouge d'un rendu à l'autre ne se compare plus.
+fn loading_row(ui: &mut egui::Ui, width: f32) {
+    let side = design::LoaderSize::Medium.px();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, side + 32.0), egui::Sense::hover());
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new().max_rect(Rect::from_center_size(rect.center(), Vec2::splat(side))),
+    );
+    cell.add(
+        design::loader()
+            .size(design::LoaderSize::Medium)
+            .preview_frame(3)
+            .log_name("maquette.chargement"),
     );
 }
 
@@ -1010,7 +1037,7 @@ fn alerts_tab(
     }
 
     if state.empty_state == EmptyState::Loading {
-        loading_placeholder(ui, width);
+        loading_row(ui, width);
         return field_bottom;
     }
 
