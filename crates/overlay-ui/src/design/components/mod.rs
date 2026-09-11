@@ -23,6 +23,7 @@
 //! 7. **Une entrée dans la galerie** (`crates/overlay-testkit/tests/design_gallery.rs`) : toute
 //!    variante et tout état visibles sur une capture unique, comparée à chaque exécution.
 
+pub mod autocomplete;
 pub mod button;
 pub mod checkbox;
 pub mod collapsible;

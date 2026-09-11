@@ -17,6 +17,9 @@
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
+#[path = "../examples/shared/wakassets_fixtures.rs"]
+mod wakassets_fixtures;
+
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
@@ -59,7 +62,9 @@ fn galerie_du_design_system() {
         // trois glyphes non carrés, deux teintes).
         // 5990 -> 6225 le 2026-09-11 : section « Onglets à pictogramme » (une barre aux 66 px du
         // jeu, une barre étirée).
-        .with_size(Vec2::new(760.0, 6225.0))
+        // 6225 -> 6885 le 2026-09-11 : section « Autocomplétion » (cinq cas, dont trois dépliés
+        // dont le panneau est peint hors flux et demande donc sa réserve explicite).
+        .with_size(Vec2::new(760.0, 6885.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1109,6 +1114,173 @@ fn gallery(ui: &mut egui::Ui) {
             .preview_frame(0)
             .log_name("galerie.loader-hors-intervalle"),
     );
+
+    section_autocomplete(ui);
+}
+
+/// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
+/// (comme `select` déplié), d'où les espaces réservés sous chaque cas.
+///
+/// `preview_open`/`preview_active`/`preview_filter` forcent l'état peint : hors écran, aucun champ
+/// n'a le focus, donc rien ne s'ouvrirait jamais.
+fn section_autocomplete(ui: &mut egui::Ui) {
+    use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems, GEM_NATIVE};
+
+    // **Gardées en mémoire egui, pas rechargées à chaque frame** : un `TextureHandle` libère sa
+    // texture quand le dernier exemplaire tombe, et un chargement local peindrait donc des cases
+    // vides — le rendu a lieu après la fin de cette fonction.
+    //
+    // Le chargement se fait HORS du verrou de `data_mut` : `load` appelle `Context::load_texture`,
+    // qui demande ce même verrou — l'imbriquer fige egui dix secondes puis fait paniquer le test.
+    let gems = charge_une_fois(ui, "galerie.gemmes", RarityGems::load);
+    let cats = charge_une_fois(ui, "galerie.categories", CategoryIcons::load);
+    let objets = charge_une_fois(ui, "galerie.objets", ItemIcons::load);
+    let largeur = 560.0;
+
+    // Les images viennent des fixtures du harnais, qui tiennent lieu de ce que `RemoteIconStore`
+    // télécharge au runtime : le composant ne les résout pas lui-même, ce sont du CONTENU.
+    // `image` n'est posée que sur les deux premières rangées : au runtime l'icône arrive du CDN
+    // APRÈS la suggestion, et une rangée doit rester lisible sans elle. Les deux cas sont donc
+    // visibles sur la même capture.
+    let entree = |label: &str, categorie: u16, rarete, deja: bool, image: Option<usize>| {
+        let mut entry = design::AutocompleteEntry::new(label, categorie);
+        entry.gem = Some(gems.texture_id(rarete));
+        entry.gem_size = GEM_NATIVE;
+        entry.image = image.map(|rang| objets.texture_id(rang));
+        entry.disabled = deja;
+        if deja {
+            entry.mention = Some("déjà suivi".to_owned());
+        }
+        entry
+    };
+    let entrees = vec![
+        entree(
+            "Pierre d'aventure",
+            2,
+            overlay_engine::WakfuRarity::Mythical,
+            true,
+            Some(0),
+        ),
+        entree(
+            "Pierre de dolomite",
+            2,
+            overlay_engine::WakfuRarity::Common,
+            false,
+            Some(1),
+        ),
+        entree(
+            "Pierre de lune",
+            1,
+            overlay_engine::WakfuRarity::Rare,
+            false,
+            None,
+        ),
+        entree(
+            "Pierre ponce",
+            7,
+            overlay_engine::WakfuRarity::Common,
+            false,
+            None,
+        ),
+    ];
+    let filtre = |f: CategoryFilter, categorie: Option<u16>| match categorie {
+        None => design::AutocompleteFilter::all(f.label(), Some(cats.texture_id(f))),
+        Some(c) => design::AutocompleteFilter::category(c, f.label(), Some(cats.texture_id(f))),
+    };
+    let filtres = vec![
+        filtre(CategoryFilter::All, None),
+        filtre(CategoryFilter::Equipment, Some(1)),
+        filtre(CategoryFilter::Resources, Some(2)),
+        filtre(CategoryFilter::Craft, Some(7)),
+    ];
+
+    heading(
+        ui,
+        "Autocomplétion — replié, et le seuil de trois caractères",
+        "Sous le seuil, le panneau ne s'ouvre pas : ce n'est pas une liste vide, c'est une liste qui ne s'affiche pas.",
+    );
+    let mut vide = String::new();
+    design::autocomplete(&mut vide)
+        .placeholder("Ajouter un objet à surveiller…")
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .log_name("galerie.autocomplete-replie")
+        .show(ui);
+    let mut court = String::from("pi");
+    design::autocomplete(&mut court)
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .log_name("galerie.autocomplete-sous-seuil")
+        .show(ui);
+
+    heading(
+        ui,
+        "Déplié — « Tout » actif, une entrée déjà suivie",
+        "La deuxième rangée porte l'entrée active (celle que le clavier désigne). La première est grisée, sans surbrillance : elle n'est pas sélectionnable. Les deux dernières n'ont pas encore leur icône — la rangée reste lisible sans elle.",
+    );
+    let mut saisi = String::from("pierre");
+    design::autocomplete(&mut saisi)
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .preview_open(true)
+        .preview_active(1)
+        .log_name("galerie.autocomplete-deplie")
+        .show(ui);
+    // Le panneau est peint dans une `Area` hors flux : sans cette réserve, la section suivante
+    // passerait dessous.
+    ui.add_space(4.0 + 38.0 + 4.0 * 28.0);
+
+    heading(
+        ui,
+        "Un filtre actif — et un filtre sans résultat",
+        "À gauche « Équipements » ne laisse qu'une entrée. À droite « Craft » n'en laisse aucune : la bande RESTE, sinon le bouton qui permettrait de la relâcher disparaîtrait avec les rangées.",
+    );
+    let mut filtre_actif = String::from("pierre");
+    design::autocomplete(&mut filtre_actif)
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .preview_open(true)
+        .preview_filter(Some(1))
+        .log_name("galerie.autocomplete-filtre")
+        .show(ui);
+    ui.add_space(4.0 + 38.0 + 28.0);
+
+    let mut filtre_vide = String::from("pierre");
+    let sans_resultat: Vec<design::AutocompleteEntry> = entrees
+        .iter()
+        .filter(|e| e.category != 9)
+        .cloned()
+        .collect();
+    design::autocomplete(&mut filtre_vide)
+        .width(largeur)
+        .entries(&sans_resultat)
+        .filters(&filtres)
+        .preview_open(true)
+        .preview_filter(Some(9))
+        .log_name("galerie.autocomplete-filtre-vide")
+        .show(ui);
+    ui.add_space(4.0 + 38.0 + 34.0);
+}
+
+/// Charge une fois pour toutes un jeu de textures et le garde en mémoire egui.
+///
+/// Le chargement a lieu **hors** du verrou de `data_mut` — voir l'appelant.
+fn charge_une_fois<T: Clone + Send + Sync + 'static>(
+    ui: &egui::Ui,
+    cle: &'static str,
+    charge: impl FnOnce(&egui::Context) -> T,
+) -> T {
+    let id = egui::Id::new(cle);
+    if let Some(valeur) = ui.data(|d| d.get_temp::<T>(id)) {
+        return valeur;
+    }
+    let valeur = charge(ui.ctx());
+    ui.data_mut(|d| d.insert_temp(id, valeur.clone()));
+    valeur
 }
 
 /// Onglets de la fenêtre de démonstration ci-dessus — un type à part, parce qu'une barre d'onglets
