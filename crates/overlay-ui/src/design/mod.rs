@@ -56,6 +56,7 @@ pub use components::loader::{loader, Loader, LoaderSize};
 pub use components::panel::{panel, Panel, PanelZones};
 pub use components::scroll_area::{scroll_area, ScrollArea};
 pub use components::select::{select, select_multi, Select, SelectState};
+pub use components::separator::{separator, Separator};
 pub use components::stepper::{stepper, Stepper};
 pub use components::tabs::{tabs, TabState, Tabs};
 pub use components::window::{window, FooterClick, Window, WindowChrome};

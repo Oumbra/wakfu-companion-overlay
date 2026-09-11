@@ -47,7 +47,10 @@ fn galerie_du_design_system() {
         // sans socle connu » — sans cette hauteur, le bas de la galerie sortait du canevas.
         // 4500 -> 4900 le 2026-09-11 : section « Rouage de chargement » (une rangée de quatre
         // tailles, une rangée d'images figées, un cas hors intervalle).
-        .with_size(Vec2::new(760.0, 4900.0))
+        // 4900 -> 5570 le 2026-09-11 : section « Filet de séparation » (deux blocs repliables
+        // portant le motif intitulé/filet/corps, plus deux filets nus) — 661 px de contenu de
+        // plus, et les ~75 px de marge basse que le réglage précédent gardait déjà.
+        .with_size(Vec2::new(760.0, 5570.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -760,6 +763,116 @@ fn gallery(ui: &mut egui::Ui) {
                     .size(14.0),
                 );
             });
+    }
+
+    heading(
+        ui,
+        "Filet de séparation — un bevel, pas un trait",
+        "Deux lignes plates de 2 px, claire sur sombre. Les teintes sont des écarts autour du fond : sur une surface survolée le jeu recalcule les deux, et c'est pour ça que le filet a sa propre paire. Montré ici sur son fond d'origine — celui du bloc repliable, pour lequel il a été mesuré.",
+    );
+    {
+        // Le motif du jeu : intitulé, filet, corps. Deux fois dans le bloc de quête relevé, à
+        // l'identique — c'est ce qui a justifié d'en faire un composant plutôt qu'un `hline`.
+        let sections = [
+            ("Description", "Un paragraphe de corps, posé sous le filet."),
+            (
+                "Objectifs",
+                "Le même motif, répété — c'est de là que vient le composant.",
+            ),
+        ];
+        let mut motif = true;
+        design::collapsible("Le motif du jeu", &mut motif)
+            .icon(DsTexture::IconInfo)
+            .log_name("galerie.filet-motif")
+            .show(ui, |ui| {
+                // L'espacement par défaut de la galerie (8 px) s'ajouterait aux cotes du relevé
+                // et on verrait 18 px là où le jeu en met 10. Il est neutralisé pour que cette
+                // section montre les vraies cotes — c'est aussi l'exemple d'usage de référence.
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (titre, corps) in sections {
+                    ui.label(
+                        RichText::new(titre)
+                            .color(Color32::from_rgb(0xBD, 0xBD, 0xBE))
+                            .size(14.0)
+                            .strong(),
+                    );
+                    ui.add_space(10.0);
+                    ui.add(design::separator().log_name(format!("galerie.filet-{titre}")));
+                    ui.label(
+                        RichText::new(corps)
+                            .color(design::tokens::INFO_TEXT)
+                            .size(14.0),
+                    );
+                    ui.add_space(10.0);
+                }
+            });
+        ui.add_space(10.0);
+
+        // Le même motif sur un bloc survolé. Sans `on_hovered_surface`, le filet garderait ses
+        // teintes de repos et sa ligne claire se fondrait dans le fond éclairci — un niveau
+        // d'écart. Les deux blocs se comparent ligne à ligne sur la capture.
+        let mut survole = true;
+        design::collapsible("Le même, surface survolée", &mut survole)
+            .icon(DsTexture::IconInfo)
+            .preview_hovered(true)
+            .log_name("galerie.filet-survole")
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.label(
+                    RichText::new("Description")
+                        .color(Color32::from_rgb(0xBD, 0xBD, 0xBE))
+                        .size(14.0)
+                        .strong(),
+                );
+                ui.add_space(10.0);
+                ui.add(
+                    design::separator()
+                        .on_hovered_surface(true)
+                        .log_name("galerie.filet-survole-1"),
+                );
+                ui.label(
+                    RichText::new("le bevel a suivi le fond, dix niveaux plus haut")
+                        .color(design::tokens::INFO_TEXT)
+                        .size(14.0),
+                );
+                ui.add_space(10.0);
+                // Ce que donnerait l'oubli du paramètre : la ligne claire du repos sur le fond
+                // survolé. Elle ne se voit plus, et c'est le but de la montrer.
+                ui.label(
+                    RichText::new("Sans on_hovered_surface — le même filet, au repos")
+                        .color(Color32::from_rgb(0xBD, 0xBD, 0xBE))
+                        .size(14.0)
+                        .strong(),
+                );
+                ui.add_space(10.0);
+                ui.add(design::separator().log_name("galerie.filet-survole-oubli"));
+                ui.label(
+                    RichText::new("la ligne claire a disparu dans le fond")
+                        .color(design::tokens::INFO_TEXT)
+                        .size(14.0),
+                );
+                ui.add_space(10.0);
+            });
+        ui.add_space(10.0);
+
+        // Largeur imposée et largeur disponible, sur le fond de page nu : le composant ne pose
+        // aucune marge latérale, c'est l'appelant qui décide de son étendue.
+        ui.add(
+            design::separator()
+                .width(200.0)
+                .log_name("galerie.filet-200"),
+        );
+        ui.label(
+            RichText::new("width(200) — largeur imposée")
+                .color(CAPTION)
+                .size(12.0),
+        );
+        ui.add(design::separator().log_name("galerie.filet-plein"));
+        ui.label(
+            RichText::new("par défaut — toute la largeur disponible")
+                .color(CAPTION)
+                .size(12.0),
+        );
     }
 
     heading(
