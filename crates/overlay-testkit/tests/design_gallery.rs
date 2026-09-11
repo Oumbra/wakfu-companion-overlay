@@ -41,7 +41,7 @@ fn heading(ui: &mut egui::Ui, text: &str, caption: &str) {
 #[test]
 fn galerie_du_design_system() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 3660.0))
+        .with_size(Vec2::new(760.0, 4160.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -623,6 +623,59 @@ fn gallery(ui: &mut egui::Ui) {
                 }
             });
         });
+    }
+
+    heading(
+        ui,
+        "Bloc repliable — deux états, contenu libre",
+        "Fermé, le bloc n'est que son en-tête (60 px). Ouvert, il encadre ce qu'on lui donne : ici du texte, mais ce pourrait être un formulaire ou un tableau. Le cadre est peint APRÈS le contenu, sa hauteur en dépend.",
+    );
+    {
+        let mut ferme = false;
+        design::collapsible("Bloc fermé", &mut ferme)
+            .icon(DsTexture::IconInfo)
+            .log_name("galerie.repliable-ferme")
+            .show(ui, |ui| {
+                ui.label("jamais rendu tant que le bloc est fermé");
+            });
+        ui.add_space(10.0);
+
+        let mut ouvert = true;
+        design::collapsible("Bloc ouvert", &mut ouvert)
+            .icon(DsTexture::IconInfo)
+            .log_name("galerie.repliable-ouvert")
+            .show(ui, |ui| {
+                for ligne in [
+                    "Le contenu est entièrement libre : le composant n'en sait rien.",
+                    "Il lui garantit un cadre, des marges et un écrêtage, rien de plus.",
+                ] {
+                    ui.label(
+                        egui::RichText::new(ligne)
+                            .color(design::tokens::INFO_TEXT)
+                            .size(14.0),
+                    );
+                    ui.add_space(6.0);
+                }
+                ui.add(design::checkbox(
+                    &mut true.clone(),
+                    "y compris un autre composant",
+                ));
+            });
+        ui.add_space(10.0);
+
+        // Sans icône, et avec un contenu qui déborde : l'écrêtage doit se voir.
+        let mut sans_icone = true;
+        design::collapsible("Sans icône, contenu écrêté", &mut sans_icone)
+            .log_name("galerie.repliable-nu")
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(
+                        "Une ligne délibérément trop longue pour la largeur du bloc, afin que la coupe se voie sur la capture plutôt que d'être affirmée dans un commentaire.",
+                    )
+                    .color(design::tokens::INFO_TEXT)
+                    .size(14.0),
+                );
+            });
     }
 }
 

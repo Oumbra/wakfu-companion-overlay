@@ -165,9 +165,16 @@ pub fn paint(
     slice: &NineSlice,
     tint: Color32,
 ) {
+    painter.add(shape(rect, texture, slice, tint));
+}
+
+/// Construit la forme d'un 9-slice **sans la peindre** — pour un appelant qui doit la poser dans un
+/// emplacement réservé plus tôt (`Painter::add` puis `Painter::set`), c'est-à-dire tout conteneur
+/// dont le cadre enveloppe un contenu de hauteur inconnue. Voir `design::collapsible`.
+pub fn shape(rect: Rect, texture: &TextureHandle, slice: &NineSlice, tint: Color32) -> Shape {
     let tex: Vec2 = texture.size_vec2();
     if tex.x < 1.0 || tex.y < 1.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
-        return;
+        return Shape::Noop;
     }
 
     // Marges effectives, utilisées à la fois côté source et côté destination : c'est ce qui garantit
@@ -209,5 +216,5 @@ pub fn paint(
             mesh.add_rect_with_uv(dst, uv, tint);
         }
     }
-    painter.add(Shape::mesh(mesh));
+    Shape::mesh(mesh)
 }
