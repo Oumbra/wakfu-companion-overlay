@@ -146,6 +146,29 @@ pub enum WakfuItemCategory {
 }
 
 impl WakfuItemCategory {
+    /// La catégorie encodée par l'index compact — miroir d'`ITEM_CATEGORY_SORT_ORDER`
+    /// (`wakfu-item-category.data.ts`), qui est l'ordre de déclaration de cette énumération.
+    ///
+    /// Repli sur `Misc` pour tout ordre inconnu, comme le web retombe sur `"misc"` : une catégorie
+    /// ajoutée côté serveur avant ce module ne doit pas faire disparaître l'objet du référentiel,
+    /// juste le ranger dans « Divers ».
+    ///
+    /// **À ne pas confondre avec [`WakfuItemCategory::icon_number`]** : l'ordre de tri sert à
+    /// l'encodage, le numéro d'icône vient de l'encyclopédie. Les deux n'ont aucun rapport — voir
+    /// le test `ordre_de_tri_et_numero_dicone_sont_deux_tables_distinctes`.
+    fn from_sort_order(order: i64) -> Self {
+        match order {
+            1 => WakfuItemCategory::Resources,
+            2 => WakfuItemCategory::Sublimations,
+            3 => WakfuItemCategory::Harvests,
+            4 => WakfuItemCategory::HavenBag,
+            5 => WakfuItemCategory::Cosmetics,
+            6 => WakfuItemCategory::Craft,
+            0 => WakfuItemCategory::Equipment,
+            _ => WakfuItemCategory::Misc, // 7 (Misc lui-même) ET tout ordre non reconnu.
+        }
+    }
+
     /// Numéro d'icône `itemTypes` — miroir d'`ITEM_CATEGORY_ICON_NUMBER`. Ce sont les ids de
     /// l'arbre de filtre « Types » de l'encyclopédie officielle, sans rapport avec l'ordre de tri :
     /// ne pas les dériver de la position dans l'énumération.
@@ -221,12 +244,12 @@ fn rarity_from_sort_order(order: i64) -> WakfuRarity {
 
 /// Un tuple positionnel de `data["items"]` — `[id, fr, en, es, pt, gfxId, raritySortOrder,
 /// hasRecipe(0|1), categorySortOrder]` (voir `server/catalog/compact-index.ts` côté
-/// `wakfu-companion`, dont l'arité DOIT rester en phase avec cette struct). `categorySortOrder`
-/// n'est pas encore exploité ici (aucun filtre par catégorie côté overlay, contrairement à
-/// l'autocomplétion web) — mais doit rester déclaré pour que la désérialisation positionnelle de
-/// serde consomme le tuple entier plutôt que de rejeter la ligne pour arité inattendue.
+/// `wakfu-companion`, dont l'arité DOIT rester en phase avec cette struct).
+///
+/// Les neuf champs sont désormais tous exploités — `categorySortOrder` était le dernier à ne
+/// servir qu'à faire consommer le tuple entier par serde ; il alimente maintenant
+/// [`CatalogIndex::find_item_category`].
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 struct RawItemRow(i64, String, String, String, String, i64, i64, i64, i64);
 
 /// Miroir de `RawItemRow` pour `data["monsters"]` — `[id, fr, en, es, pt, gfxId, family(-1 si
@@ -269,6 +292,7 @@ struct ItemEntry {
     icon: IconRef,
     rarity: WakfuRarity,
     has_recipe: bool,
+    category: WakfuItemCategory,
 }
 
 #[derive(Clone)]
@@ -325,7 +349,18 @@ impl CatalogIndex {
             .get("items")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        for RawItemRow(id, fr, en, es, pt, gfx_id, rarity_sort_order, has_recipe, ..) in raw_items {
+        for RawItemRow(
+            id,
+            fr,
+            en,
+            es,
+            pt,
+            gfx_id,
+            rarity_sort_order,
+            has_recipe,
+            category_sort_order,
+        ) in raw_items
+        {
             let entry = ItemEntry {
                 id,
                 icon: IconRef {
@@ -334,6 +369,7 @@ impl CatalogIndex {
                 },
                 rarity: rarity_from_sort_order(rarity_sort_order),
                 has_recipe: has_recipe != 0,
+                category: WakfuItemCategory::from_sort_order(category_sort_order),
             };
             for name in [&fr, &en, &es, &pt] {
                 index
@@ -390,6 +426,18 @@ impl CatalogIndex {
     pub fn find_item_rarity(&self, name: &str, catalog_id: Option<i64>) -> WakfuRarity {
         self.find_item_entry(name, catalog_id)
             .map_or(WakfuRarity::Common, |entry| entry.rarity)
+    }
+
+    /// Catégorie large d'un objet — miroir de `getWakfuItemCategory` (`wakfu-item-category.data.
+    /// ts`), même repli sur `Misc` pour un objet non résolu (catalogue pas encore chargé, ou nom
+    /// introuvable).
+    ///
+    /// C'est ce qui permet à la bande de filtres de l'autocomplétion de n'afficher que les
+    /// catégories réellement présentes dans les résultats — sans elle, `IconKind::ItemCategory`
+    /// sait construire l'URL d'une icône que rien ne sait choisir.
+    pub fn find_item_category(&self, name: &str, catalog_id: Option<i64>) -> WakfuItemCategory {
+        self.find_item_entry(name, catalog_id)
+            .map_or(WakfuItemCategory::Misc, |entry| entry.category)
     }
 
     fn find_item_entry(&self, name: &str, catalog_id: Option<i64>) -> Option<&ItemEntry> {
@@ -669,6 +717,64 @@ mod tests {
         assert_eq!(
             IconRef::for_item_category(WakfuItemCategory::Resources).image_url(),
             "https://vertylo.github.io/wakassets/itemTypes/226.png"
+        );
+    }
+
+    #[test]
+    fn resout_la_categorie_dun_objet() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        // categorySortOrder=1 dans le jeu d'essai.
+        assert_eq!(
+            index.find_item_category("Larme d'Ogrest", None),
+            WakfuItemCategory::Resources
+        );
+        // categorySortOrder=6, et résolu par id plutôt que par nom.
+        assert_eq!(
+            index.find_item_category("peu importe", Some(9001)),
+            WakfuItemCategory::Craft
+        );
+    }
+
+    #[test]
+    fn objet_non_resolu_retombe_sur_divers() {
+        let index = CatalogIndex::from_compact_json(&sample());
+        assert_eq!(
+            index.find_item_category("Inconnu au bataillon", None),
+            WakfuItemCategory::Misc
+        );
+        let vide = CatalogIndex::from_compact_json(&serde_json::json!({}));
+        assert_eq!(
+            vide.find_item_category("quoi que ce soit", Some(1)),
+            WakfuItemCategory::Misc
+        );
+    }
+
+    /// L'ordre de tri encode la catégorie dans l'index compact ; le numéro d'icône vient de
+    /// l'encyclopédie. Les confondre rangerait chaque objet sous le mauvais pictogramme — et rien
+    /// ne le signalerait, les deux étant de simples entiers.
+    #[test]
+    fn ordre_de_tri_et_numero_dicone_sont_deux_tables_distinctes() {
+        for (ordre, categorie) in [
+            (0, WakfuItemCategory::Equipment),
+            (1, WakfuItemCategory::Resources),
+            (2, WakfuItemCategory::Sublimations),
+            (3, WakfuItemCategory::Harvests),
+            (4, WakfuItemCategory::HavenBag),
+            (5, WakfuItemCategory::Cosmetics),
+            (6, WakfuItemCategory::Craft),
+            (7, WakfuItemCategory::Misc),
+        ] {
+            assert_eq!(WakfuItemCategory::from_sort_order(ordre), categorie);
+            assert_ne!(
+                i32::try_from(ordre).unwrap(),
+                categorie.icon_number(),
+                "l'ordre de tri {ordre} ne doit jamais servir de numéro d'icône"
+            );
+        }
+        // Un ordre inconnu range dans « Divers » plutôt que de faire disparaître l'objet.
+        assert_eq!(
+            WakfuItemCategory::from_sort_order(99),
+            WakfuItemCategory::Misc
         );
     }
 
