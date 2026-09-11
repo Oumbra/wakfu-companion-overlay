@@ -36,6 +36,16 @@
 //! La **rareté**, en revanche, est une intention : [`ItemRarity`] est un type du design system, et
 //! c'est au panneau de traduire son `WakfuRarity` métier — un composant n'accède pas à
 //! `overlay_engine` (§6).
+//!
+//! ## Une taille impossible se voit ET se dit
+//!
+//! Toute taille est valide — le cadre est une texture carrée mise à l'échelle, l'icône suit en
+//! proportion. Mais sous [`tokens::ITEM_SLOT_MIN_SIZE`], le liseré et la marge du cadre mangent
+//! tout le carré : l'emplacement est **peint quand même** (un rectangle trop petit doit se voir sur
+//! la capture, pas paniquer — §3 du contrat) et signalé **une fois par instance** au journal
+//! (§4). C'est `%APPDATA%\…\overlay-ui.<date>.log` qu'on relit après un retour utilisateur, pas
+//! le terminal — d'où [`ItemSlot::log_name`] dès que deux emplacements voisins doivent se
+//! distinguer.
 
 use egui::{Response, Sense, Ui, Vec2, Widget};
 
@@ -191,6 +201,30 @@ impl Widget for ItemSlot {
         if !ui.is_rect_visible(rect) {
             return response;
         }
+        // Un emplacement plus petit que [`tokens::ITEM_SLOT_MIN_SIZE`] ne peut plus rien montrer :
+        // le liseré et la marge du cadre mangent tout, l'icône n'a plus de place. **Peint quand
+        // même** — le contrat veut qu'un rectangle trop petit se voie sur la capture plutôt que de
+        // paniquer — mais dit **une fois par instance**, sur l'id de la réponse : un défaut de mise
+        // en page est un événement, pas un flux à 60 Hz. C'est le journal de l'overlay qu'on relit
+        // après un retour utilisateur, pas le terminal (§15 du plan).
+        if self.size < tokens::ITEM_SLOT_MIN_SIZE {
+            let warned_id = response.id.with("ds-item-slot-size");
+            let already = ui.ctx().data_mut(|d| {
+                let seen = d.get_temp::<bool>(warned_id).unwrap_or(false);
+                d.insert_temp(warned_id, true);
+                seen
+            });
+            if !already {
+                tracing::warn!(
+                    component = "item_slot",
+                    name = self.log_name.as_deref().unwrap_or("item_slot"),
+                    taille = self.size,
+                    minimum = tokens::ITEM_SLOT_MIN_SIZE,
+                    "emplacement trop petit pour son cadre"
+                );
+            }
+        }
+
         let ds = DesignSystem::get(ui.ctx());
         let icon_rect = egui::Rect::from_center_size(rect.center(), Vec2::splat(self.icon_side()));
 
