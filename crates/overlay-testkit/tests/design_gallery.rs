@@ -64,7 +64,9 @@ fn galerie_du_design_system() {
         // jeu, une barre étirée).
         // 6225 -> 6885 le 2026-09-11 : section « Autocomplétion » (cinq cas, dont trois dépliés
         // dont le panneau est peint hors flux et demande donc sa réserve explicite).
-        .with_size(Vec2::new(760.0, 6885.0))
+        // 6885 -> 7180 le 2026-09-11 : section « Emplacement d'objet » (les sept raretés, le cadre
+        // simple, les deux formes de compteur).
+        .with_size(Vec2::new(760.0, 7180.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -686,6 +688,80 @@ fn gallery(ui: &mut egui::Ui) {
             );
         }
     });
+
+    heading(
+        ui,
+        "Emplacement d'objet — l'ordre de peinture est le composant",
+        "Les sept raretés, puis un cadre simple. La bordure de rareté se peint SOUS l'icône : sa fenêtre intérieure n'est pas un trou transparent mais un aplat teinté à ~70 %, et l'ordre inverse voile l'icône entière. Un cadre simple fait le contraire — c'est un liseré net, il passe par-dessus.",
+    );
+    {
+        use overlay_ui::design::{ItemRarity, SlotCount, SlotFrame};
+        // Une icône factice : la galerie n'a pas de catalogue distant. Le glyphe du manifeste tient
+        // ce rôle — ce qu'on vérifie ici est le CADRE et son ordre, pas l'icône.
+        let faux_icone = design::DesignSystem::get(ui.ctx()).icon(DsIcon::Kamas).id();
+        ui.horizontal_wrapped(|ui| {
+            for (rarity, nom) in [
+                (ItemRarity::Common, "Common"),
+                (ItemRarity::Rare, "Rare"),
+                (ItemRarity::Mythical, "Mythical"),
+                (ItemRarity::Legendary, "Legendary"),
+                (ItemRarity::Memory, "Memory"),
+                (ItemRarity::Epic, "Epic"),
+                (ItemRarity::Relic, "Relic"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(
+                        design::item_slot()
+                            .frame(SlotFrame::Rarity(rarity))
+                            .icon(faux_icone)
+                            .log_name(format!("galerie.slot-{nom}")),
+                    );
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(8.0);
+            }
+        });
+        ui.horizontal(|ui| {
+            // Cadre simple, avec et sans compteur, plus les deux formes de compteur.
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Plain)
+                    .icon(faux_icone)
+                    .log_name("galerie.slot-simple"),
+            );
+            ui.add_space(8.0);
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Rarity(ItemRarity::Legendary))
+                    .icon(faux_icone)
+                    .count(SlotCount::Simple(42))
+                    .log_name("galerie.slot-compte"),
+            );
+            ui.add_space(8.0);
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Rarity(ItemRarity::Rare))
+                    .icon(faux_icone)
+                    .count(SlotCount::Fraction {
+                        current: 137,
+                        target: 500,
+                    })
+                    .log_name("galerie.slot-fraction"),
+            );
+            ui.add_space(8.0);
+            // Sans icône : l'emplacement se peint quand même, le vide se voit.
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Rarity(ItemRarity::Epic))
+                    .log_name("galerie.slot-vide"),
+            );
+        });
+        ui.label(
+            RichText::new("cadre simple · compteur simple · fraction · sans icône")
+                .color(CAPTION)
+                .size(12.0),
+        );
+    }
 
     heading(
         ui,

@@ -58,6 +58,10 @@ pub use components::icon::{icon, Icon};
 pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
 pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
+pub use components::item_slot::{
+    item_slot, paint_order as item_slot_paint_order, ItemRarity, ItemSlot, SlotCount, SlotFrame,
+    SlotLayer,
+};
 pub use components::loader::{loader, Loader, LoaderSize};
 pub use components::panel::{panel, Panel, PanelZones};
 pub use components::scroll_area::{scroll_area, ScrollArea};

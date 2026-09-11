@@ -106,6 +106,16 @@ impl UiIcons {
     }
 
     /// Texture d'emplacement d'objet du jeu pour `rarity` — voir doc de module et
+    /// **Doublon assumé depuis le 2026-09-11, et daté.** Ces sept textures sont aussi au manifeste
+    /// (`DsTexture::ItemBorder*`), où `design::item_slot` les résout depuis une intention. Le
+    /// panneau Suivi est passé au composant ; ne restent ici que deux **maquettes** du testkit
+    /// (`alertes-mockups`, `composants-a-concevoir`) qui peignent encore leur propre tuile.
+    ///
+    /// Le prix est mesuré : 512 × 512 × 4 octets × 7 = **7,3 Mo** décodés, payés deux fois tant que
+    /// les deux chemins coexistent — 4,9 % du budget de 300 Mo (§8 du plan). À résorber en migrant
+    /// ces deux maquettes, ce qui n'a pas été fait dans le même commit : elles étaient en cours de
+    /// modification par une session parallèle.
+    ///
     /// `panels::watchlist::entry_tile`. `WakfuRarity::Old` retombe sur `Common` (aucun asset dédié,
     /// jamais résolue au runtime de toute façon, voir sa doc).
     pub fn item_border(&self, rarity: WakfuRarity) -> &egui::TextureHandle {
