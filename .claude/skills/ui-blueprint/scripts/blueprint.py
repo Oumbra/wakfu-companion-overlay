@@ -68,15 +68,36 @@ def _esc(s):
     return html.escape(str(s))
 
 
-def _flat(nodes, parent=None, depth=0, out=None):
+def _flat(nodes, parent=None, depth=0, out=None, fill=None):
     out = [] if out is None else out
     for n in nodes:
         n = dict(n)
         n["_depth"] = depth
         n["_parent"] = parent
+        # Fond effectif : celui du bloc, sinon celui qu'il laisse voir de son parent. C'est lui
+        # qui décide de la couleur du libellé — un bloc sans fond propre posé sur un panneau
+        # sombre est sur du sombre, quoi qu'en dise son absence de `fill`.
+        n["_fill"] = n.get("fill") or fill
         out.append(n)
-        _flat(n.get("children", []), n.get("id"), depth + 1, out)
+        _flat(n.get("children", []), n.get("id"), depth + 1, out, n["_fill"])
     return out
+
+
+def _label_ink(fill):
+    """Encre lisible sur `fill`. Le plan peint les fonds RÉELS de l'interface relevée : sur un
+    panneau de jeu sombre, `var(--ink)` disparaît en thème clair."""
+    if not isinstance(fill, str) or not fill.startswith("#"):
+        return "var(--ink)"
+    h = fill.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) < 6:
+        return "var(--ink)"
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return "var(--ink)"
+    return "var(--ink)" if (0.299 * r + 0.587 * g + 0.114 * b) > 140 else "#f2efe9"
 
 
 def _measure_lines(nodes, scale):
@@ -122,9 +143,13 @@ def _svg(spec):
             f'stroke-dasharray="{dash}" />')
         label = n.get("label") or n.get("id", "")
         if label:
+            # Décalé d'un cran par niveau : deux blocs imbriqués dont les bords se touchent
+            # (un liseré et son contenu, par exemple) écrivaient sinon leur nom au même
+            # endroit, et aucun des deux ne se lisait.
+            dy = 11 + n["_depth"] * 11
             parts.append(
-                f'<text x="{pad + x0 + 4:.1f}" y="{pad + y0 + 11:.1f}" '
-                f'fill="var(--ink)" opacity="0.85">{_esc(label)}</text>')
+                f'<text x="{pad + x0 + 4:.1f}" y="{pad + y0 + dy:.1f}" '
+                f'fill="{_label_ink(n.get("_fill"))}" opacity="0.85">{_esc(label)}</text>')
 
     for axis, a, b, pos, gap in _measure_lines(spec.get("nodes", []), s):
         c = "var(--measure)"
@@ -147,6 +172,12 @@ def _svg(spec):
     return "".join(parts)
 
 
+def _num(v):
+    """Nombre lisible : 33.599999999999994 se lit 33.6, 44.0 se lit 44."""
+    v = round(float(v), 2)
+    return str(int(v)) if v == int(v) else str(v)
+
+
 def _inventory(spec):
     rows = []
     for n in _flat(spec.get("nodes", [])):
@@ -158,8 +189,8 @@ def _inventory(spec):
             "<tr>"
             f'<td class="mono">{"&nbsp;" * (n["_depth"] * 3)}{_esc(n.get("id", ""))}</td>'
             f'<td>{_esc(n.get("label", ""))}</td>'
-            f'<td class="mono">{x0},{y0}</td>'
-            f'<td class="mono">{x1 - x0}×{y1 - y0}</td>'
+            f'<td class="mono">{_num(x0)},{_num(y0)}</td>'
+            f'<td class="mono">{_num(x1 - x0)}×{_num(y1 - y0)}</td>'
             f'<td class="mono">{_esc(n.get("radius", "—"))}</td>'
             f'<td class="mono">{_esc(pad_s)}</td>'
             f'<td class="note">{_esc(n.get("notes", ""))}</td></tr>')
