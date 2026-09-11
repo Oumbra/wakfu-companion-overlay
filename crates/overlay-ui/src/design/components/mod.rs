@@ -34,6 +34,7 @@ pub mod loader;
 pub mod panel;
 pub mod scroll_area;
 pub mod select;
+pub mod separator;
 pub mod stepper;
 pub mod tabs;
 pub mod window;
