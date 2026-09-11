@@ -509,9 +509,10 @@ const TEXT_COLOR: egui::Color32 = egui::Color32::WHITE;
 /// `--kama-color` — valeur COURANTE d'un décompte (`.kpi-count-badge.is-fraction`).
 const KAMA_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
 
-/// `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
-/// `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`.
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
+// `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
+// `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`. Repris du
+// jeton partagé : voir `tokens::OVERLAY_ACCENT`.
+use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
 /// `--surface-raised` — fond du toast (`loot-alert-card`, dégradé à deux arrêts IDENTIQUES côté
 /// web donc simple aplat ici).
 const SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x26);
