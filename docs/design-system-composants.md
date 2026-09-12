@@ -2157,3 +2157,39 @@ Peint d'abord dans la maquette de la page Alertes, puis dans `panels::alerts_tab
 au design system le jour où la **garde de fermeture** de la fenêtre Options lui a donné un second
 appelant. L'extraction est **à pixel constant** — aucun des trois snapshots de l'onglet Alertes n'a
 bougé.
+
+
+## Piège d'appelant — `Ui::put` avance le curseur du parent (2026-09-12)
+
+Ce n'est pas un défaut de composant, c'est un piège d'**appelant**, et il a produit un bug visible
+en jeu qui a traversé une maquette validée, un portage et trois relectures avant d'être vu.
+
+**Le symptôme** : dans la grille de l'onglet « Alertes », trois tuiles affichaient « Plan "Epée
+de » à l'identique, sans ellipse, et les noms d'objet étaient coupés net au bord de la tuile. Tout
+désignait la mise en forme du texte — largeur de tuile trop petite, élision mal réglée. Mesure
+faite, le nom tenait : `Pierre d'aventure` occupait 102 px pour 108 disponibles.
+
+**La cause** était ailleurs. Chaque tuile faisait bien 118 px de large, mais les origines de deux
+tuiles voisines n'étaient espacées que de 91 px : **elles se chevauchaient de 27 px**, et le fond
+opaque de la suivante effaçait la fin du nom de la précédente.
+
+```rust
+let (rect, response) = ui.allocate_exact_size(taille_de_la_tuile, Sense::click());
+// …
+ui.put(emplacement_centré, design::item_slot());   // ⚠ avance le curseur du parent
+```
+
+`Ui::put` ouvre un scope, et un scope termine par `advance_cursor_after_rect`. Le curseur de la
+rangée était donc ramené au bord droit de l'**emplacement** — centré dans la tuile, donc 27 px
+avant son bord — et la tuile suivante démarrait là.
+
+**La règle** : dans un conteneur qui dispose des éléments (`horizontal`, `vertical`, une grille),
+poser quoi que ce soit à une position absolue passe par un enfant, jamais par le `ui` du conteneur.
+
+```rust
+let mut cellule = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+cellule.put(emplacement_centré, design::item_slot());   // le curseur de la rangée ne bouge pas
+```
+
+`Ui::new_child` n'avance rien : c'est ce qui le distingue de `scope`/`put`/`add`. Le même geste
+vaut pour tout composant posé par rectangle à l'intérieur d'une cellule déjà allouée.

@@ -24,7 +24,7 @@ pas atteint. Le lot 6 a commencé par opportunité, comme prévu.
 | 3 | Tests de géométrie des composants livrés | ✅ `a1f24e8` — critère révisé, voir le lot |
 | 4 | Formulaires — vague 2 du catalogue | ✅ 2026-09-11 — critère de fin atteint |
 | 5 | Données — vague 3 du catalogue | composants livrés sauf `badge` (bloqué) ; **critère de fin non atteint** |
-| 6 | Finitions — vague 4 du catalogue | commencé — `separator` et `confirm_dialog` faits |
+| 6 | Finitions — vague 4 du catalogue | **abandonné** (décision utilisateur 2026-09-12) — `separator` et `confirm_dialog` avaient déjà été faits par opportunité |
 
 ---
 
@@ -506,25 +506,46 @@ dirait quelle forme le composant doit prendre.
 **Critère de fin** : `panels/watchlist.rs` et `panels/combat.rs` ne contiennent plus aucun
 `Color32::from_rgb` ni `FontId::proportional`.
 
-### Où en est ce critère (mesuré le 2026-09-12)
+### Où en est ce critère (mesuré le 2026-09-12, repris après la déduplication)
 
-**Les polices sont faites** : zéro `FontId::proportional` et zéro `FontId::monospace` dans les trois
-fichiers de panneau. **Les couleurs ne le sont pas** : 18 littéraux dans `watchlist.rs`, 5 dans
-`combat.rs`. Ils se rangent en trois familles, et elles n'appellent pas le même travail :
+**Les polices étaient déjà faites** : zéro `FontId::proportional` et zéro `FontId::monospace` dans
+les trois fichiers de panneau. **Les couleurs l'étaient à moitié** : 18 littéraux dans
+`watchlist.rs`, 5 dans `combat.rs`, en trois familles qui n'appelaient pas le même travail. Deux des
+trois sont traitées :
 
-1. **L'échelle de dégâts** (`watchlist.rs`, 8 teintes de `#ffb703` à `#06d6a0`) — une palette
-   catégorielle du portage web, qui n'existe nulle part dans le jeu. La promouvoir en jetons la
-   figerait telle quelle ; décider d'abord si l'overlay la garde.
-2. **Les fonds et textes de panneau** (`SURFACE_WELL`, `SURFACE_RAISED`, `BORDER_STRONG`,
-   `TEXT_MUTED`, `TEXT_BRIGHT`, `TINT_MEDIUM`, `TINT_STRONG`, `LEADER_PANEL_FILL`) — dupliqués entre
-   `watchlist.rs` et `combat.rs`, ce qui est le vrai défaut : deux copies qui dérivent.
-3. **`DAMAGE_ACCENT`** (`combat.rs`, `#077982`) — un doublon pur de `tokens::METER_FILL`, déjà au
-   design system. Celui-là se supprime sans décision.
+1. ✅ **`DAMAGE_ACCENT`** (`combat.rs`, `#077982`) — doublon pur de `tokens::METER_FILL`, supprimé.
+2. ✅ **Les fonds et textes de contenu flottant** — remontés dans la section `OVERLAY_*` de
+   `tokens.rs`. Trois d'entre eux existaient **réellement en double** entre les deux panneaux : le
+   fond translucide (sous deux noms, `LEADER_PANEL_FILL` et `PANEL_BACKDROP_FILL`, la doc du second
+   annonçant elle-même « même teinte que » le premier) et les deux voiles de survol
+   `TINT_MEDIUM` / `TINT_STRONG`. Les autres ne vivaient que dans un fichier, mais viennent tous du
+   même `:root` du dépôt web et méritaient le même toit.
+3. ⏳ **L'échelle de dégâts** (`watchlist.rs`, 8 teintes de `#ffb703` à `#06d6a0`) — une palette
+   catégorielle du portage web, qui n'existe nulle part dans le jeu. **Laissée telle quelle** : la
+   promouvoir en jetons la figerait, et la question est d'abord de savoir si l'overlay la garde.
+
+**Après ce passage** : `combat.rs` ne contient plus **aucun** littéral de couleur.
+`watchlist.rs` en garde 10 — les 8 de l'échelle de dégâts, plus deux `from_rgba_unmultiplied`
+qui ne sont pas des littéraux mais des **calculs** (une teinte reçue à laquelle on applique un
+alpha, un noir dont l'opacité suit l'animation d'un toast). Le critère de fin, écrit comme un
+`grep`, les compterait à tort : il vise les valeurs en dur, pas les compositions.
+
+**Aucun snapshot n'a bougé** — c'est ce qui prouve que le passage est un déplacement et non une
+retouche.
+
+**Un doublon repéré et laissé** : `combat_spell_block.rs` déclare `GOLD = #f4d89e` en annonçant
+dans son propre commentaire que c'est « le même que `tokens::INPUT_TEXT` ». Même motif que
+`DAMAGE_ACCENT`, mais ce fichier est en cours d'écriture par une autre session (règle de
+coordination ci-dessus). Il signale par ailleurs un vrai sujet : `#f4d89e` est **le doré du jeu**, et
+trois jetons le portent déjà sous trois noms de composant (`INPUT_TEXT`, `TAB_LABEL_IDLE`,
+`PAGINATION_LABEL`). Un jeton nommé pour ce qu'il est, dont les trois seraient des alias, est un
+chantier à lui seul.
 
 **Deux composants du lot sont livrés sans consommateur** : `design::table` et `design::pagination`
 n'ont aucun appelant dans l'overlay — l'historique HDV n'est pas porté (hors périmètre, voir plus
-bas). C'est la même situation que celle qui bloque `badge`, à une différence près qui a compté : ils
-ont, eux, un relevé mesuré derrière chaque cote.
+bas). Décision utilisateur du 2026-09-12 : **on les garde et on verra où les employer**. C'est la
+même situation que celle qui bloque `badge`, à une différence près qui a compté : ils ont, eux, un
+relevé mesuré derrière chaque cote.
 
 **Estimation** : 5 à 7 séances.
 
@@ -532,13 +553,16 @@ ont, eux, un relevé mesuré derrière chaque cote.
 
 # Lot 6 — Finitions (vague 4 du catalogue)
 
-`toolbar`, `segmented`, `toast`, `dialog`, `separator`. Aucun ne bloque quoi que ce soit ; chacun
-retire du code d'un panneau. À prendre par opportunité, quand un besoin réel se présente — pas pour
-vider une liste.
+**Abandonné — décision utilisateur du 2026-09-12.** Ce lot n'a jamais eu d'autre justification que
+de vider une liste, et son propre énoncé le disait : « aucun ne bloque quoi que ce soit », « à
+prendre par opportunité, pas pour vider une liste ». Les deux qui ont été écrits l'ont été parce
+qu'un besoin réel les a appelés — **`separator`** (2026-09-11) et **`dialog`** (2026-09-12,
+`design::confirm_dialog`, appelé par la garde de fermeture de la fenêtre Options).
 
-**`separator`** (2026-09-11) et **`dialog`** (2026-09-12, `design::confirm_dialog`, appelé par la
-garde de fermeture de la fenêtre Options) sont faits, et tous deux exactement de cette façon : un
-besoin réel les a appelés. Restent `toolbar`, `segmented` et `toast`.
+`toolbar`, `segmented` et `toast` restent donc du code peint à la main dans les panneaux, et c'est
+assumé. Le jour où l'un d'eux est réellement nécessaire, la fiche de la vague 4 du catalogue dit ce
+qu'il absorberait et quelle matière existe — rien n'est perdu, la liste n'est simplement plus un
+travail à faire.
 
 **Estimation** : 3 à 4 séances.
 

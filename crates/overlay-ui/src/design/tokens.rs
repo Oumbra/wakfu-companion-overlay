@@ -1249,6 +1249,67 @@ pub const METER_HIGHLIGHT_RATIO: f32 = 0.35;
 pub const METER_FILL: Color32 = Color32::from_rgb(0x07, 0x79, 0x82);
 
 // ---------------------------------------------------------------------------------------------
+// Le reste du vocabulaire du contenu flottant — `OVERLAY_*`
+//
+// Remontés des panneaux le 2026-09-12. Ces valeurs viennent du thème sombre du dépôt web
+// (`styles.css`, `:root`) : l'overlay est un portage, et ce sont ses surfaces à lui, celles qui
+// n'ont pas de fenêtre du jeu autour. Ne pas les confondre avec les jetons mesurés sur le client —
+// un bouton, un champ, un onglet prennent les teintes du jeu, pas celles-ci.
+//
+// **Trois d'entre elles existaient en double**, recopiées dans `panels::combat` ET
+// `panels::watchlist` sans lien déclaré : le fond translucide (sous deux noms différents,
+// `LEADER_PANEL_FILL` et `PANEL_BACKDROP_FILL`) et les deux teintes de survol. C'est exactement le
+// motif qui avait déjà été corrigé pour l'accent — deux copies d'une même décision dérivent à la
+// première retouche.
+// ---------------------------------------------------------------------------------------------
+
+/// Fond translucide d'un bandeau posé sur l'écran de jeu — noir bleuté, alpha 150.
+///
+/// Approximation d'un bandeau du client (les captures de référence n'ont pas de canal alpha
+/// exploitable) : assez opaque pour détacher le contenu du décor sans devenir un pavé plein. La
+/// planche fournie par l'utilisateur le 2026-09-06 la montre derrière la bande de boutons de
+/// premier plan du jeu, visible dans l'écart entre deux boutons adjacents.
+///
+/// **Trois consommateurs, un seul jeton** depuis le 2026-09-12 : la ligne leader du panneau
+/// Combat, son bloc de sorts, et le fond du carré de contrôle du Suivi. Les deux premiers la
+/// nommaient `LEADER_PANEL_FILL`, le troisième `PANEL_BACKDROP_FILL` — la doc de celui-ci disait
+/// déjà « même teinte que `combat::LEADER_PANEL_FILL` », ce qui est un doublon qui s'annonce.
+pub const OVERLAY_BACKDROP: Color32 = Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
+
+/// `--tint-medium` du thème web — voile blanc à 31/255, fond d'un bouton discret au repos.
+///
+/// Était en double : bouton de fermeture d'un toast (Suivi) et surface du panneau Combat.
+pub const OVERLAY_TINT_MEDIUM: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 31);
+
+/// `--tint-strong` du thème web — le même voile à 46/255, pour le survol.
+pub const OVERLAY_TINT_STRONG: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
+
+/// `--surface-well` du thème web — fond creusé, celui du badge de compteur d'une tuile de suivi.
+pub const OVERLAY_SURFACE_WELL: Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
+
+/// `--surface-raised` du thème web — fond surélevé, celui de la carte d'un toast de ramassage.
+///
+/// Le web y pose un dégradé à deux arrêts **identiques** : un aplat suffit.
+pub const OVERLAY_SURFACE_RAISED: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+
+/// `--border-strong` du thème web — bordure d'un badge de compteur, et bordure « monstre ».
+pub const OVERLAY_BORDER_STRONG: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
+
+/// `--text-bright` du thème web — le nom d'un objet ou d'un monstre dans un toast.
+pub const OVERLAY_TEXT_BRIGHT: Color32 = Color32::from_rgb(0xF2, 0xF2, 0xF2);
+
+/// `--text-muted` du thème web — la cible grisée d'un décompte, le texte d'une tuile « + » / « − ».
+pub const OVERLAY_TEXT_MUTED: Color32 = Color32::from_rgb(0x88, 0x88, 0x88);
+
+/// Texte d'une barre de dégâts — `#ebf0f5`, **et ce n'est pas [`OVERLAY_TEXT_BRIGHT`]**.
+///
+/// Les deux sont des blancs cassés voisins, d'origines différentes : celui-ci est mesuré pixel par
+/// pixel sur la maquette de barre fournie par l'utilisateur (capture du 2026-09-02), l'autre vient
+/// du `:root` web. Les fusionner sur leur ressemblance effacerait la provenance de l'un des deux —
+/// et la mesure perdrait contre la recopie.
+pub const OVERLAY_TEXT: Color32 = Color32::from_rgb(235, 240, 245);
+
+// ---------------------------------------------------------------------------------------------
 // Portrait — `design::portrait`
 // ---------------------------------------------------------------------------------------------
 

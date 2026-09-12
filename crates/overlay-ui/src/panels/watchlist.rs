@@ -327,15 +327,15 @@ const ICON_SIZE: f32 = 30.0;
 ///
 /// La planche de référence fournie par l'utilisateur (2026-09-06) montre un léger fond noir
 /// semi-opaque derrière la bande de boutons de premier plan du jeu, visible dans le petit écart
-/// entre deux boutons adjacents et sur les bords. Même teinte que `panels::combat::
-/// LEADER_PANEL_FILL`, un bandeau translucide déjà validé ailleurs dans cette interface — pas une
-/// nouvelle valeur d'opacité inventée pour l'occasion.
+/// entre deux boutons adjacents et sur les bords. Même teinte que la ligne leader du panneau
+/// Combat, un bandeau translucide déjà validé ailleurs dans cette interface — pas une nouvelle
+/// valeur d'opacité inventée pour l'occasion. Les deux copies ont été réunies dans
+/// `tokens::OVERLAY_BACKDROP` le 2026-09-12.
 ///
 /// Vivait dans `panels::icon_button` jusqu'au 2026-09-10, du temps où `combat::bottom_toolbar` en
 /// avait besoin elle aussi ; ce carré en est le seul utilisateur depuis que les quatre boutons y
 /// ont été regroupés.
-const PANEL_BACKDROP_FILL: egui::Color32 =
-    egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
+use crate::design::tokens::OVERLAY_BACKDROP as PANEL_BACKDROP_FILL;
 /// Rayon d'angle du fond translucide — voir [`PANEL_BACKDROP_FILL`].
 const PANEL_BACKDROP_ROUNDING: f32 = 6.0;
 
@@ -449,28 +449,31 @@ fn control_row_height() -> f32 {
     CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
 }
 
-// Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
-// l'overlay reproduit pour l'instant, voir `panels::combat::ACCENT` et sa propre justification).
-/// `--surface-well` — fond du badge de compteur.
-const SURFACE_WELL: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
-/// `--border-strong` — bordure du badge ET bordure "monstre" (`.kpi.is-monster`).
-const BORDER_STRONG: egui::Color32 = egui::Color32::from_rgb(0x4d, 0x4d, 0x4d);
-/// `--text-muted` — cible grisée d'un décompte, texte des tuiles "+"/"−".
-const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(0x88, 0x88, 0x88);
+// Jetons repris de `:root` (`styles.css`, thème sombre par défaut — seul thème que l'overlay
+// reproduit pour l'instant). Ils vivent depuis le 2026-09-12 dans la section `OVERLAY_*` de
+// `design::tokens` : deux de ces valeurs existaient aussi dans `panels::combat`, et une recopie
+// n'est pas un lien.
+//
+// `--surface-well` (fond du badge de compteur), `--border-strong` (sa bordure, et la bordure
+// « monstre » de `.kpi.is-monster`), `--text-muted` (cible grisée d'un décompte, texte des tuiles
+// « + » / « − »).
+use crate::design::tokens::{
+    OVERLAY_BORDER_STRONG as BORDER_STRONG, OVERLAY_SURFACE_WELL as SURFACE_WELL,
+    OVERLAY_TEXT_MUTED as TEXT_MUTED,
+};
 
 // `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
 // `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`. Repris du
 // jeton partagé : voir `tokens::OVERLAY_ACCENT`.
 use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
-/// `--surface-raised` — fond du toast (`loot-alert-card`, dégradé à deux arrêts IDENTIQUES côté
-/// web donc simple aplat ici).
-const SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x26);
-/// `--text-bright` — nom de l'objet/monstre dans le toast (`loot-alert-name`).
-const TEXT_BRIGHT: egui::Color32 = egui::Color32::from_rgb(0xf2, 0xf2, 0xf2);
-/// `--tint-medium` — fond du bouton de fermeture au repos (`loot-alert-close`).
-const TINT_MEDIUM: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 31);
-/// `--tint-strong` — fond du bouton de fermeture survolé (`loot-alert-close:hover`).
-const TINT_STRONG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
+// `--surface-raised` (fond du toast, `loot-alert-card` — dégradé à deux arrêts IDENTIQUES côté web,
+// donc simple aplat ici), `--text-bright` (nom de l'objet ou du monstre, `loot-alert-name`), et les
+// deux teintes du bouton de fermeture au repos puis survolé (`loot-alert-close`). Ces deux
+// dernières étaient recopiées à l'identique dans `panels::combat`.
+use crate::design::tokens::{
+    OVERLAY_SURFACE_RAISED as SURFACE_RAISED, OVERLAY_TEXT_BRIGHT as TEXT_BRIGHT,
+    OVERLAY_TINT_MEDIUM as TINT_MEDIUM, OVERLAY_TINT_STRONG as TINT_STRONG,
+};
 
 /// Largeur de la couche de confettis (`.confetti-layer`, `loot-alert.component.css`) — reprise
 /// telle quelle du web (320px), centrée sur le même axe que la carte : `main.rs::

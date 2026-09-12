@@ -402,18 +402,17 @@ const ROW_GAP: f32 = 1.0;
 /// la première version de cette refonte (12 px).
 const COLUMN_GAP: f32 = 6.0;
 
-// L'accent du contenu flottant, repris du jeton partagé plutôt que recopié : ce panneau et le
-// panneau Suivi portaient la même valeur en deux constantes locales sans lien déclaré entre elles.
-// Voir `tokens::OVERLAY_ACCENT`, qui porte la décision et sa raison.
-use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
-// Couleur dédiée au remplissage de la barre de dégâts UNIQUEMENT (retour utilisateur 2026-09-05,
-// 8e retour : `#077982`, un sarcelle plus sombre que `ACCENT`) — DE NOUVEAU distincte de `ACCENT`
-// (fusionnées en 6e retour après rejet du magenta `#ff02ff` du 5e retour). Le pourcentage sur le
-// portrait, lui, est revenu à `ACCENT` au 9e retour (« je préfère la couleur accent qu'il y avait
-// avant ») — barre et pourcentage n'ont donc plus la même couleur, à nouveau explicitement voulu.
-const DAMAGE_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x07, 0x79, 0x82);
-const TINT_MEDIUM: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 31);
-const TINT_STRONG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
+// Le vocabulaire du contenu flottant vient des jetons partagés, jamais de constantes locales : ce
+// panneau et le panneau Suivi en portaient plusieurs en double, sans lien déclaré entre elles.
+// Voir la section `OVERLAY_*` de `design::tokens`, qui porte chaque décision et sa raison.
+//
+// `DAMAGE_ACCENT` a disparu le 2026-09-12 : c'était un doublon pur de `tokens::METER_FILL`, dont
+// la doc porte déjà l'historique des neuf retours utilisateur qui ont séparé, fusionné puis
+// re-séparé cette teinte de l'accent.
+use crate::design::tokens::{
+    METER_FILL as DAMAGE_ACCENT, OVERLAY_ACCENT as ACCENT, OVERLAY_TINT_MEDIUM as TINT_MEDIUM,
+    OVERLAY_TINT_STRONG as TINT_STRONG,
+};
 
 /// Hauteur d'une barre de dégâts — mesurée sur la maquette fournie par l'utilisateur (capture
 /// d'écran 2026-09-02, ~16 px de haut). Une première itération l'avait portée à 18 px sans
@@ -436,7 +435,7 @@ const GROUP_NAME_BAR_GAP: f32 = 0.0;
 // au plus près plutôt qu'approximée à l'œil (retour utilisateur 2026-09-04 : « ça dénote du jeu »,
 // la première tentative n'était pas fidèle).
 
-const TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
+use crate::design::tokens::OVERLAY_TEXT as TEXT_COLOR;
 
 const TOTAL_FONT_SIZE: f32 = 18.0;
 /// Air VISIBLE entre la ligne leader et le premier groupe — 10 px depuis le 12 sept. 2026 (retour
@@ -454,11 +453,9 @@ const NAME_FONT_SIZE: f32 = 13.0;
 const LEADER_PANEL_PADDING: f32 = 6.0;
 /// Arrondi du fond opacifié de la ligne leader.
 pub(super) const LEADER_PANEL_ROUNDING: f32 = 6.0;
-/// Couleur du fond opacifié de la ligne leader — approximation d'un bandeau translucide du jeu
-/// (captures d'écran de référence sans canal alpha exploitable, voir doc de module) : noir
-/// bleuté, assez opaque pour détacher la ligne du reste sans devenir un pavé plein.
-pub(super) const LEADER_PANEL_FILL: egui::Color32 =
-    egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
+/// Couleur du fond opacifié de la ligne leader — voir [`tokens::OVERLAY_BACKDROP`], qui la partage
+/// avec le bloc de sorts et avec le carré de contrôle du Suivi.
+pub(super) use crate::design::tokens::OVERLAY_BACKDROP as LEADER_PANEL_FILL;
 
 #[allow(clippy::too_many_arguments)]
 pub fn show(
