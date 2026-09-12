@@ -762,10 +762,50 @@ chrome porté sur les VRAIES textures du jeu (`crates/overlay-ui/assets/ui/optio
 `panels::options_modal::OptionsModalAssets::load`, une fois par fenêtre OS comme
 `panels::combat_frame::CombatFrame`) plutôt que des formes peintes à la main — coins ARRONDIS (pas
 chanfreinés) pour la fenêtre elle-même et son encadré interne, menu à trois entrées (Alertes/
-Personnages/Paramètres, seule la dernière est câblée), et un nouveau module `panels::nine_slice`
+Personnages/Paramètres — « Alertes » câblé depuis le 2026-09-12, voir §9.1 ter ; « Personnages »
+reste un stub), et un nouveau module `panels::nine_slice`
 (étirement 9-slice générique, coins/bordure à taille native) pour agrandir le bouton "Sélectionner
 le fichier" sans aplatir son chanfrein — méthode validée au préalable via une simulation HTML/CSS
 avant portage, plutôt que d'itérer directement en Rust/egui.
+
+### 9.1 ter Onglet « Alertes » de la fenêtre Options (2026-09-12)
+
+Retour utilisateur après un test en jeu : « la partie alerte n'est pas accessible ». La **mécanique**
+d'alerte existait depuis le 2026-09-02 (son + toast au ramassage d'un objet à son activé) mais
+l'**écran de réglage** manquait — la liste ne se modifiait que depuis le site, et l'entrée de menu
+était affichée désactivée. `panels::alerts_tab` la porte désormais, en appliquant la maquette
+validée (`crates/overlay-testkit/examples/alertes-mockups.rs`, trois versions, la première refusée
+par une revue à trois experts) à de vraies données.
+
+- **Contenu** : titre et description, bouton « Tester le son », bloc « Fermeture de l'alerte »
+  (case « Fermeture automatique » + durée en secondes), champ d'ajout par `design::autocomplete`
+  sur le catalogue, et la grille de tuiles. Une tuile porte **deux informations qui ne se gênent
+  pas** : bordure et pictogramme disent l'état du SON, emplacement de rareté et nom disent ce
+  qu'est l'OBJET. Cliquer bascule le son ; la croix de retrait n'existe **pas** sur les dix objets
+  de `DEFAULT_SOUND_ITEM_NAMES`, que le web refuse structurellement de supprimer.
+- **Retrait confirmé** dans la boîte centrée du jeu (pas la popover du web), au voile couvrant la
+  fenêtre ENTIÈRE — c'est lui qui dit que le pied de page est inerte. Bouton de confirmation **or,
+  jamais rouge** : le rouge est réservé au « Annuler » pleine largeur.
+- **Transactionnel**, comme le reste de la fenêtre : l'onglet travaille sur un brouillon
+  d'`AlertProfile`, et « Valider » commit **tous les onglets à la fois** — le pied de page est
+  partagé, un bouton dont l'effet dépendrait de l'onglet affiché serait imprévisible. Un chemin de
+  log refusé n'écrit donc rien, alertes comprises.
+- **Écriture au compte** : `PATCH /api/v1/settings` sur la clé `profile`, reconstruite **à partir
+  de l'objet brut reçu au `GET`** (`AlertProfile::patch_value`) — le serveur remplace la valeur
+  entière de la clé, et cette clé porte aussi le pseudo, l'avatar et le mode d'affichage des
+  personnages, que l'overlay n'affiche nulle part. Écriture sautée si le brouillon n'a pas changé :
+  l'arbitrage est « dernier écrivain gagne », une écriture inutile écraserait une modification
+  faite depuis le site.
+- **La durée réglée pilote vraiment le toast** : `WatchlistToast::hide_at` est passé à
+  `Option<Instant>`, `None` valant « ne se ferme qu'à la main ». Régler une durée sans effet aurait
+  été pire que pas de réglage.
+- **Fenêtre agrandie à 760 × 810** (contre 560 × 436), ce que la maquette demande pour cinq tuiles
+  par rangée et trois rangées visibles. Le rapport d'aspect 720:561 de la vraie fenêtre du jeu est
+  abandonné au passage : arbitrage assumé au profit du contenu.
+- **Trois captures** au testkit : liste, fermeture manuelle, confirmation de retrait.
+
+Reste hors périmètre de ce lot : la **garde de fermeture** (Échap/croix de fenêtre demandant
+confirmation quand des modifications sont en attente) et l'onglet « Personnages ».
 
 ### 9.1 bis Ligne de sorts du combat (2026-09-12)
 
