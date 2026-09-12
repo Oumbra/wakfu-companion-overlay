@@ -115,6 +115,34 @@ impl Label {
         mise_en_page(ui, text, width, size, Color32::WHITE).elided
     }
 
+    /// Distance entre le haut d'un libellé de ce corps et sa **ligne de base** — le bas des lettres
+    /// sans jambage, là où l'œil voit finir le texte. Utile à un appelant qui règle un vide SOUS
+    /// un libellé : la ligne (`height`) descend bien plus bas que l'encre, et un écart mesuré
+    /// depuis son bord se lit trop grand (les tuiles d'alerte, 2026-09-12 : « à l'œil, entre le
+    /// libellé et la bordure, il n'y a pas cinq pixels »).
+    ///
+    /// Lue sur le premier glyphe de la mise en page, dont `pos.y` est sa ligne de base dans la
+    /// rangée (`epaint::text::Glyph::pos`), arrondie au pixel par egui — donc entière, comme tout
+    /// ce qui se compare à une capture.
+    pub fn baseline(ui: &Ui, size: f32) -> f32 {
+        let galley = ui.painter().layout_no_wrap(
+            "H".to_owned(),
+            text::label_font(ui.ctx(), size),
+            Color32::WHITE,
+        );
+        galley
+            .rows
+            .first()
+            .and_then(|placed| {
+                placed
+                    .row
+                    .glyphs
+                    .first()
+                    .map(|glyph| placed.pos.y + glyph.pos.y)
+            })
+            .unwrap_or_else(|| galley.size().y)
+    }
+
     /// Hauteur qu'occupera un libellé de ce corps — utile à un appelant qui doit réserver sa place
     /// avant de l'ajouter.
     pub fn height(ui: &Ui, size: f32) -> f32 {
