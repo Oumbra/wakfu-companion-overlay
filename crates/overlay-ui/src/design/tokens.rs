@@ -1075,8 +1075,9 @@ pub const OVERLAY_ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
 ///
 /// `docs/design-tokens.json` relève `item_slot_square` entre 63 et 64 px : une fourchette, parce
 /// que la mesure pixel d'un bord adouci n'a pas de frontière nette. 64 est retenu par une
-/// coïncidence qui n'en est pas une : le liseré des textures `Border-*.webp` occupe 17 px sur un
-/// canevas de 512, soit **exactement 2,1 px une fois rendu à 64** — la valeur d'`item_slot_border`
+/// coïncidence qui n'en est pas une : le liseré des textures `Border-*.webp` occupe 1/30ᵉ de leur
+/// canevas (17 px sur les 512 qu'elles faisaient alors), soit **2,1 px une fois rendu à 64** — la
+/// valeur d'`item_slot_border`
 /// relevée sur les mêmes captures. À 58 px (la cote du portage web, `.kpi` de
 /// `tracker-strip.component.css`, en place jusqu'au 2026-09-12) il en faisait 1,9.
 pub const ITEM_SLOT_SIZE: f32 = 64.0;
@@ -1086,16 +1087,20 @@ pub const ITEM_SLOT_SIZE: f32 = 64.0;
 /// Le relevé range les emplacements dans `corner_style_inputs_lists`
 /// (« square_or_near_square »), loin des 10 px hérités du CSS : dans le jeu, une case d'inventaire
 /// est un carré. 2 plutôt que 0 parce que le contour extérieur des textures de rareté est lui-même
-/// légèrement arrondi (rayon ≈ 32/512 du canevas, soit ≈ 4 px à 64) — un fond parfaitement
+/// légèrement arrondi (rayon ≈ 1/16ᵉ du canevas, soit ≈ 4 px à 64) — un fond parfaitement
 /// rectangulaire pointerait hors de ses coins.
 pub const ITEM_SLOT_ROUNDING: f32 = 2.0;
 
 /// Marge intérieure des textures `Border-*.webp`, en fraction de leur canevas.
 ///
-/// **Mesurée** : la fenêtre où l'icône se peint commence à 52 px et finit à 460 px sur un canevas
-/// de 512, à l'identique sur les sept fichiers. `1 - 2 × ce ratio` donne donc la fraction du côté
+/// **Mesurée** : la fenêtre où l'icône se peint commence à 13 px et finit à 114 px sur le canevas
+/// de 128, à l'identique sur les sept fichiers. `1 - 2 × ce ratio` donne donc la fraction du côté
 /// occupée par cette fenêtre, soit ≈ 0,797.
-pub const ITEM_SLOT_BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
+///
+/// Le rapport est **inchangé depuis la réduction des textures** du 2026-09-12 : 13/128 vaut
+/// exactement 52/512, la valeur relevée sur le canevas d'origine. Une fraction, pas une cote —
+/// c'est ce qui a permis de changer l'échelle des assets sans toucher à ce jeton.
+pub const ITEM_SLOT_BORDER_INNER_RATIO: f32 = 13.0 / 128.0;
 
 /// Fraction de la fenêtre intérieure qu'occupe réellement l'icône — 0,96, et pas 1.
 ///
@@ -1130,7 +1135,7 @@ pub const ITEM_SLOT_PLAIN_STROKE: f32 = 2.0;
 ///
 /// **Seuil choisi, pas mesuré**, et la raison est arithmétique : un liseré de
 /// [`ITEM_SLOT_PLAIN_STROKE`] mange 2 px de chaque côté, et une bordure de rareté réserve déjà
-/// 2 × 52/512 de son carré. À 8 px, il reste 4 px au milieu, soit deux pixels d'icône une fois la
+/// 2 × [`ITEM_SLOT_BORDER_INNER_RATIO`] de son carré. À 8 px, il reste 4 px au milieu, soit deux pixels d'icône une fois la
 /// marge de [`ITEM_SLOT_ICON_FILL`] retirée. Personne ne demande sciemment un emplacement de cette
 /// taille : c'est le signe d'une largeur calculée qui est tombée à rien, exactement ce qu'un
 /// journal doit rattraper.
