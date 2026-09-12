@@ -20,7 +20,8 @@ pub mod spells;
 pub mod watchlist;
 
 pub use catalog::{
-    CatalogIndex, IconKind, IconRef, MonsterClassification, WakfuItemCategory, WakfuRarity,
+    CatalogIndex, IconKind, IconRef, ItemSuggestion, MonsterClassification, WakfuItemCategory,
+    WakfuRarity,
 };
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
@@ -31,7 +32,11 @@ pub use history::{
 };
 pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
 pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
-pub use profile::{sound_items_from_settings_json, LootAlert, SoundItemEntry};
+pub use profile::{
+    find_enabled_sound_item, profile_patch_entry, AlertProfile, LootAlert, SoundItemEntry,
+    DEFAULT_ALERT_DURATION_SECONDS, DEFAULT_SOUND_ITEM_NAMES, MAX_ALERT_DURATION_SECONDS,
+    MIN_ALERT_DURATION_SECONDS,
+};
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
 pub use session::{

@@ -44,7 +44,9 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_ui::config;
-use overlay_ui::engine_thread::{spawn_engine_thread, EngineCommand, EngineHandles, SyncCommand};
+use overlay_ui::engine_thread::{
+    spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SyncCommand,
+};
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
 use overlay_ui::logging;
@@ -368,6 +370,9 @@ struct App {
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+    /// Le profil d'alerte du compte, tel que le dernier `GET /api/v1/settings` l'a rendu — lu à
+    /// l'OUVERTURE de la fenêtre Options, pour en faire le brouillon de l'onglet « Alertes ».
+    alert_profile: SharedAlertProfile,
     /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
     /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
     /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
@@ -415,6 +420,16 @@ struct App {
     pending_dialog: Option<mpsc::Receiver<Option<PathBuf>>>,
 }
 
+/// Écrit une durée d'alerte dans le champ de l'onglet « Alertes » — sans décimale inutile, et à la
+/// virgule française que le champ accepte en entrée.
+fn format_alert_duration(seconds: f32) -> String {
+    if seconds.fract().abs() < f32::EPSILON {
+        format!("{}", seconds as i64)
+    } else {
+        format!("{seconds:.1}").replace('.', ",")
+    }
+}
+
 /// Regroupe les paramètres de construction d'`App` au-delà de `log_path` — sinon
 /// `too_many_arguments` (clippy), le nombre d'états partagés publiés par les threads de fond
 /// ayant crû au fil des lots (roster/watchlist L4, toast + catalogue L2/L3). Même motif que
@@ -424,6 +439,7 @@ struct AppState {
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+    alert_profile: SharedAlertProfile,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
@@ -441,6 +457,7 @@ impl App {
             snapshot,
             watchlist,
             watchlist_toast,
+            alert_profile,
             catalog,
             catalog_stale,
             remote_icons,
@@ -508,6 +525,7 @@ impl App {
             snapshot,
             watchlist,
             watchlist_toast,
+            alert_profile,
             catalog,
             catalog_stale,
             remote_icons,
@@ -1196,12 +1214,36 @@ impl App {
             rect,
             true,
         );
+        // **Le brouillon d'alertes est une COPIE du profil du compte**, prise à l'ouverture : les
+        // gestes de l'onglet la modifient librement, et seul « Valider » la renvoie (§5.1 du plan).
+        // Sans compte lié, il n'y a ni liste à charger ni endroit où l'écrire — l'onglet le dit.
+        let alerts_snapshot = self.alert_profile.load();
+        let (alerts_draft, alerts_availability) = match alerts_snapshot.as_ref() {
+            Some((profile, _)) => (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready),
+            None if matches!(**self.auth_status.load(), AuthStatus::Connected) => {
+                // Compte lié mais réglages pas encore revenus : c'est le seul cas où un rouage dit
+                // la vérité.
+                (None, alerts_tab::AlertsAvailability::Loading)
+            }
+            None => (None, alerts_tab::AlertsAvailability::NoAccount),
+        };
         overlay.options_state = Some(OptionsModalState {
             path_input: self.log_path.display().to_string(),
             error: None,
             // Toujours « Paramètres » à l'ouverture : c'est le défaut d'`OptionsTab`, et le
-            // seul onglet cliquable pour l'instant.
+            // réglage qu'on vient chercher en premier.
             tab: Default::default(),
+            alerts: options_modal::AlertsTabState {
+                // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
+                // existant qu'on vient modifier.
+                duration_input: alerts_draft
+                    .as_ref()
+                    .map(|p| format_alert_duration(p.duration_seconds))
+                    .unwrap_or_default(),
+                ..Default::default()
+            },
+            alerts_draft,
+            alerts_availability,
         });
         overlay.window.request_redraw();
         self.windows.insert(overlay.window.id(), overlay);
@@ -1241,6 +1283,53 @@ impl App {
     /// échec : la modale RESTE ouverte, le message d'erreur est écrit dans son état pour le
     /// prochain redessin (voir `OptionsModalState::error`) — rien n'est pris en compte tant que la
     /// validation n'a pas réussi.
+    /// Applique le brouillon d'alertes de la fenêtre Options : tout de suite à l'`Engine`, et au
+    /// compte sur un thread.
+    ///
+    /// **Ne fait rien si rien n'a changé** — rouvrir la fenêtre et cliquer « Valider » pour régler
+    /// le seul chemin de log ne doit pas écrire la clé `profile` du compte, dont l'arbitrage est
+    /// « dernier écrivain gagne » : une écriture inutile écraserait une modification faite depuis
+    /// le site entre-temps.
+    fn commit_alerts(&mut self, options_window_id: WindowId) {
+        let Some(draft) = self
+            .windows
+            .get(&options_window_id)
+            .and_then(|overlay| overlay.options_state.as_ref())
+            .and_then(|state| state.alerts_draft.clone())
+        else {
+            return;
+        };
+        let connu = self.alert_profile.load();
+        let (reference, raw) = match connu.as_ref() {
+            Some((profile, raw)) => (Some(profile.clone()), raw.clone()),
+            None => (None, None),
+        };
+        if reference.as_ref() == Some(&draft) {
+            return;
+        }
+
+        // Appliqué localement d'abord : la prochaine alerte doit obéir sans attendre le réseau.
+        let _ = self
+            .settings_tx
+            .send(EngineCommand::SetAlertProfile(draft.clone()));
+
+        // Et écrit au compte sur un thread — jamais sur la boucle winit (§7.3 du plan, même règle
+        // que tous les appels réseau de ce dépôt).
+        let profile_value = draft.patch_value(raw.as_ref());
+        thread::spawn(move || match overlay_sync::token_store::load_token() {
+            Some(token) => match overlay_sync::client::patch_profile(&token, &profile_value) {
+                Ok(_) => tracing::info!("[options] alertes enregistrées sur le compte."),
+                // Best-effort, comme la réplication des compteurs de Suivi : le réglage est déjà
+                // actif localement, et la prochaine validation réessaiera. Un échec réseau ne doit
+                // pas empêcher de fermer la fenêtre.
+                Err(err) => tracing::warn!(%err, "[options] échec de l'enregistrement des alertes"),
+            },
+            None => tracing::info!(
+                "[options] alertes appliquées localement — aucun compte lié, rien n'est enregistré."
+            ),
+        });
+    }
+
     fn validate_and_apply_log_path(&mut self, options_window_id: WindowId, raw: String) {
         let candidate = PathBuf::from(raw.trim());
         match discovery::validate_log_path(&candidate) {
@@ -1256,6 +1345,12 @@ impl App {
                 let _ = self
                     .settings_tx
                     .send(EngineCommand::ChangeLogPath(candidate));
+                // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
+                // pied de page est partagé : un bouton dont l'effet dépendrait de l'onglet affiché
+                // serait imprévisible. Fait APRÈS la validation du chemin, et seulement si elle
+                // passe — quand elle échoue, la fenêtre reste ouverte et rien n'est pris en compte,
+                // alertes comprises.
+                self.commit_alerts(options_window_id);
                 self.windows.remove(&options_window_id);
             }
             Err(err) => {
@@ -1468,6 +1563,7 @@ impl ApplicationHandler<UserEvent> for App {
                     OptionsModalAction::None => {}
                     OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
                     OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
+                    OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
                     OptionsModalAction::Validate(raw) => {
                         post_redraw = PostRedraw::ValidateOptions(raw)
                     }
@@ -2252,6 +2348,7 @@ fn main() {
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
+    let alert_profile = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
     let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
@@ -2285,6 +2382,7 @@ fn main() {
             snapshot: Arc::clone(&snapshot),
             watchlist: Arc::clone(&watchlist),
             watchlist_toast: Arc::clone(&watchlist_toast),
+            alert_profile: Arc::clone(&alert_profile),
             catalog: Arc::clone(&catalog),
             dungeons,
         },
@@ -2299,6 +2397,7 @@ fn main() {
         snapshot,
         watchlist,
         watchlist_toast,
+        alert_profile,
         catalog,
         catalog_stale,
         remote_icons,

@@ -66,6 +66,7 @@ mod linux_main {
     use overlay_ui::frame::{render, GpuState};
     use overlay_ui::logging;
     use overlay_ui::panels;
+    use overlay_ui::panels::alerts_tab::AlertsAvailability;
     use overlay_ui::panels::combat::CombatSide;
     use overlay_ui::panels::combat_frame::CombatFrame;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
@@ -563,8 +564,15 @@ mod linux_main {
                 path_input: self.log_path.display().to_string(),
                 error: None,
                 // Toujours « Paramètres » à l'ouverture : c'est le défaut d'`OptionsTab`, et le
-                // seul onglet cliquable pour l'instant.
+                // réglage qu'on vient chercher en premier.
                 tab: Default::default(),
+                alerts: Default::default(),
+                // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :
+                // aucun thread Auth ne tourne ici). Il n'y a donc ni liste à charger ni endroit où
+                // l'écrire, et l'onglet le dit au lieu d'afficher un rouage qui tournerait sans
+                // fin ou une liste qu'on ne pourrait pas enregistrer.
+                alerts_draft: None,
+                alerts_availability: AlertsAvailability::NoAccount,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
@@ -802,6 +810,11 @@ mod linux_main {
                         OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
                         OptionsModalAction::Validate(raw) => {
                             post_redraw = PostRedraw::ValidateOptions(raw)
+                        }
+                        // Le son d'alerte se joue par le même chemin qu'un vrai ramassage — c'est
+                        // tout l'intérêt du bouton : entendre ce qu'on entendra en jeu.
+                        OptionsModalAction::TestAlertSound => {
+                            overlay_ui::alert_sound::play_loot_alert()
                         }
                     }
                     overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
@@ -1056,6 +1069,9 @@ mod linux_main {
                 snapshot: Arc::clone(&snapshot),
                 watchlist: Arc::clone(&watchlist),
                 watchlist_toast: Arc::clone(&watchlist_toast),
+                // Mode invité fixe : rien ne publiera jamais de profil ici (aucun thread Auth,
+                // voir la doc de module) — la poignée existe pour satisfaire le contrat du thread.
+                alert_profile: Arc::new(ArcSwap::from_pointee(None)),
                 catalog: Arc::clone(&catalog),
                 dungeons,
             },

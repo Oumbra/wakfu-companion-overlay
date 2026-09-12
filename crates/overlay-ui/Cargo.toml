@@ -26,6 +26,10 @@ raw-window-handle = "0.6"
 rfd = "0.15"
 rodio = { version = "0.21", default-features = false, features = ["mp3", "playback"] }
 serde = { version = "1", features = ["derive"] }
+# Transporte l'objet `profile` BRUT du compte entre le thread Engine et la fenêtre Options :
+# réécrire les alertes sans repartir de cet objet effacerait le pseudo et l'avatar du compte
+# (voir `overlay_engine::AlertProfile::patch_value`).
+serde_json = "1"
 toml = "0.8"
 tracing = "0.1"
 tracing-appender = "0.2"

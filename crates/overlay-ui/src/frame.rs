@@ -72,11 +72,17 @@ pub fn render(
     // toast n'est alors plus reçu par `panels::watchlist::show`, voir son filtre) — jamais de
     // minuterie à annuler explicitement, seulement des redessins qui cessent d'être redemandés.
     if let Some(toast) = watchlist_toast {
-        if toast.hide_at > now {
+        // Un toast à fermeture manuelle (`hide_at: None`) n'a pas d'échéance à programmer, mais
+        // ses confettis tombent quand même : le redessin reste demandé, sans borne de fin.
+        if toast.hide_at.is_none_or(|hide_at| hide_at > now) {
             const CONFETTI_FRAME_INTERVAL: std::time::Duration =
                 std::time::Duration::from_millis(33); // ~30 images/s, largement suffisant à cette échelle
             repaint_delay = repaint_delay
-                .min(toast.hide_at - now)
+                .min(
+                    toast
+                        .hide_at
+                        .map_or(std::time::Duration::MAX, |hide_at| hide_at - now),
+                )
                 .min(CONFETTI_FRAME_INTERVAL);
         }
     }

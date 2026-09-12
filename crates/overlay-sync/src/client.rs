@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use overlay_engine::{
-    sound_items_from_settings_json, watchlist_from_settings_json, watchlist_patch_entry,
-    RosterIndex, SoundItemEntry, WatchlistEntry,
+    profile_patch_entry, watchlist_from_settings_json, watchlist_patch_entry, AlertProfile,
+    RosterIndex, WatchlistEntry,
 };
 use serde_json::Value;
 
@@ -93,6 +93,23 @@ pub fn patch_watchlist(token: &str, entries: &[WatchlistEntry]) -> Result<Value,
     patch_json_authenticated(token, "/api/v1/settings", &body)
 }
 
+/// `PATCH /api/v1/settings` pour écrire la clé `profile` — les alertes de ramassage réglées dans
+/// l'onglet « Alertes » de la fenêtre Options (2026-09-12).
+///
+/// **`profile` doit être l'objet ENTIER**, pas les seuls champs d'alerte : le serveur remplace la
+/// valeur de la clé, il ne fusionne pas. C'est `AlertProfile::patch_value` qui le construit, à
+/// partir de l'objet reçu au `GET` (`AccountSettings::profile_raw`) — l'appeler autrement
+/// effacerait le pseudo et l'avatar du compte.
+///
+/// L'horodatage est celui du poste. L'arbitrage serveur est « dernier écrivain gagne » sur cette
+/// valeur (`server/settings/merge.ts`) : une horloge locale en retard fait perdre l'écriture, ce
+/// qui est le comportement voulu — mieux vaut refuser que régresser une modification plus récente
+/// faite depuis le site.
+pub fn patch_profile(token: &str, profile: &Value) -> Result<Value, SyncError> {
+    let body = serde_json::json!({ "entries": [profile_patch_entry(profile)] });
+    patch_json_authenticated(token, "/api/v1/settings", &body)
+}
+
 /// Récupère les octets bruts d'une URL absolue quelconque — PAS `base_url()` (utilisé tel quel
 /// pour un CDN externe, ex. les icônes `wakassets`, voir `overlay_engine::catalog::IconRef::
 /// image_url`), pas d'en-tête d'authentification (jamais nécessaire hors du propre domaine de
@@ -147,11 +164,18 @@ pub struct AccountSettings {
     /// set_watchlist_entries` écrase le `count` de chaque entrée reçue ici par le compteur local
     /// déjà en cours, s'il existe.
     pub watchlist: Vec<WatchlistEntry>,
-    /// Objets à son activé au ramassage (`data.profile.soundItems`, voir
-    /// `overlay_engine::profile`) — INDÉPENDANT de `watchlist` : un objet peut avoir son son
-    /// activé sans être suivi, et réciproquement. Lu en lecture seule comme le reste de cette
-    /// structure, jamais réécrit par l'overlay.
-    pub sound_items: Vec<SoundItemEntry>,
+    /// Alertes de ramassage — objets à son activé et réglages du toast (`data.profile`, voir
+    /// `overlay_engine::profile`). INDÉPENDANT de `watchlist` : un objet peut avoir son son
+    /// activé sans être suivi, et réciproquement.
+    pub alerts: AlertProfile,
+    /// **L'objet `profile` brut, tel que le compte l'a renvoyé** — `None` si la clé est absente.
+    ///
+    /// Conservé pour une seule raison, et elle est décisive : `PATCH /api/v1/settings` remplace la
+    /// valeur ENTIÈRE d'une clé, et `profile` porte aussi le pseudo, l'avatar et le mode
+    /// d'affichage des personnages, que l'overlay n'affiche nulle part. Réécrire les alertes sans
+    /// repartir de cet objet effacerait ces champs du compte — voir
+    /// `AlertProfile::patch_value`, qui le prend en entrée.
+    pub profile_raw: Option<Value>,
 }
 
 /// `GET /api/v1/auth/me` avec `Authorization: Bearer <token>` — seule source de l'`uid` requis par
@@ -211,7 +235,8 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
     Ok(AccountSettings {
         roster: RosterIndex::from_settings_json(&data),
         watchlist: watchlist_from_settings_json(&data),
-        sound_items: sound_items_from_settings_json(&data),
+        alerts: AlertProfile::from_settings_json(&data),
+        profile_raw: data.get("profile").cloned(),
     })
 }
 
