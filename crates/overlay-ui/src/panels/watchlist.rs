@@ -293,11 +293,19 @@ pub fn is_active(toast: Option<&WatchlistToast>, now: std::time::Instant) -> boo
     toast.is_some_and(|t| t.hide_at > now)
 }
 
-/// 58×58, coins arrondis 10px — mêmes dimensions que `.kpi` (`tracker-strip.component.css`),
-/// repliée (pas l'état `.expanded` au clic, jamais câblé côté overlay pour l'instant).
-const TILE_SIZE: f32 = 58.0;
+/// Côté d'une tuile — **celui du composant**, pas une valeur propre au panneau.
+///
+/// Ce fut `58.0` en dur (la cote de `.kpi`, `tracker-strip.component.css`) jusqu'au 2026-09-12,
+/// même valeur que `tokens::ITEM_SLOT_SIZE` mais écrite deux fois : le passage du composant aux
+/// cotes du client (64 px) aurait laissé le bandeau à 58 sans que rien ne le signale. La largeur
+/// de la fenêtre se calcule ici (voir `panel_width`), la taille d'un emplacement non.
+const TILE_SIZE: f32 = design::tokens::ITEM_SLOT_SIZE;
 /// Un peu plus que le simple espacement visuel du web (`.kpi-strip { gap: ... }`) — écart
 /// suffisant pour distinguer clairement deux tuiles adjacentes.
+///
+/// **Reste à 12 px** alors que le client serre ses cases à 2 (`item_slot_gap`) : c'est la densité
+/// d'une grille d'inventaire, pas celle d'un bandeau de suivi posé par-dessus le jeu, et cette
+/// valeur-ci vient d'un réglage utilisateur.
 const TILE_GAP: f32 = 12.0;
 /// `app-item-icon [size]="30"` dans le template web. Ne sert plus à la tuile — `design::item_slot`
 /// porte désormais cette cote sous le nom `ITEM_SLOT_PLAIN_ICON_FILL`, en fraction du côté plutôt
