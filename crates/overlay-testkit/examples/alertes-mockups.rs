@@ -513,7 +513,15 @@ fn alert_item(
     // **`design::item_slot`**, pas une peinture locale : l'aplat, la bordure de rareté et leur
     // ordre (bordure SOUS l'icône) sont au composant depuis le 2026-09-11. L'icône reste le repli
     // générique — les vraies viennent du CDN, hors de portée du harnais.
-    ui.put(
+    //
+    // **Dans un ENFANT, jamais sur le `ui` de la rangée** : `Ui::put` ouvre un scope, et un scope
+    // avance le curseur du parent jusqu'au bord de ce qu'il pose. Appelé directement, il ramenait
+    // le curseur au bord droit de l'EMPLACEMENT (centré, donc 27 px avant le bord de la tuile) :
+    // la tuile suivante démarrait 27 px trop tôt et son fond opaque effaçait la fin du nom de la
+    // précédente. Ces maquettes portaient le défaut, et le portage l'a repris tel quel — repéré
+    // seulement le 2026-09-12, sur une capture de l'overlay en vrai.
+    let mut cellule = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    cellule.put(
         slot,
         design::item_slot()
             .size(TILE_SLOT)

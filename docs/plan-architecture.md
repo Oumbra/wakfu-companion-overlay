@@ -821,6 +821,32 @@ La boîte de confirmation a été **remontée au design system** à cette occasi
 voir le catalogue des composants) : deux appelants, donc sa place n'est plus dans un panneau.
 L'extraction est à pixel constant.
 
+### Deux défauts corrigés après un test en jeu (2026-09-12)
+
+**1. La modale restait au-dessus de tout.** Elle naissait avec un `game_hwnd` nul — « pas rattachée
+à une fenêtre de jeu précise » — ce qui obligeait `sync_windows` et `sync_topmost` à l'exclure
+explicitement de toute leur logique. Conséquence : elle restait `HWND_TOPMOST` en permanence, y
+compris quand l'utilisateur passait sur un navigateur, sur une autre application, ou sur un **second
+client Wakfu** en multi-compte. Retour utilisateur : « à la différence des overlays Suivi et Combat,
+la modale reste en premier plan, ce qui n'est pas bon ».
+
+Elle est désormais **rattachée à la fenêtre de jeu depuis laquelle on l'a ouverte**, comme n'importe
+quel overlay : le bouton « Options » du carré de contrôle passe le `HWND` de sa fenêtre, le raccourci
+global prend celle au premier plan (à défaut le premier overlay connu). Les deux exemptions sont
+supprimées — elle suit le premier plan de SON personnage, disparaît quand on regarde ailleurs, et
+s'en va avec le client qu'elle configure. Même traitement côté X11 (`game_window`,
+`_NET_ACTIVE_WINDOW`).
+
+**2. Les noms d'objet étaient illisibles dans la grille.** Trois tuiles affichaient « Plan "Epée
+de » à l'identique. La cause n'était pas la mise en forme du texte mais `Ui::put`, qui **avance le
+curseur du parent** : la tuile suivante démarrait 27 px trop tôt et son fond opaque effaçait la fin
+du nom de la précédente (voir le catalogue des composants, « Piège d'appelant »). Le défaut était
+déjà dans la maquette validée et le portage l'a repris tel quel.
+
+Corrigé, et le nom passe au passage **sur deux lignes** (`alerts_tab::NAME_MAX_ROWS`) : une seule
+ligne de 108 px ne distingue pas quatre noms qui partagent leurs quatorze premiers caractères. La
+fenêtre gagne 40 px de haut (810 → 850) pour que trois rangées restent visibles.
+
 Reste hors périmètre de ce lot : l'onglet « Personnages ».
 
 ### 9.1 bis Ligne de sorts du combat (2026-09-12)
