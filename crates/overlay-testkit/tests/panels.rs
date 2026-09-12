@@ -1300,3 +1300,74 @@ fn options_garde_de_fermeture_au_clavier() {
         "Échap dans la garde aurait dû la refermer"
     );
 }
+
+/// **L'infobulle du nom d'objet** — celle que `design::label` pose quand le nom est coupé.
+///
+/// Deux captures, et la seconde compte autant que la première : un nom qui tient en entier ne doit
+/// PAS révéler d'infobulle de nom (elle répéterait ce qui est déjà lisible), c'est celle de la
+/// tuile qui parle alors. Une règle qui se déclencherait toujours serait aussi fausse qu'une règle
+/// qui ne se déclencherait jamais.
+///
+/// Positions : les tuiles commencent à x = 47 et cadencent à 128 px (118 + gouttière), donc leurs
+/// centres tombent à 106, 234, 362, 490, 618. La ligne du nom de la première rangée est à y ≈ 496.
+fn survole_un_nom(nom_capture: &str, x: f32) {
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
+
+    let mut profile = overlay_engine::AlertProfile::default();
+    profile.add("Combinaison Lardante", Some(4242));
+
+    let mut options_state = OptionsModalState {
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: AlertsTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        alerts_draft: Some(profile),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: Default::default(),
+        pending_close: false,
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.hover_at(egui::pos2(x, 496.0));
+    harness.run();
+    harness.snapshot(nom_capture);
+}
+
+/// « Pierre d'entourage » ne tient pas dans 108 px : il est élidé, donc son nom entier s'affiche.
+#[test]
+fn options_alertes_infobulle_sur_nom_elide() {
+    survole_un_nom("options_alertes_infobulle_nom_elide", 362.0);
+}
+
+/// « Pierre ultime » tient en entier : pas d'infobulle de nom, seulement celle de la tuile, qui dit
+/// ce que le clic fera.
+#[test]
+fn options_alertes_pas_d_infobulle_sur_nom_entier() {
+    survole_un_nom("options_alertes_infobulle_nom_entier", 618.0);
+}
