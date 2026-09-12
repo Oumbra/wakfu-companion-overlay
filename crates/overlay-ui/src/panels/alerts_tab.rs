@@ -57,24 +57,28 @@ const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Largeur d'une tuile — calée pour que cinq tiennent sur une rangée dans la fenêtre agrandie.
 const TILE_WIDTH: f32 = 118.0;
-/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, nom sur **une** ligne, marges —
-/// `TILE_BADGE_ROW + TILE_SLOT + TILE_NAME_GAP + ligne de nom (≈ 18 px à 13 px de corps) +
-/// TILE_BOTTOM_INSET`, soit 18 + 64 + 5 + 18 + 18.
+/// Hauteur d'une tuile : emplacement d'objet, nom sur **une** ligne, marges —
+/// `TILE_SLOT_TOP + TILE_SLOT + TILE_NAME_GAP + ligne de nom (≈ 18 px à 13 px de corps) +
+/// TILE_BOTTOM_INSET`, soit 5 + 64 + 5 + 18 + 5 = 97.
 ///
 /// Portée à 104 px un moment le 2026-09-12, pour un nom sur deux lignes — **revenu en arrière le
 /// jour même, sur décision de l'utilisateur** : la tuile porte déjà l'icône de l'objet, et c'est
 /// elle qui lève l'ambiguïté entre deux noms proches, bien avant le texte. Le nom coupé se lit en
 /// infobulle — voir `design::label`. Puis 88 → 110 le soir même, et cette fois pour
 /// l'emplacement : c'est lui qui grandit (voir `TILE_SLOT`), le nom garde sa ligne unique. Puis
-/// 110 → 123 dans la foulée, pour la marge basse (voir `TILE_BOTTOM_INSET`).
+/// 110 → 123 pour une marge basse de 18, **sur un malentendu** : la demande était l'inverse —
+/// ramener la marge HAUTE à celle du bas, « comme ça on va gagner en hauteur ». D'où 97.
 const TILE_HEIGHT: f32 =
-    TILE_BADGE_ROW + TILE_SLOT + TILE_NAME_GAP + TILE_NAME_LINE + TILE_BOTTOM_INSET;
+    TILE_SLOT_TOP + TILE_SLOT + TILE_NAME_GAP + TILE_NAME_LINE + TILE_BOTTOM_INSET;
 /// Hauteur réservée à la ligne du nom — ce que `design::Label::height` rend à 13 px de corps.
 const TILE_NAME_LINE: f32 = 18.0;
-/// Entre la ligne du nom et le bord bas de la tuile — **le même écart qu'entre le bord haut et
-/// l'emplacement** (`TILE_BADGE_ROW`), demande du 2026-09-12 au soir. C'était 5, et le nom
-/// touchait presque le bord quand l'emplacement, lui, avait de l'air au-dessus.
-const TILE_BOTTOM_INSET: f32 = TILE_BADGE_ROW;
+/// Entre le bord haut et l'emplacement — **cinq pixels, comme entre le nom et le bord bas**
+/// (demande du 2026-09-12, nuit). L'emplacement remonte donc dans la rangée des badges : ils
+/// occupent les coins (14 px à 5 px du bord), lui le centre (27 px de chaque côté), ils ne se
+/// touchent pas. Jusque-là il attendait sous cette rangée, à 18 du bord.
+const TILE_SLOT_TOP: f32 = TILE_BADGE_INSET;
+/// Entre la ligne du nom et le bord bas de la tuile.
+const TILE_BOTTOM_INSET: f32 = 5.0;
 /// Gouttière entre deux tuiles — « les petites tuiles doivent être séparées sur tous les bords ».
 const TILE_GAP: f32 = 10.0;
 const TILE_BORDER_WIDTH: f32 = 2.0;
@@ -88,7 +92,6 @@ const TILE_FILL: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
 /// chaque côté font 64 — exactement la case du Suivi, mesurée sur le jeu. Une tuile de 118 px lui
 /// laisse 27 px de chaque côté, au lieu des 37 qui faisaient « un très grand espace latéral ».
 const TILE_SLOT: f32 = design::tokens::ITEM_SLOT_SIZE;
-const TILE_BADGE_ROW: f32 = 18.0;
 const TILE_BADGE: f32 = 14.0;
 const TILE_BADGE_INSET: f32 = 5.0;
 const TILE_NAME_INSET: f32 = 5.0;
@@ -601,7 +604,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     let slot = Rect::from_center_size(
         egui::pos2(
             rect.center().x,
-            rect.top() + TILE_BADGE_ROW + TILE_SLOT / 2.0,
+            rect.top() + TILE_SLOT_TOP + TILE_SLOT / 2.0,
         ),
         Vec2::splat(TILE_SLOT),
     );
