@@ -841,6 +841,13 @@ fn modale_options_echap_annule_et_entree_valide() {
         path_input: CHEMIN.to_string(),
         error: None,
         tab: OptionsTab::default(),
+        // **Référence = ce qui est affiché** : cette fenêtre est intouchée, donc Échap l'annule du
+        // premier coup. Une référence vide la rendrait « modifiée » dès l'ouverture, et Échap
+        // ouvrirait la garde au lieu d'annuler — voir `options_garde_de_fermeture_au_clavier`.
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            alerts: None,
+        },
         ..Default::default()
     };
     // Les actions sont ACCUMULÉES, pas gardées une par une : `Harness::run()` rejoue plusieurs
@@ -1057,6 +1064,8 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool, pending: Option<&'stati
         },
         alerts_draft: Some(profile),
         alerts_availability: AlertsAvailability::Ready,
+        initial: Default::default(),
+        pending_close: false,
     };
 
     // **À la taille réelle de la fenêtre** (`options_modal::WINDOW_SIZE`, 760 × 810 depuis que cet
@@ -1112,5 +1121,182 @@ fn options_onglet_alertes_confirmation_retrait() {
         "options_alertes_confirmation_retrait",
         false,
         Some("Combinaison Lardante"),
+    );
+}
+
+/// **La garde de fermeture** — Échap et « Annuler » demandent confirmation tant que des
+/// modifications sont en attente.
+///
+/// Sans elle, un joueur qui ajoute trois objets puis ferme par réflexe perd tout, en silence : la
+/// fenêtre est transactionnelle, rien n'est écrit avant « Valider ».
+///
+/// Ce test vérifie les deux moitiés de la règle, et la seconde compte autant que la première : une
+/// fenêtre **intouchée** doit se fermer du premier coup. Une garde qui se déclencherait toujours
+/// ajouterait un clic à chaque consultation.
+#[test]
+fn options_garde_de_fermeture() {
+    use overlay_ui::panels::alerts_tab::AlertsAvailability;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let profil = overlay_engine::AlertProfile::default();
+    let mut state = OptionsModalState {
+        path_input: CHEMIN.to_string(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: Default::default(),
+        alerts_draft: Some(profil.clone()),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            alerts: Some(profil),
+        },
+        pending_close: false,
+    };
+
+    // Rien n'a bougé : la fenêtre est propre.
+    assert!(!state.is_dirty(), "fenêtre intouchée déclarée modifiée");
+
+    // Un objet ajouté au brouillon suffit à la salir.
+    state
+        .alerts_draft
+        .as_mut()
+        .expect("brouillon")
+        .add("Combinaison Lardante", Some(4242));
+    assert!(state.is_dirty(), "ajout non détecté");
+
+    // Et un chemin retouché aussi, sur l'autre onglet : la garde couvre la FENÊTRE, pas un onglet.
+    let mut autre = state.clone();
+    autre.alerts_draft = autre.initial.alerts.clone();
+    assert!(!autre.is_dirty());
+    autre.path_input = "/autre/chemin/wakfu.log".to_string();
+    assert!(autre.is_dirty(), "chemin modifié non détecté");
+}
+
+/// La garde **à l'écran** : la boîte du jeu, sur un voile qui couvre la fenêtre entière.
+#[test]
+fn options_garde_de_fermeture_a_l_ecran() {
+    use overlay_ui::panels::alerts_tab::AlertsAvailability;
+
+    let mut profil = overlay_engine::AlertProfile::default();
+    profil.add("Combinaison Lardante", Some(4242));
+    let mut options_state = OptionsModalState {
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: Default::default(),
+        alerts_draft: Some(profil),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: Default::default(),
+        pending_close: true,
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_garde_fermeture");
+}
+
+/// Le pendant de `modale_options_echap_annule_et_entree_valide` : **Échap sur une fenêtre modifiée
+/// n'annule plus**, il ouvre la garde.
+///
+/// Les deux tests disent ensemble toute la règle. Celui-ci seul laisserait passer une garde qui se
+/// déclenche toujours ; l'autre seul, une garde qui ne se déclenche jamais.
+#[test]
+fn options_garde_de_fermeture_au_clavier() {
+    use overlay_ui::panels::alerts_tab::AlertsAvailability;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let reference = overlay_engine::AlertProfile::default();
+    let mut brouillon = reference.clone();
+    brouillon.add("Combinaison Lardante", Some(4242));
+
+    let mut options_state = OptionsModalState {
+        path_input: CHEMIN.to_string(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: Default::default(),
+        alerts_draft: Some(brouillon),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            alerts: Some(reference),
+        },
+        pending_close: false,
+    };
+    let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
+    let garde_ouverte = std::cell::Cell::new(false);
+
+    let mut harness = Harness::new_ui(|ui| {
+        overlay_ui::style::apply(ui.ctx());
+        let icons = UiIcons::load(ui.ctx());
+        let remote_icons = RemoteIconStore::empty();
+        let mut remote_icon_textures = RemoteIconTextures::default();
+        let catalog = CatalogIndex::default();
+        let action = panels::options_modal::show(
+            ui,
+            &mut options_state,
+            &mut panels::options_modal::OptionsModalContext {
+                catalog: &catalog,
+                remote_icons: &remote_icons,
+                remote_icon_textures: &mut remote_icon_textures,
+                icons: &icons,
+            },
+        );
+        if action != OptionsModalAction::None {
+            actions.borrow_mut().push(action);
+        }
+        garde_ouverte.set(options_state.pending_close);
+    });
+
+    harness.run();
+    assert!(
+        !garde_ouverte.get(),
+        "garde ouverte sans qu'on ait rien demandé"
+    );
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap ne doit RIEN fermer tant que des modifications sont en attente"
+    );
+    assert!(garde_ouverte.get(), "Échap aurait dû ouvrir la garde");
+
+    // Second appui : c'est la BOÎTE qui prend Échap, et elle répond « Non » — la fenêtre reste
+    // ouverte. Une touche ne confirme pas un abandon.
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap dans la garde ne doit pas fermer la fenêtre"
+    );
+    assert!(
+        !garde_ouverte.get(),
+        "Échap dans la garde aurait dû la refermer"
     );
 }
