@@ -59,7 +59,10 @@ use crate::ui_icons::UiIcons;
 
 use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
 
-use super::combat::{BAR_MAX_WIDTH, LEADER_PANEL_FILL, LEADER_PANEL_ROUNDING};
+use super::combat::{BAR_MAX_WIDTH, LEADER_PANEL_ROUNDING};
+// Le fond du bloc vient du jeton partagé, pas de `panels::combat` : trois blocs de l'overlay
+// portent ce bandeau translucide, aucun n'est propriétaire des deux autres.
+use crate::design::tokens::OVERLAY_BACKDROP as LEADER_PANEL_FILL;
 
 /// Air VISIBLE entre la barre du dernier groupe de dégâts et le haut du bloc — « le double de
 /// l'écart entre le switch et le premier groupe » (demande utilisateur, 2 × 9 px visibles sous le
