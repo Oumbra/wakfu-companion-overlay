@@ -843,9 +843,10 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
   second clic = retour au suivi.
 - **Remise à zéro à chaque nouveau tour** de l'allié, pas d'historique ; **pas de défilement
   latéral** : retour à la ligne tous les cinq sorts (32 px, 5 px d'écart — 3 px faisaient se
-  toucher deux critiques voisins). Badge d'index **en haut à gauche** (2 px du bord gauche, 1 px
-  du haut), critique = liseré doré + coin plié, infobulle sur une ligne « Nom · Critique » sans
-  nom de lanceur. Ennemis exclus.
+  toucher deux critiques voisins). Badge d'index **en haut à gauche** (1 px du bord gauche et du
+  haut), critique = liseré doré + coin plié, infobulle sur une ligne « Nom · Critique » sans nom
+  de lanceur. Onglets : **seul le sélectionné est en couleur**, les autres en noir et blanc
+  atténué — l'état KO ne joue pas ici (retour utilisateur du 12 sept.). Ennemis exclus.
 - **Données** : `FighterDamage::last_turn_casts` / `FightSnapshot::last_ally_caster`
   (`overlay-engine::session`, alimentés dans `apply` sur `SpellCast` via le signal « nouveau tour »
   de `register_fight_turn`, persistés par `fight_store`). **Icônes** : référentiel
