@@ -430,10 +430,11 @@ pub const SELECT_TEXT: Color32 = Color32::WHITE;
 // Autocomplétion — `design::autocomplete`
 // -------------------------------------------------------------------------------------------
 //
-// Le composant **reprend les jetons de `select` déplié** pour tout ce qui les concerne (fond de
-// liste, bord, surbrillance, filet de tête, cadence de rangée) : c'est la même liste du jeu, il n'y
-// a pas de second relevé à faire. Les jetons ci-dessous ne couvrent que ce que `select` n'a pas —
-// la bande de filtres et le contenu d'une rangée.
+// Le composant **reprend les jetons de décor de `select` déplié** (fond de liste, bord,
+// surbrillance, filet de tête) : c'est la même liste du jeu, il n'y a pas de second relevé à
+// faire. Les jetons ci-dessous couvrent ce que `select` n'a pas — la bande de filtres, et la
+// rangée entière, qui est celle du web et non la cadence de 28 px du jeu (voir
+// `AUTOCOMPLETE_ROW_HEIGHT`).
 //
 // Provenance : `shared/wakfu-autocomplete/wakfu-autocomplete.component.css` du dépôt
 // `Oumbra/wakfu-companion`, relevé le 2026-09-11. Ce sont des valeurs de la version WEB, portées
@@ -453,15 +454,45 @@ pub const AUTOCOMPLETE_FILTER_GAP: f32 = 4.0;
 pub const AUTOCOMPLETE_FILTER_RADIUS: u8 = 4;
 /// Opacité d'un filtre au repos (`opacity: 0.6`), appliquée en alpha de teinte.
 pub const AUTOCOMPLETE_FILTER_IDLE_ALPHA: u8 = 153;
-/// Marge gauche d'une rangée et de la bande de filtres.
-pub const AUTOCOMPLETE_ROW_PADDING_X: f32 = 6.0;
-/// Écart entre la gemme, l'image et le nom d'une rangée.
-pub const AUTOCOMPLETE_ROW_GAP: f32 = 6.0;
+/// Marge gauche de la bande de filtres — `.wakfu-autocomplete-categories { padding: 6px }`.
+pub const AUTOCOMPLETE_FILTER_BAR_PAD: f32 = 6.0;
+
+// La rangée : `.wakfu-autocomplete-item` et ses enfants, relevés le 2026-09-12 au soir après le
+// retour « les images sont beaucoup plus collées que sur le web, ça manque de ce côté aéré ». La
+// rangée suivait jusque-là la cadence du select du jeu (28 px, écarts de 6) ; elle reprend
+// désormais la géométrie du web **valeur pour valeur**, dans l'ordre où l'œil la parcourt :
+//
+// ```text
+// 0        10   24     30            60        70                        →  fin − 10
+// │ marge  │gem │  6   │ colonne 30  │  gap 10 │ nom …                     │ marge │
+//                        (image 24, centrée)
+// ```
+//
+// Pas de mise à l'échelle : le corps du nom (15 px contre 13,1 px sur le web) est déjà celui de
+// l'overlay, et la gemme, elle, est demandée en 14 × 14 « comme sur le web ». Un rapport unique
+// n'aurait donc pu satisfaire les deux — les cotes sont portées telles quelles.
+
+/// Hauteur d'une rangée — `.wakfu-autocomplete-item { height: 35px }`. Pas
+/// [`SELECT_ROW_HEIGHT`] (28) : la liste dépliée du jeu n'a ni gemme ni image, la rangée du web
+/// est faite pour les loger avec de l'air autour.
+pub const AUTOCOMPLETE_ROW_HEIGHT: f32 = 35.0;
+/// Marge gauche et droite d'une rangée — `.wakfu-autocomplete-item-main { padding: 0 10px }`.
+pub const AUTOCOMPLETE_ROW_PADDING_X: f32 = 10.0;
 /// Côté de la boîte de la gemme de rareté — `.wakfu-autocomplete-item-rarity`, 14 × 14 en
 /// `object-fit: contain` : une image 13 × 20 y entre donc en 9,1 × 14, limitée par la hauteur.
+/// Posée à `left: 10px`, soit au ras de la marge.
 pub const AUTOCOMPLETE_GEM_BOX: f32 = 14.0;
-/// Côté de l'image d'objet d'une rangée — tient dans les 28 px de [`SELECT_ROW_HEIGHT`].
-pub const AUTOCOMPLETE_IMAGE_SIZE: f32 = 22.0;
+/// Retrait de la colonne d'image depuis la marge gauche — `.wakfu-autocomplete-item-icon
+/// { margin-left: 20px }` : la colonne commence à 30 px du bord de la rangée, six pixels après la
+/// boîte de la gemme.
+pub const AUTOCOMPLETE_IMAGE_COLUMN_OFFSET: f32 = 20.0;
+/// Largeur de la colonne d'image — `.wakfu-autocomplete-item-icon { width: 30px }`. L'image y est
+/// centrée ; la colonne garde sa place quand l'image n'est pas encore arrivée du CDN.
+pub const AUTOCOMPLETE_IMAGE_COLUMN: f32 = 30.0;
+/// Côté de l'image d'objet — `<app-item-icon [size]="24">`.
+pub const AUTOCOMPLETE_IMAGE_SIZE: f32 = 24.0;
+/// Écart entre la colonne d'image et le nom — `.wakfu-autocomplete-item-main { gap: 10px }`.
+pub const AUTOCOMPLETE_ROW_GAP: f32 = 10.0;
 /// Écart entre le champ et le panneau déplié.
 pub const AUTOCOMPLETE_PANEL_GAP: f32 = 2.0;
 /// Marge intérieure du panneau, sur les quatre côtés.
@@ -478,18 +509,24 @@ pub const AUTOCOMPLETE_MAX_VISIBLE_ROWS: usize = 5;
 /// mesurés sur la fenêtre Options du jeu (retour du 2026-09-12 : « un tout petit peu plus large,
 /// à l'image de l'autocomplétion sur le web »).
 pub const AUTOCOMPLETE_SCROLLBAR_WIDTH: f32 = 8.0;
-/// Largeur de la barre sous le pointeur — **choix**, pas une mesure : le web ne l'élargit pas,
-/// egui le fait par défaut et l'utilisateur a jugé l'effet bienvenu (« ne me paraît pas si mal »).
-/// Deux pixels, pour que l'élargissement se voie sans que la poignée ne saute.
-pub const AUTOCOMPLETE_SCROLLBAR_HOVER_WIDTH: f32 = 10.0;
 /// Rayon de la poignée — `border-radius: 4px` du web, en cohérence avec sa largeur de 8.
 pub const AUTOCOMPLETE_SCROLLBAR_RADIUS: u8 = 4;
-/// Teinte de la poignée, **dans tous les états** — le gris de [`HEADING_TEXT`] (`#b8b9ba`, le gris
-/// unique du jeu), à deux valeurs près de ce que l'utilisateur avait sous les yeux et a validé
+/// Teinte de la poignée **au repos** — le gris de [`HEADING_TEXT`] (`#b8b9ba`, le gris unique du
+/// jeu), à deux valeurs près de ce que l'utilisateur avait sous les yeux et a validé le 2026-09-12
 /// (« conserver les couleurs de base ») : le `fg_stroke` inactif d'egui, `gray(180)`. Pas
 /// [`SCROLLBAR_THUMB`] : ce gris sombre est mesuré sur le fond noir de la fenêtre Options, et il
 /// disparaît sur le brun de la liste dépliée (`SELECT_LIST_FILL`) — vérifié au pixel.
 pub const AUTOCOMPLETE_SCROLLBAR_THUMB: Color32 = HEADING_TEXT;
+/// Teinte de la poignée **sous le pointeur et pendant le glissement** — [`SELECT_ROW_HIGHLIGHT`],
+/// le fond d'une rangée survolée. Retour du 2026-09-12 au soir : plus d'élargissement (la barre
+/// garde ses 8 px), c'est la teinte qui dit « tu peux agir dessus », « la même couleur que sur les
+/// éléments ».
+pub const AUTOCOMPLETE_SCROLLBAR_THUMB_HOVERED: Color32 = SELECT_ROW_HIGHLIGHT;
+/// Fond du rail, **plus sombre que la liste** pour qu'on lise où la barre passe — même retour.
+/// Le web fait son rail (`--scrollbar-track`, `#1a1a1a`) à 68 % de la surface qui le porte
+/// (`--surface-raised`, `#262626`) ; c'est ce rapport, appliqué au brun de [`SELECT_LIST_FILL`]
+/// (`#675d46`), qui donne cette valeur.
+pub const AUTOCOMPLETE_SCROLLBAR_TRACK: Color32 = Color32::from_rgb(0x47, 0x3F, 0x30);
 /// Longueur minimale de la poignée — **choix** : à 115 résultats pour cinq rangées visibles, le
 /// minimum d'egui (12 px) donnait un point plutôt qu'une poignée.
 pub const AUTOCOMPLETE_SCROLLBAR_MIN_HANDLE: f32 = 24.0;

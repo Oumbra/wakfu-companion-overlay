@@ -1557,12 +1557,12 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         .show(ui);
     // Le panneau est peint dans une `Area` hors flux : sans cette réserve, la section suivante
     // passerait dessous.
-    ui.add_space(4.0 + 38.0 + 4.0 * 28.0);
+    ui.add_space(4.0 + 38.0 + 4.0 * design::tokens::AUTOCOMPLETE_ROW_HEIGHT);
 
     heading(
         ui,
         "Au-delà de cinq rangées — la liste défile",
-        "Neuf entrées, cinq visibles : la barre du web (8 px, rayon 4), gris clair du jeu, sans rail. Elle s’élargit à 10 px sous le pointeur sans changer de teinte — l’élargissement seul dit le survol. Sa colonne est réservée : la mention de droite ne passe jamais dessous.",
+        "Neuf entrées, cinq visibles : la barre du web (8 px, rayon 4) sur un rail plus sombre que la liste. Elle ne s’élargit pas ; sous le pointeur, sa poignée prend la teinte des rangées survolées. Sa colonne est réservée : la mention de droite ne passe jamais dessous. Les flèches font défiler la liste pour garder l’entrée active en vue.",
     );
     let mut long = String::from("pierre");
     let beaucoup: Vec<design::AutocompleteEntry> = (1..=9)
@@ -1582,7 +1582,7 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         .preview_open(true)
         .log_name("galerie.autocomplete-defile")
         .show(ui);
-    ui.add_space(4.0 + 38.0 + 5.0 * 28.0);
+    ui.add_space(4.0 + 38.0 + 5.0 * design::tokens::AUTOCOMPLETE_ROW_HEIGHT);
 
     heading(
         ui,
@@ -1598,7 +1598,7 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         .preview_filter(Some(1))
         .log_name("galerie.autocomplete-filtre")
         .show(ui);
-    ui.add_space(4.0 + 38.0 + 28.0);
+    ui.add_space(4.0 + 38.0 + design::tokens::AUTOCOMPLETE_ROW_HEIGHT);
 
     let mut filtre_vide = String::from("pierre");
     let sans_resultat: Vec<design::AutocompleteEntry> = entrees
