@@ -21,6 +21,7 @@ use overlay_engine::{
     CatalogIndex, DungeonIndex, Engine, SessionSnapshot, WatchlistEntry, WatchlistKind,
 };
 use overlay_sync::AccountSettings;
+use serde_json::Value;
 use winit::event_loop::EventLoopProxy;
 
 use crate::alert_sound;
@@ -45,6 +46,28 @@ pub enum EngineCommand {
     /// `state` (combats/totaux Rust) suit alors la même règle que pour une rotation classique —
     /// écart déjà assumé et documenté au §5.3, pas une régression propre à ce nouveau cas.
     ChangeLogPath(PathBuf),
+    /// Profil d'alerte validé depuis l'onglet « Alertes » de la fenêtre Options (2026-09-12) —
+    /// liste d'objets à son activé ET réglages du toast.
+    ///
+    /// **Distinct d'`ApplySettings`**, qui porte tout ce qui descend du compte : celui-ci est ce
+    /// que l'utilisateur vient de régler LUI-MÊME, appliqué tout de suite pour que la prochaine
+    /// alerte obéisse sans attendre un aller-retour réseau. L'écriture au compte, elle, part en
+    /// parallèle côté hôte.
+    SetAlertProfile(overlay_engine::AlertProfile),
+}
+
+/// L'instant où un toast doit disparaître, d'après le profil d'alerte — `None` quand le compte a
+/// demandé une fermeture manuelle.
+///
+/// La durée est déjà bornée par `AlertProfile` (0,5 à 30 s) : rien à revalider ici.
+fn toast_deadline(
+    created_at: std::time::Instant,
+    profile: &overlay_engine::AlertProfile,
+) -> Option<std::time::Instant> {
+    if profile.manual_close {
+        return None;
+    }
+    Some(created_at + std::time::Duration::from_secs_f32(profile.duration_seconds))
 }
 
 /// Message transmis au thread Sync (lot L5, §7.3 du plan) — `Activate`/`Deactivate` suivent
@@ -65,6 +88,14 @@ pub enum SyncCommand {
 
 /// Regroupe les `Arc<ArcSwap<_>>` partagés avec le reste de l'app que le thread Engine consomme —
 /// factorisé pour que `spawn_engine_thread` reste sous la limite `clippy::too_many_arguments`.
+/// Le profil d'alerte du compte et l'objet `profile` BRUT dont il est tiré, partagés entre le
+/// thread Engine (qui les publie) et l'hôte (qui ouvre la fenêtre Options).
+///
+/// `None` tant qu'aucun compte n'a répondu, et de nouveau `None` après une déconnexion. Le JSON
+/// brut voyage avec le profil parce qu'il faut repartir de LUI pour réécrire la clé `profile` sans
+/// effacer le pseudo et l'avatar — voir `overlay_engine::AlertProfile::patch_value`.
+pub type SharedAlertProfile = Arc<ArcSwap<Option<(overlay_engine::AlertProfile, Option<Value>)>>>;
+
 pub struct EngineHandles {
     pub snapshot: Arc<ArcSwap<SessionSnapshot>>,
     pub watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
@@ -74,6 +105,10 @@ pub struct EngineHandles {
     /// catalogue, aucun panneau ne le consomme directement : seul l'Engine s'en sert, pour la
     /// synchro serveur.
     pub dungeons: Arc<ArcSwap<DungeonIndex>>,
+    /// Publié par ce thread, qui est celui qui reçoit `ApplySettings` — et republié à chaque
+    /// `Disconnect`. L'hôte le lit à l'ouverture de la fenêtre Options, pour en faire le brouillon
+    /// de l'onglet « Alertes ».
+    pub alert_profile: SharedAlertProfile,
 }
 
 pub fn spawn_engine_thread(
@@ -87,6 +122,7 @@ pub fn spawn_engine_thread(
         snapshot,
         watchlist,
         watchlist_toast,
+        alert_profile: alert_profile_out,
         catalog,
         dungeons,
     } = handles;
@@ -111,6 +147,10 @@ pub fn spawn_engine_thread(
             // chemin respawne un tailer flambant neuf sur CE `rx`, remplaçant l'ancien récepteur —
             // l'ancien thread watcher se termine de lui-même dès que son émetteur est abandonné ici.
             let mut rx = overlay_ingest::watcher::spawn(&log_path);
+            // Les réglages du toast (durée, fermeture manuelle) — le repli du profil par défaut
+            // tant qu'aucun compte n'a répondu. C'est ici qu'ils vivent parce que c'est ici que
+            // `hide_at` se calcule, au moment où l'alerte naît.
+            let mut alert_profile = overlay_engine::AlertProfile::default();
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
@@ -127,7 +167,12 @@ pub fn spawn_engine_thread(
                             );
                             engine.set_roster(Some(settings.roster));
                             engine.set_watchlist_entries(settings.watchlist);
-                            engine.set_sound_items(settings.alerts.sound_items);
+                            alert_profile = settings.alerts;
+                            engine.set_sound_items(alert_profile.sound_items.clone());
+                            alert_profile_out.store(Arc::new(Some((
+                                alert_profile.clone(),
+                                settings.profile_raw,
+                            ))));
                         }
                         // Déconnexion volontaire : repli mode invité — plus de roster connu
                         // (classification retombe sur `breed`), Suivi vidé (la LISTE suivie est
@@ -142,6 +187,30 @@ pub fn spawn_engine_thread(
                             engine.set_roster(None);
                             engine.set_watchlist_entries(Vec::new());
                             engine.set_sound_items(Vec::new());
+                            alert_profile = overlay_engine::AlertProfile::default();
+                            // Plus de compte : l'onglet « Alertes » doit repasser à « aucun compte
+                            // lié », pas garder la liste du compte qu'on vient de quitter.
+                            alert_profile_out.store(Arc::new(None));
+                        }
+                        EngineCommand::SetAlertProfile(profile) => {
+                            tracing::info!(
+                                sound_item_count = profile.sound_items.len(),
+                                duration_seconds = profile.duration_seconds,
+                                manual_close = profile.manual_close,
+                                "[options] profil d'alerte appliqué depuis la fenêtre Options"
+                            );
+                            engine.set_sound_items(profile.sound_items.clone());
+                            // Le brouillon validé devient la référence : rouvrir la fenêtre doit
+                            // repartir de ce qu'on vient de régler, pas de ce que le compte
+                            // renvoyait avant. Le JSON brut du compte est conservé tel quel — la
+                            // prochaine réécriture doit toujours repartir de LUI.
+                            let raw = alert_profile_out
+                                .load()
+                                .as_ref()
+                                .as_ref()
+                                .and_then(|(_, raw)| raw.clone());
+                            alert_profile_out.store(Arc::new(Some((profile.clone(), raw))));
+                            alert_profile = profile;
                         }
                         EngineCommand::ChangeLogPath(new_path) => {
                             tracing::info!(
@@ -211,7 +280,7 @@ pub fn spawn_engine_thread(
                                 catalog_id: alert.catalog_id,
                                 created_at,
                                 confetti: panels::watchlist::build_confetti(),
-                                hide_at: created_at + panels::watchlist::TOAST_DURATION,
+                                hide_at: toast_deadline(created_at, &alert_profile),
                             })));
                         }
                         // Ramassage d'un objet à son activé (compte) — INDÉPENDANT de la
@@ -235,7 +304,7 @@ pub fn spawn_engine_thread(
                                 catalog_id: alert.catalog_id,
                                 created_at,
                                 confetti: panels::watchlist::build_confetti(),
-                                hide_at: created_at + panels::watchlist::TOAST_DURATION,
+                                hide_at: toast_deadline(created_at, &alert_profile),
                             })));
                         }
                         let _ = proxy.send_event(UserEvent::NewSnapshot);

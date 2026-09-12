@@ -65,6 +65,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: None,
         tab: OptionsTab::default(),
+        ..Default::default()
     };
 
     let mut harness = Harness::new_ui(move |ui| {
