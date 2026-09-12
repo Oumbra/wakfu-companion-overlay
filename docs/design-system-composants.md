@@ -1556,13 +1556,13 @@ appartient — résoudre l'icône distante, lire la rareté au catalogue, tradui
 ~~**Les cotes restent celles du web**~~ — **passées à celles du jeu le 2026-09-12** : le carré va de
 58 à **64 px** et le rayon des coins de 10 à **2**. Ce qui a décidé la valeur haute de la fourchette
 relevée (`item_slot_square` 63-64, une mesure pixel d'un bord adouci n'ayant pas de frontière nette)
-est une coïncidence qui n'en est pas une : le liseré des `Border-*.webp` occupe 17 px sur un canevas
-de 512, soit **2,1 px rendu à 64** — exactement l'`item_slot_border` relevé sur les mêmes captures.
+est une coïncidence qui n'en est pas une : le liseré des `Border-*.webp` occupe 1/30ᵉ de leur
+canevas, soit **2,1 px rendu à 64** — exactement l'`item_slot_border` relevé sur les mêmes captures.
 À 58 il en faisait 1,9.
 
 Le rayon suit `shape.corner_style_inputs_lists` du relevé (« square_or_near_square ») : dans le jeu,
 une case d'inventaire est un carré. 2 plutôt que 0 parce que le contour extérieur des textures de
-rareté est lui-même arrondi (rayon ≈ 32/512 du canevas, ≈ 4 px à 64) — un fond parfaitement
+rareté est lui-même arrondi (rayon ≈ 1/16ᵉ du canevas, ≈ 4 px à 64) — un fond parfaitement
 rectangulaire pointerait hors de ses coins.
 
 **`item_slot_gap` (2 px) n'a PAS suivi**, et c'est délibéré deux fois : cet espacement décrit la

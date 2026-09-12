@@ -431,8 +431,16 @@ pub enum DsTexture {
     /// Découpée en [`ICON_SLICE`] : c'est un glyphe, il se met à l'échelle uniformément, il n'a ni
     /// coin ni liseré à figer.
     SliderHandle,
-    /// Les **sept bordures de rareté** d'un emplacement d'objet (`Border-*.webp`, 512 × 512
-    /// chacune), reprises telles quelles du jeu.
+    /// Les **sept bordures de rareté** d'un emplacement d'objet (`Border-*.webp`, 128 × 128
+    /// chacune), reprises du jeu.
+    ///
+    /// **Elles arrivaient en 512 × 512 pour être peintes à 64**, et ce n'était pas seulement
+    /// 6,6 Mio de mémoire de texture pour rien (2,2 % du budget de 300) : `TextureOptions::LINEAR`
+    /// n'a **pas de mipmap**, donc le GPU réduisait 512 → 64 en échantillonnant quatre texels sur
+    /// soixante-quatre. Le liseré fin y crénelait. Réduites à 128 (Lanczos, en alpha
+    /// prémultiplié), elles sont **plus fidèles** qu'avant : l'écart à un rééchantillonnage de
+    /// qualité tombe de 100/255 à 20/255 au 99ᵉ centile, et 128 est la taille exacte du rendu à un
+    /// facteur d'échelle système de 2.
     ///
     /// **Leur fenêtre intérieure n'est PAS un trou transparent** : c'est un aplat semi-transparent
     /// (~70 % d'opacité) teinté par la rareté, vérifié sur les octets décodés. D'où l'ordre de
@@ -466,9 +474,10 @@ macro_rules! ds_asset {
 ///
 /// Une seconde racine, et elle se justifie : `assets/design-system/` réunit ce qui a été **relevé
 /// sur des captures du client** — boutons, champs, onglets, glyphes détourés. Les bordures de
-/// rareté, elles, sont des **fichiers du jeu repris tels quels** (`Border-COMMON.webp` et ses six
-/// sœurs, 512 × 512), arrivées avec le portage web et jamais retouchées. Les déplacer pour
-/// uniformiser un chemin les ferait passer pour des relevés, ce qu'elles ne sont pas.
+/// rareté, elles, sont des **fichiers du jeu** (`Border-COMMON.webp` et ses six sœurs), arrivées
+/// avec le portage web. Les déplacer pour uniformiser un chemin les ferait passer pour des
+/// relevés, ce qu'elles ne sont pas — leur seule retouche est un changement d'échelle
+/// (512 → 128 le 2026-09-12), qui ne touche pas à leur dessin.
 ///
 /// Le manifeste reste le **seul endroit du crate où un chemin d'asset est écrit** — c'est ce qui
 /// compte. Deux racines nommées valent mieux qu'un `include_bytes!` égaré dans un composant.
