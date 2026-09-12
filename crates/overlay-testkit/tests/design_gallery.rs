@@ -24,7 +24,8 @@ use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, IconButtonState,
-    IconContext, InfoTone, InputState, LoaderSize, SelectState, SliderState, TabState,
+    IconContext, InfoTone, InputState, LoaderSize, SelectState, SliderState, TabState, TableAlign,
+    TableBody, TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -70,6 +71,9 @@ fn galerie_du_design_system() {
         // dégénéré).
         // 7400 -> 7530 le 2026-09-11 : section « Portrait » (deux formes, le grisé, le
         // pourcentage).
+        // PLAFOND ATTEINT le 2026-09-12 : wgpu refuse une texture de plus de 8192 px de côté
+        // (« Dimension Y value 9110 exceeds the limit of 8192 »). Il reste 662 px ici. Toute
+        // section qui ne tient pas dedans prend sa propre planche — voir `galerie_du_tableau`.
         .with_size(Vec2::new(760.0, 7530.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
@@ -1293,6 +1297,33 @@ fn gallery(ui: &mut egui::Ui) {
     section_autocomplete(ui);
 }
 
+/// **Seconde planche** — le tableau, parce que la première a atteint le plafond matériel.
+///
+/// `wgpu` refuse une texture de plus de 8192 px de côté, et `galerie_du_design_system` en occupe
+/// déjà 7530. Ce n'est donc pas un choix de présentation : une section de 1580 px n'y entre plus.
+/// La clause 7 du contrat de composant est respectée — toute variante et tout état du tableau sont
+/// sur une capture unique, celle-ci — et les prochaines sections trop grandes suivront le même
+/// chemin plutôt que de rogner sur ce qu'elles montrent.
+#[test]
+fn galerie_du_tableau() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(760.0, 1720.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    section_table(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_table");
+}
+
 /// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
 /// (comme `select` déplié), d'où les espaces réservés sous chaque cas.
 ///
@@ -1439,6 +1470,135 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         .log_name("galerie.autocomplete-filtre-vide")
         .show(ui);
     ui.add_space(4.0 + 38.0 + 34.0);
+}
+
+/// Le tableau — ses trois corps (peuplé, vide, en chargement), son défilement et son cas dégénéré.
+///
+/// **Le premier cas est peint sur un fond en bandes**, et ce n'est pas un ornement : le relevé
+/// montre que le tableau du jeu n'a PAS de fond propre — son zébrage est un éclaircissement
+/// relatif, pas une teinte. Sur un fond uni la démonstration serait invisible ; sur six bandes de
+/// luminances différentes, on voit la bande claire suivre le fond au lieu de l'écraser.
+fn section_table(ui: &mut egui::Ui) {
+    let largeur = 728.0;
+
+    let colonnes = || {
+        vec![
+            TableColumn::fixed("Date", 104.0),
+            TableColumn::flex("Nom", 1.0),
+            TableColumn::fixed("Niv.", 56.0).align(TableAlign::Center),
+            TableColumn::fixed("Prix", 108.0).align(TableAlign::End),
+        ]
+    };
+
+    // Quatre offres factices — dont une dont le nom déborde de sa colonne, pour que l'écrêtage se
+    // voie (clause « au moins un contenu qui déborde » du contrat, §1 bis).
+    let offres: [(&str, &str, i32, &str); 4] = [
+        ("12/09 14:32", "Coiffe du Bouftou Royal", 50, "12 400"),
+        (
+            "12/09 13:58",
+            "Cape de Tofu enragé aux mille et une plumes du Bouftou de Sidimote",
+            35,
+            "980",
+        ),
+        ("11/09 22:07", "Anneau de Dragodinde", 65, "145 000"),
+        ("11/09 19:41", "Amulette du Chafer", 20, "3 210"),
+    ];
+
+    let cellule = |ui: &mut egui::Ui, texte: &str, couleur: Color32| {
+        ui.label(RichText::new(texte).color(couleur).size(15.0));
+    };
+
+    heading(
+        ui,
+        "Tableau — peuplé, sur un fond qui change",
+        "Lignes de 60 px, en-tête à 14 px d'encre, écart de 7 px : les trois cotes du relevé HDV. Le zébrage est un blanc à 12/255 — il éclaircit le décor au lieu de le remplacer, ce que les six bandes de fond rendent visible. La deuxième ligne porte un nom trop long : il est coupé à la colonne, pas au tableau.",
+    );
+    let peuple = design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(offres.len()))
+        .log_name("galerie.table-peuple");
+    let fond = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(largeur, peuple.height()));
+    for (index, gris) in [0x10, 0x1C, 0x26, 0x1A, 0x2E, 0x14].into_iter().enumerate() {
+        let bande = egui::Rect::from_min_size(
+            egui::pos2(fond.left() + index as f32 * fond.width() / 6.0, fond.top()),
+            Vec2::new(fond.width() / 6.0, fond.height()),
+        );
+        ui.painter()
+            .rect_filled(bande, 0, Color32::from_rgb(gris, gris, gris + 4));
+    }
+    peuple.show(ui, |row| {
+        let (date, nom, niveau, prix) = offres[row.index()];
+        row.cell(|ui| cellule(ui, date, CAPTION));
+        row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+        row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+        row.cell(|ui| cellule(ui, prix, HEADING));
+    });
+
+    heading(
+        ui,
+        "Vide — avec message, puis comme le fait le jeu",
+        "Le jeu n'affiche RIEN dans un tableau à « 0 Objet » : pas de message, pas d'illustration. Le message est donc une décision de l'overlay, et il reste facultatif — sans empty_text, le corps garde sa hauteur et demeure vide (à droite du titre suivant).",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Empty)
+        .empty_text("Aucune vente sur la période")
+        .log_name("galerie.table-vide")
+        .show(ui, |_| {});
+
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(0))
+        .log_name("galerie.table-vide-muet")
+        .show(ui, |_| {});
+
+    heading(
+        ui,
+        "En chargement — le rouage du jeu, rien d'autre",
+        "Seul état des trois à ne rien inventer : c'est la planche d'animation relevée sur les écrans de chargement du client. Image figée par preview_loader_frame, sans quoi deux captures différeraient.",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Loading)
+        .preview_loader_frame(0)
+        .log_name("galerie.table-chargement")
+        .show(ui, |_| {});
+
+    heading(
+        ui,
+        "Corps borné — douze lignes dans la place de quatre",
+        "max_height met le CORPS seul dans une design::scroll_area : l'en-tête ne défile pas. La réserve permanente de 26 px de la barre est prise sur la largeur des colonnes dès que la borne existe, que la barre serve ou non — sinon les colonnes sauteraient le jour où une ligne de plus la fait apparaître.",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(12))
+        .max_height(4.0 * 60.0)
+        .log_name("galerie.table-defilant")
+        .show(ui, |row| {
+            let (date, nom, niveau, prix) = offres[row.index() % offres.len()];
+            row.cell(|ui| cellule(ui, date, CAPTION));
+            row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+            row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+            row.cell(|ui| cellule(ui, prix, HEADING));
+        });
+
+    heading(
+        ui,
+        "Cas dégénéré — des colonnes fixes qui ne tiennent pas",
+        "268 px de largeurs imposées dans 200 px : tout est réduit du même facteur et les élastiques tombent à zéro. Un tableau tassé se voit et se corrige ; un tableau qui déborde de son panneau passe pour un bug du panneau voisin.",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(2))
+        .width(200.0)
+        .log_name("galerie.table-serre")
+        .show(ui, |row| {
+            let (date, nom, niveau, prix) = offres[row.index()];
+            row.cell(|ui| cellule(ui, date, CAPTION));
+            row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+            row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+            row.cell(|ui| cellule(ui, prix, HEADING));
+        });
 }
 
 /// Charge une fois pour toutes un jeu de textures et le garde en mémoire egui.

@@ -1249,3 +1249,83 @@ pub const PORTRAIT_PERCENT_FONT_SIZE: f32 = 12.0;
 /// pour qu'il mange un peu moins sur le portrait ». Sur un portrait rond, ce coin du carré
 /// englobant est de toute façon hors du disque.
 pub const PORTRAIT_PERCENT_OFFSET: egui::Vec2 = egui::Vec2::new(2.0, 1.0);
+
+// ---------------------------------------------------------------------------------------------
+// Tableau — `design::table`
+//
+// Relevé du 2026-09-12 sur les trois tableaux de l'Hôtel de Vente
+// (`docs/design-system/hdv-table.json`) : `interface-hdv-historique.png`,
+// `interface-hdv-vente-list.png`, `interface-hdv-achat.png`. Les trois sont VIDES (« 0 Objet ») —
+// tout ce qui touche au contenu d'une cellule est donc choisi, et le dit.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur d'une ligne — **60 px exactement**, et c'est l'invariant le plus solide du relevé.
+///
+/// Mesuré par les transitions du zébrage sur les trois captures, à trois origines différentes
+/// (200, 260, 320… / 316, 376… / 352, 412…) : le pas est le même partout. C'est aussi, à la
+/// coïncidence près, la hauteur d'un en-tête de repliable ([`COLLAPSE_HEADER_HEIGHT`]) — les deux
+/// restent deux jetons, rien ne dit que le jeu les tienne liés.
+pub const TABLE_ROW_HEIGHT: f32 = 60.0;
+
+/// Rembourrage au-dessus de l'encre de l'en-tête — 14 px (haut du tableau y=165, encre y=179).
+pub const TABLE_HEADER_PAD_TOP: f32 = 14.0;
+
+/// Hauteur d'ENCRE réservée par l'en-tête, et non la hauteur de sa galley — 14 px (y 179..193).
+///
+/// Même raisonnement que [`HEADING_INK_HEIGHT`] : réserver la galley entière ajouterait sous
+/// l'en-tête une bande vide que le relevé ne montre pas.
+pub const TABLE_HEADER_INK: f32 = 14.0;
+
+/// Écart entre l'encre de l'en-tête et la première ligne — 7 px, identique sur les trois captures.
+///
+/// **C'est la même valeur que [`HEADING_TO_ROW`]**, mesurée indépendamment sur une autre interface :
+/// un jeton partagé plutôt qu'un doublon qui dériverait.
+pub const TABLE_HEADER_GAP: f32 = HEADING_TO_ROW;
+
+/// Couleur des libellés d'en-tête — **le gris des titres de section**, [`HEADING_TEXT`].
+///
+/// Relevé : `#b9babb` sur les pixels pleins des six libellés, contre `#b8b9ba` pour le titre de
+/// section. Un canal d'écart : c'est la même teinte, pas une seconde à déclarer.
+pub const TABLE_HEADER_TEXT: Color32 = HEADING_TEXT;
+
+/// Corps d'un libellé d'en-tête — 17 px.
+///
+/// 14 px d'encre de capitale, et le rapport d'encre d'egui pour cette police (0,805, mesuré lors
+/// du chantier du bouton) donne 14/0,805 = 17,4. **Linéale et non serif** : les libellés d'en-tête
+/// sont vérifiés sans empattement sur la capture agrandie ×4, contrairement aux titres de section.
+pub const TABLE_HEADER_FONT_SIZE: f32 = 17.0;
+
+/// Zébrage d'une ligne sur deux — un blanc à 12/255, soit **un éclaircissement, pas une teinte**.
+///
+/// Le tableau n'a **pas de fond propre** : le décor du jeu se lit à travers, et le zébrage
+/// l'éclaircit. Deux constantes opaques seraient donc fausses dès que ce décor change, ce qui est
+/// le cas permanent d'un overlay posé sur un jeu en mouvement.
+///
+/// La valeur vient d'un alpha **déduit colonne par colonne** — `(claire − nue) / (1 − nue/255)` —
+/// sur quinze colonnes réparties de x=60 à x=1180 : médiane **12,3**, valeurs de 10,1 à 16,2. La
+/// dispersion est celle du décor, pas de la mesure : deux lignes voisines ne couvrent pas le même
+/// morceau de fond. Une première estimation sur deux colonnes seulement donnait 13,5 — trois
+/// points de plus suffisaient à la déplacer, quinze la stabilisent.
+pub const TABLE_ROW_STRIPE: Color32 = Color32::from_rgba_premultiplied(12, 12, 12, 12);
+
+/// Rembourrage horizontal d'une cellule — **choisi, pas mesuré**.
+///
+/// Les trois tableaux relevés sont vides : aucune valeur n'y est alignée sur quoi que ce soit.
+/// 10 px reprend [`SELECT_PADDING_X`], le rembourrage de la liste déroulante, faute de mieux —
+/// à corriger dès qu'une capture d'un tableau peuplé existe.
+pub const TABLE_CELL_PAD_X: f32 = SELECT_PADDING_X;
+
+/// Hauteur du corps quand le tableau n'a rien à montrer — **choisie**.
+///
+/// Le jeu ne montre aucun état vide : ses tableaux à « 0 Objet » sont simplement… vides, sans
+/// message. Deux hauteurs de ligne donnent au message la place de respirer sans faire un trou.
+pub const TABLE_EMPTY_HEIGHT: f32 = 2.0 * TABLE_ROW_HEIGHT;
+
+/// Couleur du message d'un tableau vide — le gris des libellés désactivés.
+pub const TABLE_EMPTY_TEXT: Color32 = TEXT_DISABLED;
+
+/// Corps du message d'un tableau vide — celui des libellés d'en-tête.
+pub const TABLE_EMPTY_FONT_SIZE: f32 = TABLE_HEADER_FONT_SIZE;
+
+/// Hauteur du corps pendant un chargement — **choisie**, assez haute pour porter le rouage.
+pub const TABLE_LOADING_HEIGHT: f32 = 3.0 * TABLE_ROW_HEIGHT;
