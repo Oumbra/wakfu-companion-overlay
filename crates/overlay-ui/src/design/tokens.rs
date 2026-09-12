@@ -1057,23 +1057,38 @@ pub const OVERLAY_ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
 // ---------------------------------------------------------------------------------------------
 // Emplacement d'objet — `design::item_slot`
 //
-// Ces valeurs viennent de `panels::watchlist`, où elles décrivaient la tuile du bandeau Suivi.
-// Elles y ont été affinées par plusieurs retours utilisateur, et remontent ici **telles quelles**
-// le 2026-09-11 : ce commit déplace du code, il ne change pas une apparence.
+// Ces valeurs viennent de `panels::watchlist`, où elles décrivaient la tuile du bandeau Suivi, et
+// avaient été affinées par plusieurs retours utilisateur **sur les cotes du portage web**.
 //
-// **Le jeu, lui, mesure autrement** — `docs/design-tokens.json` donne `item_slot_square` 63-64,
-// `item_slot_gap` 2 et `item_slot_border` 2, contre 58 / 12 / rayon 10 ici. Basculer sur les cotes
-// du client est la suite du lot 5 (vague 3 du catalogue : « les formes migrent au langage du jeu »),
-// et c'est un changement visuel qui se valide sur des captures — pas un effet de bord de ce
-// déplacement.
+// **Le carré et ses coins sont passés aux cotes du client le 2026-09-12** : `docs/design-tokens.json`
+// (analyse pixel de captures réelles) donne `item_slot_square` 63-64 et `item_slot_border` 2, contre
+// 58 et un rayon de 10 hérités du CSS. C'est la vague 3 du lot 5 — « les formes migrent au langage
+// du jeu ».
+//
+// Ce qui N'A PAS suivi, et pourquoi : `item_slot_gap` (2 px dans le jeu) décrit la densité d'une
+// grille d'inventaire, pas celle du bandeau Suivi de l'overlay, dont l'espacement de 12 px vient
+// d'un réglage utilisateur et n'appartient de toute façon pas au composant — un emplacement ne
+// connaît pas son voisin, c'est l'appelant qui espace.
 // ---------------------------------------------------------------------------------------------
 
-/// Côté d'un emplacement d'objet — 58 px, la cote du portage web (`.kpi` de
-/// `tracker-strip.component.css`).
-pub const ITEM_SLOT_SIZE: f32 = 58.0;
+/// Côté d'un emplacement d'objet — **64 px, la cote du client**.
+///
+/// `docs/design-tokens.json` relève `item_slot_square` entre 63 et 64 px : une fourchette, parce
+/// que la mesure pixel d'un bord adouci n'a pas de frontière nette. 64 est retenu par une
+/// coïncidence qui n'en est pas une : le liseré des textures `Border-*.webp` occupe 17 px sur un
+/// canevas de 512, soit **exactement 2,1 px une fois rendu à 64** — la valeur d'`item_slot_border`
+/// relevée sur les mêmes captures. À 58 px (la cote du portage web, `.kpi` de
+/// `tracker-strip.component.css`, en place jusqu'au 2026-09-12) il en faisait 1,9.
+pub const ITEM_SLOT_SIZE: f32 = 64.0;
 
-/// Rayon des coins — 10 px, hérité du CSS. À ramener à 0-2 quand les formes migreront.
-pub const ITEM_SLOT_ROUNDING: f32 = 10.0;
+/// Rayon des coins — 2 px.
+///
+/// Le relevé range les emplacements dans `corner_style_inputs_lists`
+/// (« square_or_near_square »), loin des 10 px hérités du CSS : dans le jeu, une case d'inventaire
+/// est un carré. 2 plutôt que 0 parce que le contour extérieur des textures de rareté est lui-même
+/// légèrement arrondi (rayon ≈ 32/512 du canevas, soit ≈ 4 px à 64) — un fond parfaitement
+/// rectangulaire pointerait hors de ses coins.
+pub const ITEM_SLOT_ROUNDING: f32 = 2.0;
 
 /// Marge intérieure des textures `Border-*.webp`, en fraction de leur canevas.
 ///
@@ -1090,8 +1105,12 @@ pub const ITEM_SLOT_BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
 /// débord.
 pub const ITEM_SLOT_ICON_FILL: f32 = 0.96;
 
-/// Fraction du carré qu'occupe l'icône d'un emplacement **sans rareté** — 30 px sur 58, soit
-/// ≈ 0,517.
+/// Fraction du carré qu'occupe l'icône d'un emplacement **sans rareté** — ≈ 0,517.
+///
+/// Une **fraction**, pas une cote : elle est née d'un rapport mesuré (30 px sur 58) et suit depuis
+/// le côté qu'on donne à l'emplacement — 33 px sur les 64 d'aujourd'hui. Le carré a changé le
+/// 2026-09-12 en passant aux cotes du client, ce rapport non : c'est lui que le retour utilisateur
+/// avait réglé, pas les 30 px.
 ///
 /// **Un cadre simple ne mange pas de marge**, contrairement à une bordure de rareté dont la fenêtre
 /// intérieure impose la sienne. Rien ne contraint donc l'icône, et il a fallu une cote propre :
@@ -1111,9 +1130,10 @@ pub const ITEM_SLOT_PLAIN_STROKE: f32 = 2.0;
 ///
 /// **Seuil choisi, pas mesuré**, et la raison est arithmétique : un liseré de
 /// [`ITEM_SLOT_PLAIN_STROKE`] mange 2 px de chaque côté, et une bordure de rareté réserve déjà
-/// 2 × 52/512 de son carré. À 8 px, il ne reste que 4 px au milieu — moins que le rayon des coins.
-/// Personne ne demande sciemment un emplacement de cette taille : c'est le signe d'une largeur
-/// calculée qui est tombée à rien, exactement ce qu'un journal doit rattraper.
+/// 2 × 52/512 de son carré. À 8 px, il reste 4 px au milieu, soit deux pixels d'icône une fois la
+/// marge de [`ITEM_SLOT_ICON_FILL`] retirée. Personne ne demande sciemment un emplacement de cette
+/// taille : c'est le signe d'une largeur calculée qui est tombée à rien, exactement ce qu'un
+/// journal doit rattraper.
 pub const ITEM_SLOT_MIN_SIZE: f32 = 4.0 * ITEM_SLOT_PLAIN_STROKE;
 
 /// Fond d'un emplacement — `#1e1e1e`, repris du portage web (`--surface`).
