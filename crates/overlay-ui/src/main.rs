@@ -581,7 +581,7 @@ impl App {
                     Self::reposition(existing, info.rect);
                     continue;
                 }
-                let overlay = Self::create_overlay_window(
+                let mut overlay = Self::create_overlay_window(
                     event_loop,
                     kind,
                     info.hwnd,
@@ -599,7 +599,7 @@ impl App {
                 // (compte déjà lié via jeton natif, réponse quasi instantanée), autant forcer un
                 // redessin explicite dès la création plutôt que de risquer un premier rendu figé
                 // sur un état encore vide.
-                overlay.window.request_redraw();
+                overlay.next_redraw_at = Some(std::time::Instant::now());
                 self.windows.insert(overlay.window.id(), overlay);
             }
         }
@@ -837,11 +837,11 @@ impl App {
 
     fn toggle_interactive(&mut self) {
         self.interactive = !self.interactive;
-        for overlay in self.windows.values() {
+        for overlay in self.windows.values_mut() {
             if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
                 tracing::warn!("set_cursor_hittest a échoué : {err}");
             }
-            overlay.window.request_redraw();
+            overlay.next_redraw_at = Some(std::time::Instant::now());
         }
         tracing::info!(
             ">>> Bascule ({HOTKEY_LABEL}) : mode = {}",
@@ -900,7 +900,7 @@ impl App {
             overlay.is_topmost = true;
             overlay.last_topmost_reassert = None;
             overlay.pending_demote_since = None;
-            overlay.window.request_redraw();
+            overlay.next_redraw_at = Some(std::time::Instant::now());
         }
         self.sync_topmost();
         let settings_tx = self.settings_tx.clone();
@@ -960,7 +960,7 @@ impl App {
         for overlay in self.windows.values_mut() {
             if overlay.kind == OverlayKind::Combat {
                 overlay.combat_side = overlay.combat_side.toggled();
-                overlay.window.request_redraw();
+                overlay.next_redraw_at = Some(std::time::Instant::now());
             }
         }
         tracing::info!(">>> Bascule Alliés/Ennemis ({SIDE_HOTKEY_LABEL})");
@@ -1132,7 +1132,7 @@ impl App {
                     // première fois — voir la doc de `frame::recreate_surface`). Seule une
                     // `Surface` RECRÉÉE de zéro rejoue ce chemin.
                     recreate_surface(&mut overlay.gpu, &overlay.window);
-                    overlay.window.request_redraw();
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
                 overlay.is_topmost = true;
                 overlay.last_topmost_reassert = Some(now);
@@ -1283,7 +1283,7 @@ impl App {
             alerts_draft,
             alerts_availability,
         });
-        overlay.window.request_redraw();
+        overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
         tracing::info!("[options] modale ouverte.");
     }
@@ -1397,9 +1397,168 @@ impl App {
                     if let Some(state) = &mut overlay.options_state {
                         state.error = Some(err.message().to_string());
                     }
-                    overlay.window.request_redraw();
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
             }
+        }
+    }
+}
+
+enum PostRedraw {
+    None,
+    /// Fenêtre de jeu **depuis laquelle** la modale est demandée — son `HWND` et son
+    /// rectangle. La modale lui est rattachée comme n'importe quel overlay : c'est ce qui
+    /// la fait suivre le premier plan de CE personnage, et disparaître quand on passe sur
+    /// un autre client en multi-compte.
+    OpenOptions(HWND, GameRect),
+    CloseOptions,
+    BrowseOptions,
+    ValidateOptions(String),
+}
+
+impl App {
+    /// Rend UNE frame de la fenêtre `id` — appelé sur `WindowEvent::RedrawRequested` ET
+    /// directement depuis `about_to_wait` quand un redessin est dû (`next_redraw_at`).
+    ///
+    /// **Pourquoi ne pas s'en remettre à `Window::request_redraw()` seul.** Mesuré le
+    /// 2026-09-12 sur la modale Options (journal instrumenté, frappe pilotée par `SendInput`) :
+    /// une touche arrivait bien dans `window_event`, `request_redraw()` était appelé — depuis
+    /// là comme depuis `about_to_wait` — et AUCUN `RedrawRequested` ne suivait. La frame
+    /// suivante ne venait que de la réaffirmation topmost périodique
+    /// (`TOPMOST_REASSERT_INTERVAL`, 2 s), dont le `SetWindowPos` fait repeindre la fenêtre par
+    /// Windows lui-même. Tout ce qui se tapait dans le champ d'ajout d'alerte s'appliquait
+    /// donc par paquets de deux secondes (« le champ d'autocomplétion est extrêmement long »).
+    /// Ces fenêtres sont des cibles DirectComposition sans surface de redirection (S1) : le
+    /// `WM_PAINT` que `RedrawWindow(RDW_INTERNALPAINT)` est censé poster n'arrive pas de façon
+    /// fiable. Le rendu est donc piloté par NOTRE boucle (`about_to_wait`, qui suit
+    /// immédiatement chaque livraison d'événements), et `RedrawRequested` n'est plus qu'un
+    /// déclencheur parmi d'autres.
+    fn redraw(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
+        let mut post_redraw = PostRedraw::None;
+        let Some(overlay) = self.windows.get_mut(&id) else {
+            return;
+        };
+        // Une seule lecture de l'horloge par frame (voir la doc de `RenderContent::now`)
+        // — réutilisée ci-dessous pour le gabarit dynamique du Suivi ET transmise à
+        // `render`/`build_ui`, plutôt que deux `Instant::now()` distincts à quelques
+        // instructions d'écart qui pourraient (rarement) diverger pile à l'expiration
+        // d'un toast.
+        let now = std::time::Instant::now();
+        let snapshot = self.snapshot.load();
+        let fight = snapshot.fight_for_character(&overlay.character_name);
+        let watchlist = self.watchlist.load();
+        let watchlist_toast_guard = self.watchlist_toast.load();
+        let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
+        if overlay.kind == OverlayKind::Watchlist {
+            // Gabarit piloté par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre
+            // plus large que nécessaire reste cliquable/bloquante sur toute sa zone même
+            // transparente, l'utilisateur ne peut alors pas deviner où s'arrête l'overlay)
+            // — voir la doc de `watchlist_target_width`/`watchlist_target_height`.
+            // Comparé à la dernière valeur DEMANDÉE (`last_watchlist_width`/`_height`), pas
+            // à la taille réelle actuelle de la fenêtre, pour ne pas rappeler
+            // `request_inner_size` en boucle tant que rien n'a changé.
+            let toast_active = panels::watchlist::is_active(watchlist_toast, now);
+            let target_width =
+                watchlist_target_width(watchlist.len(), toast_active, overlay.game_rect.width);
+            let target_height = watchlist_target_height(toast_active);
+            if overlay.last_watchlist_width != Some(target_width)
+                || overlay.last_watchlist_height != Some(target_height)
+            {
+                // Sur Windows, cet appel s'applique TOUJOURS de façon synchrone — `Some`
+                // est renvoyé immédiatement et AUCUN `WindowEvent::Resized` ne suit jamais
+                // (voir la doc de `reconfigure_surface`, qui corrige exactement ce cas :
+                // sans ce bras, la surface wgpu restait configurée à l'ancienne largeur
+                // pour toujours, `render` échouait alors sa validation à chaque tentative
+                // suivante et n'affichait plus jamais rien — Suivi durablement invisible
+                // dès le tout premier élargissement, quel que soit le nombre de
+                // `Ctrl+Alt+R`).
+                if let Some(actual) = overlay
+                    .window
+                    .request_inner_size(winit::dpi::LogicalSize::new(target_width, target_height))
+                {
+                    Self::reconfigure_surface(&mut overlay.gpu, actual);
+                }
+                overlay.last_watchlist_width = Some(target_width);
+                overlay.last_watchlist_height = Some(target_height);
+            }
+        }
+        let catalog = self.catalog.load();
+        let auth_status = self.auth_status.load();
+        // La modale Options force sa propre interactivité (voir `App::
+        // open_options_modal`) — jamais assujettie à `self.interactive` (mode
+        // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait elle-même
+        // traversable si l'utilisateur avait basculé ce mode juste avant.
+        let interactive = overlay.kind == OverlayKind::Options || self.interactive;
+        let this_game_rect = overlay.game_rect;
+        let this_game_hwnd = overlay.game_hwnd;
+        let (repaint_delay, outcome) = render(
+            &mut overlay.gpu,
+            &overlay.window,
+            RenderContent {
+                kind: overlay.kind,
+                fight,
+                portraits: &overlay.portraits,
+                combat_frame: &overlay.combat_frame,
+                icons: &overlay.icons,
+                combat_side: &mut overlay.combat_side,
+                watchlist: &watchlist,
+                watchlist_toast,
+                catalog: &catalog,
+                catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
+                remote_icons: &self.remote_icons,
+                remote_icon_textures: &mut overlay.remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &self.auth_command_tx,
+                interactive,
+                now,
+                options: overlay.options_state.as_mut(),
+            },
+        );
+        // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
+        // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
+        // le toast qu'en lecture, voir `RenderContent::watchlist_toast`). Le clic ayant
+        // déjà fait passer `response.repaint` à `true` plus haut, le prochain redessin
+        // relira `None` et n'affichera plus rien.
+        if outcome.close_toast {
+            self.watchlist_toast.store(Arc::new(None));
+        }
+        // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "Options"
+        // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
+        // Options elle-même — jamais les deux à la fois (branches différentes du `match
+        // kind` de `paint_content`).
+        if outcome.open_options {
+            post_redraw = PostRedraw::OpenOptions(this_game_hwnd, this_game_rect);
+        }
+        // L'ouverture de page est faite ICI, par l'hôte, jamais par le panneau qui l'a
+        // demandée : voir `RenderOutcome::open_url`. `open::that` est best-effort, comme
+        // partout ailleurs — un navigateur qui ne s'ouvre pas ne fait rien planter.
+        if let Some(url) = &outcome.open_url {
+            let _ = open::that(url);
+        }
+        match outcome.options_action {
+            OptionsModalAction::None => {}
+            OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
+            OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
+            OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
+            OptionsModalAction::Validate(raw) => post_redraw = PostRedraw::ValidateOptions(raw),
+        }
+        // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
+        // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
+        // `about_to_wait` est responsable de le consommer le moment venu.
+        overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
+            .then(|| std::time::Instant::now() + repaint_delay);
+
+        match post_redraw {
+            PostRedraw::None => {}
+            PostRedraw::OpenOptions(hwnd, rect) => {
+                self.open_options_modal(event_loop, Some((hwnd, rect)))
+            }
+            PostRedraw::CloseOptions => {
+                self.windows.remove(&id);
+                tracing::info!("[options] modale fermée (Annuler).");
+            }
+            PostRedraw::BrowseOptions => self.start_file_dialog(),
+            PostRedraw::ValidateOptions(raw) => self.validate_and_apply_log_path(id, raw),
         }
     }
 }
@@ -1428,8 +1587,8 @@ impl ApplicationHandler<UserEvent> for App {
             // pour le refléter (le statut de connexion, en particulier, pilote l'icône de relance
             // d'appairage — voir `render`).
             UserEvent::NewSnapshot | UserEvent::AuthStatusChanged => {
-                for overlay in self.windows.values() {
-                    overlay.window.request_redraw();
+                for overlay in self.windows.values_mut() {
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
             }
         }
@@ -1442,17 +1601,6 @@ impl ApplicationHandler<UserEvent> for App {
         // la fin de cette fonction : `overlay` (obtenu juste après) emprunte `self.windows` pour
         // toute la durée de son dernier usage (NLL), un appel `&mut self` plus tôt romprait la
         // compilation.
-        enum PostRedraw {
-            None,
-            /// Fenêtre de jeu **depuis laquelle** la modale est demandée — son `HWND` et son
-            /// rectangle. La modale lui est rattachée comme n'importe quel overlay : c'est ce qui
-            /// la fait suivre le premier plan de CE personnage, et disparaître quand on passe sur
-            /// un autre client en multi-compte.
-            OpenOptions(HWND, GameRect),
-            CloseOptions,
-            BrowseOptions,
-            ValidateOptions(String),
-        }
         let mut post_redraw = PostRedraw::None;
 
         let Some(overlay) = self.windows.get_mut(&id) else {
@@ -1464,7 +1612,15 @@ impl ApplicationHandler<UserEvent> for App {
             .egui_winit
             .on_window_event(&overlay.window, &event);
         if response.repaint {
-            overlay.window.request_redraw();
+            // Pas un `request_redraw()` : le rendu est planifié pour `about_to_wait`, qui suit
+            // immédiatement la livraison de cet événement et rend la frame lui-même — voir la doc
+            // de `App::redraw` pour la mesure qui a imposé ce chemin.
+            overlay.next_redraw_at = Some(std::time::Instant::now());
+        }
+
+        if matches!(event, WindowEvent::RedrawRequested) {
+            self.redraw(event_loop, id);
+            return;
         }
 
         match event {
@@ -1478,7 +1634,7 @@ impl ApplicationHandler<UserEvent> for App {
                     match overlay.options_state.as_mut() {
                         Some(state) if state.is_dirty() => {
                             state.pending_close = true;
-                            overlay.window.request_redraw();
+                            overlay.next_redraw_at = Some(std::time::Instant::now());
                         }
                         _ => post_redraw = PostRedraw::CloseOptions,
                     }
@@ -1512,140 +1668,12 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 Self::reconfigure_surface(&mut overlay.gpu, size);
             }
-            WindowEvent::RedrawRequested => {
-                // Une seule lecture de l'horloge par frame (voir la doc de `RenderContent::now`)
-                // — réutilisée ci-dessous pour le gabarit dynamique du Suivi ET transmise à
-                // `render`/`build_ui`, plutôt que deux `Instant::now()` distincts à quelques
-                // instructions d'écart qui pourraient (rarement) diverger pile à l'expiration
-                // d'un toast.
-                let now = std::time::Instant::now();
-                let snapshot = self.snapshot.load();
-                let fight = snapshot.fight_for_character(&overlay.character_name);
-                let watchlist = self.watchlist.load();
-                let watchlist_toast_guard = self.watchlist_toast.load();
-                let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
-                if overlay.kind == OverlayKind::Watchlist {
-                    // Gabarit piloté par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre
-                    // plus large que nécessaire reste cliquable/bloquante sur toute sa zone même
-                    // transparente, l'utilisateur ne peut alors pas deviner où s'arrête l'overlay)
-                    // — voir la doc de `watchlist_target_width`/`watchlist_target_height`.
-                    // Comparé à la dernière valeur DEMANDÉE (`last_watchlist_width`/`_height`), pas
-                    // à la taille réelle actuelle de la fenêtre, pour ne pas rappeler
-                    // `request_inner_size` en boucle tant que rien n'a changé.
-                    let toast_active = panels::watchlist::is_active(watchlist_toast, now);
-                    let target_width = watchlist_target_width(
-                        watchlist.len(),
-                        toast_active,
-                        overlay.game_rect.width,
-                    );
-                    let target_height = watchlist_target_height(toast_active);
-                    if overlay.last_watchlist_width != Some(target_width)
-                        || overlay.last_watchlist_height != Some(target_height)
-                    {
-                        // Sur Windows, cet appel s'applique TOUJOURS de façon synchrone — `Some`
-                        // est renvoyé immédiatement et AUCUN `WindowEvent::Resized` ne suit jamais
-                        // (voir la doc de `reconfigure_surface`, qui corrige exactement ce cas :
-                        // sans ce bras, la surface wgpu restait configurée à l'ancienne largeur
-                        // pour toujours, `render` échouait alors sa validation à chaque tentative
-                        // suivante et n'affichait plus jamais rien — Suivi durablement invisible
-                        // dès le tout premier élargissement, quel que soit le nombre de
-                        // `Ctrl+Alt+R`).
-                        if let Some(actual) =
-                            overlay
-                                .window
-                                .request_inner_size(winit::dpi::LogicalSize::new(
-                                    target_width,
-                                    target_height,
-                                ))
-                        {
-                            Self::reconfigure_surface(&mut overlay.gpu, actual);
-                        }
-                        overlay.last_watchlist_width = Some(target_width);
-                        overlay.last_watchlist_height = Some(target_height);
-                    }
-                }
-                let catalog = self.catalog.load();
-                let auth_status = self.auth_status.load();
-                // La modale Options force sa propre interactivité (voir `App::
-                // open_options_modal`) — jamais assujettie à `self.interactive` (mode
-                // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait elle-même
-                // traversable si l'utilisateur avait basculé ce mode juste avant.
-                let interactive = overlay.kind == OverlayKind::Options || self.interactive;
-                let this_game_rect = overlay.game_rect;
-                let this_game_hwnd = overlay.game_hwnd;
-                let (repaint_delay, outcome) = render(
-                    &mut overlay.gpu,
-                    &overlay.window,
-                    RenderContent {
-                        kind: overlay.kind,
-                        fight,
-                        portraits: &overlay.portraits,
-                        combat_frame: &overlay.combat_frame,
-                        icons: &overlay.icons,
-                        combat_side: &mut overlay.combat_side,
-                        watchlist: &watchlist,
-                        watchlist_toast,
-                        catalog: &catalog,
-                        catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
-                        remote_icons: &self.remote_icons,
-                        remote_icon_textures: &mut overlay.remote_icon_textures,
-                        auth_status: &auth_status,
-                        auth_command_tx: &self.auth_command_tx,
-                        interactive,
-                        now,
-                        options: overlay.options_state.as_mut(),
-                    },
-                );
-                // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
-                // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
-                // le toast qu'en lecture, voir `RenderContent::watchlist_toast`). Le clic ayant
-                // déjà fait passer `response.repaint` à `true` plus haut, le prochain redessin
-                // relira `None` et n'affichera plus rien.
-                if outcome.close_toast {
-                    self.watchlist_toast.store(Arc::new(None));
-                }
-                // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "Options"
-                // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
-                // Options elle-même — jamais les deux à la fois (branches différentes du `match
-                // kind` de `paint_content`).
-                if outcome.open_options {
-                    post_redraw = PostRedraw::OpenOptions(this_game_hwnd, this_game_rect);
-                }
-                // L'ouverture de page est faite ICI, par l'hôte, jamais par le panneau qui l'a
-                // demandée : voir `RenderOutcome::open_url`. `open::that` est best-effort, comme
-                // partout ailleurs — un navigateur qui ne s'ouvre pas ne fait rien planter.
-                if let Some(url) = &outcome.open_url {
-                    let _ = open::that(url);
-                }
-                match outcome.options_action {
-                    OptionsModalAction::None => {}
-                    OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
-                    OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
-                    OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
-                    OptionsModalAction::Validate(raw) => {
-                        post_redraw = PostRedraw::ValidateOptions(raw)
-                    }
-                }
-                // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
-                // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
-                // `about_to_wait` est responsable de le consommer le moment venu.
-                overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
-                    .then(|| std::time::Instant::now() + repaint_delay);
-            }
             _ => {}
         }
 
-        match post_redraw {
-            PostRedraw::None => {}
-            PostRedraw::OpenOptions(hwnd, rect) => {
-                self.open_options_modal(event_loop, Some((hwnd, rect)))
-            }
-            PostRedraw::CloseOptions => {
-                self.windows.remove(&id);
-                tracing::info!("[options] modale fermée (Annuler).");
-            }
-            PostRedraw::BrowseOptions => self.start_file_dialog(),
-            PostRedraw::ValidateOptions(raw) => self.validate_and_apply_log_path(id, raw),
+        if let PostRedraw::CloseOptions = post_redraw {
+            self.windows.remove(&id);
+            tracing::info!("[options] modale fermée (Annuler).");
         }
     }
 
@@ -1710,7 +1738,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 state.path_input = path.display().to_string();
                                 state.error = validation.err().map(|e| e.message().to_string());
                             }
-                            overlay.window.request_redraw();
+                            overlay.next_redraw_at = Some(std::time::Instant::now());
                         }
                     }
                 }
@@ -1732,14 +1760,27 @@ impl ApplicationHandler<UserEvent> for App {
         // hasard d'un autre redessin (retour utilisateur 2026-09-01).
         let now = std::time::Instant::now();
         let mut next_wake = now + std::time::Duration::from_millis(50);
-        for overlay in self.windows.values_mut() {
+        let mut dues = Vec::new();
+        for (id, overlay) in &mut self.windows {
             if let Some(due) = overlay.next_redraw_at {
                 if due <= now {
                     overlay.next_redraw_at = None;
-                    overlay.window.request_redraw();
+                    dues.push(*id);
                 } else {
                     next_wake = next_wake.min(due);
                 }
+            }
+        }
+        // Rendu DIRECT, sans passer par `request_redraw()` — voir la doc de `App::redraw`.
+        for id in dues {
+            self.redraw(event_loop, id);
+        }
+        // Un rendu peut avoir replanifié un redessin immédiat (animation egui) : le réveil
+        // suivant doit le voir sans attendre le tick de 50 ms.
+        let now = std::time::Instant::now();
+        for overlay in self.windows.values() {
+            if let Some(due) = overlay.next_redraw_at {
+                next_wake = next_wake.min(due.max(now));
             }
         }
 
