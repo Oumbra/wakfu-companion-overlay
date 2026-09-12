@@ -452,7 +452,14 @@ fn add_field(
                 .any(|e| e.catalog_id == Some(item.id) || e.name == item.name);
             let mut entry =
                 design::AutocompleteEntry::new(item.name.clone(), category_key(item.category));
-            entry.gem = texture_id(ui, ctx, &IconRef::for_rarity(item.rarity));
+            // La gemme AVEC sa taille native : le composant la pose dans sa boîte de 14 à son
+            // rapport (13 × 20 → 9 × 14, comme `object-fit: contain` sur le web). Sans elle, il
+            // la prenait pour un carré et l'écrasait en 14 × 14 — « très fortement agrandies et
+            // aplaties », retour du 2026-09-12 au soir.
+            if let Some((id, size)) = texture(ui, ctx, &IconRef::for_rarity(item.rarity)) {
+                entry.gem = Some(id);
+                entry.gem_size = size;
+            }
             entry.image = texture_id(ui, ctx, &item.icon);
             entry.disabled = deja;
             if deja {
@@ -761,9 +768,18 @@ fn texture_id(
     ctx: &mut AlertsTabContext<'_>,
     icon: &IconRef,
 ) -> Option<egui::TextureId> {
+    texture(ui, ctx, icon).map(|(id, _)| id)
+}
+
+/// La texture ET sa taille native, pour ce qui doit être peint à son rapport — la gemme de rareté.
+fn texture(
+    ui: &egui::Ui,
+    ctx: &mut AlertsTabContext<'_>,
+    icon: &IconRef,
+) -> Option<(egui::TextureId, Vec2)> {
     ctx.remote_icon_textures
         .resolve(ui.ctx(), ctx.remote_icons, icon)
-        .map(|handle| handle.id())
+        .map(|handle| (handle.id(), handle.size_vec2()))
 }
 
 #[cfg(test)]
