@@ -471,6 +471,28 @@ pub const AUTOCOMPLETE_EMPTY_HEIGHT: f32 = 34.0;
 /// Nombre de rangées visibles avant que la liste ne défile — `max-height: 175px` côté web, soit
 /// cinq rangées.
 pub const AUTOCOMPLETE_MAX_VISIBLE_ROWS: usize = 5;
+/// Largeur de la barre de défilement du panneau au repos — `::-webkit-scrollbar { width: 8px }`
+/// du dépôt web (`styles.css`), la barre que l'utilisateur a sous les yeux sur le site. Le jeu n'a
+/// pas d'autocomplétion, donc pas de barre à relever pour ce panneau : c'est le web qui fait
+/// référence ici, comme pour tout ce composant. Plus large que les 6 px de [`SCROLLBAR_WIDTH`],
+/// mesurés sur la fenêtre Options du jeu (retour du 2026-09-12 : « un tout petit peu plus large,
+/// à l'image de l'autocomplétion sur le web »).
+pub const AUTOCOMPLETE_SCROLLBAR_WIDTH: f32 = 8.0;
+/// Largeur de la barre sous le pointeur — **choix**, pas une mesure : le web ne l'élargit pas,
+/// egui le fait par défaut et l'utilisateur a jugé l'effet bienvenu (« ne me paraît pas si mal »).
+/// Deux pixels, pour que l'élargissement se voie sans que la poignée ne saute.
+pub const AUTOCOMPLETE_SCROLLBAR_HOVER_WIDTH: f32 = 10.0;
+/// Rayon de la poignée — `border-radius: 4px` du web, en cohérence avec sa largeur de 8.
+pub const AUTOCOMPLETE_SCROLLBAR_RADIUS: u8 = 4;
+/// Teinte de la poignée, **dans tous les états** — le gris de [`HEADING_TEXT`] (`#b8b9ba`, le gris
+/// unique du jeu), à deux valeurs près de ce que l'utilisateur avait sous les yeux et a validé
+/// (« conserver les couleurs de base ») : le `fg_stroke` inactif d'egui, `gray(180)`. Pas
+/// [`SCROLLBAR_THUMB`] : ce gris sombre est mesuré sur le fond noir de la fenêtre Options, et il
+/// disparaît sur le brun de la liste dépliée (`SELECT_LIST_FILL`) — vérifié au pixel.
+pub const AUTOCOMPLETE_SCROLLBAR_THUMB: Color32 = HEADING_TEXT;
+/// Longueur minimale de la poignée — **choix** : à 115 résultats pour cinq rangées visibles, le
+/// minimum d'egui (12 px) donnait un point plutôt qu'une poignée.
+pub const AUTOCOMPLETE_SCROLLBAR_MIN_HANDLE: f32 = 24.0;
 /// Longueur minimale de la requête avant toute recherche — `MIN_QUERY_LENGTH`
 /// (`wakfu-search.service.ts`), comptée sur la requête NORMALISÉE, pas sur la frappe brute.
 pub const AUTOCOMPLETE_MIN_QUERY_LEN: usize = 3;

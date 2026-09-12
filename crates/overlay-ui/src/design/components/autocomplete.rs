@@ -538,19 +538,51 @@ impl<'a> Autocomplete<'a> {
                     // décalage s'anime, et un harnais offscreen (`Harness::run`) tourne alors
                     // jusqu'à sa limite d'étapes sans jamais converger. Une liste qui tient
                     // entièrement n'a rien à faire défiler, donc rien à animer.
+                    //
+                    // **La barre : celle du web, sans changer de couleur.** Le style d'egui par
+                    // défaut la faisait mince, puis large ET plus claire sous le pointeur ;
+                    // retour du 2026-09-12 : l'élargissement est bienvenu, la couleur qui change
+                    // ne l'est pas. Posé dans le scope du panneau, comme `design::scroll_area`
+                    // le fait pour les siens — sans son gabarit, qui est celui de la fenêtre
+                    // Options du jeu, pas de ce panneau porté du web.
+                    let scroll = &mut contenu.style_mut().spacing.scroll;
+                    scroll.floating = true;
+                    scroll.floating_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
+                    scroll.bar_width = tokens::AUTOCOMPLETE_SCROLLBAR_HOVER_WIDTH;
+                    // La barre a sa colonne : elle ne recouvre jamais la mention de droite.
+                    scroll.floating_allocated_width = tokens::AUTOCOMPLETE_SCROLLBAR_HOVER_WIDTH;
+                    scroll.foreground_color = false;
+                    scroll.handle_min_length = tokens::AUTOCOMPLETE_SCROLLBAR_MIN_HANDLE;
+                    // Pas de rail (le fond du panneau tient lieu de gouttière, comme dans le
+                    // jeu), et une poignée pleine dans tous les états : c'est la géométrie qui
+                    // dit le survol, pas la teinte.
+                    scroll.dormant_background_opacity = 0.0;
+                    scroll.active_background_opacity = 0.0;
+                    scroll.interact_background_opacity = 0.0;
+                    scroll.dormant_handle_opacity = 1.0;
+                    scroll.active_handle_opacity = 1.0;
+                    scroll.interact_handle_opacity = 1.0;
+                    let visuals = contenu.visuals_mut();
+                    let radius = egui::CornerRadius::same(tokens::AUTOCOMPLETE_SCROLLBAR_RADIUS);
+                    for widget in [
+                        &mut visuals.widgets.noninteractive,
+                        &mut visuals.widgets.inactive,
+                        &mut visuals.widgets.hovered,
+                        &mut visuals.widgets.active,
+                    ] {
+                        widget.bg_fill = tokens::AUTOCOMPLETE_SCROLLBAR_THUMB;
+                        widget.corner_radius = radius;
+                    }
                     egui::ScrollArea::vertical()
                         .max_height(corps)
                         .auto_shrink([false; 2])
                         .show(&mut contenu, |ui| {
+                            // La largeur DISPONIBLE, pas celle de la liste : la colonne de la
+                            // barre en est retirée, et une rangée qui passerait dessous y
+                            // perdrait sa mention.
+                            let largeur = ui.available_width();
                             for (rang, &index) in visible.iter().enumerate() {
-                                self.paint_row(
-                                    ui,
-                                    index,
-                                    rang,
-                                    active,
-                                    liste.width(),
-                                    &mut outcome,
-                                );
+                                self.paint_row(ui, index, rang, active, largeur, &mut outcome);
                             }
                         });
                 } else {
