@@ -34,6 +34,7 @@ pub mod icon_button;
 pub mod info_text;
 pub mod input;
 pub mod item_slot;
+pub mod label;
 pub mod loader;
 pub mod meter;
 pub mod pagination;

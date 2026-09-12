@@ -63,6 +63,7 @@ pub use components::item_slot::{
     item_slot, paint_order as item_slot_paint_order, ItemRarity, ItemSlot, SlotCount, SlotFrame,
     SlotLayer,
 };
+pub use components::label::{label, Label};
 pub use components::loader::{loader, Loader, LoaderSize};
 pub use components::meter::{
     fill_corners as meter_fill_corners, meter, paint as paint_meter, Meter,
