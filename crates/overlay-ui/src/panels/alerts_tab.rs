@@ -79,6 +79,15 @@ const TILE_BADGE: f32 = 14.0;
 const TILE_BADGE_INSET: f32 = 5.0;
 const TILE_NAME_INSET: f32 = 5.0;
 
+/// Couleur du nom d'objet — **l'or du jeu** ([`design::tokens::TEXT_GOLD`]), la même teinte que le
+/// libellé d'une case cochée. Demande explicite du 2026-09-12.
+///
+/// Le blanc qu'il portait avant le mettait sur le même plan que la description de la section et le
+/// libellé « Tester le son de l'alerte », qui sont du texte courant. Un nom d'objet est une
+/// **donnée**, pas une phrase — c'est le même rôle que la valeur saisie dans un champ, qui est en
+/// or pour cette raison (voir [`design::tokens::INPUT_TEXT`]).
+const TILE_NAME_TEXT: Color32 = design::tokens::TEXT_GOLD;
+
 /// Bordure d'une tuile dont le son est ACTIF — `--accent` du dépôt web.
 const ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
 /// Bordure d'une tuile dont le son est COUPÉ — le gris de bord des panneaux.
@@ -597,7 +606,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         name_rect,
         design::label(&item.name)
             .width(largeur_nom)
-            .color(TEXT)
+            .color(TILE_NAME_TEXT)
             .log_name("alertes.nom"),
     );
 

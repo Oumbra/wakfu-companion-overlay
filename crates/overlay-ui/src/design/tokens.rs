@@ -11,6 +11,18 @@
 
 use egui::Color32;
 
+/// **L'or du jeu**, celui de son texte — `#f4d89e`.
+///
+/// La teinte la plus répandue de l'interface, et elle est **mesurée trois fois indépendamment** :
+/// une valeur saisie dans un champ (`input-search.png`, `input-number.png`,
+/// `large-input-number.png` donnent tous le même pic), le libellé d'un onglet inactif, et celui
+/// d'une case cochée. C'est un fait du design system, pas une valeur propre à un composant — d'où
+/// ce jeton, que les trois précités citent au lieu de le recopier.
+///
+/// **À ne pas confondre avec [`BUTTON_TEXT_ON_GOLD`]** : celui-ci est de l'or POUR du texte, celui
+/// -là du texte SUR de l'or (un brun très sombre).
+pub const TEXT_GOLD: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+
 /// Texte d'un bouton primaire (or) — `accent_warm.button_text_on_gold` de `design-tokens.json`,
 /// mesuré sur les captures HDV : brun très sombre, jamais du noir pur.
 pub const BUTTON_TEXT_ON_GOLD: Color32 = Color32::from_rgb(0x3A, 0x35, 0x23);
@@ -97,7 +109,7 @@ pub const INPUT_RADIUS: u8 = 4;
 /// et il tient sur trois assets indépendants : `input-search.png`, `input-number.png` et
 /// `large-input-number.png` donnent tous le même pic `#f4d89e`. Un champ à valeur blanche ne
 /// ressemble pas au jeu.
-pub const INPUT_TEXT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+pub const INPUT_TEXT: Color32 = TEXT_GOLD;
 
 /// Couleur du texte indicatif — un kaki éteint, la même famille chromatique que le bord en plus
 /// sourd (pic `#83775b` sur « Rechercher », `#8a7d60` sur « Min »).
@@ -194,7 +206,7 @@ pub const TAB_HEIGHT: f32 = 44.0;
 pub const TAB_LABEL_ACTIVE: Color32 = Color32::WHITE;
 
 /// Libellé d'un onglet inactif **et** survolé — l'or du jeu.
-pub const TAB_LABEL_IDLE: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+pub const TAB_LABEL_IDLE: Color32 = TEXT_GOLD;
 
 /// Haut du trait entre deux onglets — **`#837d70`**.
 ///
@@ -315,7 +327,7 @@ pub const CHECKBOX_LABEL_OFF: Color32 = Color32::WHITE;
 
 /// Libellé d'une case COCHÉE — l'or du jeu. **Le libellé porte l'état autant que la case** : le jeu
 /// double toujours son signal, comme la barre d'onglets le fait avec le sien.
-pub const CHECKBOX_LABEL_ON: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
+pub const CHECKBOX_LABEL_ON: Color32 = TEXT_GOLD;
 
 // ---------------------------------------------------------------------------------------------
 // Liste déroulante — mesurée sur `select-simple.png` (socle, colonne x=60) et
