@@ -835,8 +835,11 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
   de `register_fight_turn`, persistés par `fight_store`). **Icônes** : référentiel
   `assets/spells.json` (maintenu à la main par l'utilisateur, embarqué, `overlay_engine::spells::
   SpellIndex`, clé nom normalisé + classe du lanceur — « Rafale »/« Poursuite » existent chez deux
-  classes), `IconKind::Spell` sur le même circuit `RemoteIconStore` que les monstres ; sort absent
-  du référentiel (mécaniques de classe, encore à ajouter) → pavé « ? » et un avertissement par nom.
+  classes, plus une pseudo-classe `common` de `breedId` −2 pour les sorts communs à tous, résolus
+  par le nom seul), `IconKind::Spell` sur le même circuit `RemoteIconStore` que les monstres ;
+  sort absent du référentiel → pavé « ? » et un avertissement par nom ; entrée sans `picture` →
+  tuile sombre sans « ? ». Référentiel complété par l'utilisateur le 12 sept. (462 entrées,
+  mécaniques de classe comprises) : plus aucun « ? » sur le log de parité.
 - **Testkit** : `tests/combat_spell_block.rs`, rejeu réel + fixtures PNG injectées par
   `RemoteIconStore::preload` (jamais le réseau), interactions par nœuds d'accessibilité.
 
