@@ -1551,11 +1551,11 @@ d'autocomplétion, c'est le web qui fait référence, comme pour tout ce composa
 | Grandeur | Valeur | Origine |
 | --- | --- | --- |
 | Largeur au repos | 8px (`AUTOCOMPLETE_SCROLLBAR_WIDTH`) | `::-webkit-scrollbar { width: 8px }`, `styles.css` du web |
-| Largeur sous le pointeur | 10px | **choix** — le web ne s'élargit pas, l'utilisateur a validé l'effet |
+| Largeur sous le pointeur | 10px | **choix** — le web ne s'élargit pas, l'utilisateur a validé l'effet. *Retiré le soir même, voir la section suivante.* |
 | Rayon | 4 | `border-radius: 4px` du web |
-| Teinte, tous états | `HEADING_TEXT` (`#b8b9ba`) | le gris que l'utilisateur voyait au repos (`gray(180)` d'egui), à deux valeurs près le gris unique du jeu — **pas** `SCROLLBAR_THUMB`, mesuré sur le fond noir de la fenêtre Options et invisible sur le brun de la liste (vérifié au pixel) |
+| Teinte, tous états *(au repos seulement depuis la section suivante)* | `HEADING_TEXT` (`#b8b9ba`) | le gris que l'utilisateur voyait au repos (`gray(180)` d'egui), à deux valeurs près le gris unique du jeu — **pas** `SCROLLBAR_THUMB`, mesuré sur le fond noir de la fenêtre Options et invisible sur le brun de la liste (vérifié au pixel) |
 | Poignée minimale | 24px | **choix** — à 115 résultats, les 12 px d'egui donnaient un point |
-| Rail | aucun | comme dans le jeu |
+| Rail | aucun | comme dans le jeu. *Ajouté le soir même, voir la section suivante.* |
 
 La colonne de la barre est réservée (`floating_allocated_width`) : la mention « déjà dans vos
 alertes » ne passe jamais dessous. Galerie : « Au-delà de cinq rangées — la liste défile ».
@@ -1563,6 +1563,69 @@ alertes » ne passe jamais dessous. Galerie : « Au-delà de cinq rangées — l
 Même soir, hors composant : **l'emplacement d'objet des tuiles d'alerte passe de 44 à 64 px**,
 la case du Suivi (`ITEM_SLOT_SIZE`), « dix pixels de plus de chaque côté » — la tuile passe de 88
 à 110 px de haut pour le loger, le nom garde sa ligne unique (`panels::alerts_tab`).
+
+### La rangée du web, cote pour cote (2026-09-12, nuit)
+
+Quatrième retour du jour, et le plus dense : « les images sont beaucoup plus collées que sur le
+web, ça manque de ce côté aéré » ; « les gemmes ont été très fortement agrandies et aplaties, sur
+le web elles sont en 14 × 14 » ; « une ligne fait 35 px sur le web, quelle est la dimension ici ? » ;
+le rail « plus sombre que le fond », la barre « sans s'agrandir », sa poignée « de la couleur des
+éléments survolés » ; le pointeur en main sur les rangées ; et un bug — « le scroll ne se
+synchronise pas avec les flèches ».
+
+**La gemme d'abord, parce que c'était un bug et non un choix.** Le composant peint la gemme à son
+rapport natif depuis le premier jour (`glyph_fit(entry.gem_size, 14)`), et la galerie lui passait
+bien `GEM_NATIVE` (13 × 20). Mais l'onglet Alertes, lui, ne posait que `entry.gem` et laissait
+`gem_size` à sa valeur par défaut, `Vec2::splat(1.0)` — un carré. Une gemme de 13 × 20 se
+retrouvait donc étirée en 14 × 14 : plus large d'un pixel, écrasée de six. `alerts_tab::texture`
+rend désormais la taille du `TextureHandle` avec son id, et la gemme entre dans sa boîte en 9 × 14,
+comme `object-fit: contain` côté web.
+
+**La rangée ensuite.** Elle suivait la cadence du select du jeu (`SELECT_ROW_HEIGHT`, 28 px) avec
+des écarts de 6 — un choix du 2026-09-11, quand le composant se présentait comme « une extension
+de `select` ». Sauf que la liste du jeu n'a ni gemme ni image à loger. Réponse à la question posée :
+la rangée faisait **28 px** contre **35** sur le web, avec un corps de nom de 15 px contre 13,1
+(0,82 rem). Un rapport unique (15 / 13,1 ≈ 1,14, soit une rangée de 40) aurait grossi la gemme à
+16 alors qu'elle est demandée en 14 : les cotes du web sont donc portées **telles quelles**, le
+corps de 15 restant celui de l'overlay. Relevé sur `wakfu-autocomplete.component.css` :
+
+| Cote | Web | Avant | Jeton |
+| --- | --- | --- | --- |
+| Hauteur de rangée | `height: 35px` | 28 | `AUTOCOMPLETE_ROW_HEIGHT` |
+| Marge gauche et droite | `padding: 0 10px` | 6 | `AUTOCOMPLETE_ROW_PADDING_X` |
+| Boîte de la gemme | 14 × 14 à `left: 10px` | 14 (écrasée) | `AUTOCOMPLETE_GEM_BOX` |
+| Colonne d'image | `width: 30px; margin-left: 20px` | — | `AUTOCOMPLETE_IMAGE_COLUMN`, `_OFFSET` |
+| Image | `[size]="24"` | 22 | `AUTOCOMPLETE_IMAGE_SIZE` |
+| Écart colonne → nom | `gap: 10px` | 6 | `AUTOCOMPLETE_ROW_GAP` |
+
+Ce qui donne, de gauche à droite : marge 10, gemme 10..24, colonne d'image 30..60 (image de 24
+centrée), nom à 70. La bande de filtres garde sa marge de 6 (`AUTOCOMPLETE_FILTER_BAR_PAD`, le
+`padding: 6px` de `.wakfu-autocomplete-categories`), qu'elle partageait jusque-là avec la rangée.
+
+**La barre, seconde version.** Le rail existe désormais (`AUTOCOMPLETE_SCROLLBAR_TRACK`,
+`#473f30`) : le web fait le sien à 68 % de la surface qui le porte (`#1a1a1a` sur `#262626`), et
+c'est ce rapport appliqué au brun de la liste. Plus d'élargissement — 8 px dans tous les états. La
+poignée reste grise au repos (`HEADING_TEXT`) et prend `SELECT_ROW_HIGHLIGHT` sous le pointeur et
+pendant le glissement (`AUTOCOMPLETE_SCROLLBAR_THUMB_HOVERED`) : egui n'applique `hovered` que le
+pointeur **sur la poignée**, pas seulement dans sa colonne. Le pointeur devient une main sur les
+rangées sélectionnables et sur les filtres (`cursor: pointer` du web), reste une flèche sur une
+rangée désactivée.
+
+**Le défilement au clavier, et ce qu'il a révélé.** Une flèche appelle maintenant
+`ui.scroll_to_rect(rangée, None)` — le `scrollIntoView({ block: 'nearest' })` de `moveActive()`
+côté web, du strict nécessaire — et la `ScrollArea` est sans animation (`animated(false)`) pour que
+la rangée soit en vue à la frame même. Le test qui le prouve
+(`options_alertes_les_fleches_font_defiler_la_liste` : huit suggestions, six ↓, capture, Entrée) a
+trouvé un second défaut en passant : **Entrée ne choisissait rien.** Un `TextEdit` à une ligne rend
+le focus sur sa touche de retour, et il est peint avant le panneau — à la frame d'Entrée,
+`has_focus()` était déjà faux, le panneau se fermait sans sélection. Aucun test n'avait validé une
+suggestion autrement qu'au clic. Le champ compte désormais comme focalisé pendant la frame où
+Entrée vient de le lui reprendre (`lost_focus() && key_pressed(Enter)`), et si rien n'est
+sélectionnable (entrée désactivée, filtre vide) il reprend le focus pour que le panneau reste.
+
+Même nuit, hors composant : la marge basse des tuiles d'alerte passe de 5 à 18 px, **le même écart
+sous le nom qu'au-dessus de l'emplacement** (`TILE_BOTTOM_INSET = TILE_BADGE_ROW`) ; la tuile fait
+123 px.
 
 ### Ce que la galerie ne pouvait pas rattraper — le clic, en vrai (2026-09-12)
 
@@ -1593,7 +1656,9 @@ masque exactement ce défaut.
 Tous préfixés `AUTOCOMPLETE_*` dans `design/tokens.rs`, sous un en-tête qui dit explicitement qu'il
 s'agit d'un **portage du CSS web** et non d'une mesure sur asset : bande 38, bouton de filtre 26
 (icône 20), opacité de repos 0,6 → alpha 153, boîte de gemme 14 (une gemme 13 × 20 y entre en
-9,1 × 14, jamais un `splat`), image d'objet 22, écarts 6, message vide 34.
+9,1 × 14, jamais un `splat`), message vide 34 — et, depuis le 2026-09-12 au soir, la rangée
+entière du web : 35 de haut, marges 10, colonne d'image 30 à 20 de la marge, image 24, écart 10
+(voir « La rangée du web, cote pour cote »).
 
 ---
 
