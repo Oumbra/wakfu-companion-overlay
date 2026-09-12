@@ -341,6 +341,38 @@ pub struct CatalogIndex {
     monsters_by_id: HashMap<i64, MonsterEntry>,
     /// Même priorité `fr` qu'`items_by_name` ci-dessus, même raison.
     monsters_by_name: HashMap<String, MonsterEntry>,
+    /// **Les objets dans l'ordre où ils se cherchent**, pour [`CatalogIndex::search_items`].
+    ///
+    /// Les deux `HashMap` ci-dessus ne peuvent pas servir : elles ne gardent aucun nom
+    /// d'affichage (la clé est normalisée, sans accent ni majuscule) et portent les quatre
+    /// langues mélangées, donc quatre fois le même objet. Un champ d'autocomplétion a besoin du
+    /// nom tel qu'il s'écrit.
+    ///
+    /// Trié une fois à la construction, par nom : la recherche parcourt dans l'ordre et sort dès
+    /// qu'elle a sa limite — le tri n'est pas refait à chaque frappe.
+    searchable_items: Vec<SearchableItem>,
+}
+
+/// Un objet tel que le champ d'ajout d'alerte le cherche — voir
+/// [`CatalogIndex::searchable_items`].
+#[derive(Clone)]
+struct SearchableItem {
+    id: i64,
+    /// Le nom **fr**, tel qu'il s'écrit. C'est aussi le nom que le log emploie et donc celui qu'il
+    /// faut stocker : les alertes se déclenchent sur la ligne « Vous avez ramassé … ».
+    name: String,
+    normalized: String,
+}
+
+/// Une suggestion rendue par [`CatalogIndex::search_items`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemSuggestion {
+    pub id: i64,
+    /// Nom fr, tel qu'il s'écrit — c'est ce qu'il faut stocker dans une alerte.
+    pub name: String,
+    pub rarity: WakfuRarity,
+    pub category: WakfuItemCategory,
+    pub icon: IconRef,
 }
 
 impl CatalogIndex {
@@ -384,8 +416,20 @@ impl CatalogIndex {
                     .entry(normalize_wakfu_name(name))
                     .or_insert_with(|| entry.clone());
             }
+            index.searchable_items.push(SearchableItem {
+                id,
+                normalized: normalize_wakfu_name(&fr),
+                name: fr,
+            });
             index.items_by_id.insert(id, entry);
         }
+        // Tri une fois pour toutes — la recherche n'a plus qu'à parcourir. `sort_unstable_by` sur
+        // le nom NORMALISÉ et non sur le nom brut : sans ça « Épée » tomberait après « Zorbak »,
+        // les majuscules et les accents ne se comparant pas comme leur lettre de base en ordre
+        // d'octets.
+        index
+            .searchable_items
+            .sort_unstable_by(|a, b| a.normalized.cmp(&b.normalized));
 
         let raw_monsters: Vec<RawMonsterRow> = data
             .get("monsters")
@@ -415,6 +459,44 @@ impl CatalogIndex {
         }
 
         index
+    }
+
+    /// Les objets dont le nom **contient** la requête, triés par nom.
+    ///
+    /// Miroir de `WakfuSearchService.searchItems` (dépôt web) : une simple recherche de
+    /// sous-chaîne sur le nom normalisé, triée alphabétiquement — **pas** de priorité au préfixe,
+    /// que le web n'a pas non plus. Sert le champ d'ajout de l'onglet « Alertes ».
+    ///
+    /// **`limit` n'existe pas côté web**, qui rend toute la liste dans un panneau que le
+    /// navigateur fait défiler. Ici le panneau de suggestions est borné
+    /// (`tokens::AUTOCOMPLETE_MAX_ROWS`) et chaque entrée coûte une allocation de nom : construire
+    /// trois mille suggestions pour en peindre six serait du travail jeté. Les entrées au-delà de
+    /// la limite sont simplement absentes — l'utilisateur affine sa requête, ce qu'il fait déjà
+    /// devant une liste trop longue.
+    ///
+    /// Une requête plus courte que `min_len` ne cherche rien et renvoie une liste vide : c'est le
+    /// seuil du champ (`MIN_QUERY_LENGTH` côté web), imposé ici plutôt que laissé à l'appelant
+    /// pour que le balayage n'ait même pas lieu.
+    pub fn search_items(&self, query: &str, min_len: usize, limit: usize) -> Vec<ItemSuggestion> {
+        let normalized = normalize_wakfu_name(query);
+        if normalized.chars().count() < min_len {
+            return Vec::new();
+        }
+        self.searchable_items
+            .iter()
+            .filter(|item| item.normalized.contains(&normalized))
+            .take(limit)
+            .filter_map(|item| {
+                let entry = self.items_by_id.get(&item.id)?;
+                Some(ItemSuggestion {
+                    id: item.id,
+                    name: item.name.clone(),
+                    rarity: entry.rarity,
+                    category: entry.category,
+                    icon: entry.icon.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Résout l'icône d'un objet — `catalog_id` (capturé sans ambiguïté à l'ajout du suivi, voir

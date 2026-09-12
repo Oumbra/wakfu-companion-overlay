@@ -20,7 +20,8 @@ pub mod spells;
 pub mod watchlist;
 
 pub use catalog::{
-    CatalogIndex, IconKind, IconRef, MonsterClassification, WakfuItemCategory, WakfuRarity,
+    CatalogIndex, IconKind, IconRef, ItemSuggestion, MonsterClassification, WakfuItemCategory,
+    WakfuRarity,
 };
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
