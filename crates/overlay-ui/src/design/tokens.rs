@@ -1354,3 +1354,44 @@ pub const TABLE_EMPTY_FONT_SIZE: f32 = TABLE_HEADER_FONT_SIZE;
 
 /// Hauteur du corps pendant un chargement — **choisie**, assez haute pour porter le rouage.
 pub const TABLE_LOADING_HEIGHT: f32 = 3.0 * TABLE_ROW_HEIGHT;
+
+// ---------------------------------------------------------------------------------------------
+// Pagination — `design::pagination`
+//
+// Relevé du 2026-09-12 (`docs/design-system/hdv-table.json`, nœud `pager`), puis re-mesuré à ×5 en
+// écrivant le composant : ce que le relevé décrivait comme « deux flèches de 7 px » sont deux
+// BOUTONS ICÔNE de 36 px portant chacun un triangle.
+// ---------------------------------------------------------------------------------------------
+
+/// Doré du libellé **et du numéro courant** — la teinte des onglets inactifs, [`TAB_LABEL_IDLE`].
+///
+/// Mesuré (244, 216, 158) sur les pixels pleins des deux, soit `#f4d89e` au canal près. Le relevé
+/// annonçait le numéro courant en blanc : c'est faux, il est doré comme le mot « Page ». Seuls la
+/// barre oblique et le total sont blancs — *ce qui bouge est en or, ce qui borne est en blanc*.
+pub const PAGINATION_LABEL: Color32 = TAB_LABEL_IDLE;
+
+/// Blanc du « / total » — blanc pur mesuré (255, 255, 255).
+pub const PAGINATION_TOTAL: Color32 = Color32::WHITE;
+
+/// Corps du libellé — **19 px, réglé au rendu et non par le calcul**.
+///
+/// La mesure de départ est la hauteur de CAPITALE et elle seule : le « P » de « Page » fait 13 px
+/// dans le jeu (y 915..927). Mesurer « Page » en entier donnerait 17 px — le jambage du « g » —
+/// pour un corps faux d'un tiers ; c'est l'erreur qui avait déjà coûté un aller-retour sur le titre
+/// de repliable.
+///
+/// Le rapport d'encre habituel (0,805) donnait 13/0,805 ≈ 16. **Au rendu, 16 ne produit que 11 px
+/// d'encre** ; 19 en produit 13, exactement comme le jeu. Vérification complète du segment
+/// « Page 0 / 0 » à ce corps : 41 px pour « Page » contre 42 dans le jeu, 83 px pour le libellé
+/// entier contre 82. Le rapport d'encre de cette police n'est donc pas celui du chantier du bouton,
+/// et une constante posée par le calcul seul aurait été 45 % trop petite.
+pub const PAGINATION_FONT_SIZE: f32 = 19.0;
+
+/// Écart entre la fin de l'encre du libellé et le premier socle — 7 px (1174 → 1181).
+pub const PAGINATION_TEXT_GAP: f32 = 7.0;
+
+/// Gouttière entre les deux flèches — 4 px (fin du premier socle 1216, début du second 1221).
+///
+/// Les deux socles font 36 px chacun, d'où un pas de 40 px entre leurs centres : c'est ce que le
+/// relevé avait lu comme « 39 px entre les deux débuts de flèche », à un pixel de détourage près.
+pub const PAGINATION_ARROW_GAP: f32 = 4.0;

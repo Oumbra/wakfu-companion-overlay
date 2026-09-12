@@ -208,8 +208,8 @@
             935
           ],
           "role": "text",
-          "fill": "#ffffff",
-          "notes": "Blanc pur, distinct du libellé."
+          "fill": "#f4d89e",
+          "notes": "CORRIGÉ le 2026-09-12 : le numéro courant est DORÉ, pas blanc. Mesure sur ses pixels pleins : (244, 216, 158), la même valeur que « Page ». Seuls la barre oblique et le total sont blancs."
         },
         {
           "id": "pager-total",
@@ -225,7 +225,7 @@
         },
         {
           "id": "pager-prev",
-          "label": "Flèche précédente",
+          "label": "Bouton icône précédente",
           "box": [
             1190,
             905,
@@ -234,11 +234,11 @@
           ],
           "role": "icon",
           "fill": "#5c5f5f",
-          "notes": "Glyphe de 7 px de large. Gris #5c5f5f : DÉSACTIVÉE ici (0 page), la teinte active n'est pas relevable sur ces captures."
+          "notes": "CORRIGÉ le 2026-09-12, en écrivant `design::pagination` : ce n'est pas une flèche nue mais un BOUTON ICÔNE de 36 × 36 (socle arrondi, hachures diagonales), y 903..938. Le triangle y fait 8 × 10 px d'encre. Les deux boutons sont séparés de 4 px et les deux triangles sont le MÊME glyphe, l'un retourné. Grisés ici (0 page) : la teinte active n'est relevable sur aucune des trois captures."
         },
         {
           "id": "pager-next",
-          "label": "Flèche suivante",
+          "label": "Bouton icône suivante",
           "box": [
             1229,
             905,
@@ -247,7 +247,7 @@
           ],
           "role": "icon",
           "fill": "#5c5f5f",
-          "notes": "39 px entre les deux débuts de flèche."
+          "notes": "CORRIGÉ le 2026-09-12, en écrivant `design::pagination` : ce n'est pas une flèche nue mais un BOUTON ICÔNE de 36 × 36 (socle arrondi, hachures diagonales), y 903..938. Le triangle y fait 8 × 10 px d'encre. Les deux boutons sont séparés de 4 px et les deux triangles sont le MÊME glyphe, l'un retourné. Grisés ici (0 page) : la teinte active n'est relevable sur aucune des trois captures."
         }
       ]
     }
@@ -258,7 +258,8 @@
       "row-stripe": "rgba(255,255,255,0.047)",
       "pager-label": "#f4d89e",
       "pager-value": "#ffffff",
-      "pager-arrow-disabled": "#5c5f5f"
+      "pager-arrow-disabled": "#5c5f5f",
+      "pager-current": "#f4d89e"
     },
     "space": [
       7,
@@ -279,10 +280,10 @@
       },
       {
         "name": "pagination",
-        "size": "≈22",
+        "size": "19 (réglé au rendu)",
         "weight": "regular",
         "color": "#f4d89e puis #ffffff",
-        "usage": "16 px d'encre (y 916..931)"
+        "usage": "13 px de hauteur de CAPITALE (le « P »), pas 16 d'encre totale — celle-ci inclut le jambage du « g ». Le rapport d'encre habituel donnait 16 ; au rendu, 16 ne produit que 11 px et 19 en produit 13."
       }
     ]
   },
@@ -298,6 +299,8 @@
     "Le doré de « Page » est #f4d89e, exactement la teinte des libellés d'onglet inactif déjà relevée dans le design system — un jeton partagé plutôt qu'une valeur propre.",
     "Le « liseré bas » du premier relevé n'en est pas un : mesuré sur toute la largeur, il déborde des bornes du tableau et appartient au décor de la fenêtre. Corrigé le 2026-09-12.",
     "Le zébrage a été re-déduit colonne par colonne en écrivant le composant : alpha médian 12,3 sur quinze colonnes (10,1 à 16,2 selon le décor sous-jacent), ce qui confirme le 12 du relevé. Deux colonnes seules donnaient 13,5 — l'échantillon comptait.",
-    "L'en-tête est en LINÉALE, pas dans la serif des titres de section (vérifié sur la capture agrandie ×4). Sa teinte relevée `#b9babb` est celle des titres de section `#b8b9ba` à un canal près : un seul jeton pour les deux."
+    "L'en-tête est en LINÉALE, pas dans la serif des titres de section (vérifié sur la capture agrandie ×4). Sa teinte relevée `#b9babb` est celle des titres de section `#b8b9ba` à un canal près : un seul jeton pour les deux.",
+    "La pagination n'est pas faite de flèches nues : ce sont deux boutons icône de 36 px du design system, portant le même triangle, l'un retourné. Corrigé le 2026-09-12.",
+    "Le numéro courant est doré comme « Page » ; seuls la barre oblique et le total sont blancs — ce qui bouge est en or, ce qui borne est en blanc."
   ]
 }
