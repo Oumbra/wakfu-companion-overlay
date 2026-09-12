@@ -6,8 +6,8 @@
 //! premier combat du rejeu (six alliés, `Anonyme-Ouginak1`, `Anonyme-Pandawa1`, `Anonyme-Ecaflip1`…) fournit tous
 //! les cas de la spec : dernier lanceur allié suivi automatiquement, un allié à cinq sorts dont un
 //! critique (une rangée), un allié à neuf sorts (deux rangées), trois alliés qui n'ont rien lancé
-//! (onglets estompés), et des sorts absents du référentiel (`Proie`, `Karcham`, `Chamrak`, `Bond
-//! du félin` — mécaniques de classe, pavé « ? »).
+//! (donc sans onglet : trois emplacements sur six restent vides), et des sorts absents du
+//! référentiel (`Proie`, `Karcham`, `Chamrak`, `Bond du félin` — mécaniques de classe, pavé « ? »).
 //!
 //! **Icônes de sorts : fixtures versionnées, jamais le réseau** (§17.1 du plan). Les cinq PNG de
 //! `fixtures/spells/` sont injectés dans `RemoteIconStore::empty()` par `preload`, adressés par le
@@ -223,7 +223,8 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
 
     // 1. Suivi automatique : l'indicateur est sous le dernier lanceur allié (Anonyme-Ouginak1, cinq
     //    sorts dont un critique en 4e ; `Proie`, mécanique Ouginak, manque au référentiel :
-    //    pavé « ? »). Anonyme-Huppermage1, Anonyme-Sadida1 et Anonyme-Zobal1 n'ont rien lancé : onglets estompés.
+    //    pavé « ? »). Anonyme-Huppermage1, Anonyme-Sadida1 et Anonyme-Zobal1 n'ont rien lancé : pas d'onglet, les
+    //    emplacements 4 à 6 restent vides.
     harness.run();
     harness.snapshot("combat_spell_block_suivi_auto");
 
@@ -247,8 +248,8 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
     harness.snapshot("combat_spell_block_epingle_sort_inconnu");
 
     // 4. Second clic sur l'onglet épinglé : retour au suivi automatique (Anonyme-Ouginak1), puis survol
-    //    de son critique : liseré ACCENT et infobulle « Croc-en-jambe / Anonyme-Ouginak1 · Critique »
-    //    au-dessus.
+    //    de son critique : liseré ACCENT et infobulle « Croc-en-jambe · Critique » au-dessus
+    //    (une ligne, sans nom de lanceur).
     harness
         .get_by_role_and_label(Role::Button, "Anonyme-Ecaflip1")
         .click();

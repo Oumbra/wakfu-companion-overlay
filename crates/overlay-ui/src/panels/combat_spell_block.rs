@@ -6,12 +6,15 @@
 //!
 //! ## Ce que le bloc montre
 //!
-//! - **Onglets** : tous les alliés du combat, dans l'ordre stable de `FightSnapshot::fighters`,
-//!   sur SIX emplacements fixes calculés sur le cas à six alliés (sept écarts égaux, premier et
-//!   dernier portrait à la même distance des bords, quel que soit le nombre d'alliés). Un allié qui
-//!   n'a encore rien lancé a son onglet estompé, non cliquable, à sa place définitive. Au-delà de
-//!   six alliés (jamais vu en pratique, même limite que le cadre à médaillons), les suivants n'ont
-//!   pas d'onglet — question encore ouverte dans l'artefact, tranchée provisoirement ainsi.
+//! - **Onglets** : les alliés qui ont lancé AU MOINS UN SORT ce combat, dans l'ordre stable de
+//!   `FightSnapshot::fighters`, sur SIX emplacements fixes calculés sur le cas à six alliés (sept
+//!   écarts égaux, premier et dernier portrait à la même distance des bords, quel que soit le
+//!   nombre d'onglets). Un allié qui n'a encore rien lancé n'a PAS d'onglet, et le bloc entier
+//!   n'apparaît qu'au premier sort allié du combat — au premier tour, personne n'a joué, rien n'est
+//!   affiché (retour utilisateur du 12 sept. sur le premier rendu, qui montrait tous les alliés avec
+//!   les silencieux estompés). Au-delà de six lanceurs (jamais vu en pratique, même limite que le
+//!   cadre à médaillons), les suivants n'ont pas d'onglet — question encore ouverte dans
+//!   l'artefact, tranchée provisoirement ainsi.
 //! - **Sélection automatique** : l'indicateur suit le dernier allié à avoir lancé un sort
 //!   (`FightSnapshot::last_ally_caster`). **Clic** sur un onglet : épingle cet allié, ses sorts
 //!   restent affichés pendant que les autres jouent ; second clic sur l'onglet épinglé : retour au
@@ -24,8 +27,9 @@
 //!   moteur à chaque nouveau tour, voir `overlay_engine::session`), cinq icônes de 32 px par
 //!   rangée, retour à la ligne (jamais de défilement latéral, décision explicite), badge d'index
 //!   en haut à gauche (décidé le 12 septembre), critique = liseré doré + coin plié haut-droit.
-//!   Survol : liseré `ACCENT` et infobulle `design::tooltip` au-dessus (nom du sort, puis lanceur
-//!   et « Critique » s'il y a lieu).
+//!   Survol : liseré `ACCENT` et infobulle `design::tooltip` au-dessus, une seule ligne : le nom du
+//!   sort en blanc, suivi de « · Critique » en doré s'il y a lieu. Pas de nom de lanceur (retiré le
+//!   12 sept. : l'onglet sélectionné dit déjà de qui sont ces sorts).
 //! - **Icône** : nom normalisé + classe du lanceur → `overlay_engine::SpellIndex` (référentiel
 //!   `assets/spells.json`, maintenu par l'utilisateur) → `RemoteIconStore`/`RemoteIconTextures`,
 //!   même circuit que les portraits de monstres. Sans correspondance : pavé « ? », nom brut en
@@ -38,9 +42,9 @@
 //! Largeur `BLOCK_WIDTH` (190, celle des barres), fond `LEADER_PANEL_FILL` arrondi 6, marge
 //! intérieure 4. Onglets 22 px à `y = 4`, emplacement `i` à `x = 4 + 7,14 + i × 29,14`.
 //! Séparateur 1 px blanc à 13 % à `y = 30`, du bord gauche du premier emplacement au bord droit du
-//! sixième. Indicateur 22 × 2 à `y = 29`. Première rangée de sorts à `y = 39`, 32 px + 3 px
-//! d'écart, cinq par rangée. Hauteur : `39 + 32·r + 3·(r − 1) + 4` = 75 / 110 / 145 px pour `r`
-//! rangées (au moins une, même vide).
+//! sixième. Indicateur 22 × 2 à `y = 29`. Première rangée de sorts à `y = 39`, 32 px + 5 px
+//! d'écart (voir `SPELL_GAP`), cinq par rangée. Hauteur : `39 + 32·r + 5·(r − 1) + 4` = 75 / 112 /
+//! 149 px pour `r` rangées (au moins une).
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -72,9 +76,8 @@ pub const TAB_SIZE: f32 = 22.0;
 /// Sept écarts égaux sur la largeur utile : `(182 − 6 × 22) / 7` ≈ 7,14 px.
 const TAB_GAP: f32 = (INNER_WIDTH - TAB_SLOTS as f32 * TAB_SIZE) / (TAB_SLOTS as f32 + 1.0);
 const TAB_TOP: f32 = 4.0;
-/// Opacité d'un onglet non sélectionné (55 %), et d'un allié qui n'a encore rien lancé (28 %).
+/// Opacité d'un onglet non sélectionné (55 %).
 const TAB_ALPHA_IDLE: u8 = 140;
-const TAB_ALPHA_SILENT: u8 = 71;
 
 /// Séparateur : 1 px, blanc à 13 %, `y = 30` (centre du trait à 30,5).
 const SEPARATOR_Y: f32 = 30.5;
@@ -87,7 +90,12 @@ const SLIDE_DURATION: f64 = 0.25;
 
 const ROWS_TOP: f32 = 39.0;
 pub const SPELL_SIZE: f32 = 32.0;
-const SPELL_GAP: f32 = 3.0;
+/// Écart entre deux icônes — 5 px, pas les 3 px de la maquette : un critique porte deux liserés
+/// HORS de son icône (1 px sombre + 1 px doré, voir `paint` plus bas), soit 2 px de chaque côté ;
+/// à 3 px, deux critiques voisins se touchaient (capture utilisateur du 12 sept., trois critiques
+/// d'affilée sans aucun jour entre eux). À 5 px il reste 1 px d'air entre deux liserés dorés, et
+/// cinq icônes tiennent toujours dans la largeur utile (5 × 32 + 4 × 5 = 180 ≤ 182).
+const SPELL_GAP: f32 = 5.0;
 pub const SPELLS_PER_ROW: usize = 5;
 const SPELL_ROUNDING: f32 = 3.0;
 const BOTTOM_PADDING: f32 = 4.0;
@@ -100,7 +108,11 @@ const SPELL_PLACEHOLDER_FILL: egui::Color32 = egui::Color32::from_rgb(0x1E, 0x22
 const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xD8, 0x9E);
 const CRIT_CORNER: f32 = 9.0;
 
-const BADGE_INSET: f32 = 2.0;
+/// Retrait du badge depuis le coin haut-gauche de l'icône : 2 px à gauche, mais 1 px seulement
+/// en haut (retour utilisateur du 12 sept. : à 2 px, le décalage entre le haut du badge et le haut
+/// de l'icône sautait aux yeux sur un critique, dont les deux liserés épaississent le bord).
+const BADGE_INSET_X: f32 = 2.0;
+const BADGE_INSET_Y: f32 = 1.0;
 const BADGE_MIN_WIDTH: f32 = 12.0;
 const BADGE_HEIGHT: f32 = 11.0;
 const BADGE_ROUNDING: f32 = 2.0;
@@ -182,9 +194,19 @@ fn block_height(rows: usize) -> f32 {
     ROWS_TOP + SPELL_SIZE * rows + SPELL_GAP * (rows - 1.0) + BOTTOM_PADDING
 }
 
+/// Le bloc a-t-il quelque chose à montrer — au moins un allié ayant lancé un sort ce combat. C'est
+/// la condition d'affichage du bloc entier (voir doc de module), utilisée par l'appelant avant de
+/// réserver `BLOCK_GAP`.
+pub fn has_casting_ally(fight: &FightSnapshot) -> bool {
+    fight
+        .fighters
+        .iter()
+        .any(|f| f.is_ally && !f.last_turn_casts.is_empty())
+}
+
 /// Peint le bloc à la position courante de `ui` (colonne des barres, après le dernier groupe et
-/// `BLOCK_GAP`). Ne fait rien si le combat n'a aucun allié — l'appelant vérifie déjà, par
-/// cohérence avec « le bloc n'est peint que s'il y a un combat et au moins un allié ».
+/// `BLOCK_GAP`). Ne fait rien tant qu'aucun allié n'a lancé de sort — l'appelant vérifie déjà (voir
+/// `has_casting_ally`), pour ne pas réserver `BLOCK_GAP` à un bloc absent.
 pub fn show(
     ui: &mut egui::Ui,
     fight: &FightSnapshot,
@@ -194,18 +216,20 @@ pub fn show(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
 ) {
+    // Seuls les alliés ayant déjà lancé un sort ont un onglet (voir doc de module) — la liste ne
+    // peut que s'allonger au fil du combat (`last_turn_casts` est vidée puis remplie d'un coup au
+    // nouveau tour, jamais laissée vide), un onglet ne disparaît donc jamais.
     let allies: Vec<(usize, &FighterDamage)> = fight
         .fighters
         .iter()
         .enumerate()
-        .filter(|(_, f)| f.is_ally)
+        .filter(|(_, f)| f.is_ally && !f.last_turn_casts.is_empty())
         .take(TAB_SLOTS)
         .collect();
     if allies.is_empty() {
         return;
     }
     let is_tab = |idx: usize| allies.iter().any(|(i, _)| *i == idx);
-    let has_casts = |idx: usize| !fight.fighters[idx].last_turn_casts.is_empty();
 
     let state_id = egui::Id::new(("combat-spell-block", fight.fight_id));
     let mut state: SpellBlockState = ui
@@ -224,17 +248,15 @@ pub fn show(
             origin + egui::vec2(tab_x(slot), TAB_TOP),
             egui::Vec2::splat(TAB_SIZE),
         );
-        let clickable = has_casts(*idx);
-        let sense = if clickable {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        };
-        let response = ui.interact(rect, ui.id().with(("spell-block-tab", *idx)), sense);
+        let response = ui.interact(
+            rect,
+            ui.id().with(("spell-block-tab", *idx)),
+            egui::Sense::click(),
+        );
         response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, clickable, ally.name.as_str())
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, ally.name.as_str())
         });
-        if clickable && response.clicked() {
+        if response.clicked() {
             state.pinned = if state.pinned == Some(*idx) {
                 None
             } else {
@@ -244,13 +266,12 @@ pub fn show(
         tab_responses.push((rect, response));
     }
 
-    // Sélection : épingle valide, sinon dernier lanceur allié, sinon premier allié ayant lancé
-    // quelque chose, sinon le premier allié (bloc vide, une rangée).
-    let pinned = state.pinned.filter(|&i| is_tab(i) && has_casts(i));
+    // Sélection : épingle valide, sinon dernier lanceur allié, sinon le premier onglet (cas d'un
+    // dernier lanceur au-delà du sixième onglet).
+    let pinned = state.pinned.filter(|&i| is_tab(i));
     state.pinned = pinned;
     let selected = pinned
         .or(fight.last_ally_caster.filter(|&i| is_tab(i)))
-        .or_else(|| allies.iter().map(|(i, _)| *i).find(|&i| has_casts(i)))
         .unwrap_or(allies[0].0);
     let selected_slot = allies.iter().position(|(i, _)| *i == selected).unwrap_or(0);
     let selected_ally = &fight.fighters[selected];
@@ -312,10 +333,8 @@ pub fn show(
     for ((rect, response), (idx, ally)) in tab_responses.iter().zip(&allies) {
         let alpha = if *idx == selected {
             255
-        } else if has_casts(*idx) {
-            TAB_ALPHA_IDLE
         } else {
-            TAB_ALPHA_SILENT
+            TAB_ALPHA_IDLE
         };
         let texture = ally
             .class_name
@@ -334,11 +353,9 @@ pub fn show(
             egui::Stroke::new(1.0, egui::Color32::from_black_alpha(alpha)),
         );
         design::tooltip(response).text(ally.name.as_str());
-        if has_casts(*idx) {
-            response
-                .clone()
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-        }
+        response
+            .clone()
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
     }
 
     // Rangées de sorts.
@@ -427,26 +444,31 @@ pub fn show(
 
         paint_index_badge(ui, &painter, rect, i + 1);
 
-        let caster = selected_ally.name.clone();
         let critical = cast.critical;
         let display_name = display_name.to_string();
         design::tooltip(&response).show(|ui| {
             ui.set_max_width(ui.spacing().tooltip_width);
-            ui.label(egui::RichText::new(display_name).color(tokens::TOOLTIP_TEXT));
-            let detail = if critical {
-                format!("{caster} · Critique")
-            } else {
-                caster
-            };
-            ui.label(egui::RichText::new(detail).color(GOLD));
+            // Une seule ligne, deux couleurs : le nom en blanc, « · Critique » en doré derrière.
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                &display_name,
+                0.0,
+                egui::TextFormat::simple(font.clone(), tokens::TOOLTIP_TEXT),
+            );
+            if critical {
+                job.append(" · Critique", 0.0, egui::TextFormat::simple(font, GOLD));
+            }
+            ui.label(job);
         });
     }
 
     ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
 }
 
-/// Badge d'index en haut à gauche de l'icône, 2 px du bord : pastille noire à 62 %, rayon 2,
-/// 12 × 11 minimum (s'élargit pour deux chiffres), chiffre blanc 9 px semi-gras sans contour.
+/// Badge d'index en haut à gauche de l'icône (2 px du bord gauche, 1 px du haut — voir
+/// `BADGE_INSET_Y`) : pastille noire à 62 %, rayon 2, 12 × 11 minimum (s'élargit pour deux
+/// chiffres), chiffre blanc 9 px semi-gras sans contour.
 fn paint_index_badge(ui: &egui::Ui, painter: &egui::Painter, icon: egui::Rect, index: usize) {
     let galley = painter.layout_no_wrap(
         index.to_string(),
@@ -455,7 +477,7 @@ fn paint_index_badge(ui: &egui::Ui, painter: &egui::Painter, icon: egui::Rect, i
     );
     let width = (galley.size().x + 2.0 * BADGE_PADDING_X).max(BADGE_MIN_WIDTH);
     let badge = egui::Rect::from_min_size(
-        icon.min + egui::Vec2::splat(BADGE_INSET),
+        icon.min + egui::vec2(BADGE_INSET_X, BADGE_INSET_Y),
         egui::vec2(width, BADGE_HEIGHT),
     );
     painter.rect_filled(badge, BADGE_ROUNDING, BADGE_FILL);
@@ -497,8 +519,21 @@ mod tests {
     fn hauteur_du_bloc_par_rangee() {
         assert_eq!(block_height(0), 75.0);
         assert_eq!(block_height(1), 75.0);
-        assert_eq!(block_height(2), 110.0);
-        assert_eq!(block_height(3), 145.0);
+        assert_eq!(block_height(2), 112.0);
+        assert_eq!(block_height(3), 149.0);
+    }
+
+    /// Cinq icônes et leurs liserés de critique (2 px hors de l'icône de chaque côté) tiennent dans
+    /// la largeur utile, et deux critiques voisins gardent un jour entre eux — voir `SPELL_GAP`.
+    #[test]
+    fn cinq_icones_tiennent_et_deux_critiques_voisins_ne_se_touchent_pas() {
+        let row_width =
+            SPELLS_PER_ROW as f32 * SPELL_SIZE + (SPELLS_PER_ROW as f32 - 1.0) * SPELL_GAP;
+        assert!(row_width <= INNER_WIDTH, "{row_width} > {INNER_WIDTH}");
+        assert!(
+            SPELL_GAP > 2.0 * 2.0,
+            "deux liserés de 2 px se toucheraient"
+        );
     }
 
     #[test]
