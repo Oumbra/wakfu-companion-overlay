@@ -2085,3 +2085,75 @@ demi** :
 Une colonne **« qui le consomme en production »** par composant. La fiche du bouton icône la porte
 déjà (« les quatre boutons du carré de contrôle du Suivi ») ; les autres non. C'est cette colonne
 qui répond, dans six mois, à « puis-je changer ce jeton sans rien casser ? ».
+
+## `design::confirm_dialog` — boîte de confirmation (2026-09-12)
+
+`crates/overlay-ui/src/design/components/confirm.rs`
+
+```rust
+use overlay_ui::design::{self, ConfirmChoice};
+
+match design::confirm_dialog("Retirer « Pierre ultime » de vos alertes ?")
+    .over(fenetre)                       // la FENÊTRE entière, pas le panneau appelant
+    .log_name("alertes.retrait")
+    .show(ui)
+{
+    ConfirmChoice::Yes => retirer(),
+    ConfirmChoice::No => fermer(),
+    ConfirmChoice::Pending => {}
+}
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `confirm_dialog(question)` | la question posée | — |
+| `over` | ce que le voile couvre et sur quoi la boîte se centre | `ui.max_rect()` |
+| `yes` / `no` | libellés des deux réponses | « Oui » / « Non » |
+| `log_name` | nom d'instance | `confirm` |
+
+Composant feuille, mais il rend un `ConfirmChoice` et non une `Response`&nbsp;: une `Response` ne
+saurait pas dire *laquelle* des deux réponses a été cliquée, et ressortir le choix par un `&mut` en
+paramètre est la maladresse que §6 reproche ailleurs.
+
+### Le voile n'est pas une teinte, c'est une information
+
+Tant que la boîte est ouverte, ce qu'elle couvre est **inerte** — et c'est pourquoi `over` demande
+la fenêtre entière, pied de page compris. Un voile rogné au panneau appelant laisserait bannière,
+onglets et boutons à pleine luminosité, ce qui se lit comme « ils restent cliquables ». Le composant
+va plus loin que l'apparence&nbsp;: il **avale** les clics qui passent à côté de la boîte, pour que
+l'inertie annoncée soit réelle.
+
+### Ce n'est pas une popover ancrée au bouton
+
+Le dépôt web a `ConfirmDeleteService`, collé au bouton déclencheur. Le jeu a sa propre boîte, et
+elle est dans les captures de référence&nbsp;: `interface-confirm-box.png` (449 × 209) pose
+exactement la même forme de question. Boîte autonome et centrée, fond gris **clair** (`#585955`
+mesuré), médaillon en crête débordant le corps.
+
+Le centrage règle du même coup une réserve d'ergonomie&nbsp;: une popover recouvrait le bouton
+« Valider » de la fenêtre, et son bouton de confirmation tombait exactement là où « Valider »
+réapparaissait une fois la popover fermée — un double-clic un peu vif validait la fenêtre.
+
+### Le bouton destructeur du jeu est or, jamais rouge
+
+`docs/design-system.md` réserve nommément le rouge au bouton « Annuler » pleine largeur d'un pied
+de fenêtre, et précise que « le bouton "Annuler" d'une boîte de dialogue simple reste kaki/gris
+standard, pas rouge ». Un « Retirer » rouge est la convention web du *destructive action*.
+
+**Échap répond « Non »**, jamais « Oui »&nbsp;: une touche ne confirme pas une action destructrice.
+L'appelant, lui, doit s'abstenir de lire cette même touche tant qu'un dialogue est ouvert — sinon le
+même appui ferme la boîte ET la fenêtre derrière.
+
+### Vérification
+
+Sa propre planche de galerie (`design_gallery_confirm`), et non une section des deux autres&nbsp;:
+son voile couvre tout ce qu'on lui donne, donc posé dans un canevas de 7530 px il assombrirait la
+galerie entière. La planche peint exprès du contenu dessous — titre, champ, deux boutons — parce
+que c'est **ce qu'il assombrit** qu'il faut juger.
+
+### Deux appelants, et c'est ce qui l'a fait naître
+
+Peint d'abord dans la maquette de la page Alertes, puis dans `panels::alerts_tab` au portage. Remonté
+au design system le jour où la **garde de fermeture** de la fenêtre Options lui a donné un second
+appelant. L'extraction est **à pixel constant** — aucun des trois snapshots de l'onglet Alertes n'a
+bougé.

@@ -53,6 +53,7 @@ pub use components::collapsible::{
     content_width as collapsible_content_width, open_height as collapsible_open_height,
     Collapsible,
 };
+pub use components::confirm::{confirm_dialog, ConfirmChoice, ConfirmDialog};
 pub use components::heading::{heading, Heading};
 pub use components::icon::{icon, Icon};
 pub use components::icon_button::{icon_button, IconButton, IconButtonState, IconContext};
