@@ -830,23 +830,27 @@ allié pendant son dernier tour**, en icônes numérotées dans l'ordre du log �
 validée en artefact avec l'utilisateur en quatre révisions (11-12 sept.), cotes reprises telles
 quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
 
-- **Position** : dans le flux de la colonne des barres, 18 px sous la barre du dernier groupe,
-  jamais en position fixe sous le gabarit ; visible sur la vue Ennemis aussi (il porte sur les
-  alliés du combat, pas sur le camp affiché). Pire cas (six groupes, trois rangées) : le bloc finit
-  à 427 px, sous le bas du gabarit 6 (437) — pas de changement de taille de fenêtre.
-- **Onglets-portraits** sur six emplacements fixes (22 px, sept écarts égaux de 7,14 px calculés
-  sur le cas à six alliés), séparateur blanc 13 %, indicateur `OVERLAY_ACCENT` 2 px qui **glisse**
-  en 250 ms (courbe CSS `ease`, miroir de `.icon-switch-highlight` du site). **Seuls les alliés
-  ayant déjà lancé un sort ont un onglet**, et le bloc n'apparaît qu'au premier sort allié du
-  combat (retour utilisateur du 12 sept. sur le premier rendu : au premier tour, rien n'est
-  affiché). Un allié à la fois : suivi automatique du dernier lanceur allié, clic = épingle,
-  second clic = retour au suivi.
+- **Position** : dans le flux de la colonne des barres, **10 px** sous la barre du dernier groupe
+  (18 px à l'origine, ramené le 12 sept. au soir — le même écart, `TOTAL_GAP`, sépare désormais le
+  total du premier groupe, « pour l'homogénéité entre les blocs »), jamais en position fixe sous
+  le gabarit ; **vue Alliés seulement** (décidé le 12 sept.). Bloc de 40 / 77 / 114 px pour une,
+  deux ou trois rangées ; pire cas (six groupes, trois rangées) : 388 px, sous le bas du gabarit 6
+  (437) — pas de changement de taille de fenêtre. Rien n'est affiché avant le premier sort allié.
+- **Sélection par le cadre** (refonte du 12 sept. au soir, proposition en artefact en deux
+  révisions, décidée) : la rangée d'onglets-portraits de 22 px du premier rendu, jugée trop petite
+  et coûteuse en hauteur, est retirée. On choisit l'allié en **cliquant son portrait dans le cadre
+  à médaillons** ; deux marques dorées (`#f4d89e`, décidé contre le violet Stasis et le cyan) : un
+  **liseré** de 2 px au bord du portrait = l'allié dont on lit les sorts ; un **point** de 6 px en
+  haut à gauche du portrait (à l'opposé du pourcentage, « comme une notification ») = le dernier
+  allié à avoir lancé un sort, toujours à jour. Par défaut les deux sont sur le même allié (suivi
+  automatique) ; clic sur un autre allié = épingle (le liseré reste, le point continue de suivre) ;
+  clic sur le porteur du point ou second clic sur l'épinglé = retour au suivi. Un allié sans sort
+  n'est ni cliquable ni marqué. Fondu de 150 ms, pas de glissade.
 - **Remise à zéro à chaque nouveau tour** de l'allié, pas d'historique ; **pas de défilement
   latéral** : retour à la ligne tous les cinq sorts (32 px, 5 px d'écart — 3 px faisaient se
   toucher deux critiques voisins). Badge d'index **en haut à gauche** (1 px du bord gauche et du
   haut), critique = liseré doré + coin plié, infobulle sur une ligne « Nom · Critique » sans nom
-  de lanceur. Onglets : **seul le sélectionné est en couleur**, les autres en noir et blanc
-  atténué — l'état KO ne joue pas ici (retour utilisateur du 12 sept.). Ennemis exclus.
+  de lanceur. Ennemis exclus.
 - **Données** : `FighterDamage::last_turn_casts` / `FightSnapshot::last_ally_caster`
   (`overlay-engine::session`, alimentés dans `apply` sur `SpellCast` via le signal « nouveau tour »
   de `register_fight_turn`, persistés par `fight_store`). **Icônes** : référentiel
@@ -860,10 +864,9 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
 - **Testkit** : `tests/combat_spell_block.rs`, rejeu réel + fixtures PNG injectées par
   `RemoteIconStore::preload` (jamais le réseau), interactions par nœuds d'accessibilité.
 
-Questions laissées ouvertes dans l'artefact : allié sans sort → **tranché par l'utilisateur le
-12 sept. : pas d'onglet du tout** ; onglets de 22 px (pas 24) et plus de six lanceurs = pas
-d'onglet au-delà du sixième, tranchés provisoirement par le code. Option « n'afficher que mes
-personnages » (roster ∩ alliés) : plus tard.
+Alliés au-delà du sixième (liste plate, cas rare) : pas encore de marque ni de clic sur leur
+portrait — à ajouter si le cas se présente. Option « n'afficher que mes personnages » (roster ∩
+alliés) : plus tard.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
