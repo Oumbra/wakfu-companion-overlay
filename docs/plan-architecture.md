@@ -804,8 +804,24 @@ par une revue à trois experts) à de vraies données.
   abandonné au passage : arbitrage assumé au profit du contenu.
 - **Trois captures** au testkit : liste, fermeture manuelle, confirmation de retrait.
 
-Reste hors périmètre de ce lot : la **garde de fermeture** (Échap/croix de fenêtre demandant
-confirmation quand des modifications sont en attente) et l'onglet « Personnages ».
+**Garde de fermeture** (ajoutée le jour même) : « Annuler », Échap **et la croix de la fenêtre OS**
+demandent confirmation tant que `OptionsModalState::is_dirty()` — chemin de log retouché, ou
+brouillon d'alertes différent de la référence figée à l'ouverture. Le **changement d'onglet**
+n'intercepte rien : le brouillon lui survit, et demander confirmation à chaque aller-retour rendrait
+la fenêtre inutilisable. Un seul dialogue à la fois : une confirmation de retrait déjà ouverte fait
+attendre la garde, deux voiles empilés étant deux fois plus sombres et leurs deux « Échap » se
+marchant dessus.
+
+Au passage, un défaut corrigé : **la croix de la fenêtre Options quittait l'overlay entier**
+(`WindowEvent::CloseRequested` → `event_loop.exit()`). Cette fenêtre est la seule focalisable, donc
+la seule dont la croix est réellement atteignable à la souris — elle ferme maintenant la modale, et
+elle seule.
+
+La boîte de confirmation a été **remontée au design system** à cette occasion (`design::confirm_dialog`,
+voir le catalogue des composants) : deux appelants, donc sa place n'est plus dans un panneau.
+L'extraction est à pixel constant.
+
+Reste hors périmètre de ce lot : l'onglet « Personnages ».
 
 ### 9.1 bis Ligne de sorts du combat (2026-09-12)
 
