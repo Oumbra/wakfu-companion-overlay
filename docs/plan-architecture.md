@@ -367,6 +367,17 @@ confirmé par le spike :
 6. Repli documenté si une configuration matérielle future s'avère incompatible : fond opaque + mode
    « fenêtre compagnon accolée » plutôt qu'overlay transparent — non nécessaire sur le matériel testé
    (RTX 3080 Ti, driver 32.0.16.1062, Windows 11).
+7. **Le rendu est piloté par notre boucle, pas par `WM_PAINT` (2026-09-12).** Sur ces fenêtres
+   (composition, `with_no_redirection_bitmap`), `Window::request_redraw()` — qui repose sur
+   `RedrawWindow(RDW_INTERNALPAINT)` — ne produit pas de `RedrawRequested` de façon fiable. Mesuré
+   sur la modale Options avec un journal instrumenté et une frappe pilotée par `SendInput` : les
+   touches arrivaient dans `window_event`, le redessin était demandé, et la frame suivante ne venait
+   que de la réaffirmation topmost périodique (`SetWindowPos`, 2 s) — la saisie s'appliquait par
+   paquets de deux secondes. Depuis, `App::redraw` rend une frame directement depuis
+   `about_to_wait` pour toute fenêtre dont `next_redraw_at` est échu ; les événements et le thread
+   Engine ne font que poser cette échéance, et `RedrawRequested` n'est plus qu'un déclencheur parmi
+   d'autres. Latence mesurée après correctif : moins de dix millisecondes entre la touche et sa
+   frame. Le mode réactif de §6.1 est intact — rien ne tourne à 60 Hz sans raison.
 
 Détail complet (bugs, découvertes, repro isolé, capture d'écran de validation) dans
 `spikes/s1-window-windows/README.md` — à relire avant d'implémenter `overlay-platform::windows`,
