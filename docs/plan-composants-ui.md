@@ -327,14 +327,21 @@ critère de fin interdit — elle attend donc sa propre décision, dans son prop
 
 **Estimation** : 1 à 1½ séance. **Réalisé** : conforme.
 
-## 2.3 — `DsIcon` : reporté, terrain occupé
+## 2.1 — fait le 2026-09-11
 
-Vérification du 2026-09-11 : une session parallèle travaille **en ce moment** sur les icônes (une
-trentaine de SVG poussés dans `assets/design-system/icons-svg/`, commit `dbf8c3b`). La règle de
-coordination de ce plan interdit de démarrer un lot dont les fichiers sont en refonte ailleurs, et
-2.1 touche exactement `assets.rs`, `icon_button.rs` et la galerie des glyphes.
+Reporté une première fois le même jour, terrain occupé : une session parallèle poussait alors une
+trentaine de SVG dans `assets/design-system/icons-svg/`. Elle les a retirés (`6bffdc5 revert: retire
+les ébauches SVG des icônes`), le terrain s'est libéré, le refactor a suivi.
 
-Conséquence pour le lot 4 : sa variante icône de `tabs` reste bloquée, comme elle l'était déjà.
+Les cinq étapes du catalogue sont faites : `design/icons.rs` et sa table, retrait des 38 variantes
+d'icône de `DsTexture` et d'`icon_content_size` avec elles, `design::icon`, `icon_button` et
+`Input::leading_icon` sur `DsIcon`, galerie à jour.
+
+**Le critère de non-régression est le même que pour 2.2** : 223 usages déplacés et **aucun snapshot
+n'a bougé**, sauf celui de la galerie où une section a été ajoutée.
+
+**Conséquence pour le lot 4** : sa variante icône de `tabs` n'est plus bloquée — `DsIcon` existe et
+c'est ce qu'elle attendait.
 
 ---
 
@@ -413,7 +420,7 @@ Deux rappels qui valent pour tout ce lot :
 | `design::collapsible` | ✅ — relevé refait sur le bon asset, voir ci-dessous |
 | `input` — état d'erreur | ✅ `41791df` — quatrième état, branché sur la modale Options |
 | `design::slider` | ✅ — `slider-handle.png` extrait de `interface-options-son.png`, rainure peinte |
-| `tabs` — variante icône | **bloqué** — dépend de `DsIcon` (lot 2), voir ci-dessous |
+| `tabs` — variante icône | ✅ 2026-09-11, après le lot 2 — `.icon()` sur une entrée, le libellé devient l'infobulle |
 
 **Ce que le `collapsible` a appris** : un asset nommé « collapse » n'est pas forcément *le*
 composant. Le premier relevé a porté sur `collapse-closed.png` — la colonne « Types » de l'Hôtel de
@@ -429,15 +436,14 @@ propre grille, sa propre taille native de socle et, quand il en impose une, sa p
 glyphe. Les deux contextes existants retombent sur le manifeste : leur rendu est inchangé, ce que
 les snapshots vérifient.
 
-**La variante icône de `tabs` ne peut pas être faite dans ce lot**, et ce n'est pas un oubli
-d'ordonnancement : elle a besoin de `DsIcon` pour nommer l'icône d'un onglet, et `DsIcon` est le
-lot 2. La faire quand même signifierait passer un `DsTexture` brut en paramètre — exactement ce que
-le contrat interdit (« une texture en paramètre de composant »), et qu'il faudrait défaire au lot
-suivant. Elle est donc reportée **au lot 2**, dont elle devient le premier consommateur : c'est
-aussi ce qui vérifiera que `DsIcon` tient ses promesses sur un cas réel.
+**La variante icône de `tabs` a attendu le lot 2**, et ce n'était pas un défaut d'ordonnancement :
+elle avait besoin de `DsIcon` pour le glyphe — passer un `DsTexture` brut aurait violé le contrat
+(« une texture en paramètre de composant ») — **et** de `design::tooltip` pour le mot, puisque son
+libellé devient une infobulle. Elle a donc été le premier consommateur du lot 2, et c'est ce qui a
+vérifié que les deux tenaient leurs promesses sur un cas réel.
 
 **Critère de fin** : l'onglet Alertes de la modale Options se compose sans qu'aucun panneau ne
-peigne un widget à la main. **Atteint pour tout ce qui ne dépend pas du lot 2.**
+peigne un widget à la main. **Atteint.**
 
 **Estimation** : 4 à 5 séances.
 
@@ -459,6 +465,41 @@ leur teinte à ce jeton, et l'écrire après reviendrait à les reprendre tous.
 `item_slot`, `badge`, `meter`, `portrait`, puis `table` + `pagination`. Détail, matière disponible
 et code absorbé : catalogue, vague 3. `table` demande un relevé `ui-blueprint` préalable sur les
 captures d'interfaces — il n'existe pas encore.
+
+### Avancement
+
+| Composant | État |
+| --- | --- |
+| `design::item_slot` | ✅ 2026-09-11 — absorbe `watchlist::entry_tile`, sept bordures au manifeste |
+| `design::meter` | ✅ 2026-09-11 — absorbe `combat::damage_bar`, six couches et l'arrondi conditionnel |
+| `design::badge` | **bloqué** — ni cotes, ni capture, ni appelant, voir ci-dessous |
+| `design::portrait` | ✅ 2026-09-11 — absorbe `paint_flat_portrait` et les deux boucles du gabarit |
+| `design::table` + `pagination` | à faire — **`ui-blueprint` d'abord** |
+
+### Pourquoi `badge` est bloqué (constat du 2026-09-11)
+
+Trois raisons, et aucune n'est un manque de temps :
+
+1. **Aucune cote mesurée.** `design-tokens.json` ne porte que deux couleurs
+   (`status_pill_active.fill` `#E6D290`, `.text` `#101215`) — pas de hauteur, pas de padding, pas de
+   rayon, pas de corps de police. §5.12 (étiquettes de rareté) n'a même pas de couleur : « fond dans
+   la teinte de la rareté mais désaturé/assombri », sans valeur.
+2. **Aucune capture de référence.** Un balayage des seize captures d'interface cherchant `#E6D290`
+   ne trouve que des **boutons or** (`button-primary.png`, `large-button-validate.png` et les
+   pieds de page des fenêtres) : cette teinte est celle du bouton primaire, pas d'une pastille
+   existante. §5.13 décrit d'ailleurs « un pattern réutilisable pour tout indicateur futur » — une
+   projection, pas le relevé d'un élément du jeu.
+3. **Aucun appelant.** `watchlist::paint_count_inline`, que le catalogue lui destinait, a migré dans
+   `design::item_slot` sous la forme de `SlotCount`. Rien d'autre dans l'overlay n'affiche
+   d'étiquette ni de pastille aujourd'hui.
+
+L'écrire maintenant reviendrait à inventer sa géométrie entière — ce que le skill `ui-component`
+proscrit (« un composant écrit sur des valeurs devinées est un composant à refaire »), et à le
+livrer sans consommateur, ce que le projet évite déjà pour les icônes du manifeste.
+
+**Pour le débloquer** : une capture du jeu montrant une pastille d'état ou une étiquette de rareté,
+puis un passage `ui-blueprint` dessus. À défaut, un besoin réel dans l'overlay — c'est lui qui
+dirait quelle forme le composant doit prendre.
 
 **Critère de fin** : `panels/watchlist.rs` et `panels/combat.rs` ne contiennent plus aucun
 `Color32::from_rgb` ni `FontId::proportional`.

@@ -252,6 +252,23 @@ pub const TAB_PADDING_X: f32 = 16.0;
 /// proportion pour un libellé court, comme `BUTTON_MIN_ASPECT` pour un bouton. Réglage, pas mesure.
 pub const TAB_MIN_WIDTH: f32 = 77.0;
 
+/// Largeur d'un onglet **à pictogramme**, quand la barre ne s'étire pas — 66 px.
+///
+/// **Mesurée** sur `assets/design-system/icon-tabs.png` (268 × 44) : les crêtes de séparation y
+/// tombent à x=65-66, 133-134 et 201-202, soit un pas de 68 px dont 2 de gouttière. Un onglet à
+/// pictogramme est donc plus étroit qu'un onglet texte ([`TAB_MIN_WIDTH`], 77) — il n'a pas de mot
+/// à contenir.
+pub const TAB_ICON_WIDTH: f32 = 66.0;
+
+/// Côté de l'encre d'un pictogramme d'onglet, **en fraction de la hauteur de la barre**.
+///
+/// **Dérivé, pas mesuré**, et il faut le dire : `icon-tabs.png` est un gabarit vide — le jeu n'y a
+/// laissé aucun pictogramme à mesurer. La valeur reprend le rapport du bouton icône
+/// ([`ICON_BUTTON_CONTENT`] sur [`ICON_BUTTON_SIZE`], soit 0,5), seul rapport glyphe/socle que le
+/// design system ait mesuré. Sur une barre de 44 px cela donne 22 px d'encre. À remplacer par une
+/// mesure dès qu'une capture d'onglets à pictogrammes existera.
+pub const TAB_ICON_RATIO: f32 = ICON_BUTTON_CONTENT / ICON_BUTTON_SIZE;
+
 /// Facteur d'assombrissement du **cerne** d'un libellé d'onglet — `0,205`.
 ///
 /// Le libellé du jeu est cerné sur 1px dans les huit directions, et ce cerne n'est **pas noir** : sa
@@ -359,6 +376,61 @@ pub const SELECT_LIST_BORDER: Color32 = Color32::from_rgb(0x0E, 0x10, 0x15);
 /// c'est son fond qui porte le signal.
 pub const SELECT_TEXT: Color32 = Color32::WHITE;
 
+// -------------------------------------------------------------------------------------------
+// Autocomplétion — `design::autocomplete`
+// -------------------------------------------------------------------------------------------
+//
+// Le composant **reprend les jetons de `select` déplié** pour tout ce qui les concerne (fond de
+// liste, bord, surbrillance, filet de tête, cadence de rangée) : c'est la même liste du jeu, il n'y
+// a pas de second relevé à faire. Les jetons ci-dessous ne couvrent que ce que `select` n'a pas —
+// la bande de filtres et le contenu d'une rangée.
+//
+// Provenance : `shared/wakfu-autocomplete/wakfu-autocomplete.component.css` du dépôt
+// `Oumbra/wakfu-companion`, relevé le 2026-09-11. Ce sont des valeurs de la version WEB, portées
+// telles quelles faute de capture du jeu montrant une autocomplétion — le jeu n'en a pas. Ce n'est
+// donc PAS une mesure sur asset : c'est un portage assumé, et c'est dit ici plutôt que laissé à
+// deviner.
+
+/// Hauteur de la bande de filtres : bouton 26 + 2 × 6 de marge (`padding: 6px`).
+pub const AUTOCOMPLETE_FILTER_BAR_HEIGHT: f32 = 38.0;
+/// Côté d'un bouton de filtre — `.wakfu-autocomplete-category-btn`, 26 × 26.
+pub const AUTOCOMPLETE_FILTER_BUTTON: f32 = 26.0;
+/// Marge intérieure d'un bouton de filtre : l'icône occupe 20 des 26 (`padding: 3px`).
+pub const AUTOCOMPLETE_FILTER_ICON_PAD: f32 = 3.0;
+/// Écart entre deux boutons de filtre (`gap: 4px`).
+pub const AUTOCOMPLETE_FILTER_GAP: f32 = 4.0;
+/// Rayon d'angle d'un bouton de filtre (`border-radius: 4px`).
+pub const AUTOCOMPLETE_FILTER_RADIUS: u8 = 4;
+/// Opacité d'un filtre au repos (`opacity: 0.6`), appliquée en alpha de teinte.
+pub const AUTOCOMPLETE_FILTER_IDLE_ALPHA: u8 = 153;
+/// Marge gauche d'une rangée et de la bande de filtres.
+pub const AUTOCOMPLETE_ROW_PADDING_X: f32 = 6.0;
+/// Écart entre la gemme, l'image et le nom d'une rangée.
+pub const AUTOCOMPLETE_ROW_GAP: f32 = 6.0;
+/// Côté de la boîte de la gemme de rareté — `.wakfu-autocomplete-item-rarity`, 14 × 14 en
+/// `object-fit: contain` : une image 13 × 20 y entre donc en 9,1 × 14, limitée par la hauteur.
+pub const AUTOCOMPLETE_GEM_BOX: f32 = 14.0;
+/// Côté de l'image d'objet d'une rangée — tient dans les 28 px de [`SELECT_ROW_HEIGHT`].
+pub const AUTOCOMPLETE_IMAGE_SIZE: f32 = 22.0;
+/// Écart entre le champ et le panneau déplié.
+pub const AUTOCOMPLETE_PANEL_GAP: f32 = 2.0;
+/// Marge intérieure du panneau, sur les quatre côtés.
+pub const AUTOCOMPLETE_PANEL_PAD: f32 = 2.0;
+/// Hauteur de la bande « Aucun résultat dans cette catégorie ».
+pub const AUTOCOMPLETE_EMPTY_HEIGHT: f32 = 34.0;
+/// Nombre de rangées visibles avant que la liste ne défile — `max-height: 175px` côté web, soit
+/// cinq rangées.
+pub const AUTOCOMPLETE_MAX_VISIBLE_ROWS: usize = 5;
+/// Longueur minimale de la requête avant toute recherche — `MIN_QUERY_LENGTH`
+/// (`wakfu-search.service.ts`), comptée sur la requête NORMALISÉE, pas sur la frappe brute.
+pub const AUTOCOMPLETE_MIN_QUERY_LEN: usize = 3;
+/// Corps du nom d'une entrée.
+pub const AUTOCOMPLETE_ENTRY_FONT_SIZE: f32 = 15.0;
+/// Corps de la mention de droite (« déjà suivi »), et du message de catégorie vide.
+pub const AUTOCOMPLETE_MENTION_FONT_SIZE: f32 = 13.0;
+/// Marge droite de la mention.
+pub const AUTOCOMPLETE_MENTION_MARGIN: f32 = 10.0;
+
 /// Corps du texte d'une liste — 17px, la même encre de 13px que tous les libellés de contrôle.
 pub const SELECT_FONT_SIZE: f32 = 17.0;
 
@@ -406,6 +478,15 @@ pub const ICON_BUTTON_SIZE: f32 = 36.0;
 /// devinée. Les icônes du design system étant blanc pur avec alpha, une simple teinte suffit à les
 /// reproduire — là où `ui_icons` en charge deux copies recolorées au chargement.
 pub const ICON_TINT: Color32 = Color32::from_rgb(0xC5, 0xCB, 0xCC);
+
+/// Côté par défaut d'un glyphe posé seul — 16 px.
+///
+/// **Choisi, pas mesuré**, et il faut le dire : le jeu ne peint aucun glyphe hors socle dans les
+/// captures relevées, il n'y a donc pas de taille de référence à reprendre. 16 est la taille d'un
+/// glyphe accolé à une ligne de texte de corps 17, celle des libellés du design system — assez
+/// grand pour se lire, assez petit pour ne pas dépasser de la ligne. À remplacer par une mesure
+/// dès qu'une capture en montrera un.
+pub const ICON_SIZE: f32 = 16.0;
 
 /// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
 pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
@@ -949,3 +1030,368 @@ pub const TOOLTIP_MARGIN: egui::Margin = egui::Margin {
     top: 10,
     bottom: 8,
 };
+
+// ---------------------------------------------------------------------------------------------
+// Le contenu flottant — `tokens::OVERLAY_ACCENT`
+// ---------------------------------------------------------------------------------------------
+
+/// Accent du **contenu qui flotte par-dessus le jeu** — le cyan `#00d2ff`.
+///
+/// **Décision utilisateur du 2026-09-10**, et le seul point où l'overlay a une contrainte que le
+/// jeu n'a pas : les panneaux Combat et Suivi prennent les formes et la typographie du jeu, mais
+/// **gardent leur accent cyan**. Ce n'est pas un compromis mou. Ces panneaux se lisent *par-dessus*
+/// le jeu, sur un fond arbitraire et mouvant ; `#00d2ff` n'existe nulle part dans l'interface
+/// Wakfu, et c'est précisément ce qui l'empêche de s'y confondre. Une jauge de dégâts or posée sur
+/// un décor or se cherche.
+///
+/// La valeur vient du thème sombre du dépôt web (`styles.css`, `:root --accent`) — elle était
+/// jusqu'ici recopiée en deux constantes locales, `panels::combat::ACCENT` et
+/// `panels::watchlist::ACCENT`, identiques au pixel et sans lien déclaré entre elles. Deux copies
+/// d'une même décision dérivent à la première retouche.
+///
+/// **À ne pas confondre avec les jetons du jeu.** Ce qui vit *dans* une fenêtre — un bouton, un
+/// champ, un onglet — prend les teintes mesurées du client. `OVERLAY_ACCENT` est réservé à ce qui
+/// n'a pas de fenêtre : les jauges, les compteurs et les bandeaux qui se posent sur l'écran de jeu.
+pub const OVERLAY_ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
+
+// ---------------------------------------------------------------------------------------------
+// Emplacement d'objet — `design::item_slot`
+//
+// Ces valeurs viennent de `panels::watchlist`, où elles décrivaient la tuile du bandeau Suivi, et
+// avaient été affinées par plusieurs retours utilisateur **sur les cotes du portage web**.
+//
+// **Le carré et ses coins sont passés aux cotes du client le 2026-09-12** : `docs/design-tokens.json`
+// (analyse pixel de captures réelles) donne `item_slot_square` 63-64 et `item_slot_border` 2, contre
+// 58 et un rayon de 10 hérités du CSS. C'est la vague 3 du lot 5 — « les formes migrent au langage
+// du jeu ».
+//
+// Ce qui N'A PAS suivi, et pourquoi : `item_slot_gap` (2 px dans le jeu) décrit la densité d'une
+// grille d'inventaire, pas celle du bandeau Suivi de l'overlay, dont l'espacement de 12 px vient
+// d'un réglage utilisateur et n'appartient de toute façon pas au composant — un emplacement ne
+// connaît pas son voisin, c'est l'appelant qui espace.
+// ---------------------------------------------------------------------------------------------
+
+/// Côté d'un emplacement d'objet — **64 px, la cote du client**.
+///
+/// `docs/design-tokens.json` relève `item_slot_square` entre 63 et 64 px : une fourchette, parce
+/// que la mesure pixel d'un bord adouci n'a pas de frontière nette. 64 est retenu par une
+/// coïncidence qui n'en est pas une : le liseré des textures `Border-*.webp` occupe 1/30ᵉ de leur
+/// canevas (17 px sur les 512 qu'elles faisaient alors), soit **2,1 px une fois rendu à 64** — la
+/// valeur d'`item_slot_border`
+/// relevée sur les mêmes captures. À 58 px (la cote du portage web, `.kpi` de
+/// `tracker-strip.component.css`, en place jusqu'au 2026-09-12) il en faisait 1,9.
+pub const ITEM_SLOT_SIZE: f32 = 64.0;
+
+/// Rayon des coins — 2 px.
+///
+/// Le relevé range les emplacements dans `corner_style_inputs_lists`
+/// (« square_or_near_square »), loin des 10 px hérités du CSS : dans le jeu, une case d'inventaire
+/// est un carré. 2 plutôt que 0 parce que le contour extérieur des textures de rareté est lui-même
+/// légèrement arrondi (rayon ≈ 1/16ᵉ du canevas, soit ≈ 4 px à 64) — un fond parfaitement
+/// rectangulaire pointerait hors de ses coins.
+pub const ITEM_SLOT_ROUNDING: f32 = 2.0;
+
+/// Marge intérieure des textures `Border-*.webp`, en fraction de leur canevas.
+///
+/// **Mesurée** : la fenêtre où l'icône se peint commence à 13 px et finit à 114 px sur le canevas
+/// de 128, à l'identique sur les sept fichiers. `1 - 2 × ce ratio` donne donc la fraction du côté
+/// occupée par cette fenêtre, soit ≈ 0,797.
+///
+/// Le rapport est **inchangé depuis la réduction des textures** du 2026-09-12 : 13/128 vaut
+/// exactement 52/512, la valeur relevée sur le canevas d'origine. Une fraction, pas une cote —
+/// c'est ce qui a permis de changer l'échelle des assets sans toucher à ce jeton.
+pub const ITEM_SLOT_BORDER_INNER_RATIO: f32 = 13.0 / 128.0;
+
+/// Fraction de la fenêtre intérieure qu'occupe réellement l'icône — 0,96, et pas 1.
+///
+/// Les captures du jeu montrent toujours une petite marge entre l'icône et son cadre, jamais un
+/// remplissage au pixel. Relevé de 0,9 à 0,96 sur retour utilisateur (« les objets doivent être
+/// plus gros ») une fois la bordure repeinte SOUS l'icône — plus aucun risque qu'elle recouvre un
+/// débord.
+pub const ITEM_SLOT_ICON_FILL: f32 = 0.96;
+
+/// Fraction du carré qu'occupe l'icône d'un emplacement **sans rareté** — ≈ 0,517.
+///
+/// Une **fraction**, pas une cote : elle est née d'un rapport mesuré (30 px sur 58) et suit depuis
+/// le côté qu'on donne à l'emplacement — 33 px sur les 64 d'aujourd'hui. Le carré a changé le
+/// 2026-09-12 en passant aux cotes du client, ce rapport non : c'est lui que le retour utilisateur
+/// avait réglé, pas les 30 px.
+///
+/// **Un cadre simple ne mange pas de marge**, contrairement à une bordure de rareté dont la fenêtre
+/// intérieure impose la sienne. Rien ne contraint donc l'icône, et il a fallu une cote propre :
+/// `app-item-icon [size]="30"` du template web, sur une tuile de 58.
+///
+/// Découvert en migrant `watchlist::entry_tile` : la première version du composant faisait occuper
+/// tout le carré à l'icône d'un cadre simple, et le snapshot du décompte l'a montré — un monstre
+/// deux fois trop gros dans sa tuile. Une bordure de rareté masquait le défaut sur les objets,
+/// c'est l'ennemi qui l'a révélé.
+pub const ITEM_SLOT_PLAIN_ICON_FILL: f32 = 30.0 / 58.0;
+
+/// Épaisseur du trait d'un emplacement **sans rareté** — 2 px, celui des tuiles d'ennemi.
+pub const ITEM_SLOT_PLAIN_STROKE: f32 = 2.0;
+
+/// En dessous de ce côté, un emplacement ne peut plus rien montrer — et le dit une fois au journal
+/// (clause 4 du contrat de composant).
+///
+/// **Seuil choisi, pas mesuré**, et la raison est arithmétique : un liseré de
+/// [`ITEM_SLOT_PLAIN_STROKE`] mange 2 px de chaque côté, et une bordure de rareté réserve déjà
+/// 2 × [`ITEM_SLOT_BORDER_INNER_RATIO`] de son carré. À 8 px, il reste 4 px au milieu, soit deux pixels d'icône une fois la
+/// marge de [`ITEM_SLOT_ICON_FILL`] retirée. Personne ne demande sciemment un emplacement de cette
+/// taille : c'est le signe d'une largeur calculée qui est tombée à rien, exactement ce qu'un
+/// journal doit rattraper.
+pub const ITEM_SLOT_MIN_SIZE: f32 = 4.0 * ITEM_SLOT_PLAIN_STROKE;
+
+/// Fond d'un emplacement — `#1e1e1e`, repris du portage web (`--surface`).
+///
+/// Sous une bordure de rareté, il n'est visible que par les coins arrondis de la texture, dont
+/// l'alpha est dégradé ; sur un emplacement sans rareté, c'est le seul fond.
+pub const ITEM_SLOT_BACKGROUND: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
+
+/// Trait d'un emplacement sans rareté — `#4d4d4d` (`--border-strong` du web).
+pub const ITEM_SLOT_PLAIN_BORDER: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
+
+/// Corps du compteur — 14 px.
+///
+/// **Trois retours pour y arriver** : 11 px était « pas du tout lisible », 15 px « beaucoup trop
+/// élevé » une fois comparé en jeu, 13 px un palier intermédiaire, 14 px la valeur retenue après
+/// test en conditions réelles.
+pub const ITEM_SLOT_COUNT_FONT_SIZE: f32 = 14.0;
+
+/// Corps de la fraction cible — 10 px, plus petite que le nombre courant (« on la mettrait en onze
+/// ou en dix »).
+pub const ITEM_SLOT_TARGET_FONT_SIZE: f32 = 10.0;
+
+/// Marge du compteur au bord droit — 6 px, assez pour rester lisible par-dessus le liseré d'une
+/// bordure de rareté sans empiéter dessus.
+pub const ITEM_SLOT_COUNT_INSET_RIGHT: f32 = 6.0;
+
+/// Marge du compteur au bord bas — 4 px. **Distincte de la marge droite** depuis le retour du
+/// 2026-09-06 (« décale d'un pixel vers la gauche et descends-le d'un pixel vers le bas ») : les
+/// deux n'ont plus de raison d'être égales.
+pub const ITEM_SLOT_COUNT_INSET_BOTTOM: f32 = 4.0;
+
+/// De combien le nombre courant remonte au-dessus de la fraction cible — 12 px.
+pub const ITEM_SLOT_TARGET_LINE_OFFSET: f32 = 12.0;
+
+/// Couleur d'un compteur simple — blanc.
+pub const ITEM_SLOT_COUNT_TEXT: Color32 = Color32::WHITE;
+
+/// Couleur du nombre **courant** d'une fraction — l'or des kamas (`--kama-color` du web).
+pub const ITEM_SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00);
+
+/// Couleur de la fraction cible — `#b0b0b0`, éclairci le 2026-09-06 par rapport au gris sourd
+/// qu'elle portait avant.
+pub const ITEM_SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
+
+// ---------------------------------------------------------------------------------------------
+// Jauge — `design::meter`
+//
+// Ces valeurs viennent de `panels::combat`, où elles décrivaient la barre de dégâts. Elles ont été
+// **mesurées pixel par pixel** sur une maquette fournie par l'utilisateur (capture du 2026-09-02),
+// après une première tentative approximée à l'œil qui « dénotait du jeu ». Elles remontent ici
+// telles quelles le 2026-09-11 : ce commit déplace du code.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur d'une jauge — 16 px, mesurée sur la maquette. Une itération l'avait portée à 18 sans
+/// nécessité (« elle est plus haute que celle que je t'ai fournie »), revenue à la mesure.
+pub const METER_HEIGHT: f32 = 16.0;
+
+/// Arrondi des coins — 4 px, et **pas `hauteur / 2`**.
+///
+/// Une première itération en avait fait un stade complet : « le border radius est beaucoup trop
+/// rond dans ce que tu as produit », capture de comparaison à l'appui. La maquette n'a qu'un
+/// arrondi léger.
+pub const METER_ROUNDING: f32 = 4.0;
+
+/// Épaisseur de **chacune** des deux bordures concentriques — 2 px sur une jauge de 16.
+pub const METER_BORDER_WIDTH: f32 = 2.0;
+
+/// Bordure extérieure — gris moyen `(72,72,74)`, **pas noir**.
+///
+/// Contre-intuitif : l'utilisateur la décrivait comme sombre, la mesure dit l'inverse. C'est la
+/// bordure *intérieure* qui est presque noire.
+pub const METER_OUTER_BORDER: Color32 = Color32::from_rgb(72, 72, 74);
+
+/// Bordure intérieure — `(34,35,39)`, presque noire. C'est elle qui donne l'effet de double
+/// bordure.
+pub const METER_INNER_BORDER: Color32 = Color32::from_rgb(34, 35, 39);
+
+/// Piste vide — `(22,23,27)`.
+pub const METER_TRACK: Color32 = Color32::from_rgb(22, 23, 27);
+
+/// Curseur de fin de remplissage — `(191,191,191)`.
+///
+/// Le petit trait clair vertical à l'extrémité du remplissage, décrit comme « une petite barre
+/// blanche pour dire c'est ici que je suis ». Il manquait entièrement à la première tentative.
+/// Couleur **fixe** : c'est un repère de position, pas une donnée à lire.
+pub const METER_END_CAP: Color32 = Color32::from_rgb(191, 191, 191);
+
+/// Largeur du curseur de fin — 2 px.
+pub const METER_END_CAP_WIDTH: f32 = 2.0;
+
+/// Reflet du haut du remplissage — `#0dbebe`, une **couleur explicite**.
+///
+/// Demandée telle quelle (retour du 2026-09-05) plutôt que dérivée du remplissage par
+/// éclaircissement : l'utilisateur veut ce ton précis, pas « n'importe quel bleu-vert plus clair ».
+/// C'est aussi pourquoi il ne suit pas la teinte de remplissage quand celle-ci varie.
+pub const METER_HIGHLIGHT: Color32 = Color32::from_rgb(0x0D, 0xBE, 0xBE);
+
+/// Fraction de la hauteur du remplissage qu'occupe le reflet — le tiers supérieur, 0,35.
+pub const METER_HIGHLIGHT_RATIO: f32 = 0.35;
+
+/// Teinte de remplissage par défaut — `#077982`, un sarcelle plus sombre que
+/// [`OVERLAY_ACCENT`].
+///
+/// **Délibérément distincte de l'accent**, après un aller-retour : les deux ont été fusionnées au
+/// 6e retour (le magenta `#ff02ff` du 5e ayant été rejeté), puis re-séparées au 8e. Le pourcentage
+/// sur le portrait, lui, est revenu à l'accent au 9e — barre et pourcentage n'ont donc plus la
+/// même couleur, et c'est voulu.
+pub const METER_FILL: Color32 = Color32::from_rgb(0x07, 0x79, 0x82);
+
+// ---------------------------------------------------------------------------------------------
+// Portrait — `design::portrait`
+// ---------------------------------------------------------------------------------------------
+
+/// Teinte d'un portrait de combattant **KO** — un gris moyen.
+///
+/// **C'est une approximation, et elle n'est pas toujours utilisée.** Une teinte egui *multiplie* :
+/// elle assombrit uniformément sans désaturer, là où un vrai niveau de gris désature. Les portraits
+/// de classe ont leur version grise **précalculée** dans l'atlas et n'en ont donc pas besoin ; cette
+/// teinte ne sert qu'aux portraits sans équivalent gris — une icône de monstre téléchargée, le
+/// repli générique. C'est à l'appelant de savoir dans quel cas il est, lui seul a la texture.
+pub const PORTRAIT_KO_TINT: Color32 = Color32::from_gray(130);
+
+/// Corps du pourcentage incrusté sur un portrait — 12 px.
+///
+/// Agrandi une fois sur retour : « ça a l'air compliqué à lire, il en manque un ou deux pixels ».
+pub const PORTRAIT_PERCENT_FONT_SIZE: f32 = 12.0;
+
+/// De combien le pourcentage déborde **vers l'extérieur** du coin bas-droit — 2 px à droite, 1 en
+/// bas.
+///
+/// Vers l'extérieur et non vers l'intérieur : « comme si on traçait un carré autour du rond et
+/// qu'on plaçait le pourcentage tout en bas à droite », puis « encore un peu plus sur la droite
+/// pour qu'il mange un peu moins sur le portrait ». Sur un portrait rond, ce coin du carré
+/// englobant est de toute façon hors du disque.
+pub const PORTRAIT_PERCENT_OFFSET: egui::Vec2 = egui::Vec2::new(2.0, 1.0);
+
+// ---------------------------------------------------------------------------------------------
+// Tableau — `design::table`
+//
+// Relevé du 2026-09-12 sur les trois tableaux de l'Hôtel de Vente
+// (`docs/design-system/hdv-table.json`) : `interface-hdv-historique.png`,
+// `interface-hdv-vente-list.png`, `interface-hdv-achat.png`. Les trois sont VIDES (« 0 Objet ») —
+// tout ce qui touche au contenu d'une cellule est donc choisi, et le dit.
+// ---------------------------------------------------------------------------------------------
+
+/// Hauteur d'une ligne — **60 px exactement**, et c'est l'invariant le plus solide du relevé.
+///
+/// Mesuré par les transitions du zébrage sur les trois captures, à trois origines différentes
+/// (200, 260, 320… / 316, 376… / 352, 412…) : le pas est le même partout. C'est aussi, à la
+/// coïncidence près, la hauteur d'un en-tête de repliable ([`COLLAPSE_HEADER_HEIGHT`]) — les deux
+/// restent deux jetons, rien ne dit que le jeu les tienne liés.
+pub const TABLE_ROW_HEIGHT: f32 = 60.0;
+
+/// Rembourrage au-dessus de l'encre de l'en-tête — 14 px (haut du tableau y=165, encre y=179).
+pub const TABLE_HEADER_PAD_TOP: f32 = 14.0;
+
+/// Hauteur d'ENCRE réservée par l'en-tête, et non la hauteur de sa galley — 14 px (y 179..193).
+///
+/// Même raisonnement que [`HEADING_INK_HEIGHT`] : réserver la galley entière ajouterait sous
+/// l'en-tête une bande vide que le relevé ne montre pas.
+pub const TABLE_HEADER_INK: f32 = 14.0;
+
+/// Écart entre l'encre de l'en-tête et la première ligne — 7 px, identique sur les trois captures.
+///
+/// **C'est la même valeur que [`HEADING_TO_ROW`]**, mesurée indépendamment sur une autre interface :
+/// un jeton partagé plutôt qu'un doublon qui dériverait.
+pub const TABLE_HEADER_GAP: f32 = HEADING_TO_ROW;
+
+/// Couleur des libellés d'en-tête — **le gris des titres de section**, [`HEADING_TEXT`].
+///
+/// Relevé : `#b9babb` sur les pixels pleins des six libellés, contre `#b8b9ba` pour le titre de
+/// section. Un canal d'écart : c'est la même teinte, pas une seconde à déclarer.
+pub const TABLE_HEADER_TEXT: Color32 = HEADING_TEXT;
+
+/// Corps d'un libellé d'en-tête — 17 px.
+///
+/// 14 px d'encre de capitale, et le rapport d'encre d'egui pour cette police (0,805, mesuré lors
+/// du chantier du bouton) donne 14/0,805 = 17,4. **Linéale et non serif** : les libellés d'en-tête
+/// sont vérifiés sans empattement sur la capture agrandie ×4, contrairement aux titres de section.
+pub const TABLE_HEADER_FONT_SIZE: f32 = 17.0;
+
+/// Zébrage d'une ligne sur deux — un blanc à 12/255, soit **un éclaircissement, pas une teinte**.
+///
+/// Le tableau n'a **pas de fond propre** : le décor du jeu se lit à travers, et le zébrage
+/// l'éclaircit. Deux constantes opaques seraient donc fausses dès que ce décor change, ce qui est
+/// le cas permanent d'un overlay posé sur un jeu en mouvement.
+///
+/// La valeur vient d'un alpha **déduit colonne par colonne** — `(claire − nue) / (1 − nue/255)` —
+/// sur quinze colonnes réparties de x=60 à x=1180 : médiane **12,3**, valeurs de 10,1 à 16,2. La
+/// dispersion est celle du décor, pas de la mesure : deux lignes voisines ne couvrent pas le même
+/// morceau de fond. Une première estimation sur deux colonnes seulement donnait 13,5 — trois
+/// points de plus suffisaient à la déplacer, quinze la stabilisent.
+pub const TABLE_ROW_STRIPE: Color32 = Color32::from_rgba_premultiplied(12, 12, 12, 12);
+
+/// Rembourrage horizontal d'une cellule — **choisi, pas mesuré**.
+///
+/// Les trois tableaux relevés sont vides : aucune valeur n'y est alignée sur quoi que ce soit.
+/// 10 px reprend [`SELECT_PADDING_X`], le rembourrage de la liste déroulante, faute de mieux —
+/// à corriger dès qu'une capture d'un tableau peuplé existe.
+pub const TABLE_CELL_PAD_X: f32 = SELECT_PADDING_X;
+
+/// Hauteur du corps quand le tableau n'a rien à montrer — **choisie**.
+///
+/// Le jeu ne montre aucun état vide : ses tableaux à « 0 Objet » sont simplement… vides, sans
+/// message. Deux hauteurs de ligne donnent au message la place de respirer sans faire un trou.
+pub const TABLE_EMPTY_HEIGHT: f32 = 2.0 * TABLE_ROW_HEIGHT;
+
+/// Couleur du message d'un tableau vide — le gris des libellés désactivés.
+pub const TABLE_EMPTY_TEXT: Color32 = TEXT_DISABLED;
+
+/// Corps du message d'un tableau vide — celui des libellés d'en-tête.
+pub const TABLE_EMPTY_FONT_SIZE: f32 = TABLE_HEADER_FONT_SIZE;
+
+/// Hauteur du corps pendant un chargement — **choisie**, assez haute pour porter le rouage.
+pub const TABLE_LOADING_HEIGHT: f32 = 3.0 * TABLE_ROW_HEIGHT;
+
+// ---------------------------------------------------------------------------------------------
+// Pagination — `design::pagination`
+//
+// Relevé du 2026-09-12 (`docs/design-system/hdv-table.json`, nœud `pager`), puis re-mesuré à ×5 en
+// écrivant le composant : ce que le relevé décrivait comme « deux flèches de 7 px » sont deux
+// BOUTONS ICÔNE de 36 px portant chacun un triangle.
+// ---------------------------------------------------------------------------------------------
+
+/// Doré du libellé **et du numéro courant** — la teinte des onglets inactifs, [`TAB_LABEL_IDLE`].
+///
+/// Mesuré (244, 216, 158) sur les pixels pleins des deux, soit `#f4d89e` au canal près. Le relevé
+/// annonçait le numéro courant en blanc : c'est faux, il est doré comme le mot « Page ». Seuls la
+/// barre oblique et le total sont blancs — *ce qui bouge est en or, ce qui borne est en blanc*.
+pub const PAGINATION_LABEL: Color32 = TAB_LABEL_IDLE;
+
+/// Blanc du « / total » — blanc pur mesuré (255, 255, 255).
+pub const PAGINATION_TOTAL: Color32 = Color32::WHITE;
+
+/// Corps du libellé — **19 px, réglé au rendu et non par le calcul**.
+///
+/// La mesure de départ est la hauteur de CAPITALE et elle seule : le « P » de « Page » fait 13 px
+/// dans le jeu (y 915..927). Mesurer « Page » en entier donnerait 17 px — le jambage du « g » —
+/// pour un corps faux d'un tiers ; c'est l'erreur qui avait déjà coûté un aller-retour sur le titre
+/// de repliable.
+///
+/// Le rapport d'encre habituel (0,805) donnait 13/0,805 ≈ 16. **Au rendu, 16 ne produit que 11 px
+/// d'encre** ; 19 en produit 13, exactement comme le jeu. Vérification complète du segment
+/// « Page 0 / 0 » à ce corps : 41 px pour « Page » contre 42 dans le jeu, 83 px pour le libellé
+/// entier contre 82. Le rapport d'encre de cette police n'est donc pas celui du chantier du bouton,
+/// et une constante posée par le calcul seul aurait été 45 % trop petite.
+pub const PAGINATION_FONT_SIZE: f32 = 19.0;
+
+/// Écart entre la fin de l'encre du libellé et le premier socle — 7 px (1174 → 1181).
+pub const PAGINATION_TEXT_GAP: f32 = 7.0;
+
+/// Gouttière entre les deux flèches — 4 px (fin du premier socle 1216, début du second 1221).
+///
+/// Les deux socles font 36 px chacun, d'où un pas de 40 px entre leurs centres : c'est ce que le
+/// relevé avait lu comme « 39 px entre les deux débuts de flèche », à un pixel de détourage près.
+pub const PAGINATION_ARROW_GAP: f32 = 4.0;

@@ -38,6 +38,7 @@ pub mod game_window;
 pub mod logging;
 pub mod panels;
 pub mod portraits;
+pub mod rarity_bridge;
 pub mod remote_icons;
 pub mod render_content;
 pub mod style;

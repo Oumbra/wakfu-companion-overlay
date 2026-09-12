@@ -52,7 +52,9 @@ use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-use super::combat::{ACCENT, BAR_MAX_WIDTH, LEADER_PANEL_FILL, LEADER_PANEL_ROUNDING};
+use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
+
+use super::combat::{BAR_MAX_WIDTH, LEADER_PANEL_FILL, LEADER_PANEL_ROUNDING};
 
 /// Air VISIBLE entre la barre du dernier groupe de dégâts et le haut du bloc — « le double de
 /// l'écart entre le switch et le premier groupe » (demande utilisateur, 2 × 9 px visibles sous le

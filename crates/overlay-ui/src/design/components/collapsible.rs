@@ -68,7 +68,7 @@
 
 use egui::{InnerResponse, Rect, Ui, Vec2};
 
-use crate::design::{assets::DsTexture, text, tokens, DesignSystem};
+use crate::design::{assets::DsTexture, icons::DsIcon, text, tokens, DesignSystem};
 
 /// Construit un bloc repliable. `open` porte son état et est muté par le clic sur l'en-tête.
 pub fn collapsible<'a>(title: impl Into<String>, open: &'a mut bool) -> Collapsible<'a> {
@@ -85,7 +85,7 @@ pub fn collapsible<'a>(title: impl Into<String>, open: &'a mut bool) -> Collapsi
 pub struct Collapsible<'a> {
     title: String,
     open: &'a mut bool,
-    icon: Option<DsTexture>,
+    icon: Option<DsIcon>,
     log_name: Option<String>,
     forced_hover: Option<bool>,
 }
@@ -97,7 +97,7 @@ impl<'a> Collapsible<'a> {
     /// icône appartient au contenu (une quête, un lieu, une famille d'objets), elle vient donc de la
     /// donnée. Le composant ne peut pas la résoudre depuis une intention comme il le fait pour ses
     /// propres textures.
-    pub fn icon(mut self, icon: DsTexture) -> Self {
+    pub fn icon(mut self, icon: DsIcon) -> Self {
         self.icon = Some(icon);
         self
     }
@@ -224,18 +224,18 @@ impl<'a> Collapsible<'a> {
 }
 
 /// Peint le contenu de l'en-tête : icône optionnelle, titre, chevron.
-fn paint_header(ui: &Ui, rect: Rect, title: &str, icon: Option<DsTexture>, open: bool) {
+fn paint_header(ui: &Ui, rect: Rect, title: &str, icon: Option<DsIcon>, open: bool) {
     let ds = DesignSystem::get(ui.ctx());
     let mut x = rect.left() + tokens::COLLAPSE_PAD_X;
 
     if let Some(icon) = icon {
         let side = rect.height() * tokens::COLLAPSE_ICON_RATIO;
-        let native = ds.native_size(icon);
+        let native = ds.icon_native_size(icon);
         let icon_rect = Rect::from_center_size(
             egui::pos2(x + side / 2.0, rect.center().y),
             super::icon_button::glyph_fit(native, side),
         );
-        ds.paint(ui.painter(), icon_rect, icon, egui::Color32::WHITE);
+        ds.paint_icon(ui.painter(), icon_rect, icon, egui::Color32::WHITE);
         x += side + tokens::COLLAPSE_ICON_GAP;
     }
 
@@ -253,7 +253,7 @@ fn paint_header(ui: &Ui, rect: Rect, title: &str, icon: Option<DsTexture>, open:
 
     // Chevron — le glyphe du manifeste, retourné quand le bloc est ouvert. Le jeu ne change QUE
     // cela entre ses deux états : ni la graisse du titre, ni la couleur, ni le fond ne bougent.
-    let native = ds.native_size(DsTexture::IconChevronDown);
+    let native = ds.icon_native_size(DsIcon::ChevronDown);
     let chevron = Rect::from_center_size(
         egui::pos2(
             rect.right() - tokens::COLLAPSE_CHEVRON_PAD_X - native.x / 2.0,
@@ -268,14 +268,14 @@ fn paint_header(ui: &Ui, rect: Rect, title: &str, icon: Option<DsTexture>, open:
         ds.paint_flipped_y(
             ui.painter(),
             chevron,
-            DsTexture::IconChevronDown,
+            DsIcon::ChevronDown,
             tokens::COLLAPSE_CHEVRON_TINT,
         );
     } else {
-        ds.paint(
+        ds.paint_icon(
             ui.painter(),
             chevron,
-            DsTexture::IconChevronDown,
+            DsIcon::ChevronDown,
             tokens::COLLAPSE_CHEVRON_TINT,
         );
     }
