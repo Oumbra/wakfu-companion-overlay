@@ -1744,7 +1744,7 @@ design::table()
 
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
-| `column` / `columns` | `TableColumn::fixed(label, px)` ou `::flex(label, poids)`, `.align(…)` | aucune colonne |
+| `column` / `columns` | `TableColumn::fixed(label, px)`, `::flex(label, poids)` ou `::numeric(label, px)`, `.align(…)` | aucune colonne |
 | `body` | `Rows(n)` / `Empty` / `Loading` | `Empty` |
 | `empty_text` | message du corps vide | aucun — le corps reste vide, comme dans le jeu |
 | `row_height` | hauteur d'une ligne | 60 (la cote du jeu) |
@@ -1773,6 +1773,21 @@ n'est mesurable : alignement des valeurs, typographie des cellules, icône d'obj
 texte trop long. Le composant n'en invente rien — il **donne la cellule à l'appelant** et ne peint
 aucun contenu. Seul `TABLE_CELL_PAD_X` est un choix, emprunté à `SELECT_PADDING_X`, et il l'annonce.
 
+### Les nombres à droite, le texte à gauche
+
+`TableColumn::numeric(label, px)` pose l'alignement à droite, **en-tête compris**. C'est une règle,
+pas un raccourci d'écriture&nbsp;: des nombres alignés à gauche se comparent mal, les unités ne
+tombent plus les unes sous les autres et « 980 » paraît plus long que « 145 000 ». Un texte ou une
+date se lisent depuis leur début et restent à gauche. La règle vit dans le constructeur pour
+qu'aucun tableau de l'overlay ne l'oublie&nbsp;; `fixed` + `align` reste disponible pour l'exception.
+
+**`Layout::with_main_align` ne suffisait pas.** Sur une `Ui` dont le rectangle est imposé, egui pose
+quand même le premier widget au départ de son curseur&nbsp;: la colonne « alignée à droite » sortait
+collée à gauche. Il faut changer le sens de parcours (`right_to_left` pour `End`,
+`centered_and_justified` pour `Center`). Mesuré après correction&nbsp;: « 12 400 » et l'en-tête
+« Prix » finissent tous deux à x=725. Conséquence à connaître&nbsp;: dans une cellule à droite,
+plusieurs widgets s'empilent **de droite à gauche**, le premier posé étant le plus à droite.
+
 ### Le zébrage éclaircit, il ne colore pas
 
 Le tableau du jeu n'a **pas de fond propre** : le décor se lit à travers. Une ligne sur deux porte
@@ -1783,8 +1798,11 @@ L'alpha est déduit colonne par colonne, `(claire − nue) / (1 − nue/255)`, s
 x=60 à x=1180 : **médiane 12,3**, valeurs de 10,1 à 16,2. La dispersion est celle du décor, pas de
 la mesure. Deux colonnes seules donnaient 13,5 : l'échantillon comptait.
 
-La galerie le démontre en peignant le premier tableau **sur six bandes de fond de luminances
-différentes** — sur un fond uni, la démonstration serait invisible.
+La galerie le démontre sur **six bandes de fond de luminances différentes** — sur un fond uni, la
+démonstration serait invisible. Ce bloc est **relégué en fin de section** depuis un retour
+utilisateur du 2026-09-12 («&nbsp;on a l'impression que c'est un damier&nbsp;»)&nbsp;: il démontre
+bien ce qu'il doit démontrer, mais il rend les lignes illisibles. Les cas d'usage se jugent donc sur
+le fond uni de la planche, et la mesure garde son bloc à part, annoncé comme tel.
 
 ### Les positions de colonne sont imposées par le composant, et c'est un constat du relevé
 
@@ -1827,9 +1845,9 @@ droite** dans Mes offres. C'est un composant autonome que la page place, pas un 
 
 Snapshot **`design_gallery_table.png`** — et c'est une *seconde* planche, pas un choix de
 présentation : `wgpu` refuse une texture de plus de 8192 px de côté et `design_gallery.png` en
-occupe déjà 7530. Six cas : peuplé sur fond en bandes (avec un nom trop long, coupé à la colonne),
-vide avec message, vide muet, en chargement, corps borné défilant, et le cas dégénéré (268 px de
-colonnes imposées dans 200 px).
+occupe déjà 7530. Six cas : peuplé (avec un nom trop long, coupé à la colonne), vide avec message,
+vide muet, en chargement, corps borné défilant, et le cas dégénéré (268 px de colonnes imposées dans
+200 px) — puis le bloc de contrôle du zébrage sur fond en bandes.
 
 ## `design::pagination` — pagination (2026-09-12)
 
