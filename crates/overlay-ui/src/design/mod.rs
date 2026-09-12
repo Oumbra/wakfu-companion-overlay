@@ -66,6 +66,10 @@ pub use components::loader::{loader, Loader, LoaderSize};
 pub use components::meter::{
     fill_corners as meter_fill_corners, meter, paint as paint_meter, Meter,
 };
+pub use components::pagination::{
+    arrows_enabled as pagination_arrows_enabled, pagination, Pagination, PaginationOutcome,
+    PaginationStep,
+};
 pub use components::panel::{panel, Panel, PanelZones};
 pub use components::portrait::{
     paint as paint_portrait, paint_percent as paint_portrait_percent,
@@ -175,12 +179,34 @@ impl DesignSystem {
         icon: DsIcon,
         tint: egui::Color32,
     ) {
-        painter.image(
-            self.icon(icon).id(),
+        self.paint_icon_flipped(painter, rect, icon, tint, false);
+    }
+
+    /// Peint un glyphe, éventuellement **retourné horizontalement**.
+    ///
+    /// Le miroir existe parce que le jeu réutilise un même glyphe dans ses deux sens : les deux
+    /// flèches de sa pagination sont le même triangle, l'une étant le reflet de l'autre. Le
+    /// retournement se fait dans les coordonnées de texture — aucun second fichier, donc aucun
+    /// doublon à retraiter le jour où le glyphe change.
+    ///
+    /// À n'employer que sur un glyphe **symétrique verticalement** : le miroir d'un « 2 » reste un
+    /// miroir, pas un caractère.
+    pub fn paint_icon_flipped(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        icon: DsIcon,
+        tint: egui::Color32,
+        mirrored: bool,
+    ) {
+        let (left, right) = if mirrored { (1.0, 0.0) } else { (0.0, 1.0) };
+        let mut mesh = egui::Mesh::with_texture(self.icon(icon).id());
+        mesh.add_rect_with_uv(
             rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Rect::from_min_max(egui::pos2(left, 0.0), egui::pos2(right, 1.0)),
             tint,
         );
+        painter.add(egui::Shape::mesh(mesh));
     }
 
     pub fn texture(&self, texture: DsTexture) -> &egui::TextureHandle {

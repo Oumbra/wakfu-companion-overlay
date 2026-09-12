@@ -294,11 +294,22 @@ ds_icons! {
         /// `DsIcon::content_size`. Même statut que [`DsIcon::BagIn`].
         Sort => "icon-sort", socle;
 
-        /// Triangle vers la droite (`icons/icon-triangle-right.png`, 7 × 10) — déplier/lire. Détouré
-        /// `--from-button --tol 4` (bouton sombre proche du décor, voir
-        /// `references/recettes-icones.md`), d'où `DsIcon::content_size`. Même statut que
-        /// [`DsIcon::BagIn`].
-        TriangleRight => "icon-triangle-right", socle;
+        /// Triangle (`icons/icon-triangle-right.png`, 7 × 10) — déplier/lire, et les deux flèches
+        /// de la pagination. Détouré `--from-button --tol 4` (bouton sombre proche du décor, voir
+        /// `references/recettes-icones.md`).
+        ///
+        /// **Il pointe vers la GAUCHE**, contrairement à ce que son nom laisse croire : la pointe
+        /// est en x=0, la base en x=6 (vérifié sur le canal alpha). Le nom du fichier vient du
+        /// jeu ; c'est la mesure qui fait foi, et `IconButton::mirrored` donne l'autre sens.
+        ///
+        /// **`libre` et non `socle`, corrigé le 2026-09-12.** L'étalon des glyphes de bouton vaut
+        /// 18 px d'encre pour un socle de 36 ; celui-ci en fait 10. Mesure directe sur les flèches
+        /// de pagination d'`interface-hdv-historique.png` : **8 × 10 px d'encre dans un socle de
+        /// 36**, soit la taille native de l'asset à un pixel de détourage près. Le normaliser à 18
+        /// l'agrandissait de 80 %, ce que la première capture du composant a montré sans
+        /// ambiguïté. Un glyphe détouré depuis un bouton n'est donc pas automatiquement sur la
+        /// grille de 18 — c'est ce que cette variante apprend au registre.
+        TriangleRight => "icon-triangle-right", libre;
 
         /// Coupe (`icons/icon-trophy.png`, 22 × 22) — trophée/haut fait. Détouré SANS `--from-button`,
         /// sur socle sombre uni. Pas de `DsIcon::content_size`. Même statut que [`DsIcon::BagIn`].

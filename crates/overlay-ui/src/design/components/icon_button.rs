@@ -205,6 +205,7 @@ pub struct IconButton {
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<IconButtonState>,
+    mirrored: bool,
 }
 
 impl IconButton {
@@ -217,7 +218,19 @@ impl IconButton {
             tooltip: None,
             log_name: None,
             forced_state: None,
+            mirrored: false,
         }
+    }
+
+    /// Retourne le glyphe horizontalement.
+    ///
+    /// Le jeu réutilise un même triangle pour les deux flèches de sa pagination, l'une étant le
+    /// reflet de l'autre. Un second fichier serait un doublon à retraiter le jour où le glyphe
+    /// change — **le miroir n'est pas un glyphe de plus**, c'est le même vu dans l'autre sens.
+    /// Réservé aux glyphes symétriques verticalement.
+    pub fn mirrored(mut self, mirrored: bool) -> Self {
+        self.mirrored = mirrored;
+        self
     }
 
     pub fn context(mut self, context: IconContext) -> Self {
@@ -303,7 +316,7 @@ impl Widget for IconButton {
                 self.context.native_size(),
             );
             let icon_rect = egui::Rect::from_center_size(rect.center(), icon_size);
-            design.paint_icon(ui.painter(), icon_rect, self.icon, icon_tint);
+            design.paint_icon_flipped(ui.painter(), icon_rect, self.icon, icon_tint, self.mirrored);
         }
 
         if response.clicked() {

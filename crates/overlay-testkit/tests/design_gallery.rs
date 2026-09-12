@@ -24,8 +24,8 @@ use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, IconButtonState,
-    IconContext, InfoTone, InputState, LoaderSize, SelectState, SliderState, TabState, TableAlign,
-    TableBody, TableColumn,
+    IconContext, InfoTone, InputState, LoaderSize, PaginationStep, SelectState, SliderState,
+    TabState, TableAlign, TableBody, TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -1307,7 +1307,7 @@ fn gallery(ui: &mut egui::Ui) {
 #[test]
 fn galerie_du_tableau() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 1720.0))
+        .with_size(Vec2::new(760.0, 2080.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1317,6 +1317,7 @@ fn galerie_du_tableau() {
                     ui.set_min_size(ui.available_size());
                     ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
                     section_table(ui);
+                    section_pagination(ui);
                 });
         });
 
@@ -1599,6 +1600,49 @@ fn section_table(ui: &mut egui::Ui) {
             row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
             row.cell(|ui| cellule(ui, prix, HEADING));
         });
+}
+
+/// La pagination — les quatre positions possibles dans une suite de pages, et le cas du jeu.
+///
+/// Elle est ici plutôt que dans `galerie_du_design_system` pour la même raison que le tableau (le
+/// plafond de 8192 px), et à côté de lui parce que c'est ensemble qu'ils se relisent — même si,
+/// justement, ce n'est PAS un pied de tableau : dans « Mes offres » le jeu la pose en haut.
+fn section_pagination(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "Pagination — les quatre positions, et celle du jeu",
+        "Deux boutons icône de 36 px et un même triangle, l'un retourné. Ce qui bouge est en or (« Page » et le numéro courant), ce qui borne est en blanc (la barre et le total). Le premier cas est celui des trois captures relevées : « Page 0 / 0 », les deux flèches grisées.",
+    );
+    for (page, total, libelle) in [
+        (0usize, 0usize, "0 / 0 — le cas du jeu, rien à parcourir"),
+        (1, 12, "première page — reculer est impossible"),
+        (6, 12, "au milieu — les deux flèches actives"),
+        (12, 12, "dernière page — avancer est impossible"),
+    ] {
+        ui.horizontal(|ui| {
+            design::pagination(page, total)
+                .log_name(format!("galerie.pagination-{page}-{total}"))
+                .show(ui);
+            ui.add_space(16.0);
+            ui.label(RichText::new(libelle).color(CAPTION).size(12.0));
+        });
+    }
+
+    heading(
+        ui,
+        "Survol forcé, et un total qui déborde",
+        "preview_hovered peint l'état survolé : hors écran, aucun pointeur ne survole quoi que ce soit. À droite, le bloc s'élargit de lui-même — sa largeur est celle de son libellé, jamais une valeur figée.",
+    );
+    ui.horizontal(|ui| {
+        design::pagination(6, 12)
+            .preview_hovered(PaginationStep::Next)
+            .log_name("galerie.pagination-survol")
+            .show(ui);
+        ui.add_space(24.0);
+        design::pagination(137, 1482)
+            .log_name("galerie.pagination-large")
+            .show(ui);
+    });
 }
 
 /// Charge une fois pour toutes un jeu de textures et le garde en mémoire egui.

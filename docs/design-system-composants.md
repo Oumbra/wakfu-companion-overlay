@@ -1831,6 +1831,84 @@ occupe déjà 7530. Six cas : peuplé sur fond en bandes (avec un nom trop long,
 vide avec message, vide muet, en chargement, corps borné défilant, et le cas dégénéré (268 px de
 colonnes imposées dans 200 px).
 
+## `design::pagination` — pagination (2026-09-12)
+
+`crates/overlay-ui/src/design/components/pagination.rs`
+
+```rust
+use overlay_ui::design::{self, PaginationStep};
+
+match design::pagination(page, total).log_name("hdv.historique").show(ui).step {
+    Some(PaginationStep::Previous) => page -= 1,
+    Some(PaginationStep::Next) => page += 1,
+    None => {}
+}
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `pagination(page, total)` | affichés tels quels — le composant ne renumérote rien | — |
+| `log_name` | nom d'instance | `pagination` |
+| `preview_hovered` | force le survol d'une flèche (galerie) | horloge réelle |
+
+Composant feuille, mais il rend un `PaginationOutcome` et non une `Response`&nbsp;: deux flèches,
+deux intentions distinctes qu'une seule `Response` ne saurait pas dire. `Pagination::height()` vaut
+`ICON_BUTTON_SIZE`&nbsp;; la largeur est celle du libellé, jamais une valeur figée.
+
+### Ce n'est pas un pied de tableau
+
+En bas dans Historique et Rechercher, **en haut à droite** dans Mes offres. C'est un constat du
+relevé, pas une préférence&nbsp;: le bloc alloue sa largeur naturelle et laisse la mise en page à
+son appelant.
+
+### Trois choses que la capture a apprises, contre le relevé
+
+1. **Ce ne sont pas des flèches nues.** Le relevé décrivait « deux flèches de 7 px espacées de
+   39 px ». Agrandie ×5, la zone montre **deux boutons icône de 36 × 36** — socle arrondi, hachures
+   diagonales — séparés de 4 px. Le composant n'en peint donc aucun&nbsp;: il compose deux
+   `design::icon_button` en contexte panneau.
+2. **Le numéro courant est doré, pas blanc.** Mesuré (244, 216, 158) sur ses pixels pleins, la même
+   valeur que « Page ». Seuls la barre oblique et le total sont blancs — *ce qui bouge est en or, ce
+   qui borne est en blanc*.
+3. **Le glyphe pointe vers la gauche**, malgré son nom de fichier (`icon-triangle-right`). Vérifié
+   sur son canal alpha&nbsp;: pointe en x=0, base en x=6. C'est donc « suivant » qui est retourné.
+   La première capture a rendu les deux flèches à l'envers — aucune relecture ne l'aurait dit.
+
+### Un glyphe détouré d'un bouton n'est pas forcément sur la grille de 18
+
+`DsIcon::TriangleRight` était déclaré `socle`, donc normalisé à `ICON_BUTTON_CONTENT` (18 px
+d'encre). Mesure directe sur la pagination du jeu&nbsp;: **8 × 10 px d'encre dans un socle de 36**,
+soit la taille native de l'asset (7 × 10) à un pixel de détourage près. La normalisation
+l'agrandissait de 80 %, ce que la première capture a montré sans ambiguïté. Passé à `libre` — et
+c'est le registre qui apprend quelque chose&nbsp;: `--from-button` dit d'où vient le détourage, pas
+que le glyphe soit sur la grille.
+
+### Le corps a été réglé au rendu, pas par le calcul
+
+13 px de hauteur de **capitale** dans le jeu (le « P » de « Page ») — pas les 16 px d'encre totale,
+qui incluent le jambage du « g » et donneraient un corps faux d'un tiers. Le rapport d'encre habituel
+(0,805) donnait 16&nbsp;; au rendu, 16 ne produit que 11 px d'encre et **19 en produit 13**. Contrôle
+sur le segment entier «&nbsp;Page 0 / 0&nbsp;»&nbsp;: 41 px pour « Page » contre 42 dans le jeu,
+83 px pour le libellé entier contre 82.
+
+### Ce qui reste inconnu
+
+**Les deux flèches sont grisées sur les trois captures** (« Page 0 / 0 » — le jeu n'a aucune page à
+parcourir). L'apparence d'une flèche *active* n'existe nulle part&nbsp;: le composant laisse
+`icon_button` rendre ses états habituels plutôt que d'inventer une teinte.
+
+Le socle **désactivé**, lui, est mesurable et diverge nettement&nbsp;: le jeu le peint à (36, 37, 41)
+sur un fond à (28, 30, 34), là où le contexte `Panel` pose `ButtonIconDisabled` en pleine opacité, à
+65. L'asset a été détouré d'un écran plus clair et rien ne le ramène au fond sur lequel il est posé.
+**C'est un écart d'`icon_button`**, qui vaut pour ses quatre boutons désactivés — le corriger dans la
+pagination créerait un second réglage du même socle.
+
+### Vérification
+
+Snapshot `design_gallery_table.png`, section basse&nbsp;: les quatre positions possibles (0/0, 1/12,
+6/12, 12/12), un survol forcé, et un total à quatre chiffres qui élargit le bloc.
+`design_gallery.png` bouge aussi, du seul fait de la renormalisation de `TriangleRight`.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -1944,7 +2022,6 @@ ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre — jamais d'
 | **`design::badge`** | `watchlist::paint_count_inline`, les étiquettes de rareté, la pastille d'état. | `status_pill_active` ; `text::OUTLINE_FULL` existe. §5.12, §5.13. |
 | **`design::meter`** | `combat::damage_bar` — 68 lignes de rectangles empilés (bord externe, bord interne, piste, remplissage, reflet, curseur de fin, arrondis conditionnels). | Six couleurs mesurées dans `combat.rs`, à promouvoir en jetons. |
 | **`design::portrait`** | `combat::paint_flat_portrait`, `panels::combat_frame` et son gabarit à six emplacements. | `crates/overlay-ui/assets/templates/*.png`, atlas de classes, portrait de repli. |
-| **`design::pagination`** | « Page 0 / 0 » et ses deux flèches, sous l'historique HDV et la recherche, **au-dessus** de Mes offres. `design::table` est écrit (fiche ci-dessus) ; la pagination en est séparée parce que sa position varie. | Relevé fait : `docs/design-system/hdv-table.json`, nœud `pager`. Manque la teinte des flèches ACTIVES — grisées sur les trois captures. |
 
 ### Vague 4 — les finitions
 
@@ -1972,6 +2049,14 @@ demi** :
   utilisateur explicite (la texture étirée cachait les portraits, voir la doc de module). Les
   unifier demanderait donc une variante du composant, pas une suppression — et cette variante
   attend une décision, pas un nettoyage.
+- **Le socle désactivé d'`icon_button` est trop clair sur un fond sombre** (constaté le 2026-09-12
+  en écrivant `design::pagination`). Le jeu peint le socle d'une flèche grisée à (36, 37, 41) sur un
+  fond à (28, 30, 34) — huit niveaux au-dessus de son fond. Le contexte `Panel` pose
+  `ButtonIconDisabled` en pleine opacité, à 65 : l'asset a été détouré d'un écran plus clair, et
+  rien ne le ramène au fond sur lequel il est posé. Le contexte `FirstPlan` a déjà rencontré ce
+  problème et le traite en gardant son socle de repos sous `DISABLED_DIM` ; `Panel` ne l'a pas
+  encore. À corriger dans `icon_button`, pour ses quatre boutons désactivés à la fois — jamais dans
+  un composant appelant, qui créerait un second réglage du même socle.
 - **Cinq chemins de chargement de texture** (et non six : `options_modal` est passé au manifeste) —
   `DesignSystem::load`, `ui_icons`, `portraits`, `remote_icons`, `combat_frame` — dont quatre copies
   de la même fonction décoder → `ColorImage` → `load_texture`. Le budget mémoire (§8 du plan,
