@@ -74,7 +74,7 @@ fn galerie_du_design_system() {
         // PLAFOND ATTEINT le 2026-09-12 : wgpu refuse une texture de plus de 8192 px de côté
         // (« Dimension Y value 9110 exceeds the limit of 8192 »). Il reste 662 px ici. Toute
         // section qui ne tient pas dedans prend sa propre planche — voir `galerie_du_tableau`.
-        .with_size(Vec2::new(760.0, 7530.0))
+        .with_size(Vec2::new(760.0, 7990.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1294,7 +1294,58 @@ fn gallery(ui: &mut egui::Ui) {
             .log_name("galerie.loader-hors-intervalle"),
     );
 
+    section_label(ui);
     section_autocomplete(ui);
+}
+
+/// Le libellé élidé — **trois largeurs pour un même texte**, parce que c'est le rapport entre les
+/// deux qui décide de l'ellipse, et rien d'autre.
+///
+/// L'infobulle ne se voit pas ici : elle demande un curseur, et aucun ne survole quoi que ce soit
+/// en rendu offscreen. C'est `tests/panels.rs` qui la vérifie, par survol simulé.
+fn section_label(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "design::label — libellé élidé",
+        "Même texte, trois largeurs : l'ellipse vient du rapport entre les deux, pas du texte. L'infobulle ne se voit pas ici — elle demande un curseur, et `tests/panels.rs` la vérifie par survol simulé.",
+    );
+    for largeur in [220.0_f32, 130.0, 80.0] {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("{largeur:.0} px"))
+                    .color(CAPTION)
+                    .size(11.0),
+            );
+            ui.add_space(8.0);
+            ui.add(
+                design::label("Plan \"Epée de Brâkmar\"")
+                    .width(largeur)
+                    .log_name(format!("galerie.label-{largeur:.0}")),
+            );
+        });
+    }
+    ui.add_space(8.0);
+    heading(
+        ui,
+        "Les trois alignements",
+        "À largeur assez large pour que le placement se voie.",
+    );
+    for (align, nom) in [
+        (egui::Align::Min, "gauche"),
+        (egui::Align::Center, "centré"),
+        (egui::Align::Max, "droite"),
+    ] {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+            ui.add_space(8.0);
+            ui.add(
+                design::label("Pierre ultime")
+                    .width(200.0)
+                    .align(align)
+                    .log_name(format!("galerie.label-{nom}")),
+            );
+        });
+    }
 }
 
 /// **Seconde planche** — le tableau et sa pagination, parce que la première a atteint le plafond

@@ -1529,3 +1529,17 @@ pub const CONFIRM_BUTTON_GAP: f32 = 14.0;
 /// qu'il couvre est inerte. C'est pourquoi le composant le peint sur le rectangle que l'appelant
 /// lui donne — la FENÊTRE entière, pied de page compris — et non sur son seul panneau.
 pub const CONFIRM_SCRIM_ALPHA: u8 = 0x88;
+
+// ---------------------------------------------------------------------------------------------
+// `design::label` — libellé d'une ligne, élidé.
+// ---------------------------------------------------------------------------------------------
+
+/// Corps par défaut d'un libellé — 13 px, celui des noms d'objet sous un emplacement.
+///
+/// **Choix de mise en page, pas une mesure du jeu** : le client n'écrit jamais le nom d'un objet
+/// sous sa case d'inventaire, il n'y a donc aucune capture à relever pour ce cas précis. 13 px est
+/// le corps qui laisse un nom d'objet courant tenir dans une tuile de 118 px.
+pub const LABEL_FONT_SIZE: f32 = 13.0;
+
+/// Couleur par défaut d'un libellé — blanc, comme tout texte de corps du jeu.
+pub const LABEL_TEXT: Color32 = Color32::WHITE;
