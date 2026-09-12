@@ -57,27 +57,35 @@ const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Largeur d'une tuile — calée pour que cinq tiennent sur une rangée dans la fenêtre agrandie.
 const TILE_WIDTH: f32 = 118.0;
-/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, nom sur **une** ligne, marges.
+/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, nom sur **une** ligne, marges —
+/// `TILE_BADGE_ROW + TILE_SLOT + TILE_NAME_GAP + ligne de nom (≈ 18 px à 13 px de corps) +
+/// TILE_BOTTOM_INSET`, soit 18 + 64 + 5 + 18 + 5.
 ///
 /// Portée à 104 px un moment le 2026-09-12, pour un nom sur deux lignes — **revenu en arrière le
 /// jour même, sur décision de l'utilisateur** : la tuile porte déjà l'icône de l'objet, et c'est
-/// elle qui lève l'ambiguïté entre deux noms proches, bien avant le texte. Faire grandir chaque
-/// tuile pour distinguer « Plan "Epée de Bonta" » de « … Brâkmar » résolvait un problème que
-/// l'utilisateur n'a pas. Le nom coupé se lit en infobulle — voir `design::label`.
-const TILE_HEIGHT: f32 = 88.0;
+/// elle qui lève l'ambiguïté entre deux noms proches, bien avant le texte. Le nom coupé se lit en
+/// infobulle — voir `design::label`. Puis 88 → 110 le soir même, et cette fois pour
+/// l'emplacement : c'est lui qui grandit (voir `TILE_SLOT`), le nom garde sa ligne unique.
+const TILE_HEIGHT: f32 = 110.0;
 /// Gouttière entre deux tuiles — « les petites tuiles doivent être séparées sur tous les bords ».
 const TILE_GAP: f32 = 10.0;
 const TILE_BORDER_WIDTH: f32 = 2.0;
 const TILE_RADIUS: u8 = 4;
 /// Fond d'une tuile — le fond de panneau du jeu, pour que la bordure d'état porte seule le signal.
 const TILE_FILL: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-/// Côté de l'emplacement d'objet — l'icône y est bien plus grande que les 32 px du web : c'est ce
-/// que « afficher les objets comme dans le jeu » demande.
-const TILE_SLOT: f32 = 44.0;
+/// Côté de l'emplacement d'objet — **la case du Suivi**, [`design::tokens::ITEM_SLOT_SIZE`].
+///
+/// 44 px jusqu'au 2026-09-12 au soir ; retour utilisateur : « les items slot sont assez petits
+/// par rapport au web et même par rapport au Suivi, dix pixels de plus de chaque côté ». Dix de
+/// chaque côté font 64 — exactement la case du Suivi, mesurée sur le jeu. Une tuile de 118 px lui
+/// laisse 27 px de chaque côté, au lieu des 37 qui faisaient « un très grand espace latéral ».
+const TILE_SLOT: f32 = design::tokens::ITEM_SLOT_SIZE;
 const TILE_BADGE_ROW: f32 = 18.0;
 const TILE_BADGE: f32 = 14.0;
 const TILE_BADGE_INSET: f32 = 5.0;
 const TILE_NAME_INSET: f32 = 5.0;
+/// Entre le bas de l'emplacement et la ligne du nom.
+const TILE_NAME_GAP: f32 = 5.0;
 
 /// Couleur du nom d'objet — **l'or du jeu** ([`design::tokens::TEXT_GOLD`]), la même teinte que le
 /// libellé d'une case cochée. Demande explicite du 2026-09-12.
@@ -608,7 +616,10 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     let largeur_nom = rect.width() - 2.0 * TILE_NAME_INSET;
     let hauteur_nom = design::Label::height(ui, design::tokens::LABEL_FONT_SIZE);
     let name_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.center().x - largeur_nom / 2.0, slot.bottom() + 5.0),
+        egui::pos2(
+            rect.center().x - largeur_nom / 2.0,
+            slot.bottom() + TILE_NAME_GAP,
+        ),
         Vec2::new(largeur_nom, hauteur_nom),
     );
     cellule.put(
