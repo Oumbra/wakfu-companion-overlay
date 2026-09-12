@@ -1700,6 +1700,119 @@ texte peint — « NaN% » sur un portrait.
 **Aucun snapshot n'a bougé** : la migration de `combat::paint_flat_portrait` et des deux boucles du
 gabarit est équivalente au pixel.
 
+## `design::table` — tableau (2026-09-12)
+
+`crates/overlay-ui/src/design/components/table.rs`
+
+```rust
+use overlay_ui::design::{self, TableAlign, TableBody, TableColumn};
+
+design::table()
+    .column(TableColumn::fixed("Date", 104.0))
+    .column(TableColumn::flex("Nom", 1.0))
+    .column(TableColumn::fixed("Prix", 108.0).align(TableAlign::End))
+    .body(TableBody::Rows(offres.len()))
+    .max_height(12.0 * design::tokens::TABLE_ROW_HEIGHT)
+    .empty_text("Aucune vente sur la période")
+    .log_name("hdv.historique")
+    .show(ui, |row| {
+        let offre = &offres[row.index()];
+        row.cell(|ui| { ui.label(&offre.date); });
+        row.cell(|ui| { ui.label(&offre.nom); });
+        row.cell(|ui| { ui.label(&offre.prix); });
+        if row.response().clicked() { /* l'appelant décide */ }
+    });
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `column` / `columns` | `TableColumn::fixed(label, px)` ou `::flex(label, poids)`, `.align(…)` | aucune colonne |
+| `body` | `Rows(n)` / `Empty` / `Loading` | `Empty` |
+| `empty_text` | message du corps vide | aucun — le corps reste vide, comme dans le jeu |
+| `row_height` | hauteur d'une ligne | 60 (la cote du jeu) |
+| `width` | largeur totale | celle du `Ui` |
+| `max_height` | borne du **corps** : au-delà il défile, en-tête figé | aucune |
+| `preview_loader_frame` | fige le rouage de `Loading` | horloge |
+
+Conteneur de la famille §1 bis, **forme closure**. `Table::height()` rend la hauteur totale *avant*
+le rendu : c'est ce qui permet à un appelant de peindre quelque chose derrière le tableau, ou de
+réserver sa place.
+
+### Trois cotes mesurées, et tout le reste vient de l'appelant
+
+Relevé : [`hdv-table.json`](design-system/hdv-table.json). Hauteur de ligne **60 px**, encre
+d'en-tête **14 px**, écart encre → première ligne **7 px** — les trois invariants sur les trois
+captures HDV. L'écart de 7 px est **la même valeur que `HEADING_TO_ROW`**, mesurée indépendamment
+sur une autre interface, et la teinte des libellés (`#b9babb`) est celle des titres de section
+(`#b8b9ba`) à un canal près : deux jetons partagés plutôt que deux quasi-doublons qui dériveraient.
+
+L'en-tête est en **linéale**, pas dans la serif des titres — vérifié sur la capture agrandie ×4,
+c'est le genre de détail qu'aucune mesure numérique ne donne. Corps 17, contrôlé au rendu : 12 px
+d'encre et 36 px de large pour « Date », contre 12 et 37 dans le jeu.
+
+**Les trois tableaux relevés sont vides** (« 0 Objet »). Rien de ce qui concerne une ligne remplie
+n'est mesurable : alignement des valeurs, typographie des cellules, icône d'objet de la colonne Nom,
+texte trop long. Le composant n'en invente rien — il **donne la cellule à l'appelant** et ne peint
+aucun contenu. Seul `TABLE_CELL_PAD_X` est un choix, emprunté à `SELECT_PADDING_X`, et il l'annonce.
+
+### Le zébrage éclaircit, il ne colore pas
+
+Le tableau du jeu n'a **pas de fond propre** : le décor se lit à travers. Une ligne sur deux porte
+donc un blanc translucide, jamais deux aplats opaques — sur un overlay posé par-dessus un jeu en
+mouvement, deux aplats seraient faux à chaque frame.
+
+L'alpha est déduit colonne par colonne, `(claire − nue) / (1 − nue/255)`, sur quinze colonnes de
+x=60 à x=1180 : **médiane 12,3**, valeurs de 10,1 à 16,2. La dispersion est celle du décor, pas de
+la mesure. Deux colonnes seules donnaient 13,5 : l'échantillon comptait.
+
+La galerie le démontre en peignant le premier tableau **sur six bandes de fond de luminances
+différentes** — sur un fond uni, la démonstration serait invisible.
+
+### Les positions de colonne sont imposées par le composant, et c'est un constat du relevé
+
+Les six libellés ont partout la même largeur d'encre d'une capture à l'autre, mais leurs abscisses
+varient avec la largeur du tableau **sans règle lisible** : entre « Enchantement » et « Quantité »
+l'écart vaut 160 px dans deux captures sur trois, ailleurs rien ne se répète. Le relevé conclut
+qu'il faut soit une quatrième capture, soit que le composant impose sa propre répartition. C'est ce
+second choix, et il est **en données** : `table_column_spans(colonnes, largeur)` — fixes d'abord,
+reste au prorata des poids élastiques, réduction proportionnelle si les fixes ne tiennent pas — avec
+quatre tests qui le verrouillent. Sans aucune colonne élastique, le reste **demeure à droite** :
+une largeur imposée l'est vraiment.
+
+### Les deux états que le jeu ne montre pas
+
+`Empty` et `Loading` sont une **décision de l'overlay**, pas un relevé : les tableaux à « 0 Objet »
+du jeu sont simplement vides, sans message, et aucune capture ne montre un tableau en chargement.
+Les deux sont construits avec des éléments déjà mesurés — le rouage de `design::loader`, le gris de
+`TEXT_DISABLED` — plutôt qu'avec des teintes inventées, et leurs hauteurs sont annoncées comme
+choisies dans les jetons. `empty_text` reste facultatif : sans lui, le corps garde sa hauteur et
+demeure vide, ce que fait le jeu.
+
+### L'identité pend à la réponse du corps
+
+Une `Ui` fille créée sans sel d'identité **hérite de l'identifiant de sa mère**. Deux tableaux posés
+dans le même panneau donnaient donc les mêmes identifiants de ligne, et egui l'écrivait en rouge sur
+la capture (« Second use of widget ID … ») — c'est la capture qui l'a montré, aucune relecture ne
+l'aurait signalé. Tout pend désormais à l'identifiant automatique de la réponse du corps, unique par
+position dans l'arbre : lignes, cellules, barre de défilement et avertissement de débordement.
+
+### Ce que le tableau ne peint PAS
+
+La bande claire de 8 px sous le tableau, que le relevé attribuait à un « liseré bas ». Mesure de
+contrôle : elle traverse **toute la largeur de la capture** (x 0..1278), bien au-delà des bornes du
+tableau (x 24..1262). Elle appartient au décor de la fenêtre — le relevé a été corrigé.
+
+La **pagination** n'en fait pas partie non plus : en bas dans Historique et Rechercher, **en haut à
+droite** dans Mes offres. C'est un composant autonome que la page place, pas un pied de tableau.
+
+### Vérification
+
+Snapshot **`design_gallery_table.png`** — et c'est une *seconde* planche, pas un choix de
+présentation : `wgpu` refuse une texture de plus de 8192 px de côté et `design_gallery.png` en
+occupe déjà 7530. Six cas : peuplé sur fond en bandes (avec un nom trop long, coupé à la colonne),
+vide avec message, vide muet, en chargement, corps borné défilant, et le cas dégénéré (268 px de
+colonnes imposées dans 200 px).
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -1813,7 +1926,7 @@ ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre — jamais d'
 | **`design::badge`** | `watchlist::paint_count_inline`, les étiquettes de rareté, la pastille d'état. | `status_pill_active` ; `text::OUTLINE_FULL` existe. §5.12, §5.13. |
 | **`design::meter`** | `combat::damage_bar` — 68 lignes de rectangles empilés (bord externe, bord interne, piste, remplissage, reflet, curseur de fin, arrondis conditionnels). | Six couleurs mesurées dans `combat.rs`, à promouvoir en jetons. |
 | **`design::portrait`** | `combat::paint_flat_portrait`, `panels::combat_frame` et son gabarit à six emplacements. | `crates/overlay-ui/assets/templates/*.png`, atlas de classes, portrait de repli. |
-| **`design::table` + `design::pagination`** | Rien aujourd'hui — mais l'historique HDV, les ventes et les échanges (§9 du plan) sont exactement cela : colonnes triables, lignes alternées, état vide, « Page 0 / 0 » et ses deux flèches. | Quatre captures complètes dans `interfaces/` ; passer par `ui-blueprint` d'abord. |
+| **`design::pagination`** | « Page 0 / 0 » et ses deux flèches, sous l'historique HDV et la recherche, **au-dessus** de Mes offres. `design::table` est écrit (fiche ci-dessus) ; la pagination en est séparée parce que sa position varie. | Relevé fait : `docs/design-system/hdv-table.json`, nœud `pager`. Manque la teinte des flèches ACTIVES — grisées sur les trois captures. |
 
 ### Vague 4 — les finitions
 

@@ -155,7 +155,7 @@
         },
         {
           "id": "table-edge",
-          "label": "Liseré bas",
+          "label": "Bande claire du décor (PAS le tableau)",
           "box": [
             20,
             889,
@@ -163,7 +163,7 @@
             897
           ],
           "role": "surface",
-          "notes": "Bande claire de 8 px qui ferme le tableau — elle ne suit pas le pas de 60 px du zébrage, c'est un bord et non une ligne."
+          "notes": "CORRIGÉ le 2026-09-12, en écrivant `design::table` : cette bande de 8 px (bordée de deux lignes sombres de 2 px) traverse TOUTE la largeur de la capture, x 0..1278, alors que le tableau s'arrête à x≈1262. Elle appartient au décor de la fenêtre, pas au tableau — le composant ne la peint pas."
         }
       ]
     },
@@ -295,6 +295,9 @@
     "La colonne Nom absorbe vraisemblablement l'élasticité — elle est la première et la plus large, et les colonnes de droite gardent des écarts proches d'une capture à l'autre. C'est une hypothèse, pas une mesure.",
     "La pagination n'est PAS un pied de tableau : elle est en bas dans Historique et Rechercher, mais en haut à droite dans Mes offres. `design::pagination` doit donc être un composant autonome, que la page place, et non une zone de `design::table`.",
     "Les deux flèches sont grisées sur les trois captures (aucune page à parcourir) : leur teinte active reste inconnue.",
-    "Le doré de « Page » est #f4d89e, exactement la teinte des libellés d'onglet inactif déjà relevée dans le design system — un jeton partagé plutôt qu'une valeur propre."
+    "Le doré de « Page » est #f4d89e, exactement la teinte des libellés d'onglet inactif déjà relevée dans le design system — un jeton partagé plutôt qu'une valeur propre.",
+    "Le « liseré bas » du premier relevé n'en est pas un : mesuré sur toute la largeur, il déborde des bornes du tableau et appartient au décor de la fenêtre. Corrigé le 2026-09-12.",
+    "Le zébrage a été re-déduit colonne par colonne en écrivant le composant : alpha médian 12,3 sur quinze colonnes (10,1 à 16,2 selon le décor sous-jacent), ce qui confirme le 12 du relevé. Deux colonnes seules donnaient 13,5 — l'échantillon comptait.",
+    "L'en-tête est en LINÉALE, pas dans la serif des titres de section (vérifié sur la capture agrandie ×4). Sa teinte relevée `#b9babb` est celle des titres de section `#b8b9ba` à un canal près : un seul jeton pour les deux."
   ]
 }
