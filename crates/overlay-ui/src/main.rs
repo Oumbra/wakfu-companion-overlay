@@ -43,6 +43,7 @@ use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
+use overlay_ui::alert_sound;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SyncCommand,
@@ -51,6 +52,7 @@ use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
+use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
@@ -1233,7 +1235,7 @@ impl App {
             // Toujours « Paramètres » à l'ouverture : c'est le défaut d'`OptionsTab`, et le
             // réglage qu'on vient chercher en premier.
             tab: Default::default(),
-            alerts: options_modal::AlertsTabState {
+            alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
                 duration_input: alerts_draft
