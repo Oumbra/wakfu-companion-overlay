@@ -64,6 +64,16 @@ use crate::ui_icons::UiIcons;
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
 pub const MAX_FRAME_SLOTS: usize = 6;
 
+/// Marques du bloc « ligne de sorts » à peindre sur les médaillons (vue Alliés seulement — voir
+/// `combat_spell_block`) : emplacements (index dans la tranche `fighters` passée à `show`) du
+/// liseré (allié dont on lit les sorts) et du point (dernier lanceur allié). `Some` rend aussi
+/// cliquables les portraits des alliés ayant lancé un sort.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelectionMarks {
+    pub ring_slot: Option<usize>,
+    pub dot_slot: Option<usize>,
+}
+
 /// Largeur de canevas commune aux 6 templates — largeur NATIVE du PNG (70 px, commune aux 6),
 /// canevas non étiré à l'affichage (voir doc de module).
 const FRAME_WIDTH: f32 = 70.0;
@@ -225,6 +235,13 @@ impl CombatFrame {
     /// `remote_icon_textures` permettent de résoudre le portrait RÉEL du monstre (voir
     /// `panels::combat::resolve_fighter_texture`) — un ennemi n'a jamais de `class_name`, sans ces
     /// paramètres tout ennemi affiché ici retomberait sur le portrait générique.
+    ///
+    /// **Sélection du bloc de sorts** (12 sept. 2026, « Sélection par le cadre ») : avec `marks`
+    /// à `Some`, le portrait de chaque allié ayant lancé un sort devient un bouton (curseur main,
+    /// nœud d'accessibilité `Button` au nom de l'allié) et les marques dorées sont peintes entre
+    /// le portrait et son pourcentage — voir `combat_spell_block::paint_marks`. Renvoie
+    /// l'emplacement cliqué cette frame, s'il y en a un ; l'appelant applique les règles de
+    /// l'épingle (`combat_spell_block::on_portrait_clicked`).
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &self,
@@ -236,7 +253,8 @@ impl CombatFrame {
         remote_icon_textures: &mut RemoteIconTextures,
         fighters: &[&FighterDamage],
         total_damage: i64,
-    ) {
+        marks: Option<SelectionMarks>,
+    ) -> Option<usize> {
         debug_assert!(!fighters.is_empty() && fighters.len() <= MAX_FRAME_SLOTS);
         let n = fighters.len().clamp(1, MAX_FRAME_SLOTS);
         let template = &TEMPLATES[n - 1];
@@ -299,14 +317,41 @@ impl CombatFrame {
         // impossible à identifier dès que sa barre n'est plus juste à côté) + pourcentage de
         // dégâts sur le portrait (bas-droite, voir `panels::combat::paint_portrait_percent`),
         // peints APRÈS les portraits — voir doc de fonction.
-        for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
+        let mut clicked = None;
+        for (slot, (fighter, &center)) in fighters.iter().zip(template.slot_centers).enumerate() {
             let pos = frame_rect.min + center.to_vec2();
             let portrait_rect = egui::Rect::from_center_size(
                 pos,
                 egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
             );
             let id = ui.id().with(("combat-frame-slot", fighter.name.as_str()));
-            let response = ui.interact(portrait_rect, id, egui::Sense::hover());
+            let selectable = marks.is_some() && !fighter.last_turn_casts.is_empty();
+            let sense = if selectable {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            };
+            let response = ui.interact(portrait_rect, id, sense);
+            if selectable {
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, fighter.name.as_str())
+                });
+                if response.clicked() {
+                    clicked = Some(slot);
+                }
+                response
+                    .clone()
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+            }
+            if let Some(marks) = marks {
+                super::combat_spell_block::paint_marks(
+                    ui,
+                    portrait_rect,
+                    id,
+                    marks.ring_slot == Some(slot),
+                    marks.dot_slot == Some(slot),
+                );
+            }
             crate::design::tooltip(&response).text(fighter.name.as_str());
             if fighter.total_damage > 0 {
                 crate::design::paint_portrait_percent(
@@ -316,5 +361,6 @@ impl CombatFrame {
                 );
             }
         }
+        clicked
     }
 }

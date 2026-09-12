@@ -1,14 +1,13 @@
-//! Snapshot testing du bloc « ligne de sorts » du panneau Combat
-//! (`overlay_ui::panels::combat_spell_block`, spec validée en artefact les 11-12 sept. 2026).
+//! Snapshot testing du bloc « ligne de sorts » du panneau Combat et de sa sélection par le cadre
+//! à médaillons (`overlay_ui::panels::combat_spell_block`, spec validée en artefact les 11-12
+//! sept. 2026, refonte « Sélection par le cadre » décidée le 12 sept. au soir).
 //!
 //! **Même règle que `tests/panels.rs`** : le `SessionSnapshot` vient du rejeu du vrai
 //! `crates/overlay-engine/tests/wakfu.log` à travers le vrai `Engine`, jamais d'un littéral. Le
 //! premier combat du rejeu (six alliés, `Erz-Wouaf`, `Néo-Erz-Alcool`, `Erz-Poker`…) fournit tous
-//! les cas de la spec : dernier lanceur allié suivi automatiquement, un allié à cinq sorts dont un
-//! critique (une rangée), un allié à neuf sorts (deux rangées), trois alliés qui n'ont rien lancé
-//! (donc sans onglet : trois emplacements sur six restent vides). Depuis la mise à jour du
-//! référentiel du 12 sept. (mécaniques de classe comprises), tous les sorts de ce combat ont une
-//! icône : le pavé « ? » d'un sort inconnu n'a plus de cas réel à capturer ici.
+//! les cas : dernier lanceur allié suivi automatiquement (liseré et point sur lui), un allié à cinq
+//! sorts dont un critique (une rangée), un allié à neuf sorts (deux rangées), trois alliés qui
+//! n'ont rien lancé (jamais cliquables, jamais marqués), et la vue Ennemis sans bloc.
 //!
 //! **Icônes de sorts : fixtures versionnées, jamais le réseau** (§17.1 du plan). Les neuf PNG de
 //! `fixtures/spells/` sont injectés dans `RemoteIconStore::empty()` par `preload`, adressés par le
@@ -19,9 +18,9 @@
 //! un pavé vide passer pour normal dans la capture.
 //!
 //! **Interactions par nœud d'accessibilité** (`get_by_role_and_label`) plutôt que par coordonnées
-//! calculées à la main : les onglets sont déclarés `Button` avec le nom de l'allié, les sorts
-//! `Image` avec « Sort n : nom » — la position exacte du bloc (qui dépend du nombre de groupes de
-//! dégâts) n'a pas à être recopiée ici.
+//! calculées à la main : les portraits cliquables du cadre sont déclarés `Button` avec le nom de
+//! l'allié, les sorts `Image` avec « Sort n : nom ». Seul le switch Alliés/Ennemis est cliqué par
+//! coordonnées (les mêmes que `tests/panels.rs`).
 //!
 //! **Driver logiciel requis** : même prérequis que `tests/panels.rs`.
 
@@ -188,7 +187,7 @@ fn last_ally_caster_name(fight: &FightSnapshot) -> &str {
 }
 
 #[test]
-fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
+fn bloc_de_sorts_selection_par_le_cadre() {
     let snapshot = replay_real_log();
     let fight: FightSnapshot = snapshot
         .fights
@@ -198,7 +197,7 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
     assert_eq!(
         fight.fighters.iter().filter(|f| f.is_ally).count(),
         6,
-        "le premier combat du rejeu doit remplir les six emplacements"
+        "le premier combat du rejeu doit remplir les six médaillons"
     );
     // L'état RÉEL du rejeu, vérifié plutôt que supposé : c'est lui que la première capture montre.
     let auto_selected = last_ally_caster_name(&fight).to_string();
@@ -218,53 +217,50 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
     let auth_sink = NoopAuthSink;
     let now = std::time::Instant::now();
 
-    // Pas de temps par étape à 0,1 s (au lieu de 0,25 s par défaut) : la glissade de
-    // l'indicateur dure 0,25 s, il faut pouvoir la capturer À MI-COURSE. `max_steps` relevé en
-    // proportion pour que `run()` ait le temps de la terminer.
-    let mut harness = Harness::builder()
-        .with_step_dt(0.1)
-        .with_max_steps(20)
-        .build_ui(move |ui| {
-            let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
-            paint_content(
-                ui,
-                RenderContent {
-                    kind: OverlayKind::Combat,
-                    fight: Some(&fight),
-                    portraits,
-                    combat_frame,
-                    icons,
-                    combat_side: &mut combat_side,
-                    watchlist: &[],
-                    watchlist_toast: None,
-                    catalog: &catalog,
-                    catalog_stale: false,
-                    remote_icons: &remote_icon_store,
-                    remote_icon_textures: &mut remote_icon_textures,
-                    auth_status: &auth_status,
-                    auth_command_tx: &auth_sink,
-                    interactive: true,
-                    now,
-                    options: None,
-                },
-            );
-        });
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Combat,
+                fight: Some(&fight),
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+                options: None,
+            },
+        );
+    });
 
-    // 1. Suivi automatique : l'indicateur est sous le dernier lanceur allié (Erz-Wouaf, cinq
-    //    sorts dont un critique en 4e). Erz-Mage, Erz-Vegetal et Erz-Zob n'ont rien lancé : pas
-    //    d'onglet, les emplacements 4 à 6 restent vides.
+    // 1. Suivi automatique : liseré ET point sur le dernier lanceur allié (Erz-Wouaf, cinq sorts
+    //    dont un critique en 4e). Erz-Mage, Erz-Vegetal et Erz-Zob n'ont rien lancé : ni marque
+    //    ni bouton.
     harness.run();
     harness.snapshot("combat_spell_block_suivi_auto");
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Erz-Mage")
+            .is_none(),
+        "un allié sans sort ne doit pas être cliquable"
+    );
 
-    // 2. Clic sur Néo-Erz-Alcool (neuf sorts, deux rangées) : deux étapes plus tard, l'indicateur
-    //    est à mi-chemin sur le séparateur, entre les deux portraits.
+    // 2. Clic sur le portrait de Néo-Erz-Alcool (neuf sorts, deux rangées) : le liseré passe sur
+    //    lui, le point reste sur Erz-Wouaf, le bloc montre ses neuf sorts.
     harness
         .get_by_role_and_label(Role::Button, "Néo-Erz-Alcool")
         .click();
-    harness.step();
-    harness.step();
-    harness.snapshot("combat_spell_block_glissade");
     harness.run();
     harness.snapshot("combat_spell_block_epingle_deux_rangees");
 
@@ -275,11 +271,11 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
     harness.run();
     harness.snapshot("combat_spell_block_epingle_un_sort");
 
-    // 4. Second clic sur l'onglet épinglé : retour au suivi automatique (Erz-Wouaf), puis survol
-    //    de son critique : liseré ACCENT et infobulle « Croc-en-jambe · Critique » au-dessus
-    //    (une ligne, sans nom de lanceur).
+    // 4. Clic sur le porteur du point (Erz-Wouaf) : retour au suivi automatique, puis survol de
+    //    son critique : liseré ACCENT et infobulle « Croc-en-jambe · Critique » au-dessus (une
+    //    ligne, sans nom de lanceur).
     harness
-        .get_by_role_and_label(Role::Button, "Erz-Poker")
+        .get_by_role_and_label(Role::Button, "Erz-Wouaf")
         .click();
     harness.run();
     harness
@@ -287,4 +283,21 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
         .hover();
     harness.run();
     harness.snapshot("combat_spell_block_survol");
+
+    // 5. Vue Ennemis : ni bloc ni marques. Le bouton « Ennemis » du switch est cliqué par
+    //    coordonnées (mêmes repères que `tests/panels.rs::panneau_combat_tooltip_switch_allies_
+    //    ennemis_au_dessus`, décalés de la colonne des portraits, présente ici : 8 de marge du
+    //    harnais + 8 + 70 (cadre) + 6 (`COLUMN_GAP`) + 6 (`LEADER_PANEL_PADDING`) + 30 + 15 = 143 ;
+    //    8 + 50 + 13 = 71).
+    harness.remove_cursor();
+    harness.drag_at(egui::pos2(143.0, 71.0));
+    harness.drop_at(egui::pos2(143.0, 71.0));
+    harness.run();
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Image, "Sort 1 : Proie")
+            .is_none(),
+        "le bloc ne doit pas exister en vue Ennemis"
+    );
+    harness.snapshot("combat_spell_block_vue_ennemis");
 }
