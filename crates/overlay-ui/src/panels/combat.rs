@@ -360,6 +360,7 @@ use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
 use super::combat_frame_scroll::EnemyFrameScroll;
+use super::combat_spell_block;
 
 /// Camp actuellement affiché dans la liste verticale de portraits, piloté par le switch
 /// (`paint_side_switch`). Un état par fenêtre overlay (donc par personnage) — voir `OverlayWindow`
@@ -403,7 +404,7 @@ const COLUMN_GAP: f32 = 6.0;
 
 // Charte reprise telle quelle du thème sombre par défaut du dépôt web (`styles.css` `:root`, voir
 // `.icon-switch`/`.icon-switch-highlight`) — pas de palette propre à l'overlay pour ce composant.
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
+pub(super) const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
 // Couleur dédiée au remplissage de la barre de dégâts UNIQUEMENT (retour utilisateur 2026-09-05,
 // 8e retour : `#077982`, un sarcelle plus sombre que `ACCENT`) — DE NOUVEAU distincte de `ACCENT`
 // (fusionnées en 6e retour après rejet du magenta `#ff02ff` du 5e retour). Le pourcentage sur le
@@ -425,7 +426,7 @@ const BAR_ROUNDING: f32 = 4.0;
 /// Largeur maximale d'une barre — agrandie par rapport à la première version de cette refonte
 /// (150 px) maintenant que `COLUMN_GAP` est réduit (voir sa doc) : l'espace regagné doit profiter
 /// à la barre, pas rester vide.
-const BAR_MAX_WIDTH: f32 = 190.0;
+pub(super) const BAR_MAX_WIDTH: f32 = 190.0;
 /// Épaisseur de chacune des deux bordures concentriques de la barre (voir `damage_bar`) — mesurée
 /// sur la maquette (~2 px sur une barre d'environ 16 px de haut).
 const BAR_BORDER_WIDTH: f32 = 2.0;
@@ -476,11 +477,11 @@ const PERCENT_FONT_SIZE: f32 = 12.0;
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
 /// Arrondi du fond opacifié de la ligne leader.
-const LEADER_PANEL_ROUNDING: f32 = 6.0;
+pub(super) const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// Couleur du fond opacifié de la ligne leader — approximation d'un bandeau translucide du jeu
 /// (captures d'écran de référence sans canal alpha exploitable, voir doc de module) : noir
 /// bleuté, assez opaque pour détacher la ligne du reste sans devenir un pavé plein.
-const LEADER_PANEL_FILL: egui::Color32 =
+pub(super) const LEADER_PANEL_FILL: egui::Color32 =
     egui::Color32::from_rgba_unmultiplied_const(10, 12, 16, 150);
 
 #[allow(clippy::too_many_arguments)]
@@ -629,6 +630,23 @@ pub fn show(
                     }
                     damage_bar_group(ui, &fighter.name, fighter.total_damage, total_damage);
                 }
+            }
+            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, dès
+            // qu'un combat a au moins un allié — quel que soit le camp affiché au-dessus, il
+            // porte sur les ALLIÉS du combat (décision artefact : visible aussi sur la vue
+            // Ennemis). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà `item_spacing.y`
+            // après le dernier widget, retranché ici pour ne pas le compter deux fois.
+            if let Some(fight) = fight.filter(|f| f.fighters.iter().any(|x| x.is_ally)) {
+                ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
+                combat_spell_block::show(
+                    ui,
+                    fight,
+                    portraits,
+                    icons,
+                    overlay_engine::SpellIndex::embedded(),
+                    remote_icons,
+                    remote_icon_textures,
+                );
             }
         });
     });
