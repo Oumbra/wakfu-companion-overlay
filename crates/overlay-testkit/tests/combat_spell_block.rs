@@ -6,10 +6,11 @@
 //! premier combat du rejeu (six alliés, `Erz-Wouaf`, `Néo-Erz-Alcool`, `Erz-Poker`…) fournit tous
 //! les cas de la spec : dernier lanceur allié suivi automatiquement, un allié à cinq sorts dont un
 //! critique (une rangée), un allié à neuf sorts (deux rangées), trois alliés qui n'ont rien lancé
-//! (donc sans onglet : trois emplacements sur six restent vides), et des sorts absents du
-//! référentiel (`Proie`, `Karcham`, `Chamrak`, `Bond du félin` — mécaniques de classe, pavé « ? »).
+//! (donc sans onglet : trois emplacements sur six restent vides). Depuis la mise à jour du
+//! référentiel du 12 sept. (mécaniques de classe comprises), tous les sorts de ce combat ont une
+//! icône : le pavé « ? » d'un sort inconnu n'a plus de cas réel à capturer ici.
 //!
-//! **Icônes de sorts : fixtures versionnées, jamais le réseau** (§17.1 du plan). Les cinq PNG de
+//! **Icônes de sorts : fixtures versionnées, jamais le réseau** (§17.1 du plan). Les neuf PNG de
 //! `fixtures/spells/` sont injectés dans `RemoteIconStore::empty()` par `preload`, adressés par le
 //! `IconRef` que `SpellIndex::embedded()` résout LUI-MÊME pour ces sorts — la même correspondance
 //! nom + classe → numéro d'image qu'au runtime, pas une seconde table écrite ici (même principe
@@ -109,6 +110,31 @@ const SPELL_FIXTURES: &[(&str, &str, &str, &[u8])] = &[
         "2208",
         include_bytes!("../fixtures/spells/2208.png"),
     ),
+    // Mécaniques de classe, ajoutées au référentiel le 12 sept. (auparavant en pavé « ? »).
+    (
+        "Proie",
+        "ouginak",
+        "6283",
+        include_bytes!("../fixtures/spells/6283.png"),
+    ),
+    (
+        "Karcham",
+        "pandawa",
+        "2195",
+        include_bytes!("../fixtures/spells/2195.png"),
+    ),
+    (
+        "Chamrak",
+        "pandawa",
+        "975",
+        include_bytes!("../fixtures/spells/975.png"),
+    ),
+    (
+        "Bond du félin",
+        "ecaflip",
+        "983",
+        include_bytes!("../fixtures/spells/983.png"),
+    ),
 ];
 
 fn preload_spell_fixtures(store: &RemoteIconStore) {
@@ -117,13 +143,17 @@ fn preload_spell_fixtures(store: &RemoteIconStore) {
         let entry = spells
             .find(name, Some(class))
             .unwrap_or_else(|| panic!("{name} ({class}) absent du référentiel assets/spells.json"));
+        let icon = entry
+            .icon
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name} ({class}) sans image dans le référentiel"));
         assert_eq!(
-            entry.icon.gfx_id, *expected_gfx_id,
+            icon.gfx_id, *expected_gfx_id,
             "{name} ({class}) : le référentiel pointe désormais sur une autre image, mettre à \
              jour fixtures/spells/"
         );
         assert!(
-            store.preload(&entry.icon, bytes),
+            store.preload(icon, bytes),
             "fixture {expected_gfx_id}.png illisible"
         );
     }
@@ -222,9 +252,8 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
         });
 
     // 1. Suivi automatique : l'indicateur est sous le dernier lanceur allié (Erz-Wouaf, cinq
-    //    sorts dont un critique en 4e ; `Proie`, mécanique Ouginak, manque au référentiel :
-    //    pavé « ? »). Erz-Mage, Erz-Vegetal et Erz-Zob n'ont rien lancé : pas d'onglet, les
-    //    emplacements 4 à 6 restent vides.
+    //    sorts dont un critique en 4e). Erz-Mage, Erz-Vegetal et Erz-Zob n'ont rien lancé : pas
+    //    d'onglet, les emplacements 4 à 6 restent vides.
     harness.run();
     harness.snapshot("combat_spell_block_suivi_auto");
 
@@ -239,13 +268,12 @@ fn bloc_de_sorts_suivi_epingle_glissade_et_survol() {
     harness.run();
     harness.snapshot("combat_spell_block_epingle_deux_rangees");
 
-    // 3. Clic sur Erz-Poker : un seul sort, absent du référentiel (`Bond du félin`) — le bloc
-    //    reste à une rangée avec son pavé « ? ».
+    // 3. Clic sur Erz-Poker : un seul sort (`Bond du félin`) — le bloc reste à une rangée.
     harness
         .get_by_role_and_label(Role::Button, "Erz-Poker")
         .click();
     harness.run();
-    harness.snapshot("combat_spell_block_epingle_sort_inconnu");
+    harness.snapshot("combat_spell_block_epingle_un_sort");
 
     // 4. Second clic sur l'onglet épinglé : retour au suivi automatique (Erz-Wouaf), puis survol
     //    de son critique : liseré ACCENT et infobulle « Croc-en-jambe · Critique » au-dessus

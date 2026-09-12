@@ -4,20 +4,23 @@
 //! (`session::SpellCastRecord`) dans le bloc « ligne de sorts » du panneau Combat
 //! (`overlay-ui::panels::combat_spell_block`).
 //!
-//! **Le fichier est maintenu à la main par l'utilisateur** (18 classes, une entrée par sort avec
-//! ses noms localisés et l'URL de son image sur le CDN `wakassets`). Il ne contient au 2026-09-12
-//! que les sorts de « panneau » de chaque classe — les mécaniques de classe (Proie/Ougigarou côté
-//! Ouginak, Karcham/Chamrak côté Pandawa, Bond du félin/Relance côté Ecaflip…) manquent encore et
-//! seront ajoutées par lui ; un sort absent du référentiel n'est PAS une erreur ici : `find`
-//! renvoie `None` et l'UI affiche un pavé « ? » (voir `combat_spell_block`). Ce module ne doit
-//! donc jamais paniquer sur un nom inconnu, seulement sur un fichier structurellement invalide
-//! (bug de build, comme un asset corrompu — voir `SpellIndex::embedded`).
+//! **Le fichier est maintenu à la main par l'utilisateur** (18 classes plus une pseudo-classe
+//! `common` de `breedId` −2 pour les sorts communs à tout le monde — Maîtrise d'Armes, Charme de
+//! Masse, Os à Moelle ; une entrée par sort avec ses noms localisés et l'URL de son image sur le
+//! CDN `wakassets`). Depuis la mise à jour du 12 sept. 2026 il couvre aussi les mécaniques de
+//! classe (Proie, Karcham/Chamrak, Bond du félin…), fusionnées dans `spells` avec les sorts de
+//! panneau. Un sort absent du référentiel n'est toujours PAS une erreur ici : `find` renvoie
+//! `None` et l'UI affiche un pavé « ? » (voir `combat_spell_block`) ; une entrée sans `picture`
+//! (`null`, ex. Engrènement côté Sadida) est connue mais sans icône (`SpellEntry::icon` à `None`).
+//! Ce module ne doit donc jamais paniquer sur un nom inconnu ou une image absente, seulement sur
+//! un fichier structurellement invalide (bug de build, comme un asset corrompu — voir
+//! `SpellIndex::embedded`).
 //!
 //! **Clé de résolution : nom normalisé + classe du lanceur.** Le nom seul est ambigu — « Rafale »
 //! et « Poursuite » existent chez deux classes chacun, avec des icônes différentes. La classe du
 //! lanceur vient de `FighterDamage::class_name` (roster, sinon `breed` du combat) ; sans classe
-//! connue, ou si la classe ne possède pas ce sort (roster périmé, sort « générique » commun à
-//! plusieurs classes), repli sur la PREMIÈRE entrée portant ce nom, dans l'ordre du fichier —
+//! connue, ou si la classe ne possède pas ce sort (roster périmé, sort commun à tout le monde —
+//! pseudo-classe `common`), repli sur la PREMIÈRE entrée portant ce nom, dans l'ordre du fichier —
 //! mieux qu'un « ? » pour un sort dont l'icône est de toute façon la même partout.
 
 use std::collections::HashMap;
@@ -41,14 +44,22 @@ pub struct SpellEntry {
     /// Nom français tel qu'écrit dans le fichier (c'est aussi ce que le log affiche) — le texte de
     /// l'infobulle, préféré au nom brut du log qui est identique aux accents près.
     pub name: String,
-    /// Classe propriétaire, clé interne (`"ouginak"`, voir `class_breed::class_for_breed`) —
-    /// dérivée de `breedId`, JAMAIS de `breedName` (le fichier y écrit « sacrieur », « roublard »,
-    /// « steamer », là où le reste du dépôt dit `sacrier`/`rogue`/`foggernaut`).
+    /// Classe propriétaire, clé interne (`"ouginak"`, voir `class_breed::class_for_breed`), ou
+    /// [`COMMON_CLASS`] pour un sort commun à toutes les classes — dérivée de `breedId`, JAMAIS de
+    /// `breedName` (le fichier y écrit « sacrieur », « roublard », « steamer », là où le reste du
+    /// dépôt dit `sacrier`/`rogue`/`foggernaut`).
     pub class_name: &'static str,
     /// Icône distante (`wakassets/spells/{n}.png`) — même circuit de téléchargement/cache que les
-    /// icônes de monstres (`overlay-ui::remote_icons`), voir `IconKind::Spell`.
-    pub icon: IconRef,
+    /// icônes de monstres (`overlay-ui::remote_icons`), voir `IconKind::Spell`. `None` pour une
+    /// entrée dont le fichier n'a pas d'image (`picture: null`) : sort connu, tuile sans icône.
+    pub icon: Option<IconRef>,
 }
+
+/// `breedId` de la pseudo-classe des sorts communs à toutes les classes dans le fichier.
+const COMMON_BREED_ID: i64 = -2;
+/// Nom de classe interne de cette pseudo-classe — jamais une classe d'un combattant, donc jamais
+/// trouvée par `by_name_and_class` : ses sorts se résolvent par le repli sur le nom seul.
+pub const COMMON_CLASS: &str = "common";
 
 #[derive(Deserialize)]
 struct RawClass {
@@ -61,7 +72,8 @@ struct RawClass {
 struct RawSpell {
     id: i64,
     fr: String,
-    picture: String,
+    #[serde(default)]
+    picture: Option<String>,
 }
 
 /// Index en lookup O(1) — voir la doc de module pour la clé de résolution.
@@ -89,13 +101,19 @@ impl SpellIndex {
     /// Construit l'index depuis le contenu JSON du référentiel (format d'`assets/spells.json` :
     /// tableau de classes `{ breedName, breedId, spells: [{ id, fr, en, es, pt, picture }] }`, les
     /// champs non listés dans `RawClass`/`RawSpell` sont ignorés). Une classe dont le `breedId` ne
-    /// correspond à aucune classe jouable (`class_for_breed`) est ignorée avec un avertissement
-    /// plutôt que de faire échouer tout le chargement.
+    /// correspond ni à une classe jouable (`class_for_breed`) ni à la pseudo-classe commune
+    /// (`COMMON_BREED_ID`) est ignorée avec un avertissement plutôt que de faire échouer tout le
+    /// chargement.
     pub fn from_json_str(json: &str) -> Result<Self, serde_json::Error> {
         let classes: Vec<RawClass> = serde_json::from_str(json)?;
         let mut index = SpellIndex::default();
         for class in classes {
-            let Some(class_name) = class_for_breed(class.breed_id) else {
+            let class_name = if class.breed_id == COMMON_BREED_ID {
+                Some(COMMON_CLASS)
+            } else {
+                class_for_breed(class.breed_id)
+            };
+            let Some(class_name) = class_name else {
                 tracing::warn!(
                     breed_id = class.breed_id,
                     "classe inconnue dans le référentiel de sorts, entrées ignorées"
@@ -109,10 +127,10 @@ impl SpellIndex {
                     id: spell.id,
                     name: spell.fr,
                     class_name,
-                    icon: IconRef {
+                    icon: spell.picture.as_deref().map(|picture| IconRef {
                         kind: IconKind::Spell,
-                        gfx_id: picture_gfx_id(&spell.picture),
-                    },
+                        gfx_id: picture_gfx_id(picture),
+                    }),
                 });
                 index
                     .by_name_and_class
@@ -165,7 +183,50 @@ mod tests {
     #[test]
     fn le_referentiel_embarque_est_valide() {
         let index = SpellIndex::embedded();
-        assert!(index.len() >= 300, "{} entrées seulement", index.len());
+        assert!(index.len() >= 400, "{} entrées seulement", index.len());
+    }
+
+    /// Les sorts communs (pseudo-classe `common`, `breedId` −2) se résolvent pour n'importe quelle
+    /// classe de lanceur, par le repli sur le nom seul.
+    #[test]
+    fn un_sort_commun_se_resout_pour_toute_classe() {
+        let index = SpellIndex::embedded();
+        for class in [Some("iop"), Some("sadida"), None] {
+            let entry = index.find("Charme de Masse", class).expect("sort commun");
+            assert_eq!(entry.class_name, COMMON_CLASS);
+            assert_eq!(entry.id, 5623);
+        }
+    }
+
+    /// Les mécaniques de classe ajoutées le 12 sept. (auparavant en pavé « ? » dans le bloc).
+    #[test]
+    fn les_mecaniques_de_classe_sont_presentes() {
+        let index = SpellIndex::embedded();
+        for (spell, class) in [
+            ("Proie", "ouginak"),
+            ("Karcham", "pandawa"),
+            ("Chamrak", "pandawa"),
+            ("Bond du félin", "ecaflip"),
+        ] {
+            let entry = index
+                .find(spell, Some(class))
+                .unwrap_or_else(|| panic!("{spell}"));
+            assert_eq!(entry.class_name, class);
+            assert!(entry.icon.is_some(), "{spell} sans image");
+        }
+    }
+
+    /// Une entrée sans `picture` reste connue (nom, classe) mais sans icône — jamais un échec de
+    /// chargement de tout le référentiel.
+    #[test]
+    fn une_entree_sans_image_est_connue_sans_icone() {
+        let index = SpellIndex::from_json_str(
+            r#"[{"breedName":"iop","breedId":8,"spells":[{"id":2,"fr":"B","picture":null},{"id":3,"fr":"C"}]}]"#,
+        )
+        .unwrap();
+        assert_eq!(index.len(), 2);
+        assert!(index.find("B", Some("iop")).unwrap().icon.is_none());
+        assert!(index.find("C", Some("iop")).unwrap().icon.is_none());
     }
 
     #[test]
@@ -173,14 +234,16 @@ mod tests {
         let classes: Vec<RawClass> = serde_json::from_str(SPELLS_JSON).unwrap();
         for class in classes {
             for spell in class.spells {
+                let Some(picture) = spell.picture else {
+                    continue; // entrée sans image, connue sans icône (voir la doc de module)
+                };
                 assert!(
-                    spell.picture.starts_with(WAKASSETS_SPELLS_URL_PREFIX)
-                        && spell.picture.ends_with(".png"),
+                    picture.starts_with(WAKASSETS_SPELLS_URL_PREFIX) && picture.ends_with(".png"),
                     "{} ({}) : image hors de wakassets/spells — `IconRef::image_url` ne saurait \
                      pas la reconstruire : {}",
                     spell.fr,
                     spell.id,
-                    spell.picture
+                    picture
                 );
             }
         }
@@ -195,7 +258,7 @@ mod tests {
         assert_eq!(entry.name, "Hachure");
         assert_eq!(entry.class_name, "ouginak");
         assert_eq!(
-            entry.icon.image_url(),
+            entry.icon.as_ref().unwrap().image_url(),
             "https://vertylo.github.io/wakassets/spells/6262.png"
         );
     }
