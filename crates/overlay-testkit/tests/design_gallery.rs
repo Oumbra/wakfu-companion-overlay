@@ -1297,7 +1297,8 @@ fn gallery(ui: &mut egui::Ui) {
     section_autocomplete(ui);
 }
 
-/// **Seconde planche** — le tableau, parce que la première a atteint le plafond matériel.
+/// **Seconde planche** — le tableau et sa pagination, parce que la première a atteint le plafond
+/// matériel.
 ///
 /// `wgpu` refuse une texture de plus de 8192 px de côté, et `galerie_du_design_system` en occupe
 /// déjà 7530. Ce n'est donc pas un choix de présentation : une section de 1580 px n'y entre plus.
@@ -1307,7 +1308,7 @@ fn gallery(ui: &mut egui::Ui) {
 #[test]
 fn galerie_du_tableau() {
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 2080.0))
+        .with_size(Vec2::new(760.0, 2430.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1475,10 +1476,11 @@ fn section_autocomplete(ui: &mut egui::Ui) {
 
 /// Le tableau — ses trois corps (peuplé, vide, en chargement), son défilement et son cas dégénéré.
 ///
-/// **Le premier cas est peint sur un fond en bandes**, et ce n'est pas un ornement : le relevé
-/// montre que le tableau du jeu n'a PAS de fond propre — son zébrage est un éclaircissement
-/// relatif, pas une teinte. Sur un fond uni la démonstration serait invisible ; sur six bandes de
-/// luminances différentes, on voit la bande claire suivre le fond au lieu de l'écraser.
+/// **Le fond en bandes est relégué au dernier bloc**, et c'est un arbitrage : il démontre que le
+/// zébrage éclaircit le décor au lieu de le remplacer (sur un fond uni, la démonstration serait
+/// invisible), mais il rend les lignes illisibles — retour utilisateur du 2026-09-12, « on a
+/// l'impression que c'est un damier ». Les cas d'usage se jugent donc sur le fond de la planche,
+/// et la mesure garde son bloc à part, clairement annoncé comme tel.
 fn section_table(ui: &mut egui::Ui) {
     let largeur = 728.0;
 
@@ -1511,29 +1513,20 @@ fn section_table(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Tableau — peuplé, sur un fond qui change",
-        "Lignes de 60 px, en-tête à 14 px d'encre, écart de 7 px : les trois cotes du relevé HDV. Le zébrage est un blanc à 12/255 — il éclaircit le décor au lieu de le remplacer, ce que les six bandes de fond rendent visible. La deuxième ligne porte un nom trop long : il est coupé à la colonne, pas au tableau.",
+        "Tableau — peuplé",
+        "Lignes de 60 px, en-tête à 14 px d'encre, écart de 7 px : les trois cotes du relevé HDV. Date et Nom sont à gauche, Niv. et Prix à droite — un nombre s'aligne par ses unités. La deuxième ligne porte un nom trop long : il est coupé à la colonne, pas au tableau.",
     );
-    let peuple = design::table()
+    design::table()
         .columns(colonnes())
         .body(TableBody::Rows(offres.len()))
-        .log_name("galerie.table-peuple");
-    let fond = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(largeur, peuple.height()));
-    for (index, gris) in [0x10, 0x1C, 0x26, 0x1A, 0x2E, 0x14].into_iter().enumerate() {
-        let bande = egui::Rect::from_min_size(
-            egui::pos2(fond.left() + index as f32 * fond.width() / 6.0, fond.top()),
-            Vec2::new(fond.width() / 6.0, fond.height()),
-        );
-        ui.painter()
-            .rect_filled(bande, 0, Color32::from_rgb(gris, gris, gris + 4));
-    }
-    peuple.show(ui, |row| {
-        let (date, nom, niveau, prix) = offres[row.index()];
-        row.cell(|ui| cellule(ui, date, CAPTION));
-        row.cell(|ui| cellule(ui, nom, Color32::WHITE));
-        row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
-        row.cell(|ui| cellule(ui, prix, HEADING));
-    });
+        .log_name("galerie.table-peuple")
+        .show(ui, |row| {
+            let (date, nom, niveau, prix) = offres[row.index()];
+            row.cell(|ui| cellule(ui, date, CAPTION));
+            row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+            row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+            row.cell(|ui| cellule(ui, prix, HEADING));
+        });
 
     heading(
         ui,
@@ -1600,6 +1593,33 @@ fn section_table(ui: &mut egui::Ui) {
             row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
             row.cell(|ui| cellule(ui, prix, HEADING));
         });
+
+    heading(
+        ui,
+        "Contrôle du zébrage — trois lignes sur un fond qui change",
+        "Ce bloc n'est pas un cas d'usage, c'est une MESURE : le tableau du jeu n'a pas de fond propre, son zébrage éclaircit le décor au lieu de le remplacer. Sur un fond uni la démonstration serait invisible, d'où les six bandes — qui rendent en revanche les lignes illisibles, raison pour laquelle elles ne servent qu'ici.",
+    );
+    let controle = design::table()
+        .columns(vec![
+            TableColumn::flex("Nom", 1.0),
+            TableColumn::numeric("Prix", 108.0),
+        ])
+        .body(TableBody::Rows(3))
+        .log_name("galerie.table-zebrage");
+    let fond = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(largeur, controle.height()));
+    for (index, gris) in [0x10, 0x1C, 0x26, 0x1A, 0x2E, 0x14].into_iter().enumerate() {
+        let bande = egui::Rect::from_min_size(
+            egui::pos2(fond.left() + index as f32 * fond.width() / 6.0, fond.top()),
+            Vec2::new(fond.width() / 6.0, fond.height()),
+        );
+        ui.painter()
+            .rect_filled(bande, 0, Color32::from_rgb(gris, gris, gris + 4));
+    }
+    controle.show(ui, |row| {
+        let (_, nom, _, prix) = offres[row.index()];
+        row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+        row.cell(|ui| cellule(ui, prix, HEADING));
+    });
 }
 
 /// La pagination — les quatre positions possibles dans une suite de pages, et le cas du jeu.

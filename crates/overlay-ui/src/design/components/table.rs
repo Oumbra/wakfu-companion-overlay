@@ -8,7 +8,7 @@
 //! design::table()
 //!     .column(TableColumn::fixed("Date", 110.0))
 //!     .column(TableColumn::flex("Nom", 1.0))
-//!     .column(TableColumn::fixed("Prix", 90.0).align(design::TableAlign::End))
+//!     .column(TableColumn::numeric("Prix", 90.0))   // un nombre s'aligne à droite
 //!     .body(TableBody::Rows(offres.len()))
 //!     .max_height(12.0 * design::tokens::TABLE_ROW_HEIGHT)
 //!     .log_name("hdv.historique")
@@ -31,6 +31,14 @@
 //! | Encre → première ligne | **7 px** | identique sur les trois |
 //! | Encre d'en-tête | 14 px | y 179..193, linéale (vérifié ×4), `#b9babb` |
 //! | Zébrage | blanc à 12/255 | un **éclaircissement**, voir plus bas |
+//!
+//! ## Les nombres à droite, le texte à gauche
+//!
+//! [`TableColumn::numeric`] pose l'alignement à droite, en-tête compris. Des nombres alignés à
+//! gauche se comparent mal : les unités ne tombent plus les unes sous les autres, et « 980 » paraît
+//! plus long que « 145 000 ». Un texte ou une date se lisent depuis leur début et restent à gauche.
+//! La règle vit dans le constructeur plutôt que chez chaque appelant, pour qu'aucun tableau ne
+//! l'oublie.
 //!
 //! **Les trois tableaux relevés sont vides** (« 0 Objet »). Tout ce qui concerne une ligne remplie
 //! — alignement des valeurs, typographie des cellules, icône d'objet de la colonne Nom, texte trop
@@ -117,16 +125,19 @@ pub enum TableAlign {
 }
 
 impl TableAlign {
-    fn egui_align(self) -> Align {
-        match self {
-            TableAlign::Start => Align::Min,
-            TableAlign::Center => Align::Center,
-            TableAlign::End => Align::Max,
-        }
-    }
-
+    /// Disposition d'une cellule.
+    ///
+    /// **`with_main_align` ne suffit pas** : sur une `Ui` dont le rectangle est imposé, egui pose
+    /// quand même le premier widget au départ de son curseur, et une colonne « alignée à droite »
+    /// sortait collée à gauche — visible sur la première capture, invisible à la relecture. Il faut
+    /// changer le sens de parcours. Conséquence à connaître : dans une cellule à droite, plusieurs
+    /// widgets s'empilent **de droite à gauche**, le premier posé étant le plus à droite.
     fn layout(self) -> Layout {
-        Layout::left_to_right(Align::Center).with_main_align(self.egui_align())
+        match self {
+            TableAlign::Start => Layout::left_to_right(Align::Center),
+            TableAlign::End => Layout::right_to_left(Align::Center),
+            TableAlign::Center => Layout::centered_and_justified(egui::Direction::LeftToRight),
+        }
     }
 }
 
@@ -155,6 +166,21 @@ impl TableColumn {
             width: TableWidth::Flex(weight),
             align: TableAlign::Start,
         }
+    }
+
+    /// Colonne **numérique** : largeur imposée, et alignée à droite — libellé d'en-tête compris.
+    ///
+    /// C'est une règle, pas un raccourci d'écriture. Des nombres alignés à gauche se comparent mal :
+    /// les unités ne tombent plus les unes sous les autres, et « 980 » paraît plus long que
+    /// « 145 000 ». Un texte ou une date, eux, se lisent depuis leur début et restent à gauche.
+    /// L'écrire ici plutôt que de laisser chaque appelant poser `align(TableAlign::End)` garantit
+    /// qu'aucun tableau de l'overlay ne l'oubliera — et le jour où la règle change, elle change à un
+    /// seul endroit.
+    ///
+    /// Un appelant qui veut malgré tout un nombre centré ou à gauche passe par [`TableColumn::fixed`]
+    /// et [`TableColumn::align`] : la règle est un défaut nommé, pas une interdiction.
+    pub fn numeric(label: impl Into<String>, px: f32) -> Self {
+        Self::fixed(label, px).align(TableAlign::End)
     }
 
     pub fn align(mut self, align: TableAlign) -> Self {
@@ -674,6 +700,19 @@ mod tests {
         for span in column_spans(&colonnes(), -40.0) {
             assert_eq!(span, 0.0);
         }
+    }
+
+    #[test]
+    fn une_colonne_numerique_est_alignee_a_droite() {
+        assert_eq!(TableColumn::numeric("Prix", 108.0).align, TableAlign::End);
+        // Et elle reste une colonne de largeur imposée.
+        assert_eq!(
+            TableColumn::numeric("Prix", 108.0).width,
+            TableWidth::Fixed(108.0)
+        );
+        // Le défaut des deux autres constructeurs demeure le bord d'attaque du texte.
+        assert_eq!(TableColumn::fixed("Date", 104.0).align, TableAlign::Start);
+        assert_eq!(TableColumn::flex("Nom", 1.0).align, TableAlign::Start);
     }
 
     #[test]
