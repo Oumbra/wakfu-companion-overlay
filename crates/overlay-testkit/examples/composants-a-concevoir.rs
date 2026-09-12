@@ -72,14 +72,13 @@ const BORDER_INNER_RATIO: f32 = 52.0 / 512.0;
 const ICON_FILL_RATIO: f32 = 0.96;
 const SHEET_MARGIN: f32 = 18.0;
 const SHEET_WIDTH: f32 = 620.0;
-/// Hauteur d'une rangée de suggestion — `SELECT_ROW_HEIGHT`, la cadence du select simple du jeu.
-/// Une image nue de 22 px y tient sans forcer ; c'est la bordure de rareté, retirée depuis, qui
-/// avait fait passer cette valeur à 32.
-const SUGGESTION_ROW_HEIGHT: f32 = design::tokens::SELECT_ROW_HEIGHT;
+/// Hauteur d'une rangée de suggestion — celle du web depuis le 2026-09-12 au soir
+/// (`AUTOCOMPLETE_ROW_HEIGHT`, 35 px) ; la cadence du select du jeu (28) collait gemme et image.
+const SUGGESTION_ROW_HEIGHT: f32 = design::tokens::AUTOCOMPLETE_ROW_HEIGHT;
 /// Marge gauche d'une rangée, et de la bande de catégories.
-const SUGGESTION_PAD_X: f32 = 6.0;
+const SUGGESTION_PAD_X: f32 = design::tokens::AUTOCOMPLETE_ROW_PADDING_X;
 /// Écart entre la gemme, l'image et le nom.
-const SUGGESTION_GAP: f32 = 6.0;
+const SUGGESTION_GAP: f32 = design::tokens::AUTOCOMPLETE_ROW_GAP;
 /// Côté de l'image d'objet d'une rangée.
 const SUGGESTION_SLOT: f32 = 22.0;
 /// Hauteur de la bande de filtres — bouton 26 + 2 × 6 de marge, comme

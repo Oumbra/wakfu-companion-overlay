@@ -1579,3 +1579,108 @@ fn options_alertes_croix_efface_la_saisie() {
         "le champ n'a pas repris le focus après l'effacement"
     );
 }
+
+/// ↓ six fois sur huit suggestions : l'entrée active sort de la fenêtre des cinq rangées visibles,
+/// et la liste **doit défiler** pour la garder en vue. Retour du 2026-09-12 au soir : « le scroll
+/// ne se synchronise pas avec les touches haut et bas — l'utilisateur ne voit pas sur quoi il va
+/// appuyer sur Entrée ». La capture montre la septième rangée en surbrillance, et Entrée l'ajoute.
+#[test]
+fn options_alertes_les_fleches_font_defiler_la_liste() {
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
+
+    // Huit « Pierre … », toutes retenues par « pierre » : trois de plus que les rangées visibles.
+    let items: Vec<serde_json::Value> = (1..=8)
+        .map(|i| {
+            serde_json::json!([
+                100 + i,
+                format!("Pierre n° {i}"),
+                format!("Stone #{i}"),
+                format!("Piedra {i}"),
+                format!("Pedra {i}"),
+                1100 + i,
+                1,
+                0,
+                1
+            ])
+        })
+        .collect();
+    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({ "items": items }));
+    assert_eq!(catalog.search_items("pierre", 3, 40).len(), 8);
+
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: AlertsTabState::default(),
+        alerts_draft: Some(overlay_engine::AlertProfile::default()),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: Default::default(),
+        pending_close: false,
+    }));
+    let vu = std::rc::Rc::clone(&etat);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+
+    let champ = egui::pos2(300.0, 393.0);
+    harness.drag_at(champ);
+    harness.run();
+    harness.drop_at(champ);
+    harness.run();
+    for c in "pierre".chars() {
+        harness.event(egui::Event::Text(c.to_string()));
+    }
+    harness.run();
+    assert_eq!(etat.borrow().alerts.search, "pierre");
+
+    // Une flèche par frame, comme au clavier : chacune est consommée par le panneau avant que
+    // le champ ne la voie.
+    for _ in 0..6 {
+        harness.key_press(egui::Key::ArrowDown);
+        harness.run();
+    }
+    harness.snapshot("options_alertes_defilement_clavier");
+
+    // Le pointeur SUR la poignée (colonne de droite du panneau, à mi-hauteur de la liste) : elle
+    // prend la teinte des rangées survolées, sans s'élargir. egui ne passe en `hovered` que le
+    // pointeur sur la poignée elle-même, pas seulement dans sa colonne.
+    harness.hover_at(egui::pos2(700.0, 560.0));
+    harness.run();
+    harness.snapshot("options_alertes_poignee_survolee");
+
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let ajoute = etat
+        .borrow()
+        .alerts_draft
+        .as_ref()
+        .unwrap()
+        .sound_items
+        .last()
+        .map(|entry| entry.name.clone());
+    assert_eq!(
+        ajoute.as_deref(),
+        Some("Pierre n° 7"),
+        "Entrée n'a pas validé l'entrée active — sept rangées plus bas que la première"
+    );
+}

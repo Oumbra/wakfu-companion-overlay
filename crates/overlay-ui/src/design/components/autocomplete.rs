@@ -18,10 +18,12 @@
 //!
 //! ## Une extension de `design::select`, pas un composant neuf
 //!
-//! Le panneau déplié reprend **tous** les jetons de la liste de `select` : fond, bord, filet de
-//! tête, surbrillance, cadence de rangée. C'est la même liste du jeu — il n'y avait pas de second
-//! relevé à faire. Ce que ce composant ajoute, et que `select` n'a pas : la bande de filtres, une
-//! image par entrée, des entrées désactivées, et un seuil de déclenchement.
+//! Le panneau déplié reprend les jetons de **décor** de la liste de `select` : fond, bord, filet
+//! de tête, surbrillance. C'est la même liste du jeu — il n'y avait pas de second relevé à faire.
+//! Sa **rangée**, en revanche, est celle du web (35 px, marges de 10) : la liste du jeu n'a ni
+//! gemme ni image à loger, et sa cadence de 28 px les collait — voir
+//! [`tokens::AUTOCOMPLETE_ROW_HEIGHT`]. Ce que ce composant ajoute, et que `select` n'a pas : la
+//! bande de filtres, une image par entrée, des entrées désactivées, et un seuil de déclenchement.
 //!
 //! ## Ce qui est porté du web, et assumé comme tel
 //!
@@ -350,12 +352,21 @@ impl<'a> Autocomplete<'a> {
             (Some(rect), Some(pos)) => rect.contains(pos),
             _ => false,
         };
-        let open = self.forced_open.unwrap_or_else(|| {
+        // **Entrée retire le focus au champ AVANT que le panneau ne la lise.** Un `TextEdit` à
+        // une ligne rend le focus sur sa touche de retour (`return_key`, voir egui), et il est
+        // peint avant ce bloc : à la frame d'Entrée, `has_focus()` est déjà faux. Sans ce
+        // rattrapage, la touche fermait le panneau sans rien choisir — le test au clavier
+        // (`options_alertes_les_fleches_font_defiler_la_liste`) l'a montré le 2026-09-12 au soir,
+        // aucun test n'ayant validé une suggestion autrement qu'au clic jusque-là. Le champ compte
+        // donc comme focalisé pendant la frame où Entrée vient de le lui reprendre.
+        let entree = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let au_clavier = field.has_focus() || (entree && field.lost_focus());
+        let open = self.forced_open.unwrap_or(
             self.enabled
                 && assez_long
                 && !self.entries.is_empty()
-                && (field.has_focus() || sur_le_panneau)
-        });
+                && (au_clavier || sur_le_panneau),
+        );
 
         let mut selected = None;
         let mut panel_rect = None;
@@ -367,15 +378,25 @@ impl<'a> Autocomplete<'a> {
 
             // Le clavier AVANT le panneau : les touches sont consommées pour que le champ de saisie
             // ne les reçoive pas (↑/↓ y déplaceraient le curseur, Échap y annulerait l'édition).
-            if self.forced_open.is_none() && field.has_focus() {
+            //
+            // **Une flèche fait aussi défiler.** Sans ça, l'entrée active sort de la fenêtre des
+            // cinq rangées visibles dès la sixième, et l'utilisateur valide à l'aveugle une entrée
+            // qu'il ne voit pas — défaut remonté le 2026-09-12 au soir. C'est le `scrollIntoView
+            // ({ block: 'nearest' })` de `moveActive()` côté web : le panneau ne défile que du
+            // strict nécessaire pour ramener la rangée en vue, jamais pour la centrer.
+            let mut suivre_au_clavier = false;
+            if self.forced_open.is_none() && au_clavier {
                 if let Some(delta) = fleche(ui) {
                     active = suivante(&visible, self.entries, active, delta);
+                    suivre_au_clavier = true;
                 }
                 if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
-                    if let Some(&index) = visible.get(active) {
-                        if !self.entries[index].disabled {
-                            selected = Some(index);
-                        }
+                    match visible.get(active) {
+                        Some(&index) if !self.entries[index].disabled => selected = Some(index),
+                        // Rien à choisir (entrée désactivée, filtre vide) : le champ reprend le
+                        // focus que le `TextEdit` vient de rendre, et le panneau reste ouvert —
+                        // comme sur le web, où Entrée sur une entrée désactivée ne fait rien.
+                        _ => field.request_focus(),
                     }
                 }
                 if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -385,7 +406,16 @@ impl<'a> Autocomplete<'a> {
                 }
             }
 
-            let outcome = self.paint_panel(ui, &field, width, &visible, active, filter, &name);
+            let outcome = self.paint_panel(
+                ui,
+                &field,
+                width,
+                &visible,
+                active,
+                suivre_au_clavier,
+                filter,
+                &name,
+            );
             panel_rect = Some(outcome.panel_rect);
             if let Some(index) = outcome.clicked_filter {
                 // Recliquer le filtre actif le relâche.
@@ -443,6 +473,7 @@ impl<'a> Autocomplete<'a> {
         width: f32,
         visible: &[usize],
         active: usize,
+        suivre_au_clavier: bool,
         filter: Option<u16>,
         name: &str,
     ) -> PanelOutcome {
@@ -456,7 +487,7 @@ impl<'a> Autocomplete<'a> {
         let corps = if visible.is_empty() {
             tokens::AUTOCOMPLETE_EMPTY_HEIGHT
         } else {
-            rows * tokens::SELECT_ROW_HEIGHT
+            rows * tokens::AUTOCOMPLETE_ROW_HEIGHT
         };
         let panel_rect = egui::Rect::from_min_size(
             egui::pos2(
@@ -524,7 +555,7 @@ impl<'a> Autocomplete<'a> {
                     Vec2::new(width - 2.0 * pad, corps),
                 );
                 let mut contenu = ui.new_child(egui::UiBuilder::new().max_rect(liste));
-                // **Rangées jointives** : la hauteur du panneau vaut `rangées × 28`, sans
+                // **Rangées jointives** : la hauteur du panneau vaut `rangées × 35`, sans
                 // interligne. L'espacement vertical hérité du thème (3 px) s'ajouterait à chaque
                 // `allocate_exact_size` et pousserait la dernière rangée SOUS le fond du panneau —
                 // défaut observé sur la galerie, le libellé de la quatrième rangée y était coupé
@@ -539,50 +570,67 @@ impl<'a> Autocomplete<'a> {
                     // jusqu'à sa limite d'étapes sans jamais converger. Une liste qui tient
                     // entièrement n'a rien à faire défiler, donc rien à animer.
                     //
-                    // **La barre : celle du web, sans changer de couleur.** Le style d'egui par
-                    // défaut la faisait mince, puis large ET plus claire sous le pointeur ;
-                    // retour du 2026-09-12 : l'élargissement est bienvenu, la couleur qui change
-                    // ne l'est pas. Posé dans le scope du panneau, comme `design::scroll_area`
-                    // le fait pour les siens — sans son gabarit, qui est celui de la fenêtre
-                    // Options du jeu, pas de ce panneau porté du web.
+                    // **La barre : celle du web.** Le style d'egui par défaut la faisait mince,
+                    // puis large ET plus claire sous le pointeur. Deux retours du 2026-09-12 l'ont
+                    // fixée : d'abord « plus large, sans changer de couleur », puis le soir même
+                    // « retire l'élargissement ; pour dire qu'on peut agir dessus, la couleur des
+                    // éléments survolés ; et un rail plus sombre que le fond ». D'où : 8 px dans
+                    // tous les états, rail visible, poignée grise au repos et de la teinte des
+                    // rangées survolées sous le pointeur. Posé dans le scope du panneau, comme
+                    // `design::scroll_area` le fait pour les siens — sans son gabarit, qui est
+                    // celui de la fenêtre Options du jeu, pas de ce panneau porté du web.
                     let scroll = &mut contenu.style_mut().spacing.scroll;
                     scroll.floating = true;
                     scroll.floating_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
-                    scroll.bar_width = tokens::AUTOCOMPLETE_SCROLLBAR_HOVER_WIDTH;
+                    scroll.bar_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
                     // La barre a sa colonne : elle ne recouvre jamais la mention de droite.
-                    scroll.floating_allocated_width = tokens::AUTOCOMPLETE_SCROLLBAR_HOVER_WIDTH;
+                    scroll.floating_allocated_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
                     scroll.foreground_color = false;
                     scroll.handle_min_length = tokens::AUTOCOMPLETE_SCROLLBAR_MIN_HANDLE;
-                    // Pas de rail (le fond du panneau tient lieu de gouttière, comme dans le
-                    // jeu), et une poignée pleine dans tous les états : c'est la géométrie qui
-                    // dit le survol, pas la teinte.
-                    scroll.dormant_background_opacity = 0.0;
-                    scroll.active_background_opacity = 0.0;
-                    scroll.interact_background_opacity = 0.0;
+                    // Rail et poignée pleins dans tous les états : ce sont leurs teintes qui
+                    // disent le survol, pas une opacité ni une largeur.
+                    scroll.dormant_background_opacity = 1.0;
+                    scroll.active_background_opacity = 1.0;
+                    scroll.interact_background_opacity = 1.0;
                     scroll.dormant_handle_opacity = 1.0;
                     scroll.active_handle_opacity = 1.0;
                     scroll.interact_handle_opacity = 1.0;
                     let visuals = contenu.visuals_mut();
+                    // egui peint le rail avec `extreme_bg_color` : c'est le seul canal qu'il offre.
+                    visuals.extreme_bg_color = tokens::AUTOCOMPLETE_SCROLLBAR_TRACK;
                     let radius = egui::CornerRadius::same(tokens::AUTOCOMPLETE_SCROLLBAR_RADIUS);
                     for widget in [
                         &mut visuals.widgets.noninteractive,
                         &mut visuals.widgets.inactive,
-                        &mut visuals.widgets.hovered,
-                        &mut visuals.widgets.active,
                     ] {
                         widget.bg_fill = tokens::AUTOCOMPLETE_SCROLLBAR_THUMB;
+                        widget.corner_radius = radius;
+                    }
+                    // `hovered` ne s'applique que le pointeur SUR la poignée (egui vérifie sa
+                    // position, pas seulement le survol de la colonne) ; `active` pendant le
+                    // glissement.
+                    for widget in [&mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+                        widget.bg_fill = tokens::AUTOCOMPLETE_SCROLLBAR_THUMB_HOVERED;
                         widget.corner_radius = radius;
                     }
                     egui::ScrollArea::vertical()
                         .max_height(corps)
                         .auto_shrink([false; 2])
+                        // Sans animation : une flèche ramène la rangée en vue à la frame même,
+                        // comme `scrollIntoView` côté web — et un harnais offscreen n'a pas à
+                        // attendre qu'un défilement converge.
+                        .animated(false)
                         .show(&mut contenu, |ui| {
                             // La largeur DISPONIBLE, pas celle de la liste : la colonne de la
                             // barre en est retirée, et une rangée qui passerait dessous y
                             // perdrait sa mention.
                             let largeur = ui.available_width();
                             for (rang, &index) in visible.iter().enumerate() {
-                                self.paint_row(ui, index, rang, active, largeur, &mut outcome);
+                                let row =
+                                    self.paint_row(ui, index, rang, active, largeur, &mut outcome);
+                                if suivre_au_clavier && rang == active {
+                                    ui.scroll_to_rect(row, None);
+                                }
                             }
                         });
                 } else {
@@ -615,7 +663,7 @@ impl<'a> Autocomplete<'a> {
             let cell = egui::Rect::from_min_size(
                 egui::pos2(
                     rect.left()
-                        + tokens::AUTOCOMPLETE_ROW_PADDING_X
+                        + tokens::AUTOCOMPLETE_FILTER_BAR_PAD
                         + i as f32
                             * (tokens::AUTOCOMPLETE_FILTER_BUTTON
                                 + tokens::AUTOCOMPLETE_FILTER_GAP),
@@ -623,11 +671,14 @@ impl<'a> Autocomplete<'a> {
                 ),
                 Vec2::splat(tokens::AUTOCOMPLETE_FILTER_BUTTON),
             );
-            let response = ui.interact(
-                cell,
-                base.with(("ds-autocomplete-filter", i)),
-                Sense::click(),
-            );
+            // La main, comme sur tout ce qui se clique — `cursor: pointer` du web.
+            let response = ui
+                .interact(
+                    cell,
+                    base.with(("ds-autocomplete-filter", i)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
             let est_actif = filtre.category == actif;
             if est_actif || response.hovered() {
                 ui.painter().rect_filled(
@@ -678,6 +729,7 @@ impl<'a> Autocomplete<'a> {
         clicked
     }
 
+    /// Peint une rangée et rend son rectangle — l'appelant s'en sert pour la ramener en vue.
     fn paint_row(
         &self,
         ui: &mut Ui,
@@ -686,16 +738,24 @@ impl<'a> Autocomplete<'a> {
         active: usize,
         width: f32,
         outcome: &mut PanelOutcome,
-    ) {
+    ) -> egui::Rect {
         let entry = &self.entries[index];
         let (row, response) = ui.allocate_exact_size(
-            Vec2::new(width, tokens::SELECT_ROW_HEIGHT),
+            Vec2::new(width, tokens::AUTOCOMPLETE_ROW_HEIGHT),
             if entry.disabled {
                 Sense::hover()
             } else {
                 Sense::click()
             },
         );
+        // La main sur ce qui se choisit, la flèche sur ce qui ne se choisit pas — `cursor:
+        // pointer` de `.wakfu-autocomplete-item-main`, `cursor: default` de sa variante
+        // `.disabled`.
+        let response = if entry.disabled {
+            response
+        } else {
+            response.on_hover_cursor(egui::CursorIcon::PointingHand)
+        };
 
         // **Aucune surbrillance sur une entrée désactivée**, même survolée : une ligne grisée qui
         // s'allume promet un clic qui n'arrivera pas.
@@ -710,30 +770,33 @@ impl<'a> Autocomplete<'a> {
             outcome.clicked_row = Some(index);
         }
 
-        let mut x = row.left() + tokens::AUTOCOMPLETE_ROW_PADDING_X;
+        // La géométrie du web, cote pour cote — voir le schéma au-dessus de
+        // `AUTOCOMPLETE_ROW_HEIGHT` dans `tokens.rs` : marge 10, gemme dans sa boîte de 14, puis
+        // une colonne d'image de 30 qui commence à 30 du bord, puis 10 d'écart, puis le nom.
+        let marge = row.left() + tokens::AUTOCOMPLETE_ROW_PADDING_X;
         if let Some(gem) = entry.gem {
             let boite = egui::Rect::from_center_size(
-                egui::pos2(x + tokens::AUTOCOMPLETE_GEM_BOX / 2.0, row.center().y),
+                egui::pos2(marge + tokens::AUTOCOMPLETE_GEM_BOX / 2.0, row.center().y),
                 Vec2::splat(tokens::AUTOCOMPLETE_GEM_BOX),
             );
-            // À son rapport NATIF : une gemme du jeu fait 13 × 20, un `splat` sur la boîte
-            // l'écraserait en carré.
+            // À son rapport NATIF, comme `object-fit: contain` : une gemme du jeu fait 13 × 20 et
+            // entre dans la boîte en 9 × 14. C'est à l'appelant de fournir `gem_size` — sans elle
+            // la gemme est écrasée en carré, et c'est précisément ce que l'onglet Alertes montrait
+            // jusqu'au 2026-09-12 au soir (« très fortement agrandies et aplaties »).
             let taille = glyph_fit(entry.gem_size, tokens::AUTOCOMPLETE_GEM_BOX);
             egui::Image::from_texture(egui::load::SizedTexture::new(gem, taille))
                 .paint_at(ui, egui::Rect::from_center_size(boite.center(), taille));
         }
-        x += tokens::AUTOCOMPLETE_GEM_BOX + tokens::AUTOCOMPLETE_ROW_GAP;
+        let colonne = egui::Rect::from_min_size(
+            egui::pos2(marge + tokens::AUTOCOMPLETE_IMAGE_COLUMN_OFFSET, row.top()),
+            Vec2::new(tokens::AUTOCOMPLETE_IMAGE_COLUMN, row.height()),
+        );
         if let Some(image) = entry.image {
             let taille = Vec2::splat(tokens::AUTOCOMPLETE_IMAGE_SIZE);
-            egui::Image::from_texture(egui::load::SizedTexture::new(image, taille)).paint_at(
-                ui,
-                egui::Rect::from_center_size(
-                    egui::pos2(x + tokens::AUTOCOMPLETE_IMAGE_SIZE / 2.0, row.center().y),
-                    taille,
-                ),
-            );
+            egui::Image::from_texture(egui::load::SizedTexture::new(image, taille))
+                .paint_at(ui, egui::Rect::from_center_size(colonne.center(), taille));
         }
-        x += tokens::AUTOCOMPLETE_IMAGE_SIZE + tokens::AUTOCOMPLETE_ROW_GAP;
+        let x = colonne.right() + tokens::AUTOCOMPLETE_ROW_GAP;
 
         let couleur = if entry.disabled {
             tokens::TEXT_DISABLED
@@ -764,6 +827,7 @@ impl<'a> Autocomplete<'a> {
                 tokens::TEXT_DISABLED,
             );
         }
+        row
     }
 }
 
