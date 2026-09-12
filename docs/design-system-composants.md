@@ -1476,6 +1476,30 @@ façon, par l'appelant.
   dans le même parent partageaient sinon le même id d'`Area` et de rangées — egui l'écrit en rouge
   par-dessus le rendu.
 
+### Ce que la galerie ne pouvait pas rattraper — le clic, en vrai (2026-09-12)
+
+La galerie force le panneau déplié (`preview_open`), donc elle ne prouve rien du **chemin réel** :
+le champ prend le focus, puis une suggestion est cliquée. Ce chemin était cassé **des deux bouts**,
+et la seule chose qui l'a montré est un test qui clique et qui tape
+(`options_alertes_champ_d_ajout_trouve_et_ajoute`). Retour utilisateur : « j'ai essayé le champ
+d'auto-complétion mais celui-ci ne semblait pas fonctionner ».
+
+1. **Le panneau ne s'ouvrait jamais.** `design::input` rendait `frame_response.union(edit_response)`.
+   `Response::union` conserve l'id de l'opérande de **gauche**, et `has_focus()` interroge la mémoire
+   d'egui avec cet id — pas un drapeau que l'union combinerait. L'appelant recevait donc l'id du
+   cadre, qui n'est pas focalisable : `has_focus()` était **toujours faux**, ici comme partout
+   ailleurs. Corrigé dans `input.rs`, dans l'autre sens.
+2. **Aucune suggestion n'était cliquable.** Un clic tient en deux frames : l'**appui**, qui retire le
+   focus au champ (le pointeur est sur le panneau, pas sur lui), et le **relâchement**, seul moment
+   où egui rend `clicked()` vrai. Une condition d'ouverture réduite à `field.has_focus()` ferme donc
+   le panneau entre les deux : la rangée n'est plus peinte à la frame du relâchement, son clic
+   n'arrive jamais. Le panneau mémorise désormais son rectangle (`ds-autocomplete-panel-rect`) et
+   reste ouvert tant que le pointeur est dessus — rectangle **effacé** dès la fermeture, pour qu'un
+   reste périmé ne le rouvre pas au simple passage de la souris.
+
+Le test sépare volontairement appui et relâchement en deux `run()` : les garder dans la même frame
+masque exactement ce défaut.
+
 ### Les jetons
 
 Tous préfixés `AUTOCOMPLETE_*` dans `design/tokens.rs`, sous un en-tête qui dit explicitement qu'il
