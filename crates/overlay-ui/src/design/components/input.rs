@@ -448,7 +448,22 @@ impl Widget for Input<'_> {
             tracing::debug!(component = "input", name, "valeur modifiée");
         }
 
-        let response = frame_response.union(edit_response);
+        // **L'ordre de cette union décide de l'`id` rendu, et cet `id` porte le FOCUS.**
+        //
+        // `Response::union` conserve l'id de l'opérande de GAUCHE, et `Response::has_focus()`
+        // interroge la mémoire d'egui avec cet id — pas un drapeau que l'union combinerait. Dans
+        // l'autre sens (`frame_response.union(edit_response)`, le code d'avant le 2026-09-12),
+        // l'appelant recevait donc l'id du CADRE, qui n'est pas focalisable : `has_focus()` était
+        // **toujours faux**.
+        //
+        // Le symptôme était à l'autre bout du design system — le panneau de `design::autocomplete`
+        // ne s'ouvrait jamais en conditions réelles (« j'ai essayé le champ d'auto-complétion mais
+        // celui-ci ne semblait pas fonctionner »), et rien ne le signalait parce que la galerie
+        // force l'état déplié par `preview_open`. Il a fallu un test qui clique et qui tape.
+        //
+        // Dans ce sens, l'id rendu est celui de la zone d'édition, ce qui est aussi le plus juste :
+        // la réponse d'un champ de saisie EST celle de ce qu'on y saisit.
+        let response = edit_response.union(frame_response);
         let response = if enabled && !self.read_only {
             response.on_hover_cursor(egui::CursorIcon::Text)
         } else {
