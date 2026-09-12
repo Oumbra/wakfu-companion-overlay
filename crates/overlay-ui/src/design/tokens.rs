@@ -509,7 +509,15 @@ pub const AUTOCOMPLETE_MAX_VISIBLE_ROWS: usize = 5;
 /// mesurés sur la fenêtre Options du jeu (retour du 2026-09-12 : « un tout petit peu plus large,
 /// à l'image de l'autocomplétion sur le web »).
 pub const AUTOCOMPLETE_SCROLLBAR_WIDTH: f32 = 8.0;
-/// Rayon de la poignée — `border-radius: 4px` du web, en cohérence avec sa largeur de 8.
+/// Ce que le rail déborde de la poignée, **de chaque côté** — un pixel à gauche et à droite, un
+/// au-dessus et au-dessous quand elle est en butée. Le rail fait donc
+/// `AUTOCOMPLETE_SCROLLBAR_WIDTH + 2` de large, et la poignée y est centrée. Retour du
+/// 2026-09-12, fin de nuit : une poignée de la couleur de la liste posée sur un rail exactement
+/// de sa largeur ne se distingue plus de la liste en butée — « histoire de bien voir le rail et
+/// la poignée à l'intérieur ».
+pub const AUTOCOMPLETE_SCROLLBAR_TRACK_INSET: f32 = 1.0;
+/// Rayon de la poignée — `border-radius: 4px` du web, en cohérence avec sa largeur de 8. Le rail,
+/// plus large d'un pixel de chaque côté, prend le rayon de plus pour rester concentrique.
 pub const AUTOCOMPLETE_SCROLLBAR_RADIUS: u8 = 4;
 /// Teinte de la poignée **au repos** — **le fond de la liste elle-même**, [`SELECT_LIST_FILL`].
 /// Sur son rail plus sombre ([`AUTOCOMPLETE_SCROLLBAR_TRACK`]), la poignée se lit comme un

@@ -71,6 +71,7 @@
 //! (domaine « objets ») que le formulaire d'ajout au Suivi (objets **et** monstres) : le domaine
 //! n'est pas un paramètre du composant, c'est simplement ce que l'appelant décide de lui donner.
 
+use egui::emath::GuiRounding as _;
 use egui::{Align2, Response, Sense, TextureId, Ui, Vec2};
 
 use crate::design::components::icon_button::glyph_fit;
@@ -489,13 +490,18 @@ impl<'a> Autocomplete<'a> {
         } else {
             rows * tokens::AUTOCOMPLETE_ROW_HEIGHT
         };
+        // **Au pixel.** Le champ peut tomber sur une demi-ligne (sa hauteur et celle de ce qui le
+        // précède ne sont pas toutes paires) : le panneau hériterait du demi-pixel, et tout ce qui
+        // se peint dedans avec lui — mesuré sur la capture, le rail de la barre y perdait son
+        // pixel de débord à chaque bout dans une rangée à moitié couverte.
         let panel_rect = egui::Rect::from_min_size(
             egui::pos2(
                 field.rect.left(),
                 field.rect.bottom() + tokens::AUTOCOMPLETE_PANEL_GAP,
             ),
             Vec2::new(width, 2.0 * pad + bar + corps),
-        );
+        )
+        .round_to_pixels(ui.pixels_per_point());
 
         let mut outcome = PanelOutcome {
             panel_rect,
@@ -571,33 +577,60 @@ impl<'a> Autocomplete<'a> {
                     // entièrement n'a rien à faire défiler, donc rien à animer.
                     //
                     // **La barre : celle du web.** Le style d'egui par défaut la faisait mince,
-                    // puis large ET plus claire sous le pointeur. Deux retours du 2026-09-12 l'ont
-                    // fixée : d'abord « plus large, sans changer de couleur », puis le soir même
+                    // puis large ET plus claire sous le pointeur. Trois retours du 2026-09-12
+                    // l'ont fixée : d'abord « plus large, sans changer de couleur », puis le soir
                     // « retire l'élargissement ; pour dire qu'on peut agir dessus, la couleur des
-                    // éléments survolés ; et un rail plus sombre que le fond ». D'où : 8 px dans
-                    // tous les états, rail visible, poignée grise au repos et de la teinte des
-                    // rangées survolées sous le pointeur. Posé dans le scope du panneau, comme
-                    // `design::scroll_area` le fait pour les siens — sans son gabarit, qui est
-                    // celui de la fenêtre Options du jeu, pas de ce panneau porté du web.
+                    // éléments survolés ; et un rail plus sombre que le fond », puis dans la nuit
+                    // « la poignée de la couleur de la liste, et le rail qui la déborde d'un
+                    // pixel de chaque côté, en butée aussi ». D'où : 8 px dans tous les états,
+                    // poignée de la teinte de la liste au repos et des rangées survolées sous le
+                    // pointeur, centrée sur un rail de 10 px et 1 px plus long à chaque bout.
+                    // Posé dans le scope du panneau, comme `design::scroll_area` le fait pour les
+                    // siens — sans son gabarit, qui est celui de la fenêtre Options du jeu, pas
+                    // de ce panneau porté du web.
+                    //
+                    // **Le rail est peint ICI, pas par egui.** egui donne au rail exactement
+                    // l'étendue de la poignée (même `cross`, même `scroll_bar_rect`) : il ne peut
+                    // ni la déborder ni s'allonger d'un pixel en butée. Il est donc peint sous la
+                    // `ScrollArea`, sur la colonne qu'elle réserve, et son propre fond est rendu
+                    // transparent (opacités à zéro). Avec le peintre du PANNEAU, pas celui de la
+                    // liste : celle-ci écrête à son rectangle, et le pixel qui dépasse à chaque
+                    // bout y disparaissait (mesuré sur la capture : 175 rangées de rail pour 177
+                    // attendues).
+                    let inset = tokens::AUTOCOMPLETE_SCROLLBAR_TRACK_INSET;
+                    let colonne = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH + 2.0 * inset;
+                    let rail = egui::Rect::from_min_max(
+                        egui::pos2(liste.right() - colonne, liste.top() - inset),
+                        egui::pos2(liste.right(), liste.bottom() + inset),
+                    );
+                    ui.painter().rect_filled(
+                        rail,
+                        egui::CornerRadius::same(
+                            tokens::AUTOCOMPLETE_SCROLLBAR_RADIUS + inset as u8,
+                        ),
+                        tokens::AUTOCOMPLETE_SCROLLBAR_TRACK,
+                    );
                     let scroll = &mut contenu.style_mut().spacing.scroll;
                     scroll.floating = true;
                     scroll.floating_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
                     scroll.bar_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
-                    // La barre a sa colonne : elle ne recouvre jamais la mention de droite.
-                    scroll.floating_allocated_width = tokens::AUTOCOMPLETE_SCROLLBAR_WIDTH;
+                    // La barre a sa colonne — celle du rail : elle ne recouvre jamais la mention
+                    // de droite. La marge extérieure la décolle du bord d'un pixel, ce qui la
+                    // centre dans le rail.
+                    scroll.floating_allocated_width = colonne;
+                    scroll.bar_outer_margin = inset;
                     scroll.foreground_color = false;
                     scroll.handle_min_length = tokens::AUTOCOMPLETE_SCROLLBAR_MIN_HANDLE;
-                    // Rail et poignée pleins dans tous les états : ce sont leurs teintes qui
-                    // disent le survol, pas une opacité ni une largeur.
-                    scroll.dormant_background_opacity = 1.0;
-                    scroll.active_background_opacity = 1.0;
-                    scroll.interact_background_opacity = 1.0;
+                    // Poignée pleine dans tous les états : c'est sa teinte qui dit le survol, pas
+                    // une opacité ni une largeur. Le rail d'egui, lui, est invisible (voir plus
+                    // haut).
+                    scroll.dormant_background_opacity = 0.0;
+                    scroll.active_background_opacity = 0.0;
+                    scroll.interact_background_opacity = 0.0;
                     scroll.dormant_handle_opacity = 1.0;
                     scroll.active_handle_opacity = 1.0;
                     scroll.interact_handle_opacity = 1.0;
                     let visuals = contenu.visuals_mut();
-                    // egui peint le rail avec `extreme_bg_color` : c'est le seul canal qu'il offre.
-                    visuals.extreme_bg_color = tokens::AUTOCOMPLETE_SCROLLBAR_TRACK;
                     let radius = egui::CornerRadius::same(tokens::AUTOCOMPLETE_SCROLLBAR_RADIUS);
                     for widget in [
                         &mut visuals.widgets.noninteractive,
@@ -613,7 +646,7 @@ impl<'a> Autocomplete<'a> {
                         widget.bg_fill = tokens::AUTOCOMPLETE_SCROLLBAR_THUMB_HOVERED;
                         widget.corner_radius = radius;
                     }
-                    let sortie = egui::ScrollArea::vertical()
+                    egui::ScrollArea::vertical()
                         .max_height(corps)
                         .auto_shrink([false; 2])
                         // Sans animation : une flèche ramène la rangée en vue à la frame même,
@@ -633,27 +666,9 @@ impl<'a> Autocomplete<'a> {
                                 }
                             }
                         });
-                    // **La main ouverte sur la barre, fermée pendant le glissement.** egui ne
-                    // rend pas la réponse de sa barre ; sa colonne est connue (à droite du
-                    // contenu, `floating_allocated_width`), et l'origine de l'appui dit si le
-                    // glissement en cours a commencé dedans. Demande du 2026-09-12, nuit : « que
-                    // la souris ait l'apparence de grappe, pour signaler qu'on peut agripper ».
-                    let colonne = egui::Rect::from_min_max(
-                        egui::pos2(sortie.inner_rect.right(), sortie.inner_rect.top()),
-                        egui::pos2(liste.right(), sortie.inner_rect.bottom()),
-                    );
-                    let (survolee, agrippee) = contenu.input(|i| {
-                        let dedans = |p: Option<egui::Pos2>| p.is_some_and(|p| colonne.contains(p));
-                        (
-                            dedans(i.pointer.latest_pos()),
-                            i.pointer.primary_down() && dedans(i.pointer.press_origin()),
-                        )
-                    });
-                    if agrippee {
-                        contenu.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                    } else if survolee {
-                        contenu.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                    }
+                    // Pas de curseur particulier sur la barre : la main qui agrippe, demandée puis
+                    // retirée dans la même nuit (2026-09-12), a vécu une version. C'est la teinte
+                    // de la poignée sous le pointeur qui dit qu'on peut agir dessus.
                 } else {
                     for (rang, &index) in visible.iter().enumerate() {
                         self.paint_row(
