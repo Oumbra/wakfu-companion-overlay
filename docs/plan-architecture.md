@@ -843,9 +843,14 @@ curseur du parent** : la tuile suivante démarrait 27 px trop tôt et son fond o
 du nom de la précédente (voir le catalogue des composants, « Piège d'appelant »). Le défaut était
 déjà dans la maquette validée et le portage l'a repris tel quel.
 
-Corrigé, et le nom passe au passage **sur deux lignes** (`alerts_tab::NAME_MAX_ROWS`) : une seule
-ligne de 108 px ne distingue pas quatre noms qui partagent leurs quatorze premiers caractères. La
-fenêtre gagne 40 px de haut (810 → 850) pour que trois rangées restent visibles.
+Corrigé — et c'était bien là tout le défaut. Le nom est passé **un moment** sur deux lignes pour
+distinguer quatre libellés proches, puis **revenu sur une seule le jour même, sur décision de
+l'utilisateur** : la tuile porte déjà l'icône de l'objet, et c'est elle qui lève l'ambiguïté, bien
+avant le texte. « Ton problème de nom, c'est un faux problème puisque l'utilisateur voit des images
+en plus des noms. » La tuile garde donc ses 88 px et la fenêtre ses 810.
+
+Le nom passe par **`design::label`** (nouveau composant) : une ligne, ellipse au bout, et
+l'infobulle qui rend le nom entier quand — et seulement quand — il est coupé.
 
 Reste hors périmètre de ce lot : l'onglet « Personnages ».
 
