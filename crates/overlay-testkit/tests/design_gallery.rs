@@ -1561,6 +1561,31 @@ fn section_autocomplete(ui: &mut egui::Ui) {
 
     heading(
         ui,
+        "Au-delà de cinq rangées — la liste défile",
+        "Neuf entrées, cinq visibles : la barre du web (8 px, rayon 4), gris clair du jeu, sans rail. Elle s’élargit à 10 px sous le pointeur sans changer de teinte — l’élargissement seul dit le survol. Sa colonne est réservée : la mention de droite ne passe jamais dessous.",
+    );
+    let mut long = String::from("pierre");
+    let beaucoup: Vec<design::AutocompleteEntry> = (1..=9)
+        .map(|i| {
+            let mut e = design::AutocompleteEntry::new(format!("Pierre de taille n° {i}"), 1);
+            if i == 3 {
+                e.disabled = true;
+                e.mention = Some("déjà suivi".to_owned());
+            }
+            e
+        })
+        .collect();
+    design::autocomplete(&mut long)
+        .width(largeur)
+        .entries(&beaucoup)
+        .filters(&filtres)
+        .preview_open(true)
+        .log_name("galerie.autocomplete-defile")
+        .show(ui);
+    ui.add_space(4.0 + 38.0 + 5.0 * 28.0);
+
+    heading(
+        ui,
         "Un filtre actif — et un filtre sans résultat",
         "À gauche « Équipements » ne laisse qu'une entrée. À droite « Craft » n'en laisse aucune : la bande RESTE, sinon le bouton qui permettrait de la relâcher disparaîtrait avec les rangées.",
     );
