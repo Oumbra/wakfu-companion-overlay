@@ -16,6 +16,7 @@ pub mod profile;
 pub mod quickjs_engine;
 pub mod roster;
 pub mod session;
+pub mod spells;
 pub mod watchlist;
 
 pub use catalog::{
@@ -33,7 +34,11 @@ pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
 pub use profile::{sound_items_from_settings_json, LootAlert, SoundItemEntry};
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
-pub use session::{Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals};
+pub use session::{
+    Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals,
+    SpellCastRecord, MAX_LAST_TURN_CASTS,
+};
+pub use spells::{SpellEntry, SpellIndex};
 pub use watchlist::{
     watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistEntry,
     WatchlistKind, WatchlistMode,

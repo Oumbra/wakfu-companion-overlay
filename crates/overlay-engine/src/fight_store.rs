@@ -157,6 +157,8 @@ mod tests {
             xp_gained: 0,
             spells: std::collections::HashMap::new(),
             is_ko: false,
+            last_turn_casts: Vec::new(),
+            last_turn: 0,
         }
     }
 
@@ -171,6 +173,7 @@ mod tests {
             // faire échouer le test ci-dessous, pas passer par coïncidence avec le repli
             // `#[serde(default)]`.
             started_at_ms: 1_757_000_000_000,
+            last_ally_caster: None,
         }
     }
 
