@@ -605,11 +605,12 @@ pub fn show(
                 }
             }
             // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, dès
-            // qu'un combat a au moins un allié — quel que soit le camp affiché au-dessus, il
-            // porte sur les ALLIÉS du combat (décision artefact : visible aussi sur la vue
-            // Ennemis). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà `item_spacing.y`
-            // après le dernier widget, retranché ici pour ne pas le compter deux fois.
-            if let Some(fight) = fight.filter(|f| f.fighters.iter().any(|x| x.is_ally)) {
+            // qu'un allié du combat a lancé un sort (avant, rien — pas même l'espace) — quel que
+            // soit le camp affiché au-dessus, il porte sur les ALLIÉS du combat (décision
+            // artefact : visible aussi sur la vue Ennemis). `BLOCK_GAP` est l'air VISIBLE voulu :
+            // egui glisse déjà `item_spacing.y` après le dernier widget, retranché ici pour ne pas
+            // le compter deux fois.
+            if let Some(fight) = fight.filter(|f| combat_spell_block::has_casting_ally(f)) {
                 ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
                 combat_spell_block::show(
                     ui,
