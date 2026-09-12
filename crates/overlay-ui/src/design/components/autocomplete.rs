@@ -613,7 +613,7 @@ impl<'a> Autocomplete<'a> {
                         widget.bg_fill = tokens::AUTOCOMPLETE_SCROLLBAR_THUMB_HOVERED;
                         widget.corner_radius = radius;
                     }
-                    egui::ScrollArea::vertical()
+                    let sortie = egui::ScrollArea::vertical()
                         .max_height(corps)
                         .auto_shrink([false; 2])
                         // Sans animation : une flèche ramène la rangée en vue à la frame même,
@@ -633,6 +633,27 @@ impl<'a> Autocomplete<'a> {
                                 }
                             }
                         });
+                    // **La main ouverte sur la barre, fermée pendant le glissement.** egui ne
+                    // rend pas la réponse de sa barre ; sa colonne est connue (à droite du
+                    // contenu, `floating_allocated_width`), et l'origine de l'appui dit si le
+                    // glissement en cours a commencé dedans. Demande du 2026-09-12, nuit : « que
+                    // la souris ait l'apparence de grappe, pour signaler qu'on peut agripper ».
+                    let colonne = egui::Rect::from_min_max(
+                        egui::pos2(sortie.inner_rect.right(), sortie.inner_rect.top()),
+                        egui::pos2(liste.right(), sortie.inner_rect.bottom()),
+                    );
+                    let (survolee, agrippee) = contenu.input(|i| {
+                        let dedans = |p: Option<egui::Pos2>| p.is_some_and(|p| colonne.contains(p));
+                        (
+                            dedans(i.pointer.latest_pos()),
+                            i.pointer.primary_down() && dedans(i.pointer.press_origin()),
+                        )
+                    });
+                    if agrippee {
+                        contenu.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if survolee {
+                        contenu.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                    }
                 } else {
                     for (rang, &index) in visible.iter().enumerate() {
                         self.paint_row(

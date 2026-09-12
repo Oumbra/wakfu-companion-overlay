@@ -511,12 +511,13 @@ pub const AUTOCOMPLETE_MAX_VISIBLE_ROWS: usize = 5;
 pub const AUTOCOMPLETE_SCROLLBAR_WIDTH: f32 = 8.0;
 /// Rayon de la poignée — `border-radius: 4px` du web, en cohérence avec sa largeur de 8.
 pub const AUTOCOMPLETE_SCROLLBAR_RADIUS: u8 = 4;
-/// Teinte de la poignée **au repos** — le gris de [`HEADING_TEXT`] (`#b8b9ba`, le gris unique du
-/// jeu), à deux valeurs près de ce que l'utilisateur avait sous les yeux et a validé le 2026-09-12
-/// (« conserver les couleurs de base ») : le `fg_stroke` inactif d'egui, `gray(180)`. Pas
-/// [`SCROLLBAR_THUMB`] : ce gris sombre est mesuré sur le fond noir de la fenêtre Options, et il
-/// disparaît sur le brun de la liste dépliée (`SELECT_LIST_FILL`) — vérifié au pixel.
-pub const AUTOCOMPLETE_SCROLLBAR_THUMB: Color32 = HEADING_TEXT;
+/// Teinte de la poignée **au repos** — **le fond de la liste elle-même**, [`SELECT_LIST_FILL`].
+/// Sur son rail plus sombre ([`AUTOCOMPLETE_SCROLLBAR_TRACK`]), la poignée se lit comme un
+/// morceau de liste qui glisse dans une gouttière. Retour du 2026-09-12, nuit : « par défaut la
+/// barre doit avoir la couleur du fond du résultat de l'autocomplétion, pas la couleur grise » —
+/// ce gris était [`HEADING_TEXT`], gardé un temps parce que l'utilisateur l'avait sous les yeux
+/// et avait dit « conserver les couleurs de base » ; c'est lui qui « perturbait ».
+pub const AUTOCOMPLETE_SCROLLBAR_THUMB: Color32 = SELECT_LIST_FILL;
 /// Teinte de la poignée **sous le pointeur et pendant le glissement** — [`SELECT_ROW_HIGHLIGHT`],
 /// le fond d'une rangée survolée. Retour du 2026-09-12 au soir : plus d'élargissement (la barre
 /// garde ses 8 px), c'est la teinte qui dit « tu peux agir dessus », « la même couleur que sur les
