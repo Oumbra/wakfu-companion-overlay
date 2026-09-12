@@ -24,8 +24,8 @@ use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, IconButtonState,
-    IconContext, InfoTone, InputState, LoaderSize, PaginationStep, SelectState, SliderState,
-    TabState, TableAlign, TableBody, TableColumn,
+    IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep, SelectState,
+    SliderState, TabState, TableAlign, TableBody, TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -584,14 +584,16 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Champ à ornement — la loupe DANS le champ",
-        "Le jeu pose toujours sa loupe à l'intérieur du champ, jamais sur un socle à côté. Le composant réserve lui-même la gouttière : la deuxième ligne, la seule qui porte une valeur, est celle qui le vérifie — le texte y démarre après l'icône, pas dessous.",
+        "Barre de recherche — la loupe DANS le champ, la croix à droite",
+        "Le jeu pose toujours sa loupe à l'intérieur du champ, jamais sur un socle à côté — manche en bas à gauche, teinte de la loupe et non du texte indicatif (empty-input-search.png). La boîte fait 28 px, pas 25 : même encre, plus d'air. La deuxième ligne, la seule qui porte une valeur, est celle qui vérifie la gouttière ET la croix d'effacement : elle n'apparaît qu'avec une valeur (input-search.png), et le texte s'arrête avant elle.",
     );
     let mut recherche_vide = String::new();
     let mut recherche_pleine = String::from("pierre");
     ui.add(
         design::input(&mut recherche_vide)
             .leading_icon(DsIcon::Search)
+            .size(InputSize::Search)
+            .clearable(true)
             .placeholder("Rechercher")
             .width(420.0)
             .log_name("galerie.recherche-vide"),
@@ -599,12 +601,16 @@ fn gallery(ui: &mut egui::Ui) {
     ui.add(
         design::input(&mut recherche_pleine)
             .leading_icon(DsIcon::Search)
+            .size(InputSize::Search)
+            .clearable(true)
             .width(420.0)
             .log_name("galerie.recherche-pleine"),
     );
     ui.add(
         design::input(&mut recherche_pleine)
             .leading_icon(DsIcon::Search)
+            .size(InputSize::Search)
+            .clearable(true)
             .width(200.0)
             .enabled(false)
             .preview_state(InputState::Disabled)

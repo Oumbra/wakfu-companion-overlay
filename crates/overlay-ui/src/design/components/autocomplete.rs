@@ -293,9 +293,12 @@ impl<'a> Autocomplete<'a> {
 
         let field = egui::widgets::Widget::ui(
             {
+                // La barre de recherche du jeu, pas le champ de formulaire : 28 px, loupe en
+                // miroir, croix d'effacement — voir `InputSize::Search` et `Input::clearable`.
                 let mut input = crate::design::input(self.query)
                     .leading_icon(DsIcon::Search)
-                    .size(InputSize::Standard)
+                    .size(InputSize::Search)
+                    .clearable(true)
                     .width(width)
                     .enabled(self.enabled);
                 if let Some(placeholder) = self.placeholder.clone() {

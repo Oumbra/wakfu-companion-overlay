@@ -125,13 +125,51 @@ pub const INPUT_FONT_SIZE_RATIO: f32 = 17.0 / 25.0;
 /// 6px sur 25 de hauteur.
 pub const INPUT_PADDING_X_RATIO: f32 = 6.0 / 25.0;
 
+/// Hauteur native de la **barre de recherche** du jeu — `InputSize::Search`.
+///
+/// Mesurée sur `empty-input-search.png` et `input-search.png` (341 × 32, boîte du champ y 2..29
+/// inclus, soit 28 px), deux assets d'accord au pixel. Ce n'est PAS le champ de 25 px de l'onglet
+/// Commandes : la barre de recherche est plus haute, et son texte garde la même encre — un « R »
+/// de 12 px (y 11..22) dans 28, là où le champ standard loge un « A » de 12 px dans 25. Retour
+/// utilisateur du 2026-09-12 (« l'input est un tout petit peu trop petit en hauteur, ou alors
+/// c'est la police qui est trop grande ») : c'est la hauteur qui manquait, pas la police qui
+/// débordait.
+pub const INPUT_SEARCH_HEIGHT: f32 = 28.0;
+
+/// Teinte de la loupe d'une barre de recherche — **pas** le kaki du texte indicatif.
+///
+/// Pic `#a69064` (166, 144, 100) sur les deux assets de barre de recherche, identique champ vide
+/// ou rempli : une teinte plus chaude et plus claire que `INPUT_PLACEHOLDER` (`#83775b`), que la
+/// loupe portait jusqu'au 2026-09-12 (« n'est pas colorée comme sur la maquette »).
+pub const INPUT_ICON: Color32 = Color32::from_rgb(0xA6, 0x90, 0x64);
+
+/// Teinte de la croix d'effacement d'un champ, au repos — pic `#675d46` (103, 93, 70) sur
+/// `input-search.png`, plus sourde que le texte indicatif : elle ne rivalise pas avec la valeur.
+pub const INPUT_CLEAR_ICON: Color32 = Color32::from_rgb(0x67, 0x5D, 0x46);
+
+/// Teinte de la croix d'effacement survolée — **inventée** (aucune capture d'une croix survolée) :
+/// la teinte de la loupe, pour rester dans la même famille sans introduire une couleur de plus.
+pub const INPUT_CLEAR_ICON_HOVERED: Color32 = INPUT_ICON;
+
+/// Côté de la boîte de la croix d'effacement, en fraction de la hauteur du champ — encre
+/// 11 × 12 px (x 320..330, y 10..21) sur les 28 de `input-search.png`.
+pub const INPUT_CLEAR_ICON_RATIO: f32 = 12.0 / 28.0;
+
+/// Retrait entre le bord extérieur DROIT du champ et la croix, en fraction de sa hauteur — l'encre
+/// finit à x=330 pour un bord extérieur à x=338 inclus : 9 px sur 28.
+pub const INPUT_CLEAR_INSET_RATIO: f32 = 9.0 / 28.0;
+
+/// Écart réservé entre la fin du texte et la croix — la même gouttière que devant la loupe, faute
+/// de valeur longue sur les captures (« aa » ne l'atteint pas).
+pub const INPUT_CLEAR_GAP_RATIO: f32 = INPUT_LEADING_ICON_GAP_RATIO;
+
 /// Côté de l'encre d'une icône d'ornement posée DANS un champ, en fraction de la hauteur du champ.
 ///
 /// **Mesuré sur `empty-input-search.png`** (341 × 32, boîte du champ y 2..29, soit 28 px de haut) :
 /// la loupe y occupe x 9..21 / y 10..22, soit 13 × 13 px. 13/28 ≈ 0,464.
 ///
-/// Un ratio et non une valeur absolue, pour la même raison que [`INPUT_FONT_SIZE_RATIO`] : cette
-/// capture est à une échelle d'interface un peu plus grande que les 25 px de `InputSize::Standard`.
+/// Un ratio et non une valeur absolue : à `InputSize::Search` (28 px, la hauteur de cette même
+/// capture) les trois ratios d'ornement redonnent exactement 7, 13 et 8 px.
 pub const INPUT_LEADING_ICON_RATIO: f32 = 13.0 / 28.0;
 
 /// Retrait entre le bord extérieur du champ et l'icône d'ornement, en fraction de sa hauteur —

@@ -82,8 +82,12 @@ use crate::design::{text, tokens};
 /// inventé — voir la doc de module.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InputSize {
-    /// 25 px — la hauteur de tous les champs de saisie relevés.
+    /// 25 px — la hauteur des champs de formulaire relevés (onglet Commandes, champs numériques).
     Standard,
+    /// 28 px — la **barre de recherche** du jeu (`empty-input-search.png`, `input-search.png`),
+    /// voir [`tokens::INPUT_SEARCH_HEIGHT`]. Même encre de texte que `Standard` : c'est la boîte
+    /// qui est plus haute, pas le corps qui grandit — un « R » de 12 px dans 28, mesuré.
+    Search,
     /// Hauteur libre. Le corps de police et le retrait du texte suivent
     /// (`tokens::INPUT_FONT_SIZE_RATIO`), donc un champ de hauteur arbitraire reste proportionné.
     Height(f32),
@@ -95,7 +99,27 @@ impl InputSize {
     pub const fn height(self) -> f32 {
         match self {
             InputSize::Standard => 25.0,
+            InputSize::Search => tokens::INPUT_SEARCH_HEIGHT,
             InputSize::Height(h) => h,
+        }
+    }
+
+    /// Corps du texte. Les deux gabarits relevés écrivent **la même encre** (12 px de capitale) :
+    /// 17 px de corps pour l'un comme pour l'autre. Seule une hauteur libre met le corps à
+    /// l'échelle.
+    pub fn font_size(self) -> f32 {
+        match self {
+            InputSize::Standard | InputSize::Search => 25.0 * tokens::INPUT_FONT_SIZE_RATIO,
+            InputSize::Height(h) => h * tokens::INPUT_FONT_SIZE_RATIO,
+        }
+    }
+
+    /// Retrait du texte depuis le bord — 6 px sur les deux gabarits relevés (le texte de la barre
+    /// de recherche démarre à 28 px, mais c'est l'ornement qui les occupe, voir `leading_icon`).
+    pub fn pad_x(self) -> f32 {
+        match self {
+            InputSize::Standard | InputSize::Search => 25.0 * tokens::INPUT_PADDING_X_RATIO,
+            InputSize::Height(h) => h * tokens::INPUT_PADDING_X_RATIO,
         }
     }
 }
@@ -131,6 +155,7 @@ pub struct Input<'a> {
     forced_state: Option<InputState>,
     request_focus: bool,
     leading_icon: Option<crate::design::DsIcon>,
+    clearable: bool,
 }
 
 impl<'a> Input<'a> {
@@ -149,7 +174,22 @@ impl<'a> Input<'a> {
             forced_state: None,
             request_focus: false,
             leading_icon: None,
+            clearable: false,
         }
+    }
+
+    /// Pose une **croix d'effacement** à droite du champ, visible dès qu'une valeur est saisie
+    /// (`input-search.png` : le « × » n'apparaît que sur le champ rempli, `empty-input-search.png`
+    /// n'en a pas). Un clic vide la valeur d'un geste et rend le focus au champ — plutôt qu'une
+    /// rafale de retours arrière (retour utilisateur du 2026-09-12 : « quelque chose de
+    /// fastidieux »).
+    ///
+    /// **Le composant réserve la place de la croix dès qu'elle est possible**, valeur ou pas :
+    /// sinon le texte se décalerait au premier caractère tapé. Sans effet sur un champ en lecture
+    /// seule ou désactivé — il n'y a rien à effacer qu'on soit autorisé à effacer.
+    pub fn clearable(mut self, clearable: bool) -> Self {
+        self.clearable = clearable;
+        self
     }
 
     /// Pose une icône **à l'intérieur** du champ, collée au bord gauche — la loupe d'une barre de
@@ -288,11 +328,49 @@ impl Widget for Input<'_> {
         let height = self.size.height();
         let box_height = self.box_height.unwrap_or(height);
         let width = self.width.unwrap_or_else(|| ui.available_width());
-        let font = text::label_font(ui.ctx(), height * tokens::INPUT_FONT_SIZE_RATIO);
-        let pad_x = height * tokens::INPUT_PADDING_X_RATIO;
+        let font = text::label_font(ui.ctx(), self.size.font_size());
+        let pad_x = self.size.pad_x();
 
         let (rect, frame_response) =
             ui.allocate_exact_size(Vec2::new(width, box_height), Sense::hover());
+
+        // **La croix d'effacement se joue AVANT la zone d'édition**, pour deux raisons : c'est
+        // elle qui décide de la place laissée au texte, et son clic doit vider la valeur avant que
+        // `TextEdit` ne l'emprunte. `interact` sur un rectangle plutôt qu'un bouton alloué : la
+        // croix vit DANS le champ, elle ne prend pas de place dans la mise en page.
+        let clear_possible = self.clearable && self.enabled && !self.read_only;
+        let mut clear_room = 0.0;
+        let mut cleared = false;
+        let mut clear_paint: Option<(egui::Rect, bool)> = None;
+        if clear_possible {
+            let side = height * tokens::INPUT_CLEAR_ICON_RATIO;
+            let inset = height * tokens::INPUT_CLEAR_INSET_RATIO;
+            let gap = height * tokens::INPUT_CLEAR_GAP_RATIO;
+            let native = crate::design::DesignSystem::get(ui.ctx())
+                .icon_native_size(crate::design::DsIcon::Close);
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - inset - side / 2.0, rect.center().y),
+                super::icon_button::glyph_fit(native, side),
+            );
+            clear_room = (inset + side + gap - pad_x).max(0.0);
+            if !self.text.is_empty() {
+                // La zone cliquable déborde de l'encre : une croix de 12 px se rate à la souris.
+                let hit = icon_rect.expand(4.0);
+                let response = ui
+                    .interact(
+                        hit,
+                        frame_response.id.with("ds-input-clear"),
+                        Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.clicked() {
+                    self.text.clear();
+                    cleared = true;
+                } else {
+                    clear_paint = Some((icon_rect, response.hovered()));
+                }
+            }
+        }
 
         let state = self.forced_state.unwrap_or({
             // **`Disabled` passe avant `Error`** : on ne corrige pas ce qu'on ne peut pas éditer,
@@ -347,13 +425,19 @@ impl Widget for Input<'_> {
             if ui.is_rect_visible(rect) {
                 let tint = match state {
                     InputState::Disabled => tokens::TEXT_DISABLED,
-                    _ => tokens::INPUT_PLACEHOLDER,
+                    _ => tokens::INPUT_ICON,
                 };
-                crate::design::DesignSystem::get(ui.ctx()).paint_icon(
+                // **En miroir.** Le glyphe du manifeste (`icon-search.png`) a son manche en bas à
+                // DROITE ; la barre de recherche du jeu (`empty-input-search.png`) le pose en bas
+                // à GAUCHE. Retour utilisateur du 2026-09-12 (« la loupe n'est pas dans le bon
+                // sens »). Le retournement se fait en coordonnées de texture, pas par un second
+                // fichier — voir `DesignSystem::paint_icon_flipped`.
+                crate::design::DesignSystem::get(ui.ctx()).paint_icon_flipped(
                     &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
                     icon_rect,
                     icon,
                     tint,
+                    true,
                 );
             }
             // Ce que le texte perd à gauche : le retrait, l'icône, la gouttière — moins le
@@ -367,8 +451,14 @@ impl Widget for Input<'_> {
         // de l'espace qu'on lui donne, ce qui collerait le texte au bord supérieur.
         let row_height = ui.fonts_mut(|f| f.row_height(&font));
         let text_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.center().x + leading_room / 2.0, rect.center().y),
-            Vec2::new((width - 2.0 * pad_x - leading_room).max(0.0), row_height),
+            egui::pos2(
+                rect.center().x + (leading_room - clear_room) / 2.0,
+                rect.center().y,
+            ),
+            Vec2::new(
+                (width - 2.0 * pad_x - leading_room - clear_room).max(0.0),
+                row_height,
+            ),
         );
 
         let empty = self.text.is_empty();
@@ -383,13 +473,34 @@ impl Widget for Input<'_> {
             .text_color(value_color)
             .interactive(!self.read_only)
             .desired_width(text_rect.width());
-        let edit_response = ui
+        let mut edit_response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
                 ui.add_enabled(enabled, edit)
             })
             .inner;
         if self.request_focus {
             edit_response.request_focus();
+        }
+        if cleared {
+            // Effacer, c'est modifier : l'appelant qui écoute `changed()` doit le voir. Et le
+            // focus revient au champ — l'appui sur la croix le lui avait retiré, or on efface
+            // pour retaper, pas pour partir.
+            edit_response.mark_changed();
+            edit_response.request_focus();
+        }
+        if let Some((icon_rect, hovered)) = clear_paint {
+            if ui.is_rect_visible(rect) {
+                crate::design::DesignSystem::get(ui.ctx()).paint_icon(
+                    &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
+                    icon_rect,
+                    crate::design::DsIcon::Close,
+                    if hovered {
+                        tokens::INPUT_CLEAR_ICON_HOVERED
+                    } else {
+                        tokens::INPUT_CLEAR_ICON
+                    },
+                );
+            }
         }
 
         // Le texte indicatif est peint À LA MAIN plutôt que confié à `TextEdit::hint_text` :
@@ -444,7 +555,9 @@ impl Widget for Input<'_> {
             }
         }
 
-        if edit_response.changed() {
+        if cleared {
+            tracing::debug!(component = "input", name, "valeur effacée par la croix");
+        } else if edit_response.changed() {
             tracing::debug!(component = "input", name, "valeur modifiée");
         }
 

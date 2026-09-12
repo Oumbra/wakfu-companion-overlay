@@ -381,6 +381,8 @@ pub fn show(
             design::input(&mut state.path_input)
                 .placeholder("Chemin vers wakfu.log")
                 .width(field_width)
+                // Un chemin se retape rarement à partir de l'ancien : la croix vide d'un geste.
+                .clearable(true)
                 // Le champ porte l'alerte en même temps que le message ci-dessous : celui-ci est
                 // sous le bouton « Parcourir » et hors du regard de qui vient de taper.
                 .error(state.error.is_some())
