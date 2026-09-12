@@ -767,6 +767,38 @@ Personnages/Paramètres, seule la dernière est câblée), et un nouveau module 
 le fichier" sans aplatir son chanfrein — méthode validée au préalable via une simulation HTML/CSS
 avant portage, plutôt que d'itérer directement en Rust/egui.
 
+### 9.1 bis Ligne de sorts du combat (2026-09-12)
+
+Sous le dernier groupe de dégâts du panneau Combat, un bloc montre **les sorts lancés par un
+allié pendant son dernier tour**, en icônes numérotées dans l'ordre du log — spécification
+validée en artefact avec l'utilisateur en quatre révisions (11-12 sept.), cotes reprises telles
+quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
+
+- **Position** : dans le flux de la colonne des barres, 18 px sous la barre du dernier groupe,
+  jamais en position fixe sous le gabarit ; visible sur la vue Ennemis aussi (il porte sur les
+  alliés du combat, pas sur le camp affiché). Pire cas (six groupes, trois rangées) : le bloc finit
+  à 427 px, sous le bas du gabarit 6 (437) — pas de changement de taille de fenêtre.
+- **Onglets-portraits** sur six emplacements fixes (22 px, sept écarts égaux de 7,14 px calculés
+  sur le cas à six alliés), séparateur blanc 13 %, indicateur `OVERLAY_ACCENT` 2 px qui **glisse**
+  en 250 ms (courbe CSS `ease`, miroir de `.icon-switch-highlight` du site). Un allié à la fois :
+  suivi automatique du dernier lanceur allié, clic = épingle, second clic = retour au suivi.
+- **Remise à zéro à chaque nouveau tour** de l'allié, pas d'historique ; **pas de défilement
+  latéral** : retour à la ligne tous les cinq sorts (32 px). Badge d'index **en haut à gauche**,
+  critique = liseré doré + coin plié. Ennemis exclus.
+- **Données** : `FighterDamage::last_turn_casts` / `FightSnapshot::last_ally_caster`
+  (`overlay-engine::session`, alimentés dans `apply` sur `SpellCast` via le signal « nouveau tour »
+  de `register_fight_turn`, persistés par `fight_store`). **Icônes** : référentiel
+  `assets/spells.json` (maintenu à la main par l'utilisateur, embarqué, `overlay_engine::spells::
+  SpellIndex`, clé nom normalisé + classe du lanceur — « Rafale »/« Poursuite » existent chez deux
+  classes), `IconKind::Spell` sur le même circuit `RemoteIconStore` que les monstres ; sort absent
+  du référentiel (mécaniques de classe, encore à ajouter) → pavé « ? » et un avertissement par nom.
+- **Testkit** : `tests/combat_spell_block.rs`, rejeu réel + fixtures PNG injectées par
+  `RemoteIconStore::preload` (jamais le réseau), interactions par nœuds d'accessibilité.
+
+Questions laissées ouvertes dans l'artefact, tranchées provisoirement par le code : onglets de
+22 px (pas 24), allié sans sort = onglet estompé à sa place, plus de six alliés = pas d'onglet
+au-delà du sixième. Option « n'afficher que mes personnages » (roster ∩ alliés) : plus tard.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
