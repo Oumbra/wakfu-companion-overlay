@@ -358,7 +358,7 @@ use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-use super::combat_frame::{CombatFrame, MAX_FRAME_SLOTS};
+use super::combat_frame::{CombatFrame, SelectionMarks, MAX_FRAME_SLOTS};
 use super::combat_frame_scroll::EnemyFrameScroll;
 use super::combat_spell_block;
 
@@ -439,8 +439,11 @@ const GROUP_NAME_BAR_GAP: f32 = 0.0;
 const TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 
 const TOTAL_FONT_SIZE: f32 = 18.0;
-/// Écart entre la ligne leader et le premier groupe — réduit en cohérence avec `ROW_GAP`.
-const TOTAL_GAP: f32 = 3.0;
+/// Air VISIBLE entre la ligne leader et le premier groupe — 10 px depuis le 12 sept. 2026 (retour
+/// utilisateur : le même écart que `combat_spell_block::BLOCK_GAP` entre le dernier groupe et le
+/// bloc de sorts, « pour l'homogénéité entre les blocs »). `show` en retranche l'`item_spacing`
+/// vertical d'egui, glissé après la ligne leader, pour que ce soit bien l'écart à l'écran.
+pub(super) const TOTAL_GAP: f32 = 10.0;
 const NAME_FONT_SIZE: f32 = 13.0;
 
 /// Marge intérieure du fond opacifié de la ligne leader (voir `show_leader_row`) entre son bord et
@@ -523,13 +526,29 @@ pub fn show(
         CombatSide::Enemies => (&[], &[], fighters.as_slice()),
     };
 
+    // Sélection du bloc « ligne de sorts » (voir `combat_spell_block`) — vue Alliés seulement,
+    // `None` tant qu'aucun allié n'a lancé de sort. Recalculée après un clic sur un portrait du
+    // cadre (colonne de gauche) pour que le bloc (colonne de droite) suive dans la même frame.
+    let mut selection = fight
+        .filter(|_| *side == CombatSide::Allies)
+        .and_then(|fight| combat_spell_block::selection(ui.ctx(), fight));
+    let slot_of = |sel: usize| {
+        framed.iter().position(|f| {
+            Some(sel) == fight.and_then(|fight| combat_spell_block::fighter_index(fight, f))
+        })
+    };
+
     ui.horizontal_top(|ui| {
         // Colonne de gauche : portraits — cadre exact (alliés ou ennemis jusqu'à `MAX_FRAME_SLOTS`),
         // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
         // module.
         ui.vertical(|ui| {
             if !framed.is_empty() {
-                frame.show(
+                let marks = selection.map(|sel| SelectionMarks {
+                    ring_slot: slot_of(sel.selected),
+                    dot_slot: slot_of(sel.last_caster),
+                });
+                let clicked = frame.show(
                     ui,
                     portraits,
                     icons,
@@ -538,7 +557,14 @@ pub fn show(
                     remote_icon_textures,
                     framed,
                     total_damage,
+                    marks,
                 );
+                if let (Some(slot), Some(fight)) = (clicked, fight) {
+                    if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
+                        combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
+                        selection = combat_spell_block::selection(ui.ctx(), fight);
+                    }
+                }
             }
             if !enemy_scroll.is_empty() {
                 EnemyFrameScroll::show(
@@ -587,7 +613,7 @@ pub fn show(
         // portrait »).
         ui.vertical(|ui| {
             show_leader_row(ui, icons, side, total_damage_raw);
-            ui.add_space(TOTAL_GAP);
+            ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
             if fighters.is_empty() {
                 ui.weak(match fight {
                     None => "Aucun combat pour l'instant.",
@@ -604,19 +630,17 @@ pub fn show(
                     damage_bar_group(ui, &fighter.name, fighter.total_damage, total_damage);
                 }
             }
-            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, dès
-            // qu'un allié du combat a lancé un sort (avant, rien — pas même l'espace) — quel que
-            // soit le camp affiché au-dessus, il porte sur les ALLIÉS du combat (décision
-            // artefact : visible aussi sur la vue Ennemis). `BLOCK_GAP` est l'air VISIBLE voulu :
-            // egui glisse déjà `item_spacing.y` après le dernier widget, retranché ici pour ne pas
-            // le compter deux fois.
-            if let Some(fight) = fight.filter(|f| combat_spell_block::has_casting_ally(f)) {
+            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, en
+            // vue Alliés seulement, dès qu'un allié du combat a lancé un sort (avant, rien — pas
+            // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
+            // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
+            // deux fois.
+            if let (Some(fight), Some(sel)) = (fight, selection) {
                 ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
                 combat_spell_block::show(
                     ui,
                     fight,
-                    portraits,
-                    icons,
+                    sel,
                     overlay_engine::SpellIndex::embedded(),
                     remote_icons,
                     remote_icon_textures,
