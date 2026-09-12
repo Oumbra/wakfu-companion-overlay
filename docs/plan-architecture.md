@@ -780,11 +780,16 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
   à 427 px, sous le bas du gabarit 6 (437) — pas de changement de taille de fenêtre.
 - **Onglets-portraits** sur six emplacements fixes (22 px, sept écarts égaux de 7,14 px calculés
   sur le cas à six alliés), séparateur blanc 13 %, indicateur `OVERLAY_ACCENT` 2 px qui **glisse**
-  en 250 ms (courbe CSS `ease`, miroir de `.icon-switch-highlight` du site). Un allié à la fois :
-  suivi automatique du dernier lanceur allié, clic = épingle, second clic = retour au suivi.
+  en 250 ms (courbe CSS `ease`, miroir de `.icon-switch-highlight` du site). **Seuls les alliés
+  ayant déjà lancé un sort ont un onglet**, et le bloc n'apparaît qu'au premier sort allié du
+  combat (retour utilisateur du 12 sept. sur le premier rendu : au premier tour, rien n'est
+  affiché). Un allié à la fois : suivi automatique du dernier lanceur allié, clic = épingle,
+  second clic = retour au suivi.
 - **Remise à zéro à chaque nouveau tour** de l'allié, pas d'historique ; **pas de défilement
-  latéral** : retour à la ligne tous les cinq sorts (32 px). Badge d'index **en haut à gauche**,
-  critique = liseré doré + coin plié. Ennemis exclus.
+  latéral** : retour à la ligne tous les cinq sorts (32 px, 5 px d'écart — 3 px faisaient se
+  toucher deux critiques voisins). Badge d'index **en haut à gauche** (2 px du bord gauche, 1 px
+  du haut), critique = liseré doré + coin plié, infobulle sur une ligne « Nom · Critique » sans
+  nom de lanceur. Ennemis exclus.
 - **Données** : `FighterDamage::last_turn_casts` / `FightSnapshot::last_ally_caster`
   (`overlay-engine::session`, alimentés dans `apply` sur `SpellCast` via le signal « nouveau tour »
   de `register_fight_turn`, persistés par `fight_store`). **Icônes** : référentiel
@@ -795,9 +800,10 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
 - **Testkit** : `tests/combat_spell_block.rs`, rejeu réel + fixtures PNG injectées par
   `RemoteIconStore::preload` (jamais le réseau), interactions par nœuds d'accessibilité.
 
-Questions laissées ouvertes dans l'artefact, tranchées provisoirement par le code : onglets de
-22 px (pas 24), allié sans sort = onglet estompé à sa place, plus de six alliés = pas d'onglet
-au-delà du sixième. Option « n'afficher que mes personnages » (roster ∩ alliés) : plus tard.
+Questions laissées ouvertes dans l'artefact : allié sans sort → **tranché par l'utilisateur le
+12 sept. : pas d'onglet du tout** ; onglets de 22 px (pas 24) et plus de six lanceurs = pas
+d'onglet au-delà du sixième, tranchés provisoirement par le code. Option « n'afficher que mes
+personnages » (roster ∩ alliés) : plus tard.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
