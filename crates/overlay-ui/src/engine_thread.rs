@@ -119,7 +119,7 @@ pub fn spawn_engine_thread(
                     match command {
                         EngineCommand::ApplySettings(settings) => {
                             let entry_count = settings.watchlist.len();
-                            let sound_item_count = settings.sound_items.len();
+                            let sound_item_count = settings.alerts.sound_items.len();
                             tracing::info!(
                                 entry_count,
                                 sound_item_count,
@@ -127,7 +127,7 @@ pub fn spawn_engine_thread(
                             );
                             engine.set_roster(Some(settings.roster));
                             engine.set_watchlist_entries(settings.watchlist);
-                            engine.set_sound_items(settings.sound_items);
+                            engine.set_sound_items(settings.alerts.sound_items);
                         }
                         // Déconnexion volontaire : repli mode invité — plus de roster connu
                         // (classification retombe sur `breed`), Suivi vidé (la LISTE suivie est
