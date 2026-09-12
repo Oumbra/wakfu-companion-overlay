@@ -59,14 +59,22 @@ const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 const TILE_WIDTH: f32 = 118.0;
 /// Hauteur d'une tuile : rangée de badges, emplacement d'objet, nom sur **une** ligne, marges —
 /// `TILE_BADGE_ROW + TILE_SLOT + TILE_NAME_GAP + ligne de nom (≈ 18 px à 13 px de corps) +
-/// TILE_BOTTOM_INSET`, soit 18 + 64 + 5 + 18 + 5.
+/// TILE_BOTTOM_INSET`, soit 18 + 64 + 5 + 18 + 18.
 ///
 /// Portée à 104 px un moment le 2026-09-12, pour un nom sur deux lignes — **revenu en arrière le
 /// jour même, sur décision de l'utilisateur** : la tuile porte déjà l'icône de l'objet, et c'est
 /// elle qui lève l'ambiguïté entre deux noms proches, bien avant le texte. Le nom coupé se lit en
 /// infobulle — voir `design::label`. Puis 88 → 110 le soir même, et cette fois pour
-/// l'emplacement : c'est lui qui grandit (voir `TILE_SLOT`), le nom garde sa ligne unique.
-const TILE_HEIGHT: f32 = 110.0;
+/// l'emplacement : c'est lui qui grandit (voir `TILE_SLOT`), le nom garde sa ligne unique. Puis
+/// 110 → 123 dans la foulée, pour la marge basse (voir `TILE_BOTTOM_INSET`).
+const TILE_HEIGHT: f32 =
+    TILE_BADGE_ROW + TILE_SLOT + TILE_NAME_GAP + TILE_NAME_LINE + TILE_BOTTOM_INSET;
+/// Hauteur réservée à la ligne du nom — ce que `design::Label::height` rend à 13 px de corps.
+const TILE_NAME_LINE: f32 = 18.0;
+/// Entre la ligne du nom et le bord bas de la tuile — **le même écart qu'entre le bord haut et
+/// l'emplacement** (`TILE_BADGE_ROW`), demande du 2026-09-12 au soir. C'était 5, et le nom
+/// touchait presque le bord quand l'emplacement, lui, avait de l'air au-dessus.
+const TILE_BOTTOM_INSET: f32 = TILE_BADGE_ROW;
 /// Gouttière entre deux tuiles — « les petites tuiles doivent être séparées sur tous les bords ».
 const TILE_GAP: f32 = 10.0;
 const TILE_BORDER_WIDTH: f32 = 2.0;
