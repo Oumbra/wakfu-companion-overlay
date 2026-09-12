@@ -110,9 +110,11 @@ const BADGE_FONT_SIZE: f32 = 9.0;
 /// (rayon 24 → 26), sur le rebord du médaillon.
 pub const RING_COLOR: egui::Color32 = GOLD;
 pub const RING_WIDTH: f32 = 2.0;
-/// Point du dernier lanceur — 6 px de diamètre, doré, cerné de 1 px sombre, centré sur le bord du
-/// portrait en haut à gauche (à 45°), à l'opposé du pourcentage de dégâts en bas à droite.
-pub const DOT_RADIUS: f32 = 3.0;
+/// Point du dernier lanceur — 9 px de diamètre (6 px au premier rendu : quand liseré et point
+/// étaient sur le même médaillon, le petit point « cassait » le cercle du liseré ; retour
+/// utilisateur du 12 sept., « la moitié plus grand »), doré, cerné de 1 px sombre, centré sur le
+/// bord du portrait en haut à gauche (à 45°), à l'opposé du pourcentage de dégâts en bas à droite.
+pub const DOT_RADIUS: f32 = 4.5;
 const DOT_OUTLINE: egui::Color32 = SPELL_FRAME;
 /// Fondu d'apparition/déplacement des deux marques.
 pub const MARK_FADE: f32 = 0.15;
