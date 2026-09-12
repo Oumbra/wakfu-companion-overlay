@@ -10,20 +10,21 @@ Le **catalogue** [`design-system-composants.md`](design-system-composants.md) re
 vérité sur *ce qui existe et avec quels paramètres*. Ce plan dit *dans quel ordre le construire et
 comment savoir que c'est fini*. Les deux ne se recopient pas.
 
-## Où en est ce plan (2026-09-10)
+## Où en est ce plan (2026-09-12)
 
-Les trois décisions préalables sont prises et consignées. **Les lots 0, 1 et 3 sont faits** ; le
-lot 2 attend que le terrain se libère, et le lot 4 est le prochain.
+Les trois décisions préalables sont prises et consignées. **Les lots 0 à 4 sont faits.** Le lot 5
+est livré à deux exceptions près — `badge`, bloqué et documenté, et son critère de fin, qui n'est
+pas atteint. Le lot 6 a commencé par opportunité, comme prévu.
 
 | Lot | Objet | État |
 | --- | --- | --- |
 | 0 | Ménage — sans dépendance, sans décision | ✅ `5ccf0d2`, `2941efd`, `973ead6` |
 | 1 | La couche conteneur (`window`, `panel`, `heading`) | ✅ `3becdc7` — 1.3 requalifié, voir ci-dessous |
-| 2 | Icônes et infobulle | à faire, **terrain occupé** |
+| 2 | Icônes et infobulle | ✅ 2026-09-11 — `DsIcon`, `design::icon`, `design::tooltip` |
 | 3 | Tests de géométrie des composants livrés | ✅ `a1f24e8` — critère révisé, voir le lot |
-| 4 | Formulaires — vague 2 du catalogue | en cours — `stepper` fait (`da37c8b`) |
-| 5 | Données — vague 3 du catalogue | à faire |
-| 6 | Finitions — vague 4 du catalogue | à faire |
+| 4 | Formulaires — vague 2 du catalogue | ✅ 2026-09-11 — critère de fin atteint |
+| 5 | Données — vague 3 du catalogue | composants livrés sauf `badge` (bloqué) ; **critère de fin non atteint** |
+| 6 | Finitions — vague 4 du catalogue | commencé — `separator` et `confirm_dialog` faits |
 
 ---
 
@@ -474,7 +475,8 @@ captures d'interfaces — il n'existe pas encore.
 | `design::meter` | ✅ 2026-09-11 — absorbe `combat::damage_bar`, six couches et l'arrondi conditionnel |
 | `design::badge` | **bloqué** — ni cotes, ni capture, ni appelant, voir ci-dessous |
 | `design::portrait` | ✅ 2026-09-11 — absorbe `paint_flat_portrait` et les deux boucles du gabarit |
-| `design::table` + `pagination` | à faire — **`ui-blueprint` d'abord** |
+| `design::table` | ✅ 2026-09-12 — relevé `hdv-table.json` d'abord, six cas en galerie |
+| `design::pagination` | ✅ 2026-09-12 — **séparée de `table`** : le jeu la pose en bas dans Historique et Rechercher, en haut à droite dans Mes offres |
 
 ### Pourquoi `badge` est bloqué (constat du 2026-09-11)
 
@@ -504,6 +506,26 @@ dirait quelle forme le composant doit prendre.
 **Critère de fin** : `panels/watchlist.rs` et `panels/combat.rs` ne contiennent plus aucun
 `Color32::from_rgb` ni `FontId::proportional`.
 
+### Où en est ce critère (mesuré le 2026-09-12)
+
+**Les polices sont faites** : zéro `FontId::proportional` et zéro `FontId::monospace` dans les trois
+fichiers de panneau. **Les couleurs ne le sont pas** : 18 littéraux dans `watchlist.rs`, 5 dans
+`combat.rs`. Ils se rangent en trois familles, et elles n'appellent pas le même travail :
+
+1. **L'échelle de dégâts** (`watchlist.rs`, 8 teintes de `#ffb703` à `#06d6a0`) — une palette
+   catégorielle du portage web, qui n'existe nulle part dans le jeu. La promouvoir en jetons la
+   figerait telle quelle ; décider d'abord si l'overlay la garde.
+2. **Les fonds et textes de panneau** (`SURFACE_WELL`, `SURFACE_RAISED`, `BORDER_STRONG`,
+   `TEXT_MUTED`, `TEXT_BRIGHT`, `TINT_MEDIUM`, `TINT_STRONG`, `LEADER_PANEL_FILL`) — dupliqués entre
+   `watchlist.rs` et `combat.rs`, ce qui est le vrai défaut : deux copies qui dérivent.
+3. **`DAMAGE_ACCENT`** (`combat.rs`, `#077982`) — un doublon pur de `tokens::METER_FILL`, déjà au
+   design system. Celui-là se supprime sans décision.
+
+**Deux composants du lot sont livrés sans consommateur** : `design::table` et `design::pagination`
+n'ont aucun appelant dans l'overlay — l'historique HDV n'est pas porté (hors périmètre, voir plus
+bas). C'est la même situation que celle qui bloque `badge`, à une différence près qui a compté : ils
+ont, eux, un relevé mesuré derrière chaque cote.
+
 **Estimation** : 5 à 7 séances.
 
 ---
@@ -513,6 +535,10 @@ dirait quelle forme le composant doit prendre.
 `toolbar`, `segmented`, `toast`, `dialog`, `separator`. Aucun ne bloque quoi que ce soit ; chacun
 retire du code d'un panneau. À prendre par opportunité, quand un besoin réel se présente — pas pour
 vider une liste.
+
+**`separator`** (2026-09-11) et **`dialog`** (2026-09-12, `design::confirm_dialog`, appelé par la
+garde de fermeture de la fenêtre Options) sont faits, et tous deux exactement de cette façon : un
+besoin réel les a appelés. Restent `toolbar`, `segmented` et `toast`.
 
 **Estimation** : 3 à 4 séances.
 
