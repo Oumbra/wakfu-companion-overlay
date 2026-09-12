@@ -4,6 +4,7 @@
 //! récap reste inline dans `main.rs::render` (voir la doc de tête de ce fichier pour le périmètre
 //! exact).
 
+pub mod alerts_tab;
 pub mod chamfer;
 pub mod combat;
 pub mod combat_frame;

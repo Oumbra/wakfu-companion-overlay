@@ -155,10 +155,16 @@ use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-/// Durée d'affichage du toast d'alerte avant fermeture automatique (§9 du plan : « toast ≤ 5 s,
-/// non bloquant ») — exportée pour que `main.rs` calcule `hide_at` avec la même valeur, sans la
-/// dupliquer. Peut aussi être fermé PLUS TÔT par un clic (voir `toast_card`) : les deux cohabitent,
-/// contrairement au réglage exclusif `ProfileService.alertManualClose` côté web.
+/// Durée d'affichage du toast d'alerte avant fermeture automatique, **quand le compte n'en a pas
+/// réglé d'autre** (§9 du plan : « toast ≤ 5 s, non bloquant »).
+///
+/// Ce n'est plus la seule valeur possible depuis le 2026-09-12 : l'onglet « Alertes » de la
+/// fenêtre Options règle la durée (`AlertProfile::duration_seconds`, 0,5 à 30 s) et la fermeture
+/// manuelle. Elle reste le repli tant qu'aucun profil n'est descendu du compte.
+///
+/// Un toast peut de toute façon être fermé PLUS TÔT par un clic (voir `toast_card`) : les deux
+/// cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, où
+/// « manuelle » retire la minuterie ET « automatique » retire la croix.
 pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Distingue les deux déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
@@ -275,7 +281,12 @@ pub struct WatchlistToast {
     /// reprogramme lui-même un redessin à cette échéance via `OverlayWindow::next_redraw_at` pour
     /// que le toast disparaisse sans qu'aucun autre événement n'ait à se produire. Peut aussi être
     /// effacé PLUS TÔT par un clic (voir `toast_card`, `main.rs::window_event`).
-    pub hide_at: std::time::Instant,
+    ///
+    /// **`None` = « ne se ferme qu'à la main »** (`alertManualClose` du profil, réglable depuis
+    /// l'onglet « Alertes » depuis le 2026-09-12). Un `Option` plutôt qu'une échéance posée très
+    /// loin : le toast est peint PAR-DESSUS LE JEU, et une durée de vingt-quatre heures écrite
+    /// pour dire « jamais » finit toujours par être lue comme une durée.
+    pub hide_at: Option<std::time::Instant>,
 }
 
 /// Vrai tant que `toast` n'a pas atteint son expiration — source de vérité unique utilisée à la
@@ -290,7 +301,7 @@ pub struct WatchlistToast {
 /// jusqu'ici comme jusqu'à `toast_card`, pour qu'un même rendu utilise une seule référence de
 /// temps cohérente.
 pub fn is_active(toast: Option<&WatchlistToast>, now: std::time::Instant) -> bool {
-    toast.is_some_and(|t| t.hide_at > now)
+    toast.is_some_and(|t| t.hide_at.is_none_or(|hide_at| hide_at > now))
 }
 
 /// Côté d'une tuile — **celui du composant**, pas une valeur propre au panneau.
@@ -598,7 +609,7 @@ pub fn show(
 
     ui.add_space(6.0);
 
-    let close_toast = match toast.filter(|t| t.hide_at > now) {
+    let close_toast = match toast.filter(|t| t.hide_at.is_none_or(|hide_at| hide_at > now)) {
         Some(toast) => toast_card(
             ui,
             icons,
