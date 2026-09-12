@@ -16,8 +16,7 @@
 //!   jamais un second téléchargement.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use overlay_engine::{IconKind, IconRef};
@@ -38,9 +37,68 @@ struct DecodedIcon {
     rgba: Vec<u8>,
 }
 
+/// Nombre de téléchargements simultanés. Quatre : assez pour qu'une liste d'autocomplétion de
+/// cent entrées s'illustre en une ou deux secondes plutôt qu'en quinze, assez peu pour ne pas
+/// ressembler à une rafale vue du CDN. Le cache disque rend de toute façon les lancements suivants
+/// quasi instantanés.
+const WORKERS: usize = 4;
+
+/// Une icône en attente de téléchargement, ordonnée pour le tas de `PendingRequests` : la frame
+/// la plus récente d'abord, et **dans l'ordre de demande à l'intérieur d'une même frame** — voir
+/// `RemoteIconStore`.
+struct Pending {
+    frame: u64,
+    seq: std::cmp::Reverse<u64>,
+    icon: IconRef,
+}
+
+impl PartialEq for Pending {
+    fn eq(&self, other: &Self) -> bool {
+        self.frame == other.frame && self.seq == other.seq
+    }
+}
+impl Eq for Pending {}
+impl PartialOrd for Pending {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Pending {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.frame, self.seq).cmp(&(other.frame, other.seq))
+    }
+}
+
+/// File d'attente des icônes à télécharger — **un tas, pas une file** : voir `RemoteIconStore`.
+#[derive(Default)]
+struct PendingRequests {
+    heap: std::collections::BinaryHeap<Pending>,
+    /// Numéro d'ordre de la prochaine demande — départage deux demandes d'une même frame.
+    seq: u64,
+    /// Vrai une fois le dernier `RemoteIconStore` abandonné : les threads s'arrêtent au lieu
+    /// d'attendre indéfiniment une requête qui ne viendra plus.
+    closed: bool,
+}
+
 /// Partagé (via `Clone`, tous les champs sont eux-mêmes des `Arc`) entre toutes les fenêtres
-/// overlay — voir la doc de module. `spawn` démarre le thread dédié une seule fois ; les clones
-/// suivants partagent le même thread/état.
+/// overlay — voir la doc de module. `spawn` démarre les threads dédiés une seule fois ; les clones
+/// suivants partagent le même état.
+///
+/// ## La frame la plus récente d'abord, et dans son ordre (2026-09-12)
+///
+/// Le champ d'autocomplétion demande les icônes de tout ce qu'il affiche, à chaque frappe :
+/// « bou », puis « bouf », puis « bouft »… Servies dans l'ordre d'arrivée, les icônes de la requête
+/// courante passaient après celles de trois préfixes que l'utilisateur ne regarde déjà plus —
+/// c'est ce que l'on voyait : des rangées qui restaient sans image plusieurs secondes après la
+/// frappe, alors que le réseau travaillait.
+///
+/// D'où un tas ordonné par **numéro de frame egui décroissant** (`Context::cumulative_pass_nr`,
+/// transmis par `RemoteIconTextures::resolve`) : ce que la dernière frame a demandé part en
+/// premier, les préfixes abandonnés suivent, et finissent en cache pour la prochaine fois. Une
+/// simple pile LIFO ne suffisait pas — essayée d'abord : elle renversait aussi l'ordre À
+/// L'INTÉRIEUR d'une frame, donc servait la centième rangée (jamais visible sans défiler) avant la
+/// première. À frame égale, l'ordre de demande est conservé — et l'appelant demande dans l'ordre
+/// d'affichage.
 #[derive(Clone)]
 pub struct RemoteIconStore {
     decoded: Arc<Mutex<HashMap<IconKey, Arc<DecodedIcon>>>>,
@@ -49,60 +107,73 @@ pub struct RemoteIconStore {
     /// un `gfx_id` donné a peu de chances de mieux répondre à la tentative suivante ; un vrai
     /// mécanisme de retenter serait pertinent mais hors périmètre de cette itération).
     requested: Arc<Mutex<HashSet<IconKey>>>,
-    request_tx: mpsc::Sender<IconRef>,
+    pending: Arc<(Mutex<PendingRequests>, Condvar)>,
 }
 
 impl RemoteIconStore {
     pub fn spawn(proxy: EventLoopProxy<UserEvent>) -> Self {
         let decoded: Arc<Mutex<HashMap<IconKey, Arc<DecodedIcon>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let (request_tx, request_rx) = mpsc::channel::<IconRef>();
+        let pending: Arc<(Mutex<PendingRequests>, Condvar)> = Arc::default();
 
-        let decoded_for_thread = Arc::clone(&decoded);
-        thread::Builder::new()
-            .name("overlay-icons".into())
-            .spawn(move || {
-                // Une seule icône à la fois (pas de pool de threads) : le volume réaliste (le
-                // nombre d'entrées suivies distinctes) reste faible, et le cache disque
-                // (`overlay_sync::icon_cache`) rend les lancements suivants quasi instantanés —
-                // pas besoin de paralléliser un besoin aussi occasionnel.
-                for icon in request_rx {
-                    let key = key_of(&icon);
-                    if let Some(decoded_icon) = fetch_and_decode(&icon) {
-                        decoded_for_thread
-                            .lock()
-                            .unwrap()
-                            .insert(key, Arc::new(decoded_icon));
-                        let _ = proxy.send_event(UserEvent::NewSnapshot);
+        for n in 0..WORKERS {
+            let decoded = Arc::clone(&decoded);
+            let pending = Arc::clone(&pending);
+            let proxy = proxy.clone();
+            thread::Builder::new()
+                .name(format!("overlay-icons-{n}"))
+                .spawn(move || {
+                    let (queue, ready) = &*pending;
+                    loop {
+                        let icon = {
+                            let mut guard = queue.lock().unwrap();
+                            loop {
+                                if let Some(pending) = guard.heap.pop() {
+                                    break pending.icon;
+                                }
+                                if guard.closed {
+                                    return;
+                                }
+                                guard = ready.wait(guard).unwrap();
+                            }
+                        };
+                        let key = key_of(&icon);
+                        if let Some(decoded_icon) = fetch_and_decode(&icon) {
+                            decoded.lock().unwrap().insert(key, Arc::new(decoded_icon));
+                            let _ = proxy.send_event(UserEvent::NewSnapshot);
+                        }
                     }
-                }
-            })
-            .expect("échec de création du thread des icônes distantes");
+                })
+                .expect("échec de création du thread des icônes distantes");
+        }
 
         Self {
             decoded,
             requested: Arc::new(Mutex::new(HashSet::new())),
-            request_tx,
+            pending,
         }
     }
 
     /// Store vide, SANS thread réseau — pour un harnais de test qui ne doit dépendre d'aucun accès
     /// réseau (§17.1 du plan : « `RemoteIconStore` construit à la main dans le harnais, jamais
     /// alimenté par le thread réseau réel »). `decoded_or_request` y renvoie toujours `None`
-    /// (repli sur l'icône générique) : le récepteur du canal de requêtes est immédiatement
-    /// abandonné, tout envoi échoue silencieusement — déjà le comportement toléré en production
-    /// (`let _ = self.request_tx.send(...)`).
+    /// (repli sur l'icône générique) : la file est marquée fermée, rien n'y est jamais déposé.
     pub fn empty() -> Self {
-        let (request_tx, _request_rx) = mpsc::channel();
         Self {
             decoded: Arc::new(Mutex::new(HashMap::new())),
             requested: Arc::new(Mutex::new(HashSet::new())),
-            request_tx,
+            pending: Arc::new((
+                Mutex::new(PendingRequests {
+                    closed: true,
+                    ..Default::default()
+                }),
+                Condvar::new(),
+            )),
         }
     }
 
     /// Injecte une icône déjà disponible sous forme de fichier PNG/WebP — pour un harnais de rendu
-    /// (`overlay-testkit`) qui doit montrer de VRAIES icônes sans jamais toucher au réseau
+    /// (`overlay-testkit`) qui doit montrer de VRAIES icônes sans jamais toucher le réseau
     /// (§17.1 du plan : « construit à la main dans le harnais, jamais alimenté par le thread
     /// réseau réel »), à partir de fixtures versionnées. Même décodage que le thread réseau
     /// (`fetch_and_decode`), même table `decoded` : l'UI ne fait aucune différence. Renvoie
@@ -121,17 +192,39 @@ impl RemoteIconStore {
 
     /// Octets décodés déjà disponibles pour cette icône ; sinon programme son téléchargement (une
     /// seule fois par icône, voir `requested`) et renvoie `None` pour ce rendu — l'appelant garde
-    /// son repli générique jusqu'au prochain redessin (déclenché par le thread ci-dessus une fois
+    /// son repli générique jusqu'au prochain redessin (déclenché par un thread ci-dessus une fois
     /// l'icône prête).
-    fn decoded_or_request(&self, icon: &IconRef) -> Option<Arc<DecodedIcon>> {
+    fn decoded_or_request(&self, icon: &IconRef, frame: u64) -> Option<Arc<DecodedIcon>> {
         let key = key_of(icon);
         if let Some(decoded) = self.decoded.lock().unwrap().get(&key) {
             return Some(Arc::clone(decoded));
         }
         if self.requested.lock().unwrap().insert(key) {
-            let _ = self.request_tx.send(icon.clone());
+            let (queue, ready) = &*self.pending;
+            let mut guard = queue.lock().unwrap();
+            if !guard.closed {
+                let seq = guard.seq;
+                guard.seq += 1;
+                guard.heap.push(Pending {
+                    frame,
+                    seq: std::cmp::Reverse(seq),
+                    icon: icon.clone(),
+                });
+                ready.notify_one();
+            }
         }
         None
+    }
+}
+
+impl Drop for RemoteIconStore {
+    fn drop(&mut self) {
+        // Le dernier clone parti, plus personne ne peut déposer : les threads peuvent s'arrêter.
+        if Arc::strong_count(&self.pending) == 1 {
+            let (queue, ready) = &*self.pending;
+            queue.lock().unwrap().closed = true;
+            ready.notify_all();
+        }
     }
 }
 
@@ -193,7 +286,7 @@ impl RemoteIconTextures {
         if let Some(handle) = self.uploaded.get(&key) {
             return Some(handle.clone());
         }
-        let decoded = store.decoded_or_request(icon)?;
+        let decoded = store.decoded_or_request(icon, ctx.cumulative_pass_nr())?;
         let color_image = egui::ColorImage::from_rgba_unmultiplied(
             [decoded.width as usize, decoded.height as usize],
             &decoded.rgba,

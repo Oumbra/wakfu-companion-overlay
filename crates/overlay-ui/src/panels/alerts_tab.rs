@@ -107,9 +107,6 @@ const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, porté de 12 après un second retour utilisateur.
 const SECTION_GAP: f32 = 18.0;
 
-/// Nombre maximal de suggestions construites par frappe — voir `CatalogIndex::search_items`.
-const MAX_SUGGESTIONS: usize = 40;
-
 /// La phrase sous le titre — `profile.alertsDesc` du dépôt web.
 const DESC: &str =
     "Un son est joué au ramassage des objets ci-dessous. Cliquez une tuile pour couper ou \
@@ -392,15 +389,47 @@ fn add_field(
     // Champ grisé pendant une lecture en vol : ce qu'on ajouterait serait écrasé par la liste qui
     // arrive. Un champ d'apparence active inviterait au geste que le chargement vient de retirer.
     let enabled = ctx.availability == AlertsAvailability::Ready;
+    // **Toutes les correspondances, comme le web** — jusqu'au 2026-09-12 la liste était coupée à
+    // quarante, et la bande de filtres, calculée sur cette liste tronquée, perdait des catégories
+    // pourtant présentes : « bouftou » montrait cinq boutons ici contre huit sur le site. La
+    // recherche coûte moins d'une demi-milliseconde pour cent quinze résultats sur seize mille
+    // objets (mesuré sur le catalogue réel) ; c'est le panneau qui défile, pas la liste qui se
+    // taille.
     let suggestions = if enabled {
         ctx.catalog.search_items(
             &state.search,
             design::tokens::AUTOCOMPLETE_MIN_QUERY_LEN,
-            MAX_SUGGESTIONS,
+            usize::MAX,
         )
     } else {
         Vec::new()
     };
+
+    // **La bande d'abord, les entrées ensuite** — l'ordre de ces deux blocs est celui des demandes
+    // d'icônes au CDN, et `RemoteIconStore` sert une frame dans son ordre de demande : huit
+    // icônes de catégorie qui coiffent toute la liste doivent partir avant cent images de
+    // rangées dont cinq seulement sont visibles. Demandées après, elles arrivaient les dernières
+    // et la bande restait vide plusieurs secondes (constaté sur « tofu », 118 résultats).
+    //
+    // **La bande se calcule sur la liste NON filtrée** (règle 4 du composant) : elle doit rester
+    // entière quand le filtre ne laisse rien passer, sinon le bouton qui permettrait de le
+    // relâcher disparaîtrait avec les résultats.
+    let mut categories: Vec<WakfuItemCategory> =
+        suggestions.iter().map(|item| item.category).collect();
+    categories.dedup_by(|a, b| a == b);
+    categories.sort_by_key(|c| c.icon_number());
+    categories.dedup();
+    let mut filters = vec![design::AutocompleteFilter::all(
+        "Toutes les catégories",
+        texture_id(ui, ctx, &IconRef::for_all_categories()),
+    )];
+    for category in categories {
+        filters.push(design::AutocompleteFilter::category(
+            category_key(category),
+            category_label(category),
+            texture_id(ui, ctx, &IconRef::for_item_category(category)),
+        ));
+    }
 
     // Les entrées et la bande de filtres, dans le vocabulaire du composant. Les images viennent du
     // CDN par le même circuit que les tuiles du Suivi : absentes tant qu'elles descendent, la
@@ -424,26 +453,6 @@ fn add_field(
             entry
         })
         .collect();
-
-    // **La bande se calcule sur la liste NON filtrée** (règle 4 du composant) : elle doit rester
-    // entière quand le filtre ne laisse rien passer, sinon le bouton qui permettrait de le
-    // relâcher disparaîtrait avec les résultats.
-    let mut categories: Vec<WakfuItemCategory> =
-        suggestions.iter().map(|item| item.category).collect();
-    categories.dedup_by(|a, b| a == b);
-    categories.sort_by_key(|c| c.icon_number());
-    categories.dedup();
-    let mut filters = vec![design::AutocompleteFilter::all(
-        "Toutes les catégories",
-        texture_id(ui, ctx, &IconRef::for_all_categories()),
-    )];
-    for category in categories {
-        filters.push(design::AutocompleteFilter::category(
-            category_key(category),
-            category_label(category),
-            texture_id(ui, ctx, &IconRef::for_item_category(category)),
-        ));
-    }
 
     let outcome = design::autocomplete(&mut state.search)
         .placeholder("Ajouter un objet à surveiller…")

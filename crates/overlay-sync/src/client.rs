@@ -27,11 +27,22 @@ pub fn base_url() -> String {
     std::env::var("WAKFU_COMPANION_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
 }
 
+/// **Un seul agent pour tout le processus**, cloné à chaque appel (`ureq::Agent` est un `Arc`
+/// sous le capot) — et non un agent neuf par requête, comme jusqu'au 2026-09-12.
+///
+/// Un agent porte le réservoir de connexions : le reconstruire à chaque appel rouvrait une
+/// connexion TLS complète par icône téléchargée. Mesuré sur `wakassets` : une icône toutes les
+/// ~145 ms, en série — cent résultats d'autocomplétion mettaient quinze secondes à s'illustrer.
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(TIMEOUT))
-        .build()
-        .into()
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            ureq::Agent::config_builder()
+                .timeout_global(Some(TIMEOUT))
+                .build()
+                .into()
+        })
+        .clone()
 }
 
 /// POST anonyme — utilisé par `pairing.rs` pour les deux seules routes appelées AVANT qu'un jeton

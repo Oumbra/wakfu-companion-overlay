@@ -468,11 +468,12 @@ impl CatalogIndex {
     /// que le web n'a pas non plus. Sert le champ d'ajout de l'onglet « Alertes ».
     ///
     /// **`limit` n'existe pas côté web**, qui rend toute la liste dans un panneau que le
-    /// navigateur fait défiler. Ici le panneau de suggestions est borné
-    /// (`tokens::AUTOCOMPLETE_MAX_ROWS`) et chaque entrée coûte une allocation de nom : construire
-    /// trois mille suggestions pour en peindre six serait du travail jeté. Les entrées au-delà de
-    /// la limite sont simplement absentes — l'utilisateur affine sa requête, ce qu'il fait déjà
-    /// devant une liste trop longue.
+    /// navigateur fait défiler. Le champ d'ajout d'alerte passe `usize::MAX` depuis le
+    /// 2026-09-12 : une limite de quarante y tronquait aussi la bande de filtres, calculée sur
+    /// la liste rendue (« bouftou » : cinq catégories ici contre huit sur le site). Le coût qui
+    /// justifiait la coupe n'existe pas — 115 résultats sur 16 302 objets en moins d'une
+    /// demi-milliseconde, mesuré sur le catalogue réel (`examples/bench-search.rs`, jetable).
+    /// Le paramètre reste pour un appelant qui n'aurait besoin que des premières entrées.
     ///
     /// Une requête plus courte que `min_len` ne cherche rien et renvoie une liste vide : c'est le
     /// seuil du champ (`MIN_QUERY_LENGTH` côté web), imposé ici plutôt que laissé à l'appelant
