@@ -1505,7 +1505,7 @@ ui.add(
 | `frame` | `Rarity(ItemRarity)` / `Plain` | `Plain` |
 | `icon` | `egui::TextureId` déjà résolu | aucune, l'emplacement est peint vide |
 | `count` | `Simple(i64)` / `Fraction { current, target }` | aucun |
-| `size` | côté du carré | `ITEM_SLOT_SIZE` = 58 |
+| `size` | côté du carré | `ITEM_SLOT_SIZE` = 64 |
 
 Textures : les sept `DsTexture::ItemBorder*`, entrées au manifeste avec ce composant.
 
@@ -1540,7 +1540,7 @@ pas à `overlay_engine`.
 | Cadre | Icône |
 | --- | --- |
 | `Rarity` | la fenêtre intérieure de la texture (≈ 0,797 du côté), réduite de 4 % |
-| `Plain` | `ITEM_SLOT_PLAIN_ICON_FILL` = 30/58, la cote du template web |
+| `Plain` | `ITEM_SLOT_PLAIN_ICON_FILL` ≈ 0,517 — un **rapport** (30/58 mesuré sur le template web), pas une cote : l'icône suit le côté qu'on donne à l'emplacement |
 
 **Aucune ne se déduit de l'autre**, et les confondre a produit un défaut réel : la première version
 faisait occuper tout le carré à l'icône d'un cadre simple. La bordure de rareté masquait le problème
@@ -1553,9 +1553,27 @@ fois trop gros.
 compteur compris. Quatorze constantes locales ont disparu du panneau, qui ne garde que ce qui lui
 appartient — résoudre l'icône distante, lire la rareté au catalogue, traduire vers le design system.
 
-**Les cotes restent celles du web** (58 px, rayon 10), pas celles du jeu (`item_slot_square` 63-64,
-`item_slot_gap` 2, `item_slot_border` 2). Basculer est la suite du lot 5 et se valide sur captures :
-ce commit déplace du code, il ne change pas une apparence.
+~~**Les cotes restent celles du web**~~ — **passées à celles du jeu le 2026-09-12** : le carré va de
+58 à **64 px** et le rayon des coins de 10 à **2**. Ce qui a décidé la valeur haute de la fourchette
+relevée (`item_slot_square` 63-64, une mesure pixel d'un bord adouci n'ayant pas de frontière nette)
+est une coïncidence qui n'en est pas une : le liseré des `Border-*.webp` occupe 17 px sur un canevas
+de 512, soit **2,1 px rendu à 64** — exactement l'`item_slot_border` relevé sur les mêmes captures.
+À 58 il en faisait 1,9.
+
+Le rayon suit `shape.corner_style_inputs_lists` du relevé (« square_or_near_square ») : dans le jeu,
+une case d'inventaire est un carré. 2 plutôt que 0 parce que le contour extérieur des textures de
+rareté est lui-même arrondi (rayon ≈ 32/512 du canevas, ≈ 4 px à 64) — un fond parfaitement
+rectangulaire pointerait hors de ses coins.
+
+**`item_slot_gap` (2 px) n'a PAS suivi**, et c'est délibéré deux fois : cet espacement décrit la
+densité d'une grille d'inventaire, pas celle d'un bandeau de suivi posé par-dessus le jeu (où le 12
+px vient d'un réglage utilisateur) — et surtout il n'appartient pas au composant : un emplacement ne
+connaît pas son voisin, c'est l'appelant qui espace.
+
+Onze snapshots régénérés (la galerie et les dix du panneau Suivi), dont la **largeur de la fenêtre
+du Suivi**, qui se calcule sur la taille de tuile. `watchlist::TILE_SIZE` ne porte d'ailleurs plus sa
+propre valeur : il valait `58.0` en dur, la même que le jeton mais écrite deux fois — le passage du
+composant à 64 aurait laissé le bandeau à 58 sans que rien ne le signale.
 
 ~~**Un doublon daté**~~ — **résorbé le 2026-09-11** : les deux maquettes du testkit
 (`alertes-mockups`, `composants-a-concevoir`) appellent le composant, `UiIcons::item_border` a
@@ -1809,7 +1827,7 @@ ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre — jamais d'
 
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
-| **`design::item_slot`** | `watchlist::entry_tile` — bordure de rareté, icône, compteur incrusté, et l'ordre de peinture dont l'inversion a déjà produit un bug. | 7 `Border-*.webp`, `rarity_borders` (7 raretés), `item_slot_square` 63–64 / `gap` 2 / `border` 2 relevés. |
+| **`design::item_slot`** | `watchlist::entry_tile` — bordure de rareté, icône, compteur incrusté, et l'ordre de peinture dont l'inversion a déjà produit un bug. | 7 `Border-*.webp`, `rarity_borders` (7 raretés), `item_slot_square` 63–64 / `border` 2 **appliqués** (2026-09-12) ; `gap` 2 laissé à l'appelant. |
 | **`design::badge`** | `watchlist::paint_count_inline`, les étiquettes de rareté, la pastille d'état. | `status_pill_active` ; `text::OUTLINE_FULL` existe. §5.12, §5.13. |
 | **`design::meter`** | `combat::damage_bar` — 68 lignes de rectangles empilés (bord externe, bord interne, piste, remplissage, reflet, curseur de fin, arrondis conditionnels). | Six couleurs mesurées dans `combat.rs`, à promouvoir en jetons. |
 | **`design::portrait`** | `combat::paint_flat_portrait`, `panels::combat_frame` et son gabarit à six emplacements. | `crates/overlay-ui/assets/templates/*.png`, atlas de classes, portrait de repli. |
