@@ -63,13 +63,21 @@
 //! en retour pour le prochain redessin.
 
 use crate::design::{self, ButtonSize, ButtonVariant};
+use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
-/// `OverlayKind::Options`) — largeur inchangée depuis la première version (560pt), hauteur portée
-/// à 436pt pour retrouver le ratio 720:561 de la vraie fenêtre Options du jeu (560 × 561 / 720 ≈
-/// 436), demande explicite de cohérence visuelle avec le rendu réel plutôt qu'une boîte compacte
-/// arbitraire.
-pub const WINDOW_SIZE: (f32, f32) = (560.0, 436.0);
+/// `OverlayKind::Options`).
+///
+/// **760 × 810 depuis le 2026-09-12**, contre 560 × 436 auparavant : c'est ce que l'onglet
+/// « Alertes » demande pour tenir cinq tuiles par rangée et trois rangées visibles (demande
+/// explicite du 2026-09-11, validée sur maquette). À 560 de large, la grille n'avait la place que
+/// de trois tuiles, et d'une seule rangée en hauteur.
+///
+/// Ce qui est abandonné au passage, et assumé : le **rapport d'aspect 720:561 de la vraie fenêtre
+/// Options du jeu**, que la version précédente reproduisait sur demande de cohérence visuelle.
+/// Arbitrage au profit du contenu — une fenêtre au bon ratio dont l'onglet principal ne tient pas
+/// n'est pas plus fidèle, elle est juste inutilisable.
+pub const WINDOW_SIZE: (f32, f32) = (760.0, 810.0);
 
 // Rembourrage du panneau de contenu — trois axes, et trois seulement. Le relevé de section est
 // catégorique : « x=29 pour les titres de section, x=36 pour tout contrôle indenté, x=62 pour le
@@ -120,15 +128,18 @@ const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 
 /// Onglet affiché par la modale.
 ///
-/// **Trois entrées, dont deux encore vides.** « Alertes » et « Personnages » sont conservés et
-/// affichés désactivés (décision utilisateur du 2026-09-10) plutôt que masqués : ils le deviendront
-/// peu après ce chantier, et un onglet qui apparaît est un changement de mise en page, pas un
-/// changement d'état.
+/// Onglet affiché par la modale — **deux entrées câblées sur trois** depuis le 2026-09-12.
+///
+/// « Alertes » a reçu son contenu (`panels::alerts_tab`) ; « Personnages » reste affiché désactivé
+/// plutôt que masqué, décision du 2026-09-10 : un onglet qui apparaît est un changement de mise en
+/// page, pas un changement d'état.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsTab {
+    /// Les alertes de ramassage — objets à son activé et fermeture du toast.
     Alertes,
     Personnages,
-    /// Le seul onglet cliquable pour l'instant, et donc le défaut.
+    /// Le défaut : c'est le réglage qu'on vient chercher en premier quand l'overlay ne trouve pas
+    /// le fichier de log.
     #[default]
     Parametres,
 }
@@ -149,9 +160,21 @@ pub struct OptionsModalState {
     /// ou clic sur "Valider" avec un chemin invalide) — `None` tant qu'aucune tentative n'a encore
     /// échoué. Vidé par l'appelant dès qu'une nouvelle tentative commence.
     pub error: Option<String>,
-    /// Onglet affiché. Ne bouge pas tant que « Alertes » et « Personnages » sont désactivés — le
-    /// champ existe pour que le jour où ils s'activeront ne demande qu'une ligne.
+    /// Onglet affiché.
     pub tab: OptionsTab,
+    /// Ce que l'onglet « Alertes » garde entre deux frames — saisie du champ d'ajout, durée en
+    /// cours de frappe, confirmation de retrait ouverte. **Pas le profil** : celui-ci est le
+    /// brouillon ci-dessous.
+    pub alerts: AlertsTabState,
+    /// **Le brouillon d'alertes** — une copie du profil du compte, modifiée librement, et prise en
+    /// compte seulement à « Valider » (§5.1 du plan, comme le chemin de log).
+    ///
+    /// `None` tant que les réglages ne sont pas descendus du compte : l'onglet affiche alors son
+    /// rouage plutôt qu'une liste provisoire que la réponse écraserait.
+    pub alerts_draft: Option<overlay_engine::AlertProfile>,
+    /// D'où vient la liste d'alertes, et si elle est modifiable — posé par l'hôte à l'ouverture de
+    /// la modale, parce que lui seul sait si un compte est lié et si une requête est en vol.
+    pub alerts_availability: alerts_tab::AlertsAvailability,
 }
 
 /// Ce que l'utilisateur vient de demander CETTE frame — `None` la plupart du temps (aucun bouton
@@ -168,6 +191,22 @@ pub enum OptionsModalAction {
     /// Chemin brut tel que tapé/affiché dans le champ au moment du clic — PAS encore un `PathBuf`
     /// validé, voir doc de module.
     Validate(String),
+    /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
+    /// audio (`alert_sound::play_loot_alert`).
+    TestAlertSound,
+}
+
+/// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
+///
+/// Seul l'onglet « Alertes » en a besoin — il liste de vrais objets, avec leurs icônes descendues
+/// du CDN et leur rareté lue au catalogue. L'onglet « Paramètres », lui, n'a jamais eu besoin de
+/// rien : c'est pourquoi `show` s'en passait jusqu'au 2026-09-12.
+pub struct OptionsModalContext<'a> {
+    pub catalog: &'a overlay_engine::CatalogIndex,
+    pub remote_icons: &'a crate::remote_icons::RemoteIconStore,
+    pub remote_icon_textures: &'a mut crate::remote_icons::RemoteIconTextures,
+    /// Repli quand l'icône d'un objet n'est pas encore descendue.
+    pub icons: &'a crate::ui_icons::UiIcons,
 }
 
 /// Clé mémoire « le focus initial a déjà été donné » — voir [`show`].
@@ -177,8 +216,13 @@ fn focus_given_id() -> egui::Id {
 
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
 /// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
-pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAction {
+pub fn show(
+    ui: &mut egui::Ui,
+    state: &mut OptionsModalState,
+    ctx: &mut OptionsModalContext<'_>,
+) -> OptionsModalAction {
     let mut action = OptionsModalAction::None;
+    let window = ui.max_rect();
 
     // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
     // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
@@ -201,14 +245,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
         .log_name("options")
         .show(ui);
 
-    // « Paramètres » est le seul onglet cliquable : les deux autres n'ont pas encore de contenu
-    // porté. Ils restent affichés désactivés plutôt que masqués — un onglet qui apparaît est un
-    // changement de mise en page, pas un changement d'état.
+    // « Personnages » est le dernier onglet sans contenu porté. Il reste affiché désactivé plutôt
+    // que masqué — un onglet qui apparaît est un changement de mise en page, pas un changement
+    // d'état.
     chrome.tabs(
         ui,
         design::tabs(&mut state.tab)
             .entry(OptionsTab::Alertes, "Alertes")
-            .enabled(false)
             .entry(OptionsTab::Personnages, "Personnages")
             .enabled(false)
             .entry(OptionsTab::Parametres, "Paramètres")
@@ -223,7 +266,33 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
         design::FooterClick::None => {}
     }
 
-    design::panel().show(ui, chrome.content, |ui, _panel| {
+    // Un seul panneau de section, deux contenus — c'est l'onglet qui décide. Le focus initial,
+    // lui, reste au champ de chemin : l'onglet par défaut est « Paramètres ».
+    let mut alerts_action = AlertsTabAction::None;
+    design::panel().show(ui, chrome.content, |ui, panel| {
+        if state.tab == OptionsTab::Alertes {
+            // Le brouillon n'existe pas tant que les réglages ne sont pas descendus du compte :
+            // l'onglet le sait et affiche son rouage. Un `AlertProfile` par défaut servi en
+            // attendant afficherait dix objets que la réponse pourrait démentir.
+            let mut vide = overlay_engine::AlertProfile::default();
+            let availability = state.alerts_availability;
+            let profile = state.alerts_draft.as_mut().unwrap_or(&mut vide);
+            alerts_action = alerts_tab::show(
+                ui,
+                panel,
+                &mut state.alerts,
+                &mut AlertsTabContext {
+                    profile,
+                    catalog: ctx.catalog,
+                    remote_icons: ctx.remote_icons,
+                    remote_icon_textures: ctx.remote_icon_textures,
+                    icons: ctx.icons,
+                    availability,
+                    window,
+                },
+            );
+            return;
+        }
         let inner_width = ui.max_rect().width();
         ui.add(design::heading("Fichier"));
 
@@ -289,6 +358,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
         }
     });
 
+    if alerts_action == AlertsTabAction::TestSound {
+        action = OptionsModalAction::TestAlertSound;
+    }
+
     // Clavier — lu APRÈS les boutons : un clic de cette frame l'emporte sur une touche de la même
     // frame (cas de figure théorique, mais l'ordre doit être décidé plutôt que subi).
     //
@@ -302,7 +375,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
     // `TextEdit` ne retire pas ces événements de l'entrée globale (il travaille sur une copie
     // filtrée, `InputState::filtered_events`) : les lire ici reste fiable même quand le champ de
     // chemin a le focus — ce qui est le cas dès l'ouverture.
-    if matches!(action, OptionsModalAction::None) {
+    //
+    // **Deux restrictions posées le 2026-09-12, avec l'onglet « Alertes »** :
+    //
+    // - *Entrée* ne vaut « Valider » que sur « Paramètres ». Sur « Alertes », la touche appartient
+    //   au champ d'autocomplétion, où elle choisit une suggestion — et comme `TextEdit` ne retire
+    //   pas l'événement de l'entrée globale (c'est ce qui rend cette lecture fiable ici), le même
+    //   appui aurait à la fois ajouté un objet ET fermé la fenêtre derrière.
+    // - Ni l'une ni l'autre ne passe tant qu'une **confirmation de retrait** est ouverte : c'est
+    //   elle qui prend Échap (pour se fermer), et son voile dit précisément que le pied de page
+    //   est inerte.
+    let confirmation_ouverte = state.alerts.pending_removal.is_some();
+    if matches!(action, OptionsModalAction::None) && !confirmation_ouverte {
         let (cancel, validate) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Escape),
@@ -311,7 +395,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut OptionsModalState) -> OptionsModalAct
         });
         if cancel {
             action = OptionsModalAction::Cancel;
-        } else if validate {
+        } else if validate && state.tab == OptionsTab::Parametres {
             action = OptionsModalAction::Validate(state.path_input.clone());
         }
     }

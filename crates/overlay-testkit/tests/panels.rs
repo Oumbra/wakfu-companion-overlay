@@ -378,7 +378,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 catalog_id: alert.catalog_id,
                 created_at,
                 confetti: build_confetti(),
-                hide_at: created_at + TOAST_DURATION,
+                hide_at: Some(created_at + TOAST_DURATION),
             });
         }
     }
@@ -773,6 +773,7 @@ fn panneau_options_ne_panique_pas() {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: Some("Le fichier sélectionné doit s'appeler wakfu.log.".to_string()),
         tab: OptionsTab::default(),
+        ..Default::default()
     };
     // Chargées à part de `Textures` (variable locale dédiée plutôt qu'un champ supplémentaire sur
     // `Textures`, jamais utilisé par les autres tests) : `get_or_load`/cet emprunt doivent coexister
@@ -840,6 +841,7 @@ fn modale_options_echap_annule_et_entree_valide() {
         path_input: CHEMIN.to_string(),
         error: None,
         tab: OptionsTab::default(),
+        ..Default::default()
     };
     // Les actions sont ACCUMULÉES, pas gardées une par une : `Harness::run()` rejoue plusieurs
     // frames jusqu'à stabilisation, et seule la PREMIÈRE voit l'événement clavier — retenir la
@@ -856,7 +858,22 @@ fn modale_options_echap_annule_et_entree_valide() {
         // proportionnelle par défaut d'egui. Repéré le 2026-09-10 par l'assertion que
         // `design::text::famille` porte désormais.
         overlay_ui::style::apply(ui.ctx());
-        let action = panels::options_modal::show(ui, &mut options_state);
+        // L'onglet « Alertes » a besoin du catalogue et des icônes distantes depuis le
+        // 2026-09-12 ; ce test-ci ne quitte jamais « Paramètres », tout est donc vide.
+        let icons = UiIcons::load(ui.ctx());
+        let remote_icons = RemoteIconStore::empty();
+        let mut remote_icon_textures = RemoteIconTextures::default();
+        let catalog = CatalogIndex::default();
+        let action = panels::options_modal::show(
+            ui,
+            &mut options_state,
+            &mut panels::options_modal::OptionsModalContext {
+                catalog: &catalog,
+                remote_icons: &remote_icons,
+                remote_icon_textures: &mut remote_icon_textures,
+                icons: &icons,
+            },
+        );
         if action != OptionsModalAction::None {
             actions.borrow_mut().push(action);
         }
@@ -940,6 +957,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: None,
         tab: OptionsTab::default(),
+        ..Default::default()
     };
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -1001,4 +1019,98 @@ fn modale_options_sur_damier_ne_panique_pas() {
 
     harness.run();
     harness.snapshot("options_modale_sur_damier");
+}
+
+/// Rend l'onglet « Alertes » de la fenêtre Options dans un état donné, et le capture.
+///
+/// **Le profil vient du moteur**, pas d'une liste écrite à la main : `AlertProfile::default()`
+/// donne les dix `DEFAULT_SOUND_ITEM_NAMES` fusionnés, exactement ce qu'un compte neuf renvoie.
+/// L'objet ajouté par le joueur est poussé par-dessus — c'est le seul qui porte une croix de
+/// retrait, et les captures doivent montrer cette règle.
+///
+/// Les icônes d'objets restent le repli générique : elles viennent du CDN, hors de portée du
+/// harnais (aucun réseau dans un test).
+///
+/// **Un `Harness` par test, jamais plusieurs** : `egui_kittest` refuse que deux jeux de résultats
+/// de snapshot soient abandonnés séparément dans le même test (« Multiple SnapshotResults were
+/// dropped without being handled »), ce qui casserait la mise à jour groupée des images.
+fn capture_onglet_alertes(nom: &str, manual_close: bool, pending: Option<&'static str>) {
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState, PendingRemoval};
+
+    let mut profile = overlay_engine::AlertProfile::default();
+    profile.add("Combinaison Lardante", Some(4242));
+    profile.manual_close = manual_close;
+    // Un objet au son coupé dans la capture : c'est l'autre moitié de ce que la tuile dit.
+    profile.toggle("Influence III", None);
+
+    let mut options_state = OptionsModalState {
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: AlertsTabState {
+            duration_input: "3,5".to_string(),
+            pending_removal: pending.map(|name| PendingRemoval {
+                name: name.to_string(),
+                catalog_id: Some(4242),
+            }),
+            ..Default::default()
+        },
+        alerts_draft: Some(profile),
+        alerts_availability: AlertsAvailability::Ready,
+    };
+
+    // **À la taille réelle de la fenêtre** (`options_modal::WINDOW_SIZE`, 760 × 810 depuis que cet
+    // onglet existe) et non aux 800 × 600 par défaut du harnais : c'est cette taille qui donne à la
+    // grille ses cinq tuiles par rangée et ses trois rangées visibles.
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// **L'onglet « Alertes »** — celui qui manquait jusqu'au 2026-09-12 : la mécanique d'alerte
+/// existait, mais l'entrée de menu était désactivée et la liste ne se réglait que depuis le site.
+#[test]
+fn options_onglet_alertes_liste() {
+    capture_onglet_alertes("options_alertes_liste", false, None);
+}
+
+/// Fermeture manuelle : le champ de durée se grise. La logique existait (`.enabled`), aucun rendu
+/// ne la montrait.
+#[test]
+fn options_onglet_alertes_fermeture_manuelle() {
+    capture_onglet_alertes("options_alertes_fermeture_manuelle", true, None);
+}
+
+/// La confirmation de retrait, et surtout **son voile sur la fenêtre ENTIÈRE** : bannière, onglets
+/// et pied de page compris. Un voile rogné au panneau de section laisserait croire qu'« Annuler »
+/// et « Valider » restent cliquables — ils ne le sont pas.
+#[test]
+fn options_onglet_alertes_confirmation_retrait() {
+    capture_onglet_alertes(
+        "options_alertes_confirmation_retrait",
+        false,
+        Some("Combinaison Lardante"),
+    );
 }

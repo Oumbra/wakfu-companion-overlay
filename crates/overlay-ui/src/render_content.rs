@@ -531,7 +531,19 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
                 OverlayKind::Options => {
                     if let Some(state) = options {
-                        outcome.options_action = panels::options_modal::show(ui, state);
+                        // Les mêmes dépendances que le bandeau Suivi : depuis le 2026-09-12,
+                        // l'onglet « Alertes » liste de vrais objets, avec leur rareté lue au
+                        // catalogue et leur icône descendue du même CDN.
+                        outcome.options_action = panels::options_modal::show(
+                            ui,
+                            state,
+                            &mut panels::options_modal::OptionsModalContext {
+                                catalog,
+                                remote_icons,
+                                remote_icon_textures,
+                                icons,
+                            },
+                        );
                     }
                 }
             }
