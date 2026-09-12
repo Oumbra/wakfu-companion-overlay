@@ -34,6 +34,7 @@
 //!   `assets/spells.json`, maintenu par l'utilisateur) → `RemoteIconStore`/`RemoteIconTextures`,
 //!   même circuit que les portraits de monstres. Sans correspondance : pavé « ? », nom brut en
 //!   infobulle, un `tracing::warn!` par nom et par session (voir `warn_unknown_spell_once`).
+//!   Entrée connue mais sans image dans le fichier : tuile sombre sans « ? », nom en infobulle.
 //! - **Ennemis** : jamais dans le bloc, mais le bloc reste visible sur la vue Ennemis (retenu
 //!   dans l'artefact) — il porte sur les alliés du combat, pas sur le camp affiché au-dessus.
 //!
@@ -378,8 +379,11 @@ pub fn show(
 
         let entry = spells.find(&cast.spell, selected_ally.class_name.as_deref());
         let display_name = entry.map_or(cast.spell.as_str(), |e| e.name.as_str());
-        let texture =
-            entry.and_then(|e| remote_icon_textures.resolve(ui.ctx(), remote_icons, &e.icon));
+        // Sort inconnu du référentiel → pavé « ? » ; connu mais sans image (`icon: None`) ou pas
+        // encore téléchargé → tuile sombre sans « ? », le nom reste en infobulle.
+        let texture = entry
+            .and_then(|e| e.icon.as_ref())
+            .and_then(|icon| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon));
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Image,
