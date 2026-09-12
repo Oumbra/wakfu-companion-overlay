@@ -2159,6 +2159,74 @@ appelant. L'extraction est **à pixel constant** — aucun des trois snapshots d
 bougé.
 
 
+## `design::label` — libellé élidé (2026-09-12)
+
+`crates/overlay-ui/src/design/components/label.rs`
+
+```rust
+use overlay_ui::design;
+
+ui.add(
+    design::label("Plan \"Epée de Brâkmar\"")
+        .width(108.0)
+        .align(egui::Align::Center)
+        .log_name("alertes.nom"),
+);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `label(text)` | le texte à afficher | — |
+| `width` | largeur imposée — le texte s'élide au-delà | largeur disponible du `Ui` |
+| `size` | corps | `LABEL_FONT_SIZE` = 13 |
+| `color` | couleur du texte | `LABEL_TEXT` = blanc |
+| `align` | `Min` / `Center` / `Max` dans la largeur | `Center` |
+| `tooltip_side` | côté de l'infobulle | au-dessus |
+
+Composant feuille (`impl Widget`). Deux fonctions associées pour l'appelant&nbsp;: `Label::height`
+(réserver la place avant d'ajouter) et `Label::elides` (voir plus bas).
+
+### Une ligne, jamais deux — et c'est une décision produit
+
+Un nom d'objet Wakfu dépasse souvent la largeur disponible&nbsp;: les quatre « Plan "Epée de … " »
+partagent leurs quatorze premiers caractères. Le réflexe est de le faire passer à la ligne pour les
+distinguer, et c'est **ce qui a été essayé puis annulé le 2026-09-12**&nbsp;: la tuile porte déjà
+l'icône de l'objet, et c'est elle qui lève l'ambiguïté d'un coup d'œil, bien avant le texte. Faire
+grandir chaque tuile pour distinguer deux libellés résolvait un problème que l'utilisateur n'a pas.
+
+> « Ton problème de nom, c'est un faux problème puisque l'utilisateur voit des images en plus des
+> noms. Pour lui, il y a beaucoup moins d'interprétation que toi, seulement avec des noms. »
+
+Ce qui manque quand un nom est coupé, ce n'est pas de la place&nbsp;: c'est **un moyen de lire la
+suite**. D'où l'infobulle.
+
+### L'infobulle n'apparaît que si le texte est réellement coupé
+
+Un nom qui tient en entier n'a rien à révéler — une infobulle qui répète ce qui est déjà lisible est
+du bruit. Même règle que le dépôt web (`[tooltipOnlyIfTruncated]="true"`), et c'est **egui** qui
+répond ici (`Galley::elided`), pas une comparaison de chaînes qu'un nom finissant déjà par « … »
+mettrait en défaut. L'infobulle est celle du design system, pas le `on_hover_text` d'egui&nbsp;:
+même socle, même police, même délai que partout ailleurs.
+
+### `Label::elides`, et la zone muette qu'elle évite
+
+Un appelant qui pose sa **propre** infobulle sur une zone plus large — une tuile, une ligne — doit
+s'effacer là où celle du libellé s'affichera&nbsp;: deux infobulles sous le même curseur se
+peignent l'une sur l'autre. Mais s'effacer *partout* sur le libellé laisse une **zone muette** au
+milieu de la tuile dès que le nom tient en entier, puisque le libellé ne dit alors rien non plus.
+C'est arrivé, le temps d'une capture.
+
+`Label::elides(ui, text, width, size)` répond à la seule question qui tranche. Les galleys étant
+mémoïsés par `Fonts`, l'appeler ne remet pas le texte en page une seconde fois.
+
+### Vérification
+
+Section de galerie&nbsp;: le **même texte à trois largeurs** — l'ellipse vient du rapport entre les
+deux, pas du texte — et les trois alignements. L'infobulle, elle, ne peut pas s'y voir&nbsp;: elle
+demande un curseur, et aucun ne survole quoi que ce soit en rendu offscreen. C'est
+`tests/panels.rs` qui la vérifie, par survol simulé, **dans ses deux cas**&nbsp;: nom coupé →
+infobulle du nom entier&nbsp;; nom complet → infobulle de la tuile, et pas celle du nom.
+
 ## Piège d'appelant — `Ui::put` avance le curseur du parent (2026-09-12)
 
 Ce n'est pas un défaut de composant, c'est un piège d'**appelant**, et il a produit un bug visible
