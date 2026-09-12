@@ -328,11 +328,34 @@ impl<'a> Autocomplete<'a> {
         // **Le seuil.** Il se compte en CARACTÈRES, pas en octets : « clé » fait trois caractères et
         // quatre octets, et doit déclencher la recherche comme n'importe quel mot de trois lettres.
         let assez_long = self.query.chars().count() >= self.min_query_len;
+
+        // **Le panneau survit à la perte de focus tant que le pointeur est dessus.**
+        //
+        // Un clic sur une suggestion se joue en deux frames : l'APPUI, qui retire le focus au champ
+        // (le pointeur est sur le panneau, pas sur lui), et le RELÂCHEMENT, seul moment où egui
+        // rend `clicked()` vrai. Une condition d'ouverture réduite à `field.has_focus()` ferme donc
+        // le panneau à l'appui : la rangée n'est plus peinte à la frame suivante, son `clicked()`
+        // n'arrive jamais, et **aucune suggestion n'est cliquable** — le défaut remonté le
+        // 2026-09-12 (« le champ d'auto-complétion ne semblait pas fonctionner »).
+        //
+        // Le rectangle du panneau de la frame PRÉCÉDENTE sert de second ancrage : il est mémorisé
+        // à chaque peinture et effacé dès que le panneau se ferme, pour qu'un rectangle périmé ne
+        // puisse pas le rouvrir au simple passage de la souris.
+        let panel_rect_id = field.id.with("ds-autocomplete-panel-rect");
+        let dernier_panneau: Option<egui::Rect> = ui.data(|d| d.get_temp(panel_rect_id));
+        let sur_le_panneau = match (dernier_panneau, ui.input(|i| i.pointer.interact_pos())) {
+            (Some(rect), Some(pos)) => rect.contains(pos),
+            _ => false,
+        };
         let open = self.forced_open.unwrap_or_else(|| {
-            self.enabled && assez_long && !self.entries.is_empty() && field.has_focus()
+            self.enabled
+                && assez_long
+                && !self.entries.is_empty()
+                && (field.has_focus() || sur_le_panneau)
         });
 
         let mut selected = None;
+        let mut panel_rect = None;
         if open {
             let mut visible = self.visible(filter);
             if active >= visible.len() {
@@ -360,6 +383,7 @@ impl<'a> Autocomplete<'a> {
             }
 
             let outcome = self.paint_panel(ui, &field, width, &visible, active, filter, &name);
+            panel_rect = Some(outcome.panel_rect);
             if let Some(index) = outcome.clicked_filter {
                 // Recliquer le filtre actif le relâche.
                 filter = if filter == index { None } else { index };
@@ -393,6 +417,12 @@ impl<'a> Autocomplete<'a> {
         ui.data_mut(|d| {
             d.insert_temp(active_id, active);
             d.insert_temp(filter_id, filter);
+            match panel_rect {
+                Some(rect) => {
+                    d.insert_temp(panel_rect_id, rect);
+                }
+                None => d.remove::<egui::Rect>(panel_rect_id),
+            }
         });
 
         AutocompleteOutcome {
@@ -433,7 +463,12 @@ impl<'a> Autocomplete<'a> {
             Vec2::new(width, 2.0 * pad + bar + corps),
         );
 
-        let mut outcome = PanelOutcome::default();
+        let mut outcome = PanelOutcome {
+            panel_rect,
+            clicked_filter: None,
+            hovered_row: None,
+            clicked_row: None,
+        };
         // `Area` au premier plan, exactement comme `design::select` : le panneau sort du flux, donc
         // ni le widget suivant ne le recouvre, ni son ouverture ne décale la mise en page.
         //
@@ -697,8 +732,10 @@ impl<'a> Autocomplete<'a> {
     }
 }
 
-#[derive(Default)]
 struct PanelOutcome {
+    /// Le rectangle réellement peint — mémorisé par [`Autocomplete::show`] pour que le panneau
+    /// survive à la frame d'appui d'un clic (voir la doc de la condition d'ouverture).
+    panel_rect: egui::Rect,
     clicked_filter: Option<Option<u16>>,
     hovered_row: Option<usize>,
     clicked_row: Option<usize>,

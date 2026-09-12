@@ -2873,6 +2873,7 @@ dependencies = [
  "overlay-engine",
  "overlay-ingest",
  "overlay-ui",
+ "serde_json",
 ]
 
 [[package]]

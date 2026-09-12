@@ -1371,3 +1371,125 @@ fn options_alertes_infobulle_sur_nom_elide() {
 fn options_alertes_pas_d_infobulle_sur_nom_entier() {
     survole_un_nom("options_alertes_infobulle_nom_entier", 618.0);
 }
+
+/// **Le champ d'ajout, exercé de bout en bout** — retour utilisateur du 2026-09-12 : « j'ai essayé
+/// le champ d'auto-complétion mais celui-ci ne semblait pas fonctionner ».
+///
+/// Les captures précédentes vérifiaient l'AFFICHAGE de l'onglet, jamais son INTERACTION : un champ
+/// peint au bon endroit peut très bien ne rien faire. Ce test clique dedans, tape trois caractères,
+/// et vérifie que le panneau s'ouvre puis qu'une sélection ajoute réellement l'objet au brouillon.
+///
+/// Le catalogue est un **vrai `CatalogIndex`**, construit depuis le JSON compact que sert l'API —
+/// pas un index vide comme dans les autres tests de ce fichier, puisque c'est précisément lui que
+/// la recherche interroge.
+#[test]
+fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
+
+    // `[id, fr, en, es, pt, gfxId, rarity_sort, has_recipe, category_sort]`
+    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        "items": [
+            [101, "Pierre de lune", "Moonstone", "Piedra", "Pedra", 1101, 2, 0, 1],
+            [102, "Pierre de dolomite", "Dolomite", "Dolomita", "Dolomita", 1102, 1, 0, 1],
+            [103, "Coiffe du Bouftou", "Gobball Headgear", "Casco", "Elmo", 1103, 3, 1, 0],
+        ],
+    }));
+    assert_eq!(
+        catalog.search_items("pierre", 3, 40).len(),
+        2,
+        "le catalogue de test ne répond pas — le reste du test ne prouverait rien"
+    );
+
+    let profil = overlay_engine::AlertProfile::default();
+    let avant = profil.sound_items.len();
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: AlertsTabState::default(),
+        alerts_draft: Some(profil),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: Default::default(),
+        pending_close: false,
+    }));
+
+    let vu = std::rc::Rc::clone(&etat);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+
+    // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
+    // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
+    // « Objets suivis », pleine largeur du panneau.
+    let champ = egui::pos2(300.0, 393.0);
+    harness.drag_at(champ);
+    harness.run();
+    harness.drop_at(champ);
+    harness.run();
+
+    // **Une frappe RÉELLE**, caractère par caractère, comme au clavier.
+    for c in "pierre".chars() {
+        harness.event(egui::Event::Text(c.to_string()));
+    }
+    harness.run();
+    assert_eq!(
+        etat.borrow().alerts.search,
+        "pierre",
+        "le champ n'a pas reçu la frappe — il n'avait donc pas le focus après le clic"
+    );
+    harness.snapshot("options_alertes_champ_deplie");
+
+    // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
+    // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
+    // immédiatement sous le champ.
+    let suggestion = egui::pos2(300.0, 462.0);
+    // **Survol d'abord, clic ensuite** : egui rattache un appui au widget que le pointeur
+    // survolait, et le pointeur n'est nulle part tant qu'aucun mouvement ne l'a placé. Sans cette
+    // frame de survol, l'appui tombe sur un widget inconnu et la rangée n'est jamais cliquée.
+    harness.hover_at(suggestion);
+    harness.run();
+
+    // **Appui et relâchement dans DEUX frames distinctes** — c'est le geste réel, et c'est lui qui
+    // a révélé le défaut du 2026-09-12 : l'appui retire le focus au champ, et une condition
+    // d'ouverture réduite à `has_focus()` fermait le panneau avant la frame du relâchement, seule
+    // où egui rend `clicked()` vrai. Les garder dans la même frame masquerait la régression.
+    harness.drag_at(suggestion);
+    harness.run();
+    harness.drop_at(suggestion);
+    harness.run();
+    let apres = etat
+        .borrow()
+        .alerts_draft
+        .as_ref()
+        .unwrap()
+        .sound_items
+        .len();
+    assert_eq!(
+        apres,
+        avant + 1,
+        "la sélection n'a rien ajouté au brouillon"
+    );
+    // Le champ vidé, le panneau refermé, et la tuile de plus dans la grille — les trois effets
+    // visibles d'une sélection, sur une seule image.
+    harness.snapshot("options_alertes_objet_ajoute");
+}

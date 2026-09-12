@@ -21,6 +21,9 @@ egui = "0.36.1"
 # experts (§17.6 du plan). Version alignée EXACTEMENT sur `egui`/`egui-wgpu` déjà utilisées par
 # `overlay-ui` (0.36.1) : jamais un mismatch à gérer.
 egui_kittest = { version = "0.36.1", features = ["wgpu", "snapshot"] }
+# Construit un vrai `CatalogIndex` depuis le JSON compact que sert l'API — un index vide ne
+# prouverait rien d'un test du champ de recherche.
+serde_json = "1"
 # Composition des rendus de `examples/modale-alpha.rs` : c'est déjà le type que rend
 # `Harness::render` (`image::RgbaImage`), déclaré ici pour pouvoir le nommer. Même version
 # qu'`overlay-ui`, jamais un second décodeur PNG dans l'arbre.
