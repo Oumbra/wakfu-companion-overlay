@@ -47,6 +47,12 @@ pub enum IconKind {
     /// icon_number`]), ou l'un des deux numéros à part que le filtre utilise sans qu'ils soient des
     /// catégories — voir [`IconRef::for_all_categories`] et [`IconRef::for_monster_category`].
     ItemCategory,
+    /// Icône de sort (`wakassets/spells/{n}.png`) — le bloc « ligne de sorts » du panneau Combat
+    /// (`overlay-ui::panels::combat_spell_block`), résolue par `crate::spells::SpellIndex` depuis
+    /// le référentiel embarqué `assets/spells.json`. Même nature que les autres variantes : une
+    /// image distante, téléchargée et mise en cache par le même `RemoteIconStore`. Le `gfx_id`
+    /// est le numéro de fichier extrait de l'URL `picture` du référentiel.
+    Spell,
 }
 
 /// Référence suffisante pour construire l'URL de l'icône réelle — voir `image_url`. `gfx_id` est
@@ -72,6 +78,7 @@ impl IconRef {
             IconKind::Monster => "monsters",
             IconKind::Rarity => "rarities",
             IconKind::ItemCategory => "itemTypes",
+            IconKind::Spell => "spells",
         };
         format!(
             "https://vertylo.github.io/wakassets/{folder}/{}.png",

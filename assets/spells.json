@@ -1,0 +1,3174 @@
+[
+  {
+    "breedName": "feca",
+    "breedId": 1,
+    "spells": [
+      {
+        "id": 6972,
+        "fr": "Goutte",
+        "en": "Drip",
+        "es": "Gota",
+        "pt": "Gota",
+        "picture": "https://vertylo.github.io/wakassets/spells/2282.png"
+      },
+      {
+        "id": 6973,
+        "fr": "Onde",
+        "en": "Wave",
+        "es": "Onda",
+        "pt": "Onda",
+        "picture": "https://vertylo.github.io/wakassets/spells/6973.png"
+      },
+      {
+        "id": 6974,
+        "fr": "Avalanche",
+        "en": "Avalanche",
+        "es": "Avalancha",
+        "pt": "Avalanche",
+        "picture": "https://vertylo.github.io/wakassets/spells/2329.png"
+      },
+      {
+        "id": 6975,
+        "fr": "Orage",
+        "en": "Storm",
+        "es": "Tormenta",
+        "pt": "Tormenta",
+        "picture": "https://vertylo.github.io/wakassets/spells/6975.png"
+      },
+      {
+        "id": 6976,
+        "fr": "Lame de fond",
+        "en": "Crashing Wave",
+        "es": "Filo Abisal",
+        "pt": "Lâmina Profunda",
+        "picture": "https://vertylo.github.io/wakassets/spells/682.png"
+      },
+      {
+        "id": 6967,
+        "fr": "Fécalistofedes",
+        "en": "Fecastopheles",
+        "es": "Fecalistófedes",
+        "pt": "Fecalistófedes",
+        "picture": "https://vertylo.github.io/wakassets/spells/2338.png"
+      },
+      {
+        "id": 6968,
+        "fr": "Météorite",
+        "en": "Meteorite",
+        "es": "Meteorito",
+        "pt": "Meteorito",
+        "picture": "https://vertylo.github.io/wakassets/spells/2258.png"
+      },
+      {
+        "id": 6969,
+        "fr": "Attaque naturelle",
+        "en": "Natural Attack",
+        "es": "Ataque Natural",
+        "pt": "Ataque Natural",
+        "picture": "https://vertylo.github.io/wakassets/spells/2288.png"
+      },
+      {
+        "id": 6970,
+        "fr": "Magma",
+        "en": "Magma",
+        "es": "Magma",
+        "pt": "Magma",
+        "picture": "https://vertylo.github.io/wakassets/spells/2289.png"
+      },
+      {
+        "id": 6971,
+        "fr": "Volcan",
+        "en": "Volcano",
+        "es": "Volcán",
+        "pt": "Vulcão",
+        "picture": "https://vertylo.github.io/wakassets/spells/2290.png"
+      },
+      {
+        "id": 6977,
+        "fr": "Frappe tellurique",
+        "en": "Telluric Whack",
+        "es": "Golpe Telúrico",
+        "pt": "Golpe Telúrico",
+        "picture": "https://vertylo.github.io/wakassets/spells/661.png"
+      },
+      {
+        "id": 6978,
+        "fr": "Orbe défensif",
+        "en": "Defensive Orb",
+        "es": "Orbe Defensivo",
+        "pt": "Orbe Defensivo",
+        "picture": "https://vertylo.github.io/wakassets/spells/2372.png"
+      },
+      {
+        "id": 6979,
+        "fr": "Bastion",
+        "en": "Bastion",
+        "es": "Bastión",
+        "pt": "Bastião",
+        "picture": "https://vertylo.github.io/wakassets/spells/6979.png"
+      },
+      {
+        "id": 6980,
+        "fr": "Rempart",
+        "en": "Rampart",
+        "es": "Muralla",
+        "pt": "Muralha",
+        "picture": "https://vertylo.github.io/wakassets/spells/6980.png"
+      },
+      {
+        "id": 6981,
+        "fr": "Bâton",
+        "en": "Staff",
+        "es": "Bastón",
+        "pt": "Bastão",
+        "picture": "https://vertylo.github.io/wakassets/spells/2373.png"
+      },
+      {
+        "id": 6982,
+        "fr": "Immunité",
+        "en": "Immunity",
+        "es": "Inmune",
+        "pt": "Imunidade",
+        "picture": "https://vertylo.github.io/wakassets/spells/5243.png"
+      },
+      {
+        "id": 6983,
+        "fr": "Trêve",
+        "en": "Truce",
+        "es": "Tregua",
+        "pt": "Trégua",
+        "picture": "https://vertylo.github.io/wakassets/spells/665.png"
+      },
+      {
+        "id": 6984,
+        "fr": "Pacification",
+        "en": "Pacification",
+        "es": "Pacificación",
+        "pt": "Pacificação",
+        "picture": "https://vertylo.github.io/wakassets/spells/2274.png"
+      },
+      {
+        "id": 6985,
+        "fr": "Provocation",
+        "en": "Provocation",
+        "es": "Provocación",
+        "pt": "Provocação",
+        "picture": "https://vertylo.github.io/wakassets/spells/2273.png"
+      },
+      {
+        "id": 6986,
+        "fr": "Égide",
+        "en": "Aegis",
+        "es": "Égida",
+        "pt": "Égide",
+        "picture": "https://vertylo.github.io/wakassets/spells/634.png"
+      },
+      {
+        "id": 6987,
+        "fr": "Magnétisme",
+        "en": "Magnetism",
+        "es": "Magnetismo",
+        "pt": "Magnetismo",
+        "picture": "https://vertylo.github.io/wakassets/spells/1824.png"
+      }
+    ]
+  },
+  {
+    "breedName": "osamodas",
+    "breedId": 2,
+    "spells": [
+      {
+        "id": 7317,
+        "fr": "Fouet",
+        "en": "Whip",
+        "es": "Látigo",
+        "pt": "Chicote",
+        "picture": "https://vertylo.github.io/wakassets/spells/7317.png"
+      },
+      {
+        "id": 7318,
+        "fr": "Déplumage",
+        "en": "Plucking",
+        "es": "Desplume",
+        "pt": "Depenagem",
+        "picture": "https://vertylo.github.io/wakassets/spells/7318.png"
+      },
+      {
+        "id": 7319,
+        "fr": "Transfert",
+        "en": "Transfer",
+        "es": "Transferencia",
+        "pt": "Transferência",
+        "picture": "https://vertylo.github.io/wakassets/spells/7319.png"
+      },
+      {
+        "id": 7320,
+        "fr": "Souffle répulsif",
+        "en": "Repulsive Breath",
+        "es": "Soplido Repulsivo",
+        "pt": "Sopro Repulsivo",
+        "picture": "https://vertylo.github.io/wakassets/spells/7320.png"
+      },
+      {
+        "id": 7321,
+        "fr": "Tornade de plumes",
+        "en": "Feather Tornado",
+        "es": "Tornado de Plumas",
+        "pt": "Tornado de Penas",
+        "picture": "https://vertylo.github.io/wakassets/spells/7321.png"
+      },
+      {
+        "id": 7307,
+        "fr": "Corbeau incendiaire",
+        "en": "Incendiary Crow",
+        "es": "Cuervo Incendiario",
+        "pt": "Corvo Incendiário",
+        "picture": "https://vertylo.github.io/wakassets/spells/7307.png"
+      },
+      {
+        "id": 7308,
+        "fr": "Fouet enflammé",
+        "en": "Flaming Whip",
+        "es": "Látigo Flamígero",
+        "pt": "Chicote Flamejante",
+        "picture": "https://vertylo.github.io/wakassets/spells/7308.png"
+      },
+      {
+        "id": 7309,
+        "fr": "Tornade de flammes",
+        "en": "Flame Tornado",
+        "es": "Tornado de Llamas",
+        "pt": "Tornado de Chamas",
+        "picture": "https://vertylo.github.io/wakassets/spells/7309.png"
+      },
+      {
+        "id": 7310,
+        "fr": "Attisement",
+        "en": "Fanning",
+        "es": "Atizamiento",
+        "pt": "Atiçamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/7310.png"
+      },
+      {
+        "id": 7311,
+        "fr": "Souffle du dragon",
+        "en": "Dragon's Breath",
+        "es": "Soplido del Dragón",
+        "pt": "Sopro do Dragão",
+        "picture": "https://vertylo.github.io/wakassets/spells/7311.png"
+      },
+      {
+        "id": 7312,
+        "fr": "Tempête de sable",
+        "en": "Sandstorm",
+        "es": "Tormenta de Arena",
+        "pt": "Tempestade de Areia",
+        "picture": "https://vertylo.github.io/wakassets/spells/7312.png"
+      },
+      {
+        "id": 7313,
+        "fr": "Pesanteur",
+        "en": "Gravity",
+        "es": "Pesante",
+        "pt": "Gravidade",
+        "picture": "https://vertylo.github.io/wakassets/spells/7313.png"
+      },
+      {
+        "id": 7314,
+        "fr": "Empalement",
+        "en": "Impalement",
+        "es": "Empalamiento",
+        "pt": "Empalamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/7314.png"
+      },
+      {
+        "id": 7315,
+        "fr": "Gambade",
+        "en": "Gambol",
+        "es": "Brinco",
+        "pt": "Rondada",
+        "picture": "https://vertylo.github.io/wakassets/spells/7315.png"
+      },
+      {
+        "id": 7316,
+        "fr": "Frappe du craqueleur",
+        "en": "Crackler Punch",
+        "es": "Golpe del Crujidor",
+        "pt": "Golpe do Smagador",
+        "picture": "https://vertylo.github.io/wakassets/spells/7316.png"
+      },
+      {
+        "id": 7322,
+        "fr": "Dernier souffle",
+        "en": "Last Breath",
+        "es": "Último Aliento",
+        "pt": "Último Suspiro",
+        "picture": "https://vertylo.github.io/wakassets/spells/7322.png"
+      },
+      {
+        "id": 7323,
+        "fr": "Piqure motivante",
+        "en": "Motivating Shot",
+        "es": "Chute Motivador",
+        "pt": "Picada Motivante",
+        "picture": "https://vertylo.github.io/wakassets/spells/7323.png"
+      },
+      {
+        "id": 7324,
+        "fr": "Célérité",
+        "en": "Velocity",
+        "es": "Celeridad",
+        "pt": "Velocidade",
+        "picture": "https://vertylo.github.io/wakassets/spells/7324.png"
+      },
+      {
+        "id": 7325,
+        "fr": "Cri affaiblissant",
+        "en": "Weakening Cry",
+        "es": "Grito Debilitador",
+        "pt": "Grito Enfraquecedor",
+        "picture": "https://vertylo.github.io/wakassets/spells/7325.png"
+      },
+      {
+        "id": 7326,
+        "fr": "Relais",
+        "en": "Relay",
+        "es": "Relevo",
+        "pt": "Transmissor",
+        "picture": "https://vertylo.github.io/wakassets/spells/7326.png"
+      },
+      {
+        "id": 7327,
+        "fr": "Lien animal",
+        "en": "Animal Link",
+        "es": "Vínculo Animal",
+        "pt": "Elo Animal",
+        "picture": "https://vertylo.github.io/wakassets/spells/7327.png"
+      }
+    ]
+  },
+  {
+    "breedName": "enutrof",
+    "breedId": 3,
+    "spells": [
+      {
+        "id": 2015,
+        "fr": "Filouterie",
+        "en": "Rascalry",
+        "es": "Timo",
+        "pt": "Patifaria",
+        "picture": "https://vertylo.github.io/wakassets/spells/2015.png"
+      },
+      {
+        "id": 2032,
+        "fr": "Purge",
+        "en": "Purge",
+        "es": "Purga",
+        "pt": "Purgação",
+        "picture": "https://vertylo.github.io/wakassets/spells/2032.png"
+      },
+      {
+        "id": 2014,
+        "fr": "Coupures",
+        "en": "Cutting",
+        "es": "Cortes",
+        "pt": "Cortes",
+        "picture": "https://vertylo.github.io/wakassets/spells/2014.png"
+      },
+      {
+        "id": 2016,
+        "fr": "Taxe",
+        "en": "Tax",
+        "es": "Impuesto",
+        "pt": "Taxa",
+        "picture": "https://vertylo.github.io/wakassets/spells/2016.png"
+      },
+      {
+        "id": 2017,
+        "fr": "Epuration",
+        "en": "Refinement",
+        "es": "Depuración",
+        "pt": "Refinamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/2017.png"
+      },
+      {
+        "id": 2021,
+        "fr": "Braise",
+        "en": "Ember",
+        "es": "Brasas",
+        "pt": "Brasas",
+        "picture": "https://vertylo.github.io/wakassets/spells/2021.png"
+      },
+      {
+        "id": 2019,
+        "fr": "Météore",
+        "en": "Meteor",
+        "es": "Meteoro",
+        "pt": "Meteoro",
+        "picture": "https://vertylo.github.io/wakassets/spells/2019.png"
+      },
+      {
+        "id": 2018,
+        "fr": "Fusion",
+        "en": "Fusion",
+        "es": "Fusión",
+        "pt": "Fusão",
+        "picture": "https://vertylo.github.io/wakassets/spells/2018.png"
+      },
+      {
+        "id": 2037,
+        "fr": "Coup de grisou",
+        "en": "Firedamp Explosion",
+        "es": "Explosión de Grisú",
+        "pt": "Explosão de Grisu",
+        "picture": "https://vertylo.github.io/wakassets/spells/2037.png"
+      },
+      {
+        "id": 2022,
+        "fr": "Coulée de lave",
+        "en": "Hot Magma",
+        "es": "Río de Lava",
+        "pt": "Torrente de Lava",
+        "picture": "https://vertylo.github.io/wakassets/spells/2022.png"
+      },
+      {
+        "id": 2008,
+        "fr": "Pelle du jugement",
+        "en": "Shovel of Judgment",
+        "es": "Pala del Juicio",
+        "pt": "Pá do Julgamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/693.png"
+      },
+      {
+        "id": 2010,
+        "fr": "Pelle tueuse",
+        "en": "Killer Spade",
+        "es": "Pala Asesina",
+        "pt": "Pá Assassina",
+        "picture": "https://vertylo.github.io/wakassets/spells/2010.png"
+      },
+      {
+        "id": 2011,
+        "fr": "Roulage de pelle",
+        "en": "Shovel Kiss",
+        "es": "Jarabe de Pala",
+        "pt": "Pá Virada",
+        "picture": "https://vertylo.github.io/wakassets/spells/2011.png"
+      },
+      {
+        "id": 2012,
+        "fr": "Pelle mêle",
+        "en": "Shady Shovel",
+        "es": "Pala Drona",
+        "pt": "Pá Sombria",
+        "picture": "https://vertylo.github.io/wakassets/spells/2012.png"
+      },
+      {
+        "id": 2013,
+        "fr": "Pelle sismique",
+        "en": "Shovel Shaker",
+        "es": "Pala Sísmica",
+        "pt": "Pá Sísmica",
+        "picture": "https://vertylo.github.io/wakassets/spells/2013.png"
+      },
+      {
+        "id": 6324,
+        "fr": "Accélération",
+        "en": "Acceleration",
+        "es": "Aceleración",
+        "pt": "Aceleração",
+        "picture": "https://vertylo.github.io/wakassets/spells/848.png"
+      },
+      {
+        "id": 6337,
+        "fr": "Maladresse",
+        "en": "Clumsiness",
+        "es": "Torpeza",
+        "pt": "Desastre",
+        "picture": "https://vertylo.github.io/wakassets/spells/696.png"
+      },
+      {
+        "id": 8240,
+        "fr": "Avarice",
+        "en": "Miserliness",
+        "es": "Avaricia",
+        "pt": "Avareza",
+        "picture": "https://vertylo.github.io/wakassets/spells/8240.png"
+      },
+      {
+        "id": 2064,
+        "fr": "Force de l'âge",
+        "en": "Prime of Life",
+        "es": "Fuerza de la Edad",
+        "pt": "Flor da Idade",
+        "picture": "https://vertylo.github.io/wakassets/spells/2064.png"
+      },
+      {
+        "id": 2026,
+        "fr": "Richesse sismique",
+        "en": "Seismic Wealth",
+        "es": "Riqueza Sísmica",
+        "pt": "Riqueza Sísmica",
+        "picture": "https://vertylo.github.io/wakassets/spells/2026.png"
+      },
+      {
+        "id": 8242,
+        "fr": "Corruption",
+        "en": "Corruption",
+        "es": "Corrupción",
+        "pt": "Corrupção",
+        "picture": "https://vertylo.github.io/wakassets/spells/8242.png"
+      }
+    ]
+  },
+  {
+    "breedName": "sram",
+    "breedId": 4,
+    "spells": [
+      {
+        "id": 4588,
+        "fr": "Premier Sang",
+        "en": "First Blood",
+        "es": "Primer Sangrado",
+        "pt": "Eliminação Sangrenta",
+        "picture": "https://vertylo.github.io/wakassets/spells/2423.png"
+      },
+      {
+        "id": 4590,
+        "fr": "Ouvrir les veines",
+        "en": "Cold Blood",
+        "es": "Abrir las Venas",
+        "pt": "Abrir as Veias",
+        "picture": "https://vertylo.github.io/wakassets/spells/2422.png"
+      },
+      {
+        "id": 4587,
+        "fr": "Saignée mortelle",
+        "en": "Bled Dry",
+        "es": "Sangría Mortal",
+        "pt": "Sangria Mortal",
+        "picture": "https://vertylo.github.io/wakassets/spells/2425.png"
+      },
+      {
+        "id": 4589,
+        "fr": "Châtiment",
+        "en": "Punishment",
+        "es": "Castigo",
+        "pt": "Castigo",
+        "picture": "https://vertylo.github.io/wakassets/spells/2424.png"
+      },
+      {
+        "id": 4586,
+        "fr": "Mise à mort",
+        "en": "Execution",
+        "es": "Ejecución",
+        "pt": "Execução",
+        "picture": "https://vertylo.github.io/wakassets/spells/2426.png"
+      },
+      {
+        "id": 4584,
+        "fr": "Kleptosram",
+        "en": "Kleptosram",
+        "es": "Cleptosram",
+        "pt": "Cleptosram",
+        "picture": "https://vertylo.github.io/wakassets/spells/2418.png"
+      },
+      {
+        "id": 4579,
+        "fr": "Arnaque",
+        "en": "Scam",
+        "es": "Estafa",
+        "pt": "Burla",
+        "picture": "https://vertylo.github.io/wakassets/spells/2419.png"
+      },
+      {
+        "id": 4583,
+        "fr": "Attaque létale",
+        "en": "Rascalry",
+        "es": "Timo",
+        "pt": "Patifaria",
+        "picture": "https://vertylo.github.io/wakassets/spells/2421.png"
+      },
+      {
+        "id": 4585,
+        "fr": "Attaque perfide",
+        "en": "Perfidious Attack",
+        "es": "Ataque Pérfido",
+        "pt": "Ataque Pérfido",
+        "picture": "https://vertylo.github.io/wakassets/spells/2417.png"
+      },
+      {
+        "id": 4581,
+        "fr": "Attaque mortelle",
+        "en": "Swindlesram",
+        "es": "Esramtafa",
+        "pt": "Srambuste",
+        "picture": "https://vertylo.github.io/wakassets/spells/2420.png"
+      },
+      {
+        "id": 4594,
+        "fr": "Coup pénétrant",
+        "en": "Forceful Blow",
+        "es": "Golpe Penetrante",
+        "pt": "Golpe Enérgico",
+        "picture": "https://vertylo.github.io/wakassets/spells/4594.png"
+      },
+      {
+        "id": 4595,
+        "fr": "Fourberie",
+        "en": "Wily",
+        "es": "Engaño",
+        "pt": "Perfídia",
+        "picture": "https://vertylo.github.io/wakassets/spells/4595.png"
+      },
+      {
+        "id": 4593,
+        "fr": "Coup Sournois",
+        "en": "Tricky Blow",
+        "es": "Golpe Solapado",
+        "pt": "Golpe Dissimulado",
+        "picture": "https://vertylo.github.io/wakassets/spells/2428.png"
+      },
+      {
+        "id": 4596,
+        "fr": "Effroi",
+        "en": "Fear",
+        "es": "Miedo",
+        "pt": "Medo",
+        "picture": "https://vertylo.github.io/wakassets/spells/2427.png"
+      },
+      {
+        "id": 4592,
+        "fr": "Traumatisme",
+        "en": "Trauma",
+        "es": "Traumatismo",
+        "pt": "Trauma",
+        "picture": "https://vertylo.github.io/wakassets/spells/2431.png"
+      },
+      {
+        "id": 8479,
+        "fr": "Peur",
+        "en": "Peur",
+        "es": "Peur",
+        "pt": "Peur",
+        "picture": "https://vertylo.github.io/wakassets/spells/581.png"
+      },
+      {
+        "id": 4601,
+        "fr": "Galopade",
+        "en": "Scram",
+        "es": "Galopada",
+        "pt": "Galopada",
+        "picture": "https://vertylo.github.io/wakassets/spells/2434.png"
+      },
+      {
+        "id": 8481,
+        "fr": "Entourloupe",
+        "en": "Entourloupe",
+        "es": "Entourloupe",
+        "pt": "Entourloupe",
+        "picture": "https://vertylo.github.io/wakassets/spells/2435.png"
+      },
+      {
+        "id": 4597,
+        "fr": "Sournoiserie",
+        "en": "Shadow Trap",
+        "es": "Sombra Trampa",
+        "pt": "Armadilha das Sombras",
+        "picture": "https://vertylo.github.io/wakassets/spells/2433.png"
+      },
+      {
+        "id": 6850,
+        "fr": "Assassinat",
+        "en": "Assassination",
+        "es": "Asesinato",
+        "pt": "Assassinato",
+        "picture": "https://vertylo.github.io/wakassets/spells/579.png"
+      },
+      {
+        "id": 4602,
+        "fr": "Surineur",
+        "en": "Stabber",
+        "es": "Destripador",
+        "pt": "Apunhalador",
+        "picture": "https://vertylo.github.io/wakassets/spells/2436.png"
+      }
+    ]
+  },
+  {
+    "breedName": "xelor",
+    "breedId": 5,
+    "spells": [
+      {
+        "id": 749,
+        "fr": "Martel'heure",
+        "en": "Hammhour",
+        "es": "Martillhora",
+        "pt": "Martel’hora",
+        "picture": "https://vertylo.github.io/wakassets/spells/749.png"
+      },
+      {
+        "id": 775,
+        "fr": "Ralentissement",
+        "en": "Slow Down",
+        "es": "Ralentización",
+        "pt": "Desaceleração",
+        "picture": "https://vertylo.github.io/wakassets/spells/775.png"
+      },
+      {
+        "id": 763,
+        "fr": "Horloge",
+        "en": "Clock",
+        "es": "Reloj",
+        "pt": "Relógio",
+        "picture": "https://vertylo.github.io/wakassets/spells/763.png"
+      },
+      {
+        "id": 783,
+        "fr": "Sablier",
+        "en": "Sandglass",
+        "es": "Reloj de Arena",
+        "pt": "Ampulheta",
+        "picture": "https://vertylo.github.io/wakassets/spells/783.png"
+      },
+      {
+        "id": 1417,
+        "fr": "Désynchronisation",
+        "en": "Desynchronization",
+        "es": "Desincronización",
+        "pt": "Dessincronização",
+        "picture": "https://vertylo.github.io/wakassets/spells/1417.png"
+      },
+      {
+        "id": 767,
+        "fr": "Pointe-heure",
+        "en": "Underhand",
+        "es": "Hora Punta",
+        "pt": "Hora de Ponta",
+        "picture": "https://vertylo.github.io/wakassets/spells/767.png"
+      },
+      {
+        "id": 765,
+        "fr": "Tempus fugit",
+        "en": "Tempus Fugit",
+        "es": "Tempus Fugit",
+        "pt": "Tempus Fugit",
+        "picture": "https://vertylo.github.io/wakassets/spells/765.png"
+      },
+      {
+        "id": 1418,
+        "fr": "Paradoxe",
+        "en": "Paradox",
+        "es": "Paradoja",
+        "pt": "Paradoxo",
+        "picture": "https://vertylo.github.io/wakassets/spells/1418.png"
+      },
+      {
+        "id": 772,
+        "fr": "Symétrie",
+        "en": "Symmetry",
+        "es": "Simetría",
+        "pt": "Simetria",
+        "picture": "https://vertylo.github.io/wakassets/spells/772.png"
+      },
+      {
+        "id": 771,
+        "fr": "Retour spontané",
+        "en": "Spontaneous Return",
+        "es": "Regreso Espontáneo",
+        "pt": "Retorno Espontâneo",
+        "picture": "https://vertylo.github.io/wakassets/spells/771.png"
+      },
+      {
+        "id": 750,
+        "fr": "Perturbation",
+        "en": "Disruption",
+        "es": "Perturbación",
+        "pt": "Perturbação",
+        "picture": "https://vertylo.github.io/wakassets/spells/750.png"
+      },
+      {
+        "id": 751,
+        "fr": "Suspension",
+        "en": "Suspension",
+        "es": "Suspensión",
+        "pt": "Suspensão",
+        "picture": "https://vertylo.github.io/wakassets/spells/7156.png"
+      },
+      {
+        "id": 752,
+        "fr": "Éclair obscur",
+        "en": "Dark Bolt",
+        "es": "Rayoscuro",
+        "pt": "Relâmpago Obscuro",
+        "picture": "https://vertylo.github.io/wakassets/spells/752.png"
+      },
+      {
+        "id": 754,
+        "fr": "Aiguille",
+        "en": "Hand",
+        "es": "Aguja",
+        "pt": "Ponteiro",
+        "picture": "https://vertylo.github.io/wakassets/spells/754.png"
+      },
+      {
+        "id": 753,
+        "fr": "Poussière",
+        "en": "Dust",
+        "es": "Polvo",
+        "pt": "Poeira",
+        "picture": "https://vertylo.github.io/wakassets/spells/753.png"
+      },
+      {
+        "id": 2839,
+        "fr": "Dévouement",
+        "en": "Devotion",
+        "es": "Devoción",
+        "pt": "Devoção",
+        "picture": "https://vertylo.github.io/wakassets/spells/2839.png"
+      },
+      {
+        "id": 776,
+        "fr": "Contre la montre",
+        "en": "Against the Clock",
+        "es": "Contrarreloj",
+        "pt": "Contra o relógio",
+        "picture": "https://vertylo.github.io/wakassets/spells/776.png"
+      },
+      {
+        "id": 777,
+        "fr": "Sinistro",
+        "en": "Sinistro",
+        "es": "Sinistro",
+        "pt": "Sinistro",
+        "picture": "https://vertylo.github.io/wakassets/spells/777.png"
+      },
+      {
+        "id": 766,
+        "fr": "Rouage",
+        "en": "Cog",
+        "es": "Rueda Dentada",
+        "pt": "Roda Dentada",
+        "picture": "https://vertylo.github.io/wakassets/spells/766.png"
+      },
+      {
+        "id": 757,
+        "fr": "Prémonition",
+        "en": "Premonition",
+        "es": "Premonición",
+        "pt": "Premonição",
+        "picture": "https://vertylo.github.io/wakassets/spells/757.png"
+      },
+      {
+        "id": 5344,
+        "fr": "Régulateur",
+        "en": "Regulator",
+        "es": "Regulador",
+        "pt": "Regulador",
+        "picture": "https://vertylo.github.io/wakassets/spells/5344.png"
+      }
+    ]
+  },
+  {
+    "breedName": "ecaflip",
+    "breedId": 6,
+    "spells": [
+      {
+        "id": 2065,
+        "fr": "Langue rapeuse",
+        "en": "Rough Tongue",
+        "es": "Lengua Raspadora",
+        "pt": "Língua Áspera",
+        "picture": "https://vertylo.github.io/wakassets/spells/2065.png"
+      },
+      {
+        "id": 2066,
+        "fr": "Lacérations",
+        "en": "Up to Scratch",
+        "es": "Laceraciones",
+        "pt": "Lacerações",
+        "picture": "https://vertylo.github.io/wakassets/spells/2066.png"
+      },
+      {
+        "id": 2067,
+        "fr": "Capucine",
+        "en": "Fleahopper",
+        "es": "Pulga Arcito",
+        "pt": "Pulgarzinho",
+        "picture": "https://vertylo.github.io/wakassets/spells/2067.png"
+      },
+      {
+        "id": 2072,
+        "fr": "Bas les pattes",
+        "en": "Paws Off",
+        "es": "¡Zarpas Quietas!",
+        "pt": "Tira a Pata",
+        "picture": "https://vertylo.github.io/wakassets/spells/2072.png"
+      },
+      {
+        "id": 2073,
+        "fr": "Pupuce",
+        "en": "Fleeflee",
+        "es": "Pulguita",
+        "pt": "Pupulga",
+        "picture": "https://vertylo.github.io/wakassets/spells/2073.png"
+      },
+      {
+        "id": 2045,
+        "fr": "Craps",
+        "en": "Craps",
+        "es": "Craps",
+        "pt": "Craps",
+        "picture": "https://vertylo.github.io/wakassets/spells/2045.png"
+      },
+      {
+        "id": 2050,
+        "fr": "Dé du chateux",
+        "en": "Loaded Dice",
+        "es": "Dado Gatuno",
+        "pt": "Dados Adulterados",
+        "picture": "https://vertylo.github.io/wakassets/spells/2042.png"
+      },
+      {
+        "id": 2042,
+        "fr": "Dé six",
+        "en": "D-Six",
+        "es": "Dado Seis",
+        "pt": "Dado Seis",
+        "picture": "https://vertylo.github.io/wakassets/spells/2050.png"
+      },
+      {
+        "id": 2048,
+        "fr": "Roulette à dés",
+        "en": "Dice Roulette",
+        "es": "Ruleta de Dados",
+        "pt": "Roleta de Dados",
+        "picture": "https://vertylo.github.io/wakassets/spells/2048.png"
+      },
+      {
+        "id": 2046,
+        "fr": "Feulement",
+        "en": "Yowling",
+        "es": "Bufido",
+        "pt": "Rugido Felino",
+        "picture": "https://vertylo.github.io/wakassets/spells/2046.png"
+      },
+      {
+        "id": 2041,
+        "fr": "Pile ou face",
+        "en": "Heads or Tails",
+        "es": "Cara o Cruz",
+        "pt": "Cara ou Coroa",
+        "picture": "https://vertylo.github.io/wakassets/spells/2041.png"
+      },
+      {
+        "id": 2047,
+        "fr": "All in",
+        "en": "All In",
+        "es": "All In",
+        "pt": "All In",
+        "picture": "https://vertylo.github.io/wakassets/spells/2047.png"
+      },
+      {
+        "id": 2049,
+        "fr": "Bataille",
+        "en": "Battle",
+        "es": "Batalla",
+        "pt": "Batalha Numérica",
+        "picture": "https://vertylo.github.io/wakassets/spells/2049.png"
+      },
+      {
+        "id": 2043,
+        "fr": "Tout ou rien",
+        "en": "All or Nothing",
+        "es": "Todo o Nada",
+        "pt": "Tudo ou Nada",
+        "picture": "https://vertylo.github.io/wakassets/spells/2043.png"
+      },
+      {
+        "id": 2044,
+        "fr": "Trois cartes",
+        "en": "Three Cards",
+        "es": "Tres Cartas",
+        "pt": "Três Cartas",
+        "picture": "https://vertylo.github.io/wakassets/spells/2044.png"
+      },
+      {
+        "id": 2060,
+        "fr": "Quitte ou double",
+        "en": "Double or Quits",
+        "es": "Doble o Nada",
+        "pt": "Dobro ou Nada",
+        "picture": "https://vertylo.github.io/wakassets/spells/859.png"
+      },
+      {
+        "id": 2075,
+        "fr": "Topkaj",
+        "en": "Topkaj",
+        "es": "Topkaj",
+        "pt": "Topkaj",
+        "picture": "https://vertylo.github.io/wakassets/spells/2075.png"
+      },
+      {
+        "id": 2061,
+        "fr": "Félintuition",
+        "en": "Felintuition",
+        "es": "Felintuición",
+        "pt": "Felintuição",
+        "picture": "https://vertylo.github.io/wakassets/spells/2061.png"
+      },
+      {
+        "id": 2078,
+        "fr": "Jeton de vie",
+        "en": "Life Token",
+        "es": "Ficha de Vida",
+        "pt": "Ficha de Vida",
+        "picture": "https://vertylo.github.io/wakassets/spells/2078.png"
+      },
+      {
+        "id": 2079,
+        "fr": "Coup du sort",
+        "en": "Spell Strike",
+        "es": "Mala Suerte",
+        "pt": "Feitiço do Destino",
+        "picture": "https://vertylo.github.io/wakassets/spells/850.png"
+      },
+      {
+        "id": 7225,
+        "fr": "Trèfle",
+        "en": "Clubs",
+        "es": "Trébol",
+        "pt": "Paus",
+        "picture": "https://vertylo.github.io/wakassets/spells/861.png"
+      }
+    ]
+  },
+  {
+    "breedName": "eniripsa",
+    "breedId": 7,
+    "spells": [
+      {
+        "id": 1533,
+        "fr": "Vivification",
+        "en": "Invigoration",
+        "es": "Vivificación",
+        "pt": "Vivificação",
+        "picture": "https://vertylo.github.io/wakassets/spells/649.png"
+      },
+      {
+        "id": 779,
+        "fr": "Mot soignant",
+        "en": "Healing Word",
+        "es": "Palabra Sanadora",
+        "pt": "Palavra Curativa",
+        "picture": "https://vertylo.github.io/wakassets/spells/779.png"
+      },
+      {
+        "id": 1532,
+        "fr": "Infusion",
+        "en": "Infusion",
+        "es": "Infusión",
+        "pt": "Infusão",
+        "picture": "https://vertylo.github.io/wakassets/spells/1532.png"
+      },
+      {
+        "id": 780,
+        "fr": "Revitalisation",
+        "en": "Revitalization",
+        "es": "Revitalización",
+        "pt": "Revitalização",
+        "picture": "https://vertylo.github.io/wakassets/spells/780.png"
+      },
+      {
+        "id": 625,
+        "fr": "Reconstitution",
+        "en": "Regeneration",
+        "es": "Reconstitución",
+        "pt": "Reconstituição",
+        "picture": "https://vertylo.github.io/wakassets/spells/625.png"
+      },
+      {
+        "id": 630,
+        "fr": "Anatomie",
+        "en": "Anatomy",
+        "es": "Anatomía",
+        "pt": "Anatomia",
+        "picture": "https://vertylo.github.io/wakassets/spells/630.png"
+      },
+      {
+        "id": 1540,
+        "fr": "Psychose",
+        "en": "Psychosis",
+        "es": "Psicosis",
+        "pt": "Psicose",
+        "picture": "https://vertylo.github.io/wakassets/spells/1540.png"
+      },
+      {
+        "id": 623,
+        "fr": "Colli-mateur",
+        "en": "Cross-Airs",
+        "es": "Colimador",
+        "pt": "Coli-mador",
+        "picture": "https://vertylo.github.io/wakassets/spells/623.png"
+      },
+      {
+        "id": 1542,
+        "fr": "Fiole infectée",
+        "en": "Infected Flask",
+        "es": "Matraz Infectado",
+        "pt": "Frasco Infectado",
+        "picture": "https://vertylo.github.io/wakassets/spells/1542.png"
+      },
+      {
+        "id": 1541,
+        "fr": "Torpeur",
+        "en": "Lethargy",
+        "es": "Aletargamiento",
+        "pt": "Torpor",
+        "picture": "https://vertylo.github.io/wakassets/spells/1541.png"
+      },
+      {
+        "id": 645,
+        "fr": "Explo-soin",
+        "en": "Heal-splosion",
+        "es": "Explosana",
+        "pt": "Explo-são",
+        "picture": "https://vertylo.github.io/wakassets/spells/645.png"
+      },
+      {
+        "id": 1539,
+        "fr": "Cure alternative",
+        "en": "Alternative Cure",
+        "es": "Cura Alternativa",
+        "pt": "Cura Alternativa",
+        "picture": "https://vertylo.github.io/wakassets/spells/1539.png"
+      },
+      {
+        "id": 638,
+        "fr": "Feu gardien",
+        "en": "Guardian Fire",
+        "es": "Fuego Guardián",
+        "pt": "Fogo Guardião",
+        "picture": "https://vertylo.github.io/wakassets/spells/638.png"
+      },
+      {
+        "id": 636,
+        "fr": "Corro-soin",
+        "en": "Corrosive Heal",
+        "es": "Corrosana",
+        "pt": "Corro-são",
+        "picture": "https://vertylo.github.io/wakassets/spells/636.png"
+      },
+      {
+        "id": 1534,
+        "fr": "Flamme purificatrice",
+        "en": "Purifying Flame",
+        "es": "Llama Purificadora",
+        "pt": "Chama Purificadora",
+        "picture": "https://vertylo.github.io/wakassets/spells/1534.png"
+      },
+      {
+        "id": 1535,
+        "fr": "Rénisurrection",
+        "en": "Eniraser",
+        "es": "Anisurrección",
+        "pt": "Renissurreição",
+        "picture": "https://vertylo.github.io/wakassets/spells/624.png"
+      },
+      {
+        "id": 782,
+        "fr": "Jouvence",
+        "en": "Fountain of Youth",
+        "es": "Juventud",
+        "pt": "Juventude",
+        "picture": "https://vertylo.github.io/wakassets/spells/782.png"
+      },
+      {
+        "id": 781,
+        "fr": "Lien d'amitié",
+        "en": "Bond of Friendship",
+        "es": "Vínculo de Amistad",
+        "pt": "Laço de Amizade",
+        "picture": "https://vertylo.github.io/wakassets/spells/781.png"
+      },
+      {
+        "id": 627,
+        "fr": "Déphasage",
+        "en": "Transcendence",
+        "es": "Desfase",
+        "pt": "Defasagem",
+        "picture": "https://vertylo.github.io/wakassets/spells/627.png"
+      },
+      {
+        "id": 1538,
+        "fr": "Interdiction",
+        "en": "Ban",
+        "es": "Prohibición",
+        "pt": "Proibição",
+        "picture": "https://vertylo.github.io/wakassets/spells/1538.png"
+      },
+      {
+        "id": 7985,
+        "fr": "Fontaine salvatrice",
+        "en": "Life-Saving Fountain",
+        "es": "Fuente salvadora",
+        "pt": "Fonte Salvadora",
+        "picture": "https://vertylo.github.io/wakassets/spells/7985.png"
+      }
+    ]
+  },
+  {
+    "breedName": "iop",
+    "breedId": 8,
+    "spells": [
+      {
+        "id": 4778,
+        "fr": "Épée céleste",
+        "en": "Celestial Sword",
+        "es": "Espada Celeste",
+        "pt": "Espada Celestial",
+        "picture": "https://vertylo.github.io/wakassets/spells/518.png"
+      },
+      {
+        "id": 4775,
+        "fr": "Fulgur",
+        "en": "Thunderbolt",
+        "es": "Fulgor",
+        "pt": "Fulgor",
+        "picture": "https://vertylo.github.io/wakassets/spells/514.png"
+      },
+      {
+        "id": 4777,
+        "fr": "Super Iop Punch",
+        "en": "Super Iop Punch",
+        "es": "Súper Puño Yopuka",
+        "pt": "Supersoco de Iop",
+        "picture": "https://vertylo.github.io/wakassets/spells/516.png"
+      },
+      {
+        "id": 4776,
+        "fr": "Jugement",
+        "en": "Judgment",
+        "es": "Juicio",
+        "pt": "Sentença",
+        "picture": "https://vertylo.github.io/wakassets/spells/515.png"
+      },
+      {
+        "id": 4779,
+        "fr": "Colère de Iop",
+        "en": "Iop's Wrath",
+        "es": "Ira de Yopuka",
+        "pt": "Ira de Iop",
+        "picture": "https://vertylo.github.io/wakassets/spells/519.png"
+      },
+      {
+        "id": 4780,
+        "fr": "Ébranler",
+        "en": "Shaker",
+        "es": "Sacudida",
+        "pt": "Sacudida",
+        "picture": "https://vertylo.github.io/wakassets/spells/492.png"
+      },
+      {
+        "id": 4781,
+        "fr": "Roknocerok",
+        "en": "Rocknoceros",
+        "es": "Lanza Rocas",
+        "pt": "Roknocerrok",
+        "picture": "https://vertylo.github.io/wakassets/spells/495.png"
+      },
+      {
+        "id": 4782,
+        "fr": "Fendoir",
+        "en": "Cleaver",
+        "es": "Cuchillo de Carnicero",
+        "pt": "Rachador",
+        "picture": "https://vertylo.github.io/wakassets/spells/505.png"
+      },
+      {
+        "id": 4783,
+        "fr": "Charge",
+        "en": "Charge",
+        "es": "Carga",
+        "pt": "Carga",
+        "picture": "https://vertylo.github.io/wakassets/spells/507.png"
+      },
+      {
+        "id": 4784,
+        "fr": "Ravage",
+        "en": "Devastate",
+        "es": "Estragos",
+        "pt": "Devastação",
+        "picture": "https://vertylo.github.io/wakassets/spells/508.png"
+      },
+      {
+        "id": 4785,
+        "fr": "Jabs",
+        "en": "Jabs",
+        "es": "Jabs",
+        "pt": "Jabs",
+        "picture": "https://vertylo.github.io/wakassets/spells/509.png"
+      },
+      {
+        "id": 4786,
+        "fr": "Rafale",
+        "en": "Flurry",
+        "es": "Ráfaga",
+        "pt": "Rajada",
+        "picture": "https://vertylo.github.io/wakassets/spells/501.png"
+      },
+      {
+        "id": 4787,
+        "fr": "Torgnole",
+        "en": "Wallop",
+        "es": "Bofetada",
+        "pt": "Pancada",
+        "picture": "https://vertylo.github.io/wakassets/spells/500.png"
+      },
+      {
+        "id": 4788,
+        "fr": "Tannée",
+        "en": "Pounding",
+        "es": "Casca",
+        "pt": "Zurzidela",
+        "picture": "https://vertylo.github.io/wakassets/spells/513.png"
+      },
+      {
+        "id": 4789,
+        "fr": "Épée de Iop",
+        "en": "Sword of Iop",
+        "es": "Espada de Yopuka",
+        "pt": "Espada de Iop",
+        "picture": "https://vertylo.github.io/wakassets/spells/4789.png"
+      },
+      {
+        "id": 4790,
+        "fr": "Focus",
+        "en": "Focus",
+        "es": "Focalización",
+        "pt": "Foco",
+        "picture": "https://vertylo.github.io/wakassets/spells/1397.png"
+      },
+      {
+        "id": 4791,
+        "fr": "Vertu",
+        "en": "Virtue",
+        "es": "Virtud",
+        "pt": "Virtude",
+        "picture": "https://vertylo.github.io/wakassets/spells/4791.png"
+      },
+      {
+        "id": 4793,
+        "fr": "Amplification",
+        "en": "Increase",
+        "es": "Amplificación",
+        "pt": "Amplificação",
+        "picture": "https://vertylo.github.io/wakassets/spells/1398.png"
+      },
+      {
+        "id": 4794,
+        "fr": "Duel",
+        "en": "Duel",
+        "es": "Duelo",
+        "pt": "Duelo",
+        "picture": "https://vertylo.github.io/wakassets/spells/4794.png"
+      },
+      {
+        "id": 4792,
+        "fr": "Posture",
+        "en": "Stance",
+        "es": "Postura",
+        "pt": "Postura",
+        "picture": "https://vertylo.github.io/wakassets/spells/520.png"
+      },
+      {
+        "id": 5130,
+        "fr": "Heure de gloire",
+        "en": "Hour of Glory",
+        "es": "Hora de Gloria",
+        "pt": "Hora da Glória",
+        "picture": "https://vertylo.github.io/wakassets/spells/5130.png"
+      }
+    ]
+  },
+  {
+    "breedName": "cra",
+    "breedId": 9,
+    "spells": [
+      {
+        "id": 4813,
+        "fr": "Flèche chercheuse",
+        "en": "Homing Arrow",
+        "es": "Flecha Buscadora",
+        "pt": "Flecha Guiada",
+        "picture": "https://vertylo.github.io/wakassets/spells/594.png"
+      },
+      {
+        "id": 4810,
+        "fr": "Flèche de recul",
+        "en": "Retreat Arrow",
+        "es": "Flecha de Retroceso",
+        "pt": "Flecha de Recuo",
+        "picture": "https://vertylo.github.io/wakassets/spells/612.png"
+      },
+      {
+        "id": 4809,
+        "fr": "Flèche tempête",
+        "en": "Storm Arrow",
+        "es": "Flecha de Tempestad",
+        "pt": "Flecha Tempestuosa",
+        "picture": "https://vertylo.github.io/wakassets/spells/899.png"
+      },
+      {
+        "id": 4811,
+        "fr": "Flèche harcelante",
+        "en": "Plaguing Arrow",
+        "es": "Flecha Acosante",
+        "pt": "Flecha Inconveniente",
+        "picture": "https://vertylo.github.io/wakassets/spells/608.png"
+      },
+      {
+        "id": 4812,
+        "fr": "Flèche statique",
+        "en": "Static Arrow",
+        "es": "Flecha Estática",
+        "pt": "Flecha Estática",
+        "picture": "https://vertylo.github.io/wakassets/spells/890.png"
+      },
+      {
+        "id": 4820,
+        "fr": "Flèche fulminante",
+        "en": "Fulminating Arrow",
+        "es": "Flecha Fulminante",
+        "pt": "Flecha Fulminante",
+        "picture": "https://vertylo.github.io/wakassets/spells/601.png"
+      },
+      {
+        "id": 4822,
+        "fr": "Flèche d'immolation",
+        "en": "Burning Arrow",
+        "es": "Flecha de Inmolación",
+        "pt": "Flecha de Imolação",
+        "picture": "https://vertylo.github.io/wakassets/spells/604.png"
+      },
+      {
+        "id": 4821,
+        "fr": "Flèche enflammée",
+        "en": "Flaming Arrow",
+        "es": "Flecha Flamígera",
+        "pt": "Flecha Flamejante",
+        "picture": "https://vertylo.github.io/wakassets/spells/4821.png"
+      },
+      {
+        "id": 4769,
+        "fr": "Flèche ardente",
+        "en": "Blazing Arrow",
+        "es": "Flecha Ardiente",
+        "pt": "Flecha Ardente",
+        "picture": "https://vertylo.github.io/wakassets/spells/600.png"
+      },
+      {
+        "id": 4819,
+        "fr": "Flèche explosive",
+        "en": "Explosive Arrow",
+        "es": "Flecha Explosiva",
+        "pt": "Flecha Explosiva",
+        "picture": "https://vertylo.github.io/wakassets/spells/606.png"
+      },
+      {
+        "id": 4816,
+        "fr": "Flèche cinglante",
+        "en": "Lashing Arrow",
+        "es": "Flecha Azotadora",
+        "pt": "Flecha Fustigante",
+        "picture": "https://vertylo.github.io/wakassets/spells/593.png"
+      },
+      {
+        "id": 4817,
+        "fr": "Pluie de flèches",
+        "en": "Raining Arrows",
+        "es": "Lluvia de Flechas",
+        "pt": "Chuva de Flechas",
+        "picture": "https://vertylo.github.io/wakassets/spells/597.png"
+      },
+      {
+        "id": 4818,
+        "fr": "Flèche criblante",
+        "en": "Riddling Arrow",
+        "es": "Flecha Perforante",
+        "pt": "Flecha Crivante",
+        "picture": "https://vertylo.github.io/wakassets/spells/607.png"
+      },
+      {
+        "id": 4815,
+        "fr": "Flèche perçante",
+        "en": "Piercing Arrow",
+        "es": "Flecha Atravesadora",
+        "pt": "Flecha Perfurante",
+        "picture": "https://vertylo.github.io/wakassets/spells/599.png"
+      },
+      {
+        "id": 4814,
+        "fr": "Flèche destructrice",
+        "en": "Destructive Arrow",
+        "es": "Flecha Destructiva",
+        "pt": "Flecha Destrutiva",
+        "picture": "https://vertylo.github.io/wakassets/spells/598.png"
+      },
+      {
+        "id": 4774,
+        "fr": "Roulade",
+        "en": "Roly-Poly",
+        "es": "Voltereta",
+        "pt": "Rolamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/617.png"
+      },
+      {
+        "id": 4805,
+        "fr": "Retraite balisée",
+        "en": "Beacon Sneakin'",
+        "es": "Retirada Balizada",
+        "pt": "Retirada Balizada",
+        "picture": "https://vertylo.github.io/wakassets/spells/4805.png"
+      },
+      {
+        "id": 4806,
+        "fr": "Eclaireur",
+        "en": "Scout",
+        "es": "Explorador",
+        "pt": "Explorador",
+        "picture": "https://vertylo.github.io/wakassets/spells/4806.png"
+      },
+      {
+        "id": 7753,
+        "fr": "Œil de taupe",
+        "en": "Bat's Eye",
+        "es": "Ojo de Topo",
+        "pt": "Olho de Toupeira",
+        "picture": "https://vertylo.github.io/wakassets/spells/7753.png"
+      },
+      {
+        "id": 4808,
+        "fr": "Frappe incisive",
+        "en": "Biting Blow",
+        "es": "Golpe Incisivo",
+        "pt": "Golpe Incisivo",
+        "picture": "https://vertylo.github.io/wakassets/spells/4808.png"
+      },
+      {
+        "id": 6842,
+        "fr": "Rafale",
+        "en": "Flurry",
+        "es": "Ráfaga",
+        "pt": "Rajada",
+        "picture": "https://vertylo.github.io/wakassets/spells/654.png"
+      }
+    ]
+  },
+  {
+    "breedName": "sadida",
+    "breedId": 10,
+    "spells": [
+      {
+        "id": 921,
+        "fr": "Vaporiser",
+        "en": "Vaporize",
+        "es": "Vaporizar",
+        "pt": "Vaporizar",
+        "picture": "https://vertylo.github.io/wakassets/spells/921.png"
+      },
+      {
+        "id": 918,
+        "fr": "Larme du Sadida",
+        "en": "Sadida's Tear",
+        "es": "Lágrima de Sadida",
+        "pt": "Lágrima do Sadida",
+        "picture": "https://vertylo.github.io/wakassets/spells/918.png"
+      },
+      {
+        "id": 930,
+        "fr": "Gadoule",
+        "en": "Mudoll",
+        "es": "Arcilla",
+        "pt": "Lamoneca",
+        "picture": "https://vertylo.github.io/wakassets/spells/930.png"
+      },
+      {
+        "id": 931,
+        "fr": "Rouille",
+        "en": "Rust",
+        "es": "Herrumbre",
+        "pt": "Ferrugem",
+        "picture": "https://vertylo.github.io/wakassets/spells/931.png"
+      },
+      {
+        "id": 922,
+        "fr": "Drainage",
+        "en": "Drain",
+        "es": "Drenaje",
+        "pt": "Drenagem",
+        "picture": "https://vertylo.github.io/wakassets/spells/922.png"
+      },
+      {
+        "id": 938,
+        "fr": "Bourrasque",
+        "en": "Gust",
+        "es": "Borrasca",
+        "pt": "Borrasca",
+        "picture": "https://vertylo.github.io/wakassets/spells/938.png"
+      },
+      {
+        "id": 919,
+        "fr": "Vent Empoisonné",
+        "en": "Poisoned Wind",
+        "es": "Viento Envenenado",
+        "pt": "Vento Envenenado",
+        "picture": "https://vertylo.github.io/wakassets/spells/919.png"
+      },
+      {
+        "id": 928,
+        "fr": "Coup de Froid",
+        "en": "Sudden Chill",
+        "es": "Resfriado",
+        "pt": "Arrepio Súbito",
+        "picture": "https://vertylo.github.io/wakassets/spells/928.png"
+      },
+      {
+        "id": 934,
+        "fr": "Kohmir",
+        "en": "K'mir",
+        "es": "Komhir",
+        "pt": "Komhir",
+        "picture": "https://vertylo.github.io/wakassets/spells/934.png"
+      },
+      {
+        "id": 932,
+        "fr": "Relent Boisé",
+        "en": "Woodland Stench",
+        "es": "Hedor Boscoso",
+        "pt": "Fedor do Bosque",
+        "picture": "https://vertylo.github.io/wakassets/spells/932.png"
+      },
+      {
+        "id": 925,
+        "fr": "Ronce",
+        "en": "Bramble",
+        "es": "Zarza",
+        "pt": "Sarça",
+        "picture": "https://vertylo.github.io/wakassets/spells/925.png"
+      },
+      {
+        "id": 929,
+        "fr": "Engrais",
+        "en": "Compost",
+        "es": "Abono",
+        "pt": "Adubo",
+        "picture": "https://vertylo.github.io/wakassets/spells/929.png"
+      },
+      {
+        "id": 927,
+        "fr": "Herbes Folles",
+        "en": "Wild Grass",
+        "es": "Hierbas Locas",
+        "pt": "Ervas Daninhas",
+        "picture": "https://vertylo.github.io/wakassets/spells/927.png"
+      },
+      {
+        "id": 935,
+        "fr": "Tremblement de Terre",
+        "en": "Earthquake",
+        "es": "Terremoto",
+        "pt": "Tremor de Terra",
+        "picture": "https://vertylo.github.io/wakassets/spells/935.png"
+      },
+      {
+        "id": 937,
+        "fr": "Ronces Multiples",
+        "en": "Manifold Bramble",
+        "es": "Zarzas Múltiples",
+        "pt": "Sarças Múltiplas",
+        "picture": "https://vertylo.github.io/wakassets/spells/937.png"
+      },
+      {
+        "id": 915,
+        "fr": "Arbre",
+        "en": "Tree",
+        "es": "Árbol",
+        "pt": "Árvore",
+        "picture": "https://vertylo.github.io/wakassets/spells/915.png"
+      },
+      {
+        "id": 920,
+        "fr": "Sacrifice Poupesque",
+        "en": "Dolly Sacrifice",
+        "es": "Sacrificio Muñequero",
+        "pt": "Sacrifício Bonecal",
+        "picture": "https://vertylo.github.io/wakassets/spells/920.png"
+      },
+      {
+        "id": 5057,
+        "fr": "Eveil Sylvestre",
+        "en": "Sylvan Awakening",
+        "es": "Despertar Silvestre",
+        "pt": "Despertar Silvestre",
+        "picture": "https://vertylo.github.io/wakassets/spells/2210.png"
+      },
+      {
+        "id": 7054,
+        "fr": "Fertilisant",
+        "en": "Fertilizer",
+        "es": "Fertilizante",
+        "pt": "Fertilizante",
+        "picture": "https://vertylo.github.io/wakassets/spells/7054.png"
+      },
+      {
+        "id": 8139,
+        "fr": "Force de la nature",
+        "en": "Force of Nature",
+        "es": "Fuerza de la Naturaleza",
+        "pt": "Força da Natureza",
+        "picture": "https://vertylo.github.io/wakassets/spells/8139.png"
+      },
+      {
+        "id": 914,
+        "fr": "Toxines",
+        "en": "Toxines",
+        "es": "Toxinas",
+        "pt": "Toxinas",
+        "picture": "https://vertylo.github.io/wakassets/spells/4308.png"
+      }
+    ]
+  },
+  {
+    "breedName": "sacrieur",
+    "breedId": 11,
+    "spells": [
+      {
+        "id": 5028,
+        "fr": "Sang pour sang",
+        "en": "Blood Rush",
+        "es": "Sangre a Sangre",
+        "pt": "Sangue por Sangue",
+        "picture": "https://vertylo.github.io/wakassets/spells/895.png"
+      },
+      {
+        "id": 5030,
+        "fr": "Furie sanguinaire",
+        "en": "Bloodthirsty Fury",
+        "es": "Furia Sanguinaria",
+        "pt": "Fúria Sanguinária",
+        "picture": "https://vertylo.github.io/wakassets/spells/887.png"
+      },
+      {
+        "id": 5031,
+        "fr": "Sang brûlant",
+        "en": "Burning Blood",
+        "es": "Sangre Ardiente",
+        "pt": "Sangue Fervente",
+        "picture": "https://vertylo.github.io/wakassets/spells/898.png"
+      },
+      {
+        "id": 5029,
+        "fr": "Cage de sang",
+        "en": "Cage of Blood",
+        "es": "Jaula de Sangre",
+        "pt": "Gaiola de Sangue",
+        "picture": "https://vertylo.github.io/wakassets/spells/2104.png"
+      },
+      {
+        "id": 5032,
+        "fr": "Punition",
+        "en": "Punition",
+        "es": "Punición",
+        "pt": "Punição",
+        "picture": "https://vertylo.github.io/wakassets/spells/900.png"
+      },
+      {
+        "id": 5038,
+        "fr": "Aversion",
+        "en": "Aversion",
+        "es": "Aversión",
+        "pt": "Aversão",
+        "picture": "https://vertylo.github.io/wakassets/spells/2099.png"
+      },
+      {
+        "id": 5041,
+        "fr": "Projection",
+        "en": "Projection",
+        "es": "Proyección",
+        "pt": "Projeção",
+        "picture": "https://vertylo.github.io/wakassets/spells/883.png"
+      },
+      {
+        "id": 5040,
+        "fr": "Assaut",
+        "en": "Assault",
+        "es": "Asalto",
+        "pt": "Agressão",
+        "picture": "https://vertylo.github.io/wakassets/spells/847.png"
+      },
+      {
+        "id": 5034,
+        "fr": "Tempête spirituelle",
+        "en": "Spiritual Tempest",
+        "es": "Tormenta Espiritual",
+        "pt": "Tempestade Espiritual",
+        "picture": "https://vertylo.github.io/wakassets/spells/5034.png"
+      },
+      {
+        "id": 5042,
+        "fr": "Fulgurance",
+        "en": "Light Speed",
+        "es": "Fulgor",
+        "pt": "Fulgurância",
+        "picture": "https://vertylo.github.io/wakassets/spells/2101.png"
+      },
+      {
+        "id": 5033,
+        "fr": "Pied rocheux",
+        "en": "Rocky Foot",
+        "es": "Pie de Roca",
+        "pt": "Pé Rochoso",
+        "picture": "https://vertylo.github.io/wakassets/spells/889.png"
+      },
+      {
+        "id": 5039,
+        "fr": "Poing tatoué agrippant",
+        "en": "Sacrier's Fist",
+        "es": "Puño Tatuabalanzante",
+        "pt": "Punho Tatuado",
+        "picture": "https://vertylo.github.io/wakassets/spells/5039.png"
+      },
+      {
+        "id": 5035,
+        "fr": "Démence",
+        "en": "Insanity",
+        "es": "Demencia",
+        "pt": "Demência",
+        "picture": "https://vertylo.github.io/wakassets/spells/5035.png"
+      },
+      {
+        "id": 5037,
+        "fr": "Colonnades",
+        "en": "Colonnades",
+        "es": "Columnata",
+        "pt": "Colunatas",
+        "picture": "https://vertylo.github.io/wakassets/spells/2116.png"
+      },
+      {
+        "id": 5036,
+        "fr": "Fracasse",
+        "en": "Smashes",
+        "es": "Fatal Furiarga",
+        "pt": "Estilhaçar",
+        "picture": "https://vertylo.github.io/wakassets/spells/892.png"
+      },
+      {
+        "id": 5043,
+        "fr": "Attirance",
+        "en": "Attraction",
+        "es": "Atracción",
+        "pt": "Atração",
+        "picture": "https://vertylo.github.io/wakassets/spells/844.png"
+      },
+      {
+        "id": 5045,
+        "fr": "Sacrifice",
+        "en": "Sacrifice",
+        "es": "Sacrificio",
+        "pt": "Sacrifício",
+        "picture": "https://vertylo.github.io/wakassets/spells/878.png"
+      },
+      {
+        "id": 5044,
+        "fr": "Transposition",
+        "en": "Transposition",
+        "es": "Transposición",
+        "pt": "Transposição",
+        "picture": "https://vertylo.github.io/wakassets/spells/888.png"
+      },
+      {
+        "id": 5047,
+        "fr": "Armure sanguine",
+        "en": "Sanguine Armor",
+        "es": "Armadura Sanguínea",
+        "pt": "Armadura Sanguínea",
+        "picture": "https://vertylo.github.io/wakassets/spells/2117.png"
+      },
+      {
+        "id": 7211,
+        "fr": "Entaille",
+        "en": "Gash",
+        "es": "Corte",
+        "pt": "Entalhe",
+        "picture": "https://vertylo.github.io/wakassets/spells/7211.png"
+      },
+      {
+        "id": 7212,
+        "fr": "Transfert sanguin",
+        "en": "Blood Transfer",
+        "es": "Transferencia Sanguínea",
+        "pt": "Transfusão Sanguínea",
+        "picture": "https://vertylo.github.io/wakassets/spells/7212.png"
+      }
+    ]
+  },
+  {
+    "breedName": "pandawa",
+    "breedId": 12,
+    "spells": [
+      {
+        "id": 4707,
+        "fr": "Souffle Laiteux",
+        "en": "Milky Breath",
+        "es": "Escupe Leches",
+        "pt": "Sopro Leitoso",
+        "picture": "https://vertylo.github.io/wakassets/spells/944.png"
+      },
+      {
+        "id": 4708,
+        "fr": "Nuage Laiteux",
+        "en": "Splash of Milk",
+        "es": "Nube de Leche",
+        "pt": "Nuvem Leitosa",
+        "picture": "https://vertylo.github.io/wakassets/spells/2203.png"
+      },
+      {
+        "id": 4709,
+        "fr": "Tekilait",
+        "en": "Bubble Trouble",
+        "es": "Tequileche",
+        "pt": "Tekileite",
+        "picture": "https://vertylo.github.io/wakassets/spells/2204.png"
+      },
+      {
+        "id": 4710,
+        "fr": "Vague de Lait",
+        "en": "Milk Wave",
+        "es": "Tsunami",
+        "pt": "Onda de Leite",
+        "picture": "https://vertylo.github.io/wakassets/spells/2205.png"
+      },
+      {
+        "id": 4711,
+        "fr": "Fontaine de Laiqueur",
+        "en": "Milk Fountain",
+        "es": "Fuente de Leches",
+        "pt": "Fonte de Leite",
+        "picture": "https://vertylo.github.io/wakassets/spells/2207.png"
+      },
+      {
+        "id": 4702,
+        "fr": "Souffle Enflammé",
+        "en": "Flaming Burp",
+        "es": "Escupe Fuegos",
+        "pt": "Sopro Flamejante",
+        "picture": "https://vertylo.github.io/wakassets/spells/2194.png"
+      },
+      {
+        "id": 4703,
+        "fr": "Tournée Générale",
+        "en": "Light My Fire",
+        "es": "Ronda General",
+        "pt": "Rodada Geral",
+        "picture": "https://vertylo.github.io/wakassets/spells/2199.png"
+      },
+      {
+        "id": 4704,
+        "fr": "Coup Laiteux",
+        "en": "Dairy Springer",
+        "es": "Golpe Lechoso",
+        "pt": "Golpe Leitoso",
+        "picture": "https://vertylo.github.io/wakassets/spells/2196.png"
+      },
+      {
+        "id": 4705,
+        "fr": "Flasque Explosive",
+        "en": "Explosive Flask",
+        "es": "Frasco Explosivo",
+        "pt": "Frasco Explosivo",
+        "picture": "https://vertylo.github.io/wakassets/spells/2200.png"
+      },
+      {
+        "id": 4706,
+        "fr": "Toilaitage",
+        "en": "Milking It",
+        "es": "Lactortazos",
+        "pt": "Puro Deleite",
+        "picture": "https://vertylo.github.io/wakassets/spells/2256.png"
+      },
+      {
+        "id": 4712,
+        "fr": "Triple Karma Leet",
+        "en": "Triple Whammy",
+        "es": "Triple Karma Gnosborne",
+        "pt": "Triplo Karmalte",
+        "picture": "https://vertylo.github.io/wakassets/spells/2190.png"
+      },
+      {
+        "id": 4713,
+        "fr": "Six Roses",
+        "en": "Six Roses",
+        "es": "Six Roses",
+        "pt": "Bêbambu",
+        "picture": "https://vertylo.github.io/wakassets/spells/2193.png"
+      },
+      {
+        "id": 4714,
+        "fr": "Frappe Fût",
+        "en": "Barrel Blow",
+        "es": "Golpe de Tonel",
+        "pt": "Golpe de Barril",
+        "picture": "https://vertylo.github.io/wakassets/spells/2197.png"
+      },
+      {
+        "id": 4715,
+        "fr": "Lucha L'ambrée",
+        "en": "Lactic Acid",
+        "es": "Lucha Cubalibre",
+        "pt": "Ácido Lático",
+        "picture": "https://vertylo.github.io/wakassets/spells/2198.png"
+      },
+      {
+        "id": 4716,
+        "fr": "Blitzkriek",
+        "en": "Blisskrieg",
+        "es": "Barriltzkrieg",
+        "pt": "Barriltzkrieg",
+        "picture": "https://vertylo.github.io/wakassets/spells/2201.png"
+      },
+      {
+        "id": 4717,
+        "fr": "Coup de bambou",
+        "en": "Bamboo Blow",
+        "es": "Golpe de Bambú",
+        "pt": "Golpe de Bambu",
+        "picture": "https://vertylo.github.io/wakassets/spells/943.png"
+      },
+      {
+        "id": 6844,
+        "fr": "Soif",
+        "en": "Thirst",
+        "es": "Sed",
+        "pt": "Sede",
+        "picture": "https://vertylo.github.io/wakassets/spells/664.png"
+      },
+      {
+        "id": 4721,
+        "fr": "Happy Hour",
+        "en": "Bamboozle",
+        "es": "Happy Hour",
+        "pt": "Happy Hour",
+        "picture": "https://vertylo.github.io/wakassets/spells/978.png"
+      },
+      {
+        "id": 4719,
+        "fr": "Ether",
+        "en": "Ether",
+        "es": "Éter",
+        "pt": "Éter",
+        "picture": "https://vertylo.github.io/wakassets/spells/2208.png"
+      },
+      {
+        "id": 4720,
+        "fr": "Téléportono",
+        "en": "Barrelhop",
+        "es": "Toneportación",
+        "pt": "Teleportonel",
+        "picture": "https://vertylo.github.io/wakassets/spells/2209.png"
+      },
+      {
+        "id": 6845,
+        "fr": "Ebriété",
+        "en": "Exhilaration",
+        "es": "Ebriedad",
+        "pt": "Sobriedade",
+        "picture": "https://vertylo.github.io/wakassets/spells/949.png"
+      }
+    ]
+  },
+  {
+    "breedName": "roublard",
+    "breedId": 13,
+    "spells": [
+      {
+        "id": 6468,
+        "fr": "Mitraille",
+        "en": "Machine Gun",
+        "es": "Metralla",
+        "pt": "Metralha",
+        "picture": "https://vertylo.github.io/wakassets/spells/1807.png"
+      },
+      {
+        "id": 6469,
+        "fr": "Tromblon",
+        "en": "Blunderbuss",
+        "es": "Tromba",
+        "pt": "Mosquete",
+        "picture": "https://vertylo.github.io/wakassets/spells/2337.png"
+      },
+      {
+        "id": 6470,
+        "fr": "Balle plombante",
+        "en": "Encumbering Shot",
+        "es": "Bala Emplomada",
+        "pt": "Bomba Paralisante",
+        "picture": "https://vertylo.github.io/wakassets/spells/6470.png"
+      },
+      {
+        "id": 6471,
+        "fr": "Dague boomerang",
+        "en": "Boomerang Dagger",
+        "es": "Daga Bumerán",
+        "pt": "Adaga Bumerangue",
+        "picture": "https://vertylo.github.io/wakassets/spells/6471.png"
+      },
+      {
+        "id": 6472,
+        "fr": "Pulsar",
+        "en": "Pulsar",
+        "es": "Púlsar",
+        "pt": "Pulsar",
+        "picture": "https://vertylo.github.io/wakassets/spells/1804.png"
+      },
+      {
+        "id": 6473,
+        "fr": "Coup rapide",
+        "en": "Slap Shot",
+        "es": "Golpe Rápido",
+        "pt": "Golpe Rápido",
+        "picture": "https://vertylo.github.io/wakassets/spells/1811.png"
+      },
+      {
+        "id": 6474,
+        "fr": "Tricherie",
+        "en": "Cheating",
+        "es": "Trampa",
+        "pt": "Costelas Grelhadas",
+        "picture": "https://vertylo.github.io/wakassets/spells/2331.png"
+      },
+      {
+        "id": 6475,
+        "fr": "Espingole",
+        "en": "Carbine",
+        "es": "Arcabuz",
+        "pt": "Gancho",
+        "picture": "https://vertylo.github.io/wakassets/spells/4824.png"
+      },
+      {
+        "id": 6478,
+        "fr": "Longue lame",
+        "en": "Longsword",
+        "es": "Larga Hoja",
+        "pt": "Lâmina Longa",
+        "picture": "https://vertylo.github.io/wakassets/spells/1814.png"
+      },
+      {
+        "id": 6476,
+        "fr": "Oblitération",
+        "en": "Obliteration",
+        "es": "Obliteración",
+        "pt": "Bomba Asfixiante",
+        "picture": "https://vertylo.github.io/wakassets/spells/6476.png"
+      },
+      {
+        "id": 6463,
+        "fr": "Barbrûlé",
+        "en": "Barbed Fire",
+        "es": "Llamambrada",
+        "pt": "Fogo Farpado",
+        "picture": "https://vertylo.github.io/wakassets/spells/1800.png"
+      },
+      {
+        "id": 6464,
+        "fr": "Bombe collante",
+        "en": "Sticky Bomb",
+        "es": "Bomba Pegajosa",
+        "pt": "Bomba Ofuscante",
+        "picture": "https://vertylo.github.io/wakassets/spells/6464.png"
+      },
+      {
+        "id": 6465,
+        "fr": "Exécution",
+        "en": "Execution",
+        "es": "Ejecución",
+        "pt": "Execução",
+        "picture": "https://vertylo.github.io/wakassets/spells/6465.png"
+      },
+      {
+        "id": 6466,
+        "fr": "Croisement",
+        "en": "Crosswise",
+        "es": "Cruce",
+        "pt": "Tiro Cruzado",
+        "picture": "https://vertylo.github.io/wakassets/spells/6466.png"
+      },
+      {
+        "id": 6467,
+        "fr": "Perforation",
+        "en": "Perforation",
+        "es": "Perforación",
+        "pt": "Tiro Penetrante",
+        "picture": "https://vertylo.github.io/wakassets/spells/6467.png"
+      },
+      {
+        "id": 6490,
+        "fr": "Botte",
+        "en": "Boot",
+        "es": "Patada",
+        "pt": "Repelente",
+        "picture": "https://vertylo.github.io/wakassets/spells/1817.png"
+      },
+      {
+        "id": 6494,
+        "fr": "Fumigènes",
+        "en": "Smoke Bombs",
+        "es": "Fumígenos",
+        "pt": "Enfumaçado",
+        "picture": "https://vertylo.github.io/wakassets/spells/1820.png"
+      },
+      {
+        "id": 6492,
+        "fr": "Grappin",
+        "en": "Claw",
+        "es": "Gancho",
+        "pt": "Ladinobot",
+        "picture": "https://vertylo.github.io/wakassets/spells/6475.png"
+      },
+      {
+        "id": 6491,
+        "fr": "Evanescence",
+        "en": "Evanescence",
+        "es": "Evanescencia",
+        "pt": "Muro de Pólvora",
+        "picture": "https://vertylo.github.io/wakassets/spells/1810.png"
+      },
+      {
+        "id": 6493,
+        "fr": "Aimant",
+        "en": "Magnet",
+        "es": "Imán",
+        "pt": "Dinamite",
+        "picture": "https://vertylo.github.io/wakassets/spells/1824.png"
+      },
+      {
+        "id": 6489,
+        "fr": "Défourailleur",
+        "en": "Fusillade",
+        "es": "Descargador",
+        "pt": "Fuzilaria",
+        "picture": "https://vertylo.github.io/wakassets/spells/1823.png"
+      }
+    ]
+  },
+  {
+    "breedName": "zobal",
+    "breedId": 14,
+    "spells": [
+      {
+        "id": 7071,
+        "fr": "Signe",
+        "en": "Sign",
+        "es": "Señales",
+        "pt": "Sinal",
+        "picture": "https://vertylo.github.io/wakassets/spells/7071.png"
+      },
+      {
+        "id": 7072,
+        "fr": "Armature",
+        "en": "Armature",
+        "es": "Armazón",
+        "pt": "Armadurecer",
+        "picture": "https://vertylo.github.io/wakassets/spells/3309.png"
+      },
+      {
+        "id": 7073,
+        "fr": "Rescousse",
+        "en": "Deliverance",
+        "es": "Salvamento",
+        "pt": "Socorro",
+        "picture": "https://vertylo.github.io/wakassets/spells/3310.png"
+      },
+      {
+        "id": 7074,
+        "fr": "Acharnement",
+        "en": "Manhunt",
+        "es": "Ensañamiento",
+        "pt": "Obstinação",
+        "picture": "https://vertylo.github.io/wakassets/spells/3312.png"
+      },
+      {
+        "id": 7075,
+        "fr": "Sarabande",
+        "en": "Sarabande",
+        "es": "Zarabanda",
+        "pt": "Sarabanda",
+        "picture": "https://vertylo.github.io/wakassets/spells/7075.png"
+      },
+      {
+        "id": 7076,
+        "fr": "Fugue",
+        "en": "Fugue",
+        "es": "Fuga",
+        "pt": "Fuga",
+        "picture": "https://vertylo.github.io/wakassets/spells/7076.png"
+      },
+      {
+        "id": 7077,
+        "fr": "Poursuite",
+        "en": "Pursuit",
+        "es": "Persecución",
+        "pt": "Perseguição",
+        "picture": "https://vertylo.github.io/wakassets/spells/3313.png"
+      },
+      {
+        "id": 7078,
+        "fr": "Culbute",
+        "en": "Somersault",
+        "es": "Brinco",
+        "pt": "Virada",
+        "picture": "https://vertylo.github.io/wakassets/spells/3315.png"
+      },
+      {
+        "id": 7079,
+        "fr": "Cavalcade",
+        "en": "Cavalcade",
+        "es": "Cabalgata",
+        "pt": "Cavalgada",
+        "picture": "https://vertylo.github.io/wakassets/spells/3316.png"
+      },
+      {
+        "id": 7080,
+        "fr": "Dislocation",
+        "en": "Dislocation",
+        "es": "Disyunción",
+        "pt": "Luxação",
+        "picture": "https://vertylo.github.io/wakassets/spells/3317.png"
+      },
+      {
+        "id": 7066,
+        "fr": "Coup de pied fouetté",
+        "en": "Whipkick",
+        "es": "Patada Azotada",
+        "pt": "Chuticote",
+        "picture": "https://vertylo.github.io/wakassets/spells/7066.png"
+      },
+      {
+        "id": 7067,
+        "fr": "Félure",
+        "en": "Fracture",
+        "es": "Hendidura",
+        "pt": "Fratura",
+        "picture": "https://vertylo.github.io/wakassets/spells/3303.png"
+      },
+      {
+        "id": 7068,
+        "fr": "Détraquage",
+        "en": "Unhinging",
+        "es": "Perturbación",
+        "pt": "Despistagem",
+        "picture": "https://vertylo.github.io/wakassets/spells/3304.png"
+      },
+      {
+        "id": 7069,
+        "fr": "Névrose",
+        "en": "Neurosis",
+        "es": "Neurosis",
+        "pt": "Neurose",
+        "picture": "https://vertylo.github.io/wakassets/spells/3305.png"
+      },
+      {
+        "id": 7070,
+        "fr": "Cabriole",
+        "en": "Capering",
+        "es": "Cabriola",
+        "pt": "Cabriola",
+        "picture": "https://vertylo.github.io/wakassets/spells/3307.png"
+      },
+      {
+        "id": 7084,
+        "fr": "Esprit masqué",
+        "en": "Masked Spirit",
+        "es": "Espíritu Enmascarado",
+        "pt": "Espírito Mascarado",
+        "picture": "https://vertylo.github.io/wakassets/spells/7084.png"
+      },
+      {
+        "id": 7085,
+        "fr": "Danse motivante",
+        "en": "Inspiring Dance",
+        "es": "Danza Motivadora",
+        "pt": "Dança Motivadora",
+        "picture": "https://vertylo.github.io/wakassets/spells/7085.png"
+      },
+      {
+        "id": 7086,
+        "fr": "Danse macabre",
+        "en": "Dance of Death",
+        "es": "Danza Macabra",
+        "pt": "Dança Macabra",
+        "picture": "https://vertylo.github.io/wakassets/spells/7086.png"
+      },
+      {
+        "id": 7087,
+        "fr": "Voltige",
+        "en": "Acrobatics",
+        "es": "Acrobatismo",
+        "pt": "Acrobacia",
+        "picture": "https://vertylo.github.io/wakassets/spells/7087.png"
+      },
+      {
+        "id": 7088,
+        "fr": "Aura de brutalité",
+        "en": "Brutality Aura",
+        "es": "Aura de Brutalidad",
+        "pt": "Aura de Brutalidade",
+        "picture": "https://vertylo.github.io/wakassets/spells/7088.png"
+      },
+      {
+        "id": 7089,
+        "fr": "Solidité",
+        "en": "Solidity",
+        "es": "Solidez",
+        "pt": "Solidez",
+        "picture": "https://vertylo.github.io/wakassets/spells/7089.png"
+      }
+    ]
+  },
+  {
+    "breedName": "ouginak",
+    "breedId": 15,
+    "spells": [
+      {
+        "id": 6260,
+        "fr": "Emeute",
+        "en": "Ruckus",
+        "es": "Disturbio",
+        "pt": "Motim",
+        "picture": "https://vertylo.github.io/wakassets/spells/6260.png"
+      },
+      {
+        "id": 6257,
+        "fr": "Fléau",
+        "en": "Flail",
+        "es": "Plaga",
+        "pt": "Flagelo",
+        "picture": "https://vertylo.github.io/wakassets/spells/6257.png"
+      },
+      {
+        "id": 6258,
+        "fr": "Rupture",
+        "en": "Rupture",
+        "es": "Ruptura",
+        "pt": "Ruptura",
+        "picture": "https://vertylo.github.io/wakassets/spells/6258.png"
+      },
+      {
+        "id": 6256,
+        "fr": "Plombage",
+        "en": "Weigh Down",
+        "es": "Emplomado",
+        "pt": "Rebaixamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/6256.png"
+      },
+      {
+        "id": 6259,
+        "fr": "Balafre",
+        "en": "Gash",
+        "es": "Cuchillada",
+        "pt": "Cutilada",
+        "picture": "https://vertylo.github.io/wakassets/spells/6259.png"
+      },
+      {
+        "id": 6261,
+        "fr": "Croc-en-jambe",
+        "en": "Fang in the Works",
+        "es": "Zascadilla",
+        "pt": "Presa Rasteira",
+        "picture": "https://vertylo.github.io/wakassets/spells/6261.png"
+      },
+      {
+        "id": 6263,
+        "fr": "Bastonnade",
+        "en": "Brawl",
+        "es": "Apaleamiento",
+        "pt": "Quebra-Quebra",
+        "picture": "https://vertylo.github.io/wakassets/spells/6263.png"
+      },
+      {
+        "id": 6265,
+        "fr": "Molosse",
+        "en": "Watchdog",
+        "es": "Moloso",
+        "pt": "Molosso",
+        "picture": "https://vertylo.github.io/wakassets/spells/6265.png"
+      },
+      {
+        "id": 6262,
+        "fr": "Hachure",
+        "en": "Crosshatch",
+        "es": "Rayadura",
+        "pt": "Hachura",
+        "picture": "https://vertylo.github.io/wakassets/spells/6262.png"
+      },
+      {
+        "id": 6264,
+        "fr": "Saccade",
+        "en": "Fits and Starts",
+        "es": "Tirón",
+        "pt": "Tranco",
+        "picture": "https://vertylo.github.io/wakassets/spells/6264.png"
+      },
+      {
+        "id": 6266,
+        "fr": "Balayage",
+        "en": "Sweeping",
+        "es": "Barrido",
+        "pt": "Varredura",
+        "picture": "https://vertylo.github.io/wakassets/spells/6266.png"
+      },
+      {
+        "id": 6267,
+        "fr": "Contusion",
+        "en": "Contusion",
+        "es": "Contusión",
+        "pt": "Contusão",
+        "picture": "https://vertylo.github.io/wakassets/spells/6267.png"
+      },
+      {
+        "id": 6268,
+        "fr": "Cador",
+        "en": "Big Dog",
+        "es": "Gran Can",
+        "pt": "Maioral",
+        "picture": "https://vertylo.github.io/wakassets/spells/6268.png"
+      },
+      {
+        "id": 6269,
+        "fr": "Brise'Os",
+        "en": "Bone-Breaker",
+        "es": "Fracturahuesos",
+        "pt": "Quebra-Osso",
+        "picture": "https://vertylo.github.io/wakassets/spells/6269.png"
+      },
+      {
+        "id": 6270,
+        "fr": "Baroud",
+        "en": "Pugnacity",
+        "es": "Bulla",
+        "pt": "Briga Feia",
+        "picture": "https://vertylo.github.io/wakassets/spells/6270.png"
+      },
+      {
+        "id": 6284,
+        "fr": "Chasseur",
+        "en": "Hunter",
+        "es": "Cazador",
+        "pt": "Caçador",
+        "picture": "https://vertylo.github.io/wakassets/spells/6284.png"
+      },
+      {
+        "id": 7552,
+        "fr": "Élan",
+        "en": "Surge",
+        "es": "Bote",
+        "pt": "Impulsão",
+        "picture": "https://vertylo.github.io/wakassets/spells/7552.png"
+      },
+      {
+        "id": 6287,
+        "fr": "Canine",
+        "en": "Canine",
+        "es": "Colmillo",
+        "pt": "Canino",
+        "picture": "https://vertylo.github.io/wakassets/spells/6287.png"
+      },
+      {
+        "id": 6288,
+        "fr": "Apaisement",
+        "en": "Appeasement",
+        "es": "Amaine",
+        "pt": "Apaziguamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/6288.png"
+      },
+      {
+        "id": 6285,
+        "fr": "Poursuite",
+        "en": "Pursuit",
+        "es": "Persecución",
+        "pt": "Perseguição",
+        "picture": "https://vertylo.github.io/wakassets/spells/6285.png"
+      },
+      {
+        "id": 7551,
+        "fr": "Meute",
+        "en": "Pack",
+        "es": "Manada",
+        "pt": "Matilha",
+        "picture": "https://vertylo.github.io/wakassets/spells/7088.png"
+      }
+    ]
+  },
+  {
+    "breedName": "steamer",
+    "breedId": 16,
+    "spells": [
+      {
+        "id": 6907,
+        "fr": "Courant",
+        "en": "Current",
+        "es": "Corriente",
+        "pt": "Corrente",
+        "picture": "https://vertylo.github.io/wakassets/spells/923.png"
+      },
+      {
+        "id": 6908,
+        "fr": "Évaporation",
+        "en": "Evaporation",
+        "es": "Evaporación",
+        "pt": "Evaporação",
+        "picture": "https://vertylo.github.io/wakassets/spells/942.png"
+      },
+      {
+        "id": 6909,
+        "fr": "Ecume",
+        "en": "Froth",
+        "es": "Espuma de Mar",
+        "pt": "Espuma",
+        "picture": "https://vertylo.github.io/wakassets/spells/4102.png"
+      },
+      {
+        "id": 6910,
+        "fr": "Flibuste",
+        "en": "Pilfer",
+        "es": "Piratería",
+        "pt": "Pirataria",
+        "picture": "https://vertylo.github.io/wakassets/spells/4101.png"
+      },
+      {
+        "id": 6911,
+        "fr": "Dissolution",
+        "en": "Dissolution",
+        "es": "Disolución",
+        "pt": "Dissolução",
+        "picture": "https://vertylo.github.io/wakassets/spells/5862.png"
+      },
+      {
+        "id": 6912,
+        "fr": "À la masse",
+        "en": "Pummel",
+        "es": "Steamaza",
+        "pt": "Steamarreta",
+        "picture": "https://vertylo.github.io/wakassets/spells/2826.png"
+      },
+      {
+        "id": 6913,
+        "fr": "Piétinement",
+        "en": "Trampling",
+        "es": "Pisoteo",
+        "pt": "Espezinhamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/2827.png"
+      },
+      {
+        "id": 6914,
+        "fr": "Pilonnage",
+        "en": "Bombardment",
+        "es": "Machacado",
+        "pt": "Bombardeio",
+        "picture": "https://vertylo.github.io/wakassets/spells/2830.png"
+      },
+      {
+        "id": 6915,
+        "fr": "Marteau aimant",
+        "en": "Hammer Claw",
+        "es": "Martillo Imán",
+        "pt": "Martelo Ímã",
+        "picture": "https://vertylo.github.io/wakassets/spells/2828.png"
+      },
+      {
+        "id": 6916,
+        "fr": "Choc",
+        "en": "Shebang",
+        "es": "Shock",
+        "pt": "Choque",
+        "picture": "https://vertylo.github.io/wakassets/spells/2829.png"
+      },
+      {
+        "id": 6902,
+        "fr": "Feu ardent",
+        "en": "Blazing Fire",
+        "es": "Fuego Ardiente",
+        "pt": "Fogo Ardente",
+        "picture": "https://vertylo.github.io/wakassets/spells/2833.png"
+      },
+      {
+        "id": 6903,
+        "fr": "Crache flammes",
+        "en": "Fire Thrower",
+        "es": "Escupellamas",
+        "pt": "Cospe-Fogo",
+        "picture": "https://vertylo.github.io/wakassets/spells/2832.png"
+      },
+      {
+        "id": 6904,
+        "fr": "Calcination",
+        "en": "Charring",
+        "es": "Calcinación",
+        "pt": "Calcinação",
+        "picture": "https://vertylo.github.io/wakassets/spells/2835.png"
+      },
+      {
+        "id": 6905,
+        "fr": "Flambage",
+        "en": "Flambé",
+        "es": "Flambeado",
+        "pt": "Flambado",
+        "picture": "https://vertylo.github.io/wakassets/spells/2831.png"
+      },
+      {
+        "id": 6906,
+        "fr": "Sabordage",
+        "en": "Scuttle",
+        "es": "Desfonde",
+        "pt": "Sabotagem",
+        "picture": "https://vertylo.github.io/wakassets/spells/2834.png"
+      },
+      {
+        "id": 6917,
+        "fr": "Blindage",
+        "en": "Armor Plating",
+        "es": "Blindaje",
+        "pt": "Blindagem",
+        "picture": "https://vertylo.github.io/wakassets/spells/2814.png"
+      },
+      {
+        "id": 6918,
+        "fr": "Surtension",
+        "en": "Hypertension",
+        "es": "Sobretensión",
+        "pt": "Sobretensão",
+        "picture": "https://vertylo.github.io/wakassets/spells/3571.png"
+      },
+      {
+        "id": 6919,
+        "fr": "Machinerie",
+        "en": "Machinery",
+        "es": "Maquinaria",
+        "pt": "Maquinário",
+        "picture": "https://vertylo.github.io/wakassets/spells/2815.png"
+      },
+      {
+        "id": 6920,
+        "fr": "Embuscade",
+        "en": "Ambush",
+        "es": "Emboscada",
+        "pt": "Emboscada",
+        "picture": "https://vertylo.github.io/wakassets/spells/3984.png"
+      },
+      {
+        "id": 6921,
+        "fr": "Transition",
+        "en": "Transition",
+        "es": "Transición",
+        "pt": "Transição",
+        "picture": "https://vertylo.github.io/wakassets/spells/4297.png"
+      },
+      {
+        "id": 6922,
+        "fr": "Flux de Stasis",
+        "en": "Stasis Flux",
+        "es": "Flujo de Stasis",
+        "pt": "Fluxo de Stasis",
+        "picture": "https://vertylo.github.io/wakassets/spells/2822.png"
+      }
+    ]
+  },
+  {
+    "breedName": "eliotrope",
+    "breedId": 18,
+    "spells": [
+      {
+        "id": 4691,
+        "fr": "Wakméha",
+        "en": "Wakmeha",
+        "es": "Wakmeha",
+        "pt": "Wakmeha",
+        "picture": "https://vertylo.github.io/wakassets/spells/4691.png"
+      },
+      {
+        "id": 4692,
+        "fr": "Pulsation",
+        "en": "Pulsation",
+        "es": "Pulsación",
+        "pt": "Pulsação",
+        "picture": "https://vertylo.github.io/wakassets/spells/4692.png"
+      },
+      {
+        "id": 4693,
+        "fr": "Déluge",
+        "en": "Flood",
+        "es": "Diluvio",
+        "pt": "Dilúvio",
+        "picture": "https://vertylo.github.io/wakassets/spells/4693.png"
+      },
+      {
+        "id": 4680,
+        "fr": "Tourbillon",
+        "en": "Whirlwind",
+        "es": "Torbellino",
+        "pt": "Turbilhão",
+        "picture": "https://vertylo.github.io/wakassets/spells/4680.png"
+      },
+      {
+        "id": 4694,
+        "fr": "Cataclysme",
+        "en": "Cataclysm",
+        "es": "Cataclismo",
+        "pt": "Cataclismo",
+        "picture": "https://vertylo.github.io/wakassets/spells/4694.png"
+      },
+      {
+        "id": 4669,
+        "fr": "Targe fracassante",
+        "en": "Deafening Targe",
+        "es": "Escudo Quebrantador",
+        "pt": "Escudo Devastador",
+        "picture": "https://vertylo.github.io/wakassets/spells/4669.png"
+      },
+      {
+        "id": 4668,
+        "fr": "Egide ardente",
+        "en": "Ardent Aegis",
+        "es": "Égida Ardiente",
+        "pt": "Égide Ardente",
+        "picture": "https://vertylo.github.io/wakassets/spells/4668.png"
+      },
+      {
+        "id": 4670,
+        "fr": "Séisme",
+        "en": "Earthquake",
+        "es": "Seísmo",
+        "pt": "Terremoto",
+        "picture": "https://vertylo.github.io/wakassets/spells/4670.png"
+      },
+      {
+        "id": 4695,
+        "fr": "Heurt",
+        "en": "Clash",
+        "es": "Colisión",
+        "pt": "Conflito",
+        "picture": "https://vertylo.github.io/wakassets/spells/4695.png"
+      },
+      {
+        "id": 4671,
+        "fr": "Raclée",
+        "en": "Hiding",
+        "es": "Tunda",
+        "pt": "Surra",
+        "picture": "https://vertylo.github.io/wakassets/spells/4671.png"
+      },
+      {
+        "id": 4697,
+        "fr": "Flux torrentiel",
+        "en": "Torrential Flux",
+        "es": "Flujo Torrencial",
+        "pt": "Fluxo Torrencial",
+        "picture": "https://vertylo.github.io/wakassets/spells/4697.png"
+      },
+      {
+        "id": 4698,
+        "fr": "Siphon",
+        "en": "Siphon",
+        "es": "Sifón",
+        "pt": "Sifão",
+        "picture": "https://vertylo.github.io/wakassets/spells/4698.png"
+      },
+      {
+        "id": 4699,
+        "fr": "Salve éthérée",
+        "en": "Ethereal Burst",
+        "es": "Salva Etérea",
+        "pt": "Salva Etérea",
+        "picture": "https://vertylo.github.io/wakassets/spells/4699.png"
+      },
+      {
+        "id": 4700,
+        "fr": "Tempête",
+        "en": "Tempest",
+        "es": "Tormenta",
+        "pt": "Tempestade",
+        "picture": "https://vertylo.github.io/wakassets/spells/4700.png"
+      },
+      {
+        "id": 4701,
+        "fr": "Lame déchaînée",
+        "en": "Unleashed Blade",
+        "es": "Hoja Desencadenada",
+        "pt": "Lâmina Desenfreada",
+        "picture": "https://vertylo.github.io/wakassets/spells/4701.png"
+      },
+      {
+        "id": 7199,
+        "fr": "Coalition",
+        "en": "Coalition",
+        "es": "Coalición",
+        "pt": "Coalizão",
+        "picture": "https://vertylo.github.io/wakassets/spells/4684.png"
+      },
+      {
+        "id": 7198,
+        "fr": "Empreinte de Wakfu",
+        "en": "Wakfu Imprint",
+        "es": "Huella de Wakfu",
+        "pt": "Marca de Wakfu",
+        "picture": "https://vertylo.github.io/wakassets/spells/4843.png"
+      },
+      {
+        "id": 4683,
+        "fr": "Brèche temporaire",
+        "en": "Time Breach",
+        "es": "Brecha Temporal",
+        "pt": "Brecha Temporária",
+        "picture": "https://vertylo.github.io/wakassets/spells/4683.png"
+      },
+      {
+        "id": 4684,
+        "fr": "Exode",
+        "en": "Exodus",
+        "es": "Éxodo",
+        "pt": "Êxodo",
+        "picture": "https://vertylo.github.io/wakassets/spells/7199.png"
+      },
+      {
+        "id": 4685,
+        "fr": "Incandescence",
+        "en": "Incandescence",
+        "es": "Incandescencia",
+        "pt": "Incandescência",
+        "picture": "https://vertylo.github.io/wakassets/spells/4685.png"
+      },
+      {
+        "id": 7200,
+        "fr": "Barrière",
+        "en": "Barrier",
+        "es": "Parapeto",
+        "pt": "Barreira",
+        "picture": "https://vertylo.github.io/wakassets/spells/7200.png"
+      }
+    ]
+  },
+  {
+    "breedName": "huppermage",
+    "breedId": 19,
+    "spells": [
+      {
+        "id": 5562,
+        "fr": "Flux d'énergie",
+        "en": "Energy Flux",
+        "es": "Flujo de Energía",
+        "pt": "Fluxo de Energia",
+        "picture": "https://vertylo.github.io/wakassets/spells/5562.png"
+      },
+      {
+        "id": 5571,
+        "fr": "Disque luminescent",
+        "en": "Luminescent Disc",
+        "es": "Disco Luminiscente",
+        "pt": "Disco Luminescente",
+        "picture": "https://vertylo.github.io/wakassets/spells/5571.png"
+      },
+      {
+        "id": 5561,
+        "fr": "Résonance",
+        "en": "Resonance",
+        "es": "Resonancia",
+        "pt": "Ressonância",
+        "picture": "https://vertylo.github.io/wakassets/spells/5561.png"
+      },
+      {
+        "id": 5563,
+        "fr": "Lueur de l'aube",
+        "en": "Light of Dawn",
+        "es": "Luz del Alba",
+        "pt": "Luz da Alvorada",
+        "picture": "https://vertylo.github.io/wakassets/spells/5563.png"
+      },
+      {
+        "id": 5591,
+        "fr": "Rayon crépusculaire",
+        "en": "Twilight Beam",
+        "es": "Rayo Crepuscular",
+        "pt": "Raio Crepuscular",
+        "picture": "https://vertylo.github.io/wakassets/spells/5591.png"
+      },
+      {
+        "id": 5564,
+        "fr": "Averse",
+        "en": "Downpour",
+        "es": "Aguacero",
+        "pt": "Aguaceiro",
+        "picture": "https://vertylo.github.io/wakassets/spells/5564.png"
+      },
+      {
+        "id": 5565,
+        "fr": "Débâcle",
+        "en": "Walloping",
+        "es": "Deshielo",
+        "pt": "Vertedouro",
+        "picture": "https://vertylo.github.io/wakassets/spells/5565.png"
+      },
+      {
+        "id": 5594,
+        "fr": "Flèche de lumière",
+        "en": "Light Arrow",
+        "es": "Flecha de Luz",
+        "pt": "Flecha de Luz",
+        "picture": "https://vertylo.github.io/wakassets/spells/5594.png"
+      },
+      {
+        "id": 5566,
+        "fr": "Vestige",
+        "en": "Vestige",
+        "es": "Vestigio",
+        "pt": "Vestígio",
+        "picture": "https://vertylo.github.io/wakassets/spells/5566.png"
+      },
+      {
+        "id": 5593,
+        "fr": "Larmes scintillantes",
+        "en": "Glistening Tears",
+        "es": "Lágrimas Centelleantes",
+        "pt": "Lágrimas Cintilantes",
+        "picture": "https://vertylo.github.io/wakassets/spells/5593.png"
+      },
+      {
+        "id": 5567,
+        "fr": "Éboulement",
+        "en": "Rock Slide",
+        "es": "Desprendimiento",
+        "pt": "Desmoronamento",
+        "picture": "https://vertylo.github.io/wakassets/spells/5567.png"
+      },
+      {
+        "id": 5569,
+        "fr": "Faille",
+        "en": "Rift",
+        "es": "Falla",
+        "pt": "Falha",
+        "picture": "https://vertylo.github.io/wakassets/spells/6400.png"
+      },
+      {
+        "id": 5597,
+        "fr": "Faisceau de lune",
+        "en": "Moonbeam",
+        "es": "Resplandor de Luna",
+        "pt": "Feixe de Lua",
+        "picture": "https://vertylo.github.io/wakassets/spells/5597.png"
+      },
+      {
+        "id": 5568,
+        "fr": "Feuillure",
+        "en": "Backband",
+        "es": "Ranura",
+        "pt": "Entalhe",
+        "picture": "https://vertylo.github.io/wakassets/spells/5568.png"
+      },
+      {
+        "id": 5595,
+        "fr": "Épée de lumière",
+        "en": "Light Sword",
+        "es": "Espada de Luz",
+        "pt": "Espada de Luz",
+        "picture": "https://vertylo.github.io/wakassets/spells/5595.png"
+      },
+      {
+        "id": 5570,
+        "fr": "Papillons diurnes",
+        "en": "Diurnal Butterflies",
+        "es": "Mariposas Diurnas",
+        "pt": "Borboletas Diurnas",
+        "picture": "https://vertylo.github.io/wakassets/spells/5570.png"
+      },
+      {
+        "id": 5572,
+        "fr": "Ombres dansantes",
+        "en": "Dancing Shadows",
+        "es": "Sombras Danzantes",
+        "pt": "Sombras Dançantes",
+        "picture": "https://vertylo.github.io/wakassets/spells/5572.png"
+      },
+      {
+        "id": 5590,
+        "fr": "Orbes luisants",
+        "en": "Shiny Orbs",
+        "es": "Orbes Relucientes",
+        "pt": "Orbes Brilhantes",
+        "picture": "https://vertylo.github.io/wakassets/spells/5590.png"
+      },
+      {
+        "id": 5596,
+        "fr": "Mirage",
+        "en": "Mirage",
+        "es": "Espejismo",
+        "pt": "Miragem",
+        "picture": "https://vertylo.github.io/wakassets/spells/5596.png"
+      },
+      {
+        "id": 5592,
+        "fr": "Halo Chatoyant",
+        "en": "Glistening Halo",
+        "es": "Halo Tornasolado",
+        "pt": "Halo Cintilante",
+        "picture": "https://vertylo.github.io/wakassets/spells/5592.png"
+      },
+      {
+        "id": 5575,
+        "fr": "Forteresse solaire",
+        "en": "Solar Stronghold",
+        "es": "Fortaleza Solar",
+        "pt": "Fortaleza Solar",
+        "picture": "https://vertylo.github.io/wakassets/spells/5575.png"
+      },
+      {
+        "id": 7755,
+        "fr": "Surcharge runique",
+        "en": "Runic Overcharge",
+        "es": "Sobrecarga Rúnica",
+        "pt": "Sobrecarga Rúnica",
+        "picture": "https://vertylo.github.io/wakassets/spells/7755.png"
+      },
+      {
+        "id": 5576,
+        "fr": "Mur d'énergie",
+        "en": "Wall of Energy",
+        "es": "Pared de Energía",
+        "pt": "Muro de Energia",
+        "picture": "https://vertylo.github.io/wakassets/spells/5576.png"
+      },
+      {
+        "id": 7754,
+        "fr": "Visio Imperum",
+        "en": "Visio Imperum",
+        "es": "Visio Imperum",
+        "pt": "Visio Imperum",
+        "picture": "https://vertylo.github.io/wakassets/spells/7754.png"
+      },
+      {
+        "id": 5577,
+        "fr": "Principio Valere",
+        "en": "Principio Valere",
+        "es": "Principio Valere",
+        "pt": "Principio Valere",
+        "picture": "https://vertylo.github.io/wakassets/spells/5577.png"
+      },
+      {
+        "id": 7809,
+        "fr": "Runification",
+        "en": "Runification",
+        "es": "Runificación",
+        "pt": "Runificação",
+        "picture": "https://vertylo.github.io/wakassets/spells/7809.png"
+      }
+    ]
+  }
+]
