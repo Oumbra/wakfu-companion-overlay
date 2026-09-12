@@ -73,7 +73,7 @@
 
 use egui::{Align2, Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{assets::DsTexture, text, tokens, DesignSystem};
+use crate::design::{assets::DsTexture, icons::DsIcon, text, tokens, DesignSystem};
 
 /// État visuel du socle. `Hovered` est identique à `Idle` faute de capture d'un socle survolé —
 /// même parti pris que `design::input`.
@@ -299,12 +299,7 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                 ),
                 tokens::SELECT_CHEVRON_SIZE,
             );
-            design.paint(
-                ui.painter(),
-                chevron,
-                DsTexture::IconChevronDown,
-                text_color,
-            );
+            design.paint_icon(ui.painter(), chevron, DsIcon::ChevronDown, text_color);
             // Le libellé s'arrête AVANT le chevron : sans cet écrêtage, une valeur longue passerait
             // dessous et le contrôle n'aurait plus l'air d'un contrôle.
             let label_clip = egui::Rect::from_min_max(

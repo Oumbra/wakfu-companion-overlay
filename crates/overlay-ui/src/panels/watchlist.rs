@@ -47,8 +47,9 @@
 //!   dynamique, voir sa doc). Infobulle à GAUCHE désormais (`design::tooltip`, côté `Left`), pas au-dessus
 //!   comme le reste du panneau — demande explicite pour CES deux boutons précisément.
 //! - Les tuiles OBJET (`WatchlistKind::Item`) n'utilisent plus le dégradé diagonal dessiné à la
-//!   main du point précédent : la texture `Border-<RARETÉ>.webp` correspondante (`UiIcons::
-//!   item_border`, voir sa doc et `docs/design-system.md` §2.4/§7), exactement l'asset
+//!   main du point précédent : la texture `Border-<RARETÉ>.webp` correspondante (aujourd'hui
+//!   `DsTexture::ItemBorder*`, résolue par `design::item_slot` ; voir `docs/design-system.md`
+//!   §2.4/§7), exactement l'asset
 //!   d'emplacement d'objet du jeu, sert de fond de la tuile — plus fidèle qu'une approximation de
 //!   dégradé mesurée au pixel. Géométrie mesurée une fois par script Python/Pillow sur les 7
 //!   fichiers (identique sur les 7) : fenêtre intérieure = pixels 52..460 d'un canevas 512×512,
@@ -149,7 +150,8 @@
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
-use crate::design::{self, DsTexture, IconContext};
+use crate::design::{self, text, DsIcon, IconContext};
+use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
@@ -291,15 +293,23 @@ pub fn is_active(toast: Option<&WatchlistToast>, now: std::time::Instant) -> boo
     toast.is_some_and(|t| t.hide_at > now)
 }
 
-/// 58×58, coins arrondis 10px — mêmes dimensions que `.kpi` (`tracker-strip.component.css`),
-/// repliée (pas l'état `.expanded` au clic, jamais câblé côté overlay pour l'instant).
-const TILE_SIZE: f32 = 58.0;
+/// Côté d'une tuile — **celui du composant**, pas une valeur propre au panneau.
+///
+/// Ce fut `58.0` en dur (la cote de `.kpi`, `tracker-strip.component.css`) jusqu'au 2026-09-12,
+/// même valeur que `tokens::ITEM_SLOT_SIZE` mais écrite deux fois : le passage du composant aux
+/// cotes du client (64 px) aurait laissé le bandeau à 58 sans que rien ne le signale. La largeur
+/// de la fenêtre se calcule ici (voir `panel_width`), la taille d'un emplacement non.
+const TILE_SIZE: f32 = design::tokens::ITEM_SLOT_SIZE;
 /// Un peu plus que le simple espacement visuel du web (`.kpi-strip { gap: ... }`) — écart
 /// suffisant pour distinguer clairement deux tuiles adjacentes.
+///
+/// **Reste à 12 px** alors que le client serre ses cases à 2 (`item_slot_gap`) : c'est la densité
+/// d'une grille d'inventaire, pas celle d'un bandeau de suivi posé par-dessus le jeu, et cette
+/// valeur-ci vient d'un réglage utilisateur.
 const TILE_GAP: f32 = 12.0;
-const TILE_ROUNDING: f32 = 10.0;
-/// `app-item-icon [size]="30"` dans le template web — mêmes proportions ; ne s'applique plus qu'aux
-/// tuiles ENNEMI (voir `entry_tile`), les tuiles OBJET utilisant désormais `ITEM_ICON_SIZE`.
+/// `app-item-icon [size]="30"` dans le template web. Ne sert plus à la tuile — `design::item_slot`
+/// porte désormais cette cote sous le nom `ITEM_SLOT_PLAIN_ICON_FILL`, en fraction du côté plutôt
+/// qu'en pixels — mais reste la taille des icônes du bandeau hors tuile.
 const ICON_SIZE: f32 = 30.0;
 
 /// Fond translucide peint sous le carré de contrôle, AVANT ses boutons.
@@ -364,62 +374,6 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// temporaire du toast (`TOAST_LAYER_WIDTH`, `toast_card`), ici permanent tant que la bande est
 /// affichée plutôt que ponctuel.
 const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
-
-/// Marge intérieure des textures `Border-<RARETÉ>.webp` — mesurée par script Python/Pillow
-/// (bbox de la fenêtre où l'icône doit se peindre, transition alpha/couleur repérée à 52px puis
-/// 460px sur un canevas 512×512, IDENTIQUE sur les 7 fichiers) : voir doc de module et
-/// `docs/design-system.md` §2.4/§7. `1.0 - 2.0 * ITEM_BORDER_INNER_MARGIN_RATIO` donne la fraction
-/// de `TILE_SIZE` correspondant à la fenêtre intérieure (~0.797, `entry_tile`).
-const ITEM_BORDER_INNER_MARGIN_RATIO: f32 = 52.0 / 512.0;
-/// Fraction de la fenêtre intérieure mesurée (voir ci-dessus) effectivement occupée par l'icône
-/// d'objet — pas 100% : les captures de référence (`common-items.png` et consorts, voir
-/// `docs/design-system.md` §7) montrent toujours une petite marge entre l'icône et le cadre, jamais
-/// un remplissage pixel-perfect du carré intérieur. Relevé de 0.9 à 0.96 (retour utilisateur : «
-/// les objets doivent être plus gros ») une fois le fond de bordure repeint EN DESSOUS de l'icône
-/// (voir doc de module, correctif same-day) — plus aucun risque que la bordure recouvre un débord.
-const ITEM_ICON_FILL_RATIO: f32 = 0.96;
-/// Taille cible de l'icône d'une tuile OBJET — dérivée des deux constantes ci-dessus plutôt qu'une
-/// valeur fixe indépendante, pour rester proportionnée si `TILE_SIZE` change un jour.
-const ITEM_ICON_SIZE: f32 =
-    TILE_SIZE * (1.0 - 2.0 * ITEM_BORDER_INNER_MARGIN_RATIO) * ITEM_ICON_FILL_RATIO;
-
-/// Marge entre le texte du compteur (voir `paint_count_inline`) et le bord DROIT de la tuile —
-/// assez pour rester lisible par-dessus le cadre de rareté (dont le liseré occupe déjà quelques
-/// pixels, voir `ITEM_BORDER_INNER_MARGIN_RATIO`) sans empiéter dessus. Distincte de
-/// `COUNT_INSET_BOTTOM` depuis le retour utilisateur 2026-09-06 (« décale d'un pixel vers la
-/// gauche [...] et descends-le d'un pixel vers le bas ») : les deux marges n'ont plus besoin de
-/// rester égales.
-const COUNT_INSET_RIGHT: f32 = 6.0;
-/// Marge entre le texte du compteur et le bord BAS de la tuile — voir `COUNT_INSET_RIGHT`, 1px de
-/// moins pour rapprocher le nombre du bas (même retour utilisateur).
-const COUNT_INSET_BOTTOM: f32 = 4.0;
-
-/// Taille du compteur (voir `paint_count_inline`) — retour utilisateur 2026-09-06, capture d'écran
-/// du jeu à l'appui (quantités d'objets en bas-droit d'un emplacement) : à 11px le nombre était
-/// « pas du tout lisible » par comparaison. Un premier essai à 15px s'est avéré « beaucoup trop
-/// élevé » une fois comparé en jeu (second retour, captures d'écran des deux côte à côte) — ramené
-/// à 13px, puis affiné à 14px (troisième retour, après test en conditions réelles).
-const COUNT_FONT_SIZE: f32 = 14.0;
-
-/// Essai demandé par l'utilisateur 2026-09-06 (test volontaire à grandes valeurs, captures d'écran
-/// à l'appui : un décompte "500/500" ou "2000/2000" — deux fois un nombre à 3-4 chiffres plus le
-/// symbole de fraction sur UNE SEULE ligne — débordait de la tuile (58px) et chevauchait la tuile
-/// voisine). Plutôt que de composer courant+"/"+cible côte à côte (voir l'ancienne version de
-/// `paint_count_inline`, gardée en mémoire dans l'historique Git), la fraction cible passe
-/// maintenant SOUS le nombre courant : `TARGET_LINE_OFFSET` décale son ancrage vers le bas depuis
-/// la MÊME position que le nombre courant, `TARGET_FONT_SIZE` réduit sa police puisqu'elle ne
-/// porte plus qu'une information secondaire. Le nombre courant, lui, retrouve exactement
-/// l'emplacement/la police du mode `up` (aucun décalage horizontal pour laisser place à la
-/// fraction, qui n'est plus sur la même ligne) — demande explicite : « la couleur et le nombre de
-/// l'élément courant [...] le même emplacement que tous les autres nombres ».
-///
-/// Ramené de 20 à 12px (retour utilisateur suivant, sur le premier essai) : les deux lignes
-/// étaient trop écartées l'une de l'autre.
-const TARGET_LINE_OFFSET: f32 = 12.0;
-/// Police de la fraction cible (ex. "/500") sous le nombre courant — plus petite que
-/// `COUNT_FONT_SIZE` (essai demandé : « on réduit la fonte [...] on la mettrait en onze ou en
-/// dix »), gardée en monospace comme le reste du compteur.
-const TARGET_FONT_SIZE: f32 = 10.0;
 
 /// Largeur de contenu nécessaire pour afficher `entry_count` entrées + la colonne de contrôle
 /// ("+"/"−" empilés), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
@@ -486,32 +440,17 @@ fn control_row_height() -> f32 {
 
 // Jetons repris tels quels de `:root` (`styles.css`, thème sombre par défaut — seul thème que
 // l'overlay reproduit pour l'instant, voir `panels::combat::ACCENT` et sa propre justification).
-/// `--panel-bg`.
-const PANEL_BG: egui::Color32 = egui::Color32::from_rgb(0x1e, 0x1e, 0x1e);
 /// `--surface-well` — fond du badge de compteur.
 const SURFACE_WELL: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
 /// `--border-strong` — bordure du badge ET bordure "monstre" (`.kpi.is-monster`).
 const BORDER_STRONG: egui::Color32 = egui::Color32::from_rgb(0x4d, 0x4d, 0x4d);
 /// `--text-muted` — cible grisée d'un décompte, texte des tuiles "+"/"−".
 const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(0x88, 0x88, 0x88);
-/// Gris de la fraction cible d'un décompte (`paint_count_inline`) — plus clair que `TEXT_MUTED`
-/// (retour utilisateur 2026-09-06 : « éclaircir le gris utilisé pour la partie fraction »).
-/// Constante dédiée plutôt qu'un simple relèvement de `TEXT_MUTED` : ce dernier reste utilisé tel
-/// quel ailleurs (tuiles "+"/"−", bordure "monstre") où aucun éclaircissement n'a été demandé.
-const TARGET_TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(0xb0, 0xb0, 0xb0);
-/// Compte en mode `up` (`paint_count_inline`) — mirait `--text-color` (`0xe0e0e0`, gris très clair)
-/// jusqu'au retour utilisateur 2026-09-06 : « la couleur des chiffres [...] c'est bien du blanc
-/// rgb(255,255,255) ? [...] j'ai l'impression que c'est ce qui change véritablement la lecture ».
-/// Vérifié par échantillonnage pixel sur sa capture d'écran de référence (quantités du jeu) :
-/// `(255,255,255)` exactement, pas le gris du jeton web — ce badge suit ici l'apparence du JEU
-/// (voir doc de module, refonte 2026-09-06), pas le dépôt web, d'où la divergence assumée.
-const TEXT_COLOR: egui::Color32 = egui::Color32::WHITE;
-/// `--kama-color` — valeur COURANTE d'un décompte (`.kpi-count-badge.is-fraction`).
-const KAMA_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
 
-/// `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
-/// `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`.
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
+// `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
+// `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`. Repris du
+// jeton partagé : voir `tokens::OVERLAY_ACCENT`.
+use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
 /// `--surface-raised` — fond du toast (`loot-alert-card`, dégradé à deux arrêts IDENTIQUES côté
 /// web donc simple aplat ici).
 const SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x26);
@@ -791,11 +730,14 @@ fn toast_card(
         _ => toast.name.clone(),
     };
 
+    // Police du design system, et non la proportionnelle par défaut d'egui — une Ubuntu *Light*,
+    // plus maigre que tout ce que le jeu écrit. Les corps, eux, ne bougent pas : ce sont des cotes
+    // du portage web, pas des mesures du client.
+    let title_font = text::label_font(ui.ctx(), 11.0);
+    let name_font = text::label_font(ui.ctx(), 14.0);
     let painter = ui.painter();
-    let title_galley =
-        painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(11.0), ACCENT);
-    let name_galley =
-        painter.layout_no_wrap(name_text, egui::FontId::proportional(14.0), TEXT_BRIGHT);
+    let title_galley = painter.layout_no_wrap(title.to_string(), title_font, ACCENT);
+    let name_galley = painter.layout_no_wrap(name_text, name_font, TEXT_BRIGHT);
 
     let text_width = title_galley.size().x.max(name_galley.size().x);
     let text_height = title_galley.size().y + CARD_TEXT_GAP + name_galley.size().y;
@@ -935,7 +877,7 @@ fn toast_card(
         close_rect.center(),
         egui::Align2::CENTER_CENTER,
         "×",
-        egui::FontId::proportional(12.0),
+        text::label_font(ui.ctx(), 12.0),
         with_alpha(close_glyph, card_alpha),
     );
     // `design::tooltip` plutôt qu'un `on_hover_text` brut (refonte 2026-09-06, design
@@ -997,7 +939,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     control_button(
         ui,
         add_top_left,
-        DsTexture::IconPlus,
+        DsIcon::Plus,
         "watchlist-add",
         "Ajouter (Ctrl+Shift+A)",
         true,
@@ -1010,7 +952,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     control_button(
         ui,
         remove_top_left,
-        DsTexture::IconMinus,
+        DsIcon::Minus,
         "watchlist-remove",
         "Supprimer (Ctrl+Shift+S)",
         !watchlist_empty,
@@ -1023,7 +965,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     let details_response = control_button(
         ui,
         details_top_left,
-        DsTexture::IconExternalLink,
+        DsIcon::ExternalLink,
         "watchlist-details",
         "Détails (Ctrl+Shift+D)",
         true,
@@ -1048,7 +990,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
     let options_response = control_button(
         ui,
         options_top_left,
-        DsTexture::IconOption,
+        DsIcon::Option,
         "watchlist-options",
         "Options (Ctrl+Shift+O)",
         true,
@@ -1076,7 +1018,7 @@ struct ControlRowClicks {
 /// **Migration 2026-09-10 (décision utilisateur).** Ces quatre boutons passaient par
 /// `panels::icon_button::paint_icon_button`, qui prenait quatre `egui::TextureHandle` en
 /// paramètres : chaque appelant devait connaître et câbler ses textures. Ils nomment maintenant une
-/// intention (`DsTexture::IconPlus`), et le manifeste résout les fichiers. Ce qui change à l'écran,
+/// intention (`DsIcon::Plus`), et le manifeste résout les fichiers. Ce qui change à l'écran,
 /// captures à l'appui (`overlay-testkit/tests/icon_button_migration.rs`) :
 ///
 /// - les glyphes sont ceux du design system, calés sur l'étalon mesuré dans le jeu
@@ -1109,7 +1051,7 @@ struct ControlRowClicks {
 fn control_button(
     ui: &mut egui::Ui,
     top_left: egui::Pos2,
-    glyph: DsTexture,
+    glyph: design::DsIcon,
     log_name: &str,
     tooltip: &str,
     enabled: bool,
@@ -1139,7 +1081,7 @@ fn control_button(
 /// télécharger (voir doc de module), repli générique sinon.
 ///
 /// Deux styles de cadre selon `entry.kind` :
-/// - OBJET : la texture `Border-<RARETÉ>.webp` (`UiIcons::item_border`) sert de FOND de la tuile,
+/// - OBJET : la texture `Border-<RARETÉ>.webp` (`DsTexture::ItemBorder*`) sert de FOND de la tuile,
 ///   peinte AVANT l'icône (voir doc de module, correctif same-day) — sa fenêtre intérieure n'est
 ///   pas un trou transparent mais un aplat teinté par la rareté, l'icône (opaque) peinte par-dessus
 ///   en recouvre l'essentiel, ne laissant dépasser que l'anneau de rareté et un mince liseré.
@@ -1158,24 +1100,11 @@ fn entry_tile(
     remote_icon_textures: &mut RemoteIconTextures,
     entry: &WatchlistEntry,
 ) {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(TILE_SIZE, TILE_SIZE), egui::Sense::hover());
-
-    // Fond sombre uni dans tous les cas — pour un ENNEMI, seul fond de la tuile (voir plus bas) ;
-    // pour un OBJET, simple filet visible sous les coins arrondis de la texture de bordure peinte
-    // juste après (celle-ci a ses propres coins arrondis avec un alpha dégradé, voir doc de
-    // module), jamais sa couleur dominante.
-    ui.painter().rect_filled(rect, TILE_ROUNDING, PANEL_BG);
-
-    // OBJET seulement : fond de bordure peint ICI, AVANT l'icône (voir doc de la fonction) —
-    // l'ordre inverse (bordure après icône) est le bug corrigé le jour même : la fenêtre
-    // "intérieure" de cette texture n'est pas transparente, peinte après elle voilait l'icône
-    // entière d'un aplat teinté par la rareté.
-    if let WatchlistKind::Item = entry.kind {
-        let rarity = catalog.find_item_rarity(&entry.name, entry.catalog_id);
-        egui::Image::new(icons.item_border(rarity)).paint_at(ui, rect);
-    }
-
+    // Tout ce qui suit était peint à la main ici jusqu'au 2026-09-11 — fond, bordure de rareté,
+    // icône, compteur, et surtout leur ORDRE. Il vit maintenant dans `design::item_slot`, qui
+    // verrouille cet ordre par un test : la bordure sous l'icône pour un objet, le trait par-dessus
+    // pour un ennemi. Ce panneau ne garde que ce qui lui appartient — résoudre l'icône distante,
+    // lire la rareté au catalogue, et traduire le métier vers le design system.
     let icon_ref = match entry.kind {
         WatchlistKind::Item => catalog.find_item_icon(&entry.name, entry.catalog_id),
         WatchlistKind::Enemy => catalog.find_monster_icon(&entry.name, entry.catalog_id),
@@ -1183,108 +1112,45 @@ fn entry_tile(
     let remote_texture = icon_ref
         .as_ref()
         .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
-
-    // `paint_at` peint directement DANS le rect donné (ignore fit_to_exact_size/
-    // maintain_aspect_ratio, qui ne s'appliquent qu'au layout via `ui.add`) — même motif que
-    // `panels::combat::draw_centered_icon`, pas la peine de les poser ici.
-    let icon_size = match entry.kind {
-        WatchlistKind::Item => ITEM_ICON_SIZE,
-        WatchlistKind::Enemy => ICON_SIZE,
+    let icon_id = match &remote_texture {
+        Some(texture) => texture.id(),
+        None => icons.unknown_entity_texture().id(),
     };
-    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_size, icon_size));
-    match &remote_texture {
-        Some(texture) => egui::Image::new(texture).paint_at(ui, icon_rect),
-        None => egui::Image::new(icons.unknown_entity_texture()).paint_at(ui, icon_rect),
-    }
 
-    if let WatchlistKind::Enemy = entry.kind {
-        ui.painter().rect_stroke(
-            rect,
-            TILE_ROUNDING,
-            egui::Stroke::new(2.0, BORDER_STRONG),
-            egui::StrokeKind::Inside,
-        );
-    }
+    let frame = match entry.kind {
+        WatchlistKind::Item => design::SlotFrame::Rarity(to_slot_rarity(
+            catalog.find_item_rarity(&entry.name, entry.catalog_id),
+        )),
+        WatchlistKind::Enemy => design::SlotFrame::Plain,
+    };
 
-    paint_count_inline(ui, rect, entry);
+    let mut slot = design::item_slot()
+        .frame(frame)
+        .icon(icon_id)
+        .size(TILE_SIZE)
+        .log_name("suivi.tuile");
+    if let Some(count) = slot_count(entry) {
+        slot = slot.count(count);
+    }
+    let response = ui.add(slot);
 
     // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
     // 2026-09-06, design system tooltip).
     design::tooltip(&response).text(&entry.name);
 }
 
-/// Compteur incrusté dans le coin bas-droit de la tuile — miroir des captures de référence du jeu
-/// (`docs/design-system.md` §7, ex. `rare-items.png` : un simple nombre cerné de noir, PAS de
-/// pastille/pilule de fond) : remplace l'ancien badge en pilule qui débordait hors de la tuile
-/// (voir doc de module, refonte 2026-09-06). Réutilise `design::text::paint_outlined_text` (même procédé
-/// que le pourcentage de dégâts sur un portrait) — un contour double (1px + 2px) essayé un temps en
-/// même temps que `COUNT_FONT_SIZE` 15px a été jugé « trop » une fois comparé en jeu (retour
-/// utilisateur, captures d'écran des deux côte à côte) : le contour simple à 1px, déjà validé
-/// ailleurs dans l'UI, reste le bon réglage.
+/// Traduit une entrée de suivi en compteur du design system.
 ///
-/// Couleur selon le mode (inchangé depuis la refonte 2026-09-02) :
-/// - `up` : le compte seul, en clair neutre (`TEXT_COLOR`).
-/// - `down` : compte courant EN COULEUR KAMAS (`KAMA_COLOR`) sur cible grisée (`TEXT_MUTED`),
-///   PAS de conversion en "déjà collecté" (le web n'affiche que `count`/`countdownTarget` bruts).
-///
-/// **Essai 2026-09-06** (voir `TARGET_LINE_OFFSET`) : le nombre courant et la fraction cible ne
-/// partagent plus la même ligne — la cible (ex. "/500") se peint sous le nombre courant, même
-/// abscisse `right`, réduite à `TARGET_FONT_SIZE`.
-///
-/// **Refonte 2026-09-06 (bis)** (retour utilisateur explicite) : c'est maintenant la FRACTION qui
-/// garde l'ancrage `bottom` du mode `up` (l'emplacement standard de TOUS les suivis incrémentaux),
-/// et le nombre courant qui remonte de `TARGET_LINE_OFFSET` au-dessus — inversion du point de
-/// référence par rapport à l'essai précédent, sur demande explicite (« remonter le groupe jusqu'à
-/// ce que la fraction soit exactement à l'emplacement des suivis incrémentaux »). Couleur de la
-/// fraction éclaircie à cette occasion (`TARGET_TEXT_COLOR`, plus clair que `TEXT_MUTED`).
-fn paint_count_inline(ui: &egui::Ui, tile_rect: egui::Rect, entry: &WatchlistEntry) {
-    let (current_text, target_part) = match entry.mode {
-        WatchlistMode::Down => (
-            entry.count.to_string(),
-            Some(format!("/{}", entry.countdown_target)),
-        ),
-        WatchlistMode::Up => (entry.count.to_string(), None),
-    };
-    let current_color = if target_part.is_some() {
-        KAMA_COLOR
-    } else {
-        TEXT_COLOR
-    };
-
-    let right = tile_rect.right() - COUNT_INSET_RIGHT;
-    let bottom = tile_rect.bottom() - COUNT_INSET_BOTTOM;
-    // Le groupe courant+fraction remonte de `TARGET_LINE_OFFSET` par rapport à l'ancien ancrage du
-    // nombre courant (retour utilisateur 2026-09-06 : remonter tout le groupe jusqu'à ce que la
-    // fraction retombe exactement à l'emplacement standard des suivis incrémentaux, c'est-à-dire
-    // `bottom` — l'ancrage qu'utilise déjà le nombre courant seul en mode `up`, INCHANGÉ). Ce
-    // décalage ne s'applique donc QUE quand une fraction est réellement affichée (mode `down`) —
-    // le mode `up` garde exactement `bottom`, sans quoi « le même emplacement que tous les autres
-    // nombres » (demande d'origine, voir doc de module) ne serait plus respecté.
-    let current_bottom = if target_part.is_some() {
-        bottom - TARGET_LINE_OFFSET
-    } else {
-        bottom
-    };
-
-    crate::design::text::paint_outlined_text(
-        ui,
-        egui::pos2(right, current_bottom),
-        egui::Align2::RIGHT_BOTTOM,
-        &current_text,
-        egui::FontId::monospace(COUNT_FONT_SIZE),
-        current_color,
-        crate::design::text::OUTLINE_FULL,
-    );
-
-    if let Some(target_text) = &target_part {
-        crate::design::text::paint_outlined_text(
-            ui,
-            egui::pos2(right, bottom),
-            egui::Align2::RIGHT_BOTTOM,
-            target_text,
-            egui::FontId::monospace(TARGET_FONT_SIZE),
-            TARGET_TEXT_COLOR,
-            crate::design::text::OUTLINE_FULL,
-        );
-    }
+/// Les deux modes du panneau se lisent directement : `Up` compte vers le haut sans cible, `Down`
+/// compte vers une cible et affiche la fraction. Ce qui est *présentation* — l'ancrage de la
+/// fraction, la couleur du nombre courant, le cerne — a migré dans `design::item_slot` le
+/// 2026-09-11 ; ce qui reste ici est la lecture du mode, qui est du métier.
+fn slot_count(entry: &WatchlistEntry) -> Option<design::SlotCount> {
+    Some(match entry.mode {
+        WatchlistMode::Down => design::SlotCount::Fraction {
+            current: entry.count,
+            target: entry.countdown_target,
+        },
+        WatchlistMode::Up => design::SlotCount::Simple(entry.count),
+    })
 }

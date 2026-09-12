@@ -46,9 +46,9 @@ use std::ops::RangeInclusive;
 use egui::{Response, Ui, Vec2, Widget};
 
 use crate::design::{
-    assets::DsTexture,
     components::icon_button::{icon_button, IconContext},
     components::input::input,
+    icons::DsIcon,
     tokens,
 };
 
@@ -173,7 +173,7 @@ impl Widget for Stepper<'_> {
         if ui
             .put(
                 minus_rect,
-                icon_button(DsTexture::IconMinus)
+                icon_button(DsIcon::Minus)
                     .context(IconContext::Stepper)
                     .size(size)
                     .enabled(can_decrease)
@@ -210,7 +210,7 @@ impl Widget for Stepper<'_> {
         if ui
             .put(
                 plus_rect,
-                icon_button(DsTexture::IconPlus)
+                icon_button(DsIcon::Plus)
                     .context(IconContext::Stepper)
                     .size(size)
                     .enabled(can_increase)

@@ -432,6 +432,49 @@ capture du jeu ou pour une barre qui ne doit pas s'étirer.
 44px étirée à 31, libellés en `FontId::proportional(12.0)`, aucun clic. Elle partageait déjà la
 largeur en trois tiers égaux ; c'est le composant qui s'en était écarté, le temps de deux captures.
 
+### La variante pictogramme (2026-09-11)
+
+```rust
+design::tabs(&mut vue)
+    .entry(Vue::Combat, "Combat").icon(DsIcon::Cards)
+    .entry(Vue::Suivi, "Suivi").icon(DsIcon::Trophy)
+    .show(ui);
+```
+
+`.icon(...)` s'applique à la **dernière entrée déclarée**, comme `.enabled(...)`. Le pictogramme
+**remplace le libellé au rendu** — et le libellé reste, ce qui n'est pas une commodité d'API :
+
+- il devient l'**infobulle** de l'onglet (`design::tooltip`), sans quoi une barre de pictogrammes
+  n'apprend à personne ce que fait chaque onglet ;
+- il reste la **ligne de journal**, sans quoi on ne saurait plus nommer ce qui a été cliqué.
+
+C'est aussi pourquoi cette variante attendait le lot 2 : elle a besoin de `DsIcon` pour le glyphe
+**et** de `design::tooltip` pour le mot.
+
+**Mesures** — `assets/design-system/icon-tabs.png` (268 × 44), un gabarit à quatre onglets :
+
+| Grandeur | Valeur |
+| --- | --- |
+| Largeur d'un onglet | **66 px** (`TAB_ICON_WIDTH`) — crêtes de séparation à x=65, 133, 201, soit un pas de 68 dont 2 de gouttière |
+| Hauteur | 44 px, la même que la variante texte — les deux partagent leurs textures |
+| Encre du pictogramme | **dérivée**, `TAB_ICON_RATIO` = 18/36 → 22 px sur 44 |
+
+Un onglet à pictogramme est donc **plus étroit** qu'un onglet texte (77 px de plancher) : il n'a pas
+de mot à contenir. En mode étiré (le défaut), il suit la même règle de parts égales que la variante
+texte ; `fit_content` lui donne les 66 px du jeu.
+
+**Le ratio d'encre est dérivé, pas mesuré**, et c'est dit dans le jeton : `icon-tabs.png` est un
+gabarit **vide** — le jeu n'y a laissé aucun pictogramme. La valeur reprend le rapport du bouton
+icône (`ICON_BUTTON_CONTENT` sur `ICON_BUTTON_SIZE`), le seul rapport glyphe/socle que le design
+system ait mesuré. À remplacer dès qu'une capture d'onglets à pictogrammes existera.
+
+**Le pictogramme prend la teinte du libellé**, pas une teinte propre : il dit la même chose qu'un
+mot d'onglet, il doit changer avec l'état de la même façon — blanc quand l'onglet est actif, doré
+sinon, gris quand il est désactivé.
+
+Vérifié au rendu : les crêtes de séparation de la galerie tombent à un pas de 68 px, crête de 2 —
+**la cote du jeu au pixel**.
+
 ---
 
 ## `design::checkbox` — case à cocher (2026-09-10)
@@ -1267,6 +1310,605 @@ offscreen statique. Sa vérification visuelle est ailleurs et existait déjà �
 `watchlist_tooltip_*` et `combat_tooltip_*`, qui simulent le pointeur. Ils sont restés **identiques
 au pixel** à travers la migration, ce qui est le critère de fin que le plan fixait.
 
+---
+
+## `design::icon` et le registre `DsIcon` (2026-09-11)
+
+`crates/overlay-ui/src/design/icons.rs`, `components/icon.rs`
+
+```rust
+use overlay_ui::design::{self, DsIcon};
+
+ui.add(design::icon(DsIcon::Kamas));                  // 16 px par défaut
+ui.add(design::icon(DsIcon::Lock).size(24.0).tint(tokens::TEXT_DISABLED));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `size` | côté du **carré englobant** | `ICON_SIZE` = 16 px |
+| `tint` | teinte | `ICON_TINT` |
+
+### Deux registres, et pourquoi
+
+`DsTexture` et `DsIcon` étaient une seule énumération, ce qui obligeait chacun à porter les
+propriétés de l'autre :
+
+- **Un glyphe n'a pas de 9-slice.** Les 38 icônes déclaraient toutes `ICON_SLICE`, un 9-slice
+  dégénéré présent parce que le champ était obligatoire. Il ne décrivait rien et masquait ce que la
+  texture *est*.
+- **Un fond n'a pas d'étalon d'encre.** `icon_content_size` énumérait à la main, dans un `match` de
+  vingt lignes, les variantes qui sont des icônes normalisées — liste tenue en parallèle de
+  l'énumération, que rien ne vérifiait.
+
+Le défaut que cette confusion a produit est daté : le test `les_glyphes_d_icone_sont_detoures_au_
+pixel_pres` sélectionnait ses cibles **par leur découpage** (`insets == 0`), faute de mieux. Il
+ratait sa cible dans les deux sens — laissant passer les glyphes sans socle, et attrapant
+`loader-sheet.png`, une planche d'atlas qu'il a fallu exempter en ajoutant `DsTexture::grid`.
+Aujourd'hui il balaie `DsIcon::ALL`, sans filtre ni exemption.
+
+### La table est la source unique
+
+Nom de cache egui, chemin du fichier et présence d'un étalon viennent d'**un seul littéral** par
+icône, assemblés par la macro `ds_icons!`. Il n'y a plus de façon d'écrire `ds-icon-eye` en face de
+`icon-eye-off.png` — c'était possible tant que les trois étaient recopiés à la main dans `spec()`.
+
+Deux catégories d'étalon, marquées dans la table :
+
+- **`socle`** (21 icônes) — détourée depuis un socle de bouton du jeu, taille d'encre connue et
+  comparable, donc normalisable sur `ICON_BUTTON_CONTENT` ;
+- **`libre`** (17) — détourée sans bouton porteur ou sans mesure consignée. La normaliser sur un
+  étalon qu'elle ne partage pas la rendrait fausse ; elle garde sa taille native.
+
+### Ce que `design::icon` fait, et ce que fait `icon_button`
+
+`icon_button` peint un glyphe **sur un socle**, avec ses états et son clic. `design::icon` ne peint
+que le glyphe : une icône dans une ligne, un en-tête de colonne, à côté d'un compteur. Il n'est pas
+cliquable — qui veut un clic prend `icon_button`, qui a le socle que ce clic mérite.
+
+**Le rapport d'aspect est préservé** : les glyphes du jeu ne sont pas carrés (chevron 14 × 8,
+pastille d'info 27 × 28). Le composant réutilise `glyph_fit`, le seul endroit du crate qui calcule
+ce rapport, plutôt qu'un `Vec2::splat` — exactement le défaut qu'`Input::leading_icon` portait
+jusqu'au 2026-09-10. `size` donne donc le côté du **carré englobant**, pas la largeur : un chevron
+demandé à 16 px sera peint 16 × 9, centré dans un carré de 16.
+
+**L'étalon ne s'applique pas hors socle** : `content_size` sert à accorder deux glyphes voisins sur
+deux boutons. Sans voisin, le glyphe occupe le carré qu'on lui donne.
+
+### Vérification
+
+Le refactor touche 223 usages et **aucun snapshot n'a bougé**, hormis celui de la galerie où une
+section a été *ajoutée*. Les six captures d'infobulle, les panneaux, la modale : identiques au
+pixel. C'est ce qu'on attend d'un changement de typage.
+
+Coût mémoire, mesuré avant décision : les 38 icônes décodées en RGBA pèsent **31 Ko** — sans effet
+sur le budget de 300 Mo (§8 du plan).
+
+## `design::autocomplete` — champ d'autocomplétion (2026-09-11)
+
+`crates/overlay-ui/src/design/components/autocomplete.rs`
+
+```rust
+use overlay_ui::design::{self, AutocompleteEntry, AutocompleteFilter};
+
+let issue = design::autocomplete(&mut state.saisie)
+    .placeholder("Ajouter un objet à surveiller…")
+    .width(560.0)
+    .filters(&filtres)   // « Tout » en tête, puis les catégories PRÉSENTES
+    .entries(&entrees)
+    .log_name("alertes.ajout")
+    .show(ui);
+if let Some(index) = issue.selected {
+    ajouter(&entrees[index]);
+}
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `entries` | `&[AutocompleteEntry]` — libellé, catégorie, gemme, image, désactivé, mention | vide |
+| `filters` | `&[AutocompleteFilter]` — `all(…)` et `category(id, …)` | vide (pas de bande) |
+| `placeholder` / `empty_filter_label` | textes | `""` / « Aucun résultat dans cette catégorie » |
+| `width` | largeur imposée | largeur disponible |
+| `min_query_len` | seuil de déclenchement | `AUTOCOMPLETE_MIN_QUERY_LEN` = 3 |
+| `max_visible_rows` | au-delà, la liste défile | `AUTOCOMPLETE_MAX_VISIBLE_ROWS` = 5 |
+| `enabled` | `bool` | `true` |
+| `preview_open` / `preview_active` / `preview_filter` | aperçu de galerie | fermé / 0 / aucun |
+
+Rend un **`AutocompleteOutcome`** : la `Response` du champ **et** `selected: Option<usize>`, l'indice
+dans `entries` de l'entrée choisie.
+
+Décor résolu en interne (socle et loupe d'`InputSize::Standard`) ; **panneau déplié entièrement
+repris de `design::select`** — fond, bord, filet de tête, surbrillance, cadence de rangée de 28 px.
+C'est la même liste du jeu, il n'y avait pas de second relevé à faire. Ce que ce composant ajoute :
+la bande de filtres, une image par entrée, des entrées désactivées, et un seuil de déclenchement.
+
+### Les cinq règles de comportement, portées du web
+
+Le jeu n'a **pas** d'autocomplétion : aucune capture ne peut servir de référence, donc rien de tout
+ceci ne se vérifie à l'œil. Relevé sur `shared/wakfu-autocomplete` (`Oumbra/wakfu-companion`) le
+2026-09-11.
+
+1. **Rien avant trois caractères** — comptés en *caractères*, pas en octets.
+2. **Une entrée désactivée n'est pas sélectionnable** : grisée, sans surbrillance au survol, sautée
+   par le clavier, et refusée par `show` même si un clic l'atteignait. Trois barrières, parce
+   qu'une seule finit toujours par être contournée.
+3. **Un filtre actif restreint la liste** à sa seule catégorie.
+4. **La bande se calcule sur la liste NON filtrée** — l'appelant construit `filters` sans tenir
+   compte du filtre actif. Sinon le bouton qui permettrait de relâcher un filtre sans résultat
+   disparaîtrait avec les rangées, et l'utilisateur resterait coincé devant une liste vide.
+5. **Après une sélection** : le champ se vide, le panneau se ferme, l'entrée active repart à la
+   première, et **le filtre revient à « Tout »**.
+
+Clavier : `↓`/`↑` sautent les entrées désactivées et bouclent, `Entrée` valide, `Échap` ferme. Les
+touches sont consommées **avant** le champ de saisie, sinon la flèche déplacerait le curseur de
+texte. Une liste entièrement désactivée termine quand même — la recherche s'arrête après un tour
+complet (test `toutes_desactivees_ne_boucle_pas_indefiniment`).
+
+### Deux écarts au contrat, assumés
+
+**`show` plutôt que `impl Widget`** (§1) : une `Response` ne peut pas dire *quelle* entrée a été
+choisie, et la ressortir par un `&mut` en paramètre est la maladresse que §6 reproche ailleurs.
+Même raison que pour les conteneurs (§1 bis), sur un composant qui n'en est pas un.
+
+**Des textures en paramètre** (§1) : la gemme de rareté et l'image d'un objet sont du **contenu**,
+pas du décor — elles viennent du CDN `wakassets` par `RemoteIconStore`, le design system ne les
+possède pas. Elles arrivent donc par `AutocompleteEntry`, au même titre que le libellé. Leur absence
+n'est pas une erreur : la colonne reste réservée, les libellés restent alignés, et la rangée se
+peint sans elles (c'est l'état normal tant que le CDN n'a pas répondu).
+
+### Ce que le composant ne fait pas
+
+Il ne cherche rien. L'appelant lui passe des entrées déjà trouvées, déjà triées, déjà marquées
+« déjà suivi ». Le domaine n'est **pas** un paramètre : la page Alertes ne lui donne que des objets,
+le futur formulaire d'ajout au Suivi lui donnera objets **et** monstres — le composant ne fait pas
+la différence. Les objets à recette (évolution demandée pour ce même formulaire) suivront de la même
+façon, par l'appelant.
+
+### Ce que la capture a rattrapé
+
+- **La quatrième rangée sortait du panneau.** La hauteur du panneau vaut `rangées × 28`, sans
+  interligne — mais `allocate_exact_size` ajoutait les 3 px d'`item_spacing` hérités du thème entre
+  chaque rangée. Neuf pixels de trop sur quatre rangées : le libellé de la dernière était coupé en
+  deux par le bord. Invisible à la relecture, évident sur la planche.
+- **La `ScrollArea` n'est instanciée que si la liste déborde vraiment** : toujours présente, elle
+  demande un repeint tant que son décalage s'anime, et `Harness::run` tourne alors jusqu'à sa limite
+  d'étapes sans converger.
+- **Les identifiants dérivent de la `Response` du champ**, jamais du `Ui` parent : trois instances
+  dans le même parent partageaient sinon le même id d'`Area` et de rangées — egui l'écrit en rouge
+  par-dessus le rendu.
+
+### Les jetons
+
+Tous préfixés `AUTOCOMPLETE_*` dans `design/tokens.rs`, sous un en-tête qui dit explicitement qu'il
+s'agit d'un **portage du CSS web** et non d'une mesure sur asset : bande 38, bouton de filtre 26
+(icône 20), opacité de repos 0,6 → alpha 153, boîte de gemme 14 (une gemme 13 × 20 y entre en
+9,1 × 14, jamais un `splat`), image d'objet 22, écarts 6, message vide 34.
+
+---
+
+## `design::item_slot` — emplacement d'objet (2026-09-11)
+
+`crates/overlay-ui/src/design/components/item_slot.rs`
+
+```rust
+use overlay_ui::design::{self, ItemRarity, SlotCount, SlotFrame};
+
+ui.add(
+    design::item_slot()
+        .frame(SlotFrame::Rarity(ItemRarity::Legendary))
+        .icon(texture_id)
+        .count(SlotCount::Fraction { current: 137, target: 500 }),
+);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `frame` | `Rarity(ItemRarity)` / `Plain` | `Plain` |
+| `icon` | `egui::TextureId` déjà résolu | aucune, l'emplacement est peint vide |
+| `count` | `Simple(i64)` / `Fraction { current, target }` | aucun |
+| `size` | côté du carré | `ITEM_SLOT_SIZE` = 64 |
+
+Textures : les sept `DsTexture::ItemBorder*`, entrées au manifeste avec ce composant.
+
+### L'ordre de peinture EST le composant
+
+**La bordure de rareté se peint SOUS l'icône. Le cadre simple, PAR-DESSUS.** Ce n'est pas une
+préférence :
+
+- la fenêtre intérieure des `Border-*.webp` **n'est pas un trou transparent** — c'est un aplat
+  semi-transparent (~70 %) teinté par la rareté, vérifié sur les octets décodés. Peinte après
+  l'icône, elle la recouvre entièrement : « j'ai l'impression que tu as mis les objets en opacité »,
+  rapporté le jour même de leur arrivée, flagrant sur le jaune-olive du légendaire ;
+- un cadre simple est au contraire un **liseré net**, qui doit rester visible si l'icône déborde.
+
+Cet ordre est décrit en **données** (`paint_order`, une fonction libre) plutôt qu'en suite
+d'instructions, et deux tests le verrouillent. Un bug qu'on rattrape à l'œil une fois ne se rattrape
+pas à chaque relecture.
+
+### Ce que l'appelant fournit, et ce qu'il ne fournit pas
+
+L'icône arrive en `TextureId` **déjà résolu**, et ce n'est pas une entorse à « aucune texture en
+paramètre » : cette règle vise les assets du design system, que le composant doit résoudre depuis
+une intention. Une icône d'objet est du **contenu** — téléchargée, mise en cache, indexée par le
+catalogue, tout cela hors du design system.
+
+La **rareté**, elle, est une intention : `ItemRarity` est un type du design system, et c'est au
+panneau de traduire son `WakfuRarity` métier (`watchlist::to_slot_rarity`) — un composant n'accède
+pas à `overlay_engine`.
+
+### Deux tailles d'icône, indépendantes
+
+| Cadre | Icône |
+| --- | --- |
+| `Rarity` | la fenêtre intérieure de la texture (≈ 0,797 du côté), réduite de 4 % |
+| `Plain` | `ITEM_SLOT_PLAIN_ICON_FILL` ≈ 0,517 — un **rapport** (30/58 mesuré sur le template web), pas une cote : l'icône suit le côté qu'on donne à l'emplacement |
+
+**Aucune ne se déduit de l'autre**, et les confondre a produit un défaut réel : la première version
+faisait occuper tout le carré à l'icône d'un cadre simple. La bordure de rareté masquait le problème
+sur les objets — c'est le snapshot d'une tuile d'**ennemi** qui l'a révélé, avec un monstre deux
+fois trop gros.
+
+### Vérification
+
+**Aucun snapshot n'a bougé** : la migration de `watchlist::entry_tile` est équivalente au pixel,
+compteur compris. Quatorze constantes locales ont disparu du panneau, qui ne garde que ce qui lui
+appartient — résoudre l'icône distante, lire la rareté au catalogue, traduire vers le design system.
+
+~~**Les cotes restent celles du web**~~ — **passées à celles du jeu le 2026-09-12** : le carré va de
+58 à **64 px** et le rayon des coins de 10 à **2**. Ce qui a décidé la valeur haute de la fourchette
+relevée (`item_slot_square` 63-64, une mesure pixel d'un bord adouci n'ayant pas de frontière nette)
+est une coïncidence qui n'en est pas une : le liseré des `Border-*.webp` occupe 1/30ᵉ de leur
+canevas, soit **2,1 px rendu à 64** — exactement l'`item_slot_border` relevé sur les mêmes captures.
+À 58 il en faisait 1,9.
+
+Le rayon suit `shape.corner_style_inputs_lists` du relevé (« square_or_near_square ») : dans le jeu,
+une case d'inventaire est un carré. 2 plutôt que 0 parce que le contour extérieur des textures de
+rareté est lui-même arrondi (rayon ≈ 1/16ᵉ du canevas, ≈ 4 px à 64) — un fond parfaitement
+rectangulaire pointerait hors de ses coins.
+
+**`item_slot_gap` (2 px) n'a PAS suivi**, et c'est délibéré deux fois : cet espacement décrit la
+densité d'une grille d'inventaire, pas celle d'un bandeau de suivi posé par-dessus le jeu (où le 12
+px vient d'un réglage utilisateur) — et surtout il n'appartient pas au composant : un emplacement ne
+connaît pas son voisin, c'est l'appelant qui espace.
+
+Onze snapshots régénérés (la galerie et les dix du panneau Suivi), dont la **largeur de la fenêtre
+du Suivi**, qui se calcule sur la taille de tuile. `watchlist::TILE_SIZE` ne porte d'ailleurs plus sa
+propre valeur : il valait `58.0` en dur, la même que le jeton mais écrite deux fois — le passage du
+composant à 64 aurait laissé le bandeau à 58 sans que rien ne le signale.
+
+~~**Un doublon daté**~~ — **résorbé le 2026-09-11** : les deux maquettes du testkit
+(`alertes-mockups`, `composants-a-concevoir`) appellent le composant, `UiIcons::item_border` a
+perdu son dernier appelant et les sept textures ne sont plus chargées qu'une fois. Les **7,3 Mo**
+payés deux fois (4,9 % du budget) sont rendus. La traduction `WakfuRarity → ItemRarity` a suivi le
+même chemin : elle est passée de `panels::watchlist` à `crate::rarity_bridge`, parce qu'un exemple
+n'a pas à traverser un panneau pour convertir une rareté.
+
+### Journalisation (clause 4)
+
+Sous `tokens::ITEM_SLOT_MIN_SIZE` (8 px = 4 × le liseré), le cadre et sa marge mangent tout le
+carré. L'emplacement est **peint quand même** — §3 veut qu'un rectangle trop petit se voie sur la
+capture plutôt que de paniquer — et un `warn!` part **une fois par instance**, mémorisé sur l'id de
+la réponse comme le fait `design::slider` pour ses crans. Le seuil est **choisi, pas mesuré**, et sa
+doc le dit : personne ne demande sciemment un emplacement de 6 px, c'est le signe d'une largeur
+calculée tombée à rien. La galerie en montre un, à droite de la rangée des cas.
+
+---
+
+## `design::meter` — jauge (2026-09-11)
+
+`crates/overlay-ui/src/design/components/meter.rs`
+
+```rust
+ui.add(design::meter(0.42).width(190.0));
+ui.add(design::meter(ratio).fill(couleur).width(190.0));
+
+// Pour un appelant qui pose déjà sa géométrie :
+design::paint_meter(ui, rect, ratio, couleur);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `fill` | teinte du remplissage | `METER_FILL` = `#077982` |
+| `width` | largeur imposée | toute la largeur disponible |
+| `height` | hauteur | `METER_HEIGHT` = 16 |
+
+### Six couches, et le piège est géométrique
+
+Là où `item_slot` avait un piège d'**ordre**, la jauge en a un de **géométrie** : chaque couche se
+déduit de la précédente par un `shrink`, et son arrondi doit décroître d'autant. Écrire les rayons à
+la main donne des coins non concentriques — visible sur un arrondi de 4 px.
+
+| Couche | Rectangle | Arrondi |
+| --- | --- | --- |
+| bordure extérieure | le rectangle donné | 4 |
+| bordure intérieure | `shrink(2)` | 2 |
+| piste | `shrink(2)` encore | 0 |
+| remplissage | fraction de la piste | conditionnel |
+| reflet | tiers supérieur du remplissage | coins hauts seulement |
+| curseur de fin | 2 px à l'extrémité | 1 |
+
+### L'arrondi conditionnel
+
+**Les coins droits du remplissage ne s'arrondissent que s'il atteint le bout de la piste.** Sinon
+son bord tombe au milieu et un coin arrondi y suggérerait un bord qui n'existe pas. C'est
+`fill_corners`, fonction libre testée : le défaut est invisible sur une jauge pleine ou vide —
+c'est-à-dire dans les deux cas qu'on regarde en premier.
+
+Le seuil de « pleine » est **0,999 et non 1,0** : une fraction calculée en `f32` peut sortir à
+0,9999998 pour un rapport qui vaut exactement un, et la jauge du premier combattant du classement —
+le cas le plus fréquent — afficherait alors un curseur collé au bord droit et deux coins carrés.
+
+### Les teintes
+
+Le **remplissage** vient de l'appelant : le panneau Combat fait varier la couleur de sa barre selon
+la part de dégâts. Le **reflet** est fixe (`#0dbebe`), demandé comme un ton précis plutôt que comme
+une dérivation du remplissage — un éclaircissement automatique a existé, il ne donnait pas ce ton.
+
+Les six couleurs ont été **mesurées pixel par pixel** sur une maquette fournie, après une première
+tentative approximée à l'œil qui « dénotait du jeu ». Contre-intuitif et conservé tel quel : la
+bordure *extérieure* est un gris moyen, c'est l'*intérieure* qui est presque noire.
+
+### Vérification
+
+**Aucun snapshot n'a bougé** : la migration de `combat::damage_bar` est équivalente au pixel. Sept
+constantes disparaissent du panneau, qui ne garde que le calcul de la part de dégâts et sa teinte —
+du métier, que le composant ne saurait pas faire.
+
+---
+
+## `design::portrait` — portrait de combattant (2026-09-11)
+
+`crates/overlay-ui/src/design/components/portrait.rs`
+
+```rust
+use overlay_ui::design::{self, PortraitShape};
+
+ui.add(
+    design::portrait(texture_id)
+        .shape(PortraitShape::Round)
+        .size(48.0)
+        .dimmed(fighter.is_ko)
+        .percent(Some(42)),
+);
+
+// Pour le gabarit à six emplacements, qui pose déjà ses centres :
+design::paint_portrait(ui, rect, texture_id, PortraitShape::Round, dimmed);
+design::paint_portrait_percent(ui, rect, design::portrait_percent(dmg, total));
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `shape` | `Square` / `Round` | `Square` |
+| `size` | côté du carré englobant | 40 (la liste plate) |
+| `dimmed` | applique le grisé KO | `false` |
+| `percent` | `Option<i64>` incrusté au coin | aucun |
+
+### Deux formes, parce que le jeu en a deux
+
+Le gabarit de combat loge ses portraits dans des **médaillons ronds**, la liste plate — celle qui
+prend le relais au-delà de six alliés — les pose **carrés**. `PortraitShape::corner_radius(size)`
+porte le calcul plutôt que de le laisser à chaque appelant : `taille / 2` écrit à deux endroits finit
+par diverger d'un pixel.
+
+### Le grisé est une approximation, et c'est l'appelant qui décide
+
+Une teinte egui **multiplie** : elle assombrit sans désaturer, là où un vrai niveau de gris
+désature. Les portraits de classe ont leur version grise **précalculée** dans l'atlas et n'ont donc
+pas besoin de la teinte — la leur serait moins bonne. Une icône de monstre téléchargée ou le repli
+générique n'ont pas d'équivalent gris et s'en contentent.
+
+Le composant ne peut pas trancher : seul l'appelant sait laquelle des trois textures il tient. D'où
+`dimmed` en paramètre plutôt qu'une déduction depuis un `is_ko` que le composant ne verrait pas.
+
+### Le pourcentage déborde du carré, volontairement
+
+Il se pose au coin bas-droit du **carré englobant**, décalé encore de 2 px à droite et 1 en bas :
+« comme si on traçait un carré autour du rond et qu'on plaçait le pourcentage tout en bas à
+droite », puis « encore un peu plus sur la droite pour qu'il mange un peu moins sur le portrait ».
+Sur un portrait rond, ce coin est hors du disque — c'est précisément ce qu'on veut.
+
+Il prend `OVERLAY_ACCENT` et **non la teinte de la jauge**, après un aller-retour : les deux ont été
+alignées un temps, puis re-séparées (« je préfère la couleur accent qu'il y avait avant »).
+
+`portrait_percent(damage, total)` est une fonction libre testée : **un total nul est le cas réel du
+tout début d'un combat**, et une division par zéro y produirait un `NaN` qui se propage jusqu'au
+texte peint — « NaN% » sur un portrait.
+
+### Vérification
+
+**Aucun snapshot n'a bougé** : la migration de `combat::paint_flat_portrait` et des deux boucles du
+gabarit est équivalente au pixel.
+
+## `design::table` — tableau (2026-09-12)
+
+`crates/overlay-ui/src/design/components/table.rs`
+
+```rust
+use overlay_ui::design::{self, TableAlign, TableBody, TableColumn};
+
+design::table()
+    .column(TableColumn::fixed("Date", 104.0))
+    .column(TableColumn::flex("Nom", 1.0))
+    .column(TableColumn::fixed("Prix", 108.0).align(TableAlign::End))
+    .body(TableBody::Rows(offres.len()))
+    .max_height(12.0 * design::tokens::TABLE_ROW_HEIGHT)
+    .empty_text("Aucune vente sur la période")
+    .log_name("hdv.historique")
+    .show(ui, |row| {
+        let offre = &offres[row.index()];
+        row.cell(|ui| { ui.label(&offre.date); });
+        row.cell(|ui| { ui.label(&offre.nom); });
+        row.cell(|ui| { ui.label(&offre.prix); });
+        if row.response().clicked() { /* l'appelant décide */ }
+    });
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `column` / `columns` | `TableColumn::fixed(label, px)` ou `::flex(label, poids)`, `.align(…)` | aucune colonne |
+| `body` | `Rows(n)` / `Empty` / `Loading` | `Empty` |
+| `empty_text` | message du corps vide | aucun — le corps reste vide, comme dans le jeu |
+| `row_height` | hauteur d'une ligne | 60 (la cote du jeu) |
+| `width` | largeur totale | celle du `Ui` |
+| `max_height` | borne du **corps** : au-delà il défile, en-tête figé | aucune |
+| `preview_loader_frame` | fige le rouage de `Loading` | horloge |
+
+Conteneur de la famille §1 bis, **forme closure**. `Table::height()` rend la hauteur totale *avant*
+le rendu : c'est ce qui permet à un appelant de peindre quelque chose derrière le tableau, ou de
+réserver sa place.
+
+### Trois cotes mesurées, et tout le reste vient de l'appelant
+
+Relevé : [`hdv-table.json`](design-system/hdv-table.json). Hauteur de ligne **60 px**, encre
+d'en-tête **14 px**, écart encre → première ligne **7 px** — les trois invariants sur les trois
+captures HDV. L'écart de 7 px est **la même valeur que `HEADING_TO_ROW`**, mesurée indépendamment
+sur une autre interface, et la teinte des libellés (`#b9babb`) est celle des titres de section
+(`#b8b9ba`) à un canal près : deux jetons partagés plutôt que deux quasi-doublons qui dériveraient.
+
+L'en-tête est en **linéale**, pas dans la serif des titres — vérifié sur la capture agrandie ×4,
+c'est le genre de détail qu'aucune mesure numérique ne donne. Corps 17, contrôlé au rendu : 12 px
+d'encre et 36 px de large pour « Date », contre 12 et 37 dans le jeu.
+
+**Les trois tableaux relevés sont vides** (« 0 Objet »). Rien de ce qui concerne une ligne remplie
+n'est mesurable : alignement des valeurs, typographie des cellules, icône d'objet de la colonne Nom,
+texte trop long. Le composant n'en invente rien — il **donne la cellule à l'appelant** et ne peint
+aucun contenu. Seul `TABLE_CELL_PAD_X` est un choix, emprunté à `SELECT_PADDING_X`, et il l'annonce.
+
+### Le zébrage éclaircit, il ne colore pas
+
+Le tableau du jeu n'a **pas de fond propre** : le décor se lit à travers. Une ligne sur deux porte
+donc un blanc translucide, jamais deux aplats opaques — sur un overlay posé par-dessus un jeu en
+mouvement, deux aplats seraient faux à chaque frame.
+
+L'alpha est déduit colonne par colonne, `(claire − nue) / (1 − nue/255)`, sur quinze colonnes de
+x=60 à x=1180 : **médiane 12,3**, valeurs de 10,1 à 16,2. La dispersion est celle du décor, pas de
+la mesure. Deux colonnes seules donnaient 13,5 : l'échantillon comptait.
+
+La galerie le démontre en peignant le premier tableau **sur six bandes de fond de luminances
+différentes** — sur un fond uni, la démonstration serait invisible.
+
+### Les positions de colonne sont imposées par le composant, et c'est un constat du relevé
+
+Les six libellés ont partout la même largeur d'encre d'une capture à l'autre, mais leurs abscisses
+varient avec la largeur du tableau **sans règle lisible** : entre « Enchantement » et « Quantité »
+l'écart vaut 160 px dans deux captures sur trois, ailleurs rien ne se répète. Le relevé conclut
+qu'il faut soit une quatrième capture, soit que le composant impose sa propre répartition. C'est ce
+second choix, et il est **en données** : `table_column_spans(colonnes, largeur)` — fixes d'abord,
+reste au prorata des poids élastiques, réduction proportionnelle si les fixes ne tiennent pas — avec
+quatre tests qui le verrouillent. Sans aucune colonne élastique, le reste **demeure à droite** :
+une largeur imposée l'est vraiment.
+
+### Les deux états que le jeu ne montre pas
+
+`Empty` et `Loading` sont une **décision de l'overlay**, pas un relevé : les tableaux à « 0 Objet »
+du jeu sont simplement vides, sans message, et aucune capture ne montre un tableau en chargement.
+Les deux sont construits avec des éléments déjà mesurés — le rouage de `design::loader`, le gris de
+`TEXT_DISABLED` — plutôt qu'avec des teintes inventées, et leurs hauteurs sont annoncées comme
+choisies dans les jetons. `empty_text` reste facultatif : sans lui, le corps garde sa hauteur et
+demeure vide, ce que fait le jeu.
+
+### L'identité pend à la réponse du corps
+
+Une `Ui` fille créée sans sel d'identité **hérite de l'identifiant de sa mère**. Deux tableaux posés
+dans le même panneau donnaient donc les mêmes identifiants de ligne, et egui l'écrivait en rouge sur
+la capture (« Second use of widget ID … ») — c'est la capture qui l'a montré, aucune relecture ne
+l'aurait signalé. Tout pend désormais à l'identifiant automatique de la réponse du corps, unique par
+position dans l'arbre : lignes, cellules, barre de défilement et avertissement de débordement.
+
+### Ce que le tableau ne peint PAS
+
+La bande claire de 8 px sous le tableau, que le relevé attribuait à un « liseré bas ». Mesure de
+contrôle : elle traverse **toute la largeur de la capture** (x 0..1278), bien au-delà des bornes du
+tableau (x 24..1262). Elle appartient au décor de la fenêtre — le relevé a été corrigé.
+
+La **pagination** n'en fait pas partie non plus : en bas dans Historique et Rechercher, **en haut à
+droite** dans Mes offres. C'est un composant autonome que la page place, pas un pied de tableau.
+
+### Vérification
+
+Snapshot **`design_gallery_table.png`** — et c'est une *seconde* planche, pas un choix de
+présentation : `wgpu` refuse une texture de plus de 8192 px de côté et `design_gallery.png` en
+occupe déjà 7530. Six cas : peuplé sur fond en bandes (avec un nom trop long, coupé à la colonne),
+vide avec message, vide muet, en chargement, corps borné défilant, et le cas dégénéré (268 px de
+colonnes imposées dans 200 px).
+
+## `design::pagination` — pagination (2026-09-12)
+
+`crates/overlay-ui/src/design/components/pagination.rs`
+
+```rust
+use overlay_ui::design::{self, PaginationStep};
+
+match design::pagination(page, total).log_name("hdv.historique").show(ui).step {
+    Some(PaginationStep::Previous) => page -= 1,
+    Some(PaginationStep::Next) => page += 1,
+    None => {}
+}
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `pagination(page, total)` | affichés tels quels — le composant ne renumérote rien | — |
+| `log_name` | nom d'instance | `pagination` |
+| `preview_hovered` | force le survol d'une flèche (galerie) | horloge réelle |
+
+Composant feuille, mais il rend un `PaginationOutcome` et non une `Response`&nbsp;: deux flèches,
+deux intentions distinctes qu'une seule `Response` ne saurait pas dire. `Pagination::height()` vaut
+`ICON_BUTTON_SIZE`&nbsp;; la largeur est celle du libellé, jamais une valeur figée.
+
+### Ce n'est pas un pied de tableau
+
+En bas dans Historique et Rechercher, **en haut à droite** dans Mes offres. C'est un constat du
+relevé, pas une préférence&nbsp;: le bloc alloue sa largeur naturelle et laisse la mise en page à
+son appelant.
+
+### Trois choses que la capture a apprises, contre le relevé
+
+1. **Ce ne sont pas des flèches nues.** Le relevé décrivait « deux flèches de 7 px espacées de
+   39 px ». Agrandie ×5, la zone montre **deux boutons icône de 36 × 36** — socle arrondi, hachures
+   diagonales — séparés de 4 px. Le composant n'en peint donc aucun&nbsp;: il compose deux
+   `design::icon_button` en contexte panneau.
+2. **Le numéro courant est doré, pas blanc.** Mesuré (244, 216, 158) sur ses pixels pleins, la même
+   valeur que « Page ». Seuls la barre oblique et le total sont blancs — *ce qui bouge est en or, ce
+   qui borne est en blanc*.
+3. **Le glyphe pointe vers la gauche**, malgré son nom de fichier (`icon-triangle-right`). Vérifié
+   sur son canal alpha&nbsp;: pointe en x=0, base en x=6. C'est donc « suivant » qui est retourné.
+   La première capture a rendu les deux flèches à l'envers — aucune relecture ne l'aurait dit.
+
+### Un glyphe détouré d'un bouton n'est pas forcément sur la grille de 18
+
+`DsIcon::TriangleRight` était déclaré `socle`, donc normalisé à `ICON_BUTTON_CONTENT` (18 px
+d'encre). Mesure directe sur la pagination du jeu&nbsp;: **8 × 10 px d'encre dans un socle de 36**,
+soit la taille native de l'asset (7 × 10) à un pixel de détourage près. La normalisation
+l'agrandissait de 80 %, ce que la première capture a montré sans ambiguïté. Passé à `libre` — et
+c'est le registre qui apprend quelque chose&nbsp;: `--from-button` dit d'où vient le détourage, pas
+que le glyphe soit sur la grille.
+
+### Le corps a été réglé au rendu, pas par le calcul
+
+13 px de hauteur de **capitale** dans le jeu (le « P » de « Page ») — pas les 16 px d'encre totale,
+qui incluent le jambage du « g » et donneraient un corps faux d'un tiers. Le rapport d'encre habituel
+(0,805) donnait 16&nbsp;; au rendu, 16 ne produit que 11 px d'encre et **19 en produit 13**. Contrôle
+sur le segment entier «&nbsp;Page 0 / 0&nbsp;»&nbsp;: 41 px pour « Page » contre 42 dans le jeu,
+83 px pour le libellé entier contre 82.
+
+### Ce qui reste inconnu
+
+**Les deux flèches sont grisées sur les trois captures** (« Page 0 / 0 » — le jeu n'a aucune page à
+parcourir). L'apparence d'une flèche *active* n'existe nulle part&nbsp;: le composant laisse
+`icon_button` rendre ses états habituels plutôt que d'inventer une teinte.
+
+Le socle **désactivé**, lui, est mesurable et diverge nettement&nbsp;: le jeu le peint à (36, 37, 41)
+sur un fond à (28, 30, 34), là où le contexte `Panel` pose `ButtonIconDisabled` en pleine opacité, à
+65. L'asset a été détouré d'un écran plus clair et rien ne le ramène au fond sur lequel il est posé.
+**C'est un écart d'`icon_button`**, qui vaut pour ses quatre boutons désactivés — le corriger dans la
+pagination créerait un second réglage du même socle.
+
+### Vérification
+
+Snapshot `design_gallery_table.png`, section basse&nbsp;: les quatre positions possibles (0/0, 1/12,
+6/12, 12/12), un survol forcé, et un total à quatre chiffres qui élargit le bloc.
+`design_gallery.png` bouge aussi, du seul fait de la renormalisation de `TriangleRight`.
+
 ## À faire — composants identifiés, pas encore écrits
 
 Inventaire refait le 2026-09-10 à partir des assets de `assets/design-system/` (55 fichiers sur 85
@@ -1376,11 +2018,10 @@ ce qui flotte, les jetons du jeu pour ce qui vit dans une fenêtre — jamais d'
 
 | Composant | Ce qu'il absorbe | Matière disponible |
 | --- | --- | --- |
-| **`design::item_slot`** | `watchlist::entry_tile` — bordure de rareté, icône, compteur incrusté, et l'ordre de peinture dont l'inversion a déjà produit un bug. | 7 `Border-*.webp`, `rarity_borders` (7 raretés), `item_slot_square` 63–64 / `gap` 2 / `border` 2 relevés. |
+| **`design::item_slot`** | `watchlist::entry_tile` — bordure de rareté, icône, compteur incrusté, et l'ordre de peinture dont l'inversion a déjà produit un bug. | 7 `Border-*.webp`, `rarity_borders` (7 raretés), `item_slot_square` 63–64 / `border` 2 **appliqués** (2026-09-12) ; `gap` 2 laissé à l'appelant. |
 | **`design::badge`** | `watchlist::paint_count_inline`, les étiquettes de rareté, la pastille d'état. | `status_pill_active` ; `text::OUTLINE_FULL` existe. §5.12, §5.13. |
 | **`design::meter`** | `combat::damage_bar` — 68 lignes de rectangles empilés (bord externe, bord interne, piste, remplissage, reflet, curseur de fin, arrondis conditionnels). | Six couleurs mesurées dans `combat.rs`, à promouvoir en jetons. |
 | **`design::portrait`** | `combat::paint_flat_portrait`, `panels::combat_frame` et son gabarit à six emplacements. | `crates/overlay-ui/assets/templates/*.png`, atlas de classes, portrait de repli. |
-| **`design::table` + `design::pagination`** | Rien aujourd'hui — mais l'historique HDV, les ventes et les échanges (§9 du plan) sont exactement cela : colonnes triables, lignes alternées, état vide, « Page 0 / 0 » et ses deux flèches. | Quatre captures complètes dans `interfaces/` ; passer par `ui-blueprint` d'abord. |
 
 ### Vague 4 — les finitions
 
@@ -1408,6 +2049,14 @@ demi** :
   utilisateur explicite (la texture étirée cachait les portraits, voir la doc de module). Les
   unifier demanderait donc une variante du composant, pas une suppression — et cette variante
   attend une décision, pas un nettoyage.
+- **Le socle désactivé d'`icon_button` est trop clair sur un fond sombre** (constaté le 2026-09-12
+  en écrivant `design::pagination`). Le jeu peint le socle d'une flèche grisée à (36, 37, 41) sur un
+  fond à (28, 30, 34) — huit niveaux au-dessus de son fond. Le contexte `Panel` pose
+  `ButtonIconDisabled` en pleine opacité, à 65 : l'asset a été détouré d'un écran plus clair, et
+  rien ne le ramène au fond sur lequel il est posé. Le contexte `FirstPlan` a déjà rencontré ce
+  problème et le traite en gardant son socle de repos sous `DISABLED_DIM` ; `Panel` ne l'a pas
+  encore. À corriger dans `icon_button`, pour ses quatre boutons désactivés à la fois — jamais dans
+  un composant appelant, qui créerait un second réglage du même socle.
 - **Cinq chemins de chargement de texture** (et non six : `options_modal` est passé au manifeste) —
   `DesignSystem::load`, `ui_icons`, `portraits`, `remote_icons`, `combat_frame` — dont quatre copies
   de la même fonction décoder → `ColorImage` → `load_texture`. Le budget mémoire (§8 du plan,

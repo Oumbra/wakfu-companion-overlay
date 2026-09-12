@@ -402,9 +402,10 @@ const ROW_GAP: f32 = 1.0;
 /// la première version de cette refonte (12 px).
 const COLUMN_GAP: f32 = 6.0;
 
-// Charte reprise telle quelle du thème sombre par défaut du dépôt web (`styles.css` `:root`, voir
-// `.icon-switch`/`.icon-switch-highlight`) — pas de palette propre à l'overlay pour ce composant.
-pub(super) const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0xd2, 0xff);
+// L'accent du contenu flottant, repris du jeton partagé plutôt que recopié : ce panneau et le
+// panneau Suivi portaient la même valeur en deux constantes locales sans lien déclaré entre elles.
+// Voir `tokens::OVERLAY_ACCENT`, qui porte la décision et sa raison.
+use crate::design::tokens::OVERLAY_ACCENT as ACCENT;
 // Couleur dédiée au remplissage de la barre de dégâts UNIQUEMENT (retour utilisateur 2026-09-05,
 // 8e retour : `#077982`, un sarcelle plus sombre que `ACCENT`) — DE NOUVEAU distincte de `ACCENT`
 // (fusionnées en 6e retour après rejet du magenta `#ff02ff` du 5e retour). Le pourcentage sur le
@@ -419,17 +420,10 @@ const TINT_STRONG: egui::Color32 = egui::Color32::from_rgba_unmultiplied_const(2
 /// nécessité (retour utilisateur : « elle est plus haute que celle que je t'ai fournie ») — revenu
 /// à la mesure d'origine.
 const BAR_HEIGHT: f32 = 16.0;
-/// Arrondi des coins de la barre — PAS `hauteur / 2` (un stade/pilule complet, ce qu'une première
-/// itération avait fait) : la maquette n'a qu'un arrondi léger (retour utilisateur, capture de
-/// comparaison à l'appui : « le border radius est beaucoup trop rond dans ce que tu as produit »).
-const BAR_ROUNDING: f32 = 4.0;
 /// Largeur maximale d'une barre — agrandie par rapport à la première version de cette refonte
 /// (150 px) maintenant que `COLUMN_GAP` est réduit (voir sa doc) : l'espace regagné doit profiter
 /// à la barre, pas rester vide.
 pub(super) const BAR_MAX_WIDTH: f32 = 190.0;
-/// Épaisseur de chacune des deux bordures concentriques de la barre (voir `damage_bar`) — mesurée
-/// sur la maquette (~2 px sur une barre d'environ 16 px de haut).
-const BAR_BORDER_WIDTH: f32 = 2.0;
 /// Écart entre le nom (+ dégâts) et sa barre, DANS un groupe (voir `damage_bar_group`) —
 /// volontairement plus petit que `ROW_GAP` (qui sépare deux groupes ENTRE eux) : c'est cette
 /// différence de rythme qui donne à l'œil la lecture "un nom + une barre = un groupe". Resserré une
@@ -441,24 +435,6 @@ const GROUP_NAME_BAR_GAP: f32 = 0.0;
 // l'utilisateur (capture d'écran 2026-09-02 : `Capture_decran_2026-09-02_122045.png`), reprise ici
 // au plus près plutôt qu'approximée à l'œil (retour utilisateur 2026-09-04 : « ça dénote du jeu »,
 // la première tentative n'était pas fidèle).
-/// Bordure extérieure — gris moyen, PAS noir (mesuré ~(72,72,74), contrairement à l'intuition
-/// visuelle de l'utilisateur qui la décrivait comme sombre : c'est la bordure INTÉRIEURE qui l'est
-/// vraiment, voir `BAR_INNER_BORDER`).
-const BAR_OUTER_BORDER: egui::Color32 = egui::Color32::from_rgb(72, 72, 74);
-/// Bordure intérieure — beaucoup plus sombre que l'extérieure, presque noire (mesurée
-/// ~(34,35,39)) : c'est elle qui donne l'effet "double bordure" décrit par l'utilisateur.
-const BAR_INNER_BORDER: egui::Color32 = egui::Color32::from_rgb(34, 35, 39);
-const BAR_TRACK: egui::Color32 = egui::Color32::from_rgb(22, 23, 27);
-/// Curseur de fin de remplissage — petit trait clair vertical à l'extrémité du remplissage (voir
-/// `damage_bar`), mesuré ~(191,191,191) sur la maquette. C'est ce trait, décrit par l'utilisateur
-/// comme « une petite barre blanche pour dire c'est ici que je suis », qui manquait entièrement à
-/// la première tentative de cette refonte. Couleur fixe (pas de dégradé, voir `damage_color`) :
-/// c'est un simple repère de position, pas une donnée à lire.
-const BAR_END_CAP: egui::Color32 = egui::Color32::from_rgb(191, 191, 191);
-/// Reflet du tiers supérieur du remplissage — couleur EXPLICITE (retour utilisateur 2026-09-05,
-/// 9e retour : `#0dbebe`), plus une dérivation de `DAMAGE_ACCENT` par éclaircissement (voir l'ancien
-/// `lighten`, retiré) : l'utilisateur veut ce ton précis, pas "n'importe quel bleu-vert plus clair".
-const BAR_HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(0x0d, 0xbe, 0xbe);
 
 const TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(235, 240, 245);
 
@@ -466,9 +442,6 @@ const TOTAL_FONT_SIZE: f32 = 18.0;
 /// Écart entre la ligne leader et le premier groupe — réduit en cohérence avec `ROW_GAP`.
 const TOTAL_GAP: f32 = 3.0;
 const NAME_FONT_SIZE: f32 = 13.0;
-/// Taille du pourcentage sur le portrait — agrandie une 1re fois (retour utilisateur, 7e retour :
-/// « ça a l'air compliqué à lire, il en manque un ou deux pixels »).
-const PERCENT_FONT_SIZE: f32 = 12.0;
 
 /// Marge intérieure du fond opacifié de la ligne leader (voir `show_leader_row`) entre son bord et
 /// le bouton/le total qu'il contient — la MÊME valeur des deux côtés (le bouton à gauche a un bord
@@ -662,7 +635,7 @@ pub fn show(
 /// cas, y compris combat vide ou camp affiché sans combattant — voir sa doc — pour que le switch
 /// reste accessible en toute circonstance.
 fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, total_damage: i64) {
-    let total_font = egui::FontId::proportional(TOTAL_FONT_SIZE);
+    let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
     let content_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
     let row_height = content_height + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
@@ -756,37 +729,25 @@ fn paint_flat_portrait(
         remote_icon_textures,
         fighter,
     );
-    let response = match portrait {
-        Some(FighterPortrait::ClassPortrait(texture)) => ui.add(
-            egui::Image::new(&texture)
-                .fit_to_exact_size(egui::vec2(
-                    crate::portraits::PORTRAIT_SIZE,
-                    crate::portraits::PORTRAIT_SIZE,
-                ))
-                .maintain_aspect_ratio(false),
-        ),
-        Some(FighterPortrait::RemoteMonster(texture)) => ui.add(
-            egui::Image::new(&texture)
-                .fit_to_exact_size(egui::vec2(
-                    crate::portraits::PORTRAIT_SIZE,
-                    crate::portraits::PORTRAIT_SIZE,
-                ))
-                .maintain_aspect_ratio(false)
-                // Pas de version grisée précalculée pour une icône distante (voir doc de
-                // `FighterPortrait::RemoteMonster`) : simple tint, approximation acceptée.
-                .tint(grey_tint_if_ko(fighter.is_ko)),
-        ),
-        None => ui.add(
-            icons
-                .unknown_entity_image()
-                .tint(grey_tint_if_ko(fighter.is_ko)),
-        ),
+    // La forme, le grisé et le pourcentage vivent dans `design::portrait` depuis le 2026-09-11.
+    // Ce qui reste ici est le choix de la TEXTURE et celui de teinter ou non : seul ce panneau sait
+    // qu'un portrait de classe a sa version grise précalculée dans l'atlas, et qu'une icône
+    // distante ou le repli n'en ont pas.
+    let (texture, dimmed) = match &portrait {
+        Some(FighterPortrait::ClassPortrait(texture)) => (texture.id(), false),
+        Some(FighterPortrait::RemoteMonster(texture)) => (texture.id(), fighter.is_ko),
+        None => (icons.unknown_entity_texture().id(), fighter.is_ko),
     };
-    let rect = response.rect;
+    let response = ui.add(
+        design::portrait(texture)
+            .size(crate::portraits::PORTRAIT_SIZE)
+            .dimmed(dimmed)
+            .percent(
+                (fighter.total_damage > 0)
+                    .then(|| design::portrait_percent(fighter.total_damage, total_damage)),
+            ),
+    );
     design::tooltip(&response).text(fighter.name.as_str());
-    if fighter.total_damage > 0 {
-        paint_portrait_percent(ui, rect, fighter.total_damage, total_damage);
-    }
 }
 
 /// Tint à appliquer à une icône de repli/distante pour approximer un grisé KO — voir la doc de
@@ -804,39 +765,6 @@ pub(crate) fn grey_tint_if_ko(is_ko: bool) -> egui::Color32 {
     }
 }
 
-/// Pourcentage de dégâts d'un combattant par rapport au total du camp affiché, incrusté au coin
-/// bas-droit du carré ENGLOBANT `rect` (portrait de classe, monstre, ou repli générique — appelé
-/// aussi bien par `panels::combat_frame::CombatFrame::show` que par `paint_flat_portrait`
-/// ci-dessus) — demande utilisateur explicite (retour après capture d'écran) : « comme si on
-/// traçait un carré autour du rond et qu'on plaçait le pourcentage tout en bas à droite », donc
-/// légèrement EN DEHORS du disque visible plutôt que dessus, pour ne jamais recouvrir le portrait.
-pub(crate) fn paint_portrait_percent(
-    ui: &egui::Ui,
-    rect: egui::Rect,
-    damage: i64,
-    total_damage: i64,
-) {
-    let ratio = (damage as f32 / total_damage as f32).clamp(0.0, 1.0);
-    let percent = (ratio as f64 * 100.0).round() as i64;
-    let text = format!("{percent}%");
-    // Décalage vers l'EXTÉRIEUR du coin (pas vers l'intérieur) — demande utilisateur : « encore un
-    // peu plus sur la droite [...] pour qu'il mange un peu moins sur le portrait ».
-    let pos = rect.right_bottom() + egui::vec2(2.0, 1.0);
-    // `ACCENT` (bleu Wakfu, même que le switch) — retour utilisateur 2026-09-05 (9e retour) :
-    // revient sur `DAMAGE_ACCENT` du 8e retour (« je préfère la couleur accent qu'il y avait
-    // avant »). Résultat assumé : la barre (`DAMAGE_ACCENT`) et ce pourcentage n'ont plus la même
-    // couleur — explicitement voulu, pas un oubli de cohérence.
-    text::paint_outlined_text(
-        ui,
-        pos,
-        egui::Align2::RIGHT_BOTTOM,
-        &text,
-        egui::FontId::proportional(PERCENT_FONT_SIZE),
-        ACCENT,
-        text::OUTLINE_FULL,
-    );
-}
-
 /// Un "groupe" nom + dégâts + barre de la colonne de droite — nom à gauche et dégâts chiffrés à
 /// droite sur la MÊME ligne (retour utilisateur : le chiffre de dégâts avait disparu avec le
 /// passage au pourcentage seul, régression à corriger), barre juste en dessous, quasiment collée
@@ -845,7 +773,7 @@ pub(crate) fn paint_portrait_percent(
 /// reste lisible.
 fn damage_bar_group(ui: &mut egui::Ui, name: &str, damage: i64, total_damage: i64) {
     let bar_width = ui.available_width().min(BAR_MAX_WIDTH);
-    let name_font = egui::FontId::proportional(NAME_FONT_SIZE);
+    let name_font = text::label_font(ui.ctx(), NAME_FONT_SIZE);
     // Pas de rembourrage supplémentaire sous le texte (retour utilisateur, 6e retour : « l'écart
     // entre la barre et la ligne du dessus », déjà réduit une 1re fois via `GROUP_NAME_BAR_GAP` —
     // le reste venait de cette marge, retirée).
@@ -887,61 +815,17 @@ fn damage_bar_group(ui: &mut egui::Ui, name: &str, damage: i64, total_damage: i6
 /// 9e retour — voir `paint_portrait_percent`). Ni nom ni pourcentage ici : le nom et les dégâts
 /// sont peints par l'appelant au-dessus de `rect`.
 fn damage_bar(ui: &mut egui::Ui, rect: egui::Rect, damage: i64, total_damage: i64) {
-    let painter = ui.painter().with_clip_rect(rect);
-    let rounding = BAR_ROUNDING;
-    painter.rect_filled(rect, rounding, BAR_OUTER_BORDER);
-
-    let inner_rect = rect.shrink(BAR_BORDER_WIDTH);
-    let inner_rounding = (rounding - BAR_BORDER_WIDTH).max(0.0);
-    painter.rect_filled(inner_rect, inner_rounding, BAR_INNER_BORDER);
-
-    let track_rect = inner_rect.shrink(BAR_BORDER_WIDTH);
-    let track_rounding = (inner_rounding - BAR_BORDER_WIDTH).max(0.0);
-    painter.rect_filled(track_rect, track_rounding, BAR_TRACK);
-
-    let ratio = (damage as f32 / total_damage as f32).clamp(0.0, 1.0);
-    if ratio > 0.0 {
-        let full = ratio >= 0.999;
-        let track_r = track_rounding as u8;
-        let fill_color = DAMAGE_ACCENT;
-        // Coins droits arrondis UNIQUEMENT si le remplissage atteint le bout de la piste — sinon
-        // le bord droit du remplissage tombe au milieu de la piste, un coin arrondi y serait
-        // visuellement faux (un arrondi qui ne correspond à aucun bord réel de la piste).
-        let fill_rounding = egui::CornerRadius {
-            nw: track_r,
-            sw: track_r,
-            ne: if full { track_r } else { 0 },
-            se: if full { track_r } else { 0 },
-        };
-        let fill_rect = egui::Rect::from_min_size(
-            track_rect.min,
-            egui::vec2(track_rect.width() * ratio, track_rect.height()),
-        );
-        painter.rect_filled(fill_rect, fill_rounding, fill_color);
-
-        let highlight_rect = egui::Rect::from_min_size(
-            fill_rect.min,
-            egui::vec2(fill_rect.width(), fill_rect.height() * 0.35),
-        );
-        let highlight_rounding = egui::CornerRadius {
-            nw: track_r,
-            ne: fill_rounding.ne,
-            sw: 0,
-            se: 0,
-        };
-        painter.rect_filled(highlight_rect, highlight_rounding, BAR_HIGHLIGHT);
-
-        // Curseur de fin — voir doc de fonction. Masqué quand le remplissage est complet : il se
-        // confondrait avec le bord droit de la piste, sans rien apporter.
-        if !full {
-            const CAP_WIDTH: f32 = 2.0;
-            let cap_rect = egui::Rect::from_center_size(
-                egui::pos2(fill_rect.max.x, track_rect.center().y),
-                egui::vec2(CAP_WIDTH, track_rect.height()),
-            );
-            painter.rect_filled(cap_rect, 1.0, BAR_END_CAP);
-        }
-    }
+    // Les six couches — deux bordures concentriques, la piste, le remplissage, son reflet et le
+    // curseur de fin — vivent dans `design::meter` depuis le 2026-09-11, avec leurs arrondis
+    // conditionnels et les tests qui les verrouillent. Ce qui reste ici est le CALCUL de la part de
+    // dégâts et sa couleur, qui sont du métier : la teinte varie selon la part, et le composant ne
+    // sait pas ce qu'est un combattant.
+    let ratio = if total_damage > 0 {
+        (damage as f32 / total_damage as f32).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    design::paint_meter(ui, rect, ratio, DAMAGE_ACCENT);
 }
 
 /// Formate un entier selon l'usage français : espace tous les 3 chiffres depuis la droite (ex.

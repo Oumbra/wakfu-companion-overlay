@@ -144,7 +144,7 @@
 
 use egui::{Align2, Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{assets::DsTexture, text, tokens, DesignSystem};
+use crate::design::{assets::DsTexture, text, tokens, DesignSystem, DsIcon};
 
 /// État peint d'un onglet. Quatre, contre trois pour les autres composants : un onglet porte en plus
 /// la notion d'être **celui qui est sélectionné**, qui n'a pas d'équivalent sur un bouton.
@@ -210,6 +210,9 @@ impl TabState {
 struct Entry<T> {
     value: T,
     label: String,
+    /// Pictogramme qui **remplace** le libellé au rendu — voir [`Tabs::icon`]. Le libellé, lui,
+    /// reste : il devient l'infobulle et la ligne de journal.
+    icon: Option<DsIcon>,
     enabled: bool,
     /// Force l'état peint de CETTE entrée — voir [`Tabs::preview_state`].
     forced_state: Option<TabState>,
@@ -242,9 +245,31 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
         self.entries.push(Entry {
             value,
             label: label.into(),
+            icon: None,
             enabled: true,
             forced_state: None,
         });
+        self
+    }
+
+    /// Donne un pictogramme à **la dernière entrée déclarée** : il **remplace son libellé** au
+    /// rendu, et le libellé devient son infobulle.
+    ///
+    /// ```ignore
+    /// design::tabs(&mut onglet)
+    ///     .entry(Vue::Combat, "Combat").icon(DsIcon::Cards)
+    ///     .entry(Vue::Suivi, "Suivi").icon(DsIcon::Trophy)
+    ///     .show(ui);
+    /// ```
+    ///
+    /// **Le libellé reste obligatoire, et ce n'est pas une commodité** : une barre de pictogrammes
+    /// sans infobulle n'apprend à personne ce que fait chaque onglet, et le journal n'aurait plus
+    /// que des indices pour nommer ce qu'on a cliqué. C'est aussi pourquoi cette variante attendait
+    /// le lot 2 — elle a besoin de `DsIcon` pour le glyphe **et** de `design::tooltip` pour le mot.
+    pub fn icon(mut self, icon: DsIcon) -> Self {
+        if let Some(last) = self.entries.last_mut() {
+            last.icon = Some(icon);
+        }
         self
     }
 
@@ -315,6 +340,11 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
                         })
                         .size()
                         .x;
+                    // Un pictogramme n'a pas de mot à contenir : sa largeur est celle du jeu, pas
+                    // celle de son libellé — qui n'est ici qu'une infobulle.
+                    if entry.icon.is_some() {
+                        return tokens::TAB_ICON_WIDTH;
+                    }
                     (ink + 2.0 * tokens::TAB_PADDING_X).max(tokens::TAB_MIN_WIDTH)
                 })
                 .collect();
@@ -484,29 +514,57 @@ impl<T: PartialEq + Copy> Widget for Tabs<'_, T> {
                     state,
                     Position::of(index, count),
                 );
-                // Libellé écrêté à SON onglet : un libellé trop long ne doit pas déborder sur le
-                // voisin, où il passerait pour un défaut de mise en page.
-                let color = state.label_color();
-                let galley = ui.fonts_mut(|f| {
-                    f.layout_no_wrap(
-                        entry.label.clone(),
-                        font.clone(),
-                        // La couleur est donnée au moment de peindre, pas à la mise en page : la
-                        // même galley sert au cerne ET au texte.
-                        egui::Color32::PLACEHOLDER,
-                    )
-                });
-                text::paint_outlined_galley(
-                    &ui.painter()
-                        .with_clip_rect(tab_rect.intersect(ui.clip_rect())),
-                    Align2::CENTER_CENTER
-                        .align_size_within_rect(galley.size(), tab_rect)
-                        .min,
-                    &galley,
-                    color,
-                    text::dimmed(color, tokens::TAB_LABEL_OUTLINE_FACTOR),
-                    text::OUTLINE_FULL,
-                );
+                // Pictogramme : il REMPLACE le libellé, il ne s'y ajoute pas. Le libellé n'est
+                // pas perdu pour autant — il devient l'infobulle, quelques lignes plus bas.
+                if let Some(icon) = entry.icon {
+                    let side = tokens::TAB_HEIGHT * tokens::TAB_ICON_RATIO;
+                    let native = design.icon_native_size(icon);
+                    design.paint_icon(
+                        &ui.painter()
+                            .with_clip_rect(tab_rect.intersect(ui.clip_rect())),
+                        egui::Rect::from_center_size(
+                            tab_rect.center(),
+                            super::icon_button::glyph_fit(native, side),
+                        ),
+                        icon,
+                        // **La teinte du libellé, pas une teinte propre** : un pictogramme
+                        // d'onglet dit la même chose qu'un mot d'onglet, il doit changer avec
+                        // l'état de la même façon — blanc quand l'onglet est actif, doré sinon.
+                        state.label_color(),
+                    );
+                } else {
+                    // Libellé écrêté à SON onglet : un libellé trop long ne doit pas déborder sur le
+                    // voisin, où il passerait pour un défaut de mise en page.
+                    let color = state.label_color();
+                    let galley = ui.fonts_mut(|f| {
+                        f.layout_no_wrap(
+                            entry.label.clone(),
+                            font.clone(),
+                            // La couleur est donnée au moment de peindre, pas à la mise en page : la
+                            // même galley sert au cerne ET au texte.
+                            egui::Color32::PLACEHOLDER,
+                        )
+                    });
+                    text::paint_outlined_galley(
+                        &ui.painter()
+                            .with_clip_rect(tab_rect.intersect(ui.clip_rect())),
+                        Align2::CENTER_CENTER
+                            .align_size_within_rect(galley.size(), tab_rect)
+                            .min,
+                        &galley,
+                        color,
+                        text::dimmed(color, tokens::TAB_LABEL_OUTLINE_FACTOR),
+                        text::OUTLINE_FULL,
+                    );
+                }
+            }
+
+            // **L'infobulle d'un onglet à pictogramme porte son libellé**, et c'est ce qui rend la
+            // variante utilisable : sans elle, une barre de pictogrammes n'apprend à personne ce
+            // que fait chaque onglet. Posée hors du test de visibilité — une infobulle s'affiche
+            // sur interaction, pas sur peinture.
+            if entry.icon.is_some() {
+                crate::design::tooltip(&tab_response).text(entry.label.clone());
             }
 
             if entry.enabled {
@@ -555,6 +613,60 @@ mod tests {
 
     /// Tolérance de comparaison — voir `window::tests`.
     const EPS: f32 = 0.01;
+
+    /// Type d'onglet des tests — un `enum` de la galerie suffirait, mais les tests de ce fichier
+    /// tournent sans contexte egui et n'ont donc pas accès au sien.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum T {
+        A,
+        B,
+    }
+
+    #[test]
+    fn un_onglet_a_pictogramme_prend_la_largeur_du_jeu_pas_celle_de_son_libelle() {
+        // Le libellé d'un onglet à pictogramme est son INFOBULLE : le laisser dicter la largeur
+        // ferait des onglets de tailles différentes pour des glyphes de même taille, et une barre
+        // qui bouge quand on traduit l'application.
+        let mut selected = T::A;
+        let tabs = Tabs::new(&mut selected)
+            .entry(T::A, "Un libellé délibérément très long")
+            .icon(DsIcon::Cards)
+            .entry(T::B, "Court")
+            .icon(DsIcon::Trophy);
+        for entry in &tabs.entries {
+            assert!(
+                entry.icon.is_some(),
+                "les deux entrées portent un pictogramme"
+            );
+        }
+        // La largeur d'un onglet à pictogramme ne dépend que du jeton.
+        assert_eq!(tokens::TAB_ICON_WIDTH, 66.0);
+        assert!(
+            tokens::TAB_ICON_WIDTH < tokens::TAB_MIN_WIDTH,
+            "un pictogramme n'a pas de mot à contenir : son onglet est plus étroit qu'un onglet texte",
+        );
+    }
+
+    #[test]
+    fn le_libelle_survit_au_pictogramme() {
+        // Il devient l'infobulle et la ligne de journal. Le perdre rendrait la barre muette et le
+        // journal illisible — c'est pourquoi `icon` s'ajoute à `entry` au lieu de la remplacer.
+        let mut selected = T::A;
+        let tabs = Tabs::new(&mut selected)
+            .entry(T::A, "Combat")
+            .icon(DsIcon::Cards);
+        assert_eq!(tabs.entries[0].label, "Combat");
+        assert_eq!(tabs.entries[0].icon, Some(DsIcon::Cards));
+    }
+
+    #[test]
+    fn icon_sans_entree_prealable_ne_panique_pas() {
+        // Même tolérance qu'`enabled` : `.icon(...)` appelé avant toute entrée est sans effet
+        // plutôt qu'une panique, pour que l'API se chaîne sans imbriquer un constructeur d'entrée.
+        let mut selected = T::A;
+        let tabs = Tabs::new(&mut selected).icon(DsIcon::Cards);
+        assert!(tabs.entries.is_empty());
+    }
 
     /// **Le bug que ce test verrouille** : arrondir chaque largeur séparément fait dériver la somme,
     /// et la barre d'onglets finit un ou deux pixels avant — ou après — le bord de son panneau. Le

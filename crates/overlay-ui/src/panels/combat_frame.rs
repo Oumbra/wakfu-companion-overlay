@@ -271,33 +271,27 @@ impl CombatFrame {
                 remote_icon_textures,
                 fighter,
             );
-            match portrait {
+            // Le rognage en cercle et le grisé vivent dans `design::portrait`. Ce qui se décide
+            // ICI est le choix de la texture et celui de teinter : un portrait de classe a sa
+            // version grise **précalculée** dans l'atlas et n'a pas besoin d'une teinte, qui serait
+            // moins bonne ; une icône de monstre téléchargée ou le repli générique (allié pas
+            // encore classifié, ennemi que le catalogue ne résout pas) n'ont pas d'équivalent gris.
+            let (texture, dimmed) = match &portrait {
                 Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
-                    egui::Image::new(&texture)
-                        .corner_radius(PORTRAIT_CORNER_RADIUS)
-                        .paint_at(ui, portrait_rect);
+                    (texture.id(), false)
                 }
                 Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
-                    // Portrait RÉEL du monstre (ennemi, voir doc de fonction) — pas de version
-                    // grisée précalculée pour celle-ci, simple tint si KO (voir `grey_tint_if_ko`).
-                    egui::Image::new(&texture)
-                        .corner_radius(PORTRAIT_CORNER_RADIUS)
-                        .tint(super::combat::grey_tint_if_ko(fighter.is_ko))
-                        .paint_at(ui, portrait_rect);
+                    (texture.id(), fighter.is_ko)
                 }
-                None => {
-                    // Allié pas encore classifié (roster absent, `breed` inconnu de ce combat), ou
-                    // ennemi que le catalogue ne résout pas encore/pas du tout : repli générique
-                    // plutôt qu'un trou vide dans le médaillon — voir doc de module. Grisé par un
-                    // tint approximatif si KO (voir `panels::combat::grey_tint_if_ko` : pas de
-                    // version grisée précalculée pour cet asset unique, contrairement aux
-                    // portraits de classe, voir `portraits.rs`).
-                    let image = egui::Image::new(icons.unknown_entity_texture())
-                        .corner_radius(PORTRAIT_CORNER_RADIUS)
-                        .tint(super::combat::grey_tint_if_ko(fighter.is_ko));
-                    image.paint_at(ui, portrait_rect);
-                }
-            }
+                None => (icons.unknown_entity_texture().id(), fighter.is_ko),
+            };
+            crate::design::paint_portrait(
+                ui,
+                portrait_rect,
+                texture,
+                crate::design::PortraitShape::Round,
+                dimmed,
+            );
         }
 
         // Infobulle (nom, demande utilisateur : les portraits ne sont plus alignés avec "leur"
@@ -315,11 +309,10 @@ impl CombatFrame {
             let response = ui.interact(portrait_rect, id, egui::Sense::hover());
             crate::design::tooltip(&response).text(fighter.name.as_str());
             if fighter.total_damage > 0 {
-                super::combat::paint_portrait_percent(
+                crate::design::paint_portrait_percent(
                     ui,
                     portrait_rect,
-                    fighter.total_damage,
-                    total_damage,
+                    crate::design::portrait_percent(fighter.total_damage, total_damage),
                 );
             }
         }

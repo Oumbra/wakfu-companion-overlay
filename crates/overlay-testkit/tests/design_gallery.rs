@@ -17,11 +17,15 @@
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
+#[path = "../examples/shared/wakassets_fixtures.rs"]
+mod wakassets_fixtures;
+
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
-    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsTexture, IconButtonState,
-    IconContext, InfoTone, InputState, LoaderSize, SelectState, SliderState, TabState,
+    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, IconButtonState,
+    IconContext, InfoTone, InputState, LoaderSize, PaginationStep, SelectState, SliderState,
+    TabState, TableAlign, TableBody, TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -55,7 +59,22 @@ fn galerie_du_design_system() {
         // 5680 -> 5860 le 2026-09-11 : section « Curseur de réglage » (trois positions, le motif à
         // libellés, le désactivé et le cas dégénéré).
         // 5860 -> 5900 le 2026-09-11 : rangée des curseurs gradués (26, 11 et 3 crans).
-        .with_size(Vec2::new(760.0, 5900.0))
+        // 5900 -> 5990 le 2026-09-11 : section « Glyphe seul » (`design::icon`, quatre tailles,
+        // trois glyphes non carrés, deux teintes).
+        // 5990 -> 6225 le 2026-09-11 : section « Onglets à pictogramme » (une barre aux 66 px du
+        // jeu, une barre étirée).
+        // 6225 -> 6885 le 2026-09-11 : section « Autocomplétion » (cinq cas, dont trois dépliés
+        // dont le panneau est peint hors flux et demande donc sa réserve explicite).
+        // 6885 -> 7180 le 2026-09-11 : section « Emplacement d'objet » (les sept raretés, le cadre
+        // simple, les deux formes de compteur).
+        // 7180 -> 7400 le 2026-09-11 : section « Jauge » (cinq taux, quatre teintes, un cas
+        // dégénéré).
+        // 7400 -> 7530 le 2026-09-11 : section « Portrait » (deux formes, le grisé, le
+        // pourcentage).
+        // PLAFOND ATTEINT le 2026-09-12 : wgpu refuse une texture de plus de 8192 px de côté
+        // (« Dimension Y value 9110 exceeds the limit of 8192 »). Il reste 662 px ici. Toute
+        // section qui ne tient pas dedans prend sa propre planche — voir `galerie_du_tableau`.
+        .with_size(Vec2::new(760.0, 7530.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -338,6 +357,57 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
+        "Onglets à pictogramme — le libellé devient l'infobulle",
+        "La variante icône du jeu (icon-tabs.png, 268 × 44) : 66 px par onglet, 2 de gouttière. Le pictogramme REMPLACE le libellé au rendu, mais le libellé reste — sans lui, une barre de pictogrammes n'apprend à personne ce que fait chaque onglet, et le journal n'aurait que des indices pour nommer ce qu'on a cliqué.",
+    );
+    {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Vue {
+            Combat,
+            Suivi,
+            Objets,
+            Reglages,
+        }
+        let mut vue = Vue::Combat;
+        design::tabs(&mut vue)
+            .entry(Vue::Combat, "Combat")
+            .icon(DsIcon::Cards)
+            .entry(Vue::Suivi, "Suivi")
+            .icon(DsIcon::Trophy)
+            .entry(Vue::Objets, "Objets")
+            .icon(DsIcon::BagIn)
+            .entry(Vue::Reglages, "Réglages")
+            .icon(DsIcon::Settings1)
+            .enabled(false)
+            .fit_content()
+            .log_name("galerie.onglets-icone")
+            .show(ui);
+        ui.label(
+            RichText::new("fit_content — les 66 px du jeu ; le dernier est désactivé")
+                .color(CAPTION)
+                .size(12.0),
+        );
+        // Étirée : la variante icône suit la même règle de largeur que la variante texte, les
+        // pictogrammes restent centrés dans des onglets plus larges.
+        let mut etiree = Vue::Suivi;
+        design::tabs(&mut etiree)
+            .entry(Vue::Combat, "Combat")
+            .icon(DsIcon::Cards)
+            .entry(Vue::Suivi, "Suivi")
+            .icon(DsIcon::Trophy)
+            .entry(Vue::Objets, "Objets")
+            .icon(DsIcon::BagIn)
+            .log_name("galerie.onglets-icone-etires")
+            .show(ui);
+        ui.label(
+            RichText::new("par défaut — parts égales sur la largeur disponible")
+                .color(CAPTION)
+                .size(12.0),
+        );
+    }
+
+    heading(
+        ui,
         "Case à cocher — 20 px, rayon 0, le seul élément carré",
         "Le LIBELLÉ porte l'état autant que la case : blanc décoché, doré coché. Le jeu double toujours son signal ; ne changer que la case perdrait la moitié de l'information.",
     );
@@ -471,23 +541,23 @@ fn gallery(ui: &mut egui::Ui) {
         // (2026-09-11) a fait dépasser la largeur fixe du canevas (760px) à une seule ligne.
         ui.horizontal_wrapped(|ui| {
             for (icon, name) in [
-                (DsTexture::IconOption, "option"),
-                (DsTexture::IconExternalLink, "lien"),
-                (DsTexture::IconPlus, "plus"),
-                (DsTexture::IconMinus, "moins"),
-                (DsTexture::IconVolume, "volume"),
-                (DsTexture::IconVolumeMute, "volume-muet"),
-                (DsTexture::IconEye, "oeil"),
-                (DsTexture::IconEyeOff, "oeil-barre"),
-                (DsTexture::IconBagIn, "sac-entree"),
-                (DsTexture::IconBagOut, "sac-sortie"),
-                (DsTexture::IconFilter, "filtre"),
-                (DsTexture::IconLock, "cadenas"),
-                (DsTexture::IconOrder, "classement"),
-                (DsTexture::IconPact, "pacte"),
-                (DsTexture::IconSave, "enregistrer"),
-                (DsTexture::IconSort, "tri"),
-                (DsTexture::IconTriangleRight, "triangle"),
+                (DsIcon::Option, "option"),
+                (DsIcon::ExternalLink, "lien"),
+                (DsIcon::Plus, "plus"),
+                (DsIcon::Minus, "moins"),
+                (DsIcon::Volume, "volume"),
+                (DsIcon::VolumeMute, "volume-muet"),
+                (DsIcon::Eye, "oeil"),
+                (DsIcon::EyeOff, "oeil-barre"),
+                (DsIcon::BagIn, "sac-entree"),
+                (DsIcon::BagOut, "sac-sortie"),
+                (DsIcon::Filter, "filtre"),
+                (DsIcon::Lock, "cadenas"),
+                (DsIcon::Order, "classement"),
+                (DsIcon::Pact, "pacte"),
+                (DsIcon::Save, "enregistrer"),
+                (DsIcon::Sort, "tri"),
+                (DsIcon::TriangleRight, "triangle"),
             ] {
                 ui.add(
                     design::icon_button(icon)
@@ -497,13 +567,13 @@ fn gallery(ui: &mut egui::Ui) {
             }
             ui.add_space(20.0);
             ui.add(
-                design::icon_button(DsTexture::IconOption)
+                design::icon_button(DsIcon::Option)
                     .context(context)
                     .preview_state(IconButtonState::Hovered)
                     .log_name("galerie.icone-survol"),
             );
             ui.add(
-                design::icon_button(DsTexture::IconOption)
+                design::icon_button(DsIcon::Option)
                     .context(context)
                     .enabled(false)
                     .preview_state(IconButtonState::Disabled)
@@ -521,20 +591,20 @@ fn gallery(ui: &mut egui::Ui) {
     let mut recherche_pleine = String::from("pierre");
     ui.add(
         design::input(&mut recherche_vide)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .placeholder("Rechercher")
             .width(420.0)
             .log_name("galerie.recherche-vide"),
     );
     ui.add(
         design::input(&mut recherche_pleine)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .width(420.0)
             .log_name("galerie.recherche-pleine"),
     );
     ui.add(
         design::input(&mut recherche_pleine)
-            .leading_icon(DsTexture::IconSearch)
+            .leading_icon(DsIcon::Search)
             .width(200.0)
             .enabled(false)
             .preview_state(InputState::Disabled)
@@ -548,27 +618,27 @@ fn gallery(ui: &mut egui::Ui) {
     );
     ui.horizontal_wrapped(|ui| {
         for icon in [
-            DsTexture::IconOption,
-            DsTexture::IconExternalLink,
-            DsTexture::IconPlus,
-            DsTexture::IconMinus,
-            DsTexture::IconClose,
-            DsTexture::IconDelete,
-            DsTexture::IconHelp,
-            DsTexture::IconUndo,
-            DsTexture::IconVolume,
-            DsTexture::IconVolumeMute,
-            DsTexture::IconEye,
-            DsTexture::IconEyeOff,
-            DsTexture::IconBagIn,
-            DsTexture::IconBagOut,
-            DsTexture::IconFilter,
-            DsTexture::IconLock,
-            DsTexture::IconOrder,
-            DsTexture::IconPact,
-            DsTexture::IconSave,
-            DsTexture::IconSort,
-            DsTexture::IconTriangleRight,
+            DsIcon::Option,
+            DsIcon::ExternalLink,
+            DsIcon::Plus,
+            DsIcon::Minus,
+            DsIcon::Close,
+            DsIcon::Delete,
+            DsIcon::Help,
+            DsIcon::Undo,
+            DsIcon::Volume,
+            DsIcon::VolumeMute,
+            DsIcon::Eye,
+            DsIcon::EyeOff,
+            DsIcon::BagIn,
+            DsIcon::BagOut,
+            DsIcon::Filter,
+            DsIcon::Lock,
+            DsIcon::Order,
+            DsIcon::Pact,
+            DsIcon::Save,
+            DsIcon::Sort,
+            DsIcon::TriangleRight,
         ] {
             ui.add(design::icon_button(icon).context(IconContext::Panel));
         }
@@ -579,13 +649,13 @@ fn gallery(ui: &mut egui::Ui) {
     let (row, _) = ui.allocate_exact_size(Vec2::new(400.0, 28.0), egui::Sense::hover());
     let mut x = row.left() + 8.0;
     for (icon, tint) in [
-        (DsTexture::IconSearch, design::tokens::INPUT_PLACEHOLDER),
-        (DsTexture::IconTick, Color32::from_rgb(0x7A, 0xC7, 0x4F)),
-        (DsTexture::IconChevronDown, design::tokens::SELECT_TEXT),
-        (DsTexture::IconInfo, design::tokens::INFO_DOT),
+        (DsIcon::Search, design::tokens::INPUT_PLACEHOLDER),
+        (DsIcon::Tick, Color32::from_rgb(0x7A, 0xC7, 0x4F)),
+        (DsIcon::ChevronDown, design::tokens::SELECT_TEXT),
+        (DsIcon::Info, design::tokens::INFO_DOT),
     ] {
-        let native = design::DesignSystem::get(ui.ctx()).native_size(icon);
-        ds.paint(
+        let native = design::DesignSystem::get(ui.ctx()).icon_native_size(icon);
+        ds.paint_icon(
             ui.painter(),
             egui::Rect::from_center_size(egui::pos2(x + native.x / 2.0, row.center().y), native),
             icon,
@@ -597,34 +667,240 @@ fn gallery(ui: &mut egui::Ui) {
     heading(
         ui,
         "Glyphes sans socle connu — lot sans appelant (2026-09-11)",
-        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (voir `DsTexture::icon_content_size`, doc de chaque variante) : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
+        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (marquées `libre` dans `design::icons`, voir la doc de chaque variante) : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
     );
     ui.horizontal_wrapped(|ui| {
         for icon in [
-            DsTexture::IconBook,
-            DsTexture::IconCalendar,
-            DsTexture::IconCards,
-            DsTexture::IconCharacters,
-            DsTexture::IconGrid,
-            DsTexture::IconHammer,
-            DsTexture::IconKamas,
-            DsTexture::IconPin,
-            DsTexture::IconRepeat,
-            DsTexture::IconSettings1,
-            DsTexture::IconSettings2,
-            DsTexture::IconTrophy,
-            DsTexture::IconXp,
+            DsIcon::Book,
+            DsIcon::Calendar,
+            DsIcon::Cards,
+            DsIcon::Characters,
+            DsIcon::Grid,
+            DsIcon::Hammer,
+            DsIcon::Kamas,
+            DsIcon::Pin,
+            DsIcon::Repeat,
+            DsIcon::Settings1,
+            DsIcon::Settings2,
+            DsIcon::Trophy,
+            DsIcon::Xp,
         ] {
-            let native = ds.native_size(icon);
+            let native = ds.icon_native_size(icon);
             let (rect, _) =
                 ui.allocate_exact_size(native + Vec2::splat(14.0), egui::Sense::hover());
-            ds.paint(
+            ds.paint_icon(
                 ui.painter(),
                 egui::Rect::from_center_size(rect.center(), native),
                 icon,
                 design::tokens::ICON_TINT,
             );
         }
+    });
+
+    heading(
+        ui,
+        "Portrait — carré ou rond, grisé sur décision de l'appelant",
+        "Le gabarit de combat loge ses portraits dans des médaillons ronds, la liste plate les pose carrés : c'est la forme des cadres du jeu, pas une préférence. Le pourcentage déborde du carré englobant vers l'EXTÉRIEUR — sur un rond, ce coin est hors du disque, et c'est ce qui l'empêche de recouvrir le visage.",
+    );
+    {
+        use overlay_ui::design::PortraitShape;
+        // Un glyphe du manifeste tient lieu de portrait : la galerie n'a ni atlas de classes ni
+        // catalogue distant. Ce qu'on vérifie ici est la FORME, le grisé et le pourcentage.
+        let faux = design::DesignSystem::get(ui.ctx())
+            .icon(DsIcon::Characters)
+            .id();
+        ui.horizontal(|ui| {
+            for (shape, dimmed, percent, nom) in [
+                (PortraitShape::Square, false, None, "carré"),
+                (PortraitShape::Round, false, None, "rond"),
+                (PortraitShape::Round, true, None, "rond, KO"),
+                (PortraitShape::Round, false, Some(42), "avec %"),
+                (PortraitShape::Round, true, Some(7), "KO + %"),
+                (PortraitShape::Square, false, Some(100), "carré, 100 %"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(
+                        design::portrait(faux)
+                            .shape(shape)
+                            .size(48.0)
+                            .dimmed(dimmed)
+                            .percent(percent),
+                    );
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(14.0);
+            }
+        });
+    }
+
+    heading(
+        ui,
+        "Jauge — six couches concentriques, et un arrondi conditionnel",
+        "Les coins DROITS du remplissage ne s'arrondissent que s'il atteint le bout de la piste : sinon son bord tombe au milieu, et un coin arrondi y suggérerait un bord qui n'existe pas. Le curseur de fin disparaît à 100 % pour la même raison — il se confondrait avec le bord droit.",
+    );
+    {
+        let mut valeur = 0.0_f32;
+        ui.horizontal(|ui| {
+            for f in [0.0_f32, 0.08, 0.5, 0.999, 1.0] {
+                ui.vertical(|ui| {
+                    ui.add(design::meter(f).width(130.0));
+                    ui.label(
+                        RichText::new(format!("{:.0} %", f * 100.0))
+                            .color(CAPTION)
+                            .size(11.0),
+                    );
+                });
+                ui.add_space(8.0);
+            }
+            valeur += 1.0;
+        });
+        // Teintes : le remplissage vient de l'appelant, le reflet reste fixe — c'est ce qui se voit
+        // ici, les quatre barres partageant le même liseré clair.
+        ui.horizontal(|ui| {
+            for (couleur, nom) in [
+                (design::tokens::METER_FILL, "défaut"),
+                (design::tokens::OVERLAY_ACCENT, "accent"),
+                (design::tokens::INFO_ALERT, "alerte"),
+                (design::tokens::TEXT_DISABLED, "grisé"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(design::meter(0.62).fill(couleur).width(130.0));
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(8.0);
+            }
+        });
+        // Dégénérée : plus fine que ses deux bordures. Les rayons tombent à zéro plutôt que de
+        // passer sous zéro, et la jauge reste peinte.
+        ui.add(design::meter(0.5).width(130.0).height(6.0));
+        ui.label(
+            RichText::new("hauteur 6 — plus fine que ses deux bordures de 2")
+                .color(CAPTION)
+                .size(12.0),
+        );
+    }
+
+    heading(
+        ui,
+        "Emplacement d'objet — l'ordre de peinture est le composant",
+        "Les sept raretés, puis un cadre simple. La bordure de rareté se peint SOUS l'icône : sa fenêtre intérieure n'est pas un trou transparent mais un aplat teinté à ~70 %, et l'ordre inverse voile l'icône entière. Un cadre simple fait le contraire — c'est un liseré net, il passe par-dessus.",
+    );
+    {
+        use overlay_ui::design::{ItemRarity, SlotCount, SlotFrame};
+        // Une icône factice : la galerie n'a pas de catalogue distant. Le glyphe du manifeste tient
+        // ce rôle — ce qu'on vérifie ici est le CADRE et son ordre, pas l'icône.
+        let faux_icone = design::DesignSystem::get(ui.ctx()).icon(DsIcon::Kamas).id();
+        ui.horizontal_wrapped(|ui| {
+            for (rarity, nom) in [
+                (ItemRarity::Common, "Common"),
+                (ItemRarity::Rare, "Rare"),
+                (ItemRarity::Mythical, "Mythical"),
+                (ItemRarity::Legendary, "Legendary"),
+                (ItemRarity::Memory, "Memory"),
+                (ItemRarity::Epic, "Epic"),
+                (ItemRarity::Relic, "Relic"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(
+                        design::item_slot()
+                            .frame(SlotFrame::Rarity(rarity))
+                            .icon(faux_icone)
+                            .log_name(format!("galerie.slot-{nom}")),
+                    );
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(8.0);
+            }
+        });
+        ui.horizontal(|ui| {
+            // Cadre simple, avec et sans compteur, plus les deux formes de compteur.
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Plain)
+                    .icon(faux_icone)
+                    .log_name("galerie.slot-simple"),
+            );
+            ui.add_space(8.0);
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Rarity(ItemRarity::Legendary))
+                    .icon(faux_icone)
+                    .count(SlotCount::Simple(42))
+                    .log_name("galerie.slot-compte"),
+            );
+            ui.add_space(8.0);
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Rarity(ItemRarity::Rare))
+                    .icon(faux_icone)
+                    .count(SlotCount::Fraction {
+                        current: 137,
+                        target: 500,
+                    })
+                    .log_name("galerie.slot-fraction"),
+            );
+            ui.add_space(8.0);
+            // Sans icône : l'emplacement se peint quand même, le vide se voit.
+            ui.add(
+                design::item_slot()
+                    .frame(SlotFrame::Rarity(ItemRarity::Epic))
+                    .log_name("galerie.slot-vide"),
+            );
+            ui.add_space(8.0);
+            // **Sous le minimum** : peint quand même — un rectangle trop petit doit se voir sur la
+            // capture, pas paniquer — et signalé une fois au journal (clause 4 du contrat).
+            ui.add(
+                design::item_slot()
+                    .size(6.0)
+                    .frame(SlotFrame::Plain)
+                    .icon(faux_icone)
+                    .log_name("galerie.slot-minuscule"),
+            );
+        });
+        ui.label(
+            RichText::new(
+                "cadre simple · compteur simple · fraction · sans icône · 6 px, sous le minimum",
+            )
+            .color(CAPTION)
+            .size(12.0),
+        );
+    }
+
+    heading(
+        ui,
+        "Glyphe seul — `design::icon`, sans socle ni clic",
+        "Le composant qui manquait pour poser une icône dans une ligne : il alloue un CARRÉ et y inscrit le glyphe en gardant son rapport. Le chevron (14 × 8) le montre — il ne devient jamais carré, quelle que soit la taille demandée.",
+    );
+    ui.horizontal(|ui| {
+        for size in [12.0_f32, 16.0, 24.0, 32.0] {
+            ui.vertical(|ui| {
+                ui.add(design::icon(DsIcon::Kamas).size(size));
+                ui.label(
+                    RichText::new(format!("{size:.0}"))
+                        .color(CAPTION)
+                        .size(11.0),
+                );
+            });
+            ui.add_space(10.0);
+        }
+        ui.add_space(20.0);
+        // Deux glyphes NON carrés à la même taille demandée : c'est le rapport préservé qui se
+        // voit, pas la taille. Un `Vec2::splat` les aplatirait tous les deux à l'identique.
+        for icon in [DsIcon::ChevronDown, DsIcon::Info, DsIcon::TriangleRight] {
+            ui.add(design::icon(icon).size(24.0));
+            ui.add_space(10.0);
+        }
+        ui.add_space(20.0);
+        ui.add(
+            design::icon(DsIcon::Lock)
+                .size(24.0)
+                .tint(design::tokens::TEXT_DISABLED),
+        );
+        ui.add(
+            design::icon(DsIcon::Tick)
+                .size(24.0)
+                .tint(design::tokens::INFO_ALERT),
+        );
     });
 
     heading(
@@ -735,7 +1011,7 @@ fn gallery(ui: &mut egui::Ui) {
     {
         let mut ferme = false;
         design::collapsible("Bloc fermé", &mut ferme)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .log_name("galerie.repliable-ferme")
             .show(ui, |ui| {
                 ui.label("jamais rendu tant que le bloc est fermé");
@@ -744,7 +1020,7 @@ fn gallery(ui: &mut egui::Ui) {
 
         let mut ouvert = true;
         design::collapsible("Bloc ouvert", &mut ouvert)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .log_name("galerie.repliable-ouvert")
             .show(ui, |ui| {
                 for ligne in [
@@ -770,7 +1046,7 @@ fn gallery(ui: &mut egui::Ui) {
         // troisième bloc est ouvert plutôt que fermé.
         let mut survole = true;
         design::collapsible("Bloc survolé", &mut survole)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .preview_hovered(true)
             .log_name("galerie.repliable-survole")
             .show(ui, |ui| {
@@ -886,7 +1162,7 @@ fn gallery(ui: &mut egui::Ui) {
         ];
         let mut motif = true;
         design::collapsible("Le motif du jeu", &mut motif)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .log_name("galerie.filet-motif")
             .show(ui, |ui| {
                 // L'espacement par défaut de la galerie (8 px) s'ajouterait aux cotes du relevé
@@ -917,7 +1193,7 @@ fn gallery(ui: &mut egui::Ui) {
         // d'écart. Les deux blocs se comparent ligne à ligne sur la capture.
         let mut survole = true;
         design::collapsible("Le même, surface survolée", &mut survole)
-            .icon(DsTexture::IconInfo)
+            .icon(DsIcon::Info)
             .preview_hovered(true)
             .log_name("galerie.filet-survole")
             .show(ui, |ui| {
@@ -1017,6 +1293,373 @@ fn gallery(ui: &mut egui::Ui) {
             .preview_frame(0)
             .log_name("galerie.loader-hors-intervalle"),
     );
+
+    section_autocomplete(ui);
+}
+
+/// **Seconde planche** — le tableau, parce que la première a atteint le plafond matériel.
+///
+/// `wgpu` refuse une texture de plus de 8192 px de côté, et `galerie_du_design_system` en occupe
+/// déjà 7530. Ce n'est donc pas un choix de présentation : une section de 1580 px n'y entre plus.
+/// La clause 7 du contrat de composant est respectée — toute variante et tout état du tableau sont
+/// sur une capture unique, celle-ci — et les prochaines sections trop grandes suivront le même
+/// chemin plutôt que de rogner sur ce qu'elles montrent.
+#[test]
+fn galerie_du_tableau() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(760.0, 2080.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    section_table(ui);
+                    section_pagination(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_table");
+}
+
+/// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
+/// (comme `select` déplié), d'où les espaces réservés sous chaque cas.
+///
+/// `preview_open`/`preview_active`/`preview_filter` forcent l'état peint : hors écran, aucun champ
+/// n'a le focus, donc rien ne s'ouvrirait jamais.
+fn section_autocomplete(ui: &mut egui::Ui) {
+    use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems, GEM_NATIVE};
+
+    // **Gardées en mémoire egui, pas rechargées à chaque frame** : un `TextureHandle` libère sa
+    // texture quand le dernier exemplaire tombe, et un chargement local peindrait donc des cases
+    // vides — le rendu a lieu après la fin de cette fonction.
+    //
+    // Le chargement se fait HORS du verrou de `data_mut` : `load` appelle `Context::load_texture`,
+    // qui demande ce même verrou — l'imbriquer fige egui dix secondes puis fait paniquer le test.
+    let gems = charge_une_fois(ui, "galerie.gemmes", RarityGems::load);
+    let cats = charge_une_fois(ui, "galerie.categories", CategoryIcons::load);
+    let objets = charge_une_fois(ui, "galerie.objets", ItemIcons::load);
+    let largeur = 560.0;
+
+    // Les images viennent des fixtures du harnais, qui tiennent lieu de ce que `RemoteIconStore`
+    // télécharge au runtime : le composant ne les résout pas lui-même, ce sont du CONTENU.
+    // `image` n'est posée que sur les deux premières rangées : au runtime l'icône arrive du CDN
+    // APRÈS la suggestion, et une rangée doit rester lisible sans elle. Les deux cas sont donc
+    // visibles sur la même capture.
+    let entree = |label: &str, categorie: u16, rarete, deja: bool, image: Option<usize>| {
+        let mut entry = design::AutocompleteEntry::new(label, categorie);
+        entry.gem = Some(gems.texture_id(rarete));
+        entry.gem_size = GEM_NATIVE;
+        entry.image = image.map(|rang| objets.texture_id(rang));
+        entry.disabled = deja;
+        if deja {
+            entry.mention = Some("déjà suivi".to_owned());
+        }
+        entry
+    };
+    let entrees = vec![
+        entree(
+            "Pierre d'aventure",
+            2,
+            overlay_engine::WakfuRarity::Mythical,
+            true,
+            Some(0),
+        ),
+        entree(
+            "Pierre de dolomite",
+            2,
+            overlay_engine::WakfuRarity::Common,
+            false,
+            Some(1),
+        ),
+        entree(
+            "Pierre de lune",
+            1,
+            overlay_engine::WakfuRarity::Rare,
+            false,
+            None,
+        ),
+        entree(
+            "Pierre ponce",
+            7,
+            overlay_engine::WakfuRarity::Common,
+            false,
+            None,
+        ),
+    ];
+    let filtre = |f: CategoryFilter, categorie: Option<u16>| match categorie {
+        None => design::AutocompleteFilter::all(f.label(), Some(cats.texture_id(f))),
+        Some(c) => design::AutocompleteFilter::category(c, f.label(), Some(cats.texture_id(f))),
+    };
+    let filtres = vec![
+        filtre(CategoryFilter::All, None),
+        filtre(CategoryFilter::Equipment, Some(1)),
+        filtre(CategoryFilter::Resources, Some(2)),
+        filtre(CategoryFilter::Craft, Some(7)),
+    ];
+
+    heading(
+        ui,
+        "Autocomplétion — replié, et le seuil de trois caractères",
+        "Sous le seuil, le panneau ne s'ouvre pas : ce n'est pas une liste vide, c'est une liste qui ne s'affiche pas.",
+    );
+    let mut vide = String::new();
+    design::autocomplete(&mut vide)
+        .placeholder("Ajouter un objet à surveiller…")
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .log_name("galerie.autocomplete-replie")
+        .show(ui);
+    let mut court = String::from("pi");
+    design::autocomplete(&mut court)
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .log_name("galerie.autocomplete-sous-seuil")
+        .show(ui);
+
+    heading(
+        ui,
+        "Déplié — « Tout » actif, une entrée déjà suivie",
+        "La deuxième rangée porte l'entrée active (celle que le clavier désigne). La première est grisée, sans surbrillance : elle n'est pas sélectionnable. Les deux dernières n'ont pas encore leur icône — la rangée reste lisible sans elle.",
+    );
+    let mut saisi = String::from("pierre");
+    design::autocomplete(&mut saisi)
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .preview_open(true)
+        .preview_active(1)
+        .log_name("galerie.autocomplete-deplie")
+        .show(ui);
+    // Le panneau est peint dans une `Area` hors flux : sans cette réserve, la section suivante
+    // passerait dessous.
+    ui.add_space(4.0 + 38.0 + 4.0 * 28.0);
+
+    heading(
+        ui,
+        "Un filtre actif — et un filtre sans résultat",
+        "À gauche « Équipements » ne laisse qu'une entrée. À droite « Craft » n'en laisse aucune : la bande RESTE, sinon le bouton qui permettrait de la relâcher disparaîtrait avec les rangées.",
+    );
+    let mut filtre_actif = String::from("pierre");
+    design::autocomplete(&mut filtre_actif)
+        .width(largeur)
+        .entries(&entrees)
+        .filters(&filtres)
+        .preview_open(true)
+        .preview_filter(Some(1))
+        .log_name("galerie.autocomplete-filtre")
+        .show(ui);
+    ui.add_space(4.0 + 38.0 + 28.0);
+
+    let mut filtre_vide = String::from("pierre");
+    let sans_resultat: Vec<design::AutocompleteEntry> = entrees
+        .iter()
+        .filter(|e| e.category != 9)
+        .cloned()
+        .collect();
+    design::autocomplete(&mut filtre_vide)
+        .width(largeur)
+        .entries(&sans_resultat)
+        .filters(&filtres)
+        .preview_open(true)
+        .preview_filter(Some(9))
+        .log_name("galerie.autocomplete-filtre-vide")
+        .show(ui);
+    ui.add_space(4.0 + 38.0 + 34.0);
+}
+
+/// Le tableau — ses trois corps (peuplé, vide, en chargement), son défilement et son cas dégénéré.
+///
+/// **Le premier cas est peint sur un fond en bandes**, et ce n'est pas un ornement : le relevé
+/// montre que le tableau du jeu n'a PAS de fond propre — son zébrage est un éclaircissement
+/// relatif, pas une teinte. Sur un fond uni la démonstration serait invisible ; sur six bandes de
+/// luminances différentes, on voit la bande claire suivre le fond au lieu de l'écraser.
+fn section_table(ui: &mut egui::Ui) {
+    let largeur = 728.0;
+
+    let colonnes = || {
+        vec![
+            TableColumn::fixed("Date", 104.0),
+            TableColumn::flex("Nom", 1.0),
+            TableColumn::fixed("Niv.", 56.0).align(TableAlign::Center),
+            TableColumn::fixed("Prix", 108.0).align(TableAlign::End),
+        ]
+    };
+
+    // Quatre offres factices — dont une dont le nom déborde de sa colonne, pour que l'écrêtage se
+    // voie (clause « au moins un contenu qui déborde » du contrat, §1 bis).
+    let offres: [(&str, &str, i32, &str); 4] = [
+        ("12/09 14:32", "Coiffe du Bouftou Royal", 50, "12 400"),
+        (
+            "12/09 13:58",
+            "Cape de Tofu enragé aux mille et une plumes du Bouftou de Sidimote",
+            35,
+            "980",
+        ),
+        ("11/09 22:07", "Anneau de Dragodinde", 65, "145 000"),
+        ("11/09 19:41", "Amulette du Chafer", 20, "3 210"),
+    ];
+
+    let cellule = |ui: &mut egui::Ui, texte: &str, couleur: Color32| {
+        ui.label(RichText::new(texte).color(couleur).size(15.0));
+    };
+
+    heading(
+        ui,
+        "Tableau — peuplé, sur un fond qui change",
+        "Lignes de 60 px, en-tête à 14 px d'encre, écart de 7 px : les trois cotes du relevé HDV. Le zébrage est un blanc à 12/255 — il éclaircit le décor au lieu de le remplacer, ce que les six bandes de fond rendent visible. La deuxième ligne porte un nom trop long : il est coupé à la colonne, pas au tableau.",
+    );
+    let peuple = design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(offres.len()))
+        .log_name("galerie.table-peuple");
+    let fond = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(largeur, peuple.height()));
+    for (index, gris) in [0x10, 0x1C, 0x26, 0x1A, 0x2E, 0x14].into_iter().enumerate() {
+        let bande = egui::Rect::from_min_size(
+            egui::pos2(fond.left() + index as f32 * fond.width() / 6.0, fond.top()),
+            Vec2::new(fond.width() / 6.0, fond.height()),
+        );
+        ui.painter()
+            .rect_filled(bande, 0, Color32::from_rgb(gris, gris, gris + 4));
+    }
+    peuple.show(ui, |row| {
+        let (date, nom, niveau, prix) = offres[row.index()];
+        row.cell(|ui| cellule(ui, date, CAPTION));
+        row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+        row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+        row.cell(|ui| cellule(ui, prix, HEADING));
+    });
+
+    heading(
+        ui,
+        "Vide — avec message, puis comme le fait le jeu",
+        "Le jeu n'affiche RIEN dans un tableau à « 0 Objet » : pas de message, pas d'illustration. Le message est donc une décision de l'overlay, et il reste facultatif — sans empty_text, le corps garde sa hauteur et demeure vide (à droite du titre suivant).",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Empty)
+        .empty_text("Aucune vente sur la période")
+        .log_name("galerie.table-vide")
+        .show(ui, |_| {});
+
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(0))
+        .log_name("galerie.table-vide-muet")
+        .show(ui, |_| {});
+
+    heading(
+        ui,
+        "En chargement — le rouage du jeu, rien d'autre",
+        "Seul état des trois à ne rien inventer : c'est la planche d'animation relevée sur les écrans de chargement du client. Image figée par preview_loader_frame, sans quoi deux captures différeraient.",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Loading)
+        .preview_loader_frame(0)
+        .log_name("galerie.table-chargement")
+        .show(ui, |_| {});
+
+    heading(
+        ui,
+        "Corps borné — douze lignes dans la place de quatre",
+        "max_height met le CORPS seul dans une design::scroll_area : l'en-tête ne défile pas. La réserve permanente de 26 px de la barre est prise sur la largeur des colonnes dès que la borne existe, que la barre serve ou non — sinon les colonnes sauteraient le jour où une ligne de plus la fait apparaître.",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(12))
+        .max_height(4.0 * 60.0)
+        .log_name("galerie.table-defilant")
+        .show(ui, |row| {
+            let (date, nom, niveau, prix) = offres[row.index() % offres.len()];
+            row.cell(|ui| cellule(ui, date, CAPTION));
+            row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+            row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+            row.cell(|ui| cellule(ui, prix, HEADING));
+        });
+
+    heading(
+        ui,
+        "Cas dégénéré — des colonnes fixes qui ne tiennent pas",
+        "268 px de largeurs imposées dans 200 px : tout est réduit du même facteur et les élastiques tombent à zéro. Un tableau tassé se voit et se corrige ; un tableau qui déborde de son panneau passe pour un bug du panneau voisin.",
+    );
+    design::table()
+        .columns(colonnes())
+        .body(TableBody::Rows(2))
+        .width(200.0)
+        .log_name("galerie.table-serre")
+        .show(ui, |row| {
+            let (date, nom, niveau, prix) = offres[row.index()];
+            row.cell(|ui| cellule(ui, date, CAPTION));
+            row.cell(|ui| cellule(ui, nom, Color32::WHITE));
+            row.cell(|ui| cellule(ui, &niveau.to_string(), Color32::WHITE));
+            row.cell(|ui| cellule(ui, prix, HEADING));
+        });
+}
+
+/// La pagination — les quatre positions possibles dans une suite de pages, et le cas du jeu.
+///
+/// Elle est ici plutôt que dans `galerie_du_design_system` pour la même raison que le tableau (le
+/// plafond de 8192 px), et à côté de lui parce que c'est ensemble qu'ils se relisent — même si,
+/// justement, ce n'est PAS un pied de tableau : dans « Mes offres » le jeu la pose en haut.
+fn section_pagination(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "Pagination — les quatre positions, et celle du jeu",
+        "Deux boutons icône de 36 px et un même triangle, l'un retourné. Ce qui bouge est en or (« Page » et le numéro courant), ce qui borne est en blanc (la barre et le total). Le premier cas est celui des trois captures relevées : « Page 0 / 0 », les deux flèches grisées.",
+    );
+    for (page, total, libelle) in [
+        (0usize, 0usize, "0 / 0 — le cas du jeu, rien à parcourir"),
+        (1, 12, "première page — reculer est impossible"),
+        (6, 12, "au milieu — les deux flèches actives"),
+        (12, 12, "dernière page — avancer est impossible"),
+    ] {
+        ui.horizontal(|ui| {
+            design::pagination(page, total)
+                .log_name(format!("galerie.pagination-{page}-{total}"))
+                .show(ui);
+            ui.add_space(16.0);
+            ui.label(RichText::new(libelle).color(CAPTION).size(12.0));
+        });
+    }
+
+    heading(
+        ui,
+        "Survol forcé, et un total qui déborde",
+        "preview_hovered peint l'état survolé : hors écran, aucun pointeur ne survole quoi que ce soit. À droite, le bloc s'élargit de lui-même — sa largeur est celle de son libellé, jamais une valeur figée.",
+    );
+    ui.horizontal(|ui| {
+        design::pagination(6, 12)
+            .preview_hovered(PaginationStep::Next)
+            .log_name("galerie.pagination-survol")
+            .show(ui);
+        ui.add_space(24.0);
+        design::pagination(137, 1482)
+            .log_name("galerie.pagination-large")
+            .show(ui);
+    });
+}
+
+/// Charge une fois pour toutes un jeu de textures et le garde en mémoire egui.
+///
+/// Le chargement a lieu **hors** du verrou de `data_mut` — voir l'appelant.
+fn charge_une_fois<T: Clone + Send + Sync + 'static>(
+    ui: &egui::Ui,
+    cle: &'static str,
+    charge: impl FnOnce(&egui::Context) -> T,
+) -> T {
+    let id = egui::Id::new(cle);
+    if let Some(valeur) = ui.data(|d| d.get_temp::<T>(id)) {
+        return valeur;
+    }
+    let valeur = charge(ui.ctx());
+    ui.data_mut(|d| d.insert_temp(id, valeur.clone()));
+    valeur
 }
 
 /// Onglets de la fenêtre de démonstration ci-dessus — un type à part, parce qu'une barre d'onglets
