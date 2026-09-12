@@ -157,6 +157,38 @@ pub struct FighterDamage {
     /// pas. `#[serde(default)]` même raison que `xp_gained` ci-dessus (champ ajouté après coup).
     #[serde(default)]
     pub is_ko: bool,
+    /// Sorts lancés par ce combattant pendant son DERNIER tour, dans l'ordre du log — la donnée du
+    /// bloc « ligne de sorts » du panneau Combat (`overlay-ui::panels::combat_spell_block`, spec
+    /// validée en artefact les 11-12 sept. 2026). Vidé au premier sort d'un NOUVEAU tour de ce
+    /// combattant (voir `SessionState::apply`, cas `SpellCast`, et `FightWorking::
+    /// register_fight_turn` : c'est le changement d'acteur qui signale un nouveau tour, jamais un
+    /// compteur) — aucun historique au-delà du tour courant, décision utilisateur explicite.
+    /// Alimenté pour les ALLIÉS seulement (un lanceur ennemi ne touche à rien, le bloc ne les
+    /// affiche jamais) ; borné à `MAX_LAST_TURN_CASTS`. `#[serde(default)]` même raison que
+    /// `xp_gained` (champ ajouté après coup, fichiers `fight-*.json` antérieurs encore lisibles).
+    #[serde(default)]
+    pub last_turn_casts: Vec<SpellCastRecord>,
+    /// Numéro du tour (`FightWorking::turn_count`, démarre à 1) auquel `last_turn_casts` se
+    /// rapporte — `0` tant que ce combattant n'a lancé aucun sort. Purement informatif pour l'UI
+    /// (jamais utilisé pour décider d'une remise à zéro, voir `last_turn_casts`).
+    #[serde(default)]
+    pub last_turn: i64,
+}
+
+/// Borne haute de `FighterDamage::last_turn_casts` — un tour Wakfu réel dépasse rarement une
+/// dizaine de sorts ; au-delà de cette borne, les sorts suivants du même tour sont ignorés plutôt
+/// que de laisser un log pathologique (boucle de sorts sans changement d'acteur) grossir la
+/// structure persistée sans limite.
+pub const MAX_LAST_TURN_CASTS: usize = 32;
+
+/// Un sort lancé — une entrée de `FighterDamage::last_turn_casts`. `spell` est le nom BRUT du log
+/// (`LogEntry::SpellCast::spell`, suffixe « (Critiques) » déjà retiré par le parser et porté par
+/// `critical`) : la résolution vers une icône (nom normalisé + classe du lanceur → référentiel
+/// `assets/spells.json`) est faite à l'affichage, voir `overlay_engine::spells::SpellIndex`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpellCastRecord {
+    pub spell: String,
+    pub critical: bool,
 }
 
 /// Cascade de classe/sexe d'un allié CONFIRMÉ (`is_controlled_by_ai == false`) — miroir de
@@ -193,6 +225,12 @@ pub struct FightSnapshot {
     /// lisible (repli `0`, seulement pour un combat déjà en vol au moment de la mise à jour).
     #[serde(default)]
     pub started_at_ms: i64,
+    /// Index (dans `fighters`) du dernier ALLIÉ à avoir lancé un sort — l'allié que la sélection
+    /// automatique du bloc « ligne de sorts » suit tant que l'utilisateur n'en épingle pas un autre
+    /// (voir `FighterDamage::last_turn_casts`). `None` tant qu'aucun allié n'a lancé de sort ; un
+    /// lanceur ennemi ne le modifie jamais. `#[serde(default)]` même raison que `started_at_ms`.
+    #[serde(default)]
+    pub last_ally_caster: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -425,9 +463,21 @@ impl FightWorking {
     /// raisonnement complet, comptage de tours (`turnSeatsSeen`/`fight.turnCount` côté web)
     /// compris : alimente `FightPayload::turns` (L5, §7.1) en plus de l'attribution des
     /// dégâts/soins par siège.
-    fn register_fight_turn(&mut self, actor: &str) {
+    ///
+    /// Renvoie le siège résolu pour cet acteur (index dans `snapshot.fighters`) et si ce sort
+    /// OUVRE un nouveau tour de cet acteur (`true`) ou prolonge le tour en cours (`false`, même
+    /// acteur qu'au sort précédent) — c'est ce signal que `SessionState::apply` utilise pour
+    /// remettre à zéro `FighterDamage::last_turn_casts`. `None` si l'acteur n'est aucun combattant
+    /// connu de ce combat (nom jamais rejoint, invocation — voir `summon_names`) : le tour est tout
+    /// de même enregistré pour la file d'initiative, comme avant, mais rien ne doit être crédité à
+    /// un combattant au hasard (le repli « index 0 » de `resolve_next_actor` n'est acceptable que
+    /// pour l'attribution des dégâts, déjà documentée comme telle).
+    fn register_fight_turn(&mut self, actor: &str) -> Option<(usize, bool)> {
+        let known = self.count_name_instances(actor) > 0;
         if self.last_turn_actor.as_deref() == Some(actor) {
-            return; // même tour en cours (plusieurs sorts d'affilée par le même acteur).
+            // Même tour en cours (plusieurs sorts d'affilée par le même acteur).
+            let seat = self.last_resolved_seat_by_name.get(actor).copied()?;
+            return known.then_some((seat, false));
         }
         let seat_fighter_index = self.resolve_next_actor(actor);
         self.last_turn_actor = Some(actor.to_string());
@@ -441,6 +491,7 @@ impl FightWorking {
             self.turn_seats_seen.clear();
         }
         self.turn_seats_seen.insert(seat_fighter_index);
+        known.then_some((seat_fighter_index, true))
     }
 
     /// Miroir de `resolveNextActor` (`stats-store.service.ts`) — voir sa doc détaillée côté web
@@ -707,11 +758,33 @@ impl SessionState {
             // `'spell-cast'` de `StatsStoreService.apply()`.
             LogEntry::SpellCast {
                 caster,
+                spell,
+                critical,
                 fight_id: Some(fight_id),
                 ..
             } => {
                 if let Some(fight) = self.fights.get_mut(fight_id) {
-                    fight.register_fight_turn(caster);
+                    // Bloc « ligne de sorts » (voir `FighterDamage::last_turn_casts`) : alliés
+                    // seulement, remise à zéro au premier sort d'un nouveau tour de CE lanceur,
+                    // puis ajout dans l'ordre du log, borné.
+                    if let Some((idx, starts_turn)) = fight.register_fight_turn(caster) {
+                        let turn = fight.turn_count;
+                        if let Some(fighter) = fight.snapshot.fighters.get_mut(idx) {
+                            if fighter.is_ally {
+                                if starts_turn {
+                                    fighter.last_turn_casts.clear();
+                                    fighter.last_turn = turn;
+                                }
+                                if fighter.last_turn_casts.len() < MAX_LAST_TURN_CASTS {
+                                    fighter.last_turn_casts.push(SpellCastRecord {
+                                        spell: spell.clone(),
+                                        critical: *critical,
+                                    });
+                                }
+                                fight.snapshot.last_ally_caster = Some(idx);
+                            }
+                        }
+                    }
                 }
             }
             LogEntry::Damage {
@@ -1133,6 +1206,7 @@ impl SessionState {
                 result: None,
                 fighters: Vec::new(),
                 started_at_ms,
+                last_ally_caster: None,
             },
             fighter_index: HashMap::new(),
             resolved_enemies: std::collections::HashSet::new(),
@@ -1248,6 +1322,8 @@ impl SessionState {
             xp_gained: 0,
             spells: HashMap::new(),
             is_ko: false,
+            last_turn_casts: Vec::new(),
+            last_turn: 0,
         });
         fight
             .fighter_index
@@ -2120,13 +2196,214 @@ mod tests {
     }
 
     fn spell_cast(fight_id: i64, caster: &str) -> LogEntry {
+        spell_cast_named(fight_id, caster, "sort", false)
+    }
+
+    fn spell_cast_named(fight_id: i64, caster: &str, spell: &str, critical: bool) -> LogEntry {
         LogEntry::SpellCast {
             time: "12:00:00,500".to_string(),
             caster: caster.to_string(),
-            spell: "sort".to_string(),
-            critical: false,
+            spell: spell.to_string(),
+            critical,
             fight_id: Some(fight_id),
         }
+    }
+
+    fn cast_names(state: &SessionState, fight_id: i64, name: &str) -> Vec<(String, bool)> {
+        state.fights[&fight_id]
+            .snapshot
+            .fighters
+            .iter()
+            .find(|f| f.name == name)
+            .expect("combattant connu")
+            .last_turn_casts
+            .iter()
+            .map(|c| (c.spell.clone(), c.critical))
+            .collect()
+    }
+
+    /// Bloc « ligne de sorts » (voir `FighterDamage::last_turn_casts`) : les sorts d'un allié
+    /// s'accumulent dans l'ordre du log tant que son tour dure, critique compris, et
+    /// `FightSnapshot::last_ally_caster` pointe vers lui.
+    #[test]
+    fn spell_cast_d_un_allie_alimente_les_sorts_du_tour_et_le_dernier_lanceur() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(&fighter_joined(1, "Bwork", 1, true), ctx, &mut Vec::new());
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Chasseur", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Croc-en-jambe", true),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        assert_eq!(
+            cast_names(&state, 1, "Oumbra"),
+            vec![
+                ("Chasseur".to_string(), false),
+                ("Croc-en-jambe".to_string(), true)
+            ]
+        );
+        let fight = &state.fights[&1].snapshot;
+        assert_eq!(
+            fight.last_ally_caster,
+            Some(1),
+            "index d'Oumbra dans `fighters`"
+        );
+        assert_eq!(fight.fighters[1].last_turn, 1);
+    }
+
+    /// Décision utilisateur : aucun historique au-delà du tour courant — quand l'allié rejoue
+    /// après qu'un autre acteur a joué, sa liste repart de zéro avec ce premier sort en n° 1.
+    #[test]
+    fn nouveau_tour_de_l_allie_remet_ses_sorts_a_zero() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(&fighter_joined(1, "Bwork", 1, true), ctx, &mut Vec::new());
+
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Chasseur", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Proie", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Bwork", "Coup d'Koko", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Canine", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        assert_eq!(
+            cast_names(&state, 1, "Oumbra"),
+            vec![("Canine".to_string(), false)]
+        );
+        assert_eq!(state.fights[&1].snapshot.fighters[0].last_turn, 2);
+    }
+
+    /// Les ennemis ne sont jamais affichés dans le bloc : leurs sorts ne sont ni conservés ni pris
+    /// en compte pour `last_ally_caster` (qui garde le dernier ALLIÉ, même si un ennemi a joué
+    /// depuis).
+    #[test]
+    fn spell_cast_ennemi_ne_touche_ni_aux_sorts_ni_au_dernier_lanceur_allie() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(&fighter_joined(1, "Bwork", 1, true), ctx, &mut Vec::new());
+
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Chasseur", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Bwork", "Coup d'Koko", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        assert!(cast_names(&state, 1, "Bwork").is_empty());
+        assert_eq!(state.fights[&1].snapshot.fighters[1].last_turn, 0);
+        assert_eq!(state.fights[&1].snapshot.last_ally_caster, Some(0));
+    }
+
+    /// Un lanceur inconnu du combat (invocation jamais ajoutée à `fighters`, jointure manquée) ne
+    /// doit créditer AUCUN combattant — le repli « index 0 » de `resolve_next_actor` est réservé à
+    /// l'attribution des dégâts (voir `register_fight_turn`).
+    #[test]
+    fn spell_cast_d_un_lanceur_inconnu_ne_credite_personne() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &spell_cast_named(1, "Totem", "Aura", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        assert!(cast_names(&state, 1, "Oumbra").is_empty());
+        assert_eq!(state.fights[&1].snapshot.last_ally_caster, None);
+    }
+
+    #[test]
+    fn les_sorts_du_tour_sont_bornes() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        for i in 0..(MAX_LAST_TURN_CASTS + 5) {
+            state.apply(
+                &spell_cast_named(1, "Oumbra", &format!("Sort {i}"), false),
+                ctx,
+                &mut Vec::new(),
+            );
+        }
+        assert_eq!(cast_names(&state, 1, "Oumbra").len(), MAX_LAST_TURN_CASTS);
+    }
+
+    /// Les deux nouveaux champs voyagent avec `fight_store` (round-trip JSON), et un fichier
+    /// antérieur sans eux reste lisible (`#[serde(default)]`).
+    #[test]
+    fn sorts_du_tour_serialises_et_replis_par_defaut() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Chasseur", true),
+            ctx,
+            &mut Vec::new(),
+        );
+        let snapshot = &state.fights[&1].snapshot;
+        let json = serde_json::to_string(snapshot).unwrap();
+        let back: FightSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(&back, snapshot);
+
+        let legacy: FightSnapshot = serde_json::from_str(
+            r#"{"fight_id":1,"ongoing":true,"result":null,"fighters":[{"name":"Oumbra","is_ally":true,"total_damage":0,"total_heal":0,"class_name":null,"gender":"m"}]}"#,
+        )
+        .unwrap();
+        assert!(legacy.fighters[0].last_turn_casts.is_empty());
+        assert_eq!(legacy.fighters[0].last_turn, 0);
+        assert_eq!(legacy.last_ally_caster, None);
     }
 
     fn roster_with(name: &str, class_name: &str, gender: Gender) -> RosterIndex {
@@ -2714,6 +2991,7 @@ mod tests {
             result: None,
             fighters: Vec::new(),
             started_at_ms,
+            last_ally_caster: None,
         });
 
         let mut events = Vec::new();
@@ -2761,6 +3039,8 @@ mod tests {
                     xp_gained: 0,
                     spells: HashMap::new(),
                     is_ko: false,
+                    last_turn_casts: Vec::new(),
+                    last_turn: 0,
                 },
                 FighterDamage {
                     name: "Bwork".to_string(),
@@ -2772,9 +3052,12 @@ mod tests {
                     xp_gained: 0,
                     spells: HashMap::new(),
                     is_ko: false,
+                    last_turn_casts: Vec::new(),
+                    last_turn: 0,
                 },
             ],
             started_at_ms: 1_757_000_000_000,
+            last_ally_caster: None,
         });
 
         let sweep_ctx = ApplyContext {
@@ -2876,6 +3159,8 @@ mod tests {
                     xp_gained: 0,
                     spells: HashMap::new(),
                     is_ko: false,
+                    last_turn_casts: Vec::new(),
+                    last_turn: 0,
                 },
                 FighterDamage {
                     name: "Bwork".to_string(),
@@ -2887,9 +3172,12 @@ mod tests {
                     xp_gained: 0,
                     spells: HashMap::new(),
                     is_ko: false,
+                    last_turn_casts: Vec::new(),
+                    last_turn: 0,
                 },
             ],
             started_at_ms: 1_757_000_000_000,
+            last_ally_caster: None,
         });
         let sweep_ctx = ApplyContext {
             in_initial_sweep: true,

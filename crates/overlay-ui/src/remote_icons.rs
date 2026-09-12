@@ -101,6 +101,24 @@ impl RemoteIconStore {
         }
     }
 
+    /// Injecte une icône déjà disponible sous forme de fichier PNG/WebP — pour un harnais de rendu
+    /// (`overlay-testkit`) qui doit montrer de VRAIES icônes sans jamais toucher au réseau
+    /// (§17.1 du plan : « construit à la main dans le harnais, jamais alimenté par le thread
+    /// réseau réel »), à partir de fixtures versionnées. Même décodage que le thread réseau
+    /// (`fetch_and_decode`), même table `decoded` : l'UI ne fait aucune différence. Renvoie
+    /// `false` (et n'insère rien) si `bytes` n'est pas une image lisible. Jamais appelé par le code
+    /// de production — mais pas `#[cfg(test)]` : les tests d'intégration d'un AUTRE crate ne
+    /// compilent pas la lib en `cfg(test)`.
+    pub fn preload(&self, icon: &IconRef, bytes: &[u8]) -> bool {
+        let Some(decoded) = decode_icon(bytes) else {
+            return false;
+        };
+        let key = key_of(icon);
+        self.requested.lock().unwrap().insert(key.clone());
+        self.decoded.lock().unwrap().insert(key, Arc::new(decoded));
+        true
+    }
+
     /// Octets décodés déjà disponibles pour cette icône ; sinon programme son téléchargement (une
     /// seule fois par icône, voir `requested`) et renvoie `None` pour ce rendu — l'appelant garde
     /// son repli générique jusqu'au prochain redessin (déclenché par le thread ci-dessus une fois
@@ -131,21 +149,25 @@ fn fetch_and_decode(icon: &IconRef) -> Option<DecodedIcon> {
         Some(fetched)
     })?;
 
-    match image::load_from_memory(&bytes) {
-        Ok(image) => {
-            let rgba = image.to_rgba8();
-            let (width, height) = rgba.dimensions();
-            Some(DecodedIcon {
-                width,
-                height,
-                rgba: rgba.into_raw(),
-            })
-        }
-        Err(err) => {
-            tracing::warn!(%url, %err, "icône distante récupérée mais illisible");
-            None
-        }
+    let decoded = decode_icon(&bytes);
+    if decoded.is_none() {
+        tracing::warn!(%url, "icône distante récupérée mais illisible");
     }
+    decoded
+}
+
+/// Décode un fichier image (PNG/WebP, voir les features de `image` dans `Cargo.toml`) en RGBA8 —
+/// partagé entre le thread réseau (`fetch_and_decode`) et l'injection de fixtures
+/// (`RemoteIconStore::preload`).
+fn decode_icon(bytes: &[u8]) -> Option<DecodedIcon> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Some(DecodedIcon {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+    })
 }
 
 /// Cache PAR FENÊTRE des textures déjà uploadées — voir la doc de module. Un champ de plus sur

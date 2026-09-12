@@ -34,6 +34,8 @@ fn enemy(name: String, total_damage: i64) -> FighterDamage {
         xp_gained: 0,
         spells: Default::default(),
         is_ko: false,
+        last_turn_casts: Vec::new(),
+        last_turn: 0,
     }
 }
 
