@@ -1866,6 +1866,34 @@ impl Engine {
         })
     }
 
+    /// Oublie la session — combats, totaux, ramassages récents — avant de relire un AUTRE
+    /// `wakfu.log` depuis sa première ligne (`EngineCommand::ChangeLogPath` côté `overlay-ui`).
+    ///
+    /// **Pourquoi ce n'est pas le rattrapage qui s'en charge.** Un rattrapage ne vide `state`
+    /// qu'au tout premier (voir `state_initialized`) : les suivants sont des rotations de
+    /// `wakfu.log` en cours de partie, où le nouveau fichier ne rejoue PAS ce qui a déjà été lu,
+    /// et où vider l'état effacerait un combat encore actif. Un changement de fichier demandé par
+    /// l'utilisateur est l'inverse : le fichier est relu **en entier**, et tout ce qu'il contient
+    /// s'ajouterait à ce que l'ancien avait déjà construit — le même combat, s'il s'agit du même
+    /// fichier sous un autre chemin, y gagnerait un doublon de chaque combattant et un second
+    /// crédit de chaque dégât (bug réel du 2026-09-12 : « Valider » dans la fenêtre Options
+    /// renvoyait le chemin même inchangé, et chaque validation ajoutait une ligne d'allié au
+    /// panneau Combat). L'hôte ne renvoie plus un chemin inchangé ; ceci couvre le vrai changement.
+    ///
+    /// Ce qui SURVIT, comme à un rattrapage : roster, catalogue, donjons, dernier personnage
+    /// connu, compteurs de suivi, objets à son — tout ce que `Engine` porte hors de `state`, pour
+    /// exactement cette raison (voir la doc de chaque champ). Les combats en cours persistés sur
+    /// disque (`fight_store`) sont effacés avec eux : ils ne verraient jamais leur fin dans le
+    /// nouveau fichier, et se feraient restaurer tels quels au prochain lancement.
+    pub fn forget_session(&mut self) {
+        for fight_id in self.state.fights.keys() {
+            crate::fight_store::delete_fight(&self.fight_store_dir, *fight_id);
+        }
+        self.state = SessionState::default();
+        self.state_initialized = false;
+        self.in_initial_sweep = false;
+    }
+
     /// Remplace le roster utilisé pour classer les alliés (voir `resolve_ally_class`) — appelé
     /// par l'hôte (`overlay-ui`) une fois l'auth/le fetch `GET /api/v1/settings` résolus, et à
     /// chaque nouveau fetch (roster modifié sur le compte). `None` = pas de roster connu (mode

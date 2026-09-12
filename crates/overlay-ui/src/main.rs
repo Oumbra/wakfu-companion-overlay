@@ -1372,17 +1372,27 @@ impl App {
         let candidate = PathBuf::from(raw.trim());
         match discovery::validate_log_path(&candidate) {
             Ok(()) => {
-                tracing::info!(
-                    "[options] nouveau fichier de log validé : {}",
-                    candidate.display()
-                );
-                self.log_path = candidate.clone();
-                config::save(&config::OverlayConfig {
-                    log_path: Some(candidate.clone()),
-                });
-                let _ = self
-                    .settings_tx
-                    .send(EngineCommand::ChangeLogPath(candidate));
+                // **Le moteur n'est rechargé que si le chemin a CHANGÉ.** Jusqu'au 2026-09-12,
+                // « Valider » renvoyait `ChangeLogPath` à chaque clic, chemin identique compris :
+                // le thread moteur abandonnait son watcher et relisait `wakfu.log` depuis le
+                // début, dans une session qui gardait son état — et chaque ligne rejouée
+                // recréditait le combat en cours (retour utilisateur, vidéo à l'appui : une ligne
+                // d'allié de plus, et le total qui grimpe, à chaque objet ajouté aux alertes).
+                if candidate == self.log_path {
+                    tracing::info!("[options] chemin de log inchangé, moteur non touché.");
+                } else {
+                    tracing::info!(
+                        "[options] nouveau fichier de log validé : {}",
+                        candidate.display()
+                    );
+                    self.log_path = candidate.clone();
+                    config::save(&config::OverlayConfig {
+                        log_path: Some(candidate.clone()),
+                    });
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::ChangeLogPath(candidate));
+                }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
                 // pied de page est partagé : un bouton dont l'effet dépendrait de l'onglet affiché
                 // serait imprévisible. Fait APRÈS la validation du chemin, et seulement si elle

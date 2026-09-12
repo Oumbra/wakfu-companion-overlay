@@ -205,3 +205,52 @@ fn rotation_en_cours_de_session_ne_perd_pas_le_combat_en_cours() {
         "une rotation en cours de session ne doit jamais effacer un combat déjà suivi"
     );
 }
+
+/// Régression réelle (retour utilisateur 2026-09-12, vidéo à l'appui) : « Valider » dans la
+/// fenêtre Options renvoyait le chemin de `wakfu.log` au moteur même inchangé, et le fichier
+/// était relu depuis sa première ligne dans une session qui gardait son état — à chaque
+/// validation, le combat en cours gagnait une ligne d'allié et un second crédit de ses dégâts.
+/// L'hôte ne renvoie plus un chemin inchangé ; et pour un vrai changement de fichier,
+/// `Engine::forget_session` repart de zéro AVANT la relecture : le récap d'un fichier relu après
+/// l'oubli est celui d'un fichier lu une seule fois.
+#[test]
+fn oublier_la_session_puis_relire_le_fichier_ne_duplique_rien() {
+    let content = fs::read_to_string(WAKFU_LOG).unwrap();
+    let lines: Vec<String> = content.lines().map(str::to_string).collect();
+
+    let mut engine = test_engine();
+    engine
+        .ingest_batch(&LineBatch {
+            lines: lines.clone(),
+            is_initial_load: true,
+        })
+        .unwrap();
+    let une_fois = engine.snapshot();
+    assert!(
+        !une_fois.fights.is_empty(),
+        "le log de référence doit laisser au moins un combat au récap"
+    );
+
+    // Relecture complète du même fichier, comme après un `ChangeLogPath`.
+    engine.forget_session();
+    assert!(
+        engine.snapshot().fights.is_empty(),
+        "la session oubliée ne doit plus porter aucun combat"
+    );
+    engine
+        .ingest_batch(&LineBatch {
+            lines,
+            is_initial_load: true,
+        })
+        .unwrap();
+    let relu = engine.snapshot();
+
+    assert_eq!(
+        une_fois.totals, relu.totals,
+        "un fichier relu après l'oubli de la session doit donner le récap d'une lecture unique"
+    );
+    assert_eq!(
+        une_fois.fights, relu.fights,
+        "aucun combattant ni dégât ne doit être compté deux fois"
+    );
+}
