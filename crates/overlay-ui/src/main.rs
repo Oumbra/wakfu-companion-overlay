@@ -551,17 +551,20 @@ impl App {
         let found = self.game_window.scan();
 
         self.windows.retain(|_, overlay| {
-            // La modale Options (2026-09-08) n'est PAS rattachée à une fenêtre de jeu précise
-            // (voir la doc de `OverlayWindow::options_state`) — jamais retirée par ce scan, sa
-            // durée de vie est pilotée exclusivement par l'utilisateur (Annuler/Valider), voir
-            // `window_event`.
-            if overlay.kind == OverlayKind::Options {
-                return true;
-            }
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
             if !still_here {
+                // **La modale Options suit la même règle depuis le 2026-09-12** : elle est
+                // rattachée à la fenêtre de jeu depuis laquelle on l'a ouverte (voir
+                // `open_options_modal`), donc elle s'en va avec elle. Un écran de réglages qui
+                // survivrait au client qu'il configure n'aurait plus de raison d'être à l'écran —
+                // et le brouillon qu'il porte ne serait de toute façon plus applicable.
+                let quoi = if overlay.kind == OverlayKind::Options {
+                    "sa fenêtre Options est fermée"
+                } else {
+                    "son overlay est retiré"
+                };
                 tracing::info!(
-                    "[fenêtre de jeu] {} fermée — son overlay est retiré.",
+                    "[fenêtre de jeu] {} fermée — {quoi}.",
                     overlay.character_name
                 );
             }
@@ -1032,14 +1035,13 @@ impl App {
         }
 
         for overlay in self.windows.values_mut() {
-            // La modale Options (2026-09-08) reste `HWND_TOPMOST` tout du long, posé une seule
-            // fois à sa création (voir `create_overlay_window`) — jamais concernée par le suivi de
-            // focus PAR PERSONNAGE ci-dessus (voir la doc de `OverlayWindow::options_state`), sans
-            // quoi elle serait démotée après le délai de grâce faute de `game_hwnd` correspondant
-            // à une vraie fenêtre de jeu.
-            if overlay.kind == OverlayKind::Options {
-                continue;
-            }
+            // **La modale Options participe à ce calcul comme les autres depuis le 2026-09-12.**
+            // Elle en était exclue — `HWND_TOPMOST` posé à sa création et jamais remis en
+            // question — parce qu'elle naissait sans `game_hwnd` : elle restait donc au-dessus de
+            // TOUT, navigateur ou autre jeu compris, y compris quand l'utilisateur avait
+            // manifestement l'attention ailleurs (retour utilisateur 2026-09-12). Rattachée à une
+            // vraie fenêtre de jeu, elle n'a plus besoin d'exception : elle suit le premier plan
+            // de SON personnage, et un second client Wakfu ne la voit pas.
             let relevant = relevant_game_hwnds.contains(&overlay.game_hwnd);
 
             // Retour utilisateur 2026-09-02 : « l'overlay disparaît de manière indéterminée, il
@@ -1186,7 +1188,18 @@ impl App {
     /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant
     /// d'en rouvrir une. Même méthode que `bin/overlay-ui-x11.rs` (dupliquée, voir la doc de
     /// `lib.rs` pour pourquoi le fenêtrage OS n'est PAS partagé entre les deux binaires).
-    fn open_options_modal(&mut self, event_loop: &ActiveEventLoop, anchor_rect: Option<GameRect>) {
+    /// Ouvre la modale Options, **rattachée à une fenêtre de jeu**.
+    ///
+    /// `anchor` est la fenêtre depuis laquelle elle est demandée : le bouton « Options » d'un
+    /// bandeau Suivi la donne directement. Le raccourci global, lui, n'en a pas — il prend alors
+    /// la fenêtre de jeu **au premier plan**, et à défaut le premier overlay connu. Sans ce
+    /// rattachement la modale n'appartiendrait à personne, ce qui était précisément le défaut :
+    /// voir `sync_topmost`.
+    fn open_options_modal(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        anchor: Option<(HWND, GameRect)>,
+    ) {
         if self
             .windows
             .values()
@@ -1194,24 +1207,42 @@ impl App {
         {
             return;
         }
-        let rect = anchor_rect
-            .or_else(|| self.windows.values().next().map(|w| w.game_rect))
-            .unwrap_or(GameRect {
-                left: 0,
-                top: 0,
-                width: 1280,
-                height: 720,
-                client_top: 0,
-            });
-        // `game_hwnd: HWND::default()` (nul) — voir la doc de `OverlayWindow::options_state` pour
-        // pourquoi `sync_windows`/`sync_topmost` excluent explicitement `OverlayKind::Options` de
-        // toute logique basée sur ce champ. Toujours interactive (`true` littéral, PAS
-        // `self.interactive`) : une modale qui doit capter le clavier/la souris pour éditer le
-        // chemin, pas un overlay passif d'information comme Combat/Suivi.
+        // Sans ancre explicite (raccourci global), la fenêtre de jeu AU PREMIER PLAN est la
+        // bonne réponse : c'est celle que l'utilisateur regarde au moment où il appuie. Repli sur
+        // le premier overlay connu si le premier plan n'est pas un client Wakfu.
+        let (game_hwnd, rect) = match anchor {
+            Some(ancre) => ancre,
+            None => {
+                let foreground = unsafe { GetForegroundWindow() };
+                self.windows
+                    .values()
+                    .find(|w| w.game_hwnd == foreground)
+                    .or_else(|| self.windows.values().next())
+                    .map(|w| (w.game_hwnd, w.game_rect))
+                    .unwrap_or((
+                        HWND::default(),
+                        GameRect {
+                            left: 0,
+                            top: 0,
+                            width: 1280,
+                            height: 720,
+                            client_top: 0,
+                        },
+                    ))
+            }
+        };
+        // **Rattachée à `game_hwnd` comme n'importe quel overlay** depuis le 2026-09-12 : elle
+        // suit donc le premier plan de ce personnage, et disparaît quand on passe sur un autre
+        // client en multi-compte. Elle portait `HWND::default()` (nul) jusque-là, ce qui obligeait
+        // `sync_windows`/`sync_topmost` à l'exclure de toute leur logique — et la laissait
+        // au-dessus de TOUT, y compris d'un navigateur ou d'un autre jeu (retour utilisateur).
+        //
+        // Toujours interactive (`true` littéral, PAS `self.interactive`) : une modale doit capter
+        // le clavier et la souris, contrairement à un overlay passif d'information.
         let mut overlay = Self::create_overlay_window(
             event_loop,
             OverlayKind::Options,
-            HWND::default(),
+            game_hwnd,
             "Options".to_string(),
             rect,
             true,
@@ -1413,7 +1444,11 @@ impl ApplicationHandler<UserEvent> for App {
         // compilation.
         enum PostRedraw {
             None,
-            OpenOptions(GameRect),
+            /// Fenêtre de jeu **depuis laquelle** la modale est demandée — son `HWND` et son
+            /// rectangle. La modale lui est rattachée comme n'importe quel overlay : c'est ce qui
+            /// la fait suivre le premier plan de CE personnage, et disparaître quand on passe sur
+            /// un autre client en multi-compte.
+            OpenOptions(HWND, GameRect),
             CloseOptions,
             BrowseOptions,
             ValidateOptions(String),
@@ -1537,6 +1572,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // traversable si l'utilisateur avait basculé ce mode juste avant.
                 let interactive = overlay.kind == OverlayKind::Options || self.interactive;
                 let this_game_rect = overlay.game_rect;
+                let this_game_hwnd = overlay.game_hwnd;
                 let (repaint_delay, outcome) = render(
                     &mut overlay.gpu,
                     &overlay.window,
@@ -1573,7 +1609,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // Options elle-même — jamais les deux à la fois (branches différentes du `match
                 // kind` de `paint_content`).
                 if outcome.open_options {
-                    post_redraw = PostRedraw::OpenOptions(this_game_rect);
+                    post_redraw = PostRedraw::OpenOptions(this_game_hwnd, this_game_rect);
                 }
                 // L'ouverture de page est faite ICI, par l'hôte, jamais par le panneau qui l'a
                 // demandée : voir `RenderOutcome::open_url`. `open::that` est best-effort, comme
@@ -1601,7 +1637,9 @@ impl ApplicationHandler<UserEvent> for App {
 
         match post_redraw {
             PostRedraw::None => {}
-            PostRedraw::OpenOptions(rect) => self.open_options_modal(event_loop, Some(rect)),
+            PostRedraw::OpenOptions(hwnd, rect) => {
+                self.open_options_modal(event_loop, Some((hwnd, rect)))
+            }
             PostRedraw::CloseOptions => {
                 self.windows.remove(&id);
                 tracing::info!("[options] modale fermée (Annuler).");

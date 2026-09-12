@@ -15,6 +15,10 @@
 //!   les silencieux estompés). Au-delà de six lanceurs (jamais vu en pratique, même limite que le
 //!   cadre à médaillons), les suivants n'ont pas d'onglet — question encore ouverte dans
 //!   l'artefact, tranchée provisoirement ainsi.
+//! - **Portraits des onglets** : SEUL l'onglet sélectionné est en couleur, KO ou pas — c'est lui
+//!   dont on lit les sorts ; tous les autres sont en noir et blanc, atténués (retour utilisateur
+//!   du 12 sept. : le premier rendu mélangeait « non sélectionné = translucide » et « KO = gris »
+//!   comme dans le cadre de combat, illisible). L'état KO n'a aucun rôle ici, il reste au cadre.
 //! - **Sélection automatique** : l'indicateur suit le dernier allié à avoir lancé un sort
 //!   (`FightSnapshot::last_ally_caster`). **Clic** sur un onglet : épingle cet allié, ses sorts
 //!   restent affichés pendant que les autres jouent ; second clic sur l'onglet épinglé : retour au
@@ -80,8 +84,14 @@ pub const TAB_SIZE: f32 = 22.0;
 /// Sept écarts égaux sur la largeur utile : `(182 − 6 × 22) / 7` ≈ 7,14 px.
 const TAB_GAP: f32 = (INNER_WIDTH - TAB_SLOTS as f32 * TAB_SIZE) / (TAB_SLOTS as f32 + 1.0);
 const TAB_TOP: f32 = 4.0;
-/// Opacité d'un onglet non sélectionné (55 %).
+/// Opacité d'un onglet non sélectionné (55 %) — appliquée à son portrait en NOIR ET BLANC (voir
+/// doc de module) : gris et atténué, il se lit comme désactivé face au seul onglet en couleur.
 const TAB_ALPHA_IDLE: u8 = 140;
+/// Teinte du portrait de repli (`UiIcons::unknown_entity_texture`, allié sans classe connue) quand
+/// il n'est pas sélectionné — pas de version grise précalculée pour lui, un tint gris est
+/// l'approximation déjà admise ailleurs (voir `combat::grey_tint_if_ko`).
+const TAB_FALLBACK_IDLE_TINT: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(70, 70, 70, TAB_ALPHA_IDLE);
 
 /// Séparateur : 1 px, blanc à 13 %, `y = 30` (centre du trait à 30,5).
 const SEPARATOR_Y: f32 = 30.5;
@@ -112,10 +122,11 @@ const SPELL_PLACEHOLDER_FILL: egui::Color32 = egui::Color32::from_rgb(0x1E, 0x22
 const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xD8, 0x9E);
 const CRIT_CORNER: f32 = 9.0;
 
-/// Retrait du badge depuis le coin haut-gauche de l'icône : 2 px à gauche, mais 1 px seulement
-/// en haut (retour utilisateur du 12 sept. : à 2 px, le décalage entre le haut du badge et le haut
-/// de l'icône sautait aux yeux sur un critique, dont les deux liserés épaississent le bord).
-const BADGE_INSET_X: f32 = 2.0;
+/// Retrait du badge depuis le coin haut-gauche de l'icône : 1 px de chaque côté (retours
+/// utilisateur du 12 sept., en deux fois : d'abord le haut — à 2 px, le décalage sautait aux yeux
+/// sur un critique, dont les deux liserés épaississent le bord — puis la gauche, jugée encore
+/// trop rentrée sur l'agrandissement ×3).
+const BADGE_INSET_X: f32 = 1.0;
 const BADGE_INSET_Y: f32 = 1.0;
 const BADGE_MIN_WIDTH: f32 = 12.0;
 const BADGE_HEIGHT: f32 = 11.0;
@@ -335,21 +346,33 @@ pub fn show(
 
     // Onglets-portraits, par-dessus le séparateur.
     for ((rect, response), (idx, ally)) in tab_responses.iter().zip(&allies) {
-        let alpha = if *idx == selected {
-            255
-        } else {
-            TAB_ALPHA_IDLE
-        };
-        let texture = ally
+        // Couleur pour le seul onglet sélectionné, noir et blanc atténué pour les autres — l'état
+        // KO ne joue pas (voir doc de module) : `ko` de `PortraitAtlas::texture` sert ici de
+        // « version grise », pas d'indicateur de KO.
+        let is_selected = *idx == selected;
+        let class_texture = ally
             .class_name
             .as_deref()
-            .and_then(|class| portraits.texture(class, ally.gender, ally.is_ko))
-            .unwrap_or_else(|| icons.unknown_entity_texture());
+            .and_then(|class| portraits.texture(class, ally.gender, !is_selected));
+        let (texture, tint, alpha) = match (class_texture, is_selected) {
+            (Some(texture), true) => (texture, egui::Color32::WHITE, 255),
+            (Some(texture), false) => (
+                texture,
+                egui::Color32::from_white_alpha(TAB_ALPHA_IDLE),
+                TAB_ALPHA_IDLE,
+            ),
+            (None, true) => (icons.unknown_entity_texture(), egui::Color32::WHITE, 255),
+            (None, false) => (
+                icons.unknown_entity_texture(),
+                TAB_FALLBACK_IDLE_TINT,
+                TAB_ALPHA_IDLE,
+            ),
+        };
         egui::Image::new(texture)
             .fit_to_exact_size(rect.size())
             .maintain_aspect_ratio(false)
             .corner_radius((TAB_SIZE / 2.0) as u8)
-            .tint(egui::Color32::from_white_alpha(alpha))
+            .tint(tint)
             .paint_at(ui, *rect);
         painter.circle_stroke(
             rect.center(),
@@ -473,9 +496,9 @@ pub fn show(
     ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
 }
 
-/// Badge d'index en haut à gauche de l'icône (2 px du bord gauche, 1 px du haut — voir
-/// `BADGE_INSET_Y`) : pastille noire à 62 %, rayon 2, 12 × 11 minimum (s'élargit pour deux
-/// chiffres), chiffre blanc 9 px semi-gras sans contour.
+/// Badge d'index en haut à gauche de l'icône (1 px du bord gauche et du haut — voir
+/// `BADGE_INSET_X`/`BADGE_INSET_Y`) : pastille noire à 62 %, rayon 2, 12 × 11 minimum (s'élargit
+/// pour deux chiffres), chiffre blanc 9 px semi-gras sans contour.
 fn paint_index_badge(ui: &egui::Ui, painter: &egui::Painter, icon: egui::Rect, index: usize) {
     let galley = painter.layout_no_wrap(
         index.to_string(),

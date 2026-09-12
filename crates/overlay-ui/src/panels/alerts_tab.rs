@@ -57,8 +57,13 @@ const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Largeur d'une tuile — calée pour que cinq tiennent sur une rangée dans la fenêtre agrandie.
 const TILE_WIDTH: f32 = 118.0;
-/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, nom, marges.
-const TILE_HEIGHT: f32 = 88.0;
+/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, **nom sur deux lignes**, marges.
+///
+/// **88 px jusqu'au 2026-09-12**, quand le nom tenait sur une seule ligne : trois objets y
+/// apparaissaient alors sous le même libellé (« Plan "Epée de… » pour Bonta, Brâkmar ET Sufokia),
+/// et la tuile ne disait plus lequel elle portait — le défaut que la revue de la v1 de la maquette
+/// avait relevé, revenu par un autre chemin. Voir [`NAME_MAX_ROWS`].
+const TILE_HEIGHT: f32 = 104.0;
 /// Gouttière entre deux tuiles — « les petites tuiles doivent être séparées sur tous les bords ».
 const TILE_GAP: f32 = 10.0;
 const TILE_BORDER_WIDTH: f32 = 2.0;
@@ -72,6 +77,17 @@ const TILE_BADGE_ROW: f32 = 18.0;
 const TILE_BADGE: f32 = 14.0;
 const TILE_BADGE_INSET: f32 = 5.0;
 const TILE_NAME_INSET: f32 = 5.0;
+
+/// Corps du nom d'objet.
+const TILE_NAME_FONT_SIZE: f32 = 13.0;
+
+/// **Deux lignes pour le nom, pas une.**
+///
+/// Une seule ligne de 108 px ne distingue pas trois noms qui partagent leurs quatorze premiers
+/// caractères — c'est exactement le cas des quatre « Plan "Epée de … " » du jeu, et la grille du
+/// dépôt web tient le même raisonnement avec son `minmax(140px, 1fr)` qui laisse le nom passer à
+/// la ligne. Au-delà de deux lignes, la tuile deviendrait plus haute que ce qu'elle montre.
+const NAME_MAX_ROWS: usize = 2;
 
 /// Bordure d'une tuile dont le son est ACTIF — `--accent` du dépôt web.
 const ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
@@ -558,7 +574,16 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         ),
         Vec2::splat(TILE_SLOT),
     );
-    ui.put(
+    // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée.**
+    //
+    // `Ui::put` ouvre un scope, et un scope **avance le curseur du parent** jusqu'au bord de ce
+    // qu'il a posé. Appelé directement sur la rangée, il ramenait donc le curseur au bord droit de
+    // l'EMPLACEMENT (centré, donc 27 px avant le bord de la tuile) : la tuile suivante démarrait
+    // 27 px trop tôt et son fond opaque effaçait la fin du nom de la précédente. C'est ce qui
+    // faisait lire « Pierre d'avent » et trois « Plan "Epée de » identiques — le nom était bien
+    // mis en page, il était recouvert.
+    let mut cellule = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    cellule.put(
         slot,
         design::item_slot()
             .size(TILE_SLOT)
@@ -567,14 +592,13 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             .log_name(item.name.clone()),
     );
 
-    let (shown, elided) = elide(ui, &item.name, rect.width() - 2.0 * TILE_NAME_INSET);
-    let name_rect = ui.painter().text(
-        egui::pos2(rect.center().x, slot.bottom() + 5.0),
-        egui::Align2::CENTER_TOP,
-        shown,
-        design::text::label_font(ui.ctx(), 13.0),
-        TEXT,
-    );
+    let (galley, elided) = name_galley(ui, &item.name, rect.width() - 2.0 * TILE_NAME_INSET);
+    // **L'ancre est le CENTRE, pas le coin** : le `LayoutJob` porte `halign = Center`, donc egui
+    // centre déjà chaque ligne sur le point qu'on lui donne. Recentrer soi-même en retranchant
+    // une demi-largeur décalait tout d'autant, et les noms débordaient sur la tuile voisine.
+    let ancre = egui::pos2(rect.center().x, slot.bottom() + 5.0);
+    let name_rect = galley.rect.translate(ancre.to_vec2());
+    ui.painter().galley(ancre, galley, TEXT);
 
     let ds = design::DesignSystem::get(ui.ctx());
     let glyph = if item.enabled {
@@ -677,28 +701,34 @@ fn loading_row(ui: &mut egui::Ui, inner: Rect) {
 // Utilitaires
 // -------------------------------------------------------------------------------------------
 
-/// Tronque un nom à la largeur d'une tuile, avec une ellipse. Rend **aussi** le fait d'avoir
-/// coupé : c'est cette information qui décide de l'infobulle du nom.
-fn elide(ui: &egui::Ui, text: &str, max_width: f32) -> (String, bool) {
-    let font = design::text::label_font(ui.ctx(), 13.0);
-    let largeur = |s: &str| {
-        ui.painter()
-            .layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-    };
-    if largeur(text) <= max_width {
-        return (text.to_string(), false);
-    }
-    let mut coupe = String::new();
-    for c in text.chars() {
-        let essai = format!("{coupe}{c}…");
-        if largeur(&essai) > max_width {
-            break;
-        }
-        coupe.push(c);
-    }
-    (format!("{coupe}…"), true)
+/// Met en forme le nom d'un objet pour sa tuile — **sur deux lignes au plus**, ellipse au bout.
+///
+/// Rend **aussi** le fait d'avoir coupé : c'est cette information qui décide de l'infobulle du nom
+/// (voir [`alert_item`]). La déduire après coup en comparant deux chaînes marcherait, mais
+/// obligerait chaque appelant à y penser — et un nom qui finirait déjà par « … » la mettrait en
+/// défaut.
+///
+/// **Le retour à la ligne se fait au mot** (`break_anywhere` laissé à `false`) : c'est ce qui
+/// sépare « Plan "Epée de » de « Brâkmar" » plutôt que de couper au milieu d'une syllabe. Un mot
+/// plus long que la tuile est alors élidé sur sa ligne plutôt que rompu — cas qui n'existe pas
+/// dans le référentiel, mais qui ne casse rien s'il arrive.
+fn name_galley(ui: &egui::Ui, text: &str, max_width: f32) -> (std::sync::Arc<egui::Galley>, bool) {
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_owned(),
+        design::text::label_font(ui.ctx(), TILE_NAME_FONT_SIZE),
+        TEXT,
+        max_width,
+    );
+    job.wrap.max_rows = NAME_MAX_ROWS;
+    job.wrap.overflow_character = Some('…');
+    // Chaque ligne est centrée dans la largeur utile, pas seulement le bloc : sans ça, un nom de
+    // deux lignes très inégales pendrait à gauche.
+    job.halign = egui::Align::Center;
+    let galley = ui.painter().layout_job(job);
+    // `elided` est vrai dès qu'egui a dû couper — c'est lui, et pas une comparaison de chaînes,
+    // qui sait si l'ellipse a été posée.
+    let coupe = galley.elided;
+    (galley, coupe)
 }
 
 /// La clé de catégorie que le composant d'autocomplétion manipule — le numéro d'icône de la
