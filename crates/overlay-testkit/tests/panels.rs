@@ -772,7 +772,9 @@ fn panneau_options_ne_panique_pas() {
     let mut options_state = OptionsModalState {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: Some("Le fichier sélectionné doit s'appeler wakfu.log.".to_string()),
-        tab: OptionsTab::default(),
+        // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
+        // le 2026-09-12, et c'est le champ de chemin que ce test regarde.
+        tab: OptionsTab::Parametres,
         ..Default::default()
     };
     // Chargées à part de `Textures` (variable locale dédiée plutôt qu'un champ supplémentaire sur
@@ -840,7 +842,9 @@ fn modale_options_echap_annule_et_entree_valide() {
     let mut options_state = OptionsModalState {
         path_input: CHEMIN.to_string(),
         error: None,
-        tab: OptionsTab::default(),
+        // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
+        // le 2026-09-12, et c'est le champ de chemin que ce test regarde.
+        tab: OptionsTab::Parametres,
         // **Référence = ce qui est affiché** : cette fenêtre est intouchée, donc Échap l'annule du
         // premier coup. Une référence vide la rendrait « modifiée » dès l'ouverture, et Échap
         // ouvrirait la garde au lieu d'annuler — voir `options_garde_de_fermeture_au_clavier`.
@@ -963,7 +967,9 @@ fn modale_options_sur_damier_ne_panique_pas() {
     let mut options_state = OptionsModalState {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: None,
-        tab: OptionsTab::default(),
+        // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
+        // le 2026-09-12, et c'est le champ de chemin que ce test regarde.
+        tab: OptionsTab::Parametres,
         ..Default::default()
     };
 
