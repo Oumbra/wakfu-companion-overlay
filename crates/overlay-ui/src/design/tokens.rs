@@ -1395,3 +1395,76 @@ pub const PAGINATION_TEXT_GAP: f32 = 7.0;
 /// Les deux socles font 36 px chacun, d'où un pas de 40 px entre leurs centres : c'est ce que le
 /// relevé avait lu comme « 39 px entre les deux débuts de flèche », à un pixel de détourage près.
 pub const PAGINATION_ARROW_GAP: f32 = 4.0;
+
+// ---------------------------------------------------------------------------------------------
+// `design::confirm_dialog` — la boîte de confirmation du jeu.
+//
+// Mesures relevées sur `assets/design-system/interfaces/interface-confirm-box.png` (449 × 209),
+// la boîte du client qui pose exactement la même forme de question (« Êtes-vous sûr(e) de vouloir
+// supprimer ce build ? »). Ces valeurs sont arrivées avec la maquette de la page Alertes
+// (2026-09-11), y ont vécu en constantes locales, et remontent ici le 2026-09-12 quand la boîte a
+// gagné un second appelant — la garde de fermeture de la fenêtre Options.
+// ---------------------------------------------------------------------------------------------
+
+/// Fond du corps — **`#585955`**, un gris CLAIR.
+///
+/// Histogramme de x 40..410 / y 60..110 sur la capture : `#585955` dominant, puis `#595a56` et
+/// `#5a5b5c`, tous à un niveau les uns des autres. À l'opposé du kaki d'une liste déroulante, que
+/// lui donnait une version antérieure de la maquette.
+pub const CONFIRM_FILL: Color32 = Color32::from_rgb(0x58, 0x59, 0x55);
+
+/// Bord du corps — le noir de bord commun au jeu, celui de [`SELECT_LIST_BORDER`].
+pub const CONFIRM_BORDER: Color32 = SELECT_LIST_BORDER;
+
+/// Épaisseur de ce bord — 2 px.
+pub const CONFIRM_BORDER_WIDTH: f32 = 2.0;
+
+/// Rayon des coins du corps — 4 px.
+pub const CONFIRM_RADIUS: u8 = 4;
+
+/// Médaillon en crête, qui déborde le haut du corps — l'or du jeu ([`TAB_LABEL_IDLE`]), comme sur
+/// la capture où le disque est doré et son point d'interrogation sombre.
+pub const CONFIRM_CREST: Color32 = TAB_LABEL_IDLE;
+
+/// Rayon du médaillon — 20 px.
+pub const CONFIRM_CREST_RADIUS: f32 = 20.0;
+
+/// Côté du glyphe inscrit dans le médaillon — 14 px.
+pub const CONFIRM_CREST_GLYPH: f32 = 14.0;
+
+/// Largeur du corps — **420 px mesurés** (bords à x=13 et x=433 sur une capture de 449).
+pub const CONFIRM_WIDTH: f32 = 420.0;
+
+/// Hauteur du corps — 120 px.
+///
+/// **Choix de mise en page, pas une mesure** : la capture donne ~144 px (y ≈ 47..191) pour une
+/// question sur deux lignes. Les questions posées ici tiennent sur une.
+pub const CONFIRM_HEIGHT: f32 = 120.0;
+
+/// Hauteur de la question, depuis le haut du corps — 46 px.
+pub const CONFIRM_QUESTION_TOP: f32 = 46.0;
+
+/// Corps de la question — 15 px, celui du texte courant du jeu.
+pub const CONFIRM_FONT_SIZE: f32 = 15.0;
+
+/// Marge latérale de la rangée de boutons — 26 px de chaque côté.
+pub const CONFIRM_BUTTONS_INSET: f32 = 26.0;
+
+/// Hauteur de cette rangée, depuis le haut du corps — 68 px.
+pub const CONFIRM_BUTTONS_TOP: f32 = 68.0;
+
+/// Hauteur des deux boutons.
+pub const CONFIRM_BUTTON_HEIGHT: f32 = 36.0;
+
+/// Largeur de chacun.
+pub const CONFIRM_BUTTON_WIDTH: f32 = 150.0;
+
+/// Gouttière entre les deux — 14 px.
+pub const CONFIRM_BUTTON_GAP: f32 = 14.0;
+
+/// Opacité du voile posé sur ce que la boîte interrompt.
+///
+/// **Le voile n'est pas une teinte, c'est une information** : tant que le dialogue est ouvert, ce
+/// qu'il couvre est inerte. C'est pourquoi le composant le peint sur le rectangle que l'appelant
+/// lui donne — la FENÊTRE entière, pied de page compris — et non sur son seul panneau.
+pub const CONFIRM_SCRIM_ALPHA: u8 = 0x88;

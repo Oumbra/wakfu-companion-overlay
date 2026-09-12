@@ -38,7 +38,7 @@
 use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
-use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize, SlotFrame};
+use crate::design::{self, DsIcon, IconContext, InputSize, SlotFrame};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -91,18 +91,6 @@ const ROW_HEIGHT: f32 = 39.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, porté de 12 après un second retour utilisateur.
 const SECTION_GAP: f32 = 18.0;
-
-/// Fond du corps d'une boîte de confirmation — `#585955` mesuré sur `interface-confirm-box.png`,
-/// un gris **clair**.
-const CONFIRM_FILL: Color32 = Color32::from_rgb(0x58, 0x59, 0x55);
-const CONFIRM_BORDER: Color32 = Color32::from_rgb(0x0E, 0x10, 0x15);
-/// Médaillon « ? » en crête — l'or du jeu, comme sur la capture de référence.
-const CONFIRM_CREST: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9E);
-/// Largeur du corps — 420 px mesurés (bords à x=13 et x=433 sur une capture de 449).
-const CONFIRM_WIDTH: f32 = 420.0;
-/// Hauteur du corps — 120, la question tenant sur une ligne au lieu de deux : choix de mise en
-/// page, pas une mesure.
-const CONFIRM_HEIGHT: f32 = 120.0;
 
 /// Nombre maximal de suggestions construites par frappe — voir `CatalogIndex::search_items`.
 const MAX_SUGGESTIONS: usize = 40;
@@ -244,13 +232,18 @@ pub fn show(
     // La confirmation est peinte EN DERNIER et sur la fenêtre entière : son voile doit passer
     // par-dessus tout ce qu'elle interrompt, pied de page compris.
     if let Some(pending) = state.pending_removal.clone() {
-        match confirm_box(ui, ctx.window, &pending.name) {
-            ConfirmChoice::Yes => {
+        let choix =
+            design::confirm_dialog(format!("Retirer « {} » de vos alertes ?", pending.name))
+                .over(ctx.window)
+                .log_name("alertes.retrait")
+                .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
                 ctx.profile.remove(&pending.name, pending.catalog_id);
                 state.pending_removal = None;
             }
-            ConfirmChoice::No => state.pending_removal = None,
-            ConfirmChoice::Pending => {}
+            design::ConfirmChoice::No => state.pending_removal = None,
+            design::ConfirmChoice::Pending => {}
         }
     }
 
@@ -678,114 +671,6 @@ fn loading_row(ui: &mut egui::Ui, inner: Rect) {
         Rect::from_center_size(reste.center(), Vec2::splat(design::LoaderSize::Large.px())),
         design::loader().size(design::LoaderSize::Large),
     );
-}
-
-/// Ce que l'utilisateur a répondu à une boîte de confirmation.
-enum ConfirmChoice {
-    Pending,
-    Yes,
-    No,
-}
-
-/// La boîte de confirmation du jeu — **centrée et autonome**, pas une popover ancrée au bouton
-/// comme le web.
-///
-/// Le centrage règle du même coup une réserve d'ergonomie : une popover recouvrait le bouton
-/// « Valider » de la fenêtre, et son bouton de confirmation tombait exactement là où « Valider »
-/// réapparaissait — un double-clic un peu vif validait la fenêtre.
-///
-/// **Le bouton destructeur du jeu est or, jamais rouge** : le rouge est réservé au « Annuler »
-/// pleine largeur d'un pied de fenêtre (`docs/design-system.md`).
-fn confirm_box(ui: &mut egui::Ui, parent: Rect, item_name: &str) -> ConfirmChoice {
-    // Voile sombre sur **toute** la fenêtre, pied de page compris : une boîte modale du jeu
-    // assombrit ce qu'elle interrompt, et ce voile porte une information — tant que le dialogue
-    // est ouvert, « Annuler » et « Valider » sont inertes.
-    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(parent).layer_id(
-        egui::LayerId::new(
-            egui::Order::Foreground,
-            egui::Id::new("alertes-confirmation"),
-        ),
-    ));
-    ui.set_clip_rect(Rect::EVERYTHING);
-    let ui = &mut ui;
-    ui.painter()
-        .rect_filled(parent, 0, Color32::from_black_alpha(0x88));
-    // Avale tout clic passant à côté de la boîte : le voile n'est pas qu'une teinte, il neutralise
-    // réellement ce qu'il couvre.
-    ui.interact(
-        parent,
-        egui::Id::new("alertes-confirmation-voile"),
-        egui::Sense::click(),
-    );
-
-    let rect = Rect::from_center_size(parent.center(), Vec2::new(CONFIRM_WIDTH, CONFIRM_HEIGHT));
-    ui.painter().rect_filled(rect, 4, CONFIRM_FILL);
-    ui.painter().rect_stroke(
-        rect,
-        4,
-        Stroke::new(2.0, CONFIRM_BORDER),
-        StrokeKind::Inside,
-    );
-
-    // Crête : le médaillon « ? » du jeu déborde le haut du corps.
-    let crest = egui::pos2(rect.center().x, rect.top());
-    ui.painter().circle_filled(crest, 20.0, CONFIRM_CREST);
-    ui.painter()
-        .circle_stroke(crest, 20.0, Stroke::new(2.0, CONFIRM_BORDER));
-    design::DesignSystem::get(ui.ctx()).paint_icon(
-        ui.painter(),
-        Rect::from_center_size(crest, Vec2::splat(14.0)),
-        DsIcon::Help,
-        design::tokens::BUTTON_TEXT_ON_GOLD,
-    );
-
-    ui.painter().text(
-        egui::pos2(rect.center().x, rect.top() + 46.0),
-        egui::Align2::CENTER_CENTER,
-        format!("Retirer « {item_name} » de vos alertes ?"),
-        design::text::label_font(ui.ctx(), 15.0),
-        TEXT,
-    );
-
-    let mut choix = ConfirmChoice::Pending;
-    let mut buttons = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(
-        egui::pos2(rect.left() + 26.0, rect.top() + 68.0),
-        Vec2::new(rect.width() - 52.0, 36.0),
-    )));
-    buttons.horizontal(|ui| {
-        if ui
-            .add(
-                design::button("Non")
-                    .variant(ButtonVariant::Secondary)
-                    .size(ButtonSize::Compact)
-                    .width(150.0)
-                    .log_name("alertes.confirm-non"),
-            )
-            .clicked()
-        {
-            choix = ConfirmChoice::No;
-        }
-        ui.add_space(14.0);
-        if ui
-            .add(
-                design::button("Oui")
-                    .variant(ButtonVariant::Primary)
-                    .size(ButtonSize::Compact)
-                    .width(150.0)
-                    .log_name("alertes.confirm-oui"),
-            )
-            .clicked()
-        {
-            choix = ConfirmChoice::Yes;
-        }
-    });
-
-    // Échap ferme la boîte comme « Non » — la fenêtre, elle, ne doit pas se fermer derrière : voir
-    // l'appelant, qui ne lit ses propres touches que quand aucune confirmation n'est ouverte.
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        choix = ConfirmChoice::No;
-    }
-    choix
 }
 
 // -------------------------------------------------------------------------------------------

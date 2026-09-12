@@ -27,6 +27,7 @@ pub mod autocomplete;
 pub mod button;
 pub mod checkbox;
 pub mod collapsible;
+pub mod confirm;
 pub mod heading;
 pub mod icon;
 pub mod icon_button;

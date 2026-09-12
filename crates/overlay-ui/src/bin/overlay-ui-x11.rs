@@ -573,6 +573,11 @@ mod linux_main {
                 // fin ou une liste qu'on ne pourrait pas enregistrer.
                 alerts_draft: None,
                 alerts_availability: AlertsAvailability::NoAccount,
+                initial: options_modal::OptionsInitial {
+                    path: self.log_path.display().to_string(),
+                    alerts: None,
+                },
+                pending_close: false,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
@@ -697,8 +702,23 @@ mod linux_main {
 
             match event {
                 WindowEvent::CloseRequested => {
-                    logging::log_session_end("fermeture de fenêtre");
-                    event_loop.exit();
+                    // **La croix de la fenêtre Options ferme la MODALE, pas l'overlay.** Elle quittait
+                    // tout jusqu'au 2026-09-12 : cette fenêtre est la seule focalisable (§9.1 du plan),
+                    // donc la seule dont la croix est réellement atteignable à la souris, et elle
+                    // tuait la session entière. Avec des modifications en attente, elle passe par la
+                    // même garde que « Annuler » et Échap — les trois gestes ferment la même chose.
+                    if overlay.kind == OverlayKind::Options {
+                        match overlay.options_state.as_mut() {
+                            Some(state) if state.is_dirty() => {
+                                state.pending_close = true;
+                                overlay.window.request_redraw();
+                            }
+                            _ => post_redraw = PostRedraw::CloseOptions,
+                        }
+                    } else {
+                        logging::log_session_end("fermeture de fenêtre");
+                        event_loop.exit();
+                    }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
                     // Les fenêtres overlay ne demandent jamais le focus clavier en pratique (elles
