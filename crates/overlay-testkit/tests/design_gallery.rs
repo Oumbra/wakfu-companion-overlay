@@ -1562,7 +1562,7 @@ fn section_autocomplete(ui: &mut egui::Ui) {
     heading(
         ui,
         "Au-delà de cinq rangées — la liste défile",
-        "Neuf entrées, cinq visibles : la barre du web (8 px, rayon 4) sur un rail plus sombre que la liste. Elle ne s’élargit pas ; sous le pointeur, sa poignée prend la teinte des rangées survolées. Sa colonne est réservée : la mention de droite ne passe jamais dessous. Les flèches font défiler la liste pour garder l’entrée active en vue.",
+        "Neuf entrées, cinq visibles : la barre du web (8 px, rayon 4) sur un rail plus sombre que la liste, sa poignée de la teinte de la liste au repos. Elle ne s’élargit pas ; sous le pointeur, la poignée prend la teinte des rangées survolées et le curseur devient une main qui agrippe. Sa colonne est réservée : la mention de droite ne passe jamais dessous. Les flèches font défiler la liste pour garder l’entrée active en vue.",
     );
     let mut long = String::from("pierre");
     let beaucoup: Vec<design::AutocompleteEntry> = (1..=9)
