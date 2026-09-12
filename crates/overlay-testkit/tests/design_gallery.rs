@@ -1326,6 +1326,67 @@ fn galerie_du_tableau() {
     harness.snapshot("design_gallery_table");
 }
 
+/// **Troisième planche** — la boîte de confirmation, qui ne peut pas vivre dans les deux autres.
+///
+/// Son voile couvre tout ce que l'appelant lui donne : posée dans un canevas de 7530 px, elle
+/// assombrirait la galerie entière et masquerait toutes les autres sections. Elle a donc sa propre
+/// planche, à la taille d'une vraie fenêtre — et c'est aussi la seule façon de montrer ce que ce
+/// composant a de particulier : **ce qu'il assombrit**.
+///
+/// Du contenu factice est peint dessous exprès (un titre, un champ, deux boutons) : sans lui, le
+/// voile ne se verrait pas, et c'est lui qu'il faut juger.
+#[test]
+fn galerie_de_la_confirmation() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(560.0, 320.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            let fenetre = ui.max_rect();
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    // Le contenu que la boîte interrompt — c'est lui qui rend le voile lisible.
+                    ui.add(design::heading("Objets suivis"));
+                    ui.add_space(6.0);
+                    let mut saisie = "Pierre ultime".to_owned();
+                    ui.add(
+                        design::input(&mut saisie)
+                            .width(400.0)
+                            .log_name("galerie.confirm-fond-champ"),
+                    );
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            design::button("Annuler")
+                                .variant(design::ButtonVariant::Danger)
+                                .size(design::ButtonSize::Compact)
+                                .width(180.0)
+                                .log_name("galerie.confirm-fond-annuler"),
+                        );
+                        ui.add_space(10.0);
+                        ui.add(
+                            design::button("Valider")
+                                .variant(design::ButtonVariant::Primary)
+                                .size(design::ButtonSize::Compact)
+                                .width(180.0)
+                                .log_name("galerie.confirm-fond-valider"),
+                        );
+                    });
+                    // Et la boîte par-dessus, sur la fenêtre ENTIÈRE — marge du cadre comprise.
+                    design::confirm_dialog("Retirer « Pierre ultime » de vos alertes ?")
+                        .over(fenetre)
+                        .log_name("galerie.confirm")
+                        .show(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_confirm");
+}
+
 /// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
 /// (comme `select` déplié), d'où les espaces réservés sous chaque cas.
 ///
