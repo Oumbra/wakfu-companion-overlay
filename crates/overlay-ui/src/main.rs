@@ -1244,6 +1244,11 @@ impl App {
                     .unwrap_or_default(),
                 ..Default::default()
             },
+            initial: options_modal::OptionsInitial {
+                path: self.log_path.display().to_string(),
+                alerts: alerts_draft.clone(),
+            },
+            pending_close: false,
             alerts_draft,
             alerts_availability,
         });
@@ -1429,8 +1434,23 @@ impl ApplicationHandler<UserEvent> for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                logging::log_session_end("fermeture de fenêtre");
-                event_loop.exit();
+                // **La croix de la fenêtre Options ferme la MODALE, pas l'overlay.** Elle quittait
+                // tout jusqu'au 2026-09-12 : cette fenêtre est la seule focalisable (§9.1 du plan),
+                // donc la seule dont la croix est réellement atteignable à la souris, et elle
+                // tuait la session entière. Avec des modifications en attente, elle passe par la
+                // même garde que « Annuler » et Échap — les trois gestes ferment la même chose.
+                if overlay.kind == OverlayKind::Options {
+                    match overlay.options_state.as_mut() {
+                        Some(state) if state.is_dirty() => {
+                            state.pending_close = true;
+                            overlay.window.request_redraw();
+                        }
+                        _ => post_redraw = PostRedraw::CloseOptions,
+                    }
+                } else {
+                    logging::log_session_end("fermeture de fenêtre");
+                    event_loop.exit();
+                }
             }
             // Filet « Échap quitte l'overlay », **sauf pour la modale Options**.
             //

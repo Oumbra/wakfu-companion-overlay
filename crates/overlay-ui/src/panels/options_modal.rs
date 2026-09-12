@@ -175,6 +175,40 @@ pub struct OptionsModalState {
     /// D'où vient la liste d'alertes, et si elle est modifiable — posé par l'hôte à l'ouverture de
     /// la modale, parce que lui seul sait si un compte est lié et si une requête est en vol.
     pub alerts_availability: alerts_tab::AlertsAvailability,
+    /// **L'état de référence**, figé à l'ouverture : le chemin de log et le profil d'alerte tels
+    /// qu'ils étaient avant que l'utilisateur ne touche à quoi que ce soit.
+    ///
+    /// C'est lui qui répond à « y a-t-il des modifications en attente ? » ([`OptionsModalState::
+    /// is_dirty`]), et donc lui qui décide si fermer doit demander confirmation. Sans référence, la
+    /// modale ne pourrait comparer qu'à elle-même.
+    pub initial: OptionsInitial,
+    /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
+    ///
+    /// Posée par le clic sur « Annuler », par Échap, **ou par l'hôte** quand la croix de la fenêtre
+    /// OS est actionnée : les trois gestes ferment la même chose et méritent la même garde.
+    pub pending_close: bool,
+}
+
+/// L'état de la fenêtre à son ouverture — voir [`OptionsModalState::initial`].
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct OptionsInitial {
+    pub path: String,
+    pub alerts: Option<overlay_engine::AlertProfile>,
+}
+
+impl OptionsModalState {
+    /// Y a-t-il des modifications en attente ?
+    ///
+    /// **Ce que la garde de fermeture protège** : un joueur qui ajoute trois objets puis ferme par
+    /// réflexe perdait tout, en silence — la fenêtre est transactionnelle, rien n'est écrit avant
+    /// « Valider ».
+    ///
+    /// Le **changement d'onglet**, lui, n'intercepte rien : le brouillon lui survit, et demander
+    /// confirmation à chaque aller-retour entre deux onglets rendrait la fenêtre inutilisable.
+    pub fn is_dirty(&self) -> bool {
+        self.path_input.trim() != self.initial.path.trim()
+            || self.alerts_draft != self.initial.alerts
+    }
 }
 
 /// Ce que l'utilisateur vient de demander CETTE frame — `None` la plupart du temps (aucun bouton
@@ -223,6 +257,14 @@ pub fn show(
 ) -> OptionsModalAction {
     let mut action = OptionsModalAction::None;
     let window = ui.max_rect();
+    // **Y avait-il un dialogue ouvert en ARRIVANT dans cette frame ?**
+    //
+    // Capturé ici, avant que quoi que ce soit ne l'ouvre ou ne le ferme, parce que le filet clavier
+    // du bas s'en sert — et que le lire à ce moment-là consommait le même appui DEUX fois : Échap
+    // fermait la garde (« Non »), après quoi le filet voyait un état sans dialogue, relisait le
+    // même Échap et rouvrait la garde. La boîte semblait ne jamais se fermer. Attrapé par
+    // `options_garde_de_fermeture_au_clavier`.
+    let dialogue_a_l_entree = state.alerts.pending_removal.is_some() || state.pending_close;
 
     // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
     // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
@@ -259,7 +301,15 @@ pub fn show(
     );
 
     match chrome.footer {
-        design::FooterClick::Cancel => action = OptionsModalAction::Cancel,
+        // **« Annuler » ne ferme plus tout de suite quand il y a des modifications en attente** :
+        // il ouvre la garde. C'est le même bouton, mais ce qu'il abandonne n'est plus rien.
+        design::FooterClick::Cancel => {
+            if state.is_dirty() {
+                state.pending_close = true;
+            } else {
+                action = OptionsModalAction::Cancel;
+            }
+        }
         design::FooterClick::Validate => {
             action = OptionsModalAction::Validate(state.path_input.clone())
         }
@@ -362,6 +412,27 @@ pub fn show(
         action = OptionsModalAction::TestAlertSound;
     }
 
+    // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE.
+    //
+    // Un seul dialogue à la fois : si une confirmation de retrait est déjà ouverte, celle-ci
+    // attend. Deux voiles empilés seraient deux fois plus sombres, et leurs deux « Échap » se
+    // marcheraient dessus.
+    let confirmation_ailleurs = state.alerts.pending_removal.is_some();
+    if state.pending_close && !confirmation_ailleurs {
+        let choix = design::confirm_dialog("Abandonner les modifications en cours ?")
+            .over(window)
+            .log_name("options.abandon")
+            .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_close = false;
+                action = OptionsModalAction::Cancel;
+            }
+            design::ConfirmChoice::No => state.pending_close = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    }
+
     // Clavier — lu APRÈS les boutons : un clic de cette frame l'emporte sur une touche de la même
     // frame (cas de figure théorique, mais l'ordre doit être décidé plutôt que subi).
     //
@@ -385,8 +456,9 @@ pub fn show(
     // - Ni l'une ni l'autre ne passe tant qu'une **confirmation de retrait** est ouverte : c'est
     //   elle qui prend Échap (pour se fermer), et son voile dit précisément que le pied de page
     //   est inerte.
-    let confirmation_ouverte = state.alerts.pending_removal.is_some();
-    if matches!(action, OptionsModalAction::None) && !confirmation_ouverte {
+    // - Une **confirmation ouverte** (retrait d'objet ou garde de fermeture) prend Échap pour elle :
+    //   la lire ici aussi fermerait la boîte ET la fenêtre derrière, du même appui.
+    if matches!(action, OptionsModalAction::None) && !dialogue_a_l_entree {
         let (cancel, validate) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Escape),
@@ -394,7 +466,12 @@ pub fn show(
             )
         });
         if cancel {
-            action = OptionsModalAction::Cancel;
+            // Échap est un « Annuler » : il passe par la même garde que le bouton.
+            if state.is_dirty() {
+                state.pending_close = true;
+            } else {
+                action = OptionsModalAction::Cancel;
+            }
         } else if validate && state.tab == OptionsTab::Parametres {
             action = OptionsModalAction::Validate(state.path_input.clone());
         }
