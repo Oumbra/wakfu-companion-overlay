@@ -634,17 +634,24 @@ mod linux_main {
             let candidate = PathBuf::from(raw.trim());
             match discovery::validate_log_path(&candidate) {
                 Ok(()) => {
-                    tracing::info!(
-                        "[options] nouveau fichier de log validé : {}",
-                        candidate.display()
-                    );
-                    self.log_path = candidate.clone();
-                    config::save(&config::OverlayConfig {
-                        log_path: Some(candidate.clone()),
-                    });
-                    let _ = self
-                        .settings_tx
-                        .send(EngineCommand::ChangeLogPath(candidate));
+                    // Rechargé seulement si le chemin a CHANGÉ — même garde que `main.rs` : un
+                    // `ChangeLogPath` à chemin identique rejouait tout le fichier dans une session
+                    // qui gardait son état, et dupliquait le combat en cours (2026-09-12).
+                    if candidate == self.log_path {
+                        tracing::info!("[options] chemin de log inchangé, moteur non touché.");
+                    } else {
+                        tracing::info!(
+                            "[options] nouveau fichier de log validé : {}",
+                            candidate.display()
+                        );
+                        self.log_path = candidate.clone();
+                        config::save(&config::OverlayConfig {
+                            log_path: Some(candidate.clone()),
+                        });
+                        let _ = self
+                            .settings_tx
+                            .send(EngineCommand::ChangeLogPath(candidate));
+                    }
                     self.windows.remove(&options_window_id);
                 }
                 Err(err) => {

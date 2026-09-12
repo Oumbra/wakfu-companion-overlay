@@ -215,9 +215,16 @@ pub fn spawn_engine_thread(
                         EngineCommand::ChangeLogPath(new_path) => {
                             tracing::info!(
                                 "[options] nouveau fichier de log : {} (ancien thread watcher \
-                                 abandonné, rattrapage complet du nouveau fichier)",
+                                 abandonné, session oubliée, rattrapage complet du nouveau fichier)",
                                 new_path.display()
                             );
+                            // Le nouveau fichier est relu depuis sa première ligne : la session
+                            // repart de zéro AVANT, sinon chaque combat qu'il contient s'ajouterait
+                            // à ce que l'ancien fichier avait déjà construit — et s'il s'agit du
+                            // même fichier sous un autre chemin, se dupliquerait ligne à ligne
+                            // (voir `Engine::forget_session`).
+                            engine.forget_session();
+                            snapshot.store(Arc::new(engine.snapshot()));
                             rx = overlay_ingest::watcher::spawn(&new_path);
                         }
                     }
