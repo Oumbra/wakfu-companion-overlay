@@ -64,7 +64,9 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
     let mut options_state = OptionsModalState {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: None,
-        tab: OptionsTab::default(),
+        // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
+        // le 2026-09-12, et c'est le champ de chemin que ce test regarde.
+        tab: OptionsTab::Parametres,
         ..Default::default()
     };
 

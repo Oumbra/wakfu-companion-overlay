@@ -576,8 +576,8 @@ mod linux_main {
             overlay.options_state = Some(OptionsModalState {
                 path_input: self.log_path.display().to_string(),
                 error: None,
-                // Toujours « Paramètres » à l'ouverture : c'est le défaut d'`OptionsTab`, et le
-                // réglage qu'on vient chercher en premier.
+                // Toujours la première entrée du menu à l'ouverture — le défaut d'`OptionsTab`,
+                // qui dit pourquoi.
                 tab: Default::default(),
                 alerts: Default::default(),
                 // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :

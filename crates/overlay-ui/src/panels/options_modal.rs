@@ -133,15 +133,25 @@ const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 /// « Alertes » a reçu son contenu (`panels::alerts_tab`) ; « Personnages » reste affiché désactivé
 /// plutôt que masqué, décision du 2026-09-10 : un onglet qui apparaît est un changement de mise en
 /// page, pas un changement d'état.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsTab {
     /// Les alertes de ramassage — objets à son activé et fermeture du toast.
     Alertes,
     Personnages,
-    /// Le défaut : c'est le réglage qu'on vient chercher en premier quand l'overlay ne trouve pas
-    /// le fichier de log.
-    #[default]
+    /// Le chemin de `wakfu.log`. Ce fut l'onglet d'ouverture tant qu'il était le seul câblé.
     Parametres,
+}
+
+impl Default for OptionsTab {
+    /// **La fenêtre s'ouvre sur la PREMIÈRE entrée du menu**, quelle qu'elle soit — demande du
+    /// 2026-09-12, nuit : « quand on ouvre les options, il faut qu'on arrive sur le premier
+    /// onglet ; si plus tard il y a une autre option en premier, il faudra atterrir sur celle-là ».
+    /// Le défaut suivait jusque-là « Paramètres », seul onglet câblé à l'origine ; il était devenu
+    /// le dernier du menu sans que l'ouverture ne suive. Si l'ordre des entrées change dans
+    /// [`show`], ce défaut change avec lui.
+    fn default() -> Self {
+        Self::Alertes
+    }
 }
 
 /// État mutable de la modale, propriété de la fenêtre OS qui l'affiche (voir
@@ -316,8 +326,9 @@ pub fn show(
         design::FooterClick::None => {}
     }
 
-    // Un seul panneau de section, deux contenus — c'est l'onglet qui décide. Le focus initial,
-    // lui, reste au champ de chemin : l'onglet par défaut est « Paramètres ».
+    // Un seul panneau de section, deux contenus — c'est l'onglet qui décide. Le focus initial du
+    // champ de chemin ne se donne qu'à la première frame de la fenêtre : ouverte sur « Alertes »
+    // (le défaut d'`OptionsTab`), elle ne le donne donc à personne, et « Paramètres » se clique.
     let mut alerts_action = AlertsTabAction::None;
     design::panel().show(ui, chrome.content, |ui, panel| {
         if state.tab == OptionsTab::Alertes {
