@@ -57,13 +57,14 @@ const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Largeur d'une tuile — calée pour que cinq tiennent sur une rangée dans la fenêtre agrandie.
 const TILE_WIDTH: f32 = 118.0;
-/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, **nom sur deux lignes**, marges.
+/// Hauteur d'une tuile : rangée de badges, emplacement d'objet, nom sur **une** ligne, marges.
 ///
-/// **88 px jusqu'au 2026-09-12**, quand le nom tenait sur une seule ligne : trois objets y
-/// apparaissaient alors sous le même libellé (« Plan "Epée de… » pour Bonta, Brâkmar ET Sufokia),
-/// et la tuile ne disait plus lequel elle portait — le défaut que la revue de la v1 de la maquette
-/// avait relevé, revenu par un autre chemin. Voir [`NAME_MAX_ROWS`].
-const TILE_HEIGHT: f32 = 104.0;
+/// Portée à 104 px un moment le 2026-09-12, pour un nom sur deux lignes — **revenu en arrière le
+/// jour même, sur décision de l'utilisateur** : la tuile porte déjà l'icône de l'objet, et c'est
+/// elle qui lève l'ambiguïté entre deux noms proches, bien avant le texte. Faire grandir chaque
+/// tuile pour distinguer « Plan "Epée de Bonta" » de « … Brâkmar » résolvait un problème que
+/// l'utilisateur n'a pas. Le nom coupé se lit en infobulle — voir `design::label`.
+const TILE_HEIGHT: f32 = 88.0;
 /// Gouttière entre deux tuiles — « les petites tuiles doivent être séparées sur tous les bords ».
 const TILE_GAP: f32 = 10.0;
 const TILE_BORDER_WIDTH: f32 = 2.0;
@@ -77,17 +78,6 @@ const TILE_BADGE_ROW: f32 = 18.0;
 const TILE_BADGE: f32 = 14.0;
 const TILE_BADGE_INSET: f32 = 5.0;
 const TILE_NAME_INSET: f32 = 5.0;
-
-/// Corps du nom d'objet.
-const TILE_NAME_FONT_SIZE: f32 = 13.0;
-
-/// **Deux lignes pour le nom, pas une.**
-///
-/// Une seule ligne de 108 px ne distingue pas trois noms qui partagent leurs quatorze premiers
-/// caractères — c'est exactement le cas des quatre « Plan "Epée de … " » du jeu, et la grille du
-/// dépôt web tient le même raisonnement avec son `minmax(140px, 1fr)` qui laisse le nom passer à
-/// la ligne. Au-delà de deux lignes, la tuile deviendrait plus haute que ce qu'elle montre.
-const NAME_MAX_ROWS: usize = 2;
 
 /// Bordure d'une tuile dont le son est ACTIF — `--accent` du dépôt web.
 const ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
@@ -592,13 +582,24 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             .log_name(item.name.clone()),
     );
 
-    let (galley, elided) = name_galley(ui, &item.name, rect.width() - 2.0 * TILE_NAME_INSET);
-    // **L'ancre est le CENTRE, pas le coin** : le `LayoutJob` porte `halign = Center`, donc egui
-    // centre déjà chaque ligne sur le point qu'on lui donne. Recentrer soi-même en retranchant
-    // une demi-largeur décalait tout d'autant, et les noms débordaient sur la tuile voisine.
-    let ancre = egui::pos2(rect.center().x, slot.bottom() + 5.0);
-    let name_rect = galley.rect.translate(ancre.to_vec2());
-    ui.painter().galley(ancre, galley, TEXT);
+    // **Le nom passe par `design::label`** : une ligne, ellipse au bout, et l'infobulle qui rend
+    // le nom entier quand il est coupé — c'est le composant qui porte les trois, pas la tuile.
+    //
+    // Posé dans la CELLULE, comme l'emplacement : `ui.add` avancerait le curseur de la rangée et
+    // décalerait la tuile suivante (voir le commentaire de l'emplacement ci-dessus).
+    let largeur_nom = rect.width() - 2.0 * TILE_NAME_INSET;
+    let hauteur_nom = design::Label::height(ui, design::tokens::LABEL_FONT_SIZE);
+    let name_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.center().x - largeur_nom / 2.0, slot.bottom() + 5.0),
+        Vec2::new(largeur_nom, hauteur_nom),
+    );
+    cellule.put(
+        name_rect,
+        design::label(&item.name)
+            .width(largeur_nom)
+            .color(TEXT)
+            .log_name("alertes.nom"),
+    );
 
     let ds = design::DesignSystem::get(ui.ctx());
     let glyph = if item.enabled {
@@ -655,17 +656,20 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         }
     }
 
-    // **Infobulle du nom : seulement si le nom est coupé, et seulement sur le libellé.** Les deux
-    // infobulles s'excluent — sans ça, survoler le nom en déclencherait deux, l'une sur l'autre.
-    let sur_le_nom = elided && {
-        let zone = ui.interact(name_rect, response.id.with("nom"), egui::Sense::hover());
-        zone.clone().on_hover_text(&item.name);
-        zone.hovered()
-    };
-
+    // **Les deux infobulles s'excluent.** Celle du nom est posée par `design::label` — elle ne
+    // paraît que si le nom est coupé, et elle rend le nom entier. Celle de la tuile dit ce que le
+    // clic fera. Sans cette exclusion, survoler un nom coupé en déclencherait deux, l'une sur
+    // l'autre : la position du curseur tranche, et le nom gagne sur sa propre zone.
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    if !sur_le_nom {
-        response.clone().on_hover_text(format!(
+    // Seulement là où le libellé porte DÉJÀ la sienne : sur un nom qui tient en entier, il n'en
+    // pose aucune, et se taire ici laisserait une zone muette au milieu de la tuile.
+    let sur_un_nom_coupe =
+        design::Label::elides(ui, &item.name, largeur_nom, design::tokens::LABEL_FONT_SIZE)
+            && ui
+                .input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| name_rect.contains(p));
+    if !sur_un_nom_coupe {
+        design::tooltip(&response).text(format!(
             "{} — {}",
             item.name,
             if item.enabled {
@@ -700,36 +704,6 @@ fn loading_row(ui: &mut egui::Ui, inner: Rect) {
 // -------------------------------------------------------------------------------------------
 // Utilitaires
 // -------------------------------------------------------------------------------------------
-
-/// Met en forme le nom d'un objet pour sa tuile — **sur deux lignes au plus**, ellipse au bout.
-///
-/// Rend **aussi** le fait d'avoir coupé : c'est cette information qui décide de l'infobulle du nom
-/// (voir [`alert_item`]). La déduire après coup en comparant deux chaînes marcherait, mais
-/// obligerait chaque appelant à y penser — et un nom qui finirait déjà par « … » la mettrait en
-/// défaut.
-///
-/// **Le retour à la ligne se fait au mot** (`break_anywhere` laissé à `false`) : c'est ce qui
-/// sépare « Plan "Epée de » de « Brâkmar" » plutôt que de couper au milieu d'une syllabe. Un mot
-/// plus long que la tuile est alors élidé sur sa ligne plutôt que rompu — cas qui n'existe pas
-/// dans le référentiel, mais qui ne casse rien s'il arrive.
-fn name_galley(ui: &egui::Ui, text: &str, max_width: f32) -> (std::sync::Arc<egui::Galley>, bool) {
-    let mut job = egui::text::LayoutJob::simple(
-        text.to_owned(),
-        design::text::label_font(ui.ctx(), TILE_NAME_FONT_SIZE),
-        TEXT,
-        max_width,
-    );
-    job.wrap.max_rows = NAME_MAX_ROWS;
-    job.wrap.overflow_character = Some('…');
-    // Chaque ligne est centrée dans la largeur utile, pas seulement le bloc : sans ça, un nom de
-    // deux lignes très inégales pendrait à gauche.
-    job.halign = egui::Align::Center;
-    let galley = ui.painter().layout_job(job);
-    // `elided` est vrai dès qu'egui a dû couper — c'est lui, et pas une comparaison de chaînes,
-    // qui sait si l'ellipse a été posée.
-    let coupe = galley.elided;
-    (galley, coupe)
-}
 
 /// La clé de catégorie que le composant d'autocomplétion manipule — le numéro d'icône de la
 /// catégorie, c'est-à-dire ce qui distingue déjà deux filtres à l'écran.

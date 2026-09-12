@@ -68,20 +68,16 @@ use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsT
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
 /// `OverlayKind::Options`).
 ///
-/// **760 × 850 depuis le 2026-09-12**, contre 560 × 436 auparavant : c'est ce que l'onglet
+/// **760 × 810 depuis le 2026-09-12**, contre 560 × 436 auparavant : c'est ce que l'onglet
 /// « Alertes » demande pour tenir cinq tuiles par rangée et trois rangées visibles (demande
 /// explicite du 2026-09-11, validée sur maquette). À 560 de large, la grille n'avait la place que
 /// de trois tuiles, et d'une seule rangée en hauteur.
-///
-/// La hauteur est passée de 810 à 850 le jour même, quand le nom d'objet est passé sur deux lignes
-/// (`alerts_tab::NAME_MAX_ROWS`) : une tuile plus haute de 16 px, c'est 48 px de plus sur trois
-/// rangées, et la troisième se retrouvait coupée par le bas.
 ///
 /// Ce qui est abandonné au passage, et assumé : le **rapport d'aspect 720:561 de la vraie fenêtre
 /// Options du jeu**, que la version précédente reproduisait sur demande de cohérence visuelle.
 /// Arbitrage au profit du contenu — une fenêtre au bon ratio dont l'onglet principal ne tient pas
 /// n'est pas plus fidèle, elle est juste inutilisable.
-pub const WINDOW_SIZE: (f32, f32) = (760.0, 850.0);
+pub const WINDOW_SIZE: (f32, f32) = (760.0, 810.0);
 
 // Rembourrage du panneau de contenu — trois axes, et trois seulement. Le relevé de section est
 // catégorique : « x=29 pour les titres de section, x=36 pour tout contrôle indenté, x=62 pour le
