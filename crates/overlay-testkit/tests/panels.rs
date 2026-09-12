@@ -1493,3 +1493,89 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // visibles d'une sélection, sur une seule image.
     harness.snapshot("options_alertes_objet_ajoute");
 }
+
+/// La croix à droite du champ d'ajout vide la saisie d'un clic, et rend le focus au champ.
+///
+/// Le geste est le même que pour une suggestion : survol, appui, relâchement, dans trois frames.
+/// L'appui retire le focus au champ (le pointeur est sur la croix, pas sur la zone d'édition) ;
+/// c'est au composant de le lui rendre, sinon l'utilisateur efface pour retaper… dans le vide.
+#[test]
+fn options_alertes_croix_efface_la_saisie() {
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
+
+    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        "items": [
+            [101, "Pierre de lune", "Moonstone", "Piedra", "Pedra", 1101, 2, 0, 1],
+        ],
+    }));
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: AlertsTabState::default(),
+        alerts_draft: Some(overlay_engine::AlertProfile::default()),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: Default::default(),
+        pending_close: false,
+    }));
+
+    let vu = std::rc::Rc::clone(&etat);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+
+    let champ = egui::pos2(300.0, 395.0);
+    harness.drag_at(champ);
+    harness.run();
+    harness.drop_at(champ);
+    harness.run();
+    for c in "pierre".chars() {
+        harness.event(egui::Event::Text(c.to_string()));
+    }
+    harness.run();
+    assert_eq!(etat.borrow().alerts.search, "pierre");
+
+    // La croix : à 9 px du bord extérieur droit du champ, sur son axe — voir
+    // `tokens::INPUT_CLEAR_INSET_RATIO`. Le champ s'arrête à x≈705 dans cette fenêtre.
+    let croix = egui::pos2(691.0, 395.0);
+    harness.hover_at(croix);
+    harness.run();
+    harness.drag_at(croix);
+    harness.run();
+    harness.drop_at(croix);
+    harness.run();
+    assert!(
+        etat.borrow().alerts.search.is_empty(),
+        "la croix n'a pas vidé la saisie : « {} »",
+        etat.borrow().alerts.search
+    );
+
+    // Le focus est revenu au champ : une frappe repart dedans sans nouveau clic.
+    harness.event(egui::Event::Text("l".to_string()));
+    harness.run();
+    assert_eq!(
+        etat.borrow().alerts.search,
+        "l",
+        "le champ n'a pas repris le focus après l'effacement"
+    );
+}
