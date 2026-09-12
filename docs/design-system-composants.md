@@ -219,6 +219,34 @@ de qui vient de taper.
 **Remplace** : le champ repeint à la main dans `panels::options_modal`, dont les trois constantes
 locales étaient toutes fausses (fond `#1C1E23`, bord 1px, rayon 2, valeur blanche).
 
+### La barre de recherche : `InputSize::Search` et `clearable` (2026-09-12)
+
+Retour utilisateur sur le champ d'ajout d'alerte, avec les deux assets détourés du jeu à l'appui
+(`empty-input-search.png`, `input-search.png`, 341 × 32) : « la loupe n'est pas dans le bon sens et
+n'est pas colorée comme sur la maquette », « l'input est un tout petit peu trop petit en hauteur, ou
+alors c'est la police qui est trop grande », et une croix d'effacement manquante. Les trois ont été
+mesurés sur ces assets, pas ajustés à l'œil :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Hauteur de la boîte | **28px** (`INPUT_SEARCH_HEIGHT`) | y 2..29 inclus sur les deux assets, identiques au pixel — ce n'est PAS le champ de 25 px de l'onglet Commandes |
+| Encre du texte | 12px de capitale (« R » y 11..22) | la même encre qu'un champ standard (« A » de 12 px dans 25) : **la boîte est plus haute, le corps ne change pas** — 17 px pour les deux gabarits |
+| Loupe | manche **en bas à gauche**, teinte `#a69064` (`INPUT_ICON`) | pic dominant de la loupe, champ vide ou rempli — plus chaude et plus claire que le kaki du texte indicatif qu'elle portait ; le glyphe du manifeste a son manche à droite, il est peint **en miroir** (`paint_icon_flipped`) |
+| Croix | encre 11 × 12 (x 320..330, y 10..21), `#675d46` (`INPUT_CLEAR_ICON`), à 9px du bord droit | `input-search.png` seulement : **absente du champ vide** |
+| Croix survolée | `INPUT_ICON` | **inventé**, aucune capture — la teinte de la loupe, pour ne pas ajouter de couleur |
+
+`InputSize::Search` porte la hauteur ; les trois ratios d'ornement (7/28, 13/28, 8/28), mesurés dès
+l'origine sur cette capture de 28 px, y redonnent exactement 7, 13 et 8 px. `Input::clearable(true)`
+pose la croix : **la place est réservée dès qu'elle est possible**, valeur ou pas, sinon le texte
+se décalerait au premier caractère tapé ; un clic vide la valeur, marque la réponse `changed()` et
+**rend le focus au champ** — l'appui sur la croix le lui avait retiré, or on efface pour retaper.
+Sans effet sur un champ désactivé ou en lecture seule. Test réel du geste dans
+`options_alertes_croix_efface_la_saisie` (survol, appui, relâchement, puis une frappe qui doit
+retomber dans le champ).
+
+Consommé par `design::autocomplete` (champ d'ajout d'alerte) et par le champ de chemin de la modale
+Options, qui garde son gabarit de 25 px mais gagne la croix.
+
 ---
 
 ## `design::info_text` — texte d'information (2026-09-10)
@@ -1475,6 +1503,42 @@ façon, par l'appelant.
 - **Les identifiants dérivent de la `Response` du champ**, jamais du `Ui` parent : trois instances
   dans le même parent partageaient sinon le même id d'`Area` et de rangées — egui l'écrit en rouge
   par-dessus le rendu.
+
+### Ce qu'aucune capture ne montrait — le temps (2026-09-12)
+
+Second retour du même jour, captures web et overlay côte à côte pour « bouftou » : « extrêmement
+long », et « pas tous les résultats ». Trois causes, aucune dans ce composant, toutes mesurées
+plutôt que supposées :
+
+1. **La fenêtre ne se redessinait qu'une fois toutes les deux secondes** pendant la frappe. Journal
+   instrumenté, frappe pilotée par `SendInput` : chaque touche arrivait dans `window_event`,
+   `request_redraw()` était appelé, et aucun `RedrawRequested` ne suivait — la frame suivante venait
+   de la réaffirmation topmost périodique (`SetWindowPos`, 2 s), qui fait repeindre la fenêtre par
+   Windows. Cinq retours arrière et trois lettres s'appliquaient d'un coup, 1,3 s plus tard. Le
+   `WM_PAINT` que `RedrawWindow(RDW_INTERNALPAINT)` est censé poster n'arrive pas de façon fiable
+   sur ces fenêtres DirectComposition sans surface de redirection. Corrigé dans l'hôte, pas ici :
+   `App::redraw` rend la frame lui-même depuis `about_to_wait`, qui suit chaque livraison
+   d'événements — une touche produit sa frame en moins de dix millisecondes (mesuré, même méthode).
+   Voir §6.2 du plan.
+2. **La recherche était coupée à quarante** (`alerts_tab::MAX_SUGGESTIONS`), et la bande de filtres,
+   calculée sur la liste rendue, perdait des catégories présentes : cinq boutons ici contre huit sur
+   le site. La recherche coûte moins d'une demi-milliseconde pour 115 résultats sur 16 302 objets
+   (mesuré sur le catalogue réel, `overlay-engine/examples/bench-search.rs`) — la limite protégeait
+   un coût qui n'existe pas. L'appelant passe `usize::MAX` ; le panneau défile, comme le web.
+3. **Les icônes arrivaient une par une, en série, dans l'ordre d'arrivée** : un agent HTTP neuf par
+   requête (une poignée de main TLS par icône, ~145 ms chacune), un seul thread, et les icônes des
+   préfixes abandonnés (« bou », « bouf ») servies avant celles de la requête courante. Corrigé dans
+   `remote_icons` : un agent partagé, quatre threads, et un **tas ordonné par frame egui** — ce que
+   la dernière frame a demandé part en premier, dans son ordre de demande. Une pile LIFO simple,
+   essayée d'abord, renversait aussi l'ordre à l'intérieur d'une frame et servait la centième
+   rangée avant la première. Corollaire pour l'appelant : `alerts_tab::add_field` demande les huit
+   icônes de la bande de filtres **avant** les images des rangées — demandées après, elles
+   arrivaient les dernières et la bande restait vide (constaté sur « tofu », 118 résultats).
+   Mesuré après correctif : 109 icônes à froid en 2,5 s, les cinq rangées visibles illustrées en
+   moins de 500 ms.
+
+Le composant, lui, n'a changé que de champ : `InputSize::Search` et `clearable(true)`, voir
+`design::input`.
 
 ### Ce que la galerie ne pouvait pas rattraper — le clic, en vrai (2026-09-12)
 
