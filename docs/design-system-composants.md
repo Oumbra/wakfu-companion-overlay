@@ -1540,6 +1540,30 @@ plutôt que supposées :
 Le composant, lui, n'a changé que de champ : `InputSize::Search` et `clearable(true)`, voir
 `design::input`.
 
+### La barre du panneau (2026-09-12, soir)
+
+Troisième retour du jour : « un tout petit peu plus large, à l'image du web ; l'élargissement au
+survol ne me paraît pas si mal, mais conserver les couleurs de base ». La barre était celle
+d'egui par défaut — mince, invisible au repos, plus large ET plus claire sous le pointeur. Elle
+est désormais posée dans le scope du panneau, avec ses propres jetons (le jeu n'a pas
+d'autocomplétion, c'est le web qui fait référence, comme pour tout ce composant) :
+
+| Grandeur | Valeur | Origine |
+| --- | --- | --- |
+| Largeur au repos | 8px (`AUTOCOMPLETE_SCROLLBAR_WIDTH`) | `::-webkit-scrollbar { width: 8px }`, `styles.css` du web |
+| Largeur sous le pointeur | 10px | **choix** — le web ne s'élargit pas, l'utilisateur a validé l'effet |
+| Rayon | 4 | `border-radius: 4px` du web |
+| Teinte, tous états | `HEADING_TEXT` (`#b8b9ba`) | le gris que l'utilisateur voyait au repos (`gray(180)` d'egui), à deux valeurs près le gris unique du jeu — **pas** `SCROLLBAR_THUMB`, mesuré sur le fond noir de la fenêtre Options et invisible sur le brun de la liste (vérifié au pixel) |
+| Poignée minimale | 24px | **choix** — à 115 résultats, les 12 px d'egui donnaient un point |
+| Rail | aucun | comme dans le jeu |
+
+La colonne de la barre est réservée (`floating_allocated_width`) : la mention « déjà dans vos
+alertes » ne passe jamais dessous. Galerie : « Au-delà de cinq rangées — la liste défile ».
+
+Même soir, hors composant : **l'emplacement d'objet des tuiles d'alerte passe de 44 à 64 px**,
+la case du Suivi (`ITEM_SLOT_SIZE`), « dix pixels de plus de chaque côté » — la tuile passe de 88
+à 110 px de haut pour le loger, le nom garde sa ligne unique (`panels::alerts_tab`).
+
 ### Ce que la galerie ne pouvait pas rattraper — le clic, en vrai (2026-09-12)
 
 La galerie force le panneau déplié (`preview_open`), donc elle ne prouve rien du **chemin réel** :
