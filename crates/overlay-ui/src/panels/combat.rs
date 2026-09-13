@@ -357,7 +357,7 @@
 //! exact (`CombatFrame::show`) ou le cadre à défilement (`EnemyFrameScroll::show`) selon le
 //! nombre d'ennemis. Voir la doc de module de `combat_spell_block` et §9.1 bis du plan.
 
-use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
+use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
 use crate::design::{self, text};
 use crate::portraits::PortraitAtlas;
@@ -982,9 +982,98 @@ fn draw_centered_icon(ui: &egui::Ui, rect: egui::Rect, texture: &egui::TextureHa
     egui::Image::new(texture).paint_at(ui, icon_rect);
 }
 
+/// Le panneau Combat doit-il être affiché pour ce personnage ? — demande du 2026-09-13.
+///
+/// **Le défaut est l'apparition automatique** (`always_visible == false`, case décochée dans la
+/// fenêtre Options) : le panneau n'est à l'écran que pendant un combat. Il apparaît quand le
+/// combat commence et se referme quand il est terminé, plutôt que de recouvrir le jeu en
+/// permanence avec son « Aucun combat pour l'instant. ».
+///
+/// **`ongoing`, et rien d'autre.** `SessionSnapshot::fight_for_character` rend aussi le DERNIER
+/// combat terminé de ce personnage quand il n'y en a plus en cours (c'est ce qui laisse son récap
+/// affiché après la victoire) : se contenter de `is_some()` laisserait donc le panneau ouvert
+/// jusqu'au combat suivant, exactement ce que ce réglage doit éviter.
+///
+/// Vit ici, et pas dans les deux hôtes qui l'appliquent (`main.rs`/`bin/overlay-ui-x11.rs`, où le
+/// fenêtrage OS est délibérément dupliqué — voir la doc de `lib.rs`) : c'est une règle du panneau
+/// Combat, la même sous Windows et sous X11, et elle se teste sans fenêtre.
+pub fn should_show(snapshot: &SessionSnapshot, character_name: &str, always_visible: bool) -> bool {
+    always_visible
+        || snapshot
+            .fight_for_character(character_name)
+            .is_some_and(|fight| fight.ongoing)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_fr_thousands;
+    use super::{format_fr_thousands, should_show};
+    use overlay_engine::{FightResult, FightSnapshot, FighterDamage, Gender, SessionSnapshot};
+
+    /// Un combat où `nom` est allié, en cours ou terminé.
+    fn combat_de(nom: &str, ongoing: bool) -> FightSnapshot {
+        FightSnapshot {
+            fight_id: 1,
+            ongoing,
+            result: (!ongoing).then_some(FightResult::Won),
+            fighters: vec![FighterDamage {
+                name: nom.to_string(),
+                is_ally: true,
+                total_damage: 0,
+                total_heal: 0,
+                class_name: None,
+                gender: Gender::M,
+                xp_gained: 0,
+                spells: Default::default(),
+                is_ko: false,
+                last_turn_casts: Vec::new(),
+                last_turn: 0,
+                breed: None,
+            }],
+            started_at_ms: 0,
+            last_ally_caster: None,
+            last_enemy_caster: None,
+        }
+    }
+
+    fn session(fights: Vec<FightSnapshot>) -> SessionSnapshot {
+        SessionSnapshot {
+            fights,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn masque_hors_combat_quand_l_option_est_decochee() {
+        assert!(!should_show(&session(Vec::new()), "Oumbra", false));
+    }
+
+    #[test]
+    fn affiche_pendant_un_combat_en_cours() {
+        let snapshot = session(vec![combat_de("Oumbra", true)]);
+        assert!(should_show(&snapshot, "Oumbra", false));
+    }
+
+    #[test]
+    fn masque_des_que_le_combat_est_termine() {
+        // Le combat reste dans le snapshot une fois fini (c'est lui que `fight_for_character` rend
+        // alors) : c'est exactement le cas que `is_some()` aurait raté.
+        let snapshot = session(vec![combat_de("Oumbra", false)]);
+        assert!(!should_show(&snapshot, "Oumbra", false));
+    }
+
+    #[test]
+    fn ignore_le_combat_d_un_autre_personnage() {
+        // Multi-compte : chaque fenêtre suit SON personnage, jamais le combat du voisin.
+        let snapshot = session(vec![combat_de("Oumbra", true)]);
+        assert!(!should_show(&snapshot, "Kaelis", false));
+    }
+
+    #[test]
+    fn l_option_cochee_affiche_en_toute_circonstance() {
+        assert!(should_show(&session(Vec::new()), "Oumbra", true));
+        let termine = session(vec![combat_de("Oumbra", false)]);
+        assert!(should_show(&termine, "Oumbra", true));
+    }
 
     #[test]
     fn format_fr_thousands_insere_une_espace_tous_les_3_chiffres() {

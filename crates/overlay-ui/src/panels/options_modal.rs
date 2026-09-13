@@ -1,7 +1,9 @@
 //! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
 //! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
-//! (voir `main.rs`/`bin/overlay-ui-x11.rs`). Premier (et pour l'instant seul) réglage exposé
-//! (onglet "Paramètres") : le chemin de `wakfu.log` à suivre.
+//! (voir `main.rs`/`bin/overlay-ui-x11.rs`). L'onglet "Paramètres" expose les réglages LOCAUX de
+//! l'overlay : le chemin de `wakfu.log` à suivre, et depuis le 2026-09-13 l'affichage du panneau
+//! de combat en dehors des combats. Les deux sont persistés par `config::OverlayConfig`, jamais
+//! sur le compte — contrairement aux onglets "Suivi" et "Alertes".
 //!
 //! **Refonte 2026-09-09 — chrome basé sur les VRAIES textures du jeu, plus des formes peintes à la
 //! main** (voir `panels::chamfer`, toujours utilisé ailleurs pour la barre de dégâts, mais plus
@@ -127,6 +129,15 @@ const INFO_GAP: f32 = 9.0;
 /// `design::components::input` pour la mesure et pourquoi les deux diffèrent.
 const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 
+/// Air entre la fin d'une section et le titre de la suivante.
+///
+/// **17px, relevé** (`docs/design-system/releve-section-options.json`, onglet Jeu) : la section
+/// « Jouabilité » s'y arrête à y=269 et le titre « Mode de déplacement » ouvre la suivante à
+/// y=286. C'est le seul signal de regroupement que le jeu emploie — ses sections n'ont ni fond, ni
+/// filet, ni bordure (note du relevé) : cet écart est donc la séparation elle-même, pas une
+/// décoration qu'on pourrait resserrer.
+const SECTION_GAP: f32 = 17.0;
+
 /// Onglet affiché par la modale.
 ///
 /// Onglet affiché par la modale — **trois entrées câblées sur quatre** depuis le 2026-09-13.
@@ -189,6 +200,11 @@ pub struct OptionsModalState {
     pub error: Option<String>,
     /// Onglet affiché.
     pub tab: OptionsTab,
+    /// Le panneau Combat reste-t-il affiché en dehors des combats ? — case à cocher de l'onglet
+    /// « Paramètres », initialisée par l'hôte au réglage en vigueur (`config::OverlayConfig::
+    /// combat_always_visible`) et prise en compte seulement à « Valider », comme le chemin de log
+    /// et les deux brouillons (§5.1 du plan).
+    pub combat_always_visible: bool,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -237,6 +253,10 @@ pub struct OptionsInitial {
     /// Les entrées suivies telles qu'elles étaient à l'ouverture — c'est elles que « Annuler »
     /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
     pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
+    /// L'affichage permanent du panneau Combat tel qu'il était à l'ouverture — une case cochée
+    /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
+    /// pas pour rien.
+    pub combat_always_visible: bool,
 }
 
 impl OptionsModalState {
@@ -248,8 +268,19 @@ impl OptionsModalState {
     ///
     /// Le **changement d'onglet**, lui, n'intercepte rien : le brouillon lui survit, et demander
     /// confirmation à chaque aller-retour entre deux onglets rendrait la fenêtre inutilisable.
+    /// Ce que « Valider » emporte de cette fenêtre — voir [`OptionsCommit`]. Les deux gestes qui
+    /// valident (le bouton du pied de page et la touche Entrée) passent par ici, pour qu'aucun des
+    /// deux ne puisse oublier un réglage que l'autre emporte.
+    pub fn commit(&self) -> OptionsCommit {
+        OptionsCommit {
+            path: self.path_input.clone(),
+            combat_always_visible: self.combat_always_visible,
+        }
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
+            || self.combat_always_visible != self.initial.combat_always_visible
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
     }
@@ -266,15 +297,32 @@ pub enum OptionsModalAction {
     /// Ouvrir l'explorateur de fichiers natif — l'appelant seul sait le faire (`rfd`, sur un thread
     /// dédié pour ne jamais geler le rendu, voir sa doc dans `main.rs`).
     Browse,
-    /// Chemin brut tel que tapé/affiché dans le champ au moment du clic — PAS encore un `PathBuf`
-    /// validé, voir doc de module.
-    Validate(String),
+    /// Les réglages de l'onglet « Paramètres » tels qu'ils sont à l'instant du clic — voir
+    /// [`OptionsCommit`].
+    Validate(OptionsCommit),
     /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
     /// audio (`alert_sound::play_loot_alert`).
     TestAlertSound,
     /// Résoudre les ingrédients de cet objet, depuis l'onglet « Suivi » — l'appelant seul a le
     /// réseau (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
+}
+
+/// Ce que « Valider » emporte de l'onglet « Paramètres ».
+///
+/// **Une struct plutôt qu'un `String` nu** depuis le 2026-09-13, où l'onglet a gagné un second
+/// réglage : un tuple anonyme de plus à chaque case à cocher ajoutée ferait une action dont
+/// personne ne saurait dire, au site d'appel, quel booléen est lequel.
+///
+/// Ne porte aucune garantie de validité (voir doc de module) : `path` est le texte BRUT du champ,
+/// pas un `PathBuf` vérifié — c'est l'hôte qui tranche, via
+/// `overlay_ingest::discovery::validate_log_path`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OptionsCommit {
+    /// Chemin brut tel que tapé/affiché dans le champ au moment du clic.
+    pub path: String,
+    /// État de la case « Afficher le panneau de combat en dehors des combats ».
+    pub combat_always_visible: bool,
 }
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
@@ -367,9 +415,7 @@ pub fn show(
                 action = OptionsModalAction::Cancel;
             }
         }
-        design::FooterClick::Validate => {
-            action = OptionsModalAction::Validate(state.path_input.clone())
-        }
+        design::FooterClick::Validate => action = OptionsModalAction::Validate(state.commit()),
         design::FooterClick::None if chrome.close => {
             if state.is_dirty() {
                 state.pending_close = true;
@@ -496,6 +542,28 @@ pub fn show(
                     .log_name("options-erreur"),
             );
         }
+
+        // **Section « Affichage »** (2026-09-13) — l'encombrement de l'overlay à l'écran, à côté
+        // du fichier qu'il lit. Le réglage vit dans la config LOCALE (`config::OverlayConfig`),
+        // pas sur le compte : ce qu'on accepte de voir par-dessus son jeu dépend de l'écran qu'on
+        // a devant soi, pas du joueur.
+        //
+        // La case est un brouillon comme le reste de cette fenêtre : elle bascule librement, et
+        // seul « Valider » l'emporte (voir `OptionsCommit`). Son retour (`changed()`) n'est donc
+        // pas lu — il n'y a rien à déclencher à la bascule.
+        ui.add_space(SECTION_GAP);
+        ui.add(design::heading("Affichage"));
+        ui.add(
+            design::checkbox(
+                &mut state.combat_always_visible,
+                "Afficher le panneau de combat en dehors des combats",
+            )
+            .tooltip(
+                "Décoché, le panneau de combat n'apparaît qu'au début d'un combat et se referme \
+                 quand il est terminé.",
+            )
+            .log_name("options-combat-toujours-visible"),
+        );
     });
 
     if alerts_action == AlertsTabAction::TestSound {
@@ -579,9 +647,64 @@ pub fn show(
                 action = OptionsModalAction::Cancel;
             }
         } else if validate && state.tab == OptionsTab::Parametres {
-            action = OptionsModalAction::Validate(state.path_input.clone());
+            action = OptionsModalAction::Validate(state.commit());
         }
     }
 
     action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// L'état d'une fenêtre qu'on vient d'ouvrir : référence et brouillon accordés, donc rien en
+    /// attente.
+    fn fenetre_ouverte(chemin: &str, combat_always_visible: bool) -> OptionsModalState {
+        OptionsModalState {
+            path_input: chemin.to_string(),
+            combat_always_visible,
+            initial: OptionsInitial {
+                path: chemin.to_string(),
+                combat_always_visible,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn une_fenetre_intouchee_n_a_rien_en_attente() {
+        assert!(!fenetre_ouverte("/jeu/wakfu.log", false).is_dirty());
+        // Y compris quand le réglage est actif : la référence part de l'état EN VIGUEUR, pas du
+        // défaut — sinon la garde de fermeture s'ouvrirait dès l'ouverture chez qui a coché.
+        assert!(!fenetre_ouverte("/jeu/wakfu.log", true).is_dirty());
+    }
+
+    #[test]
+    fn cocher_la_case_met_des_modifications_en_attente() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.combat_always_visible = true;
+        assert!(
+            state.is_dirty(),
+            "fermer après avoir coché doit passer par la garde, comme pour le chemin de log"
+        );
+        // Recochée dans l'autre sens, la fenêtre redevient intouchée : la garde ne s'ouvre pas
+        // pour un aller-retour.
+        state.combat_always_visible = false;
+        assert!(!state.is_dirty());
+    }
+
+    #[test]
+    fn valider_emporte_le_chemin_et_la_case() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.combat_always_visible = true;
+        assert_eq!(
+            state.commit(),
+            OptionsCommit {
+                path: "/jeu/wakfu.log".to_string(),
+                combat_always_visible: true,
+            }
+        );
+    }
 }

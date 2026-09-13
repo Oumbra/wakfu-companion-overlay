@@ -167,6 +167,11 @@ mod linux_main {
         last_position: Option<PhysicalPosition<i32>>,
         last_watchlist_width: Option<f64>,
         last_watchlist_height: Option<f64>,
+        /// La fenêtre est-elle actuellement affichée ? — toujours `true` sauf pour une fenêtre
+        /// `Combat` hors combat quand l'option est décochée (le défaut), voir
+        /// `App::sync_combat_visibility`. Même rôle que dans `main.rs` : éviter un `set_visible`
+        /// par tick alors que rien n'a changé.
+        visible: bool,
         /// État topmost/délai de grâce — voir `overlay_platform::linux::topmost` (7 tests
         /// unitaires, déjà couvert avant ce binaire).
         topmost_state: TopmostState,
@@ -195,10 +200,14 @@ mod linux_main {
         remote_icons: RemoteIconStore,
         auth_status: AuthStatus,
         auth_command_tx: NoopAuthSink,
-        /// Voir la doc de `AppState::settings_tx` — permet à `validate_and_apply_log_path`
+        /// Voir la doc de `AppState::settings_tx` — permet à `validate_and_commit_options`
         /// d'envoyer `EngineCommand::ChangeLogPath` sans redémarrer tout le binaire.
         settings_tx: mpsc::Sender<EngineCommand>,
         log_path: PathBuf,
+        /// Le panneau Combat reste-t-il affiché en dehors des combats ? — réglage LOCAL persisté
+        /// (`config::OverlayConfig::combat_always_visible`), même politique que `main.rs` : lu au
+        /// démarrage, remplacé à la validation de la fenêtre Options, `false` par défaut.
+        combat_always_visible: bool,
         game_window: GameWindowTracker,
         banner_printed: bool,
         /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir
@@ -210,6 +219,8 @@ mod linux_main {
 
     struct AppState {
         log_path: PathBuf,
+        /// Voir `App::combat_always_visible` — lu de la config au démarrage (`run`).
+        combat_always_visible: bool,
         snapshot: Arc<ArcSwap<SessionSnapshot>>,
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
@@ -228,6 +239,7 @@ mod linux_main {
         fn new(state: AppState) -> Self {
             let AppState {
                 log_path,
+                combat_always_visible,
                 snapshot,
                 watchlist,
                 watchlist_toast,
@@ -281,6 +293,7 @@ mod linux_main {
                 auth_command_tx: NoopAuthSink,
                 settings_tx,
                 log_path,
+                combat_always_visible,
                 game_window,
                 banner_printed: false,
                 pending_dialog: None,
@@ -291,6 +304,9 @@ mod linux_main {
         /// vers l'état actuel des fenêtres de jeu trouvées.
         fn sync_windows(&mut self, event_loop: &ActiveEventLoop) {
             let found = self.game_window.scan();
+            // Une fenêtre `Combat` créée hors combat naît masquée quand l'option est décochée —
+            // voir `sync_combat_visibility`. Lu ici une fois pour toute la passe.
+            let snapshot = self.snapshot.load();
 
             self.windows.retain(|_, overlay| {
                 // **La modale Options suit la même règle depuis le 2026-09-12** : rattachée à la
@@ -319,6 +335,12 @@ mod linux_main {
                         Self::reposition(existing, info.rect);
                         continue;
                     }
+                    let visible = kind != OverlayKind::Combat
+                        || panels::combat::should_show(
+                            &snapshot,
+                            character_name,
+                            self.combat_always_visible,
+                        );
                     let overlay = Self::create_overlay_window(
                         event_loop,
                         kind,
@@ -326,6 +348,7 @@ mod linux_main {
                         character_name.clone(),
                         info.rect,
                         self.interactive,
+                        visible,
                     );
                     tracing::info!(
                         "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -333,6 +356,37 @@ mod linux_main {
                     overlay.window.request_redraw();
                     self.windows.insert(overlay.window.id(), overlay);
                 }
+            }
+        }
+
+        /// Affiche ou masque chaque fenêtre `Combat` selon qu'un combat est en cours pour SON
+        /// personnage — même politique que `main.rs::App::sync_combat_visibility` (masquer plutôt
+        /// que détruire, défaut décoché), la règle elle-même étant `panels::combat::should_show`.
+        ///
+        /// Pas de recréation de surface ici, contrairement à Windows : ce chemin corrige un défaut
+        /// propre à DirectComposition (voir `main.rs::sync_topmost`), sans équivalent sous X11.
+        fn sync_combat_visibility(&mut self) {
+            let snapshot = self.snapshot.load();
+            let always = self.combat_always_visible;
+            for overlay in self.windows.values_mut() {
+                if overlay.kind != OverlayKind::Combat {
+                    continue;
+                }
+                let wanted =
+                    panels::combat::should_show(&snapshot, &overlay.character_name, always);
+                if wanted == overlay.visible {
+                    continue;
+                }
+                overlay.window.set_visible(wanted);
+                overlay.visible = wanted;
+                if wanted {
+                    overlay.window.request_redraw();
+                }
+                tracing::info!(
+                    "[combat] {} — panneau {}",
+                    overlay.character_name,
+                    if wanted { "affiché" } else { "masqué" }
+                );
             }
         }
 
@@ -370,6 +424,7 @@ mod linux_main {
             character_name: String,
             rect: GameRect,
             interactive: bool,
+            visible: bool,
         ) -> OverlayWindow {
             let size = match kind {
                 OverlayKind::Combat => WINDOW_SIZE,
@@ -396,6 +451,10 @@ mod linux_main {
                 .with_decorations(false)
                 .with_window_level(WindowLevel::AlwaysOnTop)
                 .with_resizable(false)
+                // Une fenêtre `Combat` peut naître MASQUÉE (aucun combat en cours, option
+                // décochée — voir `sync_combat_visibility`) : demandé dès les attributs plutôt que
+                // par un `set_visible(false)` juste après, qui la ferait clignoter à l'écran.
+                .with_visible(visible)
                 // `_NET_WM_WINDOW_TYPE_UTILITY` (§6.4 du plan) — absent du taskbar/alt-tab, comme
                 // `with_skip_taskbar` côté Windows (non applicable ici, propriété EWMH distincte).
                 .with_x11_window_type(vec![WindowType::Utility]);
@@ -438,6 +497,7 @@ mod linux_main {
                 last_position: Some(position),
                 last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
                 last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
+                visible,
                 // `WindowLevel::AlwaysOnTop` déjà appliqué ci-dessus à la création — voir la doc
                 // de `topmost::decide` pour la suite de la politique.
                 topmost_state: TopmostState::Above {
@@ -615,6 +675,9 @@ mod linux_main {
                 "Options".to_string(),
                 rect,
                 true,
+                // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul
+                // `Combat` peut naître masqué (voir `sync_combat_visibility`).
+                true,
             );
             overlay.options_state = Some(OptionsModalState {
                 path_input: self.log_path.display().to_string(),
@@ -622,6 +685,9 @@ mod linux_main {
                 // Voir la doc de `open_options_modal` : le bouton « Options » du bandeau de
                 // suivi demande `Parametres`, le raccourci global le défaut d'`OptionsTab`.
                 tab: initial_tab,
+                // La case part du réglage EN VIGUEUR, pas du défaut : « Annuler » n'a rien à
+                // défaire tant qu'on n'y touche pas (voir `OptionsModalState::is_dirty`).
+                combat_always_visible: self.combat_always_visible,
                 alerts: Default::default(),
                 // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :
                 // aucun thread Auth ne tourne ici). Il n'y a donc ni liste à charger ni endroit où
@@ -642,6 +708,7 @@ mod linux_main {
                     path: self.log_path.display().to_string(),
                     alerts: None,
                     suivi: Some(Vec::new()),
+                    combat_always_visible: self.combat_always_visible,
                 },
                 pending_close: false,
             });
@@ -663,7 +730,7 @@ mod linux_main {
                 .spawn(move || {
                     // Filtre par EXTENSION uniquement (`rfd` ne sait pas filtrer par nom de fichier
                     // exact) — le garde-fou du NOM exact (`wakfu.log`) est appliqué après coup par
-                    // `App::validate_and_apply_log_path`/`discovery::validate_log_path`, jamais
+                    // `App::validate_and_commit_options`/`discovery::validate_log_path`, jamais
                     // sauté même si l'utilisateur choisit un `.log` mal nommé dans le dialogue.
                     let picked = rfd::FileDialog::new()
                         .set_title("Sélectionner le fichier wakfu.log")
@@ -683,29 +750,54 @@ mod linux_main {
         /// échec : la modale RESTE ouverte, le message d'erreur est écrit dans son état pour le
         /// prochain redessin (voir `OptionsModalState::error`) — rien n'est pris en compte tant que
         /// la validation n'a pas réussi.
-        fn validate_and_apply_log_path(&mut self, options_window_id: WindowId, raw: String) {
-            let candidate = PathBuf::from(raw.trim());
+        fn validate_and_commit_options(
+            &mut self,
+            options_window_id: WindowId,
+            commit: options_modal::OptionsCommit,
+        ) {
+            let candidate = PathBuf::from(commit.path.trim());
             match discovery::validate_log_path(&candidate) {
                 Ok(()) => {
                     // Rechargé seulement si le chemin a CHANGÉ — même garde que `main.rs` : un
                     // `ChangeLogPath` à chemin identique rejouait tout le fichier dans une session
                     // qui gardait son état, et dupliquait le combat en cours (2026-09-12).
-                    if candidate == self.log_path {
-                        tracing::info!("[options] chemin de log inchangé, moteur non touché.");
-                    } else {
+                    let path_changed = candidate != self.log_path;
+                    if path_changed {
                         tracing::info!(
                             "[options] nouveau fichier de log validé : {}",
                             candidate.display()
                         );
                         self.log_path = candidate.clone();
-                        config::save(&config::OverlayConfig {
-                            log_path: Some(candidate.clone()),
-                        });
                         let _ = self
                             .settings_tx
-                            .send(EngineCommand::ChangeLogPath(candidate));
+                            .send(EngineCommand::ChangeLogPath(candidate.clone()));
+                    } else {
+                        tracing::info!("[options] chemin de log inchangé, moteur non touché.");
+                    }
+                    let combat_changed = commit.combat_always_visible != self.combat_always_visible;
+                    if combat_changed {
+                        self.combat_always_visible = commit.combat_always_visible;
+                        tracing::info!(
+                            "[options] panneau de combat en dehors des combats : {}",
+                            if self.combat_always_visible {
+                                "affiché"
+                            } else {
+                                "masqué"
+                            }
+                        );
+                    }
+                    // La config est réécrite EN ENTIER, et seulement si l'un des deux réglages a
+                    // bougé — même raison que `main.rs` : le fichier est réécrit d'un bloc.
+                    if path_changed || combat_changed {
+                        config::save(&config::OverlayConfig {
+                            log_path: Some(candidate),
+                            combat_always_visible: self.combat_always_visible,
+                        });
                     }
                     self.windows.remove(&options_window_id);
+                    // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
+                    // d'`about_to_wait` — même raison que `main.rs`.
+                    self.sync_combat_visibility();
                 }
                 Err(err) => {
                     tracing::info!("[options] chemin refusé : {}", err.message());
@@ -761,7 +853,9 @@ mod linux_main {
                 OpenOptions(u32, GameRect, options_modal::OptionsTab),
                 CloseOptions,
                 BrowseOptions,
-                ValidateOptions(String),
+                /// Ce que « Valider » emporte de l'onglet « Paramètres » — voir
+                /// `options_modal::OptionsCommit`.
+                ValidateOptions(options_modal::OptionsCommit),
             }
             let mut post_redraw = PostRedraw::None;
 
@@ -824,6 +918,10 @@ mod linux_main {
                         .surface
                         .configure(&overlay.gpu.device, &overlay.gpu.config);
                 }
+                // Fenêtre `Combat` masquée hors combat (voir `sync_combat_visibility`) : rien à
+                // peindre ni à présenter. C'est `sync_combat_visibility` qui redemande un
+                // redessin en la faisant réapparaître.
+                WindowEvent::RedrawRequested if !overlay.visible => {}
                 WindowEvent::RedrawRequested => {
                     let snapshot = self.snapshot.load();
                     let fight = snapshot.fight_for_character(&overlay.character_name);
@@ -937,8 +1035,8 @@ mod linux_main {
                         OptionsModalAction::None => {}
                         OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
                         OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
-                        OptionsModalAction::Validate(raw) => {
-                            post_redraw = PostRedraw::ValidateOptions(raw)
+                        OptionsModalAction::Validate(commit) => {
+                            post_redraw = PostRedraw::ValidateOptions(commit)
                         }
                         // Le son d'alerte se joue par le même chemin qu'un vrai ramassage — c'est
                         // tout l'intérêt du bouton : entendre ce qu'on entendra en jeu.
@@ -971,7 +1069,7 @@ mod linux_main {
                     tracing::info!("[options] modale fermée (Annuler).");
                 }
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
-                PostRedraw::ValidateOptions(raw) => self.validate_and_apply_log_path(id, raw),
+                PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             }
         }
 
@@ -1020,7 +1118,7 @@ mod linux_main {
                     Ok(picked) => {
                         self.pending_dialog = None;
                         if let Some(path) = picked {
-                            // Même garde que "Valider" (voir `validate_and_apply_log_path`) :
+                            // Même garde que "Valider" (voir `validate_and_commit_options`) :
                             // `rfd` ne filtre QUE par extension, un `.log` mal nommé doit être
                             // refusé exactement pareil qu'une saisie manuelle invalide, jamais
                             // silencieusement accepté parce qu'il vient du dialogue natif — le
@@ -1047,6 +1145,10 @@ mod linux_main {
             }
 
             self.sync_windows(event_loop);
+            // Apparition/disparition automatique du panneau Combat — entre les deux, même ordre
+            // que `main.rs` : `sync_windows` vient peut-être de créer la fenêtre, `sync_topmost`
+            // doit voir son état final.
+            self.sync_combat_visibility();
             self.sync_topmost();
 
             let now = std::time::Instant::now();
@@ -1217,7 +1319,7 @@ mod linux_main {
         let proxy = event_loop.create_proxy();
         // Mode invité fixe (voir la doc de module) pour `ApplySettings`/`Disconnect` : rien ne les
         // envoie jamais ici (aucun thread Auth). `ChangeLogPath` (2026-09-08, §9 du plan) est en
-        // revanche bien émis par ce binaire — voir `App::validate_and_apply_log_path` — d'où
+        // revanche bien émis par ce binaire — voir `App::validate_and_commit_options` — d'où
         // `settings_tx` conservé (plus de `_`) plutôt qu'abandonné comme avant ce lot.
         let (settings_tx, settings_rx) = mpsc::channel();
         let (sync_tx, _sync_rx) = mpsc::channel::<SyncCommand>();
@@ -1242,6 +1344,7 @@ mod linux_main {
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = App::new(AppState {
             log_path,
+            combat_always_visible: saved_config.combat_always_visible,
             snapshot,
             watchlist,
             watchlist_toast,
