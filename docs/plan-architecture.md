@@ -1271,6 +1271,17 @@ ci-dessus) ; XWayland avec le vrai client Wakfu, en revanche, reste hors de port
 environnement cloud headless (pas de session Wayland réelle à faire tourner) et devra être vérifié
 sur une vraie machine Linux le moment venu, comme documenté au §17.2 (limite assumée).
 
+**Mise à jour (2026-09-13)** : cette vérification « vraie machine Linux » est désormais possible —
+le mainteneur dispose d'un **Steam Deck (SteamOS, KDE Wayland + XWayland)** avec le client Wakfu
+natif (Zaap). Deux conséquences outillées dans le dépôt plutôt que laissées à la manœuvre manuelle :
+`crates/overlay-ui/preview.sh` (équivalent bash de `preview.ps1`, lance `overlay-ui-x11`) et
+`scripts/setup-steamdeck.sh` (conteneur `distrobox` Arch partageant HOME/écran/GPU/audio, seul moyen
+durable de compiler sous SteamOS dont le rootfs est en lecture seule et réécrit à chaque mise à
+jour ; `preview.sh` y entre tout seul). Premier constat de cette vérification sur matériel réel : la
+découverte de `wakfu.log` sous Linux (§5.1) pointait vers `~/.config/zaap/gamesLogs/wakfu/wakfu.log`
+alors que le client natif écrit dans le sous-dossier `logs/`, comme sous Windows — corrigé dans
+`overlay-ingest::discovery` (le chemin sans `logs/` reste candidat, en repli).
+
 ---
 
 ## 13. Revue des trois experts
