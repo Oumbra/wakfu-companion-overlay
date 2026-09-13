@@ -2367,3 +2367,86 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     // Le formulaire revient à son défaut après un ajout, comme `resetAddForm` côté web.
     assert_eq!(etat.borrow().suivi.target, 1);
 }
+
+/// Curseur du jeu à la place du curseur système (voir `overlay_ui::cursor`) : ce que
+/// `paint_content` publie dans `PlatformOutput::cursor_image`, là où les deux binaires le lisent
+/// (via `egui-winit`), sans fenêtre ni GPU. Mêmes coordonnées que
+/// `panneau_combat_tooltip_switch_allies_ennemis_au_dessus` (centre du bouton « Alliés », un
+/// `on_hover_cursor(PointingHand)`), et un point du vide du panneau pour la flèche.
+#[test]
+fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Combat,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+                options: None,
+            },
+        );
+    });
+    let images = overlay_ui::cursor::images();
+    let published = |harness: &Harness<'_>| harness.output().platform_output.cursor_image.clone();
+    let same = |a: &Option<egui::CustomCursorImage>, b: &egui::CustomCursorImage| {
+        a.as_ref()
+            .is_some_and(|a| std::sync::Arc::ptr_eq(&a.rgba, &b.rgba))
+    };
+
+    // Pointeur dans le vide du panneau : flèche du jeu au repos, aucun redessin réclamé.
+    harness.hover_at(egui::pos2(400.0, 400.0));
+    harness.run();
+    assert!(
+        same(&published(&harness), &images.idle),
+        "vide : attendu le bitmap de repos"
+    );
+    assert!(
+        harness.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay
+            > std::time::Duration::from_secs(60)
+    );
+
+    // Bouton « Alliés » (main) : l'éclair d'abord, et un redessin réclamé AU PLUS TARD pour la
+    // prochaine bascule (l'infobulle du switch en réclame un plus tôt encore, d'où `<=` et non
+    // `==`) — `now` est figé dans ce harnais, la phase ne progresse donc pas d'une frame à l'autre.
+    harness.hover_at(egui::pos2(35.0, 71.0));
+    harness.run();
+    assert!(
+        same(&published(&harness), &images.flash),
+        "cliquable : attendu l'éclair"
+    );
+    let delay = harness.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    assert!(
+        delay > std::time::Duration::ZERO && delay <= overlay_ui::cursor::FLASH_DURATION,
+        "délai de redessin inattendu en mode main : {delay:?}"
+    );
+
+    // Retour dans le vide : repos à nouveau.
+    harness.hover_at(egui::pos2(400.0, 400.0));
+    harness.run();
+    assert!(same(&published(&harness), &images.idle));
+}
