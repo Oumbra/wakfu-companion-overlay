@@ -30,6 +30,13 @@
 //! 5. **Rien n'est écrit avant « Valider »** : l'onglet travaille sur un brouillon que l'appelant
 //!    lui prête, comme l'onglet Alertes.
 //!
+//! Une sixième s'y est ajoutée le 2026-09-13, à la demande de l'utilisateur : **l'ordre de la liste
+//! se règle ici, au glisser-déposer**, comme sur le site (`TrackerStripComponent`). C'est le seul
+//! écran qui compose la liste, donc le seul où cet ordre se décide ; le bandeau in-game l'affiche,
+//! il ne le change pas. Voir [`reorder`] pour la sémantique, reprise au rang près du web, et
+//! [`drag_ghost`]/[`drop_marker`] pour ce que le geste montre — egui ne peint rien de lui-même
+//! pendant un déplacement, contrairement au navigateur.
+//!
 //! ## Le brouillon ne porte QUE des définitions
 //!
 //! Une entrée de suivi a deux moitiés qui ne vivent pas au même endroit : ses **définitions** (nom,
@@ -92,6 +99,24 @@ const TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
 
 /// Rouge de la croix sous le pointeur — `INFO_ALERT`, le seul rouge mesuré du jeu.
 const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
+
+/// Voile posé sur la place d'ORIGINE d'une tuile en cours de déplacement — elle doit se lire comme
+/// « partie d'ici », pas comme une tuile normale : le fantôme qui suit le pointeur ([`drag_ghost`])
+/// est alors le seul exemplaire vivant de l'entrée.
+const DRAG_SOURCE_SCRIM: Color32 = Color32::from_black_alpha(0xAA);
+
+/// Barre d'insertion peinte sur le bord de la tuile SURVOLÉE pendant un déplacement — l'or des
+/// sélections (`design::tokens::ITEM_SLOT_SELECTED_BORDER`), le ton du jeu pour « ceci est visé ».
+///
+/// Le web n'en peint aucune : le navigateur y fournit son propre fantôme natif et la liste est une
+/// bande horizontale d'une seule ligne, où le rang d'arrivée se devine. Ici la grille passe à la
+/// ligne, et egui ne peint rien tout seul — sans marqueur, on lâcherait à l'aveugle.
+const DROP_MARKER: Color32 = design::tokens::ITEM_SLOT_SELECTED_BORDER;
+const DROP_MARKER_WIDTH: f32 = 3.0;
+
+/// Opacité du fantôme qui suit le pointeur — il doit dire « en vol », donc ne pas être tout à fait
+/// opaque, tout en restant assez lisible pour qu'on sache ce qu'on déplace.
+const DRAG_GHOST_OPACITY: f32 = 0.9;
 
 /// Largeur d'un badge de quantité — celle de `−1000`, le plus large des libellés qu'il prend. Une
 /// largeur qui suivrait le libellé ferait bouger les badges à l'appui sur `Alt`, et on relâcherait
@@ -731,24 +756,45 @@ fn tile_grid(
 
     let mut retrait: Option<String> = None;
     let mut bascule: Option<String> = None;
+    let mut deplacement: Option<(usize, usize)> = None;
     let select_mode = state.select_mode;
     let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
 
     panel.scroll_area(ui, "suivi.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
         let per_row = (((content_width + TILE_GAP) / (TILE + TILE_GAP)).floor() as usize).max(1);
-        for chunk in tuiles.chunks(per_row) {
+        for (rang, chunk) in tuiles.chunks(per_row).enumerate() {
             ui.horizontal(|ui| {
-                for tuile in chunk {
-                    match tracked_tile(ui, ctx, tuile, select_mode, cochees.contains(&tuile.key)) {
+                for (colonne, tuile) in chunk.iter().enumerate() {
+                    // **Le rang dans le BROUILLON, pas dans la rangée** : c'est lui que le
+                    // déplacement manipule, et il doit rester juste quelle que soit la largeur de
+                    // la fenêtre — le nombre de colonnes, lui, change avec elle.
+                    let index = rang * per_row + colonne;
+                    match tracked_tile(
+                        ui,
+                        ctx,
+                        tuile,
+                        index,
+                        select_mode,
+                        cochees.contains(&tuile.key),
+                    ) {
                         TileClick::Remove => retrait = Some(tuile.key.clone()),
                         TileClick::Toggle => bascule = Some(tuile.key.clone()),
+                        TileClick::Reorder(depuis) => deplacement = Some((depuis, index)),
                         TileClick::None => {}
                     }
                 }
             });
         }
     });
+
+    // **Le déplacement d'abord, le retrait ensuite.** Les deux gestes s'excluent en pratique (on ne
+    // lâche pas une tuile sur une croix), mais l'ordre reste sûr dans tous les cas : le
+    // réordonnancement travaille sur des RANGS, que le retrait décalerait, tandis que le retrait
+    // travaille sur une CLÉ, que le réordonnancement ne touche pas.
+    if let Some((depuis, vers)) = deplacement {
+        reorder(ctx.entries, depuis, vers);
+    }
 
     // **Le retrait est immédiat — sur le BROUILLON, pas sur le compte.** Rien ne part au réseau
     // avant « Valider », et « Annuler » rend la liste telle qu'elle était : le geste est déjà
@@ -782,7 +828,18 @@ enum TileClick {
     None,
     Remove,
     Toggle,
+    /// Une tuile vient d'être lâchée sur celle-ci — le rang porté est celui de la tuile DÉPLACÉE,
+    /// celui de la tuile d'arrivée étant connu de l'appelant. Voir [`reorder`].
+    Reorder(usize),
 }
+
+/// Ce qu'une tuile emporte en vol — son rang dans le brouillon, et rien d'autre : la liste ne bouge
+/// pas tant que le pointeur n'est pas relâché, un rang suffit donc à retrouver l'entrée.
+///
+/// Type nommé plutôt qu'un `usize` nu : [`egui::DragAndDrop`] indexe sa charge utile **par type**,
+/// et un `usize` anonyme serait attrapé par n'importe quel autre glisser-déposer de l'application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DragIndex(usize);
 
 /// **La tuile d'un suivi — un emplacement d'objet, et rien d'autre.**
 ///
@@ -799,10 +856,19 @@ fn tracked_tile(
     ui: &mut egui::Ui,
     ctx: &mut SuiviTabContext<'_>,
     tuile: &TileData,
+    index: usize,
     select_mode: bool,
     cochee: bool,
 ) -> TileClick {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), egui::Sense::click());
+    // **Glissable seulement hors du mode sélection**, comme le web (`[attr.draggable]=
+    // "!watchlist.selectMode()"`) : dans ce mode le geste de la tuile est de cocher, et un même
+    // appui ne peut pas vouloir dire deux choses.
+    let sens = if select_mode {
+        egui::Sense::click()
+    } else {
+        egui::Sense::click_and_drag()
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), sens);
 
     let frame = match tuile.kind {
         WatchlistKind::Item => SlotFrame::Rarity(to_slot_rarity(tuile.rarity)),
@@ -851,6 +917,55 @@ fn tracked_tile(
             clic = TileClick::Toggle;
         }
         return clic;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // **Réordonnancement au glisser-déposer** — le geste du web (`TrackerStripComponent`), porté
+    // au seul écran qui compose la liste. L'ordre obtenu ici est celui que le bandeau in-game
+    // affiche et que « Valider » envoie au compte (`WatchlistState::apply_definitions` conserve
+    // l'ordre du brouillon) : les deux vues et le site restent d'accord sur une seule liste.
+    // ---------------------------------------------------------------------------------------
+
+    // Pose la charge utile à l'instant où le glissement démarre — sans effet les autres frames.
+    response.dnd_set_drag_payload(DragIndex(index));
+
+    // Lu APRÈS la pose : la tuile qui vient de partir se voit voilée dès la première frame du
+    // geste, sans attendre la suivante.
+    let en_vol = egui::DragAndDrop::payload::<DragIndex>(ui.ctx()).map(|charge| charge.0);
+
+    if let Some(depuis) = en_vol {
+        // **La croix fléchée, pendant tout le geste et sur toute la grille.** Elle est le seul
+        // signe qu'une tuile se déplace — le pointeur peut sortir des tuiles (gouttières, bord de
+        // la grille) sans que le geste s'interrompe, et le curseur ne doit pas clignoter d'une
+        // forme à l'autre au passage. Posé explicitement plutôt que laissé au `Grabbing` que
+        // `DragAndDrop` met par défaut en fin de frame : c'est la croix qui a été demandée.
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+
+        if depuis == index {
+            // La place d'origine s'efface derrière le fantôme, qui est maintenant l'exemplaire
+            // vivant de l'entrée.
+            ui.painter()
+                .rect_filled(rect, design::tokens::ITEM_SLOT_ROUNDING, DRAG_SOURCE_SCRIM);
+            drag_ghost(ui, response.id, icon_id, frame, rect);
+        } else {
+            if response.dnd_hover_payload::<DragIndex>().is_some() {
+                drop_marker(ui, rect, depuis < index);
+            }
+            if response.dnd_release_payload::<DragIndex>().is_some() {
+                return TileClick::Reorder(depuis);
+            }
+        }
+        // Ni voile de survol, ni croix de retrait, ni infobulle pendant un déplacement : la tuile
+        // survolée est une DESTINATION, pas une cible de clic — proposer d'y retirer une entrée au
+        // moment précis où l'on vise pour lâcher serait un piège, et un nom qui s'affiche sous le
+        // pointeur masquerait la barre d'insertion qu'on essaie de lire.
+        return TileClick::None;
+    }
+
+    // Hors geste, la croix fléchée dit ce que la tuile permet — c'est à cela qu'on devine qu'elle
+    // se déplace, aucun autre signe ne l'annonce (le web dit la même chose avec `cursor: grab`).
+    if response.contains_pointer() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
     }
 
     // **`contains_pointer` et NON `hovered`.** La croix a sa propre zone interactive, posée
@@ -905,6 +1020,82 @@ fn tracked_tile(
     // choisir lui-même dans cette même modale. Le nom, lui, n'est écrit nulle part ailleurs.
     design::tooltip(&response).text(&tuile.name);
     clic
+}
+
+/// **Le fantôme qui suit le pointeur** — un emplacement du même cadre et de la même icône que la
+/// tuile déplacée, peint dans sa propre couche au-dessus de tout et centré sur le pointeur.
+///
+/// Sans lui, rien ne bougerait à l'écran pendant le geste : le navigateur fabrique un fantôme
+/// natif, egui n'en fabrique aucun. Le web réduit le sien à l'icône sur un carré neutre parce que
+/// sa tuile réelle porte des éléments flottants (badge, croix) que la capture d'écran du navigateur
+/// emportait ; ici rien n'est capturé, l'emplacement est repeint — il peut donc garder son cadre de
+/// rareté, qui dit quelle entrée est en vol.
+fn drag_ghost(ui: &egui::Ui, id: egui::Id, icon: egui::TextureId, frame: SlotFrame, rect: Rect) {
+    let Some(pointeur) = ui.ctx().pointer_interact_pos() else {
+        return;
+    };
+    // **Tenue par où on l'a prise**, et non centrée sur le pointeur : la tuile garde sous le doigt
+    // le point exact où l'appui a commencé, donc elle suit la souris au pixel près. Centré, le
+    // fantôme recouvrait presque exactement la tuile visée — la barre d'insertion et la
+    // destination disparaissaient dessous, au moment précis où on les regarde (relevé sur la
+    // planche `options_suivi_deplacement`).
+    let prise = ui
+        .ctx()
+        .input(|i| i.pointer.press_origin())
+        .map(|origine| origine - rect.min)
+        .unwrap_or_else(|| Vec2::splat(TILE / 2.0));
+    egui::Area::new(id.with("fantome"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pointeur - prise)
+        // Une couche qui prendrait le survol volerait aux tuiles la détection de la destination :
+        // le fantôme est sous le pointeur en permanence, il masquerait tout.
+        .interactable(false)
+        .show(ui.ctx(), |ui| {
+            ui.set_opacity(DRAG_GHOST_OPACITY);
+            ui.add(design::item_slot().size(TILE).frame(frame).icon(icon));
+        });
+}
+
+/// **La barre d'insertion sur la tuile visée** — à droite quand l'entrée arrivera après elle, à
+/// gauche quand elle prendra sa place.
+///
+/// Le sens découle de la sémantique du déplacement (voir [`reorder`]) : une entrée qui descend
+/// (`depuis < vers`) laisse la tuile visée remonter d'un rang et se pose derrière elle ; une entrée
+/// qui remonte prend son rang et la pousse devant.
+///
+/// Peinte À L'INTÉRIEUR du bord, jamais dans la gouttière : une barre posée en dehors de la tuile
+/// serait rognée en fin de rangée par la zone de défilement, c'est-à-dire invisible exactement là
+/// où on en a besoin.
+fn drop_marker(ui: &egui::Ui, rect: Rect, apres: bool) {
+    let barre = if apres {
+        Rect::from_min_max(
+            egui::pos2(rect.right() - DROP_MARKER_WIDTH, rect.top()),
+            rect.right_bottom(),
+        )
+    } else {
+        Rect::from_min_max(
+            rect.left_top(),
+            egui::pos2(rect.left() + DROP_MARKER_WIDTH, rect.bottom()),
+        )
+    };
+    ui.painter()
+        .rect_filled(barre, DROP_MARKER_WIDTH / 2.0, DROP_MARKER);
+}
+
+/// Déplace l'entrée de rang `depuis` au rang `vers` — **miroir exact de
+/// `StatsStoreService.reorderWatchlist`** (dépôt web) : retrait, puis insertion au rang `vers` de
+/// la liste DÉJÀ amputée.
+///
+/// Cette nuance est le comportement lui-même, pas un détail d'implémentation : déplacer une entrée
+/// vers le bas la pose **après** la tuile visée (celle-ci a reculé d'un rang entre-temps), vers le
+/// haut **à sa place**. C'est ce que la barre d'insertion annonce, et ce que le site fait déjà —
+/// deux listes réordonnées différemment des deux côtés se contrediraient à la première synchro.
+fn reorder(entries: &mut Vec<WatchlistEntry>, depuis: usize, vers: usize) {
+    if depuis == vers || depuis >= entries.len() || vers >= entries.len() {
+        return;
+    }
+    let deplacee = entries.remove(depuis);
+    entries.insert(vers, deplacee);
 }
 
 /// Le rouage de chargement, centré dans les DEUX axes de la zone que la grille occuperait.
@@ -999,6 +1190,60 @@ mod tests {
             ..a.clone()
         };
         assert_ne!(entry_key(&a), entry_key(&b));
+    }
+
+    /// **Le déplacement suit le web au rang près.** `reorderWatchlist` retire puis réinsère dans
+    /// la liste amputée : descendre une entrée la pose APRÈS la tuile visée, la remonter la pose à
+    /// SA place. Deux listes réordonnées différemment ici et sur le site se contrediraient à la
+    /// première synchronisation.
+    #[test]
+    fn le_deplacement_reproduit_le_reordonnancement_du_web() {
+        let noms = |entries: &[WatchlistEntry]| -> Vec<String> {
+            entries.iter().map(|e| e.name.clone()).collect()
+        };
+        let mut entries: Vec<WatchlistEntry> = ["A", "B", "C", "D"]
+            .iter()
+            .map(|nom| WatchlistEntry {
+                name: (*nom).into(),
+                kind: WatchlistKind::Item,
+                mode: WatchlistMode::Up,
+                count: 0,
+                countdown_target: 0,
+                catalog_id: None,
+            })
+            .collect();
+
+        // Vers le bas : « A » lâchée sur « C » se pose derrière elle.
+        reorder(&mut entries, 0, 2);
+        assert_eq!(noms(&entries), ["B", "C", "A", "D"]);
+
+        // Vers le haut : « D » lâchée sur « B » prend son rang et la pousse devant.
+        reorder(&mut entries, 3, 1);
+        assert_eq!(noms(&entries), ["B", "D", "C", "A"]);
+    }
+
+    /// Un rang hors liste ou identique ne touche à rien — la grille ne devrait jamais en produire,
+    /// mais une liste réordonnée « presque » serait un désordre silencieux, pas une erreur visible.
+    #[test]
+    fn un_deplacement_impossible_laisse_la_liste_intacte() {
+        let mut entries: Vec<WatchlistEntry> = ["A", "B"]
+            .iter()
+            .map(|nom| WatchlistEntry {
+                name: (*nom).into(),
+                kind: WatchlistKind::Item,
+                mode: WatchlistMode::Up,
+                count: 0,
+                countdown_target: 0,
+                catalog_id: None,
+            })
+            .collect();
+        reorder(&mut entries, 1, 1);
+        reorder(&mut entries, 0, 9);
+        reorder(&mut entries, 9, 0);
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["A", "B"]
+        );
     }
 
     #[test]
