@@ -56,6 +56,23 @@
 //! Seule la marge extérieure peut avoir à bouger ([`ScrollArea::outer_margin`]) : les 14 px du
 //! relevé séparent la poignée du bord d'un PANNEAU, et un bandeau posé sur le jeu n'en a pas.
 //!
+//! ## La barre passe devant
+//!
+//! [`ScrollArea::bar_before`] la peint AVANT le contenu — au-dessus des tuiles pour une bande
+//! horizontale. Demande utilisateur du 2026-09-13 au soir, deux allers-retours après la barre
+//! elle-même : « je veux que la part de scroll soit au-dessus de la ligne de suivi, pas en
+//! dessous [...] il faut laisser un ou deux pixels au-dessus de la barre de scroll seulement ».
+//! La place ainsi prise en tête est la seule chose qui éloigne encore la bande du haut du jeu, et
+//! le bas redevient libre pour les infobulles, qui retrouvent leur écart mesuré à la tuile.
+//!
+//! **`egui` ne sait pas le faire** : sa barre horizontale se cale sur le bord bas du rectangle de
+//! la zone, et `ScrollArea::scroll_bar_rect` ne la déplace que le long de son propre axe (« for
+//! instance if you are painting a sticky header on top of it »). Sa barre est donc masquée et
+//! celle-ci peinte à la main : réserve en tête, poignée, survol, glissé — les proportions et le
+//! geste repris de son code, teintes et épaisseur des jetons du jeu. Deux choses en sortent
+//! gagnantes : la réserve n'existe que lorsque la barre sert (une bande qui tient entière ne
+//! décale rien), et une mise en page peut s'y aligner ([`ScrollArea::space_before`]).
+//!
 //! ## Ce qui n'est PAS reproduit
 //!
 //! L'**ombre portée de 2 px à droite de la poignée**, relevée dans le jeu. `egui::ScrollArea` peint
@@ -96,6 +113,7 @@ pub struct ScrollArea {
     auto_shrink: bool,
     axis: ScrollAxis,
     outer_margin: f32,
+    bar_before: bool,
 }
 
 impl ScrollArea {
@@ -105,6 +123,7 @@ impl ScrollArea {
             auto_shrink: false,
             axis: ScrollAxis::Vertical,
             outer_margin: tokens::SCROLLBAR_OUTER_MARGIN,
+            bar_before: false,
         }
     }
 
@@ -138,10 +157,37 @@ impl ScrollArea {
         self
     }
 
+    /// **Place la barre AVANT le contenu** — au-dessus des tuiles pour une bande horizontale — au
+    /// lieu d'après. Voir la doc de module, « la barre passe devant ».
+    ///
+    /// Horizontal uniquement pour l'instant : le seul appelant est le bandeau « Suivi », et une
+    /// barre verticale à gauche n'a été demandée nulle part.
+    pub fn bar_before(mut self, bar_before: bool) -> Self {
+        self.bar_before = bar_before;
+        self
+    }
+
     /// Réserve totale prise par la barre sur l'axe qui lui fait face — [`RESERVE_X`] avec la marge
     /// extérieure du jeu, moins si [`ScrollArea::outer_margin`] l'a réduite.
     pub fn reserve(&self) -> f32 {
         tokens::SCROLLBAR_CONTENT_MARGIN + tokens::SCROLLBAR_WIDTH + self.outer_margin
+    }
+
+    /// Place que la barre prend AVANT le contenu **à cette frame** — [`ScrollArea::reserve`] quand
+    /// elle est affichée, `0.0` sinon — et `0.0` tant que [`ScrollArea::bar_before`] n'est pas
+    /// demandé.
+    ///
+    /// Sert à une mise en page qui doit s'aligner sur le CONTENU et non sur le haut de la zone :
+    /// dans le bandeau « Suivi », le carré de contrôle descend de cette valeur pour rester à la
+    /// hauteur des tuiles plutôt que de la barre. La réponse vient de la frame précédente (voir
+    /// [`ScrollArea::show_output`]) : personne ne sait avant de l'avoir peinte si une bande
+    /// déborde.
+    pub fn space_before(&self, ui: &Ui) -> f32 {
+        if self.bar_before && bar_shown_last_frame(ui, self.id_salt) {
+            self.reserve()
+        } else {
+            0.0
+        }
     }
 
     pub fn show<R>(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
@@ -157,6 +203,9 @@ impl ScrollArea {
         ui: &mut Ui,
         add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> egui::scroll_area::ScrollAreaOutput<R> {
+        if self.bar_before && self.axis == ScrollAxis::Horizontal {
+            return self.show_bar_before(ui, add_contents);
+        }
         let axis = self.axis;
         let outer_margin = self.outer_margin;
         let id_salt = self.id_salt;
@@ -211,4 +260,167 @@ impl ScrollArea {
         })
         .inner
     }
+
+    /// La bande dont la barre est peinte AU-DESSUS du contenu (voir [`ScrollArea::bar_before`]).
+    ///
+    /// `egui` ne sait pas le faire : sa barre horizontale se cale toujours sur le bord BAS de la
+    /// zone (`outer_rect.max`), et `ScrollArea::scroll_bar_rect` ne déplace la barre que le long de
+    /// son propre axe — utile pour un en-tête collant, sans effet sur le côté. La barre d'egui est
+    /// donc masquée (`ScrollBarVisibility::AlwaysHidden`) et celle-ci peinte à la main : la place
+    /// réservée en tête, la poignée, son survol et son glissé.
+    ///
+    /// En échange, le composant gagne ce qu'egui ne donnait pas : la barre n'occupe la place que
+    /// lorsqu'elle sert (une bande qui tient entière ne décale rien du tout), et sa position est
+    /// au pixel du relevé plutôt qu'au bord d'un rectangle calculé.
+    fn show_bar_before<R>(
+        self,
+        ui: &mut Ui,
+        add_contents: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::scroll_area::ScrollAreaOutput<R> {
+        let id_salt = self.id_salt;
+        let auto_shrink = self.auto_shrink;
+        let outer_margin = self.outer_margin;
+        let reserve = self.reserve();
+        // La place se réserve AVANT de peindre, la nécessité ne se sait qu'APRÈS : la réponse
+        // vient donc de la frame précédente. Un changement d'état redemande une frame (voir plus
+        // bas), le temps que la place suive — c'est exactement ce que fait `egui` avec son propre
+        // `show_scroll_this_frame`.
+        let shown_last_frame = bar_shown_last_frame(ui, id_salt);
+
+        // Un `vertical` parce que ce composant est appelé DANS une rangée horizontale : `add_space`
+        // y pousserait sur le mauvais axe.
+        ui.vertical(|ui| {
+            let top = ui.cursor().min.y;
+            let mut style = (**ui.style()).clone();
+            // La molette (verticale) ne pilote une zone horizontale qu'avec Maj enfoncé par
+            // défaut — voir `show_output`, même raison.
+            style.always_scroll_the_only_direction = true;
+            ui.set_style(style);
+
+            if shown_last_frame {
+                ui.add_space(reserve);
+            }
+            let output = egui::ScrollArea::horizontal()
+                .id_salt(id_salt)
+                .auto_shrink([auto_shrink, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, add_contents);
+
+            let shown = output.content_size.x > output.inner_rect.width() + 0.5;
+            ui.data_mut(|data| data.insert_temp(bar_memo_id(id_salt), shown));
+            if shown != shown_last_frame {
+                // La place vient de changer : une frame de plus pour la prendre (ou la rendre).
+                ui.ctx().request_repaint();
+            }
+            if shown && shown_last_frame {
+                paint_bar_before(ui, &output, top + outer_margin);
+            }
+            output
+        })
+        .inner
+    }
+}
+
+/// Clé sous laquelle [`ScrollArea::show_bar_before`] mémorise « la barre servait-elle ? », d'une
+/// frame à l'autre.
+fn bar_memo_id(id_salt: egui::Id) -> egui::Id {
+    id_salt.with("design-scroll-bar-before")
+}
+
+fn bar_shown_last_frame(ui: &Ui, id_salt: egui::Id) -> bool {
+    ui.data(|data| data.get_temp::<bool>(bar_memo_id(id_salt)))
+        .unwrap_or(false)
+}
+
+/// Peint la poignée au-dessus du contenu et lui donne son geste — `bar_top` est l'ordonnée du HAUT
+/// de la poignée, marge extérieure déjà retirée.
+///
+/// Les proportions sont celles d'`egui` : une poignée longue de la fraction visible du contenu,
+/// posée sur sa course au prorata du défilement. Le geste aussi : glisser la poignée défile,
+/// cliquer le rail ailleurs l'y amène centrée.
+fn paint_bar_before<R>(ui: &mut Ui, output: &egui::scroll_area::ScrollAreaOutput<R>, bar_top: f32) {
+    let rail = egui::Rect::from_min_max(
+        egui::pos2(output.inner_rect.min.x, bar_top),
+        egui::pos2(output.inner_rect.max.x, bar_top + tokens::SCROLLBAR_WIDTH),
+    );
+    let visible = output.inner_rect.width();
+    let content = output.content_size.x;
+    let max_offset = (content - visible).max(0.0);
+    // Jamais plus courte que deux fois son épaisseur : en dessous, la poignée devient un point
+    // qu'on ne peut plus viser.
+    let handle_len = (visible * visible / content).max(2.0 * tokens::SCROLLBAR_WIDTH);
+    let course = (visible - handle_len).max(0.0);
+
+    let response = ui.interact(
+        rail,
+        output.id.with("design-scroll-bar-before"),
+        egui::Sense::click_and_drag(),
+    );
+
+    let offset = output.state.offset.x.clamp(0.0, max_offset);
+    let handle_x = |offset: f32| {
+        rail.min.x
+            + if max_offset > 0.0 {
+                offset / max_offset * course
+            } else {
+                0.0
+            }
+    };
+    let handle_rect = |offset: f32| {
+        egui::Rect::from_min_size(
+            egui::pos2(handle_x(offset), rail.min.y),
+            egui::vec2(handle_len, tokens::SCROLLBAR_WIDTH),
+        )
+    };
+
+    // **La position du POINTEUR, pas le cumul des déltas** — la logique d'`egui` reprise telle
+    // quelle : au premier appui, on retient où dans la poignée on l'a prise (ou, si le clic tombe
+    // à côté, de quoi l'amener centrée) ; ensuite l'offset se recalcule de la position absolue.
+    // Un cumul de `drag_delta` perd tout mouvement arrivé dans la même frame que le relâchement,
+    // ce qui suffit à rendre la barre inerte sous un harnais de test — constaté en capture.
+    let prise_id = output.id.with("design-scroll-bar-prise");
+    let mut nouveau = offset;
+    if let Some(pointeur) = response.interact_pointer_pos() {
+        let prise = ui
+            .data(|data| data.get_temp::<f32>(prise_id))
+            .unwrap_or_else(|| {
+                let handle = handle_rect(offset);
+                let prise = if handle.contains(pointeur) {
+                    pointeur.x - handle.min.x
+                } else {
+                    // Clic dans le rail, hors poignée : elle vient se centrer là.
+                    let centre =
+                        (pointeur.x - handle_len / 2.0).clamp(rail.min.x, rail.max.x - handle_len);
+                    pointeur.x - centre
+                };
+                ui.data_mut(|data| data.insert_temp(prise_id, prise));
+                prise
+            });
+        if course > 0.0 {
+            nouveau =
+                ((pointeur.x - prise - rail.min.x) / course * max_offset).clamp(0.0, max_offset);
+        }
+    } else {
+        ui.data_mut(|data| data.remove::<f32>(prise_id));
+    }
+    if (nouveau - offset).abs() > 0.01 {
+        // `State::store` plutôt qu'un `ScrollArea::horizontal_scroll_offset` posé à la frame
+        // suivante : le défilement appartient à la zone, pas à sa barre — et forcer l'offset à
+        // chaque frame écraserait la molette.
+        let mut state = output.state;
+        state.offset.x = nouveau;
+        state.store(ui.ctx(), output.id);
+        ui.ctx().request_repaint();
+    }
+
+    let tenue = response.hovered() || response.is_pointer_button_down_on();
+    ui.painter().rect_filled(
+        handle_rect(nouveau),
+        egui::CornerRadius::same(tokens::SCROLLBAR_RADIUS),
+        if tenue {
+            tokens::SCROLLBAR_THUMB_ACTIVE
+        } else {
+            tokens::SCROLLBAR_THUMB
+        },
+    );
 }

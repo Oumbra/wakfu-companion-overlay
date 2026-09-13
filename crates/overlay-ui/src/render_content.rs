@@ -402,14 +402,20 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         // du dessin des boutons ») — le carré de contrôle est le premier élément peint, son fond
         // translucide touche donc le bord de la fenêtre. La réserve d'infobulle de 48 px qui
         // s'ajoutait devant est tombée dans le même mouvement (voir
-        // `panels::watchlist::ControlLayout::tooltip_reserve`). Le HAUT ne porte plus que ces 6 px
-        // depuis le soir du même jour : les infobulles s'ouvrent toutes en dessous, la réserve
-        // qu'elles exigeaient là-haut est devenue de la hauteur de fenêtre SOUS la bande (voir
-        // [`WATCHLIST_TOOLTIP_RESERVE`]) et ne décale plus rien.
+        // `panels::watchlist::ControlLayout::tooltip_reserve`).
+        //
+        // **Marge HAUTE nulle elle aussi** depuis le soir du même jour, et pour la même raison
+        // poussée d'un cran : les infobulles s'ouvrent toutes en dessous (leur réserve est passée
+        // sous la bande, voir [`WATCHLIST_TOOLTIP_RESERVE`]), et la barre de défilement est passée
+        // AU-DESSUS des tuiles (`panels::watchlist::strip_scroll_area`) — « il faut juste mettre
+        // la marge nécessaire pour afficher la scrollbar au-dessus [...] laisser un ou deux pixels
+        // au-dessus de la barre de scroll seulement ». Ces deux pixels-là appartiennent à la
+        // bande (`panels::watchlist::STRIP_SCROLLBAR_OUTER_MARGIN`), pas au panneau : quand la
+        // bande tient entière, il n'y a pas de barre, donc rien à dégager.
         OverlayKind::Watchlist => egui::Margin {
             left: 0,
             right: 6,
-            top: 6,
+            top: 0,
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,
