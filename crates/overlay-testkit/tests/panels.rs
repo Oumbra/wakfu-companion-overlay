@@ -1330,11 +1330,17 @@ fn options_garde_de_fermeture_au_clavier() {
 ///
 /// Positions : les tuiles commencent à x = 47 et cadencent à 128 px (118 + gouttière), donc leurs
 /// centres tombent à 106, 234, 362, 490, 618. La ligne du nom de la première rangée est à y ≈ 496.
-fn survole_un_nom(nom_capture: &str, x: f32) {
+fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&str>) {
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     let mut profile = overlay_engine::AlertProfile::default();
     profile.add("Combinaison Lardante", Some(4242));
+    if let Some(nom) = couper {
+        assert!(
+            profile.toggle(nom, None),
+            "« {nom} » n'est pas dans le profil : sa tuile ne peut pas être coupée"
+        );
+    }
 
     let mut options_state = OptionsModalState {
         suivi: Default::default(),
@@ -1377,7 +1383,7 @@ fn survole_un_nom(nom_capture: &str, x: f32) {
             );
         });
     harness.run();
-    harness.hover_at(egui::pos2(x, 496.0));
+    harness.hover_at(egui::pos2(x, y));
     harness.run();
     harness.snapshot(nom_capture);
 }
@@ -1385,14 +1391,14 @@ fn survole_un_nom(nom_capture: &str, x: f32) {
 /// « Pierre d'entourage » ne tient pas dans 108 px : il est élidé, donc son nom entier s'affiche.
 #[test]
 fn options_alertes_infobulle_sur_nom_elide() {
-    survole_un_nom("options_alertes_infobulle_nom_elide", 362.0);
+    survole_l_onglet_alertes("options_alertes_infobulle_nom_elide", 362.0, 496.0, None);
 }
 
 /// « Pierre ultime » tient en entier : pas d'infobulle de nom, seulement celle de la tuile, qui dit
 /// ce que le clic fera.
 #[test]
 fn options_alertes_pas_d_infobulle_sur_nom_entier() {
-    survole_un_nom("options_alertes_infobulle_nom_entier", 618.0);
+    survole_l_onglet_alertes("options_alertes_infobulle_nom_entier", 618.0, 496.0, None);
 }
 
 /// **Le champ d'ajout, exercé de bout en bout** — retour utilisateur du 2026-09-12 : « j'ai essayé
@@ -1484,6 +1490,16 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
         "le champ n'a pas reçu la frappe — il n'avait donc pas le focus après le clic"
     );
     harness.snapshot("options_alertes_champ_deplie");
+
+    // **L'infobulle d'un bouton de filtre, au-dessus du panneau flottant.** Un passage précédent
+    // avait laissé `on_hover_text` ici, en concluant d'une planche muette que le composant du
+    // design system ne savait pas sortir d'une couche déjà en avant-plan. C'était faux : les deux
+    // passent par le même `egui::Tooltip::for_enabled` (voir `Response::on_hover_ui` dans egui),
+    // seul l'alignement diffère — et c'est lui qui envoyait le texte hors du cadre capturé. Cette
+    // capture le prouve dans les deux sens : l'infobulle sort, et elle sort AU-DESSUS.
+    harness.hover_at(egui::pos2(68.0, 431.0));
+    harness.run();
+    harness.snapshot("options_alertes_infobulle_filtre");
 
     // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
     // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
@@ -1727,6 +1743,7 @@ fn capture_onglet_suivi(
     mode: overlay_ui::panels::suivi_tab::AddMode,
     select_mode: bool,
     alt: bool,
+    survol: Option<egui::Pos2>,
 ) {
     use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
     use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
@@ -1834,6 +1851,10 @@ fn capture_onglet_suivi(
         harness.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
         harness.run();
     }
+    if let Some(point) = survol {
+        harness.hover_at(point);
+        harness.run();
+    }
     harness.snapshot(nom);
 }
 
@@ -1849,6 +1870,7 @@ fn options_onglet_suivi_incremental() {
         overlay_ui::panels::suivi_tab::AddMode::Up,
         false,
         false,
+        None,
     );
 }
 
@@ -1861,6 +1883,7 @@ fn options_onglet_suivi_decompte() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
+        None,
     );
 }
 
@@ -1873,6 +1896,7 @@ fn options_onglet_suivi_selection_multiple() {
         overlay_ui::panels::suivi_tab::AddMode::Up,
         true,
         false,
+        None,
     );
 }
 
@@ -1890,7 +1914,89 @@ fn options_onglet_suivi_decompte_alt() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         true,
+        None,
     );
+}
+
+/// **L'infobulle d'un bouton de la modale se pose AU-DESSUS de lui** — retour utilisateur du
+/// 2026-09-13, capture à l'appui : celle d'« Incrémental » sortait *sous* le bouton.
+///
+/// La cause n'était pas dans ce panneau mais dans `design::button`, qui posait son infobulle avec
+/// `Response::on_hover_text` : cet appel aligne en `RectAlign::BOTTOM_START` (voir `Popup::new`
+/// dans egui) et laisse au libellé le gris de `Visuals::widgets.noninteractive`. Sept composants
+/// du design system faisaient pareil ; les panneaux Combat et Suivi, eux, appelaient déjà
+/// `design::tooltip` — d'où deux rendus d'infobulle dans la même application, exactement ce que
+/// l'utilisateur décrivait (« le texte n'est pas en blanc et le fond est un peu trop translucide »).
+///
+/// Cette capture est le garde-fou de la règle : **au-dessus, et en blanc**, dans la modale comme
+/// ailleurs.
+#[test]
+fn options_suivi_infobulle_de_bouton_au_dessus() {
+    capture_onglet_suivi(
+        "options_suivi_infobulle_mode",
+        overlay_ui::panels::suivi_tab::AddMode::Down,
+        false,
+        false,
+        Some(egui::pos2(252.0, 252.0)),
+    );
+}
+
+/// **Un badge de quantité dit ce qu'il ajoute, pas comment faire l'inverse.**
+///
+/// Son infobulle portait « Ajouter 50 à la quantité — Alt pour retirer » ; la moitié après le tiret
+/// est partie le 2026-09-13 sur retour utilisateur. Elle ne manque à personne : la mention
+/// « (Alt : retirer) » est écrite en toutes lettres au début de la même ligne, et les cinq badges
+/// basculent visiblement en « −10 … −1000 » dès qu'`Alt` est enfoncé (voir
+/// [`options_onglet_suivi_decompte_alt`]).
+#[test]
+fn options_suivi_infobulle_de_badge_sans_mention_alt() {
+    capture_onglet_suivi(
+        "options_suivi_infobulle_badge",
+        overlay_ui::panels::suivi_tab::AddMode::Down,
+        false,
+        false,
+        Some(egui::pos2(240.0, 298.0)),
+    );
+}
+
+/// **Une tuile suivie dit son nom, et rien d'autre.**
+///
+/// Elle disait « Bois de Frêne — décompte depuis 1000 ». Le mode est parti le 2026-09-13 : il se
+/// lit déjà sur la tuile (la cible y est peinte, `/1000`), et l'utilisateur vient de le choisir
+/// dans cette même modale. Le nom, lui, n'est écrit nulle part ailleurs sur un emplacement de
+/// 64 px — c'est la seule chose que l'infobulle apporte.
+#[test]
+fn options_suivi_infobulle_de_tuile_sans_mode() {
+    capture_onglet_suivi(
+        "options_suivi_infobulle_tuile",
+        overlay_ui::panels::suivi_tab::AddMode::Down,
+        false,
+        false,
+        Some(egui::pos2(79.0, 440.0)),
+    );
+}
+
+/// **Une tuile au son coupé dit l'inverse : « Cliquer pour rétablir ».**
+///
+/// Le pendant de [`options_alertes_pas_d_infobulle_sur_nom_entier`], et ce qui reste de l'ancien
+/// libellé une fois retiré ce que la tuile montre déjà. Il disait « Influence III — son coupé,
+/// cliquer pour rétablir » : le nom est écrit sous l'icône, l'état est peint dessus (haut-parleur
+/// barré), seule l'action manquait. C'est donc la seule chose qu'il reste.
+#[test]
+fn options_alertes_infobulle_d_une_tuile_coupee() {
+    survole_l_onglet_alertes(
+        "options_alertes_infobulle_tuile_coupee",
+        106.0,
+        565.0,
+        Some("Influence III"),
+    );
+}
+
+/// **Le bouton de test du son, dans l'onglet Alertes** — même bascule que les boutons du Suivi, sur
+/// un `design::icon_button` cette fois : son infobulle sortait sous le glyphe.
+#[test]
+fn options_alertes_infobulle_du_test_de_son_au_dessus() {
+    survole_l_onglet_alertes("options_alertes_infobulle_test_son", 240.0, 252.0, None);
 }
 
 /// **Le champ d'ajout du Suivi, exercé de bout en bout — objets ET monstres.**

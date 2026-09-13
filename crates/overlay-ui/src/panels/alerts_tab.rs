@@ -683,7 +683,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             },
         );
         let zone = zone.on_hover_cursor(egui::CursorIcon::PointingHand);
-        zone.clone().on_hover_text("Retirer de vos alertes");
+        design::tooltip(&zone).text("Retirer de vos alertes");
         if zone.clicked() {
             clic = TileClick::Remove;
         }
@@ -706,15 +706,11 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|p| name_rect.contains(p));
     if !sur_un_nom_coupe {
-        design::tooltip(&response).text(format!(
-            "{} — {}",
-            item.name,
-            if item.enabled {
-                "son activé, cliquer pour couper"
-            } else {
-                "son coupé, cliquer pour rétablir"
-            }
-        ));
+        design::tooltip(&response).text(if item.enabled {
+            "Cliquer pour couper"
+        } else {
+            "Cliquer pour rétablir"
+        });
     }
     if response.clicked() {
         clic = TileClick::Toggle;

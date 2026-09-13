@@ -1133,10 +1133,33 @@ pub const SLIDER_TICK_BITE: f32 = 1.0;
 /// appliqué GLOBALEMENT (`egui::Visuals::window_fill`, voir `main.rs`/`style.rs`) plutôt que
 /// redéfini à chaque tooltip — `window_fill`/`window_stroke`/`popup_shadow`/`menu_corner_radius`/
 /// `menu_margin` ne servent QUE de socle aux tooltips dans cette UI (aucun `egui::Window` ni
-/// menu/combobox ailleurs), un seul réglage couvre donc TOUS les tooltips de l'appli — les deux
-/// enveloppes maison (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`) ET les
-/// `on_hover_text` ponctuels (`render_content`, `watchlist::toast_card`).
-pub const TOOLTIP_BG_FILL: Color32 = Color32::from_rgba_unmultiplied_const(0x15, 0x17, 0x1C, 209);
+/// menu/combobox ailleurs), un seul réglage couvre donc TOUS les tooltips de l'appli. Les deux
+/// enveloppes maison (`combat::show_tooltip_above`, `watchlist::show_tooltip_left`) ont été
+/// remplacées par `components::tooltip` le 2026-09-11, et les derniers `on_hover_text` ponctuels le
+/// 2026-09-13 : il n'existe plus **aucun** chemin d'infobulle qui contourne le composant.
+///
+/// **Alpha remonté de 209 à 240 le 2026-09-13**, sur retour utilisateur (« le fond est un peu trop
+/// translucide [...] un tout petit peu moins »), et c'est un écart ASSUMÉ à la mesure ci-dessus,
+/// pas une correction de celle-ci : `a≈0,82` reste ce que la capture du jeu donne. Ce qu'elle ne
+/// dit pas, c'est sur QUOI l'infobulle se pose ici. Le jeu la pose sur son propre décor ; cet
+/// overlay la pose aussi par-dessus ses propres écrans, où ce qui passe au travers est du TEXTE —
+/// et un titre de section lu en filigrane derrière une infobulle est précisément ce que la planche
+/// `options_suivi_infobulle_tuile` montrait encore à 232.
+///
+/// Valeur choisie sur ce résidu, pas à l'œil. La composition est linéaire, donc ce qui reste
+/// visible d'un texte clair (luminance ~230) sur une zone vide (~30) vaut `(1−a)·200` :
+///
+/// | alpha | opacité | écart résiduel |
+/// | --- | --- | --- |
+/// | 209 | 82 % | 36 niveaux — le texte derrière se lit |
+/// | 232 | 91 % | 18 niveaux — il se devine encore |
+/// | **240** | **94 %** | **12 niveaux** — il ne se distingue plus du fond |
+/// | 250 | 98 % | 4 niveaux — indiscernable, mais l'infobulle n'est plus translucide |
+///
+/// Le même retour demandait dans la même phrase un texte « plus blanc » : c'était l'autre moitié du
+/// même problème de contraste, et elle se règle sans toucher à ce jeton (voir `TOOLTIP_TEXT` — la
+/// moitié des composants la manquaient faute de passer par le composant d'infobulle).
+pub const TOOLTIP_BG_FILL: Color32 = Color32::from_rgba_unmultiplied_const(0x15, 0x17, 0x1C, 240);
 
 /// Couleur du texte d'un tooltip du design system — blanc pur, mesuré par échantillonnage pixel sur
 /// les quatre premières captures de référence (pics à `(255,255,255)`) : même démarche déjà
