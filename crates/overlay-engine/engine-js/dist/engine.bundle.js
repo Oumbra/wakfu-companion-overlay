@@ -43,6 +43,7 @@
   var ANNOUNCE_TO_INSTANTIATION_WINDOW_MS = 50;
   var TRANSFORM_RE = /^(.+?): transformée? en (.+?)\s*!?$/;
   var DEFEAT_MARKER_RE = /^Vous avez été vaincu\(e\) !$/;
+  var TURN_ENDED_RE = /^(\d+) secondes? reportées? pour le tour suivant\.?$/;
   var OCCUPATION_RE = /^Lancement de l'occupation pour le joueur (.+)$/;
   var FIGHT_END_RE = /^\[FIGHT\] End fight with id (-?\d+)$/;
   var COMBAT_START_MARKER = "CREATION DU COMBAT";
@@ -68,6 +69,7 @@
     "Stasis"
   ]);
   var DEDUPE_WINDOW_MS = 1e3;
+  var SPELL_CAST_DEDUPE_WINDOW_MS = 600;
   var DEDUPE_EXEMPT_KINDS = /* @__PURE__ */ new Set(["loot", "fighter-joined"]);
   function createFightParseState() {
     return {
@@ -422,6 +424,15 @@
       if (DEFEAT_MARKER_RE.test(content)) {
         return { kind: "combat-defeat-marker", time, fightId: this.resolveCurrentFightId() };
       }
+      const turnEnded = TURN_ENDED_RE.exec(content);
+      if (turnEnded) {
+        return {
+          kind: "turn-ended",
+          time,
+          carriedSeconds: Number(turnEnded[1]),
+          fightId: this.resolveCurrentFightId()
+        };
+      }
       const ko = KO_RE.exec(content);
       if (ko) {
         const name = ko[1].trim();
@@ -655,7 +666,8 @@
       const previous = this.recentSignatures.get(signature);
       this.recentSignatures.set(signature, nowMs);
       if (this.recentSignatures.size > 500) this.pruneSignatures(nowMs);
-      return previous !== void 0 && nowMs - previous >= 0 && nowMs - previous <= DEDUPE_WINDOW_MS;
+      const windowMs = entry.kind === "spell-cast" ? SPELL_CAST_DEDUPE_WINDOW_MS : DEDUPE_WINDOW_MS;
+      return previous !== void 0 && nowMs - previous >= 0 && nowMs - previous <= windowMs;
     }
     pruneSignatures(nowMs) {
       for (const [key, seenAt] of this.recentSignatures) {

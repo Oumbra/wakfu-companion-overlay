@@ -120,6 +120,16 @@ export interface CombatDefeatMarkerEntry {
   fightId: number | null;
 }
 
+/** Fin du tour d'un personnage du joueur ("N secondes reportées pour le tour suivant.") —
+ * AJOUT LOCAL à l'overlay, voir TURN_ENDED_RE dans log-parser.ts. */
+export interface TurnEndedEntry {
+  kind: 'turn-ended';
+  time: string;
+  /** Secondes non consommées, reportées sur le tour suivant. */
+  carriedSeconds: number;
+  fightId: number | null;
+}
+
 export interface CombatStartEntry {
   kind: 'combat-start';
   time: string;
@@ -233,6 +243,7 @@ export type LogEntry =
   | EnemyDefeatedEntry
   | EnemyFledEntry
   | CombatDefeatMarkerEntry
+  | TurnEndedEntry
   | CombatStartEntry
   | CombatEndEntry
   | LootEntry
