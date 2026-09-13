@@ -405,15 +405,14 @@ fn main() {
         ..Default::default()
     });
     h.run();
-    // `Event::Key` avec le modificateur : c'est ce que le harnais transmet à egui, et c'est ce
-    // que `i.modifiers.alt` lit dans le vrai code — pas un drapeau de planche.
-    h.event(egui::Event::Key {
-        key: egui::Key::A,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers::ALT,
-    });
+    // **`ModifiersChanged`, et rien d'autre.** C'est le SEUL événement dont egui tire
+    // `InputState::modifiers` (`input_state/mod.rs`) — celui que `i.modifiers.alt` lit dans le vrai
+    // code, et celui qu'`egui-winit` émet quand la touche est enfoncée ou relâchée. Un
+    // `Event::Key { modifiers: ALT }` porte bien le modificateur, mais **seulement pour cette
+    // touche-là** : il ne change pas l'état global, et cette planche sortait donc identique à la
+    // précédente, badges positifs compris. Défaut de planche relevé par l'utilisateur le
+    // 2026-09-13 — le code, lui, était juste.
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
     h.run();
     ecrire(&mut h, "suivi_decompte_alt");
 

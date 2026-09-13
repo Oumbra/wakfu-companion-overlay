@@ -1726,6 +1726,7 @@ fn capture_onglet_suivi(
     nom: &str,
     mode: overlay_ui::panels::suivi_tab::AddMode,
     select_mode: bool,
+    alt: bool,
 ) {
     use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
     use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
@@ -1823,6 +1824,16 @@ fn capture_onglet_suivi(
             );
         });
     harness.run();
+    if alt {
+        // **`ModifiersChanged`, et rien d'autre.** C'est le seul événement dont egui tire
+        // `InputState::modifiers`, celui que la ligne « Quantité » lit pour inverser ses badges.
+        // Un `Event::Key { modifiers: ALT }` ne porte le modificateur que pour CETTE touche : il ne
+        // change pas l'état global, et une planche qui l'employait sortait identique à celle sans
+        // `Alt` (relevé par l'utilisateur le 2026-09-13). Cette capture est là pour que l'écart
+        // entre les deux états ne puisse plus disparaître en silence.
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+        harness.run();
+    }
     harness.snapshot(nom);
 }
 
@@ -1837,6 +1848,7 @@ fn options_onglet_suivi_incremental() {
         "options_suivi_incremental",
         overlay_ui::panels::suivi_tab::AddMode::Up,
         false,
+        false,
     );
 }
 
@@ -1848,6 +1860,7 @@ fn options_onglet_suivi_decompte() {
         "options_suivi_decompte",
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
+        false,
     );
 }
 
@@ -1858,6 +1871,24 @@ fn options_onglet_suivi_selection_multiple() {
     capture_onglet_suivi(
         "options_suivi_selection",
         overlay_ui::panels::suivi_tab::AddMode::Up,
+        true,
+        false,
+    );
+}
+
+/// **`Alt` maintenu : les cinq badges de quantité retirent au lieu d'ajouter.**
+///
+/// Ils passent en or et affichent `−10 … −1000`, et la mention « (Alt : retirer) » s'allume avec
+/// eux. C'est la seule chose de cet écran qui dépende d'un modificateur clavier, et elle était
+/// invisible sur les planches jusqu'au 2026-09-13 — non parce que le code était faux, mais parce
+/// que la planche n'enfonçait pas la touche par le bon événement. Cette capture rend l'écart
+/// vérifiable à chaque exécution.
+#[test]
+fn options_onglet_suivi_decompte_alt() {
+    capture_onglet_suivi(
+        "options_suivi_decompte_alt",
+        overlay_ui::panels::suivi_tab::AddMode::Down,
+        false,
         true,
     );
 }
