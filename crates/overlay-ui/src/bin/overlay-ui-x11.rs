@@ -70,6 +70,7 @@ mod linux_main {
     use overlay_ui::panels::combat::CombatSide;
     use overlay_ui::panels::combat_frame::CombatFrame;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+    use overlay_ui::panels::suivi_tab::SuiviAvailability;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -586,9 +587,19 @@ mod linux_main {
                 // fin ou une liste qu'on ne pourrait pas enregistrer.
                 alerts_draft: None,
                 alerts_availability: AlertsAvailability::NoAccount,
+                // **L'onglet « Suivi » s'ouvre quand même, sur une liste vide.** Il n'a pas d'état
+                // « sans compte » à peindre (l'overlay ne s'adresse qu'à des utilisateurs
+                // connectés, décision du 2026-09-13) et un rouage tournerait ici sans fin, aucun
+                // thread Auth ne tournant dans ce binaire. Une liste vide et modifiable est la
+                // seule forme utile : elle permet d'exercer l'écran en développement, et ce que
+                // l'on y compose n'est simplement écrit nulle part — comme le reste de ce binaire.
+                suivi: Default::default(),
+                suivi_draft: Some(Vec::new()),
+                suivi_availability: SuiviAvailability::Ready,
                 initial: options_modal::OptionsInitial {
                     path: self.log_path.display().to_string(),
                     alerts: None,
+                    suivi: Some(Vec::new()),
                 },
                 pending_close: false,
             });
@@ -858,6 +869,15 @@ mod linux_main {
                         // tout l'intérêt du bouton : entendre ce qu'on entendra en jeu.
                         OptionsModalAction::TestAlertSound => {
                             overlay_ui::alert_sound::play_loot_alert()
+                        }
+                        // Ce binaire n'a pas de réseau (voir sa doc de module) : la fenêtre de
+                        // recette reste sur son rouage, ce qui est la vérité — les ingrédients
+                        // n'arriveront pas.
+                        OptionsModalAction::ResolveRecipe(id) => {
+                            tracing::info!(
+                                item_id = id,
+                                "[options] recette non résolue (binaire X11 sans réseau)"
+                            );
                         }
                     }
                     overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))

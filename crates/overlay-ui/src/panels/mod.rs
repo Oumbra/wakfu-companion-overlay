@@ -11,4 +11,6 @@ pub mod combat_frame;
 pub mod combat_frame_scroll;
 pub mod combat_spell_block;
 pub mod options_modal;
+pub mod recipe_dialog;
+pub mod suivi_tab;
 pub mod watchlist;

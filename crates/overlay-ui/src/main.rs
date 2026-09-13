@@ -56,6 +56,7 @@ use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -420,6 +421,14 @@ struct App {
     /// (2026-09-08, §9 du plan). Un seul à la fois (une seule modale Options peut être ouverte),
     /// sondé sans bloquer à chaque `about_to_wait`.
     pending_dialog: Option<mpsc::Receiver<Option<PathBuf>>>,
+    /// Résolution des ingrédients d'une recette en vol, et la fenêtre Options qui l'attend — voir
+    /// `App::start_recipe_resolution`. Sondée à chaque `about_to_wait`, comme le dialogue de
+    /// fichier : l'appel réseau enchaîne un aller-retour par niveau de recette et n'a aucune raison
+    /// de geler le rendu.
+    pending_recipe: Option<(
+        WindowId,
+        mpsc::Receiver<Vec<overlay_engine::RecipeIngredient>>,
+    )>,
 }
 
 /// Écrit une durée d'alerte dans le champ de l'onglet « Alertes » — sans décimale inutile, et à la
@@ -539,6 +548,7 @@ impl App {
             banner_printed: false,
             last_foreground_heartbeat: None,
             pending_dialog: None,
+            pending_recipe: None,
         }
     }
 
@@ -1260,6 +1270,50 @@ impl App {
             }
             None => (None, alerts_tab::AlertsAvailability::NoAccount),
         };
+        // **Le brouillon de suivi**, même principe que celui des alertes : une copie des entrées
+        // du compte, prise ici, modifiée librement, et renvoyée seulement à « Valider ». Les
+        // compteurs qu'elle porte sont indicatifs — la validation les recalcule depuis l'état
+        // vivant du moteur (voir `WatchlistState::apply_definitions`).
+        let suivi_snapshot = self.watchlist.load();
+        let (suivi_draft, suivi_availability) = if suivi_snapshot.is_empty()
+            && !matches!(**self.auth_status.load(), AuthStatus::Connected)
+        {
+            // Compte pas encore lié et rien en mémoire : les réglages sont en route. L'overlay ne
+            // s'adresse qu'à des utilisateurs connectés (décision du 2026-09-13), il n'y a donc pas
+            // d'état « sans compte » à peindre — seulement une attente.
+            (None, suivi_tab::SuiviAvailability::Loading)
+        } else {
+            (
+                Some(suivi_snapshot.as_ref().clone()),
+                suivi_tab::SuiviAvailability::Ready,
+            )
+        };
+
+        // **Le compte est relu à l'OUVERTURE de la fenêtre**, pas seulement au démarrage
+        // (2026-09-13). Sans ça, une liste modifiée depuis le site n'arrivait qu'au prochain
+        // lancement — et le brouillon partait d'un état périmé qu'il écrasait à la validation, la
+        // clé `watchlist` étant réécrite en entier. Ouvrir l'écran d'édition est le bon moment pour
+        // repartir de l'état réel ; la réponse arrive par `ApplySettings` comme toute autre, et la
+        // fenêtre la reprendra à sa prochaine ouverture. Sur un thread, jamais sur la boucle winit
+        // (§7.3 du plan).
+        let settings_tx = self.settings_tx.clone();
+        thread::spawn(move || {
+            let Some(token) = overlay_sync::token_store::load_token() else {
+                return;
+            };
+            match overlay_sync::client::fetch_settings(&token) {
+                Ok(settings) => {
+                    tracing::info!(
+                        entry_count = settings.watchlist.len(),
+                        "[options] réglages relus à l'ouverture de la fenêtre"
+                    );
+                    let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                }
+                // Best-effort : la fenêtre s'ouvre de toute façon, sur ce que l'overlay a déjà.
+                Err(err) => tracing::warn!(%err, "[options] relecture des réglages impossible"),
+            }
+        });
+
         overlay.options_state = Some(OptionsModalState {
             path_input: self.log_path.display().to_string(),
             error: None,
@@ -1278,10 +1332,14 @@ impl App {
             initial: options_modal::OptionsInitial {
                 path: self.log_path.display().to_string(),
                 alerts: alerts_draft.clone(),
+                suivi: suivi_draft.clone(),
             },
             pending_close: false,
             alerts_draft,
             alerts_availability,
+            suivi: Default::default(),
+            suivi_draft,
+            suivi_availability,
         });
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -1368,6 +1426,70 @@ impl App {
         });
     }
 
+    /// **« Valider » de l'onglet « Suivi »** — applique les définitions du brouillon et les réplique
+    /// au compte.
+    ///
+    /// Deux précautions, toutes deux issues de la revue de la maquette (2026-09-13) :
+    ///
+    /// 1. **Seules les DÉFINITIONS partent** (nom, genre, mode, cible). Les compteurs du brouillon
+    ///    sont ignorés par le moteur : il a les siens, et un objet ramassé pendant que la fenêtre
+    ///    était ouverte ne doit pas être annulé par la validation (voir
+    ///    `WatchlistState::apply_definitions`).
+    /// 2. **La réplication passe par le chemin habituel des compteurs** — le moteur se marque
+    ///    `dirty`, son prochain `drain_watchlist_sync` part vers `SyncCommand::SyncWatchlist`. Rien
+    ///    de spécial à écrire ici : la liste qui monte au compte est celle du moteur, compteurs
+    ///    vivants compris, jamais celle du brouillon.
+    fn commit_suivi(&mut self, options_window_id: WindowId) {
+        let Some(state) = self
+            .windows
+            .get(&options_window_id)
+            .and_then(|overlay| overlay.options_state.as_ref())
+        else {
+            return;
+        };
+        let Some(draft) = state.suivi_draft.clone() else {
+            return;
+        };
+        // Rien n'a bougé : ne pas réécrire une clé pour rien, et surtout ne pas repousser son
+        // horodatage — le « dernier écrivain gagne » du serveur ferait alors perdre une
+        // modification faite depuis le site entre-temps.
+        if state.initial.suivi.as_ref() == Some(&draft) {
+            return;
+        }
+        tracing::info!(
+            entry_count = draft.len(),
+            "[options] liste de suivi validée"
+        );
+        let _ = self
+            .settings_tx
+            .send(EngineCommand::SetWatchlistDefinitions(draft));
+    }
+
+    /// Résout les ingrédients d'une recette pour la fenêtre de l'onglet « Suivi » — sur un thread,
+    /// jamais sur la boucle winit (§7.3 du plan).
+    ///
+    /// Un aller-retour par NIVEAU de recette (`GET /api/v1/items/{id}`) : c'est pourquoi la fenêtre
+    /// s'ouvre avant la réponse et montre un rouage en attendant.
+    fn start_recipe_resolution(&mut self, options_window_id: WindowId, item_id: i64) {
+        let (tx, rx) = mpsc::channel();
+        self.pending_recipe = Some((options_window_id, rx));
+        let catalog = Arc::clone(&self.catalog);
+        thread::Builder::new()
+            .name("overlay-ui-recipe".into())
+            .spawn(move || {
+                let index = catalog.load();
+                let mut fetch = |id: i64| overlay_sync::client::fetch_item_detail(id).ok();
+                let ingredients = overlay_engine::resolve_recipe(item_id, &index, &mut fetch);
+                tracing::info!(
+                    item_id,
+                    ingredient_count = ingredients.len(),
+                    "[options] recette résolue"
+                );
+                let _ = tx.send(ingredients);
+            })
+            .ok();
+    }
+
     fn validate_and_apply_log_path(&mut self, options_window_id: WindowId, raw: String) {
         let candidate = PathBuf::from(raw.trim());
         match discovery::validate_log_path(&candidate) {
@@ -1399,6 +1521,7 @@ impl App {
                 // passe — quand elle échoue, la fenêtre reste ouverte et rien n'est pris en compte,
                 // alertes comprises.
                 self.commit_alerts(options_window_id);
+                self.commit_suivi(options_window_id);
                 self.windows.remove(&options_window_id);
             }
             Err(err) => {
@@ -1424,6 +1547,8 @@ enum PostRedraw {
     CloseOptions,
     BrowseOptions,
     ValidateOptions(String),
+    /// Résoudre les ingrédients de cet objet pour la fenêtre de recette de l'onglet « Suivi ».
+    ResolveRecipe(i64),
 }
 
 impl App {
@@ -1551,6 +1676,7 @@ impl App {
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
             OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
             OptionsModalAction::Validate(raw) => post_redraw = PostRedraw::ValidateOptions(raw),
+            OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -1569,6 +1695,7 @@ impl App {
             }
             PostRedraw::BrowseOptions => self.start_file_dialog(),
             PostRedraw::ValidateOptions(raw) => self.validate_and_apply_log_path(id, raw),
+            PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
         }
     }
 }
@@ -1754,6 +1881,29 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => self.pending_dialog = None,
+            }
+        }
+
+        // Ingrédients d'une recette, même sondage non bloquant — voir `start_recipe_resolution`.
+        // Un thread mort (`Disconnected`) laisse la fenêtre sur son rouage plutôt que d'afficher
+        // une liste vide, qui se lirait comme « cette recette n'a pas d'ingrédient » ; fermer la
+        // fenêtre annule de toute façon la demande.
+        if let Some((window_id, rx)) = &self.pending_recipe {
+            let window_id = *window_id;
+            match rx.try_recv() {
+                Ok(ingredients) => {
+                    self.pending_recipe = None;
+                    if let Some(overlay) = self.windows.get_mut(&window_id) {
+                        if let Some(state) = &mut overlay.options_state {
+                            if let Some(dialogue) = state.suivi.recipe.as_mut() {
+                                dialogue.ingredients = Some(ingredients);
+                            }
+                        }
+                        overlay.next_redraw_at = Some(std::time::Instant::now());
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => self.pending_recipe = None,
             }
         }
 
