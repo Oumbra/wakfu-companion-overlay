@@ -1585,6 +1585,69 @@ fn galerie_de_la_confirmation() {
     harness.snapshot("design_gallery_confirm");
 }
 
+/// La tuile à légende — sa propre planche, la principale ayant atteint le plafond de 8192 px.
+///
+/// Trois états forcés côte à côte, une légende longue, un contenu élidé, et une grille de quatre
+/// par rangée comme l'onglet Chat la pose — la géométrie qui a fait naître le composant.
+#[test]
+fn galerie_de_la_tuile_a_legende() {
+    use overlay_ui::design::LegendTileState;
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(760.0, 330.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 8.0);
+                    heading(
+                        ui,
+                        "Tuile à légende — trois états",
+                        "Le cadre des champs du jeu, la légende sur la bordure haute, le contenu au centre. Survolée : le voile des tuiles d'Alertes ; la croix, elle, reste au panneau.",
+                    );
+                    ui.horizontal(|ui| {
+                        for (state, legend, text) in [
+                            (LegendTileState::Idle, "Commerce", "gelano"),
+                            (LegendTileState::Hovered, "Tous les canaux", "donjon"),
+                            (LegendTileState::Disabled, "Recrutement", "pvm"),
+                        ] {
+                            ui.add(
+                                design::legend_tile(legend, text)
+                                    .width(160.0)
+                                    .preview_state(state)
+                                    .log_name(format!("galerie.tuile.{text}")),
+                            );
+                        }
+                    });
+                    heading(
+                        ui,
+                        "Quatre par rangée, contenu élidé",
+                        "La largeur d'une colonne de l'onglet Chat. Un mot trop long finit en ellipse, jamais rogné ; une légende trop longue s'arrête avant le bord.",
+                    );
+                    let width = (ui.available_width() - 12.0 * 3.0) / 4.0;
+                    ui.horizontal(|ui| {
+                        for (legend, text) in [
+                            ("Guilde", "wa wabbit"),
+                            ("Communauté", "mise à jour"),
+                            ("Commerce", "archiemblème chuchoteur chachatophile"),
+                            ("Une légende vraiment trop longue", "x"),
+                        ] {
+                            ui.add(
+                                design::legend_tile(legend, text)
+                                    .width(width)
+                                    .log_name(format!("galerie.tuile.{text}")),
+                            );
+                        }
+                    });
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_legend_tile");
+}
+
 /// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
 /// (comme `select` déplié), d'où les espaces réservés sous chaque cas.
 ///
