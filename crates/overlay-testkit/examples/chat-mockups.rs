@@ -472,12 +472,10 @@ fn add_row(ui: &mut egui::Ui, scope: &mut Scope, input: &mut String, width: f32)
                 .log_name("chat.mot"),
         );
         // **Le bouton est ancré au bord droit, dans un enfant en sens inverse**, plutôt qu'ajouté
-        // à la suite : `design::input` pose sa zone d'édition par `ui.scope_builder` sur un
-        // rectangle plus court que le champ (marges et place de la croix d'effacement déduites), et
-        // un scope avance le curseur de la rangée à la fin de CE rectangle, pas du champ — le
-        // bouton suivant chevauchait le champ (mesuré sur la v2 : bouton à 592 pour un champ
-        // allant jusqu'à 609). Ancré au bord, il ne dépend plus du curseur. Le défaut est celui
-        // du composant, à corriger là-bas ; ici on le contourne.
+        // à la suite : sa marge droite doit valoir la marge gauche du sélecteur quelle que soit la
+        // largeur des deux autres contrôles, et un ancrage le dit mieux qu'une soustraction. (C'est
+        // aussi cette ligne qui a révélé, le 2026-09-13, que `design::input` faisait reculer le
+        // curseur de la rangée — corrigé dans le composant depuis, voir `tests/input_row.rs`.)
         let mut right = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(row)

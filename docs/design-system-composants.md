@@ -219,6 +219,25 @@ de qui vient de taper.
 **Remplace** : le champ repeint à la main dans `panels::options_modal`, dont les trois constantes
 locales étaient toutes fausses (fond `#1C1E23`, bord 1px, rayon 2, valeur blanche).
 
+### Correctif du 2026-09-13 : le champ ne déplace plus le curseur de son appelant
+
+Le `TextEdit` était posé par `ui.scope_builder` sur la zone de texte — plus courte que le champ des
+marges, de la croix d'effacement et de l'icône de tête. Un scope avance le curseur du `Ui` parent
+jusqu'à la fin de ce rectangle, pas du champ : dans une rangée horizontale, le widget suivant se
+posait **21 px trop à gauche** sur un champ `clearable` (mesuré : bouton à 367 pour un champ allant
+jusqu'à 388) ; dans une pile verticale, tout ce qui suivait un champ était **4 px trop haut**. Les
+onglets Suivi et Alertes de la fenêtre Options, et la galerie, portaient ce décalage sans que
+personne ne l'ait vu — il a fallu un bouton posé juste après un champ (maquettes de l'onglet Chat,
+`crates/overlay-testkit/examples/chat-mockups.rs`) pour qu'il devienne un chevauchement.
+
+Le `TextEdit` vit maintenant dans un **enfant** (`ui.new_child`), qui a son propre curseur : la
+place du champ, c'est `allocate_exact_size` qui l'a prise, et elle seule. Même idiome que
+`panels::alerts_tab::alert_item` (« `ui.put` dans un ENFANT, jamais sur le `ui` de la rangée »).
+Test de géométrie : `crates/overlay-testkit/tests/input_row.rs` (champ nu, effaçable, à loupe et
+croix). Conséquence sur les captures : tout ce qui suit un champ a descendu de 4 px, et « sec. »
+après le champ de durée d'Alertes a reculé de 7 px vers la droite — les 24 snapshots concernés ont
+été régénérés, aucun jeton d'espacement n'a bougé.
+
 ### La barre de recherche : `InputSize::Search` et `clearable` (2026-09-12)
 
 Retour utilisateur sur le champ d'ajout d'alerte, avec les deux assets détourés du jeu à l'appui
