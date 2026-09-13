@@ -163,9 +163,14 @@ pub struct FighterDamage {
     /// combattant (voir `SessionState::apply`, cas `SpellCast`, et `FightWorking::
     /// register_fight_turn` : c'est le changement d'acteur qui signale un nouveau tour, jamais un
     /// compteur) — aucun historique au-delà du tour courant, décision utilisateur explicite.
-    /// Alimenté pour les ALLIÉS seulement (un lanceur ennemi ne touche à rien, le bloc ne les
-    /// affiche jamais) ; borné à `MAX_LAST_TURN_CASTS`. `#[serde(default)]` même raison que
-    /// `xp_gained` (champ ajouté après coup, fichiers `fight-*.json` antérieurs encore lisibles).
+    /// Alimenté pour TOUT combattant connu du combat, allié comme ennemi (les ennemis depuis le
+    /// 13 sept. 2026 : la vue Ennemis a son propre bloc, voir `last_enemy_caster`) ; borné à
+    /// `MAX_LAST_TURN_CASTS`. Limite héritée de `register_fight_turn` : deux instances HOMONYMES
+    /// (deux Grokoko) qui jouent l'une après l'autre sans autre acteur entre elles sont fusionnées
+    /// sur un seul siège — les sorts de la seconde s'ajoutent à la liste de la première, rien dans
+    /// le log ne permet de les distinguer (voir `resolve_next_actor`, test `deux_homonymes_
+    /// consecutifs_sont_fusionnes_sur_un_siege`). `#[serde(default)]` même raison que `xp_gained`
+    /// (champ ajouté après coup, fichiers `fight-*.json` antérieurs encore lisibles).
     #[serde(default)]
     pub last_turn_casts: Vec<SpellCastRecord>,
     /// Numéro du tour (`FightWorking::turn_count`, démarre à 1) auquel `last_turn_casts` se
@@ -173,6 +178,15 @@ pub struct FighterDamage {
     /// (jamais utilisé pour décider d'une remise à zéro, voir `last_turn_casts`).
     #[serde(default)]
     pub last_turn: i64,
+    /// `breed` BRUT de la ligne de jointure `[_FL_]` (voir `LogEntry::FighterJoined::breed`) — pour
+    /// un ennemi, c'est l'identifiant du monstre, la clé du référentiel `assets/monster-spells.json`
+    /// (`overlay_engine::spells::MonsterSpellIndex`, `breedId`) ; pour un allié, l'id de classe
+    /// déjà interprété par `class_name` (gardé tel quel, sans autre usage). `None` pour un combat
+    /// restauré par `fight_store` depuis un fichier antérieur à ce champ (13 sept. 2026) : la
+    /// résolution des sorts de ce combat retombe alors sur le nom seul — jamais un échec de
+    /// chargement, `#[serde(default)]` comme les autres champs ajoutés après coup.
+    #[serde(default)]
+    pub breed: Option<i64>,
 }
 
 /// Borne haute de `FighterDamage::last_turn_casts` — un tour Wakfu réel dépasse rarement une
@@ -231,6 +245,12 @@ pub struct FightSnapshot {
     /// lanceur ennemi ne le modifie jamais. `#[serde(default)]` même raison que `started_at_ms`.
     #[serde(default)]
     pub last_ally_caster: Option<usize>,
+    /// Pendant de `last_ally_caster` pour la vue Ennemis (13 sept. 2026) : index du dernier ENNEMI
+    /// à avoir lancé un sort, que le bloc suit en vue Ennemis. `None` tant qu'aucun ennemi n'a
+    /// lancé de sort ; un lanceur allié ne le modifie jamais. Un ennemi mis KO garde son point
+    /// jusqu'au prochain lancer ennemi, comme un allié KO garde le sien. `#[serde(default)]`.
+    #[serde(default)]
+    pub last_enemy_caster: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -750,7 +770,7 @@ impl SessionState {
                 } else {
                     (None, Gender::M) // un ennemi n'a jamais de classe (breed pas déterministe ici)
                 };
-                self.upsert_fighter(*fight_id, name, is_ally, class_name, gender);
+                self.upsert_fighter(*fight_id, name, is_ally, class_name, gender, Some(*breed));
             }
             // Établit QUI agit maintenant sous ce nom (voir `FightWorking::register_fight_turn`) —
             // c'est CE siège qui recevra les lignes de dégâts/soin de cet attaquant jusqu'au
@@ -764,24 +784,27 @@ impl SessionState {
                 ..
             } => {
                 if let Some(fight) = self.fights.get_mut(fight_id) {
-                    // Bloc « ligne de sorts » (voir `FighterDamage::last_turn_casts`) : alliés
-                    // seulement, remise à zéro au premier sort d'un nouveau tour de CE lanceur,
-                    // puis ajout dans l'ordre du log, borné.
+                    // Bloc « ligne de sorts » (voir `FighterDamage::last_turn_casts`) : pour
+                    // tout combattant connu, remise à zéro au premier sort d'un nouveau tour de
+                    // CE lanceur, puis ajout dans l'ordre du log, borné ; chaque camp suit son
+                    // propre dernier lanceur (`last_ally_caster`/`last_enemy_caster`).
                     if let Some((idx, starts_turn)) = fight.register_fight_turn(caster) {
                         let turn = fight.turn_count;
                         if let Some(fighter) = fight.snapshot.fighters.get_mut(idx) {
+                            if starts_turn {
+                                fighter.last_turn_casts.clear();
+                                fighter.last_turn = turn;
+                            }
+                            if fighter.last_turn_casts.len() < MAX_LAST_TURN_CASTS {
+                                fighter.last_turn_casts.push(SpellCastRecord {
+                                    spell: spell.clone(),
+                                    critical: *critical,
+                                });
+                            }
                             if fighter.is_ally {
-                                if starts_turn {
-                                    fighter.last_turn_casts.clear();
-                                    fighter.last_turn = turn;
-                                }
-                                if fighter.last_turn_casts.len() < MAX_LAST_TURN_CASTS {
-                                    fighter.last_turn_casts.push(SpellCastRecord {
-                                        spell: spell.clone(),
-                                        critical: *critical,
-                                    });
-                                }
                                 fight.snapshot.last_ally_caster = Some(idx);
+                            } else {
+                                fight.snapshot.last_enemy_caster = Some(idx);
                             }
                         }
                     }
@@ -1207,6 +1230,7 @@ impl SessionState {
                 fighters: Vec::new(),
                 started_at_ms,
                 last_ally_caster: None,
+                last_enemy_caster: None,
             },
             fighter_index: HashMap::new(),
             resolved_enemies: std::collections::HashSet::new(),
@@ -1306,6 +1330,7 @@ impl SessionState {
         is_ally: bool,
         class_name: Option<String>,
         gender: Gender,
+        breed: Option<i64>,
     ) -> usize {
         let fight = self
             .fights
@@ -1324,6 +1349,7 @@ impl SessionState {
             is_ko: false,
             last_turn_casts: Vec::new(),
             last_turn: 0,
+            breed,
         });
         fight
             .fighter_index
@@ -1389,7 +1415,7 @@ impl SessionState {
         };
         let idx = match known_idx {
             Some(idx) => idx,
-            None => self.upsert_fighter(fight_id, name, true, None, Gender::M),
+            None => self.upsert_fighter(fight_id, name, true, None, Gender::M, None),
         };
 
         let fight = self
@@ -2332,11 +2358,11 @@ mod tests {
         assert_eq!(state.fights[&1].snapshot.fighters[0].last_turn, 2);
     }
 
-    /// Les ennemis ne sont jamais affichés dans le bloc : leurs sorts ne sont ni conservés ni pris
-    /// en compte pour `last_ally_caster` (qui garde le dernier ALLIÉ, même si un ennemi a joué
-    /// depuis).
+    /// Vue Ennemis (13 sept. 2026) : un lanceur ennemi alimente SES sorts du tour et
+    /// `last_enemy_caster`, sans jamais toucher à `last_ally_caster` (qui garde le dernier ALLIÉ,
+    /// même si un ennemi a joué depuis) — et réciproquement.
     #[test]
-    fn spell_cast_ennemi_ne_touche_ni_aux_sorts_ni_au_dernier_lanceur_allie() {
+    fn spell_cast_ennemi_alimente_ses_sorts_et_le_dernier_lanceur_ennemi_seulement() {
         let mut state = SessionState::default();
         let ctx = ApplyContext::default();
         state.apply(
@@ -2352,14 +2378,116 @@ mod tests {
             &mut Vec::new(),
         );
         state.apply(
-            &spell_cast_named(1, "Bwork", "Coup d'Koko", false),
+            &spell_cast_named(1, "Bwork", "Coup d'Koko", true),
             ctx,
             &mut Vec::new(),
         );
 
-        assert!(cast_names(&state, 1, "Bwork").is_empty());
-        assert_eq!(state.fights[&1].snapshot.fighters[1].last_turn, 0);
-        assert_eq!(state.fights[&1].snapshot.last_ally_caster, Some(0));
+        assert_eq!(
+            cast_names(&state, 1, "Bwork"),
+            vec![("Coup d'Koko".to_string(), true)]
+        );
+        let fight = &state.fights[&1].snapshot;
+        assert_eq!(fight.fighters[1].last_turn, 1);
+        assert_eq!(
+            fight.last_ally_caster,
+            Some(0),
+            "inchangé par le lanceur ennemi"
+        );
+        assert_eq!(fight.last_enemy_caster, Some(1));
+        assert_eq!(
+            fight.fighters[1].breed,
+            Some(1),
+            "breed brut de la jointure"
+        );
+    }
+
+    /// Deux instances homonymes qui jouent chacune leur tour, séparées par un autre acteur, sont
+    /// deux lignes distinctes avec chacune ses sorts — le siège d'initiative les distingue comme
+    /// il le fait déjà pour les dégâts.
+    #[test]
+    fn deux_homonymes_separes_par_un_autre_acteur_ont_chacun_leurs_sorts() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Coup d'Koko", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Oumbra", "Chasseur", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Kokolatte", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        let fight = &state.fights[&1].snapshot;
+        let casts = |idx: usize| -> Vec<&str> {
+            fight.fighters[idx]
+                .last_turn_casts
+                .iter()
+                .map(|c| c.spell.as_str())
+                .collect()
+        };
+        assert_eq!(casts(0), vec!["Coup d'Koko"]);
+        assert_eq!(casts(1), vec!["Kokolatte"]);
+        assert_eq!(fight.last_enemy_caster, Some(1));
+    }
+
+    /// Limite héritée de `register_fight_turn` (voir la doc de `FighterDamage::last_turn_casts`) :
+    /// deux homonymes qui jouent l'un APRÈS l'autre sans autre acteur entre eux sont fusionnés sur
+    /// un seul siège — les sorts du second s'ajoutent à la liste du premier, le second reste vide.
+    /// Figé ici pour que le comportement soit connu, pas découvert en capture.
+    #[test]
+    fn deux_homonymes_consecutifs_sont_fusionnes_sur_un_siege() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Coup d'Koko", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Kokolatte", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        let fight = &state.fights[&1].snapshot;
+        assert_eq!(fight.fighters[0].last_turn_casts.len(), 2);
+        assert!(fight.fighters[1].last_turn_casts.is_empty());
+        assert_eq!(fight.last_enemy_caster, Some(0));
     }
 
     /// Un lanceur inconnu du combat (invocation jamais ajoutée à `fighters`, jointure manquée) ne
@@ -2404,8 +2532,9 @@ mod tests {
         assert_eq!(cast_names(&state, 1, "Oumbra").len(), MAX_LAST_TURN_CASTS);
     }
 
-    /// Les deux nouveaux champs voyagent avec `fight_store` (round-trip JSON), et un fichier
-    /// antérieur sans eux reste lisible (`#[serde(default)]`).
+    /// Les champs du bloc « ligne de sorts » (`last_turn_casts`, `last_turn`, `breed`,
+    /// `last_ally_caster`, `last_enemy_caster`) voyagent avec `fight_store` (round-trip JSON), et
+    /// un fichier antérieur sans eux reste lisible (`#[serde(default)]`).
     #[test]
     fn sorts_du_tour_serialises_et_replis_par_defaut() {
         let mut state = SessionState::default();
@@ -2431,7 +2560,12 @@ mod tests {
         .unwrap();
         assert!(legacy.fighters[0].last_turn_casts.is_empty());
         assert_eq!(legacy.fighters[0].last_turn, 0);
+        assert_eq!(
+            legacy.fighters[0].breed, None,
+            "combat d'avant le champ `breed`"
+        );
         assert_eq!(legacy.last_ally_caster, None);
+        assert_eq!(legacy.last_enemy_caster, None);
     }
 
     fn roster_with(name: &str, class_name: &str, gender: Gender) -> RosterIndex {
@@ -3020,6 +3154,7 @@ mod tests {
             fighters: Vec::new(),
             started_at_ms,
             last_ally_caster: None,
+            last_enemy_caster: None,
         });
 
         let mut events = Vec::new();
@@ -3069,6 +3204,7 @@ mod tests {
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
+                    breed: None,
                 },
                 FighterDamage {
                     name: "Bwork".to_string(),
@@ -3082,10 +3218,12 @@ mod tests {
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
+                    breed: None,
                 },
             ],
             started_at_ms: 1_757_000_000_000,
             last_ally_caster: None,
+            last_enemy_caster: None,
         });
 
         let sweep_ctx = ApplyContext {
@@ -3189,6 +3327,7 @@ mod tests {
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
+                    breed: None,
                 },
                 FighterDamage {
                     name: "Bwork".to_string(),
@@ -3202,10 +3341,12 @@ mod tests {
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
+                    breed: None,
                 },
             ],
             started_at_ms: 1_757_000_000_000,
             last_ally_caster: None,
+            last_enemy_caster: None,
         });
         let sweep_ctx = ApplyContext {
             in_initial_sweep: true,

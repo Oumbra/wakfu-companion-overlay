@@ -47,7 +47,7 @@ use crate::portraits::{PortraitAtlas, NATIVE_PORTRAIT_SIZE};
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
-use super::combat_frame::{largest_frame_geometry, CombatFrame, MAX_FRAME_SLOTS};
+use super::combat_frame::{largest_frame_geometry, CombatFrame, SelectionMarks, MAX_FRAME_SLOTS};
 
 /// Couleur unie de la scrollbar — demande explicite de l'utilisateur, PAS une teinte dérivée du
 /// thème ni des PNG essayés puis rejetés (voir doc de module).
@@ -88,6 +88,14 @@ impl EnemyFrameScroll {
     /// ennemi via le catalogue (voir `panels::combat::resolve_fighter_texture`) — sans eux, tout
     /// ennemi affiché ici retomberait sur le portrait générique (jamais de `class_name` côté
     /// ennemi).
+    ///
+    /// **Sélection du bloc de sorts** (13 sept. 2026, vue Ennemis) : même contrat que
+    /// `CombatFrame::show` — `marks` en index dans `fighters` (la tranche complète, pas les
+    /// emplacements visibles), portraits des lanceurs cliquables, marques peintes entre le
+    /// portrait et son pourcentage ; renvoie l'index cliqué cette frame. Tout cela sur les
+    /// portraits VISIBLES seulement, comme l'infobulle et le pourcentage : un portrait hors-champ
+    /// ne reçoit ni interaction ni marque, et le cadre ne défile jamais de lui-même vers le
+    /// dernier lanceur (voir la doc de module de `combat_spell_block`).
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         ui: &mut egui::Ui,
@@ -99,7 +107,8 @@ impl EnemyFrameScroll {
         remote_icon_textures: &mut RemoteIconTextures,
         fighters: &[&FighterDamage],
         total_damage: i64,
-    ) {
+        marks: Option<SelectionMarks>,
+    ) -> Option<usize> {
         debug_assert!(fighters.len() > MAX_FRAME_SLOTS);
         let n = fighters.len();
         let geometry = largest_frame_geometry();
@@ -208,9 +217,10 @@ impl EnemyFrameScroll {
             }
         });
 
-        // Infobulle + pourcentage — même logique que `CombatFrame::show`, mais uniquement pour les
-        // portraits actuellement dans la bande visible (peints ci-dessus) : un portrait hors-champ
-        // ne doit recevoir ni interaction ni incrustation.
+        // Infobulle, marques, clic + pourcentage — même logique que `CombatFrame::show`, mais
+        // uniquement pour les portraits actuellement dans la bande visible (peints ci-dessus) :
+        // un portrait hors-champ ne doit recevoir ni interaction ni incrustation.
+        let mut clicked = None;
         for (i, fighter) in fighters.iter().enumerate() {
             let cy = slot_center_y(i);
             if !is_visible(cy) {
@@ -220,8 +230,39 @@ impl EnemyFrameScroll {
                 egui::pos2(frame_rect.min.x + geometry.slot_x, cy),
                 egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
             );
-            let id = ui.id().with(("enemy-scroll-slot", fighter.name.as_str()));
-            let response = ui.interact(portrait_rect, id, egui::Sense::hover());
+            // Index dans `fighters` dans l'identifiant, PAS la position visible (qui change au
+            // défilement et casserait le fondu des marques) — et deux homonymes ne partagent
+            // plus le même `Id` (voir `CombatFrame::show`).
+            let id = ui
+                .id()
+                .with(("enemy-scroll-slot", i, fighter.name.as_str()));
+            let selectable = marks.is_some() && !fighter.last_turn_casts.is_empty();
+            let sense = if selectable {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            };
+            let response = ui.interact(portrait_rect, id, sense);
+            if selectable {
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, fighter.name.as_str())
+                });
+                if response.clicked() {
+                    clicked = Some(i);
+                }
+                response
+                    .clone()
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+            }
+            if let Some(marks) = marks {
+                super::combat_spell_block::paint_marks(
+                    ui,
+                    portrait_rect,
+                    id,
+                    marks.ring_slot == Some(i),
+                    marks.dot_slot == Some(i),
+                );
+            }
             crate::design::tooltip(&response).text(fighter.name.as_str());
             if fighter.total_damage > 0 {
                 crate::design::paint_portrait_percent(
@@ -270,5 +311,6 @@ impl EnemyFrameScroll {
         );
 
         ui.ctx().data_mut(|d| d.insert_temp(scroll_id, offset));
+        clicked
     }
 }

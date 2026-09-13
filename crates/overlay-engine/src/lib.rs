@@ -43,7 +43,10 @@ pub use session::{
     Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals,
     SpellCastRecord, MAX_LAST_TURN_CASTS,
 };
-pub use spells::{SpellEntry, SpellIndex};
+pub use spells::{
+    referential_path, resolve_cast, MonsterSpellIndex, ResolvedSpell, SpellEntry, SpellIndex,
+    SpellTable,
+};
 pub use watchlist::{
     watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistEntry,
     WatchlistKind, WatchlistMode,

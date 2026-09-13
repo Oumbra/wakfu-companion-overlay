@@ -350,6 +350,12 @@
 //! (`DETAILS_HOTKEY_LABEL`/`OPTIONS_HOTKEY_LABEL`, `main.rs`) et les deux actions elles-mêmes
 //! (`open::that(overlay_sync::client::base_url())` / TODO options) sont inchangés, seul leur point
 //! d'entrée visuel bouge.
+//!
+//! **Refonte 2026-09-13 (sorts ennemis)** : le bloc « ligne de sorts » (`combat_spell_block`,
+//! jusqu'ici vue Alliés seulement) s'affiche aussi en vue Ennemis, avec les mêmes règles — la
+//! sélection est calculée pour le camp affiché, les marques et les clics passent par le cadre
+//! exact (`CombatFrame::show`) ou le cadre à défilement (`EnemyFrameScroll::show`) selon le
+//! nombre d'ennemis. Voir la doc de module de `combat_spell_block` et §9.1 bis du plan.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage};
 
@@ -523,15 +529,23 @@ pub fn show(
         CombatSide::Enemies => (&[], &[], fighters.as_slice()),
     };
 
-    // Sélection du bloc « ligne de sorts » (voir `combat_spell_block`) — vue Alliés seulement,
-    // `None` tant qu'aucun allié n'a lancé de sort. Recalculée après un clic sur un portrait du
-    // cadre (colonne de gauche) pour que le bloc (colonne de droite) suive dans la même frame.
-    let mut selection = fight
-        .filter(|_| *side == CombatSide::Allies)
-        .and_then(|fight| combat_spell_block::selection(ui.ctx(), fight));
-    let slot_of = |sel: usize| {
-        framed.iter().position(|f| {
+    // Sélection du bloc « ligne de sorts » (voir `combat_spell_block`) pour le camp affiché —
+    // `None` tant qu'aucun combattant de ce camp n'a lancé de sort. Recalculée après un clic sur
+    // un portrait du cadre (colonne de gauche) pour que le bloc (colonne de droite) suive dans la
+    // même frame. Les marques s'expriment en positions dans la tranche du cadre qui les peint :
+    // `framed` (gabarit exact) ou `enemy_scroll` (ennemis nombreux) — jamais les deux.
+    let is_ally = *side == CombatSide::Allies;
+    let mut selection =
+        fight.and_then(|fight| combat_spell_block::selection(ui.ctx(), fight, is_ally));
+    let slot_of = |list: &[&FighterDamage], sel: usize| {
+        list.iter().position(|f| {
             Some(sel) == fight.and_then(|fight| combat_spell_block::fighter_index(fight, f))
+        })
+    };
+    let marks_in = |list: &[&FighterDamage], sel: Option<combat_spell_block::SpellSelection>| {
+        sel.map(|sel| SelectionMarks {
+            ring_slot: slot_of(list, sel.selected),
+            dot_slot: slot_of(list, sel.last_caster),
         })
     };
 
@@ -541,10 +555,7 @@ pub fn show(
         // module.
         ui.vertical(|ui| {
             if !framed.is_empty() {
-                let marks = selection.map(|sel| SelectionMarks {
-                    ring_slot: slot_of(sel.selected),
-                    dot_slot: slot_of(sel.last_caster),
-                });
+                let marks = marks_in(framed, selection);
                 let clicked = frame.show(
                     ui,
                     portraits,
@@ -559,12 +570,13 @@ pub fn show(
                 if let (Some(slot), Some(fight)) = (clicked, fight) {
                     if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
                         combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
-                        selection = combat_spell_block::selection(ui.ctx(), fight);
+                        selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
                     }
                 }
             }
             if !enemy_scroll.is_empty() {
-                EnemyFrameScroll::show(
+                let marks = marks_in(enemy_scroll, selection);
+                let clicked = EnemyFrameScroll::show(
                     ui,
                     frame,
                     portraits,
@@ -574,7 +586,15 @@ pub fn show(
                     remote_icon_textures,
                     enemy_scroll,
                     total_damage,
+                    marks,
                 );
+                if let (Some(slot), Some(fight)) = (clicked, fight) {
+                    if let Some(idx) = combat_spell_block::fighter_index(fight, enemy_scroll[slot])
+                    {
+                        combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
+                        selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
+                    }
+                }
             }
             if !flat_portraits.is_empty() {
                 if !framed.is_empty() {
@@ -627,21 +647,14 @@ pub fn show(
                     damage_bar_group(ui, &fighter.name, fighter.total_damage, total_damage);
                 }
             }
-            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, en
-            // vue Alliés seulement, dès qu'un allié du combat a lancé un sort (avant, rien — pas
+            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
+            // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
             // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
             // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
             // deux fois.
             if let (Some(fight), Some(sel)) = (fight, selection) {
                 ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
-                combat_spell_block::show(
-                    ui,
-                    fight,
-                    sel,
-                    overlay_engine::SpellIndex::embedded(),
-                    remote_icons,
-                    remote_icon_textures,
-                );
+                combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
             }
         });
     });

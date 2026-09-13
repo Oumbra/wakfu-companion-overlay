@@ -159,6 +159,7 @@ mod tests {
             is_ko: false,
             last_turn_casts: Vec::new(),
             last_turn: 0,
+            breed: None,
         }
     }
 
@@ -174,6 +175,7 @@ mod tests {
             // `#[serde(default)]`.
             started_at_ms: 1_757_000_000_000,
             last_ally_caster: None,
+            last_enemy_caster: None,
         }
     }
 
