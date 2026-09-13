@@ -18,6 +18,11 @@
 //!   survol, comme dans le jeu (le cyan apparaît dans les deux images qui suivent l'arrivée du
 //!   pointeur sur un bouton), et la bascule est franche, sans fondu (un seul pas d'image entre les
 //!   deux couleurs sur l'enregistrement) ;
+//! - croix fléchée (`CursorIcon::Move`, ce qui se déplace au glisser-déposer — les tuiles de
+//!   l'onglet Suivi, voir `panels::suivi_tab`) → bitmap `wakfu-cursor-move.png`, **fixe** : le jeu
+//!   ne fait pas clignoter celui-là (couleur constante sur les 113 images où il est visible, voir
+//!   `assets/cursor/README.md`). Son point chaud est au CENTRE, pas à la pointe : c'est une croix
+//!   symétrique, elle ne pointe nulle part ;
 //! - tout autre curseur (`Text` d'un champ de saisie, `ResizeHorizontal` d'un curseur de réglage,
 //!   `None`…) → curseur **système** correspondant, inchangé : le jeu lui-même n'a pas de variante
 //!   de sa flèche pour ces cas, et un I-beam reste plus lisible qu'une flèche sur du texte.
@@ -51,6 +56,7 @@ pub const IDLE_DURATION: Duration = Duration::from_millis(533);
 
 const IDLE_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-idle.png");
 const FLASH_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-flash.png");
+const MOVE_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-move.png");
 
 /// Les deux bitmaps décodés, prêts à être publiés tels quels à egui (voir la doc de module pour
 /// pourquoi une seule instance partagée par tout le processus).
@@ -59,6 +65,8 @@ pub struct CursorImages {
     pub idle: egui::CustomCursorImage,
     /// Éclair (cyan) — première phase du clignotement en mode main.
     pub flash: egui::CustomCursorImage,
+    /// Croix fléchée — ce qui se déplace au glisser-déposer. Sans clignotement.
+    pub moving: egui::CustomCursorImage,
 }
 
 /// Décodage paresseux, une fois par processus. Panique si un des deux PNG embarqués est illisible
@@ -66,19 +74,36 @@ pub struct CursorImages {
 pub fn images() -> &'static CursorImages {
     static IMAGES: OnceLock<CursorImages> = OnceLock::new();
     IMAGES.get_or_init(|| CursorImages {
-        idle: decode(IDLE_BYTES, "wakfu-cursor-idle.png"),
-        flash: decode(FLASH_BYTES, "wakfu-cursor-flash.png"),
+        idle: decode(IDLE_BYTES, "wakfu-cursor-idle.png", Hotspot::ArrowTip),
+        flash: decode(FLASH_BYTES, "wakfu-cursor-flash.png", Hotspot::ArrowTip),
+        moving: decode(MOVE_BYTES, "wakfu-cursor-move.png", Hotspot::Center),
     })
 }
 
-fn decode(bytes: &[u8], name: &str) -> egui::CustomCursorImage {
+/// D'où un bitmap de curseur « vise ».
+///
+/// Déduire la pointe de l'image (voir [`hotspot`]) ne vaut que pour une flèche : appliquée à la
+/// croix fléchée, la règle donnerait le sommet de la flèche du haut, et tout ce qu'on déplacerait
+/// serait décalé d'une demi-croix vers le bas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hotspot {
+    /// Pointe de la flèche, déduite des pixels.
+    ArrowTip,
+    /// Centre du bitmap — une croix symétrique ne pointe nulle part.
+    Center,
+}
+
+fn decode(bytes: &[u8], name: &str, ancrage: Hotspot) -> egui::CustomCursorImage {
     let img = image::load_from_memory(bytes)
         .unwrap_or_else(|err| panic!("assets/cursor/{name} : PNG illisible : {err}"))
         .to_rgba8();
     let (width, height) = img.dimensions();
     let rgba: std::sync::Arc<[u8]> = img.into_raw().into();
-    let hotspot = hotspot(&rgba, width)
-        .unwrap_or_else(|| panic!("assets/cursor/{name} : aucun pixel opaque, pas de pointe"));
+    let hotspot = match ancrage {
+        Hotspot::ArrowTip => hotspot(&rgba, width)
+            .unwrap_or_else(|| panic!("assets/cursor/{name} : aucun pixel opaque, pas de pointe")),
+        Hotspot::Center => [(width / 2) as u16, (height / 2) as u16],
+    };
     egui::CustomCursorImage {
         rgba,
         size: [
@@ -136,6 +161,12 @@ pub fn apply(ctx: &egui::Context, now: Instant) {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
             ctx.set_cursor_image(Some(images.idle.clone()));
         }
+        // Fixe : aucun redessin réclamé, et l'instant d'entrée en mode main est oublié pour que le
+        // prochain survol d'un cliquable reparte sur un éclair.
+        egui::CursorIcon::Move => {
+            ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
+            ctx.set_cursor_image(Some(images.moving.clone()));
+        }
         _ => {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
             ctx.set_cursor_image(None);
@@ -192,6 +223,25 @@ mod tests {
         // Même dessin recoloré : les deux phases doivent se superposer exactement.
         assert_eq!(images.idle.size, images.flash.size);
         assert_eq!(images.idle.hotspot, images.flash.hotspot);
+    }
+
+    /// **La croix vise son centre**, et non la pointe d'une de ses quatre flèches : ce qu'on
+    /// déplace suit le pixel qu'on a saisi, pas un point décalé d'une demi-croix.
+    #[test]
+    fn la_croix_flechee_est_ancree_en_son_centre() {
+        let croix = &images().moving;
+        assert_eq!(
+            croix.hotspot,
+            [croix.size[0] / 2, croix.size[1] / 2],
+            "point chaud {:?} hors du centre de {:?}",
+            croix.hotspot,
+            croix.size
+        );
+        assert_eq!(
+            croix.rgba.len(),
+            usize::from(croix.size[0]) * usize::from(croix.size[1]) * 4,
+            "tampon RGBA incohérent avec la taille"
+        );
     }
 
     #[test]
@@ -293,6 +343,15 @@ mod tests {
         assert_about(delay, IDLE_DURATION);
         let (image, _) = frame(&ctx, t0, ms(100 + 1066), egui::CursorIcon::PointingHand);
         assert!(same(&image, &images.flash));
+
+        // Glisser-déposer : la croix fléchée, fixe — aucun redessin réclamé, et le clignotement
+        // est oublié comme pour un curseur système.
+        let (image, delay) = frame(&ctx, t0, ms(1500), egui::CursorIcon::Move);
+        assert!(same(&image, &images.moving), "attendu la croix fléchée");
+        assert!(
+            delay > Duration::from_secs(60),
+            "la croix ne doit réclamer aucun redessin : {delay:?}"
+        );
 
         // Champ de saisie : curseur système, et l'entrée en mode main est oubliée…
         let (image, _) = frame(&ctx, t0, ms(2000), egui::CursorIcon::Text);

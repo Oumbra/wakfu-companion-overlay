@@ -2179,10 +2179,28 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
         .map(|e| e.name.clone())
         .collect();
 
+    // **La croix fléchée dit que la tuile se déplace, avant même qu'on l'ait prise.** C'est le seul
+    // signe de l'écran — aucune poignée, aucun libellé — et `overlay_ui::cursor` la traduit ensuite
+    // en bitmap du jeu (`wakfu-cursor-move.png`).
+    harness.hover_at(TUILE_0);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "une tuile survolée doit annoncer qu'elle se déplace"
+    );
+
     harness.drag_at(TUILE_0);
     harness.run();
     harness.hover_at(TUILE_2);
     harness.run();
+    // La croix tient pendant tout le geste, y compris au-dessus d'une AUTRE tuile : ce qui est sous
+    // le pointeur est une destination, pas un bouton.
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "le curseur doit rester la croix pendant le déplacement"
+    );
     harness.drop_at(TUILE_2);
     harness.run();
 
