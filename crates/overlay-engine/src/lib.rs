@@ -46,8 +46,8 @@ pub use session::{
     SpellCastRecord, MAX_LAST_TURN_CASTS,
 };
 pub use spells::{
-    referential_path, resolve_cast, MonsterSpellIndex, ResolvedSpell, SpellEntry, SpellIndex,
-    SpellTable,
+    preload_embedded as preload_spell_indexes, referential_path, resolve_cast, MonsterSpellIndex,
+    ResolvedSpell, SpellEntry, SpellIndex, SpellTable,
 };
 pub use watchlist::{
     watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistEntry,

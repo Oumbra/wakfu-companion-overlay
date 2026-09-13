@@ -135,7 +135,7 @@ const TRANSFORM_RE = /^(.+?): transformée? en (.+?)\s*!?$/;
  * (`combat-defeat-marker`, actuellement un no-op côté StatsStoreService) au cas où un futur usage
  * (UI temps réel affichant les KO en cours, par exemple) en aurait besoin. */
 const DEFEAT_MARKER_RE = /^Vous avez été vaincu\(e\) !$/;
-/** "N secondes reportées pour le tour suivant." — AJOUT LOCAL à l'overlay (2026-09-13, voir
+/** "N secondes reportées pour le tour suivant." — propre à l'overlay (2026-09-13, voir
  * VENDORED_FROM.txt) : message personnel émis à la FIN DU TOUR de chaque personnage du joueur (le
  * temps non consommé est reporté), y compris pour un tour passé sans lancer de sort — vérifié sur
  * `crates/overlay-engine/tests/wakfu.log` (six comptes du joueur dans le même combat : une ligne
@@ -237,8 +237,8 @@ const DAMAGE_ELEMENTS = new Set<string>([
 /** Au-delà de cette fenêtre, deux lignes de contenu identique sont considérées comme deux événements distincts, pas un doublon multi-compte. */
 const DEDUPE_WINDOW_MS = 1000;
 /**
- * Fenêtre dédiée aux lancers de sort (`spell-cast`) — MODIFICATION LOCALE à l'overlay (2026-09-13,
- * voir VENDORED_FROM.txt) : la fenêtre générale de 1 s avalait les vrais relancers rapides d'un
+ * Fenêtre dédiée aux lancers de sort (`spell-cast`) — propre à l'overlay (2026-09-13, voir
+ * VENDORED_FROM.txt) : la fenêtre générale de 1 s avalait les vrais relancers rapides d'un
  * même sort par le même lanceur (« Erz-Wouaf lance le sort Croc-en-jambe » deux fois à 724 ms
  * d'écart, chacun avec ses propres lignes de dégâts entre les deux), donc un seul sort affiché
  * dans le bloc « ligne de sorts » de l'overlay. Mesuré sur `crates/overlay-engine/tests/wakfu.log`

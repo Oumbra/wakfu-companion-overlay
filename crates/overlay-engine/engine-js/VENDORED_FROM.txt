@@ -1,7 +1,8 @@
 f34e86967b7fd2a76acd94edf8a85cc8c5024c23
 https://github.com/Oumbra/wakfu-companion
 
-Modifications locales (écart de parité assumé, à reporter dans wakfu-companion) :
+Modifications locales — l'overlay et le web n'ont pas les mêmes fonctionnalités, le parseur
+diverge donc normalement du dépôt d'origine (décision utilisateur, 2026-09-13) :
 - 2026-09-13 log-parser.ts : fenêtre de déduplication dédiée aux `spell-cast`
   (SPELL_CAST_DEDUPE_WINDOW_MS = 600 ms, mesurée sur tests/wakfu.log) — la fenêtre
   générale de 1 s avalait les relancers rapides d'un même sort.

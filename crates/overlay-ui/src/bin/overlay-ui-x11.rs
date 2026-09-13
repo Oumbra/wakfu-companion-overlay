@@ -1105,6 +1105,12 @@ mod linux_main {
             tracing::info!("journal de session : {}", dir.display());
         }
 
+        // Référentiels de sorts (classes et monstres) construits DÈS LE DÉMARRAGE, jamais au premier
+        // sort affiché en combat — décision utilisateur du 13 sept. 2026 : deux fichiers de quelques
+        // centaines de Ko, très loin du budget mémoire, et aucun à-coup en jeu.
+        let (class_spells, monster_spells) = overlay_engine::preload_spell_indexes();
+        tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
+
         let saved_config = config::load();
         let log_path = resolve_path(&saved_config);
         let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));

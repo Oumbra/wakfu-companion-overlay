@@ -20,9 +20,13 @@
 //!   plusieurs monstres (598 noms partagés sur 2 381 entrées au fichier du 13 sept.), et 69 d'entre
 //!   eux avec des images différentes selon le monstre (« Coup d'Koko » : `spells/3.png` chez le
 //!   Grokoko, `spells/4.png` chez le Kokoko) — d'où la clé par `breed`, jamais par le nom seul
-//!   quand le `breed` est connu. Deux entrées portent `passive: true` ; elles sont indexées comme
-//!   les autres (hypothèse : un passif n'apparaît pas comme « lance le sort » dans le log — non
-//!   vérifiée, aucune ligne de ce genre dans le log de parité).
+//!   quand le `breed` est connu. Le champ `passive` du fichier est ignoré.
+//!
+//! **Les deux index sont construits au démarrage de l'overlay** ([`preload_embedded`], appelé par
+//! `overlay-ui` avant la première frame), jamais à la demande : deux fichiers de quelques centaines
+//! de Ko, très loin du budget mémoire (300 Mo, §11 du plan), et aucun à-coup au premier sort
+//! affiché en combat. `embedded()` reste paresseux par construction (`OnceLock`) pour les tests et
+//! tout appelant qui n'aurait pas fait le préchargement.
 //!
 //! Un sort absent du référentiel n'est toujours PAS une erreur ici : `find` renvoie `None` et l'UI
 //! affiche un pavé « ? » (voir `combat_spell_block`) ; une entrée sans `picture` (`null`, ex.
@@ -227,10 +231,8 @@ impl SpellIndex {
 }
 
 impl MonsterSpellIndex {
-    /// Index du référentiel de monstres embarqué — même construction paresseuse que
-    /// [`SpellIndex::embedded`]. Le fichier est plus gros (580 Ko, ~2 400 entrées au 13 sept.
-    /// 2026) mais reste négligeable devant le budget mémoire de l'overlay (300 Mo, §11 du plan) ;
-    /// l'index n'est construit qu'au premier sort ennemi à afficher.
+    /// Index du référentiel de monstres embarqué — même construction que [`SpellIndex::embedded`]
+    /// (580 Ko, ~2 400 entrées au 13 sept. 2026), déclenchée au démarrage par [`preload_embedded`].
     pub fn embedded() -> &'static MonsterSpellIndex {
         static INDEX: OnceLock<MonsterSpellIndex> = OnceLock::new();
         INDEX.get_or_init(|| {
@@ -247,6 +249,16 @@ impl MonsterSpellIndex {
         let monsters: Vec<RawOwner> = serde_json::from_str(json)?;
         Ok(SpellTable::from_raw(monsters, Some))
     }
+}
+
+/// Construit les deux index embarqués maintenant plutôt qu'au premier sort affiché — à appeler au
+/// démarrage de l'overlay (voir la doc de module). Idempotent, sans effet si déjà fait. Renvoie le
+/// nombre d'entrées (classes, monstres) pour le journal de démarrage.
+pub fn preload_embedded() -> (usize, usize) {
+    (
+        SpellIndex::embedded().len(),
+        MonsterSpellIndex::embedded().len(),
+    )
 }
 
 /// Ce que l'UI consomme pour une tuile du bloc « ligne de sorts » — voir [`resolve_cast`].

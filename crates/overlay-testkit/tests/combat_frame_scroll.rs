@@ -14,8 +14,8 @@
 //! `mesa-vulkan-drivers` sous Linux.
 
 use egui_kittest::Harness;
-use overlay_engine::{CatalogIndex, FighterDamage, Gender};
-use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_engine::{CatalogIndex, FighterDamage, Gender, SpellCastRecord};
+use overlay_ui::panels::combat_frame::{CombatFrame, SelectionMarks};
 use overlay_ui::panels::combat_frame_scroll::EnemyFrameScroll;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -23,7 +23,9 @@ use overlay_ui::ui_icons::UiIcons;
 
 /// Ennemi minimal — jamais de classe/portrait (voir la doc de `FighterDamage::class_name` : les
 /// ennemis n'en ont jamais), sexe et statuts sans effet sur ce widget laissés à leur valeur neutre.
-fn enemy(name: String, total_damage: i64) -> FighterDamage {
+/// `casts` sorts du dernier tour : un ennemi qui en a lancé au moins un est cliquable et peut
+/// porter une marque du bloc de sorts (voir `combat_spell_block`).
+fn enemy(name: String, total_damage: i64, casts: usize) -> FighterDamage {
     FighterDamage {
         name,
         is_ally: false,
@@ -34,10 +36,22 @@ fn enemy(name: String, total_damage: i64) -> FighterDamage {
         xp_gained: 0,
         spells: Default::default(),
         is_ko: false,
-        last_turn_casts: Vec::new(),
+        last_turn_casts: (0..casts)
+            .map(|i| SpellCastRecord {
+                spell: format!("Sort {i}"),
+                critical: false,
+            })
+            .collect(),
         last_turn: 0,
         breed: None,
     }
+}
+
+/// Clé de l'état de défilement d'`EnemyFrameScroll` — la même chaîne que `scroll_offset_id`
+/// (privée) : le test règle le décalage directement, comme la molette le ferait, plutôt que de
+/// synthétiser des événements de défilement.
+fn scroll_offset_id() -> egui::Id {
+    egui::Id::new("combat-frame-scroll-enemy-offset")
 }
 
 /// Rejeu d'une breach à 14 monstres (au-delà des 6 emplacements du plus grand gabarit) : vérifie que
@@ -45,8 +59,16 @@ fn enemy(name: String, total_damage: i64) -> FighterDamage {
 #[test]
 fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
     const N: i64 = 14;
+    // Les Bouftou 1 et 3 ont lancé des sorts : 3 porte le liseré (sorts affichés), 1 le point
+    // (dernier lanceur) — voir `marks` plus bas.
     let fighters: Vec<FighterDamage> = (1..=N)
-        .map(|i| enemy(format!("Bouftou {i}"), i * 137))
+        .map(|i| {
+            enemy(
+                format!("Bouftou {i}"),
+                i * 137,
+                if i == 1 || i == 3 { 2 } else { 0 },
+            )
+        })
         .collect();
     let refs: Vec<&FighterDamage> = fighters.iter().collect();
     let total_damage: i64 = refs.iter().map(|f| f.total_damage).sum();
@@ -80,10 +102,15 @@ fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
             &mut remote_icon_textures,
             &refs,
             total_damage,
-            None,
+            Some(SelectionMarks {
+                ring_slot: Some(2),
+                dot_slot: Some(0),
+            }),
         );
     });
 
+    // 1. Sans défilement : liseré sur le 3ᵉ portrait, point sur le 1ᵉʳ — tous deux SOUS le
+    //    pourcentage et sous la scrollbar (retour utilisateur du 13 sept. 2026).
     harness.run();
     harness.snapshot("combat_frame_scroll_14_ennemis");
 
@@ -94,4 +121,15 @@ fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
     harness.hover_at(egui::pos2(8.0 + 35.0, 8.0 + 150.0));
     harness.run();
     harness.snapshot("combat_frame_scroll_14_ennemis_survol");
+
+    // 3. Défilement de deux emplacements et demi : le portrait 3 (liseré) n'est plus qu'à moitié
+    //    dans la bande visible — le liseré a suivi et se rogne avec lui au bord haut, le point du
+    //    portrait 1 est sorti avec lui. Décalage posé directement dans l'état du widget (voir
+    //    `scroll_offset_id`).
+    harness.remove_cursor();
+    harness
+        .ctx
+        .data_mut(|d| d.insert_temp(scroll_offset_id(), 2.5_f32));
+    harness.run();
+    harness.snapshot("combat_frame_scroll_14_ennemis_defile");
 }
