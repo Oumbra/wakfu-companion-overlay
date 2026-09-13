@@ -19,8 +19,18 @@
 //! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (les fenêtres portent
 //! `WS_EX_NOACTIVATE` et ne reçoivent jamais d'événement clavier, voir la doc de
 //! `main.rs::QUIT_HOTKEY_LABEL`), donc **volés au jeu et à toute autre application** : d'où le
-//! garde-fou [`Shortcut::is_valid`] (au moins un modificateur) — laisser l'utilisateur binder une
-//! touche nue lui prendrait cette touche dans Wakfu lui-même.
+//! garde-fou [`Shortcut::is_valid`] — une lettre nue ne peut pas être bindée, elle serait prise à
+//! Wakfu lui-même dès la première ligne de chat écrite.
+//!
+//! **Exception : les touches de fonction nues** (F1-F12), autorisées depuis le 2026-09-13 avec les
+//! raccourcis multicompte ([`ShortcutAction::InvitePartner`]/[`ShortcutAction::FollowPartner`], F1
+//! et F2 par défaut — combinaisons demandées telles quelles par l'utilisateur). Elles ne
+//! s'écrivent pas, donc ne gênent aucune saisie ; et « voler la touche au jeu » est ICI l'effet
+//! recherché — c'est l'overlay, pas Wakfu, qui doit réagir à F1. Le revers reste entier et vaut
+//! pour toute personnalisation de ce genre : la touche est confisquée à TOUTES les applications
+//! tant que l'overlay tourne (F1 n'ouvre plus l'aide du navigateur). Une action multicompte ne
+//! fait rien quand le premier plan n'est pas le jeu (`chat_command::PartnerError::NoGameFocused`),
+//! mais la frappe est perdue pour l'application qui avait le focus.
 //!
 //! **Toutes les actions ne sont pas câblées sur les deux OS** : le binaire Linux
 //! (`bin/overlay-ui-x11.rs`) n'enregistre que les actions de
@@ -97,6 +107,18 @@ pub enum ShortcutAction {
     /// `panels::combat::CombatSide::toggled` et `main.rs::App::toggle_combat_side`, appliqué à
     /// CHAQUE fenêtre Combat ouverte, pas seulement celle au premier plan.
     CombatSide,
+    /// Invite en groupe le personnage de l'AUTRE fenêtre de jeu — tape `/i "<nom>"` dans le chat de
+    /// la fenêtre au premier plan (`chat_command`, voir sa doc de module pour toute la mécanique).
+    ///
+    /// **F1 nue par défaut**, à la demande explicite de l'utilisateur (2026-09-13) et par exception
+    /// à la règle du modificateur (voir doc de module) : le geste doit être aussi immédiat que les
+    /// raccourcis du jeu qu'il imite, et c'est en jouant — donc les deux mains sur le clavier, en
+    /// plein combat ou en pleine course — qu'on invite son second compte. Un `Ctrl+Shift+…` à trois
+    /// doigts raterait entièrement l'intention.
+    InvitePartner,
+    /// Fait suivre le personnage de l'AUTRE fenêtre de jeu — `/fol "<nom>"`, **F2 nue** par défaut.
+    /// Même demande, même justification et même mécanique que [`Self::InvitePartner`].
+    FollowPartner,
     // **Il y avait ici `Disconnect`** (déconnexion du compte, `Ctrl+Alt+D` — le seul raccourci
     // resté en Ctrl+Alt quand les autres sont passés en Ctrl+Shift le 2026-09-06). Retiré le
     // 2026-09-13 à la demande de l'utilisateur : c'est désormais un bouton de l'onglet
@@ -106,7 +128,7 @@ pub enum ShortcutAction {
 
 impl ShortcutAction {
     /// Toutes les actions, dans l'ordre d'affichage — voir doc du type.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 10] = [
         Self::Toggle,
         Self::Refresh,
         Self::Quit,
@@ -115,6 +137,8 @@ impl ShortcutAction {
         Self::WatchlistAdd,
         Self::WatchlistRemove,
         Self::CombatSide,
+        Self::InvitePartner,
+        Self::FollowPartner,
     ];
 
     /// Actions réellement enregistrées par le binaire Linux (`bin/overlay-ui-x11.rs`) — voir doc
@@ -124,11 +148,17 @@ impl ShortcutAction {
     ///
     /// **À tenir à jour avec ce que ce binaire câble réellement** : une action ajoutée là-bas sans
     /// être ajoutée ici ne serait jamais enregistrée auprès de l'OS.
-    pub const LINUX_SUPPORTED: [Self; 4] = [
+    pub const LINUX_SUPPORTED: [Self; 6] = [
         Self::Toggle,
         Self::Quit,
         Self::Options,
         Self::WatchlistRemove,
+        // Câblés là-bas comme sous Windows : `chat_command` a une implémentation X11 complète
+        // (XTEST, `overlay_platform::linux::keyboard`) et le binaire Linux connaît déjà la fenêtre
+        // active (`_NET_ACTIVE_WINDOW`) — rien de ce qui manque à ce binaire (compte lié, thread
+        // Catalogue) n'entre en jeu ici.
+        Self::InvitePartner,
+        Self::FollowPartner,
     ];
 
     /// Clé stable utilisée dans `config.toml` (table `[shortcuts]`) — **jamais** la position dans
@@ -144,6 +174,8 @@ impl ShortcutAction {
             Self::WatchlistAdd => "watchlist_add",
             Self::WatchlistRemove => "watchlist_remove",
             Self::CombatSide => "combat_side",
+            Self::InvitePartner => "invite_partner",
+            Self::FollowPartner => "follow_partner",
         }
     }
 
@@ -159,6 +191,8 @@ impl ShortcutAction {
             Self::WatchlistAdd => "Ajouter au suivi",
             Self::WatchlistRemove => "Retirer du suivi",
             Self::CombatSide => "Alterner Alliés / Ennemis",
+            Self::InvitePartner => "Inviter l'autre personnage",
+            Self::FollowPartner => "Suivre l'autre personnage",
         }
     }
 
@@ -169,6 +203,7 @@ impl ShortcutAction {
             Self::Toggle | Self::Refresh | Self::Quit | Self::Options => "Overlay",
             Self::Details | Self::WatchlistAdd | Self::WatchlistRemove => "Suivi",
             Self::CombatSide => "Combat",
+            Self::InvitePartner | Self::FollowPartner => "Multicompte",
         }
     }
 
@@ -186,6 +221,9 @@ impl ShortcutAction {
             Self::WatchlistAdd => Shortcut::new(ctrl_shift, Code::KeyA),
             Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyS),
             Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyE),
+            // Nues, par exception assumée — voir la doc de ces deux variantes.
+            Self::InvitePartner => Shortcut::new(Modifiers::empty(), Code::F1),
+            Self::FollowPartner => Shortcut::new(Modifiers::empty(), Code::F2),
         }
     }
 
@@ -213,12 +251,15 @@ impl Shortcut {
         Self { mods, code }
     }
 
-    /// Au moins un modificateur **et** une touche principale acceptable : un raccourci global sans
-    /// modificateur volerait la touche à Wakfu lui-même (voir doc de module). Les combinaisons
-    /// produites par [`Self::from_egui`] passent forcément par ici avant d'être retenues.
+    /// Au moins un modificateur — **ou** une touche de fonction, seule famille de touches nues
+    /// autorisée (voir doc de module : elles ne s'écrivent pas, et les raccourcis multicompte les
+    /// demandent nues). Toute autre touche nue volerait le caractère à Wakfu lui-même dès la
+    /// première ligne de chat. Les combinaisons produites par [`Self::from_egui`] comme par
+    /// [`Self::parse`] passent forcément par ici avant d'être retenues.
     pub fn is_valid(&self) -> bool {
         self.mods
             .intersects(Modifiers::CONTROL | Modifiers::SHIFT | Modifiers::ALT | Modifiers::SUPER)
+            || is_function_key(self.code)
     }
 
     /// Équivalent `global_hotkey` à enregistrer auprès du `GlobalHotKeyManager`.
@@ -518,6 +559,26 @@ impl ShortcutRegistry {
     }
 }
 
+/// Une touche de fonction (F1-F12) — la seule famille acceptée SANS modificateur
+/// ([`Shortcut::is_valid`]), voir la doc de module pour pourquoi elle fait exception.
+fn is_function_key(code: Code) -> bool {
+    matches!(
+        code,
+        Code::F1
+            | Code::F2
+            | Code::F3
+            | Code::F4
+            | Code::F5
+            | Code::F6
+            | Code::F7
+            | Code::F8
+            | Code::F9
+            | Code::F10
+            | Code::F11
+            | Code::F12
+    )
+}
+
 /// Nom affiché d'une touche principale — symétrique de [`parse_key`] : tout ce que cette fonction
 /// produit doit être relisible par elle (propriété vérifiée par le test `aller_retour_toutes_les_touches`).
 fn key_label(code: Code) -> &'static str {
@@ -757,6 +818,9 @@ mod tests {
             "Ctrl+Shift+S"
         );
         assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+E");
+        // Nées nues (2026-09-13), à la demande de l'utilisateur — voir la doc de ces variantes.
+        assert_eq!(bindings.label(ShortcutAction::InvitePartner), "F1");
+        assert_eq!(bindings.label(ShortcutAction::FollowPartner), "F2");
     }
 
     /// Aucun conflit dans les défauts — sans quoi l'overlay démarrerait avec un raccourci non
@@ -793,10 +857,27 @@ mod tests {
         );
     }
 
+    /// L'exception des touches de fonction (voir doc de module) vaut des deux côtés : la relecture
+    /// d'un `config.toml` qui porte `invite_partner = "F1"` doit rendre exactement F1, pas le
+    /// repli silencieux sur un défaut.
+    #[test]
+    fn parse_accepte_une_touche_de_fonction_nue() {
+        assert_eq!(
+            Shortcut::parse("F1"),
+            Some(Shortcut::new(Modifiers::empty(), Code::F1))
+        );
+        assert_eq!(
+            Shortcut::parse("F12").map(|s| s.label()).as_deref(),
+            Some("F12")
+        );
+    }
+
     #[test]
     fn parse_refuse_les_combinaisons_inutilisables() {
-        // Sans modificateur : volerait la touche au jeu (voir doc de module).
+        // Sans modificateur : volerait la touche au jeu (voir doc de module). L'exception ne vaut
+        // que pour les touches de fonction, jamais pour une lettre ou un chiffre.
         assert_eq!(Shortcut::parse("W"), None);
+        assert_eq!(Shortcut::parse("5"), None);
         // Touche principale absente, inconnue, ou en double.
         assert_eq!(Shortcut::parse("Ctrl+Shift"), None);
         assert_eq!(Shortcut::parse("Ctrl+Impr"), None);
@@ -882,6 +963,14 @@ mod tests {
         assert_eq!(
             Shortcut::from_egui(egui::Key::W, egui::Modifiers::NONE),
             None
+        );
+        // …sauf sur une touche de fonction : l'utilisateur doit pouvoir RÉASSIGNER un raccourci
+        // multicompte à une autre touche nue depuis l'onglet, pas seulement hériter de F1/F2.
+        assert_eq!(
+            Shortcut::from_egui(egui::Key::F3, egui::Modifiers::NONE)
+                .map(|s| s.label())
+                .as_deref(),
+            Some("F3")
         );
         assert_eq!(
             Shortcut::from_egui(egui::Key::W, egui::Modifiers::CTRL)
