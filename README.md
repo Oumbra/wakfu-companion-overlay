@@ -31,6 +31,13 @@ le dépôt. C'est ce qui garantit que `cargo fmt` et `clippy` rendent ici le mê
 sans cet épinglage, la sortie d'une nouvelle version de Rust suffit à faire rougir le CI sur du
 code que personne n'a touché.
 
+Sur **SteamOS (Steam Deck)**, le système n'a ni `cargo` ni compilateur et son rootfs est en lecture
+seule : préparer d'abord l'environnement une fois pour toutes, depuis un terminal du mode Bureau.
+
+```bash
+bash scripts/setup-steamdeck.sh   # conteneur distrobox (Arch) + rustup, HOME/écran/GPU partagés
+```
+
 Avant de pousser (le hook `pre-push` le fait pour les lints) :
 
 ```bash
@@ -45,7 +52,7 @@ bash scripts/ci-local.sh --lint   # format + clippy seulement (rapide)
 | [`overlay-ingest`](crates/overlay-ingest/) | L1 ✅ | Suivi de `wakfu.log` : découverte de chemin, lecture incrémentale, rotation/troncature. `cargo test -p overlay-ingest`. |
 | [`overlay-app`](crates/overlay-app/) | L1 (câblage) | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
 | [`overlay-engine`](crates/overlay-engine/) | L2 🟡 | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
-| [`overlay-ui`](crates/overlay-ui/) | L2 🟡 | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` depuis le dossier du crate. |
+| [`overlay-ui`](crates/overlay-ui/) | L2 🟡 | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` (Windows) ou `preview.sh` (Linux) depuis le dossier du crate. |
 
 ## Spikes (`spikes/`)
 
