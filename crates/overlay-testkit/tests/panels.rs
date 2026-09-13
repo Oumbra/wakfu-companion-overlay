@@ -1481,6 +1481,123 @@ fn options_onglet_alertes_fermeture_manuelle() {
 /// combinaisons effectives et non les défauts), une case EN ÉCOUTE (bord d'alerte et « Tapez la
 /// combinaison… »), et le message d'une frappe refusée. Le reste — groupes, en-têtes de tableau,
 /// champ de recherche, bouton « Réinitialiser » — vient avec.
+/// **La déconnexion passe par une confirmation, et Échap y répond « Non ».**
+///
+/// Deux règles en une : le bouton ne déconnecte jamais du premier clic (l'action efface la session
+/// et renvoie l'overlay à son écran de connexion, « Annuler » ne la rattraperait pas), et l'Échap
+/// qui ferme la boîte ne doit PAS être relu par le filet clavier de la fenêtre — sinon le même
+/// appui fermerait la boîte ET la fenêtre derrière, le bug déjà attrapé pour la garde de fermeture.
+#[test]
+fn options_deconnexion_confirmee_et_echap_repond_non() {
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        // La confirmation est ouverte d'entrée : c'est l'état où l'appui d'Échap se joue, et le
+        // clic sur le bouton qui l'ouvre est déjà couvert par le composant `design::button`.
+        pending_disconnect: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
+    let confirmation_ouverte = std::cell::Cell::new(false);
+
+    let mut harness = Harness::new_ui(|ui| {
+        overlay_ui::style::apply(ui.ctx());
+        let icons = UiIcons::load(ui.ctx());
+        let remote_icons = RemoteIconStore::empty();
+        let mut remote_icon_textures = RemoteIconTextures::default();
+        let catalog = CatalogIndex::default();
+        let action = panels::options_modal::show(
+            ui,
+            &mut options_state,
+            &mut panels::options_modal::OptionsModalContext {
+                catalog: &catalog,
+                remote_icons: &remote_icons,
+                remote_icon_textures: &mut remote_icon_textures,
+                icons: &icons,
+            },
+        );
+        if action != OptionsModalAction::None {
+            actions.borrow_mut().push(action);
+        }
+        confirmation_ouverte.set(options_state.pending_disconnect);
+    });
+
+    // Frames de repos : la boîte reste ouverte, et rien n'est déconnecté tant qu'on n'a pas répondu.
+    harness.run();
+    assert!(
+        confirmation_ouverte.get(),
+        "la confirmation s'est fermée seule"
+    );
+    assert_eq!(actions.borrow_mut().drain(..).collect::<Vec<_>>(), vec![]);
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(
+        !confirmation_ouverte.get(),
+        "Échap doit fermer la confirmation"
+    );
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : ni déconnexion, ni fermeture de la fenêtre derrière"
+    );
+}
+
+/// **La section « Compte » de l'onglet « Paramètres »** (2026-09-13) — la déconnexion, qui était
+/// jusque-là un raccourci global (`Ctrl+Alt+D`), devenue un bouton avec ce qu'il faut pour
+/// comprendre ce qu'il fait avant de le presser.
+///
+/// Capturée **compte connecté** (`account_connected: true`), l'état où le bouton est actif : à
+/// `false` — le cas du binaire Linux, sans compte — il est grisé et son infobulle le dit.
+#[test]
+fn options_parametres_section_compte() {
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_parametres_compte");
+}
+
 #[test]
 fn options_onglet_raccourcis() {
     use overlay_ui::panels::raccourcis_tab::RaccourcisTabState;

@@ -664,6 +664,11 @@ mod linux_main {
                 // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
+                // Aucun compte lié dans ce binaire (mode invité fixe, voir la doc de module) : le
+                // bouton « Déconnecter » de la section « Compte » reste désactivé, avec son
+                // infobulle qui le dit.
+                account_connected: false,
+                pending_disconnect: false,
                 alerts: Default::default(),
                 // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :
                 // aucun thread Auth ne tourne ici). Il n'y a donc ni liste à charger ni endroit où
@@ -1055,6 +1060,14 @@ mod linux_main {
                         OptionsModalAction::TestAlertSound => {
                             overlay_ui::alert_sound::play_loot_alert()
                         }
+                        // **Inatteignable ici** : ce binaire n'a pas de compte (mode invité fixe,
+                        // voir la doc de module), le bouton « Déconnecter » y est donc désactivé
+                        // (`OptionsModalState::account_connected`, posé à `false` à l'ouverture) et
+                        // sa confirmation ne s'ouvre jamais. Tracé plutôt qu'ignoré : si cette
+                        // ligne apparaît un jour dans un journal, c'est que le drapeau ment.
+                        OptionsModalAction::Disconnect => tracing::warn!(
+                            "[options] déconnexion demandée sans compte lié — sans effet."
+                        ),
                         // Ce binaire n'a pas de réseau (voir sa doc de module) : la fenêtre de
                         // recette reste sur son rouage, ce qui est la vérité — les ingrédients
                         // n'arriveront pas.

@@ -258,6 +258,14 @@ pub struct OptionsModalState {
     /// is_dirty`]), et donc lui qui décide si fermer doit demander confirmation. Sans référence, la
     /// modale ne pourrait comparer qu'à elle-même.
     pub initial: OptionsInitial,
+    /// Un compte est-il connecté ? — posé par l'hôte à l'ouverture (lui seul connaît
+    /// `AuthStatus`). Décide si le bouton « Déconnecter » de l'onglet « Paramètres » est actif : le
+    /// presser sans compte lié ne ferait rien de visible, mieux vaut que ça se voie avant le clic.
+    pub account_connected: bool,
+    /// La confirmation de déconnexion est ouverte — voir la section « Compte » de [`show`]. Un
+    /// champ distinct de [`Self::pending_close`] : les deux boîtes posent des questions
+    /// différentes, et une seule peut être ouverte à la fois (voir `show`).
+    pub pending_disconnect: bool,
     /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
     ///
     /// Posée par le clic sur « Annuler », par la croix de la bannière (2026-09-13), par Échap, **ou
@@ -354,6 +362,14 @@ pub enum OptionsModalAction {
     /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
     /// audio (`alert_sound::play_loot_alert`).
     TestAlertSound,
+    /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
+    /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
+    /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
+    ///
+    /// **Immédiat, jamais un brouillon** : contrairement au chemin, aux alertes, au suivi et aux
+    /// raccourcis, ce que cette action déclenche ne passe pas par « Valider » et ne se rattrape pas
+    /// par « Annuler ».
+    Disconnect,
     /// Résoudre les ingrédients de cet objet, depuis l'onglet « Suivi » — l'appelant seul a le
     /// réseau (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
@@ -416,11 +432,11 @@ pub fn show(
     // même Échap et rouvrait la garde. La boîte semblait ne jamais se fermer. Attrapé par
     // `options_garde_de_fermeture_au_clavier`.
     //
-    // **Un seul dialogue depuis le 2026-09-13** : la confirmation de retrait de l'onglet Alertes a
-    // été supprimée (voir `alerts_tab`, règle 4), la garde de fermeture est donc la seule boîte que
-    // cette fenêtre puisse ouvrir. La capture reste nécessaire — c'est le double appui d'Échap
-    // qu'elle empêche, pas la cohabitation de deux boîtes.
-    let dialogue_a_l_entree = state.pending_close;
+    // **Deux dialogues possibles, jamais en même temps** : la garde de fermeture et, depuis le
+    // 2026-09-13, la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »).
+    // Elles s'excluent par construction (voir leur `else if` plus bas) ; la capture ci-dessus vaut
+    // pour l'une comme pour l'autre — c'est le double appui d'Échap qu'elle empêche.
+    let dialogue_a_l_entree = state.pending_close || state.pending_disconnect;
 
     // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
     // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
@@ -625,6 +641,50 @@ pub fn show(
             )
             .log_name("options-combat-toujours-visible"),
         );
+
+        // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
+        // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
+        // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
+        //
+        // **Ce bouton n'est PAS un brouillon**, contrairement à tout le reste de cette fenêtre : il
+        // agit tout de suite (l'hôte efface le jeton et l'overlay revient à son écran de
+        // connexion), et « Annuler » ne le rattraperait pas. C'est précisément ce qui justifie la
+        // confirmation qu'il ouvre — là où l'onglet « Alertes » a pu retirer la sienne, son retrait
+        // d'objet étant annulable jusqu'à « Valider » (voir `alerts_tab`, règle 4).
+        ui.add_space(SECTION_GAP);
+        ui.add(design::heading("Compte"));
+        ui.add(
+            design::info_text(
+                "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
+                 suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
+                 à son écran de connexion, et il faudra réappairer l'application pour le réutiliser.",
+            )
+            .tone(design::InfoTone::Info)
+            .width(inner_width)
+            .log_name("options-compte-info"),
+        );
+        ui.add_space(INFO_GAP);
+        // Bouton SECONDAIRE et non `Danger` : le rouge de cette fenêtre est celui du « Annuler »
+        // plein-largeur du pied de page, et le design system le réserve à ce pattern (§9 du
+        // design-system, même arbitrage que le bouton de confirmation de l'onglet « Alertes »).
+        // C'est la confirmation qui porte l'avertissement, pas la couleur.
+        if ui
+            .add(
+                design::button("Déconnecter")
+                    .variant(ButtonVariant::Secondary)
+                    .size(ButtonSize::Height(ROW_HEIGHT))
+                    .enabled(state.account_connected)
+                    .tooltip(if state.account_connected {
+                        "Effacer la session enregistrée et revenir à l'écran de connexion"
+                    } else {
+                        "Aucun compte connecté"
+                    })
+                    .log_name("options-deconnecter"),
+            )
+            .clicked()
+        {
+            state.pending_disconnect = true;
+        }
     });
 
     if alerts_action == AlertsTabAction::TestSound {
@@ -651,9 +711,30 @@ pub fn show(
         }
     }
 
-    // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE — et désormais la
-    // seule boîte de cette fenêtre : l'onglet Alertes n'en ouvre plus (voir `alerts_tab`, règle 4).
-    if state.pending_close {
+    // **La confirmation de déconnexion** (2026-09-13), peinte avant la garde de fermeture et, comme
+    // elle, sur la fenêtre ENTIÈRE. Elle passe en premier parce qu'elle EXCLUT la seconde : le
+    // `else if` ci-dessous garantit qu'une seule boîte est à l'écran, deux voiles superposés ne
+    // disant plus quel pied de page est inerte.
+    //
+    // Pourquoi confirmer ici, alors que l'onglet « Alertes » a retiré sa confirmation de retrait :
+    // celle-là portait sur un brouillon qu'« Annuler » rattrapait ; celle-ci efface la session et
+    // renvoie l'overlay à son écran de connexion, sans retour possible sans réappairer.
+    if state.pending_disconnect {
+        let choix = design::confirm_dialog("Déconnecter le compte de l'overlay ?")
+            .over(window)
+            .log_name("options.deconnexion")
+            .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_disconnect = false;
+                action = OptionsModalAction::Disconnect;
+            }
+            design::ConfirmChoice::No => state.pending_disconnect = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    }
+    // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE.
+    else if state.pending_close {
         let choix = design::confirm_dialog("Abandonner les modifications en cours ?")
             .over(window)
             .log_name("options.abandon")

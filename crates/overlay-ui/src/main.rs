@@ -352,7 +352,8 @@ struct App {
     auth_status: Arc<ArcSwap<AuthStatus>>,
     /// Signale au thread Auth une commande (`AuthCommand`) : `Retry` sur clic sur l'icône de
     /// relance (visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`),
-    /// `Disconnect` sur le raccourci `ShortcutAction::Disconnect` (voir `disconnect_account`).
+    /// `Disconnect` sur le bouton « Déconnecter » de la fenêtre Options (voir
+    /// `disconnect_account`).
     auth_command_tx: mpsc::Sender<AuthCommand>,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
@@ -943,10 +944,14 @@ impl App {
         );
     }
 
-    /// `ShortcutAction::Disconnect` : déconnexion volontaire du compte lié (lot L4, §7.2/§14 point 3
-    /// du plan) — jusqu'ici la seule façon de révoquer une session native depuis l'overlay était
-    /// d'aller effacer le jeton à la main sur disque/dans le trousseau (aucun moyen depuis
-    /// l'overlay lui-même). Purement une commande envoyée au thread Auth (voir `spawn_auth_thread`)
+    /// Déconnexion volontaire du compte lié (lot L4, §7.2/§14 point 3 du plan) — jusqu'à son
+    /// introduction, la seule façon de révoquer une session native depuis l'overlay était d'aller
+    /// effacer le jeton à la main sur disque/dans le trousseau.
+    ///
+    /// **Déclenchée par le bouton « Déconnecter » de l'onglet « Paramètres »** (section « Compte »,
+    /// `OptionsModalAction::Disconnect`) depuis le 2026-09-13 ; c'était jusque-là un raccourci
+    /// global (`Ctrl+Alt+D`), retiré à la demande de l'utilisateur — voir `overlay_ui::shortcuts`.
+    /// Purement une commande envoyée au thread Auth (voir `spawn_auth_thread`)
     /// : c'est LUI qui efface le jeton (trousseau + repli fichier) et notifie le thread Engine
     /// (`EngineCommand::Disconnect`) pour revenir en mode invité (repli `breed`, Suivi vidé) —
     /// jamais depuis ce thread (winit) directement, même raison que `force_refresh` (l'accès
@@ -958,10 +963,7 @@ impl App {
     /// effective au prochain appui une fois cette tentative résolue.
     fn disconnect_account(&mut self) {
         let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
-        tracing::info!(
-            ">>> Déconnexion du compte demandée ({})",
-            self.hotkeys.bindings().label(ShortcutAction::Disconnect)
-        );
+        tracing::info!(">>> Déconnexion du compte demandée (fenêtre Options).");
     }
 
     /// `ShortcutAction::Details` : même action que le clic sur le bouton "Détails" (lien externe)
@@ -1354,6 +1356,10 @@ impl App {
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
+            // Le bouton « Déconnecter » de la section « Compte » n'a de sens que sur un compte
+            // lié — l'hôte est seul à connaître `AuthStatus` (voir `spawn_auth_thread`).
+            account_connected: matches!(**self.auth_status.load(), AuthStatus::Connected),
+            pending_disconnect: false,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -1660,6 +1666,9 @@ enum PostRedraw {
     /// Ce que « Valider » emporte de l'onglet « Paramètres » — voir
     /// `options_modal::OptionsCommit`.
     ValidateOptions(options_modal::OptionsCommit),
+    /// Bouton « Déconnecter » de la section « Compte », **après confirmation** (voir
+    /// `panels::options_modal`) — efface la session et referme la fenêtre.
+    DisconnectAccount,
     /// Résoudre les ingrédients de cet objet pour la fenêtre de recette de l'onglet « Suivi ».
     ResolveRecipe(i64),
 }
@@ -1823,6 +1832,7 @@ impl App {
             OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
             OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
+            OptionsModalAction::Disconnect => post_redraw = PostRedraw::DisconnectAccount,
             OptionsModalAction::Validate(commit) => {
                 post_redraw = PostRedraw::ValidateOptions(commit)
             }
@@ -1840,6 +1850,14 @@ impl App {
                 self.open_options_modal(event_loop, Some((hwnd, rect)), tab)
             }
             PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
+            // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
+            // ce qu'on y réglait (liste suivie, alertes) appartient au compte qu'on vient de
+            // quitter. Ce qui n'a pas été validé est donc abandonné — c'est ce que la confirmation
+            // annonce avant le clic.
+            PostRedraw::DisconnectAccount => {
+                self.disconnect_account();
+                self.close_options_modal(id, "Déconnexion");
+            }
             PostRedraw::BrowseOptions => self.start_file_dialog(),
             PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
@@ -1859,13 +1877,12 @@ impl ApplicationHandler<UserEvent> for App {
             tracing::info!(
                 "{} pour basculer interactif / clic-traversant. \
                  {} pour forcer un rafraîchissement (overlay bloqué/mal \
-                 positionné, ou Suivi resté vide). {} pour déconnecter le \
-                 compte lié (repli mode invité). {} ou Ctrl+C (dans ce \
-                 terminal) pour quitter. {} pour la fenêtre Options, dont \
-                 l'onglet « Raccourcis » qui personnalise tout ceci.",
+                 positionné, ou Suivi resté vide). {} ou Ctrl+C (dans ce \
+                 terminal) pour quitter. {} pour la fenêtre Options — \
+                 son onglet « Raccourcis » personnalise tout ceci, et sa \
+                 section « Compte » déconnecte le compte lié.",
                 bindings.label(ShortcutAction::Toggle),
                 bindings.label(ShortcutAction::Refresh),
-                bindings.label(ShortcutAction::Disconnect),
                 bindings.label(ShortcutAction::Quit),
                 bindings.label(ShortcutAction::Options),
             );
@@ -1991,7 +2008,6 @@ impl ApplicationHandler<UserEvent> for App {
                     logging::log_session_end(&self.hotkeys.bindings().label(ShortcutAction::Quit));
                     event_loop.exit();
                 }
-                ShortcutAction::Disconnect => self.disconnect_account(),
                 ShortcutAction::Details => self.open_details(),
                 ShortcutAction::Options => {
                     tracing::info!(
@@ -2577,7 +2593,7 @@ fn backoff_delay(consecutive_failures: u32) -> std::time::Duration {
 /// **Déconnexion volontaire** (2026-09-02, §14 point 3 du plan) : contrairement à la version
 /// initiale de ce thread, une connexion réussie ne fait PLUS terminer le thread (`return`) — il
 /// reste vivant, à l'écoute de `command_rx`, pour pouvoir traiter un `AuthCommand::Disconnect`
-/// (raccourci `ShortcutAction::Disconnect`, voir `App::disconnect_account`) à tout moment tant que le
+/// (bouton « Déconnecter » de la fenêtre Options, voir `App::disconnect_account`) à tout moment tant que le
 /// compte reste lié. Un `Disconnect` efface le jeton (`token_store::clear_token`), notifie le
 /// thread Engine (`EngineCommand::Disconnect`, voir `spawn_engine_thread`) pour qu'il revienne en
 /// mode invité, republie `AuthStatus::Disconnected`, puis attend un `AuthCommand::Retry` avant de

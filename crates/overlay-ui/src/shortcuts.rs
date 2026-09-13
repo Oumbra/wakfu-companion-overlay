@@ -2,6 +2,12 @@
 //! Options, `panels::options_modal` — calqué sur l'onglet "Commandes" du jeu réel,
 //! `assets/design-system/interfaces/interface-options-commandes.png`).
 //!
+//! **La déconnexion du compte n'en fait plus partie depuis le 2026-09-13** (demande utilisateur, le
+//! jour même de la création de cet onglet) : elle est devenue un BOUTON de l'onglet « Paramètres »
+//! (section « Compte », voir `panels::options_modal`). Une action qui renvoie l'overlay à son écran
+//! de connexion n'a pas sa place derrière une combinaison globale qu'on peut frapper par
+//! inadvertance, d'autant qu'elle ne se rejoue qu'en refaisant tout un appairage.
+//!
 //! Jusqu'ici chaque combinaison était une constante en dur dans `main.rs`/`bin/overlay-ui-x11.rs`
 //! (`HOTKEY_LABEL`, `DETAILS_HOTKEY_LABEL`…), doublée d'un libellé recopié à la main dans les
 //! tooltips des boutons (`panels::watchlist::control_button_row`,
@@ -91,19 +97,16 @@ pub enum ShortcutAction {
     /// `panels::combat::CombatSide::toggled` et `main.rs::App::toggle_combat_side`, appliqué à
     /// CHAQUE fenêtre Combat ouverte, pas seulement celle au premier plan.
     CombatSide,
-    /// Déconnexion volontaire du compte lié, repli mode invité (lot L4, §7.2/§14 point 3 du plan) —
-    /// jusqu'à son introduction, révoquer une session native exigeait d'effacer le jeton à la main
-    /// sur disque/dans le trousseau. Ne fait rien de visible en mode invité (aucun compte lié), voir
-    /// `main.rs::App::disconnect_account`.
-    ///
-    /// **Seul raccourci resté en Ctrl+Alt** quand les autres sont passés de Ctrl+Alt à Ctrl+Shift
-    /// (2026-09-06, harmonisation demandée par l'utilisateur — pas pour celui-ci).
-    Disconnect,
+    // **Il y avait ici `Disconnect`** (déconnexion du compte, `Ctrl+Alt+D` — le seul raccourci
+    // resté en Ctrl+Alt quand les autres sont passés en Ctrl+Shift le 2026-09-06). Retiré le
+    // 2026-09-13 à la demande de l'utilisateur : c'est désormais un bouton de l'onglet
+    // « Paramètres », voir la doc de module. Sa clé de config (`disconnect`) est simplement ignorée
+    // à la relecture d'un `config.toml` plus ancien (`ShortcutBindings::from_config`).
 }
 
 impl ShortcutAction {
     /// Toutes les actions, dans l'ordre d'affichage — voir doc du type.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Toggle,
         Self::Refresh,
         Self::Quit,
@@ -112,7 +115,6 @@ impl ShortcutAction {
         Self::WatchlistAdd,
         Self::WatchlistRemove,
         Self::CombatSide,
-        Self::Disconnect,
     ];
 
     /// Actions réellement enregistrées par le binaire Linux (`bin/overlay-ui-x11.rs`) — voir doc
@@ -142,7 +144,6 @@ impl ShortcutAction {
             Self::WatchlistAdd => "watchlist_add",
             Self::WatchlistRemove => "watchlist_remove",
             Self::CombatSide => "combat_side",
-            Self::Disconnect => "disconnect",
         }
     }
 
@@ -158,7 +159,6 @@ impl ShortcutAction {
             Self::WatchlistAdd => "Ajouter au suivi",
             Self::WatchlistRemove => "Retirer du suivi",
             Self::CombatSide => "Alterner Alliés / Ennemis",
-            Self::Disconnect => "Déconnecter le compte",
         }
     }
 
@@ -169,7 +169,6 @@ impl ShortcutAction {
             Self::Toggle | Self::Refresh | Self::Quit | Self::Options => "Overlay",
             Self::Details | Self::WatchlistAdd | Self::WatchlistRemove => "Suivi",
             Self::CombatSide => "Combat",
-            Self::Disconnect => "Compte",
         }
     }
 
@@ -187,8 +186,6 @@ impl ShortcutAction {
             Self::WatchlistAdd => Shortcut::new(ctrl_shift, Code::KeyA),
             Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyS),
             Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyE),
-            // Seul raccourci historiquement en Ctrl+Alt (voir `DISCONNECT_HOTKEY_LABEL`).
-            Self::Disconnect => Shortcut::new(Modifiers::CONTROL | Modifiers::ALT, Code::KeyD),
         }
     }
 
@@ -196,6 +193,10 @@ impl ShortcutAction {
         Self::ALL.into_iter().find(|action| action.key() == key)
     }
 }
+
+/// Clé de config du raccourci de déconnexion, retiré le 2026-09-13 — voir [`ShortcutAction`] et
+/// [`ShortcutBindings::from_config`].
+const RETIRED_DISCONNECT_KEY: &str = "disconnect";
 
 /// Une combinaison `modificateurs + touche`. Enveloppe volontaire de `global_hotkey::HotKey` (dont
 /// elle sait produire l'équivalent, [`Shortcut::to_hotkey`]) : ce dernier n'a **ni libellé lisible**
@@ -349,6 +350,12 @@ impl ShortcutBindings {
         let mut bindings = Self::default();
         for (key, value) in raw {
             let Some(action) = ShortcutAction::from_key(key) else {
+                if key == RETIRED_DISCONNECT_KEY {
+                    // Clé d'un raccourci RETIRÉ (voir `ShortcutAction`), pas une faute de frappe :
+                    // tout `config.toml` écrit avant le 2026-09-13 en porte une. Silencieuse, donc,
+                    // là où une clé vraiment inconnue mérite un avertissement.
+                    continue;
+                }
                 tracing::warn!(
                     "[raccourcis] action inconnue « {key} » dans la configuration — ignorée."
                 );
@@ -750,11 +757,10 @@ mod tests {
             "Ctrl+Shift+S"
         );
         assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+E");
-        assert_eq!(bindings.label(ShortcutAction::Disconnect), "Ctrl+Alt+D");
     }
 
-    /// Aucun conflit dans les défauts (Détails et Déconnexion partagent la touche D mais pas les
-    /// modificateurs) — sans quoi l'overlay démarrerait avec un raccourci non enregistrable.
+    /// Aucun conflit dans les défauts — sans quoi l'overlay démarrerait avec un raccourci non
+    /// enregistrable.
     #[test]
     fn defauts_sans_conflit() {
         assert_eq!(ShortcutBindings::default().conflict(), None);
@@ -844,6 +850,19 @@ mod tests {
         let bindings = ShortcutBindings::from_config(&raw);
         assert_eq!(bindings.label(ShortcutAction::Toggle), "Ctrl+Alt+T");
         assert_eq!(bindings.label(ShortcutAction::Quit), "Ctrl+Shift+Q");
+    }
+
+    /// Une config écrite AVANT le retrait du raccourci de déconnexion reste lisible : sa clé
+    /// `disconnect` est ignorée, et tout le reste du fichier s'applique normalement.
+    #[test]
+    fn from_config_ignore_le_raccourci_de_deconnexion_retire() {
+        let raw = BTreeMap::from([
+            (RETIRED_DISCONNECT_KEY.to_string(), "Ctrl+Alt+D".to_string()),
+            ("options".to_string(), "Ctrl+Alt+O".to_string()),
+        ]);
+        let bindings = ShortcutBindings::from_config(&raw);
+        assert_eq!(bindings.label(ShortcutAction::Options), "Ctrl+Alt+O");
+        assert!(!bindings.to_config().contains_key(RETIRED_DISCONNECT_KEY));
     }
 
     #[test]
