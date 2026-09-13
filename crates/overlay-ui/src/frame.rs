@@ -47,6 +47,7 @@ pub struct GpuState {
 pub fn render(
     gpu: &mut GpuState,
     window: &winit::window::Window,
+    event_loop: &winit::event_loop::ActiveEventLoop,
     content: RenderContent<'_>,
 ) -> (std::time::Duration, RenderOutcome) {
     // Copiés hors de `content` (tous deux `Copy`) AVANT qu'il ne soit déplacé dans `build_ui` —
@@ -87,8 +88,15 @@ pub fn render(
         }
     }
 
-    gpu.egui_winit
-        .handle_platform_output(window, full_output.platform_output);
+    // Variante AVEC event loop (plutôt que `handle_platform_output`) : c'est elle qui honore
+    // `PlatformOutput::cursor_image` — le curseur du jeu publié par `crate::cursor` — en créant le
+    // `winit::window::CustomCursor` correspondant ; sans event loop, egui-winit retombe
+    // silencieusement sur le curseur système.
+    gpu.egui_winit.handle_platform_output_with_event_loop(
+        window,
+        event_loop,
+        full_output.platform_output,
+    );
 
     let paint_jobs = gpu
         .egui_ctx

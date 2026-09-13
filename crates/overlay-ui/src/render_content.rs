@@ -567,5 +567,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 }
             }
         });
+    // Curseur du jeu à la place du curseur système (voir `crate::cursor`) — APRÈS tout le contenu,
+    // une fois que chaque widget survolé a dit ce qu'il voulait (`PlatformOutput::cursor_icon`).
+    crate::cursor::apply(ui.ctx(), now);
     outcome
 }

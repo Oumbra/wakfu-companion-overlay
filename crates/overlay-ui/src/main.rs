@@ -1664,6 +1664,7 @@ impl App {
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
             &overlay.window,
+            event_loop,
             RenderContent {
                 kind: overlay.kind,
                 fight,
