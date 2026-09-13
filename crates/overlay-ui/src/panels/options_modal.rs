@@ -664,22 +664,34 @@ pub fn show(
             .log_name("options-compte-info"),
         );
         ui.add_space(INFO_GAP);
-        // Bouton SECONDAIRE et non `Danger` : le rouge de cette fenêtre est celui du « Annuler »
-        // plein-largeur du pied de page, et le design system le réserve à ce pattern (§9 du
-        // design-system, même arbitrage que le bouton de confirmation de l'onglet « Alertes »).
-        // C'est la confirmation qui porte l'avertissement, pas la couleur.
+        // **Rouge et centré** (demande utilisateur, 2026-09-13), là où ce bouton était secondaire
+        // et aligné à gauche comme les réglages au-dessus. Les deux vont ensemble : c'est la seule
+        // action de cette fenêtre qui échappe à « Annuler », et noyée dans la colonne des réglages
+        // elle ne se distinguait pas d'un champ de plus. La couleur avertit, la confirmation
+        // rattrape le geste — l'une ne remplace pas l'autre.
+        //
+        // La texture `Danger` est native en **36 px**, soit exactement `ROW_HEIGHT` : ni dégradé
+        // étiré ni embout à la mauvaise échelle (voir `design::ButtonVariant::textures`).
+        //
+        // **Largeur naturelle**, jamais figée — même règle que la ligne de recherche de l'onglet
+        // « Raccourcis » : une largeur en dur écrête le libellé dès que la police ou le mot
+        // changent, ce qui s'est déjà vu (« Réinitialise »).
+        let disconnect = design::button("Déconnecter")
+            .variant(ButtonVariant::Danger)
+            .size(ButtonSize::Height(ROW_HEIGHT))
+            .enabled(state.account_connected)
+            .tooltip(if state.account_connected {
+                "Effacer la session enregistrée et revenir à l'écran de connexion"
+            } else {
+                "Aucun compte connecté"
+            })
+            .log_name("options-deconnecter");
+        let disconnect_size = disconnect.desired_size(ui);
+        let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
         if ui
-            .add(
-                design::button("Déconnecter")
-                    .variant(ButtonVariant::Secondary)
-                    .size(ButtonSize::Height(ROW_HEIGHT))
-                    .enabled(state.account_connected)
-                    .tooltip(if state.account_connected {
-                        "Effacer la session enregistrée et revenir à l'écran de connexion"
-                    } else {
-                        "Aucun compte connecté"
-                    })
-                    .log_name("options-deconnecter"),
+            .put(
+                egui::Rect::from_center_size(row.center(), disconnect_size),
+                disconnect,
             )
             .clicked()
         {
