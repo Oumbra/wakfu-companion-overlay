@@ -2608,3 +2608,66 @@ cellule.put(emplacement_centré, design::item_slot());   // le curseur de la ran
 
 `Ui::new_child` n'avance rien : c'est ce qui le distingue de `scope`/`put`/`add`. Le même geste
 vaut pour tout composant posé par rectangle à l'intérieur d'une cellule déjà allouée.
+
+## `design::legend_tile` — tuile à légende (2026-09-13)
+
+`crates/overlay-ui/src/design/components/legend_tile.rs`
+
+```rust
+use overlay_ui::design;
+
+let response = ui.add(
+    design::legend_tile("Commerce", "gelano")
+        .width(155.0)
+        .tooltip("Retirer")
+        .log_name("chat.recherche"),
+);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `legend_tile(légende, contenu)` | la légende sur la bordure, le texte au centre | — |
+| `width` | largeur imposée | largeur disponible du `Ui` |
+| `height` | hauteur du **cadre** (la légende s'y ajoute au-dessus) | `LEGEND_TILE_HEIGHT` = 54 |
+| `enabled` | `false` = grisée, sans clic | `true` |
+| `tooltip` | infobulle du design system | aucune |
+| `preview_state` | `Idle` / `Hovered` / `Disabled` — galerie et captures seulement | état réel |
+
+Composant feuille (`impl Widget`, `Sense::click()`). Deux fonctions associées :
+`LegendTile::legend_overshoot` (de combien la légende déborde au-dessus du cadre) et
+`LegendTile::allocated_height` (la hauteur totale allouée, pour un appelant qui réserve).
+
+### À quoi elle sert
+
+À poser côte à côte des entrées qui ont **deux informations de poids inégal** : la légende dit la
+catégorie, le contenu dit la chose. Née pour les recherches de l'onglet Chat (« Commerce » /
+« gelano »), retenue par l'utilisateur le 2026-09-13 contre une liste en lignes : deux fois plus
+d'entrées visibles d'un coup, et la catégorie lisible **sans couleur** — l'utilisateur peut avoir
+appliqué un thème au jeu, une couleur figée ne correspondrait plus à la sienne.
+
+### Ce que le jeu fournit, et ce qui est emprunté
+
+Le cadre est **celui des champs de saisie** : bordure `#595140` de 2 px, fond `#0e1115`, coins
+droits — la signature « cadre » du design system, mesurée (`INPUT_BORDER`, `INPUT_FILL`). Le jeu
+n'a pas de cadre à légende : la légende posée sur la bordure, qui s'interrompt sous elle, est un
+idiome de formulaire emprunté, et les cotes qui lui sont propres (hauteur 54, légende en 11 px à
+10 px du bord, respiration de 4 px de chaque côté) sont des **choix de maquette validés**, pas des
+mesures — les jetons `LEGEND_TILE_*` le disent un par un.
+
+### Trois choses à savoir
+
+- **La tuile réserve elle-même la place de sa légende** au-dessus du cadre : un appelant qui les
+  empile n'a pas à savoir de combien elle déborde. La première rangée d'une grille n'est jamais
+  rognée par le clip de la zone défilable — c'est le défaut qu'avait la maquette.
+- **Le contenu est élidé sur une ligne**, jamais rogné en silence, avec une trace `warn!` une
+  seule fois par instance ; une légende trop longue s'arrête avant le bord droit.
+- **La croix de retrait reste au panneau**, comme pour `design::item_slot` dans Alertes : une
+  `Response` ne porte qu'un clic, et la croix est un second clic sur une zone à part. Survolée, la
+  tuile se voile (`LEGEND_TILE_HOVER_SCRIM`, le noir à 40 % des tuiles d'Alertes et du Suivi) et
+  c'est sur ce voile que le panneau pose sa croix.
+
+### Vérification
+
+Planche dédiée `design_gallery_legend_tile.png` (la galerie principale est au plafond des
+8192 px) : les trois états côte à côte, puis quatre tuiles à la largeur d'une colonne de l'onglet
+Chat, dont un contenu élidé et une légende tronquée.
