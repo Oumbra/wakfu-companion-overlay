@@ -274,7 +274,12 @@ pub fn show(
     // fermait la garde (« Non »), après quoi le filet voyait un état sans dialogue, relisait le
     // même Échap et rouvrait la garde. La boîte semblait ne jamais se fermer. Attrapé par
     // `options_garde_de_fermeture_au_clavier`.
-    let dialogue_a_l_entree = state.alerts.pending_removal.is_some() || state.pending_close;
+    //
+    // **Un seul dialogue depuis le 2026-09-13** : la confirmation de retrait de l'onglet Alertes a
+    // été supprimée (voir `alerts_tab`, règle 4), la garde de fermeture est donc la seule boîte que
+    // cette fenêtre puisse ouvrir. La capture reste nécessaire — c'est le double appui d'Échap
+    // qu'elle empêche, pas la cohabitation de deux boîtes.
+    let dialogue_a_l_entree = state.pending_close;
 
     // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
     // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
@@ -425,13 +430,9 @@ pub fn show(
         action = OptionsModalAction::TestAlertSound;
     }
 
-    // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE.
-    //
-    // Un seul dialogue à la fois : si une confirmation de retrait est déjà ouverte, celle-ci
-    // attend. Deux voiles empilés seraient deux fois plus sombres, et leurs deux « Échap » se
-    // marcheraient dessus.
-    let confirmation_ailleurs = state.alerts.pending_removal.is_some();
-    if state.pending_close && !confirmation_ailleurs {
+    // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE — et désormais la
+    // seule boîte de cette fenêtre : l'onglet Alertes n'en ouvre plus (voir `alerts_tab`, règle 4).
+    if state.pending_close {
         let choix = design::confirm_dialog("Abandonner les modifications en cours ?")
             .over(window)
             .log_name("options.abandon")
