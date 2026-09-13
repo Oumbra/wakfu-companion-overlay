@@ -4,6 +4,7 @@
 //! premières briques que les panneaux de l'UI (L2) afficheront.
 
 pub mod catalog;
+pub mod chat_alert;
 pub mod class_breed;
 pub mod dungeon;
 pub mod dungeon_run;
@@ -23,6 +24,10 @@ pub mod watchlist;
 pub use catalog::{
     CatalogIndex, IconKind, IconRef, ItemSuggestion, MonsterClassification, MonsterSuggestion,
     WakfuItemCategory, WakfuRarity,
+};
+pub use chat_alert::{
+    channel_label, chat_filters_from_settings_json, chat_filters_to_settings_json, matching_filter,
+    ChatAlert, ChatFilter, ChatFilterScope, CHAT_CHANNELS,
 };
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
