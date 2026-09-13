@@ -54,6 +54,15 @@ pub enum EngineCommand {
     /// alerte obéisse sans attendre un aller-retour réseau. L'écriture au compte, elle, part en
     /// parallèle côté hôte.
     SetAlertProfile(overlay_engine::AlertProfile),
+    /// Définitions suivies validées depuis l'onglet « Suivi » de la fenêtre Options (2026-09-13) —
+    /// nom, genre, mode et cible de chaque entrée.
+    ///
+    /// **Les compteurs n'y sont pas**, et c'est délibéré : le brouillon a été pris à l'ouverture de
+    /// la fenêtre, un objet ramassé depuis y serait resté à sa valeur d'alors. Le moteur garde donc
+    /// les siens — voir `WatchlistState::apply_definitions`. Comme pour `SetAlertProfile`, la
+    /// réplication au compte part en parallèle côté hôte, par le même chemin que les compteurs
+    /// (`SyncCommand::SyncWatchlist`).
+    SetWatchlistDefinitions(Vec<WatchlistEntry>),
 }
 
 /// L'instant où un toast doit disparaître, d'après le profil d'alerte — `None` quand le compte a
@@ -211,6 +220,15 @@ pub fn spawn_engine_thread(
                                 .and_then(|(_, raw)| raw.clone());
                             alert_profile_out.store(Arc::new(Some((profile.clone(), raw))));
                             alert_profile = profile;
+                        }
+                        EngineCommand::SetWatchlistDefinitions(definitions) => {
+                            tracing::info!(
+                                entry_count = definitions.len(),
+                                "[options] liste de suivi appliquée depuis la fenêtre Options"
+                            );
+                            // Les compteurs vivants sont gardés par le moteur, jamais repris du
+                            // brouillon — voir la doc de la commande.
+                            engine.set_watchlist_definitions(definitions);
                         }
                         EngineCommand::ChangeLogPath(new_path) => {
                             tracing::info!(

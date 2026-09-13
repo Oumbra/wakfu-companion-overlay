@@ -770,6 +770,9 @@ fn panneau_options_ne_panique_pas() {
     let auth_sink = NoopAuthSink;
     let now = std::time::Instant::now();
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: Some("Le fichier sélectionné doit s'appeler wakfu.log.".to_string()),
         // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
@@ -840,6 +843,9 @@ fn modale_options_echap_annule_et_entree_valide() {
     const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
 
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: CHEMIN.to_string(),
         error: None,
         // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
@@ -849,6 +855,9 @@ fn modale_options_echap_annule_et_entree_valide() {
         // premier coup. Une référence vide la rendrait « modifiée » dès l'ouverture, et Échap
         // ouvrirait la garde au lieu d'annuler — voir `options_garde_de_fermeture_au_clavier`.
         initial: overlay_ui::panels::options_modal::OptionsInitial {
+            // L'onglet « Suivi » n'entre dans aucune de ces captures : un brouillon vide suffit à
+            // satisfaire l'initialiseur sans rien changer à ce qu'elles vérifient.
+            suivi: None,
             path: CHEMIN.to_string(),
             alerts: None,
         },
@@ -965,6 +974,9 @@ fn modale_options_sur_damier_ne_panique_pas() {
     let auth_sink = NoopAuthSink;
     let now = std::time::Instant::now();
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         error: None,
         // L'onglet du chemin de log, explicitement : la fenêtre s'ouvre sur « Alertes » depuis
@@ -1057,6 +1069,9 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool) {
     profile.toggle("Influence III", None);
 
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: String::new(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1131,6 +1146,9 @@ fn options_garde_de_fermeture() {
 
     let profil = overlay_engine::AlertProfile::default();
     let mut state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: CHEMIN.to_string(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1138,6 +1156,9 @@ fn options_garde_de_fermeture() {
         alerts_draft: Some(profil.clone()),
         alerts_availability: AlertsAvailability::Ready,
         initial: overlay_ui::panels::options_modal::OptionsInitial {
+            // L'onglet « Suivi » n'entre dans aucune de ces captures : un brouillon vide suffit à
+            // satisfaire l'initialiseur sans rien changer à ce qu'elles vérifient.
+            suivi: None,
             path: CHEMIN.to_string(),
             alerts: Some(profil),
         },
@@ -1171,6 +1192,9 @@ fn options_garde_de_fermeture_a_l_ecran() {
     let mut profil = overlay_engine::AlertProfile::default();
     profil.add("Combinaison Lardante", Some(4242));
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: String::new(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1224,6 +1248,9 @@ fn options_garde_de_fermeture_au_clavier() {
     brouillon.add("Combinaison Lardante", Some(4242));
 
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: CHEMIN.to_string(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1231,6 +1258,9 @@ fn options_garde_de_fermeture_au_clavier() {
         alerts_draft: Some(brouillon),
         alerts_availability: AlertsAvailability::Ready,
         initial: overlay_ui::panels::options_modal::OptionsInitial {
+            // L'onglet « Suivi » n'entre dans aucune de ces captures : un brouillon vide suffit à
+            // satisfaire l'initialiseur sans rien changer à ce qu'elles vérifient.
+            suivi: None,
             path: CHEMIN.to_string(),
             alerts: Some(reference),
         },
@@ -1307,6 +1337,9 @@ fn survole_un_nom(nom_capture: &str, x: f32) {
     profile.add("Combinaison Lardante", Some(4242));
 
     let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: String::new(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1393,6 +1426,9 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     let profil = overlay_engine::AlertProfile::default();
     let avant = profil.sound_items.len();
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: String::new(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1499,6 +1535,9 @@ fn options_alertes_croix_efface_la_saisie() {
         ],
     }));
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: String::new(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1598,6 +1637,9 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
     assert_eq!(catalog.search_items("pierre", 3, 40).len(), 8);
 
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
         path_input: String::new(),
         error: None,
         tab: OptionsTab::Alertes,
@@ -1673,4 +1715,354 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
         Some("Pierre n° 7"),
         "Entrée n'a pas validé l'entrée active — sept rangées plus bas que la première"
     );
+}
+
+/// Rend l'onglet « Suivi » de la fenêtre Options dans un état donné, et le capture.
+///
+/// **Les entrées viennent du moteur**, pas d'une liste écrite à la main : ce sont de vraies
+/// [`overlay_engine::WatchlistEntry`], celles que `GET /api/v1/settings` renvoie. Les icônes, elles,
+/// restent le repli générique — elles viennent du CDN, hors de portée d'un test sans réseau.
+fn capture_onglet_suivi(
+    nom: &str,
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+    select_mode: bool,
+) {
+    use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    fn entree(name: &str, kind: WatchlistKind, mode: WatchlistMode, target: i64) -> WatchlistEntry {
+        WatchlistEntry {
+            name: name.to_string(),
+            kind,
+            mode,
+            count: target,
+            countdown_target: target,
+            catalog_id: None,
+        }
+    }
+
+    // Objets et monstres mêlés, les deux modes côte à côte : la grille doit rendre lisible d'un
+    // coup d'œil ce qui porte une cible et ce qui n'en porte pas.
+    let entries = vec![
+        entree(
+            "Bois de Frêne",
+            WatchlistKind::Item,
+            WatchlistMode::Down,
+            1000,
+        ),
+        entree("Fleur de Kalé", WatchlistKind::Item, WatchlistMode::Up, 0),
+        entree(
+            "Pierre de Lune",
+            WatchlistKind::Item,
+            WatchlistMode::Down,
+            50,
+        ),
+        entree("Bouftou", WatchlistKind::Enemy, WatchlistMode::Up, 0),
+        entree("Larve Bleue", WatchlistKind::Enemy, WatchlistMode::Up, 0),
+        entree(
+            "Plume de Tofu",
+            WatchlistKind::Item,
+            WatchlistMode::Down,
+            100,
+        ),
+        entree("Chafer Élite", WatchlistKind::Enemy, WatchlistMode::Up, 0),
+        entree("Minerai de Fer", WatchlistKind::Item, WatchlistMode::Up, 0),
+    ];
+
+    let mut options_state = OptionsModalState {
+        suivi: SuiviTabState {
+            mode,
+            target: 250,
+            select_mode,
+            // Trois tuiles cochées quand la sélection est ouverte : c'est ce qui fait basculer le
+            // libellé du bouton de « Supprimer tout » à « Supprimer (3) ».
+            selected: if select_mode {
+                entries
+                    .iter()
+                    .take(3)
+                    .map(|e| format!("{}::", e.name))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        },
+        suivi_draft: Some(entries),
+        suivi_availability: SuiviAvailability::Ready,
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Suivi,
+        alerts: Default::default(),
+        alerts_draft: None,
+        alerts_availability: Default::default(),
+        initial: Default::default(),
+        pending_close: false,
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// **L'onglet « Suivi »** — la liste réduite à ses emplacements d'objet, et son formulaire d'ajout.
+///
+/// Ce que cette capture verrouille, et qui est la règle la plus facile à perdre : **les compteurs
+/// ne s'affichent pas**. Seule la cible d'un décompte est peinte (`/50`), un incrémental ne porte
+/// aucun chiffre — cet écran sert à composer une liste, pas à la lire.
+#[test]
+fn options_onglet_suivi_incremental() {
+    capture_onglet_suivi(
+        "options_suivi_incremental",
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        false,
+    );
+}
+
+/// Mode décompte : la ligne « Quantité » apparaît, avec ses badges, sa mention « (Alt : retirer) »
+/// et son pas numérique.
+#[test]
+fn options_onglet_suivi_decompte() {
+    capture_onglet_suivi(
+        "options_suivi_decompte",
+        overlay_ui::panels::suivi_tab::AddMode::Down,
+        false,
+    );
+}
+
+/// Sélection multiple : cases à cocher sur toutes les tuiles, liseré or sur les cochées, et le
+/// bouton de suppression groupée **en rouge** — décision explicite de l'utilisateur (2026-09-13).
+#[test]
+fn options_onglet_suivi_selection_multiple() {
+    capture_onglet_suivi(
+        "options_suivi_selection",
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        true,
+    );
+}
+
+/// **Le champ d'ajout du Suivi, exercé de bout en bout — objets ET monstres.**
+///
+/// C'est la différence de fond avec celui des alertes, qui ne cherche que des objets : ici le
+/// référentiel de monstres est interrogé en même temps, et une suggestion de monstre doit créer une
+/// entrée de genre `Enemy`. Un test qui n'ajouterait qu'un objet ne prouverait rien de la moitié
+/// nouvelle.
+#[test]
+fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
+    use overlay_engine::WatchlistKind;
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    // `[id, fr, en, es, pt, gfxId, rarity_sort, has_recipe, category_sort]` pour les objets,
+    // `[id, fr, en, es, pt, gfxId, family, isBoss, isArchi, isDominant]` pour les monstres.
+    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        "items": [
+            [201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1],
+            [202, "Coiffe du Tofu", "Tofu Headgear", "Casco", "Elmo", 1202, 2, 1, 0],
+        ],
+        "monsters": [
+            [301, "Tofu", "Tofu", "Tofu", "Tofu", "2301", -1, 0, 0, 0],
+            [302, "Tofu Royal", "Royal Tofu", "Tofu Real", "Tofu Real", "2302", -1, 1, 0, 0],
+        ],
+    }));
+    assert_eq!(
+        catalog.search_items("tofu", 3, 40).len(),
+        2,
+        "le catalogue d'objets de test ne répond pas"
+    );
+    assert_eq!(
+        catalog.search_monsters("tofu", 3, 40).len(),
+        2,
+        "le référentiel de monstres de test ne répond pas — c'est précisément ce que ce test vérifie"
+    );
+
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: SuiviTabState::default(),
+        suivi_draft: Some(Vec::new()),
+        suivi_availability: SuiviAvailability::Ready,
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Suivi,
+        alerts: Default::default(),
+        alerts_draft: None,
+        alerts_availability: Default::default(),
+        initial: Default::default(),
+        pending_close: false,
+    }));
+
+    let vu = std::rc::Rc::clone(&etat);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+
+    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne).
+    let champ = egui::pos2(300.0, 300.0);
+    harness.drag_at(champ);
+    harness.run();
+    harness.drop_at(champ);
+    harness.run();
+    for c in "tofu".chars() {
+        harness.event(egui::Event::Text(c.to_string()));
+    }
+    harness.run();
+    assert_eq!(
+        etat.borrow().suivi.search,
+        "tofu",
+        "le champ n'a pas reçu la frappe — il n'avait donc pas le focus après le clic"
+    );
+
+    // Les objets d'abord, les monstres ensuite : la troisième rangée est « Tofu », un MONSTRE.
+    // Le panneau ouvre par sa bande de filtres, puis les rangées de 35 px.
+    let rangee = egui::pos2(300.0, 300.0 + 25.0 + 38.0 + 35.0 * 2.0 + 17.0);
+    harness.hover_at(rangee);
+    harness.run();
+    harness.drag_at(rangee);
+    harness.run();
+    harness.drop_at(rangee);
+    harness.run();
+
+    let ajoutees = etat.borrow().suivi_draft.clone().unwrap_or_default();
+    assert_eq!(
+        ajoutees.len(),
+        1,
+        "la sélection n'a rien ajouté au brouillon"
+    );
+    assert_eq!(
+        ajoutees[0].kind,
+        WatchlistKind::Enemy,
+        "un monstre choisi doit créer une entrée de genre Enemy, pas Item"
+    );
+    assert_eq!(ajoutees[0].catalog_id, Some(301));
+}
+
+/// **Le mode choisi avant le nom décide de ce que l'entrée devient** — règle 2 de l'onglet.
+///
+/// En décompte, l'entrée créée part de la quantité du formulaire et non de zéro : c'est tout
+/// l'intérêt du mode, et rien dans la grille ne le rattraperait après coup (la cible est figée à la
+/// création, comme sur le web).
+#[test]
+fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
+    use overlay_engine::WatchlistMode;
+    use overlay_ui::panels::suivi_tab::{AddMode, SuiviAvailability, SuiviTabState};
+
+    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        "items": [[201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1]],
+        "monsters": [],
+    }));
+
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: SuiviTabState {
+            mode: AddMode::Down,
+            target: 250,
+            ..Default::default()
+        },
+        suivi_draft: Some(Vec::new()),
+        suivi_availability: SuiviAvailability::Ready,
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Suivi,
+        alerts: Default::default(),
+        alerts_draft: None,
+        alerts_availability: Default::default(),
+        initial: Default::default(),
+        pending_close: false,
+    }));
+
+    let vu = std::rc::Rc::clone(&etat);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+
+    // Le bloc porte DEUX lignes en décompte : le champ descend d'autant.
+    let champ = egui::pos2(300.0, 346.0);
+    harness.drag_at(champ);
+    harness.run();
+    harness.drop_at(champ);
+    harness.run();
+    for c in "tofu".chars() {
+        harness.event(egui::Event::Text(c.to_string()));
+    }
+    harness.run();
+
+    let rangee = egui::pos2(300.0, 346.0 + 25.0 + 38.0 + 17.0);
+    harness.hover_at(rangee);
+    harness.run();
+    harness.drag_at(rangee);
+    harness.run();
+    harness.drop_at(rangee);
+    harness.run();
+
+    let ajoutees = etat.borrow().suivi_draft.clone().unwrap_or_default();
+    assert_eq!(
+        ajoutees.len(),
+        1,
+        "la sélection n'a rien ajouté au brouillon"
+    );
+    assert_eq!(ajoutees[0].mode, WatchlistMode::Down);
+    assert_eq!(
+        ajoutees[0].countdown_target, 250,
+        "la cible du formulaire doit suivre l'entrée créée"
+    );
+    // Le formulaire revient à son défaut après un ajout, comme `resetAddForm` côté web.
+    assert_eq!(etat.borrow().suivi.target, 1);
 }

@@ -64,6 +64,7 @@
 
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
+use crate::panels::{recipe_dialog, suivi_tab};
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
 /// `OverlayKind::Options`).
@@ -128,13 +129,20 @@ const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 
 /// Onglet affiché par la modale.
 ///
-/// Onglet affiché par la modale — **deux entrées câblées sur trois** depuis le 2026-09-12.
+/// Onglet affiché par la modale — **trois entrées câblées sur quatre** depuis le 2026-09-13.
 ///
-/// « Alertes » a reçu son contenu (`panels::alerts_tab`) ; « Personnages » reste affiché désactivé
-/// plutôt que masqué, décision du 2026-09-10 : un onglet qui apparaît est un changement de mise en
-/// page, pas un changement d'état.
+/// « Alertes » a reçu son contenu le 2026-09-12 (`panels::alerts_tab`), « Suivi » le lendemain
+/// (`panels::suivi_tab`) ; « Personnages » reste affiché désactivé plutôt que masqué, décision du
+/// 2026-09-10 : un onglet qui apparaît est un changement de mise en page, pas un changement d'état.
+///
+/// **« Suivi » ouvre le menu**, avant « Alertes » : c'est l'écran qu'on vient chercher le plus
+/// souvent — composer ce qu'on suit se refait à chaque session de jeu, régler ses alertes une fois
+/// pour toutes. L'ouverture suit l'ordre du menu (voir [`OptionsTab::default`]), elle change donc
+/// avec lui.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsTab {
+    /// La liste des objets et monstres suivis — ce qu'on ajoute, en quel mode, ce qu'on retire.
+    Suivi,
     /// Les alertes de ramassage — objets à son activé et fermeture du toast.
     Alertes,
     Personnages,
@@ -150,7 +158,7 @@ impl Default for OptionsTab {
     /// le dernier du menu sans que l'ouverture ne suive. Si l'ordre des entrées change dans
     /// [`show`], ce défaut change avec lui.
     fn default() -> Self {
-        Self::Alertes
+        Self::Suivi
     }
 }
 
@@ -172,6 +180,18 @@ pub struct OptionsModalState {
     pub error: Option<String>,
     /// Onglet affiché.
     pub tab: OptionsTab,
+    /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
+    /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
+    pub suivi: suivi_tab::SuiviTabState,
+    /// **Le brouillon de suivi** — une copie des entrées du compte, modifiée librement, et prise en
+    /// compte seulement à « Valider ».
+    ///
+    /// `None` tant que les réglages ne sont pas descendus du compte, même raison que pour les
+    /// alertes : l'onglet affiche alors son rouage plutôt qu'une liste provisoire que la réponse
+    /// démentirait.
+    pub suivi_draft: Option<Vec<overlay_engine::WatchlistEntry>>,
+    /// D'où vient la liste suivie, et si elle est modifiable — posé par l'hôte à l'ouverture.
+    pub suivi_availability: suivi_tab::SuiviAvailability,
     /// Ce que l'onglet « Alertes » garde entre deux frames — saisie du champ d'ajout, durée en
     /// cours de frappe, confirmation de retrait ouverte. **Pas le profil** : celui-ci est le
     /// brouillon ci-dessous.
@@ -204,6 +224,9 @@ pub struct OptionsModalState {
 pub struct OptionsInitial {
     pub path: String,
     pub alerts: Option<overlay_engine::AlertProfile>,
+    /// Les entrées suivies telles qu'elles étaient à l'ouverture — c'est elles que « Annuler »
+    /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
+    pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
 }
 
 impl OptionsModalState {
@@ -218,6 +241,7 @@ impl OptionsModalState {
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
             || self.alerts_draft != self.initial.alerts
+            || self.suivi_draft != self.initial.suivi
     }
 }
 
@@ -238,6 +262,9 @@ pub enum OptionsModalAction {
     /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
     /// audio (`alert_sound::play_loot_alert`).
     TestAlertSound,
+    /// Résoudre les ingrédients de cet objet, depuis l'onglet « Suivi » — l'appelant seul a le
+    /// réseau (`overlay_sync::client::fetch_item_detail`, sur un thread).
+    ResolveRecipe(i64),
 }
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
@@ -308,6 +335,7 @@ pub fn show(
     chrome.tabs(
         ui,
         design::tabs(&mut state.tab)
+            .entry(OptionsTab::Suivi, "Suivi")
             .entry(OptionsTab::Alertes, "Alertes")
             .entry(OptionsTab::Personnages, "Personnages")
             .enabled(false)
@@ -335,7 +363,30 @@ pub fn show(
     // champ de chemin ne se donne qu'à la première frame de la fenêtre : ouverte sur « Alertes »
     // (le défaut d'`OptionsTab`), elle ne le donne donc à personne, et « Paramètres » se clique.
     let mut alerts_action = AlertsTabAction::None;
+    let mut suivi_action = suivi_tab::SuiviTabAction::None;
     design::panel().show(ui, chrome.content, |ui, panel| {
+        if state.tab == OptionsTab::Suivi {
+            // Même arbitrage que pour les alertes : tant que les entrées ne sont pas descendues du
+            // compte, l'onglet affiche son rouage. Une liste vide servie en attendant se lirait
+            // comme « vous ne suivez rien ».
+            let mut vide = Vec::new();
+            let availability = state.suivi_availability;
+            let entries = state.suivi_draft.as_mut().unwrap_or(&mut vide);
+            suivi_action = suivi_tab::show(
+                ui,
+                panel,
+                &mut state.suivi,
+                &mut suivi_tab::SuiviTabContext {
+                    entries,
+                    catalog: ctx.catalog,
+                    remote_icons: ctx.remote_icons,
+                    remote_icon_textures: ctx.remote_icon_textures,
+                    icons: ctx.icons,
+                    availability,
+                },
+            );
+            return;
+        }
         if state.tab == OptionsTab::Alertes {
             // Le brouillon n'existe pas tant que les réglages ne sont pas descendus du compte :
             // l'onglet le sait et affiche son rouage. Un `AlertProfile` par défaut servi en
@@ -428,6 +479,26 @@ pub fn show(
 
     if alerts_action == AlertsTabAction::TestSound {
         action = OptionsModalAction::TestAlertSound;
+    }
+    if let suivi_tab::SuiviTabAction::ResolveRecipe(id) = suivi_action {
+        action = OptionsModalAction::ResolveRecipe(id);
+    }
+
+    // **La fenêtre de recette, peinte EN DERNIER et sur la fenêtre entière** : son voile doit
+    // passer par-dessus tout ce qu'elle interrompt, pied de page compris — même règle que la garde
+    // de fermeture.
+    if state.suivi_draft.is_some() {
+        if let Some(mut dialogue) = state.suivi.recipe.take() {
+            match recipe_dialog::show(ui, window, &mut dialogue, ctx) {
+                recipe_dialog::RecipeChoice::Pending => state.suivi.recipe = Some(dialogue),
+                recipe_dialog::RecipeChoice::Cancel => {}
+                recipe_dialog::RecipeChoice::Track(lignes) => {
+                    if let Some(brouillon) = state.suivi_draft.as_mut() {
+                        suivi_tab::track_recipe_lines(brouillon, &lignes, &mut state.suivi);
+                    }
+                }
+            }
+        }
     }
 
     // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE — et désormais la
