@@ -7,12 +7,35 @@ sur un vrai `wakfu.log` — voir [`docs/plan-architecture.md`](../../docs/plan-a
 
 ## Prévisualisation à tout moment
 
+**Windows** (binaire `overlay-ui`) :
+
 ```
 cd crates\overlay-ui
 .\preview.ps1                          # découverte automatique du wakfu.log
 .\preview.ps1 -LogPath <chemin>        # rejouer un fichier précis
 .\preview.ps1 -Debug                   # build debug, plus rapide à itérer
 ```
+
+**Linux / X11** (binaire `overlay-ui-x11`, voir « Portage Linux » plus bas) — même contrat, en
+bash, sans PowerShell :
+
+```bash
+bash crates/overlay-ui/preview.sh              # découverte automatique du wakfu.log
+bash crates/overlay-ui/preview.sh <chemin>     # rejouer un fichier précis
+bash crates/overlay-ui/preview.sh --debug      # build debug, plus rapide à itérer
+```
+
+Sur **SteamOS (Steam Deck)**, ni `cargo` ni compilateur ne sont installables durablement (rootfs en
+lecture seule, réécrit à chaque mise à jour du système) : lancer **une fois**
+`bash scripts/setup-steamdeck.sh`, qui crée un conteneur `distrobox` Arch partageant le HOME,
+l'affichage, le GPU et l'audio de l'hôte, puis y installe les dépendances de compilation et
+`rustup` (dans `~/.cargo`, donc conservé même si le conteneur est recréé). `preview.sh` **entre
+tout seul** dans ce conteneur quand `cargo` manque sur l'hôte — la commande reste la même.
+
+Les fenêtres overlay s'ancrent sur une fenêtre de jeu : elles n'apparaissent qu'avec **Wakfu
+lancé** (mode Bureau ; XWayland suffit, `$DISPLAY` doit être défini). Le binaire Linux ne câble que
+quatre des neuf actions à raccourci (voir « Raccourcis personnalisables » plus bas) : bascule,
+quitter, Options, sélection multiple.
 
 Prépare `vendor/wgpu-hal-30.0.1` (patch DirectComposition, à la racine du dépôt — voir
 `patches/setup-vendor.sh`) s'il est absent, puis `cargo run -p overlay-ui`. `Ctrl+Shift+W` bascule
