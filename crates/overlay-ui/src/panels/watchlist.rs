@@ -169,6 +169,19 @@
 //! aucune texture de bouton, seulement quatre `DsTexture`. Détail des écarts de rendu et de ce qui
 //! reste à la charge du panneau (le placement des infobulles) dans la doc de `control_button` ;
 //! avant/après dans `overlay-testkit/tests/icon_button_migration.rs`.
+//!
+//! **Refonte 2026-09-13 (bandeau vide : rangée 1×4, infobulles en dessous)** — retour utilisateur
+//! explicite, deux captures à l'appui : tant qu'aucun suivi n'est renseigné, le carré 2×2 n'a que
+//! ses infobulles pour voisins, et celles-ci « rendent la lecture et l'usage très pénibles ».
+//! Cause : `CONTROL_TOOLTIP_RESERVE` (88 px) a été mesurée sur « Supprimer » AVANT que les
+//! libellés n'annoncent leur raccourci (« Ajouter (Ctrl+Shift+A) », ~130 px) ; aucun des replis
+//! latéraux de `design::tooltip` ne tient plus, et l'infobulle retombe PAR-DESSUS les autres
+//! boutons du carré. Décision : sans entrée, les quatre boutons s'alignent en UNE rangée, dans
+//! l'ordre « Ajouter », « Supprimer », « Détails », « Options », et leur infobulle s'ouvre EN
+//! DESSOUS (`design::TooltipSide::Below`) — sous une rangée, aucun bouton n'est jamais recouvert,
+//! et la fenêtre Suivi a toujours de la place en bas (`main.rs::WATCHLIST_HEIGHT`, dimensionnée
+//! pour loger un toast). Voir [`ControlLayout`] : le carré 2×2 et ses infobulles par colonne
+//! restent la disposition dès qu'une entrée existe.
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -408,6 +421,61 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// temporaire du toast (`TOAST_LAYER_WIDTH`, `toast_card`), ici permanent tant que la bande est
 /// affichée plutôt que ponctuel.
 const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
+/// Espace réservé de CHAQUE CÔTÉ de la rangée 1×4 du bandeau VIDE ([`ControlLayout::Row`]), pour
+/// que l'infobulle du premier et du dernier bouton — ouverte EN DESSOUS, centrée sur son bouton
+/// (`design::TooltipSide::Below`) — ait la place de s'afficher entière sans se rabattre. Même
+/// raison d'être que [`CONTROL_TOOLTIP_RESERVE`] : la fenêtre Suivi est dimensionnée pile sur son
+/// contenu, une popup ne peut pas se peindre en dehors.
+///
+/// Valeur mesurée (captures de `panels.rs::panneau_suivi_vide_boutons_en_ligne_infobulles_dessous`,
+/// diff pixel avec le rendu non survolé) sur le plus long des quatre libellés, « Supprimer
+/// (Ctrl+Shift+S) » : 140 px d'infobulle, soit 70 px de chaque côté du centre de son bouton ; le
+/// centre du premier et du dernier bouton est à 16 px du bord de la rangée, il reste donc 54 px à
+/// couvrir hors rangée. Arrondi à 64 px pour la marge d'erreur (anticrénelage, arrondi du texte).
+const CONTROL_ROW_TOOLTIP_RESERVE: f32 = 64.0;
+
+/// Disposition du carré de contrôle — décidée par le CONTENU du bandeau, voir doc de module
+/// (refonte 2026-09-13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlLayout {
+    /// Au moins une entrée suivie : carré 2×2, infobulles par colonne (gauche/droite).
+    Square,
+    /// Aucune entrée : rangée 1×4 « + », « − », « Détails », « Options », infobulles en dessous.
+    Row,
+}
+
+impl ControlLayout {
+    fn for_entries(entry_count: usize) -> Self {
+        if entry_count == 0 {
+            ControlLayout::Row
+        } else {
+            ControlLayout::Square
+        }
+    }
+
+    /// Boutons par ligne et par colonne.
+    fn columns(self) -> f32 {
+        match self {
+            ControlLayout::Square => 2.0,
+            ControlLayout::Row => 4.0,
+        }
+    }
+
+    fn rows(self) -> f32 {
+        match self {
+            ControlLayout::Square => 2.0,
+            ControlLayout::Row => 1.0,
+        }
+    }
+
+    /// Réserve d'infobulle de chaque côté du fond translucide.
+    fn tooltip_reserve(self) -> f32 {
+        match self {
+            ControlLayout::Square => CONTROL_TOOLTIP_RESERVE,
+            ControlLayout::Row => CONTROL_ROW_TOOLTIP_RESERVE,
+        }
+    }
+}
 
 /// Largeur de contenu nécessaire pour afficher `entry_count` entrées + la colonne de contrôle
 /// ("+"/"−" empilés), SANS la marge de fenêtre (`egui::Frame::NONE.inner_margin`, ajoutée côté
@@ -445,31 +513,37 @@ const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
 /// le problème que cette réserve résolvait déjà à GAUCHE, voir sa doc). `.max(...)` plutôt qu'une
 /// simple addition : quand les tuiles d'entrées fournissent déjà assez de largeur, aucun espace
 /// supplémentaire n'est ajouté (le carré reste juste avant la première tuile, comme avant).
+///
+/// **Refonte 2026-09-13 (bandeau vide)** : sans entrée, le carré devient une rangée 1×4 dont les
+/// infobulles s'ouvrent EN DESSOUS (voir doc de module, [`ControlLayout::Row`]) — la réserve de
+/// chaque côté est alors `CONTROL_ROW_TOOLTIP_RESERVE`, celle d'une infobulle centrée sous le
+/// premier ou le dernier bouton, et plus celle d'une infobulle latérale.
 pub fn content_width(entry_count: usize) -> f32 {
+    let layout = ControlLayout::for_entries(entry_count);
     let entries_width = if entry_count == 0 {
         0.0
     } else {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
-    let right_of_control = (TILE_GAP + entries_width).max(CONTROL_TOOLTIP_RESERVE);
-    CONTROL_TOOLTIP_RESERVE + control_row_width() + right_of_control
+    let right_of_control = (TILE_GAP + entries_width).max(layout.tooltip_reserve());
+    layout.tooltip_reserve() + control_row_width(layout) + right_of_control
 }
 
 /// Largeur du fond translucide derrière le carré de contrôle (voir `control_button_row`) — DEUX
 /// boutons de large depuis la refonte 2026-09-08 (carré 2×2 : "+"/"−" en haut, "Options"/"Détails"
-/// en dessous, voir doc de module) plus une marge symétrique de `CONTROL_BUTTON_GAP` de chaque côté
-/// et entre les deux colonnes — MÊME formule que `control_row_height` (le carré est, comme son nom
-/// l'indique, un carré : largeur et hauteur coïncident). Fonction plutôt que constante : combine
-/// deux `const f32`, une multiplication de `f32` en contexte `const` restant plus fragile à faire
-/// évoluer ici qu'un simple appel.
-fn control_row_width() -> f32 {
-    CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
+/// en dessous, voir doc de module), QUATRE pour la rangée du bandeau vide (2026-09-13,
+/// [`ControlLayout::Row`]) — plus une marge symétrique de `CONTROL_BUTTON_GAP` de chaque côté et
+/// entre les colonnes — MÊME formule que `control_row_height`, à la dimension près. Fonction plutôt
+/// que constante : combine deux `const f32`, une multiplication de `f32` en contexte `const`
+/// restant plus fragile à faire évoluer ici qu'un simple appel.
+fn control_row_width(layout: ControlLayout) -> f32 {
+    CONTROL_BUTTON_GAP * (layout.columns() + 1.0) + CONTROL_BUTTON_SIZE * layout.columns()
 }
 
-/// Hauteur du même fond translucide — DEUX boutons empilés (voir `control_row_width`) plus une
-/// marge symétrique en haut/bas et l'écart entre les deux au milieu.
-fn control_row_height() -> f32 {
-    CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0
+/// Hauteur du même fond translucide — les lignes de boutons empilées (voir `control_row_width`)
+/// plus une marge symétrique en haut/bas et l'écart entre les lignes.
+fn control_row_height(layout: ControlLayout) -> f32 {
+    CONTROL_BUTTON_GAP * (layout.rows() + 1.0) + CONTROL_BUTTON_SIZE * layout.rows()
 }
 
 // Jetons repris de `:root` (`styles.css`, thème sombre par défaut — seul thème que l'overlay
@@ -696,15 +770,16 @@ pub fn show(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 // Réserve à GAUCHE de la colonne de contrôle pour que son infobulle ait la
-                // place de s'afficher à gauche (voir `CONTROL_TOOLTIP_RESERVE`) — zone
-                // transparente, aucun élément peint ni interactif dedans.
-                ui.add_space(CONTROL_TOOLTIP_RESERVE);
+                // place de s'afficher (à gauche pour le carré 2×2, centrée sous le premier
+                // bouton pour la rangée du bandeau vide — voir `ControlLayout::tooltip_reserve`)
+                // — zone transparente, aucun élément peint ni interactif dedans.
+                let layout = ControlLayout::for_entries(entries.len());
+                ui.add_space(layout.tooltip_reserve());
 
                 // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                let clicks =
-                    control_button_row(ui, shortcuts, entries.is_empty(), selection.is_open());
+                let clicks = control_button_row(ui, shortcuts, layout, selection.is_open());
                 open_watchlist = clicks.add;
                 open_options = clicks.options;
                 open_web_app = clicks.details;
@@ -1180,59 +1255,70 @@ fn toast_card(
 
 // Les deux enveloppes `show_tooltip_left` / `show_tooltip_right` ont été retirées le 2026-09-11 :
 // leur placement et leurs replis sont désormais `design::tooltip` et `design::TooltipSide`, qui
-// portent aussi la raison de cet ordre de replis. Ce qui reste ici est ce qui appartient à CE
-// panneau : le carré de contrôle est collé au bord gauche de la fenêtre Suivi (quelques pixels de
-// `WATCHLIST_INNER_MARGIN`), une infobulle strictement à gauche n'y tiendrait pas — d'où la réserve
-// `CONTROL_TOOLTIP_RESERVE`, symétrique des deux côtés.
+// portent aussi la raison de cet ordre de replis. L'enum local `TooltipSide` (Left/Right, né le
+// 2026-09-08 pour que le côté vienne de la COLONNE et non du rôle du bouton) a suivi le 2026-09-13,
+// quand la rangée du bandeau vide a eu besoin d'un troisième côté : `design::TooltipSide` dit
+// déjà les trois. Ce qui reste ici est ce qui appartient à CE panneau : le carré de contrôle est
+// collé au bord gauche de la fenêtre Suivi (quelques pixels de `WATCHLIST_INNER_MARGIN`), une
+// infobulle strictement à gauche n'y tiendrait pas — d'où la réserve `CONTROL_TOOLTIP_RESERVE`,
+// symétrique des deux côtés (et `CONTROL_ROW_TOOLTIP_RESERVE` pour la rangée).
 
-/// Côté d'infobulle d'un bouton du carré de contrôle — voir `control_button` et doc de module
-/// (« infobulle par COLONNE, pas par bouton »). Un type dédié plutôt que `bool`/deux fonctions
-/// séparées comme avant la refonte 2026-09-08 : `control_button` peignait jusque-là deux variantes
-/// quasi identiques (`control_button`/`control_button_click`, distinguées par `Sense`) qui
-/// codaient chacune EN DUR un côté de tooltip — devenu faux dès que "−"/"Options" (même colonne
-/// DROITE, `Sense` différent) ont eu besoin du même côté DROITE l'un que l'autre.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TooltipSide {
-    Left,
-    Right,
-}
-
-/// Carré 2×2 de boutons du bandeau, sur un fond translucide (voir doc de module, refonte
-/// 2026-09-08) : "−" reste INERTE (`Sense::hover()` de fait, voir sa doc), les trois autres sont
-/// CLIQUABLES (`Sense::click()`) — "Détails"/"Options" depuis leur déplacement depuis `combat::
-/// bottom_toolbar`, "+" depuis le 2026-09-13 (il ouvrait déjà la modale Options sur l'onglet
-/// « Suivi », voir [`ControlRowClicks::add`], sans que son clic ne soit jamais lu). Tous peints
-/// par `control_button` — même fond que `bottom_toolbar` utilisait déjà
+/// Carré 2×2 — ou rangée 1×4 du bandeau vide — de boutons, sur un fond translucide (voir doc de
+/// module, refontes 2026-09-08 et 2026-09-13) : tous CLIQUABLES (`Sense::click()`) —
+/// "Détails"/"Options" depuis leur déplacement depuis `combat::bottom_toolbar`, "+" et "−" depuis
+/// le 2026-09-13. Tous peints par `control_button` — même fond que `bottom_toolbar` utilisait déjà
 /// ([`PANEL_BACKDROP_FILL`]), marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET
-/// entre les deux colonnes/lignes.
+/// entre les colonnes/lignes.
 ///
-/// Disposition (donnée explicitement par l'utilisateur, voir doc de module) :
+/// Disposition selon `layout` (les deux données explicitement par l'utilisateur, voir doc de
+/// module) :
 /// ```text
-/// [+] [−]
+/// Square (au moins une entrée)   Row (aucune entrée)
+/// [+] [−]                        [+] [−] [🔗] [⚙]
 /// [🔗] [⚙]
 /// ```
-/// `watchlist_empty` désactive visuellement "−" (voir `control_button`, paramètre `enabled`) — rien
+/// En rangée, "−" est visuellement DÉSACTIVÉ (voir `control_button`, `ControlButtonState`) — rien
 /// à supprimer tant qu'aucune entrée n'est suivie ; les trois autres boutons restent toujours
-/// activés. Infobulle par COLONNE (voir `TooltipSide` et doc de module) : GAUCHE pour "+"/"Détails",
-/// DROITE pour "−"/"Options" — jamais l'inverse du rôle inerte/cliquable du bouton, qui ne pilotait
-/// le côté qu'AVANT cette refonte.
+/// activés. Infobulle par COLONNE en carré (voir doc de module) : GAUCHE pour "+"/"Détails",
+/// DROITE pour "−"/"Options" — jamais l'inverse du rôle du bouton ; EN DESSOUS pour les quatre en
+/// rangée, seul côté qui ne recouvre aucun voisin.
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
 fn control_button_row(
     ui: &mut egui::Ui,
     shortcuts: &ShortcutBindings,
-    watchlist_empty: bool,
+    layout: ControlLayout,
     select_open: bool,
 ) -> ControlRowClicks {
+    let watchlist_empty = layout == ControlLayout::Row;
     let row_rect = ui
         .allocate_exact_size(
-            egui::vec2(control_row_width(), control_row_height()),
+            egui::vec2(control_row_width(layout), control_row_height(layout)),
             egui::Sense::hover(),
         )
         .0;
     ui.painter()
         .rect_filled(row_rect, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
 
+    // Le pas d'un bouton au suivant, et les deux placements que `layout` distingue : la seconde
+    // ligne du carré est la suite de la rangée.
+    let step = CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP;
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
+    let remove_top_left = add_top_left + egui::vec2(step, 0.0);
+    let (details_top_left, options_top_left, left_side, right_side) = match layout {
+        ControlLayout::Square => (
+            add_top_left + egui::vec2(0.0, step),
+            remove_top_left + egui::vec2(0.0, step),
+            design::TooltipSide::Left,
+            design::TooltipSide::Right,
+        ),
+        ControlLayout::Row => (
+            remove_top_left + egui::vec2(step, 0.0),
+            remove_top_left + egui::vec2(step * 2.0, 0.0),
+            design::TooltipSide::Below,
+            design::TooltipSide::Below,
+        ),
+    };
+
     let add_response = control_button(
         ui,
         add_top_left,
@@ -1243,7 +1329,7 @@ fn control_button_row(
             shortcuts.label(ShortcutAction::WatchlistAdd)
         ),
         ControlButtonState::Enabled,
-        TooltipSide::Left,
+        left_side,
     );
     // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
     // bouton ouvrait la modale Options sur l'onglet « Suivi », son seul rôle possible, sans que
@@ -1260,7 +1346,6 @@ fn control_button_row(
     // multiple de la bande, et reste ENFONCÉ tant qu'elle est ouverte — comme un onglet actif, et
     // comme son jumeau de l'onglet « Suivi ». Son infobulle dit alors le geste inverse, puisque
     // c'est ce que le prochain clic fera.
-    let remove_top_left = add_top_left + egui::vec2(CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP, 0.0);
     let remove_response = control_button(
         ui,
         remove_top_left,
@@ -1280,12 +1365,12 @@ fn control_button_row(
             (false, true) => ControlButtonState::Active,
             (false, false) => ControlButtonState::Enabled,
         },
-        TooltipSide::Right,
+        right_side,
     );
 
-    // "Détails" sous "+" (colonne GAUCHE) — même icône/action (ouvrir la web app) que l'ancien
-    // bouton "lien externe" de `combat::bottom_toolbar`.
-    let details_top_left = add_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
+    // "Détails" sous "+" (colonne GAUCHE du carré) ou à la suite de "−" (rangée) — même
+    // icône/action (ouvrir la web app) que l'ancien bouton "lien externe" de
+    // `combat::bottom_toolbar`.
     let details_response = control_button(
         ui,
         details_top_left,
@@ -1293,7 +1378,7 @@ fn control_button_row(
         "watchlist-details",
         &format!("Détails ({})", shortcuts.label(ShortcutAction::Details)),
         ControlButtonState::Enabled,
-        TooltipSide::Left,
+        left_side,
     );
     // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
     // `open::that(base_url())` directement, et c'était un vrai défaut : un panneau qui produit un
@@ -1307,10 +1392,8 @@ fn control_button_row(
     // "Options" juste en dessous le faisait déjà.
     let details = details_response.clicked();
 
-    // "Options" sous "−" (colonne DROITE) — même icône/action que l'ancien bouton de `combat::
-    // bottom_toolbar`.
-    let options_top_left =
-        remove_top_left + egui::vec2(0.0, CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP);
+    // "Options" sous "−" (colonne DROITE du carré) ou en bout de rangée — même icône/action que
+    // l'ancien bouton de `combat::bottom_toolbar`.
     let options_response = control_button(
         ui,
         options_top_left,
@@ -1318,7 +1401,7 @@ fn control_button_row(
         "watchlist-options",
         &format!("Options ({})", shortcuts.label(ShortcutAction::Options)),
         ControlButtonState::Enabled,
-        TooltipSide::Right,
+        right_side,
     );
     ControlRowClicks {
         add,
@@ -1376,12 +1459,14 @@ enum ControlButtonState {
 ///   étaient déjà, octet pour octet, ceux du design system.
 ///
 /// **Ce que le composant ne prend pas en charge, et pourquoi ça reste ici.** Le placement de
-/// l'infobulle (`side`, voir [`TooltipSide`]) est une décision de mise en page : « + » et
-/// « Détails » l'ouvrent à gauche, « − » et « Options » à droite, pour qu'elle ne recouvre jamais
-/// l'autre colonne. `design::icon_button` expose bien un `.tooltip()`, mais il place au-dessus
-/// (depuis le 2026-09-13 ; sous l'élément avant cela) — l'utiliser casserait cette règle, que
-/// `panneau_suivi_tooltips_par_colonne_gauche_ou_droite` vérifie. Le composant peint et rend une
-/// `Response` ; le panneau décide où poser l'infobulle.
+/// l'infobulle (`side`, voir [`design::TooltipSide`] et [`ControlLayout`]) est une décision de mise
+/// en page : en carré, « + » et « Détails » l'ouvrent à gauche, « − » et « Options » à droite, pour
+/// qu'elle ne recouvre jamais l'autre colonne ; en rangée, les quatre l'ouvrent en dessous.
+/// `design::icon_button` expose bien un `.tooltip()`, mais il place au-dessus (depuis le
+/// 2026-09-13 ; sous l'élément avant cela) — l'utiliser casserait cette règle, que
+/// `panneau_suivi_tooltips_par_colonne_gauche_ou_droite` et
+/// `panneau_suivi_vide_boutons_en_ligne_infobulles_dessous` vérifient. Le composant peint et rend
+/// une `Response` ; le panneau décide où poser l'infobulle.
 ///
 /// Le paramètre `sense` disparaît en revanche : le composant sait qu'un bouton actif se clique et
 /// qu'un bouton désactivé ne réagit qu'au survol. **Aucun des quatre n'est plus inerte** depuis le
@@ -1401,7 +1486,7 @@ fn control_button(
     log_name: &str,
     tooltip: &str,
     state: ControlButtonState,
-    side: TooltipSide,
+    side: design::TooltipSide,
 ) -> egui::Response {
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
     let mut bouton = design::icon_button(glyph)
@@ -1416,14 +1501,7 @@ fn control_button(
         bouton = bouton.preview_state(design::IconButtonState::Hovered);
     }
     let response = ui.put(rect, bouton);
-    match side {
-        TooltipSide::Left => design::tooltip(&response)
-            .side(design::TooltipSide::Left)
-            .text(tooltip),
-        TooltipSide::Right => design::tooltip(&response)
-            .side(design::TooltipSide::Right)
-            .text(tooltip),
-    }
+    design::tooltip(&response).side(side).text(tooltip);
     response
 }
 

@@ -643,6 +643,81 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     harness.snapshot("watchlist_tooltip_options_a_droite");
 }
 
+/// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
+/// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les
+/// quatre boutons s'alignent en UNE rangée « + », « − », « Détails », « Options », et chaque
+/// infobulle s'ouvre EN DESSOUS de son bouton, centrée — plus jamais par-dessus un voisin.
+///
+/// Même contrainte que [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`] : le harnais est
+/// construit à la largeur EXACTE que `main.rs` calculerait sans entrée (`content_width(0)`, plus
+/// 6 px de marge de chaque côté), et à la hauteur réelle de la fenêtre (`WATCHLIST_HEIGHT`,
+/// 132 px) — c'est la seule façon de prouver que la réserve `CONTROL_ROW_TOOLTIP_RESERVE` suffit
+/// et que la place en dessous existe.
+///
+/// Positions : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 64
+/// (`CONTROL_ROW_TOOLTIP_RESERVE`) + 4 (`CONTROL_BUTTON_GAP`) + 12 (moitié de 24) = 94 ; y = 14 + 4
+/// + 12 = 30. Chaque bouton suivant est 28 px (24 + 4) plus à droite : "−" 122, "Détails" 150,
+/// "Options" 178 — même y.
+#[test]
+fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+
+    let window_width = panels::watchlist::content_width(0) + 12.0;
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, 132.0))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    combat_side: &mut combat_side,
+                    watchlist: &[],
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    options: None,
+                },
+            );
+        });
+
+    harness.run();
+    harness.snapshot("watchlist_vide_rangee");
+
+    for (x, nom) in [
+        (94.0, "ajouter"),
+        (122.0, "supprimer"),
+        (150.0, "details"),
+        (178.0, "options"),
+    ] {
+        harness.hover_at(egui::pos2(x, 30.0));
+        harness.run();
+        harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
+    }
+}
+
 /// Le harnais du bandeau in-game, avec l'état que l'hôte lui prête rendu inspectable — trois tests
 /// s'en servent (sélection multiple, glisser-déposer, planche du geste).
 struct Bandeau {
