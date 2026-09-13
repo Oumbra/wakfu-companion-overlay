@@ -220,8 +220,8 @@ pub struct RenderOutcome {
     /// Définitions de suivi restantes après une suppression groupée demandée CETTE frame depuis le
     /// bandeau — `None` le reste du temps. L'hôte les envoie au moteur
     /// (`EngineCommand::SetWatchlistDefinitions`), par le même chemin que la validation de l'onglet
-    /// « Suivi » : voir `panels::watchlist::WatchlistOutcome::remaining`.
-    pub watchlist_remaining: Option<Vec<WatchlistEntry>>,
+    /// « Suivi » : voir `panels::watchlist::WatchlistOutcome::edit`.
+    pub watchlist_edit: Option<panels::watchlist::WatchlistEdit>,
     /// URL que l'hôte doit ouvrir dans le navigateur, le cas échéant : clic sur "Détails" du
     /// panneau Suivi (la web app) ou sur "Ouvrir la page" de la carte d'appairage (l'URL de
     /// vérification).
@@ -537,7 +537,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     outcome.close_toast = watchlist_outcome.close_toast;
                     outcome.open_watchlist = watchlist_outcome.open_watchlist;
                     outcome.open_options = watchlist_outcome.open_options;
-                    outcome.watchlist_remaining = watchlist_outcome.remaining;
+                    outcome.watchlist_edit = watchlist_outcome.edit;
                     if watchlist_outcome.open_web_app {
                         outcome.open_url = Some(overlay_sync::client::base_url().to_string());
                     }

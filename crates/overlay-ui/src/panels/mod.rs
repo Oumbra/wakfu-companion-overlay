@@ -15,4 +15,5 @@ pub mod combat_spell_block;
 pub mod options_modal;
 pub mod recipe_dialog;
 pub mod suivi_tab;
+pub mod tile_reorder;
 pub mod watchlist;
