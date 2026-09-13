@@ -19,6 +19,9 @@ xtask/visual-check.png
 # (seule l'image de référence sous tests/snapshots/*.png l'est).
 crates/overlay-testkit/tests/snapshots/*.diff.png
 crates/overlay-testkit/tests/snapshots/*.old.png
+# `*.new.png` manquait, et un `git add -A` l'a committé le 2026-09-13 : c'est le rendu OBTENU que
+# le harnais écrit à côté de la référence quand une capture diverge, jamais une référence.
+crates/overlay-testkit/tests/snapshots/*.new.png
 
 # Caches Python des scripts de skills
 __pycache__/
