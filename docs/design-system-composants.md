@@ -1337,13 +1337,15 @@ use overlay_ui::design::{self, TooltipSide};
 
 design::tooltip(&response).text("Ajouter à la liste");            // au-dessus, le défaut
 design::tooltip(&response).side(TooltipSide::Right).text("Options");
+design::tooltip(&response).side(TooltipSide::Below).anchor(carre).text("Ajouter"); // sous le GROUPE
 design::tooltip(&response).show(|ui| { /* contenu libre */ });
 ```
 
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
-| `side` | `Above` / `Left` / `Right` | `Above` |
+| `side` | `Above` / `Left` / `Right` / `Below` | `Above` |
 | `gap` | écart au widget | `TOOLTIP_GAP` = 5 px |
+| `anchor` | rectangle de placement | celui du widget |
 | `text` / `show` | texte simple / contenu libre | — |
 
 Aucune texture : le fond, la marge et l'ombre viennent du **thème** (`style::apply`), parce que
@@ -1380,6 +1382,23 @@ COMBAT_TOP_MARGIN`, pas un alignement.
 contrôle du Suivi, un bouton de droite dont l'infobulle partirait à gauche la poserait par-dessus
 son voisin, gênant le survol de ce dernier.
 
+### `anchor` — quand le côté ne suffit plus (2026-09-13)
+
+Le Suivi ouvre les quatre infobulles de son carré **en dessous** depuis que la place réservée
+au-dessus éloignait trop la bande du haut du jeu (§9.1 octies du plan). Mais « en dessous de + »,
+c'est « par-dessus Détails » : le côté ne protège plus rien dès que le groupe a deux lignes.
+`anchor` accroche donc l'infobulle à un autre rectangle que celui du widget — ici le carré entier,
+et elle s'ouvre sous sa dernière ligne. Le survol reste celui du widget ; seul le placement change.
+Même usage pour une tuile de la bande, ancrée jusqu'au bas de la zone défilante pour ne pas masquer
+la barre peinte juste dessous.
+
+**Il ne change qu'`interact_rect`**, le rectangle sur lequel egui ancre le popup (« we use
+interact_rect so we don't show the popup relative to some clipped point »). Élargir aussi `rect`
+paraît symétrique et casse tout : egui garde une infobulle ouverte tant que le pointeur est dans le
+`rect` de son widget — « le cas d'une grosse infobulle qui recouvre le widget » —, et n'en autorise
+qu'une par couche. Avec un `rect` élargi au groupe, l'infobulle du premier bouton survolé colle, et
+les trois autres n'ouvrent plus jamais la leur. Constaté en capture avant d'être compris.
+
 ### Un écart au contrat, assumé et daté
 
 **La police reste celle du thème**, là où le contrat veut `design::text::label_font`. La corriger est
@@ -1388,9 +1407,14 @@ plan demande justement **inchangées** pour prouver que cette migration ne chang
 peuvent pas tenir dans le même commit — la police attend sa propre décision.
 
 **Pas d'entrée de galerie** : une infobulle a besoin d'un survol, qui n'existe pas en rendu
-offscreen statique. Sa vérification visuelle est ailleurs et existait déjà — les six tests dédiés
+offscreen statique. Sa vérification visuelle est ailleurs et existait déjà — les tests dédiés
 `watchlist_tooltip_*` et `combat_tooltip_*`, qui simulent le pointeur. Ils sont restés **identiques
 au pixel** à travers la migration, ce qui est le critère de fin que le plan fixait.
+
+Ils demandent en revanche d'être **lus**, pas seulement exécutés : les quatre survols du bandeau
+vide visaient 70 px trop à droite depuis le retrait de la réserve gauche, et deux captures
+montraient l'infobulle d'« Options » pendant que deux autres n'en montraient aucune — sans qu'un
+seul test échoue. Un nom de fichier n'est pas une assertion.
 
 ---
 
