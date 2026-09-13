@@ -112,13 +112,17 @@ impl<'a> Checkbox<'a> {
 ///
 /// Même convention que [`crate::design::paint_meter`] et [`crate::design::paint_portrait`] : une
 /// fonction de peinture à côté du composant, pas une copie de ses trois lignes chez l'appelant.
-pub fn paint(ui: &Ui, rect: egui::Rect, checked: bool) {
+///
+/// `tint` **multiplie** la texture, il ne peut donc que la ternir : `Color32::WHITE` la laisse
+/// telle quelle, et c'est ce qu'on passe partout sauf pour la sélection destructive d'un
+/// emplacement, qui vire la coche au rouge (voir `item_slot::SelectionTone`).
+pub fn paint(ui: &Ui, rect: egui::Rect, checked: bool, tint: egui::Color32) {
     let texture = if checked {
         DsTexture::CheckboxChecked
     } else {
         DsTexture::CheckboxUnchecked
     };
-    DesignSystem::get(ui.ctx()).paint(ui.painter(), rect, texture, egui::Color32::WHITE);
+    DesignSystem::get(ui.ctx()).paint(ui.painter(), rect, texture, tint);
 }
 
 impl Widget for Checkbox<'_> {
