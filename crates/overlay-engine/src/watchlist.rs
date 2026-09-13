@@ -213,6 +213,44 @@ impl WatchlistState {
         Some(self.entries.clone())
     }
 
+    /// **Remplace les DÉFINITIONS suivies par celles d'un brouillon, en gardant les compteurs
+    /// vivants** — ce que « Valider » de l'onglet « Suivi » produit (2026-09-13).
+    ///
+    /// Une définition est tout ce qui se règle dans la fenêtre : nom, genre, mode, cible et
+    /// `catalog_id`. Le `count` des entrées passées est **ignoré**, et c'est le cœur de cette
+    /// fonction : le brouillon a été pris à l'ouverture de la fenêtre, et un objet ramassé pendant
+    /// qu'elle était ouverte y serait resté à sa valeur d'alors. Valider ne doit pas annuler ce
+    /// ramassage — le compteur qui fait foi est celui d'ici, pas celui du brouillon.
+    ///
+    /// Une entrée que le brouillon **ajoute** part de la valeur que son mode impose : `countdown_
+    /// target` en décompte (il décroît vers 0), 0 en incrémental. Une entrée que le brouillon
+    /// **retire** disparaît, compteur compris. Une entrée **conservée** garde le sien, même si son
+    /// mode ou sa cible ont changé — c'est ce que fait déjà `merge_config` quand le compte répond.
+    ///
+    /// Marque l'état `dirty` : le prochain `drain_pending_sync` enverra la liste au compte.
+    pub fn apply_definitions(&mut self, definitions: Vec<WatchlistEntry>) {
+        self.entries = definitions
+            .into_iter()
+            .map(|mut definition| {
+                definition.count = self
+                    .entries
+                    .iter()
+                    .find(|existante| {
+                        existante.kind == definition.kind
+                            && existante.name.eq_ignore_ascii_case(&definition.name)
+                    })
+                    .map(|existante| existante.count)
+                    .unwrap_or(match definition.mode {
+                        WatchlistMode::Down => definition.countdown_target,
+                        WatchlistMode::Up => 0,
+                    });
+                definition
+            })
+            .collect();
+        self.persist();
+        self.dirty = true;
+    }
+
     /// Applique un `LogEntry` déjà déterminé comme HORS rattrapage initial par l'appelant (voir
     /// `Engine::ingest_batch`) — miroir du gating `if (this.currentBatchIsInitialLoad) return;`
     /// fait côté web dans `registerLoot`/`registerDefeat`, pas ici : `WatchlistState` n'a aucune
@@ -586,5 +624,73 @@ mod tests {
         assert_eq!(entries[0].kind, WatchlistKind::Item);
         assert_eq!(entries[0].count, 7);
         assert_eq!(entries[0].catalog_id, Some(123));
+    }
+}
+
+#[cfg(test)]
+mod definitions_tests {
+    use super::*;
+
+    fn entry(name: &str, mode: WatchlistMode, target: i64, count: i64) -> WatchlistEntry {
+        WatchlistEntry {
+            name: name.to_string(),
+            kind: WatchlistKind::Item,
+            mode,
+            count,
+            countdown_target: target,
+            catalog_id: None,
+        }
+    }
+
+    #[test]
+    fn une_entree_conservee_garde_son_compteur_vivant() {
+        // **Le bug que ce test verrouille** : le brouillon est pris à l'ouverture de la fenêtre, et
+        // un objet ramassé pendant qu'elle est ouverte y reste à sa valeur d'alors. Reprendre le
+        // `count` du brouillon annulerait ce ramassage à la validation.
+        let dir = std::env::temp_dir().join("wco-defs-1.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Bois de Frêne", WatchlistMode::Up, 0, 0)]);
+        // Le moteur compte pendant que la fenêtre est ouverte.
+        state.entries[0].count = 42;
+        // Le brouillon, lui, ne sait rien de ces 42.
+        state.apply_definitions(vec![entry("Bois de Frêne", WatchlistMode::Up, 0, 0)]);
+        assert_eq!(state.entries()[0].count, 42);
+    }
+
+    #[test]
+    fn une_entree_ajoutee_part_de_ce_que_son_mode_impose() {
+        let dir = std::env::temp_dir().join("wco-defs-2.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![
+            entry("Plume", WatchlistMode::Down, 50, 0),
+            entry("Bouftou", WatchlistMode::Up, 0, 0),
+        ]);
+        // Un décompte part de sa cible et descend ; un incrémental part de zéro et monte.
+        assert_eq!(state.entries()[0].count, 50);
+        assert_eq!(state.entries()[1].count, 0);
+    }
+
+    #[test]
+    fn une_entree_retiree_disparait_avec_son_compteur() {
+        let dir = std::env::temp_dir().join("wco-defs-3.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![
+            entry("Plume", WatchlistMode::Up, 0, 0),
+            entry("Sel", WatchlistMode::Up, 0, 0),
+        ]);
+        state.entries[0].count = 7;
+        state.apply_definitions(vec![entry("Sel", WatchlistMode::Up, 0, 0)]);
+        assert_eq!(state.entries().len(), 1);
+        assert_eq!(state.entries()[0].name, "Sel");
+    }
+
+    #[test]
+    fn valider_marque_la_liste_a_repliquer() {
+        let dir = std::env::temp_dir().join("wco-defs-4.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Up, 0, 0)]);
+        assert!(state.drain_pending_sync().is_some());
+        // Et une seule fois : le drain vide le drapeau.
+        assert!(state.drain_pending_sync().is_none());
     }
 }

@@ -2004,6 +2004,19 @@ impl Engine {
         self.watchlist.merge_config(entries);
     }
 
+    /// Remplace les **définitions** suivies par celles validées dans l'onglet « Suivi » de la
+    /// fenêtre Options (2026-09-13) — voir
+    /// [`WatchlistState::apply_definitions`](crate::watchlist::WatchlistState::apply_definitions)
+    /// pour ce que « définitions » veut dire, et surtout pour pourquoi le `count` du brouillon est
+    /// ignoré.
+    ///
+    /// **Distinct de `set_watchlist_entries`**, qui applique ce que le COMPTE renvoie : celui-ci
+    /// est ce que l'utilisateur vient de régler lui-même. Même distinction qu'entre
+    /// `EngineCommand::ApplySettings` et `EngineCommand::SetAlertProfile`.
+    pub fn set_watchlist_definitions(&mut self, definitions: Vec<WatchlistEntry>) {
+        self.watchlist.apply_definitions(definitions);
+    }
+
     /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte
     /// (voir `profile::sound_items_from_settings_json`) — appelé par l'hôte au même moment que
     /// `set_roster`/`set_watchlist_entries` (même source `GET /api/v1/settings`). Contrairement à
