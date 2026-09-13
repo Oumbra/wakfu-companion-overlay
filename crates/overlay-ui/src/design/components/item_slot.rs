@@ -334,11 +334,16 @@ impl Widget for ItemSlot {
         for layer in paint_order(self.frame) {
             match layer {
                 SlotLayer::Background => {
-                    ui.painter().rect_filled(
-                        rect,
-                        tokens::ITEM_SLOT_ROUNDING,
-                        tokens::ITEM_SLOT_BACKGROUND,
-                    );
+                    // **Dans l'anneau, pas sur le carré.** Peint sur `rect` avec le rayon de 2 px
+                    // de l'emplacement, ce fond dépassait des quatre coins des textures de rareté,
+                    // qui sont en retrait de 2 px et arrondies à 3 : on voyait un carré sombre
+                    // derrière une bordure arrondie (retour utilisateur du 2026-09-13, capture à
+                    // l'appui). Le même `border_ring` que le liseré le fait rentrer exactement
+                    // dedans — et il remplit toujours l'emplacement d'un monstre, dont c'est le
+                    // seul fond, jusque SOUS son trait (peint `Inside` sur ce même anneau).
+                    let (anneau, rayon) = border_ring(rect);
+                    ui.painter()
+                        .rect_filled(anneau, rayon, tokens::ITEM_SLOT_BACKGROUND);
                 }
                 SlotLayer::Border => match self.frame {
                     SlotFrame::Rarity(rarity) => {
