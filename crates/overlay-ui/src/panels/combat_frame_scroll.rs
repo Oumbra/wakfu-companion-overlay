@@ -14,8 +14,9 @@
 //!   validés du plus grand gabarit, voir sa doc) : le pas (`pitch`) entre deux portraits qui
 //!   défilent est l'écart moyen entre ces 6 centres, la bande de clip va du premier centre moins le
 //!   rayon au dernier centre plus le rayon — aucune nouvelle mesure.
-//! - Scrollbar : PAS les assets `scrollbar-active.png`/`scrollbar-inactive.png` fournis par
-//!   l'utilisateur — essayés en texture de la barre (étirée sur toute sa hauteur), rejetés (retour
+//! - Scrollbar (dessin et interaction dans `combat_scrollbar` depuis le 13 sept. 2026, partagés
+//!   avec la fenêtre des barres de dégâts) : PAS les assets `scrollbar-active.png`/
+//!   `scrollbar-inactive.png` fournis par l'utilisateur — essayés en texture de la barre (étirée sur toute sa hauteur), rejetés (retour
 //!   utilisateur explicite : trop large, cachait les portraits). Remplacés par une barre DESSINÉE,
 //!   fine (`SCROLLBAR_WIDTH`), couleur unie `SCROLLBAR_COLOR` (demande explicite), bordure noire
 //!   ~1px, coins légèrement arrondis, collée au bord gauche du cadre — entre les deux pointes de
@@ -48,24 +49,7 @@ use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
 use super::combat_frame::{largest_frame_geometry, CombatFrame, SelectionMarks, MAX_FRAME_SLOTS};
-
-/// Couleur unie de la scrollbar — demande explicite de l'utilisateur, PAS une teinte dérivée du
-/// thème ni des PNG essayés puis rejetés (voir doc de module).
-const SCROLLBAR_COLOR: egui::Color32 = egui::Color32::from_rgb(0x99, 0x8a, 0x6c);
-/// Bordure noire ~1px demandée explicitement — légèrement transparente (comme la maquette validée
-/// dans l'artefact) plutôt que noir plein.
-const SCROLLBAR_BORDER: egui::Color32 = egui::Color32::from_black_alpha(217);
-const SCROLLBAR_BORDER_WIDTH: f32 = 1.0;
-/// Coins "légèrement" arrondis — demande explicite, PAS un stade/pilule complet.
-const SCROLLBAR_ROUNDING: u8 = 2;
-/// Largeur RÉELLE de la barre dessinée — fine, comparable aux tiges des ornements du gabarit (PAS
-/// la largeur de 14px des PNG essayés puis rejetés, qui la faisait cacher les portraits).
-const SCROLLBAR_WIDTH: f32 = 5.0;
-/// Largeur de la zone cliquable/glissable — plus généreuse que la barre visuelle dessinée, pour
-/// rester facile à attraper (même écart que dans l'artefact de calibration).
-const SCROLLBAR_HIT_WIDTH: f32 = 14.0;
-/// Hauteur minimale de la barre, même à très grand nombre d'ennemis — reste cliquable et visible.
-const SCROLLBAR_MIN_HEIGHT: f32 = 20.0;
+use super::combat_scrollbar::DrawnScrollbar;
 
 /// Clé de stockage du décalage de scroll courant, en nombre FRACTIONNAIRE d'emplacements (0 = le
 /// premier ennemi de `fighters` est aligné sur le 1ᵉʳ emplacement du gabarit) — voir doc de module
@@ -284,42 +268,17 @@ impl EnemyFrameScroll {
             }
         }
 
-        // Scrollbar : fine, collée au bord gauche, hauteur dynamique — voir doc de module.
-        let band_height = clip_rect.height();
-        let visible_frac = (MAX_FRAME_SLOTS as f32 / n as f32).min(1.0);
-        let thumb_height = (band_height * visible_frac).max(SCROLLBAR_MIN_HEIGHT);
-        let usable = (band_height - thumb_height).max(0.0);
-        let thumb_top = clip_rect.min.y + usable * (offset / max_offset);
-        let hit_rect = egui::Rect::from_min_size(
-            egui::pos2(frame_rect.min.x, clip_rect.min.y),
-            egui::vec2(SCROLLBAR_HIT_WIDTH, band_height),
-        );
-        let thumb_rect = egui::Rect::from_min_size(
-            egui::pos2(frame_rect.min.x, thumb_top),
-            egui::vec2(SCROLLBAR_WIDTH, thumb_height),
-        );
-
-        let hit_id = ui.id().with("enemy-scroll-hit");
-        let hit_response = ui.interact(hit_rect, hit_id, egui::Sense::click_and_drag());
-        if (hit_response.dragged() || hit_response.clicked()) && usable > 0.0 {
-            if let Some(pointer) = hit_response.interact_pointer_pos() {
-                let target_top = pointer.y - thumb_height / 2.0;
-                offset =
-                    ((target_top - clip_rect.min.y) / usable * max_offset).clamp(0.0, max_offset);
-            }
-        }
-
-        // Toujours visible (revirement explicite de l'utilisateur, 2026-09-07 : la première
-        // version la cachait sauf survol du cadre entier, jugée finalement inutile une fois
-        // testée en jeu — la barre ne gêne pas assez pour justifier de la cacher) — voir doc de
-        // module.
-        ui.painter().rect(
-            thumb_rect,
-            SCROLLBAR_ROUNDING,
-            SCROLLBAR_COLOR,
-            egui::Stroke::new(SCROLLBAR_BORDER_WIDTH, SCROLLBAR_BORDER),
-            egui::StrokeKind::Outside,
-        );
+        // Scrollbar : fine, collée au bord gauche, hauteur dynamique — dessin et interaction
+        // partagés avec la fenêtre des barres (`combat_scrollbar`, 13 sept. 2026), position
+        // normalisée convertie depuis/vers le décalage en emplacements.
+        let scrollbar = DrawnScrollbar {
+            band: clip_rect,
+            hit_left: frame_rect.min.x,
+            thumb_left: frame_rect.min.x,
+            visible_frac: MAX_FRAME_SLOTS as f32 / n as f32,
+        };
+        let position = scrollbar.show(ui, ui.id().with("enemy-scroll-hit"), offset / max_offset);
+        offset = (position * max_offset).clamp(0.0, max_offset);
 
         ui.ctx().data_mut(|d| d.insert_temp(scroll_id, offset));
         clicked

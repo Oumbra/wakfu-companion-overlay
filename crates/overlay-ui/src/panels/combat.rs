@@ -364,6 +364,7 @@ use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
+use super::combat_bars::DamageBars;
 use super::combat_frame::{CombatFrame, SelectionMarks, MAX_FRAME_SLOTS};
 use super::combat_frame_scroll::EnemyFrameScroll;
 use super::combat_spell_block;
@@ -402,7 +403,7 @@ const SWITCH_ICON_SIZE: f32 = 15.0;
 /// colonne de droite (même rythme pour les deux colonnes, demande utilisateur explicite). Resserré
 /// une 4e fois (6 px → 4 px → 2 px → 1 px, retour utilisateur répété : « il y a un écart non
 /// négligeable entre les groupes, il faut le réduire »).
-const ROW_GAP: f32 = 1.0;
+pub(super) const ROW_GAP: f32 = 1.0;
 /// Écart horizontal entre la colonne des portraits (cadre ou liste plate) et celle des barres —
 /// réduit (retour utilisateur 2026-09-04 : « moins écartés, un peu plus proches ») par rapport à
 /// la première version de cette refonte (12 px).
@@ -424,7 +425,7 @@ use crate::design::tokens::{
 /// d'écran 2026-09-02, ~16 px de haut). Une première itération l'avait portée à 18 px sans
 /// nécessité (retour utilisateur : « elle est plus haute que celle que je t'ai fournie ») — revenu
 /// à la mesure d'origine.
-const BAR_HEIGHT: f32 = 16.0;
+pub(super) const BAR_HEIGHT: f32 = 16.0;
 /// Largeur maximale d'une barre — agrandie par rapport à la première version de cette refonte
 /// (150 px) maintenant que `COLUMN_GAP` est réduit (voir sa doc) : l'espace regagné doit profiter
 /// à la barre, pas rester vide.
@@ -434,7 +435,7 @@ pub(super) const BAR_MAX_WIDTH: f32 = 190.0;
 /// différence de rythme qui donne à l'œil la lecture "un nom + une barre = un groupe". Resserré une
 /// 3e fois (2 px → 1 px → 0, retour utilisateur répété : « encore plus compact ») — le nom/les
 /// dégâts touchent maintenant directement le haut de la barre.
-const GROUP_NAME_BAR_GAP: f32 = 0.0;
+pub(super) const GROUP_NAME_BAR_GAP: f32 = 0.0;
 
 // Couleurs de la barre de dégâts — mesurées pixel par pixel sur la maquette fournie par
 // l'utilisateur (capture d'écran 2026-09-02 : `Capture_decran_2026-09-02_122045.png`), reprise ici
@@ -449,7 +450,7 @@ const TOTAL_FONT_SIZE: f32 = 18.0;
 /// bloc de sorts, « pour l'homogénéité entre les blocs »). `show` en retranche l'`item_spacing`
 /// vertical d'egui, glissé après la ligne leader, pour que ce soit bien l'écart à l'écran.
 pub(super) const TOTAL_GAP: f32 = 10.0;
-const NAME_FONT_SIZE: f32 = 13.0;
+pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 
 /// Marge intérieure du fond opacifié de la ligne leader (voir `show_leader_row`) entre son bord et
 /// le bouton/le total qu'il contient — la MÊME valeur des deux côtés (le bouton à gauche a un bord
@@ -640,12 +641,9 @@ pub fn show(
                     },
                 });
             } else {
-                for (i, fighter) in bars.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(ROW_GAP);
-                    }
-                    damage_bar_group(ui, &fighter.name, fighter.total_damage, total_damage);
-                }
+                // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
+                // 2026) — même rythme vertical que l'ancienne liste en dessous de six.
+                DamageBars::show(ui, &bars, total_damage);
             }
             // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
             // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
@@ -800,43 +798,65 @@ pub(crate) fn grey_tint_if_ko(is_ko: bool) -> egui::Color32 {
     }
 }
 
-/// Un "groupe" nom + dégâts + barre de la colonne de droite — nom à gauche et dégâts chiffrés à
-/// droite sur la MÊME ligne (retour utilisateur : le chiffre de dégâts avait disparu avec le
-/// passage au pourcentage seul, régression à corriger), barre juste en dessous, quasiment collée
-/// (`GROUP_NAME_BAR_GAP`) pour que l'œil lise l'ensemble comme un seul bloc — et un espace plus
-/// large (`ROW_GAP`, voir l'appelant) entre deux groupes DIFFÉRENTS pour que cette distinction
-/// reste lisible.
-fn damage_bar_group(ui: &mut egui::Ui, name: &str, damage: i64, total_damage: i64) {
-    let bar_width = ui.available_width().min(BAR_MAX_WIDTH);
+/// Hauteur d'un groupe nom + dégâts + barre tel que `paint_damage_bar_group` le peint : ligne de
+/// texte (`NAME_FONT_SIZE`), `item_spacing` d'egui (héritage de l'ancienne liste, où le nom et la
+/// barre étaient deux allocations successives), `GROUP_NAME_BAR_GAP`, barre (`BAR_HEIGHT`).
+pub(super) fn damage_group_height(ui: &egui::Ui) -> f32 {
+    NAME_FONT_SIZE + ui.spacing().item_spacing.y + GROUP_NAME_BAR_GAP + BAR_HEIGHT
+}
+
+/// Un groupe « nom + dégâts + barre », peint dans `rect` (largeur = celle des barres, hauteur =
+/// `damage_group_height`) : nom à gauche et dégâts à droite sur la ligne du haut (texte contouré,
+/// voir `design::text`), barre en dessous (`damage_bar`). Aucune allocation : c'est
+/// `combat_bars::DamageBars` qui alloue la fenêtre et place chaque groupe à sa position défilée.
+/// `opacity` donne l'opacité de chaque élément (ligne de texte, puis barre) d'après son rectangle
+/// — le fondu aux bords de la fenêtre (voir `combat_bars`) ; renvoie 1 hors fondu.
+///
+/// Pas de rembourrage supplémentaire sous le texte (retour utilisateur, 6e retour : « l'écart
+/// entre la barre et la ligne du dessus », déjà réduit une 1re fois via `GROUP_NAME_BAR_GAP` —
+/// le reste venait de cette marge, retirée).
+pub(super) fn paint_damage_bar_group(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    name: &str,
+    damage: i64,
+    total_damage: i64,
+    opacity: &dyn Fn(egui::Rect) -> f32,
+) {
     let name_font = text::label_font(ui.ctx(), NAME_FONT_SIZE);
-    // Pas de rembourrage supplémentaire sous le texte (retour utilisateur, 6e retour : « l'écart
-    // entre la barre et la ligne du dessus », déjà réduit une 1re fois via `GROUP_NAME_BAR_GAP` —
-    // le reste venait de cette marge, retirée).
-    let name_height = name_font.size;
-    let (name_rect, _) =
-        ui.allocate_exact_size(egui::vec2(bar_width, name_height), egui::Sense::hover());
-    text::paint_outlined_text(
-        ui,
-        name_rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        name,
-        name_font.clone(),
-        TEXT_COLOR,
-        text::OUTLINE_FULL,
+    let name_rect = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), name_font.size));
+    // `new_child` et non `ui.scope` pour porter l'opacité : un scope réallouerait dans `ui` — voir
+    // `combat_bars::DamageBars::show`.
+    {
+        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(name_rect));
+        ui.multiply_opacity(opacity(name_rect));
+        let ui = &ui;
+        text::paint_outlined_text(
+            ui,
+            name_rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            name,
+            name_font.clone(),
+            TEXT_COLOR,
+            text::OUTLINE_FULL,
+        );
+        text::paint_outlined_text(
+            ui,
+            name_rect.right_center(),
+            egui::Align2::RIGHT_CENTER,
+            &format_fr_thousands(damage),
+            name_font,
+            TEXT_COLOR,
+            text::OUTLINE_FULL,
+        );
+    }
+    let bar_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.min.x, rect.max.y - BAR_HEIGHT),
+        egui::vec2(rect.width(), BAR_HEIGHT),
     );
-    text::paint_outlined_text(
-        ui,
-        name_rect.right_center(),
-        egui::Align2::RIGHT_CENTER,
-        &format_fr_thousands(damage),
-        name_font,
-        TEXT_COLOR,
-        text::OUTLINE_FULL,
-    );
-    ui.add_space(GROUP_NAME_BAR_GAP);
-    let (bar_rect, _) =
-        ui.allocate_exact_size(egui::vec2(bar_width, BAR_HEIGHT), egui::Sense::hover());
-    damage_bar(ui, bar_rect, damage, total_damage);
+    let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar_rect));
+    bar_ui.multiply_opacity(opacity(bar_rect));
+    damage_bar(&mut bar_ui, bar_rect, damage, total_damage);
 }
 
 /// Piste + remplissage d'une barre de dégâts, peinte dans `rect` (déjà alloué par l'appelant, voir
