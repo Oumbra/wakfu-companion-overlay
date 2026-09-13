@@ -1172,6 +1172,46 @@ ajoute 8 px de marge sur les quatre côtés) — sans effet tant que la fenêtre
 contenu, mais la barre, peinte SOUS les tuiles, tombait hors du cadre et n'apparaissait sur aucune
 capture.
 
+### 9.1 octies Bandeau « Suivi » : toutes les infobulles en dessous, la bande remonte (2026-09-13)
+
+Retour du même jour, au soir, sur le résultat de §9.1 septies — deux captures, dont un bandeau sans
+aucun suivi : « que la bande de suivi ne soit pas autant décalée par rapport au haut de la fenêtre
+du jeu, c'est très dérangeant visuellement, et encore plus lorsqu'il n'y a pas du tout de suivi —
+il y a quatre boutons qui flottent dans le vide, c'est très perturbant ».
+
+Les 28 px de `WATCHLIST_TOP_MARGIN` ne servaient qu'à loger les infobulles de « + »/« − » et des
+tuiles, ouvertes vers le haut depuis le matin même. Le remède est venu avec la demande :
+« intervertir les choses [...] le tooltip d'Ajouter se comporterait comme celui de Détails, il
+s'afficherait en bas du bouton ; pareil pour Options et Supprimer [...] en collant la bande plus
+haut et en laissant juste l'espace nécessaire — on gagnerait la moitié, peut-être plus, du vide ».
+
+- **Tout s'ouvre en dessous**, et la réserve change de côté : `WATCHLIST_TOP_MARGIN` devient
+  `WATCHLIST_TOOLTIP_RESERVE`, même valeur mais laissée en hauteur de fenêtre SOUS le contenu, là
+  où elle poussait le contenu vers le bas. La bande touche le bord haut de sa fenêtre ; ce qui
+  l'éloigne encore du client n'est plus que l'ancrage (`GAME_TOP_MARGIN_PX`, 28 px, calé sur les
+  boutons d'interface du jeu). **62 px de vide → 28.** La hauteur de fenêtre, elle, ne bouge pas :
+  ce qui était réservé au-dessus l'est maintenant en dessous.
+- **Un côté ne suffit plus à éviter le recouvrement** : sous « + », il y a « Détails ». Les quatre
+  infobulles du carré s'accrochent donc au carré ENTIER (`design::Tooltip::anchor`, §9.2) et
+  s'ouvrent sous sa dernière ligne ; celle d'une tuile s'accroche à la bande jusqu'au bas de sa
+  zone défilante, barre de défilement comprise — ouverte sous la seule tuile, elle masquerait la
+  barre qu'on vient d'y mettre (§9.1 septies). En rangée (bandeau vide), rien à protéger : chaque
+  infobulle reste centrée sur son bouton, ce qui dit lequel elle décrit.
+- **La barre de défilement reste SOUS les tuiles** — l'utilisateur proposait de la passer au-dessus
+  pour dégager le bas, mais la réserve du haut tombe alors à zéro plutôt qu'à 14 px : la bande
+  remonte de 14 px de plus que ce que la demande visait, et rien ne masque la barre puisque les
+  infobulles s'ouvrent dessous.
+- `CONTROL_TOOLTIP_RESERVE` remesurée une dernière fois : 88 px, à DROITE seulement. Une infobulle
+  ancrée sur le carré (60 px) déborde plus loin que centrée sur un bouton ; deux entrées suffisent
+  à la fournir, une seule coûte 12 px de largeur de fenêtre transparente.
+
+**Testkit** : `panneau_suivi_toutes_les_infobulles_sous_la_bande` capture les cinq survols (quatre
+boutons + une tuile). Au passage, les quatre survols de
+`panneau_suivi_vide_boutons_en_ligne_infobulles_dessous` visaient 70 px trop à droite depuis le
+retrait de la réserve gauche (§9.1 septies) : deux captures montraient l'infobulle d'« Options »,
+deux n'en montraient aucune, et aucun test n'échouait. Un nom de fichier n'est pas une assertion —
+seule la lecture de la capture publiée en artefact l'est.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
