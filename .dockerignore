@@ -1,0 +1,10 @@
+# Contexte de build Docker — voir `.github/ci-image/Dockerfile`, qui se construit depuis la RACINE
+# du dépôt (`-f .github/ci-image/Dockerfile .`) pour pouvoir copier `scripts/setup-render-env.sh`
+# sans en dupliquer le contenu.
+#
+# Sans ce fichier, `docker build` enverrait au démon TOUT le dépôt — `target/` pèse à lui seul
+# plusieurs gigaoctets sur un poste où l'on a compilé, et le build passerait des minutes à
+# transférer des artefacts dont l'image n'a aucun usage. Le Dockerfile ne copie qu'un script ; le
+# contexte doit rester de cet ordre de grandeur.
+*
+!scripts/setup-render-env.sh

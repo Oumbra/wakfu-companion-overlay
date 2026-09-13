@@ -8,19 +8,30 @@
 # poste de dev — quelle que soit sa distribution, y compris SteamOS — obtienne un rendu identique
 # au CI sans toucher à son système.
 #
-#   # digest : celui du `container.image` du job `test-linux`, à garder synchronisé avec lui
-#   docker build -t wakfu-ci-render \
-#     --build-arg BASE=ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254 \
-#     -f .github/ci-image/Dockerfile .
+# Le plus simple est de passer par `scripts/ci-local.sh`, qui fait les deux pour vous :
 #
-#   # régénérer les références (monté au MÊME chemin : cargo réutilise target/ tel quel)
-#   docker run --rm -v "$PWD:$PWD" -w "$PWD" -e UPDATE_SNAPSHOTS=1 \
-#     wakfu-ci-render cargo test --no-fail-fast -p overlay-testkit
+#   bash scripts/ci-local.sh --captures-conteneur                      # vérifier
+#   UPDATE_SNAPSHOTS=1 bash scripts/ci-local.sh --captures-conteneur   # régénérer les références
+#
+# À la main, si besoin (le dépôt monté au MÊME chemin : les empreintes de cargo contiennent des
+# chemins absolus, donc `target/` est réutilisé tel quel au lieu de tout recompiler) :
+#
+#   docker build -t wakfu-ci-render -f .github/ci-image/Dockerfile .
+#   docker run --rm -v "$PWD:$PWD" -w "$PWD" wakfu-ci-render \
+#     cargo test --no-fail-fast -p overlay-testkit
 #
 # Le contexte de build est la RACINE du dépôt (`-f .github/ci-image/Dockerfile .`) : le script
-# installé ici est celui du dépôt, jamais une copie.
+# installé ici est celui du dépôt, jamais une copie. `.dockerignore` réduit ce contexte au seul
+# script — sans lui, `docker build` enverrait aussi les gigaoctets de `target/`.
 
-ARG BASE=ubuntu:24.04
+# **Le digest par défaut est CELUI du `container.image` du job `test-linux`**, pas le tag
+# `ubuntu:24.04` : l'image locale est ainsi celle du CI par construction, et non « celle qu'on
+# espère identique ». Les deux valeurs doivent bouger ensemble — un digest changé d'un seul côté
+# fait diverger le rendu local de celui qui décide du gate.
+#
+# Surchargeable (`--build-arg BASE=…`) pour un miroir de registre, jamais pour « prendre la
+# dernière ».
+ARG BASE=ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
 FROM ${BASE}
 
 # Une seule source de vérité pour les versions : le script du dépôt, celui-là même que le CI
