@@ -208,10 +208,17 @@ fn watchlist_target_width(entry_count: usize, toast_active: bool, game_width_px:
 /// toast (carte + confettis) est actif. L'ancrage de la fenêtre Suivi (`App::anchor_position`) ne
 /// dépend que de sa LARGEUR, jamais de sa hauteur — grandir vers le bas ne déplace donc jamais la
 /// bande de tuiles déjà positionnée.
-fn watchlist_target_height(toast_active: bool) -> f64 {
+fn watchlist_target_height(toast_active: bool, select_open: bool) -> f64 {
     WATCHLIST_HEIGHT
         + if toast_active {
             panels::watchlist::TOAST_AREA_HEIGHT as f64
+        } else {
+            0.0
+        }
+        // La bande du bouton de suppression groupée, le temps de la sélection multiple — la
+        // fenêtre se rétracte en quittant le mode (2026-09-13).
+        + if select_open {
+            panels::watchlist::SELECTION_BAR_HEIGHT as f64
         } else {
             0.0
         }
@@ -369,6 +376,11 @@ struct App {
     /// `overlay_engine::watchlist`). Global comme `snapshot`, pas par fenêtre : le suivi est un
     /// suivi de compte, pas d'un personnage précis.
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
+    /// Sélection multiple du bandeau (2026-09-13) — ici et pas dans `OverlayWindow` : elle se
+    /// pilote aussi au clavier (`WATCHLIST_REMOVE_HOTKEY_LABEL`), et un raccourci global arrive
+    /// par la boucle d'événements sans savoir quelle fenêtre existe. Il n'y a de toute façon qu'un
+    /// bandeau Suivi à la fois.
+    watchlist_selection: panels::watchlist::WatchlistSelection,
     /// Publié par le thread Engine à chaque décompte de suivi qui vient d'atteindre 0 (voir
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
@@ -535,6 +547,7 @@ impl App {
             interactive: true,
             snapshot,
             watchlist,
+            watchlist_selection: panels::watchlist::WatchlistSelection::default(),
             watchlist_toast,
             alert_profile,
             catalog,
@@ -659,7 +672,7 @@ impl App {
             // `watchlist` se remplit (voir le redimensionnement dans `RedrawRequested`).
             OverlayKind::Watchlist => (
                 watchlist_target_width(0, false, rect.width),
-                watchlist_target_height(false),
+                watchlist_target_height(false, false),
             ),
             OverlayKind::Options => (
                 options_modal::WINDOW_SIZE.0 as f64,
@@ -843,6 +856,17 @@ impl App {
         gpu.config.width = size.width.min(max_dim);
         gpu.config.height = size.height.min(max_dim);
         gpu.surface.configure(&gpu.device, &gpu.config);
+    }
+
+    /// Redessine la ou les fenêtres du bandeau Suivi — appelé après une bascule venue du clavier,
+    /// que rien d'autre ne signale au moteur de rendu. Même mécanisme que `toggle_interactive` :
+    /// un `next_redraw_at` dans le passé immédiat, que la boucle honore au prochain tour.
+    fn request_watchlist_redraw(&mut self) {
+        for overlay in self.windows.values_mut() {
+            if overlay.kind == OverlayKind::Watchlist {
+                overlay.next_redraw_at = Some(std::time::Instant::now());
+            }
+        }
     }
 
     fn toggle_interactive(&mut self) {
@@ -1605,7 +1629,8 @@ impl App {
             let toast_active = panels::watchlist::is_active(watchlist_toast, now);
             let target_width =
                 watchlist_target_width(watchlist.len(), toast_active, overlay.game_rect.width);
-            let target_height = watchlist_target_height(toast_active);
+            let target_height =
+                watchlist_target_height(toast_active, self.watchlist_selection.is_open());
             if overlay.last_watchlist_width != Some(target_width)
                 || overlay.last_watchlist_height != Some(target_height)
             {
@@ -1647,6 +1672,7 @@ impl App {
                 icons: &overlay.icons,
                 combat_side: &mut overlay.combat_side,
                 watchlist: &watchlist,
+                watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,
                 catalog: &catalog,
                 catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -1666,6 +1692,19 @@ impl App {
         // relira `None` et n'affichera plus rien.
         if outcome.close_toast {
             self.watchlist_toast.store(Arc::new(None));
+        }
+        // Suppression groupée demandée depuis le bandeau : même chemin que la validation de
+        // l'onglet « Suivi » (`commit_suivi`) — seules les DÉFINITIONS partent, le moteur garde ses
+        // compteurs et réplique au compte de lui-même. L'`ArcSwap` local n'est pas touché ici :
+        // c'est le moteur qui republie la liste, compteurs vivants compris.
+        if let Some(restantes) = outcome.watchlist_remaining {
+            tracing::info!(
+                entry_count = restantes.len(),
+                "[bandeau] suppression groupée"
+            );
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetWatchlistDefinitions(restantes));
         }
         // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "+"/"Options"
         // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
@@ -1868,7 +1907,13 @@ impl ApplicationHandler<UserEvent> for App {
                 // Même destination que le bouton "+" qu'il double — voir plus haut.
                 self.open_options_modal(event_loop, None, options_modal::OptionsTab::Suivi);
             } else if event.id == self.watchlist_remove_hotkey_id {
-                tracing::debug!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL}) : encore inerte.");
+                tracing::info!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL})");
+                // Même geste que le bouton « − » qu'il double : il ouvre et referme le mode, il ne
+                // supprime rien. La fenêtre change de hauteur avec lui, et rien d'autre ne la
+                // redessine — sans ce réveil, le raccourci n'aurait d'effet qu'au prochain
+                // événement venu d'ailleurs.
+                self.watchlist_selection.toggle_mode();
+                self.request_watchlist_redraw();
             } else if event.id == self.side_hotkey_id {
                 self.toggle_combat_side();
             }

@@ -111,6 +111,9 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &[],
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,

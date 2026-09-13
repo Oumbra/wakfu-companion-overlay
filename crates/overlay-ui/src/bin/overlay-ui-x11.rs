@@ -94,6 +94,9 @@ mod linux_main {
     /// OPTIONS_HOTKEY_LABEL`), câblé ICI contrairement à Rafraîchissement/Déconnexion (voir la doc
     /// de module) : cette fonctionnalité n'a rien à voir avec le compte lié, absent en mode invité.
     const OPTIONS_HOTKEY_LABEL: &str = "Ctrl+Shift+O";
+    /// Raccourci global qui ouvre et referme la sélection multiple du bandeau — le double clavier
+    /// du bouton « − », dont l'infobulle l'annonce.
+    const WATCHLIST_REMOVE_HOTKEY_LABEL: &str = "Ctrl+Shift+S";
     /// Même cadence que Windows (§6.5 du plan) : 20 Hz pour l'ancrage/topmost/hotkey.
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
     // Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
@@ -122,10 +125,17 @@ mod linux_main {
         content.min(ceiling).max(WATCHLIST_INNER_MARGIN)
     }
 
-    fn watchlist_target_height(toast_active: bool) -> f64 {
+    fn watchlist_target_height(toast_active: bool, select_open: bool) -> f64 {
         WATCHLIST_HEIGHT
             + if toast_active {
                 panels::watchlist::TOAST_AREA_HEIGHT as f64
+            } else {
+                0.0
+            }
+            // La bande du bouton de suppression groupée, le temps de la sélection multiple — la
+            // fenêtre se rétracte en quittant le mode (2026-09-13).
+            + if select_open {
+                panels::watchlist::SELECTION_BAR_HEIGHT as f64
             } else {
                 0.0
             }
@@ -171,10 +181,16 @@ mod linux_main {
         toggle_hotkey_id: u32,
         quit_hotkey_id: u32,
         options_hotkey_id: u32,
+        /// Voir `WATCHLIST_REMOVE_HOTKEY_LABEL`.
+        watchlist_remove_hotkey_id: u32,
         interactive: bool,
         snapshot: Arc<ArcSwap<SessionSnapshot>>,
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+        /// Sélection multiple du bandeau — ici et pas dans `OverlayWindow` : elle se pilote aussi
+        /// au raccourci global, qui arrive par la boucle d'événements sans savoir quelle fenêtre
+        /// existe. Il n'y a de toute façon qu'un bandeau Suivi à la fois.
+        watchlist_selection: panels::watchlist::WatchlistSelection,
         catalog: Arc<ArcSwap<CatalogIndex>>,
         remote_icons: RemoteIconStore,
         auth_status: AuthStatus,
@@ -227,6 +243,10 @@ mod linux_main {
             let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyQ);
             let options_hotkey =
                 HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyO);
+            // `Ctrl+Shift+S` — le double clavier du bouton « − » du bandeau, promis par son
+            // infobulle depuis le 2026-09-06 et branché le 2026-09-13.
+            let watchlist_remove_hotkey =
+                HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
             hotkey_manager
                 .register(toggle_hotkey)
                 .expect("enregistrement du hotkey global");
@@ -236,6 +256,9 @@ mod linux_main {
             hotkey_manager
                 .register(options_hotkey)
                 .expect("enregistrement du hotkey Options");
+            hotkey_manager
+                .register(watchlist_remove_hotkey)
+                .expect("enregistrement du hotkey Supprimer");
 
             Self {
                 windows: HashMap::new(),
@@ -244,6 +267,8 @@ mod linux_main {
                 toggle_hotkey_id: toggle_hotkey.id(),
                 quit_hotkey_id: quit_hotkey.id(),
                 options_hotkey_id: options_hotkey.id(),
+                watchlist_remove_hotkey_id: watchlist_remove_hotkey.id(),
+                watchlist_selection: panels::watchlist::WatchlistSelection::default(),
                 interactive: true,
                 snapshot,
                 watchlist,
@@ -350,7 +375,7 @@ mod linux_main {
                 OverlayKind::Combat => WINDOW_SIZE,
                 OverlayKind::Watchlist => (
                     watchlist_target_width(0, false, rect.width),
-                    watchlist_target_height(false),
+                    watchlist_target_height(false, false),
                 ),
                 OverlayKind::Options => (
                     options_modal::WINDOW_SIZE.0 as f64,
@@ -441,6 +466,16 @@ mod linux_main {
                 // source.
                 RawWindowHandle::Xlib(handle) => handle.window as u32,
                 other => panic!("handle de fenêtre inattendu sous X11 : {other:?}"),
+            }
+        }
+
+        /// Redessine la ou les fenêtres du bandeau Suivi — appelé après une bascule venue du
+        /// clavier, que rien d'autre ne signale au moteur de rendu.
+        fn request_watchlist_redraw(&self) {
+            for overlay in self.windows.values() {
+                if overlay.kind == OverlayKind::Watchlist {
+                    overlay.window.request_redraw();
+                }
             }
         }
 
@@ -804,7 +839,10 @@ mod linux_main {
                             toast_active,
                             overlay.game_rect.width,
                         );
-                        let target_height = watchlist_target_height(toast_active);
+                        let target_height = watchlist_target_height(
+                            toast_active,
+                            self.watchlist_selection.is_open(),
+                        );
                         if overlay.last_watchlist_width != Some(target_width)
                             || overlay.last_watchlist_height != Some(target_height)
                         {
@@ -843,6 +881,7 @@ mod linux_main {
                             icons: &overlay.icons,
                             combat_side: &mut overlay.combat_side,
                             watchlist: &watchlist,
+                            watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,
                             catalog: &catalog,
                             catalog_stale: false,
@@ -857,6 +896,20 @@ mod linux_main {
                     );
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
+                    }
+                    // Suppression groupée demandée depuis le bandeau : même chemin que la
+                    // validation de l'onglet « Suivi » — seules les DÉFINITIONS partent, le moteur
+                    // garde ses compteurs et réplique au compte de lui-même (voir
+                    // `EngineCommand::SetWatchlistDefinitions`). L'`ArcSwap` local n'est pas touché
+                    // ici : c'est le moteur qui republie la liste, compteurs vivants compris.
+                    if let Some(restantes) = outcome.watchlist_remaining {
+                        tracing::info!(
+                            entry_count = restantes.len(),
+                            "[bandeau] suppression groupée"
+                        );
+                        let _ = self
+                            .settings_tx
+                            .send(EngineCommand::SetWatchlistDefinitions(restantes));
                     }
                     if outcome.open_watchlist {
                         post_redraw = PostRedraw::OpenOptions(
@@ -935,6 +988,13 @@ mod linux_main {
                 } else if event.id == self.quit_hotkey_id {
                     logging::log_session_end(QUIT_HOTKEY_LABEL);
                     event_loop.exit();
+                } else if event.id == self.watchlist_remove_hotkey_id {
+                    tracing::info!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL})");
+                    self.watchlist_selection.toggle_mode();
+                    // La fenêtre change de hauteur avec le mode, et rien d'autre ne la redessine :
+                    // sans ce réveil, le raccourci n'aurait d'effet qu'au prochain événement venu
+                    // d'ailleurs.
+                    self.request_watchlist_redraw();
                 } else if event.id == self.options_hotkey_id {
                     tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
                     // Même destination que le bouton "Options" qu'il double — voir la doc de

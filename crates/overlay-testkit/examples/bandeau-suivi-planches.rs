@@ -43,6 +43,17 @@
 //! 4. **En style danger, comme sur le web et comme dans l'onglet.** Décision déjà rendue le
 //!    2026-09-13 pour l'onglet Suivi, reprise telle quelle.
 //!
+//! ## ⚠ Portée depuis — cette maquette est un document d'archive
+//!
+//! Les quatre décisions ci-dessous ont été validées, puis portées dans le panneau lui-même le
+//! 2026-09-13 (`panels::watchlist::WatchlistSelection`). Ce que ce fichier superpose à la main —
+//! cases à cocher, liseré, « − » enfoncé, bouton de suppression — **existe maintenant pour de
+//! bon** : la référence est le panneau, et les captures qui font foi sont celles du test
+//! `panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple` (`tests/panels.rs`), qui clique
+//! réellement au lieu de dessiner par-dessus. Ce fichier n'est gardé que pour l'historique de la
+//! décision ; il peint toujours sur un bandeau dont la sélection est fermée, donc son rendu reste
+//! juste, simplement redondant.
+//!
 //! ## Ce que ce portage demandera
 //!
 //! - **La fenêtre Suivi grandit quand le mode est ouvert.** Sa hauteur est une constante
@@ -346,6 +357,9 @@ fn harnais(p: Planche) -> Harness<'static> {
                     icons,
                     combat_side: &mut combat_side,
                     watchlist: &entries,
+                    // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                    // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                    watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
