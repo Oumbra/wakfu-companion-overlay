@@ -11,19 +11,23 @@
 //!
 //! ## Les cinq règles que ces maquettes posent
 //!
-//! 1. **La liste n'affiche QUE l'emplacement d'objet** — pas de nom sous la tuile, contrairement à
-//!    l'onglet Alertes. Demande explicite : « le rendu sera différent, on n'affiche que les item
-//!    slots ». C'est exactement ce que fait déjà le bandeau Suivi in-game (`panels::watchlist`),
-//!    dont ces tuiles reprennent la géométrie ([`design::tokens::ITEM_SLOT_SIZE`], 64 px) et le
-//!    compteur peint dans le coin bas-droit ([`design::SlotCount`]) — un suivi se reconnaît à son
-//!    icône et à son compteur, le nom vit dans l'infobulle.
+//! 1. **La liste n'affiche QUE l'emplacement d'objet, et QUE la cible.** Pas de nom sous la tuile,
+//!    contrairement à l'onglet Alertes — demande explicite : « on n'affiche que les item slots ».
+//!    Et **pas la valeur courante** non plus (demande du 2026-09-13) : cet écran sert à composer
+//!    une liste, pas à la lire. Un décompte y montre sa cible (`/50`), un incrémental ne montre
+//!    rien du tout — c'est le bandeau in-game qui affiche les compteurs vivants, là où ils servent.
+//!    La tuile garde en revanche la géométrie du bandeau ([`design::tokens::ITEM_SLOT_SIZE`],
+//!    64 px), et le nom vit dans l'infobulle.
 //! 2. **Le formulaire d'ajout porte le MODE avant le nom.** Incrémental ou décompte, et en
 //!    décompte la quantité de départ : ces deux réglages sont **figés à la création** côté web
 //!    (`WatchlistTileController.add`, et `tracker.countdownTargetLocked` : « Cible fixée à la
 //!    création »). Les demander après coup serait mentir sur ce que la tuile permet.
-//! 3. **Le retrait se fait à la tuile, au survol** — une croix apparaît sur la tuile survolée, et
-//!    rien ne dépasse tant que la souris est ailleurs. C'est le `.kpi-card-del` du web, et ça tient
-//!    dans 64 px là où un nom n'y tiendrait pas.
+//! 3. **Le retrait se fait à la tuile, au survol, et sans confirmation** — une croix apparaît sur
+//!    la tuile survolée, **rouge** dès que la souris est dessus, et rien ne dépasse tant que la
+//!    souris est ailleurs. C'est le `.kpi-card-del` du web, et ça tient dans 64 px là où un nom n'y
+//!    tiendrait pas. Aucune boîte de confirmation (décision du 2026-09-13, appliquée du même coup
+//!    à l'onglet Alertes) : la fenêtre est transactionnelle, « Annuler » rattrape déjà tout et
+//!    « Valider » est une seconde garde — une troisième serait une de trop.
 //! 4. **La sélection multiple est un MODE**, pas une case permanente : un bouton l'ouvre, chaque
 //!    tuile gagne alors sa case à cocher **à la place** de sa croix, et un bouton de suppression
 //!    groupée apparaît. Sélection vide = « Supprimer tout » (aucune exclusion cochée) — la règle du
@@ -59,22 +63,23 @@
 //!    lecture seule ici ». Le transport existe déjà (`client::patch_watchlist`, écrit pour
 //!    répliquer les compteurs) ; ce qui manque est le brouillon et la frontière brouillon → compte
 //!    au moment du « Valider ».
-//! 6. **Un quatrième onglet** — `OptionsTab` n'a que `Alertes`/`Personnages`/`Parametres`. Ces
+//! 6. **`SlotCount::Target`** — la variante « cible seule », sans valeur courante (règle 1).
+//!    [`design::SlotCount`] n'a que `Simple` et `Fraction`, qui peignent toutes deux le courant ;
+//!    ces planches peignent donc la cible elles-mêmes, avec les jetons du composant
+//!    (`ITEM_SLOT_TARGET_*`), pour un rendu identique au pixel près. Une dizaine de lignes dans
+//!    `item_slot`, plus son entrée de galerie.
+//! 7. **Un quatrième onglet** — `OptionsTab` n'a que `Alertes`/`Personnages`/`Parametres`. Ces
 //!    maquettes rendent leur propre énumération ([`MockTab`]) pour ne rien changer au code de
 //!    production avant que la mise en page soit validée.
 //!
-//! ## Deux points relevés dans le code web, à trancher avec l'utilisateur
+//! ## Les deux questions de la première itération, et leurs réponses
 //!
-//! - **Les badges de quantité ADDITIONNENT, ils ne remplacent pas.** La doc de
-//!   `setAddTargetPreset` dit « remplace intégralement la cible », le code fait
-//!   `addTarget.set(addTarget() + value * (event.altKey ? -1 : 1))` — un clic sur « 100 » ajoute
-//!   cent, Alt+clic en retire cent. Les maquettes suivent le **code**, pas la doc, et l'écrivent
-//!   dans l'infobulle des badges. À confirmer : c'est peut-être la doc qui dit l'intention.
-//! - **Le retrait individuel est confirmé, le retrait groupé ne l'est pas** (web :
-//!   `ConfirmDeleteService` d'un côté, `confirmBulkDelete` immédiat de l'autre, « le passage par ce
-//!   mode dédié + une sélection explicite tient lieu de confirmation »). Ces maquettes gardent
-//!   cette asymétrie — voir [`suivi_confirmation_retrait`] — mais dans un écran transactionnel où
-//!   « Annuler » rattrape tout, on pourrait aussi bien n'en confirmer aucun.
+//! - **Les badges de quantité additionnent** — c'est confirmé, et la maquette le rend *visible*
+//!   plutôt que de l'écrire dans une infobulle que personne n'ouvre : tant qu'`Alt` est maintenu,
+//!   les cinq badges passent en or et affichent `−10 … −1000`. Une mention discrète « Alt :
+//!   retirer » vit à côté d'eux, elle aussi en or pendant l'appui. Voir [`target_line`].
+//! - **Aucun retrait n'est confirmé**, ni ici ni dans l'onglet Alertes (dont la boîte a été retirée
+//!   du code de production le même jour). Voir la règle 3.
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 //!
@@ -150,6 +155,26 @@ const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
 /// Les 10 px de l'onglet Alertes valaient pour des tuiles qui portaient leur nom ; ici la grille
 /// est faite des mêmes tuiles qu'en jeu, elle en garde le rythme.
 const TILE_GAP: f32 = 12.0;
+
+/// Marge minimale entre une infobulle et le bord de la fenêtre — voir [`paint_tooltip`].
+const TOOLTIP_EDGE_MARGIN: f32 = 8.0;
+
+/// Largeur d'un badge de quantité — celle de `−1000`, le plus large des libellés qu'il prend.
+/// Voir [`target_line`] : une largeur qui suivrait le libellé ferait bouger les badges à l'appui
+/// sur `Alt`.
+const BADGE_WIDTH: f32 = 52.0;
+
+/// Largeur de la colonne du bouton d'imbrication, dans une ligne d'ingrédient — réservée même
+/// quand la ligne n'en a pas, pour que les quantités restent alignées (voir [`ingredient_row`]).
+const RECIPE_NEST_COL: f32 = 32.0;
+/// Largeur de la colonne de la quantité, dans une ligne d'ingrédient. Quatre chiffres et le signe
+/// « × » y tiennent (`×10800`, le pire cas observé sur le bandeau Suivi).
+const RECIPE_QTY_COL: f32 = 62.0;
+
+/// Rouge du survol de la croix de retrait — **`INFO_ALERT`, le seul rouge que le design system ait
+/// mesuré sur le jeu** (haut du bouton « Annuler »). Depuis que le retrait ne demande plus
+/// confirmation, c'est cette couleur qui porte tout l'avertissement avant le clic.
+const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
 
 /// Côté d'un badge de coin sur une tuile (croix de retrait) — repris de
 /// `panels::alerts_tab::TILE_BADGE`.
@@ -359,17 +384,23 @@ enum MockTab {
 /// Ce qu'un rendu de l'onglet a besoin de savoir.
 struct SuiviTab<'a> {
     mode: AddMode,
+    /// `Alt` maintenu — les badges de quantité passent alors en retrait (voir [`target_line`]).
+    alt: bool,
     /// Quantité de départ d'un décompte — n'a de sens qu'en [`AddMode::Down`].
     target: &'a mut i64,
     search: &'a mut String,
     /// Indice de la tuile survolée, le harnais offscreen n'ayant pas de souris.
     hovered: Option<usize>,
+    /// Et, sur cette tuile, la souris est-elle sur la croix ? (voir [`TileState::remove_hovered`])
+    remove_hovered: bool,
     /// Mode « sélection multiple » ouvert, et les tuiles cochées.
     select_mode: bool,
     selected: &'a [usize],
     availability: Availability,
     /// Le panneau de suggestions, déplié — `None` quand le champ est au repos.
     suggestions: Option<&'a SuggestionPreview>,
+    /// Rang de la suggestion dont le bouton « recette » est survolé — sa tooltip est alors peinte.
+    recipe_tooltip: Option<usize>,
 }
 
 /// Dans quel état l'écran se trouve vis-à-vis du compte — **les trois mêmes cas que l'onglet
@@ -520,38 +551,69 @@ fn mode_line(ui: &mut egui::Ui, state: &mut SuiviTab<'_>, row: Rect) {
     });
 }
 
-/// La ligne « Quantité » — les badges du web, puis le pas numérique.
+/// La ligne « Quantité » — les badges du web, la mention `Alt`, puis le pas numérique.
 ///
-/// **Les badges ajoutent, le pas ajuste.** C'est ce que fait `setAddTargetPreset` (voir la doc de
-/// module) : un clic sur « 100 » ajoute cent à la valeur en cours, Alt+clic en retire cent — d'où
-/// l'infobulle qui le dit, parce que rien dans un badge « 100 » ne laisse deviner s'il pose ou
-/// ajoute. Le pas, lui, est [`design::stepper`] : ses deux boutons et son champ saisissable, plus
-/// les flèches ↑/↓ qui restent à lui ajouter (point 2 de la doc de module).
+/// **Les badges ajoutent, ils ne remplacent pas**, et `Alt` inverse le signe — c'est ce que fait
+/// `setAddTargetPreset` côté web. Le web ne le dit nulle part ; la maquette le **montre** : tant
+/// qu'`Alt` est maintenu, les cinq badges passent en or et affichent `−10 … −1000`. Rien dans un
+/// badge « 100 » ne laisse deviner qu'il ajoute plutôt qu'il pose, et rien n'aurait laissé deviner
+/// qu'`Alt` existe : la mention « Alt : retirer » à côté d'eux le dit une fois, et s'allume avec
+/// eux pendant l'appui.
+///
+/// Le pas ([`design::stepper`]) est poussé à DROITE de la ligne : c'est lui qui porte la valeur,
+/// les badges ne sont qu'un raccourci vers elle. Collés, le pas se lirait comme un sixième badge.
 fn target_line(ui: &mut egui::Ui, state: &mut SuiviTab<'_>, row: Rect) {
     let mut cell =
         ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(FORM_ROW_PAD_X, 0.0))));
+    let alt = state.alt;
     cell.horizontal_centered(|ui| {
         ui.label(RichText::new("Quantité").color(TEXT).size(BODY_FONT_SIZE));
         ui.add_space(12.0);
         for preset in TARGET_PRESETS {
             ui.add(
-                design::button(preset.to_string())
-                    .variant(ButtonVariant::Secondary)
-                    .size(ButtonSize::Height(24.0))
-                    .min_width(46.0)
-                    .tooltip(format!(
-                        "Ajouter {preset} à la quantité — Alt+clic pour en retirer autant"
-                    ))
-                    .log_name(format!("suivi.quantite-{preset}")),
+                design::button(if alt {
+                    format!("−{preset}")
+                } else {
+                    preset.to_string()
+                })
+                // L'or est la couleur d'ÉTAT de ce design system : les badges la prennent pendant
+                // l'appui sur `Alt`, comme un onglet actif ou une case cochée. Le rouge, lui,
+                // reste au « Annuler » du pied de page — retirer 100 d'une quantité n'est pas une
+                // destruction.
+                .variant(if alt {
+                    ButtonVariant::Primary
+                } else {
+                    ButtonVariant::Secondary
+                })
+                .size(ButtonSize::Height(24.0))
+                // **Largeur fixe, calée sur le plus large des deux libellés** (`−1000`) : sans
+                // elle, les cinq badges s'élargissaient à l'appui sur `Alt` et glissaient sous le
+                // curseur — on relâche alors la touche sur un autre badge que celui qu'on visait.
+                .min_width(BADGE_WIDTH)
+                .tooltip(if alt {
+                    format!("Retirer {preset} à la quantité")
+                } else {
+                    format!("Ajouter {preset} à la quantité — Alt pour retirer")
+                })
+                .log_name(format!("suivi.quantite-{preset}")),
             );
             ui.add_space(4.0);
         }
-        // Le pas est poussé à DROITE de la ligne : c'est la valeur qui compte, les badges ne sont
-        // qu'un raccourci vers elle. Les coller ensemble laisserait croire à un sixième badge.
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Alt : retirer")
+                .color(if alt {
+                    design::tokens::TEXT_GOLD
+                } else {
+                    SUBDUED
+                })
+                .size(11.0),
+        );
+
         let pas = design::stepper(state.target)
             .range(TARGET_RANGE)
-            .size(28.0)
-            .field_width(62.0)
+            .size(26.0)
+            .field_width(54.0)
             .log_name("suivi.quantite");
         let (largeur, _) = pas.desired_size();
         let reste = ui.available_width() - largeur.unwrap_or(0.0);
@@ -591,7 +653,7 @@ fn add_field(ui: &mut egui::Ui, _icons: &UiIcons, state: &mut SuiviTab<'_>, widt
     let outcome = champ.show(ui);
 
     if state.suggestions.is_some() {
-        recipe_buttons_overlay(ui, outcome.response.rect);
+        recipe_buttons_overlay(ui, outcome.response.rect, state.recipe_tooltip);
     }
 }
 
@@ -603,7 +665,7 @@ fn add_field(ui: &mut egui::Ui, _icons: &UiIcons, state: &mut SuiviTab<'_>, widt
 /// là où elle ira. **Ce code n'est pas portable tel quel** : le portage ajoute
 /// `AutocompleteEntry::action` et `AutocompleteOutcome::action_on`, et cette fonction disparaît.
 /// Elle n'existe que pour que la planche montre le geste au lieu d'en parler.
-fn recipe_buttons_overlay(ui: &mut egui::Ui, field: Rect) {
+fn recipe_buttons_overlay(ui: &mut egui::Ui, field: Rect, tooltip_on: Option<usize>) {
     // **Au-dessus du panneau, pas dedans** : `design::autocomplete` peint le sien dans une couche
     // d'avant-plan, et une peinture faite dans le `Ui` courant passerait dessous sans rien montrer
     // (constaté sur le premier rendu de cette planche).
@@ -642,7 +704,56 @@ fn recipe_buttons_overlay(ui: &mut egui::Ui, field: Rect) {
             DsIcon::Hammer,
             design::tokens::TEXT_GOLD,
         );
+
+        // **L'infobulle du bouton, peinte au même titre que lui.** Elle est le seul endroit où
+        // l'utilisateur apprend ce que le marteau fait — le web la pose aussi
+        // (`tracker.recipeTooltip`), et sans elle le glyphe reste une énigme. Peinte ici faute de
+        // pointeur en rendu offscreen ; en production c'est `design::tooltip` qui la rend, avec ses
+        // propres jetons (repris ci-dessous à l'identique).
+        if tooltip_on == Some(rang) {
+            paint_tooltip(ui, "Suivre les objets de la recette", boite);
+        }
     }
+}
+
+/// Peint une infobulle du design system au-dessus d'un rectangle — voir [`recipe_buttons_overlay`]
+/// pour pourquoi la maquette la peint elle-même.
+fn paint_tooltip(ui: &mut egui::Ui, texte: &str, ancre: Rect) {
+    let police = egui::FontId::proportional(14.0);
+    let galley = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            texte.to_string(),
+            police.clone(),
+            design::tokens::TOOLTIP_TEXT,
+        )
+    });
+    let marge = design::tokens::TOOLTIP_MARGIN;
+    let taille = galley.size()
+        + Vec2::new(
+            (marge.left + marge.right) as f32,
+            (marge.top + marge.bottom) as f32,
+        );
+    // **Ramenée dans la fenêtre si elle en sort** — c'est ce que fait `design::tooltip` avec ses
+    // replis (`TOP_END` quand `TOP` déborde). Centrée sur un bouton collé au bord droit du panneau,
+    // la boîte sortait de la fenêtre et son libellé se coupait en plein mot.
+    let fenetre = ui.max_rect();
+    let x = (ancre.center().x - taille.x / 2.0)
+        .min(fenetre.right() - taille.x - TOOLTIP_EDGE_MARGIN)
+        .max(fenetre.left() + TOOLTIP_EDGE_MARGIN);
+    let boite = Rect::from_min_size(
+        egui::pos2(x, ancre.top() - design::tokens::TOOLTIP_GAP - taille.y),
+        taille,
+    );
+    ui.painter()
+        .rect_filled(boite, 4, design::tokens::TOOLTIP_BG_FILL);
+    ui.painter().galley(
+        egui::pos2(
+            boite.left() + marge.left as f32,
+            boite.top() + marge.top as f32,
+        ),
+        galley,
+        design::tokens::TOOLTIP_TEXT,
+    );
 }
 
 /// L'en-tête de la liste : son titre à gauche, ses commandes à droite.
@@ -736,6 +847,7 @@ fn tile_grid(ui: &mut egui::Ui, icons: &UiIcons, panel: &design::PanelZones, sta
                         entry,
                         TileState {
                             hovered: state.hovered == Some(index),
+                            remove_hovered: state.hovered == Some(index) && state.remove_hovered,
                             select_mode: state.select_mode,
                             selected: state.selected.contains(&index),
                         },
@@ -748,6 +860,9 @@ fn tile_grid(ui: &mut egui::Ui, icons: &UiIcons, panel: &design::PanelZones, sta
 
 struct TileState {
     hovered: bool,
+    /// La souris est sur la CROIX, pas seulement sur la tuile — le harnais offscreen n'ayant pas de
+    /// pointeur, c'est la planche qui le dit. En production, `croix.hovered()` seul suffit.
+    remove_hovered: bool,
     select_mode: bool,
     selected: bool,
 }
@@ -757,15 +872,16 @@ struct TileState {
 /// | Élément | Ce qu'il dit |
 /// | --- | --- |
 /// | Cadre | ce qu'est l'entrée : bordure de **rareté** pour un objet, cadre neutre pour un monstre |
-/// | Compteur bas-droit | `128` en incrémental, `7` sur `/50` en décompte ([`design::SlotCount`]) |
-/// | Croix haut-droite | retrait — **seulement sur la tuile survolée**, et jamais en mode sélection |
+/// | Bas-droit | la **cible** d'un décompte (`/50`) — et rien du tout pour un incrémental |
+/// | Croix haut-droite | retrait — **seulement sur la tuile survolée**, rouge sous le pointeur |
 /// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
 /// | Liseré or | la tuile est cochée |
 ///
-/// Le nom **n'est pas peint** : il vit dans l'infobulle (demande explicite, voir la règle 1 de la
-/// doc de module). Une tuile de 64 px ne peut pas porter « Griffe de Craqueleur » sans l'amputer, et
-/// l'icône lève l'ambiguïté bien avant le texte — c'est l'arbitrage déjà rendu pour les tuiles
-/// d'alerte, poussé ici jusqu'au bout.
+/// **Ni le nom ni la valeur courante ne sont peints.** Le nom vit dans l'infobulle : une tuile de
+/// 64 px ne porte pas « Griffe de Craqueleur » sans l'amputer, et l'icône lève l'ambiguïté bien
+/// avant le texte. La valeur courante, elle, n'a rien à faire sur un écran qui sert à **composer**
+/// une liste : la lire est le travail du bandeau in-game, qui l'affiche déjà. Reste la cible, qui
+/// n'est pas une mesure mais un **réglage** de l'entrée — au même titre que son mode.
 fn tracked_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &Tracked, tile: TileState) {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), egui::Sense::click());
 
@@ -773,13 +889,6 @@ fn tracked_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &Tracked, tile: TileS
         Kind::Item(rarity) => SlotFrame::Rarity(to_slot_rarity(rarity)),
         // Un monstre n'a pas de rareté — cadre neutre, comme dans le bandeau in-game.
         Kind::Monster => SlotFrame::Plain,
-    };
-    let count = match entry.target {
-        Some(target) => design::SlotCount::Fraction {
-            current: entry.count,
-            target,
-        },
-        None => design::SlotCount::Simple(entry.count),
     };
 
     // `ui.put` dans un ENFANT, jamais sur le `ui` de la rangée : `Ui::put` ouvre un scope, et un
@@ -792,9 +901,26 @@ fn tracked_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &Tracked, tile: TileS
             .size(TILE)
             .frame(frame)
             .icon(icons.unknown_entity_texture().id())
-            .count(count)
             .log_name(entry.name.to_string()),
     );
+
+    // **La cible, peinte ici et pas par le composant** — voir le chantier 6 : `SlotCount` ne sait
+    // peindre qu'un compteur qui porte sa valeur courante. Les jetons sont ceux du composant, donc
+    // le rendu est celui qu'aura `SlotCount::Target` une fois écrit.
+    if let Some(target) = entry.target {
+        design::text::paint_outlined_text(
+            ui,
+            egui::pos2(
+                rect.right() - design::tokens::ITEM_SLOT_COUNT_INSET_RIGHT,
+                rect.bottom() - design::tokens::ITEM_SLOT_COUNT_INSET_BOTTOM,
+            ),
+            egui::Align2::RIGHT_BOTTOM,
+            &format!("/{target}"),
+            egui::FontId::monospace(design::tokens::ITEM_SLOT_TARGET_FONT_SIZE),
+            design::tokens::ITEM_SLOT_TARGET_TEXT,
+            design::text::OUTLINE_FULL,
+        );
+    }
 
     let ds = design::DesignSystem::get(ui.ctx());
 
@@ -822,14 +948,38 @@ fn tracked_tile(ui: &mut egui::Ui, icons: &UiIcons, entry: &Tracked, tile: TileS
     } else if tile.hovered {
         // Le voile dit le survol ET porte la croix — voir [`TILE_HOVER_SCRIM`].
         ui.painter().rect_filled(rect, 4, TILE_HOVER_SCRIM);
-        let croix = Rect::from_center_size(
+        let zone = Rect::from_center_size(
             egui::pos2(
                 rect.right() - BADGE_INSET - BADGE / 2.0,
                 rect.top() + BADGE_INSET + BADGE / 2.0,
             ),
-            design::components::icon_button::glyph_fit(ds.icon_native_size(DsIcon::Close), BADGE),
+            Vec2::splat(BADGE + 4.0),
         );
-        ds.paint_icon(ui.painter(), croix, DsIcon::Close, TEXT);
+        // **Sa propre zone cliquable, avec sa propre main.** La croix n'est pas un décor peint sur
+        // la tuile : elle a un geste à elle, donc un curseur à elle. Elle mange aussi le clic, pour
+        // qu'un retrait n'emporte pas au passage le geste de la tuile.
+        let croix = ui
+            .interact(zone, response.id.with("retirer"), egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        ds.paint_icon(
+            ui.painter(),
+            Rect::from_center_size(
+                zone.center(),
+                design::components::icon_button::glyph_fit(
+                    ds.icon_native_size(DsIcon::Close),
+                    BADGE,
+                ),
+            ),
+            DsIcon::Close,
+            // Rouge sous le pointeur — depuis que le retrait ne demande plus confirmation, c'est
+            // la croix qui doit dire ce qu'elle fait AVANT le clic.
+            if croix.hovered() || tile.remove_hovered {
+                REMOVE_HOVER
+            } else {
+                TEXT
+            },
+        );
+        croix.on_hover_text("Retirer du suivi");
     }
 
     // Le nom vit ici, et nulle part ailleurs sur la tuile.
@@ -872,7 +1022,13 @@ fn loading_row(ui: &mut egui::Ui, inner: Rect) {
 /// Le contenu reprend la modale du web (`recipe-quantity-modal.component.html`) : l'objet source en
 /// tête, la quantité voulue, puis un ingrédient par ligne avec sa quantité **multipliée par cette
 /// quantité**, et un bouton d'imbrication sur les lignes qui ont elles-mêmes une recette.
-fn recipe_dialog(ui: &mut egui::Ui, icons: &UiIcons, window: Rect, quantity: &mut i64) {
+fn recipe_dialog(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    window: Rect,
+    quantity: &mut i64,
+    loading: bool,
+) {
     let mut couche = ui.new_child(egui::UiBuilder::new().max_rect(window).layer_id(
         egui::LayerId::new(egui::Order::Foreground, egui::Id::new("suivi-recette")),
     ));
@@ -939,17 +1095,42 @@ fn recipe_dialog(ui: &mut egui::Ui, icons: &UiIcons, window: Rect, quantity: &mu
         ui.add_space(14.0);
         ui.add(design::heading("Ingrédients").trailing_gap(8.0));
 
+        // **Un rouage pendant la résolution.** Les ingrédients demandent un aller-retour réseau par
+        // niveau de recette (`GET /items/{id}`, voir le chantier 4) : la fenêtre s'ouvre AVANT la
+        // réponse, comme le web, et dit qu'elle attend plutôt que de montrer une liste vide qu'on
+        // prendrait pour une recette sans ingrédient.
+        if loading {
+            let reste = Rect::from_min_max(
+                egui::pos2(panel.inner.left(), ui.cursor().top()),
+                panel.inner.right_bottom(),
+            );
+            let mut zone = ui.new_child(egui::UiBuilder::new().max_rect(reste));
+            zone.put(
+                Rect::from_center_size(
+                    reste.center(),
+                    Vec2::splat(design::LoaderSize::Medium.px()),
+                ),
+                design::loader()
+                    .size(design::LoaderSize::Medium)
+                    .preview_frame(3),
+            );
+            return;
+        }
+
         panel.scroll_area(ui, "suivi.recette.liste", |ui, content_width| {
             for (nom, rarete, quantite, imbricable) in INGREDIENTS {
                 ingredient_row(
                     ui,
                     icons,
                     content_width,
-                    nom,
-                    *rarete,
-                    *quantite * *quantity,
-                    *imbricable,
-                    0.0,
+                    &IngredientRow {
+                        name: nom,
+                        rarity: *rarete,
+                        quantity: *quantite * *quantity,
+                        nestable: *imbricable,
+                        nested: *imbricable,
+                        indent: 0.0,
+                    },
                 );
                 if *imbricable {
                     // Ligne dépliée : les sous-ingrédients portent la quantité du parent en
@@ -959,11 +1140,14 @@ fn recipe_dialog(ui: &mut egui::Ui, icons: &UiIcons, window: Rect, quantity: &mu
                             ui,
                             icons,
                             content_width,
-                            sous_nom,
-                            *sous_rarete,
-                            *sous_quantite * *quantite * *quantity,
-                            false,
-                            22.0,
+                            &IngredientRow {
+                                name: sous_nom,
+                                rarity: *sous_rarete,
+                                quantity: *sous_quantite * *quantite * *quantity,
+                                nestable: false,
+                                nested: false,
+                                indent: 22.0,
+                            },
                         );
                     }
                 }
@@ -973,58 +1157,96 @@ fn recipe_dialog(ui: &mut egui::Ui, icons: &UiIcons, window: Rect, quantity: &mu
 }
 
 /// Une ligne d'ingrédient : emplacement, nom, quantité, et le bouton qui déplie sa propre recette.
-#[allow(clippy::too_many_arguments)]
-fn ingredient_row(
-    ui: &mut egui::Ui,
-    icons: &UiIcons,
-    width: f32,
-    name: &str,
-    rarity: WakfuRarity,
-    quantity: i64,
-    nestable: bool,
-    indent: f32,
-) {
+///
+/// **Les quantités sont alignées, présence de bouton ou non** (demande du 2026-09-13). Deux
+/// colonnes de largeur FIXE sont réservées à droite — [`RECIPE_NEST_COL`] pour le bouton,
+/// [`RECIPE_QTY_COL`] pour la quantité — et la ligne sans bouton laisse simplement la sienne vide.
+/// Une disposition de droite à gauche, où chaque élément pousse le suivant, donnait des quantités
+/// décalées d'une ligne à l'autre : l'œil compare des nombres en colonne, pas des nombres qui
+/// flottent.
+fn ingredient_row(ui: &mut egui::Ui, icons: &UiIcons, width: f32, row: &IngredientRow<'_>) {
     let ligne = ui.allocate_space(Vec2::new(width, 38.0)).1;
-    let ligne = Rect::from_min_max(egui::pos2(ligne.left() + indent, ligne.top()), ligne.max);
+    let ligne = Rect::from_min_max(
+        egui::pos2(ligne.left() + row.indent, ligne.top()),
+        ligne.max,
+    );
     ui.painter()
         .rect_filled(ligne, SETTING_ROW_RADIUS, SETTING_ROW_FILL);
-    let mut cell =
-        ui.new_child(egui::UiBuilder::new().max_rect(ligne.shrink2(Vec2::new(8.0, 0.0))));
-    cell.horizontal_centered(|ui| {
+    let corps = ligne.shrink2(Vec2::new(8.0, 0.0));
+
+    // Colonne du bouton, tout à droite, puis colonne de la quantité juste avant. Les deux sont
+    // posées depuis le bord droit, donc identiques d'une ligne à l'autre.
+    let colonne_bouton = Rect::from_min_max(
+        egui::pos2(corps.right() - RECIPE_NEST_COL, corps.top()),
+        corps.max,
+    );
+    let colonne_qte = Rect::from_min_max(
+        egui::pos2(colonne_bouton.left() - RECIPE_QTY_COL, corps.top()),
+        egui::pos2(colonne_bouton.left(), corps.bottom()),
+    );
+
+    let mut gauche = ui.new_child(
+        egui::UiBuilder::new().max_rect(Rect::from_min_max(corps.min, colonne_qte.left_bottom())),
+    );
+    gauche.horizontal_centered(|ui| {
         ui.add(
             design::item_slot()
                 .size(28.0)
-                .frame(SlotFrame::Rarity(to_slot_rarity(rarity)))
+                .frame(SlotFrame::Rarity(to_slot_rarity(row.rarity)))
                 .icon(icons.unknown_entity_texture().id())
-                .log_name(format!("suivi.recette.{name}")),
+                .log_name(format!("suivi.recette.{}", row.name)),
         );
         ui.add_space(8.0);
-        ui.label(RichText::new(name).color(TEXT).size(13.0));
-        let mut droite = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(ligne.shrink2(Vec2::new(8.0, 0.0)))
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        if nestable {
-            droite.add(
-                design::icon_button(DsIcon::Hammer)
-                    .context(IconContext::Panel)
-                    .size(24.0)
-                    .preview_state(design::IconButtonState::Hovered)
-                    .tooltip("Suivre les ingrédients de cet objet plutôt que l'objet lui-même")
-                    .log_name(format!("suivi.recette.imbriquer-{name}")),
-            );
-            droite.add_space(8.0);
-        } else {
-            droite.add_space(32.0);
-        }
-        droite.label(
-            RichText::new(format!("×{quantity}"))
-                .color(SUBDUED)
-                .size(13.0),
+        ui.add(
+            design::label(row.name)
+                .width(ui.available_width())
+                // `design::label` centre par défaut — ce qui convient au nom sous une tuile, pas à
+                // une ligne de liste, où le fer à gauche est ce qui rend la colonne lisible.
+                .align(egui::Align::LEFT)
+                .color(TEXT)
+                .log_name("suivi.recette.nom"),
         );
     });
+
+    ui.painter().text(
+        egui::pos2(colonne_qte.right() - 6.0, colonne_qte.center().y),
+        egui::Align2::RIGHT_CENTER,
+        format!("×{}", row.quantity),
+        design::text::label_font(ui.ctx(), 13.0),
+        SUBDUED,
+    );
+
+    if row.nestable {
+        let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(colonne_bouton));
+        cell.put(
+            Rect::from_center_size(colonne_bouton.center(), Vec2::splat(24.0)),
+            design::icon_button(DsIcon::Hammer)
+                .context(IconContext::Panel)
+                .size(24.0)
+                .preview_state(if row.nested {
+                    design::IconButtonState::Hovered
+                } else {
+                    design::IconButtonState::Idle
+                })
+                .tooltip("Suivre les ingrédients de cet objet plutôt que l'objet lui-même")
+                .log_name(format!("suivi.recette.imbriquer-{}", row.name)),
+        );
+    }
     ui.add_space(4.0);
+}
+
+/// Ce qu'une ligne d'ingrédient a besoin de savoir — un `struct` plutôt que huit paramètres
+/// positionnels, dont l'`#[allow(clippy::too_many_arguments)]` de la version précédente était le
+/// symptôme.
+struct IngredientRow<'a> {
+    name: &'a str,
+    rarity: WakfuRarity,
+    /// Déjà multipliée par la quantité voulue et, en imbrication, par celle du parent.
+    quantity: i64,
+    nestable: bool,
+    /// Sa recette est dépliée — le bouton reste alors allumé.
+    nested: bool,
+    indent: f32,
 }
 
 // -------------------------------------------------------------------------------------------
@@ -1179,26 +1401,32 @@ fn options_harness(
 #[derive(Clone)]
 struct Planche {
     mode: AddMode,
+    alt: bool,
     target: i64,
     search: String,
     hovered: Option<usize>,
+    remove_hovered: bool,
     select_mode: bool,
     selected: Vec<usize>,
     availability: Availability,
     suggestions: bool,
+    recipe_tooltip: Option<usize>,
 }
 
 impl Default for Planche {
     fn default() -> Self {
         Self {
             mode: AddMode::Up,
+            alt: false,
             target: 100,
             search: String::new(),
             hovered: None,
+            remove_hovered: false,
             select_mode: false,
             selected: Vec::new(),
             availability: Availability::Ready,
             suggestions: false,
+            recipe_tooltip: None,
         }
     }
 }
@@ -1218,13 +1446,16 @@ fn planche(nom: &str, p: Planche) {
             panel,
             &mut SuiviTab {
                 mode: p.mode,
+                alt: p.alt,
                 target: &mut target,
                 search: &mut search,
                 hovered: p.hovered,
+                remove_hovered: p.remove_hovered,
                 select_mode: p.select_mode,
                 selected: &p.selected,
                 availability: p.availability,
                 suggestions: preview.as_ref(),
+                recipe_tooltip: p.recipe_tooltip,
             },
         );
     });
@@ -1239,10 +1470,11 @@ fn planche(nom: &str, p: Planche) {
 
 fn main() {
     // 1 — L'onglet au repos, mode incrémental : le formulaire tient sur une ligne, la grille est
-    // la vedette.
+    // la vedette, et aucune tuile ne porte de compteur.
     planche("suivi_incremental", Planche::default());
 
-    // 2 — Mode décompte : la ligne « Quantité » apparaît, avec ses badges et son pas numérique.
+    // 2 — Mode décompte : la ligne « Quantité » apparaît, et les tuiles de décompte montrent leur
+    // cible — celle-là seule, jamais la valeur courante.
     planche(
         "suivi_decompte",
         Planche {
@@ -1252,8 +1484,20 @@ fn main() {
         },
     );
 
-    // 3 — Le champ déplié : objets ET monstres dans la même liste, la bande de filtres porte
-    // « Monstres », et les entrées déjà suivies sont grisées.
+    // 3 — `Alt` maintenu : les cinq badges passent en or et retirent au lieu d'ajouter. La mention
+    // « Alt : retirer » s'allume avec eux.
+    planche(
+        "suivi_decompte_alt",
+        Planche {
+            mode: AddMode::Down,
+            alt: true,
+            target: 250,
+            ..Planche::default()
+        },
+    );
+
+    // 4 — Le champ déplié : objets ET monstres dans la même liste, la bande de filtres porte
+    // « Monstres », et l'infobulle du marteau dit ce qu'il fait.
     planche(
         "suivi_autocompletion",
         Planche {
@@ -1261,20 +1505,22 @@ fn main() {
             target: 250,
             search: "tofu".to_string(),
             suggestions: true,
+            recipe_tooltip: Some(3),
             ..Planche::default()
         },
     );
 
-    // 4 — Le survol d'une tuile : son voile et sa croix de retrait, et rien sur les autres.
+    // 5 — Le survol d'une tuile, souris sur la croix : elle vire au rouge.
     planche(
         "suivi_survol_retrait",
         Planche {
             hovered: Some(6),
+            remove_hovered: true,
             ..Planche::default()
         },
     );
 
-    // 5 — La sélection multiple, sélection partielle : cases à cocher partout, liseré or sur les
+    // 6 — La sélection multiple, sélection partielle : cases à cocher partout, liseré or sur les
     // cochées, bouton « Supprimer (3) ».
     planche(
         "suivi_selection_partielle",
@@ -1285,7 +1531,7 @@ fn main() {
         },
     );
 
-    // 6 — La sélection multiple, rien de coché : le bouton dit « Supprimer tout » — aucune
+    // 7 — La sélection multiple, rien de coché : le bouton dit « Supprimer tout » — aucune
     // exclusion cochée, voir `bulk_label`.
     planche(
         "suivi_selection_vide",
@@ -1295,13 +1541,11 @@ fn main() {
         },
     );
 
-    // 7 — La confirmation de retrait d'une tuile.
-    suivi_confirmation_retrait();
+    // 8 & 9 — La fenêtre « Objets de la recette », pendant puis après la résolution réseau.
+    suivi_recette("suivi_recette_chargement", true);
+    suivi_recette("suivi_recette", false);
 
-    // 8 — La fenêtre « Objets de la recette », ouverte depuis une suggestion.
-    suivi_recette();
-
-    // 9 & 10 — Les deux états où la liste n'est pas éditable.
+    // 10 & 11 — Les deux états où la liste n'est pas éditable.
     planche(
         "suivi_chargement",
         Planche {
@@ -1323,40 +1567,9 @@ fn main() {
     println!("{ecrites} planches écrites dans {}", affiche.display());
 }
 
-/// **Le retrait d'une tuile passe par la boîte du jeu**, pas par une popover ancrée au bouton comme
-/// le web — même arbitrage que l'onglet Alertes, et pour la même raison : le jeu n'a qu'une forme
-/// de confirmation, centrée et voilée, et son bouton affirmatif est **or, jamais rouge**.
-fn suivi_confirmation_retrait() {
-    let mut harness = options_harness(move |ui, icons, panel, window| {
-        let mut target = 100;
-        let mut search = String::new();
-        suivi_tab(
-            ui,
-            icons,
-            panel,
-            &mut SuiviTab {
-                mode: AddMode::Up,
-                target: &mut target,
-                search: &mut search,
-                hovered: Some(6),
-                select_mode: false,
-                selected: &[],
-                availability: Availability::Ready,
-                suggestions: None,
-            },
-        );
-        design::confirm_dialog("Retirer « Chafer Élite » de votre suivi ?")
-            .over(window)
-            .log_name("suivi.retrait")
-            .show(ui);
-    });
-    harness.run();
-    write_mockup(&mut harness, "suivi_confirmation_retrait");
-    println!("  suivi_confirmation_retrait");
-}
-
-/// La fenêtre des ingrédients, ouverte par le bouton « recette » d'une suggestion.
-fn suivi_recette() {
+/// La fenêtre des ingrédients, ouverte par le bouton « recette » d'une suggestion — pendant la
+/// résolution réseau (`loading`) puis une fois les ingrédients descendus.
+fn suivi_recette(nom: &'static str, loading: bool) {
     let mut harness = options_harness(move |ui, icons, panel, window| {
         let mut target = 100;
         let mut search = String::from("tofu");
@@ -1366,19 +1579,22 @@ fn suivi_recette() {
             panel,
             &mut SuiviTab {
                 mode: AddMode::Up,
+                alt: false,
                 target: &mut target,
                 search: &mut search,
                 hovered: None,
+                remove_hovered: false,
                 select_mode: false,
                 selected: &[],
                 availability: Availability::Ready,
                 suggestions: None,
+                recipe_tooltip: None,
             },
         );
         let mut quantite = 2;
-        recipe_dialog(ui, icons, window, &mut quantite);
+        recipe_dialog(ui, icons, window, &mut quantite, loading);
     });
     harness.run();
-    write_mockup(&mut harness, "suivi_recette");
-    println!("  suivi_recette");
+    write_mockup(&mut harness, nom);
+    println!("  {nom}");
 }
