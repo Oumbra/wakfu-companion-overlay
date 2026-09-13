@@ -24,9 +24,12 @@
 //! 3. **Le son et le toast sont deux canaux**, réglés séparément : « Tester le son » d'un côté,
 //!    « Fermeture de l'alerte » de l'autre. Les empiler laissait entendre que la durée
 //!    s'appliquait au son.
-//! 4. **Le retrait demande confirmation**, dans la boîte centrée du jeu — pas une popover ancrée
-//!    au bouton comme le web, et son bouton de confirmation est **or, jamais rouge** : le rouge
-//!    est réservé au « Annuler » pleine largeur d'un pied de fenêtre.
+//! 4. **Le retrait ne demande AUCUNE confirmation** — décision du 2026-09-13, qui revient sur la
+//!    boîte centrée que la maquette avait posée. La raison : cette fenêtre est déjà
+//!    transactionnelle, « Annuler » rattrape tout jusqu'à la validation, et « Valider » est une
+//!    seconde garde. Confirmer un geste déjà réversible deux fois, c'est une garde de trop. La
+//!    croix devient **rouge au survol** ([`design::tokens::INFO_ALERT`], le seul rouge mesuré du
+//!    jeu) : c'est elle qui porte désormais tout l'avertissement.
 //!
 //! ## Transactionnel, comme le reste de la fenêtre
 //!
@@ -167,16 +170,6 @@ pub struct AlertsTabState {
     /// passe par un état transitoire non parsable ; l'écraser avant qu'elle soit finie interdit
     /// d'écrire la valeur voulue.
     pub duration_input: String,
-    /// L'objet dont le retrait attend une confirmation — la boîte du jeu est ouverte tant que ce
-    /// champ est renseigné.
-    pub pending_removal: Option<PendingRemoval>,
-}
-
-/// L'objet visé par une confirmation de retrait en cours.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PendingRemoval {
-    pub name: String,
-    pub catalog_id: Option<i64>,
 }
 
 /// Ce que l'onglet a besoin de recevoir pour peindre de vraies données.
@@ -274,25 +267,7 @@ pub fn show(
         AlertsAvailability::Ready => {}
     }
 
-    tile_grid(ui, panel, state, ctx);
-
-    // La confirmation est peinte EN DERNIER et sur la fenêtre entière : son voile doit passer
-    // par-dessus tout ce qu'elle interrompt, pied de page compris.
-    if let Some(pending) = state.pending_removal.clone() {
-        let choix =
-            design::confirm_dialog(format!("Retirer « {} » de vos alertes ?", pending.name))
-                .over(ctx.window)
-                .log_name("alertes.retrait")
-                .show(ui);
-        match choix {
-            design::ConfirmChoice::Yes => {
-                ctx.profile.remove(&pending.name, pending.catalog_id);
-                state.pending_removal = None;
-            }
-            design::ConfirmChoice::No => state.pending_removal = None,
-            design::ConfirmChoice::Pending => {}
-        }
-    }
+    tile_grid(ui, panel, ctx);
 
     action
 }
@@ -515,12 +490,7 @@ fn add_field(
 }
 
 /// La grille de tuiles, dans la zone défilable du panneau.
-fn tile_grid(
-    ui: &mut egui::Ui,
-    panel: &design::PanelZones,
-    state: &mut AlertsTabState,
-    ctx: &mut AlertsTabContext<'_>,
-) {
+fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabContext<'_>) {
     // Le rendu lit le profil et les gestes le modifient : les collecter d'abord évite d'emprunter
     // `ctx.profile` en lecture et en écriture dans la même boucle.
     let items: Vec<TileData> = ctx
@@ -538,7 +508,7 @@ fn tile_grid(
         .collect();
 
     let mut toggled: Option<(String, Option<i64>)> = None;
-    let mut removal: Option<PendingRemoval> = None;
+    let mut removal: Option<(String, Option<i64>)> = None;
 
     panel.scroll_area(ui, "alertes.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -549,12 +519,7 @@ fn tile_grid(
                 for item in chunk {
                     match alert_item(ui, ctx, item) {
                         TileClick::Toggle => toggled = Some((item.name.clone(), item.catalog_id)),
-                        TileClick::Remove => {
-                            removal = Some(PendingRemoval {
-                                name: item.name.clone(),
-                                catalog_id: item.catalog_id,
-                            })
-                        }
+                        TileClick::Remove => removal = Some((item.name.clone(), item.catalog_id)),
                         TileClick::None => {}
                     }
                 }
@@ -565,10 +530,11 @@ fn tile_grid(
     if let Some((name, catalog_id)) = toggled {
         ctx.profile.toggle(&name, catalog_id);
     }
-    // **Le retrait passe TOUJOURS par la confirmation**, jamais directement : c'est l'action
-    // destructrice de cet écran, et la fenêtre se ferme derrière « Valider ».
-    if removal.is_some() {
-        state.pending_removal = removal;
+    // **Le retrait est immédiat — sur le BROUILLON, pas sur le compte.** Rien ne part au réseau
+    // avant « Valider », et « Annuler » rend la liste telle qu'elle était : le geste est déjà
+    // réversible deux fois, une boîte de confirmation par-dessus n'ajoutait qu'un clic.
+    if let Some((name, catalog_id)) = removal {
+        ctx.profile.remove(&name, catalog_id);
     }
 }
 
@@ -596,7 +562,7 @@ enum TileClick {
 /// | --- | --- |
 /// | Bordure 2 px arrondie | l'état du SON : [`ACCENT`] actif, [`MUTED_BORDER`] coupé |
 /// | Pictogramme haut-gauche | le même état — `Volume` / `VolumeMute` |
-/// | Croix haut-droite | retrait — **seulement si l'objet n'est pas un défaut** |
+/// | Croix haut-droite | retrait — **seulement si l'objet n'est pas un défaut**, rouge au survol |
 /// | Emplacement à bordure de rareté | ce qu'est l'objet |
 /// | Nom sous l'emplacement | ce qu'est l'objet, en toutes lettres |
 fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData) -> TileClick {
@@ -706,7 +672,15 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
                 design::components::icon_button::glyph_fit(native, TILE_BADGE - 2.0),
             ),
             DsIcon::Close,
-            if zone.hovered() { TEXT } else { SUBDUED },
+            // **Rouge au survol** (2026-09-13) : la croix est la seule action destructrice de la
+            // tuile, et depuis que le retrait ne demande plus confirmation, c'est elle qui doit
+            // dire ce qu'elle fait avant le clic. `INFO_ALERT` est le seul rouge que le design
+            // system ait mesuré sur le jeu.
+            if zone.hovered() {
+                design::tokens::INFO_ALERT
+            } else {
+                SUBDUED
+            },
         );
         let zone = zone.on_hover_cursor(egui::CursorIcon::PointingHand);
         zone.clone().on_hover_text("Retirer de vos alertes");

@@ -1047,8 +1047,8 @@ fn modale_options_sur_damier_ne_panique_pas() {
 /// **Un `Harness` par test, jamais plusieurs** : `egui_kittest` refuse que deux jeux de résultats
 /// de snapshot soient abandonnés séparément dans le même test (« Multiple SnapshotResults were
 /// dropped without being handled »), ce qui casserait la mise à jour groupée des images.
-fn capture_onglet_alertes(nom: &str, manual_close: bool, pending: Option<&'static str>) {
-    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState, PendingRemoval};
+fn capture_onglet_alertes(nom: &str, manual_close: bool) {
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     let mut profile = overlay_engine::AlertProfile::default();
     profile.add("Combinaison Lardante", Some(4242));
@@ -1062,10 +1062,6 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool, pending: Option<&'stati
         tab: OptionsTab::Alertes,
         alerts: AlertsTabState {
             duration_input: "3,5".to_string(),
-            pending_removal: pending.map(|name| PendingRemoval {
-                name: name.to_string(),
-                catalog_id: Some(4242),
-            }),
             ..Default::default()
         },
         alerts_draft: Some(profile),
@@ -1108,26 +1104,14 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool, pending: Option<&'stati
 /// existait, mais l'entrée de menu était désactivée et la liste ne se réglait que depuis le site.
 #[test]
 fn options_onglet_alertes_liste() {
-    capture_onglet_alertes("options_alertes_liste", false, None);
+    capture_onglet_alertes("options_alertes_liste", false);
 }
 
 /// Fermeture manuelle : le champ de durée se grise. La logique existait (`.enabled`), aucun rendu
 /// ne la montrait.
 #[test]
 fn options_onglet_alertes_fermeture_manuelle() {
-    capture_onglet_alertes("options_alertes_fermeture_manuelle", true, None);
-}
-
-/// La confirmation de retrait, et surtout **son voile sur la fenêtre ENTIÈRE** : bannière, onglets
-/// et pied de page compris. Un voile rogné au panneau de section laisserait croire qu'« Annuler »
-/// et « Valider » restent cliquables — ils ne le sont pas.
-#[test]
-fn options_onglet_alertes_confirmation_retrait() {
-    capture_onglet_alertes(
-        "options_alertes_confirmation_retrait",
-        false,
-        Some("Combinaison Lardante"),
-    );
+    capture_onglet_alertes("options_alertes_fermeture_manuelle", true);
 }
 
 /// **La garde de fermeture** — Échap et « Annuler » demandent confirmation tant que des
