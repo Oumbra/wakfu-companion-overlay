@@ -744,7 +744,7 @@ DERNIER instantané compte.
 | **Alertes de drop** | toast (carte + confettis, miroir visuel de `loot-alert.component` du dépôt web) + son, sur ramassage à son activé (défaut ou ajouté au compte) ET sur décompte de suivi à 0 | Son configurable par objet (parité web) ; toast ≤ 5 s (minuterie fixe) OU fermé plus tôt par clic (carte ou croix) — les deux cohabitent, pas un réglage exclusif comme `ProfileService.alertManualClose` côté web |
 | **Récap de session** | kamas (combat / ventes HDV / échanges), XP, combats gagnés/perdus | Compact, toujours visible |
 | **État de synchro** | `idle`/`pending`/`syncing`/`error`, nombre en attente, dernière synchro | Discret ; l'erreur réseau ne doit jamais masquer le jeu |
-| **Modale Options** (2026-09-08) | Chemin de `wakfu.log` (champ texte + sélecteur de fichier natif, §5.1) — seul réglage v1 | Ouverte par le bouton "Options" du carré de contrôle Suivi ou `Ctrl+Shift+O` ; fenêtre OS dédiée, centrée sur la fenêtre de jeu, chrome du design system (bannière turquoise, pied de page Annuler/Valider) ; rien n'est pris en compte avant "Valider" |
+| **Modale Options** (2026-09-08) | Onglets « Suivi », « Alertes » (§9.1 ter), « Raccourcis » (§9.1 quinquies) et « Paramètres » (chemin de `wakfu.log`, §5.1 — plus l'affichage du panneau Combat hors combat) | Ouverte par le bouton "Options" du carré de contrôle Suivi ou son raccourci (`Ctrl+Shift+O` par défaut, personnalisable) ; fenêtre OS dédiée, centrée sur la fenêtre de jeu, chrome du design system (bannière turquoise, ligne d'onglets, pied de page Annuler/Valider) ; rien n'est pris en compte avant "Valider" |
 
 Raccourcis globaux : bascule interactif/traversable, afficher/masquer, panneau suivant.
 Chaque panneau reste ancré automatiquement sur sa fenêtre de jeu (§6.5), avec opacité réglable.
@@ -1019,6 +1019,48 @@ l'utilisateur), implémentée dans `panels::combat_bars` (voir sa doc de module)
 - **Testkit** : `combat_breche_6_ennemis` (ni ascenseur ni fondu), `combat_breche_14_ennemis`,
   `..._defile`, `..._fin` — panneau complet peint via `paint_content` sur un `FightSnapshot`
   construit à la main (même exception que `tests/combat_frame_scroll.rs`).
+
+### 9.1 quinquies Onglet « Raccourcis » de la fenêtre Options (2026-09-13)
+
+Demande utilisateur : « ajouter un onglet "Raccourcis", **avant paramètre**, pour permettre à
+l'utilisateur de personnaliser les raccourcis de l'overlay », sur le modèle de l'onglet
+« Commandes » du jeu (`assets/design-system/interfaces/interface-options-commandes.png`).
+Jusque-là, les neuf combinaisons étaient des constantes de `main.rs` — changeables seulement en
+recompilant. `overlay_ui::shortcuts` en devient la **source unique** (liste des actions,
+combinaisons par défaut, lecture/écriture de la config, enregistrement auprès de l'OS partagé par
+les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
+
+- **Ce que la référence donne, et ce qui en est repris** : champ « Rechercher » en tête, groupes
+  (« Overlay », « Suivi », « Combat », « Compte » — `ShortcutAction::section`), lignes
+  `libellé → champ`, bouton de réinitialisation. Deux écarts assumés : le nom de groupe est porté
+  par l'**en-tête du tableau** (`design::table`) et non par un `design::heading`, qui peint son
+  libellé 7 px à gauche de son rectangle et se faisait rogner par l'écrêtage de la liste défilante ;
+  et la réinitialisation est un **bouton texte** au bout de la ligne de recherche, la bannière
+  portant déjà sa croix de fermeture.
+- **Défauts inchangés** : `Ctrl+Shift+W`/`R`/`Q`/`O`/`D`/`A`/`S`/`E` et `Ctrl+Alt+D`, exactement les
+  anciennes constantes — une mise à jour ne change rien sous les doigts de qui n'a rien
+  personnalisé. Leur POURQUOI (pas de touche de fonction nue, pas d'Échap, etc.) est conservé dans
+  la doc de chaque variante de `ShortcutAction`.
+- **Au moins un modificateur** (`Shortcut::is_valid`) : ces raccourcis sont GLOBAUX
+  (`RegisterHotKey`/XGrabKey), une touche nue serait volée à Wakfu lui-même.
+- **Doublon refusé avant validation** (`ShortcutBindings::conflict`) : l'OS rejetterait le second
+  enregistrement (même `HotKey::id`). Signalé dès la frappe, et re-vérifié par
+  `OptionsModalState::validate` quel que soit le geste qui valide.
+- **Raccourcis suspendus tant que la fenêtre est ouverte** (`ShortcutRegistry::suspend`, rendus au
+  `close_options_modal`) : sans cela, l'OS avalerait la frappe que l'utilisateur essaie justement
+  d'assigner — à commencer par la combinaison qui vient d'ouvrir la fenêtre.
+- **Échec d'enregistrement non fatal** : une combinaison déjà prise par une autre application est
+  journalisée et laisse l'action sans raccourci pour la session — plus de `expect` qui ferait
+  tomber l'overlay, risque devenu réel dès lors que l'utilisateur choisit lui-même les touches.
+- **Transactionnel**, comme le reste de la fenêtre : brouillon de `ShortcutBindings`, protégé par
+  la garde de fermeture (`is_dirty`), appliqué et persisté seulement à « Valider », avec le chemin
+  de log et le reste — la table `[shortcuts]` du même `config.toml`, tolérante (clé inconnue
+  ignorée, combinaison illisible remplacée par le défaut, table absente = tous les défauts).
+- **Libellés propagés jusqu'aux infobulles** (`RenderContent::shortcuts`) : les boutons du carré de
+  contrôle et le switch Alliés/Ennemis affichent la combinaison RÉELLE, plus une chaîne recopiée.
+- **Portée Linux** : `bin/overlay-ui-x11.rs` n'enregistre que `ShortcutAction::LINUX_SUPPORTED`
+  (bascule, quitter, Options, sélection multiple) faute de câblage pour les autres — les neuf
+  restent éditables et persistées, un même `config.toml` servant aux deux OS.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
