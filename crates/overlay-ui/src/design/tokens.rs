@@ -1349,8 +1349,12 @@ pub const ITEM_SLOT_MIN_SIZE: f32 = 4.0 * ITEM_SLOT_PLAIN_STROKE;
 
 /// Fond d'un emplacement — `#1e1e1e`, repris du portage web (`--surface`).
 ///
-/// Sous une bordure de rareté, il n'est visible que par les coins arrondis de la texture, dont
-/// l'alpha est dégradé ; sur un emplacement sans rareté, c'est le seul fond.
+/// **Peint dans `item_slot::border_ring`, pas sur le carré de l'emplacement** : posé sur le carré
+/// entier, il dépassait des quatre coins des textures de rareté — qui posent leur liseré en retrait
+/// de 2 px, arrondi à 3 — et dessinait un carré sombre derrière une bordure arrondie (retour
+/// utilisateur du 2026-09-13). Sous une rareté, il n'est donc plus visible du tout, la texture le
+/// couvrant entièrement ; sur un emplacement sans rareté, c'est toujours le seul fond, et il monte
+/// jusque sous le trait gris.
 pub const ITEM_SLOT_BACKGROUND: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
 
 /// Trait d'un emplacement sans rareté — `#4d4d4d` (`--border-strong` du web).
