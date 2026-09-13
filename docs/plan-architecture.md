@@ -399,6 +399,30 @@ En mode interactif, l'overlay ne prend jamais le focus clavier tant qu'un champ 
 explicitement cliqué (`WS_EX_NOACTIVATE` côté Windows, `_NET_WM_STATE_ABOVE` + pas de
 `input_focus` côté X11) — sinon le jeu perd ses raccourcis.
 
+### 6.3 bis Curseur du jeu à la place du curseur système (2026-09-13)
+
+Quand le pointeur survole un overlay interactif, c'est le **curseur de Wakfu** qui s'affiche, pas
+la flèche de l'OS — même logique que les boutons et infobulles du design system : l'overlay doit
+passer pour une partie du jeu. Les deux bitmaps (`assets/cursor/`, isolés pixel par pixel depuis un
+enregistrement d'écran, voir leur `README.md`) sont embarqués par `overlay-ui::cursor` ; le point
+chaud est déduit de l'image (première ligne opaque), les fichiers peuvent donc être re-détourés
+sans toucher au code.
+
+Comportement calqué sur le jeu, mesuré à 30 i/s : flèche d'egui (`CursorIcon::Default`) → bitmap
+de repos, fixe ; main (`PointingHand`, tout ce qui se clique) → clignotement éclair 533 ms / repos
+533 ms, l'éclair en premier dès l'entrée en survol, bascule franche sans fondu ; tout autre curseur
+(`Text`, `ResizeHorizontal`…) → curseur système inchangé.
+
+Mécanique : egui 0.36 porte nativement un curseur bitmap (`Context::set_cursor_image` →
+`PlatformOutput::cursor_image`), qu'`egui-winit` applique en `winit::window::CustomCursor` à
+condition de recevoir l'event loop (`handle_platform_output_with_event_loop`, d'où le paramètre
+ajouté à `frame::render`). Le choix de l'image est fait à la fin de `render_content::paint_content`,
+donc dans le code partagé par les deux binaires **et** par le harnais `overlay-testkit`, qui le
+vérifie en lisant `FullOutput::platform_output.cursor_image`. Le mode réactif de §6.1 est respecté :
+en mode main, chaque frame demande le redessin pile pour la prochaine bascule
+(`request_repaint_after`) ; ailleurs, rien n'est redemandé. Limite connue : `CustomCursor` est en
+pixels physiques, le curseur n'est pas agrandi avec l'échelle d'affichage du système.
+
 ### 6.4 Linux
 
 - **X11 : plateforme supportée.** `_NET_WM_STATE_ABOVE`, `_NET_WM_WINDOW_TYPE_UTILITY`, transparence

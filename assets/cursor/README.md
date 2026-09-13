@@ -1,5 +1,10 @@
 # Curseur Wakfu
 
+Embarqués par `crates/overlay-ui/src/cursor.rs` (curseur affiché à la place du curseur système sur
+les overlays interactifs, clignotement en mode « main » — voir §6.3 bis du plan). Le point chaud
+est déduit de l'image à l'exécution : ces fichiers peuvent être remplacés par un détourage plus
+précis sans modifier le code, tant que la pointe reste en haut à gauche.
+
 Curseur de souris du jeu, isolé pixel par pixel depuis un enregistrement d'écran natif
 (13/09/2026, 30 i/s), par soustraction du fond puis moyenne par phase sur 85 images où le
 curseur est immobile. Aucune interpolation : ce sont les pixels affichés par le jeu.
