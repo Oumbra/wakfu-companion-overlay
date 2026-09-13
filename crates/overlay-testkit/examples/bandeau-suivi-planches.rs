@@ -21,29 +21,27 @@
 //! 1. **Le « + » n'ajoute pas sur place : il ouvre la fenêtre Options sur l'onglet « Suivi ».**
 //!    C'est déjà ce que fait le bouton « Options » du même carré, à un onglet près — et il n'y a
 //!    aucune place pour un champ d'autocomplétion et son panneau de suggestions dans un bandeau de
-//!    132 px de haut posé par-dessus le jeu. L'infobulle doit donc le dire : « Ajouter un suivi
-//!    (ouvre les Options) », plutôt que le simple « Ajouter » d'aujourd'hui, qui laisse attendre
-//!    une saisie immédiate.
+//!    132 px de haut posé par-dessus le jeu. **Les quatre libellés d'infobulle ne bougent pas** :
+//!    une première version de cette maquette les rallongeait pour annoncer la destination
+//!    (« Ajouter un suivi dans les Options »), l'utilisateur les a explicitement gardés tels quels
+//!    le 2026-09-13. Les planches 2 et 3 les montrent donc rendus par le panneau lui-même, survol
+//!    simulé — aucun texte n'est peint par cette maquette. Elles montrent au passage, sans rien en
+//!    demander, que « Ajouter (Ctrl+Shift+A) » ne tient pas dans les 88 px de
+//!    `CONTROL_TOOLTIP_RESERVE` et se replie à droite dès que la fenêtre est assez large pour l'y
+//!    accueillir — c'est-à-dire dès qu'il y a plus de deux suivis. Comportement d'aujourd'hui,
+//!    antérieur à cette maquette et hors de son périmètre.
 //! 2. **Le « − » ouvre un MODE, il ne supprime rien.** Même geste que l'onglet Suivi : chaque tuile
 //!    gagne une case à cocher, et un bouton de suppression groupée apparaît. Recliquer le « − »
 //!    quitte le mode — le bouton reste donc enfoncé tant qu'il est ouvert, comme un onglet actif.
-//! 3. **Le bouton de suppression est SOUS la bande, centré.** Demande explicite. Il ne peut pas
-//!    vivre dans le carré de contrôle (24 px de côté, déjà plein à quatre boutons) ni à côté des
-//!    tuiles (la bande défile horizontalement, il sortirait du champ). Sous la bande, il est à
-//!    portée immédiate et ne pousse rien.
+//! 3. **Le bouton de suppression est SOUS la bande, centré sur les TUILES.** Demande explicite, et
+//!    « centré » veut bien dire centré sur la rangée de suivis, pas sur la fenêtre : celle-ci porte
+//!    aussi le carré de contrôle et ses deux réserves d'infobulle, qui la déséquilibrent vers la
+//!    gauche — un bouton centré sur elle tombait visiblement à côté de la rangée qu'il commande.
+//!    Le bouton ne peut pas vivre dans le carré de contrôle (24 px de côté, déjà plein à quatre
+//!    boutons) ni à côté des tuiles (la bande défile horizontalement, il sortirait du champ). Sous
+//!    la bande, il est à portée immédiate et ne pousse rien.
 //! 4. **En style danger, comme sur le web et comme dans l'onglet.** Décision déjà rendue le
 //!    2026-09-13 pour l'onglet Suivi, reprise telle quelle.
-//!
-//! ## Un constat de la maquette : la réserve d'infobulle est trop courte
-//!
-//! Le bandeau garde 88 px à gauche du carré de contrôle pour que les infobulles de sa colonne
-//! gauche s'ouvrent de ce côté plutôt que par-dessus les tuiles (`CONTROL_TOOLTIP_RESERVE`, posée
-//! le 2026-09-06 pour ce défaut précis). **Aucun des libellés n'y tient** — ni celui proposé ici,
-//! ni celui d'aujourd'hui, « Ajouter (Ctrl+Shift+A) », qui se replie déjà sur la première tuile.
-//! Trois issues, à trancher : raccourcir le libellé à ce que 88 px acceptent (une dizaine de
-//! caractères), élargir la réserve (la fenêtre s'élargit d'autant, et la bande se décale encore du
-//! centre du jeu), ou accepter le repli à droite et retirer la réserve, qui ne sert alors plus à
-//! rien. Ces planches montrent le repli, pour que le choix se fasse sur pièce.
 //!
 //! ## Ce que ce portage demandera
 //!
@@ -58,6 +56,10 @@
 //!   cas, mais l'hôte doit le poser explicitement plutôt que d'en dépendre.
 //! - **Le retrait passe par le même chemin que la validation de l'onglet** : les définitions
 //!   restantes au moteur, qui garde ses compteurs et réplique au compte.
+//! - **Le centre du bouton se prend sur la zone des tuiles, pas sur la fenêtre.** Ici les huit
+//!   suivis tiennent d'un coup et cette zone est la rangée entière ; dès qu'elle défile, c'est la
+//!   fenêtre visible de la `ScrollArea` qu'il faut centrer — son `Rect` est connu du panneau, qui
+//!   n'a donc rien à mesurer.
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`.
 //!
@@ -87,10 +89,43 @@ const TILE_GAP: f32 = 12.0;
 const CONTROL_BUTTON_SIZE: f32 = 24.0;
 /// `panels::watchlist::CONTROL_BUTTON_GAP`.
 const CONTROL_BUTTON_GAP: f32 = 4.0;
+/// `panels::watchlist::CONTROL_TOOLTIP_RESERVE` — la place gardée à gauche du carré de contrôle
+/// pour que les infobulles de sa colonne gauche s'y ouvrent.
+const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
 /// `render_content::paint_content` pose cette marge autour du contenu du bandeau.
 const CONTENT_MARGIN: f32 = 6.0;
 /// La marge fixe qu'`egui_kittest` ajoute autour de tout harnais `new_ui`.
 const HARNESS_MARGIN: f32 = 8.0;
+
+/// Coin haut-gauche du bouton « − », dans le repère du harnais.
+///
+/// **Calculé, et vérifiable** : c'est exactement le repère que documente
+/// `panels.rs::panneau_suivi_tooltips_par_colonne_gauche_ou_droite`, qui survole ces quatre boutons
+/// à des coordonnées écrites à la main et tient depuis. Le contenu du bandeau commence à
+/// `HARNESS_MARGIN + CONTENT_MARGIN` sur les deux axes ; le carré de contrôle vient après la
+/// réserve d'infobulle gauche, et ses boutons après sa marge intérieure.
+///
+/// **Une première version déduisait ce point de [`TILE_ORIGIN`]** — « le carré finit `TILE_GAP`
+/// avant la première tuile, et il est centré sur leur rangée » — et les deux moitiés de cette phrase
+/// sont fausses : l'écart réel vaut 14 px (voir [`TILE_ORIGIN`], 2 px de plus que `TILE_GAP`), et le
+/// carré est aligné en HAUT du contenu, pas centré sur les tuiles, qui commencent 2 px plus bas. Le
+/// « − » repeint sortait donc 2 px trop à gauche et 4 px trop bas, ce qui se voyait comme un bouton
+/// qui saute en entrant dans le mode sélection — signalé par l'utilisateur sur la planche.
+const MINUS_TOP_LEFT: egui::Pos2 = egui::pos2(
+    HARNESS_MARGIN
+        + CONTENT_MARGIN
+        + CONTROL_TOOLTIP_RESERVE
+        + CONTROL_BUTTON_GAP
+        + CONTROL_BUTTON_SIZE
+        + CONTROL_BUTTON_GAP,
+    HARNESS_MARGIN + CONTENT_MARGIN + CONTROL_BUTTON_GAP,
+);
+
+/// Coin haut-gauche du bouton « + » — voir [`MINUS_TOP_LEFT`], dont il ne diffère qu'en abscisse.
+const PLUS_TOP_LEFT: egui::Pos2 = egui::pos2(
+    HARNESS_MARGIN + CONTENT_MARGIN + CONTROL_TOOLTIP_RESERVE + CONTROL_BUTTON_GAP,
+    MINUS_TOP_LEFT.y,
+);
 
 /// Liseré d'une tuile COCHÉE — l'or, la couleur d'état de ce design system, comme dans l'onglet.
 const TILE_SELECTED: Color32 = design::tokens::TEXT_GOLD;
@@ -187,11 +222,16 @@ fn bulk_label(selected: usize, total: usize) -> String {
 /// Bord gauche de la PREMIÈRE tuile, dans le repère du harnais — **mesuré sur la planche de
 /// repos**, pas calculé.
 ///
-/// La somme des jetons (`8 + 6 + 88 + 60 + 12`) donne 174 ; la mesure en donne 172. Les deux pixels
-/// d'écart viennent de ce que la `ScrollArea` et `paint_content` posent entre eux, et qu'aucun
-/// jeton public ne décrit. Une maquette qui superpose des éléments sur un rendu réel a tout intérêt
-/// à **relever** la position plutôt qu'à la reconstituer : l'écart ne se verrait qu'à l'œil, sur
-/// des cases décalées, et se prendrait pour un choix de design.
+/// La somme des jetons (`8 + 6 + 88 + 60 + 12`) donne 174 ; la mesure en donne 172, et 16 en
+/// ordonnée là où le contenu commence à 14. Ces écarts viennent de ce que la `ScrollArea` et
+/// `paint_content` posent entre eux, et qu'aucun jeton public ne décrit. Une maquette qui superpose
+/// des éléments sur un rendu réel a tout intérêt à **relever** la position plutôt qu'à la
+/// reconstituer : l'écart ne se verrait qu'à l'œil, sur des cases décalées, et se prendrait pour un
+/// choix de design.
+///
+/// **Et il ne se propage pas** : ce relevé vaut pour les tuiles seules. Le carré de contrôle, lui,
+/// se calcule depuis le bord du contenu — voir [`MINUS_TOP_LEFT`], et le bug qu'a coûté la
+/// déduction inverse.
 ///
 /// Méthode : sur `bandeau_repos.png`, la première colonne dont la luminance saute au-dessus du fond
 /// sur la ligne médiane des tuiles, et la première ligne de même sur leur colonne médiane.
@@ -209,16 +249,23 @@ struct Planche {
     select_mode: bool,
     /// Indices des tuiles cochées.
     selected: Vec<usize>,
-    /// L'infobulle PROPOSÉE à peindre, et sur lequel des deux boutons — voir [`paint_tooltip`].
-    /// Peinte par la maquette, pas rendue par le panneau : c'est justement le libellé qui change.
-    tooltip: Option<(ControlButton, &'static str)>,
 }
 
-/// Lequel des deux boutons du haut porte l'infobulle proposée.
+/// Centre d'un bouton du haut, pour y poser le pointeur — voir [`survole`].
 #[derive(Clone, Copy, PartialEq)]
 enum ControlButton {
     Plus,
     Minus,
+}
+
+impl ControlButton {
+    fn centre(self) -> egui::Pos2 {
+        let coin = match self {
+            ControlButton::Plus => PLUS_TOP_LEFT,
+            ControlButton::Minus => MINUS_TOP_LEFT,
+        };
+        coin + Vec2::splat(CONTROL_BUTTON_SIZE / 2.0)
+    }
 }
 
 fn dossier() -> std::path::PathBuf {
@@ -251,7 +298,6 @@ fn harnais(p: Planche) -> Harness<'static> {
     let total = entries.len();
     let select_mode = p.select_mode;
     let selected = p.selected.clone();
-    let tooltip = p.tooltip;
     // Chargées une fois et gardées entre les frames : un `TextureHandle` libère sa texture quand
     // son dernier exemplaire tombe, et la planche sortirait avec des cases vides.
     let mut textures: Option<(
@@ -312,18 +358,6 @@ fn harnais(p: Planche) -> Harness<'static> {
             if select_mode {
                 superpose_selection(ui, total, &selected);
             }
-            if let Some((bouton, texte)) = tooltip {
-                let carre = CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0;
-                let gauche = TILE_ORIGIN.x - TILE_GAP - carre + CONTROL_BUTTON_GAP;
-                let haut = TILE_ORIGIN.y + (TILE_SIZE - carre) / 2.0 + CONTROL_BUTTON_GAP;
-                let x = match bouton {
-                    ControlButton::Plus => gauche,
-                    ControlButton::Minus => gauche + CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP,
-                };
-                let ancre =
-                    Rect::from_min_size(egui::pos2(x, haut), Vec2::splat(CONTROL_BUTTON_SIZE));
-                paint_tooltip(ui, texte, ancre);
-            }
         })
 }
 
@@ -347,23 +381,10 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
     let tuile_haut = TILE_ORIGIN.y;
 
     // 1. Le « − » reste ENFONCÉ tant que le mode est ouvert — comme un onglet actif. Repeint
-    //    par-dessus l'original, à sa position exacte dans le carré de contrôle.
-    //
-    // Le carré de contrôle finit `TILE_GAP` avant la première tuile, et il est centré sur la même
-    // rangée qu'elles : sa géométrie se déduit donc de [`TILE_ORIGIN`], sans refaire la somme des
-    // marges de gauche.
-    let carre = CONTROL_BUTTON_GAP * 3.0 + CONTROL_BUTTON_SIZE * 2.0;
-    let carre_gauche = TILE_ORIGIN.x - TILE_GAP - carre;
-    let carre_haut = tuile_haut + (TILE_SIZE - carre) / 2.0;
-    let moins = Rect::from_min_size(
-        egui::pos2(
-            carre_gauche + CONTROL_BUTTON_GAP * 2.0 + CONTROL_BUTTON_SIZE,
-            carre_haut + CONTROL_BUTTON_GAP,
-        ),
-        Vec2::splat(CONTROL_BUTTON_SIZE),
-    );
+    //    par-dessus l'original, **à sa position exacte** : au pixel près, sans quoi il a l'air de
+    //    sauter au moment où le mode s'ouvre (voir [`MINUS_TOP_LEFT`]).
     couche.put(
-        moins,
+        Rect::from_min_size(MINUS_TOP_LEFT, Vec2::splat(CONTROL_BUTTON_SIZE)),
         design::icon_button(DsIcon::Minus)
             .context(IconContext::FirstPlan)
             .size(CONTROL_BUTTON_SIZE)
@@ -396,7 +417,13 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
         );
     }
 
-    // 3. Le bouton de suppression groupée, SOUS la bande et centré — demande explicite.
+    // 3. Le bouton de suppression groupée, SOUS la bande et centré **sur la rangée de tuiles**.
+    //
+    // Pas sur la fenêtre : celle-ci porte en plus le carré de contrôle et ses deux réserves
+    // d'infobulle, tout à gauche, si bien que son centre tombe nettement à gauche de celui des
+    // suivis. Un bouton centré sur elle se lisait comme mal posé — retour utilisateur sur la
+    // première planche.
+    let centre_tuiles = (tile_left(0) + tile_left(total.saturating_sub(1)) + TILE_SIZE) / 2.0;
     let bouton = design::button(bulk_label(selected.len(), total))
         .variant(ButtonVariant::Danger)
         .size(ButtonSize::Height(28.0))
@@ -405,50 +432,22 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
     let taille = bouton.desired_size(&couche);
     couche.put(
         Rect::from_center_size(
-            egui::pos2(fenetre.center().x, tuile_haut + TILE_SIZE + 8.0 + 14.0),
+            egui::pos2(centre_tuiles, tuile_haut + TILE_SIZE + 8.0 + 14.0),
             taille,
         ),
         bouton,
     );
 }
 
-/// Peint une infobulle du design system au-dessus d'un rectangle, avec ses jetons.
+/// Pose le pointeur au centre d'un bouton de contrôle et laisse le panneau ouvrir SON infobulle.
 ///
-/// **La maquette la peint elle-même** parce que c'est le LIBELLÉ qui est en question : celui du
-/// panneau dit « Ajouter » et « Supprimer », et ces deux mots sont précisément ce que la proposition
-/// corrige — le « + » n'ajoute pas sur place, et le « − » ne supprime rien.
-fn paint_tooltip(ui: &mut egui::Ui, texte: &str, ancre: Rect) {
-    let police = egui::FontId::proportional(14.0);
-    let galley =
-        ui.fonts_mut(|f| f.layout_no_wrap(texte.to_string(), police, design::tokens::TOOLTIP_TEXT));
-    let marge = design::tokens::TOOLTIP_MARGIN;
-    let taille = galley.size()
-        + Vec2::new(
-            (marge.left + marge.right) as f32,
-            (marge.top + marge.bottom) as f32,
-        );
-    // **À GAUCHE si elle tient, à droite sinon** — c'est le repli de `design::tooltip`
-    // (`TooltipSide::Left` puis ses alternatives), et il se déclenche ici : la réserve gauche du
-    // bandeau fait 88 px, et **aucun de ces libellés n'y tient**, pas même celui d'aujourd'hui.
-    // C'est un constat de la maquette, pas un défaut de rendu — voir la doc de module.
-    let fenetre = ui.max_rect();
-    let a_gauche = ancre.left() - design::tokens::TOOLTIP_GAP - taille.x;
-    let x = if a_gauche >= fenetre.left() {
-        a_gauche
-    } else {
-        ancre.right() + design::tokens::TOOLTIP_GAP
-    };
-    let boite = Rect::from_min_size(egui::pos2(x, ancre.center().y - taille.y / 2.0), taille);
-    ui.painter()
-        .rect_filled(boite, 4, design::tokens::TOOLTIP_BG_FILL);
-    ui.painter().galley(
-        egui::pos2(
-            boite.left() + marge.left as f32,
-            boite.top() + marge.top as f32,
-        ),
-        galley,
-        design::tokens::TOOLTIP_TEXT,
-    );
+/// Même geste que `panels.rs::panneau_suivi_tooltips_par_colonne_gauche_ou_droite`, qui couvre déjà
+/// ces quatre libellés en non-régression : la maquette ne les réécrit pas, elle les montre en place
+/// sous la disposition proposée.
+fn survole(harness: &mut Harness<'static>, bouton: ControlButton) {
+    harness.run();
+    harness.hover_at(bouton.centre());
+    harness.run();
 }
 
 fn main() {
@@ -457,27 +456,15 @@ fn main() {
     h.run();
     ecrire(&mut h, "bandeau_repos");
 
-    // 2 & 3 — Les deux libellés d'infobulle proposés. Ceux d'aujourd'hui — « Ajouter » et
-    // « Supprimer » — promettent l'un une saisie sur place, l'autre un effacement immédiat : ni
-    // l'un ni l'autre n'est ce que le bouton fera.
-    let mut h = harnais(Planche {
-        tooltip: Some((
-            ControlButton::Plus,
-            "Ajouter un suivi dans les Options (Ctrl+Shift+A)",
-        )),
-        ..Default::default()
-    });
-    h.run();
+    // 2 & 3 — Les deux infobulles, **inchangées et rendues par le panneau**. Une première version
+    // les peignait à la main pour proposer des libellés plus explicites ; l'utilisateur les garde
+    // telles quelles, et une maquette n'a alors plus rien à dire par-dessus le code.
+    let mut h = harnais(Planche::default());
+    survole(&mut h, ControlButton::Plus);
     ecrire(&mut h, "bandeau_plus_infobulle");
 
-    let mut h = harnais(Planche {
-        tooltip: Some((
-            ControlButton::Minus,
-            "Sélectionner pour retirer (Ctrl+Shift+S)",
-        )),
-        ..Default::default()
-    });
-    h.run();
+    let mut h = harnais(Planche::default());
+    survole(&mut h, ControlButton::Minus);
     ecrire(&mut h, "bandeau_moins_infobulle");
 
     // 3 — Sélection ouverte, rien de coché : le bouton dit « Supprimer tout ».
@@ -492,7 +479,6 @@ fn main() {
     let mut h = harnais(Planche {
         select_mode: true,
         selected: vec![1, 3, 6],
-        ..Default::default()
     });
     h.run();
     ecrire(&mut h, "bandeau_selection_partielle");
