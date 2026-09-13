@@ -1025,7 +1025,7 @@ l'utilisateur), implémentée dans `panels::combat_bars` (voir sa doc de module)
 Demande utilisateur : « ajouter un onglet "Raccourcis", **avant paramètre**, pour permettre à
 l'utilisateur de personnaliser les raccourcis de l'overlay », sur le modèle de l'onglet
 « Commandes » du jeu (`assets/design-system/interfaces/interface-options-commandes.png`).
-Jusque-là, les neuf combinaisons étaient des constantes de `main.rs` — changeables seulement en
+Jusque-là, les neuf combinaisons d'alors étaient des constantes de `main.rs` — changeables seulement en
 recompilant. `overlay_ui::shortcuts` en devient la **source unique** (liste des actions,
 combinaisons par défaut, lecture/écriture de la config, enregistrement auprès de l'OS partagé par
 les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
@@ -1042,7 +1042,9 @@ les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
   personnalisé. Leur POURQUOI (pas de touche de fonction nue, pas d'Échap, etc.) est conservé dans
   la doc de chaque variante de `ShortcutAction`.
 - **Au moins un modificateur** (`Shortcut::is_valid`) : ces raccourcis sont GLOBAUX
-  (`RegisterHotKey`/XGrabKey), une touche nue serait volée à Wakfu lui-même.
+  (`RegisterHotKey`/XGrabKey), une touche nue serait volée à Wakfu lui-même. **Une exception depuis
+  le 2026-09-13** : les touches de fonction nues (F1-F12), qui ne s'écrivent pas et que les
+  raccourcis multicompte demandent telles quelles — voir §9.1 sexies.
 - **Doublon refusé avant validation** (`ShortcutBindings::conflict`) : l'OS rejetterait le second
   enregistrement (même `HotKey::id`). Signalé dès la frappe, et re-vérifié par
   `OptionsModalState::validate` quel que soit le geste qui valide.
@@ -1059,8 +1061,9 @@ les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
 - **Libellés propagés jusqu'aux infobulles** (`RenderContent::shortcuts`) : les boutons du carré de
   contrôle et le switch Alliés/Ennemis affichent la combinaison RÉELLE, plus une chaîne recopiée.
 - **Portée Linux** : `bin/overlay-ui-x11.rs` n'enregistre que `ShortcutAction::LINUX_SUPPORTED`
-  (bascule, quitter, Options, sélection multiple) faute de câblage pour les autres — les neuf
-  restent éditables et persistées, un même `config.toml` servant aux deux OS.
+  (bascule, quitter, Options, sélection multiple, **plus les deux actions multicompte** depuis le
+  2026-09-13 — §9.1 sexies) faute de câblage pour les autres — celles-ci restent éditables et
+  persistées, un même `config.toml` servant aux deux OS.
 
 **Section « Compte » de l'onglet « Paramètres »** (même jour) : titre, bloc d'information disant que
 l'overlay ne fonctionne qu'avec un compte connecté et que se déconnecter ramène à l'écran de
@@ -1075,6 +1078,60 @@ connexion, puis un bouton « Déconnecter ». Trois décisions :
   qui porte l'avertissement, pas la couleur.
 - **Désactivé sans compte lié** (`OptionsModalState::account_connected`, posé par l'hôte qui seul
   connaît `AuthStatus`) — toujours le cas du binaire Linux, en mode invité fixe.
+
+### 9.1 sexies Raccourcis multicompte : inviter / suivre l'autre personnage (2026-09-13)
+
+Demande utilisateur : « en multicompte, on souhaite généralement suivre son second compte et
+j'aimerais rendre facile ces interactions [...] utiliser le nom du personnage de la fenêtre qui
+n'est PAS la fenêtre en focus, pour pouvoir directement appliquer les raccourcis textuels du jeu
+[...] `/i "<nom>"` pour inviter, `/fol "<nom>"` pour suivre [...] ajouter les raccourcis **F1**
+(inviter) et **F2** (suivre) ».
+
+Deux nouvelles actions (`ShortcutAction::InvitePartner`/`FollowPartner`, section « Multicompte » de
+l'onglet « Raccourcis »), un module `overlay_ui::chat_command` pour la commande elle-même, et un
+module `overlay_platform::linux::keyboard` pour la frappe synthétique côté X11.
+
+- **Le nom du personnage ne se saisit nulle part** : il est déjà dans le titre de la fenêtre de jeu
+  (`"<Nom> - WAKFU"`, §6.5), que l'overlay scrute en continu pour s'ancrer. C'est ce qui rend le
+  geste « gratuit » — aucun réglage, aucune liste de comptes à tenir à jour.
+- **La cible est la fenêtre qui n'a PAS le focus** (`chat_command::partner_character`, fonction pure
+  testée) ; la frappe, elle, part dans la fenêtre qui l'a — celle où le joueur écrit son chat.
+  L'overlay n'active ni ne déplace jamais aucune fenêtre (ses propres fenêtres portent
+  `WS_EX_NOACTIVATE`) : la frappe synthétique suit simplement le focus clavier réel.
+- **Rien n'est envoyé si le premier plan n'est pas une fenêtre de jeu**
+  (`PartnerError::NoGameFocused`) : F1 dans un navigateur ne doit pas y écrire `/i "..."`. **Le
+  revers est assumé** : la touche reste confisquée à l'application au premier plan tant que
+  l'overlay tourne (un raccourci global est un `RegisterHotKey`/XGrabKey, il n'y a pas de « laisser
+  passer »). C'est le seul coût réel de cette fonctionnalité, et il est le prix des touches nues que
+  la demande réclame.
+- **Touches de fonction nues autorisées** (`Shortcut::is_valid`, exception à la règle du
+  modificateur, §9.1 quinquies) : le geste doit être aussi immédiat que les raccourcis du jeu qu'il
+  imite — un `Ctrl+Shift+…` à trois doigts en plein combat raterait l'intention. L'exception est
+  limitée à F1-F12 : une lettre nue serait volée à Wakfu dès la première ligne de chat écrite.
+- **La séquence tapée** : `Entrée` (ouvre la saisie du chat), la ligne, `Entrée` (envoie), avec des
+  délais entre les frappes (140 ms après l'ouverture, 12 ms entre caractères). Le client Wakfu est
+  en Java et échantillonne le clavier par image : une rafale envoyée d'un bloc lui ferait perdre des
+  caractères, ou les ferait interpréter comme des raccourcis de jeu avant que le chat ait le focus.
+  Le tout sur un **thread dédié** (~300 ms) : le tenir dans la boucle d'événements figerait
+  l'overlay à chaque appui.
+- **Le nom est cité et vérifié avant de l'être** (`PartnerError::UnsafeName`) : les noms Wakfu
+  peuvent contenir une espace (« Sagittarius Caecus »), que le jeu couperait au premier mot sans les
+  guillemets ; et un titre de fenêtre est une donnée EXTERNE — un guillemet ou un retour à la ligne
+  qui s'y glisserait sortirait de la citation et ferait taper une seconde commande.
+- **Deux implémentations, une seule logique** : `SendInput` + `KEYEVENTF_UNICODE` sous Windows (la
+  frappe porte le caractère, pas une touche physique — indépendante du layout) ; **XTEST** sous X11
+  (`overlay_platform::linux::keyboard`), avec traduction caractère → keysym → keycode dans le layout
+  COURANT de l'utilisateur, niveau Maj compris, et emprunt temporaire d'un keycode libre à la
+  `xdotool` pour un caractère absent du layout — le layout est restauré même si la frappe échoue.
+  `XSendEvent` n'était pas une option : son drapeau `send_event` est ignoré par AWT, donc par le
+  client Wakfu.
+- **Trois clients ou plus** : le partenaire est la première fenêtre de jeu sans focus dans l'ordre du
+  scan — ordre de profondeur sous Windows (`EnumWindows`), ordre de création sous X11
+  (`_NET_CLIENT_LIST`). Sans ambiguïté à deux clients, le cas visé ; au-delà, un choix arbitraire
+  mais stable, jamais une commande envoyée au hasard.
+- **Limite connue** : un joueur qui aurait rebindé la touche de chat dans Wakfu (autre qu'`Entrée`)
+  verrait la séquence échouer sans trace côté jeu — à rendre configurable le jour où le cas se
+  présente.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
