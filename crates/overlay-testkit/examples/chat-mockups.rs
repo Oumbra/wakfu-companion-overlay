@@ -28,8 +28,12 @@
 //!   (`panels::watchlist::toast_card` : aplat, bordure d'accent, titre en capitales, ombre) avec le
 //!   message complet — sans confettis (ce n'est pas une célébration) et sans icône (il n'y a pas
 //!   d'objet à montrer).
-//! - **« Tester le son »**, comme dans Alertes : le son de recherche du web (`chat-filter-*.mp3`)
-//!   est un troisième son, il se teste au même endroit que le premier.
+//! - **Cliquer la carte prépare une réponse en privé** : l'overlay écrit `/w "<auteur>"` dans le
+//!   chat du jeu, le joueur n'a plus que son message à taper ([`chat_toast_survol`] montre
+//!   l'infobulle qui l'annonce).
+//! - **Le son est celui du web** (`chat-filter-*.mp3`, joué par `AlertSoundService.playChatFilter`),
+//!   repris tel quel comme l'a été le son de ramassage — pas un son nouveau. « Tester le son »,
+//!   comme dans Alertes, le fait entendre depuis l'onglet.
 //!
 //! Les composants sont **appelés**, jamais recopiés : `design::window`, `tabs`, `panel`,
 //! `heading`, `select`, `input`, `button`, `icon_button`, `info_text`. Le chrome est celui de la
@@ -45,10 +49,15 @@
 //! 2. **Un toast de chat** — `WatchlistToast` est typé objet/monstre (icône de catalogue,
 //!    confettis) ; la carte de chat en partage le gabarit mais pas le contenu. Soit une variante de
 //!    `WatchlistToastReason`, soit une carte sœur dans le même bandeau.
-//! 3. **Le son** — `alert_sound.rs` ne porte que le son de ramassage et le décompte.
-//! 4. **La persistance** — `chatFilters` est synchronisé au compte côté web (`/api/v1/settings`),
+//! 3. **Le son** — `alert_sound.rs` ne porte que le son de ramassage et le décompte ; embarquer
+//!    `public/assets/sounds/chat-filter-c13da61f.mp3` du web comme les deux autres.
+//! 4. **Écrire dans le chat du jeu** — le clic sur la carte doit donner le focus à la fenêtre
+//!    du jeu puis y saisir `/w "<auteur>"` : injection de frappe par la plateforme
+//!    (`overlay-platform`, `SendInput` sous Windows, XTest sous X11). La séquence exacte (faut-il
+//!    d'abord Entrée pour ouvrir la saisie du chat ?) est à confirmer en jeu.
+//! 5. **La persistance** — `chatFilters` est synchronisé au compte côté web (`/api/v1/settings`),
 //!    comme `profile.soundItems` ; même contrat transactionnel que le reste de la fenêtre.
-//! 5. **La règle de correspondance** — celle du web : minuscules, `contains` sur le texte OU
+//! 6. **La règle de correspondance** — celle du web : minuscules, `contains` sur le texte OU
 //!    l'auteur, un seul son par lot, jamais pendant la lecture initiale du fichier.
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
@@ -424,14 +433,26 @@ fn test_sound_row(ui: &mut egui::Ui, width: f32) {
 
 /// Canal, mot, « Ajouter » — **dans cet ordre** (demande explicite) : on dit d'abord OÙ chercher,
 /// puis QUOI.
+///
+/// **La ligne déborde la largeur utile de 7 px à droite** (retour du 2026-09-13) : la marge entre
+/// le bouton et le bord du panneau doit être celle qui sépare le bord gauche du sélecteur, soit
+/// `PANEL_PAD_CONTROL_X` (19) — or la largeur utile s'arrête 26 px avant le bord (la réserve de
+/// barre de défilement, `components::scroll_area::RESERVE_X`). Le formulaire n'est pas dans la zone défilable,
+/// il n'a pas de barre à ménager : il reprend ces 7 px. Les trois contrôles sont séparés du même
+/// écart, posé explicitement — l'espacement implicite d'egui est mis à zéro, sinon il s'ajoutait
+/// au nôtre et repoussait le bouton hors de la ligne (c'est ce qui le rétrécissait sur la v2).
 fn add_row(ui: &mut egui::Ui, scope: &mut Scope, input: &mut String, width: f32) {
     const SCOPE_WIDTH: f32 = 170.0;
-    const ADD_WIDTH: f32 = 110.0;
-    const GAP: f32 = 8.0;
+    /// Plus étroit que les 110 de la v2 : un libellé de sept lettres n'a pas besoin de plus.
+    const ADD_WIDTH: f32 = 92.0;
+    const GAP: f32 = 12.0;
+    let total =
+        width + design::components::scroll_area::RESERVE_X - design::tokens::PANEL_PAD_CONTROL_X;
     let row = ui
-        .allocate_space(Vec2::new(width, design::tokens::SELECT_HEIGHT))
+        .allocate_space(Vec2::new(total, design::tokens::SELECT_HEIGHT))
         .1;
     let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
+    cell.spacing_mut().item_spacing.x = 0.0;
     cell.horizontal_centered(|ui| {
         let mut select = design::select(scope)
             .option(Scope::All, "Tous les canaux")
@@ -447,11 +468,22 @@ fn add_row(ui: &mut egui::Ui, scope: &mut Scope, input: &mut String, width: f32)
                 .size(InputSize::Search)
                 .clearable(true)
                 .placeholder("Mot ou expression à rechercher…")
-                .width(width - SCOPE_WIDTH - ADD_WIDTH - GAP * 2.0)
+                .width(total - SCOPE_WIDTH - ADD_WIDTH - GAP * 2.0)
                 .log_name("chat.mot"),
         );
-        ui.add_space(GAP);
-        ui.add(
+        // **Le bouton est ancré au bord droit, dans un enfant en sens inverse**, plutôt qu'ajouté
+        // à la suite : `design::input` pose sa zone d'édition par `ui.scope_builder` sur un
+        // rectangle plus court que le champ (marges et place de la croix d'effacement déduites), et
+        // un scope avance le curseur de la rangée à la fin de CE rectangle, pas du champ — le
+        // bouton suivant chevauchait le champ (mesuré sur la v2 : bouton à 592 pour un champ
+        // allant jusqu'à 609). Ancré au bord, il ne dépend plus du curseur. Le défaut est celui
+        // du composant, à corriger là-bas ; ici on le contourne.
+        let mut right = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        right.add(
             design::button("Ajouter")
                 .variant(ButtonVariant::Primary)
                 .size(ButtonSize::Compact)
@@ -660,6 +692,20 @@ fn chat_toast_card(ui: &mut egui::Ui, scope: Scope, word: &str, author: &str, me
     );
     let card = Rect::from_center_size(ui.max_rect().center(), card_size);
 
+    // **Cliquer la carte prépare une réponse en privé** (demande du 2026-09-13) : l'overlay écrit
+    // `/w "<auteur>"` dans le chat du jeu, le joueur n'a plus que son message à taper. Zone de clic
+    // posée AVANT la peinture, comme `toast_card` ; l'infobulle dit ce que le clic fera.
+    let response = ui
+        .interact(
+            card,
+            ui.id().with(("chat-alert", author)),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response).text(format!(
+        "Répondre en privé — écrit /w \"{author}\" dans le chat"
+    ));
+
     painter.rect_filled(
         card.translate(egui::vec2(0.0, 6.0)),
         CARD_ROUNDING,
@@ -733,7 +779,13 @@ fn chat_options_vide() {
 /// **4 — La carte d'alerte**, par-dessus le jeu : « GELANO · COMMERCE », puis l'auteur et le message
 /// complet.
 fn chat_toast() {
-    let mut harness = Harness::builder()
+    let mut harness = toast_harness();
+    harness.run();
+    write_mockup(&mut harness, "chat_toast");
+}
+
+fn toast_harness() -> Harness<'static> {
+    Harness::builder()
         .with_size(Vec2::new(560.0, 160.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
@@ -747,9 +799,16 @@ fn chat_toast() {
                     "vends Gelano 900k, prix ferme, mp si intéressé — je suis à Bonta près du zaap",
                 );
             });
-        });
+        })
+}
+
+/// **5 — La carte survolée** : la main, et l'infobulle qui annonce la réponse en privé.
+fn chat_toast_survol() {
+    let mut harness = toast_harness();
     harness.run();
-    write_mockup(&mut harness, "chat_toast");
+    harness.hover_at(egui::pos2(280.0, 80.0));
+    harness.run();
+    write_mockup(&mut harness, "chat_toast_survol");
 }
 
 fn main() {
@@ -761,6 +820,8 @@ fn main() {
     println!("  chat_options_vide");
     chat_toast();
     println!("  chat_toast");
+    chat_toast_survol();
+    println!("  chat_toast_survol");
     let dir = mockup_dir();
     let ecrites = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
     let affiche = dir.canonicalize().unwrap_or_else(|_| dir.clone());
