@@ -500,6 +500,28 @@ exactement la couleur de la capture.
 
 ---
 
+### 9 sexies. Onglet « Raccourcis » — 2026-09-13
+
+Cinquième entrée du menu de la fenêtre Options (`panels::raccourcis_tab`), calquée sur l'onglet
+**« Commandes »** du jeu (`assets/design-system/interfaces/interface-options-commandes.png`) :
+champ « Rechercher » pleine largeur en tête, groupes, lignes `libellé à gauche → champ à droite`,
+bouton de réinitialisation. Deux écarts assumés, tous deux dictés par des composants déjà
+existants plutôt que par un choix esthétique :
+
+- **Le nom de groupe est porté par l'en-tête du tableau** (`design::table`), pas par un
+  `design::heading` posé au-dessus : celui-ci peint son libellé 7 px à GAUCHE du rectangle qu'il
+  alloue (le retrait de section du jeu, §5.8 et sa doc de composant), et l'écrêtage d'une liste
+  défilante coupe ces 7 px — première lettre rognée, constaté à la capture.
+- **La réinitialisation est un bouton TEXTE** (§5.2, kaki) au bout de la ligne de recherche, là où
+  le jeu pose un bouton icône ↺ en haut à droite : cette fenêtre porte déjà sa croix de fermeture
+  au même endroit depuis le 2026-09-13, et deux boutons icône voisins aux effets très différents
+  (« tout remettre à zéro » / « fermer ») se confondraient.
+
+La case de saisie est un `design::input` en **lecture seule** — c'est ce que montre la référence, et
+c'est juste : la case porte une valeur qu'on remplace, pas une action qu'on déclenche. En écoute,
+elle prend le bord d'alerte (`Input::error`) faute d'un autre état de bord au catalogue : dans les
+deux cas, c'est là que l'œil doit aller.
+
 ## 10. Incertitudes / à vérifier
 
 - **Pas de police dédiée disponible.** Confirmé par l'utilisateur (2026-09-05) : malgré
