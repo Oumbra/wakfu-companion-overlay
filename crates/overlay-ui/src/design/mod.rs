@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
-pub use components::checkbox::{checkbox, Checkbox, CheckboxState};
+pub use components::checkbox::{checkbox, paint as paint_checkbox, Checkbox, CheckboxState};
 pub use icons::DsIcon;
 // Les trois fonctions de géométrie du repliable sont préfixées à la réexportation : `design::
 // closed_height` ne dirait pas de quoi, et le jour où un second conteneur en aura une, le nom nu

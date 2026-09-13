@@ -1296,6 +1296,15 @@ pub const ITEM_SLOT_BORDER_CORNER_RATIO: f32 = 6.0 / 128.0;
 /// interface.
 pub const ITEM_SLOT_SELECTED_BORDER: Color32 = TEXT_GOLD;
 
+/// Retrait de la case à cocher depuis le coin d'un emplacement en mode sélection — 7 px.
+///
+/// Le liseré occupe les pixels 2 à 4 (voir [`ITEM_SLOT_BORDER_INSET_RATIO`]) : 4 collait la case
+/// contre lui, 5 la posait au contact. **Deux retours utilisateur pour arriver ici** — « décaler la
+/// checkbox d'un pixel » le 2026-09-13, puis « d'au moins 2 px » sur la planche suivante. 7 laisse
+/// donc trois pixels de fond entre le liseré et la case, sur les deux axes : ne décaler qu'en
+/// abscisse poserait la case de travers dans son coin, à 3 px du bord gauche et 1 px du bord haut.
+pub const ITEM_SLOT_SELECTION_INSET: f32 = 7.0;
+
 /// En dessous de ce côté, un emplacement ne peut plus rien montrer — et le dit une fois au journal
 /// (clause 4 du contrat de composant).
 ///
