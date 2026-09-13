@@ -43,7 +43,7 @@ use overlay_ui::panels::watchlist::{
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{
-    paint_content, AuthStatus, NoopAuthSink, OverlayKind, RenderContent,
+    self, paint_content, AuthStatus, NoopAuthSink, OverlayKind, RenderContent,
 };
 use overlay_ui::shortcuts::ShortcutBindings;
 use overlay_ui::ui_icons::UiIcons;
@@ -560,15 +560,26 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// bouton ») au lieu de GAUCHE : ce test, à l'origine centré sur "+"/"−", couvre donc aussi
 /// "Détails"/"Options" ci-dessous, mêmes abscisses que "+"/"−" (même colonne), une ligne plus bas.
 ///
-/// Base commune : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 88 (réserve) +
-/// 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié de 24, centre du bouton) = 118 ;
-/// y = 14 + 4 (même marge, haut du fond) + 12 = 30 — INCHANGÉ, "+" garde sa place. Bouton "−" :
-/// x = 118 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux colonnes)
-/// = 146 ; MÊME y (même ligne) = 30. "Détails" : MÊME x que "+" (même colonne) = 118 ;
-/// y = 30 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 58. "Options" : MÊME x que
-/// "−" (même colonne) = 146 ; MÊME y que "Détails" (même ligne) = 58.
+/// **Recalculée le 2026-09-13 (infobulles par LIGNE, voir `panels::watchlist`, doc de module)** :
+/// « + »/« − » ouvrent AU-DESSUS, « Détails »/« Options » EN DESSOUS — les réserves latérales ne
+/// logeaient plus les libellés rallongés de leur raccourci, et l'infobulle « Ajouter » recouvrait
+/// « − ». Deux conséquences sur la géométrie : la réserve gauche passe de 88 à 48 px
+/// (`CONTROL_TOOLTIP_RESERVE`, remesurée), et `render_content::WATCHLIST_TOP_MARGIN` (36 px)
+/// s'ajoute EN HAUT pour loger les infobulles au-dessus — le harnais prend la hauteur réelle de la
+/// fenêtre (132 + 36). Le nom de la tuile, côté `Above` depuis toujours mais retombé en dessous
+/// faute de place jusque-là, est capturé aussi : c'est la seconde moitié de la demande.
+///
+/// Base commune : x0 = 8 (harnais) + 6 (marge Suivi) = 14 ; y0 = 14 + 36 (marge haute) = 50.
+/// Bouton "+" : x = 14 + 48 (réserve) + 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié
+/// de 24, centre du bouton) = 78 ; y = 50 + 4 (même marge, haut du fond) + 12 = 66. Bouton "−" :
+/// x = 78 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux colonnes)
+/// = 106 ; MÊME y (même ligne) = 66. "Détails" : MÊME x que "+" (même colonne) = 78 ;
+/// y = 66 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 94. "Options" : MÊME x que
+/// "−" (même colonne) = 106 ; MÊME y que "Détails" (même ligne) = 94. Tuile : bord gauche à
+/// 14 + 48 + 60 (`control_row_width`) + 12 (`TILE_GAP`) = 134, centre à 134 + 29 = 163 ; centre
+/// vertical à 82 (voir [`BANDEAU_TUILE_0`]).
 #[test]
-fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
+fn panneau_suivi_tooltips_par_ligne_dessus_ou_dessous() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
     let remote_icon_store = RemoteIconStore::empty();
@@ -592,7 +603,7 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     let window_width = panels::watchlist::content_width(1) + 12.0;
 
     let mut harness = egui_kittest::Harness::builder()
-        .with_size(egui::Vec2::new(window_width, 150.0))
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
             let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
@@ -626,22 +637,31 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
 
     harness.run();
 
-    harness.hover_at(egui::pos2(118.0, 30.0));
-    harness.run();
-    harness.snapshot("watchlist_tooltip_ajouter_a_gauche");
-
-    harness.hover_at(egui::pos2(146.0, 30.0));
-    harness.run();
-    harness.snapshot("watchlist_tooltip_supprimer_a_droite");
-
-    harness.hover_at(egui::pos2(118.0, 58.0));
-    harness.run();
-    harness.snapshot("watchlist_tooltip_details_a_gauche");
-
-    harness.hover_at(egui::pos2(146.0, 58.0));
-    harness.run();
-    harness.snapshot("watchlist_tooltip_options_a_droite");
+    for (pos, nom) in [
+        (BANDEAU_PLUS, "watchlist_tooltip_ajouter_dessus"),
+        (BANDEAU_MOINS, "watchlist_tooltip_supprimer_dessus"),
+        (BANDEAU_DETAILS, "watchlist_tooltip_details_dessous"),
+        (BANDEAU_OPTIONS, "watchlist_tooltip_options_dessous"),
+        (BANDEAU_TUILE_0, "watchlist_tooltip_tuile_dessus"),
+    ] {
+        harness.hover_at(pos);
+        harness.run();
+        harness.snapshot(nom);
+    }
 }
+
+/// Hauteur réelle de la fenêtre Suivi sans toast ni sélection : `main.rs::WATCHLIST_HEIGHT`
+/// (132 px) plus `render_content::WATCHLIST_TOP_MARGIN`. Les harnais du bandeau la reprennent
+/// telle quelle : une infobulle ouverte au-dessus ou en dessous n'a de sens qu'à la hauteur où la
+/// vraie fenêtre la contraint.
+const BANDEAU_HAUTEUR: f32 = 132.0 + render_content::WATCHLIST_TOP_MARGIN;
+
+/// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
+/// [`panneau_suivi_tooltips_par_ligne_dessus_ou_dessous`].
+const BANDEAU_PLUS: egui::Pos2 = egui::pos2(78.0, 66.0);
+const BANDEAU_MOINS: egui::Pos2 = egui::pos2(106.0, 66.0);
+const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(78.0, 94.0);
+const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(106.0, 94.0);
 
 /// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
 /// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les
@@ -654,10 +674,10 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
 /// 132 px) — c'est la seule façon de prouver que la réserve `CONTROL_ROW_TOOLTIP_RESERVE` suffit
 /// et que la place en dessous existe.
 ///
-/// Positions : x0 = y0 = 8 (harnais) + 6 (marge Suivi) = 14. Bouton "+" : x = 14 + 64
-/// (`CONTROL_ROW_TOOLTIP_RESERVE`) + 4 (`CONTROL_BUTTON_GAP`) + 12 (moitié de 24) = 94 ; y = 14 + 4
-/// + 12 = 30. Chaque bouton suivant est 28 px (24 + 4) plus à droite : "−" 122, "Détails" 150,
-/// "Options" 178 — même y.
+/// Positions : x0 = 8 (harnais) + 6 (marge Suivi) = 14, y0 = 14 + 36 (`WATCHLIST_TOP_MARGIN`)
+/// = 50. Bouton "+" : x = 14 + 64 (`CONTROL_ROW_TOOLTIP_RESERVE`) + 4 (`CONTROL_BUTTON_GAP`) + 12
+/// (moitié de 24) = 94 ; y = 50 + 4 + 12 = 66. Chaque bouton suivant est 28 px (24 + 4) plus à
+/// droite : "−" 122, "Détails" 150, "Options" 178 — même y.
 #[test]
 fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     let mut textures = Textures::new();
@@ -673,7 +693,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     let window_width = panels::watchlist::content_width(0) + 12.0;
 
     let mut harness = egui_kittest::Harness::builder()
-        .with_size(egui::Vec2::new(window_width, 132.0))
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
             let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
@@ -712,7 +732,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         (150.0, "details"),
         (178.0, "options"),
     ] {
-        harness.hover_at(egui::pos2(x, 30.0));
+        harness.hover_at(egui::pos2(x, 66.0));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
     }
@@ -767,7 +787,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
 
     let window_width = panels::watchlist::content_width(entries.len()) + 12.0;
     let harness = egui_kittest::Harness::builder()
-        .with_size(egui::Vec2::new(window_width, 220.0))
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR + 88.0))
         .build_ui({
             let selection = Rc::clone(&selection);
             let edition = Rc::clone(&edition);
@@ -813,12 +833,13 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
 
 /// Centres des trois tuiles du bandeau — mêmes calculs que
 /// [`panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple`] : première tuile centrée en
-/// x = 206, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 46.
-const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(206.0, 46.0);
-const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(346.0, 46.0);
+/// x = 163, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 82 (46 avant la
+/// marge haute de 36 px du 2026-09-13).
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(163.0, 82.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(303.0, 82.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
-const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(189.0, 29.0);
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(146.0, 65.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
 ///
@@ -908,10 +929,11 @@ fn panneau_suivi_deplacement_en_vol() {
 /// Ce test clique réellement, et vérifie l'état plutôt que des pixels : c'est la seule forme qui
 /// aurait attrapé un bouton peint juste et branché sur rien.
 ///
-/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`]
-/// pour le carré de contrôle (« − » au centre en (146, 30)). Les tuiles suivent le carré :
-/// x = 14 (marges) + 88 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
-/// + 12 (`TILE_GAP`) = 174 pour le bord gauche de la première, soit 206 pour son centre.
+/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_ligne_dessus_ou_dessous`]
+/// pour le carré de contrôle (« − » au centre en [`BANDEAU_MOINS`]). Les tuiles suivent le carré :
+/// x = 14 (marges) + 48 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
+/// + 12 (`TILE_GAP`) = 134 pour le bord gauche de la première, soit 163 pour son centre
+/// ([`BANDEAU_TUILE_0`]).
 #[test]
 fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let Bandeau {
@@ -927,7 +949,7 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     );
 
     // 1. Le « − » ouvre le mode, et reste enfoncé tant qu'il l'est.
-    clique(&mut harness, egui::pos2(146.0, 30.0));
+    clique(&mut harness, BANDEAU_MOINS);
     assert!(
         selection.borrow().is_open(),
         "le bouton « − » n'a pas ouvert la sélection multiple",
@@ -935,11 +957,14 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     harness.snapshot("watchlist_selection_ouverte");
 
     // 2. Un clic sur une tuile la coche — le bouton passe de « Supprimer tout » à « Supprimer (1) ».
-    clique(&mut harness, egui::pos2(206.0, 46.0));
+    clique(&mut harness, BANDEAU_TUILE_0);
     harness.snapshot("watchlist_selection_une_cochee");
 
     // 3. Le bouton de suppression groupée rend les entrées RESTANTES, et referme le mode.
-    let bouton = egui::pos2(window_width / 2.0, 96.0);
+    let bouton = egui::pos2(
+        window_width / 2.0,
+        96.0 + render_content::WATCHLIST_TOP_MARGIN,
+    );
     clique(&mut harness, bouton);
     let restantes = restantes.borrow();
     let edition = restantes
@@ -1019,7 +1044,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
     let window_width = panels::watchlist::content_width(1) + 12.0;
 
     let mut harness = egui_kittest::Harness::builder()
-        .with_size(egui::Vec2::new(window_width, 150.0))
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
             let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
@@ -1053,7 +1078,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
 
     harness.run();
 
-    let details_pos = egui::pos2(118.0, 58.0);
+    let details_pos = BANDEAU_DETAILS;
 
     // Survolé (curseur dessus, bouton relâché) : apparence "survolée" de référence.
     harness.hover_at(details_pos);

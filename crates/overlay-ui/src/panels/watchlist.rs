@@ -180,8 +180,21 @@
 //! l'ordre « Ajouter », « Supprimer », « Détails », « Options », et leur infobulle s'ouvre EN
 //! DESSOUS (`design::TooltipSide::Below`) — sous une rangée, aucun bouton n'est jamais recouvert,
 //! et la fenêtre Suivi a toujours de la place en bas (`main.rs::WATCHLIST_HEIGHT`, dimensionnée
-//! pour loger un toast). Voir [`ControlLayout`] : le carré 2×2 et ses infobulles par colonne
-//! restent la disposition dès qu'une entrée existe.
+//! pour loger un toast). Voir [`ControlLayout`] : le carré 2×2 reste la disposition dès qu'une
+//! entrée existe.
+//!
+//! **Refonte 2026-09-13, même jour (carré 2×2 : infobulles par LIGNE, dessus/dessous)** — suite
+//! du même retour : « pour les deux boutons du bas, afficher [les infobulles] en dessous, comme
+//! pour les objets suivis ; pour les boutons du dessus, Ajouter et Supprimer, au-dessus ; si ça
+//! manque d'espace, déplacer un petit peu vers le bas l'overlay [...] et en profiter pour afficher
+//! celles des objets au-dessus ». Le côté vient toujours de la position dans la grille, mais par
+//! LIGNE désormais : « + »/« − » ouvrent AU-DESSUS (`design::TooltipSide::Above`), « Détails »/
+//! « Options » EN DESSOUS (`Below`) — au-dessus et en dessous d'un carré, aucun voisin à
+//! recouvrir. La place au-dessus vient de `render_content::WATCHLIST_TOP_MARGIN`, qui décale la
+//! bande vers le bas d'autant ; les tuiles d'entrées en profitent : leur infobulle
+//! (`entry_tile`, côté `Above` par défaut depuis toujours) s'ouvrait de fait en dessous faute de
+//! place. `CONTROL_TOOLTIP_RESERVE` ne réserve plus qu'à GAUCHE (voir sa doc, remesurée), et
+//! l'infobulle « Supprimer » du carré ne recouvre plus jamais « + ».
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -416,11 +429,21 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 ///
 /// **Contrepartie assumée** : `content_width` (donc la largeur de FENÊTRE) grandit d'autant, et la
 /// fenêtre Suivi étant centrée horizontalement sur cette largeur (`main.rs::anchor_position`), la
-/// bande de tuiles visible se retrouve décalée d'environ la moitié de la réserve GAUCHE (~44px) à
-/// DROITE du centre réel de la fenêtre de jeu — même compromis déjà accepté pour l'élargissement
+/// bande de tuiles visible se retrouve décalée d'environ la moitié de la réserve GAUCHE à DROITE
+/// du centre réel de la fenêtre de jeu — même compromis déjà accepté pour l'élargissement
 /// temporaire du toast (`TOAST_LAYER_WIDTH`, `toast_card`), ici permanent tant que la bande est
 /// affichée plutôt que ponctuel.
-const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
+///
+/// **Remesurée le 2026-09-13 (infobulles par LIGNE, voir doc de module)** : plus aucune infobulle
+/// latérale — celles du carré s'ouvrent au-dessus ou en dessous, CENTRÉES sur leur bouton. La
+/// réserve ne sert plus qu'à GAUCHE, pour que « Ajouter (Ctrl+Shift+A) » (125 px, centrée sur
+/// « + » dont le centre est à 16 px du bord du carré : 62,5 − 16 = 46,5 px à couvrir) tienne
+/// centrée plutôt que de se rabattre alignée à gauche du bouton (`TOP_START`, toujours au-dessus
+/// mais décalée). Arrondi à 48 px. À DROITE, les tuiles d'entrées (au moins une en carré, voir
+/// `ControlLayout`) fournissent déjà plus que ce qu'« Options (Ctrl+Shift+O) » demande sous « − »
+/// (129 px centrés à 44 px du bord gauche du carré, soit 48 px au-delà de son bord droit contre
+/// `TILE_GAP` + `TILE_SIZE` = 70 px disponibles). La bande n'est plus décalée que de ~24 px.
+const CONTROL_TOOLTIP_RESERVE: f32 = 48.0;
 /// Espace réservé de CHAQUE CÔTÉ de la rangée 1×4 du bandeau VIDE ([`ControlLayout::Row`]), pour
 /// que l'infobulle du premier et du dernier bouton — ouverte EN DESSOUS, centrée sur son bouton
 /// (`design::TooltipSide::Below`) — ait la place de s'afficher entière sans se rabattre. Même
@@ -438,7 +461,7 @@ const CONTROL_ROW_TOOLTIP_RESERVE: f32 = 64.0;
 /// (refonte 2026-09-13).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ControlLayout {
-    /// Au moins une entrée suivie : carré 2×2, infobulles par colonne (gauche/droite).
+    /// Au moins une entrée suivie : carré 2×2, infobulles par ligne (dessus/dessous).
     Square,
     /// Aucune entrée : rangée 1×4 « + », « − », « Détails », « Options », infobulles en dessous.
     Row,
@@ -468,7 +491,8 @@ impl ControlLayout {
         }
     }
 
-    /// Réserve d'infobulle de chaque côté du fond translucide.
+    /// Réserve d'infobulle à gauche du fond translucide — et à droite, quand rien d'autre n'y
+    /// fournit la place (voir `content_width`).
     fn tooltip_reserve(self) -> f32 {
         match self {
             ControlLayout::Square => CONTROL_TOOLTIP_RESERVE,
@@ -506,13 +530,13 @@ impl ControlLayout {
 /// réserver AVANT ce changement, seul `show` ne le peignait pas — voir doc de module).
 ///
 /// **Refonte 2026-09-08 (infobulles par colonne)** : la colonne DROITE du carré ("−"/"Options")
-/// affiche désormais son infobulle à DROITE (côté `Right`, voir doc de module) — l'espace
-/// après le carré (`TILE_GAP + entries_width`, jusqu'ici seulement un espacement visuel avant la
-/// première tuile) doit donc lui aussi garantir au moins `CONTROL_TOOLTIP_RESERVE` de large, MÊME
-/// SANS ENTRÉE, sans quoi cette infobulle n'aurait pas la place de s'afficher entièrement (exactement
-/// le problème que cette réserve résolvait déjà à GAUCHE, voir sa doc). `.max(...)` plutôt qu'une
-/// simple addition : quand les tuiles d'entrées fournissent déjà assez de largeur, aucun espace
-/// supplémentaire n'est ajouté (le carré reste juste avant la première tuile, comme avant).
+/// affichait son infobulle à DROITE — l'espace après le carré (`TILE_GAP + entries_width`,
+/// jusqu'ici seulement un espacement visuel avant la première tuile) devait donc lui aussi
+/// garantir au moins la réserve, MÊME SANS ENTRÉE. `.max(...)` plutôt qu'une simple addition :
+/// quand les tuiles d'entrées fournissent déjà assez de largeur, aucun espace supplémentaire n'est
+/// ajouté (le carré reste juste avant la première tuile, comme avant). Depuis le 2026-09-13 (carré
+/// à infobulles dessus/dessous, réserve remesurée à 48 px), ce `.max` ne joue plus qu'en rangée
+/// (bandeau vide) : en carré, une tuile au moins suit le carré, et 70 px > 48 px.
 ///
 /// **Refonte 2026-09-13 (bandeau vide)** : sans entrée, le carré devient une rangée 1×4 dont les
 /// infobulles s'ouvrent EN DESSOUS (voir doc de module, [`ControlLayout::Row`]) — la réserve de
@@ -1279,9 +1303,9 @@ fn toast_card(
 /// ```
 /// En rangée, "−" est visuellement DÉSACTIVÉ (voir `control_button`, `ControlButtonState`) — rien
 /// à supprimer tant qu'aucune entrée n'est suivie ; les trois autres boutons restent toujours
-/// activés. Infobulle par COLONNE en carré (voir doc de module) : GAUCHE pour "+"/"Détails",
-/// DROITE pour "−"/"Options" — jamais l'inverse du rôle du bouton ; EN DESSOUS pour les quatre en
-/// rangée, seul côté qui ne recouvre aucun voisin.
+/// activés. Infobulle par LIGNE en carré (voir doc de module, 2026-09-13) : AU-DESSUS pour
+/// "+"/"−", EN DESSOUS pour "Détails"/"Options" — jamais selon le rôle du bouton ; EN DESSOUS pour
+/// les quatre en rangée. Dans les deux cas, le seul côté qui ne recouvre aucun voisin.
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
 fn control_button_row(
     ui: &mut egui::Ui,
@@ -1300,16 +1324,17 @@ fn control_button_row(
         .rect_filled(row_rect, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
 
     // Le pas d'un bouton au suivant, et les deux placements que `layout` distingue : la seconde
-    // ligne du carré est la suite de la rangée.
+    // ligne du carré est la suite de la rangée. Le côté d'infobulle suit la LIGNE : celle du haut
+    // ouvre au-dessus, celle du bas (ou la rangée entière) en dessous.
     let step = CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP;
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
     let remove_top_left = add_top_left + egui::vec2(step, 0.0);
-    let (details_top_left, options_top_left, left_side, right_side) = match layout {
+    let (details_top_left, options_top_left, top_side, bottom_side) = match layout {
         ControlLayout::Square => (
             add_top_left + egui::vec2(0.0, step),
             remove_top_left + egui::vec2(0.0, step),
-            design::TooltipSide::Left,
-            design::TooltipSide::Right,
+            design::TooltipSide::Above,
+            design::TooltipSide::Below,
         ),
         ControlLayout::Row => (
             remove_top_left + egui::vec2(step, 0.0),
@@ -1329,7 +1354,7 @@ fn control_button_row(
             shortcuts.label(ShortcutAction::WatchlistAdd)
         ),
         ControlButtonState::Enabled,
-        left_side,
+        top_side,
     );
     // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
     // bouton ouvrait la modale Options sur l'onglet « Suivi », son seul rôle possible, sans que
@@ -1365,7 +1390,7 @@ fn control_button_row(
             (false, true) => ControlButtonState::Active,
             (false, false) => ControlButtonState::Enabled,
         },
-        right_side,
+        top_side,
     );
 
     // "Détails" sous "+" (colonne GAUCHE du carré) ou à la suite de "−" (rangée) — même
@@ -1378,7 +1403,7 @@ fn control_button_row(
         "watchlist-details",
         &format!("Détails ({})", shortcuts.label(ShortcutAction::Details)),
         ControlButtonState::Enabled,
-        left_side,
+        bottom_side,
     );
     // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
     // `open::that(base_url())` directement, et c'était un vrai défaut : un panneau qui produit un
@@ -1401,7 +1426,7 @@ fn control_button_row(
         "watchlist-options",
         &format!("Options ({})", shortcuts.label(ShortcutAction::Options)),
         ControlButtonState::Enabled,
-        right_side,
+        bottom_side,
     );
     ControlRowClicks {
         add,
@@ -1460,11 +1485,11 @@ enum ControlButtonState {
 ///
 /// **Ce que le composant ne prend pas en charge, et pourquoi ça reste ici.** Le placement de
 /// l'infobulle (`side`, voir [`design::TooltipSide`] et [`ControlLayout`]) est une décision de mise
-/// en page : en carré, « + » et « Détails » l'ouvrent à gauche, « − » et « Options » à droite, pour
-/// qu'elle ne recouvre jamais l'autre colonne ; en rangée, les quatre l'ouvrent en dessous.
-/// `design::icon_button` expose bien un `.tooltip()`, mais il place au-dessus (depuis le
+/// en page : en carré, « + » et « − » l'ouvrent au-dessus, « Détails » et « Options » en dessous,
+/// pour qu'elle ne recouvre jamais l'autre ligne ; en rangée, les quatre l'ouvrent en dessous.
+/// `design::icon_button` expose bien un `.tooltip()`, mais il place toujours au-dessus (depuis le
 /// 2026-09-13 ; sous l'élément avant cela) — l'utiliser casserait cette règle, que
-/// `panneau_suivi_tooltips_par_colonne_gauche_ou_droite` et
+/// `panneau_suivi_tooltips_par_ligne_dessus_ou_dessous` et
 /// `panneau_suivi_vide_boutons_en_ligne_infobulles_dessous` vérifient. Le composant peint et rend
 /// une `Response` ; le panneau décide où poser l'infobulle.
 ///
@@ -1623,8 +1648,11 @@ fn entry_tile(
     };
 
     // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
-    // 2026-09-06, design system tooltip). Tue pendant un déplacement : un nom affiché sous le
-    // pointeur masquerait le liseré de la tuile visée, qu'on essaie justement de lire.
+    // 2026-09-06, design system tooltip). Au-dessus de la tuile (côté par défaut) — et RÉELLEMENT
+    // au-dessus depuis le 2026-09-13 : `render_content::WATCHLIST_TOP_MARGIN` lui en donne la
+    // place, avant quoi elle retombait en dessous faute d'espace. Tue pendant un déplacement : un
+    // nom affiché sous le pointeur masquerait le liseré de la tuile visée, qu'on essaie justement
+    // de lire.
     if !reorder.in_flight() {
         design::tooltip(&response).text(&entry.name);
     }

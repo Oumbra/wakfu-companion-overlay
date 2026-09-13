@@ -46,18 +46,20 @@
 //! — la réponse est dans `render_content::COMBAT_TOP_MARGIN`, qui réserve cette place dans le
 //! panneau. Un composant d'infobulle ne peut pas créer de l'espace qui n'existe pas.
 //!
-//! ## Le côté se choisit par colonne, pas par bouton
+//! ## Le côté se choisit par position dans la grille, pas par bouton
 //!
 //! Retour utilisateur du 2026-09-08 : « la souris doit pouvoir passer d'un bouton à l'autre sans
 //! qu'il y ait un problème au niveau de la tooltip ». Dans le carré de contrôle du Suivi, un bouton
-//! de droite qui afficherait son infobulle à gauche la poserait **par-dessus son voisin de
-//! gauche**, gênant le survol de ce dernier. D'où [`TooltipSide::Left`] pour la colonne de gauche
-//! et [`TooltipSide::Right`] pour celle de droite — le côté vient de la position dans la grille,
-//! jamais du rôle du bouton.
+//! dont l'infobulle s'ouvrirait vers un voisin la poserait **par-dessus ce voisin**, gênant son
+//! survol. Le côté vient donc de la position dans la grille, jamais du rôle du bouton : d'abord
+//! [`TooltipSide::Left`]/[`TooltipSide::Right`] par colonne (2026-09-08), puis, depuis le
+//! 2026-09-13, [`TooltipSide::Above`] pour la ligne du haut et [`TooltipSide::Below`] pour celle du
+//! bas — les réserves latérales ne logeaient plus les libellés rallongés de leur raccourci, et
+//! au-dessus/en dessous d'un carré 2×2 il n'y a aucun voisin à recouvrir.
 //!
-//! Ce placement demande de la place : `watchlist::CONTROL_TOOLTIP_RESERVE` en réserve autant des
-//! deux côtés du carré. Le composant ne réserve rien lui-même (§6 du contrat : la mise en page
-//! appartient au panneau).
+//! Ce placement demande de la place : `render_content::WATCHLIST_TOP_MARGIN` la réserve au-dessus
+//! de la bande, `watchlist::CONTROL_TOOLTIP_RESERVE` à sa gauche. Le composant ne réserve rien
+//! lui-même (§6 du contrat : la mise en page appartient au panneau).
 //!
 //! ## En dessous, quand la rangée est horizontale
 //!
@@ -68,7 +70,7 @@
 //! 1×4 avec [`TooltipSide::Below`] : sous une rangée, aucun bouton n'est jamais recouvert, et la
 //! fenêtre Suivi a toujours de la place en dessous (`main.rs::WATCHLIST_HEIGHT`, dimensionnée
 //! pour un toast). Ici, `BOTTOM` est un choix, pas le défaut d'egui subi : l'infobulle s'aligne
-//! sur le BOUTON, pas sur le curseur.
+//! sur le BOUTON, pas sur le curseur. La ligne du bas du carré 2×2 l'a rejoint le même jour.
 
 use egui::{RectAlign, Response, Ui};
 
