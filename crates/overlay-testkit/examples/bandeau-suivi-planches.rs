@@ -119,15 +119,17 @@ const CONTROL_TOOLTIP_RESERVE: f32 = 0.0;
 const CONTENT_MARGIN_LEFT: f32 = 0.0;
 /// La même, sur les trois autres côtés.
 const CONTENT_MARGIN: f32 = 6.0;
-/// … plus `render_content::WATCHLIST_TOP_MARGIN` en haut (2026-09-13, infobulles au-dessus).
-const CONTENT_TOP_MARGIN: f32 = CONTENT_MARGIN + overlay_ui::render_content::WATCHLIST_TOP_MARGIN;
+/// La marge HAUTE est redevenue celle-là, et rien de plus, le soir du 2026-09-13 : les infobulles
+/// s'ouvrent toutes EN DESSOUS, la place qu'elles réclamaient au-dessus est passée sous la bande
+/// (`render_content::WATCHLIST_TOOLTIP_RESERVE`), où elle ne décale plus rien.
+const CONTENT_TOP_MARGIN: f32 = CONTENT_MARGIN;
 /// La marge fixe qu'`egui_kittest` ajoute autour de tout harnais `new_ui`.
 const HARNESS_MARGIN: f32 = 8.0;
 
 /// Coin haut-gauche du bouton « − », dans le repère du harnais.
 ///
 /// **Calculé, et vérifiable** : c'est exactement le repère que documente
-/// `panels.rs::panneau_suivi_tooltips_par_colonne_gauche_ou_droite`, qui survole ces quatre boutons
+/// `panels.rs::panneau_suivi_toutes_les_infobulles_sous_la_bande`, qui survole ces quatre boutons
 /// à des coordonnées écrites à la main et tient depuis. Le contenu du bandeau commence à
 /// `HARNESS_MARGIN + CONTENT_MARGIN` sur les deux axes ; le carré de contrôle vient après la
 /// réserve d'infobulle gauche, et ses boutons après sa marge intérieure.
@@ -342,7 +344,7 @@ fn harnais(p: Planche) -> Harness<'static> {
     let largeur =
         overlay_ui::panels::watchlist::content_width(total) + CONTENT_MARGIN_LEFT + CONTENT_MARGIN;
     let hauteur = 92.0
-        + overlay_ui::render_content::WATCHLIST_TOP_MARGIN
+        + overlay_ui::render_content::WATCHLIST_TOOLTIP_RESERVE
         + if select_mode { BULK_ROW_HEIGHT } else { 0.0 };
 
     Harness::builder()
@@ -482,7 +484,7 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
 
 /// Pose le pointeur au centre d'un bouton de contrôle et laisse le panneau ouvrir SON infobulle.
 ///
-/// Même geste que `panels.rs::panneau_suivi_tooltips_par_colonne_gauche_ou_droite`, qui couvre déjà
+/// Même geste que `panels.rs::panneau_suivi_toutes_les_infobulles_sous_la_bande`, qui couvre déjà
 /// ces quatre libellés en non-régression : la maquette ne les réécrit pas, elle les montre en place
 /// sous la disposition proposée.
 fn survole(harness: &mut Harness<'static>, bouton: ControlButton) {
