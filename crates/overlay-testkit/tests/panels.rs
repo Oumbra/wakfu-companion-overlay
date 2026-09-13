@@ -569,22 +569,24 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// demande.
 ///
 /// **Recalculée une dernière fois le soir du 2026-09-13** (retour utilisateur, capture d'un
-/// bandeau vide) : les QUATRE infobulles s'ouvrent en dessous, ancrées sur le carré entier, et
-/// celle de la tuile sous la bande — « intervertir les choses [...] on gagnerait la moitié,
-/// peut-être plus, du vide ». La marge haute tombe à 6 px (la réserve est passée SOUS la bande,
-/// `render_content::WATCHLIST_TOOLTIP_RESERVE`) : tout le contenu remonte de 28 px. La réserve
-/// DROITE, elle, passe de 48 à 88 px — une infobulle ancrée sur le carré déborde plus loin que
-/// centrée sur un bouton.
+/// bandeau vide) : les QUATRE infobulles du carré s'ouvrent en dessous, ancrées sur le carré
+/// entier — « intervertir les choses [...] on gagnerait la moitié, peut-être plus, du vide » —,
+/// et la marge haute du panneau tombe à ZÉRO, la barre de défilement étant passée au-dessus des
+/// tuiles (`panels::watchlist::strip_scroll_area`). Tout le contenu remonte de 34 px. Celle d'une
+/// TUILE, en revanche, revient à l'écart mesuré du composant (5 px sous elle) : plus rien ne se
+/// peint dessous. La réserve DROITE passe de 48 à 88 px — une infobulle ancrée sur le carré
+/// déborde plus loin que centrée sur un bouton.
 ///
-/// Base commune : x0 = 8 (harnais) + 0 (marge Suivi gauche) = 8 ; y0 = 8 + 6 (marge interne
-/// haute) = 14. Bouton "+" : x = 8 + 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié
-/// de 24, centre du bouton) = 24 ; y = 14 + 4 (même marge, haut du fond) + 12 = 30. Bouton "−" :
-/// x = 24 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux colonnes)
-/// = 52 ; MÊME y (même ligne) = 30. "Détails" : MÊME x que "+" (même colonne) = 24 ;
-/// y = 30 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 58. "Options" : MÊME x que
-/// "−" (même colonne) = 52 ; MÊME y que "Détails" (même ligne) = 58. Tuile : bord gauche à
+/// Base commune : x0 = 8 (harnais) + 0 (marge Suivi gauche) = 8 ; y0 = 8 + 0 (marge interne
+/// haute, nulle) = 8 — **ce test n'a qu'une entrée, la bande ne déborde donc pas et la barre ne
+/// prend aucune place**. Bouton "+" : x = 8 + 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12
+/// (moitié de 24, centre du bouton) = 24 ; y = 8 + 4 (même marge, haut du fond) + 12 = 24.
+/// Bouton "−" : x = 24 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les
+/// deux colonnes) = 52 ; MÊME y (même ligne) = 24. "Détails" : MÊME x que "+" (même colonne) = 24 ;
+/// y = 24 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 52. "Options" : MÊME x que
+/// "−" (même colonne) = 52 ; MÊME y que "Détails" (même ligne) = 52. Tuile : bord gauche à
 /// 8 + 60 (`control_row_width`) + 12 (`TILE_GAP`) = 80, centre à 80 + 29 = 109 ; centre
-/// vertical à 43 (voir [`BANDEAU_TUILE_0`]).
+/// vertical à 37 (voir [`BANDEAU_TUILE_0`]).
 #[test]
 fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
     let mut textures = Textures::new();
@@ -683,10 +685,10 @@ fn bandeau_largeur(entry_count: usize) -> f32 {
 
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
-const BANDEAU_PLUS: egui::Pos2 = egui::pos2(24.0, 30.0);
-const BANDEAU_MOINS: egui::Pos2 = egui::pos2(52.0, 30.0);
-const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(24.0, 58.0);
-const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 58.0);
+const BANDEAU_PLUS: egui::Pos2 = egui::pos2(24.0, 26.0);
+const BANDEAU_MOINS: egui::Pos2 = egui::pos2(52.0, 26.0);
+const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(24.0, 54.0);
+const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 54.0);
 
 /// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
 /// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les
@@ -700,8 +702,8 @@ const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 58.0);
 /// dessous existe.
 ///
 /// Positions : x0 = 8 (harnais) + 0 (marge Suivi gauche, nulle depuis le 2026-09-13) = 8,
-/// y0 = 8 + 6 (marge interne haute) = 14. Bouton "+" : x = 8 + 4 (`CONTROL_BUTTON_GAP`) +
-/// 12 (moitié de 24) = 24 ; y = 14 + 4 + 12 = 30. Chaque bouton suivant est 28 px (24 + 4) plus à
+/// y0 = 8 + 0 (marge interne haute, nulle elle aussi depuis le soir du même jour) = 8. Bouton
+/// "+" : x = 8 + 4 (`CONTROL_BUTTON_GAP`) + 12 (moitié de 24) = 24 ; y = 8 + 4 + 12 = 24. Chaque bouton suivant est 28 px (24 + 4) plus à
 /// droite : "−" 52, "Détails" 80, "Options" 108, même y. `CONTROL_ROW_TOOLTIP_RESERVE` ne joue
 /// plus qu'à DROITE : c'est elle qui donne encore à la fenêtre d'un bandeau vide de quoi contenir
 /// une infobulle, qui ne peut pas se peindre hors d'elle.
@@ -754,8 +756,8 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     harness.snapshot("watchlist_vide_rangee");
 
     // **Les quatre centres, recalculés** : x = 8 (marge du harnais) + 4 (`CONTROL_BUTTON_GAP`) +
-    // 12 (moitié de `CONTROL_BUTTON_SIZE`) = 24 pour « + », puis un pas de 28 px ; y = 8 + 6
-    // (marge interne haute) + 4 + 12 = 30.
+    // 12 (moitié de `CONTROL_BUTTON_SIZE`) = 24 pour « + », puis un pas de 28 px ; y = 8 + 0
+    // (marge interne haute, nulle) + 4 + 12 = 24.
     //
     // Ils valaient 94/122/150/178 en x et 66 en y, hérités de la réserve d'infobulle GAUCHE
     // (`CONTROL_ROW_TOOLTIP_RESERVE`, 64 px) et de la marge haute (`WATCHLIST_TOP_MARGIN`, 28 px),
@@ -769,7 +771,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         (80.0, "details"),
         (108.0, "options"),
     ] {
-        harness.hover_at(egui::pos2(x, 30.0));
+        harness.hover_at(egui::pos2(x, 24.0));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
     }
@@ -984,21 +986,25 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
     harness.snapshot("watchlist_bande_defilante_defilee");
 }
 
-/// Un point sur la poignée de la bande défilante — voir le calcul dans
+/// Un point sur la poignée de la bande défilante, **en tête de bande depuis le soir du
+/// 2026-09-13** (voir `design::ScrollArea::bar_before`) : y = 8 (marge du harnais) + 2
+/// (`STRIP_SCROLLBAR_OUTER_MARGIN`, l'air au-dessus de la barre) + 3 (moitié de
+/// `SCROLLBAR_WIDTH`) = 13. Voir le calcul complet dans
 /// [`panneau_suivi_bande_defilante_boutons_fixes`].
-const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0, 87.0);
+const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0, 13.0);
 
 /// Centres des trois tuiles du bandeau — mêmes calculs que
 /// [`panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple`] : première tuile centrée en
-/// x = 109, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 43. Les deux
+/// x = 109, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 37. Les deux
 /// coordonnées ont reculé le 2026-09-13 avec la réserve d'infobulle GAUCHE (48 px, supprimée :
-/// l'overlay démarre au premier pixel des boutons) puis la marge haute (28 px, passés sous la
-/// bande le soir : les infobulles s'y ouvrent toutes désormais).
-const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(109.0, 43.0);
-const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(249.0, 43.0);
+/// l'overlay démarre au premier pixel des boutons) puis la marge haute (28 px de réserve
+/// d'infobulle passés sous la bande, et les 6 px restants tombés avec elle). Trois entrées ne
+/// débordent pas : la barre de défilement, peinte en tête de bande, ne prend ici aucune place.
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(109.0, 37.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(249.0, 37.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
-const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(92.0, 26.0);
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(92.0, 20.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
 ///
@@ -1092,8 +1098,9 @@ fn panneau_suivi_deplacement_en_vol() {
 /// pour le carré de contrôle (« − » au centre en [`BANDEAU_MOINS`]). Les tuiles suivent le carré :
 /// x = 8 (marge du harnais) + 60 (`control_row_width`, 2 × 24 + 3 × 4) + 12 (`TILE_GAP`) = 80
 /// pour le bord gauche de la première, soit 109 pour son centre ([`BANDEAU_TUILE_0`]). Le bouton
-/// de suppression groupée est 96 px sous le haut du harnais, la bande ayant remonté de 28 px avec
-/// le passage des infobulles en dessous (voir [`BANDEAU_HAUTEUR`]).
+/// de suppression groupée est 90 px sous le haut du harnais, la bande ayant remonté de 34 px avec
+/// le passage des infobulles en dessous puis celui de la barre de défilement en tête (voir
+/// [`BANDEAU_HAUTEUR`]).
 #[test]
 fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let Bandeau {
@@ -1121,7 +1128,7 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     harness.snapshot("watchlist_selection_une_cochee");
 
     // 3. Le bouton de suppression groupée rend les entrées RESTANTES, et referme le mode.
-    let bouton = egui::pos2(window_width / 2.0, 96.0);
+    let bouton = egui::pos2(window_width / 2.0, 90.0);
     clique(&mut harness, bouton);
     let restantes = restantes.borrow();
     let edition = restantes

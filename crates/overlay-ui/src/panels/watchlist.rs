@@ -621,6 +621,29 @@ fn control_row_height(layout: ControlLayout) -> f32 {
     CONTROL_BUTTON_GAP * (layout.rows() + 1.0) + CONTROL_BUTTON_SIZE * layout.rows()
 }
 
+/// De combien le carré de contrôle descend pour que son centre tombe sur celui des tuiles.
+///
+/// Demande du 2026-09-13, dernier ajustement du bandeau : « le carré de boutons est mis au même
+/// niveau en haut qu'un item slot, sauf qu'un item slot est plus haut que le carré. J'aimerais
+/// qu'il soit aligné au milieu de manière verticale ». Les cotes le disent : une tuile fait 64 px
+/// (`tokens::ITEM_SLOT_SIZE`), le carré 60 (`4 × 3` de marge + `24 × 2` de bouton) — 4 px d'écart,
+/// tous en bas tant que les deux hauts sont alignés. Le carré descend donc de 2 px.
+///
+/// **En RANGÉE, rien à centrer** : le bandeau est alors vide, il n'y a aucune tuile en face, et
+/// descendre la rangée de 16 px remettrait précisément le vide que la journée a passé à retirer
+/// (voir doc de module).
+///
+/// L'autre proposition faite le même jour — porter les boutons à 26 px pour que le carré fasse un
+/// 64 × 64 exact, de la taille d'une case du jeu — reste ouverte et **ne demande pas de défaire
+/// ceci** : à cette taille, l'écart est nul et cette fonction rend 0. Planches de comparaison dans
+/// `overlay-testkit/examples/bandeau-carre-hauteur.rs`.
+fn control_row_centering(layout: ControlLayout) -> f32 {
+    match layout {
+        ControlLayout::Square => ((TILE_SIZE - control_row_height(layout)) / 2.0).max(0.0),
+        ControlLayout::Row => 0.0,
+    }
+}
+
 // Jetons repris de `:root` (`styles.css`, thème sombre par défaut — seul thème que l'overlay
 // reproduit pour l'instant). Ils vivent depuis le 2026-09-12 dans la section `OVERLAY_*` de
 // `design::tokens` : deux de ces valeurs existaient aussi dans `panels::combat`, et une recopie
@@ -842,19 +865,21 @@ pub fn show(
     // `ScrollArea` : défiler la bande le faisait sortir de l'écran avec les tuiles, et les quatre
     // actions du bandeau devenaient inatteignables tant qu'on ne revenait pas au début.
     let mut strip_rect = egui::Rect::NOTHING;
-    // Les tuiles peintes cette frame, dans l'ordre — leur infobulle s'ouvre APRÈS la bande, une
-    // fois son bas connu (voir `paint_tile_tips`).
-    let mut tuiles: Vec<(egui::Response, &str)> = Vec::with_capacity(entries.len());
-    // Vrai quand la bande déborde, donc quand la barre de défilement occupe la réserve sous les
-    // tuiles — c'est elle que l'infobulle ne doit pas masquer.
-    let mut barre_visible = false;
     ui.horizontal_top(|ui| {
         let layout = ControlLayout::for_entries(entries.len());
-        // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) — aligné sur
-        // le HAUT des tuiles (`horizontal_top`) et plus sur leur centre : la zone défilante est
-        // désormais plus haute qu'elles de la réserve de sa barre (voir `strip_scroll_area`), un
-        // centrage vertical décalerait le carré vers le bas d'autant.
-        let clicks = control_button_row(ui, shortcuts, layout, selection.is_open());
+        // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu de
+        // deux hauteurs qui s'additionnent :
+        //
+        // - la barre de défilement, quand la bande déborde : elle occupe la tête de la zone
+        //   (`design::ScrollArea::bar_before`), et le carré doit rester à hauteur des TUILES, pas
+        //   de la barre. Zéro quand la bande tient entière — la barre ne prend alors aucune place ;
+        // - le CENTRAGE sur la tuile ([`control_row_centering`]).
+        let clicks = ui
+            .vertical(|ui| {
+                ui.add_space(strip_scroll_area().space_before(ui) + control_row_centering(layout));
+                control_button_row(ui, shortcuts, layout, selection.is_open())
+            })
+            .inner;
         open_watchlist = clicks.add;
         open_options = clicks.options;
         open_web_app = clicks.details;
@@ -893,20 +918,11 @@ pub fn show(
                     if let Some(depuis) = tuile.reorder.dropped {
                         deplacement = Some((depuis, i));
                     }
-                    // Pas de nom pendant un déplacement : affiché sous le pointeur, il masquerait
-                    // le liseré de la tuile visée, qu'on essaie justement de lire.
-                    if !tuile.reorder.in_flight() {
-                        tuiles.push((tuile.response, entry.name.as_str()));
-                    }
                 }
             });
         });
         strip_rect = strip.inner_rect;
-        // `inner_rect` est la fenêtre du CONTENU : la barre, quand elle existe, est peinte en
-        // dessous, dans la réserve que la zone s'est gardée.
-        barre_visible = strip.content_size.x > strip.inner_rect.width() + 0.5;
     });
-    paint_tile_tips(&tuiles, strip_rect, barre_visible);
 
     // **Les deux gestes du mode, appliqués une fois la bande peinte.**
     if let Some(cle) = bascule_tuile {
@@ -1082,48 +1098,20 @@ impl WatchlistEditReason {
     }
 }
 
-/// Marge entre la poignée de la bande et le bas de la zone défilante — 14 px dans le jeu
+/// Marge entre la poignée de la bande et le bord de la zone défilante — 14 px dans le jeu
 /// (`design::tokens::SCROLLBAR_OUTER_MARGIN`, l'écart poignée → bord du PANNEAU de la modale
 /// Options), ramenés à 2 px ici : le bandeau n'a pas de panneau, il flotte sur le jeu, et ces
 /// 12 px de plus ne feraient qu'allonger une fenêtre qu'on vient au contraire de raccourcir
-/// (retour utilisateur 2026-09-13, voir `render_content::WATCHLIST_TOP_MARGIN`). La réserve totale
-/// sous les tuiles tombe ainsi à 6 + 6 + 2 = 14 px, exactement l'air que
+/// (retour utilisateur 2026-09-13, voir `render_content::WATCHLIST_TOOLTIP_RESERVE`). La réserve
+/// totale tombe ainsi à 2 + 6 + 6 = 14 px, exactement l'air que
 /// `ScrollArea::min_scrolled_height` réservait déjà à la barre flottante d'avant.
+///
+/// **Ces 2 px sont désormais AU-DESSUS de la barre**, qui est passée en tête de la bande le soir
+/// du même jour (voir [`strip_scroll_area`]) : « il faut laisser un ou deux pixels au-dessus de la
+/// barre de scroll seulement, pas besoin de mettre plus d'écart ». La marge interne haute de la
+/// fenêtre Suivi est tombée à 0 dans le même mouvement — sans quoi ils s'ajouteraient à ces 2 px
+/// (`render_content::paint_content`).
 const STRIP_SCROLLBAR_OUTER_MARGIN: f32 = 2.0;
-
-/// Ouvre le nom d'une tuile **sous la bande entière**, barre de défilement comprise.
-///
-/// Demande utilisateur du 2026-09-13 : toutes les infobulles du bandeau passent EN DESSOUS, pour
-/// que la place qu'elles réclamaient au-dessus (`render_content::WATCHLIST_TOOLTIP_RESERVE`, alors
-/// une marge HAUTE de 28 px) cesse d'éloigner la bande du bord haut du jeu — « c'est très
-/// dérangeant visuellement, et encore plus lorsqu'il n'y a pas du tout de suivi ».
-///
-/// D'où l'ancrage : « en dessous de la tuile » tomberait sur la barre de défilement, peinte à
-/// 6 px sous elle (voir [`STRIP_SCROLLBAR_OUTER_MARGIN`]) — le nom masquerait la barre au moment
-/// précis où on longe la bande pour la lire. L'infobulle s'accroche donc à un rectangle qui
-/// descend jusqu'au bas de la zone défilante (`design::Tooltip::anchor`), la barre incluse quand
-/// elle est là, et s'ouvre dessous.
-///
-/// Peinte depuis `show` plutôt que depuis `entry_tile` pour cette seule raison : le bas de la zone
-/// défilante n'est connu qu'une fois sa fermeture rendue.
-fn paint_tile_tips(tuiles: &[(egui::Response, &str)], strip_rect: egui::Rect, barre_visible: bool) {
-    let bas = strip_rect.max.y
-        + if barre_visible {
-            strip_scroll_area().reserve()
-        } else {
-            0.0
-        };
-    for (response, nom) in tuiles {
-        let ancre = egui::Rect::from_min_max(
-            response.rect.min,
-            egui::pos2(response.rect.max.x, bas.max(response.rect.max.y)),
-        );
-        design::tooltip(response)
-            .side(design::TooltipSide::Below)
-            .anchor(ancre)
-            .text(*nom);
-    }
-}
 
 /// La zone défilante des tuiles — **la barre de défilement du JEU** (`design::scroll_area`),
 /// couchée à l'horizontale (`design::ScrollAxis::Horizontal`).
@@ -1150,6 +1138,7 @@ fn strip_scroll_area() -> design::ScrollArea {
     design::scroll_area("watchlist-strip")
         .axis(design::ScrollAxis::Horizontal)
         .outer_margin(STRIP_SCROLLBAR_OUTER_MARGIN)
+        .bar_before(true)
 }
 
 /// Réglages de `Style` que la bande impose à tout son `Ui` — ce qui reste de l'ancien
@@ -1782,9 +1771,19 @@ fn entry_tile(
         ),
     };
 
-    // **L'infobulle n'est plus peinte ici** depuis le 2026-09-13 (voir `show`, `paint_tile_tips`) :
-    // elle s'ouvre EN DESSOUS de la zone défilante, dont cette fonction ne connaît pas le bas — un
-    // nom ouvert sous la tuile elle-même recouvrirait la barre de défilement, juste dessous.
+    // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte 2026-09-06,
+    // design system tooltip). EN DESSOUS de la tuile depuis le 2026-09-13 au soir, et à l'écart
+    // mesuré du composant (`tokens::TOOLTIP_GAP`, 5 px) : une version intermédiaire l'ancrait plus
+    // bas, au pied de la zone défilante, pour ne pas masquer une barre alors peinte sous les
+    // tuiles — retour utilisateur immédiat, « tu les as mises extrêmement loin, pas dans les
+    // conventions du composant ». La barre étant passée AU-DESSUS (voir `strip_scroll_area`), il
+    // n'y a plus rien à éviter dessous. Tue pendant un déplacement : un nom affiché sous le
+    // pointeur masquerait le liseré de la tuile visée, qu'on essaie justement de lire.
+    if !reorder.in_flight() {
+        design::tooltip(&response)
+            .side(design::TooltipSide::Below)
+            .text(&entry.name);
+    }
     Tile { response, reorder }
 }
 
