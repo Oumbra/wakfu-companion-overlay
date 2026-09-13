@@ -21,10 +21,10 @@
 //! - croix fléchée (tout curseur de déplacement ou de saisie : `CursorIcon::Move`, posé par les
 //!   tuiles de l'onglet Suivi — voir `panels::suivi_tab` —, mais aussi `Grab`/`Grabbing`, qu'egui
 //!   pose LUI-MÊME au survol d'un glissable sans clic (`Response::dnd_set_drag_payload`) et tant
-//!   qu'une charge est en vol (`DragAndDrop::on_end_pass`), et `AllScroll`, la même croix pour un
-//!   panoramique) → bitmap `wakfu-cursor-move.png`, **fixe** : le jeu ne fait pas clignoter
-//!   celui-là (couleur constante sur les 113 images où il est visible, voir
-//!   `assets/cursor/README.md`). Une seule image pour les quatre : le jeu n'a qu'une croix, et une
+//!   qu'une charge est en vol (`DragAndDrop::on_end_pass`)) → bitmap `wakfu-cursor-move.png`,
+//!   **fixe** : le jeu ne fait pas clignoter celui-là (couleur constante sur les 113 images où il
+//!   est visible, voir `assets/cursor/README.md`). Une seule image pour les trois : le jeu n'a
+//!   qu'une croix, et une
 //!   main système qui se fermerait au milieu d'un geste commencé sous la croix casserait
 //!   l'illusion. Son point chaud est au CENTRE, pas à la pointe : c'est une croix symétrique, elle
 //!   ne pointe nulle part ;
@@ -167,12 +167,9 @@ pub fn apply(ctx: &egui::Context, now: Instant) {
             ctx.set_cursor_image(Some(images.idle.clone()));
         }
         // Fixe : aucun redessin réclamé, et l'instant d'entrée en mode main est oublié pour que le
-        // prochain survol d'un cliquable reparte sur un éclair. Les quatre curseurs de déplacement
+        // prochain survol d'un cliquable reparte sur un éclair. Les trois curseurs de déplacement
         // ou de saisie partagent la croix — voir la doc de module.
-        egui::CursorIcon::Move
-        | egui::CursorIcon::Grab
-        | egui::CursorIcon::Grabbing
-        | egui::CursorIcon::AllScroll => {
+        egui::CursorIcon::Move | egui::CursorIcon::Grab | egui::CursorIcon::Grabbing => {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
             ctx.set_cursor_image(Some(images.moving.clone()));
         }
@@ -355,12 +352,11 @@ mod tests {
 
         // Glisser-déposer : la croix fléchée, fixe — aucun redessin réclamé, et le clignotement
         // est oublié comme pour un curseur système. Même croix pour les curseurs de saisie
-        // qu'egui pose de lui-même (`Grab` au survol, `Grabbing` en vol) et pour le panoramique.
+        // qu'egui pose de lui-même (`Grab` au survol, `Grabbing` en vol).
         for icon in [
             egui::CursorIcon::Move,
             egui::CursorIcon::Grab,
             egui::CursorIcon::Grabbing,
-            egui::CursorIcon::AllScroll,
         ] {
             let (image, delay) = frame(&ctx, t0, ms(1500), icon);
             assert!(
