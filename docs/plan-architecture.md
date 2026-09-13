@@ -868,14 +868,16 @@ Reste hors périmètre de ce lot : l'onglet « Personnages ».
 ### 9.1 bis Ligne de sorts du combat (2026-09-12)
 
 Sous le dernier groupe de dégâts du panneau Combat, un bloc montre **les sorts lancés par un
-allié pendant son dernier tour**, en icônes numérotées dans l'ordre du log — spécification
+combattant du camp affiché pendant son dernier tour** (un allié en vue Alliés, un ennemi en vue
+Ennemis — vue Ennemis ajoutée le 13 sept., voir ci-dessous), en icônes numérotées dans l'ordre du log — spécification
 validée en artefact avec l'utilisateur en quatre révisions (11-12 sept.), cotes reprises telles
 quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
 
 - **Position** : dans le flux de la colonne des barres, **10 px** sous la barre du dernier groupe
   (18 px à l'origine, ramené le 12 sept. au soir — le même écart, `TOTAL_GAP`, sépare désormais le
   total du premier groupe, « pour l'homogénéité entre les blocs »), jamais en position fixe sous
-  le gabarit ; **vue Alliés seulement** (décidé le 12 sept.). Bloc de 40 / 77 / 114 px pour une,
+  le gabarit ; **chaque vue montre le bloc de son camp** (vue Alliés seulement du 12 au 13 sept.).
+  Bloc de 40 / 77 / 114 px pour une,
   deux ou trois rangées ; pire cas (six groupes, trois rangées) : 388 px, sous le bas du gabarit 6
   (437) — pas de changement de taille de fenêtre. Rien n'est affiché avant le premier sort allié.
 - **Sélection par le cadre** (refonte du 12 sept. au soir, proposition en artefact en deux
@@ -892,7 +894,7 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
   latéral** : retour à la ligne tous les cinq sorts (32 px, 5 px d'écart — 3 px faisaient se
   toucher deux critiques voisins). Badge d'index **en haut à gauche** (1 px du bord gauche et du
   haut), critique = liseré doré + coin plié, infobulle sur une ligne « Nom · Critique » sans nom
-  de lanceur. Ennemis exclus.
+  de lanceur.
 - **Données** : `FighterDamage::last_turn_casts` / `FightSnapshot::last_ally_caster`
   (`overlay-engine::session`, alimentés dans `apply` sur `SpellCast` via le signal « nouveau tour »
   de `register_fight_turn`, persistés par `fight_store`). **Icônes** : référentiel
@@ -905,6 +907,39 @@ quelles dans `overlay-ui::panels::combat_spell_block`. Décisions fermes :
   mécaniques de classe comprises) : plus aucun « ? » sur le log de parité.
 - **Testkit** : `tests/combat_spell_block.rs`, rejeu réel + fixtures PNG injectées par
   `RemoteIconStore::preload` (jamais le réseau), interactions par nœuds d'accessibilité.
+
+**Vue Ennemis (2026-09-13)** — proposition « Sorts ennemis du combat » en artefact, revue par un
+expert (validée avec réserves, toutes intégrées), décidée :
+
+- **Mêmes règles, même géométrie, mêmes marques** que côté allié ; le composant
+  (`combat_spell_block`) ne connaît plus « l'allié » mais **le camp affiché** (`SpellSelection::
+  is_ally`). Épingle mémorisée par combat **et par camp** (`("combat-spell-block", fight_id,
+  is_ally)`) : basculer le switch retrouve chaque camp comme on l'a laissé. Point = dernier lanceur
+  du camp (`FightSnapshot::last_enemy_caster`, pendant de `last_ally_caster`).
+- **Icône** : nouveau référentiel `assets/monster-spells.json` (maintenu à la main, embarqué,
+  `overlay_engine::spells::MonsterSpellIndex`), clé nom normalisé + **`breed` de la ligne de
+  jointure** (`FighterDamage::breed`, nouveau, `#[serde(default)]`) — c'est l'identifiant du monstre
+  (`Grokoko breed : 4728` ↔ `breedId: 4728`), 69 noms ayant des images différentes selon le
+  monstre (« Coup d'Koko » : `spells/3.png` chez le Grokoko, `spells/4.png` chez le Kokoko).
+  Repli nom seul DANS ce fichier (combat restauré d'avant le champ `breed`), jamais vers le
+  référentiel de classe. Les deux index partagent une table générique (`SpellTable<K>`) et l'UI
+  passe par `overlay_engine::resolve_cast(fighter, spell)`, seul à savoir quel fichier répond.
+  Sort absent → « ? » + un avertissement nommant le fichier à compléter.
+- **Ennemis nombreux** (cadre à défilement, > 6) : marques et clics sur les portraits visibles
+  seulement ; **pas de défilement automatique** vers le dernier lanceur (le défilement reste à
+  l'utilisateur), le bloc montre ses sorts quoi qu'il en soit. Identifiant egui des médaillons
+  désormais par emplacement (deux Grokoko partageaient le même `Id` : clic attribué aux deux).
+- **Limites connues, acceptées** : deux homonymes qui jouent l'un après l'autre sans autre acteur
+  entre eux sont fusionnés sur un siège (limite de `register_fight_turn`, déjà vraie pour les
+  dégâts ; test `deux_homonymes_consecutifs_sont_fusionnes_sur_un_siege`) ; en breach, la colonne
+  des barres n'est pas bornée et dépasse déjà la fenêtre au-delà d'une dizaine d'ennemis à dégâts,
+  le bloc sort avec elle ; le nom du lanceur reste absent de l'infobulle même quand le liseré est
+  hors de la bande visible (suggestion de la revue, non retenue en révision 1 pour garder les
+  règles strictement identiques aux deux camps — à reconsidérer sur retour en jeu). Alliés au-delà
+  de six (liste plate) : toujours ni marque ni clic — asymétrie assumée avec les ennemis > 6.
+- **Testkit** : captures `combat_spell_block_ennemis_{suivi_auto,epingle,survol}` (fixtures
+  `3.png`/`4.png`), les quatre captures alliées inchangées ; l'aller-retour Alliés → Ennemis →
+  Alliés recompare la capture alliée d'origine.
 
 Alliés au-delà du sixième (liste plate, cas rare) : pas encore de marque ni de clic sur leur
 portrait — à ajouter si le cas se présente. Option « n'afficher que mes personnages » (roster ∩
