@@ -16,9 +16,9 @@
 //!
 //! Les quatre règles que la maquette a établies et que ce fichier tient :
 //!
-//! 1. **La tuile porte deux informations qui ne se gênent pas.** La bordure et le pictogramme
-//!    disent l'état du SON ; l'emplacement de rareté et le nom disent ce qu'est l'OBJET. Cliquer
-//!    bascule le son et ne touche que les deux premiers.
+//! 1. **La tuile porte deux informations qui ne se gênent pas.** Le pictogramme dit l'état du
+//!    SON ; l'emplacement de rareté dit ce qu'est l'OBJET. Cliquer bascule le son et ne touche que
+//!    le premier.
 //! 2. **Les dix objets par défaut n'ont pas de croix de retrait** (`SoundItemEntry::is_default`),
 //!    parce que le web refuse structurellement de les supprimer. Leur son, lui, se coupe.
 //! 3. **Le son et le toast sont deux canaux**, réglés séparément : « Tester le son » d'un côté,
@@ -31,6 +31,25 @@
 //!    croix devient **rouge au survol** ([`design::tokens::INFO_ALERT`], le seul rouge mesuré du
 //!    jeu) : c'est elle qui porte désormais tout l'avertissement.
 //!
+//! ## Refonte du 2026-09-13 — la tuile devient un emplacement
+//!
+//! Demande utilisateur explicite : « afficher les objets de la même manière que les éléments
+//! suivis dans l'onglet Suivi ». La carte de 118 × 93 px disparaît au profit du seul emplacement
+//! de 64 px ([`TILE`]) — voir `panels::suivi_tab::tracked_tile`, dont cette tuile reprend la
+//! forme et les gestes. Quatre choses tombent avec la carte, une cinquième change de rôle :
+//!
+//! - **la bordure d'état** (cyan quand le son est actif, gris quand il est coupé) ;
+//! - **le nom sous l'emplacement**, qui se lit désormais en infobulle — et l'infobulle ne dit plus
+//!   que le nom, plus ce que le clic fera ;
+//! - **la croix permanente**, qui n'apparaît plus qu'au survol, avec un voile, et seulement sur un
+//!   objet retirable ;
+//! - **le pictogramme du son ACTIF** : le coin haut-gauche ne montre plus que le haut-parleur
+//!   barré. Une tuile sans marque est une tuile qui sonnera — c'est lui qui porte seul l'état
+//!   depuis que la bordure est partie.
+//!
+//! Rien n'est ajouté au passage : pas de chiffre, pas de cible, pas de compteur. L'emplacement du
+//! Suivi sait en afficher un ([`design::SlotCount`]), une alerte n'en a aucun.
+//!
 //! ## Transactionnel, comme le reste de la fenêtre
 //!
 //! Rien n'est écrit tant que « Valider » n'a pas été cliqué (§5.1 du plan) : cet onglet travaille
@@ -38,7 +57,7 @@
 //! l'envoie au compte. Un onglet qui appliquerait ses changements immédiatement à côté d'un onglet
 //! qui commit donnerait le pire cas — un pied de page dont l'effet dépend de l'onglet affiché.
 
-use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
+use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
 use crate::design::{self, DsIcon, IconContext, InputSize, SlotFrame};
@@ -58,78 +77,42 @@ const TEXT: Color32 = Color32::WHITE;
 /// convergente sur quatre captures, voir `panels::options_modal::SECTION_TITLE_TEXT`).
 const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
-/// Largeur d'une tuile — calée pour que cinq tiennent sur une rangée dans la fenêtre agrandie.
-const TILE_WIDTH: f32 = 118.0;
-/// Hauteur d'une tuile : emplacement d'objet, nom sur **une** ligne, marges — voir
-/// [`tile_height`], qui la calcule à partir de la police : le bas de la tuile se règle sur la
-/// **ligne de base** du nom, pas sur le bord de sa ligne.
+/// Côté d'une tuile — **l'emplacement d'objet du jeu**, celui du Suivi et du bandeau in-game.
 ///
-/// Portée à 104 px un moment le 2026-09-12, pour un nom sur deux lignes — **revenu en arrière le
-/// jour même, sur décision de l'utilisateur** : la tuile porte déjà l'icône de l'objet, et c'est
-/// elle qui lève l'ambiguïté entre deux noms proches, bien avant le texte. Le nom coupé se lit en
-/// infobulle — voir `design::label`. Puis 88 → 110 le soir même, et cette fois pour
-/// l'emplacement : c'est lui qui grandit (voir `TILE_SLOT`), le nom garde sa ligne unique. Puis
-/// 110 → 123 pour une marge basse de 18, **sur un malentendu** : la demande était l'inverse —
-/// ramener la marge HAUTE à celle du bas, « comme ça on va gagner en hauteur ». D'où 97. Puis
-/// 97 → 93 dans la nuit : à 97, la ligne du nom descendait 6 px sous ses lettres, et l'œil lisait
-/// **9** rangées vides sous le nom contre 5 au-dessus de l'emplacement (mesuré sur la capture de
-/// l'utilisateur : « visuellement, ce n'est pas le cas »).
-fn tile_height(ui: &egui::Ui) -> f32 {
-    TILE_SLOT_TOP
-        + TILE_SLOT
-        + TILE_NAME_GAP
-        + design::Label::baseline(ui, design::tokens::LABEL_FONT_SIZE)
-        + TILE_BOTTOM_INSET
-        + TILE_BORDER_WIDTH
-}
-/// Entre le bord haut et l'emplacement — **cinq pixels, comme entre le nom et le bord bas**
-/// (demande du 2026-09-12, nuit). L'emplacement remonte donc dans la rangée des badges : ils
-/// occupent les coins (14 px à 5 px du bord), lui le centre (27 px de chaque côté), ils ne se
-/// touchent pas. Jusque-là il attendait sous cette rangée, à 18 du bord.
-///
-/// À l'œil : la bordure prend 2 de ces 5 px, et le cadre de rareté commence 2 px sous le bord de
-/// sa case (marge transparente de la texture) — la capture montre **5 rangées vides** entre la
-/// bordure et le cadre. C'est ce vide-là que [`TILE_BOTTOM_INSET`] reproduit sous le nom.
-const TILE_SLOT_TOP: f32 = TILE_BADGE_INSET;
-/// **Rangées vides entre la ligne de base du nom et la bordure basse** — autant qu'entre la
-/// bordure haute et le cadre de l'emplacement (voir [`TILE_SLOT_TOP`]). Mesuré depuis la ligne de
-/// base ([`design::Label::baseline`]), pas depuis le bord de la ligne de texte, qui descend bien
-/// plus bas que les lettres : c'est ce qui faisait lire 9 rangées vides pour 5 déclarées. Compté
-/// hors bordure ([`TILE_BORDER_WIDTH`] s'ajoute dans [`tile_height`]) parce que c'est ainsi
-/// qu'il se voit — « peu importe le nombre de pixels, autant d'écart en haut qu'en bas ».
-const TILE_BOTTOM_INSET: f32 = 5.0;
-/// Gouttière entre deux tuiles — « les petites tuiles doivent être séparées sur tous les bords ».
-const TILE_GAP: f32 = 10.0;
-const TILE_BORDER_WIDTH: f32 = 2.0;
-const TILE_RADIUS: u8 = 4;
-/// Fond d'une tuile — le fond de panneau du jeu, pour que la bordure d'état porte seule le signal.
-const TILE_FILL: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-/// Côté de l'emplacement d'objet — **la case du Suivi**, [`design::tokens::ITEM_SLOT_SIZE`].
-///
-/// 44 px jusqu'au 2026-09-12 au soir ; retour utilisateur : « les items slot sont assez petits
-/// par rapport au web et même par rapport au Suivi, dix pixels de plus de chaque côté ». Dix de
-/// chaque côté font 64 — exactement la case du Suivi, mesurée sur le jeu. Une tuile de 118 px lui
-/// laisse 27 px de chaque côté, au lieu des 37 qui faisaient « un très grand espace latéral ».
-const TILE_SLOT: f32 = design::tokens::ITEM_SLOT_SIZE;
+/// **Refonte du 2026-09-13** : la tuile n'est plus une carte de 118 × 93 px qui *portait* un
+/// emplacement de 64, elle **est** cet emplacement. Demande utilisateur explicite — « afficher les
+/// objets de la même manière que les éléments suivis dans l'onglet Suivi ». Tombent avec la carte :
+/// son fond, son rayon, sa hauteur calculée sur la ligne de base du nom, sa bordure d'état
+/// (cyan/gris) et le nom lui-même, qui se lit désormais en infobulle comme au Suivi.
+const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
+/// Gouttière entre deux tuiles — celle du Suivi (`panels::suivi_tab::TILE_GAP`), pas les 10 px de
+/// l'ancienne carte.
+const TILE_GAP: f32 = 12.0;
+/// Côté du pictogramme son et de la croix.
 const TILE_BADGE: f32 = 14.0;
-const TILE_BADGE_INSET: f32 = 5.0;
-const TILE_NAME_INSET: f32 = 5.0;
-/// Entre le bas de l'emplacement et la ligne du nom.
-const TILE_NAME_GAP: f32 = 5.0;
-
-/// Couleur du nom d'objet — **l'or du jeu** ([`design::tokens::TEXT_GOLD`]), la même teinte que le
-/// libellé d'une case cochée. Demande explicite du 2026-09-12.
+/// Retrait des deux badges depuis leur coin — **8 px, soit 2 px À L'INTÉRIEUR du contour noir**.
 ///
-/// Le blanc qu'il portait avant le mettait sur le même plan que la description de la section et le
-/// libellé « Tester le son de l'alerte », qui sont du texte courant. Un nom d'objet est une
-/// **donnée**, pas une phrase — c'est le même rôle que la valeur saisie dans un champ, qui est en
-/// or pour cette raison (voir [`design::tokens::INPUT_TEXT`]).
-const TILE_NAME_TEXT: Color32 = design::tokens::TEXT_GOLD;
+/// Mesuré au pixel sur une tuile découpée dans `options_suivi_incremental.png` : la marge
+/// transparente occupe les pixels 0-1, la bordure de rareté 2-4, le **contour noir** tombe au
+/// pixel 5, et la fenêtre de l'icône commence au 6 (c'est exactement
+/// [`design::tokens::ITEM_SLOT_BORDER_INNER_RATIO`], 13/128 × 64 ≈ 6,5). Les badges se posent donc
+/// à 6 + 2.
+///
+/// **Trois passes pour arriver ici** (2026-09-13). À 5 px — le retrait du Suivi, hérité de la
+/// carte — ils chevauchaient le cadre de rareté ; à 2 px ils se collaient au bord extérieur. La
+/// demande était « à deux pixels des bordures noires », c'est-à-dire à l'intérieur, pas à
+/// l'extérieur : « elle doit vraiment être présente à l'intérieur du bord, pour qu'il y ait un
+/// tout petit espacement entre la bordure intérieure ». Le Suivi garde 5 px de son côté : il n'y
+/// a que la croix, et rien n'y est peint dans le coin opposé.
+const TILE_BADGE_INSET: f32 = 8.0;
 
-/// Bordure d'une tuile dont le son est ACTIF — `--accent` du dépôt web.
-const ACCENT: Color32 = Color32::from_rgb(0x00, 0xD2, 0xFF);
-/// Bordure d'une tuile dont le son est COUPÉ — le gris de bord des panneaux.
-const MUTED_BORDER: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
+/// Voile d'une tuile SURVOLÉE, sous sa croix — même teinte qu'au Suivi
+/// (`panels::suivi_tab::TILE_HOVER_SCRIM`), mais **restreint à la fenêtre de l'icône** : il ne
+/// couvre ni le contour noir ni la bordure de rareté (voir [`hover_scrim_rect`]).
+const TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
+
+/// Rouge de la croix sous le pointeur — `INFO_ALERT`, le seul rouge mesuré du jeu.
+const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
 
 /// Fond d'une ligne de réglage mise en valeur — l'idiome des lignes d'aptitude du jeu
 /// (`interface-personnage-aptitudes.png`, `#26282b` sur un fond de section plus sombre).
@@ -512,8 +495,7 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
 
     panel.scroll_area(ui, "alertes.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
-        let per_row =
-            (((content_width + TILE_GAP) / (TILE_WIDTH + TILE_GAP)).floor() as usize).max(1);
+        let per_row = (((content_width + TILE_GAP) / (TILE + TILE_GAP)).floor() as usize).max(1);
         for chunk in items.chunks(per_row) {
             ui.horizontal(|ui| {
                 for item in chunk {
@@ -556,166 +538,167 @@ enum TileClick {
     Remove,
 }
 
-/// **La tuile d'un objet suivi.**
+/// **La tuile d'un objet en alerte — un emplacement d'objet, et rien d'autre.**
 ///
 /// | Élément | Ce qu'il dit |
 /// | --- | --- |
-/// | Bordure 2 px arrondie | l'état du SON : [`ACCENT`] actif, [`MUTED_BORDER`] coupé |
-/// | Pictogramme haut-gauche | le même état — `Volume` / `VolumeMute` |
-/// | Croix haut-droite | retrait — **seulement si l'objet n'est pas un défaut**, rouge au survol |
-/// | Emplacement à bordure de rareté | ce qu'est l'objet |
-/// | Nom sous l'emplacement | ce qu'est l'objet, en toutes lettres |
+/// | Cadre | ce qu'est l'objet : la bordure de sa **rareté** |
+/// | Coin haut-gauche | le son est **coupé** — et rien du tout quand il est actif |
+/// | Coin haut-droit | retrait — **seulement sur une tuile retirable ET survolée**, rouge sous le pointeur |
+/// | Voile | le survol, et un fond assez sombre pour la croix — **retirables uniquement** |
+///
+/// Ni nom, ni chiffre : le nom se lit en infobulle, et une alerte n'a ni compteur ni cible
+/// (contrairement au Suivi, dont l'emplacement sait afficher une cible de décompte).
 fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData) -> TileClick {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(TILE_WIDTH, tile_height(ui)), egui::Sense::click());
-
-    let state_color = if item.enabled { ACCENT } else { MUTED_BORDER };
-    ui.painter().rect_filled(rect, TILE_RADIUS, TILE_FILL);
-    ui.painter().rect_stroke(
-        rect,
-        TILE_RADIUS,
-        Stroke::new(TILE_BORDER_WIDTH, state_color),
-        StrokeKind::Inside,
-    );
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), egui::Sense::click());
 
     let icon_id = item
         .icon
         .as_ref()
         .and_then(|icon| texture_id(ui, ctx, icon))
         .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
-    let slot = Rect::from_center_size(
-        egui::pos2(
-            rect.center().x,
-            rect.top() + TILE_SLOT_TOP + TILE_SLOT / 2.0,
-        ),
-        Vec2::splat(TILE_SLOT),
-    );
-    // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée.**
-    //
-    // `Ui::put` ouvre un scope, et un scope **avance le curseur du parent** jusqu'au bord de ce
-    // qu'il a posé. Appelé directement sur la rangée, il ramenait donc le curseur au bord droit de
-    // l'EMPLACEMENT (centré, donc 27 px avant le bord de la tuile) : la tuile suivante démarrait
-    // 27 px trop tôt et son fond opaque effaçait la fin du nom de la précédente. C'est ce qui
-    // faisait lire « Pierre d'avent » et trois « Plan "Epée de » identiques — le nom était bien
-    // mis en page, il était recouvert.
+
+    // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée** : `Ui::put` ouvre un scope, et
+    // un scope avance le curseur du parent — la tuile suivante démarrerait au mauvais endroit.
     let mut cellule = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     cellule.put(
-        slot,
+        rect,
         design::item_slot()
-            .size(TILE_SLOT)
+            .size(TILE)
             .frame(SlotFrame::Rarity(to_slot_rarity(item.rarity)))
             .icon(icon_id)
             .log_name(item.name.clone()),
     );
 
-    // **Le nom passe par `design::label`** : une ligne, ellipse au bout, et l'infobulle qui rend
-    // le nom entier quand il est coupé — c'est le composant qui porte les trois, pas la tuile.
-    //
-    // Posé dans la CELLULE, comme l'emplacement : `ui.add` avancerait le curseur de la rangée et
-    // décalerait la tuile suivante (voir le commentaire de l'emplacement ci-dessus).
-    let largeur_nom = rect.width() - 2.0 * TILE_NAME_INSET;
-    let hauteur_nom = design::Label::height(ui, design::tokens::LABEL_FONT_SIZE);
-    let name_rect = egui::Rect::from_min_size(
-        egui::pos2(
-            rect.center().x - largeur_nom / 2.0,
-            slot.bottom() + TILE_NAME_GAP,
-        ),
-        Vec2::new(largeur_nom, hauteur_nom),
-    );
-    cellule.put(
-        name_rect,
-        design::label(&item.name)
-            .width(largeur_nom)
-            .color(TILE_NAME_TEXT)
-            .log_name("alertes.nom"),
-    );
-
     let ds = design::DesignSystem::get(ui.ctx());
-    let glyph = if item.enabled {
-        DsIcon::Volume
-    } else {
-        DsIcon::VolumeMute
-    };
-    let native = ds.icon_native_size(glyph);
-    ds.paint_icon(
-        ui.painter(),
-        Rect::from_center_size(
-            egui::pos2(
-                rect.left() + TILE_BADGE_INSET + TILE_BADGE / 2.0,
-                rect.top() + TILE_BADGE_INSET + TILE_BADGE / 2.0,
-            ),
-            design::components::icon_button::glyph_fit(native, TILE_BADGE),
-        ),
-        glyph,
-        // **Pas la couleur de la bordure** : à l'identique, le pictogramme de coupure se fondait
-        // dans son propre liseré gris et devenait illisible. La bordure porte seule le signal de
-        // couleur.
-        SUBDUED,
-    );
 
-    // Croix de retrait — absente sur un objet par défaut, que le web refuse de supprimer.
+    // **`contains_pointer` et NON `hovered`.** La croix a sa propre zone interactive, posée
+    // par-dessus la tuile : dès que le pointeur l'atteint, egui donne le survol à cette zone et
+    // `response.hovered()` retombe à faux — la croix disparaîtrait à l'instant précis où l'on
+    // vise. Piège déjà payé au Suivi, voir `panels::suivi_tab::tracked_tile`.
+    //
+    // **Et seulement sur un objet retirable** : les dix objets par défaut n'ont pas de croix, donc
+    // rien à révéler — « le voile ne concerne que les objets pouvant être supprimés » (retour du
+    // 2026-09-13). Un voile sans croix annoncerait une action qui n'existe pas.
+    let survol_retirable = !item.is_default && response.contains_pointer();
+    if survol_retirable {
+        ui.painter()
+            .rect_filled(hover_scrim_rect(rect), 0.0, TILE_HOVER_SCRIM);
+    }
+
+    // Pictogramme du son — **peint APRÈS le voile**, sinon celui-ci l'assombrirait avec l'icône.
+    // Affiché seulement quand le son est COUPÉ : une tuile sans marque est une tuile qui sonnera
+    // (décision du 2026-09-13, en remplacement de la bordure d'état cyan/gris).
+    if !item.enabled {
+        paint_outlined_icon(
+            ui,
+            &ds,
+            badge_rect(ds.icon_native_size(DsIcon::VolumeMute), rect, Corner::Left),
+            DsIcon::VolumeMute,
+            SUBDUED,
+        );
+    }
+
     let mut clic = TileClick::None;
-    if !item.is_default {
-        let croix = Rect::from_center_size(
-            egui::pos2(
-                rect.right() - TILE_BADGE_INSET - TILE_BADGE / 2.0,
-                rect.top() + TILE_BADGE_INSET + TILE_BADGE / 2.0,
-            ),
+    if survol_retirable {
+        // **Sa propre zone cliquable, avec sa propre main et sa propre infobulle.** Elle mange
+        // aussi le clic, pour qu'un retrait n'emporte pas au passage la bascule du son.
+        let zone_rect = Rect::from_center_size(
+            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::Right).center(),
             Vec2::splat(TILE_BADGE + 4.0),
         );
-        let zone = ui.interact(croix, response.id.with("retirer"), egui::Sense::click());
-        let native = ds.icon_native_size(DsIcon::Close);
+        let croix = ui
+            .interact(zone_rect, response.id.with("retirer"), egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         ds.paint_icon(
             ui.painter(),
-            Rect::from_center_size(
-                croix.center(),
-                design::components::icon_button::glyph_fit(native, TILE_BADGE - 2.0),
-            ),
+            badge_rect(ds.icon_native_size(DsIcon::Close), rect, Corner::Right),
             DsIcon::Close,
-            // **Rouge au survol** (2026-09-13) : la croix est la seule action destructrice de la
-            // tuile, et depuis que le retrait ne demande plus confirmation, c'est elle qui doit
-            // dire ce qu'elle fait avant le clic. `INFO_ALERT` est le seul rouge que le design
-            // system ait mesuré sur le jeu.
-            if zone.hovered() {
-                design::tokens::INFO_ALERT
-            } else {
-                SUBDUED
-            },
+            // Rouge sous le pointeur — depuis que le retrait ne demande plus confirmation, c'est
+            // la croix qui doit dire ce qu'elle fait AVANT le clic.
+            if croix.hovered() { REMOVE_HOVER } else { TEXT },
         );
-        let zone = zone.on_hover_cursor(egui::CursorIcon::PointingHand);
-        design::tooltip(&zone).text("Retirer de vos alertes");
-        if zone.clicked() {
-            clic = TileClick::Remove;
+        design::tooltip(&croix).text("Retirer du suivi");
+        if croix.clicked() {
+            return TileClick::Remove;
         }
-        // La croix mange le clic : sans ça, retirer basculerait aussi le son au passage.
-        if zone.hovered() {
-            return clic;
+        if croix.hovered() {
+            return TileClick::None;
         }
     }
 
-    // **Les deux infobulles s'excluent.** Celle du nom est posée par `design::label` — elle ne
-    // paraît que si le nom est coupé, et elle rend le nom entier. Celle de la tuile dit ce que le
-    // clic fera. Sans cette exclusion, survoler un nom coupé en déclencherait deux, l'une sur
-    // l'autre : la position du curseur tranche, et le nom gagne sur sa propre zone.
+    // **Le nom, et rien que le nom** (demande du 2026-09-13). L'infobulle disait aussi ce que le
+    // clic ferait (« Cliquer pour couper ») ; le pictogramme porte déjà l'état, et le nom n'est
+    // plus écrit nulle part ailleurs depuis qu'il a quitté la tuile. Du même coup disparaît
+    // l'exclusion des deux infobulles par position de pointeur, que le libellé peint imposait.
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    // Seulement là où le libellé porte DÉJÀ la sienne : sur un nom qui tient en entier, il n'en
-    // pose aucune, et se taire ici laisserait une zone muette au milieu de la tuile.
-    let sur_un_nom_coupe =
-        design::Label::elides(ui, &item.name, largeur_nom, design::tokens::LABEL_FONT_SIZE)
-            && ui
-                .input(|i| i.pointer.hover_pos())
-                .is_some_and(|p| name_rect.contains(p));
-    if !sur_un_nom_coupe {
-        design::tooltip(&response).text(if item.enabled {
-            "Cliquer pour couper"
-        } else {
-            "Cliquer pour rétablir"
-        });
-    }
+    design::tooltip(&response).text(&item.name);
     if response.clicked() {
         clic = TileClick::Toggle;
     }
     clic
+}
+
+/// Le coin d'une tuile où se pose un badge.
+#[derive(Clone, Copy)]
+enum Corner {
+    Left,
+    Right,
+}
+
+/// Où peindre un badge de [`TILE_BADGE`] px dans son coin, à [`TILE_BADGE_INSET`] des deux bords.
+///
+/// `native` est la taille native du glyphe : `glyph_fit` l'inscrit dans le carré du badge sans le
+/// déformer, exactement comme les boutons icône du design system.
+fn badge_rect(native: Vec2, tile: Rect, corner: Corner) -> Rect {
+    let x = match corner {
+        Corner::Left => tile.left() + TILE_BADGE_INSET + TILE_BADGE / 2.0,
+        Corner::Right => tile.right() - TILE_BADGE_INSET - TILE_BADGE / 2.0,
+    };
+    Rect::from_center_size(
+        egui::pos2(x, tile.top() + TILE_BADGE_INSET + TILE_BADGE / 2.0),
+        design::components::icon_button::glyph_fit(native, TILE_BADGE),
+    )
+}
+
+/// Peint un glyphe **cerné de noir**, pour qu'il tienne sur n'importe quel fond.
+///
+/// Le pictogramme du son est le seul élément de la tuile posé à même l'icône de l'objet : la croix,
+/// elle, n'apparaît qu'avec son voile, qui lui fait un fond sombre. Sans cerné, un gris
+/// [`SUBDUED`] sur une icône claire se lit mal — défaut constaté sur la capture du 2026-09-13, où
+/// le haut-parleur barré s'efface presque sur le gris clair de l'emplacement.
+///
+/// Même procédé que les compteurs du bandeau (`panels::combat::paint_outlined_text`) : quatre
+/// passes noires décalées d'un pixel, puis le glyphe par-dessus. Quatre et non huit — les
+/// diagonales n'ajoutent rien de visible à cette taille, et chaque passe est un dessin de texture
+/// de plus.
+fn paint_outlined_icon(
+    ui: &egui::Ui,
+    ds: &design::DesignSystem,
+    rect: Rect,
+    icon: DsIcon,
+    color: Color32,
+) {
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        ds.paint_icon(
+            ui.painter(),
+            rect.translate(Vec2::new(dx, dy)),
+            icon,
+            Color32::BLACK,
+        );
+    }
+    ds.paint_icon(ui.painter(), rect, icon, color);
+}
+
+/// La fenêtre de l'icône — **tout ce que le voile de survol a le droit de couvrir**.
+///
+/// Le Suivi peint le sien sur le carré entier ; ici c'est un défaut visible, signalé sur la
+/// maquette du 2026-09-13 : « le voile dépasse sur la partie inférieure et la partie de droite,
+/// ce qui n'est pas possible ». Il doit s'arrêter au contour noir, à
+/// [`design::tokens::ITEM_SLOT_BORDER_INNER_RATIO`] du bord — le même ratio que la fenêtre où
+/// `item_slot` inscrit l'icône, donc la même limite exactement.
+fn hover_scrim_rect(tile: Rect) -> Rect {
+    tile.shrink(tile.width() * design::tokens::ITEM_SLOT_BORDER_INNER_RATIO)
 }
 
 /// Le rouage de chargement, centré dans les DEUX axes de la zone que la grille occuperait.
