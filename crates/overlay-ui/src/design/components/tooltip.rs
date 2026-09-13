@@ -10,6 +10,9 @@
 //! // Sur le côté, quand un voisin ne doit pas être recouvert.
 //! design::tooltip(&response).side(TooltipSide::Right).text("Options");
 //!
+//! // En dessous, quand une rangée de voisins occupe les trois autres côtés.
+//! design::tooltip(&response).side(TooltipSide::Below).text("Ajouter");
+//!
 //! // Contenu libre, si un texte ne suffit pas.
 //! design::tooltip(&response).show(|ui| { ui.add(design::info_text("…")); });
 //! ```
@@ -55,6 +58,17 @@
 //! Ce placement demande de la place : `watchlist::CONTROL_TOOLTIP_RESERVE` en réserve autant des
 //! deux côtés du carré. Le composant ne réserve rien lui-même (§6 du contrat : la mise en page
 //! appartient au panneau).
+//!
+//! ## En dessous, quand la rangée est horizontale
+//!
+//! Retour utilisateur du 2026-09-13, deux captures à l'appui : tant qu'aucun suivi n'est
+//! renseigné, le carré 2×2 n'a que ses infobulles pour voisins, et « Ajouter (Ctrl+Shift+A) » ne
+//! tient dans aucune des deux réserves latérales — elle retombe alors par-dessus les autres
+//! boutons, « rendant la lecture et l'usage très pénibles ». Le bandeau vide passe donc en rangée
+//! 1×4 avec [`TooltipSide::Below`] : sous une rangée, aucun bouton n'est jamais recouvert, et la
+//! fenêtre Suivi a toujours de la place en dessous (`main.rs::WATCHLIST_HEIGHT`, dimensionnée
+//! pour un toast). Ici, `BOTTOM` est un choix, pas le défaut d'egui subi : l'infobulle s'aligne
+//! sur le BOUTON, pas sur le curseur.
 
 use egui::{RectAlign, Response, Ui};
 
@@ -70,6 +84,9 @@ pub enum TooltipSide {
     Left,
     /// À droite : le symétrique.
     Right,
+    /// En dessous : pour un widget d'une rangée horizontale, dont les voisins occupent les côtés
+    /// et dont rien n'occupe le dessous — voir la doc de module.
+    Below,
 }
 
 impl TooltipSide {
@@ -104,6 +121,16 @@ impl TooltipSide {
                     RectAlign::LEFT,
                     RectAlign::LEFT_START,
                     RectAlign::LEFT_END,
+                ],
+            ),
+            TooltipSide::Below => (
+                RectAlign::BOTTOM,
+                [
+                    RectAlign::BOTTOM_START,
+                    RectAlign::BOTTOM_END,
+                    RectAlign::TOP,
+                    RectAlign::TOP_START,
+                    RectAlign::TOP_END,
                 ],
             ),
         }
@@ -205,6 +232,12 @@ mod tests {
                 [RectAlign::RIGHT_START, RectAlign::RIGHT_END],
                 RectAlign::LEFT,
             ),
+            (
+                TooltipSide::Below,
+                RectAlign::BOTTOM,
+                [RectAlign::BOTTOM_START, RectAlign::BOTTOM_END],
+                RectAlign::TOP,
+            ),
         ] {
             let (got, alts) = side.alignments();
             assert_eq!(got, principal, "{side:?} : alignement principal");
@@ -224,7 +257,9 @@ mod tests {
     fn aucun_repli_ne_pose_l_infobulle_sous_la_souris() {
         // `BOTTOM_START` est le défaut d'egui, celui que toute cette mécanique existe pour fuir.
         // Il reste admis comme dernier repli de `Above` — là, tomber dessous est le seul choix
-        // qui reste — mais jamais pour un placement latéral, qui a deux côtés à sa disposition.
+        // qui reste — et comme premier repli de `Below`, qui le DEMANDE (aligné sur le widget,
+        // pas sur la souris) — mais jamais pour un placement latéral, qui a deux côtés à sa
+        // disposition.
         for side in [TooltipSide::Left, TooltipSide::Right] {
             let (_, alts) = side.alignments();
             assert!(
