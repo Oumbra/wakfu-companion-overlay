@@ -390,10 +390,13 @@ impl Widget for Slider<'_> {
             DesignSystem::get(ui.ctx()).paint(painter, handle, DsTexture::SliderHandle, tint);
         }
 
-        match self.tooltip {
-            Some(tooltip) => response.on_hover_text(tooltip),
-            None => response,
+        // L'infobulle passe par le composant du design system, jamais par `on_hover_text` :
+        // celui-ci aligne en `RectAlign::BOTTOM_START` (sous l'élément, voir `Popup::new`) et
+        // laisse au libellé le gris d'egui. Voir `components::tooltip`.
+        if let Some(tooltip) = self.tooltip {
+            crate::design::tooltip(&response).text(tooltip);
         }
+        response
     }
 }
 

@@ -772,7 +772,7 @@ impl<'a> Autocomplete<'a> {
                 .tint(teinte)
                 .paint_at(ui, cell.shrink(tokens::AUTOCOMPLETE_FILTER_ICON_PAD));
             }
-            let response = response.on_hover_text(&filtre.tooltip);
+            crate::design::tooltip(&response).text(&filtre.tooltip);
             if response.clicked() {
                 tracing::debug!(
                     component = "autocomplete",
@@ -891,7 +891,7 @@ impl<'a> Autocomplete<'a> {
                 ),
                 Vec2::splat(tokens::AUTOCOMPLETE_ACTION_BOX),
             );
-            let mut zone = ui
+            let zone = ui
                 .interact(boite, response.id.with("action"), Sense::click())
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             let ds = DesignSystem::get(ui.ctx());
@@ -911,13 +911,14 @@ impl<'a> Autocomplete<'a> {
                     tokens::AUTOCOMPLETE_ACTION_IDLE
                 },
             );
-            // `on_hover_text` et non `design::tooltip` — **comme les boutons de filtre de ce même
-            // panneau**, quelques lignes plus haut. C'est le seul des deux qui sorte réellement
-            // au-dessus du panneau flottant : ancrée dans une couche déjà en avant-plan, une
-            // infobulle du design system s'y perd (constaté sur la planche du 2026-09-13, où le
-            // glyphe s'allumait sans qu'aucun texte n'apparaisse).
+            // Le composant du design system, comme les boutons de filtre de ce même panneau.
+            // Un passage précédent avait gardé `on_hover_text` ici, croyant le composant incapable
+            // de sortir au-dessus du panneau flottant ; c'était une lecture de planche, pas un
+            // fait : les deux passent par le MÊME `egui::Tooltip::for_enabled` (voir
+            // `Response::on_hover_ui`), seul l'alignement change — et c'est le repli `TOP` qui
+            // envoyait le texte hors du cadre capturé.
             if let Some(texte) = entry.action_tooltip.as_ref() {
-                zone = zone.on_hover_text(texte);
+                crate::design::tooltip(&zone).text(texte);
             }
             if zone.clicked() {
                 outcome.clicked_action = Some(index);

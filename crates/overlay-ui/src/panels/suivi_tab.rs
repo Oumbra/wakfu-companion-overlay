@@ -411,10 +411,13 @@ fn target_line(ui: &mut egui::Ui, state: &mut SuiviTabState, row: Rect) {
                     })
                     .size(ButtonSize::Height(24.0))
                     .min_width(BADGE_WIDTH)
+                    // Le geste, rien de plus : la mention « (Alt : retirer) » est écrite en
+                    // toutes lettres au début de la ligne, la répéter dans chacune des cinq
+                    // infobulles ne l'apprend à personne (retour utilisateur 2026-09-13).
                     .tooltip(if alt {
                         format!("Retirer {preset} à la quantité")
                     } else {
-                        format!("Ajouter {preset} à la quantité — Alt pour retirer")
+                        format!("Ajouter {preset} à la quantité")
                     })
                     .log_name(format!("suivi.quantite-{preset}")),
                 )
@@ -831,7 +834,7 @@ fn tracked_tile(
         let zone = response
             .clone()
             .on_hover_cursor(egui::CursorIcon::PointingHand);
-        design::tooltip(&zone).text(format!("{} — cliquer pour cocher", tuile.name));
+        design::tooltip(&zone).text(&tuile.name);
         if zone.clicked() {
             clic = TileClick::Toggle;
         }
@@ -884,11 +887,11 @@ fn tracked_tile(
         }
     }
 
-    // Le nom vit ici, et nulle part ailleurs sur la tuile.
-    design::tooltip(&response).text(match tuile.target {
-        Some(target) => format!("{} — décompte depuis {}", tuile.name, target),
-        None => format!("{} — incrémental", tuile.name),
-    });
+    // **Le nom, et rien que le nom.** L'infobulle disait aussi le mode (« — incrémental », « —
+    // décompte depuis 50 ») ; retiré le 2026-09-13 sur retour utilisateur : le mode se lit déjà
+    // sur la tuile — un compteur qui monte ou une cible affichée — et l'utilisateur vient de le
+    // choisir lui-même dans cette même modale. Le nom, lui, n'est écrit nulle part ailleurs.
+    design::tooltip(&response).text(&tuile.name);
     clic
 }
 

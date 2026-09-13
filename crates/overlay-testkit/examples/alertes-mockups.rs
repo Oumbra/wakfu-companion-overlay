@@ -598,7 +598,7 @@ fn alert_item(
     // reste.
     let sur_le_nom = elided && {
         let zone = ui.interact(name_rect, response.id.with("nom"), egui::Sense::hover());
-        zone.clone().on_hover_text(item.name);
+        design::tooltip(&zone).text(item.name);
         zone.hovered()
     };
 
@@ -608,15 +608,14 @@ fn alert_item(
     if sur_le_nom {
         return response;
     }
-    response.on_hover_text(format!(
-        "{} — {}",
-        item.name,
-        if sound_on {
-            "son activé, cliquer pour couper"
-        } else {
-            "son coupé, cliquer pour rétablir"
-        }
-    ))
+    // L'action seule : le nom est écrit sous l'icône, et l'icône dit déjà l'état (voir
+    // `panels::alerts_tab`, retour utilisateur 2026-09-13).
+    design::tooltip(&response).text(if sound_on {
+        "Cliquer pour couper"
+    } else {
+        "Cliquer pour rétablir"
+    });
+    response
 }
 
 /// Tronque un nom à la largeur d'une tuile, avec une ellipse.
