@@ -119,10 +119,12 @@ const CONTROL_TOOLTIP_RESERVE: f32 = 0.0;
 const CONTENT_MARGIN_LEFT: f32 = 0.0;
 /// La même, sur les trois autres côtés.
 const CONTENT_MARGIN: f32 = 6.0;
-/// La marge HAUTE est redevenue celle-là, et rien de plus, le soir du 2026-09-13 : les infobulles
-/// s'ouvrent toutes EN DESSOUS, la place qu'elles réclamaient au-dessus est passée sous la bande
-/// (`render_content::WATCHLIST_TOOLTIP_RESERVE`), où elle ne décale plus rien.
-const CONTENT_TOP_MARGIN: f32 = CONTENT_MARGIN;
+/// **Nulle en HAUT** depuis le soir du 2026-09-13, comme à gauche : les infobulles s'ouvrent
+/// toutes en dessous (leur réserve est passée sous la bande,
+/// `render_content::WATCHLIST_TOOLTIP_RESERVE`) et la barre de défilement est passée au-dessus des
+/// tuiles, où elle ne prend de place que lorsqu'elle sert. Les planches de ce fichier ne débordent
+/// jamais : elles n'ont donc pas de barre, et rien au-dessus du carré de contrôle.
+const CONTENT_TOP_MARGIN: f32 = 0.0;
 /// La marge fixe qu'`egui_kittest` ajoute autour de tout harnais `new_ui`.
 const HARNESS_MARGIN: f32 = 8.0;
 
