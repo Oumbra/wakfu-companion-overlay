@@ -52,14 +52,15 @@ qu'annonçait la bannière — cause trouvée : les fenêtres overlay portent `W
 désactivé, y compris en mode interactif, pour ne jamais voler le focus au jeu) donc ne reçoivent
 JAMAIS `WindowEvent::KeyboardInput`. `Ctrl+Shift+Q` règle ça en restant, comme `Ctrl+Shift+W`/
 `Ctrl+Shift+R`, un hotkey GLOBAL indépendant du focus (à l'origine en Ctrl+Alt, harmonisés sur
-Ctrl+Shift le 2026-09-06 — seul `Ctrl+Alt+D`, déconnexion, reste sur l'ancien préfixe).
+Ctrl+Shift le 2026-09-06). `Ctrl+Alt+D` (déconnexion) a existé jusqu'au 2026-09-13 : c'est
+désormais un bouton de l'onglet « Paramètres », section « Compte ».
 
 ## Raccourcis personnalisables (onglet « Raccourcis » de la fenêtre Options)
 
 Toutes les combinaisons ci-dessus ne sont plus que des **valeurs par défaut** depuis le
 2026-09-13 : l'onglet « Raccourcis » de la fenêtre Options (ouverte par le bouton « Options » du
 bandeau de suivi, ou `Ctrl+Shift+O`) les change — clic sur une case, frappe de la nouvelle
-combinaison, « Valider ». Voir `src/shortcuts.rs` (les neuf actions, leurs défauts et le POURQUOI
+combinaison, « Valider ». Voir `src/shortcuts.rs` (les huit actions, leurs défauts et le POURQUOI
 de chacun, la lecture/écriture de la config, l'enregistrement auprès de l'OS),
 `src/panels/raccourcis_tab.rs` (l'écran) et §9.1 quinquies du plan d'architecture pour les
 décisions : modificateur obligatoire, doublons refusés, raccourcis suspendus tant que la fenêtre
@@ -68,7 +69,7 @@ est ouverte, échec d'enregistrement non fatal.
 Persisté dans la table `[shortcuts]` du même `config.toml` que le chemin de `wakfu.log` ; un
 fichier écrit par une version antérieure reste lisible tel quel. Le binaire Linux
 (`src/bin/overlay-ui-x11.rs`) n'enregistre que quatre de ces actions (bascule, quitter, Options,
-sélection multiple du bandeau) faute de câblage pour les autres — les neuf restent éditables et
+sélection multiple du bandeau) faute de câblage pour les autres — les huit restent éditables et
 persistées.
 
 ## Deux fenêtres overlay indépendantes par personnage

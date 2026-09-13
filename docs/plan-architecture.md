@@ -1062,6 +1062,20 @@ les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
   (bascule, quitter, Options, sélection multiple) faute de câblage pour les autres — les neuf
   restent éditables et persistées, un même `config.toml` servant aux deux OS.
 
+**Section « Compte » de l'onglet « Paramètres »** (même jour) : titre, bloc d'information disant que
+l'overlay ne fonctionne qu'avec un compte connecté et que se déconnecter ramène à l'écran de
+connexion, puis un bouton « Déconnecter ». Trois décisions :
+
+- **Ce bouton n'est pas un brouillon**, contrairement à tout le reste de la fenêtre : il agit tout
+  de suite, et « Annuler » ne le rattraperait pas. C'est ce qui justifie la **confirmation** qu'il
+  ouvre (`design::confirm_dialog`) là où l'onglet « Alertes » a pu retirer la sienne — son retrait
+  d'objet, lui, restait annulable jusqu'à « Valider ».
+- **Bouton secondaire (kaki), pas `Danger`** : le rouge de cette fenêtre est celui du « Annuler »
+  plein-largeur du pied de page, que le design system réserve à ce pattern. C'est la confirmation
+  qui porte l'avertissement, pas la couleur.
+- **Désactivé sans compte lié** (`OptionsModalState::account_connected`, posé par l'hôte qui seul
+  connaît `AuthStatus`) — toujours le cas du binaire Linux, en mode invité fixe.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
