@@ -126,10 +126,6 @@ const PLUS_TOP_LEFT: egui::Pos2 = egui::pos2(
     MINUS_TOP_LEFT.y,
 );
 
-/// Retrait de la case à cocher depuis le coin de la tuile — `suivi_tab::BADGE_INSET`, 5 px : un de
-/// plus que le liseré, pour le laisser visible tout du long.
-const BADGE_INSET: f32 = 5.0;
-
 /// Hauteur que la sélection ajoute sous la bande : l'écart, le bouton, l'écart.
 ///
 /// **C'est elle qui agrandit la fenêtre** — voir la doc de module. 28 px de bouton, comme celui de
@@ -393,7 +389,13 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
             .log_name("bandeau.selection-active"),
     );
 
-    // 2. Une case à cocher au coin haut-gauche de chaque tuile, et un liseré sur les cochées.
+    // 2. La sélection de chaque tuile — **peinte par le composant**, pas reproduite ici.
+    //
+    // `item_slot` porte le mode sélection depuis le 2026-09-13 : la case à cocher au coin, le liseré
+    // or sur l'anneau exact du cadre, et rien à recalculer. Une maquette qui superpose sur un rendu
+    // déjà peint ne peut pas réutiliser le slot du panneau — elle en repeint un par-dessus, à la
+    // même place, avec les mêmes textures. Ce que le portage fera, lui, c'est passer `.selection()`
+    // au slot que le panneau construit déjà.
     for index in 0..total {
         let tuile = Rect::from_min_size(
             egui::pos2(tile_left(index), tuile_haut),
@@ -401,10 +403,6 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
         );
         let cochee = selected.contains(&index);
         if cochee {
-            // **L'anneau du composant, pas le bord du carré.** Le cadre d'un emplacement flotte à
-            // 2 px du bord avec un coin qui lui est propre ; un liseré posé sur le carré passe donc
-            // à côté de celui qu'il doit recouvrir — retour utilisateur du 2026-09-13, corrigé dans
-            // `design::item_slot` et emprunté ici plutôt que recopié.
             let (anneau, rayon) = design::item_slot_border_ring(tuile);
             couche.painter().rect_stroke(
                 anneau,
@@ -416,13 +414,13 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
                 egui::StrokeKind::Inside,
             );
         }
-        let mut etat = cochee;
-        couche.put(
+        design::paint_checkbox(
+            &couche,
             Rect::from_min_size(
-                tuile.min + Vec2::splat(BADGE_INSET),
+                tuile.min + Vec2::splat(design::tokens::ITEM_SLOT_SELECTION_INSET),
                 Vec2::splat(design::tokens::CHECKBOX_SIZE),
             ),
-            design::checkbox(&mut etat, "").log_name(format!("bandeau.cocher-{index}")),
+            cochee,
         );
     }
 

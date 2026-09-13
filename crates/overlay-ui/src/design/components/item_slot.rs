@@ -159,7 +159,7 @@ pub fn item_slot() -> ItemSlot {
         icon: None,
         count: None,
         size: tokens::ITEM_SLOT_SIZE,
-        selected: false,
+        selection: None,
         log_name: None,
     }
 }
@@ -170,7 +170,7 @@ pub struct ItemSlot {
     icon: Option<egui::TextureId>,
     count: Option<SlotCount>,
     size: f32,
-    selected: bool,
+    selection: Option<bool>,
     log_name: Option<String>,
 }
 
@@ -200,14 +200,22 @@ impl ItemSlot {
         self
     }
 
-    /// Emplacement **sélectionné** : liseré or posé exactement sur celui du cadre, par-dessus tout
-    /// le reste. Par défaut `false`.
+    /// **Mode « sélection multiple »** : `None` hors du mode, `Some(cochée)` dedans.
     ///
-    /// Porté par le composant et non par l'appelant depuis le 2026-09-13 : l'onglet Suivi le
-    /// peignait lui-même, à 4 px de rayon et collé au bord, donc à côté du liseré de rareté qu'il
-    /// était censé recouvrir. Voir [`border_ring`].
-    pub fn selected(mut self, selected: bool) -> Self {
-        self.selected = selected;
+    /// Dans le mode, l'emplacement porte une **case à cocher** à son coin haut-gauche, et un
+    /// **liseré or** quand elle est cochée — posé exactement sur celui du cadre, par-dessus tout le
+    /// reste. L'appel s'écrit `.selection(select_mode.then_some(cochée))`.
+    ///
+    /// **Les deux appartiennent au composant, pas à l'appelant.** L'onglet Suivi les peignait
+    /// lui-même : le liseré à 4 px de rayon et collé au bord, donc à côté du liseré de rareté qu'il
+    /// était censé recouvrir (voir [`border_ring`]), et la case en widget interactif, qui volait à
+    /// la tuile le clic des 20 px qu'elle couvre. Le second panneau qui en aurait eu besoin — le
+    /// bandeau in-game — aurait recopié les deux, défauts compris.
+    ///
+    /// La case ne prend aucun geste : **cocher est le clic de la tuile**, que l'appelant lit sur la
+    /// [`egui::Response`] rendue. Elle est un signe d'état, pas un second contrôle.
+    pub fn selection(mut self, selection: Option<bool>) -> Self {
+        self.selection = selection;
         self
     }
 
@@ -311,18 +319,28 @@ impl Widget for ItemSlot {
             paint_count(ui, rect, count);
         }
 
-        // Le liseré de sélection vient APRÈS tout le reste, et sur le MÊME anneau que le cadre :
-        // il remplace visuellement la bordure de l'emplacement, il ne se pose pas à côté.
-        if self.selected {
-            let (anneau, rayon) = border_ring(rect);
-            ui.painter().rect_stroke(
-                anneau,
-                rayon,
-                egui::Stroke::new(
-                    tokens::ITEM_SLOT_PLAIN_STROKE,
-                    tokens::ITEM_SLOT_SELECTED_BORDER,
+        // La sélection vient APRÈS tout le reste. Le liseré se pose sur le MÊME anneau que le
+        // cadre : il remplace visuellement la bordure de l'emplacement, il ne s'ajoute pas à côté.
+        if let Some(checked) = self.selection {
+            if checked {
+                let (anneau, rayon) = border_ring(rect);
+                ui.painter().rect_stroke(
+                    anneau,
+                    rayon,
+                    egui::Stroke::new(
+                        tokens::ITEM_SLOT_PLAIN_STROKE,
+                        tokens::ITEM_SLOT_SELECTED_BORDER,
+                    ),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            crate::design::components::checkbox::paint(
+                ui,
+                egui::Rect::from_min_size(
+                    rect.min + Vec2::splat(tokens::ITEM_SLOT_SELECTION_INSET),
+                    Vec2::splat(tokens::CHECKBOX_SIZE),
                 ),
-                egui::StrokeKind::Inside,
+                checked,
             );
         }
         response
@@ -430,6 +448,22 @@ mod tests {
         assert_eq!(anneau.left() - carre.left(), 2.0, "marge du liseré à 64 px");
         assert_eq!(carre.right() - anneau.right(), 2.0, "marge symétrique");
         assert_eq!(rayon, 3.0, "rayon du coin du liseré à 64 px");
+    }
+
+    #[test]
+    fn la_case_a_cocher_degage_le_lisere_au_lieu_de_s_y_coller() {
+        // Deux retours utilisateur sur ce seul retrait : « décaler la checkbox d'un pixel », puis
+        // « d'au moins 2 px ». Ce que l'un et l'autre demandent est que le liseré reste LISIBLE tout
+        // du long — donc que la case commence franchement après lui, pas à son contact.
+        let carre =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::splat(tokens::ITEM_SLOT_SIZE));
+        let (anneau, _) = border_ring(carre);
+        let fin_du_lisere = anneau.left() - carre.left() + tokens::ITEM_SLOT_PLAIN_STROKE;
+        assert!(
+            tokens::ITEM_SLOT_SELECTION_INSET >= fin_du_lisere + 2.0,
+            "la case ({}) doit dégager le liseré, qui finit à {fin_du_lisere}",
+            tokens::ITEM_SLOT_SELECTION_INSET
+        );
     }
 
     #[test]

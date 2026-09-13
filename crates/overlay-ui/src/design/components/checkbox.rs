@@ -103,6 +103,24 @@ impl<'a> Checkbox<'a> {
     }
 }
 
+/// **Peint la case SEULE** — sans libellé, sans interaction, sans allouer de place.
+///
+/// Pour un composant qui porte lui-même le geste et n'a besoin que du signe : l'emplacement d'objet
+/// en mode sélection multiple (`item_slot`), où cocher est le clic de la TUILE et non celui d'un
+/// petit carré de 20 px posé dessus. Un vrai [`Checkbox`] y volerait le clic de la tuile sur les
+/// pixels qu'il couvre, et donnerait deux cibles là où l'utilisateur n'en voit qu'une.
+///
+/// Même convention que [`crate::design::paint_meter`] et [`crate::design::paint_portrait`] : une
+/// fonction de peinture à côté du composant, pas une copie de ses trois lignes chez l'appelant.
+pub fn paint(ui: &Ui, rect: egui::Rect, checked: bool) {
+    let texture = if checked {
+        DsTexture::CheckboxChecked
+    } else {
+        DsTexture::CheckboxUnchecked
+    };
+    DesignSystem::get(ui.ctx()).paint(ui.painter(), rect, texture, egui::Color32::WHITE);
+}
+
 impl Widget for Checkbox<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let font = text::label_font(ui.ctx(), tokens::CHECKBOX_FONT_SIZE);

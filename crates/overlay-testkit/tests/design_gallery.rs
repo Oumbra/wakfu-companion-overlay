@@ -876,22 +876,27 @@ fn gallery(ui: &mut egui::Ui) {
             // l'un avec le liseré de sa texture de rareté, l'autre avec le trait du cadre simple,
             // et par-dessus le même anneau d'or. Un décalage de 2 px entre les deux se voit ici et
             // nulle part ailleurs — c'est le défaut signalé le 2026-09-13.
-            for (frame, selected, nom) in [
-                (SlotFrame::Rarity(ItemRarity::Legendary), false, "objet"),
+            for (frame, selection, nom) in [
+                (SlotFrame::Rarity(ItemRarity::Legendary), None, "objet"),
                 (
                     SlotFrame::Rarity(ItemRarity::Legendary),
-                    true,
+                    Some(false),
+                    "à cocher",
+                ),
+                (
+                    SlotFrame::Rarity(ItemRarity::Legendary),
+                    Some(true),
                     "objet coché",
                 ),
-                (SlotFrame::Plain, false, "monstre"),
-                (SlotFrame::Plain, true, "monstre coché"),
+                (SlotFrame::Plain, None, "monstre"),
+                (SlotFrame::Plain, Some(true), "monstre coché"),
             ] {
                 ui.vertical(|ui| {
                     ui.add(
                         design::item_slot()
                             .frame(frame)
                             .icon(faux_icone)
-                            .selected(selected)
+                            .selection(selection)
                             .log_name(format!("galerie.slot-{nom}")),
                     );
                     ui.label(RichText::new(nom).color(CAPTION).size(11.0));

@@ -77,12 +77,13 @@ const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
 const TILE_GAP: f32 = 12.0;
 
 const BADGE: f32 = 14.0;
-/// Retrait de la case à cocher et de la croix depuis le coin de la tuile — 5 px, et pas 4.
+/// Retrait de la croix de retrait depuis le coin haut-droit de la tuile — 5 px, et pas 4.
 ///
 /// Le liseré d'un emplacement occupe les pixels 2 à 4 depuis le bord (voir
-/// `design::item_slot::border_ring`) : à 4, la case venait s'y coller et mangeait le liseré de
-/// sélection dans son coin. Le pixel de plus le laisse voir tout du long — demande explicite du
-/// 2026-09-13, « décaler la checkbox d'un pixel pour laisser la visibilité sur la bordure ».
+/// `design::item_slot::border_ring`) : à 4, la croix venait s'y coller. La case à cocher du mode
+/// sélection a suivi le même chemin puis l'a quitté — elle appartient maintenant au composant, qui
+/// la pose à `design::tokens::ITEM_SLOT_SELECTION_INSET`. Les deux ne s'affichent jamais ensemble
+/// (la case remplace la croix), leurs retraits n'ont donc pas à coïncider.
 const BADGE_INSET: f32 = 5.0;
 
 /// Voile d'une tuile SURVOLÉE, sous sa croix — il dit le survol *et* donne à la croix un fond assez
@@ -811,9 +812,10 @@ fn tracked_tile(
         .size(TILE)
         .frame(frame)
         .icon(icon_id)
-        // **Le liseré appartient au composant**, plus à ce panneau : peint ici, il tombait au bord
-        // du carré avec un coin de 4 px, soit à 2 px du liseré de rareté qu'il devait recouvrir.
-        .selected(cochee)
+        // **La sélection entière appartient au composant** — liseré ET case à cocher. Peints ici,
+        // le liseré tombait au bord du carré, à 2 px de celui de rareté qu'il devait recouvrir, et
+        // la case, vrai widget, volait à la tuile le clic des 20 px qu'elle couvre.
+        .selection(select_mode.then_some(cochee))
         .log_name(tuile.name.clone());
     if let Some(target) = tuile.target {
         slot = slot.count(design::SlotCount::Target(target));
@@ -824,17 +826,8 @@ fn tracked_tile(
 
     let mut clic = TileClick::None;
     if select_mode {
-        // La case **remplace** la croix : les deux gestes s'excluent, et deux marqueurs dans deux
-        // coins d'une tuile de 64 px reviendraient à demander de viser.
-        let case = Rect::from_min_size(
-            egui::pos2(rect.left() + BADGE_INSET, rect.top() + BADGE_INSET),
-            Vec2::splat(design::tokens::CHECKBOX_SIZE),
-        );
-        let mut etat = cochee;
-        cellule.put(
-            case,
-            design::checkbox(&mut etat, "").log_name(format!("suivi.cocher-{}", tuile.name)),
-        );
+        // La case du composant **remplace** la croix : les deux gestes s'excluent, et deux
+        // marqueurs dans deux coins d'une tuile de 64 px reviendraient à demander de viser.
         let zone = response
             .clone()
             .on_hover_cursor(egui::CursorIcon::PointingHand);
