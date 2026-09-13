@@ -46,6 +46,22 @@ pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 /// soit pas compressé d'autant.
 pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 
+/// Espace réservé au-dessus du contenu du panneau Suivi — même raison d'être que
+/// [`COMBAT_TOP_MARGIN`], pour le bandeau : demande utilisateur du 2026-09-13, les infobulles de
+/// « + »/« − » (ligne du HAUT du carré de contrôle) et celles des tuiles d'objets suivis doivent
+/// s'ouvrir AU-DESSUS de leur widget, quitte à « déplacer un petit peu vers le bas l'overlay »
+/// pour leur faire de la place. Sans cette marge, la bande est collée au bord supérieur de sa
+/// fenêtre (6 px de `inner_margin`), et `RectAlign::TOP` retombait TOUJOURS sur un repli
+/// `BOTTOM*` — le nom des tuiles s'affichait de fait en dessous depuis le début.
+///
+/// Valeur mesurée sur les captures du bandeau vide (`panels.rs::
+/// panneau_suivi_vide_boutons_en_ligne_infobulles_dessous`) : une infobulle d'une ligne
+/// (« Supprimer (Ctrl+Shift+S) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px)
+/// d'écart, soit 32 px — 36 px laisse 4 px de marge. Plus serré que les 44 px de Combat : ici la
+/// marge décale la bande sur l'écran, `main.rs::watchlist_target_height` et le binaire X11
+/// agrandissent la fenêtre d'autant, l'ancrage (`GAME_TOP_MARGIN_PX`) ne bouge pas.
+pub const WATCHLIST_TOP_MARGIN: f32 = 36.0;
+
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
 /// pas de boucle 60 Hz forcée, l'overlay ne consomme rien tant que rien ne change). Publique : à
@@ -357,10 +373,12 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
     // ferait partie du jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même
     // raison) — SEUL le haut gagne `COMBAT_TOP_MARGIN`, voir sa doc, pour que l'infobulle du switch
     // Alliés/Ennemis ait la place de s'afficher au-dessus de lui. Suivi garde sa marge d'origine
-    // sur les quatre côtés : non concerné par cette demande, bande de tuiles qui a toujours besoin
-    // d'un peu d'air pour ne pas coller aux boutons d'interface du jeu. Options (2026-09-08) est
-    // une fenêtre dédiée qui remplit tout son espace elle-même (voir `panels::options_modal::show`,
-    // bannière/corps/pied de page peints jusqu'aux bords) : aucune marge, comme Combat.
+    // sur les quatre côtés (bande de tuiles qui a toujours besoin d'un peu d'air pour ne pas
+    // coller aux boutons d'interface du jeu), plus `WATCHLIST_TOP_MARGIN` en haut depuis le
+    // 2026-09-13 (voir sa doc) pour les infobulles ouvertes au-dessus de la bande. Options
+    // (2026-09-08) est une fenêtre dédiée qui remplit tout son espace elle-même (voir
+    // `panels::options_modal::show`, bannière/corps/pied de page peints jusqu'aux bords) : aucune
+    // marge, comme Combat.
     let inner_margin = match kind {
         OverlayKind::Combat => egui::Margin {
             left: 0,
@@ -368,7 +386,12 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             top: COMBAT_TOP_MARGIN as i8,
             bottom: 0,
         },
-        OverlayKind::Watchlist => egui::Margin::same(6),
+        OverlayKind::Watchlist => egui::Margin {
+            left: 6,
+            right: 6,
+            top: 6 + WATCHLIST_TOP_MARGIN as i8,
+            bottom: 6,
+        },
         OverlayKind::Options => egui::Margin::ZERO,
     };
     egui::CentralPanel::default()

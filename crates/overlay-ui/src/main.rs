@@ -112,8 +112,10 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 /// tuiles elle-même dont l'ancrage vient d'être mis au point avec l'utilisateur. 116 -> 132 px
 /// (même jour, retour utilisateur : la barre de défilement flottante était trop souvent tassée
 /// contre les icônes/badges pour être agrippée) pour la marge supplémentaire réservée par
-/// `panels::watchlist::show` (`ScrollArea::min_scrolled_height`).
-const WATCHLIST_HEIGHT: f64 = 132.0;
+/// `panels::watchlist::show` (`ScrollArea::min_scrolled_height`). Plus
+/// `render_content::WATCHLIST_TOP_MARGIN` (2026-09-13, voir sa doc) : la place des infobulles
+/// ouvertes AU-DESSUS de la bande, qui décale celle-ci d'autant vers le bas sur l'écran.
+const WATCHLIST_HEIGHT: f64 = 132.0 + render_content::WATCHLIST_TOP_MARGIN as f64;
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.

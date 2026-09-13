@@ -109,10 +109,13 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 const TON: design::SelectionTone = design::SelectionTone::Danger;
 
 /// `panels::watchlist::CONTROL_TOOLTIP_RESERVE` — la place gardée à gauche du carré de contrôle
-/// pour que les infobulles de sa colonne gauche s'y ouvrent.
-const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
+/// pour que les infobulles s'y ouvrent centrées (88 px jusqu'au 2026-09-13, quand elles s'ouvraient
+/// sur le côté).
+const CONTROL_TOOLTIP_RESERVE: f32 = 48.0;
 /// `render_content::paint_content` pose cette marge autour du contenu du bandeau.
 const CONTENT_MARGIN: f32 = 6.0;
+/// … plus `render_content::WATCHLIST_TOP_MARGIN` en haut (2026-09-13, infobulles au-dessus).
+const CONTENT_TOP_MARGIN: f32 = CONTENT_MARGIN + overlay_ui::render_content::WATCHLIST_TOP_MARGIN;
 /// La marge fixe qu'`egui_kittest` ajoute autour de tout harnais `new_ui`.
 const HARNESS_MARGIN: f32 = 8.0;
 
@@ -136,7 +139,7 @@ const MINUS_TOP_LEFT: egui::Pos2 = egui::pos2(
         + CONTROL_BUTTON_GAP
         + CONTROL_BUTTON_SIZE
         + CONTROL_BUTTON_GAP,
-    HARNESS_MARGIN + CONTENT_MARGIN + CONTROL_BUTTON_GAP,
+    HARNESS_MARGIN + CONTENT_TOP_MARGIN + CONTROL_BUTTON_GAP,
 );
 
 /// Coin haut-gauche du bouton « + » — voir [`MINUS_TOP_LEFT`], dont il ne diffère qu'en abscisse.
@@ -246,12 +249,12 @@ fn bulk_label(selected: usize, total: usize) -> String {
 /// rendu ne dit que ce qu'on lui demande : « la première colonne claire » n'est pas « le bord de la
 /// tuile » dès lors que le cadre du jeu flotte à l'intérieur de son carré.
 ///
-/// La somme des jetons (`8 + 6 + 88 + 60 + 12`) donnerait 174 : les 4 px d'écart viennent de ce que
+/// La somme des jetons (`8 + 6 + 48 + 60 + 12`) donnerait 134 : les 4 px d'écart viennent de ce que
 /// la `ScrollArea` et `paint_content` posent entre eux, et qu'aucun jeton public ne décrit. C'est
 /// bien la mesure qui fait foi ici — mais pour les TUILES seulement. Le carré de contrôle, lui, se
 /// calcule depuis le bord du contenu : voir [`MINUS_TOP_LEFT`], et le bug qu'a coûté la déduction
 /// inverse.
-const TILE_ORIGIN: egui::Pos2 = egui::pos2(170.0, 14.0);
+const TILE_ORIGIN: egui::Pos2 = egui::pos2(130.0, 8.0 + CONTENT_TOP_MARGIN);
 
 /// L'abscisse du bord gauche de la `n`-ième tuile — voir [`TILE_ORIGIN`].
 fn tile_left(index: usize) -> f32 {
@@ -332,7 +335,9 @@ fn harnais(p: Planche) -> Harness<'static> {
     // colonne de contrôle est collée au bord gauche dans la fenêtre réelle, et une planche plus
     // large donnerait au « − » une marge qu'il n'a pas.
     let largeur = overlay_ui::panels::watchlist::content_width(total) + 2.0 * CONTENT_MARGIN;
-    let hauteur = 132.0 + if select_mode { BULK_ROW_HEIGHT } else { 0.0 };
+    let hauteur = 132.0
+        + overlay_ui::render_content::WATCHLIST_TOP_MARGIN
+        + if select_mode { BULK_ROW_HEIGHT } else { 0.0 };
 
     Harness::builder()
         .with_size(egui::vec2(largeur + 2.0 * HARNESS_MARGIN, hauteur))
