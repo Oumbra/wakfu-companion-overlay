@@ -49,28 +49,37 @@ fn unix_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     let home = std::env::var_os("HOME").map(PathBuf::from);
 
-    // 1. Zaap natif Linux — hypothèse non confirmée (§5.1 : « à confirmer sur machine réelle »).
-    if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
-        out.push(PathBuf::from(xdg_config).join("zaap/gamesLogs/wakfu/wakfu.log"));
-    }
-    if let Some(home) = &home {
-        out.push(home.join(".config/zaap/gamesLogs/wakfu/wakfu.log"));
+    // 1. Zaap natif Linux — sous-dossier `logs/` VÉRIFIÉ sur machine réelle (Steam Deck / SteamOS,
+    // 2026-09-13 : `~/.config/zaap/gamesLogs/wakfu/logs/wakfu.log`), exactement comme le chemin
+    // Windows n°1. Le plan (§5.1) citait le même chemin SANS `logs/`, jamais confirmé : conservé
+    // juste après en repli plutôt que supprimé, au cas où une version plus ancienne du client
+    // l'écrive encore là.
+    for base in [
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        home.as_ref().map(|home| home.join(".config")),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        out.push(base.join("zaap/gamesLogs/wakfu/logs/wakfu.log"));
+        out.push(base.join("zaap/gamesLogs/wakfu/wakfu.log"));
     }
 
     if let Some(home) = &home {
         // 2. Steam/Proton : le préfixe est un AppID numérique imprévisible à l'avance — on énumère
-        // les répertoires réellement présents plutôt que de deviner un identifiant.
+        // les répertoires réellement présents plutôt que de deviner un identifiant. Le préfixe
+        // simule Windows : c'est l'arborescence Windows (avec `logs/`) qui s'y applique.
         extend_with_prefix_children(
             &mut out,
             &home.join(".steam/steam/steamapps/compatdata"),
-            "pfx/drive_c/users/steamuser/AppData/Roaming/zaap/gamesLogs/wakfu/wakfu.log",
+            "pfx/drive_c/users/steamuser/AppData/Roaming/zaap/gamesLogs/wakfu/logs/wakfu.log",
         );
 
         // 3. Wine générique : même logique, le nom d'utilisateur simulé n'est pas prévisible.
         extend_with_prefix_children(
             &mut out,
             &home.join(".wine/drive_c/users"),
-            "AppData/Roaming/zaap/gamesLogs/wakfu/wakfu.log",
+            "AppData/Roaming/zaap/gamesLogs/wakfu/logs/wakfu.log",
         );
     }
     out
@@ -161,6 +170,31 @@ mod tests {
             &PathBuf::from("beta").join("Wakfu.LOG")
         ));
         assert!(is_valid_log_filename(Path::new("WAKFU.LOG")));
+    }
+
+    /// Régression : sous Linux, le client Zaap écrit dans `…/gamesLogs/wakfu/logs/wakfu.log`
+    /// (constaté sur un Steam Deck réel le 2026-09-13) — seul le chemin SANS `logs/` était
+    /// proposé, la découverte automatique échouait donc systématiquement sur une installation
+    /// native Linux. Le repli historique reste candidat, mais après.
+    #[cfg(not(windows))]
+    #[test]
+    fn candidats_linux_proposent_le_sous_dossier_logs_en_premier() {
+        // Sans HOME ni XDG_CONFIG_HOME, aucun chemin Zaap natif n'est proposé : rien à vérifier.
+        if std::env::var_os("HOME").is_none() && std::env::var_os("XDG_CONFIG_HOME").is_none() {
+            return;
+        }
+        let candidats = unix_candidates();
+        let dossier_logs = candidats
+            .iter()
+            .position(|p| p.ends_with("zaap/gamesLogs/wakfu/logs/wakfu.log"));
+        let sans_dossier_logs = candidats
+            .iter()
+            .position(|p| p.ends_with("zaap/gamesLogs/wakfu/wakfu.log"));
+        let dossier_logs = dossier_logs.expect("chemin Zaap natif avec logs/ attendu");
+        assert!(
+            sans_dossier_logs.is_none_or(|repli| dossier_logs < repli),
+            "le chemin avec logs/ doit passer avant le repli : {candidats:?}"
+        );
     }
 
     #[test]
