@@ -119,9 +119,16 @@ fn decode(bytes: &[u8], name: &str, ancrage: Hotspot) -> egui::CustomCursorImage
     }
 }
 
+/// Seuil d'opacité en dessous duquel un pixel ne compte pas pour la pointe : les bitmaps
+/// re-détourés (2026-09-13, v2) ont des bords lissés, avec des pixels d'anti-aliasing presque
+/// transparents (alpha 2 à 14) une ligne au-dessus du contour — pas les mêmes d'une phase à l'autre.
+/// Sans seuil, la pointe différait d'un pixel entre repos et éclair, et le curseur aurait sauté à
+/// chaque bascule. À moitié opaque ou plus, c'est le contour lui-même.
+const HOTSPOT_ALPHA_MIN: u8 = 128;
+
 /// Pointe de la flèche : pixel opaque le plus à gauche de la PREMIÈRE ligne contenant un pixel
-/// opaque (`alpha > 0`), en balayant de haut en bas. Vaut pour toute flèche orientée vers le haut
-/// à gauche, quelle que soit la marge transparente autour.
+/// opaque (`alpha >= HOTSPOT_ALPHA_MIN`), en balayant de haut en bas. Vaut pour toute flèche
+/// orientée vers le haut à gauche, quelle que soit la marge transparente autour.
 fn hotspot(rgba: &[u8], width: u32) -> Option<[u16; 2]> {
     let width = width as usize;
     rgba.chunks_exact(width * 4)
@@ -130,7 +137,7 @@ fn hotspot(rgba: &[u8], width: u32) -> Option<[u16; 2]> {
             row.as_chunks::<4>()
                 .0
                 .iter()
-                .position(|px| px[3] > 0)
+                .position(|px| px[3] >= HOTSPOT_ALPHA_MIN)
                 .map(|x| [x as u16, y as u16])
         })
 }
@@ -257,6 +264,8 @@ mod tests {
         rgba[(4 + 2) * 4 + 3] = 255;
         rgba[(4 + 3) * 4 + 3] = 255;
         rgba[(2 * 4) * 4 + 3] = 255; // plus à gauche, mais une ligne plus bas : ignoré
+        rgba[3] = 12; // anti-aliasing quasi transparent en (0, 0) : ignoré aussi
+        rgba[(4 + 1) * 4 + 3] = 127; // juste sous le seuil, à gauche de la pointe : ignoré
         assert_eq!(hotspot(&rgba, 4), Some([2, 1]));
         assert_eq!(hotspot(&vec![0u8; 4 * 3 * 4], 4), None);
     }
