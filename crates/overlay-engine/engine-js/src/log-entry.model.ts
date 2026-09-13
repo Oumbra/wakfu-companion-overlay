@@ -121,7 +121,7 @@ export interface CombatDefeatMarkerEntry {
 }
 
 /** Fin du tour d'un personnage du joueur ("N secondes reportées pour le tour suivant.") —
- * AJOUT LOCAL à l'overlay, voir TURN_ENDED_RE dans log-parser.ts. */
+ * propre à l'overlay, voir TURN_ENDED_RE dans log-parser.ts. */
 export interface TurnEndedEntry {
   kind: 'turn-ended';
   time: string;
