@@ -1076,6 +1076,45 @@ connexion, puis un bouton « Déconnecter ». Trois décisions :
 - **Désactivé sans compte lié** (`OptionsModalState::account_connected`, posé par l'hôte qui seul
   connaît `AuthStatus`) — toujours le cas du binaire Linux, en mode invité fixe.
 
+### 9.1 sexies Bandeau « Suivi » : boutons fixes, bande défilante, barre du jeu (2026-09-13)
+
+Quatre demandes d'un même retour utilisateur, capture d'un bandeau volontairement surchargé à
+l'appui (« j'ai fait en sorte d'avoir énormément d'objets suivis pour faire afficher la
+scrollbar ») :
+
+- **Les boutons ne défilent plus.** Le carré « + / − / Détails / Options » était le premier enfant
+  de la zone défilante : défiler la bande l'emmenait hors de l'écran avec les tuiles. Il est
+  maintenant peint DEHORS, dans la rangée qui porte cette zone — « les boutons sont fixes, il
+  devrait y avoir un conteneur qui affiche les éléments suivis, un peu comme le scroll pour les
+  ennemis » (§9.1 quater, où seuls les portraits défilent dans un cadre immobile).
+- **L'overlay démarre au premier pixel des boutons.** La réserve d'infobulle de 48 px à gauche du
+  carré (`CONTROL_TOOLTIP_RESERVE`) et les 6 px de marge interne gauche sont tombées : « il y a
+  cinquante pixels à gauche des boutons, alors que le groupe de boutons c'est le démarrage de
+  l'overlay ». Contrepartie admise dans la même demande : les infobulles du carré ne sont plus
+  CENTRÉES sur leur bouton mais rabattues sur le bord de la fenêtre — une popup ne peut pas se
+  peindre hors de la fenêtre qui la contient. La réserve DROITE reste, elle : sans elle, la fenêtre
+  d'un bandeau vide (116 px) serait plus étroite que la moindre infobulle.
+- **Moins d'air en haut.** `WATCHLIST_TOP_MARGIN` 36 → 28 px et `WATCHLIST_HEIGHT` 132 → 92 px :
+  les deux constantes réservaient de la place qui ne servait plus (l'espace du toast, compté deux
+  fois ; la bande dégagée sous les tuiles pour une barre flottante qui n'existe plus). Le reste de
+  l'écart visible en jeu vient de l'ancrage de la fenêtre (`GAME_TOP_MARGIN_PX`, 28 px sous le bord
+  haut du client), calé sur les boutons du jeu et laissé tel quel.
+- **La barre de défilement est celle du jeu.** `ScrollStyle::thin()` d'egui (flottante, fine au
+  repos, qui GROSSIT au survol, à moitié translucide) est remplacée par `design::scroll_area`
+  couchée à l'horizontale (§9.2) : 6 px d'épaisseur constante, pas de rail, `#515356` au repos,
+  `#c1ad83` au survol et au glissé. Demande mot pour mot : « je ne veux pas que le scroll
+  s'agrandisse […] utiliser le scroll qui est déjà utilisé pour la modale dans l'onglet
+  Raccourcis […] gris quand l'utilisateur n'a pas sa souris dessus et doré quand il passe sa souris
+  dessus, c'est mieux dans l'ADN du jeu ». Seule la marge extérieure diffère du relevé (2 px au lieu
+  de 14 : le bandeau n'a pas de bord de panneau à respecter).
+
+**Testkit** : `panneau_suivi_bande_defilante_boutons_fixes` — bande au repos, poignée survolée
+(dorée, MÊME épaisseur), et bande réellement défilée à la poignée pendant que le carré ne bouge pas.
+Au passage, les harnais du bandeau demandaient 16 px de moins que la vraie fenêtre (`egui_kittest`
+ajoute 8 px de marge sur les quatre côtés) — sans effet tant que la fenêtre était large devant son
+contenu, mais la barre, peinte SOUS les tuiles, tombait hors du cadre et n'apparaissait sur aucune
+capture.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
