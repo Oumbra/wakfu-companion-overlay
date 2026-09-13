@@ -517,6 +517,12 @@ existants plutôt que par un choix esthétique :
   au même endroit depuis le 2026-09-13, et deux boutons icône voisins aux effets très différents
   (« tout remettre à zéro » / « fermer ») se confondraient.
 
+L'onglet « Paramètres » gagne le même jour une section **« Compte »** : un `design::info_text` au
+ton informatif (ce que l'overlay perd en se déconnectant) et un bouton **secondaire** (§5.2)
+« Déconnecter », qui ouvre une confirmation. Le bouton n'est pas peint en rouge : ce rouge est
+celui du « Annuler » plein-largeur du pied de page, réservé à ce pattern (§9) — c'est la
+confirmation qui porte l'avertissement.
+
 La case de saisie est un `design::input` en **lecture seule** — c'est ce que montre la référence, et
 c'est juste : la case porte une valeur qu'on remplace, pas une action qu'on déclenche. En écoute,
 elle prend le bord d'alerte (`Input::error`) faute d'un autre état de bord au catalogue : dans les
