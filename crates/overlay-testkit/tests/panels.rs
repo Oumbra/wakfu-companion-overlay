@@ -618,22 +618,32 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     harness.snapshot("watchlist_tooltip_options_a_droite");
 }
 
-/// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
-///
-/// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
-/// suppression multiple ne s'active pas ». Il avait raison, et rien ne le disait : le « − » était
-/// documenté INERTE depuis le 2026-09-06, la maquette validée depuis le matin même, et aucun test
-/// ne demandait ce que le bouton FAIT — les captures existantes ne regardaient que son apparence.
-///
-/// Ce test clique réellement, et vérifie l'état plutôt que des pixels : c'est la seule forme qui
-/// aurait attrapé un bouton peint juste et branché sur rien.
-///
-/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`]
-/// pour le carré de contrôle (« − » au centre en (146, 30)). Les tuiles suivent le carré :
-/// x = 14 (marges) + 88 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
-/// + 12 (`TILE_GAP`) = 174 pour le bord gauche de la première, soit 206 pour son centre.
-#[test]
-fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
+/// Le harnais du bandeau in-game, avec l'état que l'hôte lui prête rendu inspectable — trois tests
+/// s'en servent (sélection multiple, glisser-déposer, planche du geste).
+struct Bandeau {
+    harness: egui_kittest::Harness<'static>,
+    /// Le pendant du champ `App::watchlist_selection`.
+    selection: std::rc::Rc<std::cell::RefCell<panels::watchlist::WatchlistSelection>>,
+    /// Ce que le panneau a demandé d'écrire à la dernière frame — le pendant de `RenderOutcome`.
+    edition: std::rc::Rc<std::cell::RefCell<Option<panels::watchlist::WatchlistEdit>>>,
+    window_width: f32,
+}
+
+fn entrees_de_bandeau() -> Vec<WatchlistEntry> {
+    ["Bottes Lantha", "Bois de Frêne", "Pierre de Lune"]
+        .iter()
+        .map(|nom| WatchlistEntry {
+            name: (*nom).to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Up,
+            count: 0,
+            countdown_target: 0,
+            catalog_id: None,
+        })
+        .collect()
+}
+
+fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -645,31 +655,19 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
     let now = std::time::Instant::now();
-    let entries: Vec<WatchlistEntry> = ["Bottes Lantha", "Bois de Frêne", "Pierre de Lune"]
-        .iter()
-        .map(|nom| WatchlistEntry {
-            name: (*nom).to_string(),
-            kind: WatchlistKind::Item,
-            mode: WatchlistMode::Up,
-            count: 0,
-            countdown_target: 0,
-            catalog_id: None,
-        })
-        .collect();
 
-    // L'état vit chez l'hôte : ce `Rc` tient le rôle du champ `App::watchlist_selection`.
     let selection = Rc::new(RefCell::new(
         panels::watchlist::WatchlistSelection::default(),
     ));
-    // Ce que le panneau a demandé à la dernière frame — le pendant de `RenderOutcome`.
-    let restantes: Rc<RefCell<Option<Vec<WatchlistEntry>>>> = Rc::new(RefCell::new(None));
+    let edition: Rc<RefCell<Option<panels::watchlist::WatchlistEdit>>> =
+        Rc::new(RefCell::new(None));
 
     let window_width = panels::watchlist::content_width(entries.len()) + 12.0;
-    let mut harness = egui_kittest::Harness::builder()
+    let harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, 220.0))
         .build_ui({
             let selection = Rc::clone(&selection);
-            let restantes = Rc::clone(&restantes);
+            let edition = Rc::clone(&edition);
             move |ui| {
                 let ctx = ui.ctx().clone();
                 let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
@@ -696,11 +694,128 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
                         options: None,
                     },
                 );
-                if outcome.watchlist_remaining.is_some() {
-                    *restantes.borrow_mut() = outcome.watchlist_remaining;
+                if outcome.watchlist_edit.is_some() {
+                    *edition.borrow_mut() = outcome.watchlist_edit;
                 }
             }
         });
+    Bandeau {
+        harness,
+        selection,
+        edition,
+        window_width,
+    }
+}
+
+/// Centres des trois tuiles du bandeau — mêmes calculs que
+/// [`panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple`] : première tuile centrée en
+/// x = 206, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 46.
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(206.0, 46.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(346.0, 46.0);
+/// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
+/// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(189.0, 29.0);
+
+/// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
+///
+/// Le bandeau est en lecture seule sur les entrées : il ne réordonne rien lui-même, il demande
+/// (`WatchlistOutcome::edit`). Ce test vérifie les deux moitiés que le module partagé ne peut pas
+/// prouver seul — que le geste souris arrive bien jusqu'au panneau sur la vraie bande, et que ce
+/// qui remonte est la liste entière dans le bon ordre, avec le motif qui le dit au journal.
+#[test]
+fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
+    let Bandeau {
+        mut harness,
+        selection,
+        edition,
+        ..
+    } = harnais_bandeau(entrees_de_bandeau());
+    harness.run();
+
+    // La croix fléchée dit que la tuile se déplace, avant même qu'on l'ait prise — `overlay_ui::
+    // cursor` la traduit ensuite en bitmap du jeu.
+    harness.hover_at(BANDEAU_TUILE_0);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "une tuile survolée doit annoncer qu'elle se déplace"
+    );
+
+    harness.drag_at(BANDEAU_TUILE_0);
+    harness.run();
+    harness.hover_at(BANDEAU_TUILE_2);
+    harness.run();
+    harness.drop_at(BANDEAU_TUILE_2);
+    harness.run();
+
+    let edition = edition.borrow();
+    let edition = edition
+        .as_ref()
+        .expect("aucun réordonnancement remonté : le glisser-déposer n'est pas branché");
+    assert_eq!(
+        edition.reason,
+        panels::watchlist::WatchlistEditReason::Reorder,
+        "un déplacement ne doit pas se journaliser comme une suppression"
+    );
+    // Retrait puis réinsertion au rang visé, comme le web : la première entrée se pose APRÈS celle
+    // qu'elle visait. Les trois entrées sont toujours là — un déplacement ne retire rien.
+    assert_eq!(
+        edition
+            .definitions
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Bois de Frêne", "Pierre de Lune", "Bottes Lantha"],
+    );
+    assert!(
+        !selection.borrow().is_open(),
+        "un déplacement ne doit pas ouvrir la sélection multiple"
+    );
+}
+
+/// **Le geste, en vol sur la bande in-game** — place d'origine voilée, fantôme sous le pointeur,
+/// barre d'insertion or sur la tuile visée. Le pendant de `options_suivi_deplacement` pour l'autre
+/// écran : les deux partagent leur mécanique (`panels::tile_reorder`), les deux planches disent
+/// qu'elle se voit pareil des deux côtés.
+#[test]
+fn panneau_suivi_deplacement_en_vol() {
+    let Bandeau { mut harness, .. } = harnais_bandeau(entrees_de_bandeau());
+    harness.run();
+
+    harness.hover_at(BANDEAU_TUILE_0_PRISE);
+    harness.run();
+    harness.drag_at(BANDEAU_TUILE_0_PRISE);
+    harness.run();
+    harness.hover_at(BANDEAU_TUILE_2);
+    harness.run();
+    // Une seconde frame : le fantôme et la barre suivent le pointeur de la frame précédente.
+    harness.run();
+    harness.snapshot("watchlist_deplacement");
+}
+
+/// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
+///
+/// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
+/// suppression multiple ne s'active pas ». Il avait raison, et rien ne le disait : le « − » était
+/// documenté INERTE depuis le 2026-09-06, la maquette validée depuis le matin même, et aucun test
+/// ne demandait ce que le bouton FAIT — les captures existantes ne regardaient que son apparence.
+///
+/// Ce test clique réellement, et vérifie l'état plutôt que des pixels : c'est la seule forme qui
+/// aurait attrapé un bouton peint juste et branché sur rien.
+///
+/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`]
+/// pour le carré de contrôle (« − » au centre en (146, 30)). Les tuiles suivent le carré :
+/// x = 14 (marges) + 88 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
+/// + 12 (`TILE_GAP`) = 174 pour le bord gauche de la première, soit 206 pour son centre.
+#[test]
+fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
+    let Bandeau {
+        mut harness,
+        selection,
+        edition: restantes,
+        window_width,
+    } = harnais_bandeau(entrees_de_bandeau());
     harness.run();
     assert!(
         !selection.borrow().is_open(),
@@ -723,14 +838,23 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let bouton = egui::pos2(window_width / 2.0, 96.0);
     clique(&mut harness, bouton);
     let restantes = restantes.borrow();
-    let restantes = restantes
+    let edition = restantes
         .as_ref()
         .expect("aucune suppression remontée : le bouton de suppression groupée n'est pas branché");
     assert_eq!(
-        restantes.len(),
+        edition.reason,
+        panels::watchlist::WatchlistEditReason::BulkRemove,
+        "l'écriture demandée doit se journaliser comme une suppression, pas autrement"
+    );
+    assert_eq!(
+        edition.definitions.len(),
         2,
         "une seule tuile était cochée : il doit rester les deux autres — restantes : {:?}",
-        restantes.iter().map(|e| &e.name).collect::<Vec<_>>(),
+        edition
+            .definitions
+            .iter()
+            .map(|e| &e.name)
+            .collect::<Vec<_>>(),
     );
     assert!(
         !selection.borrow().is_open(),
@@ -1919,15 +2043,11 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
 /// **Les entrées viennent du moteur**, pas d'une liste écrite à la main : ce sont de vraies
 /// [`overlay_engine::WatchlistEntry`], celles que `GET /api/v1/settings` renvoie. Les icônes, elles,
 /// restent le repli générique — elles viennent du CDN, hors de portée d'un test sans réseau.
-fn capture_onglet_suivi(
-    nom: &str,
-    mode: overlay_ui::panels::suivi_tab::AddMode,
-    select_mode: bool,
-    alt: bool,
-    survol: Option<egui::Pos2>,
-) {
+/// Le jeu d'entrées de toutes les planches et de tous les tests de l'onglet Suivi — **objets et
+/// monstres mêlés, les deux modes côte à côte** : la grille doit rendre lisible d'un coup d'œil ce
+/// qui porte une cible et ce qui n'en porte pas.
+fn entrees_de_suivi() -> Vec<overlay_engine::WatchlistEntry> {
     use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
-    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
 
     fn entree(name: &str, kind: WatchlistKind, mode: WatchlistMode, target: i64) -> WatchlistEntry {
         WatchlistEntry {
@@ -1940,9 +2060,7 @@ fn capture_onglet_suivi(
         }
     }
 
-    // Objets et monstres mêlés, les deux modes côte à côte : la grille doit rendre lisible d'un
-    // coup d'œil ce qui porte une cible et ce qui n'en porte pas.
-    let entries = vec![
+    vec![
         entree(
             "Bois de Frêne",
             WatchlistKind::Item,
@@ -1966,7 +2084,19 @@ fn capture_onglet_suivi(
         ),
         entree("Chafer Élite", WatchlistKind::Enemy, WatchlistMode::Up, 0),
         entree("Minerai de Fer", WatchlistKind::Item, WatchlistMode::Up, 0),
-    ];
+    ]
+}
+
+fn capture_onglet_suivi(
+    nom: &str,
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+    select_mode: bool,
+    alt: bool,
+    survol: Option<egui::Pos2>,
+) {
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    let entries = entrees_de_suivi();
 
     let mut options_state = OptionsModalState {
         suivi: SuiviTabState {
@@ -2140,6 +2270,172 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         false,
         Some(egui::pos2(240.0, 298.0)),
     );
+}
+
+/// **Le geste de réordonnancement, en vol** — la planche qui verrouille ce que l'utilisateur voit
+/// pendant qu'il déplace une tuile : la place d'origine voilée, le fantôme sous le pointeur, et la
+/// barre d'insertion or sur la tuile visée.
+///
+/// Rien de tout cela n'est fourni par la plateforme, contrairement au web où le navigateur peint
+/// lui-même un fantôme natif : sans ces trois marques, le geste serait invisible. La capture est le
+/// seul garde-fou possible — un test d'ordre (voir
+/// [`options_suivi_le_glisser_deposer_reordonne_comme_le_web`]) prouve le résultat, pas le retour
+/// visuel qui le rend praticable.
+#[test]
+fn options_suivi_deplacement_en_vol() {
+    capture_suivi_deplacement("options_suivi_deplacement");
+}
+
+fn capture_suivi_deplacement(nom: &str) {
+    let (mut harness, _etat) = harnais_suivi(overlay_ui::panels::suivi_tab::AddMode::Up);
+    harness.run();
+
+    // Première tuile prise près de son coin haut-gauche — pas en son centre : le fantôme se tient
+    // par où on l'a prise, et c'est ce décalage qui laisse voir la tuile visée dessous. Une planche
+    // qui saisirait au centre montrerait un fantôme parfaitement superposé à la destination, donc
+    // ne montrerait justement pas ce que le geste doit rendre lisible.
+    harness.drag_at(TUILE_0_PRISE);
+    harness.run();
+    harness.hover_at(TUILE_2);
+    harness.run();
+    // Une seconde frame : le fantôme et la barre suivent le pointeur de la frame précédente.
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// **Glisser-déposer : l'ordre obtenu est celui du web.**
+///
+/// `reorder` est déjà couvert unitairement (`panels::suivi_tab`) ; ce test-ci prouve l'autre
+/// moitié, celle qu'une fonction pure ne peut pas montrer : que le geste de la souris, sur la vraie
+/// grille et à travers la vraie modale, arrive bien jusqu'à elle avec les bons rangs.
+#[test]
+fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
+    let (mut harness, etat) = harnais_suivi(overlay_ui::panels::suivi_tab::AddMode::Up);
+    harness.run();
+
+    let avant: Vec<String> = etat
+        .borrow()
+        .suivi_draft
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+
+    // **La croix fléchée dit que la tuile se déplace, avant même qu'on l'ait prise.** C'est le seul
+    // signe de l'écran — aucune poignée, aucun libellé — et `overlay_ui::cursor` la traduit ensuite
+    // en bitmap du jeu (`wakfu-cursor-move.png`).
+    harness.hover_at(TUILE_0);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "une tuile survolée doit annoncer qu'elle se déplace"
+    );
+
+    harness.drag_at(TUILE_0);
+    harness.run();
+    harness.hover_at(TUILE_2);
+    harness.run();
+    // La croix tient pendant tout le geste, y compris au-dessus d'une AUTRE tuile : ce qui est sous
+    // le pointeur est une destination, pas un bouton.
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "le curseur doit rester la croix pendant le déplacement"
+    );
+    harness.drop_at(TUILE_2);
+    harness.run();
+
+    let apres: Vec<String> = etat
+        .borrow()
+        .suivi_draft
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+
+    // Retrait puis réinsertion au rang visé, comme `StatsStoreService.reorderWatchlist` : la
+    // première entrée se pose APRÈS celle qu'elle visait, les deux autres remontent d'un rang.
+    assert_eq!(
+        apres,
+        vec![
+            avant[1].clone(),
+            avant[2].clone(),
+            avant[0].clone(),
+            avant[3].clone(),
+            avant[4].clone(),
+            avant[5].clone(),
+            avant[6].clone(),
+            avant[7].clone(),
+        ],
+        "le glisser-déposer n'a pas réordonné le brouillon comme le web"
+    );
+}
+
+/// Centres des trois premières tuiles de la grille, en mode incrémental (le formulaire n'a alors
+/// qu'une ligne). Relevés sur la planche `options_suivi_incremental` : tuile de 64 px, gouttière de
+/// 12, donc un pas de 76 px.
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 394.0);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 394.0);
+/// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 377.0);
+
+/// Le harnais de l'onglet Suivi, avec son état rendu inspectable — voir [`capture_onglet_suivi`],
+/// dont c'est le même jeu d'entrées. Rendu partagé parce que deux tests ont maintenant besoin de
+/// LIRE le brouillon après coup, pas seulement de le peindre.
+fn harnais_suivi(
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+) -> (
+    Harness<'static>,
+    std::rc::Rc<std::cell::RefCell<OptionsModalState>>,
+) {
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: SuiviTabState {
+            mode,
+            target: 250,
+            ..Default::default()
+        },
+        suivi_draft: Some(entrees_de_suivi()),
+        suivi_availability: SuiviAvailability::Ready,
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Suivi,
+        alerts: Default::default(),
+        alerts_draft: None,
+        alerts_availability: Default::default(),
+        initial: Default::default(),
+        pending_close: false,
+    }));
+
+    let vu = std::rc::Rc::clone(&etat);
+    let harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    (harness, etat)
 }
 
 /// **Une tuile suivie dit son nom, et rien d'autre.**
@@ -2384,4 +2680,87 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     );
     // Le formulaire revient à son défaut après un ajout, comme `resetAddForm` côté web.
     assert_eq!(etat.borrow().suivi.target, 1);
+}
+
+/// Curseur du jeu à la place du curseur système (voir `overlay_ui::cursor`) : ce que
+/// `paint_content` publie dans `PlatformOutput::cursor_image`, là où les deux binaires le lisent
+/// (via `egui-winit`), sans fenêtre ni GPU. Mêmes coordonnées que
+/// `panneau_combat_tooltip_switch_allies_ennemis_au_dessus` (centre du bouton « Alliés », un
+/// `on_hover_cursor(PointingHand)`), et un point du vide du panneau pour la flèche.
+#[test]
+fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Combat,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                now,
+                options: None,
+            },
+        );
+    });
+    let images = overlay_ui::cursor::images();
+    let published = |harness: &Harness<'_>| harness.output().platform_output.cursor_image.clone();
+    let same = |a: &Option<egui::CustomCursorImage>, b: &egui::CustomCursorImage| {
+        a.as_ref()
+            .is_some_and(|a| std::sync::Arc::ptr_eq(&a.rgba, &b.rgba))
+    };
+
+    // Pointeur dans le vide du panneau : flèche du jeu au repos, aucun redessin réclamé.
+    harness.hover_at(egui::pos2(400.0, 400.0));
+    harness.run();
+    assert!(
+        same(&published(&harness), &images.idle),
+        "vide : attendu le bitmap de repos"
+    );
+    assert!(
+        harness.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay
+            > std::time::Duration::from_secs(60)
+    );
+
+    // Bouton « Alliés » (main) : l'éclair d'abord, et un redessin réclamé AU PLUS TARD pour la
+    // prochaine bascule (l'infobulle du switch en réclame un plus tôt encore, d'où `<=` et non
+    // `==`) — `now` est figé dans ce harnais, la phase ne progresse donc pas d'une frame à l'autre.
+    harness.hover_at(egui::pos2(35.0, 71.0));
+    harness.run();
+    assert!(
+        same(&published(&harness), &images.flash),
+        "cliquable : attendu l'éclair"
+    );
+    let delay = harness.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    assert!(
+        delay > std::time::Duration::ZERO && delay <= overlay_ui::cursor::FLASH_DURATION,
+        "délai de redessin inattendu en mode main : {delay:?}"
+    );
+
+    // Retour dans le vide : repos à nouveau.
+    harness.hover_at(egui::pos2(400.0, 400.0));
+    harness.run();
+    assert!(same(&published(&harness), &images.idle));
 }
