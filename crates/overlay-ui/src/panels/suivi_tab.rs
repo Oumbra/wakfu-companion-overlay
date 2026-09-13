@@ -39,7 +39,7 @@
 //! [`overlay_engine::watchlist::WatchlistState::apply_definitions`], qui **ignore le `count` du
 //! brouillon** et garde celui du moteur — valider ne doit pas annuler un ramassage.
 
-use egui::{Color32, Rect, RichText, Stroke, StrokeKind, Vec2};
+use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
@@ -77,15 +77,17 @@ const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
 const TILE_GAP: f32 = 12.0;
 
 const BADGE: f32 = 14.0;
-const BADGE_INSET: f32 = 4.0;
+/// Retrait de la case à cocher et de la croix depuis le coin de la tuile — 5 px, et pas 4.
+///
+/// Le liseré d'un emplacement occupe les pixels 2 à 4 depuis le bord (voir
+/// `design::item_slot::border_ring`) : à 4, la case venait s'y coller et mangeait le liseré de
+/// sélection dans son coin. Le pixel de plus le laisse voir tout du long — demande explicite du
+/// 2026-09-13, « décaler la checkbox d'un pixel pour laisser la visibilité sur la bordure ».
+const BADGE_INSET: f32 = 5.0;
 
 /// Voile d'une tuile SURVOLÉE, sous sa croix — il dit le survol *et* donne à la croix un fond assez
 /// sombre pour rester lisible par-dessus n'importe quelle bordure de rareté.
 const TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
-
-/// Liseré d'une tuile COCHÉE — l'or, la couleur d'état de ce design system.
-const TILE_SELECTED: Color32 = design::tokens::TEXT_GOLD;
-const TILE_SELECTED_WIDTH: f32 = 2.0;
 
 /// Rouge de la croix sous le pointeur — `INFO_ALERT`, le seul rouge mesuré du jeu.
 const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
@@ -809,6 +811,9 @@ fn tracked_tile(
         .size(TILE)
         .frame(frame)
         .icon(icon_id)
+        // **Le liseré appartient au composant**, plus à ce panneau : peint ici, il tombait au bord
+        // du carré avec un coin de 4 px, soit à 2 px du liseré de rareté qu'il devait recouvrir.
+        .selected(cochee)
         .log_name(tuile.name.clone());
     if let Some(target) = tuile.target {
         slot = slot.count(design::SlotCount::Target(target));
@@ -816,14 +821,6 @@ fn tracked_tile(
     cellule.put(rect, slot);
 
     let ds = design::DesignSystem::get(ui.ctx());
-    if cochee {
-        ui.painter().rect_stroke(
-            rect,
-            4,
-            Stroke::new(TILE_SELECTED_WIDTH, TILE_SELECTED),
-            StrokeKind::Inside,
-        );
-    }
 
     let mut clic = TileClick::None;
     if select_mode {
@@ -856,7 +853,8 @@ fn tracked_tile(
     // que soit le widget qui a gagné le survol.
     if response.contains_pointer() {
         // Le voile dit le survol ET porte la croix — voir [`TILE_HOVER_SCRIM`].
-        ui.painter().rect_filled(rect, 4, TILE_HOVER_SCRIM);
+        ui.painter()
+            .rect_filled(rect, design::tokens::ITEM_SLOT_ROUNDING, TILE_HOVER_SCRIM);
         let zone_rect = Rect::from_center_size(
             egui::pos2(
                 rect.right() - BADGE_INSET - BADGE / 2.0,

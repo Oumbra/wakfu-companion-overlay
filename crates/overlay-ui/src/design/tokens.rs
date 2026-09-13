@@ -1267,6 +1267,35 @@ pub const ITEM_SLOT_PLAIN_ICON_FILL: f32 = 30.0 / 58.0;
 /// Épaisseur du trait d'un emplacement **sans rareté** — 2 px, celui des tuiles d'ennemi.
 pub const ITEM_SLOT_PLAIN_STROKE: f32 = 2.0;
 
+/// Marge entre le bord d'un emplacement et son liseré, en fraction du côté — 4/128, soit 2 px à 64.
+///
+/// **Mesurée sur les textures de rareté**, à l'identique sur les sept : sur la ligne médiane du
+/// canevas de 128, l'alpha reste sous 40 jusqu'à x = 3 puis saute à 193 en x = 4. Le liseré de ces
+/// textures n'est donc pas collé au bord — il flotte à 2 px une fois rendu à 64, et le fond de
+/// l'emplacement dépasse tout autour.
+///
+/// C'est ce que [`ITEM_SLOT_BORDER_CORNER_RATIO`] et ce jeton servent à retrouver : **tout ce qui
+/// se pose sur cette bordure** — le trait d'un cadre simple, le liseré de sélection d'un panneau —
+/// doit viser le même anneau, sinon il se voit décalé de ces 2 px. Retour utilisateur du
+/// 2026-09-13, sur la sélection multiple du bandeau : « il faut vraiment que ça se superpose ».
+pub const ITEM_SLOT_BORDER_INSET_RATIO: f32 = 4.0 / 128.0;
+
+/// Rayon des coins du liseré, en fraction du côté — 6/128, soit ≈ 3 px à 64.
+///
+/// **Mesuré sur le même canevas** : le bord extérieur du liseré part de (10, 4) et rejoint (4, 9),
+/// un quart de cercle de rayon 6 autour de (10, 10). Rapporté au bord de l'emplacement, cela fait
+/// ≈ 5 px — d'où les « ≈ 4 px » estimés à l'œil dans la doc d'[`ITEM_SLOT_ROUNDING`], qui visait le
+/// contour extérieur de la texture et non le liseré lui-même.
+///
+/// Le cadre simple utilisait 2 px et le liseré de sélection du Suivi 4 : ni l'un ni l'autre ne
+/// tombait sur l'arc de la texture, ce qui se voyait aux coins dès qu'un objet et un monstre
+/// étaient côte à côte.
+pub const ITEM_SLOT_BORDER_CORNER_RATIO: f32 = 6.0 / 128.0;
+
+/// Liseré d'un emplacement **sélectionné** — l'or du design system, la couleur d'état de cette
+/// interface.
+pub const ITEM_SLOT_SELECTED_BORDER: Color32 = TEXT_GOLD;
+
 /// En dessous de ce côté, un emplacement ne peut plus rien montrer — et le dit une fois au journal
 /// (clause 4 du contrat de composant).
 ///
