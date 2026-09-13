@@ -298,9 +298,13 @@ impl SessionSnapshot {
     /// choisir quoi afficher dans la fenêtre overlay ancrée sur SA fenêtre de jeu (le nom de
     /// personnage vient du titre de fenêtre, `"<Personnage> - WAKFU"`). Normalise via
     /// `normalize_wakfu_name` (accents/casse/apostrophes), même règle que le roster. Préfère un
-    /// combat `ongoing` à un combat déjà terminé si jamais plusieurs correspondaient (ne devrait
-    /// pas arriver en pratique — un personnage n'est que dans un seul combat à la fois) ; `None` si
-    /// ce personnage n'a encore rejoint aucun combat cette session.
+    /// combat `ongoing` à un combat déjà terminé si jamais plusieurs correspondaient — et, parmi
+    /// plusieurs `ongoing`, le PLUS RÉCENT (`fights` est trié par `fight_id` croissant) : un
+    /// personnage n'est que dans un seul combat à la fois, un plus ancien encore `ongoing` est un
+    /// fantôme (voir `SessionState::abandon_fight`, 2026-09-13 — avant ce correctif, `find` prenait
+    /// le plus ANCIEN, et le panneau Combat restait figé sur un combat d'entraînement orphelin
+    /// pendant que les vrais combats défilaient) ; `None` si ce personnage n'a encore rejoint aucun
+    /// combat cette session.
     pub fn fight_for_character(&self, character_name: &str) -> Option<&FightSnapshot> {
         let key = normalize_wakfu_name(character_name);
         let matches = || {
@@ -312,7 +316,7 @@ impl SessionSnapshot {
             })
         };
         matches()
-            .find(|fight| fight.ongoing)
+            .rfind(|fight| fight.ongoing)
             .or_else(|| matches().next_back())
     }
 }
@@ -421,6 +425,13 @@ struct FightWorking {
     /// nouvelle instance (homonyme réel, ou combat rotaté-donc-neuf pour ce nom) et suit le chemin
     /// normal, comme avant ce correctif.
     pending_restored_joins: HashMap<String, usize>,
+    /// Combat SUSPENDU par une coupure du client (voir `SessionState::suspend_all_ongoing_fights`,
+    /// 2026-09-13) : marqué terminé sans résultat, mais prêt à être ROUVERT si le personnage y
+    /// revient — Wakfu remet un joueur reconnecté dans son combat, et rejoue alors toutes les
+    /// lignes `[_FL_]` de ce combat. Tant que ce drapeau est levé, ces jointures rejouées consomment
+    /// le budget `pending_restored_joins` (regarni à la suspension) au lieu de dupliquer les
+    /// combattants — même mécanisme qu'un combat restauré depuis `fight_store`, hors rattrapage.
+    suspended: bool,
     /// Instant (ms, époque Unix) de la toute première jonction de ce combat — voir
     /// `LogDateTracker::full_timestamp_ms`. Base de `FightPayload::started_at`/`duration_ms`.
     /// Persisté dans `FightSnapshot::started_at_ms` (voir sa doc) pour que `restore_fight` le
@@ -644,9 +655,98 @@ struct SessionState {
     /// qui vient d'être expliqué par un échange tout juste conclu (cas où le `TradeCompleted`
     /// PRÉCÈDE la ligne de gain).
     last_trade_completed_at_ms: Option<i64>,
+    /// Combats passés de `ongoing` à terminés SANS ligne `CombatEnd` depuis le dernier lot (voir
+    /// `abandon_fight`) — drainé par `Engine::ingest_batch`, qui supprime leur fichier
+    /// `fight_store` : `touched_fight_ids` ne connaît que les combats nommés par une entrée du
+    /// lot, et un combat abandonné l'est précisément parce qu'aucune ligne ne le nomme plus.
+    abandoned_fight_ids: Vec<i64>,
 }
 
 impl SessionState {
+    /// Termine un combat que le log ne terminera jamais — sans résultat (`result: None`, ni gagné
+    /// ni perdu, donc aucun événement d'historique) et sans toucher à ses totaux.
+    ///
+    /// **Incident réel du 2026-09-13** : le client Wakfu fermé (« Sending DisconnectionMessage to
+    /// Servers. Reason : {UI Closed} ») en plein combat d'entraînement (Sac à patates), relancé
+    /// trois minutes plus tard — la ligne `[FIGHT] End fight` de ce combat n'a jamais été écrite.
+    /// Le moteur le gardait `ongoing` pour toujours, `fight_store` le persistait et le restaurait
+    /// à chaque redémarrage, et `fight_for_character` le préférait à tous les combats suivants :
+    /// panneau Combat affiché en permanence malgré « masqué hors combat », et figé sur ce combat
+    /// fantôme pendant que cinq vrais combats se terminaient proprement.
+    ///
+    /// Deux déclencheurs : le personnage rejoint un AUTRE combat (`abandon_other_fights_of_ally`),
+    /// ou le client se déconnecte/redémarre (`suspend_all_ongoing_fights`).
+    fn abandon_fight(&mut self, fight_id: i64, time: Option<&str>) {
+        let end_ms = time.map(|t| self.date_tracker.full_timestamp_ms(t));
+        let Some(fight) = self.fights.get_mut(&fight_id) else {
+            return;
+        };
+        if !fight.snapshot.ongoing {
+            return;
+        }
+        fight.snapshot.ongoing = false;
+        fight.snapshot.result = None;
+        fight.ended_at_time = time.map(str::to_string);
+        fight.ended_at_ms = end_ms;
+        self.abandoned_fight_ids.push(fight_id);
+    }
+
+    /// Un personnage n'est jamais dans deux combats à la fois : sa jointure au combat
+    /// `joined_fight_id` termine tout AUTRE combat encore `ongoing` où il figure comme allié — voir
+    /// `abandon_fight`. Sans effet dans le cas nominal (le combat précédent a reçu son `CombatEnd`).
+    fn abandon_other_fights_of_ally(&mut self, name: &str, joined_fight_id: i64, time: &str) {
+        let key = normalize_wakfu_name(name);
+        let stale: Vec<i64> = self
+            .fights
+            .iter()
+            .filter(|(id, fight)| {
+                **id != joined_fight_id
+                    && fight.snapshot.ongoing
+                    && fight
+                        .snapshot
+                        .fighters
+                        .iter()
+                        .any(|f| f.is_ally && normalize_wakfu_name(&f.name) == key)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for fight_id in stale {
+            tracing::info!(
+                fight_id,
+                joined_fight_id,
+                character = name,
+                "combat abandonné : le personnage en a rejoint un autre"
+            );
+            self.abandon_fight(fight_id, Some(time));
+        }
+    }
+
+    /// Le client s'est déconnecté ou vient de redémarrer (voir `Engine::is_client_cut_line`) : plus
+    /// aucun combat n'est en cours côté joueur. Chacun est terminé comme `abandon_fight`, mais
+    /// laissé SUSPENDU (`FightWorking::suspended`) : si Wakfu remet le personnage dans ce même
+    /// combat à la reconnexion, ses lignes `[_FL_]` rejouées le rouvrent sans dupliquer personne
+    /// (voir `apply`, cas `FighterJoined`).
+    fn suspend_all_ongoing_fights(&mut self, time: Option<&str>) {
+        let ongoing: Vec<i64> = self
+            .fights
+            .iter()
+            .filter(|(_, fight)| fight.snapshot.ongoing)
+            .map(|(id, _)| *id)
+            .collect();
+        for fight_id in ongoing {
+            tracing::info!(fight_id, "combat suspendu : client déconnecté ou relancé");
+            self.abandon_fight(fight_id, time);
+            if let Some(fight) = self.fights.get_mut(&fight_id) {
+                fight.suspended = true;
+                let mut budget: HashMap<String, usize> = HashMap::new();
+                for fighter in &fight.snapshot.fighters {
+                    *budget.entry(fighter.name.clone()).or_insert(0) += 1;
+                }
+                fight.pending_restored_joins = budget;
+            }
+        }
+    }
+
     /// Renvoie les noms d'ennemis crédités IMPLICITEMENT comme vaincus par le filet de rattrapage
     /// de `CombatEnd` ci-dessous (vide dans tous les autres cas) — l'appelant (`Engine::
     /// ingest_batch`) s'en sert pour créditer la watchlist comme s'il s'agissait d'autant de
@@ -768,14 +868,41 @@ impl SessionState {
                     }
                     return implicitly_defeated_enemies;
                 }
+                // Un joueur n'est que dans un seul combat à la fois (voir
+                // `abandon_other_fights_of_ally`, 2026-09-13) — les invocations sont déjà sorties
+                // juste au-dessus, un ennemi (IA) n'est jamais concerné.
+                if !*is_controlled_by_ai {
+                    self.abandon_other_fights_of_ally(name, *fight_id, entry.time());
+                }
+                // Combat SUSPENDU par une coupure du client (voir `suspend_all_ongoing_fights`) que
+                // le personnage retrouve à la reconnexion : rouvert tel quel, totaux compris. Les
+                // jointures rejouées consomment alors le budget ci-dessous, hors rattrapage.
+                let rejoining_suspended = self
+                    .fights
+                    .get_mut(fight_id)
+                    .filter(|fight| fight.suspended)
+                    .map(|fight| {
+                        if !fight.snapshot.ongoing {
+                            tracing::info!(
+                                fight_id,
+                                "combat suspendu rouvert : le personnage y revient"
+                            );
+                        }
+                        fight.snapshot.ongoing = true;
+                        fight.snapshot.result = None;
+                        fight.ended_at_time = None;
+                        fight.ended_at_ms = None;
+                    })
+                    .is_some();
                 // Combat restauré (`fight_store`, §9 du plan) en plein rattrapage : cette ligne
                 // `[_FL_]` est-elle l'une de celles qui avaient déjà produit un combattant restauré
                 // (voir la doc de `pending_restored_joins`) ? Si oui, consomme le jeton et s'arrête
                 // là — `upsert_fighter` dupliquerait sinon ce combattant déjà affiché. Hors
-                // rattrapage (lignes lues en direct), le budget n'est délibérément jamais consulté :
-                // une jointure de ce nom APRÈS le rattrapage est toujours une vraie nouvelle
-                // instance (le combat continue en direct), jamais un doublon à absorber.
-                if ctx.in_initial_sweep {
+                // rattrapage (lignes lues en direct), le budget n'est délibérément jamais consulté —
+                // sauf pour un combat suspendu (voir ci-dessus) : une jointure de ce nom APRÈS le
+                // rattrapage est sinon toujours une vraie nouvelle instance (le combat continue en
+                // direct), jamais un doublon à absorber.
+                if ctx.in_initial_sweep || rejoining_suspended {
                     if let Some(fight) = self.fights.get_mut(fight_id) {
                         if let Some(remaining) = fight.pending_restored_joins.get_mut(name) {
                             if *remaining > 0 {
@@ -1274,6 +1401,7 @@ impl SessionState {
             // Combat découvert normalement (pas restauré) : rien à "reconnaître", voir la doc du
             // champ — n'importe quelle jointure future suit le chemin normal (`upsert_fighter`).
             pending_restored_joins: HashMap::new(),
+            suspended: false,
             started_at_ms,
             loot: Vec::new(),
             kamas_gained: 0,
@@ -1316,6 +1444,7 @@ impl SessionState {
                 snapshot: fight,
                 fighter_index,
                 pending_restored_joins,
+                suspended: false,
                 resolved_enemies: std::collections::HashSet::new(),
                 initiative_seats: Vec::new(),
                 initiative_cursor: 0,
@@ -2114,68 +2243,36 @@ impl Engine {
         }
         self.in_initial_sweep = batch.is_initial_load;
 
-        let entries = self.parser.parse_lines(&batch.lines)?;
         // Combats touchés par CE lot (voir `entry_fight_id`) — persistés/supprimés sur disque une
         // fois le lot entier appliqué (§9 du plan, `fight_store.rs`), pas ligne par ligne : un
         // combat encaisse potentiellement des dizaines de lignes par lot, une écriture disque par
         // ligne serait un gaspillage sans rien apporter (seul l'état final du lot compte pour la
         // restauration après redémarrage).
         let mut touched_fight_ids = std::collections::HashSet::new();
-        for entry in &entries {
-            if let Some(fight_id) = entry_fight_id(entry) {
-                touched_fight_ids.insert(fight_id);
+        // Le lot est appliqué TRONÇON par tronçon, coupé à chaque ligne de coupure du client (voir
+        // `is_client_cut_line`, 2026-09-13) : les lignes d'avant sont appliquées, puis tous les
+        // combats en cours sont suspendus, puis les lignes d'après — l'ordre du log est respecté,
+        // ce que le parser ne permettrait pas si la coupure était une entrée parmi d'autres (il ne
+        // la connaît pas, et n'a pas à la connaître : elle ne décrit rien du jeu).
+        let mut entries = Vec::new();
+        let mut run_start = 0;
+        for (index, line) in batch.lines.iter().enumerate() {
+            if !Self::is_client_cut_line(line) {
+                continue;
             }
-            self.notice_character(entry);
-            let game_server = self.current_game_server();
-            // Construit `ctx` en accédant directement aux champs de `self` (pas via une méthode
-            // `&self`) : le vérificateur d'emprunts ne sait raisonner sur des champs disjoints
-            // (`roster`/`catalog`/`dungeons`, immuables) qu'à ce niveau — masqués derrière un
-            // appel de méthode, ils entreraient en conflit avec l'emprunt mutable de `self.state`
-            // juste en dessous.
-            let ctx = ApplyContext {
-                roster: self.roster.as_ref(),
-                catalog: self.catalog.as_deref(),
-                dungeons: self.dungeons.as_deref(),
-                game_server: game_server.as_deref(),
-                in_initial_sweep: batch.is_initial_load,
-            };
-            let mut new_sync_events = Vec::new();
-            let implicitly_defeated = self.state.apply(entry, ctx, &mut new_sync_events);
-            self.pending_sync_events.extend(new_sync_events);
-            // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
-            // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
-            // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
-            if !batch.is_initial_load {
-                self.pending_alerts.extend(self.watchlist.apply(entry));
-                // Filet de rattrapage du dernier ennemi d'un combat (voir la doc de
-                // `SessionState::apply`, cas `CombatEnd`) : crédité à la watchlist comme s'il
-                // s'agissait d'autant de `LogEntry::EnemyDefeated` supplémentaires — même chemin,
-                // pas de logique dupliquée dans `WatchlistState`.
-                for name in implicitly_defeated {
-                    let alerts = self.watchlist.apply(&LogEntry::EnemyDefeated {
-                        time: entry.time().to_string(),
-                        name,
-                        fight_id: None,
-                    });
-                    self.pending_alerts.extend(alerts);
-                }
-                // Miroir de `registerLoot` (`stats-store.service.ts`), même gating
-                // `currentBatchIsInitialLoad` que ci-dessus — indépendant de la watchlist (voir la
-                // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom a son activé au
-                // compte, suivi ou non.
-                if let LogEntry::Loot { item, quantity, .. } = entry {
-                    if let Some(sound_entry) =
-                        crate::profile::find_enabled_sound_item(&self.sound_items, item)
-                    {
-                        self.pending_loot_alerts.push(crate::profile::LootAlert {
-                            name: item.clone(),
-                            quantity: *quantity,
-                            catalog_id: sound_entry.catalog_id,
-                        });
-                    }
-                }
+            let run = self.parser.parse_lines(&batch.lines[run_start..index])?;
+            for entry in &run {
+                self.apply_entry(entry, batch.is_initial_load, &mut touched_fight_ids);
             }
+            entries.extend(run);
+            self.state.suspend_all_ongoing_fights(Self::line_time(line));
+            run_start = index + 1;
         }
+        let run = self.parser.parse_lines(&batch.lines[run_start..])?;
+        for entry in &run {
+            self.apply_entry(entry, batch.is_initial_load, &mut touched_fight_ids);
+        }
+        entries.extend(run);
         // Un gain de kamas hors combat encore en attente de confirmation en fin de LOT n'a plus de
         // ligne suivante à attendre dans l'immédiat (la prochaine pourrait tarder, voire ne jamais
         // arriver avant une reconnexion) — committé maintenant plutôt que risqué de le perdre.
@@ -2196,7 +2293,10 @@ impl Engine {
         }
         // Voir la doc de `touched_fight_ids` ci-dessus : un combat absent de `self.state.fights`
         // ici a forcément déjà été purgé (`SessionState::prune_ended_fights`, sur `CombatEnd`) —
-        // son fichier n'a alors plus rien à faire sur disque non plus.
+        // son fichier n'a alors plus rien à faire sur disque non plus. Les combats abandonnés sans
+        // ligne (voir `SessionState::abandon_fight`) s'y ajoutent : plus `ongoing`, leur fichier
+        // est supprimé — sans quoi le combat fantôme reviendrait au prochain démarrage.
+        touched_fight_ids.extend(self.state.abandoned_fight_ids.drain(..));
         for fight_id in touched_fight_ids {
             match self.state.fights.get(&fight_id) {
                 Some(fight) if fight.snapshot.ongoing => {
@@ -2206,6 +2306,105 @@ impl Engine {
             }
         }
         Ok(entries)
+    }
+
+    /// Une ligne de `wakfu.log` qui signifie que le client n'est plus en jeu — déconnexion propre
+    /// (fermeture de la fenêtre, retour à la sélection de personnage), connexion perdue, ou
+    /// démarrage du client (le seul signal qui reste après un plantage). Tout combat encore en
+    /// cours à ce moment-là ne recevra jamais sa ligne `[FIGHT] End fight` : voir
+    /// `SessionState::suspend_all_ongoing_fights`, et l'incident réel documenté sur
+    /// `SessionState::abandon_fight`.
+    ///
+    /// Reconnue ICI, en Rust, plutôt que dans le parser JS partagé avec le web : ce dernier ne
+    /// décrit que des faits de jeu, et une comparaison de sous-chaîne sur chaque ligne coûte moins
+    /// qu'un passage supplémentaire par QuickJS.
+    fn is_client_cut_line(line: &str) -> bool {
+        const CLIENT_CUT_MARKERS: [&str; 3] = [
+            // « Sending DisconnectionMessage to Servers. Reason : {UI Closed} »
+            "Sending DisconnectionMessage to Servers",
+            // « Connexion avec le serveur perdue ChannelHandlerContext(...) »
+            "Connexion avec le serveur perdue",
+            // Bannière de démarrage du client — « (com.ankamagames.wakfu.client.WakfuClient:284) -
+            // Configuration loaded for region ... » et les lignes d'options JVM qui suivent.
+            "com.ankamagames.wakfu.client.WakfuClient:",
+        ];
+        CLIENT_CUT_MARKERS
+            .iter()
+            .any(|marker| line.contains(marker))
+    }
+
+    /// Heure `HH:MM:SS,mmm` d'une ligne brute de `wakfu.log` (` INFO 22:40:59,637 [...] - ...`),
+    /// `None` si la ligne n'en porte pas — même position que celle que le parser JS lit, pour
+    /// que `ended_at_ms` d'un combat suspendu soit calé sur la même horloge que tout le reste.
+    fn line_time(line: &str) -> Option<&str> {
+        let time = line.split_whitespace().nth(1)?;
+        let bytes = time.as_bytes();
+        (bytes.len() == 12 && bytes[2] == b':' && bytes[5] == b':' && bytes[8] == b',')
+            .then_some(time)
+    }
+
+    /// Applique UNE entrée du lot à l'état de session et aux compteurs — extrait de
+    /// `ingest_batch` le 2026-09-13 pour pouvoir être appelé tronçon par tronçon (voir
+    /// `is_client_cut_line`).
+    fn apply_entry(
+        &mut self,
+        entry: &LogEntry,
+        is_initial_load: bool,
+        touched_fight_ids: &mut std::collections::HashSet<i64>,
+    ) {
+        if let Some(fight_id) = entry_fight_id(entry) {
+            touched_fight_ids.insert(fight_id);
+        }
+        self.notice_character(entry);
+        let game_server = self.current_game_server();
+        // Construit `ctx` en accédant directement aux champs de `self` (pas via une méthode
+        // `&self`) : le vérificateur d'emprunts ne sait raisonner sur des champs disjoints
+        // (`roster`/`catalog`/`dungeons`, immuables) qu'à ce niveau — masqués derrière un
+        // appel de méthode, ils entreraient en conflit avec l'emprunt mutable de `self.state`
+        // juste en dessous.
+        let ctx = ApplyContext {
+            roster: self.roster.as_ref(),
+            catalog: self.catalog.as_deref(),
+            dungeons: self.dungeons.as_deref(),
+            game_server: game_server.as_deref(),
+            in_initial_sweep: is_initial_load,
+        };
+        let mut new_sync_events = Vec::new();
+        let implicitly_defeated = self.state.apply(entry, ctx, &mut new_sync_events);
+        self.pending_sync_events.extend(new_sync_events);
+        // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
+        // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
+        // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
+        if !is_initial_load {
+            self.pending_alerts.extend(self.watchlist.apply(entry));
+            // Filet de rattrapage du dernier ennemi d'un combat (voir la doc de
+            // `SessionState::apply`, cas `CombatEnd`) : crédité à la watchlist comme s'il
+            // s'agissait d'autant de `LogEntry::EnemyDefeated` supplémentaires — même chemin,
+            // pas de logique dupliquée dans `WatchlistState`.
+            for name in implicitly_defeated {
+                let alerts = self.watchlist.apply(&LogEntry::EnemyDefeated {
+                    time: entry.time().to_string(),
+                    name,
+                    fight_id: None,
+                });
+                self.pending_alerts.extend(alerts);
+            }
+            // Miroir de `registerLoot` (`stats-store.service.ts`), même gating
+            // `currentBatchIsInitialLoad` que ci-dessus — indépendant de la watchlist (voir la
+            // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom a son activé au
+            // compte, suivi ou non.
+            if let LogEntry::Loot { item, quantity, .. } = entry {
+                if let Some(sound_entry) =
+                    crate::profile::find_enabled_sound_item(&self.sound_items, item)
+                {
+                    self.pending_loot_alerts.push(crate::profile::LootAlert {
+                        name: item.clone(),
+                        quantity: *quantity,
+                        catalog_id: sound_entry.catalog_id,
+                    });
+                }
+            }
+        }
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
