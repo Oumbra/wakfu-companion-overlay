@@ -16,8 +16,8 @@
 //! - Pas de hotkey rafraîchissement/déconnexion (`Ctrl+Shift+R`/`Ctrl+Alt+D`) : sans thread
 //!   Auth/Catalogue à redemander, ils n'auraient aucun effet ici. Seules les actions de
 //!   `overlay_ui::shortcuts::ShortcutAction::LINUX_SUPPORTED` sont câblées (bascule, sortie,
-//!   Options, sélection multiple du bandeau) — les neuf restent personnalisables et persistées,
-//!   simplement inertes ici.
+//!   Options, sélection multiple du bandeau, invitation/suivi multicompte) — les autres restent
+//!   personnalisables et persistées, simplement inertes ici.
 //! - Icônes réelles d'objets/monstres : `RemoteIconStore::empty()` (pas de thread réseau, voir sa
 //!   doc) — le panneau Suivi retombe sur l'icône générique, comme en mode invité côté Windows.
 //!
@@ -60,6 +60,7 @@ mod linux_main {
     use overlay_ingest::discovery;
     use overlay_platform::linux::topmost::{self, TopmostAction, TopmostState};
     use overlay_platform::linux::x11::{GameRect, GameWindowTracker};
+    use overlay_ui::chat_command::{self, ChatCommand};
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
         spawn_engine_thread, EngineCommand, EngineHandles, SyncCommand,
@@ -529,6 +530,40 @@ mod linux_main {
                     "CLIC-TRAVERSANT"
                 }
             );
+        }
+
+        /// `ShortcutAction::InvitePartner` / `ShortcutAction::FollowPartner` : tape `/i "<nom>"` ou
+        /// `/fol "<nom>"` dans le chat de la fenêtre de jeu active, en visant le personnage de
+        /// l'AUTRE fenêtre — même code que Windows (`chat_command`, dont l'`imp` Linux passe par
+        /// XTEST, voir `overlay_platform::linux::keyboard`), seule la façon de nommer la fenêtre
+        /// active change (`_NET_ACTIVE_WINDOW` plutôt que `GetForegroundWindow`).
+        ///
+        /// **Le scan d'ici est dans l'ordre de `_NET_CLIENT_LIST`, c'est-à-dire l'ordre de
+        /// CRÉATION** des fenêtres, là où `EnumWindows` (Windows) donne l'ordre de profondeur :
+        /// au-delà de deux clients, le partenaire désigné n'est donc pas forcément le même sur les
+        /// deux OS. Stable et prévisible dans les deux cas (voir `chat_command`, doc de module),
+        /// et sans objet pour le cas visé par la demande — deux clients, un seul autre personnage.
+        fn send_partner_command(&mut self, command: ChatCommand) {
+            let label = self.hotkeys.bindings().label(match command {
+                ChatCommand::Invite => ShortcutAction::InvitePartner,
+                ChatCommand::Follow => ShortcutAction::FollowPartner,
+            });
+            // `None` (aucune fenêtre active connue du WM) ne peut désigner aucune fenêtre de jeu :
+            // `partner_character` répondra `NoGameFocused`, exactement comme il se doit.
+            let active = self.game_window.active_window().unwrap_or(0);
+            let windows: Vec<(String, u32)> = self
+                .game_window
+                .scan()
+                .into_iter()
+                .map(|(character, info)| (character, info.window))
+                .collect();
+            match chat_command::partner_character(&windows, &active) {
+                Ok(partner) => {
+                    tracing::info!(">>> {} ({label}) : {partner}", command.label());
+                    chat_command::send(command, partner);
+                }
+                Err(err) => tracing::info!(">>> {} ({label}) : {}", command.label(), err.message()),
+            }
         }
 
         /// Même politique focus-aware que Windows (`main.rs::App::sync_topmost`), portée sur
@@ -1142,6 +1177,12 @@ mod linux_main {
                             None,
                             options_modal::OptionsTab::Parametres,
                         );
+                    }
+                    ShortcutAction::InvitePartner => {
+                        self.send_partner_command(ChatCommand::Invite);
+                    }
+                    ShortcutAction::FollowPartner => {
+                        self.send_partner_command(ChatCommand::Follow);
                     }
                     // Jamais enregistrées ici — voir `ShortcutAction::LINUX_SUPPORTED`.
                     autre => tracing::debug!(
