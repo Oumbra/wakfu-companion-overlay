@@ -14,6 +14,11 @@
 # ⚠ SOURCE DE VÉRITÉ PARTAGÉE : les commandes ci-dessous doublent celles de
 # `.github/workflows/ci.yml`. Toute étape ajoutée/retirée là-bas doit l'être ici aussi.
 #
+# UNE différence assumée, et une seule : le CI exécute ses tests dans un CONTENEUR ÉPINGLÉ au rendu
+# figé (`container:` du job `test-linux` + `scripts/setup-render-env.sh`), ce script tourne sur la
+# machine du dev. Tout le reste est identique ; pour les captures, voir
+# `avertir_si_mesa_different` plus bas.
+#
 # Usage :
 #   bash scripts/ci-local.sh            # tout : format, clippy, tests
 #   bash scripts/ci-local.sh --lint     # format + clippy seulement (rapide)
@@ -82,15 +87,38 @@ if [ "$PLATFORM" = linux ]; then
 fi
 step "clippy — xtask"                 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 
+# Les captures d'`overlay-testkit` sont un GATE du CI depuis le 2026-09-13 (§17.1 du plan), et
+# elles y sont comparées sous un rendu FIGÉ : Mesa épinglé par `scripts/setup-render-env.sh`, dans
+# le conteneur épinglé du job `test-linux`. Ce script-ci, lui, tourne sur la machine du dev, avec le
+# Mesa que cette machine a. Les deux coïncident souvent — pas toujours.
+#
+# D'où un avertissement plutôt qu'un échec : un écart de Mesa ici ne dit RIEN de ce que fera le CI,
+# et laisser un dev régénérer des références sous son propre Mesa est exactement ce qu'il ne faut
+# pas faire — elles rougiraient le CI pour tout le monde. On le prévient, on ne le bloque pas.
+avertir_si_mesa_different() {
+  command -v dpkg-query > /dev/null 2>&1 || return 0   # ni Debian ni Ubuntu : rien à comparer
+  local attendu installe
+  attendu="$(sed -n 's/^MESA_ATTENDU="\(.*\)"$/\1/p' "$SCRIPT_DIR/setup-render-env.sh")"
+  installe="$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers 2>/dev/null || true)"
+  [ -n "$attendu" ] && [ -n "$installe" ] || return 0
+  [ "$attendu" = "$installe" ] && return 0
+  printf '\n\033[33m! Mesa local %s, le CI compare les captures sous %s.\033[0m\n' "$installe" "$attendu"
+  printf '  Un écart de capture ci-dessous peut ne venir que de là. Pour trancher — et pour\n'
+  printf '  RÉGÉNÉRER des références — passer par l\x27environnement de rendu du CI :\n'
+  printf '    docker build -t wakfu-ci-render -f .github/ci-image/Dockerfile .\n'
+  printf '    docker run --rm -v "$PWD:$PWD" -w "$PWD" wakfu-ci-render \\\n'
+  printf '      cargo test --no-fail-fast -p overlay-testkit\n'
+}
+
 if [ "$LINT_ONLY" -eq 0 ]; then
   step "test — crates métier"         cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
   if [ "$PLATFORM" = linux ]; then
     step "test — overlay-ui (lib)"    cargo test --no-fail-fast -p overlay-ui --lib
     step "build — overlay-ui-x11"     cargo build -p overlay-ui --bin overlay-ui-x11
-    # Miroir du `continue-on-error: true` du CI (§17.3 du plan : snapshots pas encore promus en
-    # gate) — exécuté pour information, jamais compté comme un échec.
-    printf '\n\033[1m▶ test — overlay-testkit (informatif, non bloquant)\033[0m\n'
-    cargo test --no-fail-fast -p overlay-testkit || printf '\033[33m! snapshots en écart — informatif, non bloquant (§17.3)\033[0m\n'
+    # GATE du CI depuis le 2026-09-13 (§17.1 du plan) : compté comme un échec ici aussi, comme
+    # toutes les autres étapes — un écart de capture bloque désormais le CI pour de vrai.
+    avertir_si_mesa_different
+    step "test — overlay-testkit (captures)" cargo test --no-fail-fast -p overlay-testkit
   else
     step "build — workspace (Windows)" cargo build --workspace
   fi

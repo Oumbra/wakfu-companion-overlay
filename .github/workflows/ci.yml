@@ -24,7 +24,9 @@
 # `scripts/ci-local.sh`, qui les rejoue EN LOCAL avant un push (et que le hook `pre-push` de
 # `.githooks/` lance en mode `--lint`). Toute étape ajoutée/retirée ici doit l'être là-bas aussi —
 # ce script est le garde-fou qui évite de découvrir un `fmt`/`clippy` rouge après coup, et il ne
-# protège que ce qu'il connaît.
+# protège que ce qu'il connaît. UNE seule divergence assumée : le job `test-linux` tourne ici dans
+# un conteneur au rendu figé (voir sa doc), là où le script local tourne sur la machine du dev — il
+# se contente d'avertir quand son Mesa diffère de celui du CI.
 #
 # La version de Rust vient de `rust-toolchain.toml` (épinglée), pas d'un `@stable` flottant : voir
 # la doc de ce fichier — c'est la dérive de version qui a tenu ce CI rouge du 2026-09-01 au
@@ -98,14 +100,34 @@ jobs:
 
   test-linux:
     runs-on: ubuntu-latest
+    # **Conteneur ÉPINGLÉ PAR DIGEST, pas par tag** : le tag `ubuntu:24.04` désigne une image
+    # différente à chaque point release. Depuis que la comparaison de captures est un GATE (voir
+    # l'étape `overlay-testkit` plus bas), l'environnement de rendu ne peut plus bouger tout seul —
+    # `ubuntu-latest` bascule de version majeure sans prévenir, et son `apt-get` sert ce qui est
+    # publié le jour même. Deuxième verrou dans `scripts/setup-render-env.sh` : les paquets viennent
+    # d'un instantané daté de l'archive Ubuntu, pas de l'archive vivante.
+    #
+    # Seul CE job est conteneurisé : `clippy-linux` ne fait que compiler, aucun pixel n'en sort.
+    container:
+      image: ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
     steps:
-      - uses: actions/checkout@v4
-      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
-        run: rustup toolchain install --no-self-update
-      - name: dépendances système (rendu logiciel egui_kittest + son rodio)
+      # AVANT `checkout` : une image Ubuntu nue n'a ni `git` ni `ca-certificates`, et `checkout`
+      # retomberait sur un téléchargement d'archive REST au lieu d'un vrai clone. Ces trois paquets
+      # ne participent à aucun rendu — leur version est sans importance, d'où l'archive par défaut
+      # ici et l'instantané épinglé pour tout le reste, après le clone.
+      - name: amorçage (git pour checkout — hors périmètre du rendu)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git
+      - uses: actions/checkout@v4
+      - name: environnement de rendu épinglé (Mesa/lavapipe, instantané daté — voir le script)
+        run: bash scripts/setup-render-env.sh
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/vendor-wgpu-hal
       - uses: Swatinem/rust-cache@v2
         with:
@@ -114,9 +136,18 @@ jobs:
       - run: cargo test --no-fail-fast -p overlay-ui --lib
       - name: overlay-ui-x11 — compile (pas de tests unitaires, voir bin/overlay-ui-x11.rs)
         run: cargo build -p overlay-ui --bin overlay-ui-x11
-      - name: "overlay-testkit — snapshots offscreen (informatif, voir §17.3 : pas encore promu en gate)"
+      # **GATE depuis le 2026-09-13** (§17.1 du plan). Ce n'était plus tenable en « informatif » :
+      # l'étape a caché vingt-et-une captures périmées pendant une semaine. Ce qui a rendu la
+      # promotion possible, c'est l'environnement de rendu figé ci-dessus — un gate sur un rendu
+      # flottant aurait rougi à la première mise à jour de Mesa, sur du code que personne n'a
+      # touché.
+      #
+      # Une capture en écart FAIT ÉCHOUER le CI. Deux issues, jamais une troisième : le rendu a
+      # régressé et on corrige le code, ou le changement visuel est voulu et on régénère les
+      # références DANS l'environnement de rendu (voir `.github/ci-image/Dockerfile`), dans son
+      # propre commit.
+      - name: "overlay-testkit — captures offscreen (GATE, voir §17.1)"
         run: cargo test --no-fail-fast -p overlay-testkit
-        continue-on-error: true
 
   build-windows:
     runs-on: windows-latest
