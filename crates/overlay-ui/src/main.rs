@@ -1205,10 +1205,17 @@ impl App {
     /// la fenêtre de jeu **au premier plan**, et à défaut le premier overlay connu. Sans ce
     /// rattachement la modale n'appartiendrait à personne, ce qui était précisément le défaut :
     /// voir `sync_topmost`.
+    ///
+    /// `initial_tab` est l'onglet sur lequel la fenêtre s'ouvre — **`Paramètres` pour le bouton
+    /// « Options » du bandeau de suivi** (demande utilisateur 2026-09-13 : ce bouton donne accès
+    /// au chemin de `wakfu.log`, pas à la composition de la liste suivie, qui a son propre accès
+    /// dans ce même bandeau), le défaut d'[`options_modal::OptionsTab`] pour le raccourci global,
+    /// qui n'a pas de bandeau particulier à privilégier.
     fn open_options_modal(
         &mut self,
         event_loop: &ActiveEventLoop,
         anchor: Option<(HWND, GameRect)>,
+        initial_tab: options_modal::OptionsTab,
     ) {
         if self
             .windows
@@ -1317,9 +1324,9 @@ impl App {
         overlay.options_state = Some(OptionsModalState {
             path_input: self.log_path.display().to_string(),
             error: None,
-            // Toujours la première entrée du menu à l'ouverture — le défaut d'`OptionsTab`, qui
-            // dit pourquoi.
-            tab: Default::default(),
+            // Voir la doc de `open_options_modal` : le bouton « Options » du bandeau de suivi
+            // demande `Parametres`, le raccourci global le défaut d'`OptionsTab`.
+            tab: initial_tab,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -1686,9 +1693,11 @@ impl App {
 
         match post_redraw {
             PostRedraw::None => {}
-            PostRedraw::OpenOptions(hwnd, rect) => {
-                self.open_options_modal(event_loop, Some((hwnd, rect)))
-            }
+            PostRedraw::OpenOptions(hwnd, rect) => self.open_options_modal(
+                event_loop,
+                Some((hwnd, rect)),
+                options_modal::OptionsTab::Parametres,
+            ),
             PostRedraw::CloseOptions => {
                 self.windows.remove(&id);
                 tracing::info!("[options] modale fermée (Annuler).");
@@ -1838,7 +1847,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.open_details();
             } else if event.id == self.options_hotkey_id {
                 tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
-                self.open_options_modal(event_loop, None);
+                self.open_options_modal(event_loop, None, options_modal::OptionsTab::default());
             } else if event.id == self.watchlist_add_hotkey_id {
                 // Voir la doc de `WATCHLIST_ADD_HOTKEY_LABEL` : bouton encore inerte.
                 tracing::debug!(">>> Ajouter ({WATCHLIST_ADD_HOTKEY_LABEL}) : encore inerte.");
