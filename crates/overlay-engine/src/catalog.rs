@@ -351,6 +351,14 @@ pub struct CatalogIndex {
     /// Trié une fois à la construction, par nom : la recherche parcourt dans l'ordre et sort dès
     /// qu'elle a sa limite — le tri n'est pas refait à chaque frappe.
     searchable_items: Vec<SearchableItem>,
+    /// **Les monstres dans l'ordre où ils se cherchent**, pour [`CatalogIndex::search_monsters`] —
+    /// pendant exact de [`CatalogIndex::searchable_items`], et pour les mêmes raisons : les deux
+    /// `HashMap` de monstres ne gardent aucun nom d'affichage et mélangent les quatre langues.
+    ///
+    /// Écrit pour le champ d'ajout de l'onglet « Suivi », qui cherche « objets ET monstres » là où
+    /// celui des alertes ne cherchait que des objets (`domain="both"` contre `domain="item"` côté
+    /// web).
+    searchable_monsters: Vec<SearchableItem>,
 }
 
 /// Un objet tel que le champ d'ajout d'alerte le cherche — voir
@@ -373,6 +381,21 @@ pub struct ItemSuggestion {
     pub rarity: WakfuRarity,
     pub category: WakfuItemCategory,
     pub icon: IconRef,
+}
+
+/// Une suggestion de MONSTRE rendue par [`CatalogIndex::search_monsters`].
+///
+/// **Pas de rareté ni de catégorie**, contrairement à [`ItemSuggestion`] : un monstre n'a ni l'une
+/// ni l'autre. Le champ d'ajout du Suivi ne lui pose donc pas de gemme, et le range sous le seul
+/// filtre « Monstres » ([`IconRef::for_monster_category`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MonsterSuggestion {
+    pub id: i64,
+    /// Nom fr, tel qu'il s'écrit — c'est aussi celui que le log emploie, donc celui qu'il faut
+    /// stocker dans une entrée de suivi.
+    pub name: String,
+    pub icon: IconRef,
+    pub classification: MonsterClassification,
 }
 
 impl CatalogIndex {
@@ -455,8 +478,16 @@ impl CatalogIndex {
                     .entry(normalize_wakfu_name(name))
                     .or_insert_with(|| entry.clone());
             }
+            index.searchable_monsters.push(SearchableItem {
+                id,
+                normalized: normalize_wakfu_name(&fr),
+                name: fr,
+            });
             index.monsters_by_id.insert(id, entry);
         }
+        index
+            .searchable_monsters
+            .sort_unstable_by(|a, b| a.normalized.cmp(&b.normalized));
 
         index
     }
@@ -495,6 +526,38 @@ impl CatalogIndex {
                     rarity: entry.rarity,
                     category: entry.category,
                     icon: entry.icon.clone(),
+                })
+            })
+            .collect()
+    }
+
+    /// Les monstres dont le nom **contient** la requête, triés par nom — miroir exact de
+    /// [`CatalogIndex::search_items`] pour l'autre moitié du domaine « les deux ».
+    ///
+    /// Même seuil de longueur, même recherche de sous-chaîne sans priorité au préfixe, même absence
+    /// de limite utile (`usize::MAX` chez l'appelant) : ce qui vaut pour seize mille objets vaut a
+    /// fortiori pour le référentiel de monstres, bien plus petit.
+    pub fn search_monsters(
+        &self,
+        query: &str,
+        min_len: usize,
+        limit: usize,
+    ) -> Vec<MonsterSuggestion> {
+        let normalized = normalize_wakfu_name(query);
+        if normalized.chars().count() < min_len {
+            return Vec::new();
+        }
+        self.searchable_monsters
+            .iter()
+            .filter(|monster| monster.normalized.contains(&normalized))
+            .take(limit)
+            .filter_map(|monster| {
+                let entry = self.monsters_by_id.get(&monster.id)?;
+                Some(MonsterSuggestion {
+                    id: monster.id,
+                    name: monster.name.clone(),
+                    icon: entry.icon.clone(),
+                    classification: entry.classification(),
                 })
             })
             .collect()
