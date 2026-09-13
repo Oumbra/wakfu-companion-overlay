@@ -952,9 +952,7 @@ expert (validée avec réserves, toutes intégrées), décidée :
 - **Limites connues, acceptées** : deux homonymes consécutifs sans AUCUNE ligne entre eux (allié
   intercalé KO, dont le tour est sauté par le jeu) restent fusionnés sur un siège (test
   `deux_homonymes_consecutifs_sont_fusionnes_sur_un_siege`) — indécidable depuis le log, qui ne
-  porte l'identifiant d'instance que sur la jointure ; en breach, la colonne
-  des barres n'est pas bornée et dépasse déjà la fenêtre au-delà d'une dizaine d'ennemis à dégâts,
-  le bloc sort avec elle ; le nom du lanceur reste absent de l'infobulle même quand le liseré est
+  porte l'identifiant d'instance que sur la jointure ; le nom du lanceur reste absent de l'infobulle même quand le liseré est
   hors de la bande visible (suggestion de la revue, non retenue en révision 1 pour garder les
   règles strictement identiques aux deux camps — à reconsidérer sur retour en jeu). Alliés au-delà
   de six (liste plate) : toujours ni marque ni clic — asymétrie assumée avec les ennemis > 6.
@@ -965,6 +963,33 @@ expert (validée avec réserves, toutes intégrées), décidée :
 Alliés au-delà du sixième (liste plate, cas rare) : pas encore de marque ni de clic sur leur
 portrait — à ajouter si le cas se présente. Option « n'afficher que mes personnages » (roster ∩
 alliés) : plus tard.
+
+### 9.1 quater Barres de dégâts en breach (2026-09-13)
+
+Maquette « Barres en brèche » validée en artefact interactif (deux révisions, choix arrêtés par
+l'utilisateur), implémentée dans `panels::combat_bars` (voir sa doc de module) :
+
+- **Plafond** : la colonne des barres ne dépasse jamais six groupes — le plus grand gabarit du
+  cadre (`MAX_FRAME_SLOTS`) reste la mesure de tout le panneau. Au-delà, les groupes s'accumulent
+  dans un conteneur invisible (ni bordure ni fond) haut de six groupes exactement, qui défile.
+  En dessous, la fenêtre se resserre sur son contenu : rythme vertical identique à l'ancienne
+  liste, les captures alliées de référence sont inchangées au pixel. Le plafond compte les
+  **groupes** (combattants à dégâts > 0), pas les monstres.
+- **Hors défilement** : ligne leader au-dessus, bloc « ligne de sorts » au-dessous, toujours
+  visibles.
+- **Ascenseur** : celui du cadre à défilement, extrait dans `panels::combat_scrollbar` et partagé
+  (5 px, `#998a6c`, liseré noir extérieur, coins à 2 px, 20 px minimum, zone de saisie 14 px) —
+  à **gauche** de la fenêtre, dans l'air entre le cadre et les barres, en face de celui du cadre ;
+  toujours visible dès qu'il y a plus de six groupes. Molette au survol de la fenêtre et de
+  l'ascenseur, décalage en pixels persisté comme celui du cadre (`scroll_offset_id`).
+- **Fondu de 8 px** aux bords, uniquement du côté où du contenu est masqué. egui ne masquant pas en
+  alpha ce qui est déjà peint, et le fond étant transparent, le fondu est appliqué élément par
+  élément (ligne nom + dégâts, puis barre : opacité = moyenne du masque sur la partie visible) —
+  continu au défilement, par tranches de 13 et 16 px plutôt que par pixel. Écart assumé avec la
+  maquette.
+- **Testkit** : `combat_breche_6_ennemis` (ni ascenseur ni fondu), `combat_breche_14_ennemis`,
+  `..._defile`, `..._fin` — panneau complet peint via `paint_content` sur un `FightSnapshot`
+  construit à la main (même exception que `tests/combat_frame_scroll.rs`).
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
