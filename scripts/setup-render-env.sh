@@ -36,6 +36,10 @@ SNAPSHOT="${WAKFU_APT_SNAPSHOT:-20260913T000000Z}"
 # échec explicite vaut mieux qu'un CI qui rougit ensuite sur 57 captures sans dire pourquoi.
 MESA_ATTENDU="25.2.8-0ubuntu0.24.04.2"
 
+# Chemin du marqueur écrit en fin de script — voir sa doc plus bas. Lu par `scripts/ci-local.sh`
+# (et par personne d'autre) : les deux fichiers doivent rester d'accord sur ce chemin.
+MARQUEUR="/etc/wakfu-render-pinned"
+
 # `sudo` seulement s'il existe ET qu'on n'est pas déjà root : root dans un conteneur (le cas du CI),
 # sudo sur un poste de dev.
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
@@ -81,3 +85,15 @@ if [ "$MESA_INSTALLE" != "$MESA_ATTENDU" ]; then
   echo "références dans le nouvel environnement (voir l'en-tête de ce script)." >&2
   exit 1
 fi
+
+# **Marqueur d'environnement épinglé**, posé UNIQUEMENT quand tout ce qui précède a réussi. C'est
+# lui que `scripts/ci-local.sh` lit pour savoir s'il a le droit de compter un écart de capture comme
+# un échec : sa seule présence prouve que ce script est allé au bout, donc que le rendu est celui
+# sous lequel les références ont été produites.
+#
+# Un marqueur plutôt qu'un `dpkg-query` refait par l'appelant : `dpkg` n'existe pas partout — le
+# conteneur de développement du Steam Deck est sous Arch (`scripts/setup-steamdeck.sh`), où une
+# interrogation dpkg échoue silencieusement et ferait passer un environnement NON épinglé pour
+# épinglé. Un fichier se lit sur n'importe quelle distribution.
+printf 'mesa-vulkan-drivers=%s\nsnapshot=%s\n' "$MESA_INSTALLE" "$SNAPSHOT" \
+  | $SUDO tee "$MARQUEUR" > /dev/null
