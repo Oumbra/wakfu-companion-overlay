@@ -1607,6 +1607,116 @@ fn options_garde_de_fermeture_au_clavier() {
     );
 }
 
+/// **La croix de la bannière est un « Annuler » de plus** (demande du 2026-09-13, sur captures du
+/// jeu) : même garde, même action.
+///
+/// Le centre de la croix : la fenêtre occupe (8, 8)-(752, 802) dans le harnais (8 px de marge de
+/// chaque côté), son carré de 32 px est à 12 px du bord droit et centré dans la bannière de 56 —
+/// soit (752 − 12 − 16, 8 + 28) = (724, 36).
+///
+/// Deux clics, et le second compte autant que le premier : une fenêtre **intouchée** doit se
+/// fermer du premier coup, une fenêtre modifiée ne doit PAS se fermer mais ouvrir la garde. Le
+/// test est écrit sur la même fenêtre pour que la position cliquée soit exactement la même — un
+/// clic qui manquerait la croix passerait pour une garde qui fonctionne.
+#[test]
+fn options_croix_de_la_banniere_ferme_comme_annuler() {
+    use overlay_ui::panels::alerts_tab::AlertsAvailability;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+    const CROIX: egui::Pos2 = egui::pos2(752.0 - 12.0 - 16.0, 8.0 + 28.0);
+
+    let reference = overlay_engine::AlertProfile::default();
+    let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
+        path_input: CHEMIN.to_string(),
+        error: None,
+        tab: OptionsTab::Alertes,
+        alerts: Default::default(),
+        alerts_draft: Some(reference.clone()),
+        alerts_availability: AlertsAvailability::Ready,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            suivi: None,
+            path: CHEMIN.to_string(),
+            alerts: Some(reference),
+        },
+        pending_close: false,
+    };
+    let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
+    let garde_ouverte = std::cell::Cell::new(false);
+    // Posé par le test entre deux clics, appliqué au brouillon depuis la closure — le harnais
+    // possède l'état, on ne peut plus y toucher directement une fois construit.
+    let salir = std::cell::Cell::new(false);
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            if salir.take() {
+                options_state
+                    .alerts_draft
+                    .as_mut()
+                    .expect("brouillon")
+                    .add("Combinaison Lardante", Some(4242));
+            }
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            let action = panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+            if action != OptionsModalAction::None {
+                actions.borrow_mut().push(action);
+            }
+            garde_ouverte.set(options_state.pending_close);
+        });
+
+    harness.run();
+    assert!(actions.borrow().is_empty(), "action sans clic");
+
+    // Fenêtre intouchée : la croix ferme du premier coup, sans garde.
+    harness.hover_at(CROIX);
+    harness.run();
+    harness.snapshot("options_croix_survolee");
+    harness.drag_at(CROIX);
+    harness.drop_at(CROIX);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Cancel],
+        "la croix d'une fenêtre intouchée doit fermer, comme « Annuler »"
+    );
+    assert!(
+        !garde_ouverte.get(),
+        "garde ouverte sur une fenêtre intouchée"
+    );
+
+    // Fenêtre modifiée : la croix n'agit pas, elle ouvre la garde.
+    salir.set(true);
+    harness.run();
+    harness.drag_at(CROIX);
+    harness.drop_at(CROIX);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "la croix ne doit RIEN fermer tant que des modifications sont en attente"
+    );
+    assert!(garde_ouverte.get(), "la croix aurait dû ouvrir la garde");
+}
+
 /// **L'infobulle du nom d'objet** — celle que `design::label` pose quand le nom est coupé.
 ///
 /// Deux captures, et la seconde compte autant que la première : un nom qui tient en entier ne doit

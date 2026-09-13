@@ -223,8 +223,9 @@ pub struct OptionsModalState {
     pub initial: OptionsInitial,
     /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
     ///
-    /// Posée par le clic sur « Annuler », par Échap, **ou par l'hôte** quand la croix de la fenêtre
-    /// OS est actionnée : les trois gestes ferment la même chose et méritent la même garde.
+    /// Posée par le clic sur « Annuler », par la croix de la bannière (2026-09-13), par Échap, **ou
+    /// par l'hôte** quand la croix de la fenêtre OS est actionnée : les quatre gestes ferment la
+    /// même chose et méritent la même garde.
     pub pending_close: bool,
 }
 
@@ -335,6 +336,9 @@ pub fn show(
     // ce que les deux snapshots de cette modale vérifient à chaque exécution.
     let chrome = design::window("Options")
         .footer("Annuler", "Valider")
+        // La croix en haut à droite, comme sur toutes les fenêtres du jeu (demande du
+        // 2026-09-13, sur captures) — et elle fait exactement ce que fait « Annuler ».
+        .close_button(true)
         .log_name("options")
         .show(ui);
 
@@ -354,7 +358,8 @@ pub fn show(
 
     match chrome.footer {
         // **« Annuler » ne ferme plus tout de suite quand il y a des modifications en attente** :
-        // il ouvre la garde. C'est le même bouton, mais ce qu'il abandonne n'est plus rien.
+        // il ouvre la garde. C'est le même bouton, mais ce qu'il abandonne n'est plus rien. La
+        // croix de la bannière est ce même bouton, ailleurs — même garde, même action.
         design::FooterClick::Cancel => {
             if state.is_dirty() {
                 state.pending_close = true;
@@ -364,6 +369,13 @@ pub fn show(
         }
         design::FooterClick::Validate => {
             action = OptionsModalAction::Validate(state.path_input.clone())
+        }
+        design::FooterClick::None if chrome.close => {
+            if state.is_dirty() {
+                state.pending_close = true;
+            } else {
+                action = OptionsModalAction::Cancel;
+            }
         }
         design::FooterClick::None => {}
     }

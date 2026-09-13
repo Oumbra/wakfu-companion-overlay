@@ -7,13 +7,27 @@
 //!
 //! let chrome = design::window("Options")
 //!     .footer("Annuler", "Valider")
+//!     .close_button(true)
 //!     .log_name("options")
 //!     .show(ui);
 //!
 //! chrome.tabs(ui, design::tabs(&mut state.tab).entry(Tab::Parametres, "Paramètres"));
 //! // `chrome.content` : la zone entre la barre d'onglets et le pied de page.
 //! // `chrome.footer`  : ce que le pied de page vient de recevoir.
+//! // `chrome.close`   : la croix de la bannière vient d'être cliquée.
 //! ```
+//!
+//! ## La croix de la bannière (2026-09-13)
+//!
+//! Le jeu pose en haut à droite de chacune de ses fenêtres un bouton de fermeture : un carré
+//! arrondi translucide de 32 px, centré dans la bannière et à 12 px de son bord droit, avec une
+//! croix dorée (`window-close.png`, `window-close-hover.png`). C'est un
+//! [`icon_button`](super::icon_button) en contexte `Banner`, peint par le chrome APRÈS le titre —
+//! sur une fenêtre étroite, c'est la croix qui doit rester lisible, pas le titre qui passe dessous.
+//!
+//! Le chrome ne dit que « cliquée » ([`WindowChrome::close`]) : ce que fermer veut dire —
+//! abandonner un brouillon, demander confirmation — appartient à l'appelant, comme pour
+//! « Annuler ». Dans la modale Options, les deux gestes font exactement la même chose.
 //!
 //! ## Pourquoi la forme « zone rendue » plutôt qu'une closure
 //!
@@ -45,7 +59,12 @@
 use egui::{Rect, Response, Ui};
 
 use crate::design::{
-    assets::DsTexture, components::button, components::tabs::Tabs, text, tokens, DesignSystem,
+    assets::DsTexture,
+    components::button,
+    components::icon_button::{self, IconContext},
+    components::tabs::Tabs,
+    icons::DsIcon,
+    text, tokens, DesignSystem,
 };
 
 /// Ce que le pied de page vient de recevoir.
@@ -67,6 +86,7 @@ pub fn window(title: impl Into<String>) -> Window {
         title: title.into(),
         tab_bar_height: tokens::TAB_HEIGHT,
         footer: None,
+        close_button: false,
         log_name: None,
     }
 }
@@ -76,6 +96,7 @@ pub struct Window {
     title: String,
     tab_bar_height: f32,
     footer: Option<(String, String)>,
+    close_button: bool,
     log_name: Option<String>,
 }
 
@@ -97,7 +118,15 @@ impl Window {
         self
     }
 
-    /// Nom d'instance dans `overlay-ui.<date>.log` — préfixe les deux boutons du pied de page.
+    /// Croix de fermeture en haut à droite de la bannière — voir la doc de module. Sans cet
+    /// appel, la bannière ne porte que son titre.
+    pub fn close_button(mut self, close_button: bool) -> Self {
+        self.close_button = close_button;
+        self
+    }
+
+    /// Nom d'instance dans `overlay-ui.<date>.log` — préfixe les deux boutons du pied de page et
+    /// la croix de fermeture.
     pub fn log_name(mut self, name: impl Into<String>) -> Self {
         self.log_name = Some(name.into());
         self
@@ -142,10 +171,25 @@ impl Window {
             text::SHADOW_BOTTOM_RIGHT,
         );
 
+        let prefix = self.log_name.as_deref().unwrap_or("fenetre");
+
+        // Croix de fermeture — après le titre, pour rester au-dessus de lui si la fenêtre est
+        // trop étroite pour les deux. Le chrome ne sait pas ce que fermer veut dire : il remonte
+        // le clic, comme le pied de page.
+        let close = self.close_button
+            && ui
+                .put(
+                    zones.close,
+                    icon_button::icon_button(DsIcon::CloseWindow)
+                        .context(IconContext::Banner)
+                        .size(zones.close.width())
+                        .log_name(format!("{prefix}-fermer")),
+                )
+                .clicked();
+
         // Pied de page — deux boutons du design system, séparés par la gouttière du jeu.
         let footer = match (&self.footer, zones.footer) {
             (Some((cancel_label, validate_label)), Some((cancel_rect, validate_rect))) => {
-                let prefix = self.log_name.as_deref().unwrap_or("fenetre");
                 let mut click = FooterClick::None;
                 if ui
                     .put(
@@ -182,6 +226,7 @@ impl Window {
             tab_bar: zones.tab_bar,
             content: zones.content,
             footer,
+            close,
         }
     }
 }
@@ -198,6 +243,10 @@ pub struct WindowChrome {
     pub content: Rect,
     /// Ce que le pied de page vient de recevoir.
     pub footer: FooterClick,
+    /// La croix de la bannière vient d'être cliquée — toujours `false` sans
+    /// [`Window::close_button`]. À traiter comme [`FooterClick::Cancel`] : c'est le même geste,
+    /// et l'appelant lui doit la même garde.
+    pub close: bool,
 }
 
 impl WindowChrome {
@@ -229,6 +278,16 @@ fn layout(rect: Rect, tab_bar_height: f32, has_footer: bool) -> WindowLayout {
         egui::vec2(rect.width(), tokens::WINDOW_BANNER_HEIGHT),
     );
     let body = Rect::from_min_max(egui::pos2(rect.left(), banner.bottom()), rect.max);
+
+    // La croix : un carré à la marge du bord droit, centré sur la hauteur de la bannière — les
+    // deux cotes du jeu se confondent (12 + 32 + 12 = 56), le centrage est donc aussi la mesure.
+    let close = Rect::from_center_size(
+        egui::pos2(
+            banner.right() - tokens::WINDOW_CLOSE_MARGIN - tokens::WINDOW_CLOSE_SIZE / 2.0,
+            banner.center().y,
+        ),
+        egui::Vec2::splat(tokens::WINDOW_CLOSE_SIZE),
+    );
 
     let content_rect = Rect::from_min_max(
         egui::pos2(
@@ -273,6 +332,7 @@ fn layout(rect: Rect, tab_bar_height: f32, has_footer: bool) -> WindowLayout {
     WindowLayout {
         banner,
         body,
+        close,
         tab_bar,
         content: Rect::from_min_max(
             egui::pos2(
@@ -289,6 +349,9 @@ fn layout(rect: Rect, tab_bar_height: f32, has_footer: bool) -> WindowLayout {
 struct WindowLayout {
     banner: Rect,
     body: Rect,
+    /// Le carré de la croix de fermeture, dans la bannière — calculé même quand elle n'est pas
+    /// demandée, il ne coûte rien et le test ci-dessous le vérifie sans passer par `show`.
+    close: Rect,
     tab_bar: Rect,
     content: Rect,
     /// `(annuler, valider)`, ou `None` pour une fenêtre sans pied de page.
@@ -318,6 +381,20 @@ mod tests {
         // laisserait voir le jeu au travers.
         assert!((z.body.top() - z.banner.bottom()).abs() < EPS);
         assert!((z.body.bottom() - fenetre_options().bottom()).abs() < EPS);
+    }
+
+    #[test]
+    fn la_croix_est_centree_dans_la_banniere_a_la_marge_du_bord_droit() {
+        let z = layout(fenetre_options(), tokens::TAB_HEIGHT, true);
+        assert!((z.close.width() - tokens::WINDOW_CLOSE_SIZE).abs() < EPS);
+        assert!((z.close.height() - tokens::WINDOW_CLOSE_SIZE).abs() < EPS);
+        // 12 px du bord droit de la fenêtre, mesuré sur le jeu.
+        assert!((z.banner.right() - z.close.right() - tokens::WINDOW_CLOSE_MARGIN).abs() < EPS);
+        // Et la même marge en haut : le jeu centre la croix dans sa bannière de 56.
+        assert!((z.close.top() - z.banner.top() - tokens::WINDOW_CLOSE_MARGIN).abs() < EPS);
+        assert!((z.close.center().y - z.banner.center().y).abs() < EPS);
+        // Entièrement dans la bannière, jamais sur le corps.
+        assert!(z.banner.contains_rect(z.close));
     }
 
     #[test]

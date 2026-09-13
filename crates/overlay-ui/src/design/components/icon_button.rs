@@ -38,9 +38,21 @@
 //! | --- | --- | --- |
 //! | `FirstPlan` | `button-icon-first-plan.png` | barre de premier plan, par-dessus le jeu |
 //! | `Panel` | `button-icon.png` | à l'intérieur d'un panneau |
+//! | `Stepper` | `button-stepper.png` | de part et d'autre d'un champ numérique |
+//! | `Banner` | **aucun — un voile peint** | dans la bannière d'une fenêtre (la croix de fermeture) |
 //!
-//! Les deux font **36 × 36**, la taille native. `button-icon-disabled.png` est partagée par les deux
-//! contextes — le jeu n'a qu'une capture de socle grisé, comme pour le bouton texte.
+//! Les deux premiers font **36 × 36**, la taille native. `button-icon-disabled.png` est partagée
+//! par les deux — le jeu n'a qu'une capture de socle grisé, comme pour le bouton texte.
+//!
+//! ## Le contexte `Banner` n'a pas de texture, et ce n'est pas une dérogation
+//!
+//! Le bouton de fermeture du jeu est un carré arrondi **translucide** posé sur la bannière : ses
+//! hachures se voient au travers, au repos comme au survol (`window-close.png`,
+//! `window-close-hover.png`). Une texture le figerait avec un morceau de bannière dedans, faux dès
+//! que le bouton bouge d'un pixel. Le voile est donc peint — un `rect_filled` noir à l'alpha mesuré
+//! ([`tokens::WINDOW_CLOSE_FILL`], `_HOVER`) et un liseré d'1 px au repos — sur ce que la fenêtre a
+//! déjà peint dessous. C'est le seul contexte dont le glyphe est **doré dans les deux états** : le
+//! survol de ce bouton se lit sur son voile, pas sur sa croix.
 //!
 //! ## La taille d'encre vient du manifeste
 //!
@@ -96,17 +108,48 @@ pub enum IconContext {
     /// dans les deux autres contextes. C'est un signal suffisant, et c'est le seul écart de ce
     /// contexte — il se corrigera le jour où une capture survolée existera.
     Stepper,
+    /// Dans la **bannière d'une fenêtre** — le bouton de fermeture que `design::window` pose en
+    /// haut à droite quand on le lui demande.
+    ///
+    /// Socle de 32 px sans texture (voir la doc de module) : un voile noir translucide, arrondi,
+    /// dont seule l'opacité change au survol. Encre de 12 px, dorée au repos comme au survol.
+    /// Toutes les cotes sont dans les jetons `WINDOW_CLOSE_*`.
+    Banner,
+}
+
+/// Ce que peint un contexte sous le glyphe.
+///
+/// Trois contextes ont une texture du jeu ; le quatrième ([`IconContext::Banner`]) n'en a pas et
+/// ne peut pas en avoir — son fond est celui de la fenêtre, et il ne fait que l'assombrir.
+enum IconSocle {
+    Texture(DsTexture, egui::Color32),
+    /// Voile plein `fill`, puis liseré d'1 px `rim` à l'intérieur du bord — transparent quand
+    /// l'état n'en a pas.
+    Veil {
+        fill: egui::Color32,
+        rim: egui::Color32,
+    },
 }
 
 impl IconContext {
-    fn background(self, hovered: bool) -> DsTexture {
+    fn background(self, hovered: bool) -> IconSocle {
+        let texture = |t| IconSocle::Texture(t, egui::Color32::WHITE);
         match (self, hovered) {
-            (IconContext::FirstPlan, false) => DsTexture::ButtonIconFirstPlan,
-            (IconContext::FirstPlan, true) => DsTexture::ButtonIconFirstPlanHover,
-            (IconContext::Panel, false) => DsTexture::ButtonIcon,
-            (IconContext::Panel, true) => DsTexture::ButtonIconHover,
+            (IconContext::FirstPlan, false) => texture(DsTexture::ButtonIconFirstPlan),
+            (IconContext::FirstPlan, true) => texture(DsTexture::ButtonIconFirstPlanHover),
+            (IconContext::Panel, false) => texture(DsTexture::ButtonIcon),
+            (IconContext::Panel, true) => texture(DsTexture::ButtonIconHover),
             // Pas de texture survolée capturée : c'est la teinte qui change (voir `tint`).
-            (IconContext::Stepper, _) => DsTexture::ButtonStepper,
+            (IconContext::Stepper, _) => texture(DsTexture::ButtonStepper),
+            (IconContext::Banner, false) => IconSocle::Veil {
+                fill: tokens::WINDOW_CLOSE_FILL,
+                rim: tokens::WINDOW_CLOSE_RIM,
+            },
+            // Le bord survolé ne se distingue pas de l'intérieur : pas de liseré.
+            (IconContext::Banner, true) => IconSocle::Veil {
+                fill: tokens::WINDOW_CLOSE_FILL_HOVER,
+                rim: egui::Color32::TRANSPARENT,
+            },
         }
     }
 
@@ -120,6 +163,8 @@ impl IconContext {
     fn icon_tint(self) -> Option<egui::Color32> {
         match self {
             IconContext::Stepper => Some(tokens::STEPPER_ICON_TINT),
+            // Doré dans les deux états, mesuré : le survol se lit sur le voile, pas sur la croix.
+            IconContext::Banner => Some(tokens::WINDOW_CLOSE_ICON_TINT),
             _ => None,
         }
     }
@@ -128,6 +173,7 @@ impl IconContext {
     fn native_size(self) -> f32 {
         match self {
             IconContext::Stepper => tokens::STEPPER_SIZE,
+            IconContext::Banner => tokens::WINDOW_CLOSE_SIZE,
             _ => tokens::ICON_BUTTON_SIZE,
         }
     }
@@ -141,6 +187,7 @@ impl IconContext {
     fn content_size(self, icon: DsIcon) -> Option<f32> {
         match self {
             IconContext::Stepper => Some(tokens::STEPPER_SIZE * tokens::STEPPER_ICON_RATIO),
+            IconContext::Banner => Some(tokens::WINDOW_CLOSE_ICON_CONTENT),
             _ => icon.content_size(),
         }
     }
@@ -161,23 +208,30 @@ impl IconContext {
     /// En `FirstPlan`, on garde donc le socle de repos et on l'assombrit, comme le faisait
     /// `panels::icon_button` faute d'asset dédié. Ce n'est pas un repli : c'est la seule des deux
     /// mécaniques qui dit « désactivé » sur ce fond-là.
-    fn disabled(self) -> (DsTexture, egui::Color32, egui::Color32) {
+    fn disabled(self) -> (IconSocle, egui::Color32) {
         match self {
             IconContext::FirstPlan => (
-                DsTexture::ButtonIconFirstPlan,
-                tokens::DISABLED_DIM,
+                IconSocle::Texture(DsTexture::ButtonIconFirstPlan, tokens::DISABLED_DIM),
                 tokens::ICON_TINT_DISABLED,
             ),
             IconContext::Panel => (
-                DsTexture::ButtonIconDisabled,
-                egui::Color32::WHITE,
+                IconSocle::Texture(DsTexture::ButtonIconDisabled, egui::Color32::WHITE),
                 tokens::TEXT_DISABLED,
             ),
             // Même mécanique que `FirstPlan`, et pour la même raison : aucun socle grisé n'existe
             // pour cette famille, et celui du contexte `Panel` porte un liseré kaki qui jurerait.
             IconContext::Stepper => (
-                DsTexture::ButtonStepper,
-                tokens::DISABLED_DIM,
+                IconSocle::Texture(DsTexture::ButtonStepper, tokens::DISABLED_DIM),
+                tokens::ICON_TINT_DISABLED,
+            ),
+            // Le jeu ne désactive jamais sa croix de fermeture : aucune capture, donc le voile de
+            // repos et la croix effacée — l'état existe parce que le contrat l'exige, pas parce
+            // qu'un appelant le demande.
+            IconContext::Banner => (
+                IconSocle::Veil {
+                    fill: tokens::WINDOW_CLOSE_FILL,
+                    rim: tokens::WINDOW_CLOSE_RIM,
+                },
                 tokens::ICON_TINT_DISABLED,
             ),
         }
@@ -294,20 +348,37 @@ impl Widget for IconButton {
 
         if ui.is_rect_visible(rect) {
             let design = DesignSystem::get(ui.ctx());
-            let (background, background_tint, icon_tint) = match state {
+            let (socle, icon_tint) = match state {
                 IconButtonState::Idle => (
                     self.context.background(false),
-                    egui::Color32::WHITE,
                     self.context.icon_tint().unwrap_or(tokens::ICON_TINT),
                 ),
                 IconButtonState::Hovered => (
                     self.context.background(true),
-                    egui::Color32::WHITE,
                     self.context.icon_tint().unwrap_or(tokens::ICON_TINT_HOVER),
                 ),
                 IconButtonState::Disabled => self.context.disabled(),
             };
-            design.paint(ui.painter(), rect, background, background_tint);
+            match socle {
+                IconSocle::Texture(texture, tint) => {
+                    design.paint(ui.painter(), rect, texture, tint)
+                }
+                IconSocle::Veil { fill, rim } => {
+                    // Le rayon suit l'échelle du socle, comme le glyphe : à 32 px il vaut sa
+                    // mesure, ailleurs la même proportion.
+                    let radius = f32::from(tokens::WINDOW_CLOSE_RADIUS) * rect.width()
+                        / self.context.native_size();
+                    ui.painter().rect_filled(rect, radius, fill);
+                    if rim.a() > 0 {
+                        ui.painter().rect_stroke(
+                            rect,
+                            radius,
+                            egui::Stroke::new(1.0, rim),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                }
+            }
 
             let icon_size = icon_draw_size(
                 design.icon_native_size(self.icon),
