@@ -147,7 +147,32 @@ jobs:
       # références DANS l'environnement de rendu (voir `.github/ci-image/Dockerfile`), dans son
       # propre commit.
       - name: "overlay-testkit — captures offscreen (GATE, voir §17.1)"
+        id: captures
         run: cargo test --no-fail-fast -p overlay-testkit
+      # **Sans cette étape, un gate rouge est indéchiffrable.** Le journal ne dit que « Diff: 20563 »
+      # — un nombre de pixels, qui ne dit ni QUOI a changé ni si c'est une régression. Les images de
+      # diagnostic (`*.new.png`, le rendu OBTENU ; `*.diff.png`, les pixels en écart) sont produites
+      # sur le runner puis jetées avec lui. Les publier, c'est la différence entre « je regarde ce
+      # qui a changé » et « je reproduis l'environnement du CI en local pour le découvrir ».
+      #
+      # C'est aussi ce qui rend applicable la règle du §17.1 : une régénération de références se
+      # relit sur ces images, jamais sur le diff git — un PNG modifié s'y affiche « Bin 693015 ->
+      # 698936 bytes », et rien d'autre.
+      #
+      # `outcome` et non `conclusion` : `outcome` est le résultat BRUT de l'étape, avant toute
+      # réécriture. La condition ne vise donc que l'échec des captures — un `cargo test` en échec
+      # plus haut ne déclenche pas une publication vide. `if-no-files-found: error` assume le
+      # contrat : si le gate est rouge, ces images existent forcément.
+      - name: "captures en écart — rendu obtenu et diff (diagnostic)"
+        if: always() && steps.captures.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures-en-ecart
+          path: |
+            crates/overlay-testkit/tests/snapshots/*.new.png
+            crates/overlay-testkit/tests/snapshots/*.diff.png
+          if-no-files-found: error
+          retention-days: 14
 
   build-windows:
     runs-on: windows-latest
