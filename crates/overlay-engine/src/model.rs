@@ -134,6 +134,19 @@ pub enum LogEntry {
         #[serde(rename = "fightId")]
         fight_id: Option<i64>,
     },
+    /// Fin du tour d'un personnage DU JOUEUR (« N secondes reportées pour le tour suivant. »),
+    /// tour passé sans sort compris — jamais émis pour un monstre ni pour l'allié d'un autre
+    /// joueur (ajout local au parseur vendu, voir `TURN_ENDED_RE`). Frontière de tour pour
+    /// `session::FightWorking::register_fight_turn` : le lanceur suivant ouvre un nouveau tour
+    /// même s'il porte le nom du précédent (deux monstres homonymes de part et d'autre d'un tour
+    /// allié muet).
+    TurnEnded {
+        time: String,
+        #[serde(rename = "carriedSeconds")]
+        carried_seconds: i64,
+        #[serde(rename = "fightId")]
+        fight_id: Option<i64>,
+    },
     CombatStart {
         time: String,
     },
@@ -212,6 +225,7 @@ impl LogEntry {
             | LogEntry::EnemyDefeated { time, .. }
             | LogEntry::EnemyFled { time, .. }
             | LogEntry::CombatDefeatMarker { time, .. }
+            | LogEntry::TurnEnded { time, .. }
             | LogEntry::CombatStart { time }
             | LogEntry::CombatEnd { time, .. }
             | LogEntry::Loot { time, .. }

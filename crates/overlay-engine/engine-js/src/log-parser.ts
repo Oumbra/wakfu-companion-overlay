@@ -135,6 +135,15 @@ const TRANSFORM_RE = /^(.+?): transformée? en (.+?)\s*!?$/;
  * (`combat-defeat-marker`, actuellement un no-op côté StatsStoreService) au cas où un futur usage
  * (UI temps réel affichant les KO en cours, par exemple) en aurait besoin. */
 const DEFEAT_MARKER_RE = /^Vous avez été vaincu\(e\) !$/;
+/** "N secondes reportées pour le tour suivant." — AJOUT LOCAL à l'overlay (2026-09-13, voir
+ * VENDORED_FROM.txt) : message personnel émis à la FIN DU TOUR de chaque personnage du joueur (le
+ * temps non consommé est reporté), y compris pour un tour passé sans lancer de sort — vérifié sur
+ * `crates/overlay-engine/tests/wakfu.log` (six comptes du joueur dans le même combat : une ligne
+ * après chaque tour allié, avec ou sans sort). Jamais émis pour un monstre ni pour l'allié d'un
+ * autre joueur. Sans nom de personnage dans la ligne ; rattaché au combat courant comme le
+ * marqueur de défaite. Sert de frontière de tour à `overlay_engine::session::register_fight_turn`
+ * pour distinguer deux monstres homonymes qui jouent de part et d'autre d'un tour allié muet. */
+const TURN_ENDED_RE = /^(\d+) secondes? reportées? pour le tour suivant\.?$/;
 /** "Lancement de l'occupation pour le joueur X" : diffusé UNE FOIS PAR ALLIÉ, mais seulement au
  * moment où le combat se conclut RÉELLEMENT par une défaite totale de l'équipe (vérifié sur un vrai
  * fichier multi-compte, 2026-08-25 — ne se déclenche JAMAIS pour un simple KO relevable en cours de
@@ -227,6 +236,19 @@ const DAMAGE_ELEMENTS = new Set<string>([
 
 /** Au-delà de cette fenêtre, deux lignes de contenu identique sont considérées comme deux événements distincts, pas un doublon multi-compte. */
 const DEDUPE_WINDOW_MS = 1000;
+/**
+ * Fenêtre dédiée aux lancers de sort (`spell-cast`) — MODIFICATION LOCALE à l'overlay (2026-09-13,
+ * voir VENDORED_FROM.txt) : la fenêtre générale de 1 s avalait les vrais relancers rapides d'un
+ * même sort par le même lanceur (« Anonyme-Ouginak1 lance le sort Croc-en-jambe » deux fois à 724 ms
+ * d'écart, chacun avec ses propres lignes de dégâts entre les deux), donc un seul sort affiché
+ * dans le bloc « ligne de sorts » de l'overlay. Mesuré sur `crates/overlay-engine/tests/wakfu.log`
+ * (temps monotone, combats séparés selon qu'ils sont observés par un ou deux clients — jointures
+ * `[_FL_]` dupliquées) : toutes les paires identiques à moins de 452 ms sont des copies d'un second
+ * client (combats multi-observés, souvent adjacentes), toutes les paires à plus de 724 ms sont des
+ * relancers réels dans des combats à un seul observateur. 600 ms sépare les deux populations avec
+ * une marge de part et d'autre. Les autres types gardent la fenêtre générale.
+ */
+const SPELL_CAST_DEDUPE_WINDOW_MS = 600;
 /** Types de ligne pour lesquels un contenu identique répété est plausible sans être un doublon d'observation (butin farmé en boucle) : jamais dédoublonnés. */
 const DEDUPE_EXEMPT_KINDS = new Set<string>(['loot', 'fighter-joined']);
 
@@ -747,6 +769,16 @@ export class LogParser {
       return { kind: 'combat-defeat-marker', time, fightId: this.resolveCurrentFightId() };
     }
 
+    const turnEnded = TURN_ENDED_RE.exec(content);
+    if (turnEnded) {
+      return {
+        kind: 'turn-ended',
+        time,
+        carriedSeconds: Number(turnEnded[1]),
+        fightId: this.resolveCurrentFightId(),
+      };
+    }
+
     const ko = KO_RE.exec(content);
     if (ko) {
       const name = ko[1].trim();
@@ -1033,7 +1065,8 @@ export class LogParser {
     const previous = this.recentSignatures.get(signature);
     this.recentSignatures.set(signature, nowMs);
     if (this.recentSignatures.size > 500) this.pruneSignatures(nowMs);
-    return previous !== undefined && nowMs - previous >= 0 && nowMs - previous <= DEDUPE_WINDOW_MS;
+    const windowMs = entry.kind === 'spell-cast' ? SPELL_CAST_DEDUPE_WINDOW_MS : DEDUPE_WINDOW_MS;
+    return previous !== undefined && nowMs - previous >= 0 && nowMs - previous <= windowMs;
   }
 
   private pruneSignatures(nowMs: number): void {

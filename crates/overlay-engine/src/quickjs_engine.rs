@@ -176,6 +176,64 @@ mod tests {
         None
     }
 
+    /// Lignes d'un combat à deux Grokoko et un allié du joueur, avec des relancers du même sort —
+    /// les horodatages sont ceux du test, les textes ceux du log réel.
+    fn lignes_relancers(delta_ms: u32) -> Vec<String> {
+        let t = |ms: u32| format!("10:00:{:02},{:03}", ms / 1000, ms % 1000);
+        [
+            format!(" INFO {} [T] (a:1) - [_FL_] fightId=1 Oumbra breed : 15 [1] isControlledByAI=false obstacleId : -1 join the fight at {{P}}", t(0)),
+            format!(" INFO {} [T] (a:1) - [_FL_] fightId=1 Grokoko breed : 4728 [-2] isControlledByAI=true obstacleId : -1 join the fight at {{P}}", t(1)),
+            format!(" INFO {} [T] (a:1) - [Information (combat)] Oumbra lance le sort Croc-en-jambe", t(1000)),
+            format!(" INFO {} [T] (a:1) - [Information (combat)] Grokoko: -105 PV (Terre)", t(1500)),
+            format!(" INFO {} [T] (a:1) - [Information (combat)] Oumbra lance le sort Croc-en-jambe", t(1000 + delta_ms)),
+            format!(" INFO {} [T] (a:1) - [Information (combat)] 61 secondes reportées pour le tour suivant.", t(5000)),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn casts(entries: &[LogEntry]) -> usize {
+        entries
+            .iter()
+            .filter(|e| matches!(e, LogEntry::SpellCast { .. }))
+            .count()
+    }
+
+    /// Modification locale du parseur vendu (voir `SPELL_CAST_DEDUPE_WINDOW_MS` dans
+    /// `log-parser.ts`) : un relancer réel du même sort à 724 ms (le plus rapide observé sur le log
+    /// de parité) n'est plus avalé comme doublon multi-compte ; une copie d'un second client à
+    /// 452 ms (la plus tardive observée) l'est toujours.
+    #[test]
+    fn un_relancer_rapide_du_meme_sort_nest_plus_deduplique() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine.parse_lines(&lignes_relancers(724)).expect("parsing");
+        assert_eq!(casts(&entries), 2, "relancer réel à 724 ms");
+
+        engine.reset().expect("reset");
+        let entries = engine.parse_lines(&lignes_relancers(452)).expect("parsing");
+        assert_eq!(casts(&entries), 1, "copie multi-compte à 452 ms");
+    }
+
+    /// Ajout local : « N secondes reportées pour le tour suivant. » devient `TurnEnded`, rattaché
+    /// au combat courant, avec les secondes reportées.
+    #[test]
+    fn la_fin_de_tour_du_joueur_est_un_evenement_rattache_au_combat() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine.parse_lines(&lignes_relancers(724)).expect("parsing");
+        let turn_ended = entries
+            .iter()
+            .find(|e| matches!(e, LogEntry::TurnEnded { .. }))
+            .expect("un TurnEnded");
+        assert_eq!(
+            *turn_ended,
+            LogEntry::TurnEnded {
+                time: "10:00:05,000".to_string(),
+                carried_seconds: 61,
+                fight_id: Some(1),
+            }
+        );
+    }
+
     #[test]
     fn sans_catalogue_le_repli_dinvocation_avale_nimporte_quel_nouveau_venu() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");

@@ -166,10 +166,11 @@ pub struct FighterDamage {
     /// Alimenté pour TOUT combattant connu du combat, allié comme ennemi (les ennemis depuis le
     /// 13 sept. 2026 : la vue Ennemis a son propre bloc, voir `last_enemy_caster`) ; borné à
     /// `MAX_LAST_TURN_CASTS`. Limite héritée de `register_fight_turn` : deux instances HOMONYMES
-    /// (deux Grokoko) qui jouent l'une après l'autre sans autre acteur entre elles sont fusionnées
-    /// sur un seul siège — les sorts de la seconde s'ajoutent à la liste de la première, rien dans
-    /// le log ne permet de les distinguer (voir `resolve_next_actor`, test `deux_homonymes_
-    /// consecutifs_sont_fusionnes_sur_un_siege`). `#[serde(default)]` même raison que `xp_gained`
+    /// (deux Grokoko) qui jouent l'une après l'autre sans AUCUNE ligne entre elles sont fusionnées
+    /// sur un seul siège — les sorts de la seconde s'ajoutent à la liste de la première (test
+    /// `deux_homonymes_consecutifs_sont_fusionnes_sur_un_siege`). Depuis le 13 sept. 2026, la fin
+    /// de tour d'un personnage du joueur (`LogEntry::TurnEnded`, même pour un tour passé sans sort)
+    /// lève cette ambiguïté : voir `FightWorking::end_own_turn`. `#[serde(default)]` même raison que `xp_gained`
     /// (champ ajouté après coup, fichiers `fight-*.json` antérieurs encore lisibles).
     #[serde(default)]
     pub last_turn_casts: Vec<SpellCastRecord>,
@@ -369,7 +370,10 @@ struct FightWorking {
     initiative_cursor: usize,
     /// Dernier acteur (nom brut) ayant lancé un sort — un même acteur qui enchaîne plusieurs sorts
     /// DANS LE MÊME TOUR ne doit pas faire avancer la file une deuxième fois (voir
-    /// `register_fight_turn`).
+    /// `register_fight_turn`). Remis à `None` par `end_own_turn` (13 sept. 2026) : la fin de tour
+    /// d'un personnage du joueur (`LogEntry::TurnEnded`) prouve qu'un tour allié s'est écoulé
+    /// depuis ce sort, même muet — le prochain lanceur, fût-il homonyme du précédent, ouvre un
+    /// nouveau tour et se résout par la file d'initiative, jamais par ce raccourci.
     last_turn_actor: Option<String>,
     /// Dernier siège résolu pour un nom donné (voir `resolve_next_actor`) — c'est CE siège qui
     /// reçoit les dégâts/soins d'une ligne dont l'attaquant porte ce nom, jusqu'au prochain sort
@@ -494,6 +498,9 @@ impl FightWorking {
     /// pour l'attribution des dégâts, déjà documentée comme telle).
     fn register_fight_turn(&mut self, actor: &str) -> Option<(usize, bool)> {
         let known = self.count_name_instances(actor) > 0;
+        // Le raccourci « même acteur = même tour » ci-dessous est la limite documentée de
+        // `FighterDamage::last_turn_casts` (deux homonymes consécutifs fusionnés) ; `end_own_turn`
+        // le désarme dès qu'une fin de tour alliée a été vue entre les deux sorts.
         if self.last_turn_actor.as_deref() == Some(actor) {
             // Même tour en cours (plusieurs sorts d'affilée par le même acteur).
             let seat = self.last_resolved_seat_by_name.get(actor).copied()?;
@@ -512,6 +519,20 @@ impl FightWorking {
         }
         self.turn_seats_seen.insert(seat_fighter_index);
         known.then_some((seat_fighter_index, true))
+    }
+
+    /// Frontière de tour (13 sept. 2026, ajout local sans équivalent web) : un personnage du joueur
+    /// vient de finir son tour (`LogEntry::TurnEnded`). Les combattants alternent allié/ennemi dans
+    /// la file d'initiative (règle du jeu) : le prochain sort ouvre donc forcément un nouveau tour,
+    /// y compris s'il porte le même nom que le dernier lanceur — deux Grokoko de part et d'autre
+    /// d'un tour allié passé sans sort étaient jusqu'ici fusionnés sur un siège, faute de toute
+    /// ligne entre leurs sorts. Seul `last_turn_actor` est désarmé : la file, le curseur et le
+    /// dernier siège par nom (attribution des dégâts) restent tels quels, `resolve_next_actor`
+    /// fait le reste (siège homonyme suivant, ou retour au même siège avec un nouveau tour si le
+    /// nom n'a qu'une instance). Le cas restant, indécidable depuis le log, est deux homonymes
+    /// consécutifs dont l'allié intercalé est KO (le jeu saute son tour, aucune ligne).
+    fn end_own_turn(&mut self) {
+        self.last_turn_actor = None;
     }
 
     /// Miroir de `resolveNextActor` (`stats-store.service.ts`) — voir sa doc détaillée côté web
@@ -808,6 +829,14 @@ impl SessionState {
                             }
                         }
                     }
+                }
+            }
+            LogEntry::TurnEnded {
+                fight_id: Some(fight_id),
+                ..
+            } => {
+                if let Some(fight) = self.fights.get_mut(fight_id) {
+                    fight.end_own_turn();
                 }
             }
             LogEntry::Damage {
@@ -2203,6 +2232,7 @@ fn entry_fight_id(entry: &LogEntry) -> Option<i64> {
         | LogEntry::EnemyDefeated { fight_id, .. }
         | LogEntry::EnemyFled { fight_id, .. }
         | LogEntry::CombatDefeatMarker { fight_id, .. }
+        | LogEntry::TurnEnded { fight_id, .. }
         | LogEntry::Loot { fight_id, .. }
         | LogEntry::ChallengeResult { fight_id, .. } => *fight_id,
         LogEntry::Chat { .. }
@@ -2264,6 +2294,14 @@ mod tests {
 
     fn spell_cast(fight_id: i64, caster: &str) -> LogEntry {
         spell_cast_named(fight_id, caster, "sort", false)
+    }
+
+    fn turn_ended(fight_id: i64) -> LogEntry {
+        LogEntry::TurnEnded {
+            time: "12:00:00,700".to_string(),
+            carried_seconds: 12,
+            fight_id: Some(fight_id),
+        }
     }
 
     fn spell_cast_named(fight_id: i64, caster: &str, spell: &str, critical: bool) -> LogEntry {
@@ -2501,6 +2539,96 @@ mod tests {
         assert_eq!(fight.fighters[0].last_turn_casts.len(), 2);
         assert!(fight.fighters[1].last_turn_casts.is_empty());
         assert_eq!(fight.last_enemy_caster, Some(0));
+    }
+
+    /// Frontière de tour (voir `FightWorking::end_own_turn`) : un tour allié passé sans sort ne
+    /// laisse aucune ligne, sauf la fin de tour du personnage du joueur — elle suffit à attribuer
+    /// le second « Grokoko » à l'autre instance, là où le test précédent les fusionne.
+    #[test]
+    fn deux_homonymes_separes_par_une_fin_de_tour_alliee_ont_chacun_leurs_sorts() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Coup d'Koko", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(&turn_ended(1), ctx, &mut Vec::new()); // Oumbra a passé son tour sans sort
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Kokolatte", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        let fight = &state.fights[&1].snapshot;
+        let casts = |idx: usize| -> Vec<&str> {
+            fight.fighters[idx]
+                .last_turn_casts
+                .iter()
+                .map(|c| c.spell.as_str())
+                .collect()
+        };
+        assert_eq!(casts(0), vec!["Coup d'Koko"]);
+        assert_eq!(casts(2), vec!["Kokolatte"]);
+        assert_eq!(fight.last_enemy_caster, Some(2));
+    }
+
+    /// Un seul Grokoko : après une fin de tour alliée, son sort suivant ouvre un NOUVEAU tour (la
+    /// file a bouclé), la liste repart de zéro — jamais un second siège fantôme.
+    #[test]
+    fn un_homonyme_unique_apres_une_fin_de_tour_alliee_rejoue_un_nouveau_tour() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Grokoko", 4728, true),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Coup d'Koko", false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(&turn_ended(1), ctx, &mut Vec::new());
+        state.apply(
+            &spell_cast_named(1, "Grokoko", "Kokolatte", false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        let fight = &state.fights[&1].snapshot;
+        assert_eq!(fight.fighters.len(), 2);
+        assert_eq!(
+            fight.fighters[0]
+                .last_turn_casts
+                .iter()
+                .map(|c| c.spell.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Kokolatte"]
+        );
+        assert_eq!(fight.fighters[0].last_turn, 2);
     }
 
     /// Un lanceur inconnu du combat (invocation jamais ajoutée à `fighters`, jointure manquée) ne
