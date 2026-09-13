@@ -403,15 +403,18 @@ explicitement cliqué (`WS_EX_NOACTIVATE` côté Windows, `_NET_WM_STATE_ABOVE` 
 
 Quand le pointeur survole un overlay interactif, c'est le **curseur de Wakfu** qui s'affiche, pas
 la flèche de l'OS — même logique que les boutons et infobulles du design system : l'overlay doit
-passer pour une partie du jeu. Les deux bitmaps (`assets/cursor/`, isolés pixel par pixel depuis un
+passer pour une partie du jeu. Les trois bitmaps (`assets/cursor/`, isolés pixel par pixel depuis un
 enregistrement d'écran, voir leur `README.md`) sont embarqués par `overlay-ui::cursor` ; le point
-chaud est déduit de l'image (première ligne opaque), les fichiers peuvent donc être re-détourés
-sans toucher au code.
+chaud d'une flèche est déduit de l'image (première ligne opaque), les fichiers peuvent donc être
+re-détourés sans toucher au code — celui de la croix fléchée est son **centre**, une croix
+symétrique ne pointant nulle part.
 
 Comportement calqué sur le jeu, mesuré à 30 i/s : flèche d'egui (`CursorIcon::Default`) → bitmap
 de repos, fixe ; main (`PointingHand`, tout ce qui se clique) → clignotement éclair 533 ms / repos
-533 ms, l'éclair en premier dès l'entrée en survol, bascule franche sans fondu ; tout autre curseur
-(`Text`, `ResizeHorizontal`…) → curseur système inchangé.
+533 ms, l'éclair en premier dès l'entrée en survol, bascule franche sans fondu ; croix fléchée
+(`Move`, ce qui se déplace au glisser-déposer — les tuiles de l'onglet Suivi de la fenêtre Options,
+`panels::suivi_tab`) → bitmap de déplacement, **fixe** (le jeu ne le fait pas clignoter) ; tout
+autre curseur (`Text`, `ResizeHorizontal`…) → curseur système inchangé.
 
 Mécanique : egui 0.36 porte nativement un curseur bitmap (`Context::set_cursor_image` →
 `PlatformOutput::cursor_image`), qu'`egui-winit` applique en `winit::window::CustomCursor` à
