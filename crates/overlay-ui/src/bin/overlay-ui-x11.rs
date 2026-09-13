@@ -903,14 +903,15 @@ mod linux_main {
                     // garde ses compteurs et réplique au compte de lui-même (voir
                     // `EngineCommand::SetWatchlistDefinitions`). L'`ArcSwap` local n'est pas touché
                     // ici : c'est le moteur qui republie la liste, compteurs vivants compris.
-                    if let Some(restantes) = outcome.watchlist_remaining {
+                    if let Some(edition) = outcome.watchlist_edit {
                         tracing::info!(
-                            entry_count = restantes.len(),
-                            "[bandeau] suppression groupée"
+                            entry_count = edition.definitions.len(),
+                            geste = edition.reason.label(),
+                            "[bandeau] définitions modifiées"
                         );
                         let _ = self
                             .settings_tx
-                            .send(EngineCommand::SetWatchlistDefinitions(restantes));
+                            .send(EngineCommand::SetWatchlistDefinitions(edition.definitions));
                     }
                     if outcome.open_watchlist {
                         post_redraw = PostRedraw::OpenOptions(

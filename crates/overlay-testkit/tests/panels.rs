@@ -618,22 +618,32 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     harness.snapshot("watchlist_tooltip_options_a_droite");
 }
 
-/// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
-///
-/// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
-/// suppression multiple ne s'active pas ». Il avait raison, et rien ne le disait : le « − » était
-/// documenté INERTE depuis le 2026-09-06, la maquette validée depuis le matin même, et aucun test
-/// ne demandait ce que le bouton FAIT — les captures existantes ne regardaient que son apparence.
-///
-/// Ce test clique réellement, et vérifie l'état plutôt que des pixels : c'est la seule forme qui
-/// aurait attrapé un bouton peint juste et branché sur rien.
-///
-/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`]
-/// pour le carré de contrôle (« − » au centre en (146, 30)). Les tuiles suivent le carré :
-/// x = 14 (marges) + 88 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
-/// + 12 (`TILE_GAP`) = 174 pour le bord gauche de la première, soit 206 pour son centre.
-#[test]
-fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
+/// Le harnais du bandeau in-game, avec l'état que l'hôte lui prête rendu inspectable — trois tests
+/// s'en servent (sélection multiple, glisser-déposer, planche du geste).
+struct Bandeau {
+    harness: egui_kittest::Harness<'static>,
+    /// Le pendant du champ `App::watchlist_selection`.
+    selection: std::rc::Rc<std::cell::RefCell<panels::watchlist::WatchlistSelection>>,
+    /// Ce que le panneau a demandé d'écrire à la dernière frame — le pendant de `RenderOutcome`.
+    edition: std::rc::Rc<std::cell::RefCell<Option<panels::watchlist::WatchlistEdit>>>,
+    window_width: f32,
+}
+
+fn entrees_de_bandeau() -> Vec<WatchlistEntry> {
+    ["Bottes Lantha", "Bois de Frêne", "Pierre de Lune"]
+        .iter()
+        .map(|nom| WatchlistEntry {
+            name: (*nom).to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Up,
+            count: 0,
+            countdown_target: 0,
+            catalog_id: None,
+        })
+        .collect()
+}
+
+fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -645,31 +655,19 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
     let now = std::time::Instant::now();
-    let entries: Vec<WatchlistEntry> = ["Bottes Lantha", "Bois de Frêne", "Pierre de Lune"]
-        .iter()
-        .map(|nom| WatchlistEntry {
-            name: (*nom).to_string(),
-            kind: WatchlistKind::Item,
-            mode: WatchlistMode::Up,
-            count: 0,
-            countdown_target: 0,
-            catalog_id: None,
-        })
-        .collect();
 
-    // L'état vit chez l'hôte : ce `Rc` tient le rôle du champ `App::watchlist_selection`.
     let selection = Rc::new(RefCell::new(
         panels::watchlist::WatchlistSelection::default(),
     ));
-    // Ce que le panneau a demandé à la dernière frame — le pendant de `RenderOutcome`.
-    let restantes: Rc<RefCell<Option<Vec<WatchlistEntry>>>> = Rc::new(RefCell::new(None));
+    let edition: Rc<RefCell<Option<panels::watchlist::WatchlistEdit>>> =
+        Rc::new(RefCell::new(None));
 
     let window_width = panels::watchlist::content_width(entries.len()) + 12.0;
-    let mut harness = egui_kittest::Harness::builder()
+    let harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, 220.0))
         .build_ui({
             let selection = Rc::clone(&selection);
-            let restantes = Rc::clone(&restantes);
+            let edition = Rc::clone(&edition);
             move |ui| {
                 let ctx = ui.ctx().clone();
                 let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
@@ -696,11 +694,128 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
                         options: None,
                     },
                 );
-                if outcome.watchlist_remaining.is_some() {
-                    *restantes.borrow_mut() = outcome.watchlist_remaining;
+                if outcome.watchlist_edit.is_some() {
+                    *edition.borrow_mut() = outcome.watchlist_edit;
                 }
             }
         });
+    Bandeau {
+        harness,
+        selection,
+        edition,
+        window_width,
+    }
+}
+
+/// Centres des trois tuiles du bandeau — mêmes calculs que
+/// [`panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple`] : première tuile centrée en
+/// x = 206, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 46.
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(206.0, 46.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(346.0, 46.0);
+/// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
+/// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(189.0, 29.0);
+
+/// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
+///
+/// Le bandeau est en lecture seule sur les entrées : il ne réordonne rien lui-même, il demande
+/// (`WatchlistOutcome::edit`). Ce test vérifie les deux moitiés que le module partagé ne peut pas
+/// prouver seul — que le geste souris arrive bien jusqu'au panneau sur la vraie bande, et que ce
+/// qui remonte est la liste entière dans le bon ordre, avec le motif qui le dit au journal.
+#[test]
+fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
+    let Bandeau {
+        mut harness,
+        selection,
+        edition,
+        ..
+    } = harnais_bandeau(entrees_de_bandeau());
+    harness.run();
+
+    // La croix fléchée dit que la tuile se déplace, avant même qu'on l'ait prise — `overlay_ui::
+    // cursor` la traduit ensuite en bitmap du jeu.
+    harness.hover_at(BANDEAU_TUILE_0);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "une tuile survolée doit annoncer qu'elle se déplace"
+    );
+
+    harness.drag_at(BANDEAU_TUILE_0);
+    harness.run();
+    harness.hover_at(BANDEAU_TUILE_2);
+    harness.run();
+    harness.drop_at(BANDEAU_TUILE_2);
+    harness.run();
+
+    let edition = edition.borrow();
+    let edition = edition
+        .as_ref()
+        .expect("aucun réordonnancement remonté : le glisser-déposer n'est pas branché");
+    assert_eq!(
+        edition.reason,
+        panels::watchlist::WatchlistEditReason::Reorder,
+        "un déplacement ne doit pas se journaliser comme une suppression"
+    );
+    // Retrait puis réinsertion au rang visé, comme le web : la première entrée se pose APRÈS celle
+    // qu'elle visait. Les trois entrées sont toujours là — un déplacement ne retire rien.
+    assert_eq!(
+        edition
+            .definitions
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Bois de Frêne", "Pierre de Lune", "Bottes Lantha"],
+    );
+    assert!(
+        !selection.borrow().is_open(),
+        "un déplacement ne doit pas ouvrir la sélection multiple"
+    );
+}
+
+/// **Le geste, en vol sur la bande in-game** — place d'origine voilée, fantôme sous le pointeur,
+/// barre d'insertion or sur la tuile visée. Le pendant de `options_suivi_deplacement` pour l'autre
+/// écran : les deux partagent leur mécanique (`panels::tile_reorder`), les deux planches disent
+/// qu'elle se voit pareil des deux côtés.
+#[test]
+fn panneau_suivi_deplacement_en_vol() {
+    let Bandeau { mut harness, .. } = harnais_bandeau(entrees_de_bandeau());
+    harness.run();
+
+    harness.hover_at(BANDEAU_TUILE_0_PRISE);
+    harness.run();
+    harness.drag_at(BANDEAU_TUILE_0_PRISE);
+    harness.run();
+    harness.hover_at(BANDEAU_TUILE_2);
+    harness.run();
+    // Une seconde frame : le fantôme et la barre suivent le pointeur de la frame précédente.
+    harness.run();
+    harness.snapshot("watchlist_deplacement");
+}
+
+/// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
+///
+/// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
+/// suppression multiple ne s'active pas ». Il avait raison, et rien ne le disait : le « − » était
+/// documenté INERTE depuis le 2026-09-06, la maquette validée depuis le matin même, et aucun test
+/// ne demandait ce que le bouton FAIT — les captures existantes ne regardaient que son apparence.
+///
+/// Ce test clique réellement, et vérifie l'état plutôt que des pixels : c'est la seule forme qui
+/// aurait attrapé un bouton peint juste et branché sur rien.
+///
+/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`]
+/// pour le carré de contrôle (« − » au centre en (146, 30)). Les tuiles suivent le carré :
+/// x = 14 (marges) + 88 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
+/// + 12 (`TILE_GAP`) = 174 pour le bord gauche de la première, soit 206 pour son centre.
+#[test]
+fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
+    let Bandeau {
+        mut harness,
+        selection,
+        edition: restantes,
+        window_width,
+    } = harnais_bandeau(entrees_de_bandeau());
     harness.run();
     assert!(
         !selection.borrow().is_open(),
@@ -723,14 +838,23 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let bouton = egui::pos2(window_width / 2.0, 96.0);
     clique(&mut harness, bouton);
     let restantes = restantes.borrow();
-    let restantes = restantes
+    let edition = restantes
         .as_ref()
         .expect("aucune suppression remontée : le bouton de suppression groupée n'est pas branché");
     assert_eq!(
-        restantes.len(),
+        edition.reason,
+        panels::watchlist::WatchlistEditReason::BulkRemove,
+        "l'écriture demandée doit se journaliser comme une suppression, pas autrement"
+    );
+    assert_eq!(
+        edition.definitions.len(),
         2,
         "une seule tuile était cochée : il doit rester les deux autres — restantes : {:?}",
-        restantes.iter().map(|e| &e.name).collect::<Vec<_>>(),
+        edition
+            .definitions
+            .iter()
+            .map(|e| &e.name)
+            .collect::<Vec<_>>(),
     );
     assert!(
         !selection.borrow().is_open(),
