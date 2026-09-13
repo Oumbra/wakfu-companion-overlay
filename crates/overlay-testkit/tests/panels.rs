@@ -931,8 +931,8 @@ fn panneau_suivi_deplacement_en_vol() {
 ///
 /// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_ligne_dessus_ou_dessous`]
 /// pour le carré de contrôle (« − » au centre en [`BANDEAU_MOINS`]). Les tuiles suivent le carré :
-/// x = 14 (marges) + 48 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
-/// + 12 (`TILE_GAP`) = 134 pour le bord gauche de la première, soit 163 pour son centre
+/// x = 14 (marges) + 48 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4) +
+/// 12 (`TILE_GAP`) = 134 pour le bord gauche de la première, soit 163 pour son centre
 /// ([`BANDEAU_TUILE_0`]).
 #[test]
 fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
