@@ -1968,6 +1968,13 @@ pub struct Engine {
     /// indépendants côté web (`LootAlertService` reçoit les deux, mais depuis deux déclencheurs
     /// distincts, voir `profile.rs`).
     pending_loot_alerts: Vec<crate::profile::LootAlert>,
+    /// Recherches de chat du compte (clé `chatFilters`, voir `chat_alert.rs`) — PORTÉES PAR
+    /// `Engine` comme `sound_items`, jamais recréées avec `SessionState`.
+    chat_filters: Vec<crate::chat_alert::ChatFilter>,
+    /// Alertes de chat (voir `ChatAlert`) accumulées depuis le dernier `drain_chat_alerts` —
+    /// même motif « drain » que `pending_loot_alerts`, file SÉPARÉE : un troisième déclencheur,
+    /// un troisième son, une troisième carte.
+    pending_chat_alerts: Vec<crate::chat_alert::ChatAlert>,
     /// Événements d'historique (combat/achat/échange) prêts à synchroniser, accumulés depuis le
     /// dernier `drain_sync_events` (L5, §7.1) — même motif « drain » que `pending_alerts`/
     /// `pending_loot_alerts`, file SÉPARÉE : l'hôte (`overlay-ui`) les relaie tels quels au thread
@@ -2045,6 +2052,8 @@ impl Engine {
             pending_alerts: Vec::new(),
             sound_items: Vec::new(),
             pending_loot_alerts: Vec::new(),
+            chat_filters: Vec::new(),
+            pending_chat_alerts: Vec::new(),
             pending_sync_events: Vec::new(),
             fight_store_dir,
         })
@@ -2182,6 +2191,23 @@ impl Engine {
     /// aucun état local (pas de compteur), un simple remplacement suffit.
     pub fn set_sound_items(&mut self, items: Vec<crate::profile::SoundItemEntry>) {
         self.sound_items = items;
+    }
+
+    /// Remplace les recherches de chat par celles renvoyées par le compte (clé `chatFilters`,
+    /// voir `chat_alert::chat_filters_from_settings_json`) ou validées depuis l'onglet Chat —
+    /// même principe que `set_sound_items` : aucun état local, un remplacement suffit.
+    pub fn set_chat_filters(&mut self, filters: Vec<crate::chat_alert::ChatFilter>) {
+        self.chat_filters = filters;
+    }
+
+    pub fn chat_filters(&self) -> &[crate::chat_alert::ChatFilter] {
+        &self.chat_filters
+    }
+
+    /// Vide et renvoie les alertes de chat accumulées depuis le dernier appel (voir
+    /// `pending_chat_alerts`) — même usage que `drain_loot_alerts`, file séparée.
+    pub fn drain_chat_alerts(&mut self) -> Vec<crate::chat_alert::ChatAlert> {
+        std::mem::take(&mut self.pending_chat_alerts)
     }
 
     pub fn watchlist_entries(&self) -> &[WatchlistEntry] {
@@ -2401,6 +2427,31 @@ impl Engine {
                         name: item.clone(),
                         quantity: *quantity,
                         catalog_id: sound_entry.catalog_id,
+                    });
+                }
+            }
+            // Miroir de l'`effect` d'alerte de `ChatPanelComponent` (web), même gating
+            // `wasLastBatchInitialLoad` : un message déjà dans le fichier à l'ouverture a déjà
+            // été vu, il ne sonne pas. Indépendant de tout panneau — le jeu affiche déjà son
+            // chat, l'overlay ne fait que prévenir (voir `chat_alert.rs`).
+            if let LogEntry::Chat {
+                channel,
+                author,
+                message,
+                ..
+            } = entry
+            {
+                if let Some(filter) = crate::chat_alert::matching_filter(
+                    &self.chat_filters,
+                    *channel,
+                    author,
+                    message,
+                ) {
+                    self.pending_chat_alerts.push(crate::chat_alert::ChatAlert {
+                        channel: *channel,
+                        author: author.clone(),
+                        message: message.clone(),
+                        filter: filter.clone(),
                     });
                 }
             }

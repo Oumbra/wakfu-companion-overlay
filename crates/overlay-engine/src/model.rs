@@ -25,7 +25,7 @@ pub enum DamageElement {
 }
 
 /// Canaux de chat — miroir de `ChatChannelKey`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChatChannel {
     Proximite,
