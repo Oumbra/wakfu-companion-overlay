@@ -414,7 +414,7 @@ de repos, fixe ; main (`PointingHand`, tout ce qui se clique) → clignotement �
 533 ms, l'éclair en premier dès l'entrée en survol, bascule franche sans fondu ; croix fléchée
 (tout curseur de déplacement ou de saisie : `Move`, posé par les tuiles de l'onglet Suivi de la
 fenêtre Options, `panels::suivi_tab` ; `Grab`/`Grabbing`, qu'egui pose lui-même au survol d'un
-glissable et tant qu'une charge est en vol ; `AllScroll`) → bitmap de déplacement, **fixe** (le jeu
+glissable et tant qu'une charge est en vol) → bitmap de déplacement, **fixe** (le jeu
 ne le fait pas clignoter, et n'a qu'une seule croix pour tous ces gestes) ; tout autre curseur
 (`Text`, `ResizeHorizontal`…) → curseur système inchangé.
 
