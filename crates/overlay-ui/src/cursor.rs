@@ -18,11 +18,16 @@
 //!   survol, comme dans le jeu (le cyan apparaît dans les deux images qui suivent l'arrivée du
 //!   pointeur sur un bouton), et la bascule est franche, sans fondu (un seul pas d'image entre les
 //!   deux couleurs sur l'enregistrement) ;
-//! - croix fléchée (`CursorIcon::Move`, ce qui se déplace au glisser-déposer — les tuiles de
-//!   l'onglet Suivi, voir `panels::suivi_tab`) → bitmap `wakfu-cursor-move.png`, **fixe** : le jeu
-//!   ne fait pas clignoter celui-là (couleur constante sur les 113 images où il est visible, voir
-//!   `assets/cursor/README.md`). Son point chaud est au CENTRE, pas à la pointe : c'est une croix
-//!   symétrique, elle ne pointe nulle part ;
+//! - croix fléchée (tout curseur de déplacement ou de saisie : `CursorIcon::Move`, posé par les
+//!   tuiles de l'onglet Suivi — voir `panels::suivi_tab` —, mais aussi `Grab`/`Grabbing`, qu'egui
+//!   pose LUI-MÊME au survol d'un glissable sans clic (`Response::dnd_set_drag_payload`) et tant
+//!   qu'une charge est en vol (`DragAndDrop::on_end_pass`), et `AllScroll`, la même croix pour un
+//!   panoramique) → bitmap `wakfu-cursor-move.png`, **fixe** : le jeu ne fait pas clignoter
+//!   celui-là (couleur constante sur les 113 images où il est visible, voir
+//!   `assets/cursor/README.md`). Une seule image pour les quatre : le jeu n'a qu'une croix, et une
+//!   main système qui se fermerait au milieu d'un geste commencé sous la croix casserait
+//!   l'illusion. Son point chaud est au CENTRE, pas à la pointe : c'est une croix symétrique, elle
+//!   ne pointe nulle part ;
 //! - tout autre curseur (`Text` d'un champ de saisie, `ResizeHorizontal` d'un curseur de réglage,
 //!   `None`…) → curseur **système** correspondant, inchangé : le jeu lui-même n'a pas de variante
 //!   de sa flèche pour ces cas, et un I-beam reste plus lisible qu'une flèche sur du texte.
@@ -162,8 +167,12 @@ pub fn apply(ctx: &egui::Context, now: Instant) {
             ctx.set_cursor_image(Some(images.idle.clone()));
         }
         // Fixe : aucun redessin réclamé, et l'instant d'entrée en mode main est oublié pour que le
-        // prochain survol d'un cliquable reparte sur un éclair.
-        egui::CursorIcon::Move => {
+        // prochain survol d'un cliquable reparte sur un éclair. Les quatre curseurs de déplacement
+        // ou de saisie partagent la croix — voir la doc de module.
+        egui::CursorIcon::Move
+        | egui::CursorIcon::Grab
+        | egui::CursorIcon::Grabbing
+        | egui::CursorIcon::AllScroll => {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
             ctx.set_cursor_image(Some(images.moving.clone()));
         }
@@ -345,13 +354,24 @@ mod tests {
         assert!(same(&image, &images.flash));
 
         // Glisser-déposer : la croix fléchée, fixe — aucun redessin réclamé, et le clignotement
-        // est oublié comme pour un curseur système.
-        let (image, delay) = frame(&ctx, t0, ms(1500), egui::CursorIcon::Move);
-        assert!(same(&image, &images.moving), "attendu la croix fléchée");
-        assert!(
-            delay > Duration::from_secs(60),
-            "la croix ne doit réclamer aucun redessin : {delay:?}"
-        );
+        // est oublié comme pour un curseur système. Même croix pour les curseurs de saisie
+        // qu'egui pose de lui-même (`Grab` au survol, `Grabbing` en vol) et pour le panoramique.
+        for icon in [
+            egui::CursorIcon::Move,
+            egui::CursorIcon::Grab,
+            egui::CursorIcon::Grabbing,
+            egui::CursorIcon::AllScroll,
+        ] {
+            let (image, delay) = frame(&ctx, t0, ms(1500), icon);
+            assert!(
+                same(&image, &images.moving),
+                "{icon:?} : attendu la croix fléchée"
+            );
+            assert!(
+                delay > Duration::from_secs(60),
+                "{icon:?} : la croix ne doit réclamer aucun redessin : {delay:?}"
+            );
+        }
 
         // Champ de saisie : curseur système, et l'entrée en mode main est oubliée…
         let (image, _) = frame(&ctx, t0, ms(2000), egui::CursorIcon::Text);
