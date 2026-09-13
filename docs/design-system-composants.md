@@ -647,7 +647,27 @@ design::scroll_area("options-contenu").show(ui, |ui| {
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
 | `id_salt` (à la construction) | distingue deux zones du même panneau ; porte la position de défilement | — |
-| `auto_shrink` | laisse la zone se rétrécir à son contenu | `false` — un panneau du jeu occupe toute sa hauteur |
+| `auto_shrink` | laisse la zone se rétrécir à son contenu, **sur l'axe qui défile** | `false` — un panneau du jeu occupe toute sa hauteur |
+| `axis` | `Vertical` (barre à droite) ou `Horizontal` (barre dessous) | `Vertical` |
+| `outer_margin` | marge poignée → bord de la zone | 14px, la marge du relevé |
+
+**Horizontale depuis le 2026-09-13** (`ScrollAxis::Horizontal`). La demande vient du bandeau
+« Suivi », dont la bande de tuiles défile de gauche à droite : « utiliser le scroll qui est déjà
+utilisé pour la modale dans l'onglet Raccourcis […] gris quand l'utilisateur n'a pas sa souris
+dessus et doré quand il passe sa souris dessus, c'est mieux dans l'ADN du jeu ». Rien à remesurer :
+la barre du jeu ne change pas d'aspect parce qu'elle change d'axe — mêmes jetons, même épaisseur
+**constante** (c'est précisément ce qui a fait rejeter `ScrollStyle::thin()` d'egui, qui grossit au
+survol), pas de rail.
+
+Deux réglages sont venus avec, parce qu'un bandeau posé sur le jeu n'est pas un panneau :
+
+- `outer_margin` — les 14px du relevé séparent la poignée du bord d'un **panneau**. Le bandeau n'en
+  a pas : il descend à 2px, et la réserve totale sous les tuiles tombe à 14px.
+- `auto_shrink` ne vaut plus que pour l'axe qui défile ; l'axe croisé se rétracte toujours en
+  horizontal (une bande prend la hauteur de ses tuiles, pas celle de la fenêtre). **Le mettre à
+  `true` sur une zone bornée par son parent fait disparaître la barre** : egui dimensionne alors la
+  zone sur son contenu, ne voit plus de débordement, et le contenu sort du cadre sans rien pour le
+  signaler.
 
 **Ce n'est pas un `Widget`**, et depuis le 2026-09-10 ce n'est plus un écart : c'est le premier
 **composant conteneur** du design system (§1 bis du contrat, *forme closure*). Il prend une closure
