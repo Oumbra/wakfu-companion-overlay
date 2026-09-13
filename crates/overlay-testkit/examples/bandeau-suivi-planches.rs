@@ -67,7 +67,7 @@
 //! cargo run -p overlay-testkit --example bandeau-suivi-planches
 //! ```
 
-use egui::{Color32, Rect, Vec2};
+use egui::{Rect, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext};
@@ -106,11 +106,10 @@ const HARNESS_MARGIN: f32 = 8.0;
 /// réserve d'infobulle gauche, et ses boutons après sa marge intérieure.
 ///
 /// **Une première version déduisait ce point de [`TILE_ORIGIN`]** — « le carré finit `TILE_GAP`
-/// avant la première tuile, et il est centré sur leur rangée » — et les deux moitiés de cette phrase
-/// sont fausses : l'écart réel vaut 14 px (voir [`TILE_ORIGIN`], 2 px de plus que `TILE_GAP`), et le
-/// carré est aligné en HAUT du contenu, pas centré sur les tuiles, qui commencent 2 px plus bas. Le
-/// « − » repeint sortait donc 2 px trop à gauche et 4 px trop bas, ce qui se voyait comme un bouton
-/// qui saute en entrant dans le mode sélection — signalé par l'utilisateur sur la planche.
+/// avant la première tuile, et il est centré sur leur rangée » — et la seconde moitié de cette
+/// phrase est fausse : le carré est aligné en HAUT du contenu, pas centré sur les tuiles. Le « − »
+/// repeint sortait 2 px trop à gauche et 4 px trop bas, ce qui se voyait comme un bouton qui saute
+/// en entrant dans le mode sélection — signalé par l'utilisateur sur la planche.
 const MINUS_TOP_LEFT: egui::Pos2 = egui::pos2(
     HARNESS_MARGIN
         + CONTENT_MARGIN
@@ -127,9 +126,9 @@ const PLUS_TOP_LEFT: egui::Pos2 = egui::pos2(
     MINUS_TOP_LEFT.y,
 );
 
-/// Liseré d'une tuile COCHÉE — l'or, la couleur d'état de ce design system, comme dans l'onglet.
-const TILE_SELECTED: Color32 = design::tokens::TEXT_GOLD;
-const TILE_SELECTED_WIDTH: f32 = 2.0;
+/// Retrait de la case à cocher depuis le coin de la tuile — `suivi_tab::BADGE_INSET`, 5 px : un de
+/// plus que le liseré, pour le laisser visible tout du long.
+const BADGE_INSET: f32 = 5.0;
 
 /// Hauteur que la sélection ajoute sous la bande : l'écart, le bouton, l'écart.
 ///
@@ -219,23 +218,25 @@ fn bulk_label(selected: usize, total: usize) -> String {
     }
 }
 
-/// Bord gauche de la PREMIÈRE tuile, dans le repère du harnais — **mesuré sur la planche de
+/// Coin haut-gauche de la PREMIÈRE tuile, dans le repère du harnais — **mesuré sur la planche de
 /// repos**, pas calculé.
 ///
-/// La somme des jetons (`8 + 6 + 88 + 60 + 12`) donne 174 ; la mesure en donne 172, et 16 en
-/// ordonnée là où le contenu commence à 14. Ces écarts viennent de ce que la `ScrollArea` et
-/// `paint_content` posent entre eux, et qu'aucun jeton public ne décrit. Une maquette qui superpose
-/// des éléments sur un rendu réel a tout intérêt à **relever** la position plutôt qu'à la
-/// reconstituer : l'écart ne se verrait qu'à l'œil, sur des cases décalées, et se prendrait pour un
-/// choix de design.
+/// Méthode : sur `bandeau_repos.png`, les deux liserés d'une même tuile encadrent la ligne médiane
+/// en x = 172..173 et x = 230..231, soit 60 px d'un liseré à l'autre pour un carré de 64 — donc un
+/// bord à 170, le liseré étant posé 2 px à l'intérieur (`design::item_slot::border_ring`). Même
+/// lecture en ordonnée : liseré à y = 16, bord à 14.
 ///
-/// **Et il ne se propage pas** : ce relevé vaut pour les tuiles seules. Le carré de contrôle, lui,
-/// se calcule depuis le bord du contenu — voir [`MINUS_TOP_LEFT`], et le bug qu'a coûté la
-/// déduction inverse.
+/// **La première version relevait 172 et 16, c'est-à-dire le LISERÉ pris pour le bord** — d'où des
+/// cases à cocher et un liseré de sélection décalés de 2 px sur les deux axes. Une mesure sur un
+/// rendu ne dit que ce qu'on lui demande : « la première colonne claire » n'est pas « le bord de la
+/// tuile » dès lors que le cadre du jeu flotte à l'intérieur de son carré.
 ///
-/// Méthode : sur `bandeau_repos.png`, la première colonne dont la luminance saute au-dessus du fond
-/// sur la ligne médiane des tuiles, et la première ligne de même sur leur colonne médiane.
-const TILE_ORIGIN: egui::Pos2 = egui::pos2(172.0, 16.0);
+/// La somme des jetons (`8 + 6 + 88 + 60 + 12`) donnerait 174 : les 4 px d'écart viennent de ce que
+/// la `ScrollArea` et `paint_content` posent entre eux, et qu'aucun jeton public ne décrit. C'est
+/// bien la mesure qui fait foi ici — mais pour les TUILES seulement. Le carré de contrôle, lui, se
+/// calcule depuis le bord du contenu : voir [`MINUS_TOP_LEFT`], et le bug qu'a coûté la déduction
+/// inverse.
+const TILE_ORIGIN: egui::Pos2 = egui::pos2(170.0, 14.0);
 
 /// L'abscisse du bord gauche de la `n`-ième tuile — voir [`TILE_ORIGIN`].
 fn tile_left(index: usize) -> f32 {
@@ -400,17 +401,25 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
         );
         let cochee = selected.contains(&index);
         if cochee {
+            // **L'anneau du composant, pas le bord du carré.** Le cadre d'un emplacement flotte à
+            // 2 px du bord avec un coin qui lui est propre ; un liseré posé sur le carré passe donc
+            // à côté de celui qu'il doit recouvrir — retour utilisateur du 2026-09-13, corrigé dans
+            // `design::item_slot` et emprunté ici plutôt que recopié.
+            let (anneau, rayon) = design::item_slot_border_ring(tuile);
             couche.painter().rect_stroke(
-                tuile,
-                4,
-                egui::Stroke::new(TILE_SELECTED_WIDTH, TILE_SELECTED),
+                anneau,
+                rayon,
+                egui::Stroke::new(
+                    design::tokens::ITEM_SLOT_PLAIN_STROKE,
+                    design::tokens::ITEM_SLOT_SELECTED_BORDER,
+                ),
                 egui::StrokeKind::Inside,
             );
         }
         let mut etat = cochee;
         couche.put(
             Rect::from_min_size(
-                tuile.min + Vec2::splat(4.0),
+                tuile.min + Vec2::splat(BADGE_INSET),
                 Vec2::splat(design::tokens::CHECKBOX_SIZE),
             ),
             design::checkbox(&mut etat, "").log_name(format!("bandeau.cocher-{index}")),

@@ -870,6 +870,35 @@ fn gallery(ui: &mut egui::Ui) {
             .color(CAPTION)
             .size(12.0),
         );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            // **Sélection : la paire qui doit coïncider.** Un objet et un monstre côte à côte,
+            // l'un avec le liseré de sa texture de rareté, l'autre avec le trait du cadre simple,
+            // et par-dessus le même anneau d'or. Un décalage de 2 px entre les deux se voit ici et
+            // nulle part ailleurs — c'est le défaut signalé le 2026-09-13.
+            for (frame, selected, nom) in [
+                (SlotFrame::Rarity(ItemRarity::Legendary), false, "objet"),
+                (
+                    SlotFrame::Rarity(ItemRarity::Legendary),
+                    true,
+                    "objet coché",
+                ),
+                (SlotFrame::Plain, false, "monstre"),
+                (SlotFrame::Plain, true, "monstre coché"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(
+                        design::item_slot()
+                            .frame(frame)
+                            .icon(faux_icone)
+                            .selected(selected)
+                            .log_name(format!("galerie.slot-{nom}")),
+                    );
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(8.0);
+            }
+        });
     }
 
     heading(

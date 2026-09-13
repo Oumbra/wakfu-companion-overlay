@@ -132,6 +132,26 @@ pub enum SlotLayer {
     Icon,
 }
 
+/// **L'anneau où se peint le liseré d'un emplacement** : son rectangle et son rayon de coin.
+///
+/// Les textures de rareté ne collent pas leur liseré au bord du carré — elles le posent à
+/// [`tokens::ITEM_SLOT_BORDER_INSET_RATIO`] du bord, avec un coin de
+/// [`tokens::ITEM_SLOT_BORDER_CORNER_RATIO`]. Tout trait qui veut *coïncider* avec elles doit viser
+/// cet anneau-là : le cadre simple d'un monstre, et le liseré de sélection d'un panneau.
+///
+/// **Fonction publique parce que deux mondes s'en servent.** Le composant l'utilise pour ses
+/// propres traits, mais une superposition faite par-dessus un emplacement déjà peint (une maquette,
+/// une sélection posée par un panneau qui ne construit pas le slot) n'a aucun moyen de la
+/// reconstituer sans recopier deux ratios — et c'est précisément cette recopie qui a produit le
+/// décalage signalé le 2026-09-13.
+pub fn border_ring(rect: egui::Rect) -> (egui::Rect, f32) {
+    let side = rect.width().min(rect.height());
+    (
+        rect.shrink(side * tokens::ITEM_SLOT_BORDER_INSET_RATIO),
+        side * tokens::ITEM_SLOT_BORDER_CORNER_RATIO,
+    )
+}
+
 /// Construit un emplacement d'objet vide.
 pub fn item_slot() -> ItemSlot {
     ItemSlot {
@@ -139,6 +159,7 @@ pub fn item_slot() -> ItemSlot {
         icon: None,
         count: None,
         size: tokens::ITEM_SLOT_SIZE,
+        selected: false,
         log_name: None,
     }
 }
@@ -149,6 +170,7 @@ pub struct ItemSlot {
     icon: Option<egui::TextureId>,
     count: Option<SlotCount>,
     size: f32,
+    selected: bool,
     log_name: Option<String>,
 }
 
@@ -175,6 +197,17 @@ impl ItemSlot {
     /// Côté du carré. Par défaut [`tokens::ITEM_SLOT_SIZE`].
     pub fn size(mut self, size: f32) -> Self {
         self.size = size;
+        self
+    }
+
+    /// Emplacement **sélectionné** : liseré or posé exactement sur celui du cadre, par-dessus tout
+    /// le reste. Par défaut `false`.
+    ///
+    /// Porté par le composant et non par l'appelant depuis le 2026-09-13 : l'onglet Suivi le
+    /// peignait lui-même, à 4 px de rayon et collé au bord, donc à côté du liseré de rareté qu'il
+    /// était censé recouvrir. Voir [`border_ring`].
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
         self
     }
 
@@ -250,9 +283,13 @@ impl Widget for ItemSlot {
                         ds.paint(ui.painter(), rect, rarity.border(), egui::Color32::WHITE);
                     }
                     SlotFrame::Plain => {
+                        // **Le même anneau que les textures de rareté**, pas le bord du carré :
+                        // sans cela un monstre et un objet côte à côte ont leurs liserés décalés
+                        // de 2 px, avec des coins qui ne suivent pas le même arc.
+                        let (anneau, rayon) = border_ring(rect);
                         ui.painter().rect_stroke(
-                            rect,
-                            tokens::ITEM_SLOT_ROUNDING,
+                            anneau,
+                            rayon,
                             egui::Stroke::new(
                                 tokens::ITEM_SLOT_PLAIN_STROKE,
                                 tokens::ITEM_SLOT_PLAIN_BORDER,
@@ -272,6 +309,21 @@ impl Widget for ItemSlot {
 
         if let Some(count) = self.count {
             paint_count(ui, rect, count);
+        }
+
+        // Le liseré de sélection vient APRÈS tout le reste, et sur le MÊME anneau que le cadre :
+        // il remplace visuellement la bordure de l'emplacement, il ne se pose pas à côté.
+        if self.selected {
+            let (anneau, rayon) = border_ring(rect);
+            ui.painter().rect_stroke(
+                anneau,
+                rayon,
+                egui::Stroke::new(
+                    tokens::ITEM_SLOT_PLAIN_STROKE,
+                    tokens::ITEM_SLOT_SELECTED_BORDER,
+                ),
+                egui::StrokeKind::Inside,
+            );
         }
         response
     }
@@ -359,6 +411,42 @@ mod tests {
         let border = ordre.iter().position(|l| *l == SlotLayer::Border).unwrap();
         let icon = ordre.iter().position(|l| *l == SlotLayer::Icon).unwrap();
         assert!(icon < border, "un cadre simple se pose par-dessus l'icône");
+    }
+
+    #[test]
+    fn l_anneau_du_lisere_tombe_sur_celui_des_textures_de_rarete() {
+        // **Le bug que ce test verrouille** (2026-09-13) : le cadre simple et le liseré de
+        // sélection se peignaient au bord du carré, avec des rayons de coin choisis à l'œil (2 et
+        // 4). Les textures de rareté, elles, posent leur liseré 2 px plus au centre — un monstre et
+        // un objet côte à côte n'avaient donc pas la même bordure, et cocher une tuile traçait un
+        // or décalé « au-delà de la bordure de l'item slot ».
+        //
+        // Les deux cotes attendues sont celles MESURÉES sur le canevas de 128 des sept fichiers :
+        // l'alpha saute en x = 4, et l'arc extérieur a un rayon de 6. À l'échelle de rendu (64),
+        // cela fait 2 et 3.
+        let carre =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::splat(tokens::ITEM_SLOT_SIZE));
+        let (anneau, rayon) = border_ring(carre);
+        assert_eq!(anneau.left() - carre.left(), 2.0, "marge du liseré à 64 px");
+        assert_eq!(carre.right() - anneau.right(), 2.0, "marge symétrique");
+        assert_eq!(rayon, 3.0, "rayon du coin du liseré à 64 px");
+    }
+
+    #[test]
+    fn l_anneau_suit_le_cote_de_l_emplacement() {
+        // Des **fractions**, pas des cotes : la texture est étirée sur tout le carré (`ICON_SLICE`,
+        // un 9-slice dégénéré), donc son liseré suit la taille. Un anneau figé en pixels serait
+        // faux partout ailleurs qu'à 64.
+        for cote in [32.0_f32, 64.0, 128.0] {
+            let carre = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::splat(cote));
+            let (anneau, rayon) = border_ring(carre);
+            assert_eq!(
+                anneau.left() - carre.left(),
+                cote / 32.0,
+                "marge à {cote} px"
+            );
+            assert_eq!(rayon, cote * 6.0 / 128.0, "rayon à {cote} px");
+        }
     }
 
     #[test]
