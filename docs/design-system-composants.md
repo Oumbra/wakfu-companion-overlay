@@ -709,7 +709,7 @@ if ui
 
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
-| `context` | `FirstPlan` (par-dessus le jeu), `Panel` (dans un panneau) | `FirstPlan` |
+| `context` | `FirstPlan` (par-dessus le jeu), `Panel` (dans un panneau), `Stepper` (pas numérique), `Banner` (croix de fermeture d'une fenêtre) | `FirstPlan` |
 | `size` | côté du bouton | 36px, la taille native des cinq socles |
 | `enabled` | `bool` | `true` |
 | `tooltip` / `log_name` | infobulle, nom d'instance | aucune / `"icon-button"` |
@@ -793,6 +793,22 @@ de `ui.horizontal` à `ui.horizontal_wrapped`, la largeur fixe de 760px ne conte
 glyphes sur une seule ligne — et la hauteur du canevas de test est passée de 4160 à 4500px pour la
 même raison (le bas de la galerie sortait sinon du cadre).
 
+**Contexte `Banner` (2026-09-13)** — la croix de fermeture que `design::window` pose en haut à
+droite de sa bannière. **Pas de texture, et ce n'est pas une dérogation** : dans le jeu, le bouton
+est un carré arrondi *translucide* de 32 px posé sur la bannière, dont les hachures se voient au
+travers dans les deux états (`window-close.png`, `window-close-hover.png`, deux recadrages 48 × 48
+des captures utilisateur, échelle 1). Une texture le figerait avec un morceau de bannière dedans. Le
+socle est donc un voile noir peint : α 0,168 au repos avec un liseré d'1 px (α 0,115 par-dessus),
+α 0,366 au survol sans liseré — mesurés par `tools/design-system/build_window_close.py`, qui
+extrait aussi le glyphe. Croix `DsIcon::CloseWindow` (`icon-close-window.png`, 12 × 12, plus
+grasse que `DsIcon::Close` et légèrement asymétrique comme dans le jeu), **dorée `#F4D89F` dans les
+deux états** : le survol se lit sur le voile, pas sur la croix. Rayon 5, encre 12 pour 32. Jetons
+`WINDOW_CLOSE_*`. L'état désactivé n'existe que parce que le contrat l'exige (voile de repos, croix
+effacée) — le jeu ne grise jamais sa croix.
+
+Vérifié sur les mêmes pixels avant/après (snapshot HEAD contre snapshot régénéré) : intérieur à
+82,8 % de la bannière au repos (jeu 83,2), liseré 73,3 (73,6), survol 63,5 (63,4).
+
 ---
 
 ## `design::window` — chrome de fenêtre (2026-09-10)
@@ -815,11 +831,21 @@ match chrome.footer { design::FooterClick::Validate => …, _ => {} }
 | `title` (à la construction) | peint dans la bannière, serif grasse cernée d'une ombre bas-droite | — |
 | `tab_bar_height` | hauteur réservée à la barre d'onglets ; `0.0` pour une fenêtre sans onglets | `tokens::TAB_HEIGHT` (44) |
 | `footer` | libellés des deux boutons — annulation à gauche, validation à droite | aucun pied de page |
-| `log_name` | préfixe des deux boutons dans le journal | `fenetre` |
+| `close_button` | croix de fermeture en haut à droite de la bannière (2026-09-13) | `false` |
+| `log_name` | préfixe des deux boutons du pied et de la croix dans le journal | `fenetre` |
 
-Rend un `WindowChrome` : `tab_bar` (la bande d'onglets), `content` (entre onglets et pied) et
-`footer` (le clic reçu). **`content` n'est pas écrêtée** — c'est le prix de la forme « zone rendue »,
-et la raison pour laquelle le contenu passe normalement par `design::panel`.
+Rend un `WindowChrome` : `tab_bar` (la bande d'onglets), `content` (entre onglets et pied),
+`footer` (le clic reçu) et `close` (la croix vient d'être cliquée). **`content` n'est pas écrêtée** —
+c'est le prix de la forme « zone rendue », et la raison pour laquelle le contenu passe normalement
+par `design::panel`.
+
+**La croix de la bannière (2026-09-13)** — un `icon_button` en contexte `Banner` (voir ci-dessus),
+32 px, à 12 px du bord droit et centré dans la bannière de 56 (les deux cotes du jeu se confondent :
+12 + 32 + 12). Peinte APRÈS le titre pour rester lisible sur une fenêtre étroite. Le chrome ne dit
+que « cliquée » : ce que fermer veut dire appartient à l'appelant, comme pour « Annuler » — dans la
+modale Options, les deux gestes passent par la même garde et produisent la même action
+(`options_croix_de_la_banniere_ferme_comme_annuler`). Position ancrée par
+`la_croix_est_centree_dans_la_banniere_a_la_marge_du_bord_droit`.
 
 **La barre d'onglets n'est pas peinte par le chrome** : `WindowChrome::tabs` la pose à partir du
 `Tabs` que l'appelant construit. Un onglet est du contenu, pas du décor — et c'est aussi ce qui
