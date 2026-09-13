@@ -1793,3 +1793,43 @@ pub const LABEL_FONT_SIZE: f32 = 13.0;
 
 /// Couleur par défaut d'un libellé — blanc, comme tout texte de corps du jeu.
 pub const LABEL_TEXT: Color32 = Color32::WHITE;
+
+// -------------------------------------------------------------------------------------------
+// Tuile à légende — `design::legend_tile` (2026-09-13)
+//
+// Le cadre est **celui des champs de saisie** : bordure chaude de 2 px et fond sombre, la
+// signature « cadre » du design system, mesurée sur `input-text-width-placeholder.png` (voir
+// `INPUT_BORDER`/`INPUT_FILL`). Les cotes propres à la tuile (hauteur, corps de la légende, retrait
+// de la légende) sont des **choix de maquette validés par l'utilisateur le 2026-09-13**
+// (`crates/overlay-testkit/examples/chat-mockups.rs`, planche « recherches en tuiles »), pas des
+// mesures du jeu : le client n'a pas de cadre à légende, c'est un idiome de formulaire emprunté.
+// -------------------------------------------------------------------------------------------
+
+/// Bordure de la tuile — la bordure des champs de saisie, mesurée.
+pub const LEGEND_TILE_BORDER: Color32 = INPUT_BORDER;
+/// Épaisseur de la bordure — celle des champs, 2 px.
+pub const LEGEND_TILE_BORDER_WIDTH: f32 = INPUT_BORDER_WIDTH;
+/// Fond de la tuile — le fond des champs de saisie, mesuré. Pas d'arrondi : les cadres du jeu ont
+/// les coins droits (`docs/design-system.md` §4).
+pub const LEGEND_TILE_FILL: Color32 = INPUT_FILL;
+/// Hauteur par défaut de la tuile, légende exclue — choix de maquette : une légende sur la
+/// bordure, un mot au centre, de l'air.
+pub const LEGEND_TILE_HEIGHT: f32 = 54.0;
+/// Corps de la légende — petit, c'est une étiquette, pas le contenu. Choix de maquette.
+pub const LEGEND_TILE_LEGEND_FONT_SIZE: f32 = 11.0;
+/// Couleur de la légende — le gris des titres de section du jeu (`#b8b9ba`, mesuré sur quatre
+/// captures, voir `HEADING_TEXT`).
+pub const LEGEND_TILE_LEGEND_TEXT: Color32 = HEADING_TEXT;
+/// Retrait de la légende depuis le bord gauche de la tuile. Choix de maquette.
+pub const LEGEND_TILE_LEGEND_INSET: f32 = 10.0;
+/// Respiration entre la légende et la bordure qui s'interrompt de chaque côté. Choix de maquette.
+pub const LEGEND_TILE_LEGEND_GAP: f32 = 4.0;
+/// Corps du contenu — celui du corps de texte des onglets (`panels::alerts_tab::BODY_FONT_SIZE`).
+pub const LEGEND_TILE_FONT_SIZE: f32 = 15.0;
+/// Couleur du contenu — blanc, comme tout texte de corps du jeu.
+pub const LEGEND_TILE_TEXT: Color32 = Color32::WHITE;
+/// Marge horizontale du contenu, de chaque côté : ce qui reste est la largeur utile avant ellipse.
+pub const LEGEND_TILE_PAD_X: f32 = 10.0;
+/// Voile d'une tuile survolée — le même noir à 40 % que les tuiles d'Alertes et du Suivi
+/// (`panels::alerts_tab::TILE_HOVER_SCRIM`).
+pub const LEGEND_TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
