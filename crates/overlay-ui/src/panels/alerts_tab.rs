@@ -88,8 +88,22 @@ const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
 /// Gouttière entre deux tuiles — celle du Suivi (`panels::suivi_tab::TILE_GAP`), pas les 10 px de
 /// l'ancienne carte.
 const TILE_GAP: f32 = 12.0;
-/// Côté du pictogramme son et de la croix.
+/// Côté de la croix de retrait.
 const TILE_BADGE: f32 = 14.0;
+
+/// Côté du pictogramme « son coupé » — **18 px, et non les 14 de la croix**.
+///
+/// Les deux glyphes ne partent pas de la même taille native : `icon-close.png` fait 13 × 14 px et
+/// se rend donc à l'échelle 1:1 dans son badge, tandis que `icon-volume-mute.png` fait 26 × 26 px
+/// — à 14, il était réduit de moitié, et son trait d'un pixel disparaissait dans l'interpolation.
+/// Deux glyphes de même cote n'ont pas le même poids à l'écran quand l'un est réduit et l'autre
+/// pas : c'est la cote qu'il fallait ajuster, pas la couleur seule. Demande du 2026-09-13 : « il
+/// est vraiment petit et gris noir, c'est compliqué de le voir ».
+///
+/// **20 et pas 18** : une planche des cinq variantes (14 à 22 px, avec et sans épaississement) a
+/// tranché à la vue. En dessous, le haut-parleur reste une tache ; au-dessus, il occupe près de la
+/// moitié de la fenêtre de l'icône.
+const MUTE_BADGE: f32 = 20.0;
 /// Retrait des deux badges depuis leur coin — **8 px, soit 2 px À L'INTÉRIEUR du contour noir**.
 ///
 /// Mesuré au pixel sur une tuile découpée dans `options_suivi_incremental.png` : la marge
@@ -111,6 +125,14 @@ const TILE_BADGE_INSET: f32 = 8.0;
 /// couvre ni le contour noir ni la bordure de rareté (voir [`hover_scrim_rect`]).
 const TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
 
+/// Ombre portée du pictogramme « son coupé » — un noir **adouci**, pas le noir plein.
+///
+/// Un noir plein ferait au glyphe un liseré dur, visible comme un trait à part ; à cette opacité
+/// l'ombre détache le blanc de l'icône qu'il recouvre sans se voir elle-même. C'est ce liseré dur
+/// que la première version produisait, autour d'un glyphe gris qui plus est — « une espèce de
+/// bordure noire, ça ne le rend vraiment pas lisible ».
+const MUTE_SHADOW: Color32 = Color32::from_black_alpha(0xB0);
+
 /// Rouge de la croix sous le pointeur — `INFO_ALERT`, le seul rouge mesuré du jeu.
 const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
 
@@ -128,10 +150,24 @@ const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, porté de 12 après un second retour utilisateur.
 const SECTION_GAP: f32 = 18.0;
 
-/// La phrase sous le titre — `profile.alertsDesc` du dépôt web.
-const DESC: &str =
-    "Un son est joué au ramassage des objets ci-dessous. Cliquez une tuile pour couper ou \
-     rétablir son alerte.";
+/// La phrase sous le titre « Alerte » — ce que déclenche un ramassage, et **rien d'autre**.
+///
+/// Elle disait le son seul (`profile.alertsDesc` du dépôt web) et enchaînait sur le geste de la
+/// tuile ; deux corrections du 2026-09-13 :
+/// - **elle était incomplète** — un ramassage joue un son ET affiche une carte d'alerte à
+///   l'écran (`panels::watchlist::toast_card`, confettis compris) ;
+/// - **la phrase sur le clic a déménagé** sous « Objets suivis » ([`LIST_DESC`]), où se trouvent
+///   justement les tuiles qu'elle décrit.
+const DESC: &str = "Au ramassage d'un des objets ci-dessous, un son est joué et une carte \
+                    d'alerte s'affiche par-dessus le jeu.";
+
+/// La phrase sous le titre « Objets suivis » — le geste, à côté des tuiles qu'il concerne.
+const LIST_DESC: &str = "Cliquez une tuile pour couper ou rétablir son alerte.";
+
+/// Le libellé de la légende, à droite du pictogramme.
+const LEGEND_LABEL: &str = "silencieux";
+/// Écart entre le pictogramme de la légende et son libellé.
+const LEGEND_GAP: f32 = 8.0;
 
 // -------------------------------------------------------------------------------------------
 // État et contrat
@@ -225,7 +261,10 @@ pub fn show(
 
     ui.add_space(SECTION_GAP);
     // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
-    ui.add(design::heading("Objets suivis").trailing_gap(SECTION_GAP));
+    ui.add(design::heading("Objets suivis").trailing_gap(SECTION_GAP * 0.5));
+    paragraph(ui, LIST_DESC);
+    legend_row(ui);
+    ui.add_space(SECTION_GAP);
 
     add_field(ui, state, ctx, width);
     ui.add_space(SECTION_GAP);
@@ -269,6 +308,37 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
                 .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
         )
         .wrap_mode(egui::TextWrapMode::Wrap),
+    );
+}
+
+/// **La légende du pictogramme** — « [haut-parleur barré] silencieux ».
+///
+/// Une tuile muette ne porte qu'un pictogramme de 14 px dans son coin ; rien ne dit ce qu'il
+/// signifie, et une tuile au son actif ne porte AUCUNE marque à comparer. Demande utilisateur du
+/// 2026-09-13, dans la foulée du déplacement de [`LIST_DESC`] : la légende suit la phrase qui
+/// décrit le geste, juste au-dessus des tuiles.
+///
+/// Le pictogramme y est peint **exactement comme sur une tuile** (même taille, même blanc, même
+/// cerné, voir [`paint_mute_badge`]) : une légende qui ne ressemblerait pas à ce qu'elle légende
+/// ne servirait à rien.
+fn legend_row(ui: &mut egui::Ui) {
+    let hauteur = MUTE_BADGE.max(BODY_FONT_SIZE * 1.4);
+    let (_, ligne) = ui.allocate_space(Vec2::new(ui.available_width(), hauteur));
+    let ds = design::DesignSystem::get(ui.ctx());
+    let glyphe = Rect::from_center_size(
+        egui::pos2(ligne.left() + MUTE_BADGE / 2.0, ligne.center().y),
+        design::components::icon_button::glyph_fit(
+            ds.icon_native_size(DsIcon::VolumeMute),
+            MUTE_BADGE,
+        ),
+    );
+    paint_mute_badge(ui, &ds, glyphe);
+    ui.painter().text(
+        egui::pos2(glyphe.right() + LEGEND_GAP, ligne.center().y),
+        egui::Align2::LEFT_CENTER,
+        LEGEND_LABEL,
+        design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
+        SUBDUED,
     );
 }
 
@@ -590,12 +660,15 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     // Affiché seulement quand le son est COUPÉ : une tuile sans marque est une tuile qui sonnera
     // (décision du 2026-09-13, en remplacement de la bordure d'état cyan/gris).
     if !item.enabled {
-        paint_outlined_icon(
+        paint_mute_badge(
             ui,
             &ds,
-            badge_rect(ds.icon_native_size(DsIcon::VolumeMute), rect, Corner::Left),
-            DsIcon::VolumeMute,
-            SUBDUED,
+            badge_rect(
+                ds.icon_native_size(DsIcon::VolumeMute),
+                rect,
+                Corner::Left,
+                MUTE_BADGE,
+            ),
         );
     }
 
@@ -604,7 +677,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         // **Sa propre zone cliquable, avec sa propre main et sa propre infobulle.** Elle mange
         // aussi le clic, pour qu'un retrait n'emporte pas au passage la bascule du son.
         let zone_rect = Rect::from_center_size(
-            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::Right).center(),
+            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::Right, TILE_BADGE).center(),
             Vec2::splat(TILE_BADGE + 4.0),
         );
         let croix = ui
@@ -612,7 +685,12 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         ds.paint_icon(
             ui.painter(),
-            badge_rect(ds.icon_native_size(DsIcon::Close), rect, Corner::Right),
+            badge_rect(
+                ds.icon_native_size(DsIcon::Close),
+                rect,
+                Corner::Right,
+                TILE_BADGE,
+            ),
             DsIcon::Close,
             // Rouge sous le pointeur — depuis que le retrait ne demande plus confirmation, c'est
             // la croix qui doit dire ce qu'elle fait AVANT le clic.
@@ -650,44 +728,38 @@ enum Corner {
 ///
 /// `native` est la taille native du glyphe : `glyph_fit` l'inscrit dans le carré du badge sans le
 /// déformer, exactement comme les boutons icône du design system.
-fn badge_rect(native: Vec2, tile: Rect, corner: Corner) -> Rect {
+fn badge_rect(native: Vec2, tile: Rect, corner: Corner, side: f32) -> Rect {
     let x = match corner {
-        Corner::Left => tile.left() + TILE_BADGE_INSET + TILE_BADGE / 2.0,
-        Corner::Right => tile.right() - TILE_BADGE_INSET - TILE_BADGE / 2.0,
+        Corner::Left => tile.left() + TILE_BADGE_INSET + side / 2.0,
+        Corner::Right => tile.right() - TILE_BADGE_INSET - side / 2.0,
     };
     Rect::from_center_size(
-        egui::pos2(x, tile.top() + TILE_BADGE_INSET + TILE_BADGE / 2.0),
-        design::components::icon_button::glyph_fit(native, TILE_BADGE),
+        egui::pos2(x, tile.top() + TILE_BADGE_INSET + side / 2.0),
+        design::components::icon_button::glyph_fit(native, side),
     )
 }
 
-/// Peint un glyphe **cerné de noir**, pour qu'il tienne sur n'importe quel fond.
+/// Peint le pictogramme « son coupé » — **blanc, et détaché de ce qu'il y a dessous**.
 ///
-/// Le pictogramme du son est le seul élément de la tuile posé à même l'icône de l'objet : la croix,
-/// elle, n'apparaît qu'avec son voile, qui lui fait un fond sombre. Sans cerné, un gris
-/// [`SUBDUED`] sur une icône claire se lit mal — défaut constaté sur la capture du 2026-09-13, où
-/// le haut-parleur barré s'efface presque sur le gris clair de l'emplacement.
+/// Deux couches : une ombre noire aux quatre décalages d'un pixel, puis le glyphe en [`TEXT`] —
+/// **le blanc de la croix**, et non le gris [`SUBDUED`] d'avant : « il faut qu'il ait la même
+/// couleur que la croix » (2026-09-13).
 ///
-/// Même procédé que les compteurs du bandeau (`panels::combat::paint_outlined_text`) : quatre
-/// passes noires décalées d'un pixel, puis le glyphe par-dessus. Quatre et non huit — les
-/// diagonales n'ajoutent rien de visible à cette taille, et chaque passe est un dessin de texture
-/// de plus.
-fn paint_outlined_icon(
-    ui: &egui::Ui,
-    ds: &design::DesignSystem,
-    rect: Rect,
-    icon: DsIcon,
-    color: Color32,
-) {
+/// **Sans épaississement.** Une version intermédiaire repeignait le glyphe blanc aux mêmes quatre
+/// décalages pour lui donner du corps ; la planche de variantes l'a écartée : à 20 px le trait
+/// d'`icon-volume-mute.png` mesure déjà plus d'un pixel, une passe de plus bouche le creux du
+/// haut-parleur et le glyphe devient une tache blanche. C'est la COTE qui le rend lisible, pas le
+/// gras.
+fn paint_mute_badge(ui: &egui::Ui, ds: &design::DesignSystem, rect: Rect) {
     for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
         ds.paint_icon(
             ui.painter(),
             rect.translate(Vec2::new(dx, dy)),
-            icon,
-            Color32::BLACK,
+            DsIcon::VolumeMute,
+            MUTE_SHADOW,
         );
     }
-    ds.paint_icon(ui.painter(), rect, icon, color);
+    ds.paint_icon(ui.painter(), rect, DsIcon::VolumeMute, TEXT);
 }
 
 /// La fenêtre de l'icône — **tout ce que le voile de survol a le droit de couvrir**.

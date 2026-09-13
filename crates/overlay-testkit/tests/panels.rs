@@ -1678,13 +1678,17 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
 /// noir de l'emplacement, sans mordre sur la bordure de rareté (voir
 /// `panels::alerts_tab::hover_scrim_rect`).
 ///
+/// **Les ordonnées de ce fichier suivent la mise en page** : la grille est descendue de 48 px le
+/// 2026-09-13, quand la phrase « Cliquez une tuile… » et la légende du pictogramme se sont posées
+/// sous le titre « Objets suivis ».
+///
 /// Remplace, avec les deux tests suivants, les captures `..._infobulle_nom_elide` et
 /// `..._infobulle_nom_entier` : le nom ne se peint plus sous la tuile depuis la refonte du
 /// 2026-09-13, il n'y a donc plus d'élision à vérifier. « Combinaison Lardante » est le seul objet
 /// ajouté du profil de ce test, donc le seul retirable — tuile 11, rangée 2, colonne 3.
 #[test]
 fn options_alertes_survol_d_une_tuile_retirable() {
-    survole_l_onglet_alertes("options_alertes_survol_retirable", 231.0, 531.0, None);
+    survole_l_onglet_alertes("options_alertes_survol_retirable", 231.0, 578.0, None);
 }
 
 /// **La croix sous le pointeur passe au rouge et dit ce qu'elle fait.**
@@ -1693,7 +1697,7 @@ fn options_alertes_survol_d_une_tuile_retirable() {
 /// son centre tombe donc à 15 px du coin.
 #[test]
 fn options_alertes_survol_de_la_croix() {
-    survole_l_onglet_alertes("options_alertes_survol_croix", 248.0, 514.0, None);
+    survole_l_onglet_alertes("options_alertes_survol_croix", 248.0, 561.0, None);
 }
 
 /// **Un objet PAR DÉFAUT ne change pas d'aspect au survol** — ni voile, ni croix.
@@ -1703,7 +1707,7 @@ fn options_alertes_survol_de_la_croix() {
 /// Seule l'infobulle de nom apparaît.
 #[test]
 fn options_alertes_survol_d_un_objet_par_defaut() {
-    survole_l_onglet_alertes("options_alertes_survol_par_defaut", 79.0, 455.0, None);
+    survole_l_onglet_alertes("options_alertes_survol_par_defaut", 79.0, 502.0, None);
 }
 
 /// **Le champ d'ajout, exercé de bout en bout** — retour utilisateur du 2026-09-12 : « j'ai essayé
@@ -1778,7 +1782,7 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
     // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
     // « Objets suivis », pleine largeur du panneau.
-    let champ = egui::pos2(300.0, 393.0);
+    let champ = egui::pos2(300.0, 441.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -1802,14 +1806,14 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // passent par le même `egui::Tooltip::for_enabled` (voir `Response::on_hover_ui` dans egui),
     // seul l'alignement diffère — et c'est lui qui envoyait le texte hors du cadre capturé. Cette
     // capture le prouve dans les deux sens : l'infobulle sort, et elle sort AU-DESSUS.
-    harness.hover_at(egui::pos2(68.0, 431.0));
+    harness.hover_at(egui::pos2(68.0, 479.0));
     harness.run();
     harness.snapshot("options_alertes_infobulle_filtre");
 
     // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
     // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
     // immédiatement sous le champ.
-    let suggestion = egui::pos2(300.0, 462.0);
+    let suggestion = egui::pos2(300.0, 510.0);
     // **Survol d'abord, clic ensuite** : egui rattache un appui au widget que le pointeur
     // survolait, et le pointeur n'est nulle part tant qu'aucun mouvement ne l'a placé. Sans cette
     // frame de survol, l'appui tombe sur un widget inconnu et la rangée n'est jamais cliquée.
@@ -1894,7 +1898,7 @@ fn options_alertes_croix_efface_la_saisie() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 395.0);
+    let champ = egui::pos2(300.0, 443.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -1907,7 +1911,7 @@ fn options_alertes_croix_efface_la_saisie() {
 
     // La croix : à 9 px du bord extérieur droit du champ, sur son axe — voir
     // `tokens::INPUT_CLEAR_INSET_RATIO`. Le champ s'arrête à x≈705 dans cette fenêtre.
-    let croix = egui::pos2(691.0, 395.0);
+    let croix = egui::pos2(691.0, 443.0);
     harness.hover_at(croix);
     harness.run();
     harness.drag_at(croix);
@@ -1995,7 +1999,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 393.0);
+    let champ = egui::pos2(300.0, 441.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2017,7 +2021,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
     // Le pointeur SUR la poignée (colonne de droite du panneau, à mi-hauteur de la liste) : elle
     // prend la teinte des rangées survolées, sans s'élargir. egui ne passe en `hovered` que le
     // pointeur sur la poignée elle-même, pas seulement dans sa colonne.
-    harness.hover_at(egui::pos2(700.0, 560.0));
+    harness.hover_at(egui::pos2(700.0, 608.0));
     harness.run();
     harness.snapshot("options_alertes_poignee_survolee");
 
@@ -2465,7 +2469,7 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
     survole_l_onglet_alertes(
         "options_alertes_infobulle_tuile_coupee",
         459.0,
-        455.0,
+        502.0,
         Some("Influence III"),
     );
 }
