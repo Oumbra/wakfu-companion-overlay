@@ -1550,17 +1550,36 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
     harness.snapshot(nom_capture);
 }
 
-/// « Pierre d'entourage » ne tient pas dans 108 px : il est élidé, donc son nom entier s'affiche.
+/// **Une tuile RETIRABLE survolée montre son voile et sa croix** — et le voile s'arrête au contour
+/// noir de l'emplacement, sans mordre sur la bordure de rareté (voir
+/// `panels::alerts_tab::hover_scrim_rect`).
+///
+/// Remplace, avec les deux tests suivants, les captures `..._infobulle_nom_elide` et
+/// `..._infobulle_nom_entier` : le nom ne se peint plus sous la tuile depuis la refonte du
+/// 2026-09-13, il n'y a donc plus d'élision à vérifier. « Combinaison Lardante » est le seul objet
+/// ajouté du profil de ce test, donc le seul retirable — tuile 11, rangée 2, colonne 3.
 #[test]
-fn options_alertes_infobulle_sur_nom_elide() {
-    survole_l_onglet_alertes("options_alertes_infobulle_nom_elide", 362.0, 496.0, None);
+fn options_alertes_survol_d_une_tuile_retirable() {
+    survole_l_onglet_alertes("options_alertes_survol_retirable", 231.0, 531.0, None);
 }
 
-/// « Pierre ultime » tient en entier : pas d'infobulle de nom, seulement celle de la tuile, qui dit
-/// ce que le clic fera.
+/// **La croix sous le pointeur passe au rouge et dit ce qu'elle fait.**
+///
+/// Même tuile que ci-dessus, visée dans son coin haut-droit : le badge est à 8 px des deux bords,
+/// son centre tombe donc à 15 px du coin.
 #[test]
-fn options_alertes_pas_d_infobulle_sur_nom_entier() {
-    survole_l_onglet_alertes("options_alertes_infobulle_nom_entier", 618.0, 496.0, None);
+fn options_alertes_survol_de_la_croix() {
+    survole_l_onglet_alertes("options_alertes_survol_croix", 248.0, 514.0, None);
+}
+
+/// **Un objet PAR DÉFAUT ne change pas d'aspect au survol** — ni voile, ni croix.
+///
+/// « Le voile ne concerne que les objets pouvant être supprimés » (retour du 2026-09-13) : les dix
+/// objets par défaut n'ont pas de croix, un voile seul annoncerait une action qui n'existe pas.
+/// Seule l'infobulle de nom apparaît.
+#[test]
+fn options_alertes_survol_d_un_objet_par_defaut() {
+    survole_l_onglet_alertes("options_alertes_survol_par_defaut", 79.0, 455.0, None);
 }
 
 /// **Le champ d'ajout, exercé de bout en bout** — retour utilisateur du 2026-09-12 : « j'ai essayé
@@ -2140,18 +2159,17 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
     );
 }
 
-/// **Une tuile au son coupé dit l'inverse : « Cliquer pour rétablir ».**
+/// **Une tuile au son coupé : le haut-parleur barré dans son coin, et le nom en infobulle.**
 ///
-/// Le pendant de [`options_alertes_pas_d_infobulle_sur_nom_entier`], et ce qui reste de l'ancien
-/// libellé une fois retiré ce que la tuile montre déjà. Il disait « Influence III — son coupé,
-/// cliquer pour rétablir » : le nom est écrit sous l'icône, l'état est peint dessus (haut-parleur
-/// barré), seule l'action manquait. C'est donc la seule chose qu'il reste.
+/// L'infobulle disait « Cliquer pour rétablir » ; elle ne dit plus que le nom depuis le
+/// 2026-09-13, comme au Suivi — le pictogramme porte déjà l'état, et le nom n'est plus écrit nulle
+/// part ailleurs. « Influence III » est le sixième objet par défaut : rangée 1, colonne 6.
 #[test]
 fn options_alertes_infobulle_d_une_tuile_coupee() {
     survole_l_onglet_alertes(
         "options_alertes_infobulle_tuile_coupee",
-        106.0,
-        565.0,
+        459.0,
+        455.0,
         Some("Influence III"),
     );
 }
