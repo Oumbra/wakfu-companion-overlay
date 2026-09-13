@@ -569,15 +569,22 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 /// fenêtre (132 + 36). Le nom de la tuile, côté `Above` depuis toujours mais retombé en dessous
 /// faute de place jusque-là, est capturé aussi : c'est la seconde moitié de la demande.
 ///
-/// Base commune : x0 = 8 (harnais) + 6 (marge Suivi) = 14 ; y0 = 14 + 36 (marge haute) = 50.
-/// Bouton "+" : x = 14 + 48 (réserve) + 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié
-/// de 24, centre du bouton) = 78 ; y = 50 + 4 (même marge, haut du fond) + 12 = 66. Bouton "−" :
-/// x = 78 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux colonnes)
-/// = 106 ; MÊME y (même ligne) = 66. "Détails" : MÊME x que "+" (même colonne) = 78 ;
-/// y = 66 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 94. "Options" : MÊME x que
-/// "−" (même colonne) = 106 ; MÊME y que "Détails" (même ligne) = 94. Tuile : bord gauche à
-/// 14 + 48 + 60 (`control_row_width`) + 12 (`TILE_GAP`) = 134, centre à 134 + 29 = 163 ; centre
-/// vertical à 82 (voir [`BANDEAU_TUILE_0`]).
+/// **Recalculée une troisième fois le 2026-09-13** (retour utilisateur, capture d'un bandeau
+/// rempli) : plus de réserve d'infobulle à GAUCHE et marge interne gauche nulle — « il faut que
+/// l'overlay démarre au début du premier bouton au niveau gauche » —, et marge haute resserrée de
+/// 36 à 28 px — « un tout petit peu moins d'espace entre le haut de la tooltip et le haut de la
+/// fenêtre ». Les infobulles du carré ne sont donc plus CENTRÉES sur leur bouton mais rabattues
+/// sur le bord gauche de la fenêtre, contrepartie admise dans la même demande.
+///
+/// Base commune : x0 = 8 (harnais) + 0 (marge Suivi gauche) = 8 ; y0 = 8 + 6 + 28 (marge haute)
+/// = 42. Bouton "+" : x = 8 + 4 (`CONTROL_BUTTON_GAP`, marge gauche du fond) + 12 (moitié de 24,
+/// centre du bouton) = 24 ; y = 42 + 4 (même marge, haut du fond) + 12 = 58. Bouton "−" :
+/// x = 24 + 24 (`CONTROL_BUTTON_SIZE`) + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux colonnes)
+/// = 52 ; MÊME y (même ligne) = 58. "Détails" : MÊME x que "+" (même colonne) = 24 ;
+/// y = 58 + 24 + 4 (`CONTROL_BUTTON_GAP`, écart entre les deux lignes) = 86. "Options" : MÊME x que
+/// "−" (même colonne) = 52 ; MÊME y que "Détails" (même ligne) = 86. Tuile : bord gauche à
+/// 8 + 60 (`control_row_width`) + 12 (`TILE_GAP`) = 80, centre à 80 + 29 = 109 ; centre
+/// vertical à 71 (voir [`BANDEAU_TUILE_0`]).
 #[test]
 fn panneau_suivi_tooltips_par_ligne_dessus_ou_dessous() {
     let mut textures = Textures::new();
@@ -600,7 +607,7 @@ fn panneau_suivi_tooltips_par_ligne_dessus_ou_dessous() {
         catalog_id: None,
     }];
 
-    let window_width = panels::watchlist::content_width(1) + 12.0;
+    let window_width = bandeau_largeur(1);
 
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
@@ -650,18 +657,36 @@ fn panneau_suivi_tooltips_par_ligne_dessus_ou_dessous() {
     }
 }
 
-/// Hauteur réelle de la fenêtre Suivi sans toast ni sélection : `main.rs::WATCHLIST_HEIGHT`
-/// (132 px) plus `render_content::WATCHLIST_TOP_MARGIN`. Les harnais du bandeau la reprennent
-/// telle quelle : une infobulle ouverte au-dessus ou en dessous n'a de sens qu'à la hauteur où la
-/// vraie fenêtre la contraint.
-const BANDEAU_HAUTEUR: f32 = 132.0 + render_content::WATCHLIST_TOP_MARGIN;
+/// Marge fixe qu'`egui_kittest` ajoute autour de tout harnais `build_ui` — sur les QUATRE côtés,
+/// et c'est ce dernier point qui compte : une fenêtre demandée à `with_size` offre 2 × 8 px de
+/// MOINS que la vraie au contenu peint dedans.
+const MARGE_HARNAIS: f32 = 8.0;
+
+/// Hauteur à demander au harnais pour que le contenu dispose exactement de ce que la vraie fenêtre
+/// Suivi lui donne sans toast ni sélection : `main.rs::WATCHLIST_HEIGHT` (92 px depuis le
+/// resserrement du 2026-09-13) plus `render_content::WATCHLIST_TOP_MARGIN` (28 px depuis le même
+/// retour), plus les deux marges du harnais.
+///
+/// **Ces 16 px manquaient jusqu'au 2026-09-13**, et personne ne l'avait vu : la fenêtre d'alors
+/// (168 px) était si large devant son contenu que les rogner ne coupait rien. Elle ne l'est plus,
+/// et la bande défilante a été la première à en pâtir — sa barre, peinte SOUS les tuiles, tombait
+/// hors du cadre et n'apparaissait sur aucune capture.
+const BANDEAU_HAUTEUR: f32 = 92.0 + render_content::WATCHLIST_TOP_MARGIN + 2.0 * MARGE_HARNAIS;
+
+/// Largeur à demander au harnais, même principe que [`BANDEAU_HAUTEUR`] : ce que `main.rs::
+/// watchlist_target_width` calcule (`content_width` plus la marge interne de la fenêtre Suivi —
+/// 6 px à DROITE seulement depuis le 2026-09-13, voir `render_content::paint_content`), plus les
+/// deux marges du harnais.
+fn bandeau_largeur(entry_count: usize) -> f32 {
+    panels::watchlist::content_width(entry_count) + 6.0 + 2.0 * MARGE_HARNAIS
+}
 
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_tooltips_par_ligne_dessus_ou_dessous`].
-const BANDEAU_PLUS: egui::Pos2 = egui::pos2(78.0, 66.0);
-const BANDEAU_MOINS: egui::Pos2 = egui::pos2(106.0, 66.0);
-const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(78.0, 94.0);
-const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(106.0, 94.0);
+const BANDEAU_PLUS: egui::Pos2 = egui::pos2(24.0, 58.0);
+const BANDEAU_MOINS: egui::Pos2 = egui::pos2(52.0, 58.0);
+const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(24.0, 86.0);
+const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 86.0);
 
 /// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
 /// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les
@@ -674,10 +699,12 @@ const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(106.0, 94.0);
 /// 132 px) — c'est la seule façon de prouver que la réserve `CONTROL_ROW_TOOLTIP_RESERVE` suffit
 /// et que la place en dessous existe.
 ///
-/// Positions : x0 = 8 (harnais) + 6 (marge Suivi) = 14, y0 = 14 + 36 (`WATCHLIST_TOP_MARGIN`)
-/// = 50. Bouton "+" : x = 14 + 64 (`CONTROL_ROW_TOOLTIP_RESERVE`) + 4 (`CONTROL_BUTTON_GAP`) + 12
-/// (moitié de 24) = 94 ; y = 50 + 4 + 12 = 66. Chaque bouton suivant est 28 px (24 + 4) plus à
-/// droite : "−" 122, "Détails" 150, "Options" 178 — même y.
+/// Positions : x0 = 8 (harnais) + 0 (marge Suivi gauche, nulle depuis le 2026-09-13) = 8,
+/// y0 = 8 + 6 + 28 (`WATCHLIST_TOP_MARGIN`) = 42. Bouton "+" : x = 8 + 4 (`CONTROL_BUTTON_GAP`) +
+/// 12 (moitié de 24) = 24 ; y = 42 + 4 + 12 = 58. Chaque bouton suivant est 28 px (24 + 4) plus à
+/// droite : "−" 52, "Détails" 80, "Options" 108, même y. `CONTROL_ROW_TOOLTIP_RESERVE` ne joue
+/// plus qu'à DROITE : c'est elle qui donne encore à la fenêtre d'un bandeau vide de quoi contenir
+/// une infobulle, qui ne peut pas se peindre hors d'elle.
 #[test]
 fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     let mut textures = Textures::new();
@@ -690,7 +717,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
-    let window_width = panels::watchlist::content_width(0) + 12.0;
+    let window_width = bandeau_largeur(0);
 
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
@@ -785,7 +812,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     let edition: Rc<RefCell<Option<panels::watchlist::WatchlistEdit>>> =
         Rc::new(RefCell::new(None));
 
-    let window_width = panels::watchlist::content_width(entries.len()) + 12.0;
+    let window_width = bandeau_largeur(entries.len());
     let harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR + 88.0))
         .build_ui({
@@ -831,15 +858,136 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     }
 }
 
+/// **Les boutons ne défilent pas, les tuiles si** — et la barre est celle du jeu.
+///
+/// Retour utilisateur du 2026-09-13, capture d'un bandeau volontairement surchargé à l'appui :
+/// « j'ai fait en sorte d'avoir énormément d'objets suivis pour faire afficher la scrollbar, et un
+/// point important : la scrollbar ne doit pas scroller les boutons, les boutons sont fixes ; il
+/// devrait y avoir un conteneur qui affiche les items slot, un peu comme le scroll pour les
+/// ennemis ». Jusque-là le carré de contrôle était le PREMIER enfant de la zone défilante : les
+/// quatre actions du bandeau partaient avec les tuiles.
+///
+/// Même retour, seconde moitié : « je voudrais que le scroll ne s'agrandisse pas lorsque
+/// l'utilisateur passe sa souris dessus [...] utiliser le scroll qui est déjà utilisé pour la
+/// modale dans l'onglet Raccourcis [...] gris quand l'utilisateur n'a pas sa souris dessus et doré
+/// quand il passe sa souris dessus ». Les deux captures ci-dessous montrent la même barre au repos
+/// et survolée : la seule différence attendue entre elles est la TEINTE de la poignée
+/// (`design::tokens::SCROLLBAR_THUMB` → `SCROLLBAR_THUMB_ACTIVE`), jamais son épaisseur.
+///
+/// La fenêtre est volontairement PLUS ÉTROITE que son contenu — c'est le cas réel du plafond
+/// `main.rs::WATCHLIST_WIDTH_FRACTION`, seul moment où la barre existe.
+///
+/// Position de la poignée : la zone défilante commence après le carré (x = 8 + 60 + 12 = 80) et
+/// occupe toute la hauteur que la fenêtre lui laisse ; sa barre est donc collée EN BAS de cette
+/// zone, pas juste sous les tuiles — y = 128 (bas du contenu : 136 de fenêtre moins la marge du
+/// harnais et les 6 px de marge interne basse) moins `STRIP_SCROLLBAR_OUTER_MARGIN` (2) moins la
+/// moitié des 6 px d'épaisseur, soit 115, ce que la capture confirme (poignée sur y 112..117).
+/// Elle part du bord gauche de la zone tant qu'on n'a pas défilé, et s'étend ici jusqu'à x = 280
+/// (12 tuiles pour 6 visibles environ).
+#[test]
+fn panneau_suivi_bande_defilante_boutons_fixes() {
+    let entries: Vec<WatchlistEntry> = [
+        "Bottes Lantha",
+        "Bois de Frêne",
+        "Pierre de Lune",
+        "Cuir Épais",
+        "Fleur de Sel",
+        "Graine de Kokoko",
+        "Plume de Tofu",
+        "Minerai de Fer",
+        "Laine de Bouftou",
+        "Écaille de Crocodaille",
+        "Sève de Bambou",
+        "Poil de Wabbit",
+    ]
+    .iter()
+    .map(|nom| WatchlistEntry {
+        name: (*nom).to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Up,
+        count: 0,
+        countdown_target: 0,
+        catalog_id: None,
+    })
+    .collect();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+
+    // Plafonnée, comme `main.rs::watchlist_target_width` le fait à 50 % de la largeur du jeu :
+    // 12 tuiles demanderaient 900 px de plus.
+    const LARGEUR_PLAFONNEE: f32 = 520.0;
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(LARGEUR_PLAFONNEE, BANDEAU_HAUTEUR))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    combat_side: &mut combat_side,
+                    watchlist: &entries,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    options: None,
+                },
+            );
+        });
+
+    harness.run();
+    harness.snapshot("watchlist_bande_defilante_repos");
+
+    // Survol de la poignée : dorée, et de la MÊME épaisseur qu'au repos.
+    harness.hover_at(BANDEAU_SCROLL_POIGNEE);
+    harness.run();
+    harness.snapshot("watchlist_bande_defilante_survol");
+
+    // **Et la bande défile pendant que le carré reste** : la poignée tirée vers la droite emmène
+    // les tuiles, les quatre boutons ne bougent pas d'un pixel. C'est LA demande, et une capture
+    // au repos ne la prouve pas — seul un défilement réel le fait.
+    harness.drag_at(BANDEAU_SCROLL_POIGNEE);
+    harness.run();
+    harness.drop_at(BANDEAU_SCROLL_POIGNEE + egui::vec2(120.0, 0.0));
+    harness.run();
+    harness.snapshot("watchlist_bande_defilante_defilee");
+}
+
+/// Un point sur la poignée de la bande défilante — voir le calcul dans
+/// [`panneau_suivi_bande_defilante_boutons_fixes`].
+const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0, 115.0);
+
 /// Centres des trois tuiles du bandeau — mêmes calculs que
 /// [`panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple`] : première tuile centrée en
-/// x = 163, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 82 (46 avant la
-/// marge haute de 36 px du 2026-09-13).
-const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(163.0, 82.0);
-const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(303.0, 82.0);
+/// x = 109, pas de 70 px (`TILE_SIZE` 58 + `TILE_GAP` 12), centre vertical en y = 71. Les deux
+/// coordonnées ont reculé le 2026-09-13 avec la réserve d'infobulle GAUCHE (48 px, supprimée :
+/// l'overlay démarre au premier pixel des boutons) et la marge haute resserrée de 36 à 28 px.
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(109.0, 71.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(249.0, 71.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
-const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(146.0, 65.0);
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(92.0, 54.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
 ///
@@ -931,9 +1079,8 @@ fn panneau_suivi_deplacement_en_vol() {
 ///
 /// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_ligne_dessus_ou_dessous`]
 /// pour le carré de contrôle (« − » au centre en [`BANDEAU_MOINS`]). Les tuiles suivent le carré :
-/// x = 14 (marges) + 48 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
-/// + 12 (`TILE_GAP`) = 134 pour le bord gauche de la première, soit 163 pour son centre
-/// ([`BANDEAU_TUILE_0`]).
+/// x = 8 (marge du harnais) + 60 (`control_row_width`, 2 × 24 + 3 × 4) + 12 (`TILE_GAP`) = 80
+/// pour le bord gauche de la première, soit 109 pour son centre ([`BANDEAU_TUILE_0`]).
 #[test]
 fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let Bandeau {
@@ -1041,7 +1188,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
         catalog_id: None,
     }];
 
-    let window_width = panels::watchlist::content_width(1) + 12.0;
+    let window_width = bandeau_largeur(1);
 
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))

@@ -7,6 +7,11 @@
 //! design::scroll_area("options-contenu").show(ui, |ui| {
 //!     // le contenu qui peut déborder
 //! });
+//!
+//! // … ou couchée, pour une bande qui défile de gauche à droite :
+//! design::scroll_area("bandeau")
+//!     .axis(design::ScrollAxis::Horizontal)
+//!     .show(ui, |ui| { /* … */ });
 //! ```
 //!
 //! ## Ce n'est pas un `Widget`, et c'est normal
@@ -37,6 +42,20 @@
 //! page de réserver la place **avant** que la barre existe, sans que le contenu bouge le jour où
 //! elle apparaît — voir `panels::options_modal`, qui réserve exactement cette largeur.
 //!
+//! ## La même barre, couchée
+//!
+//! Le relevé est celui d'une barre VERTICALE, la seule que la modale Options montre. Le bandeau
+//! « Suivi » (`panels::watchlist`) défile, lui, à l'horizontale — et l'utilisateur a tranché le
+//! 2026-09-13, capture à l'appui : c'est CETTE barre qu'il veut là aussi, « le scroll qui est
+//! déjà utilisé pour la modale dans l'onglet Raccourcis », « gris quand l'utilisateur n'a pas sa
+//! souris dessus et doré quand il passe sa souris dessus, c'est mieux dans l'ADN du jeu ».
+//! [`ScrollAxis::Horizontal`] la couche donc sous le contenu : mêmes jetons, même épaisseur
+//! constante, pas de rail — aucune mesure nouvelle, la barre du jeu ne change pas d'aspect parce
+//! qu'elle change d'axe.
+//!
+//! Seule la marge extérieure peut avoir à bouger ([`ScrollArea::outer_margin`]) : les 14 px du
+//! relevé séparent la poignée du bord d'un PANNEAU, et un bandeau posé sur le jeu n'en a pas.
+//!
 //! ## Ce qui n'est PAS reproduit
 //!
 //! L'**ombre portée de 2 px à droite de la poignée**, relevée dans le jeu. `egui::ScrollArea` peint
@@ -57,6 +76,15 @@ use crate::design::tokens;
 pub const RESERVE_X: f32 =
     tokens::SCROLLBAR_CONTENT_MARGIN + tokens::SCROLLBAR_WIDTH + tokens::SCROLLBAR_OUTER_MARGIN;
 
+/// Axe de défilement — voir la doc de module (« la même barre, couchée »).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollAxis {
+    /// Barre à DROITE du contenu, contenu qui défile de haut en bas. Le cas du jeu, et le défaut.
+    Vertical,
+    /// Barre SOUS le contenu, contenu qui défile de gauche à droite.
+    Horizontal,
+}
+
 /// Construit une zone défilable au style du jeu. `id_salt` distingue deux zones du même panneau —
 /// c'est lui qui porte la position de défilement d'une frame à l'autre.
 pub fn scroll_area(id_salt: impl std::hash::Hash + std::fmt::Debug) -> ScrollArea {
@@ -66,6 +94,8 @@ pub fn scroll_area(id_salt: impl std::hash::Hash + std::fmt::Debug) -> ScrollAre
 pub struct ScrollArea {
     id_salt: egui::Id,
     auto_shrink: bool,
+    axis: ScrollAxis,
+    outer_margin: f32,
 }
 
 impl ScrollArea {
@@ -73,17 +103,64 @@ impl ScrollArea {
         Self {
             id_salt: egui::Id::new(id_salt),
             auto_shrink: false,
+            axis: ScrollAxis::Vertical,
+            outer_margin: tokens::SCROLLBAR_OUTER_MARGIN,
         }
     }
 
-    /// Laisse la zone se rétrécir à la hauteur de son contenu. **Faux par défaut** : un panneau du
-    /// jeu occupe toute sa hauteur, quel que soit ce qu'il contient.
+    /// Laisse la zone se rétrécir à la taille de son contenu **sur l'axe qui défile**. Faux par
+    /// défaut : un panneau du jeu occupe toute sa hauteur, quel que soit ce qu'il contient.
+    ///
+    /// L'axe CROISÉ, lui, se rétracte toujours en horizontal (une bande posée dans une rangée
+    /// prend la hauteur de ses tuiles, pas celle de la fenêtre) et jamais en vertical — c'est ce
+    /// que faisaient déjà les deux appelants avant que l'axe soit réglable.
+    ///
+    /// **Ne pas le mettre à `true` sur une zone bornée par son parent** : egui dimensionne alors
+    /// la zone sur son CONTENU, ne voit plus de débordement et ne peint plus de barre du tout — le
+    /// contenu sort simplement du cadre, écrêté par la fenêtre. C'est exactement ce qu'a donné la
+    /// première version de la bande du bandeau « Suivi ».
     pub fn auto_shrink(mut self, auto_shrink: bool) -> Self {
         self.auto_shrink = auto_shrink;
         self
     }
 
+    /// Couche la barre sous le contenu (voir [`ScrollAxis`] et la doc de module).
+    pub fn axis(mut self, axis: ScrollAxis) -> Self {
+        self.axis = axis;
+        self
+    }
+
+    /// Remplace la marge entre la poignée et le bord de la zone
+    /// ([`tokens::SCROLLBAR_OUTER_MARGIN`], 14 px). À ne toucher que là où il n'y a PAS de bord de
+    /// panneau à respecter — voir la doc de module, cas du bandeau « Suivi ».
+    pub fn outer_margin(mut self, outer_margin: f32) -> Self {
+        self.outer_margin = outer_margin;
+        self
+    }
+
+    /// Réserve totale prise par la barre sur l'axe qui lui fait face — [`RESERVE_X`] avec la marge
+    /// extérieure du jeu, moins si [`ScrollArea::outer_margin`] l'a réduite.
+    pub fn reserve(&self) -> f32 {
+        tokens::SCROLLBAR_CONTENT_MARGIN + tokens::SCROLLBAR_WIDTH + self.outer_margin
+    }
+
     pub fn show<R>(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+        self.show_output(ui, add_contents).inner
+    }
+
+    /// Comme [`ScrollArea::show`], mais rend la sortie complète d'`egui` — `inner_rect` (la partie
+    /// RÉELLEMENT visible du contenu) est ce dont une mise en page a besoin pour se caler sur ce
+    /// qu'on voit plutôt que sur ce qui est peint (voir `panels::watchlist`, dont le bouton de
+    /// suppression groupée se centre sur les tuiles visibles).
+    pub fn show_output<R>(
+        self,
+        ui: &mut Ui,
+        add_contents: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::scroll_area::ScrollAreaOutput<R> {
+        let axis = self.axis;
+        let outer_margin = self.outer_margin;
+        let id_salt = self.id_salt;
+        let auto_shrink = self.auto_shrink;
         // Le style est posé dans un scope : il ne fuit pas vers le reste du panneau. C'est le seul
         // chemin par lequel les jetons du jeu atteignent la barre — `egui::ScrollArea` ne prend
         // aucune couleur en paramètre, elle lit `Style` au moment de peindre.
@@ -93,8 +170,14 @@ impl ScrollArea {
             scroll.floating = false;
             scroll.bar_width = tokens::SCROLLBAR_WIDTH;
             scroll.bar_inner_margin = tokens::SCROLLBAR_CONTENT_MARGIN;
-            scroll.bar_outer_margin = tokens::SCROLLBAR_OUTER_MARGIN;
+            scroll.bar_outer_margin = outer_margin;
             scroll.foreground_color = false;
+            // La molette (verticale) ne pilote une zone HORIZONTALE qu'avec Maj enfoncé par
+            // défaut ; quand une seule direction défile, c'est une exigence sans objet — et le
+            // contraire de ce qui est demandé d'un bandeau qu'on fait défiler à la molette.
+            if axis == ScrollAxis::Horizontal {
+                style.always_scroll_the_only_direction = true;
+            }
 
             // **Pas de rail.** Le relevé est catégorique : « le fond du panneau tient lieu de
             // gouttière ». `extreme_bg_color` est ce qu'egui peint derrière la poignée ; le rendre
@@ -114,11 +197,17 @@ impl ScrollArea {
                 widget.corner_radius = radius;
             }
 
-            egui::ScrollArea::vertical()
-                .id_salt(self.id_salt)
-                .auto_shrink([self.auto_shrink, self.auto_shrink])
+            let area = match axis {
+                ScrollAxis::Vertical => egui::ScrollArea::vertical(),
+                ScrollAxis::Horizontal => egui::ScrollArea::horizontal(),
+            };
+            let auto_shrink = match axis {
+                ScrollAxis::Vertical => [auto_shrink, auto_shrink],
+                ScrollAxis::Horizontal => [auto_shrink, true],
+            };
+            area.id_salt(id_salt)
+                .auto_shrink(auto_shrink)
                 .show(ui, add_contents)
-                .inner
         })
         .inner
     }

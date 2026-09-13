@@ -108,11 +108,16 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// sélection qui servirait à autre chose garde l'or.
 const TON: design::SelectionTone = design::SelectionTone::Danger;
 
-/// `panels::watchlist::CONTROL_TOOLTIP_RESERVE` — la place gardée à gauche du carré de contrôle
-/// pour que les infobulles s'y ouvrent centrées (88 px jusqu'au 2026-09-13, quand elles s'ouvraient
-/// sur le côté).
-const CONTROL_TOOLTIP_RESERVE: f32 = 48.0;
-/// `render_content::paint_content` pose cette marge autour du contenu du bandeau.
+/// `panels::watchlist::CONTROL_TOOLTIP_RESERVE` — la place gardée AUTOUR du carré de contrôle pour
+/// que les infobulles s'y ouvrent centrées (88 px jusqu'au 2026-09-13, quand elles s'ouvraient sur
+/// le côté ; 48 px ensuite). **Nulle à GAUCHE depuis le même jour** : l'overlay démarre au premier
+/// pixel des boutons, et les infobulles s'y rabattent alignées plutôt que centrées (demande
+/// utilisateur explicite).
+const CONTROL_TOOLTIP_RESERVE: f32 = 0.0;
+/// `render_content::paint_content` pose cette marge autour du contenu du bandeau — **sauf à
+/// GAUCHE**, nulle depuis le 2026-09-13 (voir [`CONTROL_TOOLTIP_RESERVE`]).
+const CONTENT_MARGIN_LEFT: f32 = 0.0;
+/// La même, sur les trois autres côtés.
 const CONTENT_MARGIN: f32 = 6.0;
 /// … plus `render_content::WATCHLIST_TOP_MARGIN` en haut (2026-09-13, infobulles au-dessus).
 const CONTENT_TOP_MARGIN: f32 = CONTENT_MARGIN + overlay_ui::render_content::WATCHLIST_TOP_MARGIN;
@@ -134,7 +139,7 @@ const HARNESS_MARGIN: f32 = 8.0;
 /// en entrant dans le mode sélection — signalé par l'utilisateur sur la planche.
 const MINUS_TOP_LEFT: egui::Pos2 = egui::pos2(
     HARNESS_MARGIN
-        + CONTENT_MARGIN
+        + CONTENT_MARGIN_LEFT
         + CONTROL_TOOLTIP_RESERVE
         + CONTROL_BUTTON_GAP
         + CONTROL_BUTTON_SIZE
@@ -144,7 +149,7 @@ const MINUS_TOP_LEFT: egui::Pos2 = egui::pos2(
 
 /// Coin haut-gauche du bouton « + » — voir [`MINUS_TOP_LEFT`], dont il ne diffère qu'en abscisse.
 const PLUS_TOP_LEFT: egui::Pos2 = egui::pos2(
-    HARNESS_MARGIN + CONTENT_MARGIN + CONTROL_TOOLTIP_RESERVE + CONTROL_BUTTON_GAP,
+    HARNESS_MARGIN + CONTENT_MARGIN_LEFT + CONTROL_TOOLTIP_RESERVE + CONTROL_BUTTON_GAP,
     MINUS_TOP_LEFT.y,
 );
 
@@ -334,8 +339,9 @@ fn harnais(p: Planche) -> Harness<'static> {
     // **À la largeur EXACTE de la vraie fenêtre** (`content_width`, plus les deux marges) : la
     // colonne de contrôle est collée au bord gauche dans la fenêtre réelle, et une planche plus
     // large donnerait au « − » une marge qu'il n'a pas.
-    let largeur = overlay_ui::panels::watchlist::content_width(total) + 2.0 * CONTENT_MARGIN;
-    let hauteur = 132.0
+    let largeur =
+        overlay_ui::panels::watchlist::content_width(total) + CONTENT_MARGIN_LEFT + CONTENT_MARGIN;
+    let hauteur = 92.0
         + overlay_ui::render_content::WATCHLIST_TOP_MARGIN
         + if select_mode { BULK_ROW_HEIGHT } else { 0.0 };
 
