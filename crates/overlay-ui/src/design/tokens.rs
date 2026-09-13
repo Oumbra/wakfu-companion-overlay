@@ -720,6 +720,46 @@ pub const WINDOW_FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 /// avant que la texture du jeu ne le remplace. La couleur, elle, vient de la texture.
 pub const WINDOW_BODY_TINT: Color32 = Color32::from_rgba_premultiplied(235, 235, 235, 235);
 
+// Bouton de fermeture de la bannière — tout mesuré sur `window-close.png` et
+// `window-close-hover.png` (deux recadrages 48 × 48 du bouton du jeu, échelle 1, captures
+// utilisateur du 2026-09-13), par `tools/design-system/build_window_close.py`. Le bouton est un
+// carré arrondi TRANSLUCIDE posé sur la bannière — les hachures se voient au travers —, ce
+// qu'aucune texture ne peut porter : il est peint, avec ces valeurs.
+
+/// Côté du bouton de fermeture — 32 px, comme le pas numérique et non comme le bouton icône (36).
+/// Mesuré identique au repos et au survol : le survol ne grossit pas le carré.
+pub const WINDOW_CLOSE_SIZE: f32 = 32.0;
+
+/// Marge entre le carré et le bord droit de la fenêtre — 12 px, ce qui le centre aussi
+/// verticalement dans la bannière de 56 (12 + 32 + 12). Le jeu n'a qu'une cote pour les deux.
+pub const WINDOW_CLOSE_MARGIN: f32 = 12.0;
+
+/// Rayon des angles du carré — l'antialiasing du survol rentre de 4, 2 puis 1 px sur ses trois
+/// premières rangées, ce qu'un rayon de 5 reproduit.
+pub const WINDOW_CLOSE_RADIUS: u8 = 5;
+
+/// Voile du carré au repos — noir à **0,168** : intérieur mesuré à 83,2 % de la bannière nue
+/// autour. À peine visible, et c'est voulu : le jeu ne signale le bouton qu'au survol.
+pub const WINDOW_CLOSE_FILL: Color32 = Color32::from_black_alpha(43);
+
+/// Liseré d'1 px au repos, PAR-DESSUS le voile — noir à 0,115, pour que le bord cumulé tombe aux
+/// 73,6 % mesurés (1 − 0,832 × (1 − 0,115) = 0,264). Absent au survol, où le bord (64,2 %) ne se
+/// distingue pas de l'intérieur.
+pub const WINDOW_CLOSE_RIM: Color32 = Color32::from_black_alpha(29);
+
+/// Voile du carré au survol — noir à **0,366** : intérieur à 63,4 % de la bannière nue.
+pub const WINDOW_CLOSE_FILL_HOVER: Color32 = Color32::from_black_alpha(93);
+
+/// Encre de la croix — 12 px pour un socle de 32, frange d'antialiasing comprise (le cœur à
+/// seuil 150 fait 10). C'est la taille du FICHIER `icon-close-window.png`, extrait de ces mêmes
+/// captures : le rapport est donc exact, pas une normalisation.
+pub const WINDOW_CLOSE_ICON_CONTENT: f32 = 12.0;
+
+/// Teinte de la croix — `#F4D89F` dans les DEUX états, le pic RGB relevé au repos comme au survol.
+/// Même or que [`ICON_TINT_HOVER`] et [`STEPPER_ICON_TINT`] : le survol de ce bouton ne se lit pas
+/// sur son glyphe, seulement sur son voile.
+pub const WINDOW_CLOSE_ICON_TINT: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
 /// Translucidité du panneau de contenu — **230/255**.
 ///
 /// Sa couleur, son liseré et l'arrondi de ses angles ne se règlent plus ici : ils sont dans

@@ -23,9 +23,9 @@ mod wakassets_fixtures;
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
 use overlay_ui::design::{
-    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, IconButtonState,
-    IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep, SelectState,
-    SliderState, TabState, TableAlign, TableBody, TableColumn,
+    self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, DsTexture,
+    IconButtonState, IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep,
+    SelectState, SliderState, TabState, TableAlign, TableBody, TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -584,6 +584,79 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
+        "Bouton icône — contexte Banner, la croix de fermeture d'une fenêtre",
+        "Pas de texture : un voile noir translucide (16,8 % au repos avec un liseré, 36,6 % au survol) sur ce que la fenêtre a déjà peint — ici un morceau de bannière, sans quoi le voile ne se verrait pas. Croix dorée dans les deux états, 12 px sur un carré de 32. À droite, les deux recadrages du jeu (window-close.png, -hover) à la même échelle, pour la comparaison.",
+    );
+    {
+        // Une bande de bannière de 56 px, la hauteur native de `modal-header.png`, et les trois
+        // états posés dedans comme le chrome les pose : centrés sur sa hauteur. La moitié gauche
+        // de la texture à l'échelle 1 (uv 0..0,5), pas la texture entière comprimée : ce sont ses
+        // hachures qu'on doit voir au travers du voile, à leur taille.
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(360.0, 56.0), egui::Sense::hover());
+        egui::Image::new(design::DesignSystem::get(ui.ctx()).texture(DsTexture::ModalHeader))
+            .uv(egui::Rect::from_min_max(
+                egui::pos2(0.0, 0.0),
+                egui::pos2(0.5, 1.0),
+            ))
+            .paint_at(ui, rect);
+        for (i, (state, name)) in [
+            (IconButtonState::Idle, "repos"),
+            (IconButtonState::Hovered, "survol"),
+            (IconButtonState::Disabled, "off"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let carre = egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 28.0 + 48.0 * i as f32, rect.center().y),
+                Vec2::splat(32.0),
+            );
+            ui.put(
+                carre,
+                design::icon_button(DsIcon::CloseWindow)
+                    .context(IconContext::Banner)
+                    .size(32.0)
+                    .enabled(state != IconButtonState::Disabled)
+                    .preview_state(state)
+                    .log_name(format!("galerie.fermer-{name}")),
+            );
+        }
+        // Les deux références du jeu, à l'échelle 1 : 48 × 48, le carré de 32 au centre. Elles ne
+        // sont pas au manifeste — ce ne sont pas des textures, mais les captures qu'on compare.
+        let references = charge_une_fois(ui, "galerie.fermer-references", |ctx| {
+            [
+                (
+                    "repos",
+                    &include_bytes!("../../../assets/design-system/window-close.png")[..],
+                ),
+                (
+                    "survol",
+                    &include_bytes!("../../../assets/design-system/window-close-hover.png")[..],
+                ),
+            ]
+            .map(|(nom, bytes)| {
+                let image = image::load_from_memory(bytes)
+                    .expect("capture de référence décodable")
+                    .to_rgba8();
+                let taille = [image.width() as usize, image.height() as usize];
+                ctx.load_texture(
+                    format!("galerie.fermer-reference-{nom}"),
+                    egui::ColorImage::from_rgba_unmultiplied(taille, image.as_raw()),
+                    egui::TextureOptions::NEAREST,
+                )
+            })
+        });
+        for (i, texture) in references.iter().enumerate() {
+            let reference = egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 220.0 + 56.0 * i as f32, rect.center().y),
+                Vec2::splat(48.0),
+            );
+            egui::Image::new((texture.id(), Vec2::splat(48.0))).paint_at(ui, reference);
+        }
+    }
+
+    heading(
+        ui,
         "Barre de recherche — la loupe DANS le champ, la croix à droite",
         "Le jeu pose toujours sa loupe à l'intérieur du champ, jamais sur un socle à côté — manche en bas à gauche, teinte de la loupe et non du texte indicatif (empty-input-search.png). La boîte fait 28 px, pas 25 : même encre, plus d'air. La deuxième ligne, la seule qui porte une valeur, est celle qui vérifie la gouttière ET la croix d'effacement : elle n'apparaît qu'avec une valeur (input-search.png), et le texte s'arrête avant elle.",
     );
@@ -1051,6 +1124,7 @@ fn gallery(ui: &mut egui::Ui) {
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             let chrome = design::window("Fenêtre")
                 .footer("Annuler", "Valider")
+                .close_button(true)
                 .log_name("galerie.fenetre")
                 .show(ui);
             chrome.tabs(

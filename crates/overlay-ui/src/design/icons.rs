@@ -140,8 +140,19 @@ ds_icons! {
         Search => "icon-search", libre;
 
         /// Croix de fermeture/retrait (`icons/icon-close.png`, 13 × 14) — le « × » de « Retirer tous
-        /// les filtres » et le bouton de fermeture d'une fenêtre.
+        /// les filtres ». **Pas celle qui ferme une fenêtre** : voir [`DsIcon::CloseWindow`].
         Close => "icon-close", socle;
+
+        /// Croix du bouton de fermeture d'une fenêtre (`icons/icon-close-window.png`, 12 × 12) —
+        /// plus grasse que [`DsIcon::Close`] (traits de ~2,7 px contre 2), et légèrement
+        /// asymétrique, comme le jeu la peint dans la bannière de toutes ses fenêtres
+        /// (`interface-hdv-achat.png`, coin haut-droit, même dessin à une autre échelle).
+        ///
+        /// Démêlée des captures `window-close.png`/`window-close-hover.png` par
+        /// `tools/design-system/build_window_close.py`, pas par `dsimg.py` (qui perd sa frange).
+        /// `libre` : elle n'a jamais vécu sur un socle de bouton icône, sa taille d'encre est
+        /// celle du contexte qui la porte ([`tokens::WINDOW_CLOSE_ICON_CONTENT`], 12 pour 32).
+        CloseWindow => "icon-close-window", libre;
 
         /// Corbeille (`icons/icon-delete.png`, 12 × 14) — la suppression d'un élément d'une liste, sur
         /// socle de bouton icône (`interface-personnage-equiement.png`, barre d'outils du build).
