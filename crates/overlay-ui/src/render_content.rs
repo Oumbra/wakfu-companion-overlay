@@ -57,10 +57,22 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// Valeur mesurée sur les captures du bandeau vide (`panels.rs::
 /// panneau_suivi_vide_boutons_en_ligne_infobulles_dessous`) : une infobulle d'une ligne
 /// (« Supprimer (Ctrl+Shift+S) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px)
-/// d'écart, soit 32 px — 36 px laisse 4 px de marge. Plus serré que les 44 px de Combat : ici la
+/// d'écart, soit 32 px. Plus serré que les 44 px de Combat : ici la
 /// marge décale la bande sur l'écran, `main.rs::watchlist_target_height` et le binaire X11
 /// agrandissent la fenêtre d'autant, l'ancrage (`GAME_TOP_MARGIN_PX`) ne bouge pas.
-pub const WATCHLIST_TOP_MARGIN: f32 = 36.0;
+///
+/// **Resserrée le jour même, 36 → 28 px** (retour utilisateur, capture à l'appui) : « on peut
+/// réduire un peu l'overlay en hauteur afin de laisser un tout petit peu moins d'espace entre le
+/// haut de la tooltip et le haut de la fenêtre, ça fait un très gros écart ». Les 36 px étaient
+/// comptés comme s'ils portaient seuls cette place, sans tenir compte des 6 px de marge interne
+/// que la fenêtre Suivi pose déjà par-dessus (voir `paint_content`) : 6 + 36 = 42 px au-dessus
+/// d'une infobulle qui n'en demande que 32, soit 10 px de vide au-dessus d'elle. 6 + 28 = 34 px
+/// n'en laissent plus que 2 — le plancher, sous lequel `RectAlign::TOP` ne tiendrait plus et se
+/// rabattrait EN DESSOUS, ce que la demande de la veille interdit. Le reste de l'écart visible en
+/// jeu ne vient pas de cette marge mais de l'ancrage de la fenêtre elle-même
+/// (`main.rs::GAME_TOP_MARGIN_PX`, 28 px sous le bord haut du client), calé sur les boutons
+/// d'interface du jeu et laissé tel quel.
+pub const WATCHLIST_TOP_MARGIN: f32 = 28.0;
 
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
@@ -372,10 +384,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
     // collé au bord de la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui
     // ferait partie du jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même
     // raison) — SEUL le haut gagne `COMBAT_TOP_MARGIN`, voir sa doc, pour que l'infobulle du switch
-    // Alliés/Ennemis ait la place de s'afficher au-dessus de lui. Suivi garde sa marge d'origine
-    // sur les quatre côtés (bande de tuiles qui a toujours besoin d'un peu d'air pour ne pas
-    // coller aux boutons d'interface du jeu), plus `WATCHLIST_TOP_MARGIN` en haut depuis le
-    // 2026-09-13 (voir sa doc) pour les infobulles ouvertes au-dessus de la bande. Options
+    // Alliés/Ennemis ait la place de s'afficher au-dessus de lui. Suivi : voir le bloc ci-dessous.
+    // Options
     // (2026-09-08) est une fenêtre dédiée qui remplit tout son espace elle-même (voir
     // `panels::options_modal::show`, bannière/corps/pied de page peints jusqu'aux bords) : aucune
     // marge, comme Combat.
@@ -386,8 +396,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             top: COMBAT_TOP_MARGIN as i8,
             bottom: 0,
         },
+        // Suivi : marge GAUCHE nulle depuis le 2026-09-13 (retour utilisateur : « il faut que
+        // l'overlay démarre au début du premier bouton au niveau gauche, à partir du premier pixel
+        // du dessin des boutons ») — le carré de contrôle est le premier élément peint, son fond
+        // translucide touche donc le bord de la fenêtre. La réserve d'infobulle de 48 px qui
+        // s'ajoutait devant est tombée dans le même mouvement (voir
+        // `panels::watchlist::ControlLayout::tooltip_reserve`). Les trois autres côtés gardent
+        // leur marge d'origine (la bande a besoin d'un peu d'air pour ne pas coller aux boutons
+        // d'interface du jeu), plus `WATCHLIST_TOP_MARGIN` en haut pour les infobulles ouvertes
+        // au-dessus de la bande.
         OverlayKind::Watchlist => egui::Margin {
-            left: 6,
+            left: 0,
             right: 6,
             top: 6 + WATCHLIST_TOP_MARGIN as i8,
             bottom: 6,

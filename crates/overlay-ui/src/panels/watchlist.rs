@@ -491,8 +491,20 @@ impl ControlLayout {
         }
     }
 
-    /// Réserve d'infobulle à gauche du fond translucide — et à droite, quand rien d'autre n'y
-    /// fournit la place (voir `content_width`).
+    /// Réserve d'infobulle à DROITE du fond translucide, quand rien d'autre n'y fournit la place
+    /// (voir `content_width`).
+    ///
+    /// **Plus rien à GAUCHE depuis le 2026-09-13** (retour utilisateur explicite, capture à
+    /// l'appui) : « j'ai l'impression qu'il y a cinquante pixels à gauche des boutons, alors que
+    /// le groupe de boutons c'est le démarrage de l'overlay [...] il faut que celui-ci démarre au
+    /// début du premier bouton au niveau gauche, à partir du premier pixel du dessin des boutons,
+    /// donc la petite bordure ». La contrepartie est admise dans le même message : sans place à
+    /// gauche, `design::tooltip` ne peut plus CENTRER l'infobulle sur son bouton et se rabat
+    /// alignée sur le bord de la fenêtre — « elles ne s'afficheront pas centrées mais alignées à
+    /// partir de l'overlay, donc collées sur la droite au lieu d'être centrales, mais ce n'est pas
+    /// problématique ». La réserve DROITE, elle, reste : elle ne décale pas le bord gauche, et
+    /// sans elle une fenêtre au bandeau vide (116 px de contenu) serait plus étroite que la
+    /// moindre infobulle — qui ne peut PHYSIQUEMENT pas se peindre hors de sa fenêtre.
     fn tooltip_reserve(self) -> f32 {
         match self {
             ControlLayout::Square => CONTROL_TOOLTIP_RESERVE,
@@ -542,6 +554,12 @@ impl ControlLayout {
 /// infobulles s'ouvrent EN DESSOUS (voir doc de module, [`ControlLayout::Row`]) — la réserve de
 /// chaque côté est alors `CONTROL_ROW_TOOLTIP_RESERVE`, celle d'une infobulle centrée sous le
 /// premier ou le dernier bouton, et plus celle d'une infobulle latérale.
+///
+/// **Refonte 2026-09-13 (l'overlay démarre au premier bouton)** : plus AUCUNE réserve à GAUCHE —
+/// voir [`ControlLayout::tooltip_reserve`], qui ne vaut plus que pour la droite. La fenêtre
+/// commence donc au premier pixel du fond translucide du carré de contrôle, comme demandé ; la
+/// marge interne gauche de la fenêtre Suivi (`render_content::paint_content`) est tombée à 0 dans
+/// le même mouvement, sans quoi il serait resté 6 px de vide avant ce premier pixel.
 pub fn content_width(entry_count: usize) -> f32 {
     let layout = ControlLayout::for_entries(entry_count);
     let entries_width = if entry_count == 0 {
@@ -550,7 +568,7 @@ pub fn content_width(entry_count: usize) -> f32 {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
     let right_of_control = (TILE_GAP + entries_width).max(layout.tooltip_reserve());
-    layout.tooltip_reserve() + control_row_width(layout) + right_of_control
+    control_row_width(layout) + right_of_control
 }
 
 /// Largeur du fond translucide derrière le carré de contrôle (voir `control_button_row`) — DEUX
@@ -575,13 +593,11 @@ fn control_row_height(layout: ControlLayout) -> f32 {
 // `design::tokens` : deux de ces valeurs existaient aussi dans `panels::combat`, et une recopie
 // n'est pas un lien.
 //
-// `--surface-well` (fond du badge de compteur), `--border-strong` (sa bordure, et la bordure
-// « monstre » de `.kpi.is-monster`), `--text-muted` (cible grisée d'un décompte, texte des tuiles
-// « + » / « − »).
-use crate::design::tokens::{
-    OVERLAY_BORDER_STRONG as BORDER_STRONG, OVERLAY_SURFACE_WELL as SURFACE_WELL,
-    OVERLAY_TEXT_MUTED as TEXT_MUTED,
-};
+// `--text-muted` (cible grisée d'un décompte, texte des tuiles « + » / « − »). `--surface-well` et
+// `--border-strong` sont partis avec `style_thin_scrollbar` le 2026-09-13 : ils n'habillaient plus
+// que la poignée de l'ancienne barre de défilement, que `design::scroll_area` peint désormais avec
+// les teintes du jeu (voir `strip_scroll_area`).
+use crate::design::tokens::OVERLAY_TEXT_MUTED as TEXT_MUTED;
 
 // `--accent` — bordure ET titre du toast (`loot-alert-card`/`loot-alert-title`,
 // `loot-alert.component.css`), les deux réutilisent le même jeton quel que soit `reason`. Repris du
@@ -759,7 +775,7 @@ pub fn show(
     // doit de toute façon pouvoir déclencher un toast même sans entrée suivie — cette garde ne
     // s'est donc jamais étendue au toast, peint plus bas hors de ce bloc.
     let mut style = (**ui.style()).clone();
-    style_thin_scrollbar(&mut style);
+    style_strip(&mut style);
     ui.set_style(style);
 
     // Renseigné par `control_button_row` dans la fermeture ci-dessous (voir la doc de `show`) —
@@ -784,32 +800,30 @@ pub fn show(
     let mut tiles_rect: Option<egui::Rect> = None;
     let mut bascule_mode = false;
 
-    let strip = egui::ScrollArea::horizontal()
-        .id_salt("watchlist-strip")
-        .auto_shrink([false, true])
-        // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
-        // flottante une bande dégagée sous les icônes/badges plutôt que de la faire chevaucher
-        // presque entièrement — retour utilisateur 2026-09-02 : « impossible de l'agripper ».
-        .min_scrolled_height(TILE_SIZE + 14.0)
-        .show(ui, |ui| {
+    // **Les boutons ne défilent pas, les tuiles si.** Le carré de contrôle est peint DEHORS, dans
+    // la rangée qui porte la zone défilante — retour utilisateur explicite 2026-09-13, capture à
+    // l'appui d'un bandeau bien rempli : « la scrollbar ne doit pas scroller les boutons, les
+    // boutons sont fixes ; il devrait y avoir un conteneur qui affiche les éléments suivis, un peu
+    // comme le scroll pour les ennemis », où seuls les portraits défilent dans un cadre immobile
+    // (`panels::combat_frame_scroll`). Jusque-là, le carré était le PREMIER enfant de la
+    // `ScrollArea` : défiler la bande le faisait sortir de l'écran avec les tuiles, et les quatre
+    // actions du bandeau devenaient inatteignables tant qu'on ne revenait pas au début.
+    let mut strip_rect = egui::Rect::NOTHING;
+    ui.horizontal_top(|ui| {
+        let layout = ControlLayout::for_entries(entries.len());
+        // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) — aligné sur
+        // le HAUT des tuiles (`horizontal_top`) et plus sur leur centre : la zone défilante est
+        // désormais plus haute qu'elles de la réserve de sa barre (voir `strip_scroll_area`), un
+        // centrage vertical décalerait le carré vers le bas d'autant.
+        let clicks = control_button_row(ui, shortcuts, layout, selection.is_open());
+        open_watchlist = clicks.add;
+        open_options = clicks.options;
+        open_web_app = clicks.details;
+        bascule_mode = clicks.remove;
+        ui.add_space(TILE_GAP);
+
+        let strip = strip_scroll_area().show_output(ui, |ui| {
             ui.horizontal(|ui| {
-                // Réserve à GAUCHE de la colonne de contrôle pour que son infobulle ait la
-                // place de s'afficher (à gauche pour le carré 2×2, centrée sous le premier
-                // bouton pour la rangée du bandeau vide — voir `ControlLayout::tooltip_reserve`)
-                // — zone transparente, aucun élément peint ni interactif dedans.
-                let layout = ControlLayout::for_entries(entries.len());
-                ui.add_space(layout.tooltip_reserve());
-
-                // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
-                // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
-                // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                let clicks = control_button_row(ui, shortcuts, layout, selection.is_open());
-                open_watchlist = clicks.add;
-                open_options = clicks.options;
-                open_web_app = clicks.details;
-                bascule_mode = clicks.remove;
-                ui.add_space(TILE_GAP);
-
                 for (i, entry) in entries.iter().enumerate() {
                     if i > 0 {
                         ui.add_space(TILE_GAP);
@@ -843,6 +857,8 @@ pub fn show(
                 }
             });
         });
+        strip_rect = strip.inner_rect;
+    });
 
     // **Les deux gestes du mode, appliqués une fois la bande peinte.**
     if let Some(cle) = bascule_tuile {
@@ -858,7 +874,7 @@ pub fn show(
     let mut edit = None;
     if selection.is_open() {
         if let Some(tuiles) = tiles_rect {
-            let visible = tuiles.intersect(strip.inner_rect);
+            let visible = tuiles.intersect(strip_rect);
             if bulk_button_row(ui, selection, entries.len(), visible) {
                 let restantes: Vec<WatchlistEntry> = if selection.picked.is_empty() {
                     // Aucune coche : « Supprimer tout » — la règle du web, voir `bulk_label`.
@@ -1018,26 +1034,53 @@ impl WatchlistEditReason {
     }
 }
 
-/// Barre de défilement fine, flottante et sombre plutôt que le style natif par défaut (épais, pris
-/// dans le flux, gris clair) — retour utilisateur 2026-09-02 (capture d'écran à l'appui) : « le
-/// scroll passe SUR les objets », « ce n'est pas très moderne », « qu'on ait juste à scroller
-/// avec la molette plutôt que de bouger le scroll manuellement ». `ScrollStyle::thin()` (preset
-/// `egui`, flottant + fin au repos + s'élargit au survol) répond exactement à ça — seules les
-/// COULEURS restent celles d'egui par défaut (pensées pour un thème clair) sans cet ajustement,
-/// remplacées ici par les jetons déjà utilisés pour le badge de compteur, cohérents avec le reste
-/// du panneau. S'applique à tout le `Style` de CE contexte egui (une fenêtre = un contexte, voir
-/// `main.rs`) : sans effet sur la fenêtre Combat, qui n'a pas de zone défilante.
-fn style_thin_scrollbar(style: &mut egui::Style) {
-    style.spacing.scroll = egui::style::ScrollStyle::thin();
-    style.visuals.widgets.noninteractive.bg_fill = SURFACE_WELL;
-    style.visuals.widgets.inactive.bg_fill = BORDER_STRONG;
-    style.visuals.widgets.hovered.bg_fill = TEXT_MUTED;
-    style.visuals.widgets.active.bg_fill = TEXT_MUTED;
+/// Marge entre la poignée de la bande et le bas de la zone défilante — 14 px dans le jeu
+/// (`design::tokens::SCROLLBAR_OUTER_MARGIN`, l'écart poignée → bord du PANNEAU de la modale
+/// Options), ramenés à 2 px ici : le bandeau n'a pas de panneau, il flotte sur le jeu, et ces
+/// 12 px de plus ne feraient qu'allonger une fenêtre qu'on vient au contraire de raccourcir
+/// (retour utilisateur 2026-09-13, voir `render_content::WATCHLIST_TOP_MARGIN`). La réserve totale
+/// sous les tuiles tombe ainsi à 6 + 6 + 2 = 14 px, exactement l'air que
+/// `ScrollArea::min_scrolled_height` réservait déjà à la barre flottante d'avant.
+const STRIP_SCROLLBAR_OUTER_MARGIN: f32 = 2.0;
+
+/// La zone défilante des tuiles — **la barre de défilement du JEU** (`design::scroll_area`),
+/// couchée à l'horizontale (`design::ScrollAxis::Horizontal`).
+///
+/// Elle remplace `ScrollStyle::thin()` d'egui (barre flottante, fine au repos, qui S'ÉLARGIT au
+/// survol) le 2026-09-13, sur retour utilisateur explicite : « je ne veux pas que le scroll
+/// s'agrandisse lorsque l'utilisateur passe sa souris dessus [...] sans la souris dessus il est
+/// trop petit, et quand on passe la souris dessus il est trop grand [...] il est à moitié
+/// translucide, à moitié machin, ce n'est pas beau », et la solution est venue avec la demande :
+/// « utiliser le scroll qui est déjà utilisé pour la modale dans l'onglet raccourcis [...] gris
+/// quand l'utilisateur n'a pas sa souris dessus et doré quand il passe sa souris dessus, c'est
+/// mieux dans l'ADN du jeu ». C'est mot pour mot ce que `design::scroll_area` peint déjà pour la
+/// fenêtre Options : 6 px d'épaisseur CONSTANTE, pas de rail, `#515356` au repos, `#c1ad83` au
+/// survol et au glissé — les deux teintes relevées sur `scrollbar-inactive.png`/
+/// `scrollbar-active.png`. Une seule chose est propre au bandeau, sa marge extérieure (voir
+/// [`STRIP_SCROLLBAR_OUTER_MARGIN`]).
+///
+/// `auto_shrink` reste FAUX sur l'axe qui défile (le défaut) : la zone occupe toute la largeur que
+/// la rangée lui laisse, et c'est ce qui lui fait voir un débordement — donc peindre une barre —
+/// quand la fenêtre est plafonnée (`main.rs::WATCHLIST_WIDTH_FRACTION`). Aucune bande morte pour
+/// autant quand les tuiles sont peu nombreuses : la fenêtre Suivi est elle-même dimensionnée pile
+/// sur son contenu (`content_width`), il n'y a alors rien à occuper au-delà.
+fn strip_scroll_area() -> design::ScrollArea {
+    design::scroll_area("watchlist-strip")
+        .axis(design::ScrollAxis::Horizontal)
+        .outer_margin(STRIP_SCROLLBAR_OUTER_MARGIN)
+}
+
+/// Réglages de `Style` que la bande impose à tout son `Ui` — ce qui reste de l'ancien
+/// `style_thin_scrollbar` (2026-09-02) une fois la barre de défilement partie chez
+/// `design::scroll_area` (voir [`strip_scroll_area`]) : la molette et l'espacement automatique
+/// d'egui, deux réglages qui n'ont jamais eu de rapport avec l'apparence de la barre.
+fn style_strip(style: &mut egui::Style) {
     // « La molette n'est pas prise en compte » (retour utilisateur 2026-09-02) : par défaut, egui
     // ne route la molette (verticale) vers une zone de défilement HORIZONTALE que si l'utilisateur
     // maintient Maj — `always_scroll_the_only_direction` lève cette exigence quand une seule
-    // direction est activée (notre cas, `ScrollArea::horizontal()`), exactement le comportement
-    // demandé (« que si on utilise la molette [...] ça applique le scroll »).
+    // direction est activée (notre cas). `design::scroll_area` le pose déjà pour sa propre zone ;
+    // il reste ici pour que la molette prenne AUSSI au survol du carré de contrôle, qui n'est plus
+    // dedans depuis que les boutons ne défilent plus.
     style.always_scroll_the_only_direction = true;
     // Élimine l'espacement AUTOMATIQUE qu'`egui` insère entre deux éléments d'un même
     // `ui.horizontal` (`spacing.item_spacing`, par défaut ~8px) — sans ça, chaque `add_space`

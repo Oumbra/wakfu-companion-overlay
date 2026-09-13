@@ -106,16 +106,21 @@ const FOREGROUND_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::
 const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGIN as f64);
 /// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
 /// `panels::watchlist`) — la LARGEUR, elle, suit dynamiquement le CONTENU (voir
-/// `watchlist_target_width`), pas une constante fixe. 84 -> 116 px (2026-09-02) pour réserver
-/// l'espace du toast d'alerte SOUS la bande de tuiles (voir `panels::watchlist::show`) — sans
-/// agrandir la fenêtre à la volée à l'apparition d'un toast, ce qui aurait fait bouger la bande de
-/// tuiles elle-même dont l'ancrage vient d'être mis au point avec l'utilisateur. 116 -> 132 px
-/// (même jour, retour utilisateur : la barre de défilement flottante était trop souvent tassée
-/// contre les icônes/badges pour être agrippée) pour la marge supplémentaire réservée par
-/// `panels::watchlist::show` (`ScrollArea::min_scrolled_height`). Plus
+/// `watchlist_target_width`), pas une constante fixe. Plus
 /// `render_content::WATCHLIST_TOP_MARGIN` (2026-09-13, voir sa doc) : la place des infobulles
 /// ouvertes AU-DESSUS de la bande, qui décale celle-ci d'autant vers le bas sur l'écran.
-const WATCHLIST_HEIGHT: f64 = 132.0 + render_content::WATCHLIST_TOP_MARGIN as f64;
+///
+/// **Ramenée de 132 à 92 px le 2026-09-13** (retour utilisateur : « on peut réduire un peu
+/// l'overlay en hauteur »). Les 132 px dataient du 2026-09-02, où ils réservaient d'un bloc
+/// l'espace du toast d'alerte SOUS la bande — devenu inutile le jour même, `watchlist_target_
+/// height` ajoutant `TOAST_AREA_HEIGHT` seulement tant qu'un toast est actif —, puis 16 px de plus
+/// pour dégager la barre de défilement flottante des icônes. Les deux raisons ont disparu : la
+/// barre du jeu (`panels::watchlist::strip_scroll_area`) prend sa place SOUS les tuiles au lieu de
+/// flotter dessus. 92 px, c'est ce que la bande occupe réellement — 6 px de marge interne haute,
+/// 72 px de zone défilante (58 de tuile + 14 de réserve de barre), 6 px de gouttière avant le
+/// toast, 6 px de marge basse, plus 2 px d'arrondi — et rien de plus : la fenêtre reste
+/// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
+const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOP_MARGIN as f64;
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.

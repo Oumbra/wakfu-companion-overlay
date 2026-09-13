@@ -77,7 +77,7 @@ pub use components::portrait::{
     paint as paint_portrait, paint_percent as paint_portrait_percent,
     percent_of as portrait_percent, portrait, Portrait, PortraitShape,
 };
-pub use components::scroll_area::{scroll_area, ScrollArea};
+pub use components::scroll_area::{scroll_area, ScrollArea, ScrollAxis};
 pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::separator::{separator, Separator};
 pub use components::slider::{
