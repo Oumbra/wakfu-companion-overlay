@@ -21,7 +21,16 @@
 # Le script ne s'arrête PAS à la première erreur : il déroule tout et récapitule à la fin, pour
 # corriger l'ensemble en une passe plutôt qu'un aller-retour par étape.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+# Chemin ABSOLU capturé AVANT le `cd` : après lui, `dirname "$0"` ne désigne plus le dossier des
+# scripts (`bash ci-local.sh` depuis `scripts/` donnerait `.`, c'est-à-dire la racine du dépôt).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+
+# Sur SteamOS, ni l'hôte ni un bac à sable Flatpak ne savent compiler : on se relance d'abord dans
+# le conteneur de développement (voir scripts/dev-env.sh). Sans cela, chaque étape échouerait sur
+# un « cargo: commande introuvable » que le hook pre-push présenterait comme un écart de lints.
+. "$SCRIPT_DIR/dev-env.sh"
+dev_env_reexec "$SCRIPT_DIR/ci-local.sh" "$@"
 
 LINT_ONLY=0
 case "${1:-}" in

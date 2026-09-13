@@ -38,6 +38,10 @@ seule : préparer d'abord l'environnement une fois pour toutes, depuis un termin
 bash scripts/setup-steamdeck.sh   # conteneur distrobox (Arch) + rustup, HOME/écran/GPU partagés
 ```
 
+Ensuite, rien ne change : `ci-local.sh`, le hook `pre-push` et `crates/overlay-ui/preview.sh`
+entrent tout seuls dans ce conteneur quand la machine ne sait pas compiler (voir
+[`scripts/dev-env.sh`](scripts/dev-env.sh)) — y compris depuis le terminal d'un éditeur Flatpak.
+
 Avant de pousser (le hook `pre-push` le fait pour les lints) :
 
 ```bash
