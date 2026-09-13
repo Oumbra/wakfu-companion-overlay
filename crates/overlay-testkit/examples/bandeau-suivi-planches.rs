@@ -85,6 +85,7 @@ use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext};
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{paint_content, OverlayKind, RenderContent};
+use overlay_ui::shortcuts::ShortcutBindings;
 use overlay_ui::ui_icons::UiIcons;
 
 // -------------------------------------------------------------------------------------------
@@ -368,6 +369,9 @@ fn harnais(p: Planche) -> Harness<'static> {
                     auth_status: &auth_status,
                     auth_command_tx: &overlay_ui::render_content::NoopAuthSink,
                     interactive: true,
+                    // Raccourcis PAR DÉFAUT — voir `overlay_ui::shortcuts` : ces planches
+                    // montrent les infobulles telles qu'elles sont sans personnalisation.
+                    shortcuts: &ShortcutBindings::default(),
                     now,
                     options: None,
                 },

@@ -42,5 +42,6 @@ pub mod portraits;
 pub mod rarity_bridge;
 pub mod remote_icons;
 pub mod render_content;
+pub mod shortcuts;
 pub mod style;
 pub mod ui_icons;

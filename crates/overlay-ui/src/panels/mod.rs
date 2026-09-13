@@ -13,6 +13,7 @@ pub mod combat_frame_scroll;
 mod combat_scrollbar;
 pub mod combat_spell_block;
 pub mod options_modal;
+pub mod raccourcis_tab;
 pub mod recipe_dialog;
 pub mod suivi_tab;
 pub mod tile_reorder;

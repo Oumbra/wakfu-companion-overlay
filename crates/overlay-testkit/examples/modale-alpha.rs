@@ -35,6 +35,7 @@ use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{
     paint_content, AuthStatus, NoopAuthSink, OverlayKind, RenderContent,
 };
+use overlay_ui::shortcuts::ShortcutBindings;
 use overlay_ui::ui_icons::UiIcons;
 
 /// Chemin de sortie — sous `target/`, jamais commité (§17.4 du plan : pas de blob d'image au
@@ -60,6 +61,9 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let mut options_state = OptionsModalState {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
@@ -109,6 +113,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: Some(&mut options_state),
             },

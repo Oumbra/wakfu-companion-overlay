@@ -15,6 +15,7 @@ use crate::panels::options_modal::{OptionsModalAction, OptionsModalState};
 use crate::panels::watchlist::{WatchlistAssets, WatchlistToast};
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
+use crate::shortcuts::ShortcutBindings;
 use crate::ui_icons::UiIcons;
 
 /// Opacité de la fenêtre entière en mode CLIC-TRAVERSANT (voir `build_ui`) — seul indicateur de
@@ -179,6 +180,12 @@ pub struct RenderContent<'a> {
     /// 2026-09-02, en remplacement du texte/icône d'état retiré le 2026-09-01 — voir la doc de
     /// `build_ui`).
     pub interactive: bool,
+    /// Raccourcis clavier EFFECTIFS (personnalisables, voir `crate::shortcuts`) — propagés jusqu'aux
+    /// infobulles des boutons du carré de contrôle (`panels::watchlist`) et du switch
+    /// Alliés/Ennemis (`panels::combat`), qui affichaient auparavant des combinaisons codées en
+    /// dur. Passé à CHAQUE frame et jamais mémorisé par les panneaux : une validation de la fenêtre
+    /// Options change les raccourcis en cours de session, sans redémarrage.
+    pub shortcuts: &'a ShortcutBindings,
     /// Instant de référence pour CETTE frame — calculé UNE FOIS par `main.rs::window_event`
     /// (`WindowEvent::RedrawRequested`) et propagé jusqu'à `panels::watchlist::is_active`/`show`/
     /// `toast_card` (horloge injectable, §17.1 du plan) plutôt que lu à nouveau à chaque étage via
@@ -304,6 +311,7 @@ pub fn build_ui(
                 auth_status: content.auth_status,
                 auth_command_tx: content.auth_command_tx,
                 interactive: content.interactive,
+                shortcuts: content.shortcuts,
                 now: content.now,
                 options: content.options.as_deref_mut(),
             },
@@ -338,6 +346,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         auth_status,
         auth_command_tx,
         interactive,
+        shortcuts,
         now,
         options,
     } = content;
@@ -505,6 +514,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         remote_icons,
                         remote_icon_textures,
                         combat_side,
+                        shortcuts,
                     );
                 }
                 // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
@@ -524,6 +534,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     let watchlist_outcome = panels::watchlist::show(
                         ui,
                         WatchlistAssets {
+                            shortcuts,
                             icons,
                             catalog,
                             remote_icons,

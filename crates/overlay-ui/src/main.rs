@@ -39,8 +39,7 @@ use std::thread;
 
 use arc_swap::ArcSwap;
 use egui_wgpu::wgpu;
-use global_hotkey::hotkey::{Code, HotKey, Modifiers};
-use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
+use global_hotkey::GlobalHotKeyEvent;
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_ui::alert_sound;
@@ -62,6 +61,7 @@ use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content;
 use overlay_ui::render_content::{AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent};
+use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
 use overlay_ui::ui_icons::UiIcons;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::HWND;
@@ -80,66 +80,14 @@ use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
 
-const HOTKEY_LABEL: &str = "Ctrl+Shift+W";
-/// Ctrl+Shift+R plutôt que F5 (suggestion initiale de l'utilisateur, 2026-09-02) : F5 est un
-/// raccourci GLOBAL (`GlobalHotKeyManager`, jamais limité à une fenêtre précise malgré la demande
-/// « quand on est focus sur une fenêtre de jeu ») — le voler à Wakfu (raccourcis de sort/action
-/// fréquents sur les touches de fonction) ou à n'importe quelle autre appli au premier plan serait
-/// activement nuisible. Même préfixe que `HOTKEY_LABEL` : cohérent, déjà éprouvé sans collision
-/// connue avec le jeu. CTRL+ALT+R -> CTRL+SHIFT+R (retour utilisateur 2026-09-06) : harmonisé avec
-/// `DETAILS_HOTKEY_LABEL` et consorts — seul `DISCONNECT_HOTKEY_LABEL` reste sur l'ancien préfixe.
-const REFRESH_HOTKEY_LABEL: &str = "Ctrl+Shift+R";
-/// Raccourci global de sortie (retour utilisateur 2026-09-02) : les fenêtres overlay portent
-/// `WS_EX_NOACTIVATE` (voir `apply_extended_styles`, jamais désactivé même en mode interactif —
-/// nécessaire pour ne jamais voler le focus au jeu) donc ne reçoivent JAMAIS `WindowEvent::
-/// KeyboardInput`, quel que soit le mode : Échap (voir `window_event`) ne peut en pratique jamais
-/// se déclencher, malgré ce qu'annonçait la bannière de démarrage. L'utilisateur devait donc
-/// systématiquement faire un Ctrl+C dans le terminal (` STATUS_CONTROL_C_EXIT` en sortie — normal
-/// dans ce cas, pas un plantage, mais peu clair). Même mécanisme que `HOTKEY_LABEL`/
-/// `REFRESH_HOTKEY_LABEL` (hotkey GLOBAL, fonctionne sans focus sur aucune fenêtre précise) pour
-/// vraiment permettre ce que la bannière annonce. CTRL+ALT+Q -> CTRL+SHIFT+Q (retour utilisateur
-/// 2026-09-06), même changement que `HOTKEY_LABEL`/`REFRESH_HOTKEY_LABEL`.
-const QUIT_HOTKEY_LABEL: &str = "Ctrl+Shift+Q";
-/// Déconnexion volontaire du compte (lot L4, §7.2/§14 point 3 du plan) — jusqu'ici, révoquer une
-/// session native depuis l'overlay exigeait d'aller effacer le jeton à la main sur disque/dans le
-/// trousseau (aucun moyen depuis l'overlay lui-même). Même famille de raccourci GLOBAL que les
-/// trois précédents ; ne fait rien de visible en mode invité (aucun compte lié) — voir
-/// `App::disconnect_account`. Resté sur CTRL+ALT lors du passage de `HOTKEY_LABEL`/
-/// `REFRESH_HOTKEY_LABEL`/`QUIT_HOTKEY_LABEL` à CTRL+SHIFT (2026-09-06, pas demandé par
-/// l'utilisateur pour celui-ci) — seul raccourci encore sur l'ancien préfixe.
-const DISCONNECT_HOTKEY_LABEL: &str = "Ctrl+Alt+D";
+// **Les combinaisons ne sont plus des constantes de ce fichier depuis le 2026-09-13** : elles sont
+// personnalisables par l'utilisateur (onglet « Raccourcis » de la fenêtre Options) et vivent donc
+// dans `overlay_ui::shortcuts` — `ShortcutAction` (la liste des actions et leur combinaison PAR
+// DÉFAUT, inchangée par rapport aux anciennes constantes `HOTKEY_LABEL`/`DETAILS_HOTKEY_LABEL`/…,
+// dont la doc a suivi là-bas), `ShortcutBindings` (les combinaisons effectives, lues de
+// `config.toml`) et `ShortcutRegistry` (l'enregistrement auprès de l'OS, partagé avec
+// `bin/overlay-ui-x11.rs`). `App::hotkeys` porte le tout.
 
-/// Raccourci global pour "Détails" (bouton lien externe, désormais dans le carré de contrôle de
-/// `panels::watchlist::control_button_row` — voir sa doc, refonte 2026-09-08 : déplacé depuis
-/// `panels::combat::bottom_toolbar`, retirée) — même action qu'un clic
-/// (`open::that(overlay_sync::client::base_url())`, voir `App::open_details`). Retour utilisateur
-/// explicite 2026-09-06 (« à l'image de ce qu'il y a dans le jeu [...] rajoute les raccourcis [...]
-/// pour le détail [...] Ctrl+Shift+D ») : modificateur CTRL+SHIFT, combinaisons données par
-/// l'utilisateur lui-même pour les cinq raccourcis de ce groupe — reflétées entre parenthèses dans
-/// les tooltips correspondants (voir `panels::combat::paint_side_switch`,
-/// `panels::watchlist::control_button_row`), à l'image du jeu. `HOTKEY_LABEL`/
-/// `REFRESH_HOTKEY_LABEL`/`QUIT_HOTKEY_LABEL`, initialement en CTRL+ALT, ont rejoint ce même
-/// préfixe CTRL+SHIFT le même jour (voir leur doc) ; seul `DISCONNECT_HOTKEY_LABEL` reste en
-/// CTRL+ALT.
-const DETAILS_HOTKEY_LABEL: &str = "Ctrl+Shift+D";
-/// Raccourci global pour "Options" (`panels::watchlist::control_button_row`, voir sa doc — déplacé
-/// depuis `panels::combat::bottom_toolbar`, refonte 2026-09-08) — ouvre la modale Options sur
-/// l'onglet « Paramètres », comme le clic sur le bouton lui-même (voir `about_to_wait` et la doc de
-/// `PostRedraw::OpenOptions` : un raccourci mène au même endroit que le bouton qu'il double).
-const OPTIONS_HOTKEY_LABEL: &str = "Ctrl+Shift+O";
-/// Raccourci global pour "Ajouter" (`panels::watchlist::control_button_row`) — ouvre la modale
-/// Options sur l'onglet « Suivi », comme le clic sur le bouton lui-même depuis le 2026-09-13 (voir
-/// doc de module de `watchlist`).
-const WATCHLIST_ADD_HOTKEY_LABEL: &str = "Ctrl+Shift+A";
-/// Raccourci global pour "Supprimer" — même remarque que `WATCHLIST_ADD_HOTKEY_LABEL`.
-const WATCHLIST_REMOVE_HOTKEY_LABEL: &str = "Ctrl+Shift+S";
-/// Raccourci global pour basculer Alliés/Ennemis (`panels::combat::paint_side_switch`) — EN MODE
-/// TOGGLE (retour utilisateur explicite : « ça inverse la sélection [...] si actuellement c'est
-/// sélectionné allié [...] ça passe en ennemi et inversement ») plutôt que deux raccourcis séparés
-/// un par camp : voir `CombatSide::toggled` et `App::toggle_combat_side`, appliqué à CHAQUE fenêtre
-/// Combat actuellement ouverte — même portée globale que les hotkeys existants, pas seulement celle
-/// au premier plan.
-const SIDE_HOTKEY_LABEL: &str = "Ctrl+Shift+E";
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
@@ -356,25 +304,13 @@ struct OverlayWindow {
 
 struct App {
     windows: HashMap<WindowId, OverlayWindow>,
-    #[allow(dead_code)] // jamais relu : sa seule raison d'être est de rester en vie (voir S1)
-    hotkey_manager: GlobalHotKeyManager,
+    /// Raccourcis globaux : combinaisons EFFECTIVES (défauts ou personnalisation lue de
+    /// `config.toml`), enregistrement auprès de l'OS et table `id -> action` consultée à la
+    /// réception (voir `about_to_wait`). Remplace depuis le 2026-09-13 les neuf champs
+    /// `*_hotkey_id` et le `GlobalHotKeyManager` qui vivaient ici — voir
+    /// `overlay_ui::shortcuts::ShortcutRegistry`, partagé avec le binaire Linux.
+    hotkeys: ShortcutRegistry,
     hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
-    /// `HotKey::id()` de `HOTKEY_LABEL`/`REFRESH_HOTKEY_LABEL` — un seul `GlobalHotKeyEventReceiver`
-    /// partagé pour tous les raccourcis enregistrés (API de `global_hotkey`), distingué par cet id
-    /// à la réception (voir `about_to_wait`).
-    toggle_hotkey_id: u32,
-    refresh_hotkey_id: u32,
-    quit_hotkey_id: u32,
-    disconnect_hotkey_id: u32,
-    /// Voir `DETAILS_HOTKEY_LABEL`/`OPTIONS_HOTKEY_LABEL`/`WATCHLIST_ADD_HOTKEY_LABEL`/
-    /// `WATCHLIST_REMOVE_HOTKEY_LABEL`/`SIDE_HOTKEY_LABEL` — même mécanisme d'id que les quatre
-    /// raccourcis ci-dessus, groupe distinct ajouté 2026-09-06 (design system tooltip, raccourcis
-    /// affichés entre parenthèses à l'image du jeu).
-    details_hotkey_id: u32,
-    options_hotkey_id: u32,
-    watchlist_add_hotkey_id: u32,
-    watchlist_remove_hotkey_id: u32,
-    side_hotkey_id: u32,
     interactive: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     /// Publié par le thread Engine à chaque lot ingéré (et une fois de plus dès la réception des
@@ -384,7 +320,7 @@ struct App {
     /// suivi de compte, pas d'un personnage précis.
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     /// Sélection multiple du bandeau (2026-09-13) — ici et pas dans `OverlayWindow` : elle se
-    /// pilote aussi au clavier (`WATCHLIST_REMOVE_HOTKEY_LABEL`), et un raccourci global arrive
+    /// pilote aussi au clavier (raccourci `ShortcutAction::WatchlistRemove`), et un raccourci global arrive
     /// par la boucle d'événements sans savoir quelle fenêtre existe. Il n'y a de toute façon qu'un
     /// bandeau Suivi à la fois.
     watchlist_selection: panels::watchlist::WatchlistSelection,
@@ -416,7 +352,7 @@ struct App {
     auth_status: Arc<ArcSwap<AuthStatus>>,
     /// Signale au thread Auth une commande (`AuthCommand`) : `Retry` sur clic sur l'icône de
     /// relance (visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`),
-    /// `Disconnect` sur `DISCONNECT_HOTKEY_LABEL` (voir `disconnect_account`).
+    /// `Disconnect` sur le raccourci `ShortcutAction::Disconnect` (voir `disconnect_account`).
     auth_command_tx: mpsc::Sender<AuthCommand>,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
@@ -473,6 +409,10 @@ struct AppState {
     /// Voir `App::combat_always_visible` — lu de la config au démarrage (`main`), jamais découvert
     /// autrement.
     combat_always_visible: bool,
+    /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`
+    /// (`config::OverlayConfig::shortcuts`). Même provenance que `combat_always_visible` : lus une
+    /// fois dans `main`, jamais redécouverts.
+    shortcuts: ShortcutBindings,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
@@ -492,6 +432,7 @@ impl App {
         let AppState {
             log_path,
             combat_always_visible,
+            shortcuts,
             snapshot,
             watchlist,
             watchlist_toast,
@@ -504,61 +445,14 @@ impl App {
             settings_tx,
         } = state;
 
-        let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
-        let toggle_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyW);
-        let refresh_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
-        let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyQ);
-        let disconnect_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyD);
-        // Ctrl+Shift comme les trois raccourcis ci-dessus — voir la doc de `DETAILS_HOTKEY_LABEL`
-        // et consorts ; seul `disconnect_hotkey` reste en Ctrl+Alt.
-        let details_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD);
-        let options_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyO);
-        let watchlist_add_hotkey =
-            HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyA);
-        let watchlist_remove_hotkey =
-            HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
-        let side_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
-        hotkey_manager
-            .register(toggle_hotkey)
-            .expect("enregistrement du hotkey global");
-        hotkey_manager
-            .register(refresh_hotkey)
-            .expect("enregistrement du hotkey de rafraîchissement");
-        hotkey_manager
-            .register(quit_hotkey)
-            .expect("enregistrement du hotkey de sortie");
-        hotkey_manager
-            .register(disconnect_hotkey)
-            .expect("enregistrement du hotkey de déconnexion");
-        hotkey_manager
-            .register(details_hotkey)
-            .expect("enregistrement du hotkey Détails");
-        hotkey_manager
-            .register(options_hotkey)
-            .expect("enregistrement du hotkey Options");
-        hotkey_manager
-            .register(watchlist_add_hotkey)
-            .expect("enregistrement du hotkey Ajouter");
-        hotkey_manager
-            .register(watchlist_remove_hotkey)
-            .expect("enregistrement du hotkey Supprimer");
-        hotkey_manager
-            .register(side_hotkey)
-            .expect("enregistrement du hotkey Alliés/Ennemis");
+        // Tout ce qui touche aux combinaisons (défauts, personnalisation, enregistrement OS,
+        // refus tolérés) est dans `ShortcutRegistry` — voir le commentaire en tête de fichier.
+        let hotkeys = ShortcutRegistry::new(&ShortcutAction::ALL, shortcuts);
 
         Self {
             windows: HashMap::new(),
-            hotkey_manager,
+            hotkeys,
             hotkey_events: GlobalHotKeyEvent::receiver(),
-            toggle_hotkey_id: toggle_hotkey.id(),
-            refresh_hotkey_id: refresh_hotkey.id(),
-            quit_hotkey_id: quit_hotkey.id(),
-            disconnect_hotkey_id: disconnect_hotkey.id(),
-            details_hotkey_id: details_hotkey.id(),
-            options_hotkey_id: options_hotkey.id(),
-            watchlist_add_hotkey_id: watchlist_add_hotkey.id(),
-            watchlist_remove_hotkey_id: watchlist_remove_hotkey.id(),
-            side_hotkey_id: side_hotkey.id(),
             interactive: true,
             snapshot,
             watchlist,
@@ -960,7 +854,8 @@ impl App {
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
         tracing::info!(
-            ">>> Bascule ({HOTKEY_LABEL}) : mode = {}",
+            ">>> Bascule ({}) : mode = {}",
+            self.hotkeys.bindings().label(ShortcutAction::Toggle),
             if self.interactive {
                 "INTERACTIF"
             } else {
@@ -969,7 +864,7 @@ impl App {
         );
     }
 
-    /// `REFRESH_HOTKEY_LABEL` : demande explicite de l'utilisateur (2026-09-02) — « il faut trouver
+    /// `ShortcutAction::Refresh` : demande explicite de l'utilisateur (2026-09-02) — « il faut trouver
     /// une solution » pour un overlay bloqué (mauvaise taille, plus au premier plan, Suivi resté
     /// masqué après un lot de réglages arrivé trop tôt) sans devoir relancer tout le processus.
     /// Explicitement voulu comme un « bouton nucléaire » (retour utilisateur 2026-09-02 : « mon
@@ -1020,27 +915,35 @@ impl App {
         }
         self.sync_topmost();
         let settings_tx = self.settings_tx.clone();
+        // Capturé AVANT le `move` : le thread n'a pas accès à `self` (et la combinaison peut de
+        // toute façon changer entre-temps, la fenêtre Options étant ouvrable pendant l'appel).
+        let refresh_label = self.hotkeys.bindings().label(ShortcutAction::Refresh);
         thread::spawn(move || match overlay_sync::token_store::load_token() {
             Some(token) => match overlay_sync::client::fetch_settings(&token) {
                 Ok(settings) => {
                     tracing::info!(
-                        ">>> Réglages de compte redemandés ({REFRESH_HOTKEY_LABEL}) : {} entrée(s) de suivi."
-                        , settings.watchlist.len()
+                        ">>> Réglages de compte redemandés ({refresh_label}) : {} entrée(s) de suivi.",
+                        settings.watchlist.len()
                     );
                     let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
                 }
                 Err(err) => {
-                    tracing::warn!(">>> Échec de la nouvelle demande de réglages ({REFRESH_HOTKEY_LABEL}) : {err}");
+                    tracing::warn!(
+                        ">>> Échec de la nouvelle demande de réglages ({refresh_label}) : {err}"
+                    );
                 }
             },
             None => tracing::info!(
-                ">>> Aucun jeton de compte stocké — rien à redemander ({REFRESH_HOTKEY_LABEL})."
+                ">>> Aucun jeton de compte stocké — rien à redemander ({refresh_label})."
             ),
         });
-        tracing::info!(">>> Rafraîchissement forcé ({REFRESH_HOTKEY_LABEL})");
+        tracing::info!(
+            ">>> Rafraîchissement forcé ({})",
+            self.hotkeys.bindings().label(ShortcutAction::Refresh)
+        );
     }
 
-    /// `DISCONNECT_HOTKEY_LABEL` : déconnexion volontaire du compte lié (lot L4, §7.2/§14 point 3
+    /// `ShortcutAction::Disconnect` : déconnexion volontaire du compte lié (lot L4, §7.2/§14 point 3
     /// du plan) — jusqu'ici la seule façon de révoquer une session native depuis l'overlay était
     /// d'aller effacer le jeton à la main sur disque/dans le trousseau (aucun moyen depuis
     /// l'overlay lui-même). Purement une commande envoyée au thread Auth (voir `spawn_auth_thread`)
@@ -1055,20 +958,26 @@ impl App {
     /// effective au prochain appui une fois cette tentative résolue.
     fn disconnect_account(&mut self) {
         let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
-        tracing::info!(">>> Déconnexion du compte demandée ({DISCONNECT_HOTKEY_LABEL})");
+        tracing::info!(
+            ">>> Déconnexion du compte demandée ({})",
+            self.hotkeys.bindings().label(ShortcutAction::Disconnect)
+        );
     }
 
-    /// `DETAILS_HOTKEY_LABEL` : même action que le clic sur le bouton "Détails" (lien externe)
+    /// `ShortcutAction::Details` : même action que le clic sur le bouton "Détails" (lien externe)
     /// du carré de contrôle (`panels::watchlist::control_button_row`) — voir sa doc pour
     /// `base_url()`. `open::that` est best-effort (résultat ignoré, même choix que le clic direct) :
     /// un navigateur qui ne s'ouvre pas n'est pas une raison de faire quoi que ce soit d'autre
     /// planter.
     fn open_details(&self) {
         let _ = open::that(overlay_sync::client::base_url());
-        tracing::info!(">>> Détails ({DETAILS_HOTKEY_LABEL}) : ouverture du site.");
+        tracing::info!(
+            ">>> Détails ({}) : ouverture du site.",
+            self.hotkeys.bindings().label(ShortcutAction::Details)
+        );
     }
 
-    /// `SIDE_HOTKEY_LABEL` : bascule Alliés/Ennemis (`CombatSide::toggled`) de CHAQUE fenêtre Combat
+    /// `ShortcutAction::CombatSide` : bascule Alliés/Ennemis (`CombatSide::toggled`) de CHAQUE fenêtre Combat
     /// actuellement ouverte, pas seulement celle au premier plan — même portée globale que les
     /// autres hotkeys de cette liste. Sans effet sur les fenêtres Suivi (`combat_side` n'a de sens
     /// que pour `OverlayKind::Combat`, voir sa doc dans `OverlayWindow`).
@@ -1079,7 +988,10 @@ impl App {
                 overlay.next_redraw_at = Some(std::time::Instant::now());
             }
         }
-        tracing::info!(">>> Bascule Alliés/Ennemis ({SIDE_HOTKEY_LABEL})");
+        tracing::info!(
+            ">>> Bascule Alliés/Ennemis ({})",
+            self.hotkeys.bindings().label(ShortcutAction::CombatSide)
+        );
     }
 
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
@@ -1299,7 +1211,7 @@ impl App {
 
     /// Ouvre la modale Options (2026-09-08, §9 du plan) — bouton "Options" du carré de contrôle
     /// (`anchor_rect` = `game_rect` de la fenêtre Suivi cliquée) ou raccourci global
-    /// `OPTIONS_HOTKEY_LABEL` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il y
+    /// `ShortcutAction::Options` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il y
     /// en a une). Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai
     /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant
     /// d'en rouvrir une. Même méthode que `bin/overlay-ui-x11.rs` (dupliquée, voir la doc de
@@ -1439,6 +1351,9 @@ impl App {
             // La case part du réglage EN VIGUEUR, pas du défaut : la fenêtre montre l'état réel,
             // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
             combat_always_visible: self.combat_always_visible,
+            // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
+            shortcuts: self.hotkeys.bindings().clone(),
+            raccourcis: Default::default(),
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -1453,6 +1368,7 @@ impl App {
                 alerts: alerts_draft.clone(),
                 suivi: suivi_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
+                shortcuts: self.hotkeys.bindings().clone(),
             },
             pending_close: false,
             alerts_draft,
@@ -1463,7 +1379,13 @@ impl App {
         });
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
-        tracing::info!("[options] modale ouverte.");
+        // **Les raccourcis globaux sont rendus au système tant que cette fenêtre est ouverte** :
+        // sans ça, toute combinaison déjà prise par l'overlay (à commencer par celle qui vient
+        // d'ouvrir cette fenêtre) serait interceptée par l'OS et n'atteindrait jamais la case en
+        // écoute de l'onglet « Raccourcis » — voir `shortcuts::ShortcutRegistry::suspend`. Rétabli
+        // par `close_options_modal`, quelle que soit la façon dont la fenêtre se referme.
+        self.hotkeys.suspend();
+        tracing::info!("[options] modale ouverte — raccourcis globaux suspendus.");
     }
 
     /// Lance l'explorateur de fichiers natif (`rfd`) sur un thread dédié — bloquant côté OS, ne
@@ -1610,6 +1532,25 @@ impl App {
             .ok();
     }
 
+    /// Ferme la fenêtre Options et **rend ses raccourcis globaux au système** (voir
+    /// `open_options_modal` pour la suspension).
+    ///
+    /// Unique point de fermeture depuis le 2026-09-13 : aucun chemin (Annuler, croix, Échap,
+    /// validation réussie) ne doit pouvoir laisser l'overlay sans raccourcis.
+    fn close_options_modal(&mut self, options_window_id: WindowId, raison: &str) {
+        self.windows.remove(&options_window_id);
+        let refuses = self.hotkeys.resume();
+        if !refuses.is_empty() {
+            // Déjà journalisé action par action par la registry ; ce résumé dit surtout que la
+            // combinaison qu'on vient de choisir n'a pas pu être prise par le système.
+            tracing::warn!(
+                "[options] {} raccourci(s) refusé(s) par le système — voir les lignes [raccourcis] ci-dessus.",
+                refuses.len()
+            );
+        }
+        tracing::info!("[options] fenêtre fermée ({raison}).");
+    }
+
     /// Applique ce que « Valider » vient d'emporter de la fenêtre Options — voir
     /// [`options_modal::OptionsCommit`].
     ///
@@ -1656,14 +1597,27 @@ impl App {
                         }
                     );
                 }
-                // **La config est réécrite EN ENTIER**, et seulement si l'un des deux réglages a
-                // bougé : le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que
-                // le réglage modifié effacerait l'autre.
-                if path_changed || combat_changed {
-                    config::save(&config::OverlayConfig {
+                // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
+                // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
+                // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
+                // autre application) n'empêche rien du reste : il est journalisé, et l'action
+                // concernée reste sans raccourci pour la session.
+                let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
+                if shortcuts_changed {
+                    tracing::info!("[options] raccourcis personnalisés mis à jour.");
+                    self.hotkeys.apply(commit.shortcuts);
+                }
+                // **La config est réécrite EN ENTIER**, et seulement si l'un des réglages a bougé :
+                // le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que le réglage
+                // modifié effacerait les autres.
+                if path_changed || combat_changed || shortcuts_changed {
+                    let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
                         combat_always_visible: self.combat_always_visible,
-                    });
+                        ..Default::default()
+                    };
+                    saved.set_shortcuts(self.hotkeys.bindings());
+                    config::save(&saved);
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
                 // pied de page est partagé : un bouton dont l'effet dépendrait de l'onglet affiché
@@ -1672,7 +1626,7 @@ impl App {
                 // alertes comprises.
                 self.commit_alerts(options_window_id);
                 self.commit_suivi(options_window_id);
-                self.windows.remove(&options_window_id);
+                self.close_options_modal(options_window_id, "Valider");
                 // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
                 // d'`about_to_wait` — 50 ms, imperceptible, mais le geste et son effet doivent
                 // être dans la même passe : c'est ce qui rend la fenêtre Options vérifiable.
@@ -1813,6 +1767,7 @@ impl App {
                 auth_status: &auth_status,
                 auth_command_tx: &self.auth_command_tx,
                 interactive,
+                shortcuts: self.hotkeys.bindings(),
                 now,
                 options: overlay.options_state.as_mut(),
             },
@@ -1884,10 +1839,7 @@ impl App {
             PostRedraw::OpenOptions(hwnd, rect, tab) => {
                 self.open_options_modal(event_loop, Some((hwnd, rect)), tab)
             }
-            PostRedraw::CloseOptions => {
-                self.windows.remove(&id);
-                tracing::info!("[options] modale fermée (Annuler).");
-            }
+            PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
             PostRedraw::BrowseOptions => self.start_file_dialog(),
             PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
@@ -1901,12 +1853,21 @@ impl ApplicationHandler<UserEvent> for App {
         if !self.banner_printed {
             tracing::info!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
             tracing::info!("Suivi de {}", self.log_path.display());
+            // Libellés LUS dans les raccourcis effectifs : une bannière qui annoncerait les
+            // combinaisons par défaut à qui les a personnalisées serait un contresens.
+            let bindings = self.hotkeys.bindings();
             tracing::info!(
-                "{HOTKEY_LABEL} pour basculer interactif / clic-traversant. \
-                 {REFRESH_HOTKEY_LABEL} pour forcer un rafraîchissement (overlay bloqué/mal \
-                 positionné, ou Suivi resté vide). {DISCONNECT_HOTKEY_LABEL} pour déconnecter le \
-                 compte lié (repli mode invité). {QUIT_HOTKEY_LABEL} ou Ctrl+C (dans ce \
-                 terminal) pour quitter."
+                "{} pour basculer interactif / clic-traversant. \
+                 {} pour forcer un rafraîchissement (overlay bloqué/mal \
+                 positionné, ou Suivi resté vide). {} pour déconnecter le \
+                 compte lié (repli mode invité). {} ou Ctrl+C (dans ce \
+                 terminal) pour quitter. {} pour la fenêtre Options, dont \
+                 l'onglet « Raccourcis » qui personnalise tout ceci.",
+                bindings.label(ShortcutAction::Toggle),
+                bindings.label(ShortcutAction::Refresh),
+                bindings.label(ShortcutAction::Disconnect),
+                bindings.label(ShortcutAction::Quit),
+                bindings.label(ShortcutAction::Options),
             );
             self.banner_printed = true;
         }
@@ -1978,9 +1939,9 @@ impl ApplicationHandler<UserEvent> for App {
             // Filet « Échap quitte l'overlay », **sauf pour la modale Options**.
             //
             // Il ne se déclenche en pratique jamais pour les autres fenêtres (voir la doc de
-            // `QUIT_HOTKEY_LABEL`) : elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le
+            // `overlay_ui::shortcuts::ShortcutAction::Quit`) : elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le
             // focus clavier, quel que soit le mode. Laissé en place au cas où l'une d'elles
-            // redeviendrait focalisable, mais `QUIT_HOTKEY_LABEL` reste le SEUL moyen fiable de
+            // redeviendrait focalisable, mais le raccourci « Quitter » reste le SEUL moyen fiable de
             // quitter sans passer par le terminal.
             //
             // La modale Options, elle, EST focalisable et délibérément (§9.1 du plan :
@@ -2020,37 +1981,56 @@ impl ApplicationHandler<UserEvent> for App {
             if event.state != global_hotkey::HotKeyState::Pressed {
                 continue;
             }
-            if event.id == self.toggle_hotkey_id {
-                self.toggle_interactive();
-            } else if event.id == self.refresh_hotkey_id {
-                self.force_refresh(event_loop);
-            } else if event.id == self.quit_hotkey_id {
-                logging::log_session_end(QUIT_HOTKEY_LABEL);
-                event_loop.exit();
-            } else if event.id == self.disconnect_hotkey_id {
-                self.disconnect_account();
-            } else if event.id == self.details_hotkey_id {
-                self.open_details();
-            } else if event.id == self.options_hotkey_id {
-                tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
-                // Même destination que le bouton "Options" qu'il double — voir la doc de
-                // `PostRedraw::OpenOptions` (2026-09-13) : un raccourci et le bouton qu'il double
-                // doivent mener au même endroit, jamais au défaut implicite d'`OptionsTab`.
-                self.open_options_modal(event_loop, None, options_modal::OptionsTab::Parametres);
-            } else if event.id == self.watchlist_add_hotkey_id {
-                tracing::info!(">>> Ajouter ({WATCHLIST_ADD_HOTKEY_LABEL})");
-                // Même destination que le bouton "+" qu'il double — voir plus haut.
-                self.open_options_modal(event_loop, None, options_modal::OptionsTab::Suivi);
-            } else if event.id == self.watchlist_remove_hotkey_id {
-                tracing::info!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL})");
-                // Même geste que le bouton « − » qu'il double : il ouvre et referme le mode, il ne
-                // supprime rien. La fenêtre change de hauteur avec lui, et rien d'autre ne la
-                // redessine — sans ce réveil, le raccourci n'aurait d'effet qu'au prochain
-                // événement venu d'ailleurs.
-                self.watchlist_selection.toggle_mode();
-                self.request_watchlist_redraw();
-            } else if event.id == self.side_hotkey_id {
-                self.toggle_combat_side();
+            let Some(action) = self.hotkeys.action_for(event.id) else {
+                continue;
+            };
+            match action {
+                ShortcutAction::Toggle => self.toggle_interactive(),
+                ShortcutAction::Refresh => self.force_refresh(event_loop),
+                ShortcutAction::Quit => {
+                    logging::log_session_end(&self.hotkeys.bindings().label(ShortcutAction::Quit));
+                    event_loop.exit();
+                }
+                ShortcutAction::Disconnect => self.disconnect_account(),
+                ShortcutAction::Details => self.open_details(),
+                ShortcutAction::Options => {
+                    tracing::info!(
+                        ">>> Options ({})",
+                        self.hotkeys.bindings().label(ShortcutAction::Options)
+                    );
+                    // Même destination que le bouton "Options" qu'il double — voir la doc de
+                    // `PostRedraw::OpenOptions` (2026-09-13) : un raccourci et le bouton qu'il
+                    // double doivent mener au même endroit, jamais au défaut implicite
+                    // d'`OptionsTab`.
+                    self.open_options_modal(
+                        event_loop,
+                        None,
+                        options_modal::OptionsTab::Parametres,
+                    );
+                }
+                ShortcutAction::WatchlistAdd => {
+                    tracing::info!(
+                        ">>> Ajouter ({})",
+                        self.hotkeys.bindings().label(ShortcutAction::WatchlistAdd)
+                    );
+                    // Même destination que le bouton "+" qu'il double — voir plus haut.
+                    self.open_options_modal(event_loop, None, options_modal::OptionsTab::Suivi);
+                }
+                ShortcutAction::WatchlistRemove => {
+                    tracing::info!(
+                        ">>> Supprimer ({})",
+                        self.hotkeys
+                            .bindings()
+                            .label(ShortcutAction::WatchlistRemove)
+                    );
+                    // Même geste que le bouton « − » qu'il double : il ouvre et referme le mode,
+                    // il ne supprime rien. La fenêtre change de hauteur avec lui, et rien d'autre
+                    // ne la redessine — sans ce réveil, le raccourci n'aurait d'effet qu'au
+                    // prochain événement venu d'ailleurs.
+                    self.watchlist_selection.toggle_mode();
+                    self.request_watchlist_redraw();
+                }
+                ShortcutAction::CombatSide => self.toggle_combat_side(),
             }
         }
         // Résultat du dialogue de fichier natif (`App::start_file_dialog`), le cas échéant — sondé
@@ -2597,7 +2577,7 @@ fn backoff_delay(consecutive_failures: u32) -> std::time::Duration {
 /// **Déconnexion volontaire** (2026-09-02, §14 point 3 du plan) : contrairement à la version
 /// initiale de ce thread, une connexion réussie ne fait PLUS terminer le thread (`return`) — il
 /// reste vivant, à l'écoute de `command_rx`, pour pouvoir traiter un `AuthCommand::Disconnect`
-/// (raccourci `DISCONNECT_HOTKEY_LABEL`, voir `App::disconnect_account`) à tout moment tant que le
+/// (raccourci `ShortcutAction::Disconnect`, voir `App::disconnect_account`) à tout moment tant que le
 /// compte reste lié. Un `Disconnect` efface le jeton (`token_store::clear_token`), notifie le
 /// thread Engine (`EngineCommand::Disconnect`, voir `spawn_engine_thread`) pour qu'il revienne en
 /// mode invité, republie `AuthStatus::Disconnected`, puis attend un `AuthCommand::Retry` avant de
@@ -2652,7 +2632,7 @@ fn spawn_auth_thread(
                         }));
                         let _ = proxy.send_event(UserEvent::AuthStatusChanged);
                         tracing::info!(
-                            "[compte] déconnecté ({DISCONNECT_HOTKEY_LABEL}) — repli mode invité."
+                            "[compte] déconnecté (raccourci de déconnexion) — repli mode invité."
                         );
                     }
                     Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
@@ -2870,6 +2850,7 @@ fn main() {
     let mut app = App::new(AppState {
         log_path,
         combat_always_visible: saved_config.combat_always_visible,
+        shortcuts: saved_config.shortcuts(),
         snapshot,
         watchlist,
         watchlist_toast,
