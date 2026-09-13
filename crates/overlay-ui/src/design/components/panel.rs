@@ -92,11 +92,19 @@ impl Panel {
         // `intersect` et non un `set` sec : `Ui::set_clip_rect` REMPLACE le clip de l'ancêtre, et
         // le contenu déborderait si le panneau se retrouvait un jour dans un clip plus étroit.
         // Même idiome que `design::components::input`.
+        //
+        // Clip élargi à DROITE jusqu'au bord du panneau, et c'est tout aussi nécessaire : la
+        // réserve de barre de défilement est HORS de `inner` (voir `zones`), et
+        // [`PanelZones::scroll_area`] intersecte son propre clip avec celui-ci — calé sur `inner`,
+        // il rognait la poignée que la zone défilable peint dans cette réserve, et aucune barre
+        // n'apparaissait jamais dans un panneau, quel que soit le contenu. Constaté sur les
+        // maquettes de l'onglet Chat (2026-09-13), le premier contenu de panneau qui défile
+        // vraiment ; les grilles d'Alertes et de Suivi tenaient jusque-là sans défiler.
         const TITLE_OUTDENT: f32 = tokens::PANEL_PAD_CONTROL_X - tokens::PANEL_PAD_TITLE_X;
         child.set_clip_rect(
             Rect::from_min_max(
                 egui::pos2(inner.left() - TITLE_OUTDENT, inner.top()),
-                inner.max,
+                egui::pos2(zones.scroll.right(), inner.bottom()),
             )
             .intersect(ui.clip_rect()),
         );
