@@ -121,6 +121,25 @@ pub fn patch_profile(token: &str, profile: &Value) -> Result<Value, SyncError> {
     patch_json_authenticated(token, "/api/v1/settings", &body)
 }
 
+/// `GET /api/v1/items/{id}` — le détail d'un objet, dont **sa recette** (`functions/api/v1/
+/// items/[id].ts` côté dépôt web).
+///
+/// C'est le seul endroit où les ingrédients d'une recette sont disponibles : l'index compact du
+/// catalogue (`fetch_catalog_index`) n'en porte que le drapeau `hasRecipe`, volontairement — les
+/// embarquer alourdirait un index que tout l'overlay charge au démarrage, pour un besoin qui ne
+/// concerne qu'un dialogue.
+///
+/// **Sans authentification** : ce référentiel est public, comme le catalogue et les donjons.
+pub fn fetch_item_detail(id: i64) -> Result<Value, SyncError> {
+    let path = format!("/api/v1/items/{id}");
+    let url = format!("{}{path}", base_url());
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body(&path, response)
+}
+
 /// Récupère les octets bruts d'une URL absolue quelconque — PAS `base_url()` (utilisé tel quel
 /// pour un CDN externe, ex. les icônes `wakassets`, voir `overlay_engine::catalog::IconRef::
 /// image_url`), pas d'en-tête d'authentification (jamais nécessaire hors du propre domaine de

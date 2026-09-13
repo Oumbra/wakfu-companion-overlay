@@ -14,14 +14,15 @@ pub mod model;
 pub mod monster_family;
 pub mod profile;
 pub mod quickjs_engine;
+pub mod recipe;
 pub mod roster;
 pub mod session;
 pub mod spells;
 pub mod watchlist;
 
 pub use catalog::{
-    CatalogIndex, IconKind, IconRef, ItemSuggestion, MonsterClassification, WakfuItemCategory,
-    WakfuRarity,
+    CatalogIndex, IconKind, IconRef, ItemSuggestion, MonsterClassification, MonsterSuggestion,
+    WakfuItemCategory, WakfuRarity,
 };
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
@@ -38,6 +39,7 @@ pub use profile::{
     MIN_ALERT_DURATION_SECONDS,
 };
 pub use quickjs_engine::{EngineError, LogParserEngine};
+pub use recipe::{flatten_for_tracking, resolve_recipe, RecipeIngredient};
 pub use roster::{Gender, RosterCharacter, RosterIndex};
 pub use session::{
     Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals,
