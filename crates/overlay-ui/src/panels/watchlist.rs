@@ -6,17 +6,26 @@
 //! `main.rs`), décorrélée de la fenêtre Combat — demande utilisateur explicite : les deux zones
 //! doivent pouvoir, à terme, être pilotées indépendamment en visibilité.
 //!
-//! Toujours en LECTURE SEULE (voir `overlay_engine::watchlist` pour la frontière
-//! définitions/compteurs) : les deux boutons "+"/"−" (voir `control_button`) reprennent l'intention
-//! du bandeau web (ajouter un suivi / sélection multiple + suppression). Restés INERTES tant
-//! qu'aucun formulaire d'ajout ni aucune sélection n'étaient câblés côté overlay (demande
-//! utilisateur d'alors : "je pense qu'on le fera plus tard quand tu auras tout câblé") — c'est fait
-//! depuis le 2026-09-13, dans l'onglet « Suivi » de la modale Options (`panels::suivi_tab`) : "+"
-//! l'ouvre directement dessus (voir [`WatchlistOutcome::open_watchlist`]), comme "Options" ouvre ce
-//! même onglet « Paramètres ». "−", lui, reste INERTE — aucune action équivalente n'a été demandée
-//! pour lui. Un survol de "−" affiche un tooltip explicite plutôt que de laisser un bouton
-//! cliquable qui ne ferait rien silencieusement (retour utilisateur déjà vécu sur le bouton de
-//! connexion au compte).
+//! Les deux boutons "+"/"−" (voir `control_button`) reprennent l'intention du bandeau web
+//! (ajouter un suivi / sélection multiple + suppression). Restés INERTES tant qu'aucun formulaire
+//! d'ajout ni aucune sélection n'étaient câblés côté overlay (demande utilisateur d'alors : "je
+//! pense qu'on le fera plus tard quand tu auras tout câblé"), **les deux sont branchés depuis le
+//! 2026-09-13** :
+//!
+//! - "+" ouvre la modale Options sur l'onglet « Suivi » (`panels::suivi_tab`, voir
+//!   [`WatchlistOutcome::open_watchlist`]), comme "Options" ouvre ce même écran sur l'onglet
+//!   « Paramètres » ;
+//! - "−" ouvre la **sélection multiple de la bande elle-même** ([`WatchlistSelection`]) : chaque
+//!   tuile gagne une case à cocher en ton destructif, un bouton de suppression groupée apparaît
+//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::remaining`]). `Ctrl+Shift+S`
+//!   fait le même geste au clavier. Le panneau reste en LECTURE SEULE sur les entrées (voir
+//!   `overlay_engine::watchlist` pour la frontière définitions/compteurs) : il demande, il
+//!   n'applique pas.
+//!
+//! Le retour qui a déclenché ce dernier branchement dit ce que dix jours d'inertie coûtent : « j'ai
+//! beau appuyer sur le bouton moins, le mode de suppression multiple ne s'active pas [...] est-ce
+//! qu'il y a un branchement qui n'a pas été fait ? ». L'infobulle promettait, la maquette montrait,
+//! rien ne faisait — et aucun test ne demandait au bouton ce qu'il FAIT.
 //!
 //! Icône réelle de chaque tuile (retour utilisateur 2026-09-02 : « comme les images de
 //! ressources/monstres n'est pas présent c'est très compliqué pour l'utilisateur » de distinguer
@@ -117,9 +126,9 @@
 //! (lien externe) sous le "+", "Options" (l'écrou) sous le "−" — disposition donnée explicitement
 //! par l'utilisateur (Options/Détails initialement intervertis par erreur, corrigé dans l'heure sur
 //! nouvelle demande explicite). "Options"/"Détails" restent CLIQUABLES (`Sense::click()`)
-//! exactement comme dans `combat::bottom_toolbar` avant leur déplacement ; "+" le devient à son
-//! tour le 2026-09-13 (voir plus bas, [`control_button_row`]), seul "−" restant INERTE
-//! (`Sense::hover()` de fait).
+//! exactement comme dans `combat::bottom_toolbar` avant leur déplacement ; "+" et "−" le
+//! deviennent à leur tour le 2026-09-13 (voir plus bas, [`control_button_row`]) — **aucun des
+//! quatre n'est plus inerte**.
 //!
 //! **Infobulle par COLONNE, pas par bouton** (retour utilisateur explicite : « la souris doit
 //! pouvoir passer d'un bouton à l'autre sans qu'il y ait un problème au niveau de la tooltip » — un
@@ -141,8 +150,8 @@
 //! contrôle avant ce changement (voir sa doc), seul `show` ne peignait rien dans cet espace.
 //!
 //! **Règle supplémentaire** (demande utilisateur explicite) : le bouton "−" est visuellement
-//! DÉSACTIVÉ (`design::icon_button`, paramètre `enabled`) tant qu'aucune entrée n'est suivie — rien
-//! à supprimer dans ce cas. "+"/"Options"/"Détails" restent toujours activés (aucune des trois
+//! DÉSACTIVÉ tant qu'aucune entrée n'est suivie — rien à supprimer dans ce cas — et reste ENFONCÉ
+//! tant que la sélection est ouverte, comme un onglet actif (voir `ControlButtonState`). "+"/"Options"/"Détails" restent toujours activés (aucune des trois
 //! actions ne dépend du contenu de la watchlist).
 //!
 //! **Migration 2026-09-10 (décision utilisateur, captures à l'appui)** : les quatre boutons du
@@ -492,6 +501,71 @@ pub const TOAST_LAYER_WIDTH: f32 = 320.0;
 /// principe que `watchlist_target_width` pour la largeur).
 pub const TOAST_AREA_HEIGHT: f32 = 170.0;
 
+/// Hauteur SUPPLÉMENTAIRE à réserver sous la bande quand la sélection multiple est ouverte — le
+/// bouton de suppression groupée et sa gouttière. Même mécanique que [`TOAST_AREA_HEIGHT`] :
+/// l'hôte l'ajoute à la hauteur de base tant que le mode est ouvert (`main.rs::
+/// watchlist_target_height`), et la fenêtre se rétracte en le quittant. Une fenêtre qui garderait
+/// cette bande en permanence bloquerait des clics du jeu pour rien.
+pub const SELECTION_BAR_HEIGHT: f32 = BULK_BUTTON_HEIGHT + BULK_BUTTON_GAP;
+/// Hauteur du bouton de suppression groupée — celle de son jumeau de l'onglet « Suivi »
+/// (`panels::suivi_tab::list_header`), à qui il emprunte aussi son libellé et sa variante.
+const BULK_BUTTON_HEIGHT: f32 = 28.0;
+/// Largeur minimale du même bouton — « Supprimer tout » est le plus long de ses deux libellés.
+const BULK_BUTTON_MIN_WIDTH: f32 = 150.0;
+/// Gouttière entre la bande de tuiles et le bouton.
+const BULK_BUTTON_GAP: f32 = 8.0;
+
+/// **La sélection multiple du bandeau** — ouverte par le « − » du carré de contrôle ou par
+/// `Ctrl+Shift+S`, refermée par le même geste.
+///
+/// Porté par l'hôte et prêté à [`show`], comme tout état de cette UI : un panneau peint et rend
+/// compte, il ne retient rien (§17.3 bis du plan). Ici la raison est concrète — le raccourci
+/// clavier est global, il arrive par la boucle d'événements de l'hôte, jamais par le `Ui`.
+///
+/// **Les clés, pas les entrées.** Une entrée peut être ramassée pendant que la sélection est
+/// ouverte : son compteur change, l'entrée aussi. La clé, elle, ne bouge pas — c'est
+/// `panels::suivi_tab::entry_key`, le miroir de `watchlistEntryKey` du web, partagé avec l'onglet
+/// pour que les deux écrans désignent la même chose de la même façon.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchlistSelection {
+    open: bool,
+    picked: Vec<String>,
+}
+
+impl WatchlistSelection {
+    /// Ouvre ou referme le mode. **Referme toujours sur une sélection vide** : rouvrir sur des
+    /// tuiles cochées de la dernière fois ferait porter au geste une intention qui n'est plus là.
+    pub fn toggle_mode(&mut self) {
+        self.open = !self.open;
+        self.picked.clear();
+    }
+
+    /// Referme le mode — après une suppression, ou quand la liste se vide sous lui.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.picked.clear();
+    }
+
+    /// Le mode est-il ouvert ?
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Coche ou décoche une tuile.
+    fn toggle(&mut self, cle: String) {
+        match self.picked.iter().position(|k| *k == cle) {
+            Some(pos) => {
+                self.picked.remove(pos);
+            }
+            None => self.picked.push(cle),
+        }
+    }
+
+    fn contains(&self, cle: &str) -> bool {
+        self.picked.iter().any(|k| k == cle)
+    }
+}
+
 const CARD_ROUNDING: f32 = 12.0;
 const CARD_BORDER_WIDTH: f32 = 1.0;
 const CARD_PAD_V: f32 = 10.0;
@@ -553,6 +627,7 @@ pub fn show(
     ui: &mut egui::Ui,
     assets: WatchlistAssets<'_>,
     entries: &[WatchlistEntry],
+    selection: &mut WatchlistSelection,
     toast: Option<&WatchlistToast>,
     now: std::time::Instant,
 ) -> WatchlistOutcome {
@@ -579,8 +654,21 @@ pub fn show(
     let mut open_watchlist = false;
     let mut open_options = false;
     let mut open_web_app = false;
+    // La liste peut se vider sous un mode resté ouvert (retrait depuis la fenêtre Options, ou
+    // dernière entrée supprimée ici même) : une bande de sélection sans tuile à cocher n'a plus
+    // d'objet, et son bouton « Supprimer tout » agirait sur rien.
+    if entries.is_empty() {
+        selection.close();
+    }
+    // Coché cette frame, appliqué après la `ScrollArea` : `selection` est emprunté par la
+    // fermeture de rendu tant qu'elle peint.
+    let mut bascule_tuile: Option<String> = None;
+    // Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
+    // (voir `bulk_button_row`).
+    let mut tiles_rect: Option<egui::Rect> = None;
+    let mut bascule_mode = false;
 
-    egui::ScrollArea::horizontal()
+    let strip = egui::ScrollArea::horizontal()
         .id_salt("watchlist-strip")
         .auto_shrink([false, true])
         // Un peu plus que la seule hauteur des tuiles (58px) : donne à la barre de défilement
@@ -597,27 +685,73 @@ pub fn show(
                 // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                let clicks = control_button_row(ui, entries.is_empty());
+                let clicks = control_button_row(ui, entries.is_empty(), selection.is_open());
                 open_watchlist = clicks.add;
                 open_options = clicks.options;
                 open_web_app = clicks.details;
+                bascule_mode = clicks.remove;
                 ui.add_space(TILE_GAP);
 
                 for (i, entry) in entries.iter().enumerate() {
                     if i > 0 {
                         ui.add_space(TILE_GAP);
                     }
-                    entry_tile(
+                    let cle = crate::panels::suivi_tab::entry_key(entry);
+                    let tuile = entry_tile(
                         ui,
                         icons,
                         catalog,
                         remote_icons,
                         remote_icon_textures,
                         entry,
+                        selection.is_open().then(|| selection.contains(&cle)),
                     );
+                    tiles_rect = Some(match tiles_rect {
+                        Some(deja) => deja.union(tuile.rect),
+                        None => tuile.rect,
+                    });
+                    // **Le clic coche, il ne supprime pas.** Hors sélection, une tuile du bandeau
+                    // n'a aucun geste — elle n'en gagne un que le temps du mode.
+                    if selection.is_open() && tuile.clicked() {
+                        bascule_tuile = Some(cle);
+                    }
                 }
             });
         });
+
+    // **Les deux gestes du mode, appliqués une fois la bande peinte.**
+    if let Some(cle) = bascule_tuile {
+        selection.toggle(cle);
+    }
+    if bascule_mode {
+        selection.toggle_mode();
+    }
+
+    // Le bouton de suppression groupée — sous la bande, centré sur les tuiles VISIBLES. La
+    // `ScrollArea` donne les deux morceaux : l'union des tuiles peintes, et sa propre fenêtre
+    // visible (`inner_rect`) quand la rangée déborde.
+    let mut remaining = None;
+    if selection.is_open() {
+        if let Some(tuiles) = tiles_rect {
+            let visible = tuiles.intersect(strip.inner_rect);
+            if bulk_button_row(ui, selection, entries.len(), visible) {
+                let restantes: Vec<WatchlistEntry> = if selection.picked.is_empty() {
+                    // Aucune coche : « Supprimer tout » — la règle du web, voir `bulk_label`.
+                    Vec::new()
+                } else {
+                    entries
+                        .iter()
+                        .filter(|entry| {
+                            !selection.contains(&crate::panels::suivi_tab::entry_key(entry))
+                        })
+                        .cloned()
+                        .collect()
+                };
+                remaining = Some(restantes);
+                selection.close();
+            }
+        }
+    }
 
     ui.add_space(6.0);
 
@@ -639,12 +773,54 @@ pub fn show(
         open_watchlist,
         open_options,
         open_web_app,
+        remaining,
     }
+}
+
+/// La bande du bouton de suppression groupée, sous les tuiles. Renvoie `true` à la frame où il est
+/// cliqué — le panneau ne supprime rien lui-même (voir [`WatchlistOutcome::remaining`]).
+///
+/// **Centré sur `tuiles`, pas sur la fenêtre**, et c'est une demande explicite (2026-09-13) : la
+/// fenêtre porte aussi le carré de contrôle et ses deux réserves d'infobulle, qui la déséquilibrent
+/// vers la gauche. Un bouton centré sur elle tombe visiblement à côté de la rangée qu'il commande.
+/// `tuiles` est déjà l'intersection de la rangée avec la partie visible de la `ScrollArea` : quand
+/// la bande défile, le bouton suit ce qu'on voit.
+fn bulk_button_row(
+    ui: &mut egui::Ui,
+    selection: &WatchlistSelection,
+    total: usize,
+    tuiles: egui::Rect,
+) -> bool {
+    ui.add_space(BULK_BUTTON_GAP);
+    let row = ui
+        .allocate_exact_size(
+            egui::vec2(ui.available_width(), BULK_BUTTON_HEIGHT),
+            egui::Sense::hover(),
+        )
+        .0;
+    let largeur = BULK_BUTTON_MIN_WIDTH.min(row.width());
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(tuiles.center().x, row.center().y),
+        egui::vec2(largeur, BULK_BUTTON_HEIGHT),
+    );
+    ui.put(
+        rect,
+        design::button(crate::panels::suivi_tab::bulk_label(
+            selection.picked.len(),
+            total,
+        ))
+        .variant(design::ButtonVariant::Danger)
+        .size(design::ButtonSize::Height(BULK_BUTTON_HEIGHT))
+        .min_width(largeur)
+        .tooltip("Retire les tuiles cochées du suivi")
+        .log_name("suivi.bandeau.supprimer-groupe"),
+    )
+    .clicked()
 }
 
 /// Ce que `show` a produit CETTE frame — voir sa doc pour pourquoi un simple `bool` (juste
 /// `close_toast`, avant le 2026-09-08) ne suffit plus.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct WatchlistOutcome {
     pub close_toast: bool,
     /// `true` à la frame où "+" vient d'être cliqué : l'appelant ouvre la modale Options sur
@@ -656,6 +832,14 @@ pub struct WatchlistOutcome {
     /// `true` à la frame où "Détails" vient d'être cliqué : l'appelant ouvre la web app. Le
     /// panneau ne l'ouvre PAS lui-même — voir `control_button_row`.
     pub open_web_app: bool,
+    /// **Les définitions qui RESTENT** après une suppression groupée, à la frame où elle est
+    /// demandée — `None` le reste du temps, et `Some(vec![])` quand tout est retiré, ce qui n'est
+    /// pas la même chose.
+    ///
+    /// La liste restante plutôt que les clés retirées : c'est ce que
+    /// `EngineCommand::SetWatchlistDefinitions` attend, le même chemin que la validation de
+    /// l'onglet « Suivi » — le moteur garde ses compteurs et réplique au compte.
+    pub remaining: Option<Vec<WatchlistEntry>>,
 }
 
 /// Barre de défilement fine, flottante et sombre plutôt que le style natif par défaut (épais, pris
@@ -956,7 +1140,11 @@ enum TooltipSide {
 /// DROITE pour "−"/"Options" — jamais l'inverse du rôle inerte/cliquable du bouton, qui ne pilotait
 /// le côté qu'AVANT cette refonte.
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
-fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowClicks {
+fn control_button_row(
+    ui: &mut egui::Ui,
+    watchlist_empty: bool,
+    select_open: bool,
+) -> ControlRowClicks {
     let row_rect = ui
         .allocate_exact_size(
             egui::vec2(control_row_width(), control_row_height()),
@@ -973,7 +1161,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
         DsIcon::Plus,
         "watchlist-add",
         "Ajouter (Ctrl+Shift+A)",
-        true,
+        ControlButtonState::Enabled,
         TooltipSide::Left,
     );
     // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
@@ -986,14 +1174,27 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
 
     // "−" à DROITE de "+" (pas en dessous, contrairement à l'ancienne disposition 1×2 — voir doc de
     // module) : désactivé tant que `watchlist_empty`, infobulle à DROITE (colonne droite).
+    //
+    // **Branché le 2026-09-13**, après dix jours d'inertie assumée : il ouvre la sélection
+    // multiple de la bande, et reste ENFONCÉ tant qu'elle est ouverte — comme un onglet actif, et
+    // comme son jumeau de l'onglet « Suivi ». Son infobulle dit alors le geste inverse, puisque
+    // c'est ce que le prochain clic fera.
     let remove_top_left = add_top_left + egui::vec2(CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP, 0.0);
-    control_button(
+    let remove_response = control_button(
         ui,
         remove_top_left,
         DsIcon::Minus,
         "watchlist-remove",
-        "Supprimer (Ctrl+Shift+S)",
-        !watchlist_empty,
+        if select_open {
+            "Quitter la sélection (Ctrl+Shift+S)"
+        } else {
+            "Supprimer (Ctrl+Shift+S)"
+        },
+        match (watchlist_empty, select_open) {
+            (true, _) => ControlButtonState::Disabled,
+            (false, true) => ControlButtonState::Active,
+            (false, false) => ControlButtonState::Enabled,
+        },
         TooltipSide::Right,
     );
 
@@ -1006,7 +1207,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
         DsIcon::ExternalLink,
         "watchlist-details",
         "Détails (Ctrl+Shift+D)",
-        true,
+        ControlButtonState::Enabled,
         TooltipSide::Left,
     );
     // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
@@ -1031,11 +1232,12 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
         DsIcon::Option,
         "watchlist-options",
         "Options (Ctrl+Shift+O)",
-        true,
+        ControlButtonState::Enabled,
         TooltipSide::Right,
     );
     ControlRowClicks {
         add,
+        remove: remove_response.clicked(),
         options: options_response.clicked(),
         details,
     }
@@ -1048,11 +1250,27 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
 struct ControlRowClicks {
     /// Le bouton "+" vient d'être cliqué — l'hôte ouvre la modale Options sur l'onglet « Suivi ».
     add: bool,
+    /// Le bouton "−" vient d'être cliqué — le panneau bascule sa sélection multiple. Le seul des
+    /// quatre dont l'effet reste DANS le bandeau.
+    remove: bool,
     /// Le bouton "Options" vient d'être cliqué — l'hôte ouvre la modale Options sur l'onglet
     /// « Paramètres ».
     options: bool,
     /// Le bouton "Détails" vient d'être cliqué — l'hôte ouvre la web app.
     details: bool,
+}
+
+/// État d'un bouton du carré de contrôle — trois cas, là où un `bool` n'en disait que deux.
+///
+/// `Active` est arrivé avec la sélection multiple (2026-09-13) : le « − » doit rester enfoncé tant
+/// que le mode est ouvert, ce qu'aucune combinaison d'`enabled` ne sait dire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlButtonState {
+    Enabled,
+    /// Rien à commander : la liste est vide.
+    Disabled,
+    /// Le mode que ce bouton ouvre est en cours.
+    Active,
 }
 
 /// Bouton du carré de contrôle — un [`design::icon_button`] posé dans un rect que ce panneau
@@ -1075,21 +1293,20 @@ struct ControlRowClicks {
 /// **Ce que le composant ne prend pas en charge, et pourquoi ça reste ici.** Le placement de
 /// l'infobulle (`side`, voir [`TooltipSide`]) est une décision de mise en page : « + » et
 /// « Détails » l'ouvrent à gauche, « − » et « Options » à droite, pour qu'elle ne recouvre jamais
-/// l'autre colonne. `design::icon_button` expose bien un `.tooltip()`, mais il retombe sur le
-/// placement par défaut d'egui — l'utiliser casserait cette règle, que
+/// l'autre colonne. `design::icon_button` expose bien un `.tooltip()`, mais il place au-dessus
+/// (depuis le 2026-09-13 ; sous l'élément avant cela) — l'utiliser casserait cette règle, que
 /// `panneau_suivi_tooltips_par_colonne_gauche_ou_droite` vérifie. Le composant peint et rend une
 /// `Response` ; le panneau décide où poser l'infobulle.
 ///
 /// Le paramètre `sense` disparaît en revanche : le composant sait qu'un bouton actif se clique et
-/// qu'un bouton désactivé ne réagit qu'au survol. Seul « − » reste INERTE (voir doc de module) —
-/// c'est son appelant qui ignore son clic, pas son `Sense` qui l'empêche ; « + » ne l'est plus
-/// depuis le 2026-09-13. Cela ne change rien à l'apparence : depuis le correctif du 2026-09-08, la
-/// règle « un appui retire le survol » est écrite `response.hovered() && !pointer.any_down()`,
-/// identique pour les deux
-/// `Sense`.
+/// qu'un bouton désactivé ne réagit qu'au survol. **Aucun des quatre n'est plus inerte** depuis le
+/// 2026-09-13 — « + » ouvre la fenêtre Options sur l'onglet « Suivi », « − » la sélection multiple
+/// de la bande. Cela ne change rien à l'apparence : depuis le correctif du 2026-09-08, la règle
+/// « un appui retire le survol » est écrite `response.hovered() && !pointer.any_down()`, identique
+/// pour les deux `Sense`.
 ///
-/// Curseur "main" au survol même pour "−" malgré son inertie (retour utilisateur explicite
-/// 2026-09-06) : porté par le composant, comme le curseur par défaut d'un bouton désactivé.
+/// Curseur "main" au survol (retour utilisateur explicite 2026-09-06) : porté par le composant,
+/// comme le curseur par défaut d'un bouton désactivé.
 /// Renvoie la `Response` : le clic (pour "Détails"/"Options") est géré par l'appelant
 /// (`control_button_row`), qui seul connaît l'action associée à chaque bouton.
 fn control_button(
@@ -1098,18 +1315,22 @@ fn control_button(
     glyph: design::DsIcon,
     log_name: &str,
     tooltip: &str,
-    enabled: bool,
+    state: ControlButtonState,
     side: TooltipSide,
 ) -> egui::Response {
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
-    let response = ui.put(
-        rect,
-        design::icon_button(glyph)
-            .context(IconContext::FirstPlan)
-            .size(CONTROL_BUTTON_SIZE)
-            .enabled(enabled)
-            .log_name(log_name),
-    );
+    let mut bouton = design::icon_button(glyph)
+        .context(IconContext::FirstPlan)
+        .size(CONTROL_BUTTON_SIZE)
+        .enabled(state != ControlButtonState::Disabled)
+        .log_name(log_name);
+    if state == ControlButtonState::Active {
+        // Le mode ouvert se lit sur le bouton lui-même : l'état de survol, en permanence. Même
+        // procédé que l'onglet « Suivi » (`suivi_tab::list_header`) — ce design system n'a pas
+        // d'état « enfoncé » distinct, l'or du survol EST sa couleur d'état.
+        bouton = bouton.preview_state(design::IconButtonState::Hovered);
+    }
+    let response = ui.put(rect, bouton);
     match side {
         TooltipSide::Left => design::tooltip(&response)
             .side(design::TooltipSide::Left)
@@ -1143,7 +1364,8 @@ fn entry_tile(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
     entry: &WatchlistEntry,
-) {
+    selection: Option<bool>,
+) -> egui::Response {
     // Tout ce qui suit était peint à la main ici jusqu'au 2026-09-11 — fond, bordure de rareté,
     // icône, compteur, et surtout leur ORDRE. Il vit maintenant dans `design::item_slot`, qui
     // verrouille cet ordre par un test : la bordure sous l'icône pour un objet, le trait par-dessus
@@ -1172,15 +1394,38 @@ fn entry_tile(
         .frame(frame)
         .icon(icon_id)
         .size(TILE_SIZE)
+        // **Le ton destructif** : ici la sélection ne sert qu'à supprimer, contrairement à celle
+        // de l'onglet « Suivi », qui reste neutre faute d'avoir une autre action à proposer.
+        .selection_tone(design::SelectionTone::Danger)
         .log_name("suivi.tuile");
     if let Some(count) = slot_count(entry) {
         slot = slot.count(count);
     }
-    let response = ui.add(slot);
+    if let Some(cochee) = selection {
+        slot = slot.selection(Some(cochee));
+    }
+
+    // **La zone cliquable appartient au panneau, pas au composant.** `design::item_slot` alloue en
+    // `Sense::hover()` : un emplacement d'inventaire n'est pas un bouton, et c'est l'écran qui
+    // décide s'il a un geste. Même procédé que l'onglet « Suivi » (`suivi_tab::tracked_tile`).
+    // Hors sélection, la tuile du bandeau n'en a aucun — elle garde donc son simple survol.
+    let (rect, response) = ui.allocate_exact_size(
+        egui::Vec2::splat(TILE_SIZE),
+        match selection {
+            Some(_) => egui::Sense::click(),
+            None => egui::Sense::hover(),
+        },
+    );
+    ui.put(rect, slot);
+    let response = match selection {
+        Some(_) => response.on_hover_cursor(egui::CursorIcon::PointingHand),
+        None => response,
+    };
 
     // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
     // 2026-09-06, design system tooltip).
     design::tooltip(&response).text(&entry.name);
+    response
 }
 
 /// Traduit une entrée de suivi en compteur du design system.

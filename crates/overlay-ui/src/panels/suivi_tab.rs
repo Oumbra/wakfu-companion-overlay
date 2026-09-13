@@ -229,7 +229,12 @@ pub enum SuiviTabAction {
 
 /// Identifie une entrée de façon unique, homonymes d'id différents compris — miroir de
 /// `watchlistEntryKey` (dépôt web).
-fn entry_key(entry: &WatchlistEntry) -> String {
+///
+/// **Partagée avec le bandeau** (`panels::watchlist::WatchlistSelection`) depuis le 2026-09-13 :
+/// les deux écrans cochent les mêmes entrées, ils doivent les désigner de la même façon. Deux
+/// fonctions de clé côte à côte, c'est une sélection qui survit à un aller-retour dans l'un et se
+/// perd dans l'autre.
+pub(crate) fn entry_key(entry: &WatchlistEntry) -> String {
     format!(
         "{}::{}",
         entry.name,
@@ -686,7 +691,10 @@ fn list_header(
 /// Aucune tuile cochée se lit « aucune exclusion » et non « rien à faire » : le bouton porte alors
 /// « Supprimer tout » et agit sur la liste entière. Tout cocher à la main donne le même libellé, par
 /// cohérence — même résultat, deux chemins pour y arriver.
-fn bulk_label(selected: usize, total: usize) -> String {
+///
+/// **Partagée avec le bandeau**, comme [`entry_key`] : le bouton y est le même, jusqu'à sa
+/// variante et sa hauteur.
+pub(crate) fn bulk_label(selected: usize, total: usize) -> String {
     if selected == 0 || selected == total {
         "Supprimer tout".to_string()
     } else {

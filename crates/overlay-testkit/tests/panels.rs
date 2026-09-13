@@ -152,6 +152,9 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &[],
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -208,6 +211,9 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &[],
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -267,6 +273,9 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &[],
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -411,6 +420,9 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &watchlist_entries,
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -469,6 +481,9 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &entries,
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -567,6 +582,9 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
                     icons,
                     combat_side: &mut combat_side,
                     watchlist: &entries,
+                    // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                    // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                    watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -598,6 +616,138 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     harness.hover_at(egui::pos2(146.0, 58.0));
     harness.run();
     harness.snapshot("watchlist_tooltip_options_a_droite");
+}
+
+/// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
+///
+/// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
+/// suppression multiple ne s'active pas ». Il avait raison, et rien ne le disait : le « − » était
+/// documenté INERTE depuis le 2026-09-06, la maquette validée depuis le matin même, et aucun test
+/// ne demandait ce que le bouton FAIT — les captures existantes ne regardaient que son apparence.
+///
+/// Ce test clique réellement, et vérifie l'état plutôt que des pixels : c'est la seule forme qui
+/// aurait attrapé un bouton peint juste et branché sur rien.
+///
+/// Positions : voir le détail de calcul de [`panneau_suivi_tooltips_par_colonne_gauche_ou_droite`]
+/// pour le carré de contrôle (« − » au centre en (146, 30)). Les tuiles suivent le carré :
+/// x = 14 (marges) + 88 (`CONTROL_TOOLTIP_RESERVE`) + 60 (`control_row_width`, 2 × 24 + 3 × 4)
+/// + 12 (`TILE_GAP`) = 174 pour le bord gauche de la première, soit 206 pour son centre.
+#[test]
+fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let now = std::time::Instant::now();
+    let entries: Vec<WatchlistEntry> = ["Bottes Lantha", "Bois de Frêne", "Pierre de Lune"]
+        .iter()
+        .map(|nom| WatchlistEntry {
+            name: (*nom).to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Up,
+            count: 0,
+            countdown_target: 0,
+            catalog_id: None,
+        })
+        .collect();
+
+    // L'état vit chez l'hôte : ce `Rc` tient le rôle du champ `App::watchlist_selection`.
+    let selection = Rc::new(RefCell::new(
+        panels::watchlist::WatchlistSelection::default(),
+    ));
+    // Ce que le panneau a demandé à la dernière frame — le pendant de `RenderOutcome`.
+    let restantes: Rc<RefCell<Option<Vec<WatchlistEntry>>>> = Rc::new(RefCell::new(None));
+
+    let window_width = panels::watchlist::content_width(entries.len()) + 12.0;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, 220.0))
+        .build_ui({
+            let selection = Rc::clone(&selection);
+            let restantes = Rc::clone(&restantes);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Watchlist,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        combat_side: &mut combat_side,
+                        watchlist: &entries,
+                        watchlist_selection: &mut selection.borrow_mut(),
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        now,
+                        options: None,
+                    },
+                );
+                if outcome.watchlist_remaining.is_some() {
+                    *restantes.borrow_mut() = outcome.watchlist_remaining;
+                }
+            }
+        });
+    harness.run();
+    assert!(
+        !selection.borrow().is_open(),
+        "la sélection ne doit pas s'ouvrir toute seule"
+    );
+
+    // 1. Le « − » ouvre le mode, et reste enfoncé tant qu'il l'est.
+    clique(&mut harness, egui::pos2(146.0, 30.0));
+    assert!(
+        selection.borrow().is_open(),
+        "le bouton « − » n'a pas ouvert la sélection multiple",
+    );
+    harness.snapshot("watchlist_selection_ouverte");
+
+    // 2. Un clic sur une tuile la coche — le bouton passe de « Supprimer tout » à « Supprimer (1) ».
+    clique(&mut harness, egui::pos2(206.0, 46.0));
+    harness.snapshot("watchlist_selection_une_cochee");
+
+    // 3. Le bouton de suppression groupée rend les entrées RESTANTES, et referme le mode.
+    let bouton = egui::pos2(window_width / 2.0, 96.0);
+    clique(&mut harness, bouton);
+    let restantes = restantes.borrow();
+    let restantes = restantes
+        .as_ref()
+        .expect("aucune suppression remontée : le bouton de suppression groupée n'est pas branché");
+    assert_eq!(
+        restantes.len(),
+        2,
+        "une seule tuile était cochée : il doit rester les deux autres — restantes : {:?}",
+        restantes.iter().map(|e| &e.name).collect::<Vec<_>>(),
+    );
+    assert!(
+        !selection.borrow().is_open(),
+        "la sélection doit se refermer une fois la suppression demandée",
+    );
+}
+
+/// Un clic complet : survol, appui, relâchement — chacun dans sa frame, comme un vrai geste. egui
+/// rattache l'appui au widget survolé, et le pointeur n'est nulle part tant qu'aucun mouvement ne
+/// l'a placé (voir `options_alertes_champ_d_ajout_trouve_et_ajoute`).
+fn clique(harness: &mut egui_kittest::Harness<'_>, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run();
+    harness.drag_at(pos);
+    harness.run();
+    harness.drop_at(pos);
+    harness.run();
 }
 
 /// Retour utilisateur explicite 2026-09-08 : « je veux que tous les boutons se comportent EXACT de
@@ -652,6 +802,9 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     icons,
                     combat_side: &mut combat_side,
                     watchlist: &entries,
+                    // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                    // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                    watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -736,6 +889,9 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &entries,
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -805,6 +961,9 @@ fn panneau_options_ne_panique_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &[],
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1028,6 +1187,9 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 icons,
                 combat_side: &mut combat_side,
                 watchlist: &[],
+                // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
+                // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
+                watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
