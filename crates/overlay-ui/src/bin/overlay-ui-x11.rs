@@ -527,10 +527,17 @@ mod linux_main {
         /// Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai dialogue
         /// modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant d'en
         /// rouvrir une.
+        ///
+        /// `initial_tab` est l'onglet sur lequel la fenêtre s'ouvre — **`Paramètres` pour le
+        /// bouton « Options » du bandeau de suivi** (demande utilisateur 2026-09-13 : ce bouton
+        /// donne accès au chemin de `wakfu.log`, pas à la composition de la liste suivie, qui a
+        /// son propre accès dans ce même bandeau), le défaut d'[`options_modal::OptionsTab`] pour
+        /// le raccourci global, qui n'a pas de bandeau particulier à privilégier.
         fn open_options_modal(
             &mut self,
             event_loop: &ActiveEventLoop,
             anchor: Option<(u32, GameRect)>,
+            initial_tab: options_modal::OptionsTab,
         ) {
             if self
                 .windows
@@ -577,9 +584,9 @@ mod linux_main {
             overlay.options_state = Some(OptionsModalState {
                 path_input: self.log_path.display().to_string(),
                 error: None,
-                // Toujours la première entrée du menu à l'ouverture — le défaut d'`OptionsTab`,
-                // qui dit pourquoi.
-                tab: Default::default(),
+                // Voir la doc de `open_options_modal` : le bouton « Options » du bandeau de
+                // suivi demande `Parametres`, le raccourci global le défaut d'`OptionsTab`.
+                tab: initial_tab,
                 alerts: Default::default(),
                 // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :
                 // aucun thread Auth ne tourne ici). Il n'y a donc ni liste à charger ni endroit où
@@ -888,9 +895,11 @@ mod linux_main {
 
             match post_redraw {
                 PostRedraw::None => {}
-                PostRedraw::OpenOptions(window, rect) => {
-                    self.open_options_modal(event_loop, Some((window, rect)))
-                }
+                PostRedraw::OpenOptions(window, rect) => self.open_options_modal(
+                    event_loop,
+                    Some((window, rect)),
+                    options_modal::OptionsTab::Parametres,
+                ),
                 PostRedraw::CloseOptions => {
                     self.windows.remove(&id);
                     tracing::info!("[options] modale fermée (Annuler).");
@@ -917,7 +926,7 @@ mod linux_main {
                     event_loop.exit();
                 } else if event.id == self.options_hotkey_id {
                     tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
-                    self.open_options_modal(event_loop, None);
+                    self.open_options_modal(event_loop, None, options_modal::OptionsTab::default());
                 }
             }
 
