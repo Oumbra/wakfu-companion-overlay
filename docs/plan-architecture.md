@@ -1648,6 +1648,41 @@ standard.
   qui doit bloquer, préférer des assertions structurelles (layout, présence/absence de panneau,
   contenu textuel) au diff pixel brut.
 
+**Promu en GATE le 2026-09-13** (décision utilisateur explicite), avec l'environnement de rendu figé
+que la règle « version de Mesa figée dans l'image CI » ci-dessus réclamait depuis le début et qui
+n'avait jamais été mis en place.
+
+- **Ce qui a forcé la décision** : l'étape informative ne rodait rien du tout. `cargo test` s'arrête
+  au premier BINAIRE de test en échec, et `tests/design_gallery.rs` passe avant `tests/panels.rs`
+  dans l'ordre alphabétique — deux captures périmées du premier ont caché **vingt-et-une** captures
+  périmées du second pendant une semaine, sans qu'aucun journal du CI n'ait montré une seule ligne
+  de `panels.rs`. Un job non bloquant qui n'exécute pas ce qu'il prétend surveiller ne rode rien ;
+  `--no-fail-fast` (ajouté le même jour sur les quatre `cargo test` du workflow) est ce qui rend le
+  signal complet.
+- **Rendu figé, à deux verrous** : le job `test-linux` tourne dans un conteneur `ubuntu:24.04`
+  épinglé **par digest** (un tag désigne une image différente à chaque point release), et
+  `scripts/setup-render-env.sh` fait pointer APT vers un **instantané daté** de l'archive Ubuntu
+  (`snapshot.ubuntu.com`) plutôt que vers l'archive vivante. Épingler seulement la version du paquet
+  ne suffisait pas : une version supplantée finit par disparaître de l'archive, et l'installation
+  échouerait en 404 quelques semaines plus tard — constaté dans ce dépôt sur `libasound2-dev` le
+  jour même. Le script échoue explicitement si le Mesa obtenu n'est pas celui attendu, plutôt que de
+  laisser le gate rougir ensuite sur 57 captures sans dire pourquoi.
+- **Vérifié avant promotion, pas supposé** : les 57 tests passent dans cet environnement figé contre
+  les références **telles qu'elles sont versionnées**, sans aucune régénération. C'était la condition
+  — promouvoir d'abord et régénérer ensuite aurait rendu le gate rouge dès son premier run.
+- **Mettre à jour le rendu est un geste explicite**, dans son propre commit, exactement comme monter
+  la version de Rust (`rust-toolchain.toml`, même histoire) : changer l'instantané, régénérer les
+  références DANS cet environnement (`.github/ci-image/Dockerfile` le reproduit sur un poste de dev),
+  committer les deux ensemble.
+- **Ce que la promotion coûte** : tout changement visuel voulu doit désormais porter ses références
+  régénérées, sinon le CI bloque. La règle « régénération revue en PR dédiée, jamais glissée dans une
+  PR fonctionnelle » (ci-dessus) reste écrite mais n'est pas tenue dans les faits — les références
+  voyagent avec le commit qui change l'interface. À trancher : l'appliquer, ou l'amender.
+- **Ce que la promotion ne couvre pas** : `scripts/ci-local.sh` tourne sur la machine du dev, pas
+  dans le conteneur. Il avertit quand le Mesa local diffère de celui du CI
+  (`avertir_si_mesa_different`) sans jamais bloquer — un écart local ne dit rien de ce que fera le
+  CI, et régénérer des références sous un autre Mesa les rougirait pour tout le monde.
+
 **État (2026-09-04) : Niveau 1 implémenté et validé de bout en bout, portée volontairement
 réduite pour l'instant.**
 
@@ -1712,7 +1747,9 @@ réduite pour l'instant.**
     RÉELLE ci-dessus, aussi minime soit-elle une fois le seuil corrigé, est précisément le signal
     qu'une période de rodage sans flake constaté (§17.3) n'a pas encore commencé pour de bon ;
     repartir de zéro sur ce compteur à partir de ce commit plutôt que de considérer un incident déjà
-    corrigé comme suffisant serait prématuré.
+    corrigé comme suffisant serait prématuré. **Caduc depuis le 2026-09-13** : l'étape est un gate,
+    et le rodage attendu ici n'aurait de toute façon jamais eu lieu — elle n'exécutait pas
+    `tests/panels.rs`. Voir « Promu en GATE » au §17.1.
 
 ### 17.2 Niveau 2 — Comportemental multi-fenêtres/click-through (X11, sous Xvfb)
 
