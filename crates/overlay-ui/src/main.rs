@@ -123,13 +123,13 @@ const DISCONNECT_HOTKEY_LABEL: &str = "Ctrl+Alt+D";
 /// CTRL+ALT.
 const DETAILS_HOTKEY_LABEL: &str = "Ctrl+Shift+D";
 /// Raccourci global pour "Options" (`panels::watchlist::control_button_row`, voir sa doc — déplacé
-/// depuis `panels::combat::bottom_toolbar`, refonte 2026-09-08) — n'ouvre encore aucun panneau,
-/// comme le clic sur le bouton lui-même (voir sa doc) : réservé à une future page de réglages,
-/// juste enregistré/journalisé pour l'instant (voir `about_to_wait`).
+/// depuis `panels::combat::bottom_toolbar`, refonte 2026-09-08) — ouvre la modale Options sur
+/// l'onglet « Paramètres », comme le clic sur le bouton lui-même (voir `about_to_wait` et la doc de
+/// `PostRedraw::OpenOptions` : un raccourci mène au même endroit que le bouton qu'il double).
 const OPTIONS_HOTKEY_LABEL: &str = "Ctrl+Shift+O";
-/// Raccourci global pour "Ajouter" (`panels::watchlist::control_button_row`) — reste INERTE comme
-/// le bouton lui-même (voir doc de module de `watchlist` : aucune sélection/formulaire câblés côté
-/// overlay pour cette itération), juste enregistré/journalisé pour l'instant.
+/// Raccourci global pour "Ajouter" (`panels::watchlist::control_button_row`) — ouvre la modale
+/// Options sur l'onglet « Suivi », comme le clic sur le bouton lui-même depuis le 2026-09-13 (voir
+/// doc de module de `watchlist`).
 const WATCHLIST_ADD_HOTKEY_LABEL: &str = "Ctrl+Shift+A";
 /// Raccourci global pour "Supprimer" — même remarque que `WATCHLIST_ADD_HOTKEY_LABEL`.
 const WATCHLIST_REMOVE_HOTKEY_LABEL: &str = "Ctrl+Shift+S";
@@ -1549,8 +1549,11 @@ enum PostRedraw {
     /// Fenêtre de jeu **depuis laquelle** la modale est demandée — son `HWND` et son
     /// rectangle. La modale lui est rattachée comme n'importe quel overlay : c'est ce qui
     /// la fait suivre le premier plan de CE personnage, et disparaître quand on passe sur
-    /// un autre client en multi-compte.
-    OpenOptions(HWND, GameRect),
+    /// un autre client en multi-compte. Le troisième champ est l'onglet à ouvrir — "+"
+    /// demande « Suivi », "Options" demande « Paramètres » (voir `render_content::
+    /// RenderOutcome::open_watchlist`/`open_options`) : deux boutons, deux destinations,
+    /// jamais le défaut implicite d'`options_modal::OptionsTab`.
+    OpenOptions(HWND, GameRect, options_modal::OptionsTab),
     CloseOptions,
     BrowseOptions,
     ValidateOptions(String),
@@ -1664,12 +1667,23 @@ impl App {
         if outcome.close_toast {
             self.watchlist_toast.store(Arc::new(None));
         }
-        // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "Options"
+        // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "+"/"Options"
         // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
-        // Options elle-même — jamais les deux à la fois (branches différentes du `match
-        // kind` de `paint_content`).
+        // Options elle-même — jamais deux de ces trois à la fois (branches différentes du
+        // `match kind` de `paint_content`).
+        if outcome.open_watchlist {
+            post_redraw = PostRedraw::OpenOptions(
+                this_game_hwnd,
+                this_game_rect,
+                options_modal::OptionsTab::Suivi,
+            );
+        }
         if outcome.open_options {
-            post_redraw = PostRedraw::OpenOptions(this_game_hwnd, this_game_rect);
+            post_redraw = PostRedraw::OpenOptions(
+                this_game_hwnd,
+                this_game_rect,
+                options_modal::OptionsTab::Parametres,
+            );
         }
         // L'ouverture de page est faite ICI, par l'hôte, jamais par le panneau qui l'a
         // demandée : voir `RenderOutcome::open_url`. `open::that` est best-effort, comme
@@ -1693,11 +1707,9 @@ impl App {
 
         match post_redraw {
             PostRedraw::None => {}
-            PostRedraw::OpenOptions(hwnd, rect) => self.open_options_modal(
-                event_loop,
-                Some((hwnd, rect)),
-                options_modal::OptionsTab::Parametres,
-            ),
+            PostRedraw::OpenOptions(hwnd, rect, tab) => {
+                self.open_options_modal(event_loop, Some((hwnd, rect)), tab)
+            }
             PostRedraw::CloseOptions => {
                 self.windows.remove(&id);
                 tracing::info!("[options] modale fermée (Annuler).");
@@ -1847,10 +1859,14 @@ impl ApplicationHandler<UserEvent> for App {
                 self.open_details();
             } else if event.id == self.options_hotkey_id {
                 tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
-                self.open_options_modal(event_loop, None, options_modal::OptionsTab::default());
+                // Même destination que le bouton "Options" qu'il double — voir la doc de
+                // `PostRedraw::OpenOptions` (2026-09-13) : un raccourci et le bouton qu'il double
+                // doivent mener au même endroit, jamais au défaut implicite d'`OptionsTab`.
+                self.open_options_modal(event_loop, None, options_modal::OptionsTab::Parametres);
             } else if event.id == self.watchlist_add_hotkey_id {
-                // Voir la doc de `WATCHLIST_ADD_HOTKEY_LABEL` : bouton encore inerte.
-                tracing::debug!(">>> Ajouter ({WATCHLIST_ADD_HOTKEY_LABEL}) : encore inerte.");
+                tracing::info!(">>> Ajouter ({WATCHLIST_ADD_HOTKEY_LABEL})");
+                // Même destination que le bouton "+" qu'il double — voir plus haut.
+                self.open_options_modal(event_loop, None, options_modal::OptionsTab::Suivi);
             } else if event.id == self.watchlist_remove_hotkey_id {
                 tracing::debug!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL}) : encore inerte.");
             } else if event.id == self.side_hotkey_id {

@@ -8,11 +8,15 @@
 //!
 //! Toujours en LECTURE SEULE (voir `overlay_engine::watchlist` pour la frontière
 //! définitions/compteurs) : les deux boutons "+"/"−" (voir `control_button`) reprennent l'intention
-//! du bandeau web (ajouter un suivi / sélection multiple + suppression) mais restent INERTES ici —
-//! aucun formulaire d'ajout, aucune sélection ne sont câblés côté overlay pour cette itération
-//! (demande utilisateur : "je pense qu'on le fera plus tard quand tu auras tout câblé").
-//! Un survol affiche un tooltip explicite plutôt que de laisser un bouton cliquable qui ne ferait
-//! rien silencieusement (retour utilisateur déjà vécu sur le bouton de connexion au compte).
+//! du bandeau web (ajouter un suivi / sélection multiple + suppression). Restés INERTES tant
+//! qu'aucun formulaire d'ajout ni aucune sélection n'étaient câblés côté overlay (demande
+//! utilisateur d'alors : "je pense qu'on le fera plus tard quand tu auras tout câblé") — c'est fait
+//! depuis le 2026-09-13, dans l'onglet « Suivi » de la modale Options (`panels::suivi_tab`) : "+"
+//! l'ouvre directement dessus (voir [`WatchlistOutcome::open_watchlist`]), comme "Options" ouvre ce
+//! même onglet « Paramètres ». "−", lui, reste INERTE — aucune action équivalente n'a été demandée
+//! pour lui. Un survol de "−" affiche un tooltip explicite plutôt que de laisser un bouton
+//! cliquable qui ne ferait rien silencieusement (retour utilisateur déjà vécu sur le bouton de
+//! connexion au compte).
 //!
 //! Icône réelle de chaque tuile (retour utilisateur 2026-09-02 : « comme les images de
 //! ressources/monstres n'est pas présent c'est très compliqué pour l'utilisateur » de distinguer
@@ -112,9 +116,10 @@
 //! "+" garde sa place (coin haut-gauche), "−" vient à sa DROITE (au lieu d'en dessous), "Détails"
 //! (lien externe) sous le "+", "Options" (l'écrou) sous le "−" — disposition donnée explicitement
 //! par l'utilisateur (Options/Détails initialement intervertis par erreur, corrigé dans l'heure sur
-//! nouvelle demande explicite). Contrairement à "+"/"−" (restent INERTES, `Sense::hover()` seul),
-//! "Options"/"Détails" restent CLIQUABLES (`Sense::click()`) exactement comme dans `combat::
-//! bottom_toolbar` avant leur déplacement.
+//! nouvelle demande explicite). "Options"/"Détails" restent CLIQUABLES (`Sense::click()`)
+//! exactement comme dans `combat::bottom_toolbar` avant leur déplacement ; "+" le devient à son
+//! tour le 2026-09-13 (voir plus bas, [`control_button_row`]), seul "−" restant INERTE
+//! (`Sense::hover()` de fait).
 //!
 //! **Infobulle par COLONNE, pas par bouton** (retour utilisateur explicite : « la souris doit
 //! pouvoir passer d'un bouton à l'autre sans qu'il y ait un problème au niveau de la tooltip » — un
@@ -541,7 +546,9 @@ pub struct WatchlistAssets<'a> {
 /// simple `bool` — le clic sur "Options" (`control_button_row`) doit remonter jusqu'à
 /// `render_content::paint_content`, qui seul peut déclencher l'ouverture d'une fenêtre OS dédiée
 /// (`main.rs`/`bin/overlay-ui-x11.rs`, nouveau cas `OverlayKind::Options`) ; `close_toast` garde
-/// exactement son rôle d'avant (fermeture du toast, voir plus bas).
+/// exactement son rôle d'avant (fermeture du toast, voir plus bas). Le clic sur "+" remonte de la
+/// même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même mécanisme, pour
+/// ouvrir la même fenêtre sur un autre onglet.
 pub fn show(
     ui: &mut egui::Ui,
     assets: WatchlistAssets<'_>,
@@ -568,7 +575,8 @@ pub fn show(
 
     // Renseigné par `control_button_row` dans la fermeture ci-dessous (voir la doc de `show`) —
     // `false` par défaut : aucune raison de rouvrir la modale si elle l'est déjà tant que
-    // l'utilisateur n'a pas recliqué sur "Options".
+    // l'utilisateur n'a pas recliqué sur "+"/"Options".
+    let mut open_watchlist = false;
     let mut open_options = false;
     let mut open_web_app = false;
 
@@ -590,6 +598,7 @@ pub fn show(
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
                 let clicks = control_button_row(ui, entries.is_empty());
+                open_watchlist = clicks.add;
                 open_options = clicks.options;
                 open_web_app = clicks.details;
                 ui.add_space(TILE_GAP);
@@ -627,6 +636,7 @@ pub fn show(
 
     WatchlistOutcome {
         close_toast,
+        open_watchlist,
         open_options,
         open_web_app,
     }
@@ -637,6 +647,11 @@ pub fn show(
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WatchlistOutcome {
     pub close_toast: bool,
+    /// `true` à la frame où "+" vient d'être cliqué : l'appelant ouvre la modale Options sur
+    /// l'onglet « Suivi » — c'est l'écran où ce bouton mène, depuis le 2026-09-13.
+    pub open_watchlist: bool,
+    /// `true` à la frame où "Options" vient d'être cliqué : l'appelant ouvre la modale Options sur
+    /// l'onglet « Paramètres ».
     pub open_options: bool,
     /// `true` à la frame où "Détails" vient d'être cliqué : l'appelant ouvre la web app. Le
     /// panneau ne l'ouvre PAS lui-même — voir `control_button_row`.
@@ -922,11 +937,13 @@ enum TooltipSide {
 }
 
 /// Carré 2×2 de boutons du bandeau, sur un fond translucide (voir doc de module, refonte
-/// 2026-09-08) : "+"/"−" en haut (INERTES, `Sense::hover()`), "Détails"/"Options" en dessous
-/// (CLIQUABLES, `Sense::click()` — déplacés depuis `combat::bottom_toolbar`), tous peints par
-/// `control_button` — même fond que `bottom_toolbar` utilisait déjà ([`PANEL_BACKDROP_FILL`]),
-/// marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET entre
-/// les deux colonnes/lignes.
+/// 2026-09-08) : "−" reste INERTE (`Sense::hover()` de fait, voir sa doc), les trois autres sont
+/// CLIQUABLES (`Sense::click()`) — "Détails"/"Options" depuis leur déplacement depuis `combat::
+/// bottom_toolbar`, "+" depuis le 2026-09-13 (il ouvrait déjà la modale Options sur l'onglet
+/// « Suivi », voir [`ControlRowClicks::add`], sans que son clic ne soit jamais lu). Tous peints
+/// par `control_button` — même fond que `bottom_toolbar` utilisait déjà
+/// ([`PANEL_BACKDROP_FILL`]), marge symétrique de `CONTROL_BUTTON_GAP` sur les quatre côtés ET
+/// entre les deux colonnes/lignes.
 ///
 /// Disposition (donnée explicitement par l'utilisateur, voir doc de module) :
 /// ```text
@@ -950,7 +967,7 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
         .rect_filled(row_rect, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
 
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
-    control_button(
+    let add_response = control_button(
         ui,
         add_top_left,
         DsIcon::Plus,
@@ -959,6 +976,13 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
         true,
         TooltipSide::Left,
     );
+    // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
+    // bouton ouvrait la modale Options sur l'onglet « Suivi », son seul rôle possible, sans que
+    // personne ne lise jamais son clic. `enabled` valait déjà `true` (voir la doc de
+    // `control_button`, qui distingue « inerte » de « désactivé » : c'est l'appelant qui ignorait
+    // le clic, pas le `Sense` du bouton qui l'empêchait), ce qui a laissé le défaut invisible
+    // jusqu'au retour utilisateur.
+    let add = add_response.clicked();
 
     // "−" à DROITE de "+" (pas en dessous, contrairement à l'ancienne disposition 1×2 — voir doc de
     // module) : désactivé tant que `watchlist_empty`, infobulle à DROITE (colonne droite).
@@ -1011,16 +1035,21 @@ fn control_button_row(ui: &mut egui::Ui, watchlist_empty: bool) -> ControlRowCli
         TooltipSide::Right,
     );
     ControlRowClicks {
+        add,
         options: options_response.clicked(),
         details,
     }
 }
 
-/// Ce que la rangée de contrôles a produit CETTE frame. Deux booléens plutôt qu'un, depuis que
-/// "Détails" remonte lui aussi son clic au lieu d'ouvrir le navigateur lui-même.
+/// Ce que la rangée de contrôles a produit CETTE frame. Trois booléens plutôt qu'un, depuis que
+/// "Détails" et "+" remontent eux aussi leur clic au lieu d'agir directement (navigateur pour
+/// l'un, rien du tout pour l'autre jusqu'au 2026-09-13).
 #[derive(Debug, Clone, Copy, Default)]
 struct ControlRowClicks {
-    /// Le bouton "Options" vient d'être cliqué.
+    /// Le bouton "+" vient d'être cliqué — l'hôte ouvre la modale Options sur l'onglet « Suivi ».
+    add: bool,
+    /// Le bouton "Options" vient d'être cliqué — l'hôte ouvre la modale Options sur l'onglet
+    /// « Paramètres ».
     options: bool,
     /// Le bouton "Détails" vient d'être cliqué — l'hôte ouvre la web app.
     details: bool,
@@ -1052,13 +1081,14 @@ struct ControlRowClicks {
 /// `Response` ; le panneau décide où poser l'infobulle.
 ///
 /// Le paramètre `sense` disparaît en revanche : le composant sait qu'un bouton actif se clique et
-/// qu'un bouton désactivé ne réagit qu'au survol. « + » et « − » restent INERTES (voir doc de
-/// module) — c'est leur appelant qui ignore leur clic, pas leur `Sense` qui l'empêche. Cela ne
-/// change rien à l'apparence : depuis le correctif du 2026-09-08, la règle « un appui retire le
-/// survol » est écrite `response.hovered() && !pointer.any_down()`, identique pour les deux
+/// qu'un bouton désactivé ne réagit qu'au survol. Seul « − » reste INERTE (voir doc de module) —
+/// c'est son appelant qui ignore son clic, pas son `Sense` qui l'empêche ; « + » ne l'est plus
+/// depuis le 2026-09-13. Cela ne change rien à l'apparence : depuis le correctif du 2026-09-08, la
+/// règle « un appui retire le survol » est écrite `response.hovered() && !pointer.any_down()`,
+/// identique pour les deux
 /// `Sense`.
 ///
-/// Curseur "main" au survol même pour "+"/"−" malgré leur inertie (retour utilisateur explicite
+/// Curseur "main" au survol même pour "−" malgré son inertie (retour utilisateur explicite
 /// 2026-09-06) : porté par le composant, comme le curseur par défaut d'un bouton désactivé.
 /// Renvoie la `Response` : le clic (pour "Détails"/"Options") est géré par l'appelant
 /// (`control_button_row`), qui seul connaît l'action associée à chaque bouton.

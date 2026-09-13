@@ -201,9 +201,15 @@ pub struct RenderOutcome {
     /// Voir la doc historique de `build_ui` : fermeture du toast de suivi (clic sur la carte ou sa
     /// croix, `panels::watchlist::toast_card`).
     pub close_toast: bool,
+    /// `true` UNIQUEMENT à la frame où le bouton "+" du carré de contrôle
+    /// (`panels::watchlist::control_button_row`) vient d'être cliqué — `kind == Watchlist`
+    /// seulement. L'appelant ouvre la modale Options sur l'onglet « Suivi » — voir
+    /// `panels::watchlist::WatchlistOutcome::open_watchlist`.
+    pub open_watchlist: bool,
     /// `true` UNIQUEMENT à la frame où le bouton "Options" du carré de contrôle
     /// (`panels::watchlist::control_button_row`) vient d'être cliqué — `kind == Watchlist`
-    /// seulement, jamais émis par Combat/Options eux-mêmes.
+    /// seulement, jamais émis par Combat/Options eux-mêmes. L'appelant ouvre la modale Options sur
+    /// l'onglet « Paramètres ».
     pub open_options: bool,
     /// Action déclenchée CETTE frame par la modale Options elle-même (`kind == Options`
     /// seulement) — voir `panels::options_modal::OptionsModalAction`.
@@ -518,6 +524,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         now,
                     );
                     outcome.close_toast = watchlist_outcome.close_toast;
+                    outcome.open_watchlist = watchlist_outcome.open_watchlist;
                     outcome.open_options = watchlist_outcome.open_options;
                     if watchlist_outcome.open_web_app {
                         outcome.open_url = Some(overlay_sync::client::base_url().to_string());

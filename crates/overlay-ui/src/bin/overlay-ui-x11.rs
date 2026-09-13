@@ -720,8 +720,10 @@ mod linux_main {
             enum PostRedraw {
                 None,
                 /// Fenêtre de jeu **depuis laquelle** la modale est demandée — son XID et son
-                /// rectangle. Voir `App::open_options_modal`.
-                OpenOptions(u32, GameRect),
+                /// rectangle. Voir `App::open_options_modal`. Le troisième champ est l'onglet à
+                /// ouvrir — "+" demande « Suivi », "Options" demande « Paramètres » (voir
+                /// `render_content::RenderOutcome::open_watchlist`/`open_options`).
+                OpenOptions(u32, GameRect, options_modal::OptionsTab),
                 CloseOptions,
                 BrowseOptions,
                 ValidateOptions(String),
@@ -856,8 +858,19 @@ mod linux_main {
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
                     }
+                    if outcome.open_watchlist {
+                        post_redraw = PostRedraw::OpenOptions(
+                            this_game_window,
+                            this_game_rect,
+                            options_modal::OptionsTab::Suivi,
+                        );
+                    }
                     if outcome.open_options {
-                        post_redraw = PostRedraw::OpenOptions(this_game_window, this_game_rect);
+                        post_redraw = PostRedraw::OpenOptions(
+                            this_game_window,
+                            this_game_rect,
+                            options_modal::OptionsTab::Parametres,
+                        );
                     }
                     // L'ouverture de page est faite ICI, par l'hôte, jamais par le panneau qui l'a
                     // demandée : voir `RenderOutcome::open_url`. `open::that` est best-effort, comme
@@ -895,11 +908,9 @@ mod linux_main {
 
             match post_redraw {
                 PostRedraw::None => {}
-                PostRedraw::OpenOptions(window, rect) => self.open_options_modal(
-                    event_loop,
-                    Some((window, rect)),
-                    options_modal::OptionsTab::Parametres,
-                ),
+                PostRedraw::OpenOptions(window, rect, tab) => {
+                    self.open_options_modal(event_loop, Some((window, rect)), tab)
+                }
                 PostRedraw::CloseOptions => {
                     self.windows.remove(&id);
                     tracing::info!("[options] modale fermée (Annuler).");
@@ -926,7 +937,13 @@ mod linux_main {
                     event_loop.exit();
                 } else if event.id == self.options_hotkey_id {
                     tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
-                    self.open_options_modal(event_loop, None, options_modal::OptionsTab::default());
+                    // Même destination que le bouton "Options" qu'il double — voir la doc de
+                    // `PostRedraw::OpenOptions` (2026-09-13).
+                    self.open_options_modal(
+                        event_loop,
+                        None,
+                        options_modal::OptionsTab::Parametres,
+                    );
                 }
             }
 

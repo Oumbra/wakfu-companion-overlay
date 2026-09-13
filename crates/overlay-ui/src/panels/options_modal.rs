@@ -137,15 +137,17 @@ const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 ///
 /// **« Suivi » ouvre le menu**, avant « Alertes » : c'est l'écran qu'on vient chercher le plus
 /// souvent — composer ce qu'on suit se refait à chaque session de jeu, régler ses alertes une fois
-/// pour toutes. L'ouverture suit l'ordre du menu (voir [`OptionsTab::default`]), elle change donc
-/// avec lui.
+/// pour toutes. L'ouverture suit l'ordre du menu (voir [`OptionsTab::default`]).
 ///
-/// **Exception, depuis le 2026-09-13** : le bouton « Options » du bandeau de suivi in-game
-/// (`panels::watchlist::control_button_row`) ouvre directement sur « Paramètres », pas sur ce
-/// défaut — ce bandeau porte déjà son propre accès à la composition de la liste suivie, le bouton
-/// « Options » y sert donc à autre chose : le chemin de `wakfu.log`. Voir
-/// `App::open_options_modal` (`main.rs`/`bin/overlay-ui-x11.rs`), qui reçoit l'onglet initial en
-/// paramètre plutôt que de s'en remettre systématiquement à ce défaut.
+/// **Deux boutons du bandeau de suivi in-game ouvrent CETTE fenêtre, chacun sur un onglet
+/// différent** (`panels::watchlist::control_button_row`, refonte 2026-09-13) : « + » sur « Suivi »
+/// (l'écran où il mène), « Options » sur « Paramètres » (ce bandeau porte déjà son propre accès à
+/// la composition de la liste suivie, « Options » y sert donc à autre chose : le chemin de
+/// `wakfu.log`). Chacun a un raccourci global qui le double (`Ctrl+Shift+A`/`Ctrl+Shift+O`) et doit
+/// mener au MÊME endroit — l'un et l'autre passent l'onglet à `App::open_options_modal`
+/// (`main.rs`/`bin/overlay-ui-x11.rs`) explicitement, sans jamais s'en remettre à
+/// [`OptionsTab::default`] : un bouton et son raccourci qui atterriraient sur deux onglets
+/// différents serait le bug exact corrigé ce jour-là (retour utilisateur explicite).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsTab {
     /// La liste des objets et monstres suivis — ce qu'on ajoute, en quel mode, ce qu'on retire.
