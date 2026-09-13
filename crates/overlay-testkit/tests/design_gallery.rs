@@ -904,6 +904,39 @@ fn gallery(ui: &mut egui::Ui) {
                 ui.add_space(8.0);
             }
         });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            // **Le second ton**, pour une sélection qui va supprimer : même anneau, même case, même
+            // retrait — seule la couleur change. La planche `examples/item-slot-selection.rs` les
+            // met l'un sous l'autre pour les comparer ; ici on vérifie surtout que le ton ne touche
+            // à rien d'autre.
+            for (frame, selection, nom) in [
+                (
+                    SlotFrame::Rarity(ItemRarity::Legendary),
+                    Some(false),
+                    "à retirer",
+                ),
+                (
+                    SlotFrame::Rarity(ItemRarity::Legendary),
+                    Some(true),
+                    "objet retenu",
+                ),
+                (SlotFrame::Plain, Some(true), "monstre retenu"),
+            ] {
+                ui.vertical(|ui| {
+                    ui.add(
+                        design::item_slot()
+                            .frame(frame)
+                            .icon(faux_icone)
+                            .selection(selection)
+                            .selection_tone(design::SelectionTone::Danger)
+                            .log_name(format!("galerie.slot-danger-{nom}")),
+                    );
+                    ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+                });
+                ui.add_space(8.0);
+            }
+        });
     }
 
     heading(

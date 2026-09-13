@@ -61,7 +61,7 @@ pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
 pub use components::item_slot::{
     border_ring as item_slot_border_ring, item_slot, paint_order as item_slot_paint_order,
-    ItemRarity, ItemSlot, SlotCount, SlotFrame, SlotLayer,
+    ItemRarity, ItemSlot, SelectionTone, SlotCount, SlotFrame, SlotLayer,
 };
 pub use components::label::{label, Label};
 pub use components::loader::{loader, Loader, LoaderSize};

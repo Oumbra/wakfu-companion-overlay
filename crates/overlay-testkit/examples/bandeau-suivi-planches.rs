@@ -89,6 +89,13 @@ const TILE_GAP: f32 = 12.0;
 const CONTROL_BUTTON_SIZE: f32 = 24.0;
 /// `panels::watchlist::CONTROL_BUTTON_GAP`.
 const CONTROL_BUTTON_GAP: f32 = 4.0;
+/// **Ton de la sélection du bandeau** — elle ne sert qu'à retirer, donc le rouge.
+///
+/// `SelectionTone` est né de cette maquette (2026-09-13) : l'onglet Suivi et ce bandeau
+/// sélectionnent tous deux pour supprimer, mais le composant doit savoir faire les deux — une
+/// sélection qui servirait à autre chose garde l'or.
+const TON: design::SelectionTone = design::SelectionTone::Danger;
+
 /// `panels::watchlist::CONTROL_TOOLTIP_RESERVE` — la place gardée à gauche du carré de contrôle
 /// pour que les infobulles de sa colonne gauche s'y ouvrent.
 const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
@@ -407,10 +414,7 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
             couche.painter().rect_stroke(
                 anneau,
                 rayon,
-                egui::Stroke::new(
-                    design::tokens::ITEM_SLOT_PLAIN_STROKE,
-                    design::tokens::ITEM_SLOT_SELECTED_BORDER,
-                ),
+                egui::Stroke::new(design::tokens::ITEM_SLOT_PLAIN_STROKE, TON.border()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -421,6 +425,7 @@ fn superpose_selection(ui: &mut egui::Ui, total: usize, selected: &[usize]) {
                 Vec2::splat(design::tokens::CHECKBOX_SIZE),
             ),
             cochee,
+            TON.checkbox_tint(cochee),
         );
     }
 

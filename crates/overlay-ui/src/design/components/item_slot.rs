@@ -132,6 +132,49 @@ pub enum SlotLayer {
     Icon,
 }
 
+/// **Ton d'une sélection** — ce que le fait d'être retenu annonce.
+///
+/// Demande utilisateur du 2026-09-13 : une sélection multiple ne sert pas toujours à supprimer, et
+/// les deux ne doivent pas se ressembler. Rien d'autre ne change entre les deux — même anneau, même
+/// case, même retrait : **seule la couleur**.
+///
+/// Le vocabulaire est celui des boutons (`ButtonVariant::Danger`), pas un nom inventé : dans cette
+/// interface, le rouge du bouton « Annuler » est la couleur d'une action qui détruit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectionTone {
+    /// Retenu pour une action quelconque — l'or, la couleur d'état de l'interface.
+    #[default]
+    Neutral,
+    /// Retenu pour être supprimé — le rouge mesuré du jeu.
+    Danger,
+}
+
+impl SelectionTone {
+    /// Couleur du liseré.
+    pub fn border(self) -> egui::Color32 {
+        match self {
+            SelectionTone::Neutral => tokens::ITEM_SLOT_SELECTED_BORDER,
+            SelectionTone::Danger => tokens::ITEM_SLOT_SELECTED_BORDER_DANGER,
+        }
+    }
+
+    /// Teinte de la case à cocher — **appliquée seulement quand elle est cochée**.
+    ///
+    /// Une case décochée ne dit rien de l'action : elle annonce un geste possible, pas un objet
+    /// retenu. La teindre en rouge ferait passer pour « à supprimer » ce que l'utilisateur n'a
+    /// justement pas choisi, et le ferait sur les huit tuiles à la fois. Le ton porte donc sur ce
+    /// qui est retenu, jamais sur ce qui ne l'est pas.
+    ///
+    /// Le tint d'egui **multiplie** : sur la case cochée, dont le carré intérieur est blanc, il
+    /// rend exactement la couleur demandée, et assombrit le cadre doré vers la même teinte.
+    pub fn checkbox_tint(self, checked: bool) -> egui::Color32 {
+        match (self, checked) {
+            (SelectionTone::Danger, true) => tokens::ITEM_SLOT_SELECTED_BORDER_DANGER,
+            _ => egui::Color32::WHITE,
+        }
+    }
+}
+
 /// **L'anneau où se peint le liseré d'un emplacement** : son rectangle et son rayon de coin.
 ///
 /// Les textures de rareté ne collent pas leur liseré au bord du carré — elles le posent à
@@ -160,6 +203,7 @@ pub fn item_slot() -> ItemSlot {
         count: None,
         size: tokens::ITEM_SLOT_SIZE,
         selection: None,
+        selection_tone: SelectionTone::Neutral,
         log_name: None,
     }
 }
@@ -171,6 +215,7 @@ pub struct ItemSlot {
     count: Option<SlotCount>,
     size: f32,
     selection: Option<bool>,
+    selection_tone: SelectionTone,
     log_name: Option<String>,
 }
 
@@ -216,6 +261,15 @@ impl ItemSlot {
     /// [`egui::Response`] rendue. Elle est un signe d'état, pas un second contrôle.
     pub fn selection(mut self, selection: Option<bool>) -> Self {
         self.selection = selection;
+        self
+    }
+
+    /// Ton de la sélection — voir [`SelectionTone`]. Par défaut [`SelectionTone::Neutral`], l'or.
+    ///
+    /// Sans effet hors du mode sélection : un emplacement qu'on ne peut pas cocher n'annonce
+    /// aucune action.
+    pub fn selection_tone(mut self, tone: SelectionTone) -> Self {
+        self.selection_tone = tone;
         self
     }
 
@@ -327,10 +381,7 @@ impl Widget for ItemSlot {
                 ui.painter().rect_stroke(
                     anneau,
                     rayon,
-                    egui::Stroke::new(
-                        tokens::ITEM_SLOT_PLAIN_STROKE,
-                        tokens::ITEM_SLOT_SELECTED_BORDER,
-                    ),
+                    egui::Stroke::new(tokens::ITEM_SLOT_PLAIN_STROKE, self.selection_tone.border()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -341,6 +392,7 @@ impl Widget for ItemSlot {
                     Vec2::splat(tokens::CHECKBOX_SIZE),
                 ),
                 checked,
+                self.selection_tone.checkbox_tint(checked),
             );
         }
         response
@@ -448,6 +500,48 @@ mod tests {
         assert_eq!(anneau.left() - carre.left(), 2.0, "marge du liseré à 64 px");
         assert_eq!(carre.right() - anneau.right(), 2.0, "marge symétrique");
         assert_eq!(rayon, 3.0, "rayon du coin du liseré à 64 px");
+    }
+
+    #[test]
+    fn les_deux_tons_ne_different_que_par_la_couleur() {
+        // La règle de la demande, mot pour mot : « exactement les mêmes choses, c'est juste la
+        // couleur qui change ». Un ton qui se mettrait à décider d'une géométrie — un liseré plus
+        // épais pour « insister » sur la suppression — romprait la seule chose que l'utilisateur a
+        // demandé de garder identique.
+        assert_ne!(
+            SelectionTone::Neutral.border(),
+            SelectionTone::Danger.border(),
+            "les deux tons doivent se distinguer"
+        );
+        assert_eq!(
+            SelectionTone::Danger.border(),
+            tokens::INFO_ALERT,
+            "le rouge est celui du bouton « Annuler », pas un rouge choisi à l'œil"
+        );
+    }
+
+    #[test]
+    fn seule_la_case_cochee_prend_le_ton_destructif() {
+        // Une case vide annonce un geste possible, pas un objet retenu : la teindre dirait « ces
+        // huit tuiles vont être supprimées » alors que rien n'a été choisi.
+        assert_eq!(
+            SelectionTone::Danger.checkbox_tint(false),
+            egui::Color32::WHITE,
+            "une case décochée reste neutre, même en mode suppression"
+        );
+        assert_eq!(
+            SelectionTone::Danger.checkbox_tint(true),
+            tokens::ITEM_SLOT_SELECTED_BORDER_DANGER,
+            "une case cochée porte le ton, comme le liseré"
+        );
+        // Le ton neutre ne teinte jamais : le tint multiplie, et l'or de la case est déjà dans
+        // l'asset.
+        for coche in [false, true] {
+            assert_eq!(
+                SelectionTone::Neutral.checkbox_tint(coche),
+                egui::Color32::WHITE
+            );
+        }
     }
 
     #[test]

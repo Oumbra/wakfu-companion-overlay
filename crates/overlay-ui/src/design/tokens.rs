@@ -1296,6 +1296,14 @@ pub const ITEM_SLOT_BORDER_CORNER_RATIO: f32 = 6.0 / 128.0;
 /// interface.
 pub const ITEM_SLOT_SELECTED_BORDER: Color32 = TEXT_GOLD;
 
+/// Liseré d'un emplacement sélectionné **en vue d'une suppression** — le rouge du bouton
+/// « Annuler », seul rouge que le design system ait mesuré (voir [`INFO_ALERT`]).
+///
+/// Demande utilisateur du 2026-09-13 : une sélection multiple n'est pas toujours destructive, et
+/// les deux ne doivent pas se ressembler. L'or dit « retenu », le rouge dit « retenu pour être
+/// détruit » — même géométrie, même case, seule la couleur change.
+pub const ITEM_SLOT_SELECTED_BORDER_DANGER: Color32 = INFO_ALERT;
+
 /// Retrait de la case à cocher depuis le coin d'un emplacement en mode sélection — 7 px.
 ///
 /// Le liseré occupe les pixels 2 à 4 (voir [`ITEM_SLOT_BORDER_INSET_RATIO`]) : 4 collait la case
