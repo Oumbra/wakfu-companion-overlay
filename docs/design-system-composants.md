@@ -875,10 +875,18 @@ rayon (2), c'est le **panneau** qui contient les sections.
 
 Ce qu'il fait pour son contenu, et qu'aucun appelant n'a donc plus à faire : les rembourrages, la
 réserve de barre de défilement à droite (26 px, **toujours posée**, comme le jeu), l'écrêtage — élargi
-à gauche du retrait des titres, sans quoi un titre de section perd sa première lettre —, et la mise à
-zéro de l'espacement implicite d'egui.
+à gauche du retrait des titres, sans quoi un titre de section perd sa première lettre, **et à droite
+jusqu'au bord du panneau**, sans quoi la poignée de défilement est rognée —, et la mise à zéro de
+l'espacement implicite d'egui.
 
-**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+**Correctif du 2026-09-13** : l'écrêtage était calé sur `inner`, qui exclut la réserve de barre ; comme
+`PanelZones::scroll_area` intersecte son propre clip avec celui du panneau, la poignée peinte dans
+cette réserve n'apparaissait **jamais**, quel que soit le contenu. Personne ne l'avait vu parce
+qu'aucune grille d'Alertes ou de Suivi ne défilait encore — c'est le fil de messages des maquettes
+de l'onglet Chat (`crates/overlay-testkit/examples/chat-mockups.rs`) qui l'a révélé.
+
+**Utilisé en production** : la modale Options, les maquettes de la page Alertes et celles de l'onglet
+Chat.
 
 ---
 
