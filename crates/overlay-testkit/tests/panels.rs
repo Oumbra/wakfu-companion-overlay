@@ -1900,15 +1900,11 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
 /// **Les entrées viennent du moteur**, pas d'une liste écrite à la main : ce sont de vraies
 /// [`overlay_engine::WatchlistEntry`], celles que `GET /api/v1/settings` renvoie. Les icônes, elles,
 /// restent le repli générique — elles viennent du CDN, hors de portée d'un test sans réseau.
-fn capture_onglet_suivi(
-    nom: &str,
-    mode: overlay_ui::panels::suivi_tab::AddMode,
-    select_mode: bool,
-    alt: bool,
-    survol: Option<egui::Pos2>,
-) {
+/// Le jeu d'entrées de toutes les planches et de tous les tests de l'onglet Suivi — **objets et
+/// monstres mêlés, les deux modes côte à côte** : la grille doit rendre lisible d'un coup d'œil ce
+/// qui porte une cible et ce qui n'en porte pas.
+fn entrees_de_suivi() -> Vec<overlay_engine::WatchlistEntry> {
     use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode};
-    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
 
     fn entree(name: &str, kind: WatchlistKind, mode: WatchlistMode, target: i64) -> WatchlistEntry {
         WatchlistEntry {
@@ -1921,9 +1917,7 @@ fn capture_onglet_suivi(
         }
     }
 
-    // Objets et monstres mêlés, les deux modes côte à côte : la grille doit rendre lisible d'un
-    // coup d'œil ce qui porte une cible et ce qui n'en porte pas.
-    let entries = vec![
+    vec![
         entree(
             "Bois de Frêne",
             WatchlistKind::Item,
@@ -1947,7 +1941,19 @@ fn capture_onglet_suivi(
         ),
         entree("Chafer Élite", WatchlistKind::Enemy, WatchlistMode::Up, 0),
         entree("Minerai de Fer", WatchlistKind::Item, WatchlistMode::Up, 0),
-    ];
+    ]
+}
+
+fn capture_onglet_suivi(
+    nom: &str,
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+    select_mode: bool,
+    alt: bool,
+    survol: Option<egui::Pos2>,
+) {
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    let entries = entrees_de_suivi();
 
     let mut options_state = OptionsModalState {
         suivi: SuiviTabState {
@@ -2121,6 +2127,154 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         false,
         Some(egui::pos2(240.0, 298.0)),
     );
+}
+
+/// **Le geste de réordonnancement, en vol** — la planche qui verrouille ce que l'utilisateur voit
+/// pendant qu'il déplace une tuile : la place d'origine voilée, le fantôme sous le pointeur, et la
+/// barre d'insertion or sur la tuile visée.
+///
+/// Rien de tout cela n'est fourni par la plateforme, contrairement au web où le navigateur peint
+/// lui-même un fantôme natif : sans ces trois marques, le geste serait invisible. La capture est le
+/// seul garde-fou possible — un test d'ordre (voir
+/// [`options_suivi_le_glisser_deposer_reordonne_comme_le_web`]) prouve le résultat, pas le retour
+/// visuel qui le rend praticable.
+#[test]
+fn options_suivi_deplacement_en_vol() {
+    capture_suivi_deplacement("options_suivi_deplacement");
+}
+
+fn capture_suivi_deplacement(nom: &str) {
+    let (mut harness, _etat) = harnais_suivi(overlay_ui::panels::suivi_tab::AddMode::Up);
+    harness.run();
+
+    // Première tuile prise près de son coin haut-gauche — pas en son centre : le fantôme se tient
+    // par où on l'a prise, et c'est ce décalage qui laisse voir la tuile visée dessous. Une planche
+    // qui saisirait au centre montrerait un fantôme parfaitement superposé à la destination, donc
+    // ne montrerait justement pas ce que le geste doit rendre lisible.
+    harness.drag_at(TUILE_0_PRISE);
+    harness.run();
+    harness.hover_at(TUILE_2);
+    harness.run();
+    // Une seconde frame : le fantôme et la barre suivent le pointeur de la frame précédente.
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// **Glisser-déposer : l'ordre obtenu est celui du web.**
+///
+/// `reorder` est déjà couvert unitairement (`panels::suivi_tab`) ; ce test-ci prouve l'autre
+/// moitié, celle qu'une fonction pure ne peut pas montrer : que le geste de la souris, sur la vraie
+/// grille et à travers la vraie modale, arrive bien jusqu'à elle avec les bons rangs.
+#[test]
+fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
+    let (mut harness, etat) = harnais_suivi(overlay_ui::panels::suivi_tab::AddMode::Up);
+    harness.run();
+
+    let avant: Vec<String> = etat
+        .borrow()
+        .suivi_draft
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+
+    harness.drag_at(TUILE_0);
+    harness.run();
+    harness.hover_at(TUILE_2);
+    harness.run();
+    harness.drop_at(TUILE_2);
+    harness.run();
+
+    let apres: Vec<String> = etat
+        .borrow()
+        .suivi_draft
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+
+    // Retrait puis réinsertion au rang visé, comme `StatsStoreService.reorderWatchlist` : la
+    // première entrée se pose APRÈS celle qu'elle visait, les deux autres remontent d'un rang.
+    assert_eq!(
+        apres,
+        vec![
+            avant[1].clone(),
+            avant[2].clone(),
+            avant[0].clone(),
+            avant[3].clone(),
+            avant[4].clone(),
+            avant[5].clone(),
+            avant[6].clone(),
+            avant[7].clone(),
+        ],
+        "le glisser-déposer n'a pas réordonné le brouillon comme le web"
+    );
+}
+
+/// Centres des trois premières tuiles de la grille, en mode incrémental (le formulaire n'a alors
+/// qu'une ligne). Relevés sur la planche `options_suivi_incremental` : tuile de 64 px, gouttière de
+/// 12, donc un pas de 76 px.
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 394.0);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 394.0);
+/// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 377.0);
+
+/// Le harnais de l'onglet Suivi, avec son état rendu inspectable — voir [`capture_onglet_suivi`],
+/// dont c'est le même jeu d'entrées. Rendu partagé parce que deux tests ont maintenant besoin de
+/// LIRE le brouillon après coup, pas seulement de le peindre.
+fn harnais_suivi(
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+) -> (
+    Harness<'static>,
+    std::rc::Rc<std::cell::RefCell<OptionsModalState>>,
+) {
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
+        suivi: SuiviTabState {
+            mode,
+            target: 250,
+            ..Default::default()
+        },
+        suivi_draft: Some(entrees_de_suivi()),
+        suivi_availability: SuiviAvailability::Ready,
+        path_input: String::new(),
+        error: None,
+        tab: OptionsTab::Suivi,
+        alerts: Default::default(),
+        alerts_draft: None,
+        alerts_availability: Default::default(),
+        initial: Default::default(),
+        pending_close: false,
+    }));
+
+    let vu = std::rc::Rc::clone(&etat);
+    let harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut vu.borrow_mut(),
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    (harness, etat)
 }
 
 /// **Une tuile suivie dit son nom, et rien d'autre.**
