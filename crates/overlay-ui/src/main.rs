@@ -43,6 +43,7 @@ use global_hotkey::GlobalHotKeyEvent;
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_ui::alert_sound;
+use overlay_ui::chat_command::{self, ChatCommand};
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SyncCommand,
@@ -979,6 +980,42 @@ impl App {
             ">>> Détails ({}) : ouverture du site.",
             self.hotkeys.bindings().label(ShortcutAction::Details)
         );
+    }
+
+    /// `ShortcutAction::InvitePartner` / `ShortcutAction::FollowPartner` : tape `/i "<nom>"` ou
+    /// `/fol "<nom>"` dans le chat de la fenêtre de jeu au premier plan, en visant le personnage de
+    /// l'AUTRE fenêtre — voir `chat_command`, doc de module, pour toute la mécanique et ses limites.
+    ///
+    /// **Un scan frais plutôt que `self.windows`** : `EnumWindows` énumère dans l'ordre de
+    /// PROFONDEUR (la fenêtre la plus récemment au premier plan d'abord), ce dont
+    /// `chat_command::partner_character` se sert pour désigner un partenaire stable au-delà de deux
+    /// clients ; `self.windows` est une `HashMap` d'overlays, sans ordre et à deux entrées par
+    /// fenêtre de jeu (Combat + Suivi). Le scan coûte un `EnumWindows`, déjà fait à chaque tick
+    /// (`sync_windows`) — négligeable pour un geste manuel.
+    fn send_partner_command(&mut self, command: ChatCommand) {
+        let label = self.hotkeys.bindings().label(match command {
+            ChatCommand::Invite => ShortcutAction::InvitePartner,
+            ChatCommand::Follow => ShortcutAction::FollowPartner,
+        });
+        // Clé numérique (`HWND` réduite à son entier) plutôt que la `HWND` elle-même : c'est ce
+        // que `chat_command::partner_character` compare, et cela lui laisse la même forme des deux
+        // côtés (XID `u32` sous X11) — une seule fonction pure, aucun type d'OS dans sa signature.
+        let foreground = unsafe { GetForegroundWindow() }.0 as usize;
+        let windows: Vec<(String, usize)> = self
+            .game_window
+            .scan()
+            .into_iter()
+            .map(|(character, info)| (character, info.hwnd.0 as usize))
+            .collect();
+        match chat_command::partner_character(&windows, &foreground) {
+            Ok(partner) => {
+                tracing::info!(">>> {} ({label}) : {partner}", command.label());
+                chat_command::send(command, partner);
+            }
+            // Jamais une erreur remontée à l'utilisateur : il n'y a rien à réparer, seulement un
+            // contexte où le geste n'a pas de sens (voir `PartnerError`).
+            Err(err) => tracing::info!(">>> {} ({label}) : {}", command.label(), err.message()),
+        }
     }
 
     /// `ShortcutAction::CombatSide` : bascule Alliés/Ennemis (`CombatSide::toggled`) de CHAQUE fenêtre Combat
@@ -2049,6 +2086,12 @@ impl ApplicationHandler<UserEvent> for App {
                     self.request_watchlist_redraw();
                 }
                 ShortcutAction::CombatSide => self.toggle_combat_side(),
+                ShortcutAction::InvitePartner => {
+                    self.send_partner_command(ChatCommand::Invite);
+                }
+                ShortcutAction::FollowPartner => {
+                    self.send_partner_command(ChatCommand::Follow);
+                }
             }
         }
         // Résultat du dialogue de fichier natif (`App::start_file_dialog`), le cas échéant — sondé
