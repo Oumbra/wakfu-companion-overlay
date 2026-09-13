@@ -19,7 +19,12 @@
 #   bash scripts/ci-local.sh --lint     # format + clippy seulement (rapide)
 #
 # Le script ne s'arrête PAS à la première erreur : il déroule tout et récapitule à la fin, pour
-# corriger l'ensemble en une passe plutôt qu'un aller-retour par étape.
+# corriger l'ensemble en une passe plutôt qu'un aller-retour par étape. `--no-fail-fast` étend ce
+# principe À L'INTÉRIEUR d'une étape : sans lui, `cargo test` s'arrête au premier BINAIRE de test en
+# échec et n'exécute pas les suivants — c'est ainsi que deux captures périmées de
+# `tests/design_gallery.rs` (qui passe avant `tests/panels.rs` dans l'ordre alphabétique) en ont
+# caché vingt-et-une de `tests/panels.rs` pendant une semaine, sans qu'aucun journal n'en montre la
+# moindre ligne.
 set -uo pipefail
 # Chemin ABSOLU capturé AVANT le `cd` : après lui, `dirname "$0"` ne désigne plus le dossier des
 # scripts (`bash ci-local.sh` depuis `scripts/` donnerait `.`, c'est-à-dire la racine du dépôt).
@@ -78,14 +83,14 @@ fi
 step "clippy — xtask"                 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 
 if [ "$LINT_ONLY" -eq 0 ]; then
-  step "test — crates métier"         cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
+  step "test — crates métier"         cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
   if [ "$PLATFORM" = linux ]; then
-    step "test — overlay-ui (lib)"    cargo test -p overlay-ui --lib
+    step "test — overlay-ui (lib)"    cargo test --no-fail-fast -p overlay-ui --lib
     step "build — overlay-ui-x11"     cargo build -p overlay-ui --bin overlay-ui-x11
     # Miroir du `continue-on-error: true` du CI (§17.3 du plan : snapshots pas encore promus en
     # gate) — exécuté pour information, jamais compté comme un échec.
     printf '\n\033[1m▶ test — overlay-testkit (informatif, non bloquant)\033[0m\n'
-    cargo test -p overlay-testkit || printf '\033[33m! snapshots en écart — informatif, non bloquant (§17.3)\033[0m\n'
+    cargo test --no-fail-fast -p overlay-testkit || printf '\033[33m! snapshots en écart — informatif, non bloquant (§17.3)\033[0m\n'
   else
     step "build — workspace (Windows)" cargo build --workspace
   fi
