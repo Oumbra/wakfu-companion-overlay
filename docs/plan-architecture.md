@@ -412,11 +412,11 @@ symétrique ne pointant nulle part.
 Comportement calqué sur le jeu, mesuré à 30 i/s : flèche d'egui (`CursorIcon::Default`) → bitmap
 de repos, fixe ; main (`PointingHand`, tout ce qui se clique) → clignotement éclair 533 ms / repos
 533 ms, l'éclair en premier dès l'entrée en survol, bascule franche sans fondu ; croix fléchée
-(tout curseur de déplacement ou de saisie : `Move`, posé par les tuiles de l'onglet Suivi de la
-fenêtre Options, `panels::suivi_tab` ; `Grab`/`Grabbing`, qu'egui pose lui-même au survol d'un
-glissable et tant qu'une charge est en vol) → bitmap de déplacement, **fixe** (le jeu
-ne le fait pas clignoter, et n'a qu'une seule croix pour tous ces gestes) ; tout autre curseur
-(`Text`, `ResizeHorizontal`…) → curseur système inchangé.
+(tout curseur de déplacement ou de saisie : `Move`, posé par les tuiles de suivi — dans la fenêtre
+Options comme dans le bandeau in-game, voir `panels::tile_reorder` ; `Grab`/`Grabbing`, qu'egui pose
+lui-même au survol d'un glissable et tant qu'une charge est en vol) → bitmap de déplacement,
+**fixe** (le jeu ne le fait pas clignoter, et n'a qu'une seule croix pour tous ces gestes) ; tout
+autre curseur (`Text`, `ResizeHorizontal`…) → curseur système inchangé.
 
 Mécanique : egui 0.36 porte nativement un curseur bitmap (`Context::set_cursor_image` →
 `PlatformOutput::cursor_image`), qu'`egui-winit` applique en `winit::window::CustomCursor` à
