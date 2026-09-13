@@ -1912,10 +1912,7 @@ fn options_onglet_raccourcis() {
         shortcuts,
         raccourcis: RaccourcisTabState {
             capturing: Some(ShortcutAction::Quit),
-            error: Some(
-                "Combinaison refusée : ajoutez Ctrl, Alt ou Shift à une touche prise en charge."
-                    .to_string(),
-            ),
+            error: Some(panels::raccourcis_tab::MESSAGE_COMBINAISON_REFUSEE.to_string()),
             ..Default::default()
         },
         ..Default::default()
@@ -1948,6 +1945,52 @@ fn options_onglet_raccourcis() {
         });
     harness.run();
     harness.snapshot("options_raccourcis");
+}
+
+/// La section « Multicompte » (2026-09-13, §9.1 sexies du plan) est la DERNIÈRE de la liste : elle
+/// est hors écran sur la capture ci-dessus, qui montre le haut de l'onglet. Le champ « Rechercher »
+/// la ramène — et c'est aussi la seule capture qui montre des combinaisons par défaut SANS
+/// modificateur (F1/F2), l'exception que ces deux raccourcis ont introduite.
+#[test]
+fn options_raccourcis_section_multicompte() {
+    use overlay_ui::panels::raccourcis_tab::RaccourcisTabState;
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Raccourcis,
+        path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+        shortcuts: ShortcutBindings::default(),
+        raccourcis: RaccourcisTabState {
+            search: "multicompte".to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_raccourcis_multicompte");
 }
 
 /// **La garde de fermeture** — Échap et « Annuler » demandent confirmation tant que des

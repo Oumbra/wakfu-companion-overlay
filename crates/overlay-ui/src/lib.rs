@@ -21,6 +21,13 @@
 //! `logging` (initialisation `tracing`, gestionnaire Ctrl+C) est également générique — exposé pour
 //! la même raison.
 //!
+//! `chat_command` (2026-09-13, raccourcis multicompte — §9.1 sexies du plan) : frappe d'une
+//! commande de chat du jeu (`/i`, `/fol`) dans la fenêtre au premier plan. Exposé pour la même
+//! raison que `game_window`, dont il est le pendant « écriture » : les DEUX binaires s'en servent,
+//! chacun avec son `imp` (`SendInput` sous Windows, XTEST via `overlay_platform::linux::keyboard`
+//! sous Linux), et la sélection du personnage visé (`chat_command::partner_character`) est une
+//! fonction pure testée ici plutôt que dupliquée dans chaque binaire.
+//!
 //! `config` (2026-09-08, modale Options — §9 du plan) : persistance du chemin de `wakfu.log`
 //! choisi par l'utilisateur, même raison que le paragraphe ci-dessus (aucun appel Windows,
 //! `resolve_log_path`/`save` appelés à l'identique par `main.rs` et `bin/overlay-ui-x11.rs`).
@@ -30,6 +37,7 @@
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
 
 pub mod alert_sound;
+pub mod chat_command;
 pub mod config;
 pub mod cursor;
 pub mod design;

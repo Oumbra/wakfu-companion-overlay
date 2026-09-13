@@ -36,9 +36,10 @@
 //! Clic sur une case → [`RaccourcisTabState::capturing`], et la prochaine frappe est capturée
 //! (`Shortcut::from_egui`). Deux garde-fous portés par `crate::shortcuts`, rappelés ici parce
 //! qu'ils décident de ce que l'écran affiche : une combinaison **sans modificateur** est refusée
-//! (ces raccourcis sont globaux — une touche nue serait volée à Wakfu lui-même), et un **doublon**
-//! est signalé immédiatement plutôt qu'au moment de valider (l'OS refuserait le second
-//! enregistrement).
+//! sauf sur une **touche de fonction** (ces raccourcis sont globaux — une lettre nue serait volée à
+//! Wakfu lui-même, une touche de fonction ne s'écrit pas ; c'est l'exception qui porte les
+//! raccourcis multicompte, F1/F2 par défaut), et un **doublon** est signalé immédiatement plutôt
+//! qu'au moment de valider (l'OS refuserait le second enregistrement).
 //!
 //! **Les raccourcis globaux sont suspendus tant que la fenêtre Options est ouverte**
 //! (`main.rs::open_options_modal`) : sans cela, l'OS avalerait la frappe que l'utilisateur essaie
@@ -97,7 +98,7 @@ pub struct RaccourcisTabState {
     /// L'action dont la case attend une frappe, le cas échéant. Un second clic sur la même case,
     /// Échap, ou un changement d'onglet l'abandonne.
     pub capturing: Option<ShortcutAction>,
-    /// Message de la dernière frappe refusée (sans modificateur, ou touche sans équivalent
+    /// Message de la dernière frappe refusée (touche nue autre qu'une touche de fonction, ou sans équivalent
     /// système) ou du dernier doublon détecté — `None` quand tout va bien.
     pub error: Option<String>,
 }
@@ -129,9 +130,9 @@ pub fn show(
     ui.add(design::heading("Raccourcis").trailing_gap(SECTION_GAP * 0.5));
     paragraph(
         ui,
-        "Cliquez sur une combinaison pour la changer, puis tapez la nouvelle. Au moins Ctrl, Alt \
-         ou Shift est requis : ces raccourcis fonctionnent même quand le jeu a le focus, une \
-         touche seule serait prise à Wakfu.",
+        "Cliquez sur une combinaison pour la changer, puis tapez la nouvelle. Ces raccourcis \
+         fonctionnent même quand le jeu a le focus : Ctrl, Alt ou Shift est donc requis, sauf sur \
+         une touche de fonction (F1 à F12) — toute autre touche seule serait prise à Wakfu.",
     );
     ui.add_space(SECTION_GAP);
 
@@ -152,7 +153,7 @@ pub fn show(
         ui.add_space(SECTION_GAP);
     }
 
-    // **Les groupes défilent, le champ de recherche et le message restent.** Neuf raccourcis en
+    // **Les groupes défilent, le champ de recherche et le message restent.** Dix raccourcis en
     // quatre groupes dépassent la hauteur du panneau ; filtrer ou lire un refus depuis le bas de
     // la liste exigerait sinon de remonter.
     let needle = state.search.trim().to_lowercase();
@@ -196,7 +197,13 @@ pub fn show(
 /// l'onglet « Paramètres ») — un groupe vide ne s'affiche pas, mais le laisser ici ferait croire
 /// qu'il reste quelque chose à y ranger. Le test `toutes_les_sections_sont_listees` garantit
 /// l'inverse : aucune action ne peut se retrouver sans groupe.
-const SECTIONS: [&str; 3] = ["Overlay", "Suivi", "Combat"];
+const SECTIONS: [&str; 4] = ["Overlay", "Suivi", "Combat", "Multicompte"];
+
+/// Message affiché quand la frappe capturée n'est pas assignable — `pub` pour que le harnais de
+/// capture (`overlay-testkit`, `tests/panels.rs::options_raccourcis`) le REPRENNE plutôt que de le
+/// recopier : une capture qui montre un message que le code n'affiche plus ne vérifie rien.
+pub const MESSAGE_COMBINAISON_REFUSEE: &str =
+    "Combinaison refusée : ajoutez Ctrl, Alt ou Shift, ou utilisez une touche de fonction seule (F1 à F12).";
 
 fn paragraph(ui: &mut egui::Ui, text: &str) {
     // Un paragraphe, pas un `design::info_text` : celui-ci porte une pastille et un fond, réservés
@@ -398,10 +405,7 @@ fn capture_pending_key(
                 .map(|(first, second)| conflict_message(first, second, shortcut));
         }
         None => {
-            state.error = Some(
-                "Combinaison refusée : ajoutez Ctrl, Alt ou Shift à une touche prise en charge."
-                    .to_string(),
-            );
+            state.error = Some(MESSAGE_COMBINAISON_REFUSEE.to_string());
         }
     }
 }
