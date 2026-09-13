@@ -12,6 +12,14 @@
 # second binaire du même paquet, `overlay-ui-x11` (§17.2 du plan) — build/clippy/test le ciblent
 # donc explicitement en plus de `--lib`.
 #
+# `--no-fail-fast` sur CHAQUE `cargo test` : sans lui, cargo s'arrête au premier BINAIRE de test en
+# échec et n'exécute pas les suivants. Ce n'est pas une subtilité théorique — `tests/design_gallery.rs`
+# passe avant `tests/panels.rs` dans l'ordre alphabétique, et deux captures périmées dans le premier
+# ont caché VINGT-ET-UNE captures périmées du second pendant une semaine : le journal du CI n'a
+# jamais montré la moindre ligne de `panels.rs`. Un seul run doit dire TOUT ce qui est cassé, sinon
+# chaque correctif ne révèle que le prochain échec, un aller-retour de CI à la fois. Même principe
+# que `scripts/ci-local.sh`, qui déroule toutes ses étapes avant de récapituler.
+#
 # ⚠ SOURCE DE VÉRITÉ PARTAGÉE : la liste des vérifications ci-dessous est dupliquée dans
 # `scripts/ci-local.sh`, qui les rejoue EN LOCAL avant un push (et que le hook `pre-push` de
 # `.githooks/` lance en mode `--lint`). Toute étape ajoutée/retirée ici doit l'être là-bas aussi —
@@ -102,12 +110,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
-      - run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
-      - run: cargo test -p overlay-ui --lib
+      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
+      - run: cargo test --no-fail-fast -p overlay-ui --lib
       - name: overlay-ui-x11 — compile (pas de tests unitaires, voir bin/overlay-ui-x11.rs)
         run: cargo build -p overlay-ui --bin overlay-ui-x11
       - name: "overlay-testkit — snapshots offscreen (informatif, voir §17.3 : pas encore promu en gate)"
-        run: cargo test -p overlay-testkit
+        run: cargo test --no-fail-fast -p overlay-testkit
         continue-on-error: true
 
   build-windows:
@@ -122,7 +130,7 @@ jobs:
           workspaces: . -> target
       - run: cargo build --workspace
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
-        run: cargo test -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
+        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
 
   mem-budget:
     runs-on: ubuntu-latest
