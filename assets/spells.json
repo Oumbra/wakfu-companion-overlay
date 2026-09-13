@@ -26,6 +26,54 @@
         "es": "Hueso con Tuétano",
         "pt": "Tutano",
         "picture": "https://vertylo.github.io/wakassets/spells/6327.png"
+      },
+      {
+        "id": 4630,
+        "fr": "Ancrage",
+        "en": "Anchor",
+        "es": "Anclaje",
+        "pt": "Ancoragem",
+        "picture": "https://vertylo.github.io/wakassets/spells/4630.png"
+      },
+      {
+        "id": 4634,
+        "fr": "Prévention",
+        "en": "Prevention",
+        "es": "Prevención",
+        "pt": "Prevenção",
+        "picture": "https://vertylo.github.io/wakassets/spells/4634.png"
+      },
+      {
+        "id": 4632,
+        "fr": "Méditation",
+        "en": "Meditation",
+        "es": "La meditación",
+        "pt": "Meditação",
+        "picture": "https://vertylo.github.io/wakassets/spells/4632.png"
+      },
+      {
+        "id": 4635,
+        "fr": "Brasier",
+        "en": "Inferno",
+        "es": "Hoguera",
+        "pt": "Braseiro",
+        "picture": "https://vertylo.github.io/wakassets/spells/4635.png"
+      },
+      {
+        "id": 4633,
+        "fr": "Engouement",
+        "en": "Enthusiasm",
+        "es": "Entusiasmo",
+        "pt": "Entusiasmo",
+        "picture": "https://vertylo.github.io/wakassets/spells/4633.png"
+      },
+      {
+        "id": 4631,
+        "fr": "Libération",
+        "en": "Release",
+        "es": "Liberación",
+        "pt": "Liberação",
+        "picture": "https://vertylo.github.io/wakassets/spells/4631.png"
       }
     ]
   },
