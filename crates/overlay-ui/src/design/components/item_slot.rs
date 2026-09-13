@@ -99,6 +99,14 @@ pub enum SlotCount {
     /// au-dessus d'elle. **Inversion demandée explicitement** le 2026-09-06 : c'est la fraction qui
     /// doit tomber à l'emplacement standard des suivis incrémentaux, pas le nombre courant.
     Fraction { current: i64, target: i64 },
+    /// La cible SEULE, sans valeur courante — `/50` à l'emplacement standard.
+    ///
+    /// **Écrite pour l'onglet « Suivi » de la fenêtre Options** (2026-09-13), qui sert à *composer*
+    /// une liste et non à la lire : y afficher les compteurs vivants « polluait en informations »
+    /// (retour utilisateur). La cible, elle, n'est pas une mesure mais un **réglage** de l'entrée,
+    /// au même titre que son mode — elle reste donc visible. Les compteurs, eux, gardent leur place
+    /// dans le bandeau in-game, où les lire est justement le but.
+    Target(i64),
 }
 
 /// Ordre dans lequel les couches d'un emplacement se peignent.
@@ -286,6 +294,19 @@ fn paint_count(ui: &Ui, rect: egui::Rect, count: SlotCount) {
                 &value.to_string(),
                 egui::FontId::monospace(tokens::ITEM_SLOT_COUNT_FONT_SIZE),
                 tokens::ITEM_SLOT_COUNT_TEXT,
+                text::OUTLINE_FULL,
+            );
+        }
+        SlotCount::Target(target) => {
+            // Même ancrage et mêmes jetons que la cible d'une fraction : les deux tombent au même
+            // endroit, seule la ligne du courant disparaît.
+            text::paint_outlined_text(
+                ui,
+                egui::pos2(right, bottom),
+                egui::Align2::RIGHT_BOTTOM,
+                &format!("/{target}"),
+                egui::FontId::monospace(tokens::ITEM_SLOT_TARGET_FONT_SIZE),
+                tokens::ITEM_SLOT_TARGET_TEXT,
                 text::OUTLINE_FULL,
             );
         }

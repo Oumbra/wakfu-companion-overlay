@@ -100,6 +100,20 @@ pub struct AutocompleteEntry {
     pub disabled: bool,
     /// Mention alignée à droite (« déjà suivi »), affichée seulement si l'entrée est désactivée.
     pub mention: Option<String>,
+    /// **Une action propre à la rangée**, peinte à sa droite — l'icône « recette » du Suivi
+    /// (`.wakfu-autocomplete-recipe-btn` côté web, `tracker.recipeTooltip`).
+    ///
+    /// Elle vit DANS la rangée et non à côté du champ, parce qu'elle porte sur *une* suggestion :
+    /// suivre les ingrédients de cet objet-là plutôt que l'objet lui-même. Sans elle, l'onglet Suivi
+    /// devait la peindre par-dessus le panneau, à des coordonnées recalculées à la main.
+    ///
+    /// **Sans socle**, contrairement à [`design::icon_button`](super::icon_button) : une plaque de
+    /// bouton dans une rangée de liste ferait un second niveau de relief là où le jeu n'en met pas.
+    /// Le glyphe porte seul son état — [`tokens::AUTOCOMPLETE_ACTION_IDLE`] au repos,
+    /// [`tokens::AUTOCOMPLETE_ACTION_HOVERED`] sous le pointeur, avec la main.
+    pub action: Option<DsIcon>,
+    /// L'infobulle de [`AutocompleteEntry::action`] — sans elle, le glyphe reste une énigme.
+    pub action_tooltip: Option<String>,
 }
 
 impl AutocompleteEntry {
@@ -113,6 +127,8 @@ impl AutocompleteEntry {
             image: None,
             disabled: false,
             mention: None,
+            action: None,
+            action_tooltip: None,
         }
     }
 }
@@ -156,6 +172,12 @@ pub struct AutocompleteOutcome {
     /// Indice, dans la liste passée à [`Autocomplete::entries`], de l'entrée choisie à cette frame.
     /// Jamais une entrée désactivée.
     pub selected: Option<usize>,
+    /// Indice de l'entrée dont l'**action** ([`AutocompleteEntry::action`]) vient d'être cliquée.
+    ///
+    /// Distinct de [`AutocompleteOutcome::selected`] et **exclusif** : cliquer l'action n'a jamais
+    /// choisi l'entrée. Les deux gestes sont dans la même rangée mais ne veulent pas dire la même
+    /// chose — « suivre cet objet » d'un côté, « suivre ses ingrédients » de l'autre.
+    pub action_on: Option<usize>,
 }
 
 /// Construit un champ d'autocomplétion sur `query`. Point d'entrée unique — voir la doc de module.
@@ -370,6 +392,7 @@ impl<'a> Autocomplete<'a> {
         );
 
         let mut selected = None;
+        let mut action_on = None;
         let mut panel_rect = None;
         if open {
             let mut visible = self.visible(filter);
@@ -431,6 +454,9 @@ impl<'a> Autocomplete<'a> {
             if let Some(index) = outcome.clicked_row {
                 selected = Some(index);
             }
+            if let Some(index) = outcome.clicked_action {
+                action_on = Some(index);
+            }
         }
 
         if let Some(index) = selected {
@@ -462,6 +488,7 @@ impl<'a> Autocomplete<'a> {
         AutocompleteOutcome {
             response: field,
             selected,
+            action_on,
         }
     }
 
@@ -508,6 +535,7 @@ impl<'a> Autocomplete<'a> {
             clicked_filter: None,
             hovered_row: None,
             clicked_row: None,
+            clicked_action: None,
         };
         // `Area` au premier plan, exactement comme `design::select` : le panneau sort du flux, donc
         // ni le widget suivant ne le recouvre, ni son ouverture ne décale la mise en page.
@@ -851,6 +879,56 @@ impl<'a> Autocomplete<'a> {
                 couleur,
             );
 
+        // **L'action de la rangée**, tout à droite — une entrée désactivée n'en a pas : elle est
+        // déjà suivie, il n'y a plus rien à en faire.
+        if let (false, Some(icone)) = (entry.disabled, entry.action) {
+            let boite = egui::Rect::from_center_size(
+                egui::pos2(
+                    row.right()
+                        - tokens::AUTOCOMPLETE_ROW_PADDING_X
+                        - tokens::AUTOCOMPLETE_ACTION_BOX / 2.0,
+                    row.center().y,
+                ),
+                Vec2::splat(tokens::AUTOCOMPLETE_ACTION_BOX),
+            );
+            let mut zone = ui
+                .interact(boite, response.id.with("action"), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let ds = DesignSystem::get(ui.ctx());
+            ds.paint_icon(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    boite.center(),
+                    glyph_fit(
+                        ds.icon_native_size(icone),
+                        tokens::AUTOCOMPLETE_ACTION_GLYPH,
+                    ),
+                ),
+                icone,
+                if zone.hovered() {
+                    tokens::AUTOCOMPLETE_ACTION_HOVERED
+                } else {
+                    tokens::AUTOCOMPLETE_ACTION_IDLE
+                },
+            );
+            // `on_hover_text` et non `design::tooltip` — **comme les boutons de filtre de ce même
+            // panneau**, quelques lignes plus haut. C'est le seul des deux qui sorte réellement
+            // au-dessus du panneau flottant : ancrée dans une couche déjà en avant-plan, une
+            // infobulle du design system s'y perd (constaté sur la planche du 2026-09-13, où le
+            // glyphe s'allumait sans qu'aucun texte n'apparaisse).
+            if let Some(texte) = entry.action_tooltip.as_ref() {
+                zone = zone.on_hover_text(texte);
+            }
+            if zone.clicked() {
+                outcome.clicked_action = Some(index);
+            }
+            // L'action mange le survol de la rangée : sans ça, pointer le glyphe rendrait aussi
+            // l'entrée « active » au clavier, et la flèche du bas repartirait d'ailleurs.
+            if zone.hovered() {
+                outcome.hovered_row = None;
+            }
+        }
+
         if let (true, Some(mention)) = (entry.disabled, entry.mention.as_ref()) {
             ui.painter().text(
                 egui::pos2(
@@ -874,6 +952,7 @@ struct PanelOutcome {
     clicked_filter: Option<Option<u16>>,
     hovered_row: Option<usize>,
     clicked_row: Option<usize>,
+    clicked_action: Option<usize>,
 }
 
 /// La flèche pressée, consommée pour que le champ de saisie ne la reçoive pas.

@@ -152,7 +152,12 @@ impl Widget for Stepper<'_> {
         let field =
             field_width.unwrap_or_else(|| (ui.available_width() - 2.0 * (size + gutter)).max(0.0));
         let total = Vec2::new(field + 2.0 * (size + gutter), size);
-        let (rect, response) = ui.allocate_exact_size(total, egui::Sense::hover());
+        // **`click` et non `hover` : c'est ce qui rend le pas focusable.** Les flèches ↑/↓ ne
+        // peuvent piloter la valeur que si quelque chose porte le focus, et ce ne peut pas être le
+        // champ : il est en lecture seule, donc `interactive(false)`, donc jamais focalisable (voir
+        // `Input::read_only`). Le pas entier prend donc le focus — au `Tab` comme au clic sur sa
+        // partie centrale, les deux boutons ayant leur propre zone posée par-dessus.
+        let (rect, response) = ui.allocate_exact_size(total, egui::Sense::click());
 
         let square = Vec2::splat(size);
         let minus_rect = egui::Rect::from_min_size(rect.min, square);
@@ -219,6 +224,39 @@ impl Widget for Stepper<'_> {
             .clicked()
         {
             *value = (*value + step).min(*range.end());
+        }
+
+        // **Les flèches ↑ et ↓**, demandées explicitement le 2026-09-12 (« flèche du haut, flèche du
+        // bas qui pourront augmenter la valeur de cet input number »). Seulement celles-là : ← et →
+        // restent au déplacement de curseur, et le jour où le champ deviendra éditable (voir plus
+        // haut) les leur reprendre serait un piège.
+        //
+        // `consume_key` plutôt qu'une simple lecture : sans ça la même touche servirait aussi à
+        // déplacer le focus entre widgets, et un appui ferait les deux.
+        if response.clicked() {
+            response.request_focus();
+        }
+        if enabled && response.has_focus() {
+            let (haut, bas) = ui.input_mut(|i| {
+                (
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                )
+            });
+            if haut {
+                *value = (*value + step).min(*range.end());
+            }
+            if bas {
+                *value = (*value - step).max(*range.start());
+            }
+            if haut || bas {
+                tracing::debug!(
+                    component = "stepper",
+                    name = prefix,
+                    valeur = *value,
+                    "flèche clavier"
+                );
+            }
         }
 
         response

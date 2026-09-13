@@ -536,6 +536,25 @@ pub const AUTOCOMPLETE_SCROLLBAR_THUMB_HOVERED: Color32 = SELECT_ROW_HIGHLIGHT;
 /// (`--surface-raised`, `#262626`) ; c'est ce rapport, appliqué au brun de [`SELECT_LIST_FILL`]
 /// (`#675d46`), qui donne cette valeur.
 pub const AUTOCOMPLETE_SCROLLBAR_TRACK: Color32 = Color32::from_rgb(0x47, 0x3F, 0x30);
+
+/// Côté de la zone cliquable d'une action de rangée — voir [`AutocompleteEntry::action`].
+pub const AUTOCOMPLETE_ACTION_BOX: f32 = 22.0;
+
+/// Encre du glyphe d'une action de rangée, dans cette boîte.
+pub const AUTOCOMPLETE_ACTION_GLYPH: f32 = 14.0;
+
+/// Glyphe d'une action de rangée AU REPOS — **la teinte du rail de la barre de défilement de ce
+/// même panneau** ([`AUTOCOMPLETE_SCROLLBAR_TRACK`]).
+///
+/// Demande explicite du 2026-09-13, et elle a une logique : au repos, cette action est un **affordant
+/// discret**, du même ordre qu'un rail de défilement — présent, disponible, mais qui ne réclame pas
+/// l'attention dans une liste où l'œil cherche des noms. Elle ne prend sa couleur pleine que sous
+/// le pointeur.
+pub const AUTOCOMPLETE_ACTION_IDLE: Color32 = AUTOCOMPLETE_SCROLLBAR_TRACK;
+
+/// Glyphe d'une action de rangée SOUS LE POINTEUR — l'or du jeu, la couleur d'état de ce design
+/// system.
+pub const AUTOCOMPLETE_ACTION_HOVERED: Color32 = TEXT_GOLD;
 /// Longueur minimale de la poignée — **choix** : à 115 résultats pour cinq rangées visibles, le
 /// minimum d'egui (12 px) donnait un point plutôt qu'une poignée.
 pub const AUTOCOMPLETE_SCROLLBAR_MIN_HANDLE: f32 = 24.0;
