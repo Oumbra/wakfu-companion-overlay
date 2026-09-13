@@ -924,14 +924,16 @@ expert (validée avec réserves, toutes intégrées), décidée :
   Repli nom seul DANS ce fichier (combat restauré d'avant le champ `breed`), jamais vers le
   référentiel de classe. Les deux index partagent une table générique (`SpellTable<K>`) et l'UI
   passe par `overlay_engine::resolve_cast(fighter, spell)`, seul à savoir quel fichier répond.
-  Sort absent → « ? » + un avertissement nommant le fichier à compléter.
+  Sort absent → « ? » + un avertissement nommant le fichier à compléter. Les deux index sont
+  construits **au démarrage de l'overlay** (`preload_spell_indexes`), jamais au premier sort.
 - **Ennemis nombreux** (cadre à défilement, > 6) : marques et clics sur les portraits visibles
   seulement ; **pas de défilement automatique** vers le dernier lanceur (le défilement reste à
   l'utilisateur), le bloc montre ses sorts quoi qu'il en soit. Identifiant egui des médaillons
   désormais par emplacement (deux Grokoko partageaient le même `Id` : clic attribué aux deux).
 - **Deux corrections d'attribution (2026-09-13, retour utilisateur : « deux sorts du même nom
-  rapprochés, un seul affiché »)**, toutes deux dans le parseur vendu (`engine-js/`, écart de
-  parité assumé et consigné dans `VENDORED_FROM.txt`, à reporter dans `wakfu-companion`) :
+  rapprochés, un seul affiché »)**, toutes deux dans le parseur vendu (`engine-js/`, consignées
+  dans `VENDORED_FROM.txt` — l'overlay et le web n'ont pas les mêmes fonctionnalités, le parseur
+  diverge normalement, décision utilisateur du 13 sept.) :
   - **Relancers avalés par la déduplication multi-compte** : `isDuplicate` jetait tout
     événement identique à moins de 1 s ; un vrai relancer du même sort (Croc-en-jambe deux fois
     à 724 ms, chacun avec ses dégâts) disparaissait. Mesuré sur le log de parité en séparant les
