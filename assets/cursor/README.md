@@ -42,6 +42,7 @@ seuls les tons changent.
 Croix à quatre flèches affichée pendant le glissement d'une fenêtre, isolée de la même façon
 (enregistrement 68 × 50 px du 13/09/2026, fond = médiane des images sans curseur, moyenne de
 20 images immobiles, masque à 50 % de couverture). Curseur nu 31 × 31 px + marge de 1 px, alpha
-binaire, quatre jours transparents entre les bras. Pas d'animation : couleur constante sur les
+binaire (pixels de bord mélangés retirés, contour aplati en noir), quatre jours
+transparents entre les bras. Pas d'animation : couleur constante sur les
 113 images où il est visible. Tons `#e2dfb8` (clair), `#a29b69` (ombre), `#090908` (contour).
 Point chaud présumé au centre, pixel (16, 16) du bitmap avec marge.
