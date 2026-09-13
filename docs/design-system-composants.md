@@ -703,6 +703,27 @@ assets ligne y=150) :
 | **Réserve totale** | **26px** | 679 → 705, « même quand la barre ne sert pas » |
 
 **`design::components::scroll_area::RESERVE_X` vaut ces 26px**, et c'est la somme des trois marges.
+
+### `bar_before` — la barre devant le contenu (2026-09-13)
+
+Le bandeau « Suivi » la veut **au-dessus** de ses tuiles, à deux pixels du bord de la fenêtre :
+c'est alors la seule chose qui l'éloigne encore du haut du jeu, et le bas reste libre pour les
+infobulles, qui retrouvent leur écart mesuré à la tuile (5 px) au lieu d'être repoussées au pied de
+la zone.
+
+`egui` ne sait pas le faire — sa barre horizontale se cale sur le bord bas du rectangle de la zone,
+et `ScrollArea::scroll_bar_rect` ne la déplace que le long de son propre axe, pour un en-tête
+collant. Le composant masque donc la barre d'egui (`ScrollBarVisibility::AlwaysHidden`) et peint la
+sienne : réserve en tête, poignée, survol, glissé. Les proportions et le geste sont repris du code
+d'egui — dont le point important, **le glissé suit la position du pointeur et non un cumul de
+`drag_delta`** : un cumul perd le mouvement arrivé dans la même frame que le relâchement, ce qui
+suffit à rendre la barre inerte sous un harnais de test.
+
+Deux gains en échange du code : la réserve n'existe **que lorsque la barre sert** (une bande qui
+tient entière ne décale plus rien — egui, lui, réserve dès qu'il affiche), et une mise en page peut
+s'aligner dessus. `ScrollArea::space_before(ui)` rend cette place ; dans le bandeau, le carré de
+contrôle en descend pour rester à hauteur des tuiles plutôt que de la barre. La réponse vient de la
+frame précédente : personne ne sait avant de l'avoir peinte si une bande déborde.
 Une mise en page peut donc réserver la place **avant** que la barre existe, sans qu'un pixel de
 contenu ne bouge le jour où elle apparaît — c'est ce que fait `panels::options_modal`, ce qui lève la
 déviation qu'il documentait (19px au lieu de 26, faute de barre à y mettre).

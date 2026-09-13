@@ -1185,7 +1185,8 @@ tuiles, ouvertes vers le haut depuis le matin même. Le remède est venu avec la
 s'afficherait en bas du bouton ; pareil pour Options et Supprimer [...] en collant la bande plus
 haut et en laissant juste l'espace nécessaire — on gagnerait la moitié, peut-être plus, du vide ».
 
-- **Tout s'ouvre en dessous**, et la réserve change de côté : `WATCHLIST_TOP_MARGIN` devient
+- **Tout s'ouvre en dessous** — les quatre boutons du carré ; une tuile, elle, ouvre son nom à
+  l'écart du composant, voir la barre plus bas — et la réserve change de côté : `WATCHLIST_TOP_MARGIN` devient
   `WATCHLIST_TOOLTIP_RESERVE`, même valeur mais laissée en hauteur de fenêtre SOUS le contenu, là
   où elle poussait le contenu vers le bas. La bande touche le bord haut de sa fenêtre ; ce qui
   l'éloigne encore du client n'est plus que l'ancrage (`GAME_TOP_MARGIN_PX`, 28 px, calé sur les
@@ -1197,10 +1198,16 @@ haut et en laissant juste l'espace nécessaire — on gagnerait la moitié, peut
   zone défilante, barre de défilement comprise — ouverte sous la seule tuile, elle masquerait la
   barre qu'on vient d'y mettre (§9.1 septies). En rangée (bandeau vide), rien à protéger : chaque
   infobulle reste centrée sur son bouton, ce qui dit lequel elle décrit.
-- **La barre de défilement reste SOUS les tuiles** — l'utilisateur proposait de la passer au-dessus
-  pour dégager le bas, mais la réserve du haut tombe alors à zéro plutôt qu'à 14 px : la bande
-  remonte de 14 px de plus que ce que la demande visait, et rien ne masque la barre puisque les
-  infobulles s'ouvrent dessous.
+- **La barre de défilement passe AU-DESSUS des tuiles** (`design::ScrollArea::bar_before`, §9.2).
+  Première version : elle restait dessous, l'infobulle d'une tuile s'ancrant alors au pied de la
+  zone défilante pour ne pas la masquer. Retour immédiat, et il porte sur les deux : « je veux que
+  la part de scroll soit au-dessus de la ligne de suivi, pas en dessous [...] il faut laisser un ou
+  deux pixels au-dessus de la barre de scroll seulement », et les noms d'objets étaient
+  « extrêmement loin, pas dans les conventions du composant ». La barre en tête libère le bas :
+  l'infobulle d'une tuile revient à `TOOLTIP_GAP` (5 px) sous elle. La marge interne HAUTE de la
+  fenêtre tombe à 0 dans le même mouvement — les 2 px au-dessus de la barre appartiennent à la
+  bande (`STRIP_SCROLLBAR_OUTER_MARGIN`), et quand la bande tient entière il n'y a pas de barre
+  du tout, donc rien à dégager : les boutons touchent alors le bord haut de leur fenêtre.
 - `CONTROL_TOOLTIP_RESERVE` remesurée une dernière fois : 88 px, à DROITE seulement. Une infobulle
   ancrée sur le carré (60 px) déborde plus loin que centrée sur un bouton ; deux entrées suffisent
   à la fournir, une seule coûte 12 px de largeur de fenêtre transparente.
