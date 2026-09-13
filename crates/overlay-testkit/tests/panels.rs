@@ -685,10 +685,10 @@ fn bandeau_largeur(entry_count: usize) -> f32 {
 
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
-const BANDEAU_PLUS: egui::Pos2 = egui::pos2(24.0, 26.0);
-const BANDEAU_MOINS: egui::Pos2 = egui::pos2(52.0, 26.0);
-const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(24.0, 54.0);
-const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 54.0);
+const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0, 25.0);
+const BANDEAU_MOINS: egui::Pos2 = egui::pos2(55.0, 25.0);
+const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(25.0, 55.0);
+const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(55.0, 55.0);
 
 /// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
 /// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les
@@ -766,12 +766,12 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     // « options » n'en montraient aucune, le pointeur étant tombé hors de la rangée. Un nom de
     // fichier n'est pas une assertion ; c'est la capture publiée en artefact qui l'est.
     for (x, nom) in [
-        (24.0, "ajouter"),
-        (52.0, "supprimer"),
-        (80.0, "details"),
-        (108.0, "options"),
+        (25.0, "ajouter"),
+        (55.0, "supprimer"),
+        (85.0, "details"),
+        (115.0, "options"),
     ] {
-        harness.hover_at(egui::pos2(x, 24.0));
+        harness.hover_at(egui::pos2(x, 25.0));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
     }
@@ -1000,11 +1000,11 @@ const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0, 13.0);
 /// l'overlay démarre au premier pixel des boutons) puis la marge haute (28 px de réserve
 /// d'infobulle passés sous la bande, et les 6 px restants tombés avec elle). Trois entrées ne
 /// débordent pas : la barre de défilement, peinte en tête de bande, ne prend ici aucune place.
-const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(109.0, 37.0);
-const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(249.0, 37.0);
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(116.0, 40.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(268.0, 40.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
-const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(92.0, 20.0);
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(99.0, 23.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
 ///

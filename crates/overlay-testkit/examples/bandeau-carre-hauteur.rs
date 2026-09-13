@@ -15,16 +15,19 @@
 //! | Carré de contrôle (`4 × 3` de marge + `24 × 2` de bouton) | **60 px** |
 //! | Écart | **4 px**, tous en bas |
 //!
-//! Trois planches, une par ligne de l'artefact — la première est l'état poussé, les deux autres
-//! les propositions :
+//! Trois planches, une par ligne de l'artefact — la première est l'état d'avant, les deux autres
+//! les propositions. **La troisième a été retenue** (`panels::watchlist::CONTROL_BUTTON_SIZE`
+//! vaut 26 depuis) ; les deux premières restent ici pour que la décision garde ses termes :
 //!
 //! 1. `carre_aligne_haut` : les deux hauts sur la même ligne, le carré 4 px trop court.
 //! 2. `carre_centre` : le carré descend de 2 px, son centre sur celui des tuiles. Aucune cote de
 //!    composant ne bouge — les 24 px des boutons sont un réglage utilisateur du 2026-09-06
 //!    (« essaie vingt-quatre sur vingt-quatre pour voir le rendu que ça fait »).
 //! 3. `carre_agrandi` : les boutons passent à 26 px, le carré devient un **64 × 64 exact**, de la
-//!    taille d'une case d'inventaire du jeu. La grille est alors parfaite, mais la cote validée
-//!    des boutons change, et avec elle leurs glyphes.
+//!    taille d'une case d'inventaire du jeu. La grille est alors parfaite, au prix de la cote de
+//!    bouton arrêtée à l'essai le 2026-09-06 — que la demande remettait elle-même en jeu.
+//!    **C'est l'état d'aujourd'hui** : le centrage de la planche 2 est resté en place et ne
+//!    déplace plus rien, l'écart qu'il comblait étant devenu nul.
 //!
 //! Le trait doré de chaque planche est le centre vertical des tuiles — c'est LA ligne dont parle
 //! la demande.
@@ -59,7 +62,8 @@ const MARGE: f32 = 10.0;
 /// Une proposition : la taille de bouton, et si le carré se centre sur les tuiles.
 struct Variante {
     slug: &'static str,
-    /// Côté d'un bouton du carré (`panels::watchlist::CONTROL_BUTTON_SIZE` vaut 24).
+    /// Côté d'un bouton du carré (`panels::watchlist::CONTROL_BUTTON_SIZE`, 24 px jusqu'au
+    /// 2026-09-13, 26 depuis).
     bouton: f32,
     /// Centrer le carré sur la hauteur d'une tuile, au lieu d'aligner les hauts.
     centre: bool,
