@@ -473,11 +473,15 @@ impl Widget for Input<'_> {
             .text_color(value_color)
             .interactive(!self.read_only)
             .desired_width(text_rect.width());
-        let mut edit_response = ui
-            .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                ui.add_enabled(enabled, edit)
-            })
-            .inner;
+        // **Dans un ENFANT, jamais dans un scope du `ui` de l'appelant.** Un `scope_builder`
+        // avance le curseur du parent jusqu'à la fin de `text_rect` — plus court que le champ des
+        // marges, de la croix d'effacement et de l'icône de tête — et dans une rangée horizontale
+        // le widget suivant venait se poser 21 px trop à gauche, sur le champ (constaté le
+        // 2026-09-13 sur les maquettes de l'onglet Chat, voir `tests/input_row.rs` d'`overlay-
+        // testkit`). Un enfant a son propre curseur : la place du champ, c'est
+        // `allocate_exact_size` plus haut qui l'a prise, et elle seule.
+        let mut edit_child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
+        let mut edit_response = edit_child.add_enabled(enabled, edit);
         if self.request_focus {
             edit_response.request_focus();
         }
