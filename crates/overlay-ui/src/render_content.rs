@@ -46,33 +46,34 @@ pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 /// soit pas compressé d'autant.
 pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 
-/// Espace réservé au-dessus du contenu du panneau Suivi — même raison d'être que
-/// [`COMBAT_TOP_MARGIN`], pour le bandeau : demande utilisateur du 2026-09-13, les infobulles de
-/// « + »/« − » (ligne du HAUT du carré de contrôle) et celles des tuiles d'objets suivis doivent
-/// s'ouvrir AU-DESSUS de leur widget, quitte à « déplacer un petit peu vers le bas l'overlay »
-/// pour leur faire de la place. Sans cette marge, la bande est collée au bord supérieur de sa
-/// fenêtre (6 px de `inner_margin`), et `RectAlign::TOP` retombait TOUJOURS sur un repli
-/// `BOTTOM*` — le nom des tuiles s'affichait de fait en dessous depuis le début.
+/// Espace réservé **sous** la bande du panneau Suivi, pour ses infobulles — voir
+/// [`COMBAT_TOP_MARGIN`] pour le principe, ici retourné.
 ///
-/// Valeur mesurée sur les captures du bandeau vide (`panels.rs::
-/// panneau_suivi_vide_boutons_en_ligne_infobulles_dessous`) : une infobulle d'une ligne
-/// (« Supprimer (Ctrl+Shift+S) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px)
-/// d'écart, soit 32 px. Plus serré que les 44 px de Combat : ici la
-/// marge décale la bande sur l'écran, `main.rs::watchlist_target_height` et le binaire X11
-/// agrandissent la fenêtre d'autant, l'ancrage (`GAME_TOP_MARGIN_PX`) ne bouge pas.
+/// **Ce fut une marge HAUTE** (`WATCHLIST_TOP_MARGIN`, 36 px puis 28 px) du 2026-09-13 au soir du
+/// même jour : les infobulles de « + »/« − » et des tuiles s'ouvraient au-dessus, il fallait leur
+/// faire de la place là-haut, et cette place décalait la bande vers le BAS d'autant. Retour
+/// utilisateur, deux captures à l'appui : « que la bande de suivi ne soit pas autant décalée par
+/// rapport au haut de la fenêtre du jeu, c'est très dérangeant visuellement, et encore plus
+/// lorsqu'il n'y a pas du tout de suivi — il y a quatre boutons qui flottent dans le vide, c'est
+/// très perturbant ».
 ///
-/// **Resserrée le jour même, 36 → 28 px** (retour utilisateur, capture à l'appui) : « on peut
-/// réduire un peu l'overlay en hauteur afin de laisser un tout petit peu moins d'espace entre le
-/// haut de la tooltip et le haut de la fenêtre, ça fait un très gros écart ». Les 36 px étaient
-/// comptés comme s'ils portaient seuls cette place, sans tenir compte des 6 px de marge interne
-/// que la fenêtre Suivi pose déjà par-dessus (voir `paint_content`) : 6 + 36 = 42 px au-dessus
-/// d'une infobulle qui n'en demande que 32, soit 10 px de vide au-dessus d'elle. 6 + 28 = 34 px
-/// n'en laissent plus que 2 — le plancher, sous lequel `RectAlign::TOP` ne tiendrait plus et se
-/// rabattrait EN DESSOUS, ce que la demande de la veille interdit. Le reste de l'écart visible en
-/// jeu ne vient pas de cette marge mais de l'ancrage de la fenêtre elle-même
-/// (`main.rs::GAME_TOP_MARGIN_PX`, 28 px sous le bord haut du client), calé sur les boutons
-/// d'interface du jeu et laissé tel quel.
-pub const WATCHLIST_TOP_MARGIN: f32 = 28.0;
+/// Le remède est venu avec la demande : « intervertir les choses [...] toutes les infobulles en
+/// bas, comme celle du bouton Détails ; en collant la bande plus haut et en laissant juste
+/// l'espace nécessaire — on gagnerait la moitié, peut-être plus, du vide qu'il y a aujourd'hui ».
+/// Les quatre boutons du carré ouvrent donc sous le carré, les tuiles sous la bande (voir
+/// `panels::watchlist::paint_tile_tips`), et cette réserve passe de la marge HAUTE du contenu à la
+/// hauteur de fenêtre qui reste SOUS lui : elle ne décale plus rien, la bande touche le bord haut
+/// de sa fenêtre.
+///
+/// Valeur inchangée, la mesure ne dépend pas du côté : une infobulle d'une ligne (« Supprimer
+/// (Ctrl+Shift+S) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px) d'écart, soit
+/// 32 px ; la marge basse de `paint_content` (6 px) en fournit déjà une partie, 28 px complètent
+/// avec 2 px de garde.
+///
+/// L'écart qui reste entre le haut du client et la bande n'est plus que celui de l'ANCRAGE de la
+/// fenêtre (`main.rs::GAME_TOP_MARGIN_PX`, 28 px sous le bord haut du client, calé sur les boutons
+/// d'interface du jeu) plus les 6 px de marge interne — 34 px au lieu de 62.
+pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
 
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
@@ -401,14 +402,14 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         // du dessin des boutons ») — le carré de contrôle est le premier élément peint, son fond
         // translucide touche donc le bord de la fenêtre. La réserve d'infobulle de 48 px qui
         // s'ajoutait devant est tombée dans le même mouvement (voir
-        // `panels::watchlist::ControlLayout::tooltip_reserve`). Les trois autres côtés gardent
-        // leur marge d'origine (la bande a besoin d'un peu d'air pour ne pas coller aux boutons
-        // d'interface du jeu), plus `WATCHLIST_TOP_MARGIN` en haut pour les infobulles ouvertes
-        // au-dessus de la bande.
+        // `panels::watchlist::ControlLayout::tooltip_reserve`). Le HAUT ne porte plus que ces 6 px
+        // depuis le soir du même jour : les infobulles s'ouvrent toutes en dessous, la réserve
+        // qu'elles exigeaient là-haut est devenue de la hauteur de fenêtre SOUS la bande (voir
+        // [`WATCHLIST_TOOLTIP_RESERVE`]) et ne décale plus rien.
         OverlayKind::Watchlist => egui::Margin {
             left: 0,
             right: 6,
-            top: 6 + WATCHLIST_TOP_MARGIN as i8,
+            top: 6,
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,

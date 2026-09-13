@@ -52,13 +52,18 @@
 //! qu'il y ait un problème au niveau de la tooltip ». Dans le carré de contrôle du Suivi, un bouton
 //! dont l'infobulle s'ouvrirait vers un voisin la poserait **par-dessus ce voisin**, gênant son
 //! survol. Le côté vient donc de la position dans la grille, jamais du rôle du bouton : d'abord
-//! [`TooltipSide::Left`]/[`TooltipSide::Right`] par colonne (2026-09-08), puis, depuis le
-//! 2026-09-13, [`TooltipSide::Above`] pour la ligne du haut et [`TooltipSide::Below`] pour celle du
-//! bas — les réserves latérales ne logeaient plus les libellés rallongés de leur raccourci, et
-//! au-dessus/en dessous d'un carré 2×2 il n'y a aucun voisin à recouvrir.
+//! [`TooltipSide::Left`]/[`TooltipSide::Right`] par colonne (2026-09-08), puis [`TooltipSide::
+//! Above`] pour la ligne du haut et [`TooltipSide::Below`] pour celle du bas (2026-09-13, matin) —
+//! les réserves latérales ne logeaient plus les libellés rallongés de leur raccourci.
 //!
-//! Ce placement demande de la place : `render_content::WATCHLIST_TOP_MARGIN` la réserve au-dessus
-//! de la bande, `watchlist::CONTROL_TOOLTIP_RESERVE` à sa gauche. Le composant ne réserve rien
+//! **Depuis le soir du 2026-09-13, le carré ouvre les quatre EN DESSOUS** — la place réservée
+//! au-dessus éloignait trop la bande du haut du jeu (voir `render_content::
+//! WATCHLIST_TOOLTIP_RESERVE`). Ce qui empêche alors le recouvrement n'est plus le côté mais
+//! l'ANCRE : [`Tooltip::anchor`] accroche l'infobulle au carré entier, elle s'ouvre sous sa
+//! dernière ligne. Un côté seul ne suffisait plus.
+//!
+//! Ce placement demande de la place : `render_content::WATCHLIST_TOOLTIP_RESERVE` la réserve sous
+//! la bande, `watchlist::CONTROL_TOOLTIP_RESERVE` à sa droite. Le composant ne réserve rien
 //! lui-même (§6 du contrat : la mise en page appartient au panneau).
 //!
 //! ## En dessous, quand la rangée est horizontale
@@ -70,7 +75,8 @@
 //! 1×4 avec [`TooltipSide::Below`] : sous une rangée, aucun bouton n'est jamais recouvert, et la
 //! fenêtre Suivi a toujours de la place en dessous (`main.rs::WATCHLIST_HEIGHT`, dimensionnée
 //! pour un toast). Ici, `BOTTOM` est un choix, pas le défaut d'egui subi : l'infobulle s'aligne
-//! sur le BOUTON, pas sur le curseur. La ligne du bas du carré 2×2 l'a rejoint le même jour.
+//! sur le BOUTON, pas sur le curseur. Le carré 2×2 entier l'a rejoint le soir même — voir
+//! [`Tooltip::anchor`], qui règle le recouvrement que le côté ne réglait plus.
 
 use egui::{RectAlign, Response, Ui};
 
@@ -146,6 +152,7 @@ pub fn tooltip(response: &Response) -> Tooltip<'_> {
         response,
         side: TooltipSide::default(),
         gap: tokens::TOOLTIP_GAP,
+        anchor: None,
     }
 }
 
@@ -154,6 +161,7 @@ pub struct Tooltip<'a> {
     response: &'a Response,
     side: TooltipSide,
     gap: f32,
+    anchor: Option<egui::Rect>,
 }
 
 impl Tooltip<'_> {
@@ -169,6 +177,23 @@ impl Tooltip<'_> {
         self
     }
 
+    /// **Accroche l'infobulle à un autre rectangle que celui du widget** — le survol reste celui du
+    /// widget, seul le placement change. Par défaut, le rectangle du widget lui-même.
+    ///
+    /// Sert quand le widget appartient à un GROUPE qu'il ne doit pas recouvrir : dans le carré de
+    /// contrôle du Suivi (`panels::watchlist`), l'infobulle de « + » s'ouvre en dessous — demande
+    /// utilisateur du 2026-09-13 — mais « en dessous de + » c'est « par-dessus Détails ». Ancrée
+    /// sur le carré entier, elle s'ouvre sous la DERNIÈRE ligne, et ne recouvre plus personne.
+    /// Même chose pour une tuile de la bande, ancrée jusqu'au bas de la zone défilante pour ne pas
+    /// masquer la barre de défilement.
+    ///
+    /// Un `anchor` ne crée pas de place : le rectangle doit être visible dans la même fenêtre, et
+    /// les replis de [`TooltipSide`] s'appliquent à LUI (voir la doc de module).
+    pub fn anchor(mut self, anchor: egui::Rect) -> Self {
+        self.anchor = Some(anchor);
+        self
+    }
+
     /// Affiche un texte simple — le cas de tous les appels de l'application.
     pub fn text(self, text: impl Into<String>) {
         let text = text.into();
@@ -180,7 +205,29 @@ impl Tooltip<'_> {
     /// s'accroche à une `Response` déjà rendue.
     pub fn show<R>(self, add_contents: impl FnOnce(&mut Ui) -> R) {
         let (align, alternatives) = self.side.alignments();
-        let mut tip = egui::Tooltip::for_enabled(self.response);
+        // `egui::Tooltip` place son popup sur `Response::rect`. Une `Response` est une VALEUR (id,
+        // rect, drapeaux d'interaction) : la cloner pour en changer le seul rectangle ne touche à
+        // rien d'autre — ni au survol, déjà décidé, ni à l'id, dont dépend la persistance du popup.
+        let ancree;
+        let response = match self.anchor {
+            Some(rect) => {
+                // **`interact_rect`, et lui SEUL.** C'est le rectangle sur lequel `egui::Tooltip`
+                // ancre son popup (« we use interact_rect so we don't show the popup relative to
+                // some clipped point »). `rect` doit rester celui du widget : egui garde une
+                // infobulle ouverte tant que le pointeur est dans le `rect` de SON widget — « le
+                // cas d'une grosse infobulle qui recouvre le widget » —, et un seul widget par
+                // couche peut en afficher une. Élargir `rect` au groupe fait donc coller
+                // l'infobulle du premier bouton survolé : les trois autres, pointeur dessus,
+                // n'ouvrent plus jamais la leur. Vu en capture avant d'être compris.
+                ancree = egui::Response {
+                    interact_rect: rect,
+                    ..self.response.clone()
+                };
+                &ancree
+            }
+            None => self.response,
+        };
+        let mut tip = egui::Tooltip::for_enabled(response);
         tip.popup = tip
             .popup
             .align(align)

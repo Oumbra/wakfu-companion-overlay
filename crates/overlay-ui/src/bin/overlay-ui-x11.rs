@@ -101,8 +101,8 @@ mod linux_main {
     // tooltips du switch Alliés/Ennemis affichées en dessous faute de place au-dessus, même
     // correctif que `main.rs::WINDOW_SIZE`) — voir sa doc.
     const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGIN as f64);
-    // Voir `main.rs::WATCHLIST_HEIGHT` — même marge haute pour les infobulles au-dessus de la bande.
-    const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOP_MARGIN as f64;
+    // Voir `main.rs::WATCHLIST_HEIGHT` — même réserve sous la bande pour ses infobulles.
+    const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE as f64;
     const WATCHLIST_INNER_MARGIN: f64 = 12.0;
     const WATCHLIST_WIDTH_FRACTION: f64 = 0.5;
     const WATCHLIST_MAX_CEILING: f64 = 1000.0;

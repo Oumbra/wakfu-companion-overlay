@@ -185,16 +185,38 @@
 //!
 //! **Refonte 2026-09-13, même jour (carré 2×2 : infobulles par LIGNE, dessus/dessous)** — suite
 //! du même retour : « pour les deux boutons du bas, afficher [les infobulles] en dessous, comme
-//! pour les objets suivis ; pour les boutons du dessus, Ajouter et Supprimer, au-dessus ; si ça
-//! manque d'espace, déplacer un petit peu vers le bas l'overlay [...] et en profiter pour afficher
-//! celles des objets au-dessus ». Le côté vient toujours de la position dans la grille, mais par
-//! LIGNE désormais : « + »/« − » ouvrent AU-DESSUS (`design::TooltipSide::Above`), « Détails »/
-//! « Options » EN DESSOUS (`Below`) — au-dessus et en dessous d'un carré, aucun voisin à
-//! recouvrir. La place au-dessus vient de `render_content::WATCHLIST_TOP_MARGIN`, qui décale la
-//! bande vers le bas d'autant ; les tuiles d'entrées en profitent : leur infobulle
-//! (`entry_tile`, côté `Above` par défaut depuis toujours) s'ouvrait de fait en dessous faute de
-//! place. `CONTROL_TOOLTIP_RESERVE` ne réserve plus qu'à GAUCHE (voir sa doc, remesurée), et
-//! l'infobulle « Supprimer » du carré ne recouvre plus jamais « + ».
+//! pour les objets suivis ; pour les boutons du dessus, Ajouter et Supprimer, au-dessus ». Le côté
+//! venait de la position dans la grille, par LIGNE : « + »/« − » au-dessus, « Détails »/
+//! « Options » en dessous. La place au-dessus venait de `render_content::WATCHLIST_TOP_MARGIN`,
+//! qui décalait la bande vers le bas d'autant. **Cette moitié-là n'a pas tenu la journée** — voir
+//! ci-dessous.
+//!
+//! **Refonte 2026-09-13, le soir (tout en dessous, la bande remonte)** — retour utilisateur, deux
+//! captures à l'appui, dont un bandeau sans aucun suivi : « que la bande de suivi ne soit pas
+//! autant décalée par rapport au haut de la fenêtre du jeu, c'est très dérangeant visuellement,
+//! et encore plus lorsqu'il n'y a pas du tout de suivi — il y a quatre boutons qui flottent dans
+//! le vide, c'est très perturbant ». Le remède est venu avec la demande : « intervertir les
+//! choses [...] le tooltip d'Ajouter se comporterait comme celui de Détails, il s'afficherait en
+//! bas du bouton ; pareil pour Options et Supprimer [...] en collant la bande plus haut et en
+//! laissant juste l'espace nécessaire — on gagnerait la moitié, peut-être plus, du vide ».
+//!
+//! Les quatre infobulles du carré s'ouvrent donc EN DESSOUS (`design::TooltipSide::Below`), et
+//! celles des tuiles aussi. Deux précautions, sans quoi l'interversion rendrait le bandeau
+//! inutilisable — un côté « libre » ne l'est que pour le bouton du bas :
+//!
+//! - les quatre infobulles du carré s'accrochent au CARRÉ entier (`design::Tooltip::anchor`, voir
+//!   `control_button_row`), pas à leur bouton : « en dessous de + », c'est « par-dessus Détails »,
+//!   exactement le recouvrement que le retour du 2026-09-08 avait fait corriger ;
+//! - celle d'une tuile s'accroche à la bande jusqu'au bas de sa zone défilante (voir
+//!   [`paint_tile_tips`]), barre de défilement comprise : ouverte sous la seule tuile, elle
+//!   masquerait la barre qu'on vient de mettre là.
+//!
+//! `render_content::WATCHLIST_TOP_MARGIN` disparaît au profit de
+//! `render_content::WATCHLIST_TOOLTIP_RESERVE` : même valeur, mais elle laisse de la hauteur de
+//! fenêtre SOUS la bande au lieu d'en pousser le contenu vers le bas. La bande touche le bord haut
+//! de sa fenêtre ; ce qui l'éloigne encore du client (28 px) n'est plus que l'ancrage de la
+//! fenêtre elle-même (`main.rs::GAME_TOP_MARGIN_PX`). `CONTROL_TOOLTIP_RESERVE` est remesurée une
+//! dernière fois (voir sa doc) : plus rien à gauche, 88 px à droite.
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -435,15 +457,26 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// affichée plutôt que ponctuel.
 ///
 /// **Remesurée le 2026-09-13 (infobulles par LIGNE, voir doc de module)** : plus aucune infobulle
-/// latérale — celles du carré s'ouvrent au-dessus ou en dessous, CENTRÉES sur leur bouton. La
-/// réserve ne sert plus qu'à GAUCHE, pour que « Ajouter (Ctrl+Shift+A) » (125 px, centrée sur
-/// « + » dont le centre est à 16 px du bord du carré : 62,5 − 16 = 46,5 px à couvrir) tienne
-/// centrée plutôt que de se rabattre alignée à gauche du bouton (`TOP_START`, toujours au-dessus
-/// mais décalée). Arrondi à 48 px. À DROITE, les tuiles d'entrées (au moins une en carré, voir
-/// `ControlLayout`) fournissent déjà plus que ce qu'« Options (Ctrl+Shift+O) » demande sous « − »
-/// (129 px centrés à 44 px du bord gauche du carré, soit 48 px au-delà de son bord droit contre
-/// `TILE_GAP` + `TILE_SIZE` = 70 px disponibles). La bande n'est plus décalée que de ~24 px.
-const CONTROL_TOOLTIP_RESERVE: f32 = 48.0;
+/// latérale — celles du carré s'ouvrent au-dessus ou en dessous. La réserve ne servait alors qu'à
+/// GAUCHE, et valait 48 px.
+///
+/// **Remesurée le soir du même jour (toutes les infobulles en dessous, ancrées sur le carré)** :
+/// plus rien à gauche non plus — la fenêtre démarre au premier pixel des boutons, décision de la
+/// veille — et la réserve ne vaut plus que pour la DROITE. Les quatre infobulles s'accrochent
+/// maintenant au carré entier (voir `control_button_row`), large de `control_row_width` = 60 px :
+/// « Supprimer (Ctrl+Shift+S) », le plus long des quatre libellés, mesure 140 px et se rabat
+/// alignée sur le bord GAUCHE du carré (`BOTTOM_START`, faute de place à gauche pour la centrer),
+/// il lui faut donc 140 − 60 = 80 px au-delà du carré. Arrondi à 88 px.
+///
+/// Deux entrées suffisent à les fournir (`TILE_GAP` + `TILE_SIZE` deux fois, 152 px) ; avec une
+/// seule, la fenêtre gagne 12 px de large qu'elle ne peint pas — le prix d'une infobulle entière,
+/// et elle reste transparente.
+///
+/// Le cas non couvert, assumé : « Quitter la sélection (Ctrl+Shift+S) », le libellé que « − »
+/// prend pendant la sélection multiple, est bien plus long. Il se rabat alors sur ce que la
+/// fenêtre offre — mais ce mode ouvre déjà sa propre bande sous les tuiles, et la fenêtre est
+/// alors plus large que ces 88 px.
+const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
 /// Espace réservé de CHAQUE CÔTÉ de la rangée 1×4 du bandeau VIDE ([`ControlLayout::Row`]), pour
 /// que l'infobulle du premier et du dernier bouton — ouverte EN DESSOUS, centrée sur son bouton
 /// (`design::TooltipSide::Below`) — ait la place de s'afficher entière sans se rabattre. Même
@@ -809,6 +842,12 @@ pub fn show(
     // `ScrollArea` : défiler la bande le faisait sortir de l'écran avec les tuiles, et les quatre
     // actions du bandeau devenaient inatteignables tant qu'on ne revenait pas au début.
     let mut strip_rect = egui::Rect::NOTHING;
+    // Les tuiles peintes cette frame, dans l'ordre — leur infobulle s'ouvre APRÈS la bande, une
+    // fois son bas connu (voir `paint_tile_tips`).
+    let mut tuiles: Vec<(egui::Response, &str)> = Vec::with_capacity(entries.len());
+    // Vrai quand la bande déborde, donc quand la barre de défilement occupe la réserve sous les
+    // tuiles — c'est elle que l'infobulle ne doit pas masquer.
+    let mut barre_visible = false;
     ui.horizontal_top(|ui| {
         let layout = ControlLayout::for_entries(entries.len());
         // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) — aligné sur
@@ -854,11 +893,20 @@ pub fn show(
                     if let Some(depuis) = tuile.reorder.dropped {
                         deplacement = Some((depuis, i));
                     }
+                    // Pas de nom pendant un déplacement : affiché sous le pointeur, il masquerait
+                    // le liseré de la tuile visée, qu'on essaie justement de lire.
+                    if !tuile.reorder.in_flight() {
+                        tuiles.push((tuile.response, entry.name.as_str()));
+                    }
                 }
             });
         });
         strip_rect = strip.inner_rect;
+        // `inner_rect` est la fenêtre du CONTENU : la barre, quand elle existe, est peinte en
+        // dessous, dans la réserve que la zone s'est gardée.
+        barre_visible = strip.content_size.x > strip.inner_rect.width() + 0.5;
     });
+    paint_tile_tips(&tuiles, strip_rect, barre_visible);
 
     // **Les deux gestes du mode, appliqués une fois la bande peinte.**
     if let Some(cle) = bascule_tuile {
@@ -1042,6 +1090,40 @@ impl WatchlistEditReason {
 /// sous les tuiles tombe ainsi à 6 + 6 + 2 = 14 px, exactement l'air que
 /// `ScrollArea::min_scrolled_height` réservait déjà à la barre flottante d'avant.
 const STRIP_SCROLLBAR_OUTER_MARGIN: f32 = 2.0;
+
+/// Ouvre le nom d'une tuile **sous la bande entière**, barre de défilement comprise.
+///
+/// Demande utilisateur du 2026-09-13 : toutes les infobulles du bandeau passent EN DESSOUS, pour
+/// que la place qu'elles réclamaient au-dessus (`render_content::WATCHLIST_TOOLTIP_RESERVE`, alors
+/// une marge HAUTE de 28 px) cesse d'éloigner la bande du bord haut du jeu — « c'est très
+/// dérangeant visuellement, et encore plus lorsqu'il n'y a pas du tout de suivi ».
+///
+/// D'où l'ancrage : « en dessous de la tuile » tomberait sur la barre de défilement, peinte à
+/// 6 px sous elle (voir [`STRIP_SCROLLBAR_OUTER_MARGIN`]) — le nom masquerait la barre au moment
+/// précis où on longe la bande pour la lire. L'infobulle s'accroche donc à un rectangle qui
+/// descend jusqu'au bas de la zone défilante (`design::Tooltip::anchor`), la barre incluse quand
+/// elle est là, et s'ouvre dessous.
+///
+/// Peinte depuis `show` plutôt que depuis `entry_tile` pour cette seule raison : le bas de la zone
+/// défilante n'est connu qu'une fois sa fermeture rendue.
+fn paint_tile_tips(tuiles: &[(egui::Response, &str)], strip_rect: egui::Rect, barre_visible: bool) {
+    let bas = strip_rect.max.y
+        + if barre_visible {
+            strip_scroll_area().reserve()
+        } else {
+            0.0
+        };
+    for (response, nom) in tuiles {
+        let ancre = egui::Rect::from_min_max(
+            response.rect.min,
+            egui::pos2(response.rect.max.x, bas.max(response.rect.max.y)),
+        );
+        design::tooltip(response)
+            .side(design::TooltipSide::Below)
+            .anchor(ancre)
+            .text(*nom);
+    }
+}
 
 /// La zone défilante des tuiles — **la barre de défilement du JEU** (`design::scroll_area`),
 /// couchée à l'horizontale (`design::ScrollAxis::Horizontal`).
@@ -1328,7 +1410,7 @@ fn toast_card(
 // déjà les trois. Ce qui reste ici est ce qui appartient à CE panneau : le carré de contrôle est
 // collé au bord gauche de la fenêtre Suivi (quelques pixels de `WATCHLIST_INNER_MARGIN`), une
 // infobulle strictement à gauche n'y tiendrait pas — d'où la réserve `CONTROL_TOOLTIP_RESERVE`,
-// symétrique des deux côtés (et `CONTROL_ROW_TOOLTIP_RESERVE` pour la rangée).
+// désormais à DROITE seulement (et `CONTROL_ROW_TOOLTIP_RESERVE` pour la rangée).
 
 /// Carré 2×2 — ou rangée 1×4 du bandeau vide — de boutons, sur un fond translucide (voir doc de
 /// module, refontes 2026-09-08 et 2026-09-13) : tous CLIQUABLES (`Sense::click()`) —
@@ -1346,9 +1428,9 @@ fn toast_card(
 /// ```
 /// En rangée, "−" est visuellement DÉSACTIVÉ (voir `control_button`, `ControlButtonState`) — rien
 /// à supprimer tant qu'aucune entrée n'est suivie ; les trois autres boutons restent toujours
-/// activés. Infobulle par LIGNE en carré (voir doc de module, 2026-09-13) : AU-DESSUS pour
-/// "+"/"−", EN DESSOUS pour "Détails"/"Options" — jamais selon le rôle du bouton ; EN DESSOUS pour
-/// les quatre en rangée. Dans les deux cas, le seul côté qui ne recouvre aucun voisin.
+/// activés. **Les quatre infobulles s'ouvrent EN DESSOUS** (voir doc de module, refonte du soir du
+/// 2026-09-13) : en rangée sous leur bouton, en carré sous le CARRÉ (`anchor`) — sous un bouton du
+/// haut, elles recouvriraient celui du bas.
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
 fn control_button_row(
     ui: &mut egui::Ui,
@@ -1372,18 +1454,21 @@ fn control_button_row(
     let step = CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP;
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
     let remove_top_left = add_top_left + egui::vec2(step, 0.0);
-    let (details_top_left, options_top_left, top_side, bottom_side) = match layout {
+    let (details_top_left, options_top_left, anchor) = match layout {
+        // En carré, les quatre infobulles s'accrochent au CARRÉ, pas à leur bouton : « en dessous
+        // de + », c'est « par-dessus Détails ». Ancrées sur le groupe, elles s'ouvrent toutes sous
+        // sa dernière ligne (voir `design::Tooltip::anchor`).
         ControlLayout::Square => (
             add_top_left + egui::vec2(0.0, step),
             remove_top_left + egui::vec2(0.0, step),
-            design::TooltipSide::Above,
-            design::TooltipSide::Below,
+            Some(row_rect),
         ),
+        // En rangée, rien n'est jamais recouvert en dessous : chaque infobulle reste centrée sur
+        // SON bouton, ce qui dit lequel elle décrit.
         ControlLayout::Row => (
             remove_top_left + egui::vec2(step, 0.0),
             remove_top_left + egui::vec2(step * 2.0, 0.0),
-            design::TooltipSide::Below,
-            design::TooltipSide::Below,
+            None,
         ),
     };
 
@@ -1397,7 +1482,7 @@ fn control_button_row(
             shortcuts.label(ShortcutAction::WatchlistAdd)
         ),
         ControlButtonState::Enabled,
-        top_side,
+        anchor,
     );
     // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
     // bouton ouvrait la modale Options sur l'onglet « Suivi », son seul rôle possible, sans que
@@ -1433,7 +1518,7 @@ fn control_button_row(
             (false, true) => ControlButtonState::Active,
             (false, false) => ControlButtonState::Enabled,
         },
-        top_side,
+        anchor,
     );
 
     // "Détails" sous "+" (colonne GAUCHE du carré) ou à la suite de "−" (rangée) — même
@@ -1446,7 +1531,7 @@ fn control_button_row(
         "watchlist-details",
         &format!("Détails ({})", shortcuts.label(ShortcutAction::Details)),
         ControlButtonState::Enabled,
-        bottom_side,
+        anchor,
     );
     // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
     // `open::that(base_url())` directement, et c'était un vrai défaut : un panneau qui produit un
@@ -1469,7 +1554,7 @@ fn control_button_row(
         "watchlist-options",
         &format!("Options ({})", shortcuts.label(ShortcutAction::Options)),
         ControlButtonState::Enabled,
-        bottom_side,
+        anchor,
     );
     ControlRowClicks {
         add,
@@ -1527,12 +1612,12 @@ enum ControlButtonState {
 ///   étaient déjà, octet pour octet, ceux du design system.
 ///
 /// **Ce que le composant ne prend pas en charge, et pourquoi ça reste ici.** Le placement de
-/// l'infobulle (`side`, voir [`design::TooltipSide`] et [`ControlLayout`]) est une décision de mise
-/// en page : en carré, « + » et « − » l'ouvrent au-dessus, « Détails » et « Options » en dessous,
-/// pour qu'elle ne recouvre jamais l'autre ligne ; en rangée, les quatre l'ouvrent en dessous.
-/// `design::icon_button` expose bien un `.tooltip()`, mais il place toujours au-dessus (depuis le
-/// 2026-09-13 ; sous l'élément avant cela) — l'utiliser casserait cette règle, que
-/// `panneau_suivi_tooltips_par_ligne_dessus_ou_dessous` et
+/// l'infobulle est une décision de mise en page : les quatre l'ouvrent EN DESSOUS, et en carré
+/// sous le carré ENTIER (`anchor`, voir [`control_button_row`]) pour ne pas recouvrir la ligne du
+/// bas. `design::icon_button` expose bien un `.tooltip()`, mais il place toujours au-dessus
+/// (depuis le 2026-09-13 ; sous l'élément avant cela) et ne sait pas s'ancrer ailleurs que sur son
+/// propre rectangle — l'utiliser casserait cette règle, que
+/// `panneau_suivi_toutes_les_infobulles_sous_la_bande` et
 /// `panneau_suivi_vide_boutons_en_ligne_infobulles_dessous` vérifient. Le composant peint et rend
 /// une `Response` ; le panneau décide où poser l'infobulle.
 ///
@@ -1554,7 +1639,7 @@ fn control_button(
     log_name: &str,
     tooltip: &str,
     state: ControlButtonState,
-    side: design::TooltipSide,
+    anchor: Option<egui::Rect>,
 ) -> egui::Response {
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
     let mut bouton = design::icon_button(glyph)
@@ -1569,7 +1654,14 @@ fn control_button(
         bouton = bouton.preview_state(design::IconButtonState::Hovered);
     }
     let response = ui.put(rect, bouton);
-    design::tooltip(&response).side(side).text(tooltip);
+    // TOUJOURS en dessous (voir [`control_button_row`]), et en dessous de ce que `anchor` désigne :
+    // le carré entier quand il y en a un, sans quoi l'infobulle d'un bouton du HAUT se poserait
+    // par-dessus celui du bas.
+    let mut infobulle = design::tooltip(&response).side(design::TooltipSide::Below);
+    if let Some(anchor) = anchor {
+        infobulle = infobulle.anchor(anchor);
+    }
+    infobulle.text(tooltip);
     response
 }
 
@@ -1690,15 +1782,9 @@ fn entry_tile(
         ),
     };
 
-    // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
-    // 2026-09-06, design system tooltip). Au-dessus de la tuile (côté par défaut) — et RÉELLEMENT
-    // au-dessus depuis le 2026-09-13 : `render_content::WATCHLIST_TOP_MARGIN` lui en donne la
-    // place, avant quoi elle retombait en dessous faute d'espace. Tue pendant un déplacement : un
-    // nom affiché sous le pointeur masquerait le liseré de la tuile visée, qu'on essaie justement
-    // de lire.
-    if !reorder.in_flight() {
-        design::tooltip(&response).text(&entry.name);
-    }
+    // **L'infobulle n'est plus peinte ici** depuis le 2026-09-13 (voir `show`, `paint_tile_tips`) :
+    // elle s'ouvre EN DESSOUS de la zone défilante, dont cette fonction ne connaît pas le bas — un
+    // nom ouvert sous la tuile elle-même recouvrirait la barre de défilement, juste dessous.
     Tile { response, reorder }
 }
 

@@ -108,8 +108,10 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 /// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
 /// `panels::watchlist`) — la LARGEUR, elle, suit dynamiquement le CONTENU (voir
 /// `watchlist_target_width`), pas une constante fixe. Plus
-/// `render_content::WATCHLIST_TOP_MARGIN` (2026-09-13, voir sa doc) : la place des infobulles
-/// ouvertes AU-DESSUS de la bande, qui décale celle-ci d'autant vers le bas sur l'écran.
+/// `render_content::WATCHLIST_TOOLTIP_RESERVE` (2026-09-13, voir sa doc) : la place des
+/// infobulles, qui s'ouvrent toutes EN DESSOUS de la bande depuis le soir du même jour. Cette
+/// réserve-là ne décale rien — elle laisse de la hauteur de fenêtre SOUS le contenu, là où la
+/// version du matin la prenait AU-DESSUS et éloignait la bande du bord haut du jeu d'autant.
 ///
 /// **Ramenée de 132 à 92 px le 2026-09-13** (retour utilisateur : « on peut réduire un peu
 /// l'overlay en hauteur »). Les 132 px dataient du 2026-09-02, où ils réservaient d'un bloc
@@ -121,7 +123,7 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 /// 72 px de zone défilante (58 de tuile + 14 de réserve de barre), 6 px de gouttière avant le
 /// toast, 6 px de marge basse, plus 2 px d'arrondi — et rien de plus : la fenêtre reste
 /// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
-const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOP_MARGIN as f64;
+const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE as f64;
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.
