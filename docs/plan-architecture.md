@@ -1678,7 +1678,8 @@ standard.
 - **Comparaison à seuil, jamais pixel-exact** : `assert_eq!` sur des octets PNG est écarté d'emblée
   (dérive connue de rastérisation entre versions de Mesa). Image de référence versionnée dans le
   dépôt, version de Mesa figée dans l'image CI, flux explicite de mise à jour des références,
-  revu en PR dédiée — jamais glissé dans une PR fonctionnelle.
+  ~~revu en PR dédiée — jamais glissé dans une PR fonctionnelle~~ → **commit dédié + capture
+  publiée** (amendé le 2026-09-13, voir ci-dessous).
 - **Fixtures : jamais de `UiSnapshot`/`SessionSnapshot` construit à la main.** Il doit systématiquement
   être dérivé du rejeu du vrai `crates/overlay-engine/tests/wakfu.log` à travers le vrai
   `EngineBackend` — pour rester attelé au harnais de parité existant (§2.2) et casser visiblement le
@@ -1715,13 +1716,48 @@ n'avait jamais été mis en place.
   références DANS cet environnement (`.github/ci-image/Dockerfile` le reproduit sur un poste de dev),
   committer les deux ensemble.
 - **Ce que la promotion coûte** : tout changement visuel voulu doit désormais porter ses références
-  régénérées, sinon le CI bloque. La règle « régénération revue en PR dédiée, jamais glissée dans une
-  PR fonctionnelle » (ci-dessus) reste écrite mais n'est pas tenue dans les faits — les références
-  voyagent avec le commit qui change l'interface. À trancher : l'appliquer, ou l'amender.
-- **Ce que la promotion ne couvre pas** : `scripts/ci-local.sh` tourne sur la machine du dev, pas
-  dans le conteneur. Il avertit quand le Mesa local diffère de celui du CI
-  (`avertir_si_mesa_different`) sans jamais bloquer — un écart local ne dit rien de ce que fera le
-  CI, et régénérer des références sous un autre Mesa les rougirait pour tout le monde.
+  régénérées, sinon le CI bloque.
+
+**Règle de régénération, amendée le 2026-09-13** (décision utilisateur) : « revu en PR dédiée »
+devient **commit dédié + capture publiée**.
+
+- **Ce que la règle protège, et qui ne change pas** : régénérer une référence est une AFFIRMATION
+  — « ce nouveau rendu est correct » — et c'est la seule que git ne sait pas montrer, un PNG modifié
+  s'affichant `Bin 693015 -> 698936 bytes`. Le mode de défaillance visé est précis : on change du
+  code d'interface, douze captures rougissent, `UPDATE_SNAPSHOTS=1`, vert — et si l'une des douze
+  était une vraie régression (libellé rogné, infobulle du mauvais côté), elle vient de devenir la
+  référence, définitivement et sans que personne l'ait vue. La règle existe pour que ce geste ne
+  soit jamais un réflexe.
+- **Pourquoi « PR dédiée » ne s'appliquait pas** : ce dépôt n'ouvre pas de PR (voir `CLAUDE.md` —
+  tout converge sur `dev` par commits directs). La règle avait été écrite pour un flux qui n'est pas
+  le sien, et n'a donc jamais été tenue une seule fois.
+- **Ce qui la remplace, à intention identique** : (1) un **commit dédié** ne portant que les `.png`,
+  visible dans `git log` comme un acte distinct du changement de code ; (2) la **capture publiée en
+  artefact**, déjà imposée par `CLAUDE.md` pour tout changement visuel — le seul support qui rende
+  la bénédiction relisible, puisque le diff ne le peut pas.
+- **Et le CI publie désormais de quoi la relire** : sur un gate rouge, `*.new.png` (le rendu obtenu)
+  et `*.diff.png` (les pixels en écart) sont publiés en artefact. Sans eux, le journal ne donne
+  qu'un nombre de pixels, et il fallait reproduire l'environnement du CI en local rien que pour
+  savoir CE QUI avait changé.
+**Captures hors CI — `scripts/ci-local.sh`, tranché le 2026-09-13** (décision utilisateur) : le
+script tourne sur la machine du dev, qui n'a aucune raison d'avoir le rendu du CI. Trois situations,
+trois comportements.
+
+- **Environnement prouvé épinglé → étape bloquante**, comme au CI. La preuve est le marqueur
+  `/etc/wakfu-render-pinned`, posé par `setup-render-env.sh` en fin de course. **Un marqueur et non
+  un `dpkg-query` refait par l'appelant** : `dpkg` n'existe pas sous Arch — le conteneur de
+  développement du Steam Deck (`setup-steamdeck.sh`) en est un — où l'interrogation échouerait
+  silencieusement et ferait passer un environnement NON épinglé pour épinglé.
+- **Environnement quelconque → étape informative**, jamais comptée en échec, et le récapitulatif
+  final dit explicitement que les captures n'ont pas été vérifiées. Un verdict rendu sous un autre
+  Mesa ne vaut rien, et un « tout est vert » qui rougit à tort est pire que pas de verdict : c'est
+  la mécanique qui a fait que plus personne ne lisait le CI pendant la semaine rouge de septembre.
+  Le cas est réel et non théorique — sur le Steam Deck, le conteneur de dev est sous Arch, en Mesa
+  roulant, et sans `vulkan-swrast` il ne rendrait même pas avec le même pilote.
+- **`--captures-conteneur` → on se place dans l'environnement du CI**, donc bloquante. Le script
+  construit l'image de `.github/ci-image/Dockerfile` et y rejoue les captures ; c'est aussi le seul
+  chemin légitime pour les RÉGÉNÉRER (`UPDATE_SNAPSHOTS=1 bash scripts/ci-local.sh
+  --captures-conteneur`).
 
 **État (2026-09-04) : Niveau 1 implémenté et validé de bout en bout, portée volontairement
 réduite pour l'instant.**
