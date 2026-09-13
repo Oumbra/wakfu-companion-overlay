@@ -10,8 +10,8 @@
 //! ## Ce que la référence du jeu donne, et ce qui en est repris
 //!
 //! Trois éléments, dans cet ordre : un **champ « Rechercher »** pleine largeur en tête d'écran, des
-//! **en-têtes de groupe** (« Barres de raccourcis » là-bas ; « Overlay », « Suivi », « Combat »,
-//! « Compte » ici, voir `shortcuts::ShortcutAction::section`), et des **lignes
+//! **en-têtes de groupe** (« Barres de raccourcis » là-bas ; « Overlay », « Suivi », « Combat »
+//! ici, voir `shortcuts::ShortcutAction::section`), et des **lignes
 //! `libellé à gauche → champ à droite`**. Le bouton de réinitialisation que le jeu pose en haut à
 //! droite est repris au bout de la ligne de recherche : la bannière de CETTE fenêtre porte déjà sa
 //! croix de fermeture (2026-09-13), y ajouter un second bouton icône donnerait deux gestes très
@@ -19,7 +19,7 @@
 //!
 //! **Un tableau du design system, pas des lignes peintes à la main** (`design::table`) : les
 //! groupes deviennent des tableaux successifs coiffés d'un `design::heading`. Le jeu, lui, n'a
-//! qu'une seule longue liste — mais neuf actions réparties en quatre familles se lisent mieux
+//! qu'une seule longue liste — mais huit actions réparties en trois familles se lisent mieux
 //! groupées, et c'est le composant qui apporte le zébrage, la barre de défilement du jeu et
 //! l'écrêtage des cellules.
 //!
@@ -53,7 +53,12 @@ use crate::shortcuts::{Shortcut, ShortcutAction, ShortcutBindings};
 const TEXT: Color32 = Color32::WHITE;
 /// Gris du jeu (`#b8b9ba`) — libellés secondaires, voir `panels::alerts_tab::SUBDUED`.
 const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
-const BODY_FONT_SIZE: f32 = 12.0;
+/// Corps du texte courant — **15 px, comme les onglets « Alertes » et « Suivi »**.
+///
+/// 12 px à la première version, et c'était trop petit (retour utilisateur du 2026-09-13 : la
+/// police des libellés d'action doit être « un tout petit plus grande ») : cet onglet était le seul
+/// de la fenêtre à ne pas être au corps commun, ce qui se voyait d'un onglet à l'autre.
+const BODY_FONT_SIZE: f32 = 15.0;
 
 /// Air entre deux blocs — même valeur relevée que les autres onglets
 /// (`panels::options_modal::SECTION_GAP`, 17 px : le seul signal de regroupement du jeu).
@@ -76,9 +81,11 @@ const ROW_GAP: f32 = 10.0;
 /// hauteur native et se centrant dessus (même composition que la ligne « chemin + Parcourir » de
 /// l'onglet « Paramètres », voir `panels::options_modal`).
 const SEARCH_ROW_HEIGHT: f32 = 36.0;
-/// Hauteur d'une ligne de tableau — celle du champ qu'elle porte, plus l'air au-dessus et en
-/// dessous (le tableau du design system centre son contenu dans la ligne).
-const ROW_HEIGHT: f32 = 34.0;
+/// Hauteur d'une ligne de tableau — **39 px, le pas relevé sur la référence de cet onglet même**
+/// (`interface-options-commandes.png`, voir `panels::alerts_tab::ROW_HEIGHT` qui cite la même
+/// mesure). 34 px à la première version, une valeur choisie ; le passage du corps de texte à 15 px
+/// demandait de toute façon plus d'air.
+const ROW_HEIGHT: f32 = 39.0;
 
 /// Ce que l'onglet garde entre deux frames. **Pas les raccourcis** : ceux-ci sont le brouillon que
 /// l'appelant prête à [`show`], comme le profil d'alertes de `panels::alerts_tab`.
@@ -184,16 +191,24 @@ pub fn show(
 
 /// Les sections, dans l'ordre d'affichage — celui de `ShortcutAction::ALL`, dont les actions d'une
 /// même section sont contiguës.
-const SECTIONS: [&str; 4] = ["Overlay", "Suivi", "Combat", "Compte"];
+///
+/// « Compte » a disparu le 2026-09-13 avec son unique action (la déconnexion, devenue un bouton de
+/// l'onglet « Paramètres ») — un groupe vide ne s'affiche pas, mais le laisser ici ferait croire
+/// qu'il reste quelque chose à y ranger. Le test `toutes_les_sections_sont_listees` garantit
+/// l'inverse : aucune action ne peut se retrouver sans groupe.
+const SECTIONS: [&str; 3] = ["Overlay", "Suivi", "Combat"];
 
 fn paragraph(ui: &mut egui::Ui, text: &str) {
     // Un paragraphe, pas un `design::info_text` : celui-ci porte une pastille et un fond, réservés
     // à ce qui doit arrêter l'œil (même arbitrage que `panels::alerts_tab::paragraph`).
-    ui.label(
-        RichText::new(text)
-            .color(SUBDUED)
-            .size(BODY_FONT_SIZE)
-            .line_height(Some(BODY_FONT_SIZE * 1.5)),
+    ui.add(
+        egui::Label::new(
+            RichText::new(text)
+                .color(SUBDUED)
+                .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE))
+                .line_height(Some(BODY_FONT_SIZE * 1.5)),
+        )
+        .wrap_mode(egui::TextWrapMode::Wrap),
     );
 }
 
@@ -279,7 +294,7 @@ fn shortcut_table(
                 ui.label(
                     RichText::new(action.label())
                         .color(TEXT)
-                        .size(BODY_FONT_SIZE),
+                        .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
                 );
             });
             row.cell(|ui| shortcut_cell(ui, state, bindings, action));
