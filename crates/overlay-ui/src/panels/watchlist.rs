@@ -1394,8 +1394,9 @@ fn entry_tile(
         .frame(frame)
         .icon(icon_id)
         .size(TILE_SIZE)
-        // **Le ton destructif** : ici la sélection ne sert qu'à supprimer, contrairement à celle
-        // de l'onglet « Suivi », qui reste neutre faute d'avoir une autre action à proposer.
+        // **Le ton destructif** : la sélection ne sert qu'à supprimer. Même ton dans l'onglet
+        // « Suivi » (`suivi_tab::tracked_tile`) — les deux écrans cochent les mêmes entrées pour
+        // la même action, ils ne peuvent pas se le dire avec deux couleurs.
         .selection_tone(design::SelectionTone::Danger)
         .log_name("suivi.tuile");
     if let Some(count) = slot_count(entry) {

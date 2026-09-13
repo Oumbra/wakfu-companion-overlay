@@ -792,7 +792,7 @@ enum TileClick {
 /// | Bas-droit | la **cible** d'un décompte (`/50`) — et rien du tout pour un incrémental |
 /// | Croix haut-droite | retrait — **seulement sur la tuile survolée**, rouge sous le pointeur |
 /// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
-/// | Liseré or | la tuile est cochée |
+/// | Liseré rouge | la tuile est cochée — le ton destructif, la sélection ne mène qu'au retrait |
 ///
 /// Ni le nom ni la valeur courante ne sont peints — voir la règle 1 de la doc de module.
 fn tracked_tile(
@@ -827,6 +827,10 @@ fn tracked_tile(
         // le liseré tombait au bord du carré, à 2 px de celui de rareté qu'il devait recouvrir, et
         // la case, vrai widget, volait à la tuile le clic des 20 px qu'elle couvre.
         .selection(select_mode.then_some(cochee))
+        // **Le ton destructif**, comme sur le bandeau (`panels::watchlist::entry_tile`) : cocher
+        // des tuiles ici ne mène qu'au bouton « Supprimer », jamais à une autre action. L'or de
+        // `SelectionTone::Neutral` promettait un choix qui n'existe pas (retour du 2026-09-13).
+        .selection_tone(design::SelectionTone::Danger)
         .log_name(tuile.name.clone());
     if let Some(target) = tuile.target {
         slot = slot.count(design::SlotCount::Target(target));

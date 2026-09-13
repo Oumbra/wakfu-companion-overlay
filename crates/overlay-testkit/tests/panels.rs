@@ -2049,8 +2049,10 @@ fn options_onglet_suivi_decompte() {
     );
 }
 
-/// Sélection multiple : cases à cocher sur toutes les tuiles, liseré or sur les cochées, et le
-/// bouton de suppression groupée **en rouge** — décision explicite de l'utilisateur (2026-09-13).
+/// Sélection multiple : cases à cocher sur toutes les tuiles, **liseré et coche rouges** sur les
+/// cochées, et le bouton de suppression groupée en rouge — décision explicite de l'utilisateur
+/// (2026-09-13). Le ton destructif est le même que sur le bandeau : cocher ici ne mène nulle part
+/// ailleurs qu'au retrait, l'or promettait un choix qui n'existe pas.
 #[test]
 fn options_onglet_suivi_selection_multiple() {
     capture_onglet_suivi(
