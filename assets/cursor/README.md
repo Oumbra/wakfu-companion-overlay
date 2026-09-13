@@ -16,8 +16,11 @@ curseur est immobile. Aucune interpolation : ce sont les pixels affichés par le
 | `wakfu-cursor-move.png` | déplacement (croix fléchée, fixe) | 33 × 33 px, RGBA |
 
 - Curseur nu : 24 × 31 px ; les bitmaps ajoutent une marge transparente de 1 px.
-- Point chaud (pointe) : pixel (2, 0) du bitmap avec marge.
-- Alpha binaire (masque de différence avec le fond).
+- Point chaud (pointe) : pixel (2, 2) du bitmap avec marge — premier pixel au moins à moitié opaque
+  en lisant de haut en bas (`cursor::hotspot`, seuil `HOTSPOT_ALPHA_MIN`).
+- Re-détourés à la main le 13/09/2026 (v2, mainteneur) : contour affiné, bords lissés (alpha sur
+  plusieurs niveaux). La première découpe automatique (alpha binaire, contour de 3 px) reste dans
+  l'historique git.
 
 ## Animation
 
