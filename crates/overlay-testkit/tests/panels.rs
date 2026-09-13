@@ -1598,6 +1598,56 @@ fn options_parametres_section_compte() {
     harness.snapshot("options_parametres_compte");
 }
 
+/// **La confirmation de déconnexion** — l'autre moitié de la section « Compte ». Le bouton est la
+/// seule action de cette fenêtre qui échappe à « Annuler » (l'hôte efface le jeton dès qu'elle
+/// répond « Oui ») : cette boîte est ce qui rattrape le clic par inadvertance, et son voile doit
+/// couvrir la fenêtre ENTIÈRE, pied de page compris, pour que rien ne reste cliquable derrière.
+///
+/// La logique — Échap répond « Non » sans fermer la fenêtre derrière — est couverte par
+/// `options_deconnexion_confirmee_et_echap_repond_non` ; ici, seul le rendu est figé.
+#[test]
+fn options_deconnexion_confirmation() {
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        pending_disconnect: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_deconnexion_confirmation");
+}
+
 #[test]
 fn options_onglet_raccourcis() {
     use overlay_ui::panels::raccourcis_tab::RaccourcisTabState;
