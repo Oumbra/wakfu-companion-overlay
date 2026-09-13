@@ -362,6 +362,7 @@ use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot
 use crate::design::{self, text};
 use crate::portraits::PortraitAtlas;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
+use crate::shortcuts::{ShortcutAction, ShortcutBindings};
 use crate::ui_icons::UiIcons;
 
 use super::combat_bars::DamageBars;
@@ -384,7 +385,7 @@ pub enum CombatSide {
 }
 
 impl CombatSide {
-    /// Inverse le camp affiché — utilisé par le raccourci global `Ctrl+Shift+E`
+    /// Inverse le camp affiché — utilisé par le raccourci global `ShortcutAction::CombatSide`
     /// (`main.rs::App::toggle_combat_side`) en plus du clic direct sur `paint_side_switch` : retour
     /// utilisateur explicite (« en mode toggle, c'est-à-dire que quand on appuie, ça inverse la
     /// sélection »), un seul raccourci pour les deux camps plutôt qu'un par camp.
@@ -475,6 +476,9 @@ pub fn show(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
     side: &mut CombatSide,
+    // Voir `panels::watchlist::WatchlistAssets::shortcuts` : même raison, ici pour l'infobulle du
+    // switch Alliés/Ennemis.
+    shortcuts: &ShortcutBindings,
 ) {
     // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`) — c'est
     // l'ordre des PORTRAITS, cadre et liste plate confondus. Calculé ICI, avant toute mise en page
@@ -630,7 +634,7 @@ pub fn show(
         // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
         // portrait »).
         ui.vertical(|ui| {
-            show_leader_row(ui, icons, side, total_damage_raw);
+            show_leader_row(ui, icons, side, shortcuts, total_damage_raw);
             ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
             if fighters.is_empty() {
                 ui.weak(match fight {
@@ -667,7 +671,13 @@ pub fn show(
 /// suffit déjà, la ligne est seule tout en haut de la colonne). Appelée par `show` dans TOUS les
 /// cas, y compris combat vide ou camp affiché sans combattant — voir sa doc — pour que le switch
 /// reste accessible en toute circonstance.
-fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, total_damage: i64) {
+fn show_leader_row(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
+    side: &mut CombatSide,
+    shortcuts: &ShortcutBindings,
+    total_damage: i64,
+) {
     let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
     let content_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
     let row_height = content_height + LEADER_PANEL_PADDING * 2.0;
@@ -681,7 +691,7 @@ fn show_leader_row(ui: &mut egui::Ui, icons: &UiIcons, side: &mut CombatSide, to
         row_rect.min.x + LEADER_PANEL_PADDING,
         row_rect.center().y - SWITCH_HEIGHT / 2.0,
     );
-    paint_side_switch(ui, switch_top_left, side, icons);
+    paint_side_switch(ui, switch_top_left, side, icons, shortcuts);
 
     text::paint_outlined_text(
         ui,
@@ -925,6 +935,7 @@ fn paint_side_switch(
     top_left: egui::Pos2,
     side: &mut CombatSide,
     icons: &UiIcons,
+    shortcuts: &ShortcutBindings,
 ) {
     let option_size = egui::vec2(SWITCH_OPTION_WIDTH, SWITCH_HEIGHT);
     let allies_rect = egui::Rect::from_min_size(top_left, option_size);
@@ -957,7 +968,8 @@ fn paint_side_switch(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    design::tooltip(&allies_response).text("Alliés (Ctrl+Shift+E)");
+    let side_hotkey = shortcuts.label(ShortcutAction::CombatSide);
+    design::tooltip(&allies_response).text(format!("Alliés ({side_hotkey})"));
     let enemies_response = ui
         .interact(
             enemies_rect,
@@ -965,7 +977,7 @@ fn paint_side_switch(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    design::tooltip(&enemies_response).text("Ennemis (Ctrl+Shift+E)");
+    design::tooltip(&enemies_response).text(format!("Ennemis ({side_hotkey})"));
     if allies_response.clicked() {
         *side = CombatSide::Allies;
     }

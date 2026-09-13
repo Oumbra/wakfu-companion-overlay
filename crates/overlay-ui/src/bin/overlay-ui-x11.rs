@@ -14,8 +14,10 @@
 //!   `Connected` fixe (aucune icône de relance d'appairage n'est jamais affichée),
 //!   `auth_command_tx` est un `NoopAuthSink` (rien n'écoute de toute façon).
 //! - Pas de hotkey rafraîchissement/déconnexion (`Ctrl+Shift+R`/`Ctrl+Alt+D`) : sans thread
-//!   Auth/Catalogue à redemander, ils n'auraient aucun effet ici. Seuls bascule (`HOTKEY_LABEL`)
-//!   et sortie (`QUIT_HOTKEY_LABEL`) sont câblés.
+//!   Auth/Catalogue à redemander, ils n'auraient aucun effet ici. Seules les actions de
+//!   `overlay_ui::shortcuts::ShortcutAction::LINUX_SUPPORTED` sont câblées (bascule, sortie,
+//!   Options, sélection multiple du bandeau) — les neuf restent personnalisables et persistées,
+//!   simplement inertes ici.
 //! - Icônes réelles d'objets/monstres : `RemoteIconStore::empty()` (pas de thread réseau, voir sa
 //!   doc) — le panneau Suivi retombe sur l'icône générique, comme en mode invité côté Windows.
 //!
@@ -53,8 +55,7 @@ mod linux_main {
 
     use arc_swap::ArcSwap;
     use egui_wgpu::wgpu;
-    use global_hotkey::hotkey::{Code, HotKey, Modifiers};
-    use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
+    use global_hotkey::GlobalHotKeyEvent;
     use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
     use overlay_ingest::discovery;
     use overlay_platform::linux::topmost::{self, TopmostAction, TopmostState};
@@ -78,6 +79,7 @@ mod linux_main {
     use overlay_ui::render_content::{
         AuthStatus, NoopAuthSink, OverlayKind, RenderContent, UserEvent,
     };
+    use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
     use overlay_ui::ui_icons::UiIcons;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use winit::application::ApplicationHandler;
@@ -88,15 +90,10 @@ mod linux_main {
     use winit::platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11, WindowType};
     use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 
-    const HOTKEY_LABEL: &str = "Ctrl+Shift+W";
-    const QUIT_HOTKEY_LABEL: &str = "Ctrl+Shift+Q";
-    /// Modale Options (2026-09-08, §9 du plan) — même raccourci que Windows (`main.rs::
-    /// OPTIONS_HOTKEY_LABEL`), câblé ICI contrairement à Rafraîchissement/Déconnexion (voir la doc
-    /// de module) : cette fonctionnalité n'a rien à voir avec le compte lié, absent en mode invité.
-    const OPTIONS_HOTKEY_LABEL: &str = "Ctrl+Shift+O";
-    /// Raccourci global qui ouvre et referme la sélection multiple du bandeau — le double clavier
-    /// du bouton « − », dont l'infobulle l'annonce.
-    const WATCHLIST_REMOVE_HOTKEY_LABEL: &str = "Ctrl+Shift+S";
+    // Combinaisons : voir `overlay_ui::shortcuts` (personnalisables depuis le 2026-09-13, onglet
+    // « Raccourcis » de la fenêtre Options). Ce binaire n'enregistre que les actions de
+    // `ShortcutAction::LINUX_SUPPORTED` — bascule, quitter, Options et la sélection multiple du
+    // bandeau ; les autres n'ont pas de câblage ici (voir la doc de module).
     /// Même cadence que Windows (§6.5 du plan) : 20 Hz pour l'ancrage/topmost/hotkey.
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
     // Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
@@ -180,14 +177,10 @@ mod linux_main {
 
     struct App {
         windows: HashMap<WindowId, OverlayWindow>,
-        #[allow(dead_code)] // jamais relu : sa seule raison d'être est de rester en vie
-        hotkey_manager: GlobalHotKeyManager,
+        /// Voir `overlay_ui::shortcuts::ShortcutRegistry` (partagé avec `main.rs`) — combinaisons
+        /// effectives, enregistrement auprès de l'OS et table `id -> action`.
+        hotkeys: ShortcutRegistry,
         hotkey_events: &'static global_hotkey::GlobalHotKeyEventReceiver,
-        toggle_hotkey_id: u32,
-        quit_hotkey_id: u32,
-        options_hotkey_id: u32,
-        /// Voir `WATCHLIST_REMOVE_HOTKEY_LABEL`.
-        watchlist_remove_hotkey_id: u32,
         interactive: bool,
         snapshot: Arc<ArcSwap<SessionSnapshot>>,
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
@@ -221,6 +214,9 @@ mod linux_main {
         log_path: PathBuf,
         /// Voir `App::combat_always_visible` — lu de la config au démarrage (`run`).
         combat_always_visible: bool,
+        /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
+        /// Même provenance que `combat_always_visible`.
+        shortcuts: ShortcutBindings,
         snapshot: Arc<ArcSwap<SessionSnapshot>>,
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
@@ -240,6 +236,7 @@ mod linux_main {
             let AppState {
                 log_path,
                 combat_always_visible,
+                shortcuts,
                 snapshot,
                 watchlist,
                 watchlist_toast,
@@ -249,37 +246,12 @@ mod linux_main {
                 settings_tx,
             } = state;
 
-            let hotkey_manager = GlobalHotKeyManager::new().expect("création GlobalHotKeyManager");
-            let toggle_hotkey =
-                HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyW);
-            let quit_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyQ);
-            let options_hotkey =
-                HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyO);
-            // `Ctrl+Shift+S` — le double clavier du bouton « − » du bandeau, promis par son
-            // infobulle depuis le 2026-09-06 et branché le 2026-09-13.
-            let watchlist_remove_hotkey =
-                HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
-            hotkey_manager
-                .register(toggle_hotkey)
-                .expect("enregistrement du hotkey global");
-            hotkey_manager
-                .register(quit_hotkey)
-                .expect("enregistrement du hotkey de sortie");
-            hotkey_manager
-                .register(options_hotkey)
-                .expect("enregistrement du hotkey Options");
-            hotkey_manager
-                .register(watchlist_remove_hotkey)
-                .expect("enregistrement du hotkey Supprimer");
+            let hotkeys = ShortcutRegistry::new(&ShortcutAction::LINUX_SUPPORTED, shortcuts);
 
             Self {
                 windows: HashMap::new(),
-                hotkey_manager,
+                hotkeys,
                 hotkey_events: GlobalHotKeyEvent::receiver(),
-                toggle_hotkey_id: toggle_hotkey.id(),
-                quit_hotkey_id: quit_hotkey.id(),
-                options_hotkey_id: options_hotkey.id(),
-                watchlist_remove_hotkey_id: watchlist_remove_hotkey.id(),
                 watchlist_selection: panels::watchlist::WatchlistSelection::default(),
                 interactive: true,
                 snapshot,
@@ -548,7 +520,8 @@ mod linux_main {
                 overlay.window.request_redraw();
             }
             tracing::info!(
-                ">>> Bascule ({HOTKEY_LABEL}) : mode = {}",
+                ">>> Bascule ({}) : mode = {}",
+                self.hotkeys.bindings().label(ShortcutAction::Toggle),
                 if self.interactive {
                     "INTERACTIF"
                 } else {
@@ -688,6 +661,9 @@ mod linux_main {
                 // La case part du réglage EN VIGUEUR, pas du défaut : « Annuler » n'a rien à
                 // défaire tant qu'on n'y touche pas (voir `OptionsModalState::is_dirty`).
                 combat_always_visible: self.combat_always_visible,
+                // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
+                shortcuts: self.hotkeys.bindings().clone(),
+                raccourcis: Default::default(),
                 alerts: Default::default(),
                 // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :
                 // aucun thread Auth ne tourne ici). Il n'y a donc ni liste à charger ni endroit où
@@ -709,12 +685,30 @@ mod linux_main {
                     alerts: None,
                     suivi: Some(Vec::new()),
                     combat_always_visible: self.combat_always_visible,
+                    shortcuts: self.hotkeys.bindings().clone(),
                 },
                 pending_close: false,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
-            tracing::info!("[options] modale ouverte.");
+            // Voir `main.rs::open_options_modal` : XGrabKey intercepterait sinon la frappe que
+            // l'onglet « Raccourcis » essaie justement de capturer.
+            self.hotkeys.suspend();
+            tracing::info!("[options] modale ouverte — raccourcis globaux suspendus.");
+        }
+
+        /// Voir `main.rs::close_options_modal` — unique point de fermeture, rend les raccourcis
+        /// globaux au système.
+        fn close_options_modal(&mut self, options_window_id: WindowId, raison: &str) {
+            self.windows.remove(&options_window_id);
+            let refuses = self.hotkeys.resume();
+            if !refuses.is_empty() {
+                tracing::warn!(
+                    "[options] {} raccourci(s) refusé(s) par le système — voir les lignes [raccourcis] ci-dessus.",
+                    refuses.len()
+                );
+            }
+            tracing::info!("[options] fenêtre fermée ({raison}).");
         }
 
         /// Lance l'explorateur de fichiers natif (`rfd`) sur un thread dédié — bloquant côté OS,
@@ -786,15 +780,25 @@ mod linux_main {
                             }
                         );
                     }
-                    // La config est réécrite EN ENTIER, et seulement si l'un des deux réglages a
-                    // bougé — même raison que `main.rs` : le fichier est réécrit d'un bloc.
-                    if path_changed || combat_changed {
-                        config::save(&config::OverlayConfig {
+                    // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
+                    // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.
+                    let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
+                    if shortcuts_changed {
+                        tracing::info!("[options] raccourcis personnalisés mis à jour.");
+                        self.hotkeys.apply(commit.shortcuts);
+                    }
+                    // La config est réécrite EN ENTIER, et seulement si l'un des réglages a bougé —
+                    // même raison que `main.rs` : le fichier est réécrit d'un bloc.
+                    if path_changed || combat_changed || shortcuts_changed {
+                        let mut saved = config::OverlayConfig {
                             log_path: Some(candidate),
                             combat_always_visible: self.combat_always_visible,
-                        });
+                            ..Default::default()
+                        };
+                        saved.set_shortcuts(self.hotkeys.bindings());
+                        config::save(&saved);
                     }
-                    self.windows.remove(&options_window_id);
+                    self.close_options_modal(options_window_id, "Valider");
                     // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
                     // d'`about_to_wait` — même raison que `main.rs`.
                     self.sync_combat_visibility();
@@ -818,10 +822,17 @@ mod linux_main {
             if !self.banner_printed {
                 tracing::info!("=== wakfu-companion-overlay (Linux/X11, §17.2 du plan) ===");
                 tracing::info!("Suivi de {}", self.log_path.display());
+                // Libellés LUS dans les raccourcis effectifs (personnalisables) : une bannière
+                // qui annoncerait les défauts à qui les a changés serait un contresens.
+                let bindings = self.hotkeys.bindings();
                 tracing::info!(
                     "Mode invité uniquement (pas de compte lié, voir la doc de ce binaire). \
-                     {HOTKEY_LABEL} pour basculer interactif / clic-traversant. \
-                     {QUIT_HOTKEY_LABEL} ou Ctrl+C (dans ce terminal) pour quitter."
+                     {} pour basculer interactif / clic-traversant. \
+                     {} ou Ctrl+C (dans ce terminal) pour quitter. \
+                     {} pour la fenêtre Options, dont l'onglet « Raccourcis ».",
+                    bindings.label(ShortcutAction::Toggle),
+                    bindings.label(ShortcutAction::Quit),
+                    bindings.label(ShortcutAction::Options),
                 );
                 self.banner_printed = true;
             }
@@ -989,6 +1000,7 @@ mod linux_main {
                             auth_status: &self.auth_status,
                             auth_command_tx: &self.auth_command_tx,
                             interactive,
+                            shortcuts: self.hotkeys.bindings(),
                             now,
                             options: overlay.options_state.as_mut(),
                         },
@@ -1064,10 +1076,7 @@ mod linux_main {
                 PostRedraw::OpenOptions(window, rect, tab) => {
                     self.open_options_modal(event_loop, Some((window, rect)), tab)
                 }
-                PostRedraw::CloseOptions => {
-                    self.windows.remove(&id);
-                    tracing::info!("[options] modale fermée (Annuler).");
-                }
+                PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             }
@@ -1083,27 +1092,47 @@ mod linux_main {
                 if event.state != global_hotkey::HotKeyState::Pressed {
                     continue;
                 }
-                if event.id == self.toggle_hotkey_id {
-                    self.toggle_interactive();
-                } else if event.id == self.quit_hotkey_id {
-                    logging::log_session_end(QUIT_HOTKEY_LABEL);
-                    event_loop.exit();
-                } else if event.id == self.watchlist_remove_hotkey_id {
-                    tracing::info!(">>> Supprimer ({WATCHLIST_REMOVE_HOTKEY_LABEL})");
-                    self.watchlist_selection.toggle_mode();
-                    // La fenêtre change de hauteur avec le mode, et rien d'autre ne la redessine :
-                    // sans ce réveil, le raccourci n'aurait d'effet qu'au prochain événement venu
-                    // d'ailleurs.
-                    self.request_watchlist_redraw();
-                } else if event.id == self.options_hotkey_id {
-                    tracing::info!(">>> Options ({OPTIONS_HOTKEY_LABEL})");
-                    // Même destination que le bouton "Options" qu'il double — voir la doc de
-                    // `PostRedraw::OpenOptions` (2026-09-13).
-                    self.open_options_modal(
-                        event_loop,
-                        None,
-                        options_modal::OptionsTab::Parametres,
-                    );
+                let Some(action) = self.hotkeys.action_for(event.id) else {
+                    continue;
+                };
+                match action {
+                    ShortcutAction::Toggle => self.toggle_interactive(),
+                    ShortcutAction::Quit => {
+                        logging::log_session_end(
+                            &self.hotkeys.bindings().label(ShortcutAction::Quit),
+                        );
+                        event_loop.exit();
+                    }
+                    ShortcutAction::WatchlistRemove => {
+                        tracing::info!(
+                            ">>> Supprimer ({})",
+                            self.hotkeys
+                                .bindings()
+                                .label(ShortcutAction::WatchlistRemove)
+                        );
+                        self.watchlist_selection.toggle_mode();
+                        // La fenêtre change de hauteur avec le mode, et rien d'autre ne la
+                        // redessine : sans ce réveil, le raccourci n'aurait d'effet qu'au prochain
+                        // événement venu d'ailleurs.
+                        self.request_watchlist_redraw();
+                    }
+                    ShortcutAction::Options => {
+                        tracing::info!(
+                            ">>> Options ({})",
+                            self.hotkeys.bindings().label(ShortcutAction::Options)
+                        );
+                        // Même destination que le bouton "Options" qu'il double — voir la doc de
+                        // `PostRedraw::OpenOptions` (2026-09-13).
+                        self.open_options_modal(
+                            event_loop,
+                            None,
+                            options_modal::OptionsTab::Parametres,
+                        );
+                    }
+                    // Jamais enregistrées ici — voir `ShortcutAction::LINUX_SUPPORTED`.
+                    autre => tracing::debug!(
+                        ">>> Action {autre:?} sans câblage dans le binaire Linux — ignorée."
+                    ),
                 }
             }
 
@@ -1345,6 +1374,7 @@ mod linux_main {
         let mut app = App::new(AppState {
             log_path,
             combat_always_visible: saved_config.combat_always_visible,
+            shortcuts: saved_config.shortcuts(),
             snapshot,
             watchlist,
             watchlist_toast,

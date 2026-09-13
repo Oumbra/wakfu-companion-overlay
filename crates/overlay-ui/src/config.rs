@@ -23,11 +23,14 @@
 //! simplement sur la découverte automatique à chaque lancement, comme avant l'existence de ce
 //! module.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+use crate::shortcuts::ShortcutBindings;
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayConfig {
     /// Chemin explicite de `wakfu.log`, choisi par l'utilisateur via la modale Options — voir
     /// doc de module pour l'ordre de priorité au démarrage et
@@ -47,6 +50,40 @@ pub struct OverlayConfig {
     /// un parsing en échec repart de `OverlayConfig::default()`, chemin de log compris).
     #[serde(default)]
     pub combat_always_visible: bool,
+    /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
+    /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
+    /// « Raccourcis » de la fenêtre Options (2026-09-13).
+    ///
+    /// Volontairement une map de CHAÎNES plutôt que des champs typés : une clé inconnue (config
+    /// écrite par une version ultérieure de l'overlay) ou une combinaison illisible (édition à la
+    /// main malheureuse) doit être ignorée sans faire échouer la lecture de TOUT le fichier — ce
+    /// que des champs typés `Shortcut` interdiraient (`toml::from_str` échouerait d'un bloc, et
+    /// l'utilisateur perdrait aussi son `log_path`). La conversion tolérante est faite par
+    /// [`ShortcutBindings::from_config`].
+    ///
+    /// `#[serde(default)]` : même raison que `combat_always_visible` ci-dessus — un `config.toml`
+    /// écrit avant ce champ reste lisible (table absente = tous les raccourcis par défaut).
+    ///
+    /// **Doit rester le DERNIER champ de cette structure** : `toml::to_string_pretty` écrit les
+    /// champs dans l'ordre de déclaration, et une table TOML ne peut pas être suivie d'une clé de
+    /// racine (`log_path` après `[shortcuts]` appartiendrait à la table). Couvert par
+    /// `aller_retour_toml_avec_raccourcis_personnalises`.
+    #[serde(default)]
+    pub shortcuts: BTreeMap<String, String>,
+}
+
+impl OverlayConfig {
+    /// Raccourcis effectifs de cette config — défauts inclus pour toute action absente/illisible,
+    /// voir [`ShortcutBindings::from_config`].
+    pub fn shortcuts(&self) -> ShortcutBindings {
+        ShortcutBindings::from_config(&self.shortcuts)
+    }
+
+    /// Remplace la table `[shortcuts]` par l'intégralité de `bindings` — appelée à la validation de
+    /// la fenêtre Options (voir `panels::options_modal`), jamais à chaque frame.
+    pub fn set_shortcuts(&mut self, bindings: &ShortcutBindings) {
+        self.shortcuts = bindings.to_config();
+    }
 }
 
 fn project_dirs() -> Option<directories::ProjectDirs> {
@@ -164,5 +201,39 @@ mod tests {
         };
         let resolved = resolve_log_path(None, &config);
         assert_eq!(resolved, Some(PathBuf::from("/config/wakfu.log")));
+    }
+
+    /// Une config écrite AVANT l'existence de la table `[shortcuts]` doit rester lisible — sans
+    /// `#[serde(default)]` sur ce champ, elle ferait échouer `toml::from_str` et l'utilisateur
+    /// perdrait son `log_path` au premier lancement de la nouvelle version.
+    #[test]
+    fn config_sans_table_de_raccourcis_reste_lisible() {
+        let config: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert_eq!(config.log_path, Some(PathBuf::from("/config/wakfu.log")));
+        assert_eq!(config.shortcuts(), ShortcutBindings::default());
+    }
+
+    /// Aller-retour par le FORMAT réellement écrit sur disque (`to_string_pretty`, voir `save`) :
+    /// les clés de racine doivent rester AVANT la table `[shortcuts]`, sinon le fichier relu
+    /// rattacherait `log_path` à la table — voir la doc du champ.
+    #[test]
+    fn aller_retour_toml_avec_raccourcis_personnalises() {
+        let mut config = OverlayConfig {
+            log_path: Some(PathBuf::from("/config/wakfu.log")),
+            combat_always_visible: true,
+            ..Default::default()
+        };
+        let mut bindings = ShortcutBindings::default();
+        bindings.set(
+            crate::shortcuts::ShortcutAction::Quit,
+            crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
+        );
+        config.set_shortcuts(&bindings);
+
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu, config);
+        assert_eq!(relu.shortcuts(), bindings);
     }
 }

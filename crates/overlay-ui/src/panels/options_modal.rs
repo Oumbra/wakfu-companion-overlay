@@ -66,7 +66,8 @@
 
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
-use crate::panels::{recipe_dialog, suivi_tab};
+use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
+use crate::shortcuts::ShortcutBindings;
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
 /// `OverlayKind::Options`).
@@ -140,11 +141,16 @@ const SECTION_GAP: f32 = 17.0;
 
 /// Onglet affiché par la modale.
 ///
-/// Onglet affiché par la modale — **trois entrées câblées sur quatre** depuis le 2026-09-13.
+/// Onglet affiché par la modale — **quatre entrées câblées sur cinq** depuis le 2026-09-13.
 ///
 /// « Alertes » a reçu son contenu le 2026-09-12 (`panels::alerts_tab`), « Suivi » le lendemain
-/// (`panels::suivi_tab`) ; « Personnages » reste affiché désactivé plutôt que masqué, décision du
-/// 2026-09-10 : un onglet qui apparaît est un changement de mise en page, pas un changement d'état.
+/// (`panels::suivi_tab`), « Raccourcis » le même jour (`panels::raccourcis_tab`) ; « Personnages »
+/// reste affiché désactivé plutôt que masqué, décision du 2026-09-10 : un onglet qui apparaît est
+/// un changement de mise en page, pas un changement d'état.
+///
+/// **« Raccourcis » se place AVANT « Paramètres »** (demande du 2026-09-13) : les deux écrans
+/// règlent l'overlay lui-même, et celui qu'on vient rouvrir est celui des touches — le chemin de
+/// `wakfu.log` se règle une fois.
 ///
 /// **« Suivi » ouvre le menu**, avant « Alertes » : c'est l'écran qu'on vient chercher le plus
 /// souvent — composer ce qu'on suit se refait à chaque session de jeu, régler ses alertes une fois
@@ -166,6 +172,10 @@ pub enum OptionsTab {
     /// Les alertes de ramassage — objets à son activé et fermeture du toast.
     Alertes,
     Personnages,
+    /// Les raccourcis clavier globaux de l'overlay (`panels::raccourcis_tab`) — **placé avant
+    /// « Paramètres »**, demande utilisateur explicite du 2026-09-13 : « ajouter un onglet
+    /// "Raccourcis", avant paramètre ».
+    Raccourcis,
     /// Le chemin de `wakfu.log`. Ce fut l'onglet d'ouverture tant qu'il était le seul câblé.
     Parametres,
 }
@@ -217,6 +227,17 @@ pub struct OptionsModalState {
     pub suivi_draft: Option<Vec<overlay_engine::WatchlistEntry>>,
     /// D'où vient la liste suivie, et si elle est modifiable — posé par l'hôte à l'ouverture.
     pub suivi_availability: suivi_tab::SuiviAvailability,
+    /// Ce que l'onglet « Raccourcis » garde entre deux frames — recherche, case en écoute, dernier
+    /// refus. **Pas les combinaisons** : celles-ci sont le brouillon ci-dessous.
+    pub raccourcis: raccourcis_tab::RaccourcisTabState,
+    /// **Le brouillon de raccourcis** — une copie des combinaisons EN VIGUEUR (posée par l'hôte à
+    /// l'ouverture, `main.rs::open_options_modal`), modifiée librement, et prise en compte
+    /// seulement à « Valider ».
+    ///
+    /// Pas d'`Option` ici, contrairement aux alertes et au suivi : les raccourcis sont un réglage
+    /// LOCAL (`config::OverlayConfig`), jamais descendu du compte — il n'y a donc rien à attendre,
+    /// et aucun état « en chargement » à afficher.
+    pub shortcuts: ShortcutBindings,
     /// Ce que l'onglet « Alertes » garde entre deux frames — saisie du champ d'ajout, durée en
     /// cours de frappe, confirmation de retrait ouverte. **Pas le profil** : celui-ci est le
     /// brouillon ci-dessous.
@@ -257,6 +278,9 @@ pub struct OptionsInitial {
     /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
     /// pas pour rien.
     pub combat_always_visible: bool,
+    /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
+    /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
+    pub shortcuts: ShortcutBindings,
 }
 
 impl OptionsModalState {
@@ -275,7 +299,33 @@ impl OptionsModalState {
         OptionsCommit {
             path: self.path_input.clone(),
             combat_always_visible: self.combat_always_visible,
+            shortcuts: self.shortcuts.clone(),
         }
+    }
+
+    /// Ce que « Valider » produit — action de validation, **ou** refus sur place quand deux
+    /// raccourcis partagent la même combinaison.
+    ///
+    /// Le doublon est le seul cas que cette fenêtre peut trancher elle-même : l'OS refuserait le
+    /// second enregistrement (même `HotKey::id`), et personne d'autre n'a la liste sous les yeux.
+    /// Le chemin de log, lui, reste validé par l'hôte (`discovery::validate_log_path`) — un panneau
+    /// ne touche pas au disque.
+    ///
+    /// Bascule sur l'onglet « Raccourcis » en cas de refus : le message y est, et l'utilisateur a
+    /// pu cliquer « Valider » depuis n'importe quel autre écran.
+    pub fn validate(&mut self) -> OptionsModalAction {
+        if let Some((first, second)) = self.shortcuts.conflict() {
+            self.tab = OptionsTab::Raccourcis;
+            self.raccourcis.capturing = None;
+            self.raccourcis.error = Some(raccourcis_tab::conflict_message(
+                first,
+                second,
+                self.shortcuts.get(first),
+            ));
+            return OptionsModalAction::None;
+        }
+        self.raccourcis.error = None;
+        OptionsModalAction::Validate(self.commit())
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -283,6 +333,7 @@ impl OptionsModalState {
             || self.combat_always_visible != self.initial.combat_always_visible
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
+            || self.shortcuts != self.initial.shortcuts
     }
 }
 
@@ -323,6 +374,11 @@ pub struct OptionsCommit {
     pub path: String,
     /// État de la case « Afficher le panneau de combat en dehors des combats ».
     pub combat_always_visible: bool,
+    /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
+    /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
+    /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
+    /// (`shortcuts::ShortcutRegistry::apply`).
+    pub shortcuts: ShortcutBindings,
 }
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
@@ -400,6 +456,7 @@ pub fn show(
             .entry(OptionsTab::Alertes, "Alertes")
             .entry(OptionsTab::Personnages, "Personnages")
             .enabled(false)
+            .entry(OptionsTab::Raccourcis, "Raccourcis")
             .entry(OptionsTab::Parametres, "Paramètres")
             .log_name("options-onglets"),
     );
@@ -415,7 +472,7 @@ pub fn show(
                 action = OptionsModalAction::Cancel;
             }
         }
-        design::FooterClick::Validate => action = OptionsModalAction::Validate(state.commit()),
+        design::FooterClick::Validate => action = state.validate(),
         design::FooterClick::None if chrome.close => {
             if state.is_dirty() {
                 state.pending_close = true;
@@ -475,6 +532,10 @@ pub fn show(
                     window,
                 },
             );
+            return;
+        }
+        if state.tab == OptionsTab::Raccourcis {
+            raccourcis_tab::show(ui, panel, &mut state.raccourcis, &mut state.shortcuts);
             return;
         }
         let inner_width = ui.max_rect().width();
@@ -647,7 +708,7 @@ pub fn show(
                 action = OptionsModalAction::Cancel;
             }
         } else if validate && state.tab == OptionsTab::Parametres {
-            action = OptionsModalAction::Validate(state.commit());
+            action = state.validate();
         }
     }
 
@@ -704,7 +765,50 @@ mod tests {
             OptionsCommit {
                 path: "/jeu/wakfu.log".to_string(),
                 combat_always_visible: true,
+                shortcuts: ShortcutBindings::default(),
             }
         );
+    }
+
+    /// Toucher un raccourci met des modifications en attente, au même titre que le chemin ou la
+    /// case : fermer sans valider doit passer par la garde.
+    #[test]
+    fn changer_un_raccourci_met_des_modifications_en_attente() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        assert!(!state.is_dirty());
+        state.shortcuts.set(
+            crate::shortcuts::ShortcutAction::Quit,
+            crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
+        );
+        assert!(state.is_dirty());
+        // Remis comme avant, la fenêtre redevient intouchée — la garde ne s'ouvre pas pour un
+        // aller-retour.
+        state.shortcuts = state.initial.shortcuts.clone();
+        assert!(!state.is_dirty());
+    }
+
+    /// Deux actions sur la même combinaison : « Valider » REFUSE sur place (l'OS rejetterait le
+    /// second enregistrement), bascule sur l'onglet concerné et porte le message.
+    #[test]
+    fn valider_refuse_deux_raccourcis_identiques() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.tab = OptionsTab::Parametres;
+        let toggle = crate::shortcuts::ShortcutAction::Toggle.default_shortcut();
+        state
+            .shortcuts
+            .set(crate::shortcuts::ShortcutAction::Details, toggle);
+
+        assert_eq!(state.validate(), OptionsModalAction::None);
+        assert_eq!(state.tab, OptionsTab::Raccourcis);
+        assert!(state
+            .raccourcis
+            .error
+            .as_deref()
+            .is_some_and(|message| message.contains(&toggle.label())));
+
+        // Conflit levé : la validation repasse, et le message s'efface.
+        state.shortcuts = ShortcutBindings::default();
+        assert!(matches!(state.validate(), OptionsModalAction::Validate(_)));
+        assert_eq!(state.raccourcis.error, None);
     }
 }

@@ -45,6 +45,7 @@ use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{
     paint_content, AuthStatus, NoopAuthSink, OverlayKind, RenderContent,
 };
+use overlay_ui::shortcuts::ShortcutBindings;
 use overlay_ui::ui_icons::UiIcons;
 
 const WAKFU_LOG: &str = concat!(
@@ -137,6 +138,9 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -163,6 +167,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },
@@ -196,6 +201,9 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -222,6 +230,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },
@@ -258,6 +267,9 @@ fn panneau_suivi_vide_ne_panique_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -284,6 +296,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },
@@ -405,6 +418,9 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = toast.created_at; // dans la fenêtre d'affichage (`TOAST_DURATION`), rendu reproductible
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -431,6 +447,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },
@@ -458,6 +475,9 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let entries = vec![WatchlistEntry {
         name: "Plume de Craqueleur".to_string(),
@@ -492,6 +512,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },
@@ -555,6 +576,9 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let entries = vec![WatchlistEntry {
         name: "Bottes Lantha".to_string(),
@@ -593,6 +617,7 @@ fn panneau_suivi_tooltips_par_colonne_gauche_ou_droite() {
                     auth_status: &auth_status,
                     auth_command_tx: &auth_sink,
                     interactive: true,
+                    shortcuts: &shortcuts,
                     now,
                     options: None,
                 },
@@ -654,6 +679,9 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
     let selection = Rc::new(RefCell::new(
@@ -690,6 +718,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         auth_status: &auth_status,
                         auth_command_tx: &auth_sink,
                         interactive: true,
+                        shortcuts: &shortcuts,
                         now,
                         options: None,
                     },
@@ -899,6 +928,9 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let entries = vec![WatchlistEntry {
         name: "Bottes Lantha".to_string(),
@@ -937,6 +969,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     auth_status: &auth_status,
                     auth_command_tx: &auth_sink,
                     interactive: true,
+                    shortcuts: &shortcuts,
                     now,
                     options: None,
                 },
@@ -980,6 +1013,9 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let entries = vec![
         WatchlistEntry {
@@ -1024,6 +1060,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },
@@ -1048,6 +1085,9 @@ fn panneau_options_ne_panique_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let mut options_state = OptionsModalState {
         suivi: Default::default(),
@@ -1096,6 +1136,7 @@ fn panneau_options_ne_panique_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: Some(&mut options_state),
             },
@@ -1199,6 +1240,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // dans cet état, et personne ne l'a touchée : « Valider » emporte le réglage tel
                 // qu'il est, jamais un défaut recalculé au passage.
                 combat_always_visible: false,
+                // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
+                // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
+                shortcuts: ShortcutBindings::default(),
             }
         )],
         "Entrée doit valider les réglages courants, comme le bouton « Valider » du pied de page"
@@ -1264,6 +1308,9 @@ fn modale_options_sur_damier_ne_panique_pas() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     let mut options_state = OptionsModalState {
         suivi: Default::default(),
@@ -1331,6 +1378,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: Some(&mut options_state),
             },
@@ -1423,6 +1471,69 @@ fn options_onglet_alertes_liste() {
 #[test]
 fn options_onglet_alertes_fermeture_manuelle() {
     capture_onglet_alertes("options_alertes_fermeture_manuelle", true);
+}
+
+/// **L'onglet « Raccourcis »** (2026-09-13) — celui qui personnalise les raccourcis clavier
+/// globaux, demandé « avant paramètre ».
+///
+/// La capture porte les trois états que cet onglet peut montrer en même temps : une combinaison
+/// PERSONNALISÉE (`Ctrl+Alt+F9` sur « Rafraîchir l'affichage », qui prouve que la liste affiche les
+/// combinaisons effectives et non les défauts), une case EN ÉCOUTE (bord d'alerte et « Tapez la
+/// combinaison… »), et le message d'une frappe refusée. Le reste — groupes, en-têtes de tableau,
+/// champ de recherche, bouton « Réinitialiser » — vient avec.
+#[test]
+fn options_onglet_raccourcis() {
+    use overlay_ui::panels::raccourcis_tab::RaccourcisTabState;
+    use overlay_ui::shortcuts::{Shortcut, ShortcutAction};
+
+    let mut shortcuts = ShortcutBindings::default();
+    shortcuts.set(
+        ShortcutAction::Refresh,
+        Shortcut::parse("Ctrl+Alt+F9").expect("combinaison de test valide"),
+    );
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Raccourcis,
+        path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+        shortcuts,
+        raccourcis: RaccourcisTabState {
+            capturing: Some(ShortcutAction::Quit),
+            error: Some(
+                "Combinaison refusée : ajoutez Ctrl, Alt ou Shift à une touche prise en charge."
+                    .to_string(),
+            ),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    // À la taille réelle de la fenêtre, comme les captures des autres onglets : c'est elle qui
+    // décide combien de raccourcis se lisent sans défiler.
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_raccourcis");
 }
 
 /// **La garde de fermeture** — Échap et « Annuler » demandent confirmation tant que des
@@ -2835,6 +2946,9 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT (voir `overlay_ui::shortcuts`) : les infobulles affichent donc les
+    // mêmes combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -2859,6 +2973,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },

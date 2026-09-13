@@ -45,6 +45,7 @@ use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{
     paint_content, AuthStatus, NoopAuthSink, OverlayKind, RenderContent,
 };
+use overlay_ui::shortcuts::ShortcutBindings;
 use overlay_ui::ui_icons::UiIcons;
 
 const WAKFU_LOG: &str = concat!(
@@ -295,6 +296,9 @@ fn bloc_de_sorts_selection_par_le_cadre() {
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
+    // Raccourcis PAR DÉFAUT — voir `overlay_ui::shortcuts` : les infobulles affichent les mêmes
+    // combinaisons qu'avant leur personnalisation, captures inchangées de ce fait.
+    let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -321,6 +325,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 auth_status: &auth_status,
                 auth_command_tx: &auth_sink,
                 interactive: true,
+                shortcuts: &shortcuts,
                 now,
                 options: None,
             },

@@ -175,6 +175,7 @@ use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode}
 use crate::design::{self, text, DsIcon, IconContext};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
+use crate::shortcuts::{ShortcutAction, ShortcutBindings};
 use crate::ui_icons::UiIcons;
 
 /// Durée d'affichage du toast d'alerte avant fermeture automatique, **quand le compte n'en a pas
@@ -615,6 +616,12 @@ pub struct WatchlistAssets<'a> {
     pub catalog: &'a CatalogIndex,
     pub remote_icons: &'a RemoteIconStore,
     pub remote_icon_textures: &'a mut RemoteIconTextures,
+    /// Raccourcis EFFECTIFS (personnalisables depuis le 2026-09-13, voir `crate::shortcuts`) —
+    /// affichés entre parenthèses dans l'infobulle de chaque bouton du carré de contrôle, à
+    /// l'image du jeu. Passés par l'hôte à chaque frame plutôt que recopiés en dur ici : une
+    /// infobulle qui annoncerait encore `Ctrl+Shift+O` après personnalisation serait pire que pas
+    /// d'infobulle du tout.
+    pub shortcuts: &'a ShortcutBindings,
 }
 
 /// Renvoie `true` quand l'utilisateur vient de fermer le toast affiché (clic sur la carte ou sur
@@ -644,6 +651,7 @@ pub fn show(
         catalog,
         remote_icons,
         remote_icon_textures,
+        shortcuts,
     } = assets;
     // Le carré de contrôle ("+"/"−"/"Options"/"Détails", voir `control_button_row`) est peint
     // INCONDITIONNELLEMENT depuis la refonte 2026-09-08 (voir doc de module) — Options/Détails
@@ -695,7 +703,8 @@ pub fn show(
                 // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) —
                 // `ui.horizontal` centre ses enfants verticalement par défaut, ce qui aligne
                 // naturellement ce carré sur le centre des tuiles d'entrée (58px) juste à côté.
-                let clicks = control_button_row(ui, entries.is_empty(), selection.is_open());
+                let clicks =
+                    control_button_row(ui, shortcuts, entries.is_empty(), selection.is_open());
                 open_watchlist = clicks.add;
                 open_options = clicks.options;
                 open_web_app = clicks.details;
@@ -1210,6 +1219,7 @@ enum TooltipSide {
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
 fn control_button_row(
     ui: &mut egui::Ui,
+    shortcuts: &ShortcutBindings,
     watchlist_empty: bool,
     select_open: bool,
 ) -> ControlRowClicks {
@@ -1228,7 +1238,10 @@ fn control_button_row(
         add_top_left,
         DsIcon::Plus,
         "watchlist-add",
-        "Ajouter (Ctrl+Shift+A)",
+        &format!(
+            "Ajouter ({})",
+            shortcuts.label(ShortcutAction::WatchlistAdd)
+        ),
         ControlButtonState::Enabled,
         TooltipSide::Left,
     );
@@ -1253,11 +1266,15 @@ fn control_button_row(
         remove_top_left,
         DsIcon::Minus,
         "watchlist-remove",
-        if select_open {
-            "Quitter la sélection (Ctrl+Shift+S)"
-        } else {
-            "Supprimer (Ctrl+Shift+S)"
-        },
+        &format!(
+            "{} ({})",
+            if select_open {
+                "Quitter la sélection"
+            } else {
+                "Supprimer"
+            },
+            shortcuts.label(ShortcutAction::WatchlistRemove)
+        ),
         match (watchlist_empty, select_open) {
             (true, _) => ControlButtonState::Disabled,
             (false, true) => ControlButtonState::Active,
@@ -1274,7 +1291,7 @@ fn control_button_row(
         details_top_left,
         DsIcon::ExternalLink,
         "watchlist-details",
-        "Détails (Ctrl+Shift+D)",
+        &format!("Détails ({})", shortcuts.label(ShortcutAction::Details)),
         ControlButtonState::Enabled,
         TooltipSide::Left,
     );
@@ -1299,7 +1316,7 @@ fn control_button_row(
         options_top_left,
         DsIcon::Option,
         "watchlist-options",
-        "Options (Ctrl+Shift+O)",
+        &format!("Options ({})", shortcuts.label(ShortcutAction::Options)),
         ControlButtonState::Enabled,
         TooltipSide::Right,
     );
