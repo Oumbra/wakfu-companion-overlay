@@ -1,7 +1,13 @@
 //! Persistance de la configuration utilisateur de l'overlay — §5.1 du plan d'architecture : le
 //! chemin de `wakfu.log` doit être « toujours surchargeable par la config et par un sélecteur de
-//! fichier dans l'UI ». Seul ce champ est persisté pour l'instant (voir [`OverlayConfig`]) : un
-//! seul fichier TOML pour toute future extension plutôt qu'un fichier par réglage.
+//! fichier dans l'UI ». Un seul fichier TOML pour tous les réglages locaux (voir
+//! [`OverlayConfig`]) plutôt qu'un fichier par réglage — il en porte deux depuis le 2026-09-13 :
+//! le chemin de log et l'affichage permanent du panneau Combat.
+//!
+//! **Ce qui vit ici, et ce qui n'y vit pas** : la config locale porte ce qui dépend de la MACHINE
+//! (un chemin de fichier) ou de la fenêtre de jeu qu'on a sous les yeux (l'encombrement de
+//! l'overlay à l'écran). Tout ce qui appartient au JOUEUR — liste suivie, profil d'alertes —
+//! passe par le compte (`overlay_sync::client::fetch_settings`), jamais par ce fichier.
 //!
 //! **Priorité de résolution du chemin au démarrage** (voir `resolve_log_path`, partagé par
 //! `main.rs` et `bin/overlay-ui-x11.rs`) : argument CLI explicite > chemin sauvegardé ici (choisi
@@ -28,6 +34,19 @@ pub struct OverlayConfig {
     /// `engine_thread::EngineCommand::ChangeLogPath` pour le rechargement à chaud (sans
     /// redémarrer l'overlay) quand ce réglage change en cours de session.
     pub log_path: Option<PathBuf>,
+    /// Le panneau Combat reste-t-il affiché **en dehors des combats** ?
+    ///
+    /// `false` par défaut (demande du 2026-09-13) : la fenêtre Combat n'apparaît qu'au début d'un
+    /// combat et se referme quand il est terminé — le reste du temps, rien ne recouvre le jeu.
+    /// `true` restaure le comportement d'origine, une fenêtre affichée en permanence (avec son
+    /// « Aucun combat pour l'instant. », voir `panels::combat::show`) : c'est un choix
+    /// d'encombrement à l'écran, laissé à l'utilisateur.
+    ///
+    /// `#[serde(default)]` : un `config.toml` écrit avant ce champ reste lisible, et retombe donc
+    /// sur le nouveau défaut plutôt que de faire échouer tout le chargement (voir doc de module —
+    /// un parsing en échec repart de `OverlayConfig::default()`, chemin de log compris).
+    #[serde(default)]
+    pub combat_always_visible: bool,
 }
 
 fn project_dirs() -> Option<directories::ProjectDirs> {
@@ -131,6 +150,7 @@ mod tests {
     fn resolve_priorise_argument_cli() {
         let config = OverlayConfig {
             log_path: Some(PathBuf::from("/config/wakfu.log")),
+            ..Default::default()
         };
         let resolved = resolve_log_path(Some(PathBuf::from("/cli/wakfu.log")), &config);
         assert_eq!(resolved, Some(PathBuf::from("/cli/wakfu.log")));
@@ -140,6 +160,7 @@ mod tests {
     fn resolve_retombe_sur_la_config_sans_argument_cli() {
         let config = OverlayConfig {
             log_path: Some(PathBuf::from("/config/wakfu.log")),
+            ..Default::default()
         };
         let resolved = resolve_log_path(None, &config);
         assert_eq!(resolved, Some(PathBuf::from("/config/wakfu.log")));

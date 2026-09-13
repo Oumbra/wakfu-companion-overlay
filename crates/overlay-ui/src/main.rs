@@ -335,6 +335,13 @@ struct OverlayWindow {
     /// le principe du 2026-09-01 (ne pas recouvrir durablement une autre appli) : la réaffirmation
     /// en topmost, elle, reste immédiate (voir plus bas) — seule la démotion est temporisée.
     pending_demote_since: Option<std::time::Instant>,
+    /// La fenêtre est-elle actuellement affichée à l'écran ?
+    ///
+    /// Toujours `true` sauf pour une fenêtre `Combat` quand l'option « Afficher le panneau de
+    /// combat en dehors des combats » est décochée (le défaut) et qu'aucun combat n'est en cours —
+    /// voir `App::sync_combat_visibility`. Mémorisé ici pour ne pas rappeler `Window::set_visible`
+    /// à chaque tick (50 ms) alors que rien n'a changé, comme `is_topmost` pour le z-order.
+    visible: bool,
     /// Prochain redessin déjà planifié par une frame précédente qui a demandé un délai (retour
     /// egui `ViewportOutput::repaint_delay` — ex. le délai d'apparition d'une tooltip au survol
     /// d'un portrait, voir `panels::combat`) — sans ce champ, ce délai n'avait AUCUN moyen d'être
@@ -414,6 +421,10 @@ struct App {
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
     log_path: PathBuf,
+    /// Le panneau Combat reste-t-il affiché en dehors des combats ? — réglage LOCAL persisté
+    /// (`config::OverlayConfig::combat_always_visible`), lu au démarrage et remplacé à la
+    /// validation de la fenêtre Options. `false` par défaut : voir `sync_combat_visibility`.
+    combat_always_visible: bool,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -459,6 +470,9 @@ fn format_alert_duration(seconds: f32) -> String {
 /// `RenderContent` pour `render()`.
 struct AppState {
     log_path: PathBuf,
+    /// Voir `App::combat_always_visible` — lu de la config au démarrage (`main`), jamais découvert
+    /// autrement.
+    combat_always_visible: bool,
     snapshot: Arc<ArcSwap<SessionSnapshot>>,
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
@@ -477,6 +491,7 @@ impl App {
     fn new(state: AppState) -> Self {
         let AppState {
             log_path,
+            combat_always_visible,
             snapshot,
             watchlist,
             watchlist_toast,
@@ -557,6 +572,7 @@ impl App {
             auth_command_tx,
             settings_tx,
             log_path,
+            combat_always_visible,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -572,6 +588,10 @@ impl App {
     /// rappelable sans risque.
     fn sync_windows(&mut self, event_loop: &ActiveEventLoop) {
         let found = self.game_window.scan();
+        // Une fenêtre `Combat` créée alors qu'aucun combat n'est en cours naît MASQUÉE quand
+        // l'option est décochée — voir `sync_combat_visibility`, qui la fera apparaître au premier
+        // combat. Lu ici une fois pour toute la passe.
+        let snapshot = self.snapshot.load();
 
         self.windows.retain(|_, overlay| {
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
@@ -604,6 +624,12 @@ impl App {
                     Self::reposition(existing, info.rect);
                     continue;
                 }
+                let visible = kind != OverlayKind::Combat
+                    || panels::combat::should_show(
+                        &snapshot,
+                        character_name,
+                        self.combat_always_visible,
+                    );
                 let mut overlay = Self::create_overlay_window(
                     event_loop,
                     kind,
@@ -611,6 +637,7 @@ impl App {
                     character_name.clone(),
                     info.rect,
                     self.interactive,
+                    visible,
                 );
                 tracing::info!(
                     "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -625,6 +652,54 @@ impl App {
                 overlay.next_redraw_at = Some(std::time::Instant::now());
                 self.windows.insert(overlay.window.id(), overlay);
             }
+        }
+    }
+
+    /// Affiche ou masque chaque fenêtre `Combat` selon qu'un combat est en cours pour SON
+    /// personnage — demande du 2026-09-13. La règle elle-même est
+    /// `panels::combat::should_show` (voir sa doc) : cette méthode ne fait que l'appliquer aux
+    /// fenêtres OS, que ce binaire seul sait manipuler.
+    ///
+    /// **Masquer plutôt que détruire la fenêtre** : une fenêtre OS, sa surface wgpu et ses trois
+    /// atlas de textures (portraits, cadre, icônes) se recréent en dizaines de millisecondes — les
+    /// refaire à chaque combat mettrait ce coût pile au moment où le joueur a besoin de voir ses
+    /// dégâts. `set_visible` ne coûte rien et garde la fenêtre prête.
+    ///
+    /// Appelée à chaque tick d'`about_to_wait`, juste après `sync_windows` (une fenêtre tout juste
+    /// créée est donc déjà au bon état) et avant `sync_topmost` (une fenêtre qui vient de
+    /// réapparaître doit être promue dans la même passe).
+    fn sync_combat_visibility(&mut self) {
+        let snapshot = self.snapshot.load();
+        let always = self.combat_always_visible;
+        for overlay in self.windows.values_mut() {
+            if overlay.kind != OverlayKind::Combat {
+                continue;
+            }
+            let wanted = panels::combat::should_show(&snapshot, &overlay.character_name, always);
+            if wanted == overlay.visible {
+                continue;
+            }
+            overlay.window.set_visible(wanted);
+            overlay.visible = wanted;
+            if wanted {
+                // Même précaution qu'à la repromotion topmost (voir `sync_topmost`, correctif
+                // 2026-09-06) : `IDCompositionVisual::SetContent`/`Commit` ne sont joués qu'à la
+                // création du swapchain par `wgpu-hal`, jamais rejoués ensuite — une fenêtre qui
+                // réapparaît après avoir été masquée (ou qui n'a jamais été montrée depuis sa
+                // création) peut donc présenter sans jamais être composée à l'écran. Seule une
+                // `Surface` recréée de zéro rejoue ce chemin.
+                recreate_surface(&mut overlay.gpu, &overlay.window);
+                overlay.next_redraw_at = Some(std::time::Instant::now());
+                // Le z-order d'une fenêtre masquée n'a pas été suivi pendant son absence :
+                // réaffirmer `HWND_TOPMOST` au prochain tick plutôt qu'à la prochaine échéance
+                // périodique (jusqu'à `TOPMOST_REASSERT_INTERVAL` plus tard).
+                overlay.last_topmost_reassert = None;
+            }
+            tracing::info!(
+                "[combat] {} — panneau {}",
+                overlay.character_name,
+                if wanted { "affiché" } else { "masqué" }
+            );
         }
     }
 
@@ -664,6 +739,7 @@ impl App {
         character_name: String,
         rect: GameRect,
         interactive: bool,
+        visible: bool,
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
@@ -692,7 +768,12 @@ impl App {
             .with_transparent(true)
             .with_decorations(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_resizable(false);
+            .with_resizable(false)
+            // Une fenêtre `Combat` peut naître MASQUÉE (aucun combat en cours, option décochée —
+            // voir `sync_combat_visibility`) : demandé dès les attributs plutôt que par un
+            // `set_visible(false)` juste après la création, qui la laisserait clignoter à l'écran
+            // le temps d'une frame. Toujours `true` pour Suivi et Options.
+            .with_visible(visible);
         #[cfg(target_os = "windows")]
         let attrs = attrs
             .with_skip_taskbar(true)
@@ -765,6 +846,7 @@ impl App {
             // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
             last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
             last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
+            visible,
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
             last_topmost_reassert: None,
             pending_demote_since: None,
@@ -1287,6 +1369,9 @@ impl App {
             "Options".to_string(),
             rect,
             true,
+            // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul `Combat`
+            // peut naître masqué (voir `sync_combat_visibility`).
+            true,
         );
         // **Le brouillon d'alertes est une COPIE du profil du compte**, prise à l'ouverture : les
         // gestes de l'onglet la modifient librement, et seul « Valider » la renvoie (§5.1 du plan).
@@ -1351,6 +1436,9 @@ impl App {
             // Voir la doc de `open_options_modal` : le bouton « Options » du bandeau de suivi
             // demande `Parametres`, le raccourci global le défaut d'`OptionsTab`.
             tab: initial_tab,
+            // La case part du réglage EN VIGUEUR, pas du défaut : la fenêtre montre l'état réel,
+            // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
+            combat_always_visible: self.combat_always_visible,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -1364,6 +1452,7 @@ impl App {
                 path: self.log_path.display().to_string(),
                 alerts: alerts_draft.clone(),
                 suivi: suivi_draft.clone(),
+                combat_always_visible: self.combat_always_visible,
             },
             pending_close: false,
             alerts_draft,
@@ -1390,7 +1479,7 @@ impl App {
             .spawn(move || {
                 // Filtre par EXTENSION uniquement (`rfd` ne sait pas filtrer par nom de fichier
                 // exact) — le garde-fou du NOM exact (`wakfu.log`) est appliqué après coup par
-                // `App::validate_and_apply_log_path`/`discovery::validate_log_path`, jamais sauté
+                // `App::validate_and_commit_options`/`discovery::validate_log_path`, jamais sauté
                 // même si l'utilisateur choisit un `.log` mal nommé dans le dialogue.
                 let picked = rfd::FileDialog::new()
                     .set_title("Sélectionner le fichier wakfu.log")
@@ -1521,8 +1610,19 @@ impl App {
             .ok();
     }
 
-    fn validate_and_apply_log_path(&mut self, options_window_id: WindowId, raw: String) {
-        let candidate = PathBuf::from(raw.trim());
+    /// Applique ce que « Valider » vient d'emporter de la fenêtre Options — voir
+    /// [`options_modal::OptionsCommit`].
+    ///
+    /// **Le chemin de log commande** : tant qu'il est invalide, la fenêtre reste ouverte avec son
+    /// message d'erreur et RIEN n'est pris en compte — ni les alertes, ni le suivi, ni l'affichage
+    /// du panneau de combat. Un commit partiel laisserait l'utilisateur devant une fenêtre en
+    /// erreur sans savoir ce qui a déjà été écrit.
+    fn validate_and_commit_options(
+        &mut self,
+        options_window_id: WindowId,
+        commit: options_modal::OptionsCommit,
+    ) {
+        let candidate = PathBuf::from(commit.path.trim());
         match discovery::validate_log_path(&candidate) {
             Ok(()) => {
                 // **Le moteur n'est rechargé que si le chemin a CHANGÉ.** Jusqu'au 2026-09-12,
@@ -1531,20 +1631,39 @@ impl App {
                 // début, dans une session qui gardait son état — et chaque ligne rejouée
                 // recréditait le combat en cours (retour utilisateur, vidéo à l'appui : une ligne
                 // d'allié de plus, et le total qui grimpe, à chaque objet ajouté aux alertes).
-                if candidate == self.log_path {
-                    tracing::info!("[options] chemin de log inchangé, moteur non touché.");
-                } else {
+                let path_changed = candidate != self.log_path;
+                if path_changed {
                     tracing::info!(
                         "[options] nouveau fichier de log validé : {}",
                         candidate.display()
                     );
                     self.log_path = candidate.clone();
-                    config::save(&config::OverlayConfig {
-                        log_path: Some(candidate.clone()),
-                    });
                     let _ = self
                         .settings_tx
-                        .send(EngineCommand::ChangeLogPath(candidate));
+                        .send(EngineCommand::ChangeLogPath(candidate.clone()));
+                } else {
+                    tracing::info!("[options] chemin de log inchangé, moteur non touché.");
+                }
+                let combat_changed = commit.combat_always_visible != self.combat_always_visible;
+                if combat_changed {
+                    self.combat_always_visible = commit.combat_always_visible;
+                    tracing::info!(
+                        "[options] panneau de combat en dehors des combats : {}",
+                        if self.combat_always_visible {
+                            "affiché"
+                        } else {
+                            "masqué"
+                        }
+                    );
+                }
+                // **La config est réécrite EN ENTIER**, et seulement si l'un des deux réglages a
+                // bougé : le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que
+                // le réglage modifié effacerait l'autre.
+                if path_changed || combat_changed {
+                    config::save(&config::OverlayConfig {
+                        log_path: Some(candidate),
+                        combat_always_visible: self.combat_always_visible,
+                    });
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
                 // pied de page est partagé : un bouton dont l'effet dépendrait de l'onglet affiché
@@ -1554,6 +1673,10 @@ impl App {
                 self.commit_alerts(options_window_id);
                 self.commit_suivi(options_window_id);
                 self.windows.remove(&options_window_id);
+                // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
+                // d'`about_to_wait` — 50 ms, imperceptible, mais le geste et son effet doivent
+                // être dans la même passe : c'est ce qui rend la fenêtre Options vérifiable.
+                self.sync_combat_visibility();
             }
             Err(err) => {
                 tracing::info!("[options] chemin refusé : {}", err.message());
@@ -1580,7 +1703,9 @@ enum PostRedraw {
     OpenOptions(HWND, GameRect, options_modal::OptionsTab),
     CloseOptions,
     BrowseOptions,
-    ValidateOptions(String),
+    /// Ce que « Valider » emporte de l'onglet « Paramètres » — voir
+    /// `options_modal::OptionsCommit`.
+    ValidateOptions(options_modal::OptionsCommit),
     /// Résoudre les ingrédients de cet objet pour la fenêtre de recette de l'onglet « Suivi ».
     ResolveRecipe(i64),
 }
@@ -1607,6 +1732,12 @@ impl App {
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
+        // Fenêtre `Combat` masquée hors combat (voir `sync_combat_visibility`) : rien à peindre,
+        // et surtout rien à présenter — un `Present()` sur une surface invisible ne sert à rien.
+        // C'est `sync_combat_visibility` qui replanifie un redessin en la faisant réapparaître.
+        if !overlay.visible {
+            return;
+        }
         // Une seule lecture de l'horloge par frame (voir la doc de `RenderContent::now`)
         // — réutilisée ci-dessous pour le gabarit dynamique du Suivi ET transmise à
         // `render`/`build_ui`, plutôt que deux `Instant::now()` distincts à quelques
@@ -1737,7 +1868,9 @@ impl App {
             OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
             OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
-            OptionsModalAction::Validate(raw) => post_redraw = PostRedraw::ValidateOptions(raw),
+            OptionsModalAction::Validate(commit) => {
+                post_redraw = PostRedraw::ValidateOptions(commit)
+            }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
@@ -1756,7 +1889,7 @@ impl App {
                 tracing::info!("[options] modale fermée (Annuler).");
             }
             PostRedraw::BrowseOptions => self.start_file_dialog(),
-            PostRedraw::ValidateOptions(raw) => self.validate_and_apply_log_path(id, raw),
+            PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
         }
     }
@@ -1931,7 +2064,7 @@ impl ApplicationHandler<UserEvent> for App {
                 Ok(picked) => {
                     self.pending_dialog = None;
                     if let Some(path) = picked {
-                        // Même garde que "Valider" (voir `validate_and_apply_log_path`) : `rfd` ne
+                        // Même garde que "Valider" (voir `validate_and_commit_options`) : `rfd` ne
                         // filtre QUE par extension, un `.log` mal nommé doit être refusé exactement
                         // pareil qu'une saisie manuelle invalide, jamais silencieusement accepté
                         // parce qu'il vient du dialogue natif — le champ affiche quand même le
@@ -1984,6 +2117,9 @@ impl ApplicationHandler<UserEvent> for App {
         // n'est pas la nôtre sans un hook global — un sondage à 20 Hz est largement assez réactif
         // ici et reste négligeable en coût, voir game_window.rs).
         self.sync_windows(event_loop);
+        // Apparition/disparition automatique du panneau Combat — entre les deux : `sync_windows`
+        // vient peut-être de créer la fenêtre, `sync_topmost` doit voir son état final.
+        self.sync_combat_visibility();
         self.sync_topmost();
 
         // Honore les délais de redessin qu'egui a demandés (tooltip au survol d'un portrait,
@@ -2733,6 +2869,7 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(AppState {
         log_path,
+        combat_always_visible: saved_config.combat_always_visible,
         snapshot,
         watchlist,
         watchlist_toast,

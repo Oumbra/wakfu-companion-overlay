@@ -1143,6 +1143,7 @@ fn modale_options_echap_annule_et_entree_valide() {
             suivi: None,
             path: CHEMIN.to_string(),
             alerts: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -1191,8 +1192,16 @@ fn modale_options_echap_annule_et_entree_valide() {
     harness.run();
     assert_eq!(
         actions.borrow_mut().drain(..).collect::<Vec<_>>(),
-        vec![OptionsModalAction::Validate(CHEMIN.to_string())],
-        "Entrée doit valider le chemin courant, comme le bouton « Valider » du pied de page"
+        vec![OptionsModalAction::Validate(
+            overlay_ui::panels::options_modal::OptionsCommit {
+                path: CHEMIN.to_string(),
+                // La case « Afficher le panneau de combat en dehors des combats » est décochée
+                // dans cet état, et personne ne l'a touchée : « Valider » emporte le réglage tel
+                // qu'il est, jamais un défaut recalculé au passage.
+                combat_always_visible: false,
+            }
+        )],
+        "Entrée doit valider les réglages courants, comme le bouton « Valider » du pied de page"
     );
 
     harness.key_press(egui::Key::Escape);
@@ -1369,6 +1378,7 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool) {
         alerts_availability: AlertsAvailability::Ready,
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     };
 
     // **À la taille réelle de la fenêtre** (`options_modal::WINDOW_SIZE`, 760 × 810 depuis que cet
@@ -1447,8 +1457,10 @@ fn options_garde_de_fermeture() {
             suivi: None,
             path: CHEMIN.to_string(),
             alerts: Some(profil),
+            ..Default::default()
         },
         pending_close: false,
+        ..Default::default()
     };
 
     // Rien n'a bougé : la fenêtre est propre.
@@ -1489,6 +1501,7 @@ fn options_garde_de_fermeture_a_l_ecran() {
         alerts_availability: AlertsAvailability::Ready,
         initial: Default::default(),
         pending_close: true,
+        ..Default::default()
     };
 
     let mut harness = Harness::builder()
@@ -1549,8 +1562,10 @@ fn options_garde_de_fermeture_au_clavier() {
             suivi: None,
             path: CHEMIN.to_string(),
             alerts: Some(reference),
+            ..Default::default()
         },
         pending_close: false,
+        ..Default::default()
     };
     let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
     let garde_ouverte = std::cell::Cell::new(false);
@@ -1640,8 +1655,10 @@ fn options_croix_de_la_banniere_ferme_comme_annuler() {
             suivi: None,
             path: CHEMIN.to_string(),
             alerts: Some(reference),
+            ..Default::default()
         },
         pending_close: false,
+        ..Default::default()
     };
     let actions = std::cell::RefCell::new(Vec::<OptionsModalAction>::new());
     let garde_ouverte = std::cell::Cell::new(false);
@@ -1753,6 +1770,7 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
         alerts_availability: AlertsAvailability::Ready,
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     };
 
     let mut harness = Harness::builder()
@@ -1862,6 +1880,7 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
         alerts_availability: AlertsAvailability::Ready,
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     }));
 
     let vu = std::rc::Rc::clone(&etat);
@@ -1981,6 +2000,7 @@ fn options_alertes_croix_efface_la_saisie() {
         alerts_availability: AlertsAvailability::Ready,
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     }));
 
     let vu = std::rc::Rc::clone(&etat);
@@ -2083,6 +2103,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
         alerts_availability: AlertsAvailability::Ready,
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     }));
     let vu = std::rc::Rc::clone(&etat);
     let mut harness = Harness::builder()
@@ -2240,6 +2261,7 @@ fn capture_onglet_suivi(
         alerts_availability: Default::default(),
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     };
 
     let mut harness = Harness::builder()
@@ -2523,6 +2545,7 @@ fn harnais_suivi(
         alerts_availability: Default::default(),
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     }));
 
     let vu = std::rc::Rc::clone(&etat);
@@ -2637,6 +2660,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
         alerts_availability: Default::default(),
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     }));
 
     let vu = std::rc::Rc::clone(&etat);
@@ -2735,6 +2759,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
         alerts_availability: Default::default(),
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     }));
 
     let vu = std::rc::Rc::clone(&etat);

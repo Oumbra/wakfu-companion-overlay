@@ -199,6 +199,7 @@ fn harnais(p: Planche) -> Harness<'static> {
         alerts_availability: Default::default(),
         initial: Default::default(),
         pending_close: false,
+        ..Default::default()
     };
     let etat = std::rc::Rc::new(std::cell::RefCell::new(state));
     let catalog = catalogue();
