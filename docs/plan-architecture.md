@@ -1212,6 +1212,18 @@ haut et en laissant juste l'espace nécessaire — on gagnerait la moitié, peut
   ancrée sur le carré (60 px) déborde plus loin que centrée sur un bouton ; deux entrées suffisent
   à la fournir, une seule coûte 12 px de largeur de fenêtre transparente.
 
+**Dernier ajustement du même jour — le carré de contrôle fait une CASE.** « Le carré de boutons
+est mis au même niveau en haut qu'un item slot, sauf qu'un item slot est plus haut que le carré :
+soit qu'il soit aligné au milieu de manière verticale, soit qu'on augmente la taille des quatre
+boutons pour que le carré, avec le fond de section en plus, fasse la hauteur d'un item slot. » Les
+cotes : tuile 64 px, carré 60 (`4 × 3` de marge + `24 × 2` de bouton), 4 px d'écart tous en bas.
+Les deux propositions ont été rendues à l'échelle (`overlay-testkit/examples/
+bandeau-carre-hauteur.rs`), et **la seconde retenue** : `CONTROL_BUTTON_SIZE` passe de 24 à 26 px,
+`control_row_height` vaut alors exactement 64 — hauts alignés, bas alignés, la trame d'une grille
+d'inventaire. Le centrage de la première (`control_row_centering`) reste en place et devient neutre
+de lui-même : il vaut la moitié de ce qui manque au carré, donc zéro. Écrit comme un calcul et non
+comme une constante, il tiendra aussi si la cote des boutons rebouge.
+
 **Testkit** : `panneau_suivi_toutes_les_infobulles_sous_la_bande` capture les cinq survols (quatre
 boutons + une tuile). Au passage, les quatre survols de
 `panneau_suivi_vide_boutons_en_ligne_infobulles_dessous` visaient 70 px trop à droite depuis le
