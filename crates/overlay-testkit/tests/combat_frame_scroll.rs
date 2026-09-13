@@ -36,6 +36,7 @@ fn enemy(name: String, total_damage: i64) -> FighterDamage {
         is_ko: false,
         last_turn_casts: Vec::new(),
         last_turn: 0,
+        breed: None,
     }
 }
 
@@ -79,6 +80,7 @@ fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
             &mut remote_icon_textures,
             &refs,
             total_damage,
+            None,
         );
     });
 

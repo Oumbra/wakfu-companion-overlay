@@ -64,10 +64,11 @@ use crate::ui_icons::UiIcons;
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
 pub const MAX_FRAME_SLOTS: usize = 6;
 
-/// Marques du bloc « ligne de sorts » à peindre sur les médaillons (vue Alliés seulement — voir
-/// `combat_spell_block`) : emplacements (index dans la tranche `fighters` passée à `show`) du
-/// liseré (allié dont on lit les sorts) et du point (dernier lanceur allié). `Some` rend aussi
-/// cliquables les portraits des alliés ayant lancé un sort.
+/// Marques du bloc « ligne de sorts » à peindre sur les médaillons (camp affiché, allié ou ennemi
+/// depuis le 13 sept. 2026 — voir `combat_spell_block`) : emplacements (index dans la tranche
+/// `fighters` passée à `show`) du liseré (combattant dont on lit les sorts) et du point (dernier
+/// lanceur du camp). `Some` rend aussi cliquables les portraits des combattants ayant lancé un
+/// sort.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SelectionMarks {
     pub ring_slot: Option<usize>,
@@ -236,9 +237,11 @@ impl CombatFrame {
     /// `panels::combat::resolve_fighter_texture`) — un ennemi n'a jamais de `class_name`, sans ces
     /// paramètres tout ennemi affiché ici retomberait sur le portrait générique.
     ///
-    /// **Sélection du bloc de sorts** (12 sept. 2026, « Sélection par le cadre ») : avec `marks`
-    /// à `Some`, le portrait de chaque allié ayant lancé un sort devient un bouton (curseur main,
-    /// nœud d'accessibilité `Button` au nom de l'allié) et les marques dorées sont peintes entre
+    /// **Sélection du bloc de sorts** (12 sept. 2026, « Sélection par le cadre » ; ennemis compris
+    /// depuis le 13 sept.) : avec `marks` à `Some`, le portrait de chaque combattant ayant lancé un
+    /// sort devient un bouton (curseur main, nœud d'accessibilité `Button` à son nom — deux
+    /// homonymes portent le même nom, seul leur emplacement les distingue) et les marques dorées
+    /// sont peintes entre
     /// le portrait et son pourcentage — voir `combat_spell_block::paint_marks`. Renvoie
     /// l'emplacement cliqué cette frame, s'il y en a un ; l'appelant applique les règles de
     /// l'épingle (`combat_spell_block::on_portrait_clicked`).
@@ -324,7 +327,12 @@ impl CombatFrame {
                 pos,
                 egui::vec2(NATIVE_PORTRAIT_SIZE, NATIVE_PORTRAIT_SIZE),
             );
-            let id = ui.id().with(("combat-frame-slot", fighter.name.as_str()));
+            // L'emplacement fait partie de l'identifiant (13 sept. 2026) : deux ennemis HOMONYMES
+            // (deux Grokoko) partageaient sinon le même `Id` — clic attribué aux deux (le dernier
+            // gagnait), fondu des marques partagé.
+            let id = ui
+                .id()
+                .with(("combat-frame-slot", slot, fighter.name.as_str()));
             let selectable = marks.is_some() && !fighter.last_turn_casts.is_empty();
             let sense = if selectable {
                 egui::Sense::click()
