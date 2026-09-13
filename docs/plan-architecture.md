@@ -929,9 +929,28 @@ expert (validée avec réserves, toutes intégrées), décidée :
   seulement ; **pas de défilement automatique** vers le dernier lanceur (le défilement reste à
   l'utilisateur), le bloc montre ses sorts quoi qu'il en soit. Identifiant egui des médaillons
   désormais par emplacement (deux Grokoko partageaient le même `Id` : clic attribué aux deux).
-- **Limites connues, acceptées** : deux homonymes qui jouent l'un après l'autre sans autre acteur
-  entre eux sont fusionnés sur un siège (limite de `register_fight_turn`, déjà vraie pour les
-  dégâts ; test `deux_homonymes_consecutifs_sont_fusionnes_sur_un_siege`) ; en breach, la colonne
+- **Deux corrections d'attribution (2026-09-13, retour utilisateur : « deux sorts du même nom
+  rapprochés, un seul affiché »)**, toutes deux dans le parseur vendu (`engine-js/`, écart de
+  parité assumé et consigné dans `VENDORED_FROM.txt`, à reporter dans `wakfu-companion`) :
+  - **Relancers avalés par la déduplication multi-compte** : `isDuplicate` jetait tout
+    événement identique à moins de 1 s ; un vrai relancer du même sort (Croc-en-jambe deux fois
+    à 724 ms, chacun avec ses dégâts) disparaissait. Mesuré sur le log de parité en séparant les
+    combats observés par un ou deux clients (jointures `[_FL_]` dupliquées) : les copies d'un
+    second client sont toutes à moins de 452 ms, les relancers réels tous à plus de 724 ms.
+    Fenêtre dédiée aux `spell-cast` : **600 ms** (`SPELL_CAST_DEDUPE_WINDOW_MS`), 18 lancers
+    récupérés sur le log de parité. Les dégâts et soins gardent la fenêtre de 1 s — même
+    mécanisme, même risque théorique, non mesuré, à reprendre séparément.
+  - **Homonymes de part et d'autre d'un tour allié muet** : « N secondes reportées pour le tour
+    suivant. » est émis à la fin du tour de chaque personnage du joueur, même passé sans sort
+    (nouvel événement `turn-ended` / `LogEntry::TurnEnded`, rattaché au combat courant). Le
+    moteur y désarme le raccourci « même acteur = même tour » (`FightWorking::end_own_turn`) :
+    « Grokoko, fin de tour allié, Grokoko » est désormais résolu par la file d'initiative — l'autre
+    Grokoko, ou le même avec un nouveau tour s'il n'y en a qu'un. Ne couvre pas les alliés d'un
+    autre joueur (aucune ligne pour eux) ni un tour où tout le temps a été consommé.
+- **Limites connues, acceptées** : deux homonymes consécutifs sans AUCUNE ligne entre eux (allié
+  intercalé KO, dont le tour est sauté par le jeu) restent fusionnés sur un siège (test
+  `deux_homonymes_consecutifs_sont_fusionnes_sur_un_siege`) — indécidable depuis le log, qui ne
+  porte l'identifiant d'instance que sur la jointure ; en breach, la colonne
   des barres n'est pas bornée et dépasse déjà la fenêtre au-delà d'une dizaine d'ennemis à dégâts,
   le bloc sort avec elle ; le nom du lanceur reste absent de l'infobulle même quand le liseré est
   hors de la bande visible (suggestion de la revue, non retenue en révision 1 pour garder les
