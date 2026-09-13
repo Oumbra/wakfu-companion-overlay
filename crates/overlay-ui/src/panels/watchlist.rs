@@ -416,7 +416,19 @@ const PANEL_BACKDROP_ROUNDING: f32 = 6.0;
 /// de 34×34 (taille déjà validée par l'utilisateur avant le passage au design system commun) à
 /// 24×24 — à l'essai, retour utilisateur explicite 2026-09-06 (« essaie vingt-quatre sur
 /// vingt-quatre pour voir le rendu que ça fait »).
-const CONTROL_BUTTON_SIZE: f32 = 24.0;
+///
+/// **26×26 depuis le 2026-09-13**, et ce n'est pas un réglage d'apparence : c'est la taille qui
+/// fait du carré de contrôle un carré de la taille d'une CASE du jeu. `control_row_height` vaut
+/// `4 × 3 + 26 × 2` = 64, soit exactement [`TILE_SIZE`] — hauts alignés, bas alignés, la trame
+/// d'une grille d'inventaire au lieu d'un bloc de 60 px qui flotte dans 64. Demande utilisateur,
+/// deuxième des deux propositions qu'elle formulait : « soit qu'il soit aligné au milieu de
+/// manière verticale, soit qu'on augmente la taille des quatre boutons pour que le carré, avec le
+/// fond de section en plus, fasse la hauteur d'un item slot » — les deux ont été rendues à
+/// l'échelle (`overlay-testkit/examples/bandeau-carre-hauteur.rs`), celle-ci a été retenue.
+///
+/// Le centrage de l'autre proposition reste en place et devient neutre de lui-même : à cette
+/// taille, il n'y a plus d'écart à combler (voir [`control_row_centering`]).
+const CONTROL_BUTTON_SIZE: f32 = 26.0;
 /// Écart entre deux boutons adjacents du carré de contrôle (voir doc de module, refonte
 /// 2026-09-06 — 1×2 boutons empilés à l'origine, 2×2 depuis la refonte 2026-09-08), réutilisé
 /// aussi comme marge du fond translucide sur les quatre côtés — volontairement plus serré que
