@@ -17,10 +17,18 @@
 //!   « Paramètres » ;
 //! - "−" ouvre la **sélection multiple de la bande elle-même** ([`WatchlistSelection`]) : chaque
 //!   tuile gagne une case à cocher en ton destructif, un bouton de suppression groupée apparaît
-//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::remaining`]). `Ctrl+Shift+S`
+//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::edit`]). `Ctrl+Shift+S`
 //!   fait le même geste au clavier. Le panneau reste en LECTURE SEULE sur les entrées (voir
 //!   `overlay_engine::watchlist` pour la frontière définitions/compteurs) : il demande, il
 //!   n'applique pas.
+//!
+//! **Et les tuiles se réordonnent à la souris depuis le 2026-09-13** (demande utilisateur, dans la
+//! foulée du même geste ajouté à l'onglet « Suivi ») : une tuile se prend et se repose ailleurs
+//! dans la bande, curseur en croix fléchée, comme sur le site (`TrackerStripComponent`). La
+//! mécanique est celle de [`crate::panels::tile_reorder`], partagée avec l'onglet — les deux
+//! écrans réordonnent la même liste, ils ne peuvent pas le faire chacun à leur façon. Le panneau
+//! reste en lecture seule ici aussi : l'ordre voulu remonte à l'hôte
+//! ([`WatchlistOutcome::edit`]), qui seul écrit.
 //!
 //! Le retour qui a déclenché ce dernier branchement dit ce que dix jours d'inertie coûtent : « j'ai
 //! beau appuyer sur le bouton moins, le mode de suppression multiple ne s'active pas [...] est-ce
@@ -663,6 +671,8 @@ pub fn show(
     // Coché cette frame, appliqué après la `ScrollArea` : `selection` est emprunté par la
     // fermeture de rendu tant qu'elle peint.
     let mut bascule_tuile: Option<String> = None;
+    // Idem pour le glisser-déposer : le rang pris et le rang visé, lus à la frame du dépôt.
+    let mut deplacement: Option<(usize, usize)> = None;
     // Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
     // (voir `bulk_button_row`).
     let mut tiles_rect: Option<egui::Rect> = None;
@@ -704,16 +714,23 @@ pub fn show(
                         remote_icons,
                         remote_icon_textures,
                         entry,
-                        selection.is_open().then(|| selection.contains(&cle)),
+                        TileState {
+                            index: i,
+                            selection: selection.is_open().then(|| selection.contains(&cle)),
+                        },
                     );
                     tiles_rect = Some(match tiles_rect {
-                        Some(deja) => deja.union(tuile.rect),
-                        None => tuile.rect,
+                        Some(deja) => deja.union(tuile.response.rect),
+                        None => tuile.response.rect,
                     });
-                    // **Le clic coche, il ne supprime pas.** Hors sélection, une tuile du bandeau
-                    // n'a aucun geste — elle n'en gagne un que le temps du mode.
-                    if selection.is_open() && tuile.clicked() {
+                    // **Le clic coche, il ne supprime pas.** Hors sélection, le geste de la tuile
+                    // est de se déplacer (voir `entry_tile`) ; elle ne gagne le clic que le temps
+                    // du mode.
+                    if selection.is_open() && tuile.response.clicked() {
                         bascule_tuile = Some(cle);
+                    }
+                    if let Some(depuis) = tuile.reorder.dropped {
+                        deplacement = Some((depuis, i));
                     }
                 }
             });
@@ -730,7 +747,7 @@ pub fn show(
     // Le bouton de suppression groupée — sous la bande, centré sur les tuiles VISIBLES. La
     // `ScrollArea` donne les deux morceaux : l'union des tuiles peintes, et sa propre fenêtre
     // visible (`inner_rect`) quand la rangée déborde.
-    let mut remaining = None;
+    let mut edit = None;
     if selection.is_open() {
         if let Some(tuiles) = tiles_rect {
             let visible = tuiles.intersect(strip.inner_rect);
@@ -747,10 +764,26 @@ pub fn show(
                         .cloned()
                         .collect()
                 };
-                remaining = Some(restantes);
+                edit = Some(WatchlistEdit {
+                    reason: WatchlistEditReason::BulkRemove,
+                    definitions: restantes,
+                });
                 selection.close();
             }
         }
+    }
+
+    // **Le déplacement part avec la liste entière**, comme le retrait : le panneau ne réordonne
+    // rien lui-même, il dit à l'hôte ce que la liste devrait être. Les compteurs partis avec elle
+    // sont ignorés côté moteur (`WatchlistState::apply_definitions`) — une tuile déplacée pendant
+    // qu'on ramasse ne remet donc aucun compteur en arrière.
+    if let Some((depuis, vers)) = deplacement {
+        let mut definitions = entries.to_vec();
+        crate::panels::tile_reorder::reorder(&mut definitions, depuis, vers);
+        edit = Some(WatchlistEdit {
+            reason: WatchlistEditReason::Reorder,
+            definitions,
+        });
     }
 
     ui.add_space(6.0);
@@ -773,12 +806,12 @@ pub fn show(
         open_watchlist,
         open_options,
         open_web_app,
-        remaining,
+        edit,
     }
 }
 
 /// La bande du bouton de suppression groupée, sous les tuiles. Renvoie `true` à la frame où il est
-/// cliqué — le panneau ne supprime rien lui-même (voir [`WatchlistOutcome::remaining`]).
+/// cliqué — le panneau ne supprime rien lui-même (voir [`WatchlistOutcome::edit`]).
 ///
 /// **Centré sur `tuiles`, pas sur la fenêtre**, et c'est une demande explicite (2026-09-13) : la
 /// fenêtre porte aussi le carré de contrôle et ses deux réserves d'infobulle, qui la déséquilibrent
@@ -832,14 +865,49 @@ pub struct WatchlistOutcome {
     /// `true` à la frame où "Détails" vient d'être cliqué : l'appelant ouvre la web app. Le
     /// panneau ne l'ouvre PAS lui-même — voir `control_button_row`.
     pub open_web_app: bool,
-    /// **Les définitions qui RESTENT** après une suppression groupée, à la frame où elle est
-    /// demandée — `None` le reste du temps, et `Some(vec![])` quand tout est retiré, ce qui n'est
-    /// pas la même chose.
-    ///
-    /// La liste restante plutôt que les clés retirées : c'est ce que
-    /// `EngineCommand::SetWatchlistDefinitions` attend, le même chemin que la validation de
-    /// l'onglet « Suivi » — le moteur garde ses compteurs et réplique au compte.
-    pub remaining: Option<Vec<WatchlistEntry>>,
+    /// **Ce que le bandeau demande d'écrire**, à la frame où le geste est fait — `None` le reste
+    /// du temps. Voir [`WatchlistEdit`].
+    pub edit: Option<WatchlistEdit>,
+}
+
+/// Une écriture demandée par le bandeau, et le geste qui l'a produite.
+///
+/// **Une seule sortie pour les deux gestes** qui touchent aux définitions — le retrait groupé et le
+/// réordonnancement : les deux partent par `EngineCommand::SetWatchlistDefinitions`, avec la liste
+/// entière, le même chemin que la validation de l'onglet « Suivi » (le moteur garde ses compteurs
+/// et réplique au compte). Deux champs auraient dupliqué ce chemin chez les deux hôtes.
+///
+/// La liste entière plutôt que le geste à rejouer : c'est ce que la commande attend, et c'est aussi
+/// ce qui garde le panneau en LECTURE SEULE sur les entrées (voir `overlay_engine::watchlist`) — il
+/// dit ce que la liste devrait être, il ne l'applique pas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchlistEdit {
+    /// Le geste, pour le journal de l'hôte (§15 du plan) : « suppression groupée » et
+    /// « réordonnancement » ne se lisent pas de la même façon dans `overlay-ui.<date>.log`, et la
+    /// liste seule ne permet pas de les distinguer.
+    pub reason: WatchlistEditReason,
+    /// La liste complète telle qu'elle devrait être. `Some(vec![])` — tout retiré — est une demande
+    /// valide, ce n'est pas la même chose que `None`.
+    pub definitions: Vec<WatchlistEntry>,
+}
+
+/// Voir [`WatchlistEdit::reason`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchlistEditReason {
+    /// Le bouton « Supprimer » du mode sélection.
+    BulkRemove,
+    /// Une tuile déplacée au glisser-déposer.
+    Reorder,
+}
+
+impl WatchlistEditReason {
+    /// Libellé de journal — français, comme le reste des lignes du bandeau.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BulkRemove => "suppression groupée",
+            Self::Reorder => "réordonnancement",
+        }
+    }
 }
 
 /// Barre de défilement fine, flottante et sombre plutôt que le style natif par défaut (épais, pris
@@ -1357,6 +1425,23 @@ fn control_button(
 /// Compteur incrusté dans le coin bas-droit (voir `paint_count_inline`), nom complet en tooltip —
 /// jamais tronqué silencieusement sans recours, y compris avec une icône réelle (contrairement au
 /// web, dont l'image elle-même porte souvent assez d'info visuelle).
+/// Ce qu'une tuile du bandeau rend à [`show`] : sa réponse (pour le rang coché et l'union des
+/// rectangles) et ce que le glisser-déposer y a produit.
+struct Tile {
+    response: egui::Response,
+    reorder: crate::panels::tile_reorder::Gesture,
+}
+
+/// Ce qu'une tuile sait d'elle-même en plus de son entrée — les deux vont ensemble (ils décident du
+/// même geste) et tiennent `entry_tile` sous la limite de clippy, comme [`WatchlistAssets`] le fait
+/// pour `show` : un `#[allow(clippy::too_many_arguments)]` n'aurait fait que taire le compte.
+struct TileState {
+    /// Rang dans la bande — ce que le glisser-déposer déplace.
+    index: usize,
+    /// `None` hors du mode sélection, `Some(cochée)` dedans.
+    selection: Option<bool>,
+}
+
 fn entry_tile(
     ui: &mut egui::Ui,
     icons: &UiIcons,
@@ -1364,8 +1449,9 @@ fn entry_tile(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
     entry: &WatchlistEntry,
-    selection: Option<bool>,
-) -> egui::Response {
+    etat: TileState,
+) -> Tile {
+    let TileState { index, selection } = etat;
     // Tout ce qui suit était peint à la main ici jusqu'au 2026-09-11 — fond, bordure de rareté,
     // icône, compteur, et surtout leur ORDRE. Il vit maintenant dans `design::item_slot`, qui
     // verrouille cet ordre par un test : la bordure sous l'icône pour un objet, le trait par-dessus
@@ -1409,12 +1495,13 @@ fn entry_tile(
     // **La zone cliquable appartient au panneau, pas au composant.** `design::item_slot` alloue en
     // `Sense::hover()` : un emplacement d'inventaire n'est pas un bouton, et c'est l'écran qui
     // décide s'il a un geste. Même procédé que l'onglet « Suivi » (`suivi_tab::tracked_tile`).
-    // Hors sélection, la tuile du bandeau n'en a aucun — elle garde donc son simple survol.
+    // Hors sélection, la tuile se DÉPLACE (voir plus bas) ; dedans, elle se coche — jamais les
+    // deux, un même appui ne peut pas vouloir dire deux choses.
     let (rect, response) = ui.allocate_exact_size(
         egui::Vec2::splat(TILE_SIZE),
         match selection {
             Some(_) => egui::Sense::click(),
-            None => egui::Sense::hover(),
+            None => egui::Sense::click_and_drag(),
         },
     );
     ui.put(rect, slot);
@@ -1423,10 +1510,30 @@ fn entry_tile(
         None => response,
     };
 
+    // **Réordonnancement au glisser-déposer** — même mécanique que l'onglet « Suivi »
+    // (`panels::tile_reorder`, partagé) : la bande in-game affiche l'ordre de la liste, elle doit
+    // pouvoir le changer là où on la regarde plutôt qu'en passant par la fenêtre Options.
+    let reorder = match selection {
+        Some(_) => Default::default(),
+        None => crate::panels::tile_reorder::handle(
+            ui,
+            &response,
+            crate::panels::tile_reorder::Tile {
+                index,
+                icon: icon_id,
+                frame,
+                size: TILE_SIZE,
+            },
+        ),
+    };
+
     // `design::tooltip` plutôt qu'un `on_hover_text` brut — voir sa doc (refonte
-    // 2026-09-06, design system tooltip).
-    design::tooltip(&response).text(&entry.name);
-    response
+    // 2026-09-06, design system tooltip). Tue pendant un déplacement : un nom affiché sous le
+    // pointeur masquerait le liseré de la tuile visée, qu'on essaie justement de lire.
+    if !reorder.in_flight() {
+        design::tooltip(&response).text(&entry.name);
+    }
+    Tile { response, reorder }
 }
 
 /// Traduit une entrée de suivi en compteur du design system.

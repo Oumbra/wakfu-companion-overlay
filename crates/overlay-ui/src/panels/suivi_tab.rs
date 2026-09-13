@@ -30,6 +30,13 @@
 //! 5. **Rien n'est écrit avant « Valider »** : l'onglet travaille sur un brouillon que l'appelant
 //!    lui prête, comme l'onglet Alertes.
 //!
+//! Une sixième s'y est ajoutée le 2026-09-13, à la demande de l'utilisateur : **l'ordre de la liste
+//! se règle ici, au glisser-déposer**, comme sur le site (`TrackerStripComponent`). C'est le seul
+//! écran qui compose la liste, donc le seul où cet ordre se décide ; le bandeau in-game l'affiche,
+//! il ne le change pas. La mécanique du geste — sémantique du rang, fantôme, barre d'insertion,
+//! croix fléchée — vit dans [`crate::panels::tile_reorder`], partagée avec le bandeau : les deux
+//! écrans réordonnent la même liste.
+//!
 //! ## Le brouillon ne porte QUE des définitions
 //!
 //! Une entrée de suivi a deux moitiés qui ne vivent pas au même endroit : ses **définitions** (nom,
@@ -43,6 +50,7 @@ use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
+use crate::panels::tile_reorder;
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -731,24 +739,45 @@ fn tile_grid(
 
     let mut retrait: Option<String> = None;
     let mut bascule: Option<String> = None;
+    let mut deplacement: Option<(usize, usize)> = None;
     let select_mode = state.select_mode;
     let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
 
     panel.scroll_area(ui, "suivi.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
         let per_row = (((content_width + TILE_GAP) / (TILE + TILE_GAP)).floor() as usize).max(1);
-        for chunk in tuiles.chunks(per_row) {
+        for (rang, chunk) in tuiles.chunks(per_row).enumerate() {
             ui.horizontal(|ui| {
-                for tuile in chunk {
-                    match tracked_tile(ui, ctx, tuile, select_mode, cochees.contains(&tuile.key)) {
+                for (colonne, tuile) in chunk.iter().enumerate() {
+                    // **Le rang dans le BROUILLON, pas dans la rangée** : c'est lui que le
+                    // déplacement manipule, et il doit rester juste quelle que soit la largeur de
+                    // la fenêtre — le nombre de colonnes, lui, change avec elle.
+                    let index = rang * per_row + colonne;
+                    match tracked_tile(
+                        ui,
+                        ctx,
+                        tuile,
+                        index,
+                        select_mode,
+                        cochees.contains(&tuile.key),
+                    ) {
                         TileClick::Remove => retrait = Some(tuile.key.clone()),
                         TileClick::Toggle => bascule = Some(tuile.key.clone()),
+                        TileClick::Reorder(depuis) => deplacement = Some((depuis, index)),
                         TileClick::None => {}
                     }
                 }
             });
         }
     });
+
+    // **Le déplacement d'abord, le retrait ensuite.** Les deux gestes s'excluent en pratique (on ne
+    // lâche pas une tuile sur une croix), mais l'ordre reste sûr dans tous les cas : le
+    // réordonnancement travaille sur des RANGS, que le retrait décalerait, tandis que le retrait
+    // travaille sur une CLÉ, que le réordonnancement ne touche pas.
+    if let Some((depuis, vers)) = deplacement {
+        tile_reorder::reorder(ctx.entries, depuis, vers);
+    }
 
     // **Le retrait est immédiat — sur le BROUILLON, pas sur le compte.** Rien ne part au réseau
     // avant « Valider », et « Annuler » rend la liste telle qu'elle était : le geste est déjà
@@ -782,6 +811,10 @@ enum TileClick {
     None,
     Remove,
     Toggle,
+    /// Une tuile vient d'être lâchée sur celle-ci — le rang porté est celui de la tuile DÉPLACÉE,
+    /// celui de la tuile d'arrivée étant connu de l'appelant. Voir
+    /// [`tile_reorder::reorder`].
+    Reorder(usize),
 }
 
 /// **La tuile d'un suivi — un emplacement d'objet, et rien d'autre.**
@@ -799,10 +832,19 @@ fn tracked_tile(
     ui: &mut egui::Ui,
     ctx: &mut SuiviTabContext<'_>,
     tuile: &TileData,
+    index: usize,
     select_mode: bool,
     cochee: bool,
 ) -> TileClick {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), egui::Sense::click());
+    // **Glissable seulement hors du mode sélection**, comme le web (`[attr.draggable]=
+    // "!watchlist.selectMode()"`) : dans ce mode le geste de la tuile est de cocher, et un même
+    // appui ne peut pas vouloir dire deux choses.
+    let sens = if select_mode {
+        egui::Sense::click()
+    } else {
+        egui::Sense::click_and_drag()
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), sens);
 
     let frame = match tuile.kind {
         WatchlistKind::Item => SlotFrame::Rarity(to_slot_rarity(tuile.rarity)),
@@ -851,6 +893,31 @@ fn tracked_tile(
             clic = TileClick::Toggle;
         }
         return clic;
+    }
+
+    // **Réordonnancement au glisser-déposer** — la mécanique vit dans `panels::tile_reorder`, que
+    // le bandeau in-game partage : les deux écrans réordonnent la même liste, ils ne peuvent pas le
+    // faire chacun à sa façon. L'ordre obtenu ici est celui que « Valider » envoie au compte
+    // (`WatchlistState::apply_definitions` conserve l'ordre du brouillon).
+    let geste = tile_reorder::handle(
+        ui,
+        &response,
+        tile_reorder::Tile {
+            index,
+            icon: icon_id,
+            frame,
+            size: TILE,
+        },
+    );
+    if let Some(depuis) = geste.dropped {
+        return TileClick::Reorder(depuis);
+    }
+    if geste.in_flight() {
+        // Ni voile de survol, ni croix de retrait, ni infobulle pendant un déplacement : la tuile
+        // survolée est une DESTINATION, pas une cible de clic — proposer d'y retirer une entrée au
+        // moment précis où l'on vise pour lâcher serait un piège, et un nom qui s'affiche sous le
+        // pointeur masquerait le liseré de la tuile visée, qu'on essaie de lire.
+        return TileClick::None;
     }
 
     // **`contains_pointer` et NON `hovered`.** La croix a sa propre zone interactive, posée

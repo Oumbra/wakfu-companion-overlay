@@ -1664,6 +1664,7 @@ impl App {
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
             &overlay.window,
+            event_loop,
             RenderContent {
                 kind: overlay.kind,
                 fight,
@@ -1697,14 +1698,15 @@ impl App {
         // l'onglet « Suivi » (`commit_suivi`) — seules les DÉFINITIONS partent, le moteur garde ses
         // compteurs et réplique au compte de lui-même. L'`ArcSwap` local n'est pas touché ici :
         // c'est le moteur qui republie la liste, compteurs vivants compris.
-        if let Some(restantes) = outcome.watchlist_remaining {
+        if let Some(edition) = outcome.watchlist_edit {
             tracing::info!(
-                entry_count = restantes.len(),
-                "[bandeau] suppression groupée"
+                entry_count = edition.definitions.len(),
+                geste = edition.reason.label(),
+                "[bandeau] définitions modifiées"
             );
             let _ = self
                 .settings_tx
-                .send(EngineCommand::SetWatchlistDefinitions(restantes));
+                .send(EngineCommand::SetWatchlistDefinitions(edition.definitions));
         }
         // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "+"/"Options"
         // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
