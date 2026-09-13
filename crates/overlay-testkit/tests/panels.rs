@@ -685,10 +685,10 @@ fn bandeau_largeur(entry_count: usize) -> f32 {
 
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
-const BANDEAU_PLUS: egui::Pos2 = egui::pos2(24.0, 24.0);
-const BANDEAU_MOINS: egui::Pos2 = egui::pos2(52.0, 24.0);
-const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(24.0, 52.0);
-const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 52.0);
+const BANDEAU_PLUS: egui::Pos2 = egui::pos2(24.0, 26.0);
+const BANDEAU_MOINS: egui::Pos2 = egui::pos2(52.0, 26.0);
+const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(24.0, 54.0);
+const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(52.0, 54.0);
 
 /// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
 /// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les

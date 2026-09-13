@@ -621,6 +621,29 @@ fn control_row_height(layout: ControlLayout) -> f32 {
     CONTROL_BUTTON_GAP * (layout.rows() + 1.0) + CONTROL_BUTTON_SIZE * layout.rows()
 }
 
+/// De combien le carré de contrôle descend pour que son centre tombe sur celui des tuiles.
+///
+/// Demande du 2026-09-13, dernier ajustement du bandeau : « le carré de boutons est mis au même
+/// niveau en haut qu'un item slot, sauf qu'un item slot est plus haut que le carré. J'aimerais
+/// qu'il soit aligné au milieu de manière verticale ». Les cotes le disent : une tuile fait 64 px
+/// (`tokens::ITEM_SLOT_SIZE`), le carré 60 (`4 × 3` de marge + `24 × 2` de bouton) — 4 px d'écart,
+/// tous en bas tant que les deux hauts sont alignés. Le carré descend donc de 2 px.
+///
+/// **En RANGÉE, rien à centrer** : le bandeau est alors vide, il n'y a aucune tuile en face, et
+/// descendre la rangée de 16 px remettrait précisément le vide que la journée a passé à retirer
+/// (voir doc de module).
+///
+/// L'autre proposition faite le même jour — porter les boutons à 26 px pour que le carré fasse un
+/// 64 × 64 exact, de la taille d'une case du jeu — reste ouverte et **ne demande pas de défaire
+/// ceci** : à cette taille, l'écart est nul et cette fonction rend 0. Planches de comparaison dans
+/// `overlay-testkit/examples/bandeau-carre-hauteur.rs`.
+fn control_row_centering(layout: ControlLayout) -> f32 {
+    match layout {
+        ControlLayout::Square => ((TILE_SIZE - control_row_height(layout)) / 2.0).max(0.0),
+        ControlLayout::Row => 0.0,
+    }
+}
+
 // Jetons repris de `:root` (`styles.css`, thème sombre par défaut — seul thème que l'overlay
 // reproduit pour l'instant). Ils vivent depuis le 2026-09-12 dans la section `OVERLAY_*` de
 // `design::tokens` : deux de ces valeurs existaient aussi dans `panels::combat`, et une recopie
@@ -844,14 +867,16 @@ pub fn show(
     let mut strip_rect = egui::Rect::NOTHING;
     ui.horizontal_top(|ui| {
         let layout = ControlLayout::for_entries(entries.len());
-        // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08) — aligné sur
-        // le HAUT DES TUILES, pas sur le haut de la rangée : la barre de défilement occupe la tête
-        // de la zone défilante quand la bande déborde (`design::ScrollArea::bar_before`), et le
-        // carré descend d'autant pour rester à hauteur des tuiles plutôt que de la barre. Zéro
-        // quand la bande tient entière — la barre ne prend alors aucune place.
+        // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu de
+        // deux hauteurs qui s'additionnent :
+        //
+        // - la barre de défilement, quand la bande déborde : elle occupe la tête de la zone
+        //   (`design::ScrollArea::bar_before`), et le carré doit rester à hauteur des TUILES, pas
+        //   de la barre. Zéro quand la bande tient entière — la barre ne prend alors aucune place ;
+        // - le CENTRAGE sur la tuile ([`control_row_centering`]).
         let clicks = ui
             .vertical(|ui| {
-                ui.add_space(strip_scroll_area().space_before(ui));
+                ui.add_space(strip_scroll_area().space_before(ui) + control_row_centering(layout));
                 control_button_row(ui, shortcuts, layout, selection.is_open())
             })
             .inner;
