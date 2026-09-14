@@ -2,8 +2,9 @@
 
 Embarqués par `crates/overlay-ui/src/cursor.rs` (curseur affiché à la place du curseur système sur
 les overlays interactifs, clignotement en mode « main » — voir §6.3 bis du plan). Le point chaud
-est déduit de l'image à l'exécution : ces fichiers peuvent être remplacés par un détourage plus
-précis sans modifier le code, tant que la pointe reste en haut à gauche.
+de la flèche est déduit de l'image à l'exécution : ces fichiers peuvent être remplacés par un
+détourage plus précis sans modifier le code, tant que la pointe reste en haut à gauche ; celui de
+la croix et de l'I-beam est le centre du bitmap.
 
 Curseur de souris du jeu, isolé pixel par pixel depuis un enregistrement d'écran natif
 (13/09/2026, 30 i/s), par soustraction du fond puis moyenne par phase sur 85 images où le
@@ -72,4 +73,5 @@ symétrique gauche/droite et haut/bas.
 - Couleurs : luminance mesurée conservée (exacte en h264), teinte crème unique reconstruite
   (`G = 0,985 R`, `B = 0,841 R`) pour effacer le sous-échantillonnage chroma 4:2:0, luminances
   distantes de ≤ 5 fusionnées — 12 tons au total.
-- Point chaud proposé au centre de la hampe crème : pixel (9, 15) du bitmap avec marge.
+- Point chaud au centre du bitmap, pixel (9, 15) avec marge — la colonne crème de la hampe, à
+  mi-hauteur. Affiché au survol des champs de saisie (`CursorIcon::Text`), sans animation.
