@@ -34,6 +34,12 @@ use crate::render_content::UserEvent;
 /// (`AccountSettings`) — `Disconnect` (déconnexion volontaire) n'est PAS juste une absence de
 /// réglages : il doit activement effacer le roster/suivi déjà appliqués (repli `breed`, Suivi
 /// vidé), ce qu'un simple silence sur le canal ne ferait jamais.
+// `AccountSettings` pèse ~280 octets là où la deuxième variante en fait 32 : clippy propose de le
+// boxer. Ce canal porte des GESTES D'UTILISATEUR — une connexion, un réglage changé dans la modale
+// — quelques messages par session, jamais une boucle chaude. Un `Box` y échangerait 250 octets sur
+// une poignée d'envois contre une allocation et une indirection à chaque lecture, et surtout contre
+// la lisibilité de l'appelant. L'écart est assumé, pas ignoré.
+#[allow(clippy::large_enum_variant)]
 pub enum EngineCommand {
     ApplySettings(AccountSettings),
     Disconnect,

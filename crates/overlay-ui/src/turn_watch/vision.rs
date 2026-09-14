@@ -94,7 +94,7 @@ fn longest_run(mask: &[bool], max_gap: usize) -> Option<(usize, usize)> {
             (true, None) => start = Some(i),
             (false, Some(s)) => {
                 let len = i - s;
-                if best.map_or(true, |(_, l)| len > l) {
+                if best.is_none_or(|(_, l)| len > l) {
                     best = Some((s, len));
                 }
                 start = None;
@@ -285,11 +285,11 @@ pub fn extract_glyph(band: &Band, area: Rect) -> Option<Glyph> {
     let mut best: Option<(usize, usize, u32)> = None; // (top, bottom, pixels)
     let mut cur: Option<(usize, usize, u32)> = None;
     let mut gap = 0usize;
-    for y in 0..h {
-        if row_count[y] > 0 {
+    for (y, &count) in row_count.iter().enumerate().take(h) {
+        if count > 0 {
             cur = match cur {
-                Some((t, _, n)) => Some((t, y, n + row_count[y])),
-                None => Some((y, y, row_count[y])),
+                Some((t, _, n)) => Some((t, y, n + count)),
+                None => Some((y, y, count)),
             };
             gap = 0;
         } else if let Some(c) = cur {
