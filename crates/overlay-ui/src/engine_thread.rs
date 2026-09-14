@@ -35,7 +35,11 @@ use crate::render_content::UserEvent;
 /// réglages : il doit activement effacer le roster/suivi déjà appliqués (repli `breed`, Suivi
 /// vidé), ce qu'un simple silence sur le canal ne ferait jamais.
 pub enum EngineCommand {
-    ApplySettings(AccountSettings),
+    /// `Box` plutôt que `AccountSettings` nu : cette variante pèse à elle seule 280 octets là où
+    /// toutes les autres tiennent en 32, et `clippy::large_enum_variant` fait de cet écart une
+    /// erreur — chaque message du canal, y compris un simple `Disconnect`, paierait sinon la
+    /// taille du plus gros.
+    ApplySettings(Box<AccountSettings>),
     Disconnect,
     /// Nouveau chemin de `wakfu.log` à suivre, choisi par l'utilisateur via la modale Options
     /// (2026-09-08, §5.1/§9 du plan) — voir `panels::options_modal`. Traité en respawnant SEULEMENT
