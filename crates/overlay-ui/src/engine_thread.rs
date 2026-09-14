@@ -405,8 +405,7 @@ pub fn spawn_engine_thread(
                                 name: alert.author.clone(),
                                 kind: WatchlistKind::Item,
                                 reason: WatchlistToastReason::Chat {
-                                    channel_label: overlay_engine::channel_label(alert.channel)
-                                        .to_string(),
+                                    channel: alert.channel,
                                     word: alert.filter.text,
                                     author: alert.author,
                                     message: alert.message,

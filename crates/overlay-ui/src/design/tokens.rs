@@ -10,6 +10,7 @@
 //! qu'elle est devinée est le pire cas — impossible à distinguer plus tard d'une mesure.
 
 use egui::Color32;
+use overlay_engine::ChatChannel;
 
 /// **L'or du jeu**, celui de son texte — `#f4d89e`.
 ///
@@ -1833,3 +1834,39 @@ pub const LEGEND_TILE_PAD_X: f32 = 10.0;
 /// Voile d'une tuile survolée — le même noir à 40 % que les tuiles d'Alertes et du Suivi
 /// (`panels::alerts_tab::TILE_HOVER_SCRIM`).
 pub const LEGEND_TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
+
+// -------------------------------------------------------------------------------------------
+// Couleurs des canaux de chat
+//
+// Relevées **à l'œil** sur une capture de la légende des canaux du client Wakfu fournie par
+// l'utilisateur le 2026-09-14 (douze lignes « /l - Proximité », « /w - Privé », …, chaque libellé
+// écrit dans la couleur de son canal). Pas de pipette : l'image n'a pas été versée au dépôt, les
+// valeurs sont une lecture, à ±10 par composante. Seuls les six canaux que le moteur reconnaît
+// (`overlay_engine::CHAT_CHANNELS`) sont portés — Privé, Information, Politique, Camp JcJ et
+// Discussion ANKAMA n'existent pas côté parser.
+// -------------------------------------------------------------------------------------------
+
+/// « /l - Proximité » — blanc cassé.
+pub const CHAT_CHANNEL_PROXIMITE: Color32 = Color32::from_rgb(0xe6, 0xe6, 0xe6);
+/// « /p - Groupe » — violet.
+pub const CHAT_CHANNEL_GROUPE: Color32 = Color32::from_rgb(0x9c, 0x6b, 0xdd);
+/// « /g - Guilde » — pourpre, plus sourd que Groupe.
+pub const CHAT_CHANNEL_GUILDE: Color32 = Color32::from_rgb(0x8b, 0x64, 0xba);
+/// « /r - Recrutement (FR) » — magenta.
+pub const CHAT_CHANNEL_RECRUTEMENT: Color32 = Color32::from_rgb(0xd8, 0x41, 0x9a);
+/// « /m - Commerce » — orange.
+pub const CHAT_CHANNEL_COMMERCE: Color32 = Color32::from_rgb(0xe9, 0x96, 0x2f);
+/// « /c - Communauté (FR) » — bleu.
+pub const CHAT_CHANNEL_COMMUNAUTE: Color32 = Color32::from_rgb(0x4d, 0x80, 0xd9);
+
+/// La couleur d'un canal, telle que le client l'écrit dans sa légende.
+pub fn chat_channel_color(channel: ChatChannel) -> Color32 {
+    match channel {
+        ChatChannel::Proximite => CHAT_CHANNEL_PROXIMITE,
+        ChatChannel::Groupe => CHAT_CHANNEL_GROUPE,
+        ChatChannel::Guilde => CHAT_CHANNEL_GUILDE,
+        ChatChannel::Recrutement => CHAT_CHANNEL_RECRUTEMENT,
+        ChatChannel::Commerce => CHAT_CHANNEL_COMMERCE,
+        ChatChannel::Communaute => CHAT_CHANNEL_COMMUNAUTE,
+    }
+}

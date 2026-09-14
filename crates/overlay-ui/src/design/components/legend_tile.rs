@@ -55,6 +55,7 @@ pub fn legend_tile(legend: impl Into<String>, text: impl Into<String>) -> Legend
         width: None,
         height: tokens::LEGEND_TILE_HEIGHT,
         enabled: true,
+        legend_color: None,
         tooltip: None,
         log_name: None,
         forced_state: None,
@@ -68,6 +69,7 @@ pub struct LegendTile {
     width: Option<f32>,
     height: f32,
     enabled: bool,
+    legend_color: Option<Color32>,
     tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<LegendTileState>,
@@ -89,6 +91,13 @@ impl LegendTile {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Couleur de la légende — celle du canal de chat (`tokens::chat_channel_color`), par exemple.
+    /// Par défaut le gris des titres de section (`LEGEND_TILE_LEGEND_TEXT`).
+    pub fn legend_color(mut self, color: Color32) -> Self {
+        self.legend_color = Some(color);
         self
     }
 
@@ -179,7 +188,7 @@ impl Widget for LegendTile {
             let legend = painter.layout_no_wrap(
                 self.legend.clone(),
                 text::label_font(ui.ctx(), tokens::LEGEND_TILE_LEGEND_FONT_SIZE),
-                dim(tokens::LEGEND_TILE_LEGEND_TEXT),
+                dim(self.legend_color.unwrap_or(tokens::LEGEND_TILE_LEGEND_TEXT)),
             );
             let legend_left = frame.left() + tokens::LEGEND_TILE_LEGEND_INSET;
             let legend_right = (legend_left + legend.size().x)

@@ -254,8 +254,9 @@ pub enum WatchlistToastReason {
     /// célébration, c'est un message à lire — et un clic sur la carte prépare la réponse en privé
     /// (voir `toast_card` et `WatchlistOutcome::whisper_to`).
     Chat {
-        /// Libellé du canal (« Commerce »), pour le titre.
-        channel_label: String,
+        /// Le canal du message — son libellé et sa couleur (celle du client,
+        /// `tokens::chat_channel_color`) font la seconde moitié du titre.
+        channel: overlay_engine::ChatChannel,
         /// Le mot de la recherche qui a correspondu, pour le titre.
         word: String,
         author: String,
@@ -1267,15 +1268,18 @@ fn toast_card(
         } => Some((author.as_str(), message.as_str())),
         _ => None,
     };
-    let title = match &toast.reason {
-        WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !".to_string(),
-        WatchlistToastReason::Loot { .. } => "OBJET OBTENU !".to_string(),
-        // « GELANO · COMMERCE » : le mot trouvé, puis le canal.
-        WatchlistToastReason::Chat {
-            channel_label,
-            word,
-            ..
-        } => format!("{} · {}", word.to_uppercase(), channel_label.to_uppercase()),
+    // Le titre : un texte d'accent, sauf pour le chat — « GELANO · COMMERCE », le mot trouvé en
+    // accent puis le canal dans SA couleur, celle que le client lui donne dans sa légende.
+    let title: Vec<(String, egui::Color32)> = match &toast.reason {
+        WatchlistToastReason::Countdown => vec![("COMPTEUR ÉPUISÉ !".to_string(), ACCENT)],
+        WatchlistToastReason::Loot { .. } => vec![("OBJET OBTENU !".to_string(), ACCENT)],
+        WatchlistToastReason::Chat { channel, word, .. } => vec![
+            (format!("{} · ", word.to_uppercase()), ACCENT),
+            (
+                overlay_engine::channel_label(*channel).to_uppercase(),
+                design::tokens::chat_channel_color(*channel),
+            ),
+        ],
     };
     let name_text = match &toast.reason {
         WatchlistToastReason::Loot { quantity } if *quantity > 1 => {
@@ -1290,7 +1294,21 @@ fn toast_card(
     let title_font = text::label_font(ui.ctx(), 11.0);
     let name_font = text::label_font(ui.ctx(), 14.0);
     let painter = ui.painter();
-    let title_galley = painter.layout_no_wrap(title, title_font, ACCENT);
+    let title_galley = {
+        let mut job = egui::text::LayoutJob::default();
+        for (part, color) in &title {
+            job.append(
+                part,
+                0.0,
+                egui::text::TextFormat {
+                    font_id: title_font.clone(),
+                    color: *color,
+                    ..Default::default()
+                },
+            );
+        }
+        painter.layout_job(job)
+    };
     let name_galley = match chat {
         // L'auteur en graisse, puis le message complet, qui retourne à la ligne au-delà de
         // `CHAT_CARD_TEXT_MAX_WIDTH` — un message de chat peut être long, un nom d'objet jamais.

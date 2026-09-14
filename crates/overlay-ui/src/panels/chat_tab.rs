@@ -436,10 +436,20 @@ fn add_row(ui: &mut egui::Ui, state: &mut ChatTabState, draft: &mut ChatDraft, w
 /// au survol — l'idiome des tuiles d'Alertes (`panels::alerts_tab::alert_item`).
 fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraft) {
     // Collecter avant de muter : le rendu lit le brouillon, le geste le modifie.
-    let items: Vec<(String, String)> = draft
+    // La légende prend la couleur du canal (celle du client, `tokens::chat_channel_color`) ;
+    // « Tous les canaux » garde le gris des légendes.
+    let items: Vec<(String, Option<Color32>, String)> = draft
         .filters
         .iter()
-        .map(|f| (f.scope.label().to_owned(), f.text.clone()))
+        .map(|f| {
+            let color = match f.scope {
+                ChatFilterScope::All => None,
+                ChatFilterScope::Channel(channel) => {
+                    Some(design::tokens::chat_channel_color(channel))
+                }
+            };
+            (f.scope.label().to_owned(), color, f.text.clone())
+        })
         .collect();
     let mut removed: Option<usize> = None;
     panel.scroll_area(ui, "chat.recherches", |ui, content_width| {
@@ -448,9 +458,9 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraf
             (content_width - TILE_GAP * (TILES_PER_ROW as f32 - 1.0)) / TILES_PER_ROW as f32;
         for (row_index, chunk) in items.chunks(TILES_PER_ROW).enumerate() {
             ui.horizontal(|ui| {
-                for (col, (legend, text)) in chunk.iter().enumerate() {
+                for (col, (legend, color, text)) in chunk.iter().enumerate() {
                     let index = row_index * TILES_PER_ROW + col;
-                    if filter_tile(ui, legend, text, tile_width) {
+                    if filter_tile(ui, legend, *color, text, tile_width) {
                         removed = Some(index);
                     }
                 }
@@ -464,11 +474,19 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraf
 }
 
 /// Une tuile, et sa croix. `true` quand la croix vient d'être cliquée.
-fn filter_tile(ui: &mut egui::Ui, legend: &str, text: &str, width: f32) -> bool {
+fn filter_tile(
+    ui: &mut egui::Ui,
+    legend: &str,
+    legend_color: Option<Color32>,
+    text: &str,
+    width: f32,
+) -> bool {
+    let mut tile = design::legend_tile(legend, text).width(width);
+    if let Some(color) = legend_color {
+        tile = tile.legend_color(color);
+    }
     let response = ui.add(
-        design::legend_tile(legend, text)
-            .width(width)
-            .tooltip(format!("{legend} — {text}"))
+        tile.tooltip(format!("{legend} — {text}"))
             .log_name(format!("chat.recherche.{text}")),
     );
     // **`contains_pointer` et NON `hovered`** : la croix a sa propre zone, posée par-dessus la
