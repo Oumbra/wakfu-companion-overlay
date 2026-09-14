@@ -116,7 +116,7 @@ fn lignes() -> Vec<(f32, String, String)> {
     // vers le centre, jamais vers la croix — reste-t-il à distance respectable du titre ?
     v.push((
         tokens::WINDOW_VERSION_FONT_SIZE,
-        "v10.12.4".to_string(),
+        "10.12.4".to_string(),
         format!(
             "{:.0} px — numéro long (pire cas)",
             tokens::WINDOW_VERSION_FONT_SIZE
