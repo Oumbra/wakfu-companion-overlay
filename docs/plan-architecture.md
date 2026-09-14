@@ -1265,9 +1265,11 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   dans le bandeau Suivi — **le gabarit des tuiles de recherche** (`design::LegendTile::paint_frame`,
   révision du 2026-09-14) : le canal en légende sur la bordure haute, à gauche, dans la couleur
   que le client lui donne (`tokens::chat_channel_color`) ; dedans « mot » en gris, l'auteur en doré
-  puis le message complet (retour à la ligne à 420 px). Sans icône ni confettis ; la croix du coin
-  haut-droit ferme **sans** répondre, seule issue en fermeture manuelle.
-- **Réponse en privé** : un clic sur la carte la ferme et prépare `/w "<auteur>" ` dans le jeu
+  puis le message complet (retour à la ligne à 420 px) ; **largeur fixe** (`CHAT_CARD_WIDTH`),
+  hauteur au texte. Sans confettis. À droite, la bulle de message (`DsIcon::Message`, icône
+  fournie par l'utilisateur, blanche puis cyan sur halo au survol) prépare la réponse en privé ;
+  cliquer la carte elle-même la ferme, comme les autres cartes (inversion du 2026-09-14).
+- **Réponse en privé** : un clic sur la bulle de la carte la ferme et prépare `/w "<auteur>" ` dans le jeu
   (`chat_command::send_whisper`, espace final, **sans Entrée final** : le joueur tape son
   message). Séquence sur un thread : rendre le focus à la fenêtre de jeu au premier plan ou à la
   première trouvée (`SetForegroundWindow` / `_NET_ACTIVE_WINDOW`, nouveau
@@ -1275,7 +1277,7 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   la fermeture au clic des autres cartes, cela demande le mode interactif de l'overlay.
 - **Vérifications** : 7 tests unitaires + 2 d'intégration côté moteur, tests de brouillon, de
   config et de garde de fermeture côté UI, quatre captures (`options_chat_*`,
-  `watchlist_avec_carte_de_chat` — celle-ci produite par le vrai moteur), planche
+  `watchlist_avec_carte_de_chat` et `_courte` — produites par le vrai moteur, la seconde bulle survolée), planche
   `design_gallery_legend_tile`. Les 28 captures de la fenêtre Options ont été régénérées : la
   barre d'onglets compte une entrée de plus.
 
