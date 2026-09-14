@@ -3610,9 +3610,9 @@ fn options_onglet_chat_vide() {
 
 /// **La carte de chat par-dessus le jeu**, produite par le VRAI moteur : une recherche posée, un
 /// message de chat en direct qui lui correspond, l'alerte drainée et le toast construit comme
-/// `engine_thread` le fait — jamais un `ChatAlert` fabriqué à la main.
-#[test]
-fn panneau_suivi_avec_carte_de_chat() {
+/// `engine_thread` le fait — jamais un `ChatAlert` fabriqué à la main. `survol` : un point où
+/// poser le pointeur avant la capture (la bulle « répondre en privé »).
+fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
     use overlay_engine::{ChatChannel, ChatFilter, ChatFilterScope};
     use overlay_ingest::LineBatch;
 
@@ -3624,11 +3624,10 @@ fn panneau_suivi_avec_carte_de_chat() {
     .expect("mot")]);
     engine
         .ingest_batch(&LineBatch {
-            lines: vec![
+            lines: vec![format!(
                 " INFO 21:08:40,000 [AWT-EventQueue-0] (aPV:174) - [Commerce] Huppermage-Bleu : \
-                 vends Gelano 900k, prix ferme, mp si intéressé — je suis à Bonta près du zaap"
-                    .to_string(),
-            ],
+                 {message}"
+            )],
             is_initial_load: false,
         })
         .expect("ingestion du message");
@@ -3693,5 +3692,32 @@ fn panneau_suivi_avec_carte_de_chat() {
         );
     });
     harness.run();
-    harness.snapshot("watchlist_avec_carte_de_chat");
+    if let Some(pos) = survol {
+        harness.hover_at(pos);
+        harness.run();
+    }
+    harness.snapshot(nom);
+}
+
+/// Un message de trois lignes : la carte au repos, bulle blanche.
+#[test]
+fn panneau_suivi_avec_carte_de_chat() {
+    capture_carte_de_chat(
+        "watchlist_avec_carte_de_chat",
+        "vends Gelano 900k, prix ferme, mp si intéressé — je suis à Bonta près du zaap",
+        None,
+    );
+}
+
+/// Un message d'un mot, et la bulle survolée : **même largeur** que la carte de trois lignes
+/// (`CHAT_CARD_WIDTH`), bulle cyan sur son halo. Le point survolé est le centre de la bulle :
+/// 400 (centre du bandeau) + 246 (demi-largeur) − 16 (marge) − 13 (demi-bulle), à la hauteur du
+/// milieu du cadre.
+#[test]
+fn panneau_suivi_avec_carte_de_chat_courte_survolee() {
+    capture_carte_de_chat(
+        "watchlist_avec_carte_de_chat_courte",
+        "gelano ?",
+        Some(egui::pos2(617.0, 108.0)),
+    );
 }
