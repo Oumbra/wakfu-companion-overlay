@@ -15,7 +15,7 @@
 
 use egui_kittest::Harness;
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, Gender, SpellCastRecord};
-use overlay_ui::panels::combat::CombatSide;
+use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_bars::scroll_offset_id;
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::portraits::PortraitAtlas;
@@ -33,10 +33,13 @@ fn enemy(name: String, total_damage: i64, casts: usize) -> FighterDamage {
         is_ally: false,
         total_damage,
         total_heal: 0,
+        total_armor: 0,
         class_name: None,
         gender: Gender::M,
         xp_gained: 0,
         spells: Default::default(),
+        heal_spells: Default::default(),
+        armor_spells: Default::default(),
         is_ko: false,
         last_turn_casts: (0..casts)
             .map(|i| SpellCastRecord {
@@ -95,6 +98,7 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
         icons: None,
     };
     let mut combat_side = CombatSide::Enemies;
+    let mut combat_metric = CombatMetric::default();
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
@@ -114,6 +118,7 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).

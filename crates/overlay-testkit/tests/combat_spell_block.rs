@@ -38,7 +38,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use overlay_engine::{resolve_cast, CatalogIndex, Engine, FightSnapshot, SessionSnapshot};
 use overlay_ingest::Tailer;
-use overlay_ui::panels::combat::CombatSide;
+use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -293,6 +293,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
         icons: None,
     };
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let catalog = CatalogIndex::default();
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
@@ -313,6 +314,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).

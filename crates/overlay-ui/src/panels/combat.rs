@@ -356,6 +356,20 @@
 //! sélection est calculée pour le camp affiché, les marques et les clics passent par le cadre
 //! exact (`CombatFrame::show`) ou le cadre à défilement (`EnemyFrameScroll::show`) selon le
 //! nombre d'ennemis. Voir la doc de module de `combat_spell_block` et §9.1 bis du plan.
+//!
+//! **Refonte 2026-09-14 (armure donnée et soins)** — demande utilisateur : le panneau ne montrait
+//! que les dégâts, alors que le moteur capte désormais aussi l'armure DONNÉE et les soins, pour
+//! les deux camps (voir `overlay_engine::session::FighterDamage::total_armor`/`total_heal`, portés
+//! par le parser vendu du dépôt web). Un switch à trois positions (`CombatMetric`,
+//! `paint_metric_switch`) s'ajoute dans le bandeau leader, SOUS le switch Alliés/Ennemis : les
+//! deux axes sont indépendants (l'armure d'un boss se regarde comme celle d'un allié). Tout ce que
+//! le panneau chiffre suit ce switch — total de la ligne leader, tri et remplissage des barres,
+//! pourcentage incrusté sur chaque portrait — parce qu'un seul point de lecture décide désormais
+//! de la valeur d'un combattant (`CombatMetric::value_of`), au lieu d'un `total_damage` lu en dur
+//! en quatre endroits. Un camp peuplé qui n'a rien produit de la grandeur choisie le dit
+//! (« Aucune armure donnée pour l'instant. ») plutôt que de laisser une colonne muette.
+//! Libellés en TEXTE et non en icônes : l'overlay n'a ni épée, ni bouclier, ni cœur dans son jeu
+//! d'icônes (voir `UiIcons`) — à basculer sur de vrais pictogrammes si le principe est validé.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -393,6 +407,81 @@ impl CombatSide {
         match self {
             Self::Allies => Self::Enemies,
             Self::Enemies => Self::Allies,
+        }
+    }
+}
+
+/// Grandeur mesurée par les barres, les pourcentages sur les portraits et le total de la ligne
+/// leader — pilotée par `paint_metric_switch`, un état par fenêtre overlay comme [`CombatSide`]
+/// (voir `OverlayWindow` dans `main.rs`).
+///
+/// Le camp affiché et la grandeur mesurée sont deux axes INDÉPENDANTS : « armure donnée par les
+/// ennemis » est une question aussi légitime que « dégâts infligés par les alliés » (demande
+/// utilisateur explicite, 2026-09-14 — l'armure et les soins sont captés pour les deux camps, voir
+/// `overlay_engine::session::FighterDamage`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CombatMetric {
+    /// Dégâts infligés — la vue historique du panneau, et le défaut.
+    #[default]
+    Damage,
+    /// Armure DONNÉE (jamais reçue, jamais perdue — voir `FighterDamage::total_armor`).
+    Armor,
+    /// Soins produits.
+    Heal,
+}
+
+impl CombatMetric {
+    /// Dans l'ordre du switch — dégâts d'abord (le défaut), puis les deux grandeurs de soutien.
+    pub const ALL: [Self; 3] = [Self::Damage, Self::Armor, Self::Heal];
+
+    /// Libellé du switch, au singulier de la grandeur mesurée (pas « Dégâts infligés » : le switch
+    /// est large de 59 px par option, voir `paint_metric_switch`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Damage => "Dégâts",
+            Self::Armor => "Armure",
+            Self::Heal => "Soins",
+        }
+    }
+
+    /// Infobulle du switch — dit ce que la grandeur compte VRAIMENT, là où le libellé seul reste
+    /// ambigu (l'armure est celle qu'on donne, pas celle qu'on encaisse).
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Damage => "Dégâts infligés",
+            Self::Armor => "Armure donnée",
+            Self::Heal => "Soins prodigués",
+        }
+    }
+
+    /// Message affiché à la place des barres quand personne, dans le camp affiché, n'a encore
+    /// produit quoi que ce soit de cette grandeur.
+    pub fn empty_message(self) -> &'static str {
+        match self {
+            Self::Damage => "Aucun dégât pour l'instant.",
+            Self::Armor => "Aucune armure donnée pour l'instant.",
+            Self::Heal => "Aucun soin pour l'instant.",
+        }
+    }
+
+    /// Valeur de CE combattant pour cette grandeur — le seul endroit qui décide quel champ de
+    /// `FighterDamage` alimente l'affichage ; tout le panneau (barres, total, pourcentage sur le
+    /// portrait, cadres) passe par ici plutôt que de lire `total_damage` en dur.
+    pub fn value_of(self, fighter: &FighterDamage) -> i64 {
+        match self {
+            Self::Damage => fighter.total_damage,
+            Self::Armor => fighter.total_armor,
+            Self::Heal => fighter.total_heal,
+        }
+    }
+
+    /// Grandeur suivante, en boucle — pendant de [`CombatSide::toggled`] pour un futur raccourci
+    /// clavier (le switch reste la voie principale).
+    pub fn next(self) -> Self {
+        match self {
+            Self::Damage => Self::Armor,
+            Self::Armor => Self::Heal,
+            Self::Heal => Self::Damage,
         }
     }
 }
@@ -459,6 +548,15 @@ pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 /// espacement interne avant l'encre visible : l'écart géométrique posé ici est bien symétrique,
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
+/// Hauteur du switch de grandeur (voir `paint_metric_switch`) — un peu plus plat que le switch de
+/// camp (26 px) : il porte du texte, pas des icônes, et une rangée de plus dans un bandeau flottant
+/// au-dessus du jeu se paie en pixels de décor masqués.
+const METRIC_SWITCH_HEIGHT: f32 = 22.0;
+/// Air entre la rangée camp/total et le switch de grandeur, DANS le bandeau leader.
+const METRIC_SWITCH_GAP: f32 = 5.0;
+/// Taille du libellé d'une option de grandeur — « Dégâts » (le plus large des trois) tient dans les
+/// 59 px d'une option à cette taille, marge comprise.
+const METRIC_FONT_SIZE: f32 = 12.0;
 /// Arrondi du fond opacifié de la ligne leader.
 pub(super) const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// Couleur du fond opacifié de la ligne leader — voir [`tokens::OVERLAY_BACKDROP`], qui la partage
@@ -476,6 +574,9 @@ pub fn show(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
     side: &mut CombatSide,
+    // Grandeur mesurée (dégâts / armure donnée / soins), voir `CombatMetric` — indépendante du
+    // camp affiché, pilotée par le switch de `show_leader_row`.
+    metric: &mut CombatMetric,
     // Voir `panels::watchlist::WatchlistAssets::shortcuts` : même raison, ici pour l'infobulle du
     // switch Alliés/Ennemis.
     shortcuts: &ShortcutBindings,
@@ -501,18 +602,19 @@ pub fn show(
     // résultat est identique, mais c'est bien le total du camp affiché qui a du sens ici) — seule
     // référence désormais pour le remplissage ET le pourcentage (voir doc de module, correctif de
     // cohérence 2026-09-04).
+    let measured = *metric;
     let mut bars: Vec<&FighterDamage> = fighters
         .iter()
         .copied()
-        .filter(|f| f.total_damage > 0)
+        .filter(|f| measured.value_of(f) > 0)
         .collect();
-    bars.sort_by_key(|f| std::cmp::Reverse(f.total_damage));
+    bars.sort_by_key(|f| std::cmp::Reverse(measured.value_of(f)));
 
     // Vrai total (0 tant qu'il n'y a pas de combat, ou que le camp affiché est vide — on l'affiche
     // tel quel, voir `show_leader_row`) — `total_damage` (avec `.max(1)`) n'existe que pour
     // sécuriser les divisions de ratio ; sans effet sur le résultat puisqu'un dégât nul donne de
     // toute façon un ratio nul.
-    let total_damage_raw = fighters.iter().map(|f| f.total_damage).sum::<i64>();
+    let total_damage_raw = fighters.iter().map(|f| measured.value_of(f)).sum::<i64>();
     let total_damage = total_damage_raw.max(1);
 
     // `framed` : gabarit exact (`CombatFrame::show`, 1 à `MAX_FRAME_SLOTS` combattants). `enemy_
@@ -569,6 +671,7 @@ pub fn show(
                     remote_icons,
                     remote_icon_textures,
                     framed,
+                    measured,
                     total_damage,
                     marks,
                 );
@@ -590,6 +693,7 @@ pub fn show(
                     remote_icons,
                     remote_icon_textures,
                     enemy_scroll,
+                    measured,
                     total_damage,
                     marks,
                 );
@@ -617,6 +721,7 @@ pub fn show(
                         remote_icons,
                         remote_icon_textures,
                         fighter,
+                        measured,
                         total_damage,
                     );
                 }
@@ -634,20 +739,26 @@ pub fn show(
         // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
         // portrait »).
         ui.vertical(|ui| {
-            show_leader_row(ui, icons, side, shortcuts, total_damage_raw);
+            show_leader_row(ui, icons, side, metric, shortcuts, total_damage_raw);
             ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
-            if fighters.is_empty() {
-                ui.weak(match fight {
-                    None => "Aucun combat pour l'instant.",
-                    Some(_) => match side {
+            if fighters.is_empty() || bars.is_empty() {
+                // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
+                // personne à soigner serait une fausse piste. Un camp peuplé mais sans rien à
+                // montrer pour la grandeur choisie, lui, le dit explicitement — sans ce message,
+                // basculer sur Armure dans un combat sans blindeur laissait la colonne vide sans
+                // qu'on sache si c'était zéro ou un bug.
+                ui.weak(match (fight, fighters.is_empty()) {
+                    (None, _) => "Aucun combat pour l'instant.",
+                    (Some(_), true) => match side {
                         CombatSide::Allies => "Aucun allié pour l'instant.",
                         CombatSide::Enemies => "Aucun ennemi pour l'instant.",
                     },
+                    (Some(_), false) => measured.empty_message(),
                 });
             } else {
                 // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
                 // 2026) — même rythme vertical que l'ancienne liste en dessous de six.
-                DamageBars::show(ui, &bars, total_damage);
+                DamageBars::show(ui, &bars, measured, total_damage);
             }
             // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
             // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
@@ -675,33 +786,102 @@ fn show_leader_row(
     ui: &mut egui::Ui,
     icons: &UiIcons,
     side: &mut CombatSide,
+    metric: &mut CombatMetric,
     shortcuts: &ShortcutBindings,
     total_damage: i64,
 ) {
     let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
-    let content_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
-    let row_height = content_height + LEADER_PANEL_PADDING * 2.0;
+    let top_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
+    let row_height =
+        top_height + METRIC_SWITCH_GAP + METRIC_SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
 
     ui.painter()
         .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
 
+    // Rangée du haut — inchangée depuis la refonte du 11e retour : camp à gauche, total à droite.
+    let top_center_y = row_rect.min.y + LEADER_PANEL_PADDING + top_height / 2.0;
     let switch_top_left = egui::pos2(
         row_rect.min.x + LEADER_PANEL_PADDING,
-        row_rect.center().y - SWITCH_HEIGHT / 2.0,
+        top_center_y - SWITCH_HEIGHT / 2.0,
     );
     paint_side_switch(ui, switch_top_left, side, icons, shortcuts);
 
     text::paint_outlined_text(
         ui,
-        egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, row_rect.center().y),
+        egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, top_center_y),
         egui::Align2::RIGHT_CENTER,
         &format_fr_thousands(total_damage),
         total_font,
         TEXT_COLOR,
         text::OUTLINE_FULL,
     );
+
+    // Rangée du bas — la grandeur mesurée, sur toute la largeur utile du bandeau : c'est elle qui
+    // décide de ce que raconte TOUT le reste du panneau (total ci-dessus, barres, pourcentages sur
+    // les portraits), elle ne peut pas être une petite icône de plus à côté du camp.
+    let metric_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            row_rect.min.x + LEADER_PANEL_PADDING,
+            row_rect.max.y - LEADER_PANEL_PADDING - METRIC_SWITCH_HEIGHT,
+        ),
+        egui::vec2(
+            BAR_MAX_WIDTH - LEADER_PANEL_PADDING * 2.0,
+            METRIC_SWITCH_HEIGHT,
+        ),
+    );
+    paint_metric_switch(ui, metric_rect, metric);
+}
+
+/// Switch de grandeur (Dégâts / Armure / Soins) — trois options de largeur égale, même vocabulaire
+/// visuel que `paint_side_switch` (piste `TINT_MEDIUM` bordée de `TINT_STRONG`, option active
+/// remplie d'`ACCENT`) mais libellées en TEXTE plutôt qu'en icônes : le jeu d'icônes de l'overlay
+/// n'a ni épée, ni bouclier, ni cœur à ce jour (voir `UiIcons`), et trois pictogrammes inventés au
+/// trait pour l'occasion auraient été moins lisibles qu'un mot — à remplacer par de vraies icônes
+/// du design system si l'utilisateur en valide le principe.
+fn paint_metric_switch(ui: &mut egui::Ui, rect: egui::Rect, metric: &mut CombatMetric) {
+    let painter = ui.painter();
+    painter.rect_filled(rect, 5.0, TINT_MEDIUM);
+    painter.rect_stroke(
+        rect,
+        5.0,
+        egui::Stroke::new(1.0, TINT_STRONG),
+        egui::StrokeKind::Inside,
+    );
+
+    let option_width = rect.width() / CombatMetric::ALL.len() as f32;
+    let font = text::label_font(ui.ctx(), METRIC_FONT_SIZE);
+    for (i, option) in CombatMetric::ALL.into_iter().enumerate() {
+        let option_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.min.x + option_width * i as f32, rect.min.y),
+            egui::vec2(option_width, rect.height()),
+        );
+        if option == *metric {
+            ui.painter()
+                .rect_filled(option_rect.shrink(1.0), 4.0, ACCENT);
+        }
+        text::paint_outlined_text(
+            ui,
+            option_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            option.label(),
+            font.clone(),
+            TEXT_COLOR,
+            text::OUTLINE_FULL,
+        );
+        let response = ui
+            .interact(
+                option_rect,
+                ui.id().with(("combat-metric", i)),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        design::tooltip(&response).text(option.tooltip());
+        if response.clicked() {
+            *metric = option;
+        }
+    }
 }
 
 /// Texture résolue pour un combattant — voir `resolve_fighter_texture`. Distingue les deux
@@ -762,6 +942,7 @@ fn paint_flat_portrait(
     remote_icons: &RemoteIconStore,
     remote_icon_textures: &mut RemoteIconTextures,
     fighter: &FighterDamage,
+    metric: CombatMetric,
     total_damage: i64,
 ) {
     let portrait = resolve_fighter_texture(
@@ -785,10 +966,10 @@ fn paint_flat_portrait(
         design::portrait(texture)
             .size(crate::portraits::PORTRAIT_SIZE)
             .dimmed(dimmed)
-            .percent(
-                (fighter.total_damage > 0)
-                    .then(|| design::portrait_percent(fighter.total_damage, total_damage)),
-            ),
+            .percent({
+                let value = metric.value_of(fighter);
+                (value > 0).then(|| design::portrait_percent(value, total_damage))
+            }),
     );
     design::tooltip(&response).text(fighter.name.as_str());
 }
@@ -1032,10 +1213,13 @@ mod tests {
                 is_ally: true,
                 total_damage: 0,
                 total_heal: 0,
+                total_armor: 0,
                 class_name: None,
                 gender: Gender::M,
                 xp_gained: 0,
                 spells: Default::default(),
+                heal_spells: Default::default(),
+                armor_spells: Default::default(),
                 is_ko: false,
                 last_turn_casts: Vec::new(),
                 last_turn: 0,

@@ -82,7 +82,7 @@ use egui::{Rect, Vec2};
 use egui_kittest::Harness;
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext};
-use overlay_ui::panels::combat::CombatSide;
+use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{paint_content, OverlayKind, RenderContent};
 use overlay_ui::shortcuts::ShortcutBindings;
@@ -334,6 +334,7 @@ fn harnais(p: Planche) -> Harness<'static> {
         UiIcons,
     )> = None;
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icons = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -372,6 +373,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     combat_frame,
                     icons,
                     combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).

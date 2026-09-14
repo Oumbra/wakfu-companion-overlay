@@ -79,7 +79,7 @@ mod linux_main {
     use overlay_ui::panels;
     use overlay_ui::panels::alerts_tab;
     use overlay_ui::panels::chat_tab;
-    use overlay_ui::panels::combat::CombatSide;
+    use overlay_ui::panels::combat::{CombatMetric, CombatSide};
     use overlay_ui::panels::combat_frame::CombatFrame;
     use overlay_ui::panels::login::{self, LoginState};
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
@@ -170,6 +170,10 @@ mod linux_main {
         icons: UiIcons,
         remote_icon_textures: RemoteIconTextures,
         combat_side: CombatSide,
+        /// Grandeur mesurée par le panneau Combat — dégâts, armure donnée ou soins (voir
+        /// `panels::combat::CombatMetric`). Un état par fenêtre, comme `combat_side` : deux
+        /// personnages peuvent regarder deux grandeurs différentes du même combat.
+        combat_metric: CombatMetric,
         /// État de la modale Options (2026-09-08) — `Some` UNIQUEMENT pour `kind ==
         /// OverlayKind::Options`, voir `App::open_options_modal`.
         options_state: Option<OptionsModalState>,
@@ -445,6 +449,7 @@ mod linux_main {
                 icons,
                 remote_icon_textures: RemoteIconTextures::default(),
                 combat_side: CombatSide::default(),
+                combat_metric: CombatMetric::default(),
                 options_state: None,
                 login_state: Some(LoginState::new(std::time::Instant::now())),
                 last_login_height: Some(login::INITIAL_HEIGHT),
@@ -688,6 +693,7 @@ mod linux_main {
                 icons,
                 remote_icon_textures: RemoteIconTextures::default(),
                 combat_side: CombatSide::default(),
+                combat_metric: CombatMetric::default(),
                 // Renseigné juste après par l'appelant (`open_options_modal`) pour `kind ==
                 // Options` — `None` ici pour Combat/Suivi, jamais consulté (voir
                 // `RenderContent::options`).
@@ -1526,6 +1532,7 @@ mod linux_main {
                             combat_frame: &overlay.combat_frame,
                             icons: &overlay.icons,
                             combat_side: &mut overlay.combat_side,
+                            combat_metric: &mut overlay.combat_metric,
                             watchlist: &watchlist,
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,

@@ -15,6 +15,7 @@
 
 use egui_kittest::Harness;
 use overlay_engine::{CatalogIndex, FighterDamage, Gender, SpellCastRecord};
+use overlay_ui::panels::combat::CombatMetric;
 use overlay_ui::panels::combat_frame::{CombatFrame, SelectionMarks};
 use overlay_ui::panels::combat_frame_scroll::EnemyFrameScroll;
 use overlay_ui::portraits::PortraitAtlas;
@@ -31,10 +32,13 @@ fn enemy(name: String, total_damage: i64, casts: usize) -> FighterDamage {
         is_ally: false,
         total_damage,
         total_heal: 0,
+        total_armor: 0,
         class_name: None,
         gender: Gender::M,
         xp_gained: 0,
         spells: Default::default(),
+        heal_spells: Default::default(),
+        armor_spells: Default::default(),
         is_ko: false,
         last_turn_casts: (0..casts)
             .map(|i| SpellCastRecord {
@@ -101,6 +105,7 @@ fn cadre_ennemi_a_defilement_au_dela_de_six_ne_panique_pas() {
             &remote_icon_store,
             &mut remote_icon_textures,
             &refs,
+            CombatMetric::Damage,
             total_damage,
             Some(SelectionMarks {
                 ring_slot: Some(2),
