@@ -2619,7 +2619,6 @@ use overlay_ui::design;
 let response = ui.add(
     design::legend_tile("Commerce", "gelano")
         .width(155.0)
-        .tooltip("Retirer")
         .log_name("chat.recherche"),
 );
 ```
@@ -2631,15 +2630,18 @@ let response = ui.add(
 | `height` | hauteur du **cadre** (la légende s'y ajoute au-dessus) | `LEGEND_TILE_HEIGHT` = 54 |
 | `enabled` | `false` = grisée, sans clic | `true` |
 | `legend_color` | couleur de la légende — celle du canal de chat (`tokens::chat_channel_color`) | `LEGEND_TILE_LEGEND_TEXT` (gris des titres) |
-| `tooltip` | infobulle du design system | aucune |
 | `preview_state` | `Idle` / `Hovered` / `Disabled` — galerie et captures seulement | état réel |
 
 Composant feuille (`impl Widget`, `Sense::click()`). Trois fonctions associées :
 `LegendTile::legend_overshoot` (de combien la légende déborde au-dessus du cadre),
 `LegendTile::allocated_height` (la hauteur totale allouée, pour un appelant qui réserve) et
-`LegendTile::paint_frame` (le cadre seul — fond, bordure interrompue, légende à gauche ou à droite
-selon `LegendSide`, une teinte appliquée à chaque couleur — pour un appelant qui compose son propre
-contenu dedans : la carte d'alerte de chat du Suivi, `panels::watchlist::chat_toast_card`).
+`LegendTile::paint_frame` (le cadre seul — fond, bordure interrompue, légende en haut à gauche, une
+teinte appliquée à chaque couleur — pour un appelant qui compose son propre contenu dedans : la
+carte d'alerte de chat du Suivi, `panels::watchlist::chat_toast_card`).
+
+**Infobulle** : aucune à poser. La tuile en montre une **seulement quand son contenu est élidé**,
+avec le mot entier et rien d'autre — jamais pour répéter ce qui se lit déjà, ni la légende sous
+les yeux (règle utilisateur du 2026-09-14).
 
 ### À quoi elle sert
 
@@ -2683,4 +2685,4 @@ légende des canaux (`/l - Proximité` en blanc, `/m - Commerce` en orange, `/r 
 magenta…) : jetons `CHAT_CHANNEL_*` et `tokens::chat_channel_color(ChatChannel)`, relevés à l'œil
 sur une capture fournie par l'utilisateur puis corrigés par lui pour cinq canaux (Commerce reste
 le relevé). La carte d'alerte du Suivi (`panels::watchlist::chat_toast_card`) reprend le cadre via
-`paint_frame`, canal à droite. « Tous les canaux » n'est pas un canal : la légende garde son gris.
+`paint_frame`, canal en haut à gauche comme sur les tuiles. « Tous les canaux » n'est pas un canal : la légende garde son gris.
