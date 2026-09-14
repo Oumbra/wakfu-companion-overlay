@@ -58,6 +58,7 @@
 
 use egui::{Rect, Response, Ui};
 
+use crate::build_info;
 use crate::design::{
     assets::DsTexture,
     components::button,
@@ -87,6 +88,7 @@ pub fn window(title: impl Into<String>) -> Window {
         tab_bar_height: tokens::TAB_HEIGHT,
         footer: None,
         close_button: false,
+        version: false,
         log_name: None,
     }
 }
@@ -97,6 +99,7 @@ pub struct Window {
     tab_bar_height: f32,
     footer: Option<(String, String)>,
     close_button: bool,
+    version: bool,
     log_name: Option<String>,
 }
 
@@ -122,6 +125,17 @@ impl Window {
     /// appel, la bannière ne porte que son titre.
     pub fn close_button(mut self, close_button: bool) -> Self {
         self.close_button = close_button;
+        self
+    }
+
+    /// Peint le numéro de version du produit à gauche de la bannière — voir
+    /// [`build_info::banner_label`].
+    ///
+    /// Opt-in, et non systématique sur toute fenêtre : le numéro dit de quel overlay il s'agit, ce
+    /// qui n'a de sens que sur une fenêtre « racine » (la modale Options aujourd'hui). Une boîte de
+    /// confirmation ouverte PAR-DESSUS elle le répéterait sans rien apprendre à personne.
+    pub fn version(mut self, version: bool) -> Self {
+        self.version = version;
         self
     }
 
@@ -170,6 +184,25 @@ impl Window {
             tokens::WINDOW_TITLE_TEXT,
             text::SHADOW_BOTTOM_RIGHT,
         );
+
+        // Numéro de version — à GAUCHE, à la distance du bord qu'observe la croix à droite
+        // (`WINDOW_CLOSE_MARGIN`), centré verticalement comme elle. Même police serif, même blanc
+        // et même ombre portée que le titre : c'est le même bandeau, éclairé de la même façon ;
+        // seule la taille descend (voir `tokens::WINDOW_VERSION_FONT_SIZE`).
+        if self.version {
+            text::paint_outlined_text(
+                ui,
+                egui::pos2(
+                    zones.banner.left() + tokens::WINDOW_CLOSE_MARGIN,
+                    zones.banner.center().y,
+                ),
+                egui::Align2::LEFT_CENTER,
+                build_info::banner_label(),
+                text::title_font(ui.ctx(), tokens::WINDOW_VERSION_FONT_SIZE),
+                tokens::WINDOW_TITLE_TEXT,
+                text::SHADOW_BOTTOM_RIGHT,
+            );
+        }
 
         let prefix = self.log_name.as_deref().unwrap_or("fenetre");
 

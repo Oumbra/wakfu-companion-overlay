@@ -113,6 +113,16 @@ impl Textures {
         // `egui::Context`, qui ne passe jamais par le point de configuration des deux binaires) et
         // ne vaudraient plus rien pour vérifier visuellement le design system tooltip.
         overlay_ui::style::apply(ctx);
+        // Numéro de version FIGÉ dans toutes les captures de ce binaire de test (`v0.0.0`) : la
+        // version réelle est incrémentée automatiquement à chaque commit `feat:`/`fix:`/… (voir
+        // `scripts/bump-version.sh`), et la bannière de la modale Options la peint depuis le
+        // 2026-09-14. Sans ce gel, CHAQUE bump périmerait d'un coup toutes les captures de cette
+        // modale — un gate rouge par commit, pour un changement que personne n'a demandé.
+        //
+        // Posé ici, et pas dans chaque test : `get_or_load` est le passage obligé de tout rendu de
+        // ce fichier (c'est déjà pour cette raison qu'`overlay_ui::style::apply` y est appelé), donc
+        // un futur test ne peut pas l'oublier. L'appel est idempotent.
+        overlay_ui::build_info::freeze_for_snapshots();
         let portraits = self
             .portraits
             .get_or_insert_with(|| PortraitAtlas::load(ctx));
