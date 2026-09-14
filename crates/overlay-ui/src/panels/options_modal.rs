@@ -1,9 +1,10 @@
 //! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
 //! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
 //! (voir `main.rs`/`bin/overlay-ui-x11.rs`). L'onglet "Paramètres" expose les réglages LOCAUX de
-//! l'overlay : le chemin de `wakfu.log` à suivre, et depuis le 2026-09-13 l'affichage du panneau
-//! de combat en dehors des combats. Les deux sont persistés par `config::OverlayConfig`, jamais
-//! sur le compte — contrairement aux onglets "Suivi" et "Alertes".
+//! l'overlay : le chemin de `wakfu.log` à suivre, et la section « Combat » — l'affichage du
+//! panneau de combat en dehors des combats (2026-09-13) et la notification de tour (2026-09-14).
+//! Tous sont persistés par `config::OverlayConfig`, jamais sur le compte — contrairement aux
+//! onglets "Suivi" et "Alertes".
 //!
 //! **Refonte 2026-09-09 — chrome basé sur les VRAIES textures du jeu, plus des formes peintes à la
 //! main** (voir `panels::chamfer`, toujours utilisé ailleurs pour la barre de dégâts, mais plus
@@ -669,16 +670,29 @@ pub fn show(
             );
         }
 
-        // **Section « Affichage »** (2026-09-13) — l'encombrement de l'overlay à l'écran, à côté
-        // du fichier qu'il lit. Le réglage vit dans la config LOCALE (`config::OverlayConfig`),
-        // pas sur le compte : ce qu'on accepte de voir par-dessus son jeu dépend de l'écran qu'on
-        // a devant soi, pas du joueur.
+        // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
+        // en un seul endroit.
         //
-        // La case est un brouillon comme le reste de cette fenêtre : elle bascule librement, et
-        // seul « Valider » l'emporte (voir `OptionsCommit`). Son retour (`changed()`) n'est donc
-        // pas lu — il n'y a rien à déclencher à la bascule.
+        // Elle s'appelait « Affichage » et ne portait qu'une case, qui parlait déjà du panneau de
+        // COMBAT ; la notification de tour arrivée le même jour en aurait fait une deuxième
+        // section sur le même sujet. **Fusionnées sur décision de l'utilisateur** le 2026-09-14 :
+        // « déplace la case Affichage dans la section Combat ». « Affichage » disparaît donc, elle
+        // n'avait rien d'autre à porter.
+        //
+        // Les deux réglages vivent dans la config LOCALE (`config::OverlayConfig`), pas sur le
+        // compte, pour deux raisons voisines : ce qu'on accepte de voir par-dessus son jeu dépend
+        // de l'écran qu'on a devant soi, et une notification du système — le seul effet de
+        // l'overlay qui sorte de l'écran de jeu — dépend de la machine (démon de notifications
+        // présent ou non, téléphone apparié…). Jamais du joueur.
+        //
+        // Les deux cases sont des brouillons comme le reste de cette fenêtre : elles basculent
+        // librement, et seul « Valider » l'emporte (voir `OptionsCommit`). Leur retour
+        // (`changed()`) n'est donc pas lu — il n'y a rien à déclencher à la bascule.
+        //
+        // Ordre : l'affichage permanent d'abord (ce qu'on voit en dehors d'un combat), la
+        // notification ensuite (ce qui arrive pendant) — du plus passif au plus intrusif.
         ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Affichage"));
+        ui.add(design::heading("Combat"));
         ui.add(
             design::checkbox(
                 &mut state.combat_always_visible,
@@ -690,17 +704,6 @@ pub fn show(
             )
             .log_name("options-combat-toujours-visible"),
         );
-
-        // **Section « Combat »** (2026-09-14) — ce que l'overlay fait PENDANT un combat, par
-        // opposition à « Affichage », qui règle ce qu'il montre en dehors. Demande utilisateur
-        // explicite du jour : « une case à cocher dans la rubrique combat ».
-        //
-        // Réglage LOCAL, comme sa voisine et pour la même raison, mais poussée d'un cran : une
-        // notification du système est le seul effet de l'overlay qui sorte de l'écran de jeu. Elle
-        // dépend donc de la machine (démon de notifications présent ou non, téléphone apparié…),
-        // jamais du joueur — et elle est décochée par défaut.
-        ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Combat"));
         ui.add(
             design::checkbox(
                 &mut state.turn_notification,
