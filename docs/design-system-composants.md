@@ -785,6 +785,21 @@ tous dès le premier composant peint).
 `menu-button-icon-first-plan.png`. Les icônes du design system étant blanc pur avec alpha, une
 teinte appliquée au moment de peindre suffit — pas de copie recolorée à charger.
 
+**Seul `FirstPlan` dore son glyphe au survol.** Ces deux teintes ont été mesurées sur une planche de
+socles *bleus* — la barre de premier plan — et s'appliquaient par défaut aux quatre contextes faute
+de mesure ailleurs. Retour utilisateur 2026-09-14, deux captures du jeu à l'appui (« Jouer le son
+d'alerte », au repos et survolé) : sur le socle kaki d'un panneau, le glyphe est **blanc et le reste
+au survol**, seule la texture du socle s'éclaircit (`tokens::PANEL_ICON_TINT`). Les trois autres
+contextes figent donc leur teinte — blanc pour `Panel`, or pour `Stepper` et `Banner` — et
+`IconContext::icon_tint` en est le seul point de décision :
+
+| Contexte | Glyphe au repos | Glyphe au survol |
+| --- | --- | --- |
+| `FirstPlan` | `#c5cbcc` | `#f4d89f` |
+| `Panel` | blanc | blanc |
+| `Stepper` | `#f4d89f` | `#f4d89f` |
+| `Banner` | `#f4d89f` | `#f4d89f` |
+
 **Taille d'encre** : les glyphes sont détourés au pixel près, donc de tailles inégales d'un fichier
 à l'autre (13, 14, 16). Le jeu les cale sur une grille commune — **18px d'encre pour un socle de
 36**, médiane des huit icônes de `menu-button-icon-first-plan.png` (plage 16–20, seuil de luminance
