@@ -1,0 +1,90 @@
+//! Persistance des gabarits de nom appris — un PNG 8 bits par personnage, dans le dossier de
+//! données de l'overlay (`turn-templates/`, même racine que `logs/` et `catalog_cache`).
+//!
+//! Un gabarit vaut pour un client à une échelle d'interface donnée : il est indexé par le nom du
+//! personnage tel que le titre de fenêtre le donne. Changer l'échelle d'interface du jeu rendra
+//! les gabarits obsolètes — ils cesseront simplement de reconnaître, et le prochain combat en
+//! réapprendra de nouveaux. Effacer le dossier fait la même chose à la main.
+//!
+//! Best-effort comme `config` : un échec d'écriture est journalisé, jamais fatal — l'overlay
+//! réapprendra au prochain lancement.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use super::vision::Glyph;
+
+fn dir() -> Option<PathBuf> {
+    directories::ProjectDirs::from("com", "Oumbra", "wakfu-companion-overlay")
+        .map(|d| d.data_dir().join("turn-templates"))
+}
+
+/// Nom de fichier sûr pour un nom de personnage (les noms Wakfu peuvent porter des espaces et des
+/// signes ; on garde lettres, chiffres, tiret et souligné).
+fn file_stem(character: &str) -> String {
+    character
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Tous les gabarits du disque — un fichier illisible est ignoré et journalisé.
+pub fn load_all() -> HashMap<String, Glyph> {
+    let mut out = HashMap::new();
+    let Some(dir) = dir() else {
+        return out;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "png") {
+            continue;
+        }
+        // Le nom réel est dans le fichier compagnon `.name` (le nom de fichier est assaini) ;
+        // à défaut, le nom de fichier lui-même.
+        let name = std::fs::read_to_string(path.with_extension("name"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .or_else(|| path.file_stem().map(|s| s.to_string_lossy().to_string()));
+        let Some(name) = name else { continue };
+        match std::fs::read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|b| Glyph::from_png(&b).map_err(|e| e.to_string()))
+        {
+            Ok(glyph) => {
+                tracing::info!("[tour] gabarit chargé : {name} ({}x{})", glyph.w, glyph.h);
+                out.insert(name, glyph);
+            }
+            Err(err) => tracing::warn!("[tour] gabarit illisible {} : {err}", path.display()),
+        }
+    }
+    out
+}
+
+pub fn save(character: &str, glyph: &Glyph) {
+    let Some(dir) = dir() else {
+        return;
+    };
+    let result = (|| -> Result<(), String> {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let stem = file_stem(character);
+        let png = glyph.to_png().map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("{stem}.png")), png).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("{stem}.name")), character).map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(()) => tracing::info!(
+            "[tour] gabarit enregistré : {character} → {}",
+            dir.display()
+        ),
+        Err(err) => tracing::warn!("[tour] gabarit non enregistré ({character}) : {err}"),
+    }
+}
