@@ -629,6 +629,17 @@ pub const ICON_SIZE: f32 = 16.0;
 /// Teinte d'une icône survolée — `#f4d89f`, valeur donnée par l'utilisateur (2026-09-06).
 pub const ICON_TINT_HOVER: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 
+/// Teinte du glyphe d'un bouton icône posé **dans un panneau** (socle kaki `button-icon.png`) —
+/// **blanc pur, dans les DEUX états**.
+///
+/// Retour utilisateur 2026-09-14, deux captures du jeu à l'appui (le bouton « Jouer le son
+/// d'alerte », au repos et survolé) : sur ce socle-là, le jeu peint un glyphe blanc et ne le change
+/// pas au survol — c'est **la texture du socle** qui s'éclaircit, et elle seule. Le couple
+/// [`ICON_TINT`] / [`ICON_TINT_HOVER`] (gris clair → or) reste celui du contexte premier plan, où
+/// il a été mesuré : `menu-button-icon-first-plan.png` ne montre que des socles bleus, elle
+/// n'arbitrait donc rien pour le socle de panneau, qui avait hérité de ces teintes par défaut.
+pub const PANEL_ICON_TINT: Color32 = Color32::WHITE;
+
 /// Assombrissement d'un bouton icône désactivé **en contexte premier plan**, où le socle grisé du
 /// jeu ne convient pas (voir `IconContext::disabled`) — un multiplicateur d'alpha appliqué au socle
 /// de repos, ~43 % d'opacité.

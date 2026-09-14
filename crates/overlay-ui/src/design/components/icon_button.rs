@@ -30,16 +30,27 @@
 //!   2026-09-08 parce que deux familles de boutons s'en écartaient.
 //! - **Les deux teintes d'icône** : `#c5cbcc` au repos, `#f4d89f` au survol, mesurées sur
 //!   `menu-button-icon-first-plan.png`. Les icônes du design system étant blanc pur avec alpha, une
-//!   simple teinte les reproduit — là où `ui_icons` en charge deux copies recolorées.
+//!   simple teinte les reproduit — là où `ui_icons` en charge deux copies recolorées. Ce couple est
+//!   celui du **premier plan**, et de lui seul (voir la section suivante).
+//!
+//! ## Le glyphe ne change de couleur qu'en premier plan
+//!
+//! Les deux teintes ci-dessus ont été mesurées sur une planche de socles **bleus** — la barre de
+//! premier plan du jeu. Elles s'étaient appliquées par défaut aux quatre contextes, faute de mesure
+//! ailleurs. Retour utilisateur 2026-09-14, deux captures du jeu à l'appui (le bouton « Jouer le son
+//! d'alerte » au repos et survolé) : sur le socle kaki d'un panneau, le glyphe est **blanc et le
+//! reste au survol** — seule la texture du socle s'éclaircit. C'est [`tokens::PANEL_ICON_TINT`],
+//! rendu par `IconContext::icon_tint` comme les teintes figées du pas et de la croix de bannière ;
+//! `FirstPlan` est désormais le seul contexte dont le glyphe vire à l'or sous la souris.
 //!
 //! ## Deux contextes de socle
 //!
-//! | Contexte | Socle | Où |
-//! | --- | --- | --- |
-//! | `FirstPlan` | `button-icon-first-plan.png` | barre de premier plan, par-dessus le jeu |
-//! | `Panel` | `button-icon.png` | à l'intérieur d'un panneau |
-//! | `Stepper` | `button-stepper.png` | de part et d'autre d'un champ numérique |
-//! | `Banner` | **aucun — un voile peint** | dans la bannière d'une fenêtre (la croix de fermeture) |
+//! | Contexte | Socle | Glyphe (repos → survol) | Où |
+//! | --- | --- | --- | --- |
+//! | `FirstPlan` | `button-icon-first-plan.png` | `#c5cbcc` → `#f4d89f` | barre de premier plan, par-dessus le jeu |
+//! | `Panel` | `button-icon.png` | blanc → blanc | à l'intérieur d'un panneau |
+//! | `Stepper` | `button-stepper.png` | or → or | de part et d'autre d'un champ numérique |
+//! | `Banner` | **aucun — un voile peint** | or → or | dans la bannière d'une fenêtre (la croix de fermeture) |
 //!
 //! Les deux premiers font **36 × 36**, la taille native. `button-icon-disabled.png` est partagée
 //! par les deux — le jeu n'a qu'une capture de socle grisé, comme pour le bouton texte.
@@ -153,19 +164,29 @@ impl IconContext {
         }
     }
 
-    /// Teinte du glyphe, quand le contexte en impose une.
+    /// Teinte du glyphe, quand le contexte en impose une — la même dans les DEUX états.
     ///
-    /// Le pas est le seul des trois à peindre son glyphe **en or au repos** (mesuré sur
-    /// `large-input-number.png`, voir [`tokens::STEPPER_ICON_TINT`]) ; les deux autres le peignent
-    /// en gris clair et ne passent à l'or qu'au survol. Faute de capture survolée d'un pas, l'or y
-    /// reste aussi la teinte de survol : le signal de survol du pas est donc son curseur, pas sa
-    /// couleur — écart assumé, à corriger le jour où une capture existera.
+    /// `FirstPlan` est le seul contexte à ne rien imposer : son glyphe suit le couple gris clair →
+    /// or ([`tokens::ICON_TINT`] / [`tokens::ICON_TINT_HOVER`]) mesuré sur les socles bleus de
+    /// `menu-button-icon-first-plan.png`. Les trois autres figent leur teinte, chacun pour une
+    /// raison mesurée :
+    ///
+    /// - `Panel` la garde **blanche** — retour utilisateur 2026-09-14, captures du jeu à l'appui :
+    ///   sur le socle kaki, le survol change la texture du socle, jamais la couleur du glyphe (voir
+    ///   [`tokens::PANEL_ICON_TINT`]) ;
+    /// - le pas peint son glyphe **en or au repos** (mesuré sur `large-input-number.png`, voir
+    ///   [`tokens::STEPPER_ICON_TINT`]), et faute de capture survolée l'or y reste aussi la teinte
+    ///   de survol : son signal de survol est son curseur, pas sa couleur — écart assumé, à
+    ///   corriger le jour où une capture existera ;
+    /// - la croix de bannière est **dorée dans les deux états**, mesuré : son survol se lit sur son
+    ///   voile.
     fn icon_tint(self) -> Option<egui::Color32> {
         match self {
+            IconContext::Panel => Some(tokens::PANEL_ICON_TINT),
             IconContext::Stepper => Some(tokens::STEPPER_ICON_TINT),
             // Doré dans les deux états, mesuré : le survol se lit sur le voile, pas sur la croix.
             IconContext::Banner => Some(tokens::WINDOW_CLOSE_ICON_TINT),
-            _ => None,
+            IconContext::FirstPlan => None,
         }
     }
 
@@ -460,6 +481,36 @@ mod tests {
     /// Tolérance de comparaison — ces tailles finissent en coordonnées de peinture flottantes, pas
     /// en pixels entiers ; un centième suffit à attraper une erreur de formule.
     const EPS: f32 = 0.01;
+
+    /// **Le glyphe d'un bouton de panneau est blanc, au repos comme au survol** (retour utilisateur
+    /// 2026-09-14, captures du jeu à l'appui) : seul son socle change sous la souris. Le test porte
+    /// sur `icon_tint`, qui est appliquée aux DEUX états par `Widget::ui` — une teinte rendue ici
+    /// est donc par construction la même au repos et au survol.
+    #[test]
+    fn le_glyphe_d_un_bouton_de_panneau_reste_blanc() {
+        assert_eq!(
+            IconContext::Panel.icon_tint(),
+            Some(egui::Color32::WHITE),
+            "le socle kaki ne dore pas son glyphe au survol",
+        );
+    }
+
+    /// Le pendant du test précédent : le premier plan est le seul contexte à laisser `Widget::ui`
+    /// choisir la teinte selon l'état, donc le seul dont le glyphe vire à l'or sous la souris.
+    #[test]
+    fn seul_le_premier_plan_dore_son_glyphe_au_survol() {
+        assert_eq!(IconContext::FirstPlan.icon_tint(), None);
+        for context in [
+            IconContext::Panel,
+            IconContext::Stepper,
+            IconContext::Banner,
+        ] {
+            assert!(
+                context.icon_tint().is_some(),
+                "{context:?} doit figer la teinte de son glyphe",
+            );
+        }
+    }
 
     /// Les quatre glyphes du carré de contrôle du Suivi, à leur taille de fichier (détourés au
     /// pixel près par le skill `design-asset`, donc canevas = encre). Recopiés ici plutôt que lus
