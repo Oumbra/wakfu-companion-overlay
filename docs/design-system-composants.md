@@ -620,13 +620,29 @@ avec le nœud `select-theme` de `releve-options-interface.json`) :
 | Grandeur | Valeur | Origine |
 | --- | --- | --- |
 | Hauteur du socle | **36px, bord compris** | bord 2 + liseré 2 + dégradé 28 + ombre 2 + bord 2 |
-| Rayon | 2 | comme tout le reste |
+| Rayon du socle, et des coins **hauts** de la liste | 2 | comme tout le reste |
+| Rayon des coins **bas** de la liste | **4** | fond rentrant de 3, 2, 1, 0px sur les quatre dernières lignes (x=7 en y=151, x=8 en 152, x=9 en 153, bord noir à x=10 en 154) |
 | Chevron | 14 × 8px, à 8px du bord droit | **la taille native d'`icons/icon-chevron-down.png`**, au pixel |
 | Retrait du libellé de socle | 10px | texte à x=17 pour un socle à x=7 |
 | Hauteur d'une entrée | 28px | surbrillance en y 71..98, entrée suivante à y=99 |
 | Retrait du texte d'une entrée | 12px | « Tous » à x=19 pour une liste à x=7 |
 | Fond de liste | `#675d46` | uniforme, aucun dégradé |
 | Entrée mise en avant | `#a58e63` | seul fond de mise en avant relevé |
+
+**Les bords de la liste dépliée** (corrigés le 2026-09-14, sur capture de l'utilisateur) tiennent
+entièrement à l'**ordre de peinture** : fond, puis les entrées, puis le liseré clair et le bord. Dans
+l'ordre inverse, la mise en avant de l'entrée du haut mangeait le liseré et celle du bas recouvrait
+le bord — la liste avait l'air de déborder de son conteneur, et le liseré n'existait que dans le
+code, deux pixels de bord noir se posant par-dessus son unique pixel clair. Trois conséquences à
+retenir :
+
+- le liseré et le bord **rognent d'un pixel** la première et la dernière entrée, exactement comme la
+  référence (27px utiles pour un pas de 28) ;
+- la mise en avant **porte les rayons du conteneur** aux extrémités, sans quoi elle ressort, carrée,
+  par les coins arrondis ;
+- le bas est **plus rond que le haut** (4 contre 2) : le haut est collé au socle, il n'a pas à s'en
+  détacher, le bas flotte au-dessus du contenu. Le jeu ne met d'ailleurs aucun bord en haut de la
+  liste — le bord bas du socle en tient lieu — et enchaîne directement sur le liseré.
 
 **Le piège de la hauteur**, énoncé par le relevé : « le chiffre de 32px qu'on lit en mesurant le
 remplissage est trompeur — il exclut les 2px de bord haut et bas. »
