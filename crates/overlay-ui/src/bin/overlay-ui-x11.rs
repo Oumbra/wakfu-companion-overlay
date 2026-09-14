@@ -204,6 +204,10 @@ mod linux_main {
         /// (`config::OverlayConfig::combat_always_visible`), même politique que `main.rs` : lu au
         /// démarrage, remplacé à la validation de la fenêtre Options, `false` par défaut.
         combat_always_visible: bool,
+        /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
+        /// persisté (`config::OverlayConfig::turn_notification`), même politique que
+        /// `combat_always_visible`.
+        turn_notification: bool,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         game_window: GameWindowTracker,
@@ -219,6 +223,8 @@ mod linux_main {
         log_path: PathBuf,
         /// Voir `App::combat_always_visible` — lu de la config au démarrage (`run`).
         combat_always_visible: bool,
+        /// Voir `App::turn_notification` — même provenance.
+        turn_notification: bool,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
@@ -243,6 +249,7 @@ mod linux_main {
             let AppState {
                 log_path,
                 combat_always_visible,
+                turn_notification,
                 chat_toast,
                 shortcuts,
                 snapshot,
@@ -274,6 +281,7 @@ mod linux_main {
                 settings_tx,
                 log_path,
                 combat_always_visible,
+                turn_notification,
                 chat_toast,
                 game_window,
                 banner_printed: false,
@@ -724,6 +732,7 @@ mod linux_main {
                 // La case part du réglage EN VIGUEUR, pas du défaut : « Annuler » n'a rien à
                 // défaire tant qu'on n'y touche pas (voir `OptionsModalState::is_dirty`).
                 combat_always_visible: self.combat_always_visible,
+                turn_notification: self.turn_notification,
                 // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
@@ -758,6 +767,7 @@ mod linux_main {
                     suivi: Some(Vec::new()),
                     chat: None,
                     combat_always_visible: self.combat_always_visible,
+                    turn_notification: self.turn_notification,
                     shortcuts: self.hotkeys.bindings().clone(),
                 },
                 pending_close: false,
@@ -853,6 +863,18 @@ mod linux_main {
                             }
                         );
                     }
+                    let turn_changed = commit.turn_notification != self.turn_notification;
+                    if turn_changed {
+                        self.turn_notification = commit.turn_notification;
+                        tracing::info!(
+                            "[options] notification de tour : {}",
+                            if self.turn_notification {
+                                "activée"
+                            } else {
+                                "désactivée"
+                            }
+                        );
+                    }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.
                     let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
@@ -862,10 +884,11 @@ mod linux_main {
                     }
                     // La config est réécrite EN ENTIER, et seulement si l'un des réglages a bougé —
                     // même raison que `main.rs` : le fichier est réécrit d'un bloc.
-                    if path_changed || combat_changed || shortcuts_changed {
+                    if path_changed || combat_changed || turn_changed || shortcuts_changed {
                         let mut saved = config::OverlayConfig {
                             log_path: Some(candidate),
                             combat_always_visible: self.combat_always_visible,
+                            turn_notification: self.turn_notification,
                             ..Default::default()
                         };
                         saved.set_shortcuts(self.hotkeys.bindings());
@@ -1475,6 +1498,7 @@ mod linux_main {
         let mut app = App::new(AppState {
             log_path,
             combat_always_visible: saved_config.combat_always_visible,
+            turn_notification: saved_config.turn_notification,
             chat_toast: saved_config.chat_toast(),
             shortcuts: saved_config.shortcuts(),
             snapshot,

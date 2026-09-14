@@ -380,6 +380,10 @@ struct App {
     /// (`config::OverlayConfig::combat_always_visible`), lu au démarrage et remplacé à la
     /// validation de la fenêtre Options. `false` par défaut : voir `sync_combat_visibility`.
     combat_always_visible: bool,
+    /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
+    /// persisté (`config::OverlayConfig::turn_notification`), même politique que
+    /// `combat_always_visible` : lu au démarrage, remplacé à la validation de la fenêtre Options.
+    turn_notification: bool,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -428,6 +432,8 @@ struct AppState {
     /// Voir `App::combat_always_visible` — lu de la config au démarrage (`main`), jamais découvert
     /// autrement.
     combat_always_visible: bool,
+    /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
+    turn_notification: bool,
     /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`
     /// (`config::OverlayConfig::shortcuts`). Même provenance que `combat_always_visible` : lus une
     /// fois dans `main`, jamais redécouverts.
@@ -454,6 +460,7 @@ impl App {
         let AppState {
             log_path,
             combat_always_visible,
+            turn_notification,
             shortcuts,
             snapshot,
             watchlist,
@@ -493,6 +500,7 @@ impl App {
             settings_tx,
             log_path,
             combat_always_visible,
+            turn_notification,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -1450,6 +1458,7 @@ impl App {
             // La case part du réglage EN VIGUEUR, pas du défaut : la fenêtre montre l'état réel,
             // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
             combat_always_visible: self.combat_always_visible,
+            turn_notification: self.turn_notification,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -1476,6 +1485,7 @@ impl App {
                 suivi: suivi_draft.clone(),
                 chat: chat_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
+                turn_notification: self.turn_notification,
                 shortcuts: self.hotkeys.bindings().clone(),
             },
             pending_close: false,
@@ -1751,6 +1761,18 @@ impl App {
                         }
                     );
                 }
+                let turn_changed = commit.turn_notification != self.turn_notification;
+                if turn_changed {
+                    self.turn_notification = commit.turn_notification;
+                    tracing::info!(
+                        "[options] notification de tour : {}",
+                        if self.turn_notification {
+                            "activée"
+                        } else {
+                            "désactivée"
+                        }
+                    );
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -1767,10 +1789,16 @@ impl App {
                 // Les réglages de la carte de chat vivent dans la même config : commités AVANT
                 // l'écriture, pour qu'elle les emporte (voir `commit_chat`).
                 let chat_toast_changed = self.commit_chat(options_window_id);
-                if path_changed || combat_changed || shortcuts_changed || chat_toast_changed {
+                if path_changed
+                    || combat_changed
+                    || turn_changed
+                    || shortcuts_changed
+                    || chat_toast_changed
+                {
                     let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
                         combat_always_visible: self.combat_always_visible,
+                        turn_notification: self.turn_notification,
                         ..Default::default()
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
@@ -3039,6 +3067,7 @@ fn main() {
     let mut app = App::new(AppState {
         log_path,
         combat_always_visible: saved_config.combat_always_visible,
+        turn_notification: saved_config.turn_notification,
         shortcuts: saved_config.shortcuts(),
         snapshot,
         watchlist,
