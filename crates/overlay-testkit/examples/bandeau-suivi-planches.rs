@@ -389,6 +389,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     shortcuts: &ShortcutBindings::default(),
                     now,
                     options: None,
+                    login: None,
                 },
             );
 

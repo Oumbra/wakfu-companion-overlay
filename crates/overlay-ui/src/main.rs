@@ -15,6 +15,16 @@
 //! `OverlayWindow` et le commentaire sur `Arc<Window>` (remplace la fuite `'static` d'origine,
 //! plus tenable dès que des fenêtres doivent pouvoir être détruites).
 //!
+//! **Fenêtre de connexion et compte obligatoire (2026-09-14, §9.1 undecies du plan)** : l'overlay
+//! n'a plus de mode invité. Tant que le thread Auth n'a pas publié `AuthStatus::Connected`, la
+//! seule fenêtre à l'écran est la fenêtre de connexion (`OverlayKind::Login`, `panels::login`) —
+//! une fenêtre logicielle classique, centrée sur l'écran principal, présente dans la barre des
+//! tâches, jamais ancrée sur le jeu. Les overlays Combat/Suivi ne naissent qu'une fois le compte
+//! lié (`App::sync_windows` s'y refuse sinon) et sont TOUS fermés à la déconnexion, qui ramène
+//! à cette fenêtre (`App::sync_session_windows`). Le logo du site est l'icône de fenêtre et
+//! l'icône de zone de notification, dont le menu — Options / Déconnecter / Quitter — est le
+//! seul accès à l'overlay quand aucune fenêtre de jeu n'est ouverte (`App::install_tray`).
+//!
 //! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
 //! synchro serveur, L5). Pas de thème configurable ni de disposition repositionnable/persistée par
 //! écran — décision du mainteneur (§9 du plan, 2026-09-02) : un overlay n'est pas un site, palette
@@ -57,16 +67,21 @@ use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::chat_tab;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_ui::panels::login::{self, LoginState};
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content;
-use overlay_ui::render_content::{AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent};
+use overlay_ui::render_content::{
+    AuthCommand, AuthFailure, AuthStatus, OverlayKind, RenderContent, UserEvent,
+};
 use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
-use overlay_ui::ui_icons::UiIcons;
+use overlay_ui::ui_icons::{self, UiIcons};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::{TrayIcon, TrayIconBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
@@ -78,7 +93,7 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
+use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
@@ -258,6 +273,15 @@ struct OverlayWindow {
     /// `bin/overlay-ui-x11.rs` (code partagé côté `panels::options_modal`, duplication assumée
     /// côté fenêtrage OS comme le reste de ce fichier).
     options_state: Option<OptionsModalState>,
+    /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour `kind ==
+    /// OverlayKind::Login`, voir `App::create_login_window`. Même règle qu'`options_state`.
+    login_state: Option<LoginState>,
+    /// Dernière hauteur demandée pour la fenêtre de connexion (voir
+    /// `panels::login::LoginOutcome::content_height`) — même principe que `last_watchlist_height` :
+    /// la fenêtre OS n'est retaillée que quand l'état affiché change de hauteur.
+    last_login_height: Option<f32>,
+    /// Fenêtre de jeu à laquelle cet overlay est ancré — **nulle pour la fenêtre de connexion**,
+    /// qui n'appartient à aucun personnage (voir `sync_topmost`, qui l'ignore).
     game_hwnd: HWND,
     /// Dernier rectangle connu de la fenêtre de jeu (mis à jour par `sync_windows`/`reposition`,
     /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
@@ -365,13 +389,13 @@ struct App {
     /// uploadées (`OverlayWindow::remote_icon_textures`), mais ne retélécharge jamais une icône
     /// qu'une AUTRE fenêtre a déjà demandée.
     remote_icons: RemoteIconStore,
-    /// Publié par le thread Auth (voir `spawn_auth_thread`) — piloté l'affichage de l'icône de
-    /// relance d'appairage (`render`).
+    /// Publié par le thread Auth (voir `spawn_auth_thread`) — pilote la fenêtre de connexion et
+    /// l'existence même des overlays de jeu (voir `sync_session_windows`).
     auth_status: Arc<ArcSwap<AuthStatus>>,
-    /// Signale au thread Auth une commande (`AuthCommand`) : `Retry` sur clic sur l'icône de
-    /// relance (visible uniquement quand `auth_status` vaut `Disconnected` — voir `render`),
-    /// `Disconnect` sur le bouton « Déconnecter » de la fenêtre Options (voir
-    /// `disconnect_account`).
+    /// Signale au thread Auth une commande (`AuthCommand`) : `Retry`/`CancelPairing` depuis la
+    /// fenêtre de connexion (`panels::login`), `Disconnect` depuis le bouton « Déconnecter » de
+    /// la fenêtre Options (voir `disconnect_account`) ou le menu de l'icône de zone de
+    /// notification.
     auth_command_tx: mpsc::Sender<AuthCommand>,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
@@ -411,6 +435,31 @@ struct App {
         WindowId,
         mpsc::Receiver<Vec<overlay_engine::RecipeIngredient>>,
     )>,
+    /// Icône de zone de notification et son menu (2026-09-14) — `None` tant que `resumed` ne
+    /// l'a pas posée, ou si le système l'a refusée (journalisé, jamais fatal). Voir `install_tray`.
+    tray: Option<TrayMenu>,
+    /// Clics sur le menu de l'icône de zone de notification — même sondage non bloquant que
+    /// `hotkey_events`, à chaque `about_to_wait`.
+    menu_events: &'static tray_icon::menu::MenuEventReceiver,
+}
+
+/// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les trois
+/// entrées de son menu — gardées pour reconnaître leurs clics (`MenuEvent::id`) et pour activer
+/// ou griser « Options » et « Déconnecter » selon qu'un compte est lié (voir `sync_tray_menu`).
+///
+/// **Menu validé par l'utilisateur (2026-09-14)** : Options / Déconnecter / Quitter, rien d'autre.
+/// C'est le seul accès à l'overlay quand ni fenêtre de jeu ni fenêtre de connexion ne sont à
+/// l'écran — et le seul moyen de quitter proprement une fois connecté (les overlays ancrés sur le
+/// jeu n'ont ni croix ni barre des tâches).
+struct TrayMenu {
+    /// Gardée en vie : l'icône disparaît de la zone de notification à la destruction.
+    _icon: TrayIcon,
+    options: MenuItem,
+    disconnect: MenuItem,
+    quit: MenuItem,
+    /// Dernier état appliqué à « Options » et « Déconnecter » — évite un aller-retour Win32 par
+    /// tick quand rien n'a changé.
+    enabled_for_account: bool,
 }
 
 /// Écrit une durée d'alerte dans le champ de l'onglet « Alertes » — sans décimale inutile, et à la
@@ -506,6 +555,246 @@ impl App {
             last_foreground_heartbeat: None,
             pending_dialog: None,
             pending_recipe: None,
+            tray: None,
+            menu_events: MenuEvent::receiver(),
+        }
+    }
+
+    /// Fait converger les fenêtres sur l'état du compte (2026-09-14, §9.1 undecies du plan) :
+    /// **compte lié ⇒ pas de fenêtre de connexion ; compte non lié ⇒ rien d'autre qu'elle.**
+    ///
+    /// Appelée à chaque tick d'`about_to_wait`, AVANT `sync_windows` (qui ne crée d'overlay de
+    /// jeu que compte lié, voir sa garde). La transition est pilotée par `auth_status`, publié
+    /// par le thread Auth ; ce tick-ci la voit au plus 50 ms après.
+    ///
+    /// À la déconnexion, la fenêtre Options tombe avec les overlays — sans passer par
+    /// `close_options_modal`, d'où la reprise explicite des raccourcis qu'elle avait suspendus.
+    /// Ce qu'elle contenait appartient au compte qu'on vient de quitter (c'est ce que sa
+    /// confirmation annonce).
+    fn sync_session_windows(&mut self, event_loop: &ActiveEventLoop) {
+        let connected = self.auth_status.load().is_connected();
+        let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
+        if connected {
+            if has_login {
+                self.windows.retain(|_, w| w.kind != OverlayKind::Login);
+                tracing::info!(
+                    "[connexion] compte lié — fenêtre de connexion fermée, overlays de jeu activés."
+                );
+            }
+        } else {
+            let had_options = self
+                .windows
+                .values()
+                .any(|w| w.kind == OverlayKind::Options);
+            let before = self.windows.len();
+            self.windows.retain(|_, w| w.kind == OverlayKind::Login);
+            if self.windows.len() != before {
+                if had_options {
+                    let _ = self.hotkeys.resume();
+                }
+                tracing::info!(
+                    "[connexion] aucun compte lié — {} fenêtre(s) de jeu fermée(s), retour à la fenêtre de connexion.",
+                    before - self.windows.len()
+                );
+            }
+            if !has_login {
+                self.create_login_window(event_loop);
+            }
+        }
+        self.sync_tray_menu(connected);
+    }
+
+    /// Crée la fenêtre de connexion (`OverlayKind::Login`, `panels::login`) : une **fenêtre
+    /// logicielle classique**, pas un overlay — visible dans la barre des tâches et la bascule
+    /// de fenêtres, focalisable, en z-order normal (jamais `HWND_TOPMOST`), centrée sur l'écran
+    /// principal comme le lanceur de Discord. Sans décorations OS : la carte peint son propre
+    /// bord, et se déplace par sa bannière (`LoginOutcome::drag_window`).
+    ///
+    /// Le logo du site (`ui_icons::app_logo_rgba`) est son icône de fenêtre ET son icône de barre
+    /// des tâches (`with_taskbar_icon`, distincte sous Windows).
+    ///
+    /// La hauteur de départ est celle de l'écran d'accueil ; `redraw` la retaille à chaque
+    /// changement d'état d'après ce que la carte a réellement occupé, en gardant son centre.
+    fn create_login_window(&mut self, event_loop: &ActiveEventLoop) {
+        let (rgba, width, height) = ui_icons::app_logo_rgba();
+        let icon = match Icon::from_rgba(rgba, width, height) {
+            Ok(icon) => Some(icon),
+            Err(err) => {
+                tracing::warn!("[connexion] icône de fenêtre refusée : {err}");
+                None
+            }
+        };
+        let attrs = WindowAttributes::default()
+            .with_title("Wakfu Companion Overlay")
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                login::WINDOW_WIDTH as f64,
+                login::INITIAL_HEIGHT as f64,
+            ))
+            .with_transparent(true)
+            .with_decorations(false)
+            .with_window_level(WindowLevel::Normal)
+            .with_resizable(false)
+            .with_visible(true)
+            .with_window_icon(icon.clone());
+        #[cfg(target_os = "windows")]
+        let attrs = attrs
+            .with_taskbar_icon(icon)
+            .with_no_redirection_bitmap(true);
+
+        let window = event_loop
+            .create_window(attrs)
+            .expect("création de la fenêtre de connexion");
+        let window = Arc::new(window);
+        // Toujours interactive, jamais assujettie au mode clic-traversant des overlays.
+        if let Err(err) = window.set_cursor_hittest(true) {
+            tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
+        }
+
+        let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
+        let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+        let combat_frame = CombatFrame::load(&gpu.egui_ctx);
+        let icons = UiIcons::load(&gpu.egui_ctx);
+
+        Self::center_on_primary_monitor(event_loop, &window);
+        window.focus_window();
+
+        let now = std::time::Instant::now();
+        let overlay = OverlayWindow {
+            window,
+            gpu,
+            kind: OverlayKind::Login,
+            portraits,
+            combat_frame,
+            icons,
+            remote_icon_textures: RemoteIconTextures::default(),
+            combat_side: CombatSide::default(),
+            options_state: None,
+            login_state: Some(LoginState::new(now)),
+            last_login_height: Some(login::INITIAL_HEIGHT),
+            game_hwnd: HWND::default(),
+            game_rect: GameRect {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                client_top: 0,
+            },
+            character_name: "Connexion".to_string(),
+            last_position: None,
+            last_watchlist_width: None,
+            last_watchlist_height: None,
+            visible: true,
+            is_topmost: false,
+            last_topmost_reassert: None,
+            pending_demote_since: None,
+            next_redraw_at: Some(now),
+        };
+        tracing::info!("[connexion] fenêtre de connexion ouverte.");
+        self.windows.insert(overlay.window.id(), overlay);
+    }
+
+    /// Centre `window` sur l'écran principal (repli : le premier écran connu) — « comme Discord
+    /// au lancement ». Pas d'ancrage sur le jeu : cette fenêtre n'en dépend pas.
+    fn center_on_primary_monitor(event_loop: &ActiveEventLoop, window: &Window) {
+        let monitor = event_loop
+            .primary_monitor()
+            .or_else(|| event_loop.available_monitors().next());
+        let Some(monitor) = monitor else {
+            return;
+        };
+        let origin = monitor.position();
+        let screen = monitor.size();
+        let outer = window.outer_size();
+        window.set_outer_position(PhysicalPosition::new(
+            origin.x + (screen.width as i32 - outer.width as i32) / 2,
+            origin.y + (screen.height as i32 - outer.height as i32) / 2,
+        ));
+    }
+
+    /// Pose l'icône de zone de notification et son menu — une fois, au premier `resumed`
+    /// (`tray-icon` exige une boucle de messages sur le thread appelant, c'est celui de winit).
+    /// Jamais fatal : sans icône, l'overlay reste pilotable par ses raccourcis et sa fenêtre de
+    /// connexion ; le refus est journalisé.
+    fn install_tray(&mut self) {
+        if self.tray.is_some() {
+            return;
+        }
+        let menu = Menu::new();
+        // « Options » et « Déconnecter » naissent grisés : rien à régler ni à quitter tant
+        // qu'aucun compte n'est lié (voir `sync_tray_menu`).
+        let options = MenuItem::new("Options", false, None);
+        let disconnect = MenuItem::new("Déconnecter", false, None);
+        let quit = MenuItem::new("Quitter", true, None);
+        if let Err(err) = menu.append_items(&[
+            &options,
+            &PredefinedMenuItem::separator(),
+            &disconnect,
+            &PredefinedMenuItem::separator(),
+            &quit,
+        ]) {
+            tracing::warn!("[zone de notification] menu refusé : {err}");
+            return;
+        }
+        let (rgba, width, height) = ui_icons::app_logo_rgba();
+        let icon = match tray_icon::Icon::from_rgba(rgba, width, height) {
+            Ok(icon) => icon,
+            Err(err) => {
+                tracing::warn!("[zone de notification] icône refusée : {err}");
+                return;
+            }
+        };
+        match TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("Wakfu Companion Overlay")
+            .with_icon(icon)
+            .build()
+        {
+            Ok(tray) => {
+                tracing::info!(
+                    "[zone de notification] icône posée — menu Options / Déconnecter / Quitter."
+                );
+                self.tray = Some(TrayMenu {
+                    _icon: tray,
+                    options,
+                    disconnect,
+                    quit,
+                    enabled_for_account: false,
+                });
+            }
+            Err(err) => tracing::warn!("[zone de notification] icône refusée : {err}"),
+        }
+    }
+
+    /// Active ou grise « Options » et « Déconnecter » selon qu'un compte est lié — appelé à
+    /// chaque tick par `sync_session_windows`, effectif seulement à la transition.
+    fn sync_tray_menu(&mut self, connected: bool) {
+        if let Some(tray) = &mut self.tray {
+            if tray.enabled_for_account != connected {
+                tray.options.set_enabled(connected);
+                tray.disconnect.set_enabled(connected);
+                tray.enabled_for_account = connected;
+            }
+        }
+    }
+
+    /// Clics sur le menu de l'icône de zone de notification — voir `TrayMenu`. « Déconnecter »
+    /// agit tout de suite, sans la confirmation de la fenêtre Options : un menu contextuel ne
+    /// peut pas en ouvrir, et l'entrée est explicite.
+    fn handle_tray_menu(&mut self, event_loop: &ActiveEventLoop) {
+        while let Ok(event) = self.menu_events.try_recv() {
+            let Some(tray) = &self.tray else {
+                continue;
+            };
+            if event.id == *tray.options.id() {
+                tracing::info!(">>> Options (zone de notification)");
+                self.open_options_modal(event_loop, None, options_modal::OptionsTab::Parametres);
+            } else if event.id == *tray.disconnect.id() {
+                tracing::info!(">>> Déconnexion du compte demandée (zone de notification).");
+                let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+            } else if event.id == *tray.quit.id() {
+                logging::log_session_end("Quitter (zone de notification)");
+                event_loop.exit();
+            }
         }
     }
 
@@ -514,7 +803,14 @@ impl App {
     /// fenêtre de jeu trouvée, repositionne les autres. Appelé au premier `resumed()` et à chaque
     /// tick d'`about_to_wait` (comme l'ancien `track_game_window` mono-fenêtre) — idempotent,
     /// rappelable sans risque.
+    ///
+    /// **Compte non lié ⇒ aucun overlay de jeu** (2026-09-14) : cette méthode ne fait rien tant
+    /// qu'`auth_status` n'est pas `Connected` — la fenêtre de connexion est alors la seule
+    /// interface (voir `sync_session_windows`), et ne participe jamais à cette convergence.
     fn sync_windows(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.auth_status.load().is_connected() {
+            return;
+        }
         let found = self.game_window.scan();
         // Une fenêtre `Combat` créée alors qu'aucun combat n'est en cours naît MASQUÉE quand
         // l'option est décochée — voir `sync_combat_visibility`, qui la fera apparaître au premier
@@ -522,6 +818,9 @@ impl App {
         let snapshot = self.snapshot.load();
 
         self.windows.retain(|_, overlay| {
+            if overlay.kind == OverlayKind::Login {
+                return true; // n'appartient à aucune fenêtre de jeu
+            }
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
             if !still_here {
                 // **La modale Options suit la même règle depuis le 2026-09-12** : elle est
@@ -657,6 +956,10 @@ impl App {
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.top + (rect.height - overlay_height) / 2,
             ),
+            // Jamais ancrée sur le jeu — centrée sur l'écran par `center_on_primary_monitor`,
+            // et jamais repositionnée ensuite (`reposition` ne la voit pas, `sync_windows`
+            // l'ignore). Ce bras n'est là que pour l'exhaustivité.
+            OverlayKind::Login => PhysicalPosition::new(0, 0),
         }
     }
 
@@ -682,11 +985,14 @@ impl App {
                 options_modal::WINDOW_SIZE.0 as f64,
                 options_modal::WINDOW_SIZE.1 as f64,
             ),
+            // Créée par `create_login_window`, jamais par ici — voir sa doc.
+            OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
             OverlayKind::Watchlist => "Suivi",
             OverlayKind::Options => "Options",
+            OverlayKind::Login => "Connexion",
         };
         let attrs = WindowAttributes::default()
             .with_title(format!(
@@ -765,6 +1071,8 @@ impl App {
             // Renseigné juste après par l'appelant (`open_options_modal`) pour `kind == Options`
             // — `None` ici pour Combat/Suivi, jamais consulté (voir `RenderContent::options`).
             options_state: (kind == OverlayKind::Options).then(OptionsModalState::default),
+            login_state: None,
+            last_login_height: None,
             game_hwnd,
             game_rect: rect,
             character_name,
@@ -882,6 +1190,10 @@ impl App {
     fn toggle_interactive(&mut self) {
         self.interactive = !self.interactive;
         for overlay in self.windows.values_mut() {
+            // La fenêtre de connexion n'est pas un overlay : toujours interactive.
+            if overlay.kind == OverlayKind::Login {
+                continue;
+            }
             if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
                 tracing::warn!("set_cursor_hittest a échoué : {err}");
             }
@@ -929,6 +1241,11 @@ impl App {
     fn force_refresh(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_windows(event_loop);
         for overlay in self.windows.values_mut() {
+            // La fenêtre de connexion n'est ni topmost ni « outil » : rien à réaffirmer.
+            if overlay.kind == OverlayKind::Login {
+                overlay.next_redraw_at = Some(std::time::Instant::now());
+                continue;
+            }
             let hwnd = Self::hwnd_of(&overlay.window);
             Self::apply_extended_styles(hwnd);
             unsafe {
@@ -986,13 +1303,14 @@ impl App {
     /// global (`Ctrl+Alt+D`), retiré à la demande de l'utilisateur — voir `overlay_ui::shortcuts`.
     /// Purement une commande envoyée au thread Auth (voir `spawn_auth_thread`)
     /// : c'est LUI qui efface le jeton (trousseau + repli fichier) et notifie le thread Engine
-    /// (`EngineCommand::Disconnect`) pour revenir en mode invité (repli `breed`, Suivi vidé) —
-    /// jamais depuis ce thread (winit) directement, même raison que `force_refresh` (l'accès
-    /// trousseau/fichier ne doit jamais bloquer le rendu). Sans effet si aucun compte n'est
-    /// actuellement lié (voir `AuthCommand::Disconnect`, ignoré par le thread Auth hors de l'état
-    /// `Connected`) — ni si une tentative de connexion est en cours (`Connecting`, ex. en pleine
-    /// attente de confirmation d'appairage) : le thread Auth est alors occupé dans
-    /// `attempt_connect`, pas encore revenu écouter les commandes ; la déconnexion redeviendra
+    /// (`EngineCommand::Disconnect`, roster et Suivi vidés) — jamais depuis ce thread (winit)
+    /// directement, même raison que `force_refresh` (l'accès trousseau/fichier ne doit jamais
+    /// bloquer le rendu). L'hôte voit ensuite `AuthStatus::Disconnected` et ferme tous les
+    /// overlays pour ne laisser que la fenêtre de connexion (`sync_session_windows`, 2026-09-14).
+    /// Sans effet si aucun compte n'est actuellement lié (voir `AuthCommand::Disconnect`, ignoré
+    /// par le thread Auth hors de l'état `Connected`) ; pendant un appairage en cours, vaut
+    /// annulation (voir `attempt_connect`). Pendant la validation d'un jeton (`Connecting`), le
+    /// thread Auth est occupé dans `attempt_connect` ; la déconnexion redeviendra
     /// effective au prochain appui une fois cette tentative résolue.
     fn disconnect_account(&mut self) {
         let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
@@ -1146,6 +1464,9 @@ impl App {
         // multi-compte, qui gardent leur propre calcul indépendant.
         let mut relevant_game_hwnds: Vec<HWND> = Vec::new();
         for overlay in self.windows.values() {
+            if overlay.kind == OverlayKind::Login {
+                continue;
+            }
             let this_relevant =
                 overlay.game_hwnd == foreground || Self::hwnd_of(&overlay.window) == foreground;
             if this_relevant && !relevant_game_hwnds.contains(&overlay.game_hwnd) {
@@ -1154,6 +1475,12 @@ impl App {
         }
 
         for overlay in self.windows.values_mut() {
+            // **La fenêtre de connexion n'y participe jamais** (2026-09-14) : c'est une fenêtre
+            // logicielle ordinaire, en z-order normal — elle passe derrière ce que l'utilisateur
+            // active, et revient par la barre des tâches, comme n'importe quelle application.
+            if overlay.kind == OverlayKind::Login {
+                continue;
+            }
             // **La modale Options participe à ce calcul comme les autres depuis le 2026-09-12.**
             // Elle en était exclue — `HWND_TOPMOST` posé à sa création et jamais remis en
             // question — parce qu'elle naissait sans `game_hwnd` : elle restait donc au-dessus de
@@ -1331,6 +1658,15 @@ impl App {
             .values()
             .any(|w| w.kind == OverlayKind::Options)
         {
+            return;
+        }
+        // Compte non lié : la fenêtre de connexion est la seule interface (2026-09-14). Le
+        // raccourci global reste enregistré à ce moment-là, d'où cette garde — l'entrée de
+        // l'icône de zone de notification, elle, est déjà grisée (voir `sync_tray_menu`).
+        if !self.auth_status.load().is_connected() {
+            tracing::info!(
+                "[options] aucun compte lié — la fenêtre Options n'est accessible qu'une fois connecté."
+            );
             return;
         }
         // Sans ancre explicite (raccourci global), la fenêtre de jeu AU PREMIER PLAN est la
@@ -1935,7 +2271,8 @@ impl App {
         // open_options_modal`) — jamais assujettie à `self.interactive` (mode
         // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait elle-même
         // traversable si l'utilisateur avait basculé ce mode juste avant.
-        let interactive = overlay.kind == OverlayKind::Options || self.interactive;
+        let interactive =
+            matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login) || self.interactive;
         let this_game_rect = overlay.game_rect;
         let this_game_hwnd = overlay.game_hwnd;
         let (repaint_delay, outcome) = render(
@@ -1962,8 +2299,45 @@ impl App {
                 shortcuts: self.hotkeys.bindings(),
                 now,
                 options: overlay.options_state.as_mut(),
+                login: overlay.login_state.as_mut(),
             },
         );
+        // Fenêtre de connexion : retaillée à la hauteur que la carte vient d'occuper (chaque
+        // état a la sienne), en gardant son centre — `request_inner_size` est synchrone sous
+        // Windows, d'où `reconfigure_surface` ici même (voir sa doc). Et déplacée à la souris
+        // sur demande de sa bannière : sans décorations OS, c'est le seul moyen.
+        if overlay.kind == OverlayKind::Login {
+            if let Some(height) = outcome.login_height {
+                if overlay.last_login_height != Some(height) {
+                    let before = overlay.window.outer_size();
+                    if let Some(actual) =
+                        overlay
+                            .window
+                            .request_inner_size(winit::dpi::LogicalSize::new(
+                                login::WINDOW_WIDTH as f64,
+                                height as f64,
+                            ))
+                    {
+                        Self::reconfigure_surface(&mut overlay.gpu, actual);
+                    }
+                    let after = overlay.window.outer_size();
+                    if let Ok(position) = overlay.window.outer_position() {
+                        let shift = (after.height as i32 - before.height as i32) / 2;
+                        overlay.window.set_outer_position(PhysicalPosition::new(
+                            position.x,
+                            position.y - shift,
+                        ));
+                    }
+                    overlay.last_login_height = Some(height);
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
+                }
+            }
+            if outcome.drag_window {
+                if let Err(err) = overlay.window.drag_window() {
+                    tracing::warn!("[connexion] déplacement de la fenêtre refusé : {err}");
+                }
+            }
+        }
         // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
         // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
         // le toast qu'en lecture, voir `RenderContent::watchlist_toast`). Le clic ayant
@@ -2058,6 +2432,8 @@ impl App {
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.install_tray();
+        self.sync_session_windows(event_loop);
         self.sync_windows(event_loop);
         if !self.banner_printed {
             tracing::info!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
@@ -2071,7 +2447,9 @@ impl ApplicationHandler<UserEvent> for App {
                  positionné, ou Suivi resté vide). {} ou Ctrl+C (dans ce \
                  terminal) pour quitter. {} pour la fenêtre Options — \
                  son onglet « Raccourcis » personnalise tout ceci, et sa \
-                 section « Compte » déconnecte le compte lié.",
+                 section « Compte » déconnecte le compte lié. Un compte est \
+                 obligatoire : la fenêtre de connexion reste seule à l'écran \
+                 tant qu'aucun n'est lié.",
                 bindings.label(ShortcutAction::Toggle),
                 bindings.label(ShortcutAction::Refresh),
                 bindings.label(ShortcutAction::Quit),
@@ -2085,8 +2463,8 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             // Les deux variantes ont le même effet ici : un nouvel état est disponible (snapshot
             // de combat, ou statut de connexion au compte), toutes les fenêtres doivent redessiner
-            // pour le refléter (le statut de connexion, en particulier, pilote l'icône de relance
-            // d'appairage — voir `render`).
+            // pour le refléter (le statut de connexion pilote la fenêtre de connexion — et, au
+            // prochain tick, quelles fenêtres existent, voir `sync_session_windows`).
             UserEvent::NewSnapshot | UserEvent::AuthStatusChanged => {
                 for overlay in self.windows.values_mut() {
                     overlay.next_redraw_at = Some(std::time::Instant::now());
@@ -2158,8 +2536,12 @@ impl ApplicationHandler<UserEvent> for App {
             // saisie. Ses deux touches (`Échap` annule, `Entrée` valide) sont traitées par le
             // panneau lui-même, qui les remonte en `OptionsModalAction` — voir
             // `panels::options_modal::show`.
+            // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une fenêtre
+            // logicielle ordinaire ne quitte pas l'application — sa croix de barre des tâches
+            // et Alt+F4 (`CloseRequested` ci-dessus) le font, comme le menu de zone de
+            // notification.
             WindowEvent::KeyboardInput { event, .. } => {
-                if overlay.kind != OverlayKind::Options
+                if !matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login)
                     && event.state == ElementState::Pressed
                     && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                 {
@@ -2305,6 +2687,12 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        // Menu de l'icône de zone de notification — même sondage que les hotkeys.
+        self.handle_tray_menu(event_loop);
+
+        // Fenêtre de connexion ou overlays de jeu, jamais les deux — d'après l'état du compte
+        // (voir `sync_session_windows`). AVANT `sync_windows`, qui ne fait rien compte non lié.
+        self.sync_session_windows(event_loop);
         // Découverte/suivi des fenêtres de jeu : même sondage périodique que le hotkey (pas d'API
         // Win32 pour être notifié d'un déplacement/redimensionnement/apparition d'une fenêtre qui
         // n'est pas la nôtre sans un hook global — un sondage à 20 Hz est largement assez réactif
@@ -2449,10 +2837,9 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
     }
 }
 
-/// Thread Auth (lot L4, §7.2 du plan) : résout l'accès au compte AVANT de bloquer sur quoi que ce
-/// soit d'autre — jamais le thread Engine ni le main thread. Best-effort et jamais fatal : sans
-/// jeton stocké ni appairage complété, l'overlay continue simplement en mode invité (repli
-/// `breed` déjà géré par `overlay-engine::session`), exactement comme le mode invité du web.
+/// Thread Auth (lot L4, §7.2 du plan) : résout l'accès au compte sur un thread dédié — jamais le
+/// thread Engine ni le main thread. Jamais fatal : sans jeton stocké, l'overlay affiche sa fenêtre
+/// de connexion et attend (plus de mode invité depuis le 2026-09-14, voir `spawn_auth_thread`).
 ///
 /// Thread Catalogue (lot L3, §7.4 du plan — réduit pour l'instant à la résolution d'icônes, voir
 /// `overlay_engine::catalog`) : résout les icônes réelles d'objets/monstres affichées par le
@@ -2782,27 +3169,28 @@ fn backoff_delay(consecutive_failures: u32) -> std::time::Duration {
 
 /// **Boucle de retentative** (2026-09-01, retour utilisateur : appairage en échec — 405 côté
 /// serveur — sans aucun moyen de retenter sans relancer tout le logiciel) : une tentative échouée
-/// (`attempt_connect` renvoie `Err(raison)`) publie `AuthStatus::Disconnected { reason }` (voir
-/// `status`) plutôt que de laisser le thread mourir — `render` en déduit l'icône de relance (dont
-/// le tooltip affiche `reason`), et son clic pousse `AuthCommand::Retry` dans `command_rx` pour
-/// reprendre cette boucle.
+/// publie `AuthStatus::Disconnected` plutôt que de laisser le thread mourir — la fenêtre de
+/// connexion (`panels::login`) en déduit son écran, et ses boutons poussent `AuthCommand::Retry`
+/// dans `command_rx` pour reprendre cette boucle.
 ///
-/// **Déconnexion volontaire** (2026-09-02, §14 point 3 du plan) : contrairement à la version
-/// initiale de ce thread, une connexion réussie ne fait PLUS terminer le thread (`return`) — il
-/// reste vivant, à l'écoute de `command_rx`, pour pouvoir traiter un `AuthCommand::Disconnect`
-/// (bouton « Déconnecter » de la fenêtre Options, voir `App::disconnect_account`) à tout moment tant que le
-/// compte reste lié. Un `Disconnect` efface le jeton (`token_store::clear_token`), notifie le
-/// thread Engine (`EngineCommand::Disconnect`, voir `spawn_engine_thread`) pour qu'il revienne en
-/// mode invité, republie `AuthStatus::Disconnected`, puis attend un `AuthCommand::Retry` avant de
-/// relancer un appairage — **jamais automatiquement** : une déconnexion volontaire ne doit pas
-/// rouvrir le navigateur toute seule. Chaque commande hors de son état pertinent (`Retry` reçu
-/// alors que déjà connecté, `Disconnect` reçu alors que déjà déconnecté ou en pleine tentative) est
-/// silencieusement ignorée plutôt que de perturber l'état courant.
+/// **Plus d'appairage spontané (2026-09-14, §9.1 undecies du plan).** Au démarrage, seul un jeton
+/// déjà stocké est essayé ; sans jeton (ou jeton refusé), le thread publie l'état neutre
+/// `Disconnected { failure: None }` et attend — le navigateur ne s'ouvre que sur « Se
+/// connecter », jamais tout seul au lancement. C'est `pair_if_needed`, vrai seulement après un
+/// `Retry` explicite. Un échec réseau sur un jeton stocké le CONSERVE (voir `attempt_connect`) :
+/// un lancement hors ligne ne doit pas effacer une session valide.
 ///
-/// **UI de pairing (2026-09-02)** : le code d'appairage est désormais publié via
-/// `AuthStatus::PairingStarted` (voir `attempt_connect`) et affiché directement dans la fenêtre
-/// overlay (voir `render`), plus seulement en console — en plus du déclenchement d'une nouvelle
-/// tentative, de la déconnexion et de la raison du dernier échec, déjà pilotables depuis l'overlay.
+/// **Déconnexion volontaire** (2026-09-02, §14 point 3 du plan) : une connexion réussie ne fait
+/// PAS terminer le thread — il reste à l'écoute de `command_rx` pour traiter un
+/// `AuthCommand::Disconnect` (bouton « Déconnecter » de la fenêtre Options ou de l'icône de zone
+/// de notification) tant que le compte reste lié. Un `Disconnect` efface le jeton
+/// (`token_store::clear_token`), notifie le thread Engine (`EngineCommand::Disconnect`) et la
+/// file de synchro, republie l'état neutre, puis attend un `Retry`. Chaque commande hors de son
+/// état pertinent est silencieusement ignorée.
+///
+/// **Annulation d'un appairage** : pendant `pair_and_wait`, le thread ne lit pas `command_rx`
+/// ici mais par la fermeture `should_cancel` — `CancelPairing` (lien de la fenêtre) ou
+/// `Disconnect` (menu de zone de notification) y valent abandon, retour à l'état neutre.
 fn spawn_auth_thread(
     settings_tx: mpsc::Sender<EngineCommand>,
     sync_tx: mpsc::Sender<SyncCommand>,
@@ -2812,65 +3200,107 @@ fn spawn_auth_thread(
 ) {
     thread::Builder::new()
         .name("overlay-auth".into())
-        .spawn(move || loop {
-            status.store(Arc::new(AuthStatus::Connecting));
-            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
-
-            let result = attempt_connect(&settings_tx, &sync_tx, &status, &proxy);
-
-            let mut connected = result.is_ok();
-            status.store(Arc::new(match result {
-                Ok(()) => AuthStatus::Connected,
-                Err(reason) => AuthStatus::Disconnected { reason },
-            }));
-            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
-
-            // Attend la commande qui justifie de reprendre la boucle externe (nouvel appel à
-            // `attempt_connect`) : `Retry` seulement si PAS déjà connecté, jamais de nouvelle
-            // tentative automatique en boucle (ce serait spammer le serveur/le navigateur pour un
-            // utilisateur qui n'a peut-être pas l'intention de lier son compte). Une fois
-            // `Disconnect` traité (voir `connected = false` ci-dessous), un `Retry` suivant reprend
-            // normalement la boucle externe — c'est ce qui permet de relier un compte après une
-            // déconnexion volontaire sans redémarrer l'overlay.
+        .spawn(move || {
+            let mut pair_if_needed = false;
             loop {
-                match command_rx.recv() {
-                    Ok(AuthCommand::Retry) if !connected => break,
-                    Ok(AuthCommand::Disconnect) if connected => {
-                        overlay_sync::token_store::clear_token();
-                        let _ = settings_tx.send(EngineCommand::Disconnect);
-                        let _ = sync_tx.send(SyncCommand::Deactivate);
-                        connected = false;
-                        status.store(Arc::new(AuthStatus::Disconnected {
-                            reason: "déconnecté manuellement".to_string(),
-                        }));
-                        let _ = proxy.send_event(UserEvent::AuthStatusChanged);
-                        tracing::info!(
-                            "[compte] déconnecté (raccourci de déconnexion) — repli mode invité."
-                        );
+                status.store(Arc::new(AuthStatus::Connecting));
+                let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+
+                let result = attempt_connect(
+                    pair_if_needed,
+                    &settings_tx,
+                    &sync_tx,
+                    &status,
+                    &command_rx,
+                    &proxy,
+                );
+
+                let mut connected = result.is_ok();
+                status.store(Arc::new(match result {
+                    Ok(()) => AuthStatus::Connected,
+                    Err(AttemptEnd::Idle) => AuthStatus::Disconnected { failure: None },
+                    Err(AttemptEnd::Failed(failure)) => AuthStatus::Disconnected {
+                        failure: Some(failure),
+                    },
+                }));
+                let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+
+                // Attend la commande qui justifie de reprendre la boucle externe : `Retry`
+                // seulement si PAS déjà connecté, jamais de nouvelle tentative automatique.
+                loop {
+                    match command_rx.recv() {
+                        Ok(AuthCommand::Retry) if !connected => {
+                            pair_if_needed = true;
+                            break;
+                        }
+                        Ok(AuthCommand::Disconnect) if connected => {
+                            overlay_sync::token_store::clear_token();
+                            let _ = settings_tx.send(EngineCommand::Disconnect);
+                            let _ = sync_tx.send(SyncCommand::Deactivate);
+                            connected = false;
+                            status.store(Arc::new(AuthStatus::Disconnected { failure: None }));
+                            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+                            tracing::info!(
+                                "[compte] déconnecté — jeton effacé, retour à la fenêtre de connexion."
+                            );
+                        }
+                        Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
+                        Err(_) => return,  // App fermée (canal fermé avec l'émetteur) — rien à faire.
                     }
-                    Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
-                    Err(_) => return,  // App fermée (canal fermé avec l'émetteur) — rien à faire.
                 }
             }
         })
         .expect("échec de création du thread Auth");
 }
 
-/// Une tentative complète de connexion au compte : jeton déjà stocké et encore valide, sinon
-/// nouvel appairage — voir la doc de `spawn_auth_thread` pour la boucle de retentative autour de
-/// cette fonction. `Ok(())` si les réglages de compte (roster + watchlist) ont bien été récupérés
-/// et transmis (`settings_tx`), `Err(_)` sinon (appairage non complété, ou réglages injoignables
-/// même après appairage) avec un message COURT destiné à l'utilisateur (tooltip de l'icône de
-/// relance, voir `render` — pas qu'à la console) : dans tous les cas l'overlay continue, au pire
-/// en mode invité (repli `breed`, aucun suivi affiché). `status`/`proxy` servent uniquement à
-/// publier `AuthStatus::PairingStarted` dès que le code d'appairage est connu (voir plus bas) —
+/// Comment une tentative de connexion s'est terminée sans compte lié — voir `attempt_connect`.
+enum AttemptEnd {
+    /// Rien à reprocher à personne : pas de jeton et pas de « Se connecter » encore, jeton refusé
+    /// par le serveur (session révoquée), ou appairage annulé. La fenêtre de connexion montre son
+    /// écran d'accueil.
+    Idle,
+    /// La tentative a échoué pour une raison à montrer (serveur injoignable, appairage expiré…).
+    Failed(AuthFailure),
+}
+
+/// Titre court + détail technique d'un échec, pour la fenêtre de connexion — `step` dit ce que
+/// l'overlay faisait (« la validation de la session », « l'appairage »…). Jamais le jeton dans le
+/// détail (§10 du plan) : `SyncError` ne le porte pas.
+fn auth_failure(err: &overlay_sync::SyncError, step: &str) -> AuthFailure {
+    use overlay_sync::SyncError;
+    let headline = match err {
+        SyncError::Network(_) => "Serveur injoignable",
+        SyncError::Http { .. } => "Réponse inattendue du serveur",
+        SyncError::Json(_) => "Réponse illisible du serveur",
+        SyncError::PairingExpired => "Appairage expiré",
+        SyncError::PairingCancelled => "Appairage annulé",
+        SyncError::TokenStore(_) => "Stockage de la session impossible",
+    };
+    AuthFailure {
+        headline: headline.to_string(),
+        detail: format!("{step} — {err}"),
+    }
+}
+
+/// Une tentative complète de connexion au compte : jeton déjà stocké et encore valide, sinon —
+/// et seulement si `pair_if_needed` — nouvel appairage. `Ok(())` si les réglages de compte
+/// (roster + watchlist) ont bien été récupérés et transmis (`settings_tx`) ; sinon `AttemptEnd`
+/// dit si c'est un échec à afficher ou un simple état neutre (voir sa doc).
+///
+/// **Le jeton n'est effacé que sur refus du serveur** (401/403) : un serveur injoignable garde la
+/// session pour la prochaine tentative (« Réessayer », ou le prochain lancement). `status`/`proxy`
+/// servent uniquement à publier `AuthStatus::PairingStarted` dès que le code est connu ;
 /// `spawn_auth_thread` publie lui-même `Connecting`/`Connected`/`Disconnected` autour de l'appel.
 fn attempt_connect(
+    pair_if_needed: bool,
     settings_tx: &mpsc::Sender<EngineCommand>,
     sync_tx: &mpsc::Sender<SyncCommand>,
     status: &Arc<ArcSwap<AuthStatus>>,
+    command_rx: &mpsc::Receiver<AuthCommand>,
     proxy: &EventLoopProxy<UserEvent>,
-) -> Result<(), String> {
+) -> Result<(), AttemptEnd> {
+    use overlay_sync::SyncError;
+
     if let Some(token) = overlay_sync::token_store::load_token() {
         match overlay_sync::client::fetch_settings(&token) {
             Ok(settings) => {
@@ -2887,43 +3317,75 @@ fn attempt_connect(
                 activate_sync_queue(&token, sync_tx);
                 return Ok(());
             }
-            Err(err) => {
+            Err(SyncError::Http {
+                status: 401 | 403, ..
+            }) => {
                 tracing::warn!(
-                    "[compte] jeton natif invalide/expiré ({err}) — nouvel appairage nécessaire."
+                    "[compte] jeton natif refusé par le serveur — session révoquée ou expirée, nouvel appairage nécessaire."
                 );
                 overlay_sync::token_store::clear_token();
+                if !pair_if_needed {
+                    return Err(AttemptEnd::Idle);
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "[compte] validation du jeton natif impossible ({err}) — jeton conservé, nouvelle tentative sur « Réessayer »."
+                );
+                return Err(AttemptEnd::Failed(auth_failure(
+                    &err,
+                    "GET /api/v1/settings",
+                )));
             }
         }
+    } else if !pair_if_needed {
+        tracing::info!(
+            "[compte] aucun jeton natif stocké — en attente de « Se connecter » dans la fenêtre de connexion."
+        );
+        return Err(AttemptEnd::Idle);
     }
 
-    let token = match overlay_sync::pair_and_wait(|handle| {
-        tracing::info!("=== Connexion du compte (optionnelle) ===");
-        tracing::info!(
-            "Ouvre {} et entre le code : {}",
-            handle.verification_url,
-            handle.pairing_code
-        );
-        tracing::info!(
-            "(l'overlay fonctionne aussi sans compte lié — repli sur la classe détectée automatiquement)"
-        );
-        // Voir `AuthStatus::PairingStarted` : c'est ce qui rend le code visible directement dans
-        // la fenêtre overlay, pas seulement dans ces logs.
-        status.store(Arc::new(AuthStatus::PairingStarted {
-            pairing_code: handle.pairing_code.clone(),
-            verification_url: handle.verification_url.clone(),
-        }));
-        let _ = proxy.send_event(UserEvent::AuthStatusChanged);
-    }) {
-        Ok(token) => token,
-        Err(err) => {
-            tracing::warn!(
-                "[compte] appairage non complété ({err}) — l'overlay continue sans roster."
+    let should_cancel = || {
+        matches!(
+            command_rx.try_recv(),
+            Ok(AuthCommand::CancelPairing | AuthCommand::Disconnect)
+        )
+    };
+    let token = match overlay_sync::pair_and_wait(
+        |handle| {
+            tracing::info!("=== Connexion du compte ===");
+            tracing::info!(
+                "Ouvre {} et confirme le code : {}",
+                handle.verification_url,
+                handle.pairing_code
             );
-            // Le message le plus utile ici précise que la requête de DÉPART (obtenir un code) a
-            // échoué — donc qu'aucun navigateur n'a pu s'ouvrir (retour utilisateur 2026-09-01 :
-            // « il devrait ouvrir le navigateur... rien ne se passe ») : ce n'est pas un appairage
-            // abandonné/expiré après affichage d'un code, l'échec est plus en amont.
-            return Err(format!("impossible de démarrer l'appairage ({err})"));
+            // Voir `AuthStatus::PairingStarted` : c'est ce qui rend le code visible dans la
+            // fenêtre de connexion, pas seulement dans ces logs.
+            status.store(Arc::new(AuthStatus::PairingStarted {
+                pairing_code: handle.pairing_code.clone(),
+                verification_url: handle.verification_url.clone(),
+                expires_at: handle.expires_at,
+            }));
+            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+        },
+        should_cancel,
+    ) {
+        Ok(token) => token,
+        Err(SyncError::PairingCancelled) => {
+            tracing::info!("[compte] appairage annulé — retour à la fenêtre de connexion.");
+            return Err(AttemptEnd::Idle);
+        }
+        Err(err) => {
+            // Le détail précise la ROUTE en cause : « pair » a échoué avant même qu'un code
+            // n'existe (aucun navigateur ne s'est ouvert — retour utilisateur 2026-09-01 : « il
+            // devrait ouvrir le navigateur... rien ne se passe »), ou « poll » après coup.
+            tracing::warn!("[compte] appairage non complété ({err}).");
+            let step = if matches!(err, SyncError::PairingExpired) {
+                "POST /api/v1/auth/native/poll"
+            } else {
+                "POST /api/v1/auth/native/pair"
+            };
+            return Err(AttemptEnd::Failed(auth_failure(&err, step)));
         }
     };
 
@@ -2946,7 +3408,10 @@ fn attempt_connect(
         }
         Err(err) => {
             tracing::warn!("[compte] échec de récupération des réglages après appairage ({err}).");
-            Err(format!("réglages injoignables après appairage ({err})"))
+            Err(AttemptEnd::Failed(auth_failure(
+                &err,
+                "GET /api/v1/settings après appairage",
+            )))
         }
     }
 }
