@@ -74,6 +74,12 @@ pub struct OverlayConfig {
     /// `combat_always_visible`.
     #[serde(default)]
     pub turn_notification: bool,
+    /// La notification de tour s'affiche **sans son** — case « Couper le son des notifications »,
+    /// sous `turn_notification` dont elle dépend (grisée tant que celle-ci est décochée, demande
+    /// du 2026-09-14). Locale pour la même raison qu'elle : c'est la machine, et l'endroit où elle
+    /// est, qui décident si un son est bienvenu. `#[serde(default)]` comme ses voisines.
+    #[serde(default)]
+    pub turn_notification_muted: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).

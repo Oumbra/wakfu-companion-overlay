@@ -242,6 +242,8 @@ mod linux_main {
         /// persisté (`config::OverlayConfig::turn_notification`), même politique que
         /// `combat_always_visible`.
         turn_notification: bool,
+        /// Voir `AppState::turn_notification_muted`.
+        turn_notification_muted: bool,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         game_window: GameWindowTracker,
@@ -264,6 +266,10 @@ mod linux_main {
         combat_always_visible: bool,
         /// Voir `App::turn_notification` — même provenance.
         turn_notification: bool,
+        /// Le son de la notification de tour coupé (`config::OverlayConfig::
+        /// turn_notification_muted`) — persisté, sans effet tant que la notification elle-même
+        /// n'existe pas sous X11.
+        turn_notification_muted: bool,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
@@ -292,6 +298,7 @@ mod linux_main {
                 log_path,
                 combat_always_visible,
                 turn_notification,
+                turn_notification_muted,
                 chat_toast,
                 shortcuts,
                 snapshot,
@@ -332,6 +339,7 @@ mod linux_main {
                 log_path,
                 combat_always_visible,
                 turn_notification,
+                turn_notification_muted,
                 chat_toast,
                 game_window,
                 banner_printed: false,
@@ -1019,6 +1027,7 @@ mod linux_main {
                 tab: initial_tab,
                 combat_always_visible: self.combat_always_visible,
                 turn_notification: self.turn_notification,
+                turn_notification_muted: self.turn_notification_muted,
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
@@ -1041,6 +1050,7 @@ mod linux_main {
                     chat: chat_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
                     turn_notification: self.turn_notification,
+                    turn_notification_muted: self.turn_notification_muted,
                     shortcuts: self.hotkeys.bindings().clone(),
                 },
                 pending_close: false,
@@ -1289,6 +1299,11 @@ mod linux_main {
                             );
                         }
                     }
+                    let turn_muted_changed =
+                        commit.turn_notification_muted != self.turn_notification_muted;
+                    if turn_muted_changed {
+                        self.turn_notification_muted = commit.turn_notification_muted;
+                    }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.
                     let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
@@ -1302,6 +1317,7 @@ mod linux_main {
                     if path_changed
                         || combat_changed
                         || turn_changed
+                        || turn_muted_changed
                         || shortcuts_changed
                         || chat_toast_changed
                     {
@@ -1309,6 +1325,7 @@ mod linux_main {
                             log_path: Some(candidate),
                             combat_always_visible: self.combat_always_visible,
                             turn_notification: self.turn_notification,
+                            turn_notification_muted: self.turn_notification_muted,
                             ..Default::default()
                         };
                         saved.set_shortcuts(self.hotkeys.bindings());
@@ -2015,6 +2032,7 @@ mod linux_main {
             log_path,
             combat_always_visible: saved_config.combat_always_visible,
             turn_notification: saved_config.turn_notification,
+            turn_notification_muted: saved_config.turn_notification_muted,
             chat_toast: saved_config.chat_toast(),
             shortcuts: saved_config.shortcuts(),
             snapshot,
