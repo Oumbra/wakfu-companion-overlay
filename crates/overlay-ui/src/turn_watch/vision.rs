@@ -189,15 +189,19 @@ pub fn find_gold_panel(band: &Band) -> Option<Rect> {
 }
 
 /// Bande du nom déduite du panneau doré : juste au-dessus du cadre, alignée sur le bord droit du
-/// panneau. Marges mesurées sur les captures S4 à l'échelle 100 % (nom 12 px au-dessus du cadre,
-/// cadre 3 px au-dessus du panneau) et prises larges — la bande est ensuite rognée au texte, une
-/// marge ne coûte rien.
+/// panneau. Marges **proportionnelles à la hauteur du panneau** (donc à l'échelle d'interface) :
+/// mesuré à 100 % sur un panneau de 93 px, le nom finit 16 px au-dessus du cadre, et l'étincelle
+/// animée qui glisse le long du haut du cadre remonte d'une dizaine de pixels quand elle passe
+/// dessous — elle clignotait la reconnaissance un tick sur deux (observé en jeu le 2026-09-14). La
+/// bande s'arrête donc à un huitième de panneau au-dessus du cadre, hors de portée du halo, et
+/// commence une demi-hauteur plus haut ; elle est ensuite rognée au texte, une marge ne coûte rien.
 pub fn name_area_above(panel: Rect, band: &Band) -> Rect {
+    let h = panel.height();
     Rect {
         x0: panel.x1.saturating_sub(320),
-        y0: panel.y0.saturating_sub(48),
+        y0: panel.y0.saturating_sub(h / 2),
         x1: (panel.x1 + 4).min(band.width),
-        y1: panel.y0.saturating_sub(6),
+        y1: panel.y0.saturating_sub(h / 8 + 2),
     }
 }
 
