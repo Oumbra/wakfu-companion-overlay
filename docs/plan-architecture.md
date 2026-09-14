@@ -1231,6 +1231,49 @@ retrait de la réserve gauche (§9.1 septies) : deux captures montraient l'infob
 deux n'en montraient aucune, et aucun test n'échouait. Un nom de fichier n'est pas une assertion —
 seule la lecture de la capture publiée en artefact l'est.
 
+### 9.1 nonies Onglet « Chat » : recherches, son et carte de réponse (2026-09-14)
+
+Portage du panneau Chat du dépôt web, **recadré par l'utilisateur** après une première maquette
+qui reportait le panneau entier (fil de messages, cases de canaux) : le jeu affiche déjà son chat
+et filtre déjà ses canaux, l'overlay n'a rien à en remontrer. Ce qui manque au joueur, c'est
+d'**être prévenu** quand un message correspond à un critère qu'il a posé. Maquettes :
+`crates/overlay-testkit/examples/chat-mockups.rs` (v3, tuiles retenues contre la liste en lignes).
+
+- **Moteur** (`overlay_engine::chat_alert`) : une recherche = un mot (trimé, minuscules) et une
+  portée (un canal, ou tous). Règle du web reprise telle quelle : `contains` sur le texte OU
+  l'auteur, en minuscules, sans expression régulière ni mot entier. `LogEntry::Chat`, parsé depuis
+  L2 mais jeté jusqu'ici, est confronté aux recherches dans `Engine::apply_entry`, **sous le même
+  gating `is_initial_load` que le ramassage** : un message déjà dans le fichier à l'ouverture ne
+  sonne pas. File `drain_chat_alerts`, séparée des deux autres.
+- **Compte** : clé `chatFilters` de `/api/v1/settings`, déjà dans la liste blanche du serveur, lue
+  au `GET` (`AccountSettings::chat_filters`) et réécrite en entier au `PATCH`
+  (`client::patch_chat_filters`) au **format du web** — `[{ text, channel }]`, `channel` valant
+  `global` ou la clé d'un canal, anciens éléments texte relus comme des recherches globales.
+- **Onglet** (`panels::chat_tab`, entre Alertes et Personnages) : « Tester le son », bloc
+  « Fermeture automatique » + durée, formulaire canal → mot → « Ajouter » (Entrée ajoute aussi ;
+  vide et doublon refusés avec une phrase), grille de tuiles à légende
+  (`design::legend_tile`, §9.2) quatre par rangée, croix au survol. **Sans couleur de canal** : les
+  thèmes du jeu. Transactionnel comme les autres onglets (`OptionsModalState::chat_draft`,
+  `is_dirty`, `main.rs::commit_chat`).
+- **La durée de la carte est locale** (`config::OverlayConfig::chat_alert_*`), par exception au
+  principe « ce qui appartient au joueur passe par le compte » : ce réglage n'a pas d'équivalent
+  web et le serveur n'accepte que des clés connues. Le jour où il en porte une, il y migre.
+- **Son et carte** : le son du web (`chat-filter-c13da61f.mp3`, `alert_sound::play_chat_alert`),
+  **une fois par lot** et pour le dernier message trouvé ; carte `WatchlistToastReason::Chat`
+  dans le bandeau Suivi — même gabarit que le toast de ramassage, sans icône ni confettis, titre
+  « MOT · CANAL », auteur en graisse puis message complet (retour à la ligne à 420 px).
+- **Réponse en privé** : un clic sur la carte la ferme et prépare `/w "<auteur>" ` dans le jeu
+  (`chat_command::send_whisper`, espace final, **sans Entrée final** : le joueur tape son
+  message). Séquence sur un thread : rendre le focus à la fenêtre de jeu au premier plan ou à la
+  première trouvée (`SetForegroundWindow` / `_NET_ACTIVE_WINDOW`, nouveau
+  `overlay_platform::linux::x11::GameWindowTracker::activate`), un délai, Entrée, la ligne. Comme
+  la fermeture au clic des autres cartes, cela demande le mode interactif de l'overlay.
+- **Vérifications** : 7 tests unitaires + 2 d'intégration côté moteur, tests de brouillon, de
+  config et de garde de fermeture côté UI, quatre captures (`options_chat_*`,
+  `watchlist_avec_carte_de_chat` — celle-ci produite par le vrai moteur), planche
+  `design_gallery_legend_tile`. Les 28 captures de la fenêtre Options ont été régénérées : la
+  barre d'onglets compte une entrée de plus.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
