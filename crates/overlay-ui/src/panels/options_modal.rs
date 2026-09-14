@@ -473,6 +473,10 @@ pub fn show(
         // La croix en haut à droite, comme sur toutes les fenêtres du jeu (demande du
         // 2026-09-13, sur captures) — et elle fait exactement ce que fait « Annuler ».
         .close_button(true)
+        // Numéro de version à gauche de la bannière, à la même distance du bord que la croix à
+        // droite (2026-09-14) : la fenêtre Options est la seule « racine » de l'overlay, donc le
+        // seul endroit où un utilisateur peut lire quelle version tourne sans ouvrir son journal.
+        .version(true)
         .log_name("options")
         .show(ui);
 

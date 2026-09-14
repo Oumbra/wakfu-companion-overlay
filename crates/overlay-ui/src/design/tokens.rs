@@ -690,6 +690,19 @@ pub const WINDOW_TITLE_FONT_SIZE: f32 = 21.0;
 /// Couleur du titre de bannière — blanc pur, contre le gris des titres de section.
 pub const WINDOW_TITLE_TEXT: Color32 = Color32::WHITE;
 
+/// Corps du numéro de version peint à GAUCHE de la bannière (`design::window(..).version(true)`).
+///
+/// Même police, même blanc et même ombre portée que le titre, à un seul réglage près : la taille.
+/// Le rapport au titre (15 contre 21) reprend celui que le jeu tient entre un titre de fenêtre et
+/// la ligne d'appoint qui l'accompagne — assez petit pour ne jamais concurrencer le titre centré,
+/// assez grand pour rester lisible par-dessus le grain de `modal-header.png`.
+///
+/// Son ancrage n'a pas de constante propre : il reprend [`WINDOW_CLOSE_MARGIN`] telle quelle, pour
+/// que le numéro à gauche et la croix à droite soient à la MÊME distance de leur bord (demande
+/// explicite de l'utilisateur, 2026-09-14). Une seconde constante de même valeur les aurait laissés
+/// diverger au premier réglage de l'une des deux.
+pub const WINDOW_VERSION_FONT_SIZE: f32 = 15.0;
+
 /// Marge gauche et droite du contenu, hors bannière et pied de page.
 pub const WINDOW_PAD_SIDE: f32 = 20.0;
 
