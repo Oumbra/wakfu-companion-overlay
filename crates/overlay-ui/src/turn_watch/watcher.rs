@@ -28,10 +28,16 @@
 //! « c'est à P de jouer » — et il n'est notifié que si la fenêtre de P n'est pas au premier plan,
 //! au plus une fois par [`NOTIFY_COOLDOWN`].
 //!
-//! Effet de bord assumé : en phase de placement, le widget affiche le personnage local sous un
-//! bouton « Prêt » — doré, donc localisable, et son nom se reconnaît. Un combat lancé pendant que
-//! la fenêtre de P est en arrière-plan produit donc une notification dès le placement. C'est
-//! « il faut te placer », et c'est utile.
+//! **Pas de notification en phase de placement** (demande du 2026-09-14) : le widget y affiche le
+//! personnage local sous un bouton « Prêt », doré comme « Fin du tour », et son nom se reconnaît —
+//! sans garde, chaque combat commencerait par un toast. Le combat est dit **engagé** dès que le
+//! panneau porte « Fin du tour » ([`vision::panel_shows_end_turn`]) ou que le log a vu un sort ;
+//! c'est acquis pour le reste du combat, et rien n'est notifié avant.
+//!
+//! **Une notification par tour, jamais de rafale** : le front montant seul ne suffit pas quand les
+//! tours s'enchaînent en quelques secondes (observé en test contre un mannequin, tours passés à la
+//! volée) — [`NOTIFY_COOLDOWN`] par personnage borne la cadence à ce qu'un vrai combat produit, où
+//! un cycle complet dépasse largement la demi-minute.
 //!
 //! ## La géométrie, apprise elle aussi
 //!
@@ -53,8 +59,10 @@ pub const MATCH_THRESHOLD: f64 = 0.85;
 const LEARN_THRESHOLD: f64 = 0.93;
 /// Durée pendant laquelle un sort de P autorise à échantillonner le nom affiché.
 const LEARN_WINDOW: Duration = Duration::from_millis(2500);
-/// Deux notifications pour la même fenêtre ne peuvent pas être plus rapprochées que ça.
-pub const NOTIFY_COOLDOWN: Duration = Duration::from_secs(8);
+/// Deux notifications pour le même personnage ne peuvent pas être plus rapprochées que ça. Un tour
+/// de Wakfu dure 30 s de base plus le report ; deux tours d'un même personnage sont séparés par
+/// ceux de tous les autres combattants. 25 s coupe les rafales sans jamais rater un vrai tour.
+pub const NOTIFY_COOLDOWN: Duration = Duration::from_secs(25);
 /// Ticks consécutifs sans reconnaissance avant de considérer que le tour du personnage est fini.
 /// Un parasite d'un tick (halo de l'étincelle animée, capture au milieu d'une transition) ne doit
 /// pas produire un faux front descendant — puis un faux front montant, et un toast de trop.
@@ -64,6 +72,9 @@ const INACTIVE_TICKS: u32 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FightFacts {
     pub ongoing: bool,
+    /// Le log a vu au moins un sort ou des dégâts dans ce combat : la phase de placement est
+    /// passée, quoi que montre l'écran.
+    pub engaged_by_log: bool,
     /// `FighterDamage::last_turn_casts.len()` du personnage — ses sorts du tour en cours. Toute
     /// variation vers une valeur non nulle signale un sort qui vient d'être lancé.
     pub own_cast_len: usize,
@@ -98,6 +109,8 @@ struct WindowState {
     active: bool,
     /// Ticks consécutifs sans reconnaissance pendant que `active` — voir `INACTIVE_TICKS`.
     misses: u32,
+    /// Le combat a quitté la phase de placement — acquis jusqu'à la fin du combat.
+    engaged: bool,
     last_notified: Option<Instant>,
 }
 
@@ -149,6 +162,16 @@ impl Watcher {
         // Géométrie : celle déjà connue pour cette taille, sinon apprise sur un panneau doré.
         let size = (band.width, band.height);
         let panel = vision::find_gold_panel(band);
+        if !state.engaged
+            && (fight.engaged_by_log
+                || panel.is_some_and(|p| vision::panel_shows_end_turn(band, p)))
+        {
+            state.engaged = true;
+            tracing::info!(
+                "[tour] {} : combat engagé, placement terminé",
+                input.character
+            );
+        }
         let area = match self.geometry_by_size.get(&size) {
             Some(area) => *area,
             None => match panel {
@@ -224,7 +247,12 @@ impl Watcher {
             let cooled = state
                 .last_notified
                 .is_none_or(|t| input.now.duration_since(t) >= NOTIFY_COOLDOWN);
-            if !input.foreground && cooled {
+            if !state.engaged {
+                tracing::debug!(
+                    "[tour] {} : tour reconnu, pas de notification (phase de placement)",
+                    input.character
+                );
+            } else if !input.foreground && cooled {
                 state.last_notified = Some(input.now);
                 events.push(Event::Notify {
                     character: input.character.to_string(),
@@ -275,8 +303,89 @@ mod tests {
     fn fight(casts: usize) -> Option<FightFacts> {
         Some(FightFacts {
             ongoing: true,
+            engaged_by_log: true,
             own_cast_len: casts,
         })
+    }
+
+    fn facts(engaged: bool) -> Option<FightFacts> {
+        Some(FightFacts {
+            ongoing: true,
+            engaged_by_log: engaged,
+            own_cast_len: 0,
+        })
+    }
+
+    #[test]
+    fn pas_de_notification_pendant_le_placement() {
+        let mut w = Watcher::default();
+        let t0 = Instant::now();
+        learn_oumbra(&mut w, t0);
+        // Fin du combat, puis un nouveau : la bande au repos porte « Prêt » et le nom du personnage
+        // local, en arrière-plan, sans aucun sort au log — c'est la phase de placement.
+        w.tick(TickInput {
+            character: "Oumbra",
+            band: None,
+            fight: Some(FightFacts {
+                ongoing: false,
+                engaged_by_log: false,
+                own_cast_len: 0,
+            }),
+            foreground: false,
+            now: t0 + Duration::from_secs(60),
+        });
+        // La fixture « Prêt » porte le nom « Pugio Letalis » : on surveille donc Pugio ici, avec le
+        // gabarit d'Oumbra rebaptisé — seul le mécanisme compte.
+        let pret = fixture("repos-pugio-t18");
+        let glyph = vision::extract_glyph(
+            &pret,
+            vision::name_area_above(vision::find_gold_panel(&pret).unwrap(), &pret),
+        )
+        .unwrap();
+        w.templates.insert("Pugio Letalis".to_string(), glyph);
+        for i in 0..4 {
+            let ev = w.tick(TickInput {
+                character: "Pugio Letalis",
+                band: Some(&pret),
+                fight: facts(false),
+                foreground: false,
+                now: t0 + Duration::from_secs(61 + i),
+            });
+            assert!(ev.is_empty(), "placement : {ev:?}");
+        }
+        // Le log voit un sort : engagé. Le tour est déjà reconnu (pas de front montant), donc pas
+        // de notification rétroactive non plus ; il faut un vrai nouveau tour.
+        let ev = w.tick(TickInput {
+            character: "Pugio Letalis",
+            band: Some(&pret),
+            fight: facts(true),
+            foreground: false,
+            now: t0 + Duration::from_secs(66),
+        });
+        assert!(ev.is_empty(), "{ev:?}");
+        let autre = fixture("repos-oumbra");
+        for i in 0..2 {
+            w.tick(TickInput {
+                character: "Pugio Letalis",
+                band: Some(&autre),
+                fight: facts(true),
+                foreground: false,
+                now: t0 + Duration::from_secs(70 + i),
+            });
+        }
+        let ev = w.tick(TickInput {
+            character: "Pugio Letalis",
+            band: Some(&pret),
+            fight: facts(true),
+            foreground: false,
+            now: t0 + Duration::from_secs(100),
+        });
+        assert_eq!(
+            ev,
+            vec![Event::Notify {
+                character: "Pugio Letalis".to_string()
+            }]
+        );
     }
 
     /// Joue les ticks qui font acquérir le gabarit d'« Oumbra » : deux sorts, la bande au repos.
@@ -476,6 +585,7 @@ mod tests {
             band: None,
             fight: Some(FightFacts {
                 ongoing: false,
+                engaged_by_log: false,
                 own_cast_len: 0,
             }),
             foreground: false,

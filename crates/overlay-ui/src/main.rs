@@ -960,6 +960,10 @@ impl App {
                     .map_or(0, |f| f.last_turn_casts.len());
                 turn_watch::watcher::FightFacts {
                     ongoing: fight.ongoing,
+                    // Un sort ou des dégâts de qui que ce soit : la phase de placement est passée.
+                    engaged_by_log: fight.fighters.iter().any(|f| {
+                        !f.last_turn_casts.is_empty() || f.total_damage != 0 || f.total_heal != 0
+                    }),
                     own_cast_len,
                 }
             });
