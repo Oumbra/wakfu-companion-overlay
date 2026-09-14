@@ -102,56 +102,81 @@ pub enum OverlayKind {
     /// "Options" du carré de contrôle, ou raccourci `Ctrl+Shift+O`), voir
     /// `main.rs::App::open_options_modal`/`bin/overlay-ui-x11.rs` (même méthode dupliquée).
     Options,
+    /// Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) — voir `panels::login`. **La
+    /// première interface de l'overlay**, et la seule tant que `AuthStatus` n'est pas `Connected` :
+    /// une fenêtre logicielle classique (barre des tâches, focus, centrée sur l'écran), jamais un
+    /// overlay ancré sur le jeu. `main.rs::App::sync_session_windows` la crée dès que le compte
+    /// n'est pas lié et la retire dès qu'il l'est ; aucun `Combat`/`Watchlist` n'existe pendant
+    /// qu'elle est affichée. Il n'y a pas de mode invité : un compte est obligatoire.
+    Login,
 }
 
 /// État de la connexion au compte (lot L4, §7.2 du plan) — publié par le thread Auth
-/// (`main.rs::spawn_auth_thread`) via `Arc<ArcSwap<_>>`, lu par le main thread à chaque frame pour
-/// décider d'afficher ou non l'icône de relance d'appairage (voir `build_ui`). Volontairement
-/// distinct d'un simple `bool` : `Connecting` évite d'afficher l'icône pendant la toute première
-/// tentative (jeton déjà stocké, ou premier appairage) — elle ne doit apparaître qu'après un échec
-/// avéré.
+/// (`main.rs::spawn_auth_thread`) via `Arc<ArcSwap<_>>`, lu par le main thread à chaque frame.
+/// Depuis le 2026-09-14 (§9.1 undecies), il pilote **quelles fenêtres existent** : la fenêtre de
+/// connexion (`panels::login`) seule tant que la valeur n'est pas `Connected`, les overlays de jeu
+/// seulement une fois qu'elle l'est — voir `main.rs::App::sync_session_windows`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthStatus {
+    /// Tentative en cours qui n'attend rien de l'utilisateur : validation d'un jeton déjà stocké au
+    /// démarrage, ou demande d'un code d'appairage juste après « Se connecter ». La fenêtre de
+    /// connexion affiche « Connexion… » à la place de son bouton.
     Connecting,
     /// Code d'appairage obtenu (`POST /api/v1/auth/native/pair`), en attente que l'utilisateur le
-    /// saisisse sur `verification_url` — voir `overlay_sync::pair_and_wait`. Publié UNE FOIS par
+    /// confirme sur `verification_url` — voir `overlay_sync::pair_and_wait`. Publié UNE FOIS par
     /// tentative, avant le premier sondage (`poll`), donc bien avant `Connected`/`Disconnected`.
     ///
-    /// **UI de pairing (2026-09-02, lot L4)** : jusqu'ici le code n'était visible qu'en console
-    /// (`tracing::info!`) — invisible pour qui joue en plein écran sans terminal à côté. `build_ui`
-    /// l'affiche maintenant directement dans la fenêtre overlay (voir sa doc), le navigateur étant
-    /// déjà ouvert automatiquement en best-effort (`open::that`, voir `pair_and_wait`) — ce champ
-    /// couvre le cas où cette ouverture automatique échoue ou où l'onglet a été fermé par erreur.
+    /// La fenêtre de connexion l'affiche en grand avec un bouton de copie, un bouton pour rouvrir
+    /// la page (le navigateur s'ouvre déjà tout seul en best-effort, ce bouton couvre l'onglet
+    /// fermé par erreur) et le compte à rebours jusqu'à `expires_at`.
     PairingStarted {
         pairing_code: String,
         verification_url: String,
+        expires_at: std::time::Instant,
     },
     Connected,
-    /// Ni jeton valide ni appairage complété — l'icône de relance doit être visible (retour
-    /// utilisateur 2026-09-01 : appairage en échec — 405 côté serveur — sans aucun moyen de
-    /// retenter sans relancer tout le logiciel).
-    ///
-    /// `reason` porte le message d'erreur de la DERNIÈRE tentative (`attempt_connect`) — affiché
-    /// en tooltip sur l'icône de relance (voir `build_ui`) : un clic qui ne se traduit par rien de
-    /// visible (le serveur refuse la requête AVANT même qu'un code d'appairage existe, donc aucun
-    /// navigateur ne s'ouvre) est indiscernable d'un bouton cassé sans ce message — retour
-    /// utilisateur 2026-09-01 : « l'appui du bouton ne déclenche rien, pas de message d'erreur
-    /// dans la console » — le message existait déjà (console), seulement invisible pour qui ne
-    /// regarde pas un terminal ; il l'est maintenant aussi directement dans l'overlay.
+    /// Aucun compte lié. `failure: None` est l'état **neutre** — premier lancement, déconnexion
+    /// volontaire, appairage annulé, jeton refusé par le serveur — la fenêtre de connexion
+    /// propose simplement « Se connecter ». `Some` est un **échec** de la dernière tentative
+    /// (serveur injoignable, appairage expiré, réglages injoignables) : même fenêtre, en rouge,
+    /// avec le détail technique et « Réessayer » — un clic qui ne se traduit par rien de visible
+    /// est indiscernable d'un bouton cassé sans ce message (retour utilisateur 2026-09-01).
     Disconnected {
-        reason: String,
+        failure: Option<AuthFailure>,
     },
 }
 
-/// Commande envoyée au thread Auth (`main.rs::spawn_auth_thread`) depuis le main thread — `Retry`
-/// (clic sur l'icône de relance, `build_ui`) n'a d'effet que si PAS déjà connecté ; `Disconnect`
-/// (raccourci `DISCONNECT_HOTKEY_LABEL`, `main.rs::App::disconnect_account`) n'a d'effet que si
-/// déjà connecté. Les deux canaux d'origine (icône cliquée / hotkey pressé) convergent sur ce même
-/// type plutôt que sur deux canaux séparés : un seul thread Auth, un seul point d'attente
-/// (`command_rx.recv()`).
+impl AuthStatus {
+    pub fn is_connected(&self) -> bool {
+        matches!(self, AuthStatus::Connected)
+    }
+}
+
+/// Échec d'une tentative de connexion, tel que la fenêtre de connexion l'affiche : un titre court
+/// pour l'utilisateur (« Serveur injoignable ») et le détail technique en dessous (le message
+/// d'erreur brut — jamais le jeton, §10 du plan).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthFailure {
+    pub headline: String,
+    pub detail: String,
+}
+
+/// Commande envoyée au thread Auth (`main.rs::spawn_auth_thread`) depuis le main thread.
+///
+/// - `Retry` — « Se connecter » ou « Réessayer » de la fenêtre de connexion : reprend une tentative
+///   complète (jeton stocké si encore valide, sinon appairage). Sans effet si déjà connecté.
+/// - `CancelPairing` — « Annuler l'appairage » : abandonne l'attente de confirmation en cours
+///   (voir `overlay_sync::pair_and_wait`), retour à l'état neutre. Sans effet hors appairage.
+/// - `Disconnect` — bouton « Déconnecter » de la fenêtre Options ou de l'icône de zone de
+///   notification : efface le jeton, l'overlay revient à sa fenêtre de connexion. Sans effet si
+///   pas connecté (mais vaut annulation pendant un appairage).
+///
+/// Un seul thread Auth, un seul point d'attente (`command_rx.recv()`) : toutes les origines
+/// convergent sur ce même type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthCommand {
     Retry,
+    CancelPairing,
     Disconnect,
 }
 
@@ -227,6 +252,10 @@ pub struct RenderContent<'a> {
     /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
     /// `panels::options_modal::OptionsModalState`.
     pub options: Option<&'a mut OptionsModalState>,
+    /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
+    /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
+    /// (l'horloge de l'anneau animé et le survol vivent d'une frame à l'autre).
+    pub login: Option<&'a mut panels::login::LoginState>,
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
@@ -272,6 +301,12 @@ pub struct RenderOutcome {
     /// fois dans la même journée (signalé le 2026-09-09). Faire remonter l'intention rend les
     /// panneaux inertes par construction, sans qu'aucun test n'ait à s'en préoccuper.
     pub open_url: Option<String>,
+    /// La fenêtre de connexion demande à être déplacée à la souris (appui sur sa bannière, voir
+    /// `panels::login`) — sans décorations OS, c'est l'hôte qui appelle `Window::drag_window`.
+    pub drag_window: bool,
+    /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
+    /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
+    pub login_height: Option<f32>,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
@@ -347,6 +382,7 @@ pub fn build_ui(
                 shortcuts: content.shortcuts,
                 now: content.now,
                 options: content.options.as_deref_mut(),
+                login: content.login.as_deref_mut(),
             },
         );
     });
@@ -382,6 +418,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         shortcuts,
         now,
         options,
+        login,
     } = content;
 
     let mut outcome = RenderOutcome::default();
@@ -423,6 +460,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,
+        // La fenêtre de connexion peint sa carte jusqu'aux bords de sa fenêtre OS (fond
+        // translucide, anneau animé sur le pourtour) — voir `panels::login`.
+        OverlayKind::Login => egui::Margin::ZERO,
     };
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.inner_margin(inner_margin))
@@ -435,102 +475,13 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 CLICK_THROUGH_OPACITY
             });
             match kind {
-                // Zone Combat : dégâts du combat en cours + icône de connexion au compte. Cette
-                // dernière reste ici (pas dans la zone Suivi) — ni l'une ni l'autre zone n'en est
-                // propriétaire de façon évidente, mais Combat est la fenêtre "historique", la
-                // moins perturbante à faire bouger encore une fois.
+                // Zone Combat : dégâts du combat en cours.
                 OverlayKind::Combat => {
-                    // Icône de relance d'appairage — visible UNIQUEMENT quand la connexion au
-                    // compte a échoué (retour utilisateur 2026-09-01 : 405 côté serveur au premier
-                    // appairage, aucun moyen de retenter sans relancer tout le logiciel), réduite
-                    // au minimum et collée à droite (retour utilisateur : la barre pleine largeur
-                    // précédente était trop imposante) — le libellé passe en tooltip. `reason`
-                    // (message d'erreur de la dernière tentative) y est ajouté : un clic qui ne se
-                    // traduit par rien de visible (le serveur refuse la requête avant même qu'un
-                    // code d'appairage existe, donc aucun navigateur ne s'ouvre) est indiscernable
-                    // d'un bouton cassé sans lui — retour utilisateur : « l'appui du bouton ne
-                    // déclenche rien, pas de message d'erreur dans la console » (le message
-                    // existait déjà, seulement en console). Un clic renvoie sur
-                    // `spawn_auth_thread`, qui relance un appairage COMPLET (rouvre le navigateur
-                    // avec un nouveau code, voir `overlay_sync::pair_and_wait`).
-                    match auth_status {
-                        AuthStatus::Disconnected { reason } => {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        let retry = ui.add(egui::Button::new("🔌").small());
-                                        // `combat::show_tooltip_above` plutôt qu'un `on_hover_text`
-                                        // brut (refonte 2026-09-06, design system tooltip) — voir
-                                        // sa doc.
-                                        crate::design::tooltip(&retry).text(format!(
-                                            "Connecter le compte (relance l'appairage, ouvre \
-                                                 le navigateur).\nDernier échec : {reason}"
-                                        ));
-                                        if retry.clicked() {
-                                            auth_command_tx.send(AuthCommand::Retry);
-                                        }
-                                    },
-                                );
-                            });
-                            ui.add_space(4.0);
-                        }
-                        // UI de pairing (2026-09-02, lot L4) : le code n'était jusqu'ici visible
-                        // qu'en console (`tracing::info!`) — invisible pour qui joue en plein
-                        // écran sans terminal à côté. Le navigateur s'est déjà ouvert tout seul
-                        // (best-effort, `open::that` dans `pair_and_wait`) ; cette carte couvre
-                        // le cas où cette ouverture échoue ou où l'onglet a été fermé par erreur
-                        // — code affiché en GRAND (il faut pouvoir le lire et le taper sans
-                        // plisser les yeux), bouton de copie, et bouton pour rouvrir la page si
-                        // besoin. Reste minimal : pas de fenêtre dédiée, une simple carte dans la
-                        // zone Combat comme le reste de ces indicateurs.
-                        AuthStatus::PairingStarted {
-                            pairing_code,
-                            verification_url,
-                        } => {
-                            egui::Frame::new()
-                                .fill(ui.visuals().extreme_bg_color)
-                                .corner_radius(4.0)
-                                .inner_margin(6.0)
-                                .show(ui, |ui| {
-                                    ui.vertical_centered(|ui| {
-                                        ui.weak("Connexion du compte — code d'appairage");
-                                        ui.add_space(2.0);
-                                        ui.label(
-                                            egui::RichText::new(pairing_code)
-                                                .monospace()
-                                                .size(20.0)
-                                                .strong(),
-                                        );
-                                        ui.add_space(2.0);
-                                        ui.horizontal(|ui| {
-                                            if ui.small_button("📋 Copier").clicked() {
-                                                ui.ctx().copy_text(pairing_code.clone());
-                                            }
-                                            if ui.small_button("🌐 Ouvrir la page").clicked() {
-                                                outcome.open_url =
-                                                    Some(verification_url.to_string());
-                                            }
-                                        });
-                                    });
-                                });
-                            ui.add_space(4.0);
-                        }
-                        // Retour visuel qu'un clic a bien déclenché quelque chose — son absence
-                        // donnait l'impression que le bouton ne faisait rien (retour utilisateur :
-                        // « on dirait que ça ne fait rien »).
-                        AuthStatus::Connecting => {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| ui.weak("Connexion…"),
-                                );
-                            });
-                            ui.add_space(4.0);
-                        }
-                        AuthStatus::Connected => {}
-                    }
-
+                    // **Plus aucun indicateur de compte ici depuis le 2026-09-14** : la carte
+                    // d'appairage, l'icône de relance et « Connexion… » qui vivaient dans cette
+                    // zone ont été remplacés par la fenêtre de connexion (`OverlayKind::Login`,
+                    // `panels::login`). Cette fenêtre-ci n'existe plus que compte lié — voir
+                    // `main.rs::App::sync_session_windows`.
                     // Indicateur « catalogue daté » (§7.4/§9 du plan, lot L3) — visible UNIQUEMENT
                     // quand `catalog` provient du repli hors-ligne embarqué (ni cache disque ni
                     // réseau au démarrage, voir `spawn_catalog_thread`) : les icônes/classements
@@ -613,6 +564,23 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // ne verrait simplement rien peint ici plutôt que de paniquer — jamais souhaitable
                 // en pratique (voir `main.rs`/`bin/overlay-ui-x11.rs`, qui le fournissent toujours
                 // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
+                // Fenêtre de connexion (2026-09-14) — voir `panels::login`. `login` est `Some`
+                // uniquement pour ce `kind` (même règle et même repli silencieux que `options`).
+                OverlayKind::Login => {
+                    if let Some(state) = login {
+                        let login_outcome = panels::login::show(
+                            ui,
+                            state,
+                            icons,
+                            auth_status,
+                            auth_command_tx,
+                            now,
+                        );
+                        outcome.open_url = login_outcome.open_url;
+                        outcome.drag_window = login_outcome.drag_window;
+                        outcome.login_height = Some(login_outcome.content_height);
+                    }
+                }
                 OverlayKind::Options => {
                     if let Some(state) = options {
                         // Les mêmes dépendances que le bandeau Suivi : depuis le 2026-09-12,

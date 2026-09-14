@@ -180,6 +180,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -243,6 +244,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -309,6 +311,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -460,6 +463,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -525,6 +529,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -650,6 +655,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     shortcuts: &shortcuts,
                     now,
                     options: None,
+                    login: None,
                 },
             );
         });
@@ -758,6 +764,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     shortcuts: &shortcuts,
                     now,
                     options: None,
+                    login: None,
                 },
             );
         });
@@ -865,6 +872,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         shortcuts: &shortcuts,
                         now,
                         options: None,
+                        login: None,
                     },
                 );
                 if outcome.watchlist_edit.is_some() {
@@ -974,6 +982,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     shortcuts: &shortcuts,
                     now,
                     options: None,
+                    login: None,
                 },
             );
         });
@@ -1246,6 +1255,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     shortcuts: &shortcuts,
                     now,
                     options: None,
+                    login: None,
                 },
             );
         });
@@ -1337,6 +1347,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -1413,6 +1424,7 @@ fn panneau_options_ne_panique_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: Some(&mut options_state),
+                login: None,
             },
         );
     });
@@ -1658,6 +1670,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 shortcuts: &shortcuts,
                 now,
                 options: Some(&mut options_state),
+                login: None,
             },
         );
     });
@@ -3469,6 +3482,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -3707,6 +3721,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });
@@ -3739,4 +3754,150 @@ fn panneau_suivi_avec_carte_de_chat_courte_survolee() {
         "gelano ?",
         Some(egui::pos2(617.0, 108.0)),
     );
+}
+
+// ── Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) ────────────────────────────────────
+
+/// Les trois états de la fenêtre de connexion, tels que `main.rs` les construit — le harnais ne
+/// fabrique jamais un `AuthStatus` que le thread Auth ne publierait pas.
+fn login_states() -> Vec<(&'static str, AuthStatus)> {
+    let now = std::time::Instant::now();
+    vec![
+        (
+            "login_non_connecte",
+            AuthStatus::Disconnected { failure: None },
+        ),
+        (
+            "login_appairage",
+            AuthStatus::PairingStarted {
+                pairing_code: "K7QX-2M9D".to_string(),
+                verification_url: "https://claude-dev.wakfu-companion.com/pair?code=K7QX-2M9D"
+                    .to_string(),
+                // 9 min 41 s : le compte à rebours de la maquette.
+                expires_at: now + std::time::Duration::from_secs(9 * 60 + 41),
+            },
+        ),
+        (
+            "login_erreur",
+            AuthStatus::Disconnected {
+                failure: Some(overlay_ui::render_content::AuthFailure {
+                    headline: "Serveur injoignable".to_string(),
+                    detail:
+                        "POST /api/v1/auth/native/pair — erreur réseau : délai dépassé après 10 s"
+                            .to_string(),
+                }),
+            },
+        ),
+        ("login_connexion_en_cours", AuthStatus::Connecting),
+    ]
+}
+
+/// Peint la fenêtre de connexion dans `auth_status`, sur une fenêtre de la hauteur qu'elle demande,
+/// et rend la hauteur mesurée (`LoginOutcome::content_height`) — la même que `main.rs` applique
+/// à la fenêtre OS.
+fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    // Animation FIGÉE (anneau et points à leur phase 0) : le harnais exige qu'une frame finisse
+    // par ne plus rien redemander, et une capture doit être reproductible. `started_at == now`
+    // fixe la phase quoi qu'il arrive.
+    let mut login_state = overlay_ui::panels::login::LoginState {
+        started_at: now,
+        animate: false,
+    };
+    let measured = Rc::new(Cell::new(0.0_f32));
+    let measured_in = Rc::clone(&measured);
+
+    // `Harness::new_ui` ajoute 8 px de marge autour du contenu : la fenêtre fait 400 px de large
+    // comme en production, plus ces marges.
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(
+            overlay_ui::panels::login::WINDOW_WIDTH + 16.0,
+            height + 16.0,
+        ))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let outcome = paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Login,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    combat_side: &mut combat_side,
+                    watchlist: &[],
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    options: None,
+                    login: Some(&mut login_state),
+                },
+            );
+            if let Some(h) = outcome.login_height {
+                measured_in.set(h);
+            }
+        });
+
+    harness.run();
+    harness.snapshot(nom);
+    measured.get()
+}
+
+/// Une capture par état — **un harnais par test**, jamais plusieurs dans le même :
+/// `egui_kittest` exige que les résultats de capture d'un test viennent d'un seul harnais.
+///
+/// La hauteur passée est celle que `main.rs` donne à la fenêtre OS pour cet état (mesurée par la
+/// carte elle-même, `LoginOutcome::content_height`) : le test la vérifie, une carte plus haute que
+/// sa fenêtre serait coupée en production. Un écart se corrige en reportant la valeur mesurée.
+fn verifie_login(nom: &str, height: f32) {
+    let auth_status = login_states()
+        .into_iter()
+        .find(|(n, _)| *n == nom)
+        .map(|(_, s)| s)
+        .expect("état connu");
+    let measured = capture_login(nom, auth_status, height);
+    assert_eq!(
+        measured, height,
+        "{nom} : la carte mesure {measured} px, la fenêtre en fait {height} — reporter la \
+         nouvelle hauteur dans le test"
+    );
+}
+
+#[test]
+fn fenetre_de_connexion_non_connecte() {
+    verifie_login("login_non_connecte", 385.0);
+}
+
+#[test]
+fn fenetre_de_connexion_appairage() {
+    verifie_login("login_appairage", 536.0);
+}
+
+#[test]
+fn fenetre_de_connexion_erreur() {
+    verifie_login("login_erreur", 443.0);
+}
+
+#[test]
+fn fenetre_de_connexion_en_cours() {
+    verifie_login("login_connexion_en_cours", 385.0);
 }

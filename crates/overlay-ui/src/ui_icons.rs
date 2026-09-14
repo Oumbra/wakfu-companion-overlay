@@ -31,11 +31,16 @@
 const ALLIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-allies.png");
 const ENEMIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-enemies.png");
 const UNKNOWN_ENTITY_BYTES: &[u8] = include_bytes!("../assets/ui/unknown-entity.png");
+/// Logo du projet — copie conforme de `public/logo-purple.png` du dépôt web (128×128). Sert de
+/// logo à la fenêtre de connexion (`panels::login`), d'icône de fenêtre (barre des tâches) et
+/// d'icône de zone de notification (voir `app_logo_rgba`).
+const LOGO_BYTES: &[u8] = include_bytes!("../assets/ui/logo-purple.png");
 
 pub struct UiIcons {
     allies: egui::TextureHandle,
     enemies: egui::TextureHandle,
     unknown_entity: egui::TextureHandle,
+    logo: egui::TextureHandle,
 }
 
 impl UiIcons {
@@ -44,7 +49,13 @@ impl UiIcons {
             allies: load_texture(ctx, "icon-header-allies", ALLIES_ICON_BYTES),
             enemies: load_texture(ctx, "icon-header-enemies", ENEMIES_ICON_BYTES),
             unknown_entity: load_texture(ctx, "icon-unknown-entity", UNKNOWN_ENTITY_BYTES),
+            logo: load_texture(ctx, "icon-logo", LOGO_BYTES),
         }
+    }
+
+    /// Logo du projet (voir `LOGO_BYTES`) — peint à 56 px par la fenêtre de connexion.
+    pub fn logo(&self) -> &egui::TextureHandle {
+        &self.logo
     }
 
     pub fn allies(&self) -> &egui::TextureHandle {
@@ -75,6 +86,14 @@ impl UiIcons {
     pub fn unknown_entity_texture(&self) -> &egui::TextureHandle {
         &self.unknown_entity
     }
+}
+
+/// Le logo décodé en RGBA 8 bits, avec ses dimensions — pour `winit::window::Icon::from_rgba` et
+/// `tray_icon::Icon::from_rgba`, qui veulent des pixels bruts et non un PNG.
+pub fn app_logo_rgba() -> (Vec<u8>, u32, u32) {
+    let decoded = decode(LOGO_BYTES);
+    let (width, height) = decoded.dimensions();
+    (decoded.into_raw(), width, height)
 }
 
 fn load_texture(ctx: &egui::Context, name: &'static str, bytes: &[u8]) -> egui::TextureHandle {
