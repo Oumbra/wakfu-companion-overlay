@@ -22,6 +22,7 @@ mod wakassets_fixtures;
 
 use egui::{Color32, RichText, Vec2};
 use egui_kittest::Harness;
+use overlay_engine::ChatChannel;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, DsTexture,
     IconButtonState, IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep,
@@ -1608,17 +1609,29 @@ fn galerie_de_la_tuile_a_legende() {
                         "Le cadre des champs du jeu, la légende sur la bordure haute, le contenu au centre. Survolée : le voile des tuiles d'Alertes ; la croix, elle, reste au panneau.",
                     );
                     ui.horizontal(|ui| {
-                        for (state, legend, text) in [
-                            (LegendTileState::Idle, "Commerce", "gelano"),
-                            (LegendTileState::Hovered, "Tous les canaux", "donjon"),
-                            (LegendTileState::Disabled, "Recrutement", "pvm"),
+                        for (state, legend, color, text) in [
+                            (
+                                LegendTileState::Idle,
+                                "Commerce",
+                                Some(design::tokens::chat_channel_color(ChatChannel::Commerce)),
+                                "gelano",
+                            ),
+                            (LegendTileState::Hovered, "Tous les canaux", None, "donjon"),
+                            (
+                                LegendTileState::Disabled,
+                                "Recrutement",
+                                Some(design::tokens::chat_channel_color(ChatChannel::Recrutement)),
+                                "pvm",
+                            ),
                         ] {
-                            ui.add(
-                                design::legend_tile(legend, text)
-                                    .width(160.0)
-                                    .preview_state(state)
-                                    .log_name(format!("galerie.tuile.{text}")),
-                            );
+                            let mut tile = design::legend_tile(legend, text)
+                                .width(160.0)
+                                .preview_state(state)
+                                .log_name(format!("galerie.tuile.{text}"));
+                            if let Some(color) = color {
+                                tile = tile.legend_color(color);
+                            }
+                            ui.add(tile);
                         }
                     });
                     heading(
@@ -1628,17 +1641,23 @@ fn galerie_de_la_tuile_a_legende() {
                     );
                     let width = (ui.available_width() - 12.0 * 3.0) / 4.0;
                     ui.horizontal(|ui| {
-                        for (legend, text) in [
-                            ("Guilde", "wa wabbit"),
-                            ("Communauté", "mise à jour"),
-                            ("Commerce", "archiemblème chuchoteur chachatophile"),
-                            ("Une légende vraiment trop longue", "x"),
+                        for (legend, channel, text) in [
+                            ("Guilde", Some(ChatChannel::Guilde), "wa wabbit"),
+                            ("Communauté", Some(ChatChannel::Communaute), "mise à jour"),
+                            (
+                                "Commerce",
+                                Some(ChatChannel::Commerce),
+                                "archiemblème chuchoteur chachatophile",
+                            ),
+                            ("Une légende vraiment trop longue", None, "x"),
                         ] {
-                            ui.add(
-                                design::legend_tile(legend, text)
-                                    .width(width)
-                                    .log_name(format!("galerie.tuile.{text}")),
-                            );
+                            let mut tile = design::legend_tile(legend, text)
+                                .width(width)
+                                .log_name(format!("galerie.tuile.{text}"));
+                            if let Some(channel) = channel {
+                                tile = tile.legend_color(design::tokens::chat_channel_color(channel));
+                            }
+                            ui.add(tile);
                         }
                     });
                 });
