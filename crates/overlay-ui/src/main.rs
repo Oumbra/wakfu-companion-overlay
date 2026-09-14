@@ -60,6 +60,7 @@ use overlay_ui::chat_command::{self, ChatCommand};
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
+    SharedRoster,
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
@@ -424,6 +425,9 @@ struct App {
     /// Dernier tick de `sync_turn_watch` : la capture d'une fenêtre est bien plus chère que les
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
+    /// Le roster du compte, publié par le thread Engine — la surveillance de tour y lit les
+    /// personnages du compte de chaque fenêtre (titulaire + héros).
+    roster: SharedRoster,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -508,6 +512,8 @@ struct AppState {
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     alert_profile: SharedAlertProfile,
     chat_filters: SharedChatFilters,
+    /// Voir `App::roster`.
+    roster: SharedRoster,
     /// Voir `App::chat_toast` — lu de la config au démarrage.
     chat_toast: chat_tab::ChatToastSettings,
     catalog: Arc<ArcSwap<CatalogIndex>>,
@@ -534,6 +540,7 @@ impl App {
             watchlist_toast,
             alert_profile,
             chat_filters,
+            roster,
             chat_toast,
             catalog,
             catalog_stale,
@@ -579,6 +586,7 @@ impl App {
             turn_notification,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
+            roster,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -994,34 +1002,57 @@ impl App {
         }
 
         let snapshot = self.snapshot.load();
+        let roster = self.roster.load();
         let foreground = unsafe { GetForegroundWindow() };
         for (character, hwnd) in targets {
-            let key = overlay_engine::roster::normalize_wakfu_name(&character);
+            // Les personnages que cette fenêtre peut jouer : le titulaire et ses héros — même
+            // compte au roster. Sans roster, le titulaire seul.
+            let mut characters = roster
+                .as_ref()
+                .as_ref()
+                .map(|r| r.account_mates(&character))
+                .unwrap_or_default();
+            if !characters.iter().any(|c| {
+                overlay_engine::roster::normalize_wakfu_name(c)
+                    == overlay_engine::roster::normalize_wakfu_name(&character)
+            }) {
+                characters.insert(0, character.clone());
+            }
             let fight = snapshot.fight_for_character(&character).map(|fight| {
-                let own_cast_len = fight
-                    .fighters
+                let cast_lens = characters
                     .iter()
-                    .find(|f| {
-                        f.is_ally && overlay_engine::roster::normalize_wakfu_name(&f.name) == key
+                    .map(|name| {
+                        let key = overlay_engine::roster::normalize_wakfu_name(name);
+                        let len = fight
+                            .fighters
+                            .iter()
+                            .find(|f| {
+                                f.is_ally
+                                    && overlay_engine::roster::normalize_wakfu_name(&f.name) == key
+                            })
+                            .map_or(0, |f| f.last_turn_casts.len());
+                        (name.clone(), len)
                     })
-                    .map_or(0, |f| f.last_turn_casts.len());
+                    .collect();
                 turn_watch::watcher::FightFacts {
                     ongoing: fight.ongoing,
                     // Un sort ou des dégâts de qui que ce soit : la phase de placement est passée.
                     engaged_by_log: fight.fighters.iter().any(|f| {
                         !f.last_turn_casts.is_empty() || f.total_damage != 0 || f.total_heal != 0
                     }),
-                    own_cast_len,
+                    cast_lens,
                 }
             });
             // Pas de capture hors combat : le moteur le sait, inutile de lire l'écran.
             let band = fight
+                .as_ref()
                 .filter(|f| f.ongoing)
                 .and_then(|_| turn_watch::capture::capture_bottom_band(hwnd));
             let events = self.turn_watcher.tick(turn_watch::watcher::TickInput {
-                character: &character,
+                window: &character,
+                characters: &characters,
                 band: band.as_ref(),
-                fight,
+                fight: fight.as_ref(),
                 foreground: foreground.0 == hwnd.0,
                 now,
             });
@@ -3054,6 +3085,7 @@ fn main() {
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let alert_profile = Arc::new(ArcSwap::from_pointee(None));
     let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
+    let roster: SharedRoster = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
     let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
@@ -3091,6 +3123,7 @@ fn main() {
             watchlist_toast: Arc::clone(&watchlist_toast),
             alert_profile: Arc::clone(&alert_profile),
             chat_filters: Arc::clone(&chat_filters),
+            roster: Arc::clone(&roster),
             catalog: Arc::clone(&catalog),
             dungeons,
             startup: Arc::clone(&startup),
@@ -3113,6 +3146,7 @@ fn main() {
         watchlist_toast,
         alert_profile,
         chat_filters,
+        roster,
         chat_toast: saved_config.chat_toast(),
         catalog,
         catalog_stale,

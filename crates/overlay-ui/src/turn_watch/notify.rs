@@ -139,6 +139,9 @@ fn register_protocol() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
+    // Le binaire dédié `overlay-focus.exe`, à côté de l'overlay, n'a pas de console (voir
+    // `src/bin/overlay-focus.rs`) et démarre plus vite : c'est lui qu'on enregistre quand il est
+    // là ; l'overlay lui-même sinon (il sait aussi le faire, voir `main`).
     unsafe {
         let set = |subkey: &str, name: Option<&str>, value: &str| {
             let subkey_w = wide(subkey);
@@ -171,14 +174,17 @@ fn register_protocol() {
             }
             let _ = RegCloseKey(key);
         };
+        let focus_exe = exe.with_file_name("overlay-focus.exe");
+        let handler = if focus_exe.is_file() { focus_exe } else { exe };
         let root = format!("Software\\Classes\\{PROTOCOL}");
         set(&root, None, "URL:Wakfu Companion Overlay");
         set(&root, Some("URL Protocol"), "");
         set(
             &format!("{root}\\shell\\open\\command"),
             None,
-            &format!("\"{}\" \"%1\"", exe.display()),
+            &format!("\"{}\" \"%1\"", handler.display()),
         );
+        tracing::info!("[tour] protocole {PROTOCOL}: → {}", handler.display());
     }
 }
 

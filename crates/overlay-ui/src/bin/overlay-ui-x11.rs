@@ -1955,6 +1955,9 @@ mod linux_main {
         let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
         let alert_profile: SharedAlertProfile = Arc::new(ArcSwap::from_pointee(None));
         let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
+        // Publié par le thread Engine pour la surveillance de tour — sans effet sous X11 pour
+        // l'instant (voir `turn_notification`), mais le thread l'attend.
+        let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
         let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
         let startup = Arc::new(StartupProgress::new());
 
@@ -1995,6 +1998,7 @@ mod linux_main {
                 watchlist_toast: Arc::clone(&watchlist_toast),
                 alert_profile: Arc::clone(&alert_profile),
                 chat_filters: Arc::clone(&chat_filters),
+                roster,
                 catalog: Arc::clone(&catalog),
                 dungeons,
                 startup: Arc::clone(&startup),
