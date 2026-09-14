@@ -480,8 +480,9 @@ impl CombatMetric {
         }
     }
 
-    /// Grandeur suivante, en boucle — pendant de [`CombatSide::toggled`] pour un futur raccourci
-    /// clavier (le switch reste la voie principale).
+    /// Grandeur suivante, en boucle — pendant de [`CombatSide::toggled`], appelée par le raccourci
+    /// global `ShortcutAction::CombatMetric` (`Ctrl+Shift+V` par défaut, `main.rs::App::
+    /// cycle_combat_metric`) en plus du clic direct sur le switch.
     pub fn next(self) -> Self {
         match self {
             Self::Damage => Self::Armor,
@@ -828,7 +829,7 @@ fn show_leader_row(
             SWITCH_HEIGHT,
         ),
     );
-    paint_metric_switch(ui, metric_rect, metric, icons);
+    paint_metric_switch(ui, metric_rect, metric, icons, shortcuts);
 }
 
 /// Switch de grandeur (Dégâts / Armure / Soins) — même vocabulaire visuel et même gabarit
@@ -843,6 +844,7 @@ fn paint_metric_switch(
     rect: egui::Rect,
     metric: &mut CombatMetric,
     icons: &UiIcons,
+    shortcuts: &ShortcutBindings,
 ) {
     let painter = ui.painter();
     painter.rect_filled(rect, 5.0, TINT_MEDIUM);
@@ -854,6 +856,9 @@ fn paint_metric_switch(
     );
 
     let option_width = rect.width() / CombatMetric::ALL.len() as f32;
+    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`) —
+    // même convention que l'infobulle du switch Alliés/Ennemis juste au-dessus.
+    let metric_hotkey = shortcuts.label(ShortcutAction::CombatMetric);
     for (i, option) in CombatMetric::ALL.into_iter().enumerate() {
         let option_rect = egui::Rect::from_min_size(
             egui::pos2(rect.min.x + option_width * i as f32, rect.min.y),
@@ -871,7 +876,7 @@ fn paint_metric_switch(
                 egui::Sense::click(),
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand);
-        design::tooltip(&response).text(option.tooltip());
+        design::tooltip(&response).text(format!("{} ({metric_hotkey})", option.tooltip()));
         if response.clicked() {
             *metric = option;
         }

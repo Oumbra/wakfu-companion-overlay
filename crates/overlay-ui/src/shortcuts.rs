@@ -107,6 +107,12 @@ pub enum ShortcutAction {
     /// `panels::combat::CombatSide::toggled` et `main.rs::App::toggle_combat_side`, appliqué à
     /// CHAQUE fenêtre Combat ouverte, pas seulement celle au premier plan.
     CombatSide,
+    /// Fait tourner la grandeur mesurée par le panneau Combat — Dégâts → Armure → Soins → Dégâts
+    /// (demande utilisateur du 2026-09-14, `Ctrl+Shift+V`). Même mode TOGGLE que [`Self::CombatSide`]
+    /// juste au-dessus, et pour la même raison : une seule touche pour tout le cycle plutôt qu'une
+    /// par grandeur, appliquée à CHAQUE fenêtre Combat ouverte. Voir
+    /// `panels::combat::CombatMetric::next` et `main.rs::App::cycle_combat_metric`.
+    CombatMetric,
     /// Invite en groupe le personnage de l'AUTRE fenêtre de jeu — tape `/i "<nom>"` dans le chat de
     /// la fenêtre au premier plan (`chat_command`, voir sa doc de module pour toute la mécanique).
     ///
@@ -128,7 +134,7 @@ pub enum ShortcutAction {
 
 impl ShortcutAction {
     /// Toutes les actions, dans l'ordre d'affichage — voir doc du type.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Toggle,
         Self::Refresh,
         Self::Quit,
@@ -137,6 +143,7 @@ impl ShortcutAction {
         Self::WatchlistAdd,
         Self::WatchlistRemove,
         Self::CombatSide,
+        Self::CombatMetric,
         Self::InvitePartner,
         Self::FollowPartner,
     ];
@@ -174,6 +181,7 @@ impl ShortcutAction {
             Self::WatchlistAdd => "watchlist_add",
             Self::WatchlistRemove => "watchlist_remove",
             Self::CombatSide => "combat_side",
+            Self::CombatMetric => "combat_metric",
             Self::InvitePartner => "invite_partner",
             Self::FollowPartner => "follow_partner",
         }
@@ -191,6 +199,7 @@ impl ShortcutAction {
             Self::WatchlistAdd => "Ajouter au suivi",
             Self::WatchlistRemove => "Retirer du suivi",
             Self::CombatSide => "Alterner Alliés / Ennemis",
+            Self::CombatMetric => "Dégâts / Armure / Soins",
             Self::InvitePartner => "Inviter l'autre personnage",
             Self::FollowPartner => "Suivre l'autre personnage",
         }
@@ -202,7 +211,7 @@ impl ShortcutAction {
         match self {
             Self::Toggle | Self::Refresh | Self::Quit | Self::Options => "Overlay",
             Self::Details | Self::WatchlistAdd | Self::WatchlistRemove => "Suivi",
-            Self::CombatSide => "Combat",
+            Self::CombatSide | Self::CombatMetric => "Combat",
             Self::InvitePartner | Self::FollowPartner => "Multicompte",
         }
     }
@@ -221,6 +230,7 @@ impl ShortcutAction {
             Self::WatchlistAdd => Shortcut::new(ctrl_shift, Code::KeyA),
             Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyS),
             Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyE),
+            Self::CombatMetric => Shortcut::new(ctrl_shift, Code::KeyV),
             // Nues, par exception assumée — voir la doc de ces deux variantes.
             Self::InvitePartner => Shortcut::new(Modifiers::empty(), Code::F1),
             Self::FollowPartner => Shortcut::new(Modifiers::empty(), Code::F2),
@@ -818,6 +828,8 @@ mod tests {
             "Ctrl+Shift+S"
         );
         assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+E");
+        // Né le 2026-09-14 avec le switch de grandeur, combinaison choisie par l'utilisateur.
+        assert_eq!(bindings.label(ShortcutAction::CombatMetric), "Ctrl+Shift+V");
         // Nées nues (2026-09-13), à la demande de l'utilisateur — voir la doc de ces variantes.
         assert_eq!(bindings.label(ShortcutAction::InvitePartner), "F1");
         assert_eq!(bindings.label(ShortcutAction::FollowPartner), "F2");

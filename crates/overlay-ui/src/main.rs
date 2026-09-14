@@ -1605,6 +1605,22 @@ impl App {
         );
     }
 
+    /// `ShortcutAction::CombatMetric` : fait tourner la grandeur mesurée (`CombatMetric::next`) de
+    /// CHAQUE fenêtre Combat ouverte — même portée et même logique que `toggle_combat_side`
+    /// ci-dessus, dont c'est le pendant pour le second switch du bandeau.
+    fn cycle_combat_metric(&mut self) {
+        for overlay in self.windows.values_mut() {
+            if overlay.kind == OverlayKind::Combat {
+                overlay.combat_metric = overlay.combat_metric.next();
+                overlay.next_redraw_at = Some(std::time::Instant::now());
+            }
+        }
+        tracing::info!(
+            ">>> Grandeur du combat ({})",
+            self.hotkeys.bindings().label(ShortcutAction::CombatMetric)
+        );
+    }
+
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
     /// sinon repli en z-order normal — pour ne plus recouvrir une application quelconque devenue
     /// active (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus
@@ -2840,6 +2856,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.request_watchlist_redraw();
                 }
                 ShortcutAction::CombatSide => self.toggle_combat_side(),
+                ShortcutAction::CombatMetric => self.cycle_combat_metric(),
                 ShortcutAction::InvitePartner => {
                     self.send_partner_command(ChatCommand::Invite);
                 }
