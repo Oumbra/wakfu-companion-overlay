@@ -1595,12 +1595,9 @@ fn chat_toast_card(
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     let icon_hovered = icon_response.contains_pointer() && !ui.input(|i| i.pointer.any_down());
 
+    // Pas d'ombre portée, contrairement à `toast_card` : le cadre des champs du jeu n'en a pas,
+    // et la bande sombre sous la carte se lisait comme un défaut (retour du 2026-09-14).
     let painter = ui.painter();
-    painter.rect_filled(
-        frame.translate(egui::vec2(0.0, 6.0)),
-        0.0,
-        egui::Color32::from_rgba_unmultiplied(0, 0, 0, (90.0 * card_alpha) as u8),
-    );
     design::LegendTile::paint_frame(
         painter,
         &ctx,
@@ -1610,9 +1607,9 @@ fn chat_toast_card(
             color: design::tokens::chat_channel_color(channel),
             font_size: CHAT_CARD_LEGEND_FONT_SIZE,
             side: design::LegendSide::Right,
-            // Par-dessus le jeu : la moitié haute du canal déborde du cadre, elle a besoin d'un
-            // fond (constat en jeu du 2026-09-14 : « Proximité » illisible sur la scène).
-            backing: Some(design::tokens::LEGEND_TILE_FILL),
+            // Sans fond, sur décision utilisateur (2026-09-14) : à 16 px et en couleur, le canal
+            // se lit sur la scène ; le pavé sombre derrière lui se voyait davantage.
+            backing: None,
         },
         &fade,
     );
