@@ -116,6 +116,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 shortcuts: &shortcuts,
                 now,
                 options: Some(&mut options_state),
+                login: None,
             },
         );
     });

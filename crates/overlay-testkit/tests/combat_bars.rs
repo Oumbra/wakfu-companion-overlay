@@ -129,6 +129,7 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     })
