@@ -143,6 +143,12 @@ ds_icons! {
         /// les filtres ». **Pas celle qui ferme une fenêtre** : voir [`DsIcon::CloseWindow`].
         Close => "icon-close", socle;
 
+        /// Bulle de message (`icons/icon-message.png`, 28 × 28, encre ~23 × 19) — fournie par
+        /// l'utilisateur le 2026-09-14 pour la carte d'alerte de chat du Suivi (« répondre en
+        /// privé », `panels::watchlist::chat_toast_card`). `libre` : pas de socle, sa taille est
+        /// celle que la carte lui donne.
+        Message => "icon-message", libre;
+
         /// Croix du bouton de fermeture d'une fenêtre (`icons/icon-close-window.png`, 12 × 12) —
         /// plus grasse que [`DsIcon::Close`] (traits de ~2,7 px contre 2), et légèrement
         /// asymétrique, comme le jeu la peint dans la bannière de toutes ses fenêtres
