@@ -1482,11 +1482,22 @@ session), portée telle quelle dans `panels::login`.
 
 **Ce qui existe maintenant :**
 
+- **Écran de chargement d'abord** (demande utilisateur, même jour) : la toute première image de
+  l'overlay est cette carte avec le rouage du jeu (`design::loader`, 72 px) centré dans le corps —
+  logo, titre, séparateur, version, rien d'autre. Elle masque tout le démarrage : catalogue,
+  référentiel de donjons, rattrapage de `wakfu.log` par le moteur (fin détectée au premier
+  silence de 200 ms du watcher), vérification du jeton stocké et `GET /api/v1/settings`. Les
+  trois premiers posent chacun un drapeau sur `overlay_ui::startup::StartupProgress` (partagé
+  avec les threads, `UserEvent::StartupProgress` réveille l'hôte) ; le compte est
+  `AuthStatus::Connecting`. Garde-fou de 45 s, puis l'écran suivant quoi qu'il arrive. Compte lié
+  ⇒ la fenêtre cède la place aux overlays ; sinon ⇒ « Vous n'êtes pas connecté ». Même hauteur
+  que cet écran-là : le passage ne fait pas bouger la fenêtre.
 - **`OverlayKind::Login` / `panels::login`** — une carte de 400 px sur fond noir translucide :
   logo du site (`assets/ui/logo-purple.png`, copie de `public/logo-purple.png` du dépôt web),
   titre « WAKFU COMPANION » en accent cyan `#00d2ff` suivi d'« OVERLAY » en italique gris, badge
-  *beta* en haut à droite, séparateur gravé, corps aligné à gauche, version en pied au style de la
-  bannière Options (11 px, gris du badge). Un **anneau lumineux tourne en permanence** autour de la
+  *beta* en haut à droite, séparateur gravé, corps aligné à gauche, version en pied en bas à
+  droite, au style exact du badge *beta* (Ubuntu 10 px, italique simulé, même gris — demande
+  utilisateur du même jour, elle était d'abord à gauche en PT Serif). Un **anneau lumineux tourne en permanence** autour de la
   carte (`Mesh` à couleurs par sommet, ~30 images/s) : gris translucide au repos, cyan pendant
   l'appairage, rouge en erreur. Trois états calqués sur `AuthStatus` — *non connecté* (« Se
   connecter »), *appairage* (code en grand, compte à rebours « expire dans mm:ss », « Copier le
@@ -1504,15 +1515,18 @@ session), portée telle quelle dans `panels::login`.
   d'état à la hauteur que la carte a réellement occupée (`LoginOutcome::content_height`), en
   gardant son centre. Le logo est son icône de fenêtre et de barre des tâches. Échap n'y quitte
   pas l'application ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
-- **Cycle de vie piloté par `AuthStatus`** (`App::sync_session_windows`, avant `sync_windows` à
-  chaque tick) : compte non lié ⇒ la fenêtre de connexion est la SEULE fenêtre (tout `Combat`/
+- **Cycle de vie piloté par le démarrage et `AuthStatus`** (`App::sync_session_windows`, avant
+  `sync_windows` à chaque tick) : chargement en cours ⇒ la fenêtre de connexion seule, sur son
+  rouage ; compte non lié ⇒ la fenêtre de connexion est la SEULE fenêtre (tout `Combat`/
   `Watchlist`/`Options` est fermé, raccourcis rendus au système si une modale Options tombait) ;
-  compte lié ⇒ elle disparaît et `sync_windows` crée enfin les overlays de jeu (garde
-  `is_connected()` en tête de méthode). « Déconnecter » (fenêtre Options, section « Compte », ou
-  menu de zone de notification) efface le jeton, ferme tous les overlays et ramène à cette fenêtre.
-  Au relancement, elle reste tant que le jeton n'est pas validé — le passage par `Connecting` la
-  fait brièvement apparaître même avec une session valide, retour visuel assumé.
-- **Thread Auth sans appairage spontané** (`spawn_auth_thread`/`attempt_connect`) : au démarrage,
+  compte lié et tout chargé (`App::session_ready`) ⇒ elle disparaît et `sync_windows` crée enfin
+  les overlays de jeu. « Déconnecter » (fenêtre Options, section « Compte », ou menu de zone de
+  notification) efface le jeton, ferme tous les overlays et ramène à cette fenêtre. Au
+  relancement, elle reste sur son rouage tant que le jeton n'est pas validé.
+- **Threads de fond partagés** (`overlay_ui::background`, 2026-09-14) : Auth, Sync, Catalogue et
+  Donjons vivaient dans `main.rs` ; rien n'y dépend de l'OS, ils sont sortis dans la lib pour
+  servir aussi le binaire Linux.
+- **Thread Auth sans appairage spontané** (`background::spawn_auth_thread`/`attempt_connect`) : au démarrage,
   seul un jeton stocké est essayé ; sans jeton, l'état neutre `Disconnected { failure: None }` est
   publié et le navigateur ne s'ouvre que sur « Se connecter » (`AuthCommand::Retry`). Un jeton
   **refusé** (401/403) est effacé ; un jeton **injoignable** (réseau) est conservé — un lancement
@@ -1533,12 +1547,16 @@ session), portée telle quelle dans `panels::login`.
   qu'un test n'en ait qu'un) : les quatre états, animation figée (`LoginState::animate = false`),
   chacune prise à la hauteur exacte que `main.rs` donne à la fenêtre OS, vérifiée par assertion.
 
-**Portée Linux (honnêtement) :** `bin/overlay-ui-x11.rs` n'a toujours aucun thread Auth (mode
-invité fixe, voir sa doc de module) — la fenêtre de connexion et l'icône de zone de notification
-n'y sont pas câblées ; `panels::login` et `render_content` sont partagés, seul le fenêtrage OS
-resterait à dupliquer le jour où le thread Auth y sera porté. L'obligation de compte est donc, à
-ce stade, celle du binaire Windows. Sous Linux/GNOME, une icône de zone de notification dépendrait
-de toute façon d'une extension.
+**Linux (`bin/overlay-ui-x11.rs`, porté le même jour) :** mêmes threads de fond
+(`overlay_ui::background`), même fenêtre de connexion (fenêtre X11 ordinaire, pas `Utility` —
+barre des tâches, focus, centrée sur l'écran principal, icône = logo), même cycle de vie, fenêtre
+Options désormais pleinement câblée (compte, alertes, chat, suivi, recettes) et icônes réseau
+(`RemoteIconStore::spawn`). Le binaire n'est plus « invité fixe ». Reste propre à Windows :
+l'icône de zone de notification (`tray-icon` tire GTK/libappindicator sous Linux, et GNOME exige
+une extension) — « Quitter » y passe par le raccourci global ou la fermeture de la fenêtre de
+connexion, « Déconnecter » par la fenêtre Options.
+
+**Captures** : `login_chargement`, `login_non_connecte`, `login_appairage`, `login_erreur`.
 
 **Non fait, volontairement :** pas de bouton de fermeture dans la carte (fidèle à la maquette) ;
 pas de mémorisation de la position de la fenêtre ; « Réessayer » et « Se connecter » sont la même
