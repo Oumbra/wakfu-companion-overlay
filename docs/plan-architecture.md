@@ -1265,7 +1265,7 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   dans le bandeau Suivi — **le gabarit des tuiles de recherche** (`design::LegendTile::paint_frame`,
   révision du 2026-09-14) : le canal en légende sur la bordure haute, **à droite, en 16 px et sur
   fond** (sa moitié haute déborde du cadre par-dessus le jeu, sans fond elle s'y perdait — constat
-  en jeu), dans la couleur que le client lui donne (`tokens::chat_channel_color`) ; dedans « mot » en gris, l'auteur en doré
+  en jeu), dans la couleur que le client lui donne (`tokens::chat_channel_color`) ; dedans « Recherche : « mot » » en gris italique au corps du message, l'auteur en doré
   puis le message complet (retour à la ligne à 420 px) ; **largeur fixe** (`CHAT_CARD_WIDTH`),
   hauteur au texte. Sans confettis. À droite, la bulle de message (`DsIcon::Message`, icône
   fournie par l'utilisateur, blanche puis cyan sur halo au survol) prépare la réponse en privé ;
