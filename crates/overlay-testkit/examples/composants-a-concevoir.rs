@@ -182,7 +182,7 @@ fn legende(ui: &mut egui::Ui, text: &str) {
 /// Titre d'une bande de cas.
 fn bande(ui: &mut egui::Ui, text: &str) {
     ui.add_space(10.0);
-    ui.add(design::heading(text).trailing_gap(8.0));
+    ui.add(design::heading(text));
 }
 
 /// L'emplacement d'objet du jeu — **`design::item_slot` depuis le 2026-09-11**.

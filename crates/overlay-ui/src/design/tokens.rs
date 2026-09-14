@@ -885,9 +885,12 @@ pub const HEADING_INK_TOP: f32 = 6.0;
 /// remesurées avec la méthode appliquée au jeu, 13 donne 30px et 16px du bas de l'encre au haut de
 /// la case, les deux cotes du jeu exactement ; 14 donne 31 et 17.
 ///
-/// **Ne vaut que pour le défaut** : les onglets Suivi, Alertes, Chat et Raccourcis surchargent
-/// `Heading::trailing_gap` avec leur propre demi-`SECTION_GAP`, calé sur les maquettes validées de
-/// leurs grilles de tuiles — ils ne coiffent pas des lignes d'option et ne sont pas concernés.
+/// **Vaut pour TOUS les écrans** depuis le 2026-09-14 (2) : cinq d'entre eux posaient jusque-là
+/// leur propre écart — une demi-`SECTION_GAP` dans les onglets Suivi, Alertes, Chat et Raccourcis,
+/// un littéral de 8 dans la fenêtre de recette — et le même titre s'ouvrait sur quatre valeurs
+/// différentes selon l'endroit. Retirés sur demande de l'utilisateur : « les espacements doivent
+/// être génériques ». Seul `Heading::preview_trailing_gap` en change encore, et uniquement dans les
+/// planches de simulation qui servent à mesurer une valeur candidate.
 pub const HEADING_TO_ROW: f32 = 13.0;
 
 // ---------------------------------------------------------------------------------------------
