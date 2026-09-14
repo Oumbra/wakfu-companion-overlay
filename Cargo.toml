@@ -5,6 +5,17 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
+# **Version UNIQUE du produit**, partagée par toutes les crates (`version.workspace = true`) et
+# embarquée dans le binaire par `env!("CARGO_PKG_VERSION")` — voir `crates/overlay-ui/src/build_info.rs`.
+#
+# Ne JAMAIS l'éditer à la main : le hook `post-commit` (`.githooks/post-commit`, installé par
+# `scripts/install-hooks.sh`) l'incrémente tout seul selon le type Conventional Commits du commit
+# qui vient d'être créé — voir `scripts/bump-version.sh` pour la table des correspondances.
+#
+# `xtask/` a volontairement sa PROPRE version, figée : c'est de l'outillage de CI jamais distribué
+# (son `[workspace]` vide le tient hors de ce workspace, voir son Cargo.toml), rien n'y est versionné
+# pour l'utilisateur.
+version = "0.2.0"
 edition = "2021"
 publish = false
 

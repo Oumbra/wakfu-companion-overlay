@@ -1,6 +1,6 @@
 [package]
 name = "overlay-ingest"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "Suivi (tail) de wakfu.log : découverte de chemin, lecture incrémentale, détection de rotation/troncature — voir docs/plan-architecture.md §5."

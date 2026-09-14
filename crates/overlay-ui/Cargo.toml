@@ -1,6 +1,6 @@
 [package]
 name = "overlay-ui"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "Fenetre overlay transparente (Windows, DirectComposition — voir S1) rendant les deux premiers panneaux de L2 (degats du combat en cours, recap de session) a partir d'overlay-engine/overlay-ingest."
