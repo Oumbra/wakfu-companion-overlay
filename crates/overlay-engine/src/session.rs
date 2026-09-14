@@ -368,6 +368,22 @@ struct FightWorking {
     /// victoires par instance du panneau Suivi) : au pire, un deuxième combattant homonyme jamais
     /// explicitement vaincu ne sera pas crédité une deuxième fois par le filet de rattrapage.
     resolved_enemies: std::collections::HashSet<String>,
+    /// `fighterId` (voir `LogEntry::FighterJoined`) de chaque combattant qui a déjà sa ligne dans
+    /// `snapshot.fighters` — miroir de `FightWorking.fighterIdsSeen` côté web
+    /// (`registerFighterJoin`, `stats-store.service.ts`), **oublié dans le portage jusqu'au
+    /// 2026-09-14**. Le client réémet `[_FL_] … join the fight` pour un même combattant au fil du
+    /// combat (placement, affectation d'un `obstacleId`, resynchronisation — et deux clients qui
+    /// observent le même combat l'écrivent chacun) : sans ce filtre, chaque réémission créait une
+    /// LIGNE de plus pour le même personnage, que la file d'initiative prenait ensuite pour un
+    /// homonyme distinct — au deuxième tour, ses dégâts partaient sur cette ligne fantôme, et le
+    /// panneau Combat affichait « Sagittarius Caecus » deux fois avec les totaux répartis (retour
+    /// utilisateur, capture à l'appui, combat à six personnages sur deux clients). Un
+    /// `fighterId` déjà vu ne crée jamais de ligne ; le siège d'initiative distingue toujours les
+    /// VRAIS homonymes (pack du même monstre : un `fighterId` chacun). Pas persisté par
+    /// `fight_store` : après un redémarrage en plein combat, ce sont les jetons de
+    /// `pending_restored_joins` qui absorbent les jointures rejouées — et elles y inscrivent leur
+    /// `fighterId`, pour que les suivantes du même combattant soient reconnues ici.
+    fighter_ids_seen: std::collections::HashSet<i64>,
     /// File d'initiative de ce combat — voir `InitiativeSeat`/`resolve_next_actor`.
     initiative_seats: Vec<InitiativeSeat>,
     /// Index (dans `initiative_seats`) du prochain siège attendu à jouer.
@@ -852,6 +868,7 @@ impl SessionState {
                 fight_id,
                 name,
                 breed,
+                fighter_id,
                 is_controlled_by_ai,
                 summoned_by,
                 ..
@@ -907,9 +924,17 @@ impl SessionState {
                         if let Some(remaining) = fight.pending_restored_joins.get_mut(name) {
                             if *remaining > 0 {
                                 *remaining -= 1;
+                                fight.fighter_ids_seen.insert(*fighter_id);
                                 return implicitly_defeated_enemies;
                             }
                         }
+                    }
+                }
+                // Réémission d'une jointure déjà vue (voir `FightWorking::fighter_ids_seen`) :
+                // ce combattant a déjà sa ligne, rien à créer.
+                if let Some(fight) = self.fights.get_mut(fight_id) {
+                    if !fight.fighter_ids_seen.insert(*fighter_id) {
+                        return implicitly_defeated_enemies;
                     }
                 }
                 let is_ally = !is_controlled_by_ai;
@@ -1389,6 +1414,7 @@ impl SessionState {
                 last_enemy_caster: None,
             },
             fighter_index: HashMap::new(),
+            fighter_ids_seen: std::collections::HashSet::new(),
             resolved_enemies: std::collections::HashSet::new(),
             initiative_seats: Vec::new(),
             initiative_cursor: 0,
@@ -1443,6 +1469,9 @@ impl SessionState {
             FightWorking {
                 snapshot: fight,
                 fighter_index,
+                // Les identifiants ne sont pas persistés (voir la doc du champ) : le rattrapage
+                // qui suit les réinscrit en consommant les jetons ci-dessus.
+                fighter_ids_seen: std::collections::HashSet::new(),
                 pending_restored_joins,
                 suspended: false,
                 resolved_enemies: std::collections::HashSet::new(),
@@ -2498,10 +2527,34 @@ fn entry_fight_id(entry: &LogEntry) -> Option<i64> {
 mod tests {
     use super::*;
 
+    /// Un `fighter_id` neuf à chaque appel, comme chaque combattant réel en a un : deux
+    /// homonymes construits ici sont deux combattants distincts (voir
+    /// `FightWorking::fighter_ids_seen`). La réémission d'une jointure se construit avec
+    /// `fighter_rejoined`.
     fn fighter_joined(
         fight_id: i64,
         name: &str,
         breed: i64,
+        is_controlled_by_ai: bool,
+    ) -> LogEntry {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static NEXT_ID: AtomicI64 = AtomicI64::new(1);
+        fighter_rejoined(
+            fight_id,
+            name,
+            breed,
+            NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            is_controlled_by_ai,
+        )
+    }
+
+    /// Jointure d'un combattant au `fighter_id` donné — une réémission quand cet identifiant a
+    /// déjà rejoint ce combat.
+    fn fighter_rejoined(
+        fight_id: i64,
+        name: &str,
+        breed: i64,
+        fighter_id: i64,
         is_controlled_by_ai: bool,
     ) -> LogEntry {
         LogEntry::FighterJoined {
@@ -2509,10 +2562,60 @@ mod tests {
             fight_id,
             name: name.to_string(),
             breed,
-            fighter_id: 1,
+            fighter_id,
             is_controlled_by_ai,
             summoned_by: None,
         }
+    }
+
+    /// Retour utilisateur du 2026-09-14 (capture à l'appui, combat à six personnages sur deux
+    /// clients) : chaque client réécrit `[_FL_] … join the fight` pour les mêmes combattants,
+    /// et l'un d'eux figurait deux fois au panneau Combat avec ses dégâts répartis — la ligne
+    /// fantôme créée par la réémission passait pour un homonyme à la file d'initiative, qui lui
+    /// donnait le deuxième tour. Un `fighter_id` déjà vu ne crée pas de ligne.
+    #[test]
+    fn une_jointure_reemise_ne_cree_pas_de_deuxieme_ligne() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_rejoined(1, "Sagittarius Caecus", 9, 5749864, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_rejoined(1, "Oumbra", 4, 11039330, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_rejoined(1, "Sagittarius Caecus", 9, 5749864, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_rejoined(1, "Oumbra", 4, 11039330, false),
+            ctx,
+            &mut Vec::new(),
+        );
+        state.apply(
+            &fighter_joined(1, "Sac à patates", 2335, true),
+            ctx,
+            &mut Vec::new(),
+        );
+        // Tour 1.
+        state.apply(&spell_cast(1, "Sagittarius Caecus"), ctx, &mut Vec::new());
+        state.apply(&damage(1, "Sagittarius Caecus", 100), ctx, &mut Vec::new());
+        state.apply(&spell_cast(1, "Oumbra"), ctx, &mut Vec::new());
+        state.apply(&damage(1, "Oumbra", 50), ctx, &mut Vec::new());
+        state.apply(&turn_ended(1), ctx, &mut Vec::new());
+        // Tour 2 : les dégâts restent sur la même ligne.
+        state.apply(&spell_cast(1, "Sagittarius Caecus"), ctx, &mut Vec::new());
+        state.apply(&damage(1, "Sagittarius Caecus", 70), ctx, &mut Vec::new());
+
+        let fight = &state.snapshot().fights[0];
+        let names: Vec<&str> = fight.fighters.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["Sagittarius Caecus", "Oumbra", "Sac à patates"]);
+        assert_eq!(fight.fighters[0].total_damage, 170);
     }
 
     /// Comme `fighter_joined`, mais pour une invocation (`summoned_by` renseigné) — `wakfu.log`
