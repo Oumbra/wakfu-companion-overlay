@@ -637,7 +637,7 @@ fn direction_a(
     liste: &[Perso],
 ) {
     let width = panel.inner.width();
-    ui.add(design::heading("Personnages").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Personnages"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 
@@ -646,7 +646,7 @@ fn direction_a(
     add_row(ui, nom, Some(&liste[1]), portraits, icons, width);
     ui.add_space(SECTION_GAP * 0.75);
 
-    ui.add(design::heading(format!("{} personnages", liste.len())).trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading(format!("{} personnages", liste.len())));
 
     panel.scroll_area(ui, "personnages.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -683,7 +683,7 @@ fn direction_b(
     lignes: &[Ligne],
 ) {
     let width = panel.inner.width();
-    ui.add(design::heading("Personnages").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Personnages"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 
@@ -1018,7 +1018,7 @@ fn personnages_c_comptes() {
     let mut ouverts = [true, false, false];
     let mut noms = [String::new(), String::new(), String::new()];
     let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        ui.add(design::heading("Personnages").trailing_gap(SECTION_GAP * 0.5));
+        ui.add(design::heading("Personnages"));
         paragraph(ui, DESC);
         ui.add_space(SECTION_GAP);
 
@@ -1067,7 +1067,7 @@ fn personnages_selecteur_classe() {
     let mut genre = 0usize;
     let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
         let width = panel.inner.width();
-        ui.add(design::heading("Choisir la classe").trailing_gap(SECTION_GAP * 0.5));
+        ui.add(design::heading("Choisir la classe"));
         paragraph(
             ui,
             "Le portrait porte l'identité du personnage dans tout l'overlay : liste de combat, \
@@ -1180,7 +1180,7 @@ fn personnages_selecteur_classe() {
 fn personnages_sans_compte() {
     let mut harness = options_harness(move |ui, _icons, _portraits, panel, _window| {
         let width = panel.inner.width();
-        ui.add(design::heading("Personnages").trailing_gap(SECTION_GAP * 0.5));
+        ui.add(design::heading("Personnages"));
         paragraph(ui, DESC);
         ui.add_space(SECTION_GAP);
         ui.add(
@@ -1205,7 +1205,7 @@ fn personnages_vide() {
     let mut nom = String::new();
     let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
         let width = panel.inner.width();
-        ui.add(design::heading("Personnages").trailing_gap(SECTION_GAP * 0.5));
+        ui.add(design::heading("Personnages"));
         paragraph(ui, DESC);
         ui.add_space(SECTION_GAP);
         account_row(ui, &mut compte, &mut serveur, width);
