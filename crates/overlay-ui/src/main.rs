@@ -120,10 +120,6 @@ const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_mill
 /// widget change à la seconde ; 500 ms suffisent pour voir chaque tour commencer.
 const TURN_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Combien de temps un toast de tour reste cliquable côté overlay — Windows le garde dans le
-/// centre de notifications bien plus longtemps, mais après ça le tour est passé de toute façon.
-const TURN_TOAST_RETENTION: std::time::Duration = std::time::Duration::from_secs(120);
-
 /// Voir `App::last_foreground_heartbeat`.
 const FOREGROUND_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
@@ -428,9 +424,6 @@ struct App {
     /// Dernier tick de `sync_turn_watch` : la capture d'une fenêtre est bien plus chère que les
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
-    /// Toasts de tour affichés, gardés vivants pour recevoir le clic (voir
-    /// `turn_watch::notify::Toast`) — purgés au bout de `TURN_TOAST_RETENTION`.
-    turn_toasts: Vec<(std::time::Instant, turn_watch::notify::Toast)>,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -586,7 +579,6 @@ impl App {
             turn_notification,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
-            turn_toasts: Vec::new(),
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -984,8 +976,6 @@ impl App {
             return;
         }
         self.turn_watch_last_tick = Some(now);
-        self.turn_toasts
-            .retain(|(shown, _)| now.duration_since(*shown) < TURN_TOAST_RETENTION);
 
         // Une fenêtre de jeu par personnage — les overlays Combat et Suivi partagent le même
         // `game_hwnd`, on ne la lit qu'une fois.
@@ -1042,16 +1032,14 @@ impl App {
                     }
                     turn_watch::watcher::Event::Notify { character } => {
                         tracing::info!("[tour] >>> {character} doit jouer — notification.");
-                        // Le clic ramène la fenêtre de CE personnage au premier plan — la `HWND`
-                        // passe en entier, le gestionnaire tourne sur un thread du système.
-                        let target = hwnd.0 as isize;
-                        match turn_watch::notify::show(
+                        // Le clic ramène la fenêtre de CE personnage au premier plan — par un
+                        // process frais lancé sur l'URI du toast (voir `turn_watch::notify`).
+                        if let Err(err) = turn_watch::notify::show(
                             &format!("{character} doit jouer"),
                             "C'est à toi — clique pour passer sur sa fenêtre",
-                            move || turn_watch::notify::focus_window(target),
+                            hwnd.0 as isize,
                         ) {
-                            Ok(toast) => self.turn_toasts.push((now, toast)),
-                            Err(err) => tracing::warn!("[tour] notification en échec : {err}"),
+                            tracing::warn!("[tour] notification en échec : {err}");
                         }
                         // Le toast est silencieux (sons système seuls autorisés, jugés
                         // insipides) : le son est le nôtre.
@@ -3035,6 +3023,18 @@ fn resolve_path(config: &config::OverlayConfig) -> PathBuf {
 }
 
 fn main() {
+    // Lancé par le clic d'un toast de tour (activation de protocole, voir
+    // `turn_watch::notify`) : ce process n'existe que pour donner le premier plan à la fenêtre
+    // du personnage, ce que l'overlay déjà en cours n'a pas le droit de faire. Rien d'autre n'est
+    // initialisé — pas de journal, pas de moteur — et il se termine aussitôt.
+    if let Some(hwnd) = std::env::args()
+        .nth(1)
+        .as_deref()
+        .and_then(turn_watch::notify::parse_focus_uri)
+    {
+        turn_watch::notify::focus_window(hwnd);
+        return;
+    }
     let log_dir = logging::init();
     logging::install_ctrlc_handler();
     if let Some(dir) = &log_dir {

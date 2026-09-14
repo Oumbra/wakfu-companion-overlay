@@ -200,10 +200,14 @@ pub fn find_gold_panel(band: &Band) -> Option<Rect> {
 ///
 /// La bande s'arrête donc à un dixième de panneau au-dessus (9 px) : descendantes dedans, halo
 /// dehors. Elle commence une demi-hauteur plus haut, et est ensuite rognée au texte.
+///
+/// En largeur, **quatre panneaux** vers la gauche (480 px à 100 %) : un nom Wakfu fait jusqu'à
+/// vingt caractères, « Sagitta Tenebrarum » en occupe déjà ~160 px, et le nom déborde du cadre
+/// vers la gauche plutôt que d'être coupé (retour utilisateur du 2026-09-14, six personnages).
 pub fn name_area_above(panel: Rect, band: &Band) -> Rect {
     let h = panel.height();
     Rect {
-        x0: panel.x1.saturating_sub(320),
+        x0: panel.x1.saturating_sub(panel.width() * 4),
         y0: panel.y0.saturating_sub(h / 2),
         x1: (panel.x1 + 4).min(band.width),
         y1: panel.y0.saturating_sub(h / 10),
@@ -251,9 +255,10 @@ const TEXT_LUMA: u32 = 170;
 
 /// Extrait le texte de `area` : binarise, garde le **bloc de lignes le plus dense** (le nom, pas
 /// un reflet du médaillon d'initiative quelques lignes plus haut), puis, dans ces lignes, le
-/// **bloc de colonnes contigu le plus à droite** (le nom est aligné à droite ; un gap de 12
-/// colonnes vides le sépare de tout ce qui traîne à gauche — l'étincelle animée, typiquement).
-/// `None` si rien de blanc — pas de widget, ou le tout début d'un combat.
+/// **bloc de colonnes contigu le plus à droite** (le nom est aligné à droite ; un trou d'un tiers
+/// de la hauteur de la zone — 12 colonnes à 100 %, deux fois l'espace entre deux mots — le sépare
+/// de tout ce qui traîne à gauche, l'étincelle animée typiquement). `None` si rien de blanc — pas
+/// de widget, ou le tout début d'un combat.
 pub fn extract_glyph(band: &Band, area: Rect) -> Option<Glyph> {
     let area = Rect {
         x0: area.x0.min(band.width),
@@ -303,7 +308,9 @@ pub fn extract_glyph(band: &Band, area: Rect) -> Option<Glyph> {
         }
     }
     let (top, bottom, _) = best?;
-    // Colonnes, dans ces lignes : depuis la droite, jusqu'au premier trou de 12 colonnes.
+    // Colonnes, dans ces lignes : depuis la droite, jusqu'au premier trou d'un tiers de hauteur
+    // de zone (suit l'échelle d'interface — un espace entre deux mots en fait la moitié).
+    let word_gap = (h / 3).max(8);
     let col_has = |x: usize| (top..=bottom).any(|y| bits[y * w + x]);
     let last = (0..w).rev().find(|&x| col_has(x))?;
     let mut first = last;
@@ -314,7 +321,7 @@ pub fn extract_glyph(band: &Band, area: Rect) -> Option<Glyph> {
             gap = 0;
         } else {
             gap += 1;
-            if gap >= 12 {
+            if gap >= word_gap {
                 break;
             }
         }
