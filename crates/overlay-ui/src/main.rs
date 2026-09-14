@@ -78,6 +78,7 @@ use overlay_ui::render_content::{
     AuthCommand, AuthFailure, AuthStatus, OverlayKind, RenderContent, UserEvent,
 };
 use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
+use overlay_ui::turn_watch;
 use overlay_ui::ui_icons::{self, UiIcons};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
@@ -114,6 +115,10 @@ const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from
 /// 2026-09-01), assez long pour absorber un aléa de timing d'un seul tick (~50 ms) entre les deux
 /// overlays d'un même personnage.
 const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// Cadence de la surveillance de tour (§9.1 decies) — voir `App::sync_turn_watch`. Le chrono du
+/// widget change à la seconde ; 500 ms suffisent pour voir chaque tour commencer.
+const TURN_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Voir `App::last_foreground_heartbeat`.
 const FOREGROUND_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
@@ -408,6 +413,12 @@ struct App {
     /// persisté (`config::OverlayConfig::turn_notification`), même politique que
     /// `combat_always_visible` : lu au démarrage, remplacé à la validation de la fenêtre Options.
     turn_notification: bool,
+    /// La surveillance de tour (§9.1 decies) — voir `sync_turn_watch`. Toujours construite, même
+    /// option décochée : les gabarits chargés au démarrage servent dès qu'on la coche.
+    turn_watcher: turn_watch::watcher::Watcher,
+    /// Dernier tick de `sync_turn_watch` : la capture d'une fenêtre est bien plus chère que les
+    /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
+    turn_watch_last_tick: Option<std::time::Instant>,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -550,6 +561,8 @@ impl App {
             log_path,
             combat_always_visible,
             turn_notification,
+            turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
+            turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -892,6 +905,94 @@ impl App {
     /// refaire à chaque combat mettrait ce coût pile au moment où le joueur a besoin de voir ses
     /// dégâts. `set_visible` ne coûte rien et garde la fenêtre prête.
     ///
+    /// Un tick de la surveillance de tour (§9.1 decies du plan) : pour chaque fenêtre de jeu en
+    /// combat, lire le bas de la fenêtre (`turn_watch::capture`), le donner à la machine d'états
+    /// (`turn_watch::watcher`), et honorer ce qu'elle rend — un gabarit à enregistrer, ou une
+    /// notification à envoyer.
+    ///
+    /// Cadencée par `TURN_WATCH_INTERVAL`, pas par le tick de 20 Hz d'`about_to_wait` : une capture
+    /// `PrintWindow` coûte quelques millisecondes par fenêtre, et un chrono qui change à la seconde
+    /// n'a pas besoin de mieux que 2 Hz. Rien n'est capturé hors combat — le moteur le sait avant
+    /// toute lecture d'écran.
+    ///
+    /// Option décochée : rien. Mais les gabarits restent chargés et le `Watcher` construit, pour
+    /// qu'une case cochée en cours de session agisse au tick suivant.
+    fn sync_turn_watch(&mut self) {
+        if !self.turn_notification {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self
+            .turn_watch_last_tick
+            .is_some_and(|t| now.duration_since(t) < TURN_WATCH_INTERVAL)
+        {
+            return;
+        }
+        self.turn_watch_last_tick = Some(now);
+
+        // Une fenêtre de jeu par personnage — les overlays Combat et Suivi partagent le même
+        // `game_hwnd`, on ne la lit qu'une fois.
+        let mut targets: Vec<(String, HWND)> = Vec::new();
+        for overlay in self.windows.values() {
+            if !matches!(overlay.kind, OverlayKind::Combat | OverlayKind::Watchlist) {
+                continue;
+            }
+            if targets.iter().any(|(_, h)| h.0 == overlay.game_hwnd.0) {
+                continue;
+            }
+            targets.push((overlay.character_name.clone(), overlay.game_hwnd));
+        }
+        if targets.is_empty() {
+            return;
+        }
+
+        let snapshot = self.snapshot.load();
+        let foreground = unsafe { GetForegroundWindow() };
+        for (character, hwnd) in targets {
+            let key = overlay_engine::roster::normalize_wakfu_name(&character);
+            let fight = snapshot.fight_for_character(&character).map(|fight| {
+                let own_cast_len = fight
+                    .fighters
+                    .iter()
+                    .find(|f| {
+                        f.is_ally && overlay_engine::roster::normalize_wakfu_name(&f.name) == key
+                    })
+                    .map_or(0, |f| f.last_turn_casts.len());
+                turn_watch::watcher::FightFacts {
+                    ongoing: fight.ongoing,
+                    own_cast_len,
+                }
+            });
+            // Pas de capture hors combat : le moteur le sait, inutile de lire l'écran.
+            let band = fight
+                .filter(|f| f.ongoing)
+                .and_then(|_| turn_watch::capture::capture_bottom_band(hwnd));
+            let events = self.turn_watcher.tick(turn_watch::watcher::TickInput {
+                character: &character,
+                band: band.as_ref(),
+                fight,
+                foreground: foreground.0 == hwnd.0,
+                now,
+            });
+            for event in events {
+                match event {
+                    turn_watch::watcher::Event::TemplateLearned { character, glyph } => {
+                        turn_watch::templates::save(&character, &glyph);
+                    }
+                    turn_watch::watcher::Event::Notify { character } => {
+                        tracing::info!("[tour] >>> {character} doit jouer — notification.");
+                        if let Err(err) = turn_watch::notify::show(
+                            &format!("{character} doit jouer"),
+                            "C'est à toi — Wakfu",
+                        ) {
+                            tracing::warn!("[tour] notification en échec : {err}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Appelée à chaque tick d'`about_to_wait`, juste après `sync_windows` (une fenêtre tout juste
     /// créée est donc déjà au bon état) et avant `sync_topmost` (une fenêtre qui vient de
     /// réapparaître doit être promue dans la même passe).
@@ -2702,6 +2803,9 @@ impl ApplicationHandler<UserEvent> for App {
         // vient peut-être de créer la fenêtre, `sync_topmost` doit voir son état final.
         self.sync_combat_visibility();
         self.sync_topmost();
+        // Surveillance de tour (§9.1 decies) — après `sync_windows`, qui vient de mettre à jour
+        // la liste des fenêtres de jeu qu'elle lit.
+        self.sync_turn_watch();
 
         // Honore les délais de redessin qu'egui a demandés (tooltip au survol d'un portrait,
         // typiquement) et qu'aucun `WindowEvent`/`UserEvent` ne redéclenchera de lui-même — voir

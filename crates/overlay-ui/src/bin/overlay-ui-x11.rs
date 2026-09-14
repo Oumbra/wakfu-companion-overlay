@@ -887,6 +887,14 @@ mod linux_main {
                                 "désactivée"
                             }
                         );
+                        // La lecture du widget passe par une capture de fenêtre sans focus, tranchée
+                        // sous Windows (spike S4) et pas encore sous X11 (`XCompositeNameWindowPixmap`,
+                        // §14 point 7 du plan) : le réglage est persisté, il ne fait rien ici.
+                        if self.turn_notification {
+                            tracing::warn!(
+                                "[tour] la notification de tour n'est pas encore disponible sous                                  Linux — réglage enregistré, sans effet pour l'instant."
+                            );
+                        }
                     }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.

@@ -8,9 +8,11 @@
 //! - [`watcher`] — la machine d'états par fenêtre : apprendre le gabarit du personnage quand le
 //!   log dit qu'il joue, reconnaître son tour ensuite, décider quand notifier. Sans OS non plus :
 //!   la capture et la notification lui sont injectées.
+//! - [`templates`] — les gabarits appris, un PNG par personnage dans le dossier de données.
 //! - `capture` / `notify` (Windows seulement) — `PrintWindow` de la bande basse d'une fenêtre, et
 //!   le toast système. Le binaire X11 compile sans eux : l'option y est sans effet, et le dit.
 
+pub mod templates;
 pub mod vision;
 pub mod watcher;
 
