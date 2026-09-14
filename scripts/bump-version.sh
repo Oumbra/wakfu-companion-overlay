@@ -150,17 +150,25 @@ git add Cargo.toml
 # `--no-verify` : les hooks de VALIDATION (pre-commit/commit-msg) ont déjà tourné pour ce commit,
 # les rejouer ne vérifierait rien de neuf. `post-commit`, lui, se relance quand même (git l'exécute
 # hors du périmètre de `--no-verify`) — c'est `WAKFU_VERSION_BUMP_AMEND` qui l'arrête.
-if ! WAKFU_VERSION_BUMP_AMEND=1 git commit --amend --no-edit --no-verify --quiet; then
+# stderr de la PREMIÈRE tentative mis de côté : quand la signature est indisponible, git y écrit
+# un « fatal: cannot exec … / failed to write commit object » qui n'est pas un incident — le repli
+# juste en dessous règle le cas. Ne l'afficher que si les DEUX tentatives échouent, sinon le hook
+# crie à l'erreur sur un commit qui s'est parfaitement bien passé.
+erreur_signature="$(mktemp)"
+if ! WAKFU_VERSION_BUMP_AMEND=1 git commit --amend --no-edit --no-verify --quiet 2> "$erreur_signature"; then
   # Repli documenté par CLAUDE.md : en session cloud, le programme de signature (`gpg.ssh.program`,
   # script temporaire) est parfois absent et `git commit` échoue sur `failed to write commit
   # object`. Committer sans signature vaut mieux que laisser le dépôt avec un bump indexé mais
   # jamais committé, que le commit SUIVANT emporterait à tort.
   if ! WAKFU_VERSION_BUMP_AMEND=1 git commit --amend --no-edit --no-verify --no-gpg-sign --quiet; then
+    cat "$erreur_signature" >&2
+    rm -f "$erreur_signature"
     echo "[version] amend impossible — bump annulé (fichiers restaurés)." >&2
     git checkout -- Cargo.toml Cargo.lock xtask/Cargo.lock 2>/dev/null
     exit 1
   fi
   log "commit amendé SANS signature (programme de signature indisponible)."
 fi
+rm -f "$erreur_signature"
 
 log "$actuelle → $nouvelle ($niveau)"
