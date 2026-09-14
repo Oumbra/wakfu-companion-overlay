@@ -701,9 +701,11 @@ pub const CHAT_CARD_TEXT_MAX_WIDTH: f32 = 420.0;
 /// distance, par-dessus le jeu, 11 px ne se lit pas (retour du 2026-09-14). Choisi parmi
 /// 15/16/17 sur captures.
 const CHAT_CARD_LEGEND_FONT_SIZE: f32 = 16.0;
-/// Corps du mot trouvé (« gelano ») dans la carte de chat — celui des légendes de tuile
-/// (`LEGEND_TILE_LEGEND_FONT_SIZE`), un cran au-dessus pour rester lisible par-dessus le jeu.
-const CHAT_CARD_WORD_FONT_SIZE: f32 = 12.0;
+/// Corps de la ligne « Recherche : « gelano » » de la carte de chat — celui du message en
+/// dessous (retour utilisateur du 2026-09-14 : 12 px ne se lisait pas par-dessus le jeu), en
+/// italique synthétisé par epaint (aucune fonte italique n'est embarquée) et dans le gris des
+/// légendes.
+const CHAT_CARD_WORD_FONT_SIZE: f32 = 14.0;
 /// Marge verticale du contenu de la carte de chat, plus haute que `CARD_PAD_V` : la légende mord
 /// sur la bordure haute, le mot doit en rester décollé.
 const CHAT_CARD_PAD_V: f32 = 12.0;
@@ -1511,16 +1513,18 @@ fn chat_toast_card(
         },
         ..Default::default()
     };
-    // « gelano » — le corps des légendes de tuile, dans leur gris : c'est la même information
-    // (la recherche) au même rang. Une expression longue retourne à la ligne comme le message.
+    // « Recherche : « gelano » » — dans le gris des légendes de tuile, en italique : c'est la
+    // même information que sur la tuile, dite en aparté au-dessus du message. Une expression
+    // longue retourne à la ligne comme le message.
     let word_galley = {
         let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
         job.append(
-            &format!("« {word} »"),
+            &format!("Recherche : « {word} »"),
             0.0,
             egui::text::TextFormat {
                 font_id: text::label_font(&ctx, CHAT_CARD_WORD_FONT_SIZE),
                 color: fade(design::tokens::HEADING_TEXT),
+                italics: true,
                 ..Default::default()
             },
         );
