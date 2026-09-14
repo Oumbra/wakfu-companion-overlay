@@ -9,7 +9,10 @@ du widget « Fin du tour » identique à la seconde près, focus ou non). Ce qu'
 dire : si une capture *programmatique* — pas une capture d'écran de ce que DWM affiche — voit ce
 contenu quand la fenêtre est recouverte.
 
-**État : en cours de validation** (voir §« Résultats » en bas, complété au fil des essais).
+**État : validé sous Windows (2026-09-14, deux passages sur la machine du mainteneur).** Les deux
+API voient un contenu **vivant** d'une fenêtre Wakfu recouverte à 100 % — par l'autre client
+comme par une application tierce maximisée. Une fenêtre **minimisée** est hors d'atteinte des
+deux, et chacune le signale proprement. Réponse à la question posée : **oui.** Détail en §« Résultats ».
 
 ## Méthode
 
@@ -55,4 +58,44 @@ Le rapport final se lit par ligne ; les `*_widget.png` montrent le chrono captur
 
 ## Résultats
 
-_À compléter._
+Machine du mainteneur, Windows 11 Pro 22631, deux clients Wakfu en combat (Pugio Letalis, Oumbra),
+chacun plein écran fenêtré sur son moniteur (2560 × 1392 de zone client). Deux passages de 90 s,
+un tick par seconde, les deux méthodes à chaque tick.
+
+**Passage 1** — les deux fenêtres côte à côte, focus alterné à la main. Recoupe la vidéo du même
+jour : sans premier plan mais visible, le widget change à 40 paires sur 47 (PrintWindow) et 46 sur
+47 (WGC), chrono décompté seconde par seconde. WGC livre 2 images par tick, en continu.
+
+**Passage 2** — les trois gestes du protocole, l'occultation mesurée à chaque tick par la grille
+`WindowFromPoint`. Différence moyenne par canal entre deux recadrages « widget » consécutifs
+(seuil de changement : 0,5) :
+
+| Situation | PrintWindow | WGC |
+| --- | --- | --- |
+| Recouverte ≥ 90 % par l'autre client Wakfu (Pugio, t = 6–18 et 23–30) | vivant, chrono « Prêt » puis « Fin du tour » | vivant, 2 images/tick |
+| Recouverte ≥ 90 % par une **application tierce maximisée**, les deux fenêtres, aucune au premier plan (t = 37–42) | **96 → 95 → 94 → 93 → 92 → 91 s**, 5/5 paires changent, les deux fenêtres | **97 → 92 s**, 5/5, les deux fenêtres |
+| Minimisée (Pugio t = 45–50, Oumbra t = 53–57) | **aucune image** — `PrintWindow` renvoie faux | image **figée** sur la dernière reçue, **0 image** livrée par DWM pendant la minimisation |
+
+Totaux sous occultation (minimisée exclue) : Oumbra 13/13 paires changent (PrintWindow), 12/13
+(WGC) ; Pugio 15/25 et 14/25 — les paires immobiles de Pugio sont les ticks 8–16, phase de
+placement où le widget est un fond quasi noir avec un seul petit chiffre qui bouge, sous le seuil ;
+la planche des captures le montre vivant.
+
+Ce qu'on retient pour l'implémentation :
+
+- **Les deux API conviennent ; `PrintWindow` est retenue pour la v1.** Synchrone, à la demande,
+  aucune session à tenir par fenêtre, aucun liseré, et l'image de l'instant même — WGC, dans ce
+  spike, est en retard d'environ une seconde (dernière image du pool, drainée à 1 Hz), et sous
+  Windows 11 peut dessiner un liseré jaune. WGC reste le repli documenté si `PrintWindow` échouait
+  sur une autre configuration graphique, avec un atout propre : « 0 image reçue » dit à lui seul
+  que la fenêtre ne vit plus.
+- **Minimisée = non couvert**, à annoncer tel quel : `PrintWindow` échoue (à traiter comme « pas de
+  lecture ce tick »), et `IsIconic` le dit avant même d'essayer.
+- **Coût** : `PrintWindow` rend toute la fenêtre (14 Mo de DIB en 2560 × 1392), mais `GetDIBits`
+  sait ne copier que les dernières lignes (`startScan`/`cLines`) — le widget vit en bas, une bande
+  de 200 lignes suffit, soit 2 Mo par lecture. À 2 Hz sur deux fenêtres, négligeable.
+- Un tick de ce spike dure ~1,5 s au lieu de 1 : c'est l'écriture de huit PNG plein cadre par tick,
+  pas la capture.
+
+**Hors périmètre de ce spike** : Linux / X11 (`XCompositeNameWindowPixmap`), à valider séparément
+sur une machine Linux — le mainteneur teste sous SteamOS (voir `scripts/ci-local.sh`).

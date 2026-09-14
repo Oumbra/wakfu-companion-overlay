@@ -30,9 +30,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClientRect, GetForegroundWindow, GetWindowTextW, IsIconic, IsWindowVisible,
+    EnumWindows, GetAncestor, GetClientRect, GetForegroundWindow, GetWindowRect, GetWindowTextW,
+    IsIconic, IsWindowVisible, WindowFromPoint, GA_ROOT,
 };
 
 mod printwindow;
@@ -163,6 +164,37 @@ fn list_game_windows(title_filter: Option<&str>) -> Vec<GameWindow> {
     ctx.out
 }
 
+/// Part de la fenêtre recouverte par d'autres, mesurée en sondant une grille de points de son
+/// rectangle avec `WindowFromPoint` : un point dont la fenêtre racine n'est pas `hwnd` est
+/// recouvert (ou hors écran). 0.0 = entièrement visible, 1.0 = entièrement cachée. C'est cette
+/// mesure, croisée avec le contenu capturé, qui prouve qu'une API voit une fenêtre occultée.
+fn occlusion(hwnd: HWND) -> f64 {
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+        return 1.0;
+    }
+    let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+    if w <= 0 || h <= 0 {
+        return 1.0;
+    }
+    const N: i32 = 7;
+    let mut hidden = 0;
+    for iy in 0..N {
+        for ix in 0..N {
+            // Grille strictement intérieure (jamais sur le bord, où vit le cadre).
+            let p = POINT {
+                x: rect.left + w * (2 * ix + 1) / (2 * N),
+                y: rect.top + h * (2 * iy + 1) / (2 * N),
+            };
+            let under = unsafe { GetAncestor(WindowFromPoint(p), GA_ROOT) };
+            if under.0 != hwnd.0 {
+                hidden += 1;
+            }
+        }
+    }
+    hidden as f64 / (N * N) as f64
+}
+
 fn is_foreground(hwnd: HWND) -> bool {
     let fg = unsafe { GetForegroundWindow() };
     fg.0 == hwnd.0
@@ -280,6 +312,8 @@ fn main() {
     struct Sample {
         tick: u32,
         foreground: bool,
+        occlusion: f64,
+        minimized: bool,
         black: f64,
         wgc_frames: u32,
         widget: Frame,
@@ -293,6 +327,7 @@ fn main() {
         for w in &windows {
             let fg = is_foreground(w.hwnd);
             let iconic = unsafe { IsIconic(w.hwnd) }.as_bool();
+            let occ = occlusion(w.hwnd);
             for &m in &args.methods {
                 let (frame, wgc_frames) = match m {
                     Method::PrintWindow => (printwindow::capture(w.hwnd), 0),
@@ -306,12 +341,13 @@ fn main() {
                 };
                 let Some(frame) = frame else {
                     println!(
-                        "t={:>2}  {:<11} {:<24} premier plan={:<5} minimisée={:<5} — aucune image",
+                        "t={:>2}  {:<11} {:<24} premier plan={:<5} minimisée={:<5} recouverte={:>3.0}% — aucune image",
                         tick,
                         m.label(),
                         w.character,
                         fg,
-                        iconic
+                        iconic,
+                        occ * 100.0
                     );
                     continue;
                 };
@@ -321,12 +357,13 @@ fn main() {
                 let _ = frame.save_png(&args.out.join(format!("{base}.png")));
                 let _ = widget.save_png(&args.out.join(format!("{base}_widget.png")));
                 println!(
-                    "t={:>2}  {:<11} {:<24} premier plan={:<5} minimisée={:<5} {}x{}  noir={:>5.1}%{}",
+                    "t={:>2}  {:<11} {:<24} premier plan={:<5} minimisée={:<5} recouverte={:>3.0}% {}x{}  noir={:>5.1}%{}",
                     tick,
                     m.label(),
                     w.character,
                     fg,
                     iconic,
+                    occ * 100.0,
                     frame.width,
                     frame.height,
                     black * 100.0,
@@ -339,6 +376,8 @@ fn main() {
                 log.entry((m, w.character.clone())).or_default().push(Sample {
                     tick,
                     foreground: fg,
+                    occlusion: occ,
+                    minimized: iconic,
                     black,
                     wgc_frames,
                     widget,
@@ -359,12 +398,17 @@ fn main() {
         // Vivant = le recadrage « widget » change d'un tick à l'autre, sur les ticks où la
         // fenêtre n'avait PAS le premier plan (c'est le cas qu'on teste).
         let mut diffs_bg = Vec::new();
+        let mut diffs_occ = Vec::new();
         let mut diffs_all = Vec::new();
         for pair in samples.windows(2) {
             let d = pair[0].widget.mean_diff(&pair[1].widget);
             diffs_all.push(d);
             if !pair[0].foreground && !pair[1].foreground {
                 diffs_bg.push(d);
+            }
+            let occluded = |s: &Sample| s.occlusion >= 0.9 && !s.minimized;
+            if occluded(&pair[0]) && occluded(&pair[1]) {
+                diffs_occ.push(d);
             }
         }
         let mean = |v: &[f64]| {
@@ -375,6 +419,7 @@ fn main() {
             }
         };
         let changed_bg = diffs_bg.iter().filter(|d| **d > 0.5).count();
+        let changed_occ = diffs_occ.iter().filter(|d| **d > 0.5).count();
         let wgc_total: u32 = samples.iter().map(|s| s.wgc_frames).sum();
         let verdict = if black_avg > 0.98 {
             "NOIR   — la méthode ne voit pas cette fenêtre"
@@ -404,6 +449,26 @@ fn main() {
         println!("            → {verdict}");
         let ticks_bg: Vec<u32> = samples.iter().filter(|s| !s.foreground).map(|s| s.tick).collect();
         println!("            ticks sans premier plan : {ticks_bg:?}");
+        let ticks_occ: Vec<u32> = samples.iter().filter(|s| s.occlusion >= 0.9 && !s.minimized).map(|s| s.tick).collect();
+        let ticks_min: Vec<u32> = samples.iter().filter(|s| s.minimized).map(|s| s.tick).collect();
+        if !ticks_min.is_empty() {
+            let frames_min: u32 = samples.iter().filter(|s| s.minimized).map(|s| s.wgc_frames).sum();
+            println!(
+                "            ticks minimisée : {ticks_min:?}{}",
+                if *m == Method::Wgc { format!("  images WGC reçues pendant : {frames_min} (0 = DWM ne compose plus, image figée)") } else { String::new() }
+            );
+        }
+        if diffs_occ.is_empty() {
+            println!("            ticks recouverte ≥ 90 % : aucun — l'occultation n'a pas été testée");
+        } else {
+            println!(
+                "            ticks recouverte ≥ 90 % : {ticks_occ:?}  Δwidget={:.2} ({} paires, {} changent) → {}",
+                mean(&diffs_occ),
+                diffs_occ.len(),
+                changed_occ,
+                if changed_occ * 2 >= diffs_occ.len() { "VIVANT sous occultation" } else { "FIGÉ sous occultation" }
+            );
+        }
     }
     println!("\nCaptures dans {} — ouvrir les *_widget.png pour voir le chrono.", args.out.display());
 }
