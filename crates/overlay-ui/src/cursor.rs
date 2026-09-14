@@ -2,11 +2,13 @@
 //! overlay interactif — pour que l'overlay se fonde dans l'interface de Wakfu jusque dans le
 //! curseur, comme il le fait déjà pour ses boutons et ses infobulles.
 //!
-//! **Source.** Les deux bitmaps d'`assets/cursor/` (voir son `README.md`) : `wakfu-cursor-idle.png`
-//! (repos, remplissage crème) et `wakfu-cursor-flash.png` (éclair, remplissage cyan), isolés pixel
-//! par pixel depuis un enregistrement d'écran du jeu (2026-09-13). Le point chaud (la pointe de la
-//! flèche) est **déduit de l'image** — première ligne opaque, pixel opaque le plus à gauche — plutôt
-//! que codé en dur : les fichiers peuvent être re-détourés (marge, taille) sans toucher à ce module.
+//! **Source.** Les bitmaps d'`assets/cursor/` (voir son `README.md`) : `wakfu-cursor-idle.png`
+//! (repos, remplissage crème) et `wakfu-cursor-flash.png` (éclair, remplissage cyan) pour la
+//! flèche, `wakfu-cursor-move.png` (croix fléchée) et `wakfu-cursor-text.png` (I-beam), isolés pixel
+//! par pixel depuis des enregistrements d'écran du jeu (2026-09-13). Le point chaud de la flèche
+//! (sa pointe) est **déduit de l'image** — première ligne opaque, pixel opaque le plus à gauche —
+//! plutôt que codé en dur : les fichiers peuvent être re-détourés (marge, taille) sans toucher à ce
+//! module.
 //!
 //! **Comportement, calqué sur le jeu** (mesuré sur la vidéo, 30 i/s) :
 //!
@@ -28,9 +30,13 @@
 //!   main système qui se fermerait au milieu d'un geste commencé sous la croix casserait
 //!   l'illusion. Son point chaud est au CENTRE, pas à la pointe : c'est une croix symétrique, elle
 //!   ne pointe nulle part ;
-//! - tout autre curseur (`Text` d'un champ de saisie, `ResizeHorizontal` d'un curseur de réglage,
-//!   `None`…) → curseur **système** correspondant, inchangé : le jeu lui-même n'a pas de variante
-//!   de sa flèche pour ces cas, et un I-beam reste plus lisible qu'une flèche sur du texte.
+//! - I-beam (`CursorIcon::Text`, posé par egui au survol d'un champ de saisie) → bitmap
+//!   `wakfu-cursor-text.png`, **fixe** (couleur constante sur les 103 images où il est visible,
+//!   voir `assets/cursor/README.md`). Point chaud au CENTRE lui aussi : c'est la hampe, entre les
+//!   deux empattements, qui marque l'endroit où le clic posera le caret ;
+//! - tout autre curseur (`ResizeHorizontal` d'un curseur de réglage, `VerticalText`, `None`…) →
+//!   curseur **système** correspondant, inchangé : le jeu lui-même n'a pas de variante pour ces
+//!   cas.
 //!
 //! **Mécanique.** egui 0.36 sait porter un curseur bitmap ([`egui::Context::set_cursor_image`],
 //! relayé par `PlatformOutput::cursor_image`) et `egui-winit` l'applique via
@@ -62,8 +68,9 @@ pub const IDLE_DURATION: Duration = Duration::from_millis(533);
 const IDLE_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-idle.png");
 const FLASH_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-flash.png");
 const MOVE_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-move.png");
+const TEXT_BYTES: &[u8] = include_bytes!("../../../assets/cursor/wakfu-cursor-text.png");
 
-/// Les deux bitmaps décodés, prêts à être publiés tels quels à egui (voir la doc de module pour
+/// Les bitmaps décodés, prêts à être publiés tels quels à egui (voir la doc de module pour
 /// pourquoi une seule instance partagée par tout le processus).
 pub struct CursorImages {
     /// Repos (crème) — aussi le curseur fixe hors de tout élément cliquable.
@@ -72,9 +79,11 @@ pub struct CursorImages {
     pub flash: egui::CustomCursorImage,
     /// Croix fléchée — ce qui se déplace au glisser-déposer. Sans clignotement.
     pub moving: egui::CustomCursorImage,
+    /// I-beam — au survol d'un champ de saisie. Sans clignotement.
+    pub text: egui::CustomCursorImage,
 }
 
-/// Décodage paresseux, une fois par processus. Panique si un des deux PNG embarqués est illisible
+/// Décodage paresseux, une fois par processus. Panique si un des PNG embarqués est illisible
 /// ou vide : ce serait un asset cassé à la compilation, jamais une condition d'exécution.
 pub fn images() -> &'static CursorImages {
     static IMAGES: OnceLock<CursorImages> = OnceLock::new();
@@ -82,6 +91,7 @@ pub fn images() -> &'static CursorImages {
         idle: decode(IDLE_BYTES, "wakfu-cursor-idle.png", Hotspot::ArrowTip),
         flash: decode(FLASH_BYTES, "wakfu-cursor-flash.png", Hotspot::ArrowTip),
         moving: decode(MOVE_BYTES, "wakfu-cursor-move.png", Hotspot::Center),
+        text: decode(TEXT_BYTES, "wakfu-cursor-text.png", Hotspot::Center),
     })
 }
 
@@ -89,12 +99,13 @@ pub fn images() -> &'static CursorImages {
 ///
 /// Déduire la pointe de l'image (voir [`hotspot`]) ne vaut que pour une flèche : appliquée à la
 /// croix fléchée, la règle donnerait le sommet de la flèche du haut, et tout ce qu'on déplacerait
-/// serait décalé d'une demi-croix vers le bas.
+/// serait décalé d'une demi-croix vers le bas ; appliquée à l'I-beam, le coin de l'empattement du
+/// haut, et le caret se poserait une demi-hampe trop bas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hotspot {
     /// Pointe de la flèche, déduite des pixels.
     ArrowTip,
-    /// Centre du bitmap — une croix symétrique ne pointe nulle part.
+    /// Centre du bitmap — une croix symétrique ne pointe nulle part, un I-beam vise sa hampe.
     Center,
 }
 
@@ -173,12 +184,16 @@ pub fn apply(ctx: &egui::Context, now: Instant) {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
             ctx.set_cursor_image(Some(images.idle.clone()));
         }
-        // Fixe : aucun redessin réclamé, et l'instant d'entrée en mode main est oublié pour que le
-        // prochain survol d'un cliquable reparte sur un éclair. Les trois curseurs de déplacement
-        // ou de saisie partagent la croix — voir la doc de module.
+        // Fixes : aucun redessin réclamé, et l'instant d'entrée en mode main est oublié pour que
+        // le prochain survol d'un cliquable reparte sur un éclair. Les trois curseurs de
+        // déplacement ou de saisie partagent la croix — voir la doc de module.
         egui::CursorIcon::Move | egui::CursorIcon::Grab | egui::CursorIcon::Grabbing => {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
             ctx.set_cursor_image(Some(images.moving.clone()));
+        }
+        egui::CursorIcon::Text => {
+            ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
+            ctx.set_cursor_image(Some(images.text.clone()));
         }
         _ => {
             ctx.data_mut(|d| d.remove::<Instant>(pointer_since_id()));
@@ -238,22 +253,36 @@ mod tests {
         assert_eq!(images.idle.hotspot, images.flash.hotspot);
     }
 
-    /// **La croix vise son centre**, et non la pointe d'une de ses quatre flèches : ce qu'on
-    /// déplace suit le pixel qu'on a saisi, pas un point décalé d'une demi-croix.
+    /// **La croix et l'I-beam visent leur centre**, et non la pointe d'une flèche ou le coin d'un
+    /// empattement : ce qu'on déplace suit le pixel qu'on a saisi, et le caret se pose sous la
+    /// hampe.
     #[test]
-    fn la_croix_flechee_est_ancree_en_son_centre() {
-        let croix = &images().moving;
-        assert_eq!(
-            croix.hotspot,
-            [croix.size[0] / 2, croix.size[1] / 2],
-            "point chaud {:?} hors du centre de {:?}",
-            croix.hotspot,
-            croix.size
-        );
-        assert_eq!(
-            croix.rgba.len(),
-            usize::from(croix.size[0]) * usize::from(croix.size[1]) * 4,
-            "tampon RGBA incohérent avec la taille"
+    fn la_croix_flechee_et_l_i_beam_sont_ancres_en_leur_centre() {
+        let images = images();
+        for (name, image) in [("move", &images.moving), ("text", &images.text)] {
+            assert_eq!(
+                image.hotspot,
+                [image.size[0] / 2, image.size[1] / 2],
+                "{name} : point chaud {:?} hors du centre de {:?}",
+                image.hotspot,
+                image.size
+            );
+            assert_eq!(
+                image.rgba.len(),
+                usize::from(image.size[0]) * usize::from(image.size[1]) * 4,
+                "{name} : tampon RGBA incohérent avec la taille"
+            );
+        }
+        // L'I-beam est symétrique : son centre tombe sur la colonne crème de la hampe, à
+        // mi-hauteur — pas sur le contour noir.
+        let text = &images.text;
+        let [x, y] = text.hotspot;
+        let px =
+            &text.rgba[(usize::from(y) * usize::from(text.size[0]) + usize::from(x)) * 4..][..4];
+        assert!(
+            px[3] == 255 && px[0] > 200,
+            "point chaud {:?} de l'I-beam sur un pixel {px:?}, attendu la hampe crème",
+            text.hotspot
         );
     }
 
@@ -378,8 +407,16 @@ mod tests {
             );
         }
 
-        // Champ de saisie : curseur système, et l'entrée en mode main est oubliée…
-        let (image, _) = frame(&ctx, t0, ms(2000), egui::CursorIcon::Text);
+        // Champ de saisie : l'I-beam du jeu, fixe — aucun redessin réclamé.
+        let (image, delay) = frame(&ctx, t0, ms(1800), egui::CursorIcon::Text);
+        assert!(same(&image, &images.text), "Text : attendu l'I-beam");
+        assert!(
+            delay > Duration::from_secs(60),
+            "l'I-beam ne doit réclamer aucun redessin : {delay:?}"
+        );
+
+        // Curseur de réglage : curseur système, et l'entrée en mode main est oubliée…
+        let (image, _) = frame(&ctx, t0, ms(2000), egui::CursorIcon::ResizeHorizontal);
         assert!(image.is_none());
         // …donc un nouveau survol repart sur un éclair, quel que soit le temps écoulé.
         let (image, delay) = frame(&ctx, t0, ms(2600), egui::CursorIcon::PointingHand);
