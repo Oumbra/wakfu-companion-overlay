@@ -3492,3 +3492,204 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
     harness.run();
     assert!(same(&published(&harness), &images.idle));
 }
+
+// -------------------------------------------------------------------------------------------
+// Onglet « Chat » (2026-09-14) — les recherches qui font sonner l'overlay, et la carte de chat.
+// -------------------------------------------------------------------------------------------
+
+/// Le brouillon des captures : neuf recherches — assez pour trois rangées de tuiles, une rangée
+/// incomplète, et deux recherches globales.
+fn recherches_de_chat() -> overlay_ui::panels::chat_tab::ChatDraft {
+    use overlay_engine::{ChatChannel, ChatFilter, ChatFilterScope};
+    let canal = |c: ChatChannel, mot: &str| {
+        ChatFilter::new(ChatFilterScope::Channel(c), mot).expect("mot non vide")
+    };
+    let tous = |mot: &str| ChatFilter::new(ChatFilterScope::All, mot).expect("mot non vide");
+    overlay_ui::panels::chat_tab::ChatDraft {
+        filters: vec![
+            canal(ChatChannel::Commerce, "gelano"),
+            tous("donjon"),
+            canal(ChatChannel::Recrutement, "pvm"),
+            canal(ChatChannel::Guilde, "wa wabbit"),
+            canal(ChatChannel::Commerce, "bois de bouleau"),
+            canal(ChatChannel::Proximite, "archi"),
+            canal(ChatChannel::Communaute, "mise à jour"),
+            canal(ChatChannel::Commerce, "pierre de kamas"),
+            tous("kralamoure"),
+        ],
+        toast: Default::default(),
+    }
+}
+
+/// Même gabarit que `capture_onglet_alertes` : la fenêtre à sa taille réelle, l'onglet « Chat »
+/// actif, un survol optionnel (la croix d'une tuile).
+fn capture_onglet_chat(
+    nom: &str,
+    draft: Option<overlay_ui::panels::chat_tab::ChatDraft>,
+    availability: overlay_ui::panels::chat_tab::ChatAvailability,
+    survol: Option<egui::Pos2>,
+) {
+    use overlay_ui::panels::chat_tab::ChatTabState;
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Chat,
+        chat: ChatTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        chat_draft: draft,
+        chat_availability: availability,
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    if let Some(pos) = survol {
+        harness.hover_at(pos);
+        harness.run();
+    }
+    harness.snapshot(nom);
+}
+
+/// **L'onglet « Chat »** : « Tester le son », fermeture automatique, formulaire canal → mot →
+/// « Ajouter », neuf recherches en tuiles à légende, quatre par rangée.
+#[test]
+fn options_onglet_chat_recherches() {
+    capture_onglet_chat(
+        "options_chat_recherches",
+        Some(recherches_de_chat()),
+        Default::default(),
+        None,
+    );
+}
+
+/// Une tuile survolée : voile et croix de retrait, l'idiome des tuiles d'Alertes. La position
+/// vise le centre de la deuxième tuile (panneau à x ≈ 47, tuiles de ≈ 155 px et gouttière de 12).
+#[test]
+fn options_onglet_chat_survol_d_une_tuile() {
+    capture_onglet_chat(
+        "options_chat_survol_tuile",
+        Some(recherches_de_chat()),
+        Default::default(),
+        Some(egui::pos2(47.0 + 155.0 + 12.0 + 77.0, 470.0)),
+    );
+}
+
+/// Aucune recherche : le formulaire seul, et le bloc d'information qui dit quoi faire.
+#[test]
+fn options_onglet_chat_vide() {
+    capture_onglet_chat(
+        "options_chat_vide",
+        Some(Default::default()),
+        Default::default(),
+        None,
+    );
+}
+
+/// **La carte de chat par-dessus le jeu**, produite par le VRAI moteur : une recherche posée, un
+/// message de chat en direct qui lui correspond, l'alerte drainée et le toast construit comme
+/// `engine_thread` le fait — jamais un `ChatAlert` fabriqué à la main.
+#[test]
+fn panneau_suivi_avec_carte_de_chat() {
+    use overlay_engine::{ChatChannel, ChatFilter, ChatFilterScope};
+    use overlay_ingest::LineBatch;
+
+    let mut engine = test_engine();
+    engine.set_chat_filters(vec![ChatFilter::new(
+        ChatFilterScope::Channel(ChatChannel::Commerce),
+        "gelano",
+    )
+    .expect("mot")]);
+    engine
+        .ingest_batch(&LineBatch {
+            lines: vec![
+                " INFO 21:08:40,000 [AWT-EventQueue-0] (aPV:174) - [Commerce] Huppermage-Bleu : \
+                 vends Gelano 900k, prix ferme, mp si intéressé — je suis à Bonta près du zaap"
+                    .to_string(),
+            ],
+            is_initial_load: false,
+        })
+        .expect("ingestion du message");
+    let alert = engine
+        .drain_chat_alerts()
+        .pop()
+        .expect("le message doit correspondre à la recherche");
+    let created_at = std::time::Instant::now();
+    let toast = WatchlistToast {
+        name: alert.author.clone(),
+        kind: WatchlistKind::Item,
+        reason: WatchlistToastReason::Chat {
+            channel_label: overlay_engine::channel_label(alert.channel).to_string(),
+            word: alert.filter.text,
+            author: alert.author,
+            message: alert.message,
+        },
+        catalog_id: None,
+        created_at,
+        confetti: Vec::new(),
+        hide_at: Some(created_at + TOAST_DURATION),
+    };
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = toast.created_at;
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Watchlist,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                watchlist: &[],
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: Some(&toast),
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                options: None,
+            },
+        );
+    });
+    harness.run();
+    harness.snapshot("watchlist_avec_carte_de_chat");
+}
