@@ -225,6 +225,9 @@ pub struct OptionsModalState {
     /// brouillon que la case ci-dessus : initialisée par l'hôte au réglage en vigueur
     /// (`config::OverlayConfig::turn_notification`), prise en compte seulement à « Valider ».
     pub turn_notification: bool,
+    /// Couper le son de la notification de tour ? — case sous la précédente, dont elle dépend
+    /// (`config::OverlayConfig::turn_notification_muted`), même mécanique de brouillon.
+    pub turn_notification_muted: bool,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -305,6 +308,8 @@ pub struct OptionsInitial {
     /// La notification de tour telle qu'elle était à l'ouverture — même rôle que le champ
     /// ci-dessus.
     pub turn_notification: bool,
+    /// Le son coupé tel qu'il était à l'ouverture — même rôle.
+    pub turn_notification_muted: bool,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -327,6 +332,7 @@ impl OptionsModalState {
             path: self.path_input.clone(),
             combat_always_visible: self.combat_always_visible,
             turn_notification: self.turn_notification,
+            turn_notification_muted: self.turn_notification_muted,
             shortcuts: self.shortcuts.clone(),
         }
     }
@@ -360,6 +366,7 @@ impl OptionsModalState {
         self.path_input.trim() != self.initial.path.trim()
             || self.combat_always_visible != self.initial.combat_always_visible
             || self.turn_notification != self.initial.turn_notification
+            || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -417,6 +424,9 @@ pub struct OptionsCommit {
     pub combat_always_visible: bool,
     /// État de la case « Me prévenir quand un de mes personnages doit jouer ».
     pub turn_notification: bool,
+    /// État de la case « Couper le son des notifications » — emporté tel quel même si la case
+    /// au-dessus est décochée (il ne fait alors rien, et sera retrouvé si on la recoche).
+    pub turn_notification_muted: bool,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -715,6 +725,24 @@ pub fn show(
             )
             .log_name("options-notification-de-tour"),
         );
+        // **Le son, sous la notification et en retrait** (demande du 2026-09-14) : la case ne
+        // vaut que si la notification est active — grisée sinon, sans changer de valeur (un son
+        // coupé le reste si on désactive puis réactive la notification). Le retrait est celui
+        // que le jeu met entre un titre de section et ses contrôles (7 px, voir
+        // `design::heading`) : c'est son seul signal de dépendance, on le réemploie tel quel
+        // plutôt que d'en inventer un autre.
+        ui.horizontal(|ui| {
+            ui.add_space(design::tokens::PANEL_PAD_CONTROL_X - design::tokens::PANEL_PAD_TITLE_X);
+            ui.add(
+                design::checkbox(
+                    &mut state.turn_notification_muted,
+                    "Couper le son des notifications",
+                )
+                .enabled(state.turn_notification)
+                .tooltip("La notification s'affiche sans jouer de son.")
+                .log_name("options-notification-de-tour-sans-son"),
+            );
+        });
 
         // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
         // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
@@ -937,9 +965,22 @@ mod tests {
                 path: "/jeu/wakfu.log".to_string(),
                 combat_always_visible: true,
                 turn_notification: true,
+                turn_notification_muted: false,
                 shortcuts: ShortcutBindings::default(),
             }
         );
+    }
+
+    /// La case « Couper le son des notifications » est un brouillon comme sa voisine, et se
+    /// garde même quand la notification est décochée : « Valider » l'emporte telle quelle.
+    #[test]
+    fn couper_le_son_est_un_brouillon_independant_de_la_notification() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.turn_notification_muted = true;
+        assert!(state.is_dirty());
+        assert!(state.commit().turn_notification_muted);
+        state.turn_notification_muted = false;
+        assert!(!state.is_dirty());
     }
 
     /// La case « Me prévenir quand un de mes personnages doit jouer » suit la même mécanique de
