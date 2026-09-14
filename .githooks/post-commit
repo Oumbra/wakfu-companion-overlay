@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Hook `post-commit` — incrémente la version du produit d'après le type Conventional Commits du
+# commit qui vient d'être créé, et l'amende dans ce même commit.
+#
+# Activé par `bash scripts/install-hooks.sh` (positionne `core.hooksPath` sur `.githooks/`), comme
+# le hook `pre-push`. Toute la logique — table des correspondances, gardes, écriture des deux
+# fichiers de verrouillage — vit dans le script appelé, testable à part (`--dry-run`).
+#
+# Pourquoi `post-commit` et pas `commit-msg`, qui reçoit pourtant le message AVANT la création du
+# commit : git construit l'arbre du commit à partir de l'index tel qu'il était à l'appel de `git
+# commit`, donc un `git add` fait depuis `commit-msg` n'entre PAS dans le commit en cours (vérifié
+# empiriquement sur le dépôt web, où ce système est né). `post-commit` travaille sur un commit qui
+# existe déjà : on peut l'amender, ce qui donne bien UN commit portant son propre bump.
+#
+# Contournement ponctuel : `SKIP_VERSION_BUMP=1 git commit …`.
+exec bash "$(git rev-parse --show-toplevel)/scripts/bump-version.sh"
