@@ -747,7 +747,7 @@ fn gallery(ui: &mut egui::Ui) {
     heading(
         ui,
         "Glyphes sans socle connu — lot sans appelant (2026-09-11)",
-        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (marquées `libre` dans `design::icons`, voir la doc de chaque variante) : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
+        "Les treize icônes du lot du 2026-09-11 dont la mesure `--from-button` n'est pas consignée (marquées `libre` dans `design::icons`, voir la doc de chaque variante), plus la bulle de message du 2026-09-14 : à défaut de certitude sur un socle porteur, elles sont peintes ici à leur taille de fichier, en teinte neutre — la même prudence que la rangée du dessus.",
     );
     ui.horizontal_wrapped(|ui| {
         for icon in [
@@ -758,6 +758,7 @@ fn gallery(ui: &mut egui::Ui) {
             DsIcon::Grid,
             DsIcon::Hammer,
             DsIcon::Kamas,
+            DsIcon::Message,
             DsIcon::Pin,
             DsIcon::Repeat,
             DsIcon::Settings1,
