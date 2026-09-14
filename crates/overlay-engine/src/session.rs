@@ -1801,6 +1801,23 @@ fn fight_own_signature(fight: &FightWorking, time: &str, won: bool) -> String {
 /// dépendre de `FightWorking::fighter_index` (déjà utilisé pour un besoin différent, l'attribution
 /// des dégâts par siège d'initiative — voir sa doc). `turns` vient de `FightWorking::turn_count`
 /// (voir `register_fight_turn`).
+/// Une ventilation par sort (dégâts, soin ou armure — les trois ont la même forme, voir
+/// `FighterDamage::spells`) telle que le serveur l'attend. Triée par nom de sort pour un résultat
+/// déterministe (`HashMap` n'a pas d'ordre stable), utile aux tests et sans importance pour le
+/// serveur, qui n'indexe jamais par position.
+fn spell_payloads(spells: &HashMap<String, HashMap<String, i64>>) -> Vec<FightSpellPayload> {
+    let mut payloads: Vec<FightSpellPayload> = spells
+        .iter()
+        .map(|(spell, by_element)| FightSpellPayload {
+            spell: spell.clone(),
+            total: by_element.values().sum(),
+            by_element: by_element.clone(),
+        })
+        .collect();
+    payloads.sort_by(|a, b| a.spell.cmp(&b.spell));
+    payloads
+}
+
 fn build_fight_sync_event(
     fight: &FightWorking,
     time: &str,
@@ -1838,19 +1855,11 @@ fn build_fight_sync_event(
             } else {
                 ctx.catalog.and_then(|c| c.find_monster_id(&fighter.name))
             };
-            // Ventilation par sort/élément — voir `FighterDamage::spells`. Triée par nom de sort
-            // pour un résultat déterministe (HashMap n'a pas d'ordre stable), utile aux tests et
-            // sans aucune importance pour le serveur (simple liste, jamais indexée par position).
-            let mut spells: Vec<FightSpellPayload> = fighter
-                .spells
-                .iter()
-                .map(|(spell, by_element)| FightSpellPayload {
-                    spell: spell.clone(),
-                    total: by_element.values().sum(),
-                    by_element: by_element.clone(),
-                })
-                .collect();
-            spells.sort_by(|a, b| a.spell.cmp(&b.spell));
+            // Les trois ventilations par sort — voir `FighterDamage::spells`/`heal_spells`/
+            // `armor_spells` et `spell_payloads`.
+            let spells = spell_payloads(&fighter.spells);
+            let heal_spells = spell_payloads(&fighter.heal_spells);
+            let armor_spells = spell_payloads(&fighter.armor_spells);
             FightParticipantPayload {
                 side: if fighter.is_ally {
                     FightSide::Ally
@@ -1865,6 +1874,10 @@ fn build_fight_sync_event(
                 defeated,
                 fled,
                 spells,
+                heal: fighter.total_heal,
+                armor: fighter.total_armor,
+                heal_spells,
+                armor_spells,
                 xp_gained: fighter.xp_gained,
             }
         })
@@ -4141,6 +4154,60 @@ mod tests {
         assert_eq!(ennemi.total_armor, 75);
         assert_eq!(ennemi.total_heal, 33);
         assert_eq!(ennemi.total_damage, 0);
+    }
+
+    /// Le payload envoyé au serveur porte les trois grandeurs, chacune avec sa ventilation — le
+    /// serveur les stocke depuis le 2026-09-14 (`fight_participants.heal`/`armor`), exactement
+    /// comme le client web les envoie de son côté.
+    #[test]
+    fn le_payload_de_synchro_porte_soin_et_armure_ventiles() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Fayto", 1, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &damage_with_spell(1, "Fayto", "Frappe", DamageElement::Feu, 100),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &heal_with_spell(1, "Fayto", "Mot Curatif", DamageElement::Eau, 60),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &armor_with_spell(1, "Fayto", "Armure Incandescente", 460),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        let participant = &fight.participants[0];
+        assert_eq!(participant.damage, 100);
+        assert_eq!(participant.heal, 60);
+        assert_eq!(participant.armor, 460);
+        assert_eq!(participant.heal_spells.len(), 1);
+        assert_eq!(participant.heal_spells[0].spell, "Mot Curatif");
+        assert_eq!(participant.heal_spells[0].total, 60);
+        assert_eq!(participant.armor_spells[0].spell, "Armure Incandescente");
+        assert_eq!(
+            participant.armor_spells[0].by_element.get("Inconnu"),
+            Some(&460),
+            "une ligne d'armure ne porte jamais d'élément"
+        );
+        assert_eq!(
+            participant.spells.len(),
+            1,
+            "la ventilation des dégâts ne contient que le sort de dégâts"
+        );
     }
 
     /// Miroir du filtre déjà en place pour les dégâts (`les_degats_bruts_dune_invocation_ne_
