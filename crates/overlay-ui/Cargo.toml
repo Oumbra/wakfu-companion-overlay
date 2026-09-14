@@ -50,4 +50,10 @@ windows = { version = "0.62.2", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
+  # Surveillance de tour (`turn_watch`, §9.1 decies) : `PrintWindow` vit dans `Storage_Xps`
+  # (héritage de l'API d'impression), le toast dans WinRT `UI_Notifications` + `Data_Xml_Dom`.
+  "Win32_Storage_Xps",
+  "Win32_System_WinRT",
+  "UI_Notifications",
+  "Data_Xml_Dom",
 ] }
