@@ -267,9 +267,34 @@ pub fn focus_window(hwnd: isize) {
             trace("direct : ok");
             return;
         }
-        // 2. Le leurre — la voie qui marche depuis un toast.
+        // 2. Le leurre — la voie qui marche depuis un toast. Le shell peut reprendre le premier
+        //    plan juste après (il referme le toast et le rend à la fenêtre d'avant) : on
+        //    surveille quelques centaines de millisecondes et on réapplique si besoin.
         if focus_via_decoy(hwnd, &trace) {
             trace("leurre : ok");
+            for wait_ms in [300u64, 500, 800] {
+                std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+                let fg = GetForegroundWindow();
+                if fg.0 == hwnd.0 {
+                    continue;
+                }
+                trace(&format!(
+                    "premier plan repris par {} — réapplication",
+                    fg.0 as isize
+                ));
+                if !focus_via_decoy(hwnd, &trace) {
+                    trace("réapplication : refusée");
+                }
+            }
+            trace(&format!(
+                "final : premier plan = {} ({})",
+                GetForegroundWindow().0 as isize,
+                if GetForegroundWindow().0 == hwnd.0 {
+                    "la cible"
+                } else {
+                    "PAS la cible"
+                }
+            ));
             return;
         }
         // 3. Filet : rattachement à la file d'entrée du premier plan et de la cible.
