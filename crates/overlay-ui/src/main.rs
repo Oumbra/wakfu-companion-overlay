@@ -1469,7 +1469,7 @@ impl App {
                         ">>> Réglages de compte redemandés ({refresh_label}) : {} entrée(s) de suivi.",
                         settings.watchlist.len()
                     );
-                    let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                    let _ = settings_tx.send(EngineCommand::ApplySettings(Box::new(settings)));
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -1971,7 +1971,7 @@ impl App {
                         entry_count = settings.watchlist.len(),
                         "[options] réglages relus à l'ouverture de la fenêtre"
                     );
-                    let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                    let _ = settings_tx.send(EngineCommand::ApplySettings(Box::new(settings)));
                 }
                 // Best-effort : la fenêtre s'ouvre de toute façon, sur ce que l'overlay a déjà.
                 Err(err) => tracing::warn!(%err, "[options] relecture des réglages impossible"),

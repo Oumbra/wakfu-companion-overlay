@@ -1009,7 +1009,7 @@ mod linux_main {
                             entry_count = settings.watchlist.len(),
                             "[options] réglages relus à l'ouverture de la fenêtre"
                         );
-                        let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                        let _ = settings_tx.send(EngineCommand::ApplySettings(Box::new(settings)));
                     }
                     Err(err) => {
                         tracing::warn!(%err, "[options] relecture des réglages impossible")
