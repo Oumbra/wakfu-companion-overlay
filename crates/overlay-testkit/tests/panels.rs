@@ -3514,7 +3514,7 @@ fn recherches_de_chat() -> overlay_ui::panels::chat_tab::ChatDraft {
             canal(ChatChannel::Commerce, "bois de bouleau"),
             canal(ChatChannel::Proximite, "archi"),
             canal(ChatChannel::Communaute, "mise à jour"),
-            canal(ChatChannel::Commerce, "pierre de kamas"),
+            canal(ChatChannel::Groupe, "pierre de kamas"),
             tous("kralamoure"),
         ],
         toast: Default::default(),
@@ -3641,7 +3641,7 @@ fn panneau_suivi_avec_carte_de_chat() {
         name: alert.author.clone(),
         kind: WatchlistKind::Item,
         reason: WatchlistToastReason::Chat {
-            channel_label: overlay_engine::channel_label(alert.channel).to_string(),
+            channel: alert.channel,
             word: alert.filter.text,
             author: alert.author,
             message: alert.message,
