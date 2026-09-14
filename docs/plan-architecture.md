@@ -1402,8 +1402,12 @@ angle mort — et l'utilisateur prévenu que l'exigence n'est pas tenue.
 
 - **Canal : notification du système**, pas un toast dans l'overlay — un toast s'afficherait sur une
   fenêtre que l'utilisateur ne regarde pas (décision de l'utilisateur, 2026-09-14).
-- **Emplacement du réglage** : section « Combat » de l'onglet Paramètres, sous « Affichage »
-  (décision de l'utilisateur, 2026-09-14).
+- **Emplacement du réglage** : section « Combat » de l'onglet Paramètres (décision de
+  l'utilisateur, 2026-09-14). Cette section **absorbe l'ancienne « Affichage »** le même jour, sur
+  décision de l'utilisateur : celle-ci ne portait qu'une case, « Afficher le panneau de combat en
+  dehors des combats », qui parlait déjà du panneau de COMBAT — deux sections voisines sur le même
+  sujet en auraient fait une de trop. Ordre des deux cases : l'affichage permanent d'abord, la
+  notification ensuite, du plus passif au plus intrusif.
 - **Réglage local**, jamais au compte : une notification système dépend de la machine (démon de
   notifications, écrans, appairage téléphone), pas du joueur.
 - **Une notification par tour et par personnage** au maximum ; rien quand la fenêtre concernée est
