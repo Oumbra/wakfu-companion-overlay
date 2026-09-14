@@ -161,7 +161,7 @@ pub fn show(
         });
 
         ui.add_space(14.0);
-        ui.add(design::heading("Ingrédients").trailing_gap(8.0));
+        ui.add(design::heading("Ingrédients"));
 
         // **Un rouage pendant la résolution.** Chaque niveau de recette demande un aller-retour
         // réseau : la fenêtre s'ouvre AVANT la réponse, comme le web, et dit qu'elle attend plutôt

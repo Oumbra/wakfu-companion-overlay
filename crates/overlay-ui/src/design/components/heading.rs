@@ -31,6 +31,15 @@
 //! Ce composant réserve donc [`tokens::HEADING_INK_HEIGHT`], pas la hauteur de sa galley. C'est ce
 //! qui permet aux deux cotes verticales du relevé d'être utilisées telles quelles.
 //!
+//! ## Un seul écart sous un titre, partout
+//!
+//! L'espace qu'un titre laisse sous lui est [`tokens::HEADING_TO_ROW`] — 13 px, la cote du jeu —
+//! et **ce n'est pas un réglage d'écran**. Cinq écrans en décidaient autrement jusqu'au
+//! 2026-09-14, chacun avec sa valeur (une demi-`SECTION_GAP` ici, un littéral là) : le même titre
+//! s'ouvrait sur quatre écarts selon l'onglet où on le lisait. Seul
+//! [`Heading::preview_trailing_gap`] permet encore d'en changer, pour les planches de simulation
+//! qui servent à mesurer une valeur candidate — jamais pour un écran.
+//!
 //! ## Le retrait, qui est le seul signal de niveau
 //!
 //! Un titre de section est **en retrait de 7 px à gauche** par rapport aux contrôles qu'il coiffe
@@ -58,9 +67,17 @@ pub struct Heading {
 }
 
 impl Heading {
-    /// Écart réservé sous le titre, avant la première ligne de la section. Par défaut
-    /// [`tokens::HEADING_TO_ROW`], la cote du relevé.
-    pub fn trailing_gap(mut self, gap: f32) -> Self {
+    /// Remplace l'écart réservé sous le titre, **réservé aux planches de simulation** — voir
+    /// `overlay-testkit/examples/interligne-options.rs`, qui rend une même section pour plusieurs
+    /// valeurs candidates afin de les départager au pixel.
+    ///
+    /// **Aucun écran de production ne l'appelle, et aucun ne doit** : l'écart sous un titre est
+    /// celui du jeu ([`tokens::HEADING_TO_ROW`]), le même partout. Il l'a longtemps été en théorie
+    /// seulement — cinq écrans posaient ici leur propre demi-`SECTION_GAP` ou un littéral, et le
+    /// même titre s'ouvrait sur quatre écarts différents selon l'onglet. Retirés le 2026-09-14 sur
+    /// demande de l'utilisateur : « les espacements doivent être génériques ». Même esprit que
+    /// `Checkbox::preview_state`.
+    pub fn preview_trailing_gap(mut self, gap: f32) -> Self {
         self.trailing_gap = gap;
         self
     }

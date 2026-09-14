@@ -197,7 +197,7 @@ pub fn show(
     let mut action = ChatTabAction::None;
     let width = panel.inner.width();
 
-    ui.add(design::heading("Chat").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Chat"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 
@@ -228,7 +228,7 @@ pub fn show(
     close_settings_row(ui, state, &mut ctx.draft.toast, width);
     ui.add_space(SECTION_GAP);
 
-    ui.add(design::heading("Recherches").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Recherches"));
     add_row(ui, state, ctx.draft, width);
     if let Some(notice) = state.notice {
         ui.add_space(6.0);
