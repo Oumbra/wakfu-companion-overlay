@@ -119,7 +119,8 @@ pub fn init() -> Option<PathBuf> {
 
     tracing::info!(
         session_id = pid,
-        version = env!("CARGO_PKG_VERSION"),
+        version = crate::build_info::VERSION,
+        commit = crate::build_info::COMMIT,
         os = std::env::consts::OS,
         "=== session démarrée ==="
     );

@@ -37,6 +37,7 @@
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
 
 pub mod alert_sound;
+pub mod build_info;
 pub mod chat_command;
 pub mod config;
 pub mod cursor;

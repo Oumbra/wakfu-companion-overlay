@@ -1,6 +1,6 @@
 [package]
 name = "overlay-app"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "Cablage minimal de L1 (overlay-ingest) pour l'observer tourner sur un vrai wakfu.log — pas encore l'overlay final, voir README.md."
