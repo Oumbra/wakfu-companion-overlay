@@ -32,7 +32,12 @@ pub const COMMIT: &str = env!("WAKFU_OVERLAY_COMMIT");
 pub const BANNER_LABEL: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 /// Identité complète, pour le journal : `0.4.2 (a1b2c3d)`.
-pub const FULL_LABEL: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("WAKFU_OVERLAY_COMMIT"), ")");
+pub const FULL_LABEL: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("WAKFU_OVERLAY_COMMIT"),
+    ")"
+);
 
 /// Surcharge posée par les tests de capture — voir [`freeze_for_snapshots`].
 static FROZEN: OnceLock<&'static str> = OnceLock::new();
