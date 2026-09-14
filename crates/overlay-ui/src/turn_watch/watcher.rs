@@ -21,6 +21,11 @@
 //! Tant que le gabarit manque, rien n'est notifié pour P — l'apprentissage se fait au fil du
 //! premier combat, et vaut pour tous les suivants (persisté par l'appelant).
 //!
+//! **Et il se corrige tout seul** : si, à un sort de P au repos, le nom affiché ne ressemble pas
+//! au gabarit connu, c'est le gabarit qui a tort (échelle d'interface changée, géométrie corrigée
+//! par une mise à jour — vécu le 2026-09-14, un gabarit lu deux pixels trop court et plus jamais
+//! reconnu). Le même protocole à deux sorts concordants le remplace alors.
+//!
 //! ## Reconnaître, puis décider
 //!
 //! Gabarit acquis, chaque tick compare le nom affiché au gabarit : P est actif si la ressemblance
@@ -199,8 +204,14 @@ impl Watcher {
             return events;
         };
 
-        // Apprentissage — au repos seulement, dans la fenêtre ouverte par un sort.
-        if !self.templates.contains_key(input.character)
+        // Apprentissage — au repos seulement, dans la fenêtre ouverte par un sort. Aussi quand un
+        // gabarit existe mais ne reconnaît pas ce que le jeu affiche au moment où P joue : il est
+        // obsolète, et se remplace par le même protocole.
+        let template_disagrees = self
+            .templates
+            .get(input.character)
+            .is_some_and(|t| vision::similarity(t, &glyph) < MATCH_THRESHOLD);
+        if (!self.templates.contains_key(input.character) || template_disagrees)
             && panel.is_some()
             && state.learn_until.is_some_and(|until| input.now < until)
         {
@@ -208,8 +219,13 @@ impl Watcher {
                 Some((first, seq)) if *seq != state.spell_seq => {
                     if vision::similarity(first, &glyph) >= LEARN_THRESHOLD {
                         tracing::info!(
-                            "[tour] {} : gabarit du nom acquis ({}x{})",
+                            "[tour] {} : gabarit du nom {} ({}x{})",
                             input.character,
+                            if template_disagrees {
+                                "remplacé — l'ancien ne reconnaissait plus"
+                            } else {
+                                "acquis"
+                            },
                             glyph.w,
                             glyph.h
                         );
@@ -314,6 +330,26 @@ mod tests {
             engaged_by_log: engaged,
             own_cast_len: 0,
         })
+    }
+
+    #[test]
+    fn un_gabarit_obsolete_est_remplace_au_sort_suivant() {
+        // Un gabarit faux (celui d'un autre nom) est en place pour « Oumbra » : deux sorts au repos
+        // le remplacent par ce que le jeu affiche, et Oumbra redevient reconnu.
+        let pret = fixture("repos-pugio-t18");
+        let faux = vision::extract_glyph(
+            &pret,
+            vision::name_area_above(vision::find_gold_panel(&pret).unwrap(), &pret),
+        )
+        .unwrap();
+        let mut w = Watcher::new(HashMap::from([("Oumbra".to_string(), faux)]));
+        let t0 = Instant::now();
+        let events = learn_oumbra(&mut w, t0);
+        assert!(
+            matches!(events.as_slice(), [Event::TemplateLearned { character, glyph }]
+                if character == "Oumbra" && glyph.w > 50 && glyph.w < 90),
+            "{events:?}"
+        );
     }
 
     #[test]

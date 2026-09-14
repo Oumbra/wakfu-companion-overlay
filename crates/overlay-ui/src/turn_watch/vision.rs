@@ -189,19 +189,24 @@ pub fn find_gold_panel(band: &Band) -> Option<Rect> {
 }
 
 /// Bande du nom déduite du panneau doré : juste au-dessus du cadre, alignée sur le bord droit du
-/// panneau. Marges **proportionnelles à la hauteur du panneau** (donc à l'échelle d'interface) :
-/// mesuré à 100 % sur un panneau de 93 px, le nom finit 16 px au-dessus du cadre, et l'étincelle
-/// animée qui glisse le long du haut du cadre remonte d'une dizaine de pixels quand elle passe
-/// dessous — elle clignotait la reconnaissance un tick sur deux (observé en jeu le 2026-09-14). La
-/// bande s'arrête donc à un huitième de panneau au-dessus du cadre, hors de portée du halo, et
-/// commence une demi-hauteur plus haut ; elle est ensuite rognée au texte, une marge ne coûte rien.
+/// panneau. Marges **proportionnelles à la hauteur du panneau** (donc à l'échelle d'interface),
+/// mesurées à 100 % sur un panneau de 93 px :
+///
+/// - le corps des lettres finit 16 px au-dessus du panneau, une **descendante** (le « g » de
+///   « Pugio ») 13 px — la couper change la hauteur du glyphe et fait échouer la comparaison
+///   (observé en jeu le 2026-09-14 : un gabarit de 17 px lu en 15, plus jamais reconnu) ;
+/// - l'étincelle animée qui glisse le long du haut du cadre remonte jusqu'à 6 px au-dessus du
+///   panneau quand elle passe dessous, et clignotait la reconnaissance un tick sur deux.
+///
+/// La bande s'arrête donc à un dixième de panneau au-dessus (9 px) : descendantes dedans, halo
+/// dehors. Elle commence une demi-hauteur plus haut, et est ensuite rognée au texte.
 pub fn name_area_above(panel: Rect, band: &Band) -> Rect {
     let h = panel.height();
     Rect {
         x0: panel.x1.saturating_sub(320),
         y0: panel.y0.saturating_sub(h / 2),
         x1: (panel.x1 + 4).min(band.width),
-        y1: panel.y0.saturating_sub(h / 8 + 2),
+        y1: panel.y0.saturating_sub(h / 10),
     }
 }
 
@@ -465,6 +470,19 @@ mod tests {
         .unwrap();
         let s = similarity(&oumbra, &pugio);
         assert!(s < 0.2, "similarité {s}");
+    }
+
+    #[test]
+    fn la_descendante_du_g_est_gardee() {
+        // « Pugio Letalis » : le corps fait 13 px, le « g » descend à 17. Un gabarit appris avec
+        // la descendante doit se relire avec — sinon la comparaison, ancrée en bas, se décale.
+        let pret = fixture("repos-pugio-t18");
+        let glyph = extract_glyph(
+            &pret,
+            name_area_above(find_gold_panel(&pret).unwrap(), &pret),
+        )
+        .unwrap();
+        assert!((16..=18).contains(&glyph.h), "{}x{}", glyph.w, glyph.h);
     }
 
     #[test]

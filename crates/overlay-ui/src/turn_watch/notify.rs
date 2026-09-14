@@ -41,10 +41,13 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_MENU,
+};
 use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow,
-    SW_RESTORE,
+    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow,
+    ShowWindow, SwitchToThisWindow, SW_RESTORE,
 };
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 
@@ -149,15 +152,38 @@ pub fn show(
     Ok(Toast { _inner: toast })
 }
 
-/// Amène `hwnd` au premier plan — restaurée si minimisée. Depuis un thread qui n'a pas le premier
-/// plan, `SetForegroundWindow` peut être refusé : second essai après s'être rattaché à la file
-/// d'entrée du thread qui l'a (la voie classique pour obtenir ce droit).
+/// Amène `hwnd` au premier plan — restaurée si minimisée.
+///
+/// Un process qui n'a pas le premier plan n'a en principe pas le droit de le donner : Windows
+/// refuse `SetForegroundWindow` et fait **clignoter** la fenêtre dans la barre des tâches à la
+/// place (vu en jeu le 2026-09-14 au clic du toast). Trois leviers, du plus propre au plus
+/// brutal, jusqu'à ce que l'un passe :
+///
+/// 1. une frappe **Alt** synthétique (appui puis relâchement) : le dernier process à avoir produit
+///    une entrée clavier obtient le droit — c'est le contournement établi de longue date ;
+/// 2. le rattachement à la file d'entrée du thread au premier plan (`AttachThreadInput`) ;
+/// 3. `SwitchToThisWindow`, le mécanisme d'Alt-Tab lui-même, qui ne demande pas de permission.
 pub fn focus_window(hwnd: isize) {
     let hwnd = HWND(hwnd as *mut _);
     unsafe {
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
+        let tap = |vk, flags| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    dwFlags: flags,
+                    ..Default::default()
+                },
+            },
+        };
+        let alt = [
+            tap(VK_MENU, Default::default()),
+            tap(VK_MENU, KEYEVENTF_KEYUP),
+        ];
+        SendInput(&alt, std::mem::size_of::<INPUT>() as i32);
         if SetForegroundWindow(hwnd).as_bool() {
             tracing::info!("[tour] fenêtre de jeu amenée au premier plan.");
             return;
@@ -167,12 +193,18 @@ pub fn focus_window(hwnd: isize) {
         let me = GetCurrentThreadId();
         let attached =
             fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
+        let _ = BringWindowToTop(hwnd);
         let ok = SetForegroundWindow(hwnd).as_bool();
         if attached {
             let _ = AttachThreadInput(me, fg_thread, false);
         }
         if ok {
             tracing::info!("[tour] fenêtre de jeu amenée au premier plan (après rattachement).");
+            return;
+        }
+        SwitchToThisWindow(hwnd, true);
+        if GetForegroundWindow().0 == hwnd.0 {
+            tracing::info!("[tour] fenêtre de jeu amenée au premier plan (SwitchToThisWindow).");
         } else {
             tracing::warn!(
                 "[tour] Windows a refusé de donner le premier plan à la fenêtre de jeu."
