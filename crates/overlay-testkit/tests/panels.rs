@@ -3660,7 +3660,9 @@ fn panneau_suivi_avec_carte_de_chat() {
     let auth_status = AuthStatus::Connected;
     let auth_sink = NoopAuthSink;
     let shortcuts = ShortcutBindings::default();
-    let now = toast.created_at;
+    // Une seconde après la création : le fondu d'entrée (`POP_DURATION`, 0,35 s) est fini, la
+    // carte est au repos — à `created_at` pile, tout ce qui suit le fondu serait transparent.
+    let now = toast.created_at + std::time::Duration::from_secs(1);
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
