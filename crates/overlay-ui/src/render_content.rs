@@ -83,6 +83,9 @@ pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
 pub enum UserEvent {
     NewSnapshot,
     AuthStatusChanged,
+    /// Un chargement initial vient de se terminer (voir `crate::startup::StartupProgress`) — la
+    /// fenêtre de connexion doit réévaluer son écran de chargement.
+    StartupProgress,
 }
 
 /// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
