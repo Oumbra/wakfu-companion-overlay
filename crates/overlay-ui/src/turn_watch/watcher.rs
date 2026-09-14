@@ -1,6 +1,6 @@
-//! Machine d'états de la surveillance de tour — **sans OS** : la capture, l'horloge et l'état du
-//! combat lui sont donnés à chaque tick, elle rend des événements. C'est ce qui la rend testable
-//! sur les fixtures du spike S4 sans fenêtre de jeu.
+//! Machine d'états de la surveillance de tour — **sans OS** : la capture, l'horloge, le titre de
+//! la fenêtre et l'état du combat lui sont donnés à chaque tick, elle rend des événements. C'est
+//! ce qui la rend testable sur les fixtures du spike S4 sans fenêtre de jeu.
 //!
 //! ## Le problème que ce module résout
 //!
@@ -8,46 +8,56 @@
 //! un nom — il sait seulement comparer deux images de nom ([`vision::similarity`]). Il lui faut
 //! donc, pour chaque personnage P, un **gabarit** : l'image de son nom telle que le jeu la peint.
 //!
-//! ## Une fenêtre, plusieurs personnages
+//! ## Une fenêtre, plusieurs personnages : le titre dit qui est aux commandes
 //!
-//! Un client Wakfu joue le titulaire de sa fenêtre **et ses héros** — jusqu'à trois personnages du
-//! même compte, qui apparaissent tour à tour comme combattant actif dans la même fenêtre. La
-//! première version ne cherchait que le titulaire : en test réel à six personnages, seuls deux
-//! étaient notifiés (2026-09-14). Chaque fenêtre surveille donc **tous les personnages de son
-//! compte**, que l'appelant tire du roster ([`overlay_engine::RosterIndex::account_mates`]) —
-//! le titulaire seul quand il n'y a pas de roster.
+//! Un client Wakfu joue le titulaire de sa fenêtre **et ses héros** — jusqu'à trois personnages
+//! du même compte. Et le jeu le dit lui-même : **le titre de la fenêtre** (`"<Nom> - WAKFU"`)
+//! porte le personnage aux commandes, et **bascule sur le héros dont le tour commence** — relevé
+//! au journal du 2026-09-14 (sondage du premier plan : « Sagittarius Caecus - WAKFU » à l'instant
+//! de son sort, puis « Sagitta Lucis - WAKFU » au sien, « Magister Thesaurorum - WAKFU »…). Le
+//! titre est donc la vérité de l'appelant, lue à chaque tick ([`TickInput::current`]) : c'est
+//! **lui** que la fenêtre surveille, et une bascule de titre pendant un combat engagé vaut à elle
+//! seule « c'est à lui de jouer » — sans capture, donc même fenêtre minimisée. La première
+//! version demandait au roster les personnages du compte : dépendance à une déclaration
+//! extérieure, et rien ne disait quel héros jouait dans quelle fenêtre — en test réel, un seul
+//! personnage sur six notifié.
+//!
+//! Le widget reste nécessaire quand le titre ne bouge pas : fenêtre à un seul personnage, ou
+//! premier tour d'un héros après le placement s'il en était déjà le titulaire.
 //!
 //! ## Apprendre le gabarit sans rien demander à l'utilisateur
 //!
-//! Le log dit quand P lance un sort (`FighterDamage::last_turn_casts` grandit). Un sort se lance
-//! pendant son propre tour, depuis la fenêtre qui porte P : à cet instant, le widget de cette
-//! fenêtre affiche P — **si** il est au repos (panneau doré, voir [`vision::find_gold_panel`]) et
-//! non sur la carte d'un combattant survolé. Le module ouvre donc une courte fenêtre
-//! d'apprentissage à chaque sort, ne prend un échantillon qu'au repos, et n'acquiert le gabarit
-//! qu'avec **deux échantillons concordants pris à deux sorts différents** : un tour qui se termine
-//! pile après le sort (le nom bascule vers le suivant) ne peut pas contaminer les deux.
+//! Deux instants où le widget, **s'il est au repos** (panneau doré, voir
+//! [`vision::find_gold_panel`], et non la carte d'un combattant survolé), affiche à coup sûr le
+//! personnage aux commandes P : quand le log dit que P lance un sort
+//! (`FighterDamage::last_turn_casts` grandit — un sort se lance pendant son propre tour), et quand
+//! le titre vient de basculer sur P. Chacun ouvre une courte fenêtre d'échantillonnage, et le
+//! gabarit n'est acquis qu'avec **deux échantillons concordants pris à deux événements
+//! différents** : un tour qui se termine pile après le sort (le nom bascule vers le suivant) ne
+//! peut pas contaminer les deux.
 //!
-//! Tant que le gabarit manque, rien n'est notifié pour P — l'apprentissage se fait au fil du
-//! premier combat, et vaut pour tous les suivants (persisté par l'appelant).
+//! Tant que le gabarit manque, le widget ne notifie rien pour P — l'apprentissage se fait au fil
+//! du premier combat, et vaut pour tous les suivants (persisté par l'appelant).
 //!
 //! **Et il se corrige tout seul** : si, à un sort de P au repos, le nom affiché ne ressemble pas
 //! au gabarit connu, c'est le gabarit qui a tort (échelle d'interface changée, géométrie corrigée
 //! par une mise à jour — vécu le 2026-09-14, un gabarit lu deux pixels trop court et plus jamais
-//! reconnu). Le même protocole à deux sorts concordants le remplace alors.
+//! reconnu). Le même protocole à deux échantillons concordants le remplace alors.
 //!
 //! ## Reconnaître, puis décider
 //!
-//! Gabarits acquis, chaque tick compare le nom affiché à ceux des personnages de la fenêtre : le
-//! mieux ressemblant, au-dessus de [`MATCH_THRESHOLD`], est l'actif. C'est le **changement
-//! d'actif** vers un personnage (il ne l'était pas, il l'est) qui vaut « c'est à lui de jouer » —
-//! notifié seulement si la fenêtre n'est pas au premier plan, au plus une fois par
-//! [`NOTIFY_COOLDOWN`] et par personnage.
+//! Gabarit acquis, chaque tick compare le nom affiché à celui du personnage aux commandes : au-
+//! dessus de [`MATCH_THRESHOLD`], il est l'actif. C'est le **passage à actif** (il ne l'était pas,
+//! il l'est — par le widget ou par le titre) qui vaut « c'est à lui de jouer » — notifié seulement
+//! si la fenêtre n'est pas au premier plan, au plus une fois par [`NOTIFY_COOLDOWN`] et par
+//! personnage.
 //!
 //! **Pas de notification en phase de placement** (demande du 2026-09-14) : le widget y affiche le
-//! personnage local sous un bouton « Prêt », doré comme « Fin du tour », et son nom se reconnaît —
-//! sans garde, chaque combat commencerait par un toast. Le combat est dit **engagé** dès que le
-//! panneau porte « Fin du tour » ([`vision::panel_shows_end_turn`]) ou que le log a vu un sort ;
-//! c'est acquis pour le reste du combat, et rien n'est notifié avant.
+//! personnage aux commandes sous un bouton « Prêt », doré comme « Fin du tour », et son nom se
+//! reconnaît — et le titre y bascule à chaque héros qu'on place. Sans garde, chaque combat
+//! commencerait par des toasts. Le combat est dit **engagé** dès que le panneau porte « Fin du
+//! tour » ([`vision::panel_shows_end_turn`]) ou que le log a vu un sort ou des dégâts ; c'est
+//! acquis pour le reste du combat, et rien n'est notifié avant.
 //!
 //! **Une notification par tour, jamais de rafale** : le front montant seul ne suffit pas quand les
 //! tours s'enchaînent en quelques secondes (observé en test contre un mannequin, tours passés à la
@@ -72,7 +82,8 @@ use super::vision::{self, Band, Glyph, Rect};
 pub const MATCH_THRESHOLD: f64 = 0.85;
 /// Concordance exigée entre les deux échantillons d'apprentissage.
 const LEARN_THRESHOLD: f64 = 0.93;
-/// Durée pendant laquelle un sort de P autorise à échantillonner le nom affiché.
+/// Durée pendant laquelle un sort de P, ou une bascule du titre sur P, autorise à échantillonner
+/// le nom affiché.
 const LEARN_WINDOW: Duration = Duration::from_millis(2500);
 /// Deux notifications pour le même personnage ne peuvent pas être plus rapprochées que ça. Un tour
 /// de Wakfu dure 30 s de base plus le report ; deux tours d'un même personnage sont séparés par
@@ -90,19 +101,22 @@ pub struct FightFacts {
     /// Le log a vu au moins un sort ou des dégâts dans ce combat : la phase de placement est
     /// passée, quoi que montre l'écran.
     pub engaged_by_log: bool,
-    /// `FighterDamage::last_turn_casts.len()` de chaque personnage surveillé, par nom tel que
-    /// donné dans `TickInput::characters` (absent = 0). Toute variation vers une valeur non nulle
-    /// signale un sort qui vient d'être lancé.
-    pub cast_lens: HashMap<String, usize>,
+    /// `FighterDamage::last_turn_casts.len()` du personnage aux commandes
+    /// ([`TickInput::current`]), 0 s'il n'est pas dans ce combat. Toute variation vers une valeur
+    /// non nulle signale un sort qui vient d'être lancé.
+    pub cast_len: usize,
+    /// Le personnage aux commandes est un allié de ce combat — une bascule de titre vers un nom
+    /// qui n'y combat pas n'est pas un tour.
+    pub current_in_fight: bool,
 }
 
 /// Ce que l'appelant fournit pour une fenêtre, à chaque tick.
 pub struct TickInput<'a> {
-    /// Le titulaire de la fenêtre — la clé de son état.
+    /// La clé de la fenêtre — son titulaire à la création, stable pour toute sa vie.
     pub window: &'a str,
-    /// Les personnages qui peuvent y jouer : le titulaire et ses héros (même compte au roster).
-    /// Toujours au moins le titulaire.
-    pub characters: &'a [String],
+    /// Le personnage aux commandes de la fenêtre **maintenant** : son titre, lu à ce tick (voir
+    /// la doc de module).
+    pub current: &'a str,
     /// `None` : pas de capture ce tick (fenêtre minimisée, `PrintWindow` en échec).
     pub band: Option<&'a Band>,
     /// `None` : aucun combat connu pour cette fenêtre.
@@ -123,14 +137,18 @@ pub enum Event {
 #[derive(Debug, Default)]
 struct Learning {
     prev_cast_len: usize,
-    /// Nombre de sorts vus — identifie l'échantillon d'apprentissage à un sort.
-    spell_seq: u64,
+    /// Nombre d'événements vus (sorts, bascules de titre) — identifie l'échantillon
+    /// d'apprentissage à un événement.
+    event_seq: u64,
     learn_until: Option<Instant>,
     candidate: Option<(Glyph, u64)>,
 }
 
 #[derive(Debug, Default)]
 struct WindowState {
+    /// Le personnage aux commandes au tick précédent — une différence avec `current` est une
+    /// bascule de titre.
+    current: Option<String>,
     learning: HashMap<String, Learning>,
     /// Le personnage reconnu comme actif au tick précédent.
     active: Option<String>,
@@ -150,7 +168,7 @@ pub struct Watcher {
 
 impl Watcher {
     /// `templates` : les gabarits déjà appris (chargés du disque), par nom de personnage tel que
-    /// le roster ou le titre de fenêtre le donne.
+    /// le titre de fenêtre le donne.
     pub fn new(templates: HashMap<String, Glyph>) -> Self {
         Self {
             templates,
@@ -166,6 +184,7 @@ impl Watcher {
     pub fn tick(&mut self, input: TickInput<'_>) -> Vec<Event> {
         let mut events = Vec::new();
         let state = self.windows.entry(input.window.to_string()).or_default();
+        let current = input.current;
 
         let Some(fight) = input.fight.filter(|f| f.ongoing) else {
             // Hors combat : tout repart de zéro au prochain, gabarit et géométrie exceptés.
@@ -173,16 +192,42 @@ impl Watcher {
             return events;
         };
 
-        // Un sort d'un personnage de la fenêtre ouvre sa fenêtre d'apprentissage. La longueur peut
-        // aussi *baisser* (nouveau tour, liste vidée puis premier sort) : c'est un sort aussi.
-        for name in input.characters {
-            let len = fight.cast_lens.get(name).copied().unwrap_or(0);
-            let learning = state.learning.entry(name.clone()).or_default();
-            if len != learning.prev_cast_len && len > 0 {
-                learning.spell_seq += 1;
+        let switched = state.current.as_deref().is_some_and(|prev| prev != current);
+        state.current = Some(current.to_string());
+
+        // Un sort du personnage aux commandes ouvre sa fenêtre d'échantillonnage — la longueur
+        // peut aussi *baisser* (nouveau tour, liste vidée puis premier sort) : c'est un sort
+        // aussi. Une bascule de titre sur lui l'ouvre de même.
+        {
+            let learning = state.learning.entry(current.to_string()).or_default();
+            let len = fight.cast_len;
+            let cast = len != learning.prev_cast_len && len > 0;
+            learning.prev_cast_len = len;
+            if cast || switched {
+                learning.event_seq += 1;
                 learning.learn_until = Some(input.now + LEARN_WINDOW);
             }
-            learning.prev_cast_len = len;
+        }
+
+        if !state.engaged && fight.engaged_by_log {
+            state.engaged = true;
+            tracing::info!("[tour] {} : combat engagé, placement terminé", input.window);
+        }
+
+        // Le titre vient de basculer sur un combattant du combat engagé : c'est son tour, sans
+        // rien lire à l'écran.
+        if switched && fight.current_in_fight {
+            if state.engaged {
+                tracing::info!(
+                    "[tour] {} : la fenêtre passe aux commandes de {current}",
+                    input.window
+                );
+                Self::activate(state, current, input.foreground, input.now, &mut events);
+            } else {
+                tracing::debug!(
+                    "[tour] {current} : bascule de titre, pas de notification (phase de placement)"
+                );
+            }
         }
 
         let Some(band) = input.band else {
@@ -192,10 +237,7 @@ impl Watcher {
         // Géométrie : celle déjà connue pour cette taille, sinon apprise sur un panneau doré.
         let size = (band.width, band.height);
         let panel = vision::find_gold_panel(band);
-        if !state.engaged
-            && (fight.engaged_by_log
-                || panel.is_some_and(|p| vision::panel_shows_end_turn(band, p)))
-        {
+        if !state.engaged && panel.is_some_and(|p| vision::panel_shows_end_turn(band, p)) {
             state.engaged = true;
             tracing::info!("[tour] {} : combat engagé, placement terminé", input.window);
         }
@@ -226,113 +268,119 @@ impl Watcher {
             return events;
         };
 
-        // Apprentissage — au repos seulement, dans la fenêtre ouverte par un sort du personnage.
-        // Aussi quand un gabarit existe mais ne reconnaît pas ce que le jeu affiche au moment où
-        // le personnage joue : il est obsolète, et se remplace par le même protocole.
+        // Apprentissage — au repos seulement, dans la fenêtre ouverte par un sort du personnage
+        // aux commandes ou une bascule sur lui. Aussi quand un gabarit existe mais ne reconnaît
+        // pas ce que le jeu affiche à cet instant : il est obsolète, et se remplace par le même
+        // protocole.
         if panel.is_some() {
-            for name in input.characters {
-                let Some(learning) = state.learning.get_mut(name) else {
-                    continue;
-                };
-                if !learning.learn_until.is_some_and(|until| input.now < until) {
-                    continue;
-                }
-                let disagrees = self
-                    .templates
-                    .get(name)
-                    .is_some_and(|t| vision::similarity(t, &glyph) < MATCH_THRESHOLD);
-                if self.templates.contains_key(name) && !disagrees {
-                    continue;
-                }
-                match &learning.candidate {
-                    Some((first, seq)) if *seq != learning.spell_seq => {
-                        if vision::similarity(first, &glyph) >= LEARN_THRESHOLD {
-                            tracing::info!(
-                                "[tour] {name} : gabarit du nom {} ({}x{}, fenêtre {})",
-                                if disagrees {
-                                    "remplacé — l'ancien ne reconnaissait plus"
+            if let Some(learning) = state.learning.get_mut(current) {
+                if learning.learn_until.is_some_and(|until| input.now < until) {
+                    let disagrees = self
+                        .templates
+                        .get(current)
+                        .is_some_and(|t| vision::similarity(t, &glyph) < MATCH_THRESHOLD);
+                    if !self.templates.contains_key(current) || disagrees {
+                        match &learning.candidate {
+                            Some((first, seq)) if *seq != learning.event_seq => {
+                                if vision::similarity(first, &glyph) >= LEARN_THRESHOLD {
+                                    tracing::info!(
+                                        "[tour] {current} : gabarit du nom {} ({}x{}, fenêtre {})",
+                                        if disagrees {
+                                            "remplacé — l'ancien ne reconnaissait plus"
+                                        } else {
+                                            "acquis"
+                                        },
+                                        glyph.w,
+                                        glyph.h,
+                                        input.window
+                                    );
+                                    self.templates.insert(current.to_string(), glyph.clone());
+                                    events.push(Event::TemplateLearned {
+                                        character: current.to_string(),
+                                        glyph: glyph.clone(),
+                                    });
+                                    learning.candidate = None;
                                 } else {
-                                    "acquis"
-                                },
-                                glyph.w,
-                                glyph.h,
-                                input.window
-                            );
-                            self.templates.insert(name.clone(), glyph.clone());
-                            events.push(Event::TemplateLearned {
-                                character: name.clone(),
-                                glyph: glyph.clone(),
-                            });
-                            learning.candidate = None;
-                        } else {
-                            // Deux sorts, deux noms : l'un des deux était un survol ou un
-                            // changement de tour. On repart du plus récent.
-                            learning.candidate = Some((glyph.clone(), learning.spell_seq));
+                                    // Deux événements, deux noms : l'un des deux était un survol
+                                    // ou un changement de tour. On repart du plus récent.
+                                    learning.candidate = Some((glyph.clone(), learning.event_seq));
+                                }
+                            }
+                            // Même événement que le premier échantillon : on attend le suivant.
+                            Some(_) => {}
+                            None => learning.candidate = Some((glyph.clone(), learning.event_seq)),
                         }
                     }
-                    Some(_) => {} // même sort que le premier échantillon : on attend le suivant
-                    None => learning.candidate = Some((glyph.clone(), learning.spell_seq)),
                 }
             }
         }
 
-        // Reconnaissance : le personnage de la fenêtre dont le gabarit ressemble le plus.
-        let mut best: Option<(&str, f64)> = None;
-        for name in input.characters {
-            let Some(template) = self.templates.get(name) else {
-                continue;
-            };
+        // Reconnaissance : le nom affiché est-il celui du personnage aux commandes ?
+        let recognized = self.templates.get(current).is_some_and(|template| {
             let score = vision::similarity(template, &glyph);
             tracing::trace!(
-                "[tour] {} / {name} : ressemblance {score:.2} ({}x{})",
+                "[tour] {} / {current} : ressemblance {score:.2} ({}x{})",
                 input.window,
                 glyph.w,
                 glyph.h
             );
-            if score >= MATCH_THRESHOLD && best.is_none_or(|(_, s)| score > s) {
-                best = Some((name.as_str(), score));
-            }
-        }
+            score >= MATCH_THRESHOLD
+        });
 
-        match best {
-            Some((name, _)) => {
-                if state.active.as_deref() != Some(name) {
-                    let cooled = state
-                        .last_notified
-                        .get(name)
-                        .is_none_or(|t| input.now.duration_since(*t) >= NOTIFY_COOLDOWN);
-                    if !state.engaged {
-                        tracing::debug!(
-                            "[tour] {name} : tour reconnu, pas de notification (phase de placement)"
-                        );
-                    } else if !input.foreground && cooled {
-                        state.last_notified.insert(name.to_string(), input.now);
-                        events.push(Event::Notify {
-                            character: name.to_string(),
-                        });
-                    } else {
-                        tracing::debug!(
-                            "[tour] {name} : tour reconnu, pas de notification ({})",
-                            if input.foreground {
-                                "fenêtre au premier plan"
-                            } else {
-                                "trop tôt après la précédente"
-                            }
-                        );
-                    }
+        if recognized {
+            if state.active.as_deref() != Some(current) {
+                if state.engaged {
+                    Self::activate(state, current, input.foreground, input.now, &mut events);
+                } else {
+                    tracing::debug!(
+                        "[tour] {current} : tour reconnu, pas de notification (phase de placement)"
+                    );
                 }
-                state.active = Some(name.to_string());
-                state.misses = 0;
             }
-            None => {
-                // Front descendant retardé : `INACTIVE_TICKS` ticks sans reconnaissance.
-                state.misses += 1;
-                if state.misses >= INACTIVE_TICKS {
-                    state.active = None;
-                }
+            state.active = Some(current.to_string());
+            state.misses = 0;
+        } else {
+            // Front descendant retardé : `INACTIVE_TICKS` ticks sans reconnaissance.
+            state.misses += 1;
+            if state.misses >= INACTIVE_TICKS {
+                state.active = None;
             }
         }
         events
+    }
+
+    /// `character` vient de passer actif dans un combat engagé — notifié si la fenêtre n'est pas
+    /// au premier plan et que sa dernière notification date d'assez longtemps.
+    fn activate(
+        state: &mut WindowState,
+        character: &str,
+        foreground: bool,
+        now: Instant,
+        events: &mut Vec<Event>,
+    ) {
+        if state.active.as_deref() != Some(character) {
+            let cooled = state
+                .last_notified
+                .get(character)
+                .is_none_or(|t| now.duration_since(*t) >= NOTIFY_COOLDOWN);
+            if !foreground && cooled {
+                state.last_notified.insert(character.to_string(), now);
+                events.push(Event::Notify {
+                    character: character.to_string(),
+                });
+            } else {
+                tracing::debug!(
+                    "[tour] {character} : tour reconnu, pas de notification ({})",
+                    if foreground {
+                        "fenêtre au premier plan"
+                    } else {
+                        "trop tôt après la précédente"
+                    }
+                );
+            }
+        }
+        state.active = Some(character.to_string());
+        state.misses = 0;
     }
 }
 
@@ -353,22 +401,19 @@ mod tests {
         }
     }
 
-    fn facts(engaged: bool, casts: &[(&str, usize)]) -> FightFacts {
+    fn facts(engaged: bool, cast_len: usize) -> FightFacts {
         FightFacts {
             ongoing: true,
             engaged_by_log: engaged,
-            cast_lens: casts.iter().map(|(n, c)| (n.to_string(), *c)).collect(),
+            cast_len,
+            current_in_fight: true,
         }
-    }
-
-    fn one(name: &str) -> Vec<String> {
-        vec![name.to_string()]
     }
 
     fn tick<'a>(
         w: &mut Watcher,
         window: &'a str,
-        characters: &'a [String],
+        current: &'a str,
         band: Option<&'a Band>,
         fight: &'a FightFacts,
         foreground: bool,
@@ -376,7 +421,7 @@ mod tests {
     ) -> Vec<Event> {
         w.tick(TickInput {
             window,
-            characters,
+            current,
             band,
             fight: Some(fight),
             foreground,
@@ -387,24 +432,23 @@ mod tests {
     /// Joue les ticks qui font acquérir le gabarit d'« Oumbra » : deux sorts, la bande au repos.
     fn learn_oumbra(w: &mut Watcher, t0: Instant) -> Vec<Event> {
         let repos = fixture("repos-oumbra");
-        let chars = one("Oumbra");
         let mut all = Vec::new();
-        let f1 = facts(true, &[("Oumbra", 1)]);
-        all.extend(tick(w, "Oumbra", &chars, Some(&repos), &f1, true, t0));
+        let f1 = facts(true, 1);
+        all.extend(tick(w, "Oumbra", "Oumbra", Some(&repos), &f1, true, t0));
         all.extend(tick(
             w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&repos),
             &f1,
             true,
             t0 + Duration::from_millis(500),
         ));
-        let f2 = facts(true, &[("Oumbra", 2)]);
+        let f2 = facts(true, 2);
         all.extend(tick(
             w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&repos),
             &f2,
             true,
@@ -430,13 +474,12 @@ mod tests {
         let t0 = Instant::now();
         let repos = fixture("repos-oumbra");
         let carte = fixture("carte-pugio");
-        let chars = one("Oumbra");
-        let f0 = facts(true, &[]);
+        let f0 = facts(true, 0);
         for i in 0..4 {
             let ev = tick(
                 &mut w,
                 "Oumbra",
-                &chars,
+                "Oumbra",
                 Some(&repos),
                 &f0,
                 true,
@@ -445,11 +488,11 @@ mod tests {
             assert!(ev.is_empty());
         }
         for i in 0..4u64 {
-            let f = facts(true, &[("Oumbra", i as usize + 1)]);
+            let f = facts(true, i as usize + 1);
             let ev = tick(
                 &mut w,
                 "Oumbra",
-                &chars,
+                "Oumbra",
                 Some(&carte),
                 &f,
                 true,
@@ -467,13 +510,12 @@ mod tests {
         learn_oumbra(&mut w, t0);
         let repos = fixture("repos-oumbra");
         let autre = fixture("repos-pugio-t18");
-        let chars = one("Oumbra");
-        let f = facts(true, &[("Oumbra", 2)]);
+        let f = facts(true, 2);
         // Déjà actif → rien.
         let ev = tick(
             &mut w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&repos),
             &f,
             false,
@@ -485,7 +527,7 @@ mod tests {
             let ev = tick(
                 &mut w,
                 "Oumbra",
-                &chars,
+                "Oumbra",
                 Some(&autre),
                 &f,
                 false,
@@ -497,7 +539,7 @@ mod tests {
         let ev = tick(
             &mut w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&repos),
             &f,
             false,
@@ -513,7 +555,7 @@ mod tests {
         let ev = tick(
             &mut w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&repos),
             &f,
             false,
@@ -529,13 +571,12 @@ mod tests {
         learn_oumbra(&mut w, t0);
         let repos = fixture("repos-oumbra");
         let autre = fixture("repos-pugio-t18");
-        let chars = one("Oumbra");
-        let f = facts(true, &[("Oumbra", 2)]);
+        let f = facts(true, 2);
         for i in 0..2 {
             tick(
                 &mut w,
                 "Oumbra",
-                &chars,
+                "Oumbra",
                 Some(&autre),
                 &f,
                 true,
@@ -545,7 +586,7 @@ mod tests {
         let ev = tick(
             &mut w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&repos),
             &f,
             true,
@@ -561,13 +602,12 @@ mod tests {
         learn_oumbra(&mut w, t0);
         let carte = fixture("carte-pugio");
         let autre = fixture("repos-pugio-t18");
-        let chars = one("Oumbra");
-        let f = facts(true, &[("Oumbra", 2)]);
+        let f = facts(true, 2);
         for i in 0..2 {
             tick(
                 &mut w,
                 "Oumbra",
-                &chars,
+                "Oumbra",
                 Some(&autre),
                 &f,
                 false,
@@ -577,7 +617,7 @@ mod tests {
         let ev = tick(
             &mut w,
             "Oumbra",
-            &chars,
+            "Oumbra",
             Some(&carte),
             &f,
             false,
@@ -600,7 +640,7 @@ mod tests {
         let ev = tick(
             &mut w,
             "Oumbra",
-            &one("Oumbra"),
+            "Oumbra",
             None,
             &ended,
             false,
@@ -639,13 +679,12 @@ mod tests {
         )
         .unwrap();
         w.templates.insert("Pugio Letalis".to_string(), glyph);
-        let chars = one("Pugio Letalis");
-        let placement = facts(false, &[]);
+        let placement = facts(false, 0);
         for i in 0..4 {
             let ev = tick(
                 &mut w,
                 "Pugio Letalis",
-                &chars,
+                "Pugio Letalis",
                 Some(&pret),
                 &placement,
                 false,
@@ -654,11 +693,11 @@ mod tests {
             assert!(ev.is_empty(), "placement : {ev:?}");
         }
         // Le log voit un sort : engagé. Déjà reconnu, pas de front : rien de rétroactif.
-        let engaged = facts(true, &[]);
+        let engaged = facts(true, 0);
         let ev = tick(
             &mut w,
             "Pugio Letalis",
-            &chars,
+            "Pugio Letalis",
             Some(&pret),
             &engaged,
             false,
@@ -670,7 +709,7 @@ mod tests {
             tick(
                 &mut w,
                 "Pugio Letalis",
-                &chars,
+                "Pugio Letalis",
                 Some(&autre),
                 &engaged,
                 false,
@@ -680,7 +719,7 @@ mod tests {
         let ev = tick(
             &mut w,
             "Pugio Letalis",
-            &chars,
+            "Pugio Letalis",
             Some(&pret),
             &engaged,
             false,
@@ -695,62 +734,22 @@ mod tests {
     }
 
     #[test]
-    fn un_heros_est_appris_et_notifie_depuis_la_fenetre_de_son_compte() {
-        // Fenêtre « Oumbra », compte à deux personnages : Oumbra et Pugio Letalis (héros). Pugio
-        // lance deux sorts pendant que la fenêtre montre son nom sous un panneau doré : son gabarit
-        // s'apprend depuis cette fenêtre. Ensuite, quand son tour revient et que la fenêtre est en
-        // arrière-plan, c'est LUI qui est notifié.
+    fn la_bascule_du_titre_sur_un_heros_notifie_sans_capture() {
+        // Fenêtre « Oumbra », combat engagé, en arrière-plan. Le titre passe à « Pugio Letalis »
+        // (son tour commence) : notifié aussitôt, sans gabarit ni capture — fenêtre minimisée.
         let mut w = Watcher::default();
         let t0 = Instant::now();
-        learn_oumbra(&mut w, t0);
-        let chars = vec!["Oumbra".to_string(), "Pugio Letalis".to_string()];
-        let pret = fixture("repos-pugio-t18"); // le widget affiche « Pugio Letalis »
-        let repos = fixture("repos-oumbra");
-        let f1 = facts(true, &[("Oumbra", 2), ("Pugio Letalis", 1)]);
-        tick(
-            &mut w,
-            "Oumbra",
-            &chars,
-            Some(&pret),
-            &f1,
-            true,
-            t0 + Duration::from_secs(20),
-        );
-        let f2 = facts(true, &[("Oumbra", 2), ("Pugio Letalis", 2)]);
+        let f = facts(true, 0);
+        let ev = tick(&mut w, "Oumbra", "Oumbra", None, &f, false, t0);
+        assert!(ev.is_empty(), "{ev:?}");
         let ev = tick(
             &mut w,
             "Oumbra",
-            &chars,
-            Some(&pret),
-            &f2,
-            true,
-            t0 + Duration::from_secs(23),
-        );
-        assert!(
-            matches!(ev.as_slice(), [Event::TemplateLearned { character, .. }] if character == "Pugio Letalis"),
-            "{ev:?}"
-        );
-        // Oumbra joue (fenêtre au premier plan), puis le tour revient à Pugio, fenêtre en
-        // arrière-plan.
-        for i in 0..2 {
-            tick(
-                &mut w,
-                "Oumbra",
-                &chars,
-                Some(&repos),
-                &f2,
-                true,
-                t0 + Duration::from_secs(30 + i),
-            );
-        }
-        let ev = tick(
-            &mut w,
-            "Oumbra",
-            &chars,
-            Some(&pret),
-            &f2,
+            "Pugio Letalis",
+            None,
+            &f,
             false,
-            t0 + Duration::from_secs(60),
+            t0 + Duration::from_secs(30),
         );
         assert_eq!(
             ev,
@@ -758,5 +757,105 @@ mod tests {
                 character: "Pugio Letalis".to_string()
             }]
         );
+        // Le titre ne bouge plus : rien de plus.
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Pugio Letalis",
+            None,
+            &f,
+            false,
+            t0 + Duration::from_secs(31),
+        );
+        assert!(ev.is_empty(), "{ev:?}");
+        // Retour à Oumbra, une minute plus tard : son tour.
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Oumbra",
+            None,
+            &f,
+            false,
+            t0 + Duration::from_secs(90),
+        );
+        assert_eq!(
+            ev,
+            vec![Event::Notify {
+                character: "Oumbra".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn la_bascule_du_titre_pendant_le_placement_ne_notifie_pas() {
+        let mut w = Watcher::default();
+        let t0 = Instant::now();
+        let placement = facts(false, 0);
+        tick(&mut w, "Oumbra", "Oumbra", None, &placement, false, t0);
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Pugio Letalis",
+            None,
+            &placement,
+            false,
+            t0 + Duration::from_secs(2),
+        );
+        assert!(ev.is_empty(), "{ev:?}");
+        // Un nom qui ne combat pas ici (bascule hors combat, autre compte) : rien non plus.
+        let mut etranger = facts(true, 0);
+        etranger.current_in_fight = false;
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Inconnu",
+            None,
+            &etranger,
+            false,
+            t0 + Duration::from_secs(40),
+        );
+        assert!(ev.is_empty(), "{ev:?}");
+    }
+
+    #[test]
+    fn le_titre_puis_le_widget_ne_notifient_qu_une_fois() {
+        // Le titre bascule sur Pugio (notifié), puis le widget le reconnaît : pas de doublon. Et
+        // la bascule ouvre l'apprentissage : avec un sort ensuite, le gabarit s'acquiert.
+        let mut w = Watcher::default();
+        let t0 = Instant::now();
+        let pret = fixture("repos-pugio-t18");
+        let repos = fixture("repos-oumbra");
+        let f = facts(true, 0);
+        tick(&mut w, "Oumbra", "Oumbra", Some(&repos), &f, false, t0);
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Pugio Letalis",
+            Some(&pret),
+            &f,
+            false,
+            t0 + Duration::from_secs(30),
+        );
+        assert_eq!(
+            ev,
+            vec![Event::Notify {
+                character: "Pugio Letalis".to_string()
+            }]
+        );
+        let f1 = facts(true, 1);
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Pugio Letalis",
+            Some(&pret),
+            &f1,
+            false,
+            t0 + Duration::from_secs(33),
+        );
+        assert!(
+            matches!(ev.as_slice(), [Event::TemplateLearned { character, .. }] if character == "Pugio Letalis"),
+            "{ev:?}"
+        );
+        assert!(w.has_template("Pugio Letalis"));
     }
 }

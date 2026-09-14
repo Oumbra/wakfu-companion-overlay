@@ -60,7 +60,6 @@ use overlay_ui::chat_command::{self, ChatCommand};
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
-    SharedRoster,
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
@@ -294,7 +293,13 @@ struct OverlayWindow {
     /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
     /// dynamique du Suivi (`watchlist_target_width`) sans re-scanner les fenêtres à chaque frame.
     game_rect: GameRect,
+    /// Le titulaire de la fenêtre de jeu à la création de cet overlay — sa clé, stable.
     character_name: String,
+    /// Le personnage **aux commandes** de la fenêtre de jeu maintenant : son titre au dernier
+    /// `scan()` (voir `sync_windows`). Le client Wakfu y met le héros dont c'est le tour — c'est
+    /// ce que lit la surveillance de tour (`sync_turn_watch`, doc de `turn_watch::watcher`).
+    /// Égal à `character_name` tant que la fenêtre ne joue qu'un personnage.
+    active_character: String,
     /// Dernière position appliquée — évite de rappeler `set_outer_position` à chaque tick (50 ms)
     /// quand la fenêtre de jeu n'a pas bougé.
     last_position: Option<PhysicalPosition<i32>>,
@@ -425,9 +430,6 @@ struct App {
     /// Dernier tick de `sync_turn_watch` : la capture d'une fenêtre est bien plus chère que les
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
-    /// Le roster du compte, publié par le thread Engine — la surveillance de tour y lit les
-    /// personnages du compte de chaque fenêtre (titulaire + héros).
-    roster: SharedRoster,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -512,8 +514,6 @@ struct AppState {
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     alert_profile: SharedAlertProfile,
     chat_filters: SharedChatFilters,
-    /// Voir `App::roster`.
-    roster: SharedRoster,
     /// Voir `App::chat_toast` — lu de la config au démarrage.
     chat_toast: chat_tab::ChatToastSettings,
     catalog: Arc<ArcSwap<CatalogIndex>>,
@@ -540,7 +540,6 @@ impl App {
             watchlist_toast,
             alert_profile,
             chat_filters,
-            roster,
             chat_toast,
             catalog,
             catalog_stale,
@@ -586,7 +585,6 @@ impl App {
             turn_notification,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
-            roster,
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -748,6 +746,7 @@ impl App {
                 client_top: 0,
             },
             character_name: "Connexion".to_string(),
+            active_character: "Connexion".to_string(),
             last_position: None,
             last_watchlist_width: None,
             last_watchlist_height: None,
@@ -917,6 +916,9 @@ impl App {
                     .find(|w| w.game_hwnd == info.hwnd && w.kind == kind)
                 {
                     Self::reposition(existing, info.rect);
+                    if existing.active_character != *character_name {
+                        existing.active_character = character_name.clone();
+                    }
                     continue;
                 }
                 let visible = kind != OverlayKind::Combat
@@ -985,72 +987,67 @@ impl App {
         }
         self.turn_watch_last_tick = Some(now);
 
-        // Une fenêtre de jeu par personnage — les overlays Combat et Suivi partagent le même
-        // `game_hwnd`, on ne la lit qu'une fois.
-        let mut targets: Vec<(String, HWND)> = Vec::new();
+        // Une fenêtre de jeu par client — les overlays Combat et Suivi partagent le même
+        // `game_hwnd`, on ne la lit qu'une fois. `(clé, personnage aux commandes, fenêtre)`.
+        let mut targets: Vec<(String, String, HWND)> = Vec::new();
         for overlay in self.windows.values() {
             if !matches!(overlay.kind, OverlayKind::Combat | OverlayKind::Watchlist) {
                 continue;
             }
-            if targets.iter().any(|(_, h)| h.0 == overlay.game_hwnd.0) {
+            if targets.iter().any(|(_, _, h)| h.0 == overlay.game_hwnd.0) {
                 continue;
             }
-            targets.push((overlay.character_name.clone(), overlay.game_hwnd));
+            targets.push((
+                overlay.character_name.clone(),
+                overlay.active_character.clone(),
+                overlay.game_hwnd,
+            ));
         }
         if targets.is_empty() {
             return;
         }
 
         let snapshot = self.snapshot.load();
-        let roster = self.roster.load();
         let foreground = unsafe { GetForegroundWindow() };
-        for (character, hwnd) in targets {
-            // Les personnages que cette fenêtre peut jouer : le titulaire et ses héros — même
-            // compte au roster. Sans roster, le titulaire seul.
-            let mut characters = roster
-                .as_ref()
-                .as_ref()
-                .map(|r| r.account_mates(&character))
-                .unwrap_or_default();
-            if !characters.iter().any(|c| {
-                overlay_engine::roster::normalize_wakfu_name(c)
-                    == overlay_engine::roster::normalize_wakfu_name(&character)
-            }) {
-                characters.insert(0, character.clone());
-            }
-            let fight = snapshot.fight_for_character(&character).map(|fight| {
-                let cast_lens = characters
-                    .iter()
-                    .map(|name| {
-                        let key = overlay_engine::roster::normalize_wakfu_name(name);
-                        let len = fight
-                            .fighters
-                            .iter()
-                            .find(|f| {
-                                f.is_ally
-                                    && overlay_engine::roster::normalize_wakfu_name(&f.name) == key
-                            })
-                            .map_or(0, |f| f.last_turn_casts.len());
-                        (name.clone(), len)
-                    })
-                    .collect();
-                turn_watch::watcher::FightFacts {
-                    ongoing: fight.ongoing,
-                    // Un sort ou des dégâts de qui que ce soit : la phase de placement est passée.
-                    engaged_by_log: fight.fighters.iter().any(|f| {
-                        !f.last_turn_casts.is_empty() || f.total_damage != 0 || f.total_heal != 0
-                    }),
-                    cast_lens,
-                }
-            });
+        for (window, current, hwnd) in targets {
+            // Le combat du personnage aux commandes — à défaut celui du titulaire (même combat en
+            // pratique : les héros d'une fenêtre combattent ensemble).
+            let key = overlay_engine::roster::normalize_wakfu_name(&current);
+            let fight = snapshot
+                .fight_for_character(&current)
+                .or_else(|| snapshot.fight_for_character(&window))
+                .map(|fight| {
+                    let own = fight
+                        .fighters
+                        .iter()
+                        .filter(|f| {
+                            f.is_ally
+                                && overlay_engine::roster::normalize_wakfu_name(&f.name) == key
+                        })
+                        // Le tour le plus récent — une ligne fantôme d'un ancien tour ne doit pas
+                        // masquer le sort qui vient d'être lancé.
+                        .max_by_key(|f| f.last_turn);
+                    turn_watch::watcher::FightFacts {
+                        ongoing: fight.ongoing,
+                        // Un sort ou des dégâts de qui que ce soit : la phase de placement est
+                        // passée.
+                        engaged_by_log: fight.fighters.iter().any(|f| {
+                            !f.last_turn_casts.is_empty()
+                                || f.total_damage != 0
+                                || f.total_heal != 0
+                        }),
+                        cast_len: own.map_or(0, |f| f.last_turn_casts.len()),
+                        current_in_fight: own.is_some(),
+                    }
+                });
             // Pas de capture hors combat : le moteur le sait, inutile de lire l'écran.
             let band = fight
                 .as_ref()
                 .filter(|f| f.ongoing)
                 .and_then(|_| turn_watch::capture::capture_bottom_band(hwnd));
             let events = self.turn_watcher.tick(turn_watch::watcher::TickInput {
-                window: &character,
-                characters: &characters,
+                window: &window,
+                current: &current,
                 band: band.as_ref(),
                 fight: fight.as_ref(),
                 foreground: foreground.0 == hwnd.0,
@@ -1264,6 +1261,7 @@ impl App {
             last_login_height: None,
             game_hwnd,
             game_rect: rect,
+            active_character: character_name.clone(),
             character_name,
             last_position: Some(position),
             // Déjà la largeur demandée ci-dessus (`size.0`) pour une fenêtre `Suivi` — la première
@@ -3085,7 +3083,7 @@ fn main() {
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let alert_profile = Arc::new(ArcSwap::from_pointee(None));
     let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
-    let roster: SharedRoster = Arc::new(ArcSwap::from_pointee(None));
+    let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
     let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
@@ -3146,7 +3144,6 @@ fn main() {
         watchlist_toast,
         alert_profile,
         chat_filters,
-        roster,
         chat_toast: saved_config.chat_toast(),
         catalog,
         catalog_stale,
