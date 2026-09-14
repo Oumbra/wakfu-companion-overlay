@@ -3108,10 +3108,16 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// Centres des trois premières tuiles de la grille, en mode incrémental (le formulaire n'a alors
 /// qu'une ligne). Relevés sur la planche `options_suivi_incremental` : tuile de 64 px, gouttière de
 /// 12, donc un pas de 76 px.
-const TUILE_0: egui::Pos2 = egui::pos2(79.0, 394.0);
-const TUILE_2: egui::Pos2 = egui::pos2(231.0, 394.0);
+///
+/// Descendus de 8 px le 2026-09-14 : l'en-tête de la liste a gagné la hauteur qui manquait à son
+/// bouton icône et la gouttière qui le sépare de la grille (`suivi_tab::LIST_HEADER_GAP`). Ces
+/// points désignent des TUILES, pas des pixels d'une image — s'ils ne suivaient pas, les planches
+/// d'infobulle et de déplacement resteraient vertes en cessant de montrer ce pour quoi elles
+/// existent.
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 402.0);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 402.0);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
-const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 377.0);
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 385.0);
 
 /// Le harnais de l'onglet Suivi, avec son état rendu inspectable — voir [`capture_onglet_suivi`],
 /// dont c'est le même jeu d'entrées. Rendu partagé parce que deux tests ont maintenant besoin de
@@ -3183,7 +3189,7 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(79.0, 440.0)),
+        Some(egui::pos2(79.0, 448.0)),
     );
 }
 
