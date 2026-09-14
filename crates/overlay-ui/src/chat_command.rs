@@ -89,6 +89,59 @@ impl ChatCommand {
     }
 }
 
+/// La ligne d'une réponse en privé — `/w "<nom>" `, **laissée ouverte** : espace final, pas
+/// d'envoi, le joueur n'a plus que son message à taper (décision du 2026-09-13). Pas une variante
+/// de [`ChatCommand`] : celles-ci sont des commandes COMPLÈTES, envoyées, liées à un raccourci.
+pub fn whisper_line(character: &str) -> String {
+    format!("/w \"{character}\" ")
+}
+
+/// Prépare une réponse en privé à `character` dans la fenêtre de jeu `target` — le clic sur la
+/// carte d'alerte de chat (`panels::watchlist::toast_card`, 2026-09-13).
+///
+/// Séquence, sur un thread dédié comme [`send`] : **rendre le focus au jeu** (`target`, la fenêtre
+/// de jeu au premier plan ou la première trouvée — le clic sur l'overlay a pu le lui prendre, sous
+/// X11 surtout), un délai pour que l'OS livre le focus, `Entrée` (ouvre la saisie du chat), puis
+/// `/w "Nom" ` — **sans `Entrée` final** : c'est au joueur d'écrire son message.
+///
+/// `target` est la clé de fenêtre de la plateforme (`HWND` réduit à son entier sous Windows, XID
+/// sous X11) ; `None` quand aucune fenêtre de jeu n'est connue — on tape alors là où est le focus,
+/// comme les raccourcis multicompte.
+pub fn send_whisper(character: &str, target: Option<usize>) {
+    if !is_quotable(character) {
+        tracing::warn!(
+            "[chat] réponse en privé refusée : nom de personnage non citable ({character:?})"
+        );
+        return;
+    }
+    let line = whisper_line(character);
+    let character = character.to_string();
+    std::thread::Builder::new()
+        .name("chat-whisper".into())
+        .spawn(move || {
+            if let Some(target) = target {
+                match imp::activate(target) {
+                    Ok(()) => std::thread::sleep(FOCUS_DELAY),
+                    Err(err) => tracing::warn!("[chat] focus du jeu non rendu : {err}"),
+                }
+            }
+            match imp::type_open_line(&line, CHAT_OPEN_DELAY) {
+                Ok(()) => tracing::info!("[chat] réponse en privé préparée pour {character}"),
+                Err(err) => {
+                    tracing::warn!("[chat] réponse en privé vers {character} en échec : {err}")
+                }
+            }
+        })
+        .map(|_| ())
+        .unwrap_or_else(|err| {
+            tracing::warn!("[chat] thread de frappe non démarré ({err}).");
+        });
+}
+
+/// Délai entre la demande de focus et la première frappe : le temps que l'OS ou le WM livre le
+/// focus à la fenêtre du jeu. Estimation, du même ordre que [`CHAT_OPEN_DELAY`].
+const FOCUS_DELAY: Duration = Duration::from_millis(120);
+
 /// Pourquoi aucune commande n'a pu être préparée — chaque cas mérite une trace différente, aucun ne
 /// mérite d'interrompre l'overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,6 +259,30 @@ mod imp {
         tap_return()
     }
 
+    /// `Entrée`, la ligne, et c'est tout — voir `send_whisper`.
+    pub fn type_open_line(line: &str, open_delay: Duration) -> Result<(), String> {
+        tap_return()?;
+        sleep(open_delay);
+        for unit in line.encode_utf16() {
+            send(&[unicode_input(unit, false), unicode_input(unit, true)])?;
+            sleep(KEY_DELAY);
+        }
+        Ok(())
+    }
+
+    /// Rend le premier plan à la fenêtre de jeu. `SetForegroundWindow` n'est honoré que par un
+    /// processus qui vient de recevoir l'entrée utilisateur — c'est notre cas, la demande suit un
+    /// clic sur l'overlay ; sinon Windows se contente de faire clignoter la barre des tâches, et
+    /// la frappe part vers la fenêtre qui a réellement le focus.
+    pub fn activate(target: usize) -> Result<(), String> {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+        let hwnd = HWND(target as *mut core::ffi::c_void);
+        let ok = unsafe { SetForegroundWindow(hwnd) }.as_bool();
+        ok.then_some(())
+            .ok_or_else(|| "SetForegroundWindow a refusé".to_string())
+    }
+
     fn tap_return() -> Result<(), String> {
         send(&[key_input(VK_RETURN, false), key_input(VK_RETURN, true)])
     }
@@ -273,6 +350,21 @@ mod imp {
     ) -> Result<(), overlay_platform::linux::keyboard::TypeError> {
         overlay_platform::linux::keyboard::type_chat_line(line, open_delay, send_delay)
     }
+
+    /// `Entrée`, la ligne, et c'est tout — voir `send_whisper`.
+    pub fn type_open_line(
+        line: &str,
+        open_delay: Duration,
+    ) -> Result<(), overlay_platform::linux::keyboard::TypeError> {
+        overlay_platform::linux::keyboard::type_open_line(line, open_delay)
+    }
+
+    /// Rend le focus à la fenêtre de jeu par `_NET_ACTIVE_WINDOW` — voir
+    /// `overlay_platform::linux::x11::activate_window`.
+    pub fn activate(target: usize) -> Result<(), String> {
+        let window = u32::try_from(target).map_err(|_| "XID hors plage".to_string())?;
+        overlay_platform::linux::x11::activate_window(window)
+    }
 }
 
 #[cfg(test)]
@@ -288,6 +380,8 @@ mod tests {
     #[test]
     fn lignes_citees_comme_le_jeu_les_attend() {
         assert_eq!(ChatCommand::Invite.line("Oumbra"), "/i \"Oumbra\"");
+        // La réponse en privé reste ouverte : espace final, pas d'envoi.
+        assert_eq!(whisper_line("Huppermage-Bleu"), "/w \"Huppermage-Bleu\" ");
         assert_eq!(
             ChatCommand::Follow.line("Sagittarius Caecus"),
             "/fol \"Sagittarius Caecus\""
