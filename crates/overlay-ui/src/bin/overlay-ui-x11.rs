@@ -11,8 +11,13 @@
 //! (§17.2 « État ») — mode INVITÉ uniquement pour cette première version :**
 //! - Pas de compte lié / synchro serveur (lots L4-L5) : aucun thread Auth/Sync/Catalogue/Donjons.
 //!   `catalog`/`dungeons` restent à leurs valeurs par défaut (vides), `auth_status` reste
-//!   `Connected` fixe (aucune icône de relance d'appairage n'est jamais affichée),
-//!   `auth_command_tx` est un `NoopAuthSink` (rien n'écoute de toute façon).
+//!   `Connected` fixe, `auth_command_tx` est un `NoopAuthSink` (rien n'écoute de toute façon).
+//!   **La fenêtre de connexion (`OverlayKind::Login`, `panels::login`, 2026-09-14) n'est donc
+//!   pas câblée ici** — ni l'icône de zone de notification (`tray-icon`, dépendance Windows
+//!   seulement). Ce binaire est un harnais de rendu réel sous X11 ; l'obligation de compte, elle,
+//!   est celle du binaire Windows (`main.rs`, §9.1 undecies du plan). Le jour où le thread Auth y
+//!   sera porté, `panels::login` et `render_content` sont déjà partagés : seul le fenêtrage OS
+//!   (`main.rs::App::create_login_window`/`sync_session_windows`) reste à dupliquer.
 //! - Pas de hotkey rafraîchissement/déconnexion (`Ctrl+Shift+R`/`Ctrl+Alt+D`) : sans thread
 //!   Auth/Catalogue à redemander, ils n'auraient aucun effet ici. Seules les actions de
 //!   `overlay_ui::shortcuts::ShortcutAction::LINUX_SUPPORTED` sont câblées (bascule, sortie,
@@ -403,6 +408,8 @@ mod linux_main {
                     rect.left + (rect.width - overlay_width) / 2,
                     rect.top + (rect.height - overlay_height) / 2,
                 ),
+                // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
+                OverlayKind::Login => PhysicalPosition::new(0, 0),
             }
         }
 
@@ -425,11 +432,17 @@ mod linux_main {
                     options_modal::WINDOW_SIZE.0 as f64,
                     options_modal::WINDOW_SIZE.1 as f64,
                 ),
+                // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
+                OverlayKind::Login => (
+                    panels::login::WINDOW_WIDTH as f64,
+                    panels::login::INITIAL_HEIGHT as f64,
+                ),
             };
             let title_suffix = match kind {
                 OverlayKind::Combat => "Combat",
                 OverlayKind::Watchlist => "Suivi",
                 OverlayKind::Options => "Options",
+                OverlayKind::Login => "Connexion",
             };
             let attrs = WindowAttributes::default()
                 .with_title(format!(
@@ -1102,6 +1115,8 @@ mod linux_main {
                             shortcuts: self.hotkeys.bindings(),
                             now,
                             options: overlay.options_state.as_mut(),
+                            // Jamais de fenêtre de connexion ici (voir la doc de module).
+                            login: None,
                         },
                     );
                     if outcome.close_toast {

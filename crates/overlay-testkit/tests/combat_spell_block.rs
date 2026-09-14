@@ -328,6 +328,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 shortcuts: &shortcuts,
                 now,
                 options: None,
+                login: None,
             },
         );
     });

@@ -28,6 +28,10 @@ pub enum SyncError {
     Json(String),
     #[error("l'appairage a expiré avant confirmation")]
     PairingExpired,
+    /// Attente abandonnée à la demande de l'utilisateur (voir `pair_and_wait`) — pas un échec à
+    /// afficher en rouge : la fenêtre de connexion revient simplement à son état « non connecté ».
+    #[error("appairage annulé")]
+    PairingCancelled,
     #[error("erreur d'accès au trousseau/fichier de jeton : {0}")]
     TokenStore(String),
 }
