@@ -727,12 +727,12 @@ pub fn show(
         );
         // **Le son, sous la notification et en retrait** (demande du 2026-09-14) : la case ne
         // vaut que si la notification est active — grisée sinon, sans changer de valeur (un son
-        // coupé le reste si on désactive puis réactive la notification). Le retrait est celui
-        // que le jeu met entre un titre de section et ses contrôles (7 px, voir
-        // `design::heading`) : c'est son seul signal de dépendance, on le réemploie tel quel
-        // plutôt que d'en inventer un autre.
+        // coupé le reste si on désactive puis réactive la notification). Sa case commence là où
+        // commence le LIBELLÉ de la case du dessus (case + écart, voir `design::checkbox`) : la
+        // première version reprenait le retrait titre → contrôle (7 px), jugé trop faible au
+        // rendu — « aligner la partie gauche avec le début du m d'en haut ».
         ui.horizontal(|ui| {
-            ui.add_space(design::tokens::PANEL_PAD_CONTROL_X - design::tokens::PANEL_PAD_TITLE_X);
+            ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
             ui.add(
                 design::checkbox(
                     &mut state.turn_notification_muted,
