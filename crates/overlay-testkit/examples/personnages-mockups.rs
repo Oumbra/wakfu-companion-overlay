@@ -92,17 +92,23 @@ const BODY_FONT_SIZE: f32 = 15.0;
 const TILE_GAP: f32 = 12.0;
 /// Croix de retrait révélée au survol — `panels::alerts_tab::TILE_BADGE` / `TILE_BADGE_INSET`.
 const TILE_BADGE: f32 = 14.0;
-const TILE_BADGE_INSET: f32 = 7.0;
+const TILE_BADGE_INSET: f32 = 8.0;
 /// Voile posé sur une tuile survolée — `tokens::LEGEND_TILE_HOVER_SCRIM`.
 const TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
 
-/// **Le turquoise du jeu**, relevé sur le bandeau de nom des cartes du panneau de héros — la même
-/// famille que la bannière de fenêtre (`design-tokens.json`, `banner_teal.gradient_end` `#1D8B9C`).
+/// **Le turquoise du jeu**, à sa mesure RÉELLE : `#1A6E80`, relevé au pixel sur
+/// `interface-options-jeu.png` — et non le `banner_teal.gradient_end` `#1D8B9C` de
+/// `design-tokens.json`, que le fichier signale lui-même comme une première mesure révisée depuis.
+/// L'écart se voyait : le bandeau d'une tuile ressortait plus clair et plus saturé que la bannière
+/// de la fenêtre qui le contient.
+///
 /// Ici il ne dit pas « sélectionné » mais **« actif » : le dernier personnage reconnu dans
 /// `wakfu.log`**, ce que le jeu ne peut pas savoir et l'overlay si.
-const ACTIVE_BAND: Color32 = Color32::from_rgb(0x1D, 0x8B, 0x9C);
-/// Le second état du même bandeau, gris sombre — relevé sur les mêmes captures.
-const IDLE_BAND: Color32 = Color32::from_rgb(0x2A, 0x2E, 0x33);
+const ACTIVE_BAND: Color32 = Color32::from_rgb(0x1A, 0x6E, 0x80);
+/// Le second état du même bandeau. `panels::alerts_tab::SETTING_ROW_FILL`, l'aplat de ligne de
+/// réglage déjà posé par les deux onglets voisins — plutôt que le `#2A2E33` relevé sur les captures
+/// du jeu, qui introduirait un troisième gris dans la même fenêtre pour un écart invisible.
+const IDLE_BAND: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
 
 /// Cadre d'une tuile — ceux de `design::legend_tile` (`tokens::LEGEND_TILE_FILL` / `_BORDER`),
 /// pour que la grille de Personnages et celle de Chat aient le même trait.
@@ -363,10 +369,12 @@ fn paint_face(
 }
 
 /// La croix de retrait révélée au survol d'une tuile — l'idiome des tuiles d'Alertes et de Chat.
-fn hover_badge(ui: &mut egui::Ui, rect: Rect, log_name: String) {
+/// `scrim` est la zone réellement voilée : elle vaut la tuile entière quand rien n'y doit rester
+/// lisible, et s'arrête au bandeau de nom quand il y en a un (voir [`hero_tile`]).
+fn hover_badge(ui: &mut egui::Ui, rect: Rect, scrim: Rect, log_name: String) {
     let ctx = ui.ctx().clone();
     let painter = ui.painter().clone();
-    painter.rect_filled(rect.shrink(TILE_BORDER_WIDTH), 0.0, TILE_HOVER_SCRIM);
+    painter.rect_filled(scrim.shrink(TILE_BORDER_WIDTH), 0.0, TILE_HOVER_SCRIM);
     let ds = design::DesignSystem::get(&ctx);
     let native = ds.icon_native_size(DsIcon::Close);
     let side = native.x.max(native.y);
@@ -440,7 +448,7 @@ fn account_row(ui: &mut egui::Ui, compte: &mut usize, serveur: &mut usize, width
                 .tooltip("Supprimer ce compte")
                 .log_name("personnages.compte.retirer"),
         );
-        right.add_space(6.0);
+        right.add_space(design::tokens::PANEL_PAD_CONTROL_X);
         right.add(
             design::icon_button(DsIcon::Plus)
                 .context(IconContext::Panel)
@@ -548,11 +556,12 @@ fn add_row(
 /// Tuiles par rangée. **Cinq** : à 675 pt de large utile, une tuile fait 125 pt, soit très près des
 /// 105 px des cartes du jeu — quatre les rendrait obèses, six couperait un nom sur deux.
 const A_TILES_PER_ROW: usize = 5;
-/// Hauteur d'une tuile : 8 de marge + 56 de portrait + 4 + 14 de classe + 6 + 22 de bandeau.
-const A_TILE_HEIGHT: f32 = 110.0;
-/// Côté du portrait dans la tuile. Les fichiers `class-profile/*.png` sont natifs en 48 ; 56 les
-/// agrandit d'un sixième, ce qui reste net — et donne au portrait le poids qu'il a dans le jeu.
-const A_FACE: f32 = 56.0;
+/// Hauteur d'une tuile : 8 de marge + 48 de portrait + 4 + 14 de classe + 6 + 22 de bandeau.
+const A_TILE_HEIGHT: f32 = 102.0;
+/// Côté du portrait dans la tuile — **48, la taille NATIVE** des fichiers `class-profile/*.png`.
+/// `portraits.rs` a justement été refondu en 36 textures indépendantes pour éviter le filtrage
+/// LINEAR sur le bord des médaillons ; les peindre à 56 rendait ce travail inutile.
+const A_FACE: f32 = 48.0;
 /// Hauteur du bandeau de nom, relevée sur les captures du panneau de héros (~20 px).
 const A_BAND: f32 = 22.0;
 
@@ -570,13 +579,13 @@ fn hero_tile(
     let actif = perso.name == ACTIF;
 
     painter.rect_filled(rect, 2.0, TILE_FILL);
+    // **Un seul porteur du turquoise : le bandeau.** Un liseré de tuile en plus doublait le signal
+    // et serait entré en concurrence avec le liseré or que `panels::tile_reorder` pose sur la tuile
+    // visée pendant un déplacement — deux accents pour deux sens différents sur la même arête.
     painter.rect_stroke(
         rect,
         2.0,
-        egui::Stroke::new(
-            TILE_BORDER_WIDTH,
-            if actif { ACTIVE_BAND } else { TILE_BORDER },
-        ),
+        egui::Stroke::new(TILE_BORDER_WIDTH, TILE_BORDER),
         egui::StrokeKind::Inside,
     );
 
@@ -621,7 +630,14 @@ fn hero_tile(
     );
 
     if response.contains_pointer() {
-        hover_badge(ui, rect, format!("personnages.retirer.{}", perso.name));
+        // Le voile s'arrête au bord haut du bandeau — le couvrir rendait le nom gris sur gris à
+        // l'instant où le pointeur l'atteint, c'est-à-dire exactement quand on le lit.
+        hover_badge(
+            ui,
+            rect,
+            Rect::from_min_max(rect.min, egui::pos2(rect.right(), band.top())),
+            format!("personnages.retirer.{}", perso.name),
+        );
     }
 }
 
@@ -645,8 +661,6 @@ fn direction_a(
     ui.add_space(SECTION_GAP * 0.75);
     add_row(ui, nom, Some(&liste[1]), portraits, icons, width);
     ui.add_space(SECTION_GAP * 0.75);
-
-    ui.add(design::heading(format!("{} personnages", liste.len())));
 
     panel.scroll_area(ui, "personnages.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -834,8 +848,11 @@ fn direction_b(
 // -------------------------------------------------------------------------------------------
 
 const C_TILES_PER_ROW: usize = 3;
-const C_TILE_HEIGHT: f32 = 62.0;
-const C_FACE: f32 = 40.0;
+/// 64 — `tokens::ITEM_SLOT_SIZE`, le pas des grilles d'Alertes et du Suivi : la grille des comptes
+/// se cale sur elles au lieu d'inventer sa propre hauteur.
+const C_TILE_HEIGHT: f32 = 64.0;
+/// 48, taille native du portrait — voir [`A_FACE`].
+const C_FACE: f32 = 48.0;
 
 /// Une tuile compacte : portrait à gauche, nom et classe à droite. Plus dense que la carte de la
 /// direction A, parce qu'elle vit DANS un bloc qui a déjà son propre en-tête.
@@ -860,22 +877,8 @@ fn compact_tile(
         ),
         egui::StrokeKind::Inside,
     );
-    if actif {
-        painter.rect_filled(
-            Rect::from_min_max(
-                egui::pos2(
-                    rect.left() + TILE_BORDER_WIDTH,
-                    rect.top() + TILE_BORDER_WIDTH,
-                ),
-                egui::pos2(
-                    rect.left() + TILE_BORDER_WIDTH + 3.0,
-                    rect.bottom() - TILE_BORDER_WIDTH,
-                ),
-            ),
-            0.0,
-            ACTIVE_BAND,
-        );
-    }
+    // Un seul porteur du turquoise ici aussi : la bordure. L'arête de 3 pt qu'elle portait en plus
+    // disparaissait dessous, à un pixel près.
 
     let face = Rect::from_center_size(
         egui::pos2(rect.left() + 10.0 + C_FACE / 2.0, rect.center().y),
@@ -907,7 +910,12 @@ fn compact_tile(
     );
 
     if response.contains_pointer() {
-        hover_badge(ui, rect, format!("personnages.c.retirer.{}", perso.name));
+        hover_badge(
+            ui,
+            rect,
+            rect,
+            format!("personnages.c.retirer.{}", perso.name),
+        );
     }
 }
 
@@ -919,6 +927,8 @@ fn compte_bloc(
     liste: &[Perso],
     ouvert: &mut bool,
     nom: &mut String,
+    // Le compte principal ne se supprime pas — voir la ligne de réglage ci-dessous.
+    principal: bool,
     portraits: &PortraitAtlas,
     icons: &UiIcons,
 ) {
@@ -928,6 +938,61 @@ fn compte_bloc(
         .log_name(format!("personnages.compte.{titre}"))
         .show(ui, |ui| {
             let width = ui.available_width();
+            // **La ligne de réglage du compte, DANS son bloc.** Sans elle, la direction C ne sait
+            // ni renommer un compte, ni lui poser un serveur, ni le supprimer — et le bloc
+            // repliable n'est plus qu'un classeur. Aplat de ligne de réglage du jeu
+            // (`alerts_tab::SETTING_ROW_FILL`, rayon 4, 40 pt), comme « Fermeture automatique ».
+            let ligne = ui.allocate_space(Vec2::new(width, 40.0)).1;
+            ui.painter().rect_filled(ligne, 4.0, IDLE_BAND);
+            let mut cell =
+                ui.new_child(egui::UiBuilder::new().max_rect(ligne.shrink2(Vec2::new(12.0, 0.0))));
+            cell.spacing_mut().item_spacing.x = 0.0;
+            cell.horizontal_centered(|ui| {
+                ui.label(
+                    RichText::new("Nom du compte")
+                        .color(SUBDUED)
+                        .font(design::text::label_font(ui.ctx(), 13.0)),
+                );
+                ui.add_space(10.0);
+                let mut libelle = titre.to_owned();
+                ui.add(
+                    design::input(&mut libelle)
+                        .size(InputSize::Search)
+                        .width(180.0)
+                        .log_name("personnages.compte.nom"),
+                );
+                ui.add_space(20.0);
+                ui.label(
+                    RichText::new("Serveur")
+                        .color(SUBDUED)
+                        .font(design::text::label_font(ui.ctx(), 13.0)),
+                );
+                ui.add_space(10.0);
+                let mut choix = 0usize;
+                design::select(&mut choix)
+                    .option(0usize, serveur)
+                    .option(1usize, "Aucun")
+                    .width(150.0)
+                    .log_name("personnages.compte.serveur")
+                    .show(ui);
+                let mut right = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(ligne.shrink2(Vec2::new(8.0, 0.0)))
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                );
+                // **Rien du tout sur le compte principal**, pas un bouton désactivé : c'est le
+                // traitement que les dix objets par défaut d'Alertes ont déjà reçu.
+                if !principal {
+                    right.add(
+                        design::icon_button(DsIcon::Delete)
+                            .context(IconContext::Panel)
+                            .size(28.0)
+                            .tooltip("Supprimer ce compte")
+                            .log_name("personnages.compte.retirer"),
+                    );
+                }
+            });
+            ui.add_space(TILE_GAP);
             add_row(ui, nom, Some(&liste[0]), portraits, icons, width - 26.0);
             ui.add_space(TILE_GAP);
             ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -1031,6 +1096,7 @@ fn personnages_c_comptes() {
                 COMPTE_PRINCIPAL,
                 &mut ouverts[0],
                 &mut noms[0],
+                true,
                 portraits,
                 icons,
             );
@@ -1041,6 +1107,7 @@ fn personnages_c_comptes() {
                 COMPTE_MULE,
                 &mut ouverts[1],
                 &mut noms[1],
+                false,
                 portraits,
                 icons,
             );
@@ -1051,6 +1118,7 @@ fn personnages_c_comptes() {
                 COMPTE_CRAFT,
                 &mut ouverts[2],
                 &mut noms[2],
+                false,
                 portraits,
                 icons,
             );
