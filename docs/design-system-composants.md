@@ -559,6 +559,19 @@ qui ne changerait que la case perdrait la moitié de l'information.
 | Case → libellé | 6px | la case finit à x=56, le libellé commence à x=62 |
 | Corps du libellé | 15px (encre 10) | jeton `libellé d'option` — plus petit qu'un libellé de bouton |
 | Libellé décoché / coché | `#ffffff` / `#f4d89e` | relevé |
+| **Pas entre deux lignes** | **31px**, soit **11px de blanc** | « Rythme : 31 px entre deux lignes d'option consécutives » — vérifié au pixel (jeu : case 1 à y=175, case 2 à y=206) et sur les onze lignes de l'onglet Chat, dont les pas vont de 30 à 31 |
+
+**L'interligne est un jeton de MISE EN PAGE** (`tokens::CHECKBOX_ROW_GAP`, 11px), pas une affaire du
+composant : `design::checkbox` alloue la hauteur d'une ligne et rien de plus, et `design::panel` met
+`item_spacing.y` à zéro pour que chaque écart soit posé explicitement. Un écart porté par le
+composant s'ajouterait au `SECTION_GAP` qui suit la dernière ligne d'un bloc. Il se pose donc
+**entre** deux lignes, jamais après la dernière.
+
+> Personne ne l'avait posé jusqu'au 2026-09-14 : deux cases empilées se suivaient à 20px — la
+> hauteur de la case, sans un pixel de blanc — contre 31 dans le jeu. Retour utilisateur, capture du
+> jeu à l'appui : « l'espacement entre les lignes du design system du jeu est beaucoup plus élevé
+> que celui qui est utilisé dans la modale de l'overlay ». Les candidats ont été rendus par le vrai
+> moteur avant de trancher (`cargo run -p overlay-testkit --example interligne-options`).
 
 **Textures** : `checkbox-true.png` et `checkbox-false.png`, 20 × 20 toutes les deux — la taille
 relevée exactement. Leur découpage 9-slice (5px figés) n'existe que pour honorer la règle « toute
@@ -568,8 +581,9 @@ taille est valide » : en pratique une case est toujours peinte à sa taille nat
 l'état **désactivé** teinte la case et le libellé de `TEXT_DISABLED`, par cohérence avec le bouton
 désactivé.
 
-**Pas encore utilisé** : la modale Options n'a aujourd'hui aucun réglage booléen. Le composant est
-livré prêt ; son premier usage viendra avec le contenu de l'onglet « Paramètres ».
+**Usages** : la section « Combat » de l'onglet « Paramètres » (trois lignes, dont la dernière en
+retrait sous celle dont elle dépend) et la case « Fermeture automatique » des onglets « Alertes » et
+« Chat », seule sur sa ligne de réglage.
 
 ---
 
