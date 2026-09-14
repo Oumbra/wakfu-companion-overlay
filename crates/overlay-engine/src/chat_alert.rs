@@ -162,6 +162,25 @@ pub fn chat_filters_to_settings_json(filters: &[ChatFilter]) -> serde_json::Valu
     .unwrap_or(serde_json::Value::Array(Vec::new()))
 }
 
+/// Lit la clé `chatFilters` de l'objet `data` de `GET /api/v1/settings` — même contrat que
+/// `watchlist_from_settings_json` : l'objet `data`, pas la réponse entière.
+pub fn chat_filters_from_account_data(data: &serde_json::Value) -> Vec<ChatFilter> {
+    data.get("chatFilters")
+        .map(chat_filters_from_settings_json)
+        .unwrap_or_default()
+}
+
+/// L'entrée `{ key, value, updatedAt }` d'un `PATCH /api/v1/settings` pour la clé `chatFilters` —
+/// jumeau de `watchlist_patch_entry`. La clé n'appartient qu'aux recherches : la valeur est
+/// remplacée en entier, sans rien à préserver.
+pub fn chat_filters_patch_entry(filters: &[ChatFilter]) -> serde_json::Value {
+    serde_json::json!({
+        "key": "chatFilters",
+        "value": chat_filters_to_settings_json(filters),
+        "updatedAt": chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 /// Deux recherches sont-elles la même ? Même mot ET même portée — `addFilter` refuse ce doublon.
 pub fn same_filter(a: &ChatFilter, b: &ChatFilter) -> bool {
     a == b
@@ -231,6 +250,20 @@ mod tests {
                 { "text": "ancien", "channel": "global" }
             ])
         );
+    }
+
+    #[test]
+    fn l_entree_de_patch_porte_la_cle_et_le_format_du_web() {
+        let entry = chat_filters_patch_entry(&[commerce("gelano")]);
+        assert_eq!(entry["key"], "chatFilters");
+        assert_eq!(
+            entry["value"],
+            json!([{ "text": "gelano", "channel": "commerce" }])
+        );
+        assert!(entry["updatedAt"].as_str().is_some_and(|s| s.contains('T')));
+        let data = json!({ "chatFilters": [{ "text": "x", "channel": "guilde" }] });
+        assert_eq!(chat_filters_from_account_data(&data).len(), 1);
+        assert!(chat_filters_from_account_data(&json!({})).is_empty());
     }
 
     #[test]
