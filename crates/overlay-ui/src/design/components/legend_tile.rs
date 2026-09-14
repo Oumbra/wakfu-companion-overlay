@@ -8,7 +8,6 @@
 //! let response = ui.add(
 //!     design::legend_tile("Commerce", "gelano")
 //!         .width(155.0)
-//!         .tooltip("Retirer")
 //!         .log_name("chat.recherche"),
 //! );
 //! ```
@@ -26,9 +25,10 @@
 //! - Elle **réserve elle-même la place de sa légende** au-dessus du cadre : un appelant qui l'empile
 //!   n'a pas à savoir de combien la légende déborde. `height` est la hauteur du CADRE ; la boîte
 //!   allouée le dépasse de la moitié de la légende.
-//! - Le contenu est **élidé sur une ligne**, jamais rogné en silence, et l'infobulle de l'appelant
-//!   (`tooltip`) est la seule : un contenu coupé se lit dans l'infobulle que l'appelant pose, avec
-//!   le mot entier s'il le souhaite.
+//! - Le contenu est **élidé sur une ligne**, jamais rogné en silence, et **seul un contenu coupé
+//!   a une infobulle** — le mot entier, rien d'autre (règle utilisateur du 2026-09-14 : jamais
+//!   d'infobulle pour répéter ce qui se lit déjà en entier, ni pour redire la légende sous les
+//!   yeux). Un appelant n'a pas d'infobulle à poser.
 //! - Survolée, elle se **voile** comme les tuiles d'Alertes et du Suivi. La croix de retrait, elle,
 //!   reste au panneau (`panels::alerts_tab::alert_item`) : une `Response` ne porte qu'un clic, et
 //!   la croix est un second clic sur une zone à part.
@@ -47,13 +47,6 @@ pub enum LegendTileState {
     Disabled,
 }
 
-/// De quel côté de la bordure haute la légende se pose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LegendSide {
-    Left,
-    Right,
-}
-
 /// Construit une tuile à légende.
 pub fn legend_tile(legend: impl Into<String>, text: impl Into<String>) -> LegendTile {
     LegendTile {
@@ -63,7 +56,6 @@ pub fn legend_tile(legend: impl Into<String>, text: impl Into<String>) -> Legend
         height: tokens::LEGEND_TILE_HEIGHT,
         enabled: true,
         legend_color: None,
-        tooltip: None,
         log_name: None,
         forced_state: None,
     }
@@ -77,7 +69,6 @@ pub struct LegendTile {
     height: f32,
     enabled: bool,
     legend_color: Option<Color32>,
-    tooltip: Option<String>,
     log_name: Option<String>,
     forced_state: Option<LegendTileState>,
 }
@@ -108,11 +99,6 @@ impl LegendTile {
         self
     }
 
-    pub fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
-        self.tooltip = Some(tooltip.into());
-        self
-    }
-
     pub fn log_name(mut self, name: impl Into<String>) -> Self {
         self.log_name = Some(name.into());
         self
@@ -125,9 +111,9 @@ impl LegendTile {
         self
     }
 
-    /// Peint **le cadre seul** — fond, bordure interrompue sous la légende, légende — pour un
-    /// appelant qui compose lui-même son contenu dedans (la carte d'alerte de chat du Suivi,
-    /// `panels::watchlist`). `frame` est le cadre ; la légende déborde au-dessus de
+    /// Peint **le cadre seul** — fond, bordure interrompue sous la légende, légende en haut à
+    /// gauche — pour un appelant qui compose lui-même son contenu dedans (la carte d'alerte de
+    /// chat du Suivi, `panels::watchlist`). `frame` est le cadre ; la légende déborde au-dessus de
     /// `legend_overshoot`. `tint` s'applique à chaque couleur (grisé, fondu d'entrée…).
     pub fn paint_frame(
         painter: &egui::Painter,
@@ -135,7 +121,6 @@ impl LegendTile {
         frame: Rect,
         legend: &str,
         legend_color: Color32,
-        side: LegendSide,
         tint: &dyn Fn(Color32) -> Color32,
     ) {
         painter.rect_filled(frame, 0.0, tint(tokens::LEGEND_TILE_FILL));
@@ -146,12 +131,8 @@ impl LegendTile {
             tint(legend_color),
         );
         let inset = tokens::LEGEND_TILE_LEGEND_INSET;
-        let legend_width = legend.size().x.min(frame.width() - inset * 2.0);
-        let legend_left = match side {
-            LegendSide::Left => frame.left() + inset,
-            LegendSide::Right => frame.right() - inset - legend_width,
-        };
-        let legend_right = legend_left + legend_width;
+        let legend_left = frame.left() + inset;
+        let legend_right = (legend_left + legend.size().x).min(frame.right() - inset);
         let stroke = Stroke::new(
             tokens::LEGEND_TILE_BORDER_WIDTH,
             tint(tokens::LEGEND_TILE_BORDER),
@@ -231,6 +212,7 @@ impl Widget for LegendTile {
             LegendTileState::Idle
         });
 
+        let mut elided = false;
         if ui.is_rect_visible(allocated) {
             let painter = ui
                 .painter()
@@ -251,7 +233,6 @@ impl Widget for LegendTile {
                 frame,
                 &self.legend,
                 self.legend_color.unwrap_or(tokens::LEGEND_TILE_LEGEND_TEXT),
-                LegendSide::Left,
                 &dim,
             );
             let half = tokens::LEGEND_TILE_BORDER_WIDTH / 2.0;
@@ -267,6 +248,7 @@ impl Widget for LegendTile {
             job.wrap.break_anywhere = true;
             job.wrap.overflow_character = Some('…');
             let content = painter.layout_job(job);
+            elided = content.elided;
             if content.elided {
                 // Une seule fois par instance : un contenu coupé est un événement de mise en
                 // page, pas un flux à 60 Hz (§4 du contrat).
@@ -309,8 +291,9 @@ impl Widget for LegendTile {
         } else {
             response
         };
-        if let Some(tooltip) = &self.tooltip {
-            crate::design::tooltip(&response).text(tooltip.as_str());
+        // L'infobulle n'existe que pour lire ce que la tuile a coupé — et rien que cela.
+        if elided {
+            crate::design::tooltip(&response).text(self.text.as_str());
         }
         response
     }

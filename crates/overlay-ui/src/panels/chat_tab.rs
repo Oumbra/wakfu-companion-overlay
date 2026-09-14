@@ -485,10 +485,7 @@ fn filter_tile(
     if let Some(color) = legend_color {
         tile = tile.legend_color(color);
     }
-    let response = ui.add(
-        tile.tooltip(format!("{legend} — {text}"))
-            .log_name(format!("chat.recherche.{text}")),
-    );
+    let response = ui.add(tile.log_name(format!("chat.recherche.{text}")));
     // **`contains_pointer` et NON `hovered`** : la croix a sa propre zone, posée par-dessus la
     // tuile — dès que le pointeur l'atteint, egui lui donne le survol. Piège déjà payé au Suivi
     // et dans Alertes.
