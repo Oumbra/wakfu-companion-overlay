@@ -1282,6 +1282,142 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   `design_gallery_legend_tile`. Les 28 captures de la fenêtre Options ont été régénérées : la
   barre d'onglets compte une entrée de plus.
 
+### 9.1 decies Notification de tour (2026-09-14) — spécification, décisions acquises, reste à valider
+
+**La demande, dans les mots de l'utilisateur** : « avertir l'utilisateur qu'un de ses personnages
+a démarré son tour et qu'il doit jouer », par une **notification du système**, uniquement quand la
+fenêtre de jeu concernée n'est pas celle qu'il a sous les yeux. Réglée par une case à cocher — la
+section « Combat » de l'onglet Paramètres, livrée ce jour (`config::OverlayConfig::
+turn_notification`), décochée par défaut.
+
+#### L'exigence qui structure tout : ça marche dans tous les cas, ou ça ne sert à rien
+
+Reformulation de l'utilisateur le 2026-09-14, qui **remplace** la lecture initiale (« multicompte,
+même combat ») :
+
+> Dès lors que la fenêtre n'est pas en focus, elle doit surveiller à qui c'est de jouer. […] Peu
+> importe si je suis en multicompte, en monocompte, dans le même combat ou pas dans le même combat.
+
+Quatre situations, toutes à couvrir :
+
+| | Fenêtres Wakfu | Au premier plan | Ce qu'il faut lire |
+| --- | --- | --- | --- |
+| A | une | un navigateur | la fenêtre de jeu, **en arrière-plan** |
+| B | deux, même combat | une fenêtre de jeu | celle du premier plan suffit |
+| C | deux, combats séparés | une fenêtre de jeu | **l'autre fenêtre**, en arrière-plan |
+| D | deux | un navigateur | **les deux**, en arrière-plan |
+
+Trois cas sur quatre exigent de lire une fenêtre **qui n'a pas le focus**. C'est donc la brique
+centrale, pas un cas limite — à l'inverse de la lecture retenue le matin même, qui n'aurait couvert
+que B.
+
+Le cas B reste utile comme **raccourci** : quand toutes les fenêtres partagent un combat (ce que le
+moteur sait dire, voir plus bas), une seule lecture renseigne tout le monde.
+
+#### Ce que le log donne, et où il s'arrête (vérifié, pas supposé)
+
+Dépouillement de `crates/overlay-engine/tests/wakfu.log` (10 975 lignes, 133 fins de tour) :
+
+- **Aucun début de tour n'est jamais logué.** Ni dans `[Information (combat)]`, ni dans `[FIGHT]`,
+  `[FIGHT_STATE]`, `[FIGHT_REFACTOR]` ou `[_FL_]`.
+- Le seul marqueur de tour est une **fin** : « N secondes reportées pour le tour suivant. »
+  (`TURN_ENDED_RE` → `LogEntry::TurnEnded`, §5 et `engine-js/src/log-parser.ts`). Elle est émise
+  pour **chaque personnage du joueur**, toutes instances confondues (le log est partagé, §6.5),
+  **même pour un tour passé sans agir** — observé à 20:35:00 sur un tour sans le moindre sort.
+  Elle **ne porte aucun nom**.
+- Un tour de monstre n'émet rien. Or les camps alternent : c'est presque toujours un monstre qui
+  précède le personnage suivant du joueur.
+- Aucune occurrence de « 0 seconde reportée » sur 133 fins : un tour mené jusqu'au bout du chrono
+  n'émet probablement pas la ligne. À confirmer en conditions réelles.
+
+Conséquence : la file d'initiative (`FightWorking::initiative_seats`) sait dire **qui** vient après
+qui, mais seulement une fois construite par observation — elle est **aveugle au premier tour**, et
+le premier tour est précisément le moment où un personnage qui joue en dernier doit être annoncé.
+Le log seul ne peut donc pas tenir l'exigence.
+
+#### Ce que le widget « Fin du tour » du jeu donne (analyse vidéo, 2026-09-14)
+
+Vidéo fournie par l'utilisateur (90 s, 30 i/s, recadrée sur le widget), dépouillée image par image :
+
+- **Deux états.** Au repos, le widget affiche le **nom du combattant dont c'est le tour**, le bouton
+  « Fin du tour » et le chrono du tour. Au survol d'un combattant, il bascule en carte de stats
+  (niveau, PV, PA/PM/PO, portrait) et le nom devient celui du **survolé** — état à écarter, et
+  facile à écarter : le panneau droit passe d'un beige uniforme `rgb(209, 190, 133)` à un portrait
+  sombre.
+- **Le bouton ne distingue rien.** À t = 3,6 s (« Pugio Letalis ») et t = 6,0 s (« Oumbra »), tous
+  deux au repos, le panneau doré est rigoureusement identique. Pas de variante grisée ou
+  désactivée selon que le combattant actif est ou non le personnage de cette fenêtre. **Toute piste
+  fondée sur l'apparence du bouton est close.**
+- Le chrono est celui du tour en cours et **saute vers le haut** à chaque changement de tour
+  (63 s → 105 s entre les deux images ci-dessus) : c'est un détecteur de frontière de tour
+  indépendant du nom.
+- La boussole de gauche indique l'**orientation** du personnage, pas le tour.
+- La bande du nom est un cas favorable : **fond noir uni** (aucun décor derrière), texte blanc,
+  serif gras, aligné à droite sur une ligne de base fixe.
+
+**Le seul discriminant est donc le nom**, et il faut le lire.
+
+#### Lire le nom sans embarquer d'OCR
+
+La question n'est pas « quel texte ? » mais « **est-ce l'un de mes N personnages, et lequel ?** » —
+N vaut 2 à 8, et les noms sont connus d'avance : le roster les donne, et les lignes `[_FL_]`
+donnent en plus la liste fermée des combattants du combat en cours. Comparaison de gabarits, donc,
+pas de reconnaissance de texte.
+
+Et le gabarit **s'apprend à l'exécution** plutôt que de se deviner : quand la fenêtre du personnage
+P est lisible et que le log vient de dire que P a lancé un sort, la bande affichée à cet instant
+*est* le gabarit de P — dans la police, la taille et l'échelle d'interface exactes du client, sans
+calibration à la charge de l'utilisateur. Mis en cache à côté de `config.toml`, indexé par
+personnage et par taille de fenêtre.
+
+#### Le point dur, à valider par un spike avant tout engagement
+
+**Capturer une fenêtre de jeu qui n'a pas le focus** — et, cas D, qui peut être entièrement occultée
+par une autre application. Wakfu est Java/JOGL (§6.4), le pire cas pour les API de capture :
+
+- **Windows** : `PrintWindow` + `PW_RENDERFULLCONTENT` est réputé capricieux sur OpenGL. La voie à
+  tester en premier est **Windows Graphics Capture** (WinRT, Windows 10 1803+), qui passe par la
+  composition DWM et capture une fenêtre en arrière-plan non minimisée. Une fenêtre **minimisée**
+  reste hors d'atteinte : à traiter comme un cas non couvert, pas à contourner.
+- **Linux / X11** : `XCompositeRedirectWindow` + `XCompositeNameWindowPixmap`. Le compositeur actif
+  est déjà une **condition d'exploitation** de l'overlay (§6.4, transparence par visuel ARGB), la
+  dépendance n'est donc pas nouvelle. `XGetImage` sur une fenêtre occluse ne convient pas.
+
+Tant que ce spike n'a pas conclu sur les deux plateformes, **rien de la chaîne visuelle n'est
+engagé**. Repli en cas d'échec : la file d'initiative seule, avec le premier tour assumé comme
+angle mort — et l'utilisateur prévenu que l'exigence n'est pas tenue.
+
+#### Ce que le moteur sait déjà, et qui sert tel quel
+
+- `SessionSnapshot::fight_for_character` rattache un combat à un personnage : c'est lui qui dit si
+  deux fenêtres partagent un combat (cas B) ou non (cas C), sans rien ajouter.
+- `RosterIndex::find` dit si un nom est un personnage du joueur.
+- `GameWindowTracker::scan` donne toutes les fenêtres de jeu avec leur personnage (titre
+  `"<Nom> - WAKFU"`, §6.5) et leur rectangle.
+- `GetForegroundWindow` / `_NET_ACTIVE_WINDOW` (déjà lus par `sync_topmost` et
+  `send_partner_command`) donnent la fenêtre au premier plan — y compris « aucune fenêtre Wakfu »,
+  qui est le cas A/D et non une erreur.
+
+#### Décidé
+
+- **Canal : notification du système**, pas un toast dans l'overlay — un toast s'afficherait sur une
+  fenêtre que l'utilisateur ne regarde pas (décision de l'utilisateur, 2026-09-14).
+- **Emplacement du réglage** : section « Combat » de l'onglet Paramètres, sous « Affichage »
+  (décision de l'utilisateur, 2026-09-14).
+- **Réglage local**, jamais au compte : une notification système dépend de la machine (démon de
+  notifications, écrans, appairage téléphone), pas du joueur.
+- **Une notification par tour et par personnage** au maximum ; rien quand la fenêtre concernée est
+  déjà au premier plan.
+
+#### Ouvert (voir aussi §14)
+
+- **Windows, identité de l'émetteur** : sans `AppUserModelID` enregistré (un raccourci dans le menu
+  Démarrer), le toast s'affiche au nom de PowerShell. L'overlay n'a pas d'installeur (§11).
+  **Reporté explicitement par l'utilisateur le 2026-09-14** — à trancher avec l'installeur.
+- **Faisabilité de la capture hors focus** sur les deux plateformes : spike préalable, ci-dessus.
+- **Position du widget dans la fenêtre** : inconnue (la vidéo est recadrée). Détection par recherche
+  du panneau beige uniforme, ou relevé sur une capture plein écran — en attente.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
@@ -1627,6 +1763,16 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
 4. **Signature Authenticode** Windows : budget accepté ou distribution non signée assumée en v1 ?
 5. **Langue du client de jeu** : le parser actuel est FR uniquement. L'overlay hérite de cette
    limite — la documenter, ou élargir le parser côté web (qui bénéficierait aux deux) ?
+6. **Notification de tour, émetteur Windows** (2026-09-14, voir §9.1 decies) : un toast WinRT sans
+   `AppUserModelID` enregistré s'affiche au nom de PowerShell, et l'overlay n'a pas d'installeur
+   (§11). Trois issues : l'assumer en l'état, faire poser le raccourci du menu Démarrer par
+   l'overlay lui-même au premier lancement, ou ne livrer que Linux en attendant.
+   **Reporté explicitement par l'utilisateur le 2026-09-14** — à reprendre avec l'installeur, dont
+   ce point devient une exigence.
+7. **Notification de tour, capture d'une fenêtre sans focus** (2026-09-14, voir §9.1 decies) :
+   trois des quatre situations à couvrir l'exigent, et Wakfu est Java/JOGL. Windows Graphics
+   Capture d'un côté, `XComposite` de l'autre — à trancher par un spike avant tout engagement de
+   la chaîne visuelle. Une fenêtre minimisée restera hors d'atteinte quoi qu'il arrive.
 
 ---
 
