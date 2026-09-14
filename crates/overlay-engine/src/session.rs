@@ -125,6 +125,14 @@ pub struct FighterDamage {
     pub is_ally: bool,
     pub total_damage: i64,
     pub total_heal: i64,
+    /// Armure DONNÉE par ce combattant (jamais l'armure qu'il reçoit d'un tiers, ni une perte
+    /// d'armure : le parser vendu n'émet `LogEntry::Armor` que pour un gain, voir `ARMOR_RE` dans
+    /// `engine-js/src/log-parser.ts`) — pendant exact de `total_heal`, alimenté de la même façon,
+    /// pour les DEUX camps (un ennemi qui se blinde compte comme un allié qui blinde son groupe).
+    /// `#[serde(default)]` : un fichier `fight-*.json` persisté avant ce champ reste chargeable,
+    /// à `0` (même raison que `xp_gained` ci-dessous).
+    #[serde(default)]
+    pub total_armor: i64,
     /// Classe de l'allié — roster déclaré par l'utilisateur prioritaire, sinon `breed` du combat
     /// (voir `resolve_ally_class`), sinon `None` (allié pas encore classifié, ou ennemi — les
     /// ennemis n'ont jamais de classe). `None` signifie « pas de portrait à afficher », jamais un
@@ -146,6 +154,25 @@ pub struct FighterDamage {
     /// choix) — `#[serde(default)]` même raison que `xp_gained` ci-dessus.
     #[serde(default)]
     pub spells: HashMap<String, HashMap<String, i64>>,
+    /// Soins PRODUITS par ce combattant, ventilés par nom de sort puis par élément — même forme
+    /// que `spells` ci-dessus (c'est ce qui permet à l'UI comme à un futur envoi serveur de les
+    /// traiter par le même chemin), miroir de `healSourceMap` (`stats-store.service.ts`, qui
+    /// ventile déjà les soins par source côté web). Alimenté depuis `LogEntry::Heal`, dont le
+    /// parser résout l'`attacker` avec une cascade PROPRE aux soins (`selfFallback: true`,
+    /// `riposteFallback: false` — un passif de soin non rattaché à un sort récent se crédite à sa
+    /// cible, pas au dernier lanceur venu, voir `resolveEffectTail`). `#[serde(default)]` même
+    /// raison que `xp_gained`.
+    #[serde(default)]
+    pub heal_spells: HashMap<String, HashMap<String, i64>>,
+    /// Armure DONNÉE par ce combattant, même ventilation (sort → élément → montant) que `spells`
+    /// et `heal_spells` — miroir d'`armorSourceMap` (`stats-store.service.ts`). L'élément vaut
+    /// TOUJOURS `"Inconnu"` : une ligne « X: N Armure (Source) » ne porte jamais de tag
+    /// élémentaire, contrairement à une ligne PV (le web passe exactement de même `'Inconnu'` en
+    /// dur à `addStatAmount` pour ce cas). La dimension est gardée quand même pour que les trois
+    /// ventilations partagent une seule forme, un seul chemin d'agrégation et un seul payload.
+    /// `#[serde(default)]` même raison que `xp_gained`.
+    #[serde(default)]
+    pub armor_spells: HashMap<String, HashMap<String, i64>>,
     /// Ce combattant a-t-il été mis KO au moins une fois DANS ce combat — alimenté par
     /// `LogEntry::EnemyDefeated` (voir `SessionState::apply`, cas `EnemyDefeated`), qui malgré son
     /// nom couvre aussi bien "X est KO !" (réservé aux alliés, `KO_RE`) que "X est hors-combat !"
@@ -1018,11 +1045,49 @@ impl SessionState {
                 fight_id: Some(fight_id),
                 attacker,
                 amount,
+                spell,
+                element,
                 time,
                 ..
             } => {
                 if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
                     fighter.total_heal += amount;
+                    // Ventilation par sort/élément — voir `FighterDamage::heal_spells`. Même
+                    // chemin que les dégâts ci-dessus, mais dans sa PROPRE ventilation : un soin
+                    // n'a jamais été, et ne doit jamais devenir, un dégât de plus dans `spells`
+                    // (`build_fight_sync_event` alimente `FightParticipantPayload::damage`
+                    // depuis celle-ci).
+                    *fighter
+                        .heal_spells
+                        .entry(spell.clone())
+                        .or_default()
+                        .entry(damage_element_label(*element).to_string())
+                        .or_insert(0) += amount;
+                }
+            }
+            // Armure DONNÉE (jamais une perte : le parser vendu filtre le signe `-`, voir
+            // `ARMOR_RE` dans `engine-js/src/log-parser.ts`), pour les DEUX camps — même chemin
+            // d'attribution que les dégâts et les soins (`fighter_mut` résout le siège exact d'un
+            // nom porté par plusieurs combattants, et refuse une invocation, dont l'action a déjà
+            // été réattribuée à son invocateur par le parser).
+            LogEntry::Armor {
+                fight_id: Some(fight_id),
+                attacker,
+                amount,
+                spell,
+                time,
+                ..
+            } => {
+                if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
+                    fighter.total_armor += amount;
+                    // `DamageElement::Inconnu` en dur, jamais un élément deviné : une ligne
+                    // d'armure ne porte pas de tag élémentaire (voir `FighterDamage::armor_spells`).
+                    *fighter
+                        .armor_spells
+                        .entry(spell.clone())
+                        .or_default()
+                        .entry(damage_element_label(DamageElement::Inconnu).to_string())
+                        .or_insert(0) += amount;
                 }
             }
             LogEntry::EnemyDefeated {
@@ -1234,7 +1299,7 @@ impl SessionState {
                     sync_events.push(event);
                 }
             }
-            // Hors périmètre de ce premier slice (voir le commentaire de module) : chat, armor,
+            // Hors périmètre de ce premier slice (voir le commentaire de module) : chat,
             // combat-defeat-marker, combat-start (ne porte pas de fightId, voir le TS vendu),
             // market-occupation, et les variantes sans fightId (kamas/loot hors combat, dégâts non
             // résolus, spell-cast/enemy-defeated/fled/challenge-result sans fightId résolu par le
@@ -1529,10 +1594,13 @@ impl SessionState {
             is_ally,
             total_damage: 0,
             total_heal: 0,
+            total_armor: 0,
             class_name,
             gender,
             xp_gained: 0,
             spells: HashMap::new(),
+            heal_spells: HashMap::new(),
+            armor_spells: HashMap::new(),
             is_ko: false,
             last_turn_casts: Vec::new(),
             last_turn: 0,
@@ -3593,6 +3661,37 @@ mod tests {
         }
     }
 
+    fn heal_with_spell(
+        fight_id: i64,
+        attacker: &str,
+        spell: &str,
+        element: DamageElement,
+        amount: i64,
+    ) -> LogEntry {
+        LogEntry::Heal {
+            time: "12:00:01,000".to_string(),
+            target: "cible".to_string(),
+            attacker: attacker.to_string(),
+            spell: spell.to_string(),
+            element,
+            amount,
+            fight_id: Some(fight_id),
+        }
+    }
+
+    /// Une ligne « <cible>: <valeur> Armure (<source>) » telle que le parser vendu l'émet — sans
+    /// élément (le log n'en porte jamais sur cette ligne, voir `FighterDamage::armor_spells`).
+    fn armor_with_spell(fight_id: i64, attacker: &str, spell: &str, amount: i64) -> LogEntry {
+        LogEntry::Armor {
+            time: "12:00:01,000".to_string(),
+            target: "cible".to_string(),
+            attacker: attacker.to_string(),
+            spell: spell.to_string(),
+            amount,
+            fight_id: Some(fight_id),
+        }
+    }
+
     /// Extrait le seul `FightPayload` d'une liste de `SyncEvent` — panique si absent/ambigu,
     /// pratique pour les assertions de ces tests (un seul combat terminé par scénario).
     fn only_fight_payload(events: &[SyncEvent]) -> &FightPayload {
@@ -3691,10 +3790,13 @@ mod tests {
                     is_ally: true,
                     total_damage: 120,
                     total_heal: 0,
+                    total_armor: 0,
                     class_name: None,
                     gender: Gender::M,
                     xp_gained: 0,
                     spells: HashMap::new(),
+                    heal_spells: HashMap::new(),
+                    armor_spells: HashMap::new(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -3705,10 +3807,13 @@ mod tests {
                     is_ally: false,
                     total_damage: 0,
                     total_heal: 0,
+                    total_armor: 0,
                     class_name: None,
                     gender: Gender::M,
                     xp_gained: 0,
                     spells: HashMap::new(),
+                    heal_spells: HashMap::new(),
+                    armor_spells: HashMap::new(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -3814,10 +3919,13 @@ mod tests {
                     is_ally: true,
                     total_damage: 0,
                     total_heal: 0,
+                    total_armor: 0,
                     class_name: None,
                     gender: Gender::M,
                     xp_gained: 0,
                     spells: HashMap::new(),
+                    heal_spells: HashMap::new(),
+                    armor_spells: HashMap::new(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -3828,10 +3936,13 @@ mod tests {
                     is_ally: false,
                     total_damage: 0,
                     total_heal: 0,
+                    total_armor: 0,
                     class_name: None,
                     gender: Gender::M,
                     xp_gained: 0,
                     spells: HashMap::new(),
+                    heal_spells: HashMap::new(),
+                    armor_spells: HashMap::new(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -3949,6 +4060,145 @@ mod tests {
         assert_eq!(spells[0].total, 180);
         assert_eq!(spells[0].by_element.get("Feu"), Some(&150));
         assert_eq!(spells[0].by_element.get("Air"), Some(&30));
+    }
+
+    /// Armure DONNÉE et soins sont comptés pour les DEUX camps, chacun dans SON total et SA
+    /// ventilation — jamais mélangés aux dégâts (`total_damage`/`spells` restent intacts).
+    #[test]
+    fn armure_et_soins_sont_captes_pour_les_deux_camps() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &fighter_joined(1, "Bouftou", 0, true),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &damage_with_spell(1, "Oumbra", "Frappe", DamageElement::Feu, 100),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &heal_with_spell(1, "Oumbra", "Mot Curatif", DamageElement::Eau, 40),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &heal_with_spell(1, "Oumbra", "Mot Curatif", DamageElement::Eau, 20),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &armor_with_spell(1, "Oumbra", "Armure Incandescente", 460),
+            ApplyContext::default(),
+            &mut events,
+        );
+        // Camp ennemi : un monstre qui se blinde et se soigne compte exactement pareil.
+        state.apply(
+            &armor_with_spell(1, "Bouftou", "Carapace", 75),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &heal_with_spell(1, "Bouftou", "Régénération", DamageElement::Inconnu, 33),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = state.fights.get(&1).expect("combat suivi");
+        let allie = &fight.snapshot.fighters[0];
+        assert_eq!(allie.total_damage, 100);
+        assert_eq!(allie.total_heal, 60);
+        assert_eq!(allie.total_armor, 460);
+        assert_eq!(
+            allie
+                .heal_spells
+                .get("Mot Curatif")
+                .and_then(|e| e.get("Eau")),
+            Some(&60),
+            "deux soins du même sort s'additionnent dans la même case"
+        );
+        assert_eq!(
+            allie
+                .armor_spells
+                .get("Armure Incandescente")
+                .and_then(|e| e.get("Inconnu")),
+            Some(&460),
+            "une ligne d'armure ne porte jamais d'élément"
+        );
+        assert!(
+            !allie.spells.contains_key("Mot Curatif")
+                && !allie.spells.contains_key("Armure Incandescente"),
+            "ni soin ni armure ne doit atterrir dans la ventilation des dégâts"
+        );
+
+        let ennemi = &fight.snapshot.fighters[1];
+        assert_eq!(ennemi.total_armor, 75);
+        assert_eq!(ennemi.total_heal, 33);
+        assert_eq!(ennemi.total_damage, 0);
+    }
+
+    /// Miroir du filtre déjà en place pour les dégâts (`les_degats_bruts_dune_invocation_ne_
+    /// creditent_personne`) : une invocation dont le parser n'a pas réattribué l'action à son
+    /// invocateur ne se voit jamais créditer sa propre ligne d'armure ou de soin.
+    #[test]
+    fn armure_et_soins_bruts_dune_invocation_ne_creditent_personne() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Fayto", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &LogEntry::FighterJoined {
+                time: "12:00:00,000".to_string(),
+                fight_id: 1,
+                name: "Dark Lapino".to_string(),
+                breed: 0,
+                fighter_id: 424_242,
+                is_controlled_by_ai: true,
+                summoned_by: Some("Fayto".to_string()),
+            },
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &armor_with_spell(1, "Dark Lapino", "Ronce", 50),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &heal_with_spell(1, "Dark Lapino", "Ronce", DamageElement::Eau, 30),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = state.fights.get(&1).expect("combat suivi");
+        assert_eq!(
+            fight.snapshot.fighters.len(),
+            1,
+            "l'invocation n'a jamais sa propre ligne"
+        );
+        assert_eq!(fight.snapshot.fighters[0].total_armor, 0);
+        assert_eq!(fight.snapshot.fighters[0].total_heal, 0);
+    }
+
+    /// Compatibilité ascendante d'un `fight-*.json` persisté avant ces trois champs (voir
+    /// `fight_store.rs`) : il reste chargeable, armure à `0` et ventilations vides.
+    #[test]
+    fn armure_et_soins_ventiles_replis_par_defaut_a_la_relecture() {
+        let json = r#"{"name":"Oumbra","is_ally":true,"total_damage":10,"total_heal":5,
+            "class_name":null,"gender":"m"}"#;
+        let fighter: FighterDamage = serde_json::from_str(json).expect("relecture");
+        assert_eq!(fighter.total_armor, 0);
+        assert!(fighter.heal_spells.is_empty());
+        assert!(fighter.armor_spells.is_empty());
     }
 
     #[test]
