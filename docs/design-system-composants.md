@@ -2634,9 +2634,12 @@ let response = ui.add(
 | `tooltip` | infobulle du design system | aucune |
 | `preview_state` | `Idle` / `Hovered` / `Disabled` — galerie et captures seulement | état réel |
 
-Composant feuille (`impl Widget`, `Sense::click()`). Deux fonctions associées :
-`LegendTile::legend_overshoot` (de combien la légende déborde au-dessus du cadre) et
-`LegendTile::allocated_height` (la hauteur totale allouée, pour un appelant qui réserve).
+Composant feuille (`impl Widget`, `Sense::click()`). Trois fonctions associées :
+`LegendTile::legend_overshoot` (de combien la légende déborde au-dessus du cadre),
+`LegendTile::allocated_height` (la hauteur totale allouée, pour un appelant qui réserve) et
+`LegendTile::paint_frame` (le cadre seul — fond, bordure interrompue, légende à gauche ou à droite
+selon `LegendSide`, une teinte appliquée à chaque couleur — pour un appelant qui compose son propre
+contenu dedans : la carte d'alerte de chat du Suivi, `panels::watchlist::chat_toast_card`).
 
 ### À quoi elle sert
 
@@ -2678,6 +2681,6 @@ Chat, dont un contenu élidé et une légende tronquée.
 Une légende qui nomme un canal de chat prend **la couleur que le client donne à ce canal** dans sa
 légende des canaux (`/l - Proximité` en blanc, `/m - Commerce` en orange, `/r - Recrutement` en
 magenta…) : jetons `CHAT_CHANNEL_*` et `tokens::chat_channel_color(ChatChannel)`, relevés à l'œil
-sur une capture fournie par l'utilisateur, pas à la pipette. La carte d'alerte du Suivi
-(`panels::watchlist`, raison `Chat`) colore de la même façon la moitié « canal » de son titre.
-« Tous les canaux » n'est pas un canal : la légende garde son gris.
+sur une capture fournie par l'utilisateur puis corrigés par lui pour cinq canaux (Commerce reste
+le relevé). La carte d'alerte du Suivi (`panels::watchlist::chat_toast_card`) reprend le cadre via
+`paint_frame`, canal à droite. « Tous les canaux » n'est pas un canal : la légende garde son gris.
