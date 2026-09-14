@@ -1416,17 +1416,27 @@ par une autre application. Wakfu est Java/JOGL (§6.4), le pire cas pour les API
 risque que le CLIENT lui-même se fige en arrière-plan est levé (ci-dessus, vérifié par vidéo) ; ce
 qui reste à établir est que l'API de capture, elle, obtient bien ce contenu :
 
-- **Windows** : `PrintWindow` + `PW_RENDERFULLCONTENT` est réputé capricieux sur OpenGL. La voie à
-  tester en premier est **Windows Graphics Capture** (WinRT, Windows 10 1803+), qui passe par la
-  composition DWM et capture une fenêtre en arrière-plan non minimisée. Une fenêtre **minimisée**
-  reste hors d'atteinte : à traiter comme un cas non couvert, pas à contourner.
-- **Linux / X11** : `XCompositeRedirectWindow` + `XCompositeNameWindowPixmap`. Le compositeur actif
-  est déjà une **condition d'exploitation** de l'overlay (§6.4, transparence par visuel ARGB), la
-  dépendance n'est donc pas nouvelle. `XGetImage` sur une fenêtre occluse ne convient pas.
+- **Windows — ✅ tranché par le spike S4** (`spikes/s4-capture-hors-focus/`, 2026-09-14, deux
+  passages sur la machine du mainteneur, deux clients en combat). `PrintWindow` +
+  `PW_RENDERFULLCONTENT` **et** Windows Graphics Capture voient toutes deux un contenu **vivant**
+  d'une fenêtre recouverte à 100 % — par l'autre client comme par une application tierce
+  maximisée avec aucune fenêtre Wakfu au premier plan (le cas D) : chrono 96 → 95 → 94 → 93 → 92
+  → 91 s, dans les deux fenêtres, par les deux méthodes. La réputation de `PrintWindow` sur OpenGL
+  ne s'est pas vérifiée sur ce client. **Retenue pour la v1 : `PrintWindow`** — synchrone, à la
+  demande, aucune session par fenêtre, aucun liseré, image de l'instant même ; et `GetDIBits`
+  sait ne copier que les dernières lignes, là où vit le widget (2 Mo par lecture au lieu de 14).
+  WGC reste le repli documenté si `PrintWindow` échouait sur une autre configuration graphique.
+  Une fenêtre **minimisée** est hors d'atteinte des deux, proprement : `PrintWindow` renvoie faux,
+  WGC ne reçoit plus d'image — et `IsIconic` le dit avant d'essayer. Cas non couvert, annoncé
+  tel quel.
+- **Linux / X11 — reste à valider** : `XCompositeRedirectWindow` + `XCompositeNameWindowPixmap`.
+  Le compositeur actif est déjà une **condition d'exploitation** de l'overlay (§6.4, transparence
+  par visuel ARGB), la dépendance n'est donc pas nouvelle. `XGetImage` sur une fenêtre occluse ne
+  convient pas. À faire sur une machine Linux (SteamOS chez le mainteneur), même protocole que S4.
 
-Tant que ce spike n'a pas conclu sur les deux plateformes, **rien de la chaîne visuelle n'est
-engagé**. Repli en cas d'échec : la file d'initiative seule, avec le premier tour assumé comme
-angle mort — et l'utilisateur prévenu que l'exigence n'est pas tenue.
+La chaîne visuelle peut donc s'engager **sous Windows**. Sous Linux, tant que le pendant de S4
+n'a pas conclu, le repli reste la file d'initiative seule, avec le premier tour assumé comme angle
+mort — et l'utilisateur prévenu que l'exigence n'y est pas tenue.
 
 #### Ce que le moteur sait déjà, et qui sert tel quel
 
@@ -1814,13 +1824,13 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
    l'overlay lui-même au premier lancement, ou ne livrer que Linux en attendant.
    **Reporté explicitement par l'utilisateur le 2026-09-14** — à reprendre avec l'installeur, dont
    ce point devient une exigence.
-7. **Notification de tour, capture d'une fenêtre sans focus** (2026-09-14, voir §9.1 decies) :
-   trois des quatre situations à couvrir l'exigent, et Wakfu est Java/JOGL. **Le risque que le
-   client se fige en arrière-plan est levé** (vidéo du 2026-09-14 : chrono identique à la seconde
-   près, focus ou non) ; **reste à prouver que l'API de capture obtient ce contenu** — Windows
-   Graphics Capture d'un côté, `XComposite` de l'autre — par un spike avant tout engagement de la
-   chaîne visuelle. Une fenêtre minimisée restera hors d'atteinte quoi qu'il arrive, et le cas D
-   (aucune fenêtre Wakfu visible, focus sur une autre application) reste à vérifier séparément.
+7. ~~**Notification de tour, capture d'une fenêtre sans focus**~~ (2026-09-14, voir §9.1 decies) :
+   **tranché sous Windows par le spike S4** (`spikes/s4-capture-hors-focus/`) — `PrintWindow`
+   comme Windows Graphics Capture voient un contenu vivant d'une fenêtre recouverte à 100 %, cas D
+   compris (application tierce maximisée, aucune fenêtre Wakfu au premier plan) ; `PrintWindow`
+   retenue pour la v1, WGC en repli documenté ; minimisée = hors d'atteinte, annoncé tel quel.
+   **Reste ouvert : Linux / X11** (`XCompositeNameWindowPixmap`), même protocole, sur une machine
+   Linux.
 
 ---
 
