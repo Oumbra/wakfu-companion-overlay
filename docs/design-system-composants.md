@@ -1006,7 +1006,7 @@ ui.add(design::heading("Fichier"));
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
 | `text` (à la construction) | le titre | — |
-| `trailing_gap` | écart réservé sous le titre | `tokens::HEADING_TO_ROW` (7) |
+| `trailing_gap` | écart réservé sous le titre | `tokens::HEADING_TO_ROW` (13) |
 
 Serif grasse au corps du titre de fenêtre (21), **gris `#b8b9ba` et non blanc** : la hiérarchie
 entre les deux niveaux de titre du jeu passe par la couleur, pas par le corps.
@@ -1015,7 +1015,22 @@ Deux pièges que le composant absorbe : il réserve la hauteur d'**encre** (16) 
 galley — réserver la galley ajoutait ~14 px invisibles sous le titre, sur sept relevés — et il
 applique lui-même le **retrait de 7 px** qui est, dans le jeu, le seul signal qu'une section existe.
 
-**Utilisé en production** : la modale Options et les maquettes de la page Alertes.
+**Ce qui se relève n'est pas l'écart sous le titre, mais la cote d'ensemble** : 30 px du haut du
+titre au haut de la première ligne. Vérifiée au pixel sur les sept sections des cinq onglets du jeu
+où un titre est immédiatement suivi d'un contrôle (30, 30, 30, 30, 30, 28, 32 — l'écart tient à la
+rondeur de la capitale initiale). L'encre réservant 16 px, il reste **13 px** sous le titre.
+
+> `HEADING_TO_ROW` valait 7 jusqu'au 2026-09-14 : l'overlay posait 24 px là où le jeu en pose 30 —
+> « le titre est très collé à la suite », retour utilisateur. Les deux candidates 13 et 14 ne se
+> départageaient pas au calcul (le bord peint d'une case commence un pixel sous le rect qui la
+> porte) ; rendues toutes les deux puis remesurées avec la méthode appliquée au jeu, **13 donne 30 px
+> et 16 px du bas de l'encre au haut de la case, les deux cotes du jeu exactement**, quand 14 donne
+> 31 et 17.
+
+**Utilisé en production** : la modale Options et les maquettes de la page Alertes. Seul l'onglet
+« Paramètres » prend l'écart par DÉFAUT — Suivi, Alertes, Chat et Raccourcis surchargent
+`trailing_gap` avec leur propre demi-`SECTION_GAP`, calé sur les maquettes validées de leurs grilles
+de tuiles.
 
 ---
 
@@ -2152,9 +2167,12 @@ réserver sa place.
 
 Relevé : [`hdv-table.json`](design-system/hdv-table.json). Hauteur de ligne **60 px**, encre
 d'en-tête **14 px**, écart encre → première ligne **7 px** — les trois invariants sur les trois
-captures HDV. L'écart de 7 px est **la même valeur que `HEADING_TO_ROW`**, mesurée indépendamment
-sur une autre interface, et la teinte des libellés (`#b9babb`) est celle des titres de section
-(`#b8b9ba`) à un canal près : deux jetons partagés plutôt que deux quasi-doublons qui dériveraient.
+captures HDV. L'écart de 7 px **portait le même jeton que `HEADING_TO_ROW`**, les deux mesures — sur
+deux interfaces différentes — étant tombées sur la même valeur. L'alias est retiré depuis le
+2026-09-14 : celle de la fenêtre Options s'est révélée fausse (13 px, voir `design::heading`) et
+aurait emporté l'en-tête de tableau avec elle, alors que ses trois captures disent toujours 7. Deux
+mesures qui coïncident ne sont pas une mesure commune. La teinte des libellés (`#b9babb`), elle,
+reste celle des titres de section (`#b8b9ba`) à un canal près : un vrai jeton partagé.
 
 L'en-tête est en **linéale**, pas dans la serif des titres — vérifié sur la capture agrandie ×4,
 c'est le genre de détail qu'aucune mesure numérique ne donne. Corps 17, contrôlé au rendu : 12 px

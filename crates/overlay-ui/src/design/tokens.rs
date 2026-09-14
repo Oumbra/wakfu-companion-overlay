@@ -870,8 +870,25 @@ pub const HEADING_INK_HEIGHT: f32 = 16.0;
 /// Décalage du haut de la galley au haut de l'encre — voir [`HEADING_INK_HEIGHT`].
 pub const HEADING_INK_TOP: f32 = 6.0;
 
-/// Écart entre un titre de section et la première ligne qui le suit.
-pub const HEADING_TO_ROW: f32 = 7.0;
+/// Écart entre un titre de section et la première ligne qui le suit — **13px depuis le
+/// 2026-09-14**, contre 7 auparavant.
+///
+/// Ce qui se relève n'est pas cet écart mais la **cote d'ensemble** : « 30 px entre le haut d'un
+/// titre de section et le haut de la première ligne qui le suit ». Vérifiée au pixel sur les sept
+/// sections des cinq onglets du jeu où un titre est immédiatement suivi d'un contrôle — 30, 30,
+/// 30, 30, 30, 28, 32, l'écart tenant à la rondeur de la capitale initiale. Un titre réservant
+/// [`HEADING_INK_HEIGHT`] (16px), il reste **13px** sous lui, et non 7 : à 7, l'overlay mesurait
+/// 24px là où le jeu en donne 30 — « le titre est très collé à la suite », retour utilisateur.
+///
+/// Les deux candidates 13 et 14 ne se départageaient pas au calcul (le bord peint d'une case
+/// commence un pixel sous le rect qui la porte) : rendues toutes les deux par le vrai moteur puis
+/// remesurées avec la méthode appliquée au jeu, 13 donne 30px et 16px du bas de l'encre au haut de
+/// la case, les deux cotes du jeu exactement ; 14 donne 31 et 17.
+///
+/// **Ne vaut que pour le défaut** : les onglets Suivi, Alertes, Chat et Raccourcis surchargent
+/// `Heading::trailing_gap` avec leur propre demi-`SECTION_GAP`, calé sur les maquettes validées de
+/// leurs grilles de tuiles — ils ne coiffent pas des lignes d'option et ne sont pas concernés.
+pub const HEADING_TO_ROW: f32 = 13.0;
 
 // ---------------------------------------------------------------------------------------------
 // Pas numérique — `design::stepper`
@@ -1668,9 +1685,13 @@ pub const TABLE_HEADER_INK: f32 = 14.0;
 
 /// Écart entre l'encre de l'en-tête et la première ligne — 7 px, identique sur les trois captures.
 ///
-/// **C'est la même valeur que [`HEADING_TO_ROW`]**, mesurée indépendamment sur une autre interface :
-/// un jeton partagé plutôt qu'un doublon qui dériverait.
-pub const TABLE_HEADER_GAP: f32 = HEADING_TO_ROW;
+/// **Sa propre valeur, plus un alias de [`HEADING_TO_ROW`]** (2026-09-14). Les deux mesures
+/// tombaient sur 7 px, l'une sur le HDV et l'autre sur la fenêtre Options, et le jeton était
+/// partagé pour ne pas laisser dériver un doublon. La seconde s'est révélée fausse — l'écart sous
+/// un titre de section vaut 13 px, voir [`HEADING_TO_ROW`] — et l'alias aurait emporté l'en-tête de
+/// tableau avec elle, alors que ses trois captures disent toujours 7. Deux mesures qui coïncident
+/// ne sont pas une mesure commune.
+pub const TABLE_HEADER_GAP: f32 = 7.0;
 
 /// Couleur des libellés d'en-tête — **le gris des titres de section**, [`HEADING_TEXT`].
 ///
