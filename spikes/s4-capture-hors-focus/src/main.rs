@@ -292,6 +292,7 @@ fn main() {
         let tick_start = Instant::now();
         for w in &windows {
             let fg = is_foreground(w.hwnd);
+            let iconic = unsafe { IsIconic(w.hwnd) }.as_bool();
             for &m in &args.methods {
                 let (frame, wgc_frames) = match m {
                     Method::PrintWindow => (printwindow::capture(w.hwnd), 0),
@@ -305,11 +306,12 @@ fn main() {
                 };
                 let Some(frame) = frame else {
                     println!(
-                        "t={:>2}  {:<11} {:<24} premier plan={:<5}  — aucune image",
+                        "t={:>2}  {:<11} {:<24} premier plan={:<5} minimisée={:<5} — aucune image",
                         tick,
                         m.label(),
                         w.character,
-                        fg
+                        fg,
+                        iconic
                     );
                     continue;
                 };
@@ -319,11 +321,12 @@ fn main() {
                 let _ = frame.save_png(&args.out.join(format!("{base}.png")));
                 let _ = widget.save_png(&args.out.join(format!("{base}_widget.png")));
                 println!(
-                    "t={:>2}  {:<11} {:<24} premier plan={:<5}  {}x{}  noir={:>5.1}%{}",
+                    "t={:>2}  {:<11} {:<24} premier plan={:<5} minimisée={:<5} {}x{}  noir={:>5.1}%{}",
                     tick,
                     m.label(),
                     w.character,
                     fg,
+                    iconic,
                     frame.width,
                     frame.height,
                     black * 100.0,
