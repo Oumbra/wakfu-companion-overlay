@@ -79,6 +79,21 @@ const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, la valeur arrêtée pour l'onglet Alertes.
 const SECTION_GAP: f32 = 18.0;
 
+/// Hauteur de la ligne d'en-tête de la liste — **le côté du bouton icône, pas une valeur ronde**.
+///
+/// Elle valait 34 px alors que le bouton de suppression multiple en mesure 36 : centré dans une
+/// ligne plus courte que lui, il débordait d'un pixel en haut ET en bas, et ce débordement du bas
+/// mangeait la gouttière qui le séparait de la première tuile. Le bouton semblait alors posé sur
+/// la grille (relevé par l'utilisateur le 2026-09-14). La ligne fait désormais la taille de son
+/// plus haut occupant : plus rien n'en sort, et [`LIST_HEADER_GAP`] reste entier.
+const LIST_HEADER_HEIGHT: f32 = design::tokens::ICON_BUTTON_SIZE;
+/// Gouttière entre l'en-tête de la liste et la première rangée de tuiles.
+///
+/// Le titre, plus court que le bouton, garde l'air que lui donne sa ligne ; le bouton, lui, n'a que
+/// cette gouttière. 6 px : l'écart mesuré sous le titre sans qu'elle repousse la grille au point de
+/// détacher l'en-tête de ce qu'il commande.
+const LIST_HEADER_GAP: f32 = 6.0;
+
 /// Côté d'une tuile — **l'emplacement d'objet du jeu**, celui du bandeau de suivi.
 const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
 /// Gouttière entre deux tuiles — celle du bandeau (`panels::watchlist::TILE_GAP`).
@@ -275,6 +290,7 @@ pub fn show(
     ui.add_space(SECTION_GAP);
 
     list_header(ui, state, ctx, width);
+    ui.add_space(LIST_HEADER_GAP);
 
     if ctx.availability == SuiviAvailability::Loading {
         loading_row(ui, panel.inner);
@@ -618,7 +634,7 @@ fn list_header(
     ctx: &mut SuiviTabContext<'_>,
     width: f32,
 ) {
-    let row = ui.allocate_space(Vec2::new(width, 34.0)).1;
+    let row = ui.allocate_space(Vec2::new(width, LIST_HEADER_HEIGHT)).1;
     let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
     let mut bascule = false;
     let mut supprimer = false;
