@@ -119,6 +119,10 @@ const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_mill
 /// widget change à la seconde ; 500 ms suffisent pour voir chaque tour commencer.
 const TURN_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Combien de temps un toast de tour reste cliquable côté overlay — Windows le garde dans le
+/// centre de notifications bien plus longtemps, mais après ça le tour est passé de toute façon.
+const TURN_TOAST_RETENTION: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Voir `App::last_foreground_heartbeat`.
 const FOREGROUND_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 // Largeur élargie 360 -> 420 (2026-09-01) pour laisser la place au portrait de classe (40px,
@@ -419,6 +423,9 @@ struct App {
     /// Dernier tick de `sync_turn_watch` : la capture d'une fenêtre est bien plus chère que les
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
+    /// Toasts de tour affichés, gardés vivants pour recevoir le clic (voir
+    /// `turn_watch::notify::Toast`) — purgés au bout de `TURN_TOAST_RETENTION`.
+    turn_toasts: Vec<(std::time::Instant, turn_watch::notify::Toast)>,
     game_window: GameWindowTracker,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
@@ -540,6 +547,13 @@ impl App {
         // refus tolérés) est dans `ShortcutRegistry` — voir le commentaire en tête de fichier.
         let hotkeys = ShortcutRegistry::new(&ShortcutAction::ALL, shortcuts);
 
+        // Identité des toasts de tour (nom + logo de l'overlay, voir `turn_watch::notify`) —
+        // une clé HKCU et un PNG, idempotents, au démarrage plutôt qu'à la première notification
+        // pour que le centre de notifications la connaisse avant le premier toast.
+        if let Some(dir) = turn_watch::templates::data_dir() {
+            turn_watch::notify::register_identity(&dir, ui_icons::app_logo_png());
+        }
+
         Self {
             windows: HashMap::new(),
             hotkeys,
@@ -563,6 +577,7 @@ impl App {
             turn_notification,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
+            turn_toasts: Vec::new(),
             game_window: GameWindowTracker::new(),
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -929,6 +944,8 @@ impl App {
             return;
         }
         self.turn_watch_last_tick = Some(now);
+        self.turn_toasts
+            .retain(|(shown, _)| now.duration_since(*shown) < TURN_TOAST_RETENTION);
 
         // Une fenêtre de jeu par personnage — les overlays Combat et Suivi partagent le même
         // `game_hwnd`, on ne la lit qu'une fois.
@@ -985,12 +1002,20 @@ impl App {
                     }
                     turn_watch::watcher::Event::Notify { character } => {
                         tracing::info!("[tour] >>> {character} doit jouer — notification.");
-                        if let Err(err) = turn_watch::notify::show(
+                        // Le clic ramène la fenêtre de CE personnage au premier plan — la `HWND`
+                        // passe en entier, le gestionnaire tourne sur un thread du système.
+                        let target = hwnd.0 as isize;
+                        match turn_watch::notify::show(
                             &format!("{character} doit jouer"),
-                            "C'est à toi — Wakfu",
+                            "C'est à toi — clique pour passer sur sa fenêtre",
+                            move || turn_watch::notify::focus_window(target),
                         ) {
-                            tracing::warn!("[tour] notification en échec : {err}");
+                            Ok(toast) => self.turn_toasts.push((now, toast)),
+                            Err(err) => tracing::warn!("[tour] notification en échec : {err}"),
                         }
+                        // Le toast est silencieux (sons système seuls autorisés, jugés
+                        // insipides) : le son est le nôtre.
+                        alert_sound::play_turn_alert();
                     }
                 }
             }

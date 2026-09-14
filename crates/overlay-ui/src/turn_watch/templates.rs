@@ -14,9 +14,14 @@ use std::path::PathBuf;
 
 use super::vision::Glyph;
 
-fn dir() -> Option<PathBuf> {
+/// Dossier de données de l'overlay — même racine que `config`, `logs/` et `catalog_cache`.
+pub fn data_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("com", "Oumbra", "wakfu-companion-overlay")
-        .map(|d| d.data_dir().join("turn-templates"))
+        .map(|d| d.data_dir().to_path_buf())
+}
+
+fn dir() -> Option<PathBuf> {
+    data_dir().map(|d| d.join("turn-templates"))
 }
 
 /// Nom de fichier sûr pour un nom de personnage (les noms Wakfu peuvent porter des espaces et des

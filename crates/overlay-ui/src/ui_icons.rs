@@ -90,6 +90,12 @@ impl UiIcons {
 
 /// Le logo décodé en RGBA 8 bits, avec ses dimensions — pour `winit::window::Icon::from_rgba` et
 /// `tray_icon::Icon::from_rgba`, qui veulent des pixels bruts et non un PNG.
+/// Le logo tel qu'embarqué (PNG 128 × 128) — pour le déposer sur disque là où une API ne prend
+/// qu'un chemin de fichier (icône des toasts, `turn_watch::notify::register_identity`).
+pub fn app_logo_png() -> &'static [u8] {
+    LOGO_BYTES
+}
+
 pub fn app_logo_rgba() -> (Vec<u8>, u32, u32) {
     let decoded = decode(LOGO_BYTES);
     let (width, height) = decoded.dimensions();
