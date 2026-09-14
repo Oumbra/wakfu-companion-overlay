@@ -35,7 +35,9 @@
 //! écart entre le harnais de test et le jeu réel, à noter en le lisant.
 
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, Window};
+use x11rb::protocol::xproto::{
+    AtomEnum, ClientMessageEvent, ConnectionExt as _, EventMask, Window,
+};
 use x11rb::rust_connection::RustConnection;
 
 /// Suffixe distinctif et invariant du titre de la fenêtre du client Wakfu — voir le commentaire de
@@ -124,6 +126,27 @@ impl GameWindowTracker {
             .ok()?;
         let value = reply.value32()?.next()?;
         (value != 0).then_some(value)
+    }
+
+    /// Demande au gestionnaire de fenêtres de donner le focus à `window` — pendant EWMH de
+    /// `SetForegroundWindow` : un `ClientMessage` `_NET_ACTIVE_WINDOW` envoyé à la racine, que
+    /// tout WM EWMH honore (avec sa propre politique de vol de focus, que l'overlay ne cherche pas
+    /// à contourner). Sert à la réponse en privé de la carte d'alerte de chat : le clic sur
+    /// l'overlay a pu prendre le focus au jeu, il faut le lui rendre avant de taper.
+    ///
+    /// `source = 1` (« application normale ») plutôt que 2 (« pager ») : c'est une demande au nom
+    /// de l'utilisateur qui vient de cliquer, pas d'un outil de bureau.
+    pub fn activate(&self, window: Window) -> Result<(), String> {
+        let event = ClientMessageEvent::new(32, window, self.net_active_window, [1, 0, 0, 0, 0]);
+        self.conn
+            .send_event(
+                false,
+                self.root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                event,
+            )
+            .map_err(|err| err.to_string())?;
+        self.conn.flush().map_err(|err| err.to_string())
     }
 
     /// Toutes les fenêtres de jeu actuellement visibles (titre finissant par `TITLE_SUFFIX`), avec
@@ -235,4 +258,11 @@ impl GameWindowTracker {
             values.next()? as i32,
         ))
     }
+}
+
+/// Active `window` depuis une connexion ouverte pour l'occasion — pour un thread qui n'a pas de
+/// [`GameWindowTracker`] sous la main (le thread de frappe de `overlay_ui::chat_command`).
+pub fn activate_window(window: Window) -> Result<(), String> {
+    let tracker = GameWindowTracker::connect().map_err(|err| err.to_string())?;
+    tracker.activate(window)
 }

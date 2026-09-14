@@ -300,6 +300,16 @@ pub fn type_chat_line(
     typist.tap_return()
 }
 
+/// Ouvre la saisie du chat et y tape `line`, **sans l'envoyer** : le joueur termine lui-même sa
+/// phrase. C'est la réponse en privé de la carte d'alerte de chat (`/w "Nom" `, espace final
+/// compris) — voir `overlay_ui::chat_command::send_whisper`.
+pub fn type_open_line(line: &str, open_delay: Duration) -> Result<(), TypeError> {
+    let typist = Typist::connect()?;
+    typist.tap_return()?;
+    sleep(open_delay);
+    typist.type_text(line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
