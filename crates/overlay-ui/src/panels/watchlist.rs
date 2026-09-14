@@ -1634,9 +1634,7 @@ fn chat_toast_card(
         egui::Color32::WHITE
     };
     ds.paint_icon(painter, icon_rect, DsIcon::Message, fade(icon_tint));
-    design::tooltip(&icon_response).text(format!(
-        "Répondre en privé — écrit /w \"{author}\" dans le chat"
-    ));
+    design::tooltip(&icon_response).text("Répondre en privé");
 
     let whisper = icon_response.clicked();
     ToastClick {
