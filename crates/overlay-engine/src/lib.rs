@@ -26,8 +26,9 @@ pub use catalog::{
     WakfuItemCategory, WakfuRarity,
 };
 pub use chat_alert::{
-    channel_label, chat_filters_from_settings_json, chat_filters_to_settings_json, matching_filter,
-    ChatAlert, ChatFilter, ChatFilterScope, CHAT_CHANNELS,
+    channel_label, chat_filters_from_account_data, chat_filters_from_settings_json,
+    chat_filters_patch_entry, chat_filters_to_settings_json, matching_filter, ChatAlert,
+    ChatFilter, ChatFilterScope, CHAT_CHANNELS,
 };
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{

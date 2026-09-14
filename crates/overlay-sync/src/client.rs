@@ -6,8 +6,9 @@
 use std::time::Duration;
 
 use overlay_engine::{
-    profile_patch_entry, watchlist_from_settings_json, watchlist_patch_entry, AlertProfile,
-    RosterIndex, WatchlistEntry,
+    chat_filters_from_account_data, chat_filters_patch_entry, profile_patch_entry,
+    watchlist_from_settings_json, watchlist_patch_entry, AlertProfile, ChatFilter, RosterIndex,
+    WatchlistEntry,
 };
 use serde_json::Value;
 
@@ -121,6 +122,15 @@ pub fn patch_profile(token: &str, profile: &Value) -> Result<Value, SyncError> {
     patch_json_authenticated(token, "/api/v1/settings", &body)
 }
 
+/// `PATCH /api/v1/settings` pour écrire la clé `chatFilters` — les recherches réglées dans
+/// l'onglet « Chat » de la fenêtre Options (2026-09-13). Même forme que `patch_watchlist` : la clé
+/// n'appartient qu'aux recherches, sa valeur est remplacée en entier, rien à préserver. Même
+/// arbitrage serveur « dernier écrivain gagne » que `patch_profile`.
+pub fn patch_chat_filters(token: &str, filters: &[ChatFilter]) -> Result<Value, SyncError> {
+    let body = serde_json::json!({ "entries": [chat_filters_patch_entry(filters)] });
+    patch_json_authenticated(token, "/api/v1/settings", &body)
+}
+
 /// `GET /api/v1/items/{id}` — le détail d'un objet, dont **sa recette** (`functions/api/v1/
 /// items/[id].ts` côté dépôt web).
 ///
@@ -206,6 +216,9 @@ pub struct AccountSettings {
     /// repartir de cet objet effacerait ces champs du compte — voir
     /// `AlertProfile::patch_value`, qui le prend en entrée.
     pub profile_raw: Option<Value>,
+    /// Recherches de chat (`data.chatFilters`, voir `overlay_engine::chat_alert`) — la liste que
+    /// l'onglet « Chat » édite et que le moteur confronte à chaque message.
+    pub chat_filters: Vec<ChatFilter>,
 }
 
 /// `GET /api/v1/auth/me` avec `Authorization: Bearer <token>` — seule source de l'`uid` requis par
@@ -267,6 +280,7 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
         watchlist: watchlist_from_settings_json(&data),
         alerts: AlertProfile::from_settings_json(&data),
         profile_raw: data.get("profile").cloned(),
+        chat_filters: chat_filters_from_account_data(&data),
     })
 }
 
