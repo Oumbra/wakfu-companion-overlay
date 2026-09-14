@@ -68,6 +68,13 @@ pub struct RosterIndex {
     /// (compte sans serveur déclaré) distinct d'une absence d'entrée (personnage inconnu) : les
     /// deux renvoient `None` côté `find_game_server`, mais seule cette table sait laquelle.
     game_server_by_normalized_name: HashMap<String, Option<String>>,
+    /// Les personnages de chaque compte, tels que déclarés — pour [`account_mates`]. Un client
+    /// Wakfu joue le titulaire de sa fenêtre **et ses héros**, tous du même compte : c'est cette
+    /// table qui dit, pour une fenêtre, quels noms peuvent y apparaître comme combattant actif.
+    ///
+    /// [`account_mates`]: RosterIndex::account_mates
+    characters_by_account: Vec<Vec<String>>,
+    account_by_normalized_name: HashMap<String, usize>,
 }
 
 impl RosterIndex {
@@ -82,7 +89,16 @@ impl RosterIndex {
 
         let mut by_normalized_name = HashMap::new();
         let mut game_server_by_normalized_name = HashMap::new();
-        for account in accounts {
+        let mut characters_by_account = Vec::new();
+        let mut account_by_normalized_name = HashMap::new();
+        for (account_index, account) in accounts.into_iter().enumerate() {
+            characters_by_account.push(
+                account
+                    .characters
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<Vec<_>>(),
+            );
             for character in account.characters {
                 // Dernier écrivain gagne en cas d'homonyme entre deux comptes — comportement
                 // best-effort assumé, un vrai conflit de nom entre comptes est un cas limite que
@@ -92,13 +108,28 @@ impl RosterIndex {
                 // partagent le même dernier écrivain, jamais désynchronisées l'une de l'autre.
                 let key = normalize_wakfu_name(&character.name);
                 game_server_by_normalized_name.insert(key.clone(), account.game_server.clone());
+                account_by_normalized_name.insert(key.clone(), account_index);
                 by_normalized_name.insert(key, character);
             }
         }
         Self {
             by_normalized_name,
             game_server_by_normalized_name,
+            characters_by_account,
+            account_by_normalized_name,
         }
+    }
+
+    /// Les personnages du **même compte** que `name`, lui compris, tels que déclarés — vide si
+    /// `name` n'est pas au roster. Un client Wakfu joue jusqu'à trois personnages d'un compte (le
+    /// titulaire de la fenêtre et ses héros) : ce sont les noms qu'une fenêtre peut afficher comme
+    /// combattant actif (§9.1 decies du plan, surveillance de tour).
+    pub fn account_mates(&self, name: &str) -> Vec<String> {
+        self.account_by_normalized_name
+            .get(&normalize_wakfu_name(name))
+            .and_then(|&i| self.characters_by_account.get(i))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Recherche insensible à la casse/accents/apostrophes — miroir de
@@ -128,6 +159,25 @@ impl RosterIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn les_personnages_d_un_meme_compte_se_retrouvent() {
+        let data = serde_json::json!({ "roster": [
+            { "characters": [
+                { "name": "Oumbra", "className": "Sram", "gender": "m" },
+                { "name": "Sagitta Lucis", "className": "Cra", "gender": "f" }
+            ], "gameServer": "pandora" },
+            { "characters": [
+                { "name": "Pugio Letalis", "className": "Iop", "gender": "m" }
+            ] }
+        ]});
+        let index = RosterIndex::from_settings_json(&data);
+        let mut mates = index.account_mates("oumbra");
+        mates.sort();
+        assert_eq!(mates, vec!["Oumbra", "Sagitta Lucis"]);
+        assert_eq!(index.account_mates("Pugio Letalis"), vec!["Pugio Letalis"]);
+        assert!(index.account_mates("Inconnu").is_empty());
+    }
 
     fn sample_settings() -> serde_json::Value {
         serde_json::json!({

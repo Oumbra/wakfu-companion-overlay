@@ -130,6 +130,10 @@ pub type SharedAlertProfile = Arc<ArcSwap<Option<(overlay_engine::AlertProfile, 
 /// L'hôte les lit à l'ouverture de la fenêtre Options, pour en faire le brouillon de l'onglet
 /// « Chat ».
 pub type SharedChatFilters = Arc<ArcSwap<Option<Vec<overlay_engine::ChatFilter>>>>;
+/// Le roster du compte, publié par le thread Engine comme les filtres de chat — la surveillance
+/// de tour (`turn_watch`) y lit les personnages du compte de chaque fenêtre (titulaire + héros).
+/// `None` sans compte lié.
+pub type SharedRoster = Arc<ArcSwap<Option<overlay_engine::RosterIndex>>>;
 
 pub struct EngineHandles {
     pub snapshot: Arc<ArcSwap<SessionSnapshot>>,
@@ -146,6 +150,8 @@ pub struct EngineHandles {
     pub alert_profile: SharedAlertProfile,
     /// Publié par ce thread comme `alert_profile`, pour l'onglet « Chat ».
     pub chat_filters: SharedChatFilters,
+    /// Publié par ce thread comme `alert_profile`, pour la surveillance de tour.
+    pub roster: SharedRoster,
     /// Avancement du démarrage (voir `crate::startup`) : ce thread y marque la fin du rattrapage
     /// initial de `wakfu.log` — au premier silence du watcher (200 ms sans lot), ou au premier lot
     /// qui n'est plus étiqueté `is_initial_load`. Le watcher pousse les lots du rattrapage d'un
@@ -170,6 +176,7 @@ pub fn spawn_engine_thread(
         catalog,
         dungeons,
         chat_filters: chat_filters_out,
+        roster: roster_out,
     } = handles;
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -216,6 +223,7 @@ pub fn spawn_engine_thread(
                                 sound_item_count,
                                 "réglages de compte appliqués à l'Engine (lot L4)"
                             );
+                            roster_out.store(Arc::new(Some(settings.roster.clone())));
                             engine.set_roster(Some(settings.roster));
                             engine.set_watchlist_entries(settings.watchlist);
                             alert_profile = settings.alerts;
@@ -237,6 +245,7 @@ pub fn spawn_engine_thread(
                             tracing::info!(
                                 "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé)"
                             );
+                            roster_out.store(Arc::new(None));
                             engine.set_roster(None);
                             engine.set_watchlist_entries(Vec::new());
                             engine.set_sound_items(Vec::new());
