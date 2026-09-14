@@ -100,7 +100,7 @@ fn rendu(gap: f32, titre_gap: f32) -> image::RgbaImage {
                     .log_name("interligne-onglets"),
             );
             design::panel().show(ui, chrome.content, |ui, _panel| {
-                ui.add(design::heading("Combat").trailing_gap(titre_gap));
+                ui.add(design::heading("Combat").preview_trailing_gap(titre_gap));
                 ui.add(design::checkbox(
                     &mut toujours_visible,
                     "Afficher le panneau de combat en dehors des combats",

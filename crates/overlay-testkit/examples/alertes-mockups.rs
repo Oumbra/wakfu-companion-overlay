@@ -1022,7 +1022,7 @@ fn alerts_tab(
     // de page web. Le jeu, lui, n'en pose jamais à côté d'un titre de section — celui de
     // `interface-personnage-equiement.png` est en tête de FENÊTRE, ce qui est un autre objet.
     // Retiré sur demande explicite (2026-09-11).
-    ui.add(design::heading("Alerte").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Alerte"));
     // La phrase d'explication de la page (`profile.alertsDesc` côté web) — remise sous le titre à
     // la demande de l'utilisateur, après que le retrait du `?` qui la portait en infobulle l'ait
     // fait disparaître.
@@ -1040,15 +1040,16 @@ fn alerts_tab(
     ui.add_space(SECTION_GAP);
     close_settings_row(ui, state.auto, state.seconds, width);
 
-    // **Un seul écart, partout** : `SECTION_GAP` sépare chaque bloc de son voisin, et un titre a
-    // exactement le même espace au-dessus qu'en dessous (`trailing_gap`). Les versions
-    // précédentes mélangeaient `SECTION_GAP`, sa moitié et des littéraux, ce qui donnait un titre
-    // collé à son champ et un autre décollé — et l'écart ne s'ouvrait que lorsqu'un message
-    // d'erreur s'intercalait, donc au hasard de l'état.
+    // **Un seul écart, partout** : `SECTION_GAP` sépare chaque bloc de son voisin, et ce qu'un
+    // titre laisse sous lui n'appartient plus à cette maquette — c'est `HEADING_TO_ROW`, la cote
+    // du jeu, la même sur tous les écrans (2026-09-14). Les versions précédentes mélangeaient ici
+    // `SECTION_GAP`, sa moitié et des littéraux, ce qui donnait un titre collé à son champ et un
+    // autre décollé — et l'écart ne s'ouvrait que lorsqu'un message d'erreur s'intercalait, donc
+    // au hasard de l'état.
     ui.add_space(SECTION_GAP);
     // **Sans compteur** : demande explicite. « (11) » n'apprend rien qu'un coup d'œil à la grille
     // ne donne déjà.
-    ui.add(design::heading("Objets suivis").trailing_gap(SECTION_GAP));
+    ui.add(design::heading("Objets suivis"));
 
     // Champ grisé pendant une lecture en vol : ce qu'on ajouterait serait écrasé par la liste
     // qui arrive. Un champ d'apparence active inviterait au geste que le chargement vient

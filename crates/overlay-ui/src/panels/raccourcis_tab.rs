@@ -127,7 +127,7 @@ pub fn show(
     // combinaison dès cette frame, et non à la suivante.
     capture_pending_key(ui, state, bindings);
 
-    ui.add(design::heading("Raccourcis").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Raccourcis"));
     paragraph(
         ui,
         "Cliquez sur une combinaison pour la changer, puis tapez la nouvelle. Ces raccourcis \

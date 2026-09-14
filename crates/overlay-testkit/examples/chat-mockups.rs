@@ -364,14 +364,14 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
 fn chat_tab(ui: &mut egui::Ui, panel: &design::PanelZones, tab: &mut ChatTab<'_>) {
     let width = panel.inner.width();
 
-    ui.add(design::heading("Chat").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Chat"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 
     test_sound_row(ui, width);
     ui.add_space(SECTION_GAP);
 
-    ui.add(design::heading("Recherches").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Recherches"));
     add_row(ui, tab.scope, tab.input, width);
     ui.add_space(SECTION_GAP * 0.75);
 
