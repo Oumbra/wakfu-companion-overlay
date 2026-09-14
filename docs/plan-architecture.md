@@ -403,11 +403,11 @@ explicitement cliqué (`WS_EX_NOACTIVATE` côté Windows, `_NET_WM_STATE_ABOVE` 
 
 Quand le pointeur survole un overlay interactif, c'est le **curseur de Wakfu** qui s'affiche, pas
 la flèche de l'OS — même logique que les boutons et infobulles du design system : l'overlay doit
-passer pour une partie du jeu. Les trois bitmaps (`assets/cursor/`, isolés pixel par pixel depuis un
-enregistrement d'écran, voir leur `README.md`) sont embarqués par `overlay-ui::cursor` ; le point
-chaud d'une flèche est déduit de l'image (première ligne opaque), les fichiers peuvent donc être
-re-détourés sans toucher au code — celui de la croix fléchée est son **centre**, une croix
-symétrique ne pointant nulle part.
+passer pour une partie du jeu. Les quatre bitmaps (`assets/cursor/`, isolés pixel par pixel depuis
+des enregistrements d'écran, voir leur `README.md`) sont embarqués par `overlay-ui::cursor` ; le
+point chaud de la flèche est déduit de l'image (première ligne opaque), les fichiers peuvent donc
+être re-détourés sans toucher au code — celui de la croix fléchée et de l'I-beam est leur
+**centre**, une croix symétrique ne pointant nulle part et un I-beam visant sa hampe.
 
 Comportement calqué sur le jeu, mesuré à 30 i/s : flèche d'egui (`CursorIcon::Default`) → bitmap
 de repos, fixe ; main (`PointingHand`, tout ce qui se clique) → clignotement éclair 533 ms / repos
@@ -415,8 +415,10 @@ de repos, fixe ; main (`PointingHand`, tout ce qui se clique) → clignotement �
 (tout curseur de déplacement ou de saisie : `Move`, posé par les tuiles de suivi — dans la fenêtre
 Options comme dans le bandeau in-game, voir `panels::tile_reorder` ; `Grab`/`Grabbing`, qu'egui pose
 lui-même au survol d'un glissable et tant qu'une charge est en vol) → bitmap de déplacement,
-**fixe** (le jeu ne le fait pas clignoter, et n'a qu'une seule croix pour tous ces gestes) ; tout
-autre curseur (`Text`, `ResizeHorizontal`…) → curseur système inchangé.
+**fixe** (le jeu ne le fait pas clignoter, et n'a qu'une seule croix pour tous ces gestes) ;
+I-beam (`Text`, posé par `design::input` au survol d'un champ de saisie) → bitmap texte, **fixe**
+lui aussi (2026-09-14) ; tout autre curseur (`ResizeHorizontal`, `VerticalText`…) → curseur système
+inchangé.
 
 Mécanique : egui 0.36 porte nativement un curseur bitmap (`Context::set_cursor_image` →
 `PlatformOutput::cursor_image`), qu'`egui-winit` applique en `winit::window::CustomCursor` à
