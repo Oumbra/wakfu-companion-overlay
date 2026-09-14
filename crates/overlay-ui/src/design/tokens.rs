@@ -356,6 +356,25 @@ pub const CHECKBOX_SIZE: f32 = 20.0;
 /// Écart entre la case et son libellé — la case finit à x=56, le libellé commence à x=62.
 pub const CHECKBOX_LABEL_GAP: f32 = 6.0;
 
+/// Écart vertical entre deux lignes d'option consécutives — **11px**.
+///
+/// Le relevé donne le PAS, pas l'écart : « Rythme : 31 px entre deux lignes d'option
+/// consécutives », vérifié au pixel sur `interface-options-jeu.png` (haut de la première case
+/// y=175, haut de la seconde y=206) et sur les onze lignes de `interface-options-chat.png`, dont
+/// les pas relevés sont 30/31/31/31/31/33/…/31/31. Une ligne étant haute de
+/// [`CHECKBOX_SIZE`], il reste **31 − 20 = 11px** de blanc entre deux cases.
+///
+/// **C'est un jeton de MISE EN PAGE, pas du composant** : `design::checkbox` alloue la hauteur
+/// d'une ligne et rien de plus (voir sa doc de module, « affaire de la mise en page, pas du
+/// composant »), et `design::panel` met `item_spacing.y` à zéro pour que chaque écart soit posé
+/// explicitement. C'est ce qui a manqué jusqu'au 2026-09-14 : deux cases empilées se suivaient à
+/// 20px au lieu de 31 — retour utilisateur, capture du jeu à l'appui, « un gros écart entre les
+/// deux ». L'écart n'a jamais été un choix, seulement une valeur que personne n'avait posée.
+///
+/// Se pose entre deux lignes, **jamais après la dernière** : le blanc qui suit un bloc est le
+/// `SECTION_GAP` de `panels::options_modal` (17px, le relevé encore), et les deux s'ajouteraient.
+pub const CHECKBOX_ROW_GAP: f32 = 11.0;
+
 /// Corps du libellé d'une case — **15, pas 17**. Le jeton `libellé d'option` de
 /// `releve-modale-options.json` donne une encre de 10px, plus petite que les 13px d'un libellé de
 /// bouton : une ligne d'option n'est pas un contrôle, elle se lit en continu.

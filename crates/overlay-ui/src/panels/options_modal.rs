@@ -714,6 +714,11 @@ pub fn show(
             )
             .log_name("options-combat-toujours-visible"),
         );
+        // **L'interligne des lignes d'option** (2026-09-14) — voir `tokens::CHECKBOX_ROW_GAP` : le
+        // jeu laisse 11px entre deux cases, pas zéro. Posé ici et pas dans `design::checkbox`
+        // parce que le relevé le range du côté de la mise en page, et parce qu'un écart porté par
+        // le composant s'ajouterait au `SECTION_GAP` qui suit la dernière ligne d'un bloc.
+        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
         ui.add(
             design::checkbox(
                 &mut state.turn_notification,
@@ -731,6 +736,7 @@ pub fn show(
         // commence le LIBELLÉ de la case du dessus (case + écart, voir `design::checkbox`) : la
         // première version reprenait le retrait titre → contrôle (7 px), jugé trop faible au
         // rendu — « aligner la partie gauche avec le début du m d'en haut ».
+        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
         ui.horizontal(|ui| {
             ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
             ui.add(
