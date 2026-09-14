@@ -697,6 +697,10 @@ use crate::design::tokens::{
 /// à la ligne — [`TOAST_LAYER_WIDTH`] élargie d'un tiers : au-delà, la carte masquerait trop du
 /// jeu (maquette du 2026-09-13).
 pub const CHAT_CARD_TEXT_MAX_WIDTH: f32 = 420.0;
+/// Corps du canal en légende de la carte de chat — plus grand que sur les tuiles (11 px) : à
+/// distance, par-dessus le jeu, 11 px ne se lit pas (retour du 2026-09-14). Choisi parmi
+/// 15/16/17 sur captures.
+const CHAT_CARD_LEGEND_FONT_SIZE: f32 = 16.0;
 /// Corps du mot trouvé (« gelano ») dans la carte de chat — celui des légendes de tuile
 /// (`LEGEND_TILE_LEGEND_FONT_SIZE`), un cran au-dessus pour rester lisible par-dessus le jeu.
 const CHAT_CARD_WORD_FONT_SIZE: f32 = 12.0;
@@ -1470,7 +1474,8 @@ fn toast_card(
 
 /// Carte d'alerte de chat — **le gabarit des tuiles de recherche de l'onglet Chat**
 /// (`design::legend_tile`, demande utilisateur du 2026-09-14) : le cadre des champs du jeu, le
-/// canal en légende sur la bordure haute, à gauche comme sur les tuiles, dans sa couleur ; dedans, le mot trouvé
+/// canal en légende sur la bordure haute, **à droite** et plus grand que sur les tuiles
+/// (`CHAT_CARD_LEGEND_FONT_SIZE`), dans sa couleur ; dedans, le mot trouvé
 /// entre guillemets en gris (une couleur de moins : le canal suffit), puis l'auteur en doré — ce
 /// qui précède les deux-points — et le message, qui retourne à la ligne au-delà de
 /// [`CHAT_CARD_TEXT_MAX_WIDTH`]. Largeur **fixe** ([`CHAT_CARD_WIDTH`]), hauteur au texte. Pas
@@ -1557,7 +1562,7 @@ fn chat_toast_card(
     let allocated = egui::Rect::from_min_max(
         egui::pos2(
             frame.left(),
-            frame.top() - design::LegendTile::legend_overshoot(ui),
+            frame.top() - design::LegendTile::legend_overshoot_for(ui, CHAT_CARD_LEGEND_FONT_SIZE),
         ),
         frame.max,
     );
@@ -1596,8 +1601,15 @@ fn chat_toast_card(
         painter,
         &ctx,
         frame,
-        overlay_engine::channel_label(channel),
-        design::tokens::chat_channel_color(channel),
+        design::FrameLegend {
+            text: overlay_engine::channel_label(channel),
+            color: design::tokens::chat_channel_color(channel),
+            font_size: CHAT_CARD_LEGEND_FONT_SIZE,
+            side: design::LegendSide::Right,
+            // Par-dessus le jeu : la moitié haute du canal déborde du cadre, elle a besoin d'un
+            // fond (constat en jeu du 2026-09-14 : « Proximité » illisible sur la scène).
+            backing: Some(design::tokens::LEGEND_TILE_FILL),
+        },
         &fade,
     );
     let text_left = frame.left() + CARD_PAD_LEFT;
@@ -1634,7 +1646,11 @@ fn chat_toast_card(
         egui::Color32::WHITE
     };
     ds.paint_icon(painter, icon_rect, DsIcon::Message, fade(icon_tint));
-    design::tooltip(&icon_response).text("Répondre en privé");
+    // EN DESSOUS : au-dessus de la bulle, il y a le canal en légende — une infobulle par défaut
+    // le recouvrait (capture du 2026-09-14).
+    design::tooltip(&icon_response)
+        .side(design::TooltipSide::Below)
+        .text("Répondre en privé");
 
     let whisper = icon_response.clicked();
     ToastClick {

@@ -47,6 +47,27 @@ pub enum LegendTileState {
     Disabled,
 }
 
+/// De quel côté de la bordure haute une légende se pose — les tuiles la mettent à gauche, la
+/// carte d'alerte de chat à droite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegendSide {
+    Left,
+    Right,
+}
+
+/// La légende d'un cadre peint par [`LegendTile::paint_frame`].
+#[derive(Debug, Clone, Copy)]
+pub struct FrameLegend<'a> {
+    pub text: &'a str,
+    pub color: Color32,
+    pub font_size: f32,
+    pub side: LegendSide,
+    /// Fond peint derrière la légende, débordement compris — pour un cadre posé **par-dessus le
+    /// jeu**, où la moitié haute de la légende n'a pas de panneau sombre sous elle. `None` dans un
+    /// panneau : le fond y est déjà sombre, et un pavé plus sombre encore se verrait.
+    pub backing: Option<Color32>,
+}
+
 /// Construit une tuile à légende.
 pub fn legend_tile(legend: impl Into<String>, text: impl Into<String>) -> LegendTile {
     LegendTile {
@@ -111,28 +132,39 @@ impl LegendTile {
         self
     }
 
-    /// Peint **le cadre seul** — fond, bordure interrompue sous la légende, légende en haut à
-    /// gauche — pour un appelant qui compose lui-même son contenu dedans (la carte d'alerte de
-    /// chat du Suivi, `panels::watchlist`). `frame` est le cadre ; la légende déborde au-dessus de
-    /// `legend_overshoot`. `tint` s'applique à chaque couleur (grisé, fondu d'entrée…).
+    /// Peint **le cadre seul** — fond, bordure interrompue sous la légende, légende — pour un
+    /// appelant qui compose lui-même son contenu dedans (la carte d'alerte de chat du Suivi,
+    /// `panels::watchlist`). `frame` est le cadre ; la légende déborde au-dessus de
+    /// [`Self::legend_overshoot_for`]`(legend.font_size)`. `tint` s'applique à chaque couleur
+    /// (grisé, fondu d'entrée…).
     pub fn paint_frame(
         painter: &egui::Painter,
         ctx: &egui::Context,
         frame: Rect,
-        legend: &str,
-        legend_color: Color32,
+        legend: FrameLegend<'_>,
         tint: &dyn Fn(Color32) -> Color32,
     ) {
         painter.rect_filled(frame, 0.0, tint(tokens::LEGEND_TILE_FILL));
 
+        let FrameLegend {
+            text: legend_text,
+            color: legend_color,
+            font_size,
+            side,
+            backing,
+        } = legend;
         let legend = painter.layout_no_wrap(
-            legend.to_owned(),
-            text::label_font(ctx, tokens::LEGEND_TILE_LEGEND_FONT_SIZE),
+            legend_text.to_owned(),
+            text::label_font(ctx, font_size),
             tint(legend_color),
         );
         let inset = tokens::LEGEND_TILE_LEGEND_INSET;
-        let legend_left = frame.left() + inset;
-        let legend_right = (legend_left + legend.size().x).min(frame.right() - inset);
+        let legend_width = legend.size().x.min(frame.width() - inset * 2.0);
+        let legend_left = match side {
+            LegendSide::Left => frame.left() + inset,
+            LegendSide::Right => frame.right() - inset - legend_width,
+        };
+        let legend_right = legend_left + legend_width;
         let stroke = Stroke::new(
             tokens::LEGEND_TILE_BORDER_WIDTH,
             tint(tokens::LEGEND_TILE_BORDER),
@@ -155,20 +187,36 @@ impl LegendTile {
             [egui::pos2(left, bottom), egui::pos2(right, bottom)],
             stroke,
         );
-        painter.galley(
-            egui::pos2(legend_left, frame.top() + half - legend.size().y / 2.0),
-            legend,
-            Color32::WHITE,
-        );
+        let legend_pos = egui::pos2(legend_left, frame.top() + half - legend.size().y / 2.0);
+        if let Some(backing) = backing {
+            // La moitié haute de la légende vit HORS du cadre : par-dessus le jeu, sans ce fond,
+            // elle se lit sur ce que le jeu affiche à cet instant — c'est-à-dire souvent pas.
+            painter.rect_filled(
+                Rect::from_min_max(
+                    egui::pos2(legend_left - gap, legend_pos.y),
+                    egui::pos2(legend_right + gap, legend_pos.y + legend.size().y),
+                ),
+                0.0,
+                tint(backing),
+            );
+        }
+        painter.galley(legend_pos, legend, Color32::WHITE);
     }
 
-    /// De combien la légende dépasse au-dessus du cadre — la moitié de sa hauteur de ligne.
+    /// De combien la légende d'une **tuile** dépasse au-dessus du cadre — la moitié de sa hauteur
+    /// de ligne.
     pub fn legend_overshoot(ui: &Ui) -> f32 {
+        Self::legend_overshoot_for(ui, tokens::LEGEND_TILE_LEGEND_FONT_SIZE)
+    }
+
+    /// De combien une légende de corps `font_size` dépasse au-dessus du cadre — pour un appelant
+    /// de [`Self::paint_frame`] qui choisit son corps.
+    pub fn legend_overshoot_for(ui: &Ui, font_size: f32) -> f32 {
         let line = ui
             .painter()
             .layout_no_wrap(
                 "Ag".to_owned(),
-                text::label_font(ui.ctx(), tokens::LEGEND_TILE_LEGEND_FONT_SIZE),
+                text::label_font(ui.ctx(), font_size),
                 Color32::WHITE,
             )
             .size()
@@ -231,8 +279,13 @@ impl Widget for LegendTile {
                 &painter,
                 ui.ctx(),
                 frame,
-                &self.legend,
-                self.legend_color.unwrap_or(tokens::LEGEND_TILE_LEGEND_TEXT),
+                FrameLegend {
+                    text: &self.legend,
+                    color: self.legend_color.unwrap_or(tokens::LEGEND_TILE_LEGEND_TEXT),
+                    font_size: tokens::LEGEND_TILE_LEGEND_FONT_SIZE,
+                    side: LegendSide::Left,
+                    backing: None,
+                },
                 &dim,
             );
             let half = tokens::LEGEND_TILE_BORDER_WIDTH / 2.0;
