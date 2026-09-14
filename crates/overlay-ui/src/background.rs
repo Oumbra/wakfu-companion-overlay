@@ -521,7 +521,7 @@ fn attempt_connect(
                     "[compte] réglages récupérés depuis le jeton natif déjà connu ({} entrée(s) de suivi).",
                     settings.watchlist.len()
                 );
-                let _ = settings_tx.send(EngineCommand::ApplySettings(Box::new(settings)));
+                let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
                 activate_sync_queue(&token, sync_tx);
                 return Ok(());
             }
@@ -610,7 +610,7 @@ fn attempt_connect(
                 "[compte] connecté — réglages récupérés ({} entrée(s) de suivi).",
                 settings.watchlist.len()
             );
-            let _ = settings_tx.send(EngineCommand::ApplySettings(Box::new(settings)));
+            let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
             activate_sync_queue(&token, sync_tx);
             Ok(())
         }
