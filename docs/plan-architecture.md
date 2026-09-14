@@ -1262,8 +1262,11 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   web et le serveur n'accepte que des clés connues. Le jour où il en porte une, il y migre.
 - **Son et carte** : le son du web (`chat-filter-c13da61f.mp3`, `alert_sound::play_chat_alert`),
   **une fois par lot** et pour le dernier message trouvé ; carte `WatchlistToastReason::Chat`
-  dans le bandeau Suivi — même gabarit que le toast de ramassage, sans icône ni confettis, titre
-  « MOT · CANAL », auteur en graisse puis message complet (retour à la ligne à 420 px).
+  dans le bandeau Suivi — **le gabarit des tuiles de recherche** (`design::LegendTile::paint_frame`,
+  révision du 2026-09-14) : le canal en légende sur la bordure haute, à droite, dans la couleur
+  que le client lui donne (`tokens::chat_channel_color`) ; dedans « mot » en gris, l'auteur en doré
+  puis le message complet (retour à la ligne à 420 px). Sans icône ni confettis ; la croix passe à
+  droite, centrée, le coin haut-droit étant pris par la légende.
 - **Réponse en privé** : un clic sur la carte la ferme et prépare `/w "<auteur>" ` dans le jeu
   (`chat_command::send_whisper`, espace final, **sans Entrée final** : le joueur tape son
   message). Séquence sur un thread : rendre le focus à la fenêtre de jeu au premier plan ou à la
