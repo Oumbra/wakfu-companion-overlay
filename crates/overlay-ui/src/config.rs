@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::shortcuts::ShortcutBindings;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OverlayConfig {
     /// Chemin explicite de `wakfu.log`, choisi par l'utilisateur via la modale Options — voir
     /// doc de module pour l'ordre de priorité au démarrage et
@@ -50,6 +50,15 @@ pub struct OverlayConfig {
     /// un parsing en échec repart de `OverlayConfig::default()`, chemin de log compris).
     #[serde(default)]
     pub combat_always_visible: bool,
+    /// Durée d'affichage de la carte d'alerte de **chat**, en secondes (onglet « Chat », voir
+    /// `panels::chat_tab::ChatToastSettings`). **Ici et non au compte**, par exception au principe
+    /// de la doc de module : ce réglage n'a pas d'équivalent web, et le serveur n'accepte que des
+    /// clés connues — le jour où il en porte une, il y migre. `None` = défaut.
+    #[serde(default)]
+    pub chat_alert_duration_seconds: Option<f32>,
+    /// La carte d'alerte de chat ne se ferme qu'à la main — même exception, même raison.
+    #[serde(default)]
+    pub chat_alert_manual_close: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -83,6 +92,24 @@ impl OverlayConfig {
     /// la fenêtre Options (voir `panels::options_modal`), jamais à chaque frame.
     pub fn set_shortcuts(&mut self, bindings: &ShortcutBindings) {
         self.shortcuts = bindings.to_config();
+    }
+
+    /// Réglages de la carte de chat effectifs — défaut pour une config qui ne les porte pas.
+    pub fn chat_toast(&self) -> crate::panels::chat_tab::ChatToastSettings {
+        let mut toast = crate::panels::chat_tab::ChatToastSettings {
+            manual_close: self.chat_alert_manual_close,
+            ..Default::default()
+        };
+        if let Some(seconds) = self.chat_alert_duration_seconds {
+            toast.set_duration(seconds);
+        }
+        toast
+    }
+
+    /// Reporte les réglages de la carte de chat dans la config.
+    pub fn set_chat_toast(&mut self, toast: crate::panels::chat_tab::ChatToastSettings) {
+        self.chat_alert_duration_seconds = Some(toast.duration_seconds);
+        self.chat_alert_manual_close = toast.manual_close;
     }
 }
 
@@ -206,6 +233,25 @@ mod tests {
     /// Une config écrite AVANT l'existence de la table `[shortcuts]` doit rester lisible — sans
     /// `#[serde(default)]` sur ce champ, elle ferait échouer `toml::from_str` et l'utilisateur
     /// perdrait son `log_path` au premier lancement de la nouvelle version.
+    /// Les réglages de la carte de chat font l'aller-retour, et une config qui ne les porte pas
+    /// retombe sur le défaut sans faire échouer la lecture.
+    #[test]
+    fn aller_retour_des_reglages_de_carte_de_chat() {
+        let mut config = OverlayConfig::default();
+        assert_eq!(
+            config.chat_toast(),
+            crate::panels::chat_tab::ChatToastSettings::default()
+        );
+        config.set_chat_toast(crate::panels::chat_tab::ChatToastSettings {
+            duration_seconds: 7.5,
+            manual_close: true,
+        });
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu.chat_toast().duration_seconds, 7.5);
+        assert!(relu.chat_toast().manual_close);
+    }
+
     #[test]
     fn config_sans_table_de_raccourcis_reste_lisible() {
         let config: OverlayConfig =

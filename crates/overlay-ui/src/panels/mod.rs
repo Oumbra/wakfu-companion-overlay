@@ -6,6 +6,7 @@
 
 pub mod alerts_tab;
 pub mod chamfer;
+pub mod chat_tab;
 pub mod combat;
 pub mod combat_bars;
 pub mod combat_frame;

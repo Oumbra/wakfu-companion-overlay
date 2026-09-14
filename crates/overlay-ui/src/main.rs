@@ -46,13 +46,15 @@ use overlay_ui::alert_sound;
 use overlay_ui::chat_command::{self, ChatCommand};
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
-    spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SyncCommand,
+    spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
+    SyncCommand,
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::alerts_tab;
+use overlay_ui::panels::chat_tab;
 use overlay_ui::panels::combat::CombatSide;
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
@@ -341,6 +343,12 @@ struct App {
     /// Le profil d'alerte du compte, tel que le dernier `GET /api/v1/settings` l'a rendu — lu à
     /// l'OUVERTURE de la fenêtre Options, pour en faire le brouillon de l'onglet « Alertes ».
     alert_profile: SharedAlertProfile,
+    /// Les recherches de chat du compte, même provenance et même usage que `alert_profile` — le
+    /// brouillon de l'onglet « Chat ».
+    chat_filters: SharedChatFilters,
+    /// Réglages de la carte d'alerte de chat EN VIGUEUR (durée, fermeture manuelle) — lus de la
+    /// config locale au démarrage, réécrits à la validation de l'onglet « Chat ».
+    chat_toast: chat_tab::ChatToastSettings,
     /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
     /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
     /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
@@ -428,6 +436,9 @@ struct AppState {
     watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     alert_profile: SharedAlertProfile,
+    chat_filters: SharedChatFilters,
+    /// Voir `App::chat_toast` — lu de la config au démarrage.
+    chat_toast: chat_tab::ChatToastSettings,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
@@ -448,6 +459,8 @@ impl App {
             watchlist,
             watchlist_toast,
             alert_profile,
+            chat_filters,
+            chat_toast,
             catalog,
             catalog_stale,
             remote_icons,
@@ -470,6 +483,8 @@ impl App {
             watchlist_selection: panels::watchlist::WatchlistSelection::default(),
             watchlist_toast,
             alert_profile,
+            chat_filters,
+            chat_toast,
             catalog,
             catalog_stale,
             remote_icons,
@@ -999,6 +1014,26 @@ impl App {
     /// clients ; `self.windows` est une `HashMap` d'overlays, sans ordre et à deux entrées par
     /// fenêtre de jeu (Combat + Suivi). Le scan coûte un `EnumWindows`, déjà fait à chaque tick
     /// (`sync_windows`) — négligeable pour un geste manuel.
+    /// Réponse en privé depuis la carte d'alerte de chat — vise la fenêtre de jeu au premier plan,
+    /// ou la première trouvée : l'overlay ne prend jamais le focus (`WS_EX_NOACTIVATE`), le jeu
+    /// l'a donc encore le plus souvent, et `send_whisper` le lui rend sinon.
+    fn whisper_from_toast(&mut self, author: &str) {
+        let foreground = unsafe { GetForegroundWindow() }.0 as usize;
+        let windows: Vec<usize> = self
+            .game_window
+            .scan()
+            .into_iter()
+            .map(|(_, info)| info.hwnd.0 as usize)
+            .collect();
+        let target = windows
+            .iter()
+            .copied()
+            .find(|key| *key == foreground)
+            .or_else(|| windows.first().copied());
+        tracing::info!(">>> Répondre en privé : {author}");
+        chat_command::send_whisper(author, target);
+    }
+
     fn send_partner_command(&mut self, command: ChatCommand) {
         let label = self.hotkeys.bindings().label(match command {
             ChatCommand::Invite => ShortcutAction::InvitePartner,
@@ -1346,6 +1381,22 @@ impl App {
             }
             None => (None, alerts_tab::AlertsAvailability::NoAccount),
         };
+        // **Le brouillon de chat**, même principe : une copie des recherches du compte, plus les
+        // réglages locaux de la carte.
+        let chat_snapshot = self.chat_filters.load();
+        let (chat_draft, chat_availability) = match chat_snapshot.as_ref() {
+            Some(filters) => (
+                Some(chat_tab::ChatDraft {
+                    filters: filters.clone(),
+                    toast: self.chat_toast,
+                }),
+                chat_tab::ChatAvailability::Ready,
+            ),
+            None if matches!(**self.auth_status.load(), AuthStatus::Connected) => {
+                (None, chat_tab::ChatAvailability::Loading)
+            }
+            None => (None, chat_tab::ChatAvailability::NoAccount),
+        };
         // **Le brouillon de suivi**, même principe que celui des alertes : une copie des entrées
         // du compte, prise ici, modifiée librement, et renvoyée seulement à « Valider ». Les
         // compteurs qu'elle porte sont indicatifs — la validation les recalcule depuis l'état
@@ -1415,16 +1466,23 @@ impl App {
                     .unwrap_or_default(),
                 ..Default::default()
             },
+            chat: chat_tab::ChatTabState {
+                duration_input: format_alert_duration(self.chat_toast.duration_seconds),
+                ..Default::default()
+            },
             initial: options_modal::OptionsInitial {
                 path: self.log_path.display().to_string(),
                 alerts: alerts_draft.clone(),
                 suivi: suivi_draft.clone(),
+                chat: chat_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
                 shortcuts: self.hotkeys.bindings().clone(),
             },
             pending_close: false,
             alerts_draft,
             alerts_availability,
+            chat_draft,
+            chat_availability,
             suivi: Default::default(),
             suivi_draft,
             suivi_availability,
@@ -1462,6 +1520,50 @@ impl App {
                 let _ = tx.send(picked);
             })
             .expect("échec de création du thread de dialogue de fichier");
+    }
+
+    /// Commit du brouillon de l'onglet « Chat » — calqué sur `commit_alerts` pour les recherches
+    /// (clé `chatFilters` du compte, remplacée en entier) ; les réglages de la carte, locaux, sont
+    /// appliqués au moteur et rendus à l'appelant pour la config (`true` = ils ont changé).
+    fn commit_chat(&mut self, options_window_id: WindowId) -> bool {
+        let Some(draft) = self
+            .windows
+            .get(&options_window_id)
+            .and_then(|overlay| overlay.options_state.as_ref())
+            .and_then(|state| state.chat_draft.clone())
+        else {
+            return false;
+        };
+        let toast_changed = draft.toast != self.chat_toast;
+        if toast_changed {
+            self.chat_toast = draft.toast;
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetChatToast(draft.toast));
+        }
+        let reference = self.chat_filters.load();
+        if reference.as_ref().as_ref() == Some(&draft.filters) {
+            return toast_changed;
+        }
+        // Appliqué localement d'abord : le prochain message doit obéir sans attendre le réseau.
+        let _ = self
+            .settings_tx
+            .send(EngineCommand::SetChatFilters(draft.filters.clone()));
+        let filters = draft.filters;
+        thread::spawn(move || {
+            match overlay_sync::token_store::load_token() {
+            Some(token) => match overlay_sync::client::patch_chat_filters(&token, &filters) {
+                Ok(_) => tracing::info!("[options] recherches de chat enregistrées sur le compte."),
+                Err(err) => {
+                    tracing::warn!(%err, "[options] échec de l'enregistrement des recherches de chat")
+                }
+            },
+            None => tracing::info!(
+                "[options] recherches de chat appliquées localement — aucun compte lié, rien n'est enregistré."
+            ),
+        }
+        });
+        toast_changed
     }
 
     /// Valide `raw` (contenu du champ texte au moment du clic sur "Valider", ou chemin choisi par
@@ -1662,13 +1764,17 @@ impl App {
                 // **La config est réécrite EN ENTIER**, et seulement si l'un des réglages a bougé :
                 // le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que le réglage
                 // modifié effacerait les autres.
-                if path_changed || combat_changed || shortcuts_changed {
+                // Les réglages de la carte de chat vivent dans la même config : commités AVANT
+                // l'écriture, pour qu'elle les emporte (voir `commit_chat`).
+                let chat_toast_changed = self.commit_chat(options_window_id);
+                if path_changed || combat_changed || shortcuts_changed || chat_toast_changed {
                     let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
                         combat_always_visible: self.combat_always_visible,
                         ..Default::default()
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
+                    saved.set_chat_toast(self.chat_toast);
                     config::save(&saved);
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
@@ -1708,6 +1814,9 @@ enum PostRedraw {
     /// jamais le défaut implicite d'`options_modal::OptionsTab`.
     OpenOptions(HWND, GameRect, options_modal::OptionsTab),
     CloseOptions,
+    /// Carte d'alerte de chat cliquée : préparer la réponse en privé à cet auteur (voir
+    /// `whisper_from_toast`) — après le rendu, comme tout ce qui touche `self` entier.
+    Whisper(String),
     BrowseOptions,
     /// Ce que « Valider » emporte de l'onglet « Paramètres » — voir
     /// `options_modal::OptionsCommit`.
@@ -1835,6 +1944,12 @@ impl App {
         if outcome.close_toast {
             self.watchlist_toast.store(Arc::new(None));
         }
+        // Carte d'alerte de chat cliquée : la réponse en privé se prépare dans la fenêtre de jeu
+        // — celle au premier plan si c'en est une, la première trouvée sinon (voir
+        // `chat_command::send_whisper`).
+        if let Some(author) = outcome.whisper_to {
+            post_redraw = PostRedraw::Whisper(author);
+        }
         // Suppression groupée demandée depuis le bandeau : même chemin que la validation de
         // l'onglet « Suivi » (`commit_suivi`) — seules les DÉFINITIONS partent, le moteur garde ses
         // compteurs et réplique au compte de lui-même. L'`ArcSwap` local n'est pas touché ici :
@@ -1878,6 +1993,7 @@ impl App {
             OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
             OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
+            OptionsModalAction::TestChatSound => alert_sound::play_chat_alert(),
             OptionsModalAction::Disconnect => post_redraw = PostRedraw::DisconnectAccount,
             OptionsModalAction::Validate(commit) => {
                 post_redraw = PostRedraw::ValidateOptions(commit)
@@ -1896,6 +2012,7 @@ impl App {
                 self.open_options_modal(event_loop, Some((hwnd, rect)), tab)
             }
             PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
+            PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
             // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
             // ce qu'on y réglait (liste suivie, alertes) appartient au compte qu'on vient de
             // quitter. Ce qui n'a pas été validé est donc abandonné — c'est ce que la confirmation
@@ -2872,6 +2989,7 @@ fn main() {
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let alert_profile = Arc::new(ArcSwap::from_pointee(None));
+    let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
     let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
@@ -2906,6 +3024,7 @@ fn main() {
             watchlist: Arc::clone(&watchlist),
             watchlist_toast: Arc::clone(&watchlist_toast),
             alert_profile: Arc::clone(&alert_profile),
+            chat_filters: Arc::clone(&chat_filters),
             catalog: Arc::clone(&catalog),
             dungeons,
         },
@@ -2913,6 +3032,8 @@ fn main() {
         settings_rx,
         sync_tx,
     );
+    // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici, pas du compte.
+    let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
 
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(AppState {
@@ -2923,6 +3044,8 @@ fn main() {
         watchlist,
         watchlist_toast,
         alert_profile,
+        chat_filters,
+        chat_toast: saved_config.chat_toast(),
         catalog,
         catalog_stale,
         remote_icons,

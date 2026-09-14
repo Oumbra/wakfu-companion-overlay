@@ -69,6 +69,7 @@ mod linux_main {
     use overlay_ui::logging;
     use overlay_ui::panels;
     use overlay_ui::panels::alerts_tab::AlertsAvailability;
+    use overlay_ui::panels::chat_tab::{self, ChatAvailability};
     use overlay_ui::panels::combat::CombatSide;
     use overlay_ui::panels::combat_frame::CombatFrame;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
@@ -203,6 +204,8 @@ mod linux_main {
         /// (`config::OverlayConfig::combat_always_visible`), même politique que `main.rs` : lu au
         /// démarrage, remplacé à la validation de la fenêtre Options, `false` par défaut.
         combat_always_visible: bool,
+        /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
+        chat_toast: chat_tab::ChatToastSettings,
         game_window: GameWindowTracker,
         banner_printed: bool,
         /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir
@@ -216,6 +219,8 @@ mod linux_main {
         log_path: PathBuf,
         /// Voir `App::combat_always_visible` — lu de la config au démarrage (`run`).
         combat_always_visible: bool,
+        /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
+        chat_toast: chat_tab::ChatToastSettings,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
         /// Même provenance que `combat_always_visible`.
         shortcuts: ShortcutBindings,
@@ -238,6 +243,7 @@ mod linux_main {
             let AppState {
                 log_path,
                 combat_always_visible,
+                chat_toast,
                 shortcuts,
                 snapshot,
                 watchlist,
@@ -268,6 +274,7 @@ mod linux_main {
                 settings_tx,
                 log_path,
                 combat_always_visible,
+                chat_toast,
                 game_window,
                 banner_printed: false,
                 pending_dialog: None,
@@ -532,6 +539,26 @@ mod linux_main {
             );
         }
 
+        /// Réponse en privé depuis la carte d'alerte de chat — voir `main.rs::whisper_from_toast` :
+        /// la fenêtre de jeu active, ou la première trouvée.
+        fn whisper_from_toast(&mut self, author: &str) {
+            let active = self.game_window.active_window().unwrap_or(0);
+            let windows: Vec<u32> = self
+                .game_window
+                .scan()
+                .into_iter()
+                .map(|(_, info)| info.window)
+                .collect();
+            let target = windows
+                .iter()
+                .copied()
+                .find(|key| *key == active)
+                .or_else(|| windows.first().copied())
+                .map(|xid| xid as usize);
+            tracing::info!(">>> Répondre en privé : {author}");
+            chat_command::send_whisper(author, target);
+        }
+
         /// `ShortcutAction::InvitePartner` / `ShortcutAction::FollowPartner` : tape `/i "<nom>"` ou
         /// `/fol "<nom>"` dans le chat de la fenêtre de jeu active, en visant le personnage de
         /// l'AUTRE fenêtre — même code que Windows (`chat_command`, dont l'`imp` Linux passe par
@@ -712,6 +739,10 @@ mod linux_main {
                 // fin ou une liste qu'on ne pourrait pas enregistrer.
                 alerts_draft: None,
                 alerts_availability: AlertsAvailability::NoAccount,
+                // Même raison pour les recherches de chat : elles vivent au compte.
+                chat: Default::default(),
+                chat_draft: None,
+                chat_availability: ChatAvailability::NoAccount,
                 // **L'onglet « Suivi » s'ouvre quand même, sur une liste vide.** Il n'a pas d'état
                 // « sans compte » à peindre (l'overlay ne s'adresse qu'à des utilisateurs
                 // connectés, décision du 2026-09-13) et un rouage tournerait ici sans fin, aucun
@@ -725,6 +756,7 @@ mod linux_main {
                     path: self.log_path.display().to_string(),
                     alerts: None,
                     suivi: Some(Vec::new()),
+                    chat: None,
                     combat_always_visible: self.combat_always_visible,
                     shortcuts: self.hotkeys.bindings().clone(),
                 },
@@ -837,6 +869,7 @@ mod linux_main {
                             ..Default::default()
                         };
                         saved.set_shortcuts(self.hotkeys.bindings());
+                        saved.set_chat_toast(self.chat_toast);
                         config::save(&saved);
                     }
                     self.close_options_modal(options_window_id, "Valider");
@@ -904,6 +937,8 @@ mod linux_main {
                 /// `render_content::RenderOutcome::open_watchlist`/`open_options`).
                 OpenOptions(u32, GameRect, options_modal::OptionsTab),
                 CloseOptions,
+                /// Carte d'alerte de chat cliquée — voir `main.rs`.
+                Whisper(String),
                 BrowseOptions,
                 /// Ce que « Valider » emporte de l'onglet « Paramètres » — voir
                 /// `options_modal::OptionsCommit`.
@@ -1049,6 +1084,10 @@ mod linux_main {
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
                     }
+                    // Carte d'alerte de chat cliquée — voir `main.rs`.
+                    if let Some(author) = outcome.whisper_to {
+                        post_redraw = PostRedraw::Whisper(author);
+                    }
                     // Suppression groupée demandée depuis le bandeau : même chemin que la
                     // validation de l'onglet « Suivi » — seules les DÉFINITIONS partent, le moteur
                     // garde ses compteurs et réplique au compte de lui-même (voir
@@ -1096,6 +1135,9 @@ mod linux_main {
                         OptionsModalAction::TestAlertSound => {
                             overlay_ui::alert_sound::play_loot_alert()
                         }
+                        OptionsModalAction::TestChatSound => {
+                            overlay_ui::alert_sound::play_chat_alert()
+                        }
                         // **Inatteignable ici** : ce binaire n'a pas de compte (mode invité fixe,
                         // voir la doc de module), le bouton « Déconnecter » y est donc désactivé
                         // (`OptionsModalState::account_connected`, posé à `false` à l'ouverture) et
@@ -1126,6 +1168,7 @@ mod linux_main {
                     self.open_options_modal(event_loop, Some((window, rect)), tab)
                 }
                 PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
+                PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             }
@@ -1417,6 +1460,7 @@ mod linux_main {
                 // Mode invité fixe : rien ne publiera jamais de profil ici (aucun thread Auth,
                 // voir la doc de module) — la poignée existe pour satisfaire le contrat du thread.
                 alert_profile: Arc::new(ArcSwap::from_pointee(None)),
+                chat_filters: Arc::new(ArcSwap::from_pointee(None)),
                 catalog: Arc::clone(&catalog),
                 dungeons,
             },
@@ -1424,11 +1468,14 @@ mod linux_main {
             settings_rx,
             sync_tx,
         );
+        // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici.
+        let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
 
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = App::new(AppState {
             log_path,
             combat_always_visible: saved_config.combat_always_visible,
+            chat_toast: saved_config.chat_toast(),
             shortcuts: saved_config.shortcuts(),
             snapshot,
             watchlist,
