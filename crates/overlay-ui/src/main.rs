@@ -424,6 +424,9 @@ struct App {
     /// persisté (`config::OverlayConfig::turn_notification`), même politique que
     /// `combat_always_visible` : lu au démarrage, remplacé à la validation de la fenêtre Options.
     turn_notification: bool,
+    /// La notification de tour sans son (`config::OverlayConfig::turn_notification_muted`) —
+    /// même provenance.
+    turn_notification_muted: bool,
     /// La surveillance de tour (§9.1 decies) — voir `sync_turn_watch`. Toujours construite, même
     /// option décochée : les gabarits chargés au démarrage servent dès qu'on la coche.
     turn_watcher: turn_watch::watcher::Watcher,
@@ -505,6 +508,8 @@ struct AppState {
     combat_always_visible: bool,
     /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
     turn_notification: bool,
+    /// Voir `App::turn_notification_muted`.
+    turn_notification_muted: bool,
     /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`
     /// (`config::OverlayConfig::shortcuts`). Même provenance que `combat_always_visible` : lus une
     /// fois dans `main`, jamais redécouverts.
@@ -534,6 +539,7 @@ impl App {
             log_path,
             combat_always_visible,
             turn_notification,
+            turn_notification_muted,
             shortcuts,
             snapshot,
             watchlist,
@@ -583,6 +589,7 @@ impl App {
             log_path,
             combat_always_visible,
             turn_notification,
+            turn_notification_muted,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
@@ -1070,8 +1077,10 @@ impl App {
                             tracing::warn!("[tour] notification en échec : {err}");
                         }
                         // Le toast est silencieux (sons système seuls autorisés, jugés
-                        // insipides) : le son est le nôtre.
-                        alert_sound::play_turn_alert();
+                        // insipides) : le son est le nôtre — sauf coupé dans les Options.
+                        if !self.turn_notification_muted {
+                            alert_sound::play_turn_alert();
+                        }
                     }
                 }
             }
@@ -1982,6 +1991,7 @@ impl App {
             // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
             combat_always_visible: self.combat_always_visible,
             turn_notification: self.turn_notification,
+            turn_notification_muted: self.turn_notification_muted,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -2009,6 +2019,7 @@ impl App {
                 chat: chat_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
                 turn_notification: self.turn_notification,
+                turn_notification_muted: self.turn_notification_muted,
                 shortcuts: self.hotkeys.bindings().clone(),
             },
             pending_close: false,
@@ -2296,6 +2307,19 @@ impl App {
                         }
                     );
                 }
+                let turn_muted_changed =
+                    commit.turn_notification_muted != self.turn_notification_muted;
+                if turn_muted_changed {
+                    self.turn_notification_muted = commit.turn_notification_muted;
+                    tracing::info!(
+                        "[options] son de la notification de tour : {}",
+                        if self.turn_notification_muted {
+                            "coupé"
+                        } else {
+                            "rétabli"
+                        }
+                    );
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -2315,6 +2339,7 @@ impl App {
                 if path_changed
                     || combat_changed
                     || turn_changed
+                    || turn_muted_changed
                     || shortcuts_changed
                     || chat_toast_changed
                 {
@@ -2322,6 +2347,7 @@ impl App {
                         log_path: Some(candidate),
                         combat_always_visible: self.combat_always_visible,
                         turn_notification: self.turn_notification,
+                        turn_notification_muted: self.turn_notification_muted,
                         ..Default::default()
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
@@ -3138,6 +3164,7 @@ fn main() {
         log_path,
         combat_always_visible: saved_config.combat_always_visible,
         turn_notification: saved_config.turn_notification,
+        turn_notification_muted: saved_config.turn_notification_muted,
         shortcuts: saved_config.shortcuts(),
         snapshot,
         watchlist,
