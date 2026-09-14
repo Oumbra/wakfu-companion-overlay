@@ -703,6 +703,25 @@ const CHAT_CARD_WORD_FONT_SIZE: f32 = 12.0;
 /// Marge verticale du contenu de la carte de chat, plus haute que `CARD_PAD_V` : la légende mord
 /// sur la bordure haute, le mot doit en rester décollé.
 const CHAT_CARD_PAD_V: f32 = 12.0;
+/// Côté de la bulle « répondre en privé » (`DsIcon::Message`) — nettement plus grande que la
+/// croix des autres cartes (18 px) : c'est une action à découvrir, elle doit se voir cliquable
+/// (demande utilisateur du 2026-09-14).
+const CHAT_CARD_ICON_SIZE: f32 = 26.0;
+/// Écart entre la colonne de texte et la bulle.
+const CHAT_CARD_ICON_GAP: f32 = 14.0;
+/// Rayon du halo cyan peint derrière la bulle survolée — aussi le demi-côté de sa zone de clic.
+const CHAT_CARD_ICON_HALO: f32 = 21.0;
+/// Opacité du halo — l'accent du bandeau très dilué : une lueur, pas un socle.
+const CHAT_CARD_ICON_HALO_ALPHA: f32 = 0.22;
+/// Largeur **fixe** de la carte de chat, quelle que soit la longueur du message : la colonne de
+/// texte à [`CHAT_CARD_TEXT_MAX_WIDTH`], la bulle, les marges. Seule la hauteur suit le texte
+/// (demande utilisateur du 2026-09-14 : une carte d'un mot fait la même largeur qu'une de trois
+/// lignes).
+const CHAT_CARD_WIDTH: f32 = CARD_PAD_LEFT
+    + CHAT_CARD_TEXT_MAX_WIDTH
+    + CHAT_CARD_ICON_GAP
+    + CHAT_CARD_ICON_SIZE
+    + CARD_PAD_LEFT;
 
 /// Largeur de la couche de confettis (`.confetti-layer`, `loot-alert.component.css`) — reprise
 /// telle quelle du web (320px), centrée sur le même axe que la carte : `main.rs::
@@ -1454,9 +1473,12 @@ fn toast_card(
 /// canal en légende sur la bordure haute, à gauche comme sur les tuiles, dans sa couleur ; dedans, le mot trouvé
 /// entre guillemets en gris (une couleur de moins : le canal suffit), puis l'auteur en doré — ce
 /// qui précède les deux-points — et le message, qui retourne à la ligne au-delà de
-/// [`CHAT_CARD_TEXT_MAX_WIDTH`]. Ni icône ni confettis : c'est un message à lire, pas une
-/// célébration. La croix ferme sans répondre ; la carte entière prépare la réponse en privé
-/// (`WatchlistOutcome::whisper_to`). Même fondu d'entrée que `toast_card`, même emplacement.
+/// [`CHAT_CARD_TEXT_MAX_WIDTH`]. Largeur **fixe** ([`CHAT_CARD_WIDTH`]), hauteur au texte. Pas
+/// de confettis : c'est un message à lire, pas une célébration. À droite, la bulle de message
+/// (`DsIcon::Message`, blanche, cyan et halo au survol) prépare la réponse en privé
+/// (`WatchlistOutcome::whisper_to`) ; **la carte elle-même, cliquée, se ferme** — comme les
+/// autres cartes, et sans rien écrire dans le jeu. Même fondu d'entrée que `toast_card`, même
+/// emplacement.
 fn chat_toast_card(
     ui: &mut egui::Ui,
     toast: &WatchlistToast,
@@ -1477,21 +1499,30 @@ fn chat_toast_card(
 
     let ctx = ui.ctx().clone();
     let painter = ui.painter();
+    let wrapped = |max_width: f32| egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping {
+            max_width,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     // « gelano » — le corps des légendes de tuile, dans leur gris : c'est la même information
-    // (la recherche) au même rang.
-    let word_galley = painter.layout_no_wrap(
-        format!("« {word} »"),
-        text::label_font(&ctx, CHAT_CARD_WORD_FONT_SIZE),
-        fade(design::tokens::HEADING_TEXT),
-    );
-    let body_galley = {
-        let mut job = egui::text::LayoutJob {
-            wrap: egui::text::TextWrapping {
-                max_width: CHAT_CARD_TEXT_MAX_WIDTH,
+    // (la recherche) au même rang. Une expression longue retourne à la ligne comme le message.
+    let word_galley = {
+        let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
+        job.append(
+            &format!("« {word} »"),
+            0.0,
+            egui::text::TextFormat {
+                font_id: text::label_font(&ctx, CHAT_CARD_WORD_FONT_SIZE),
+                color: fade(design::tokens::HEADING_TEXT),
                 ..Default::default()
             },
-            ..Default::default()
-        };
+        );
+        painter.layout_job(job)
+    };
+    let body_galley = {
+        let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
         job.append(
             author,
             0.0,
@@ -1513,17 +1544,15 @@ fn chat_toast_card(
         painter.layout_job(job)
     };
 
-    let text_width = word_galley.size().x.max(body_galley.size().x);
     let text_height = word_galley.size().y + CARD_TEXT_GAP + body_galley.size().y;
-    let card_width = CARD_PAD_LEFT + text_width + CARD_PAD_RIGHT;
-    let card_height = text_height + 2.0 * CHAT_CARD_PAD_V;
+    let card_height = text_height.max(CHAT_CARD_ICON_SIZE) + 2.0 * CHAT_CARD_PAD_V;
 
     // Même haut de cadre que la carte de ramassage : la légende, elle, déborde au-dessus.
     let center_x = ui.max_rect().center().x;
     let card_top = ui.cursor().top() + slide + CONFETTI_TOP_OVERSHOOT + CARD_TOP_GAP;
     let frame = egui::Rect::from_min_size(
-        egui::pos2(center_x - card_width / 2.0, card_top),
-        egui::vec2(card_width, card_height),
+        egui::pos2(center_x - CHAT_CARD_WIDTH / 2.0, card_top),
+        egui::vec2(CHAT_CARD_WIDTH, card_height),
     );
     let allocated = egui::Rect::from_min_max(
         egui::pos2(
@@ -1533,7 +1562,8 @@ fn chat_toast_card(
         frame.max,
     );
 
-    // Zone de clic AVANT la peinture, même motif que `toast_card`.
+    // Zones de clic AVANT la peinture, même motif que `toast_card` : la carte, puis la bulle
+    // par-dessus — le second `interact` l'emporte sur le premier là où ils se recouvrent.
     let card_response = ui
         .interact(
             allocated,
@@ -1541,6 +1571,20 @@ fn chat_toast_card(
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let icon_center = egui::pos2(
+        frame.right() - CARD_PAD_LEFT - CHAT_CARD_ICON_SIZE / 2.0,
+        frame.center().y,
+    );
+    let icon_hit =
+        egui::Rect::from_center_size(icon_center, egui::Vec2::splat(CHAT_CARD_ICON_HALO * 2.0));
+    let icon_response = ui
+        .interact(
+            icon_hit,
+            ui.id().with(("chat-alert-whisper", toast.name.as_str())),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let icon_hovered = icon_response.contains_pointer() && !ui.input(|i| i.pointer.any_down());
 
     let painter = ui.painter();
     painter.rect_filled(
@@ -1569,46 +1613,35 @@ fn chat_toast_card(
         egui::Color32::WHITE,
     );
 
-    // --- Croix : coin haut-droit, comme sur la carte de ramassage. Elle ferme SANS répondre —
-    // indispensable en fermeture manuelle (`ChatToastSettings::manual_close`), où la carte ne
-    // part jamais d'elle-même et où cliquer la carte ouvrirait un `/w` non voulu. ---
-    let close_rect = egui::Rect::from_min_size(
-        egui::pos2(
-            frame.right() - CLOSE_BTN_MARGIN - CLOSE_BTN_SIZE,
-            frame.top() + CLOSE_BTN_MARGIN,
+    // --- La bulle : blanche au repos ; cyan sur un halo cyan au survol, pour dire « ici, une
+    // action » (demande utilisateur du 2026-09-14). ---
+    let ds = design::DesignSystem::get(&ctx);
+    let icon_rect = egui::Rect::from_center_size(
+        icon_center,
+        design::components::icon_button::glyph_fit(
+            ds.icon_native_size(DsIcon::Message),
+            CHAT_CARD_ICON_SIZE,
         ),
-        egui::vec2(CLOSE_BTN_SIZE, CLOSE_BTN_SIZE),
     );
-    let close_response = ui
-        .interact(
-            close_rect,
-            ui.id().with(("chat-alert-close", toast.name.as_str())),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let (close_bg, close_glyph) = if close_response.hovered() {
-        (TINT_STRONG, TEXT_BRIGHT)
+    let icon_tint = if icon_hovered {
+        painter.circle_filled(
+            icon_center,
+            CHAT_CARD_ICON_HALO,
+            fade(with_alpha(ACCENT, CHAT_CARD_ICON_HALO_ALPHA)),
+        );
+        ACCENT
     } else {
-        (TINT_MEDIUM, TEXT_MUTED)
+        egui::Color32::WHITE
     };
-    let painter = ui.painter();
-    painter.rect_filled(close_rect, CLOSE_BTN_ROUNDING, fade(close_bg));
-    painter.text(
-        close_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "×",
-        text::label_font(&ctx, 12.0),
-        fade(close_glyph),
-    );
-    design::tooltip(&close_response).text("Fermer");
-    // **La carte entière annonce ce que son clic prépare** — la croix, elle, ferme seulement.
-    design::tooltip(&card_response).text(format!(
+    ds.paint_icon(painter, icon_rect, DsIcon::Message, fade(icon_tint));
+    design::tooltip(&icon_response).text(format!(
         "Répondre en privé — écrit /w \"{author}\" dans le chat"
     ));
 
+    let whisper = icon_response.clicked();
     ToastClick {
-        close: card_response.clicked() || close_response.clicked(),
-        whisper_to: card_response.clicked().then(|| author.to_string()),
+        close: whisper || card_response.clicked(),
+        whisper_to: whisper.then(|| author.to_string()),
     }
 }
 
