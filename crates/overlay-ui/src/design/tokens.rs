@@ -381,8 +381,17 @@ pub const CHECKBOX_LABEL_ON: Color32 = TEXT_GOLD;
 /// dégradé 28 + ombre 2 + bord 2.
 pub const SELECT_HEIGHT: f32 = 36.0;
 
-/// Rayon du socle et de la liste — 2, comme tout le reste de l'interface.
+/// Rayon du socle, et des DEUX COINS HAUTS de la liste — 2, comme tout le reste de l'interface.
 pub const SELECT_RADIUS: u8 = 2;
+
+/// Rayon des **deux coins bas de la liste dépliée** — 4, presque le double du reste.
+///
+/// Ce n'est pas une fantaisie : `select-simple-opened.png` le montre au pixel. Les quatre
+/// dernières lignes de la liste rentrent de 3, 2, 1 puis 0 px — fond à x=7 en y=151, x=8 en 152,
+/// x=9 en 153, bord noir à x=10 en 154 — et symétriquement à droite. Le haut, lui, ne rentre que
+/// de 2 px : il est collé au socle, il n'a pas à s'en détacher. C'est le bas, qui flotte au-dessus
+/// du contenu, que le jeu adoucit.
+pub const SELECT_LIST_BOTTOM_RADIUS: u8 = 4;
 
 /// Retrait du libellé de socle — le texte commence à x=17 pour un socle dont le bord est à x=7.
 pub const SELECT_PADDING_X: f32 = 10.0;

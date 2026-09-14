@@ -34,12 +34,14 @@ use crate::render_content::UserEvent;
 /// (`AccountSettings`) — `Disconnect` (déconnexion volontaire) n'est PAS juste une absence de
 /// réglages : il doit activement effacer le roster/suivi déjà appliqués (repli `breed`, Suivi
 /// vidé), ce qu'un simple silence sur le canal ne ferait jamais.
+// `AccountSettings` pèse ~280 octets là où la deuxième variante en fait 32 : clippy propose de le
+// boxer. Ce canal porte des GESTES D'UTILISATEUR — une connexion, un réglage changé dans la modale
+// — quelques messages par session, jamais une boucle chaude. Un `Box` y échangerait 250 octets sur
+// une poignée d'envois contre une allocation et une indirection à chaque lecture, et surtout contre
+// la lisibilité de l'appelant. L'écart est assumé, pas ignoré.
+#[allow(clippy::large_enum_variant)]
 pub enum EngineCommand {
-    /// `Box` plutôt que `AccountSettings` nu : cette variante pèse à elle seule 280 octets là où
-    /// toutes les autres tiennent en 32, et `clippy::large_enum_variant` fait de cet écart une
-    /// erreur — chaque message du canal, y compris un simple `Disconnect`, paierait sinon la
-    /// taille du plus gros.
-    ApplySettings(Box<AccountSettings>),
+    ApplySettings(AccountSettings),
     Disconnect,
     /// Nouveau chemin de `wakfu.log` à suivre, choisi par l'utilisateur via la modale Options
     /// (2026-09-08, §5.1/§9 du plan) — voir `panels::options_modal`. Traité en respawnant SEULEMENT
