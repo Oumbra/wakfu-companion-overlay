@@ -3,12 +3,14 @@
 //! selon leur propre commentaire de source), embarqués ici pour ne dépendre d'aucun téléchargement
 //! au premier lancement. Miroir réduit d'`AlertSoundService` (`alert-sound.service.ts`) : le web a
 //! trois sons distincts (ramassage avec son activé, filtre de chat, décompte à 0) — seuls les deux
-//! premiers sont câblés côté overlay (voir `overlay_engine::watchlist::WatchlistAlert` et
-//! `overlay_engine::profile::LootAlert`), le filtre de chat restant hors périmètre (pas de panneau
-//! chat côté overlay pour l'instant).
+//! premiers l'ont été d'abord (voir `overlay_engine::watchlist::WatchlistAlert` et
+//! `overlay_engine::profile::LootAlert`), le troisième — la recherche de chat,
+//! `public/assets/sounds/chat-filter-c13da61f.mp3` côté web — depuis le 2026-09-13 (voir
+//! `overlay_engine::chat_alert::ChatAlert`).
 
 const COUNTDOWN_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/countdown.mp3");
 const LOOT_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/loot.mp3");
+const CHAT_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/chat-filter.mp3");
 
 /// Joue le son de décompte à 0 — voir `play_alert` pour les garanties (thread dédié, best-effort).
 pub fn play_countdown_alert() {
@@ -19,6 +21,13 @@ pub fn play_countdown_alert() {
 /// `play_alert` pour les garanties (thread dédié, best-effort).
 pub fn play_loot_alert() {
     play_alert("ramassage", LOOT_SOUND_BYTES);
+}
+
+/// Joue le son de recherche de chat (un message correspond à une recherche de l'onglet « Chat »,
+/// voir `overlay_engine::chat_alert`) — le fichier du web, tel quel. Voir `play_alert` pour les
+/// garanties (thread dédié, best-effort).
+pub fn play_chat_alert() {
+    play_alert("chat", CHAT_SOUND_BYTES);
 }
 
 /// Joue `bytes` sur un thread dédié et JAMAIS bloquant pour l'appelant (voir

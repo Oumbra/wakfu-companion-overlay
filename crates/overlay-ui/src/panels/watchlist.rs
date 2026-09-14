@@ -242,13 +242,25 @@ pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5
 /// `loot-alert.service.ts`) — seul le libellé affiché change (voir `toast_card`), le son a déjà
 /// été choisi par l'appelant (`main.rs::spawn_engine_thread`, `alert_sound::{play_countdown_alert,
 /// play_loot_alert}`) avant même la construction de ce toast.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WatchlistToastReason {
     /// Un décompte de suivi (mode `down`) vient d'atteindre 0.
     Countdown,
     /// Un objet à son activé (compte, voir `overlay_engine::profile`) vient d'être ramassé —
     /// `quantity` affichée seulement si > 1 (voir `toast_card`).
     Loot { quantity: i64 },
+    /// Un message de chat correspond à une recherche de l'onglet « Chat » (2026-09-13, voir
+    /// `overlay_engine::chat_alert`). **Pas d'icône, pas de confettis** : ce n'est pas une
+    /// célébration, c'est un message à lire — et un clic sur la carte prépare la réponse en privé
+    /// (voir `toast_card` et `WatchlistOutcome::whisper_to`).
+    Chat {
+        /// Libellé du canal (« Commerce »), pour le titre.
+        channel_label: String,
+        /// Le mot de la recherche qui a correspondu, pour le titre.
+        word: String,
+        author: String,
+        message: String,
+    },
 }
 
 /// Un confetti du toast — mêmes bornes aléatoires que `buildConfetti()`
@@ -680,6 +692,11 @@ use crate::design::tokens::{
     OVERLAY_TINT_MEDIUM as TINT_MEDIUM, OVERLAY_TINT_STRONG as TINT_STRONG,
 };
 
+/// Largeur maximale du message dans une carte de chat (`WatchlistToastReason::Chat`) avant retour
+/// à la ligne — [`TOAST_LAYER_WIDTH`] élargie d'un tiers : au-delà, la carte masquerait trop du
+/// jeu (maquette du 2026-09-13).
+pub const CHAT_CARD_TEXT_MAX_WIDTH: f32 = 420.0;
+
 /// Largeur de la couche de confettis (`.confetti-layer`, `loot-alert.component.css`) — reprise
 /// telle quelle du web (320px), centrée sur le même axe que la carte : `main.rs::
 /// watchlist_target_width` s'en sert pour élargir la fenêtre Suivi le temps qu'un toast est
@@ -988,21 +1005,26 @@ pub fn show(
 
     ui.add_space(6.0);
 
-    let close_toast = match toast.filter(|t| t.hide_at.is_none_or(|hide_at| hide_at > now)) {
-        Some(toast) => toast_card(
-            ui,
-            icons,
-            catalog,
-            remote_icons,
-            remote_icon_textures,
-            toast,
-            now,
-        ),
-        None => false,
-    };
+    let (close_toast, whisper_to) =
+        match toast.filter(|t| t.hide_at.is_none_or(|hide_at| hide_at > now)) {
+            Some(toast) => {
+                let click = toast_card(
+                    ui,
+                    icons,
+                    catalog,
+                    remote_icons,
+                    remote_icon_textures,
+                    toast,
+                    now,
+                );
+                (click.close, click.whisper_to)
+            }
+            None => (false, None),
+        };
 
     WatchlistOutcome {
         close_toast,
+        whisper_to,
         open_watchlist,
         open_options,
         open_web_app,
@@ -1056,6 +1078,9 @@ fn bulk_button_row(
 #[derive(Debug, Clone, Default)]
 pub struct WatchlistOutcome {
     pub close_toast: bool,
+    /// Auteur du message de chat de la carte qu'on vient de cliquer : l'hôte prépare la réponse
+    /// en privé (`chat_command::send_whisper`). `None` le reste du temps.
+    pub whisper_to: Option<String>,
     /// `true` à la frame où "+" vient d'être cliqué : l'appelant ouvre la modale Options sur
     /// l'onglet « Suivi » — c'est l'écran où ce bouton mène, depuis le 2026-09-13.
     pub open_watchlist: bool,
@@ -1221,7 +1246,7 @@ fn toast_card(
     remote_icon_textures: &mut RemoteIconTextures,
     toast: &WatchlistToast,
     now: std::time::Instant,
-) -> bool {
+) -> ToastClick {
     let elapsed = now
         .saturating_duration_since(toast.created_at)
         .as_secs_f32();
@@ -1234,12 +1259,26 @@ fn toast_card(
     let card_alpha = pop_eased;
     let slide = (1.0 - pop_eased) * 10.0;
 
-    let title = match toast.reason {
-        WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !",
-        WatchlistToastReason::Loot { .. } => "OBJET OBTENU !",
+    // La carte de chat n'a ni icône ni confettis (voir `WatchlistToastReason::Chat`) : elle
+    // partage le gabarit — aplat, bordure d'accent, titre en capitales — pas le contenu.
+    let chat = match &toast.reason {
+        WatchlistToastReason::Chat {
+            author, message, ..
+        } => Some((author.as_str(), message.as_str())),
+        _ => None,
     };
-    let name_text = match toast.reason {
-        WatchlistToastReason::Loot { quantity } if quantity > 1 => {
+    let title = match &toast.reason {
+        WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !".to_string(),
+        WatchlistToastReason::Loot { .. } => "OBJET OBTENU !".to_string(),
+        // « GELANO · COMMERCE » : le mot trouvé, puis le canal.
+        WatchlistToastReason::Chat {
+            channel_label,
+            word,
+            ..
+        } => format!("{} · {}", word.to_uppercase(), channel_label.to_uppercase()),
+    };
+    let name_text = match &toast.reason {
+        WatchlistToastReason::Loot { quantity } if *quantity > 1 => {
             format!("{} × {quantity}", toast.name)
         }
         _ => toast.name.clone(),
@@ -1251,13 +1290,55 @@ fn toast_card(
     let title_font = text::label_font(ui.ctx(), 11.0);
     let name_font = text::label_font(ui.ctx(), 14.0);
     let painter = ui.painter();
-    let title_galley = painter.layout_no_wrap(title.to_string(), title_font, ACCENT);
-    let name_galley = painter.layout_no_wrap(name_text, name_font, TEXT_BRIGHT);
+    let title_galley = painter.layout_no_wrap(title, title_font, ACCENT);
+    let name_galley = match chat {
+        // L'auteur en graisse, puis le message complet, qui retourne à la ligne au-delà de
+        // `CHAT_CARD_TEXT_MAX_WIDTH` — un message de chat peut être long, un nom d'objet jamais.
+        Some((author, message)) => {
+            let mut job = egui::text::LayoutJob {
+                wrap: egui::text::TextWrapping {
+                    max_width: CHAT_CARD_TEXT_MAX_WIDTH,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            job.append(
+                &format!("{author} : "),
+                0.0,
+                egui::text::TextFormat {
+                    font_id: text::label_strong_font(ui.ctx(), 14.0),
+                    color: TEXT_BRIGHT,
+                    ..Default::default()
+                },
+            );
+            job.append(
+                message,
+                0.0,
+                egui::text::TextFormat {
+                    font_id: name_font,
+                    color: TEXT_BRIGHT,
+                    ..Default::default()
+                },
+            );
+            painter.layout_job(job)
+        }
+        None => painter.layout_no_wrap(name_text, name_font, TEXT_BRIGHT),
+    };
+    let has_icon = chat.is_none();
 
     let text_width = title_galley.size().x.max(name_galley.size().x);
     let text_height = title_galley.size().y + CARD_TEXT_GAP + name_galley.size().y;
-    let content_height = ICON_SIZE.max(text_height);
-    let card_width = CARD_PAD_LEFT + ICON_SIZE + CARD_ICON_GAP + text_width + CARD_PAD_RIGHT;
+    let content_height = if has_icon {
+        ICON_SIZE.max(text_height)
+    } else {
+        text_height
+    };
+    let icon_room = if has_icon {
+        ICON_SIZE + CARD_ICON_GAP
+    } else {
+        0.0
+    };
+    let card_width = CARD_PAD_LEFT + icon_room + text_width + CARD_PAD_RIGHT;
     let card_height = content_height + 2.0 * CARD_PAD_V;
 
     let center_x = ui.max_rect().center().x;
@@ -1324,31 +1405,34 @@ fn toast_card(
         egui::StrokeKind::Inside,
     );
 
-    let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(
-            card_rect.left() + CARD_PAD_LEFT + ICON_SIZE / 2.0,
-            card_rect.center().y,
-        ),
-        egui::vec2(ICON_SIZE, ICON_SIZE),
-    );
-    let icon_ref = match toast.kind {
-        WatchlistKind::Item => catalog.find_item_icon(&toast.name, toast.catalog_id),
-        WatchlistKind::Enemy => catalog.find_monster_icon(&toast.name, toast.catalog_id),
+    let text_left = if has_icon {
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(
+                card_rect.left() + CARD_PAD_LEFT + ICON_SIZE / 2.0,
+                card_rect.center().y,
+            ),
+            egui::vec2(ICON_SIZE, ICON_SIZE),
+        );
+        let icon_ref = match toast.kind {
+            WatchlistKind::Item => catalog.find_item_icon(&toast.name, toast.catalog_id),
+            WatchlistKind::Enemy => catalog.find_monster_icon(&toast.name, toast.catalog_id),
+        };
+        let remote_texture = icon_ref
+            .as_ref()
+            .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
+        let icon_tint = egui::Color32::from_white_alpha((255.0 * card_alpha) as u8);
+        match &remote_texture {
+            Some(texture) => egui::Image::new(texture)
+                .tint(icon_tint)
+                .paint_at(ui, icon_rect),
+            None => egui::Image::new(icons.unknown_entity_texture())
+                .tint(icon_tint)
+                .paint_at(ui, icon_rect),
+        }
+        icon_rect.right() + CARD_ICON_GAP
+    } else {
+        card_rect.left() + CARD_PAD_LEFT
     };
-    let remote_texture = icon_ref
-        .as_ref()
-        .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
-    let icon_tint = egui::Color32::from_white_alpha((255.0 * card_alpha) as u8);
-    match &remote_texture {
-        Some(texture) => egui::Image::new(texture)
-            .tint(icon_tint)
-            .paint_at(ui, icon_rect),
-        None => egui::Image::new(icons.unknown_entity_texture())
-            .tint(icon_tint)
-            .paint_at(ui, icon_rect),
-    }
-
-    let text_left = icon_rect.right() + CARD_ICON_GAP;
     let text_top = card_rect.center().y - text_height / 2.0;
     let painter = ui.painter();
     painter.galley(
@@ -1400,7 +1484,26 @@ fn toast_card(
     // qu'un tooltip ponctuel comme celui-ci reste sur le thème par défaut d'egui.
     design::tooltip(&close_response).text("Fermer");
 
-    card_response.clicked() || close_response.clicked()
+    // **Sur une carte de chat, la carte entière annonce ce que son clic prépare** — la croix,
+    // elle, ferme seulement.
+    if let Some((author, _)) = chat {
+        design::tooltip(&card_response).text(format!(
+            "Répondre en privé — écrit /w \"{author}\" dans le chat"
+        ));
+    }
+    ToastClick {
+        close: card_response.clicked() || close_response.clicked(),
+        whisper_to: chat
+            .filter(|_| card_response.clicked())
+            .map(|(author, _)| author.to_string()),
+    }
+}
+
+/// Ce qu'un clic sur le toast demande — voir `toast_card`.
+struct ToastClick {
+    close: bool,
+    /// Auteur à qui répondre en privé (carte de chat cliquée, hors croix).
+    whisper_to: Option<String>,
 }
 
 // Les deux enveloppes `show_tooltip_left` / `show_tooltip_right` ont été retirées le 2026-09-11 :

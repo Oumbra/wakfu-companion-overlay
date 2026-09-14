@@ -66,6 +66,7 @@
 
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
+use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabAction, ChatTabState};
 use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
 use crate::shortcuts::ShortcutBindings;
 
@@ -171,6 +172,9 @@ pub enum OptionsTab {
     Suivi,
     /// Les alertes de ramassage — objets à son activé et fermeture du toast.
     Alertes,
+    /// Les recherches de chat — mot et canal qui font sonner l'overlay, et la carte qui va avec
+    /// (`panels::chat_tab`). Entre Alertes et Personnages : maquette validée le 2026-09-13.
+    Chat,
     Personnages,
     /// Les raccourcis clavier globaux de l'overlay (`panels::raccourcis_tab`) — **placé avant
     /// « Paramètres »**, demande utilisateur explicite du 2026-09-13 : « ajouter un onglet
@@ -251,6 +255,11 @@ pub struct OptionsModalState {
     /// D'où vient la liste d'alertes, et si elle est modifiable — posé par l'hôte à l'ouverture de
     /// la modale, parce que lui seul sait si un compte est lié et si une requête est en vol.
     pub alerts_availability: alerts_tab::AlertsAvailability,
+    pub chat: ChatTabState,
+    /// Brouillon de l'onglet « Chat » — même principe que `alerts_draft` : `None` tant que le
+    /// compte n'a pas répondu.
+    pub chat_draft: Option<ChatDraft>,
+    pub chat_availability: ChatAvailability,
     /// **L'état de référence**, figé à l'ouverture : le chemin de log et le profil d'alerte tels
     /// qu'ils étaient avant que l'utilisateur ne touche à quoi que ce soit.
     ///
@@ -282,6 +291,7 @@ pub struct OptionsInitial {
     /// Les entrées suivies telles qu'elles étaient à l'ouverture — c'est elles que « Annuler »
     /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
     pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
+    pub chat: Option<ChatDraft>,
     /// L'affichage permanent du panneau Combat tel qu'il était à l'ouverture — une case cochée
     /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
     /// pas pour rien.
@@ -341,6 +351,7 @@ impl OptionsModalState {
             || self.combat_always_visible != self.initial.combat_always_visible
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
+            || self.chat_draft != self.initial.chat
             || self.shortcuts != self.initial.shortcuts
     }
 }
@@ -362,6 +373,9 @@ pub enum OptionsModalAction {
     /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
     /// audio (`alert_sound::play_loot_alert`).
     TestAlertSound,
+    /// « Tester le son » de l'onglet « Chat » : jouer le son de recherche
+    /// (`alert_sound::play_chat_alert`).
+    TestChatSound,
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -470,6 +484,7 @@ pub fn show(
         design::tabs(&mut state.tab)
             .entry(OptionsTab::Suivi, "Suivi")
             .entry(OptionsTab::Alertes, "Alertes")
+            .entry(OptionsTab::Chat, "Chat")
             .entry(OptionsTab::Personnages, "Personnages")
             .enabled(false)
             .entry(OptionsTab::Raccourcis, "Raccourcis")
@@ -503,8 +518,26 @@ pub fn show(
     // champ de chemin ne se donne qu'à la première frame de la fenêtre : ouverte sur « Alertes »
     // (le défaut d'`OptionsTab`), elle ne le donne donc à personne, et « Paramètres » se clique.
     let mut alerts_action = AlertsTabAction::None;
+    let mut chat_action = ChatTabAction::None;
     let mut suivi_action = suivi_tab::SuiviTabAction::None;
     design::panel().show(ui, chrome.content, |ui, panel| {
+        if state.tab == OptionsTab::Chat {
+            // Même arbitrage que pour les alertes : tant que les recherches ne sont pas descendues
+            // du compte, l'onglet affiche son rouage.
+            let mut vide = ChatDraft::default();
+            let availability = state.chat_availability;
+            let draft = state.chat_draft.as_mut().unwrap_or(&mut vide);
+            chat_action = chat_tab::show(
+                ui,
+                panel,
+                &mut state.chat,
+                &mut chat_tab::ChatTabContext {
+                    draft,
+                    availability,
+                },
+            );
+            return;
+        }
         if state.tab == OptionsTab::Suivi {
             // Même arbitrage que pour les alertes : tant que les entrées ne sont pas descendues du
             // compte, l'onglet affiche son rouage. Une liste vide servie en attendant se lirait
@@ -702,6 +735,9 @@ pub fn show(
     if alerts_action == AlertsTabAction::TestSound {
         action = OptionsModalAction::TestAlertSound;
     }
+    if chat_action == ChatTabAction::TestSound {
+        action = OptionsModalAction::TestChatSound;
+    }
     if let suivi_tab::SuiviTabAction::ResolveRecipe(id) = suivi_action {
         action = OptionsModalAction::ResolveRecipe(id);
     }
@@ -877,6 +913,24 @@ mod tests {
         // Remis comme avant, la fenêtre redevient intouchée — la garde ne s'ouvre pas pour un
         // aller-retour.
         state.shortcuts = state.initial.shortcuts.clone();
+        assert!(!state.is_dirty());
+    }
+
+    /// Ajouter une recherche de chat met des modifications en attente, comme un objet d'alerte.
+    #[test]
+    fn ajouter_une_recherche_de_chat_met_des_modifications_en_attente() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.chat_draft = Some(ChatDraft::default());
+        state.initial.chat = Some(ChatDraft::default());
+        assert!(!state.is_dirty());
+        state
+            .chat_draft
+            .as_mut()
+            .expect("brouillon posé juste avant")
+            .add(overlay_engine::ChatFilterScope::All, "gelano")
+            .expect("ajout d'une recherche");
+        assert!(state.is_dirty());
+        state.chat_draft = state.initial.chat.clone();
         assert!(!state.is_dirty());
     }
 

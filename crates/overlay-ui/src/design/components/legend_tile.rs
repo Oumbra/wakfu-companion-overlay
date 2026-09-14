@@ -148,9 +148,12 @@ impl Widget for LegendTile {
         );
 
         // Même condition que tous les composants (§2 du contrat) : l'appui retire le survol.
+        // `contains_pointer` et non `hovered` : le panneau pose une croix PAR-DESSUS la tuile, et
+        // dès que le pointeur l'atteint egui lui donne le survol — le voile disparaîtrait à
+        // l'instant où l'on vise. Piège déjà payé par les tuiles d'Alertes et du Suivi.
         let state = self.forced_state.unwrap_or(if !self.enabled {
             LegendTileState::Disabled
-        } else if response.hovered() && !ui.input(|i| i.pointer.any_down()) {
+        } else if response.contains_pointer() && !ui.input(|i| i.pointer.any_down()) {
             LegendTileState::Hovered
         } else {
             LegendTileState::Idle

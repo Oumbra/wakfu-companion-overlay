@@ -240,6 +240,10 @@ pub struct RenderOutcome {
     /// Voir la doc historique de `build_ui` : fermeture du toast de suivi (clic sur la carte ou sa
     /// croix, `panels::watchlist::toast_card`).
     pub close_toast: bool,
+    /// Auteur à qui répondre en privé — carte d'alerte de chat cliquée CETTE frame (`kind ==
+    /// Watchlist`). L'hôte ferme la carte et tape `/w "<auteur>" ` dans le jeu
+    /// (`chat_command::send_whisper`) ; voir `panels::watchlist::WatchlistOutcome::whisper_to`.
+    pub whisper_to: Option<String>,
     /// `true` UNIQUEMENT à la frame où le bouton "+" du carré de contrôle
     /// (`panels::watchlist::control_button_row`) vient d'être cliqué — `kind == Watchlist`
     /// seulement. L'appelant ouvre la modale Options sur l'onglet « Suivi » — voir
@@ -595,6 +599,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         now,
                     );
                     outcome.close_toast = watchlist_outcome.close_toast;
+                    outcome.whisper_to = watchlist_outcome.whisper_to;
                     outcome.open_watchlist = watchlist_outcome.open_watchlist;
                     outcome.open_options = watchlist_outcome.open_options;
                     outcome.watchlist_edit = watchlist_outcome.edit;

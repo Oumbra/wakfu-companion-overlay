@@ -26,6 +26,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::alert_sound;
 use crate::panels;
+use crate::panels::chat_tab::ChatToastSettings;
 use crate::panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use crate::render_content::UserEvent;
 
@@ -63,6 +64,25 @@ pub enum EngineCommand {
     /// réplication au compte part en parallèle côté hôte, par le même chemin que les compteurs
     /// (`SyncCommand::SyncWatchlist`).
     SetWatchlistDefinitions(Vec<WatchlistEntry>),
+    /// Recherches de chat validées depuis l'onglet « Chat » (2026-09-13) — même principe que
+    /// `SetAlertProfile` : appliquées tout de suite, l'écriture au compte (`chatFilters`) part en
+    /// parallèle côté hôte.
+    SetChatFilters(Vec<overlay_engine::ChatFilter>),
+    /// Réglages de la carte d'alerte de chat (durée, fermeture manuelle) — locaux à la machine
+    /// (voir `config::OverlayConfig`), envoyés au démarrage puis à chaque validation de l'onglet.
+    SetChatToast(ChatToastSettings),
+}
+
+/// L'instant où une carte de chat doit disparaître — le pendant de [`toast_deadline`] pour les
+/// réglages propres à l'onglet Chat.
+fn chat_toast_deadline(
+    created_at: std::time::Instant,
+    settings: &ChatToastSettings,
+) -> Option<std::time::Instant> {
+    if settings.manual_close {
+        return None;
+    }
+    Some(created_at + std::time::Duration::from_secs_f32(settings.duration_seconds))
 }
 
 /// L'instant où un toast doit disparaître, d'après le profil d'alerte — `None` quand le compte a
@@ -105,6 +125,12 @@ pub enum SyncCommand {
 /// effacer le pseudo et l'avatar — voir `overlay_engine::AlertProfile::patch_value`.
 pub type SharedAlertProfile = Arc<ArcSwap<Option<(overlay_engine::AlertProfile, Option<Value>)>>>;
 
+/// Les recherches de chat du compte, partagées de la même façon que [`SharedAlertProfile`] :
+/// `None` tant qu'aucun compte n'a répondu (et après une déconnexion), `Some` sinon — même vide.
+/// L'hôte les lit à l'ouverture de la fenêtre Options, pour en faire le brouillon de l'onglet
+/// « Chat ».
+pub type SharedChatFilters = Arc<ArcSwap<Option<Vec<overlay_engine::ChatFilter>>>>;
+
 pub struct EngineHandles {
     pub snapshot: Arc<ArcSwap<SessionSnapshot>>,
     pub watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
@@ -118,6 +144,8 @@ pub struct EngineHandles {
     /// `Disconnect`. L'hôte le lit à l'ouverture de la fenêtre Options, pour en faire le brouillon
     /// de l'onglet « Alertes ».
     pub alert_profile: SharedAlertProfile,
+    /// Publié par ce thread comme `alert_profile`, pour l'onglet « Chat ».
+    pub chat_filters: SharedChatFilters,
 }
 
 pub fn spawn_engine_thread(
@@ -134,6 +162,7 @@ pub fn spawn_engine_thread(
         alert_profile: alert_profile_out,
         catalog,
         dungeons,
+        chat_filters: chat_filters_out,
     } = handles;
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -160,6 +189,9 @@ pub fn spawn_engine_thread(
             // tant qu'aucun compte n'a répondu. C'est ici qu'ils vivent parce que c'est ici que
             // `hide_at` se calcule, au moment où l'alerte naît.
             let mut alert_profile = overlay_engine::AlertProfile::default();
+            // Même rôle pour la carte de chat — envoyés par l'hôte dès le démarrage
+            // (`SetChatToast`, depuis la config locale).
+            let mut chat_toast = ChatToastSettings::default();
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
@@ -182,6 +214,8 @@ pub fn spawn_engine_thread(
                                 alert_profile.clone(),
                                 settings.profile_raw,
                             ))));
+                            engine.set_chat_filters(settings.chat_filters.clone());
+                            chat_filters_out.store(Arc::new(Some(settings.chat_filters)));
                         }
                         // Déconnexion volontaire : repli mode invité — plus de roster connu
                         // (classification retombe sur `breed`), Suivi vidé (la LISTE suivie est
@@ -200,6 +234,8 @@ pub fn spawn_engine_thread(
                             // Plus de compte : l'onglet « Alertes » doit repasser à « aucun compte
                             // lié », pas garder la liste du compte qu'on vient de quitter.
                             alert_profile_out.store(Arc::new(None));
+                            engine.set_chat_filters(Vec::new());
+                            chat_filters_out.store(Arc::new(None));
                         }
                         EngineCommand::SetAlertProfile(profile) => {
                             tracing::info!(
@@ -220,6 +256,22 @@ pub fn spawn_engine_thread(
                                 .and_then(|(_, raw)| raw.clone());
                             alert_profile_out.store(Arc::new(Some((profile.clone(), raw))));
                             alert_profile = profile;
+                        }
+                        EngineCommand::SetChatFilters(filters) => {
+                            tracing::info!(
+                                filter_count = filters.len(),
+                                "[options] recherches de chat appliquées depuis la fenêtre Options"
+                            );
+                            engine.set_chat_filters(filters.clone());
+                            chat_filters_out.store(Arc::new(Some(filters)));
+                        }
+                        EngineCommand::SetChatToast(settings) => {
+                            tracing::info!(
+                                duration_seconds = settings.duration_seconds,
+                                manual_close = settings.manual_close,
+                                "[options] réglages de la carte de chat appliqués"
+                            );
+                            chat_toast = settings;
                         }
                         EngineCommand::SetWatchlistDefinitions(definitions) => {
                             tracing::info!(
@@ -330,6 +382,40 @@ pub fn spawn_engine_thread(
                                 created_at,
                                 confetti: panels::watchlist::build_confetti(),
                                 hide_at: toast_deadline(created_at, &alert_profile),
+                            })));
+                        }
+                        // Message de chat correspondant à une recherche (compte, onglet « Chat »)
+                        // — INDÉPENDANT des deux alertes ci-dessus, même emplacement de toast.
+                        // **Un seul son par lot** (règle du web, `ChatPanelComponent`) et la
+                        // carte du DERNIER message trouvé : un lot en rafale ne doit pas
+                        // empiler cinq sons.
+                        let chat_alerts = engine.drain_chat_alerts();
+                        for alert in &chat_alerts {
+                            tracing::info!(
+                                author = %alert.author,
+                                word = %alert.filter.text,
+                                channel = overlay_engine::channel_label(alert.channel),
+                                "alerte de chat (recherche trouvée)"
+                            );
+                        }
+                        if let Some(alert) = chat_alerts.into_iter().last() {
+                            alert_sound::play_chat_alert();
+                            let created_at = std::time::Instant::now();
+                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
+                                name: alert.author.clone(),
+                                kind: WatchlistKind::Item,
+                                reason: WatchlistToastReason::Chat {
+                                    channel_label: overlay_engine::channel_label(alert.channel)
+                                        .to_string(),
+                                    word: alert.filter.text,
+                                    author: alert.author,
+                                    message: alert.message,
+                                },
+                                catalog_id: None,
+                                created_at,
+                                // Pas de confettis : ce n'est pas une célébration.
+                                confetti: Vec::new(),
+                                hide_at: chat_toast_deadline(created_at, &chat_toast),
                             })));
                         }
                         let _ = proxy.send_event(UserEvent::NewSnapshot);
