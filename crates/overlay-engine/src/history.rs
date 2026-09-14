@@ -113,6 +113,17 @@ pub struct FightParticipantPayload {
     pub defeated: bool,
     pub fled: bool,
     pub spells: Vec<FightSpellPayload>,
+    /// Soin produit et armure DONNÉE par ce combattant — les deux autres grandeurs du panneau
+    /// Combat (voir `overlay_ui::panels::combat::CombatMetric`), transmises depuis le 2026-09-14
+    /// comme le web les transmet désormais aussi : le serveur les stocke
+    /// (`fight_participants.heal`/`armor`), et un combat rechargé depuis l'archive du compte les
+    /// retrouve au lieu de n'avoir que les dégâts.
+    pub heal: i64,
+    pub armor: i64,
+    /// Leur ventilation par sort, même forme que `spells` — `byElement` d'une ligne d'armure ne
+    /// porte que `Inconnu` (une ligne « X: N Armure » ne cite jamais d'élément).
+    pub heal_spells: Vec<FightSpellPayload>,
+    pub armor_spells: Vec<FightSpellPayload>,
     pub xp_gained: i64,
 }
 
