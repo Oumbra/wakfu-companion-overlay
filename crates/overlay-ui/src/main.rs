@@ -67,7 +67,7 @@ use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::chat_tab;
-use overlay_ui::panels::combat::CombatSide;
+use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::login::{self, LoginState};
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
@@ -274,6 +274,10 @@ struct OverlayWindow {
     /// — état PAR FENÊTRE (donc par personnage), pas global : `Allies` par défaut à chaque
     /// création de fenêtre (demande utilisateur explicite). Sans objet pour une fenêtre `Suivi`.
     combat_side: CombatSide,
+    /// Grandeur mesurée par le panneau Combat — dégâts, armure donnée ou soins (voir
+    /// `panels::combat::CombatMetric`). Un état par fenêtre, comme `combat_side` : deux
+    /// personnages peuvent regarder deux grandeurs différentes du même combat.
+    combat_metric: CombatMetric,
     /// État de la modale Options (2026-09-08, §9 du plan) — `Some` UNIQUEMENT pour `kind ==
     /// OverlayKind::Options`, voir `App::open_options_modal`. Même remarque que
     /// `bin/overlay-ui-x11.rs` (code partagé côté `panels::options_modal`, duplication assumée
@@ -739,6 +743,7 @@ impl App {
             icons,
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
+            combat_metric: CombatMetric::default(),
             options_state: None,
             // Naît sur l'écran de chargement : `sync_session_windows` la fera basculer dès que
             // les chargements initiaux et la vérification du compte auront répondu.
@@ -1263,6 +1268,7 @@ impl App {
             icons,
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
+            combat_metric: CombatMetric::default(),
             // Renseigné juste après par l'appelant (`open_options_modal`) pour `kind == Options`
             // — `None` ici pour Combat/Suivi, jamais consulté (voir `RenderContent::options`).
             options_state: (kind == OverlayKind::Options).then(OptionsModalState::default),
@@ -2499,6 +2505,7 @@ impl App {
                 combat_frame: &overlay.combat_frame,
                 icons: &overlay.icons,
                 combat_side: &mut overlay.combat_side,
+                combat_metric: &mut overlay.combat_metric,
                 watchlist: &watchlist,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,

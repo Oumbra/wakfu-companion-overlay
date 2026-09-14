@@ -467,10 +467,13 @@ mod tests {
             is_ally,
             total_damage: 0,
             total_heal: 0,
+            total_armor: 0,
             class_name: None,
             gender: Gender::M,
             xp_gained: 0,
             spells: Default::default(),
+            heal_spells: Default::default(),
+            armor_spells: Default::default(),
             is_ko: false,
             last_turn_casts: (0..casts)
                 .map(|i| SpellCastRecord {
