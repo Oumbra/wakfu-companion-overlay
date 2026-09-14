@@ -42,7 +42,9 @@
 
 use overlay_engine::FighterDamage;
 
-use super::combat::{damage_group_height, paint_damage_bar_group, BAR_MAX_WIDTH, ROW_GAP};
+use super::combat::{
+    damage_group_height, paint_damage_bar_group, CombatMetric, BAR_MAX_WIDTH, ROW_GAP,
+};
 use super::combat_scrollbar::{DrawnScrollbar, SCROLLBAR_HIT_WIDTH, SCROLLBAR_WIDTH};
 
 /// Plafond de groupes visibles — le plus grand gabarit du cadre (`combat_frame::MAX_FRAME_SLOTS`),
@@ -68,11 +70,17 @@ pub fn scroll_offset_id() -> egui::Id {
 pub struct DamageBars;
 
 impl DamageBars {
-    /// Peint les groupes de `bars` (déjà filtrés aux dégâts > 0 et triés par l'appelant) dans une
-    /// fenêtre haute d'au plus `MAX_VISIBLE_GROUPS` groupes, défilante au-delà. `total_damage`
-    /// est la référence du remplissage des barres (total du camp affiché, voir `combat::show`).
-    /// Ne peint rien pour une liste vide.
-    pub fn show(ui: &mut egui::Ui, bars: &[&FighterDamage], total_damage: i64) {
+    /// Peint les groupes de `bars` (déjà filtrés à une valeur > 0 et triés par l'appelant) dans
+    /// une fenêtre haute d'au plus `MAX_VISIBLE_GROUPS` groupes, défilante au-delà. `metric` dit
+    /// QUELLE grandeur chaque groupe chiffre (dégâts, armure donnée, soins — voir
+    /// `combat::CombatMetric`) ; `total_damage` en est le total pour le camp affiché, référence du
+    /// remplissage des barres (voir `combat::show`). Ne peint rien pour une liste vide.
+    pub fn show(
+        ui: &mut egui::Ui,
+        bars: &[&FighterDamage],
+        metric: CombatMetric,
+        total_damage: i64,
+    ) {
         let n = bars.len();
         if n == 0 {
             return;
@@ -148,7 +156,7 @@ impl DamageBars {
                     ui,
                     group_rect,
                     &fighter.name,
-                    fighter.total_damage,
+                    metric.value_of(fighter),
                     total_damage,
                     &fade_alpha,
                 );

@@ -61,6 +61,8 @@ use crate::portraits::{PortraitAtlas, NATIVE_PORTRAIT_SIZE};
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
 
+use super::combat::CombatMetric;
+
 /// Nombre de médaillons du plus grand template disponible — voir la doc de module.
 pub const MAX_FRAME_SLOTS: usize = 6;
 
@@ -255,6 +257,7 @@ impl CombatFrame {
         remote_icons: &RemoteIconStore,
         remote_icon_textures: &mut RemoteIconTextures,
         fighters: &[&FighterDamage],
+        metric: CombatMetric,
         total_damage: i64,
         marks: Option<SelectionMarks>,
     ) -> Option<usize> {
@@ -361,11 +364,12 @@ impl CombatFrame {
                 );
             }
             crate::design::tooltip(&response).text(fighter.name.as_str());
-            if fighter.total_damage > 0 {
+            let measured = metric.value_of(fighter);
+            if measured > 0 {
                 crate::design::paint_portrait_percent(
                     ui,
                     portrait_rect,
-                    crate::design::portrait_percent(fighter.total_damage, total_damage),
+                    crate::design::portrait_percent(measured, total_damage),
                 );
             }
         }
