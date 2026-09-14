@@ -27,6 +27,21 @@
 //! `egui::Area` au premier plan, pas dans le `Ui` courant : sans ça, elle serait recouverte par le
 //! widget suivant, et la place qu'elle occupe décalerait la mise en page à chaque ouverture.
 //!
+//! ### L'ordre de peinture fait le contour
+//!
+//! Le fond de la liste passe en premier, **les entrées ensuite, le liseré clair et le bord en
+//! dernier**. L'inverse — celui d'avant le 2026-09-14 — donnait à la liste l'air de déborder de
+//! son conteneur : la mise en avant de l'entrée du haut mangeait le liseré qui détache la liste du
+//! socle, celle du bas recouvrait le bord. Le liseré et le bord rognent donc d'un pixel la
+//! première et la dernière entrée, exactement comme dans la référence (première entrée sur 27 px
+//! utiles, dernière idem, pour un pas de 28). Et la mise en avant porte les rayons du conteneur
+//! aux extrémités, faute de quoi elle ressortirait, carrée, par les coins arrondis.
+//!
+//! Le liseré passe **après le bord**, sur la dernière ligne de celui-ci. Avant cette date il
+//! passait avant : deux pixels de bord noir se posaient par-dessus son unique pixel clair, et il
+//! n'existait que dans le code. Le jeu, lui, ne met aucun bord en haut de la liste — le bord bas du
+//! socle en tient lieu — et enchaîne directement sur le liseré.
+//!
 //! L'état ouvert/fermé vit dans la mémoire d'egui, indexé sur l'id du widget — pas chez l'appelant.
 //! Ce n'est pas de l'état applicatif (le contrat de composant en interdit) mais de l'état
 //! d'interaction, du même ordre que « ce widget a le focus » : il ne survit pas à la fermeture de la
@@ -41,7 +56,8 @@
 //! | Grandeur | Valeur | Détail |
 //! | --- | --- | --- |
 //! | Hauteur du socle | **36 px, bord compris** | bord 2 + liseré 2 + dégradé 28 + ombre 2 + bord 2 |
-//! | Rayon | 2 | comme tout le reste de l'interface |
+//! | Rayon du socle, et des coins HAUTS de la liste | 2 | comme tout le reste de l'interface |
+//! | Rayon des coins BAS de la liste | **4** | fond rentrant de 3, 2, 1, 0 px sur les quatre dernières lignes |
 //! | Chevron | **14 × 8 px**, à 8 px du bord droit | exactement la taille native d'`icons/icon-chevron-down.png` |
 //! | Retrait du libellé de socle | 10 px | le texte commence à x=17 pour un socle à x=7 |
 //! | Hauteur d'une entrée | **28 px** | surbrillance en y 71..98, entrée suivante à 99 |
@@ -52,6 +68,11 @@
 //! > **Le piège de la hauteur**, énoncé par le relevé : « le chiffre de 32 px qu'on lit en mesurant
 //! > le remplissage est trompeur — il exclut les 2 px de bord haut et bas. » Vérifié au pixel : le
 //! > socle occupe y 5..40 inclus, soit 36.
+//!
+//! > **Le bas de la liste est plus rond que son haut.** Ce n'est pas un défaut de la capture : le
+//! > haut est collé au socle, il n'a pas à s'en détacher, tandis que le bas flotte au-dessus du
+//! > contenu. Mesuré en bas à gauche — fond à x=7 en y=151, x=8 en 152, x=9 en 153, bord noir à
+//! > x=10 en 154 — et symétrique à droite.
 //!
 //! > **Il n'existe pas de largeur de liste unique.** Le relevé mesure 210, 208, 560 et 650 px selon
 //! > le contrôle : « la largeur est décidée contrôle par contrôle ». Le composant n'impose donc
@@ -332,22 +353,20 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                 .constrain(false)
                 .show(ui.ctx(), |ui| {
                     ui.set_min_size(list_rect.size());
-                    let painter = ui.painter();
-                    painter.rect_filled(list_rect, tokens::SELECT_RADIUS, tokens::SELECT_LIST_FILL);
-                    // Liseré clair d'un pixel en haut de la liste : c'est ce qui la détache du
-                    // socle, dont l'ombre basse est de la même famille.
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(list_rect.min, Vec2::new(width, 1.0)),
-                        0,
-                        tokens::SELECT_LIST_TOP_LINE,
-                    );
-                    painter.rect_stroke(
-                        list_rect,
-                        tokens::SELECT_RADIUS,
-                        egui::Stroke::new(2.0, tokens::SELECT_LIST_BORDER),
-                        egui::StrokeKind::Inside,
-                    );
+                    // Les coins bas sont PLUS ronds que les coins hauts : le haut de la liste est
+                    // collé au socle, il n'a pas à s'en détacher, tandis que le bas flotte
+                    // au-dessus du contenu. C'est ce que la référence montre au pixel — voir
+                    // `tokens::SELECT_LIST_BOTTOM_RADIUS`.
+                    let list_radius = egui::CornerRadius {
+                        nw: tokens::SELECT_RADIUS,
+                        ne: tokens::SELECT_RADIUS,
+                        sw: tokens::SELECT_LIST_BOTTOM_RADIUS,
+                        se: tokens::SELECT_LIST_BOTTOM_RADIUS,
+                    };
+                    ui.painter()
+                        .rect_filled(list_rect, list_radius, tokens::SELECT_LIST_FILL);
 
+                    let last = self.options.len() - 1;
                     let mut clicked = None;
                     for (index, (_, label)) in self.options.iter().enumerate() {
                         let row = egui::Rect::from_min_size(
@@ -369,8 +388,20 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                             || row_response.hovered()
                             || (!self.is_multiple() && checked);
                         if highlighted {
-                            ui.painter()
-                                .rect_filled(row, 0, tokens::SELECT_ROW_HIGHLIGHT);
+                            // La mise en avant épouse le conteneur. Carrée, elle sortait par les
+                            // coins arrondis en première et en dernière position — le défaut que
+                            // la capture du 2026-09-14 montrait sur l'entrée du haut.
+                            let highlight_radius = egui::CornerRadius {
+                                nw: if index == 0 { list_radius.nw } else { 0 },
+                                ne: if index == 0 { list_radius.ne } else { 0 },
+                                sw: if index == last { list_radius.sw } else { 0 },
+                                se: if index == last { list_radius.se } else { 0 },
+                            };
+                            ui.painter().rect_filled(
+                                row,
+                                highlight_radius,
+                                tokens::SELECT_ROW_HIGHLIGHT,
+                            );
                         }
                         let mut text_x = row.left() + tokens::SELECT_ROW_PADDING_X;
                         if self.is_multiple() {
@@ -402,6 +433,33 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                             clicked = Some(index);
                         }
                     }
+
+                    // Liseré et bord EN DERNIER, par-dessus les entrées. Peints avant, la mise en
+                    // avant de la première entrée mangeait le liseré et celle de la dernière
+                    // recouvrait le bord bas : la liste avait l'air de déborder de son conteneur.
+                    // Ce recouvrement d'un pixel est aussi ce que fait la référence, où la
+                    // première et la dernière entrée sont rognées d'autant.
+                    let painter = ui.painter();
+                    painter.rect_stroke(
+                        list_rect,
+                        list_radius,
+                        egui::Stroke::new(2.0, tokens::SELECT_LIST_BORDER),
+                        egui::StrokeKind::Inside,
+                    );
+                    // Liseré clair d'un pixel en haut de la liste : c'est ce qui la détache du
+                    // socle, dont l'ombre basse est de la même famille. Il vient APRÈS le bord,
+                    // sur la dernière ligne de celui-ci : peint avant, le bord le recouvrait
+                    // intégralement — deux pixels de noir par-dessus un pixel clair, le liseré
+                    // n'existait qu'en théorie (constaté le 2026-09-14). Rentré de 2 px à gauche
+                    // et à droite pour ne pas sortir par les coins hauts.
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            list_rect.min + Vec2::new(2.0, 1.0),
+                            Vec2::new(width - 4.0, 1.0),
+                        ),
+                        0,
+                        tokens::SELECT_LIST_TOP_LINE,
+                    );
                     clicked
                 });
 
