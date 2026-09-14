@@ -143,10 +143,18 @@ ds_icons! {
         /// les filtres ». **Pas celle qui ferme une fenêtre** : voir [`DsIcon::CloseWindow`].
         Close => "icon-close", socle;
 
-        /// Bulle de message (`icons/icon-message.png`, 28 × 28, encre ~23 × 19) — fournie par
-        /// l'utilisateur le 2026-09-14 pour la carte d'alerte de chat du Suivi (« répondre en
-        /// privé », `panels::watchlist::chat_toast_card`). `libre` : pas de socle, sa taille est
-        /// celle que la carte lui donne.
+        /// Bulle de message (`icons/icon-message.png`, 23 × 19) — fournie par l'utilisateur le
+        /// 2026-09-14 pour la carte d'alerte de chat du Suivi (« répondre en privé »,
+        /// `panels::watchlist::chat_toast_card`). `libre` : pas de socle, sa taille est celle que la
+        /// carte lui donne.
+        ///
+        /// Le fichier est arrivé avec une marge transparente (canevas 28 × 28 pour une encre de
+        /// 22 × 19), que `les_glyphes_d_icone_sont_detoures_au_pixel_pres` a signalée : `glyph_fit`
+        /// mettant le CANEVAS à l'échelle, cette marge rétrécissait le glyphe en silence chez son
+        /// appelant. Détouré le 2026-09-14 à sa boîte d'alpha non nul — frange d'antialiasing
+        /// comprise, d'où le pixel d'écart entre canevas et encre que le test tolère — et
+        /// `watchlist::CHAT_CARD_ICON_SIZE` recalée dans le même mouvement pour que la carte peigne
+        /// exactement la même bulle qu'avant.
         Message => "icon-message", libre;
 
         /// Croix du bouton de fermeture d'une fenêtre (`icons/icon-close-window.png`, 12 × 12) —

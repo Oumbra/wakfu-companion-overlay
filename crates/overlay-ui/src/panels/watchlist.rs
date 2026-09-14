@@ -709,10 +709,24 @@ const CHAT_CARD_WORD_FONT_SIZE: f32 = 14.0;
 /// Marge verticale du contenu de la carte de chat, plus haute que `CARD_PAD_V` : la légende mord
 /// sur la bordure haute, le mot doit en rester décollé.
 const CHAT_CARD_PAD_V: f32 = 12.0;
-/// Côté de la bulle « répondre en privé » (`DsIcon::Message`) — nettement plus grande que la
-/// croix des autres cartes (18 px) : c'est une action à découvrir, elle doit se voir cliquable
-/// (demande utilisateur du 2026-09-14).
+/// Côté de la CASE réservée à la bulle « répondre en privé » (`DsIcon::Message`) — nettement plus
+/// grande que la croix des autres cartes (18 px) : c'est une action à découvrir, elle doit se voir
+/// cliquable (demande utilisateur du 2026-09-14). C'est elle qui entre dans [`CHAT_CARD_WIDTH`],
+/// dans la hauteur plancher de la carte et dans le centre de la bulle ; la taille à laquelle le
+/// glyphe est PEINT dans cette case est [`CHAT_CARD_ICON_INK`].
 const CHAT_CARD_ICON_SIZE: f32 = 26.0;
+
+/// Côté auquel le glyphe de la bulle est peint dans sa case — **21,4 px, et ce n'est pas un
+/// rétrécissement**.
+///
+/// Le fichier du glyphe est arrivé le 2026-09-14 avec une marge transparente (canevas 28 × 28 pour
+/// une encre de 22 × 19). `glyph_fit` mettant le CANEVAS à l'échelle, les 26 px de la case n'en
+/// peignaient que 20,4 d'encre — c'est cette bulle-là que l'utilisateur a validée. Le glyphe ayant
+/// été détouré depuis (canevas 23 × 19, l'invariant que
+/// `les_glyphes_d_icone_sont_detoures_au_pixel_pres` vérifie), la même bulle se redemande à
+/// `26 × 23 / 28 ≈ 21,4`. Séparer les deux cotes garde la carte au pixel près : la case tient la
+/// géométrie, l'encre ne décale plus rien en changeant.
+const CHAT_CARD_ICON_INK: f32 = 21.4;
 /// Écart entre la colonne de texte et la bulle.
 const CHAT_CARD_ICON_GAP: f32 = 14.0;
 /// Rayon du halo cyan peint derrière la bulle survolée — aussi le demi-côté de sa zone de clic.
@@ -1633,7 +1647,7 @@ fn chat_toast_card(
         icon_center,
         design::components::icon_button::glyph_fit(
             ds.icon_native_size(DsIcon::Message),
-            CHAT_CARD_ICON_SIZE,
+            CHAT_CARD_ICON_INK,
         ),
     );
     let icon_tint = if icon_hovered {
