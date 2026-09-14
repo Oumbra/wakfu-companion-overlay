@@ -2630,6 +2630,7 @@ let response = ui.add(
 | `width` | largeur imposée | largeur disponible du `Ui` |
 | `height` | hauteur du **cadre** (la légende s'y ajoute au-dessus) | `LEGEND_TILE_HEIGHT` = 54 |
 | `enabled` | `false` = grisée, sans clic | `true` |
+| `legend_color` | couleur de la légende — celle du canal de chat (`tokens::chat_channel_color`) | `LEGEND_TILE_LEGEND_TEXT` (gris des titres) |
 | `tooltip` | infobulle du design system | aucune |
 | `preview_state` | `Idle` / `Hovered` / `Disabled` — galerie et captures seulement | état réel |
 
@@ -2671,3 +2672,12 @@ mesures — les jetons `LEGEND_TILE_*` le disent un par un.
 Planche dédiée `design_gallery_legend_tile.png` (la galerie principale est au plafond des
 8192 px) : les trois états côte à côte, puis quatre tuiles à la largeur d'une colonne de l'onglet
 Chat, dont un contenu élidé et une légende tronquée.
+
+### Couleurs des canaux (2026-09-14)
+
+Une légende qui nomme un canal de chat prend **la couleur que le client donne à ce canal** dans sa
+légende des canaux (`/l - Proximité` en blanc, `/m - Commerce` en orange, `/r - Recrutement` en
+magenta…) : jetons `CHAT_CHANNEL_*` et `tokens::chat_channel_color(ChatChannel)`, relevés à l'œil
+sur une capture fournie par l'utilisateur, pas à la pipette. La carte d'alerte du Suivi
+(`panels::watchlist`, raison `Chat`) colore de la même façon la moitié « canal » de son titre.
+« Tous les canaux » n'est pas un canal : la légende garde son gris.
