@@ -87,6 +87,81 @@ fn ingest_vrai_wakfu_log_produit_un_recap_plausible() {
     );
 }
 
+/// Les soins et les dons d'armure du VRAI fichier arrivent bien jusqu'au récap — le fichier
+/// contient 380 lignes de soin (« X: +N PV ») et une ligne d'armure (« Erz-Wouaf: 460 Armure »,
+/// ligne 2391), donc un total nul de l'un ou de l'autre sur tout le fichier signalerait que la
+/// capture a été rompue quelque part entre le parser vendu et `FighterDamage`.
+#[test]
+fn soins_et_armure_du_vrai_log_arrivent_jusquau_recap() {
+    let mut tailer = Tailer::new(WAKFU_LOG);
+    let mut engine = test_engine();
+    loop {
+        let batches = tailer.poll().expect("poll() du tailer");
+        if batches.is_empty() {
+            break;
+        }
+        for batch in &batches {
+            engine.ingest_batch(batch).expect("ingestion d'un lot");
+        }
+    }
+
+    let snapshot = engine.snapshot();
+    // Les combats terminés sont purgés au fil de l'eau (voir `MAX_TRACKED_FIGHTS`) : ces totaux
+    // portent sur les combats encore suivis en fin de fichier, pas sur l'intégralité du log.
+    let heal: i64 = snapshot
+        .fights
+        .iter()
+        .flat_map(|fight| fight.fighters.iter())
+        .map(|fighter| fighter.total_heal)
+        .sum();
+    assert!(heal > 0, "aucun soin capté sur un vrai log qui en contient");
+
+    let heal_spells: usize = snapshot
+        .fights
+        .iter()
+        .flat_map(|fight| fight.fighters.iter())
+        .map(|fighter| fighter.heal_spells.len())
+        .sum();
+    assert!(
+        heal_spells > 0,
+        "soins comptés mais jamais ventilés par source"
+    );
+
+    // L'armure de référence appartient à un combat qui peut avoir été purgé (`MAX_TRACKED_FIGHTS`)
+    // avant la fin du fichier : on rejoue donc le début du log jusqu'à cette ligne incluse plutôt
+    // que de dépendre de ce que la purge a laissé.
+    let mut engine = test_engine();
+    let contenu = std::fs::read_to_string(WAKFU_LOG).expect("lecture du log");
+    let mut lines: Vec<String> = Vec::new();
+    for line in contenu.lines() {
+        lines.push(line.to_string());
+        if line.contains("460 Armure") {
+            break;
+        }
+    }
+    assert!(
+        lines.last().is_some_and(|line| line.contains("460 Armure")),
+        "la ligne d'armure de référence a disparu du fichier de test"
+    );
+    engine
+        .ingest_batch(&LineBatch {
+            lines,
+            is_initial_load: true,
+        })
+        .expect("ingestion du rejeu ciblé");
+    let armure: i64 = engine
+        .snapshot()
+        .fights
+        .iter()
+        .flat_map(|fight| fight.fighters.iter())
+        .map(|fighter| fighter.total_armor)
+        .sum();
+    assert_eq!(
+        armure, 460,
+        "la ligne « Erz-Wouaf: 460 Armure » du vrai log doit créditer son porteur"
+    );
+}
+
 /// Garde-fou pour la subtilité documentée dans `Engine::ingest_batch` : un rattrapage qui
 /// s'étale sur plusieurs `LineBatch` (à cause de `MAX_BATCH_LINES`, voir `overlay-ingest`) ne doit
 /// réinitialiser le parser/l'état de session qu'une seule fois, au tout premier lot — jamais entre
