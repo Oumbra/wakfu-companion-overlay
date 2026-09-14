@@ -27,7 +27,7 @@
 
 use egui_kittest::Harness;
 use overlay_engine::CatalogIndex;
-use overlay_ui::panels::combat::CombatSide;
+use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::options_modal::{OptionsModalState, OptionsTab};
 use overlay_ui::portraits::PortraitAtlas;
@@ -56,6 +56,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
     let mut frame: Option<CombatFrame> = None;
     let mut icons: Option<UiIcons> = None;
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -101,6 +102,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 combat_frame: f,
                 icons: i,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).

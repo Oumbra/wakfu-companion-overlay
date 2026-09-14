@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use overlay_engine::{CatalogIndex, FightSnapshot, WatchlistEntry};
 
 use crate::panels;
-use crate::panels::combat::CombatSide;
+use crate::panels::combat::{CombatMetric, CombatSide};
 use crate::panels::combat_frame::CombatFrame;
 use crate::panels::options_modal::{OptionsModalAction, OptionsModalState};
 use crate::panels::watchlist::{WatchlistAssets, WatchlistToast};
@@ -220,6 +220,9 @@ pub struct RenderContent<'a> {
     pub combat_frame: &'a CombatFrame,
     pub icons: &'a UiIcons,
     pub combat_side: &'a mut CombatSide,
+    /// Grandeur mesurée par le panneau Combat (dégâts / armure donnée / soins) — même statut que
+    /// `combat_side` : un état par fenêtre overlay, porté par l'hôte (voir `CombatMetric`).
+    pub combat_metric: &'a mut CombatMetric,
     pub watchlist: &'a [WatchlistEntry],
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
     /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
@@ -372,6 +375,7 @@ pub fn build_ui(
                 combat_frame: content.combat_frame,
                 icons: content.icons,
                 combat_side: &mut *content.combat_side,
+                combat_metric: &mut *content.combat_metric,
                 watchlist: content.watchlist,
                 watchlist_selection: &mut *content.watchlist_selection,
                 watchlist_toast: content.watchlist_toast,
@@ -408,6 +412,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         combat_frame,
         icons,
         combat_side,
+        combat_metric,
         watchlist,
         watchlist_selection,
         watchlist_toast,
@@ -521,6 +526,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         remote_icons,
                         remote_icon_textures,
                         combat_side,
+                        combat_metric,
                         shortcuts,
                     );
                 }

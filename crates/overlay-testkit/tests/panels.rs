@@ -34,7 +34,7 @@ use overlay_engine::{
 };
 use overlay_ingest::Tailer;
 use overlay_ui::panels;
-use overlay_ui::panels::combat::CombatSide;
+use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::options_modal::{OptionsModalAction, OptionsModalState, OptionsTab};
 use overlay_ui::panels::watchlist::{
@@ -143,6 +143,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -165,6 +166,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -207,6 +209,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
 fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -229,6 +232,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -274,6 +278,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -296,6 +301,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -426,6 +432,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -448,6 +455,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &watchlist_entries,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -484,6 +492,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
 fn panneau_suivi_mode_up_ne_panique_pas() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -514,6 +523,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &entries,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -606,6 +616,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -640,6 +651,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     combat_frame,
                     icons,
                     combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -727,6 +739,7 @@ const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(55.0, 55.0);
 fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -751,6 +764,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     combat_frame,
                     icons,
                     combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
                     watchlist: &[],
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
@@ -825,6 +839,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -859,6 +874,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         combat_frame,
                         icons,
                         combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
                         watchlist: &entries,
                         watchlist_selection: &mut selection.borrow_mut(),
                         watchlist_toast: None,
@@ -943,6 +959,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -969,6 +986,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     combat_frame,
                     icons,
                     combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
@@ -1206,6 +1224,7 @@ fn clique(harness: &mut egui_kittest::Harness<'_>, pos: egui::Pos2) {
 fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -1240,6 +1259,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     combat_frame,
                     icons,
                     combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -1292,6 +1312,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
 fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -1332,6 +1353,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &entries,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -1365,6 +1387,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
 fn panneau_options_ne_panique_pas() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -1409,6 +1432,7 @@ fn panneau_options_ne_panique_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -1592,6 +1616,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -1655,6 +1680,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
@@ -3447,6 +3473,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
 fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() {
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -3469,6 +3496,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
@@ -3686,6 +3714,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -3708,6 +3737,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 combat_frame,
                 icons,
                 combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: Some(&toast),
@@ -3803,6 +3833,7 @@ fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
 
     let mut textures = Textures::new();
     let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let catalog = CatalogIndex::default();
@@ -3840,6 +3871,7 @@ fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
                     combat_frame,
                     icons,
                     combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
                     watchlist: &[],
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
