@@ -47,6 +47,13 @@ pub enum LegendTileState {
     Disabled,
 }
 
+/// De quel côté de la bordure haute la légende se pose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegendSide {
+    Left,
+    Right,
+}
+
 /// Construit une tuile à légende.
 pub fn legend_tile(legend: impl Into<String>, text: impl Into<String>) -> LegendTile {
     LegendTile {
@@ -118,6 +125,62 @@ impl LegendTile {
         self
     }
 
+    /// Peint **le cadre seul** — fond, bordure interrompue sous la légende, légende — pour un
+    /// appelant qui compose lui-même son contenu dedans (la carte d'alerte de chat du Suivi,
+    /// `panels::watchlist`). `frame` est le cadre ; la légende déborde au-dessus de
+    /// `legend_overshoot`. `tint` s'applique à chaque couleur (grisé, fondu d'entrée…).
+    pub fn paint_frame(
+        painter: &egui::Painter,
+        ctx: &egui::Context,
+        frame: Rect,
+        legend: &str,
+        legend_color: Color32,
+        side: LegendSide,
+        tint: &dyn Fn(Color32) -> Color32,
+    ) {
+        painter.rect_filled(frame, 0.0, tint(tokens::LEGEND_TILE_FILL));
+
+        let legend = painter.layout_no_wrap(
+            legend.to_owned(),
+            text::label_font(ctx, tokens::LEGEND_TILE_LEGEND_FONT_SIZE),
+            tint(legend_color),
+        );
+        let inset = tokens::LEGEND_TILE_LEGEND_INSET;
+        let legend_width = legend.size().x.min(frame.width() - inset * 2.0);
+        let legend_left = match side {
+            LegendSide::Left => frame.left() + inset,
+            LegendSide::Right => frame.right() - inset - legend_width,
+        };
+        let legend_right = legend_left + legend_width;
+        let stroke = Stroke::new(
+            tokens::LEGEND_TILE_BORDER_WIDTH,
+            tint(tokens::LEGEND_TILE_BORDER),
+        );
+        let half = tokens::LEGEND_TILE_BORDER_WIDTH / 2.0;
+        let (top, bottom) = (frame.top() + half, frame.bottom() - half);
+        let (left, right) = (frame.left() + half, frame.right() - half);
+        let gap = tokens::LEGEND_TILE_LEGEND_GAP;
+        painter.line_segment(
+            [egui::pos2(left, top), egui::pos2(legend_left - gap, top)],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(legend_right + gap, top), egui::pos2(right, top)],
+            stroke,
+        );
+        painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], stroke);
+        painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], stroke);
+        painter.line_segment(
+            [egui::pos2(left, bottom), egui::pos2(right, bottom)],
+            stroke,
+        );
+        painter.galley(
+            egui::pos2(legend_left, frame.top() + half - legend.size().y / 2.0),
+            legend,
+            Color32::WHITE,
+        );
+    }
+
     /// De combien la légende dépasse au-dessus du cadre — la moitié de sa hauteur de ligne.
     pub fn legend_overshoot(ui: &Ui) -> f32 {
         let line = ui
@@ -182,44 +245,16 @@ impl Widget for LegendTile {
                 }
             };
 
-            painter.rect_filled(frame, 0.0, tokens::LEGEND_TILE_FILL);
-
-            // La légende, et la bordure qui s'interrompt sous elle.
-            let legend = painter.layout_no_wrap(
-                self.legend.clone(),
-                text::label_font(ui.ctx(), tokens::LEGEND_TILE_LEGEND_FONT_SIZE),
-                dim(self.legend_color.unwrap_or(tokens::LEGEND_TILE_LEGEND_TEXT)),
-            );
-            let legend_left = frame.left() + tokens::LEGEND_TILE_LEGEND_INSET;
-            let legend_right = (legend_left + legend.size().x)
-                .min(frame.right() - tokens::LEGEND_TILE_LEGEND_INSET);
-            let stroke = Stroke::new(
-                tokens::LEGEND_TILE_BORDER_WIDTH,
-                dim(tokens::LEGEND_TILE_BORDER),
+            Self::paint_frame(
+                &painter,
+                ui.ctx(),
+                frame,
+                &self.legend,
+                self.legend_color.unwrap_or(tokens::LEGEND_TILE_LEGEND_TEXT),
+                LegendSide::Left,
+                &dim,
             );
             let half = tokens::LEGEND_TILE_BORDER_WIDTH / 2.0;
-            let (top, bottom) = (frame.top() + half, frame.bottom() - half);
-            let (left, right) = (frame.left() + half, frame.right() - half);
-            let gap = tokens::LEGEND_TILE_LEGEND_GAP;
-            painter.line_segment(
-                [egui::pos2(left, top), egui::pos2(legend_left - gap, top)],
-                stroke,
-            );
-            painter.line_segment(
-                [egui::pos2(legend_right + gap, top), egui::pos2(right, top)],
-                stroke,
-            );
-            painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], stroke);
-            painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], stroke);
-            painter.line_segment(
-                [egui::pos2(left, bottom), egui::pos2(right, bottom)],
-                stroke,
-            );
-            painter.galley(
-                egui::pos2(legend_left, frame.top() + half - legend.size().y / 2.0),
-                legend,
-                Color32::WHITE,
-            );
 
             // Le contenu, centré, élidé s'il déborde — jamais rogné en silence.
             let mut job = egui::text::LayoutJob::simple(
