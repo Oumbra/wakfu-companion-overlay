@@ -1354,8 +1354,47 @@ Vidéo fournie par l'utilisateur (90 s, 30 i/s, recadrée sur le widget), dépou
 - La boussole de gauche indique l'**orientation** du personnage, pas le tour.
 - La bande du nom est un cas favorable : **fond noir uni** (aucun décor derrière), texte blanc,
   serif gras, aligné à droite sur une ligne de base fixe.
+- **Position à l'écran, établie par une seconde vidéo** (2026-09-14, plein écran non recadré, deux
+  fenêtres côte à côte) : le widget est ancré au **coin bas-droit** de la fenêtre de jeu, jamais en
+  haut. Deux widgets distincts partagent cet emplacement selon la phase : en phase de placement
+  (« Tour 0 »), une carte simplifiée « Prêt / N s » qui égrène les personnages au fil de leurs
+  confirmations (changements de nom toutes les 200-400 ms, à ne pas confondre avec un vrai
+  changement de tour) ; le combat engagé (« Tour 1 » et suivants), le widget riche décrit
+  ci-dessus.
 
 **Le seul discriminant est donc le nom**, et il faut le lire.
+
+#### Le rendu ne se fige pas hors focus — vérifié, plus seulement espéré
+
+**La question qui conditionnait toute la chaîne visuelle** : Wakfu suspend-il son rendu et sa
+logique de jeu quand sa fenêtre perd le focus — comme le font, par économie, beaucoup
+d'applications Java ? Si oui, aucune API de capture, aussi bonne soit-elle, ne verrait plus qu'une
+image figée. Ce n'était pas acquis, et c'était le principal risque du point dur ci-dessous.
+
+Réponse mesurée sur la même vidéo (85,6 s, 5118 × 1438, deux fenêtres partageant le même combat) :
+**non.** Deux segments, focus inversé entre les deux, chacun comparant le chrono de la fenêtre
+active à celui de la fenêtre sans focus :
+
+- 44,0 s → 49,6 s, focus à gauche : chrono à droite (sans focus) 54 → 53 → 52 → 51 → 50 → 49 s.
+- 63,6 s → 68,8 s, focus inversé (à droite) : chrono à gauche (sans focus) 54 → 53 → 52 → 51 → 50 s.
+
+Dans les deux sens, le chrono de la fenêtre sans focus décompte **exactement au même rythme** que
+celui de la fenêtre active, à la seconde près. Le client ne suspend ni son rendu ni sa logique de
+jeu en arrière-plan.
+
+**Bonus qui simplifie le chemin critique** : dans les deux segments, c'est systématiquement la
+fenêtre SANS focus qui affiche le bouton doré (état « repos »), jamais la carte de stats (état
+« survol »). Logique : l'état survol dépend de la position de la souris, qui ne peut pas se
+trouver dans une fenêtre qu'on ne regarde pas. **Le cas qui nous intéresse — lire une fenêtre en
+arrière-plan — retombe donc quasi toujours dans l'état le plus simple à lire**, nom net sans
+portrait ni stats en travers ; l'état survol reste un repli à gérer, pas le chemin principal.
+
+Reste hors du périmètre de cette vidéo, donc encore à vérifier : cette capture est une capture
+d'écran **complète** (ce que Windows compose à l'affichage), elle ne prouve pas qu'une capture
+**programmatique** (Windows Graphics Capture, XComposite) obtient le même résultat — c'est
+justement l'objet du spike ci-dessous. Les deux fenêtres sont restées visibles côte à côte tout du
+long, jamais l'une entièrement masquée par l'autre ni par une troisième application : le cas D
+(focus sur un navigateur, aucune fenêtre Wakfu visible) n'a pas été couvert.
 
 #### Lire le nom sans embarquer d'OCR
 
@@ -1373,7 +1412,9 @@ personnage et par taille de fenêtre.
 #### Le point dur, à valider par un spike avant tout engagement
 
 **Capturer une fenêtre de jeu qui n'a pas le focus** — et, cas D, qui peut être entièrement occultée
-par une autre application. Wakfu est Java/JOGL (§6.4), le pire cas pour les API de capture :
+par une autre application. Wakfu est Java/JOGL (§6.4), le pire cas pour les API de capture. Le
+risque que le CLIENT lui-même se fige en arrière-plan est levé (ci-dessus, vérifié par vidéo) ; ce
+qui reste à établir est que l'API de capture, elle, obtient bien ce contenu :
 
 - **Windows** : `PrintWindow` + `PW_RENDERFULLCONTENT` est réputé capricieux sur OpenGL. La voie à
   tester en premier est **Windows Graphics Capture** (WinRT, Windows 10 1803+), qui passe par la
@@ -1774,9 +1815,12 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
    **Reporté explicitement par l'utilisateur le 2026-09-14** — à reprendre avec l'installeur, dont
    ce point devient une exigence.
 7. **Notification de tour, capture d'une fenêtre sans focus** (2026-09-14, voir §9.1 decies) :
-   trois des quatre situations à couvrir l'exigent, et Wakfu est Java/JOGL. Windows Graphics
-   Capture d'un côté, `XComposite` de l'autre — à trancher par un spike avant tout engagement de
-   la chaîne visuelle. Une fenêtre minimisée restera hors d'atteinte quoi qu'il arrive.
+   trois des quatre situations à couvrir l'exigent, et Wakfu est Java/JOGL. **Le risque que le
+   client se fige en arrière-plan est levé** (vidéo du 2026-09-14 : chrono identique à la seconde
+   près, focus ou non) ; **reste à prouver que l'API de capture obtient ce contenu** — Windows
+   Graphics Capture d'un côté, `XComposite` de l'autre — par un spike avant tout engagement de la
+   chaîne visuelle. Une fenêtre minimisée restera hors d'atteinte quoi qu'il arrive, et le cas D
+   (aucune fenêtre Wakfu visible, focus sur une autre application) reste à vérifier séparément.
 
 ---
 
