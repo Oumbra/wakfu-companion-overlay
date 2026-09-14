@@ -70,6 +70,38 @@ l'environnement. Une session locale (terminal de l'utilisateur) n'est normalemen
 cette panne d'infrastructure ; si la signature y échoue aussi, diagnostiquer avant de contourner de
 la même façon plutôt que de supposer que ce cas s'applique.
 
+# Numéro de version — automatique, jamais à la main
+
+La version du produit vit **uniquement** dans `[workspace.package] version` (`Cargo.toml` racine) ;
+les crates y renvoient par `version.workspace = true`, et `crates/overlay-ui/build.rs` y adjoint le
+hash du commit compilé. Les deux se lisent dans `overlay_ui::build_info` et s'affichent dans la
+bannière de la fenêtre Options (`v0.1.0`) et au journal (`0.1.0 (a1b2c3d)`).
+
+**Ne jamais éditer ce champ, ni celui des `Cargo.lock`.** Le hook `post-commit` (`.githooks/`,
+installé par `scripts/install-hooks.sh` — à relancer en début de session cloud, `core.hooksPath` est
+une config locale) s'en charge, d'après le type Conventional Commits du commit :
+
+| Type | Niveau |
+| --- | --- |
+| `feat!:`/`fix!:`/… ou footer `BREAKING CHANGE:` | major |
+| `feat:` | minor |
+| `fix:`, `style:`, `perf:`, `refactor:`, `test:` | patch |
+| `docs:`, `chore:`, `ci:`, `build:`, message non conforme | aucun |
+
+Le hook amende le commit qu'on vient de créer pour y inclure le bump : **un commit porte donc sa
+propre version**. Vérifier ce qu'il ferait sans rien écrire : `bash scripts/bump-version.sh
+--dry-run`. Échappatoire ponctuelle : `SKIP_VERSION_BUMP=1 git commit …`.
+
+Deux conséquences à garder en tête :
+
+- Un changement visuel dans `overlay-ui` ne doit **jamais** faire dépendre une capture de la version
+  réelle : `build_info::freeze_for_snapshots()` (appelée par `Textures::get_or_load` dans
+  `tests/panels.rs`) la fige à `v0.0.0` pour tout le harnais. Sans ce gel, le gate de captures
+  virerait au rouge à chaque commit.
+- Le hook s'abstient pendant un `rebase`/`merge`/`cherry-pick` et sur un commit de fusion. Si un
+  bump manque après une manipulation d'historique, le rattraper par un commit ordinaire plutôt que
+  d'écrire le numéro à la main.
+
 # CI — ne jamais pousser du rouge
 
 Le CI (`.github/workflows/ci.yml`) est resté **rouge en continu du 2026-09-01 au 2026-09-10** pour

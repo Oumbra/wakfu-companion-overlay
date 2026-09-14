@@ -49,6 +49,37 @@ bash scripts/ci-local.sh          # tout : format, clippy, tests
 bash scripts/ci-local.sh --lint   # format + clippy seulement (rapide)
 ```
 
+## Numéro de version
+
+La version du produit vit à **un seul endroit**, `[workspace.package] version` du `Cargo.toml`
+racine : toutes les crates y renvoient (`version.workspace = true`) et Cargo l'embarque dans le
+binaire. `crates/overlay-ui/build.rs` y ajoute le **hash du commit** compilé. Les deux se lisent
+dans `overlay_ui::build_info`, et se voient à deux endroits : la bannière de la fenêtre Options
+(`v0.1.0`) et la ligne `=== session démarrée ===` du journal (`0.1.0 (a1b2c3d)`).
+
+**Elle s'incrémente toute seule, ne pas l'éditer à la main.** Le hook `post-commit`
+(`scripts/bump-version.sh`) lit le type [Conventional Commits](https://www.conventionalcommits.org/)
+du commit qui vient d'être créé, calcule le niveau, met à jour le manifeste et les deux
+`Cargo.lock`, puis **amende ce même commit** — le bump voyage donc avec le changement qui l'a causé,
+jamais dans un commit séparé.
+
+| Type de commit | Niveau | Exemple |
+| --- | --- | --- |
+| `feat!:`, `fix!:`, … ou footer `BREAKING CHANGE:` | **major** | `0.4.2` → `1.0.0` |
+| `feat:` | **minor** | `0.4.2` → `0.5.0` |
+| `fix:`, `style:`, `perf:`, `refactor:`, `test:` | **patch** | `0.4.2` → `0.4.3` |
+| `docs:`, `chore:`, `ci:`, `build:`, message non conforme | aucun | `0.4.2` inchangé |
+
+Ce qui touche le binaire livré fait avancer le numéro ; ce qui n'en sort jamais le laisse en place.
+
+```bash
+bash scripts/bump-version.sh --dry-run   # ce que ferait le hook sur le commit courant
+SKIP_VERSION_BUMP=1 git commit -m "…"    # committer sans bump (échappatoire ponctuelle)
+```
+
+Le hook s'abstient de lui-même pendant un `rebase`/`merge`/`cherry-pick` et sur un commit de
+fusion : rejouer un commit déjà versionné le bumperait une seconde fois.
+
 ## Crates (`crates/`)
 
 | Crate | Lot | Contenu |

@@ -1435,6 +1435,23 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   installable sans.
 - **Linux** : AppImage (cible principale, aucune dépendance système à gérer) + `.deb`. Dépendances
   runtime documentées : Vulkan/Mesa, X11, `libsecret` (optionnel, cf. repli §7.2).
+- **Numéro de version : une seule source, incrémentée automatiquement** (décision du 2026-09-14).
+  `[workspace.package] version` du `Cargo.toml` racine est la version du PRODUIT ; toutes les crates
+  y renvoient (`version.workspace = true`), Cargo l'embarque dans le binaire, et
+  `crates/overlay-ui/build.rs` y ajoute le hash du commit compilé (`overlay_ui::build_info`). Le
+  hook `post-commit` (`scripts/bump-version.sh`) l'incrémente d'après le type Conventional Commits
+  du commit — `feat:` → minor, `fix:`/`style:`/`perf:`/`refactor:`/`test:` → patch, `!`/`BREAKING
+  CHANGE:` → major, `docs:`/`chore:`/`ci:`/`build:` → rien — puis AMENDE ce commit, de sorte que le
+  bump ne vive jamais séparément du changement qui l'a causé. Ce que la distribution en attend : un
+  asset de Release et un rapport de bug désignent tous deux un état exact du dépôt, sans qu'il
+  faille penser à relever un numéro à la main. Modèle repris du dépôt web (`tools/bump-version-from-
+  commit.mjs`), avec deux gardes que celui-ci n'a pas : aucun bump pendant un `rebase`/`merge`/
+  `cherry-pick` ni sur un commit de fusion (rejouer un commit déjà versionné le bumpait une seconde
+  fois — bug vécu côté web).
+  - **Conséquence sur le gate de captures** (§17.1) : la bannière de la fenêtre Options peint ce
+    numéro, donc chaque bump périmerait toutes ses captures. `overlay_ui::build_info::
+    freeze_for_snapshots` le fige à `v0.0.0` pour le harnais, appelée depuis le point de passage
+    obligé de `tests/panels.rs` (`Textures::get_or_load`) plutôt que test par test.
 - Mise à jour : vérification `GET` de la dernière Release au démarrage, téléchargement en tâche de
   fond, application au prochain lancement. Le bundle moteur peut être mis à jour **sans** nouvelle
   version du binaire (asset versionné + signature) — c'est ce qui permet de suivre une correction de
@@ -1644,7 +1661,8 @@ la console n'en est qu'un miroir.
   lexical fiable et aucune ambiguïté de fuseau/heure d'été.
 - **Niveau** : `info` sur le code de l'appli, `warn` sur `wgpu_hal`/`wgpu_core`/`naga` (bruyants),
   réglable sans recompiler via `RUST_LOG` (même convention que `overlay-app`).
-- **Bornes de session** : chaque lancement journalise `=== session démarrée ===` (PID, version, OS)
+- **Bornes de session** : chaque lancement journalise `=== session démarrée ===` (PID, version,
+  hash de commit — voir §11, OS)
   en tout premier dans `main()`, et `=== session terminée ===` (même PID, + la raison) à CHAQUE
   point de sortie — fermeture de fenêtre, hotkey Quitter, Ctrl+C (`logging::install_ctrlc_handler`,
   sans quoi ce chemin de sortie n'aurait jamais de borne de fin exploitable), échec de démarrage
