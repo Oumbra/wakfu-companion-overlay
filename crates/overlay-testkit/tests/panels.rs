@@ -1107,6 +1107,13 @@ fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
 /// qu'elle se voit pareil des deux côtés.
 #[test]
 fn panneau_suivi_deplacement_en_vol() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     let Bandeau { mut harness, .. } = harnais_bandeau(entrees_de_bandeau());
     harness.run();
 
@@ -1140,6 +1147,13 @@ fn panneau_suivi_deplacement_en_vol() {
 /// [`BANDEAU_HAUTEUR`]).
 #[test]
 fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     let Bandeau {
         mut harness,
         selection,
@@ -1875,6 +1889,13 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
 /// `false` — le cas du binaire Linux, sans compte — il est grisé et son infobulle le dit.
 #[test]
 fn options_parametres_section_compte() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
 
     let mut options_state = OptionsModalState {
@@ -1924,6 +1945,13 @@ fn options_parametres_section_compte() {
 /// `options_deconnexion_confirmee_et_echap_repond_non` ; ici, seul le rendu est figé.
 #[test]
 fn options_deconnexion_confirmation() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
 
     let mut options_state = OptionsModalState {
@@ -1967,6 +1995,13 @@ fn options_deconnexion_confirmation() {
 
 #[test]
 fn options_onglet_raccourcis() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::raccourcis_tab::RaccourcisTabState;
     use overlay_ui::shortcuts::{Shortcut, ShortcutAction};
 
@@ -2023,6 +2058,13 @@ fn options_onglet_raccourcis() {
 /// modificateur (F1/F2), l'exception que ces deux raccourcis ont introduite.
 #[test]
 fn options_raccourcis_section_multicompte() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::raccourcis_tab::RaccourcisTabState;
 
     let mut options_state = OptionsModalState {
@@ -2123,6 +2165,13 @@ fn options_garde_de_fermeture() {
 /// La garde **à l'écran** : la boîte du jeu, sur un voile qui couvre la fenêtre entière.
 #[test]
 fn options_garde_de_fermeture_a_l_ecran() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::alerts_tab::AlertsAvailability;
 
     let mut profil = overlay_engine::AlertProfile::default();
@@ -2273,6 +2322,13 @@ fn options_garde_de_fermeture_au_clavier() {
 /// clic qui manquerait la croix passerait pour une garde qui fonctionne.
 #[test]
 fn options_croix_de_la_banniere_ferme_comme_annuler() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::alerts_tab::AlertsAvailability;
 
     const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
@@ -2488,6 +2544,13 @@ fn options_alertes_survol_d_un_objet_par_defaut() {
 /// la recherche interroge.
 #[test]
 fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     // `[id, fr, en, es, pt, gfxId, rarity_sort, has_recipe, category_sort]`
@@ -2708,6 +2771,13 @@ fn options_alertes_croix_efface_la_saisie() {
 /// appuyer sur Entrée ». La capture montre la septième rangée en surbrillance, et Entrée l'ajoute.
 #[test]
 fn options_alertes_les_fleches_font_defiler_la_liste() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     // Huit « Pierre … », toutes retenues par « pierre » : trois de plus que les rangées visibles.
@@ -3057,6 +3127,13 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
 /// visuel qui le rend praticable.
 #[test]
 fn options_suivi_deplacement_en_vol() {
+    // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
+    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
+    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
+    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
+    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
+    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
+    overlay_ui::build_info::freeze_for_snapshots();
     capture_suivi_deplacement("options_suivi_deplacement");
 }
 
