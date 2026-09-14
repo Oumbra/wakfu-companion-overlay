@@ -1006,7 +1006,7 @@ ui.add(design::heading("Fichier"));
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
 | `text` (à la construction) | le titre | — |
-| `trailing_gap` | écart réservé sous le titre | `tokens::HEADING_TO_ROW` (13) |
+| `preview_trailing_gap` | écart sous le titre — **planches de simulation uniquement** | `tokens::HEADING_TO_ROW` (13) |
 
 Serif grasse au corps du titre de fenêtre (21), **gris `#b8b9ba` et non blanc** : la hiérarchie
 entre les deux niveaux de titre du jeu passe par la couleur, pas par le corps.
@@ -1027,10 +1027,16 @@ rondeur de la capitale initiale). L'encre réservant 16 px, il reste **13 px** s
 > et 16 px du bas de l'encre au haut de la case, les deux cotes du jeu exactement**, quand 14 donne
 > 31 et 17.
 
-**Utilisé en production** : la modale Options et les maquettes de la page Alertes. Seul l'onglet
-« Paramètres » prend l'écart par DÉFAUT — Suivi, Alertes, Chat et Raccourcis surchargent
-`trailing_gap` avec leur propre demi-`SECTION_GAP`, calé sur les maquettes validées de leurs grilles
-de tuiles.
+**Un seul écart sous un titre, sur tous les écrans.** Cinq d'entre eux en décidaient autrement
+jusqu'au 2026-09-14 — une demi-`SECTION_GAP` dans les onglets Suivi, Alertes, Chat et Raccourcis, un
+littéral de 8 dans la fenêtre de recette — et le même titre s'ouvrait sur quatre valeurs selon
+l'endroit où on le lisait. Retirés sur demande de l'utilisateur : « les espacements doivent être
+génériques ». `preview_trailing_gap` en change encore, mais son nom dit à quoi il sert : les
+planches de simulation qui mesurent une valeur candidate, jamais un écran. Même esprit que
+`Checkbox::preview_state`.
+
+**Utilisé en production** : la modale Options (six titres sur quatre onglets) et la fenêtre de
+recette.
 
 ---
 
