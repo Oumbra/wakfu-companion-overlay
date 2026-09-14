@@ -55,7 +55,7 @@ La version du produit vit à **un seul endroit**, `[workspace.package] version` 
 racine : toutes les crates y renvoient (`version.workspace = true`) et Cargo l'embarque dans le
 binaire. `crates/overlay-ui/build.rs` y ajoute le **hash du commit** compilé. Les deux se lisent
 dans `overlay_ui::build_info`, et se voient à deux endroits : la bannière de la fenêtre Options
-(`v0.1.0`) et la ligne `=== session démarrée ===` du journal (`0.1.0 (a1b2c3d)`).
+(`0.1.0`) et la ligne `=== session démarrée ===` du journal (`0.1.0 (a1b2c3d)`).
 
 **Elle s'incrémente toute seule, ne pas l'éditer à la main.** Le hook `post-commit`
 (`scripts/bump-version.sh`) lit le type [Conventional Commits](https://www.conventionalcommits.org/)

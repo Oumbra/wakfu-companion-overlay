@@ -24,12 +24,16 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Hash court du commit compilé, ou `"inconnu"` — voir `build.rs`.
 pub const COMMIT: &str = env!("WAKFU_OVERLAY_COMMIT");
 
-/// Ce que peint la bannière des fenêtres : `v0.4.2`.
+/// Ce que peint la bannière des fenêtres : `0.4.2`.
 ///
 /// Volontairement SANS le hash : la bannière est un bandeau étroit partagé avec le titre centré et
 /// la croix de fermeture, et le numéro public suffit à un utilisateur qui veut savoir s'il est à
-/// jour. Le hash reste à un geste de là, dans le journal ([`full_label`]).
-pub const BANNER_LABEL: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+/// jour. Le hash reste à un geste de là, dans le journal ([`FULL_LABEL`]).
+///
+/// Sans préfixe `v` non plus (choix de l'utilisateur, 2026-09-14) : à cette place, rien d'autre
+/// qu'un numéro de version ne peut s'afficher — la lettre n'apprend rien et allonge le seul élément
+/// que la bannière pousse vers son titre.
+pub const BANNER_LABEL: &str = env!("CARGO_PKG_VERSION");
 
 /// Identité complète, pour le journal : `0.4.2 (a1b2c3d)`.
 pub const FULL_LABEL: &str = concat!(
@@ -68,15 +72,15 @@ pub fn freeze_for_snapshots() {
 
 /// Le libellé figé des captures. Même gabarit qu'un vrai numéro (trois composantes d'un chiffre),
 /// pour que la référence rende compte de la place réellement occupée en production.
-pub const FROZEN_LABEL: &str = "v0.0.0";
+pub const FROZEN_LABEL: &str = "0.0.0";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn le_libelle_de_banniere_prefixe_la_version_du_manifeste() {
-        assert_eq!(BANNER_LABEL, format!("v{VERSION}"));
+    fn le_libelle_de_banniere_est_la_version_du_manifeste() {
+        assert_eq!(BANNER_LABEL, VERSION);
         // Sans surcharge posée, c'est bien la vraie version qui est peinte.
         assert_eq!(banner_label(), BANNER_LABEL);
     }

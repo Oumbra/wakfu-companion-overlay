@@ -1450,7 +1450,7 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   fois — bug vécu côté web).
   - **Conséquence sur le gate de captures** (§17.1) : la bannière de la fenêtre Options peint ce
     numéro, donc chaque bump périmerait toutes ses captures. `overlay_ui::build_info::
-    freeze_for_snapshots` le fige à `v0.0.0` pour le harnais, appelée depuis le point de passage
+    freeze_for_snapshots` le fige à `0.0.0` pour le harnais, appelée depuis le point de passage
     obligé de `tests/panels.rs` (`Textures::get_or_load`) plutôt que test par test.
 - Mise à jour : vérification `GET` de la dernière Release au démarrage, téléchargement en tâche de
   fond, application au prochain lancement. Le bundle moteur peut être mis à jour **sans** nouvelle
