@@ -219,6 +219,11 @@ pub struct OptionsModalState {
     /// combat_always_visible`) et prise en compte seulement à « Valider », comme le chemin de log
     /// et les deux brouillons (§5.1 du plan).
     pub combat_always_visible: bool,
+    /// Prévenir par une notification du système qu'un personnage du joueur doit jouer ? — case à
+    /// cocher de la section « Combat » de l'onglet « Paramètres » (2026-09-14), même mécanique de
+    /// brouillon que la case ci-dessus : initialisée par l'hôte au réglage en vigueur
+    /// (`config::OverlayConfig::turn_notification`), prise en compte seulement à « Valider ».
+    pub turn_notification: bool,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -296,6 +301,9 @@ pub struct OptionsInitial {
     /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
     /// pas pour rien.
     pub combat_always_visible: bool,
+    /// La notification de tour telle qu'elle était à l'ouverture — même rôle que le champ
+    /// ci-dessus.
+    pub turn_notification: bool,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -317,6 +325,7 @@ impl OptionsModalState {
         OptionsCommit {
             path: self.path_input.clone(),
             combat_always_visible: self.combat_always_visible,
+            turn_notification: self.turn_notification,
             shortcuts: self.shortcuts.clone(),
         }
     }
@@ -349,6 +358,7 @@ impl OptionsModalState {
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
             || self.combat_always_visible != self.initial.combat_always_visible
+            || self.turn_notification != self.initial.turn_notification
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -404,6 +414,8 @@ pub struct OptionsCommit {
     pub path: String,
     /// État de la case « Afficher le panneau de combat en dehors des combats ».
     pub combat_always_visible: bool,
+    /// État de la case « Me prévenir quand un de mes personnages doit jouer ».
+    pub turn_notification: bool,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -679,6 +691,28 @@ pub fn show(
             .log_name("options-combat-toujours-visible"),
         );
 
+        // **Section « Combat »** (2026-09-14) — ce que l'overlay fait PENDANT un combat, par
+        // opposition à « Affichage », qui règle ce qu'il montre en dehors. Demande utilisateur
+        // explicite du jour : « une case à cocher dans la rubrique combat ».
+        //
+        // Réglage LOCAL, comme sa voisine et pour la même raison, mais poussée d'un cran : une
+        // notification du système est le seul effet de l'overlay qui sorte de l'écran de jeu. Elle
+        // dépend donc de la machine (démon de notifications présent ou non, téléphone apparié…),
+        // jamais du joueur — et elle est décochée par défaut.
+        ui.add_space(SECTION_GAP);
+        ui.add(design::heading("Combat"));
+        ui.add(
+            design::checkbox(
+                &mut state.turn_notification,
+                "Me prévenir quand un de mes personnages doit jouer",
+            )
+            .tooltip(
+                "Une notification du système annonce le personnage dont c'est le tour, uniquement \
+                 si sa fenêtre de jeu n'est pas celle que vous avez sous les yeux.",
+            )
+            .log_name("options-notification-de-tour"),
+        );
+
         // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
         // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
         // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
@@ -893,14 +927,28 @@ mod tests {
     fn valider_emporte_le_chemin_et_la_case() {
         let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
         state.combat_always_visible = true;
+        state.turn_notification = true;
         assert_eq!(
             state.commit(),
             OptionsCommit {
                 path: "/jeu/wakfu.log".to_string(),
                 combat_always_visible: true,
+                turn_notification: true,
                 shortcuts: ShortcutBindings::default(),
             }
         );
+    }
+
+    /// La case « Me prévenir quand un de mes personnages doit jouer » suit la même mécanique de
+    /// brouillon que sa voisine : la garde de fermeture s'ouvre si on la bascule, et se referme
+    /// sur un aller-retour.
+    #[test]
+    fn cocher_la_notification_de_tour_met_des_modifications_en_attente() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.turn_notification = true;
+        assert!(state.is_dirty());
+        state.turn_notification = false;
+        assert!(!state.is_dirty());
     }
 
     /// Toucher un raccourci met des modifications en attente, au même titre que le chemin ou la

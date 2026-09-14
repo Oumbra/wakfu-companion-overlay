@@ -59,6 +59,21 @@ pub struct OverlayConfig {
     /// La carte d'alerte de chat ne se ferme qu'à la main — même exception, même raison.
     #[serde(default)]
     pub chat_alert_manual_close: bool,
+    /// Prévenir par une **notification du système** qu'un personnage du joueur doit jouer
+    /// (section « Combat » de l'onglet Paramètres, 2026-09-14).
+    ///
+    /// `false` par défaut : une notification système est le seul réglage de l'overlay qui déborde
+    /// de l'écran de jeu (barre de notifications, téléphone apparié sous Windows…), elle ne
+    /// s'active donc que si on la demande.
+    ///
+    /// **Locale et non au compte**, comme ses voisines : elle dépend de la machine — un multicompte
+    /// sur un seul écran n'a pas les mêmes besoins que deux écrans côte à côte, et c'est la même
+    /// machine qui porte ou non un démon de notifications.
+    ///
+    /// `#[serde(default)]` : un `config.toml` écrit avant ce champ reste lisible, voir
+    /// `combat_always_visible`.
+    #[serde(default)]
+    pub turn_notification: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).

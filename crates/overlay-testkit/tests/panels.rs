@@ -1514,6 +1514,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // dans cet état, et personne ne l'a touchée : « Valider » emporte le réglage tel
                 // qu'il est, jamais un défaut recalculé au passage.
                 combat_always_visible: false,
+                // Même chose pour « Me prévenir quand un de mes personnages doit jouer » : décochée
+                // à l'ouverture, elle est emportée décochée.
+                turn_notification: false,
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
