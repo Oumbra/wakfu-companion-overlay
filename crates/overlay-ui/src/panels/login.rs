@@ -5,14 +5,19 @@
 //! quatre passes) : une carte de 400 px sur fond noir translucide, le logo du site, le titre
 //! « WAKFU COMPANION » dans l'accent cyan du site suivi d'« OVERLAY » en italique gris, le badge
 //! « beta » en haut à droite, un séparateur gravé (ligne sombre puis claire), un corps aligné à
-//! gauche, et le numéro de version en pied, au style de la bannière de la fenêtre Options. Un
+//! gauche, et le numéro de version en pied, en bas à droite, au style du badge « beta ». Un
 //! **anneau lumineux tourne en permanence** autour de la carte — gris translucide au repos, cyan
 //! pendant l'appairage, rouge en erreur : la fenêtre est toujours vivante.
 //!
-//! Trois états, calqués sur [`AuthStatus`] :
+//! Quatre états — l'écran de chargement, puis trois calqués sur [`AuthStatus`] :
 //!
-//! - **non connecté** (`Disconnected { failure: None }`, et `Connecting` avec « Connexion… » à la
-//!   place du bouton) : « Vous n'êtes pas connecté » + « Se connecter » ;
+//! - **chargement** ([`LoginState::loading`], et `Connecting`) : la même carte, avec le rouage du
+//!   jeu (`design::loader`) centré dans le corps et rien d'autre. C'est **la toute première
+//!   image de l'overlay** : elle masque tout le démarrage — catalogue, référentiels, rattrapage
+//!   de `wakfu.log`, vérification du jeton stocké et récupération des réglages du compte (voir
+//!   `crate::startup`) — et ne cède la place qu'à l'overlay (compte lié) ou à l'écran suivant ;
+//! - **non connecté** (`Disconnected { failure: None }`) : « Vous n'êtes pas connecté » + « Se
+//!   connecter » ;
 //! - **appairage** (`PairingStarted`) : le code en grand, le compte à rebours, « Copier le code »,
 //!   « Rouvrir la page », et le lien « Annuler l'appairage » ;
 //! - **erreur** (`Disconnected { failure: Some(_) }`) : « Connexion impossible », le titre court de
@@ -22,8 +27,7 @@
 //! overlay posé sur le jeu mais une fenêtre logicielle classique, la porte d'entrée du compte
 //! Wakfu Companion — elle reprend donc l'en-tête du site (`app-header.component`, accent
 //! `#00d2ff`, badge *beta*, logo `logo-purple.png`) et ses boutons (`.btn-primary`), pas les
-//! textures 9-slice de `crate::design`. Seule la version du pied reprend le style du jeu, comme
-//! la bannière de la fenêtre Options.
+//! textures 9-slice de `crate::design`. Seul le rouage de l'écran de chargement vient du jeu.
 //!
 //! **Pas de mode invité.** Cette fenêtre n'a aucun bouton pour la contourner, et n'en aura jamais :
 //! un compte est obligatoire (décision utilisateur, 2026-09-13/14).
@@ -40,15 +44,16 @@ use egui::text::LayoutJob;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 use crate::build_info;
-use crate::design::text;
+use crate::design::{self, text};
 use crate::render_content::{AuthCommand, AuthCommandSink, AuthStatus};
 use crate::ui_icons::UiIcons;
 
 /// Largeur de la carte, et donc de la fenêtre OS (maquette : 400 px).
 pub const WINDOW_WIDTH: f32 = 400.0;
-/// Hauteur de départ de la fenêtre OS — celle de l'état « non connecté », le premier affiché. La
-/// hauteur réelle est mesurée à chaque frame ([`LoginOutcome::content_height`]) et l'hôte ajuste
-/// la fenêtre dès la première : cette valeur ne sert qu'à ne pas naître à une taille absurde.
+/// Hauteur de la fenêtre OS sur l'écran de chargement, et celle de l'état « non connecté » qui
+/// lui succède le plus souvent — les deux écrans font exactement la même taille, pour que le
+/// passage de l'un à l'autre ne fasse pas bouger la fenêtre. Les autres états sont mesurés à
+/// chaque frame ([`LoginOutcome::content_height`]) et l'hôte ajuste la fenêtre.
 pub const INITIAL_HEIGHT: f32 = 385.0;
 
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
@@ -135,8 +140,13 @@ const DETAIL_PAD_X: f32 = 10.0;
 const DETAIL_PAD_Y: f32 = 8.0;
 const DETAIL_SIZE: f32 = 11.0;
 const FOOT_HEIGHT: f32 = 30.0;
+/// Côté du rouage de l'écran de chargement — le palier « bloc en cours de chargement » du design
+/// system (`LoaderSize::Medium`, 72 px), assez grand pour être le seul sujet de la carte sans
+/// l'écraser.
+const LOADER_SIZE: f32 = 72.0;
 const FOOT_PAD_SIDE: f32 = 12.0;
-const VERSION_SIZE: f32 = 11.0;
+/// Le corps du badge « beta » (`BETA_HEIGHT`) : la version est son pendant, en bas à droite.
+const VERSION_SIZE: f32 = BETA_HEIGHT;
 /// Inclinaison de l'italique simulé (voir [`paint_italic`]) — proche des 12° d'une vraie italique.
 const ITALIC_SHEAR: f32 = 0.2;
 
@@ -149,6 +159,10 @@ pub struct LoginState {
     /// `false` fige l'animation (aucun redessin réclamé) — réservé aux captures de non-régression,
     /// dont le harnais exige qu'une frame finisse par ne plus rien demander.
     pub animate: bool,
+    /// Écran de chargement (voir la doc de module) — posé par l'hôte tant que les chargements
+    /// initiaux ne sont pas terminés (`crate::startup::StartupProgress::is_complete`). `true` à la
+    /// création : la fenêtre naît sur le rouage.
+    pub loading: bool,
 }
 
 impl LoginState {
@@ -156,6 +170,7 @@ impl LoginState {
         Self {
             started_at,
             animate: true,
+            loading: true,
         }
     }
 }
@@ -311,81 +326,90 @@ pub fn show(
     let h2_font = text::label_strong_font(&ctx, H2_SIZE);
     let p_font = text::label_font(&ctx, P_SIZE);
 
-    match auth_status {
-        AuthStatus::Disconnected { failure: None }
-        | AuthStatus::Connecting
-        | AuthStatus::Connected => {
-            y = paint_paragraph(
-                ui,
-                Pos2::new(body_left, y),
-                body_width,
-                "Vous n'êtes pas connecté",
-                &h2_font,
-                TEXT,
-                H2_LINE,
-            ) + H2_GAP;
-            y = paint_paragraph(
-                ui,
-                Pos2::new(body_left, y),
-                body_width,
-                "Associez ce poste à votre compte Wakfu Companion pour activer le suivi des \
-                 combats, du butin et de l'historique.",
-                &p_font,
-                TEXT_MUTED,
-                P_LINE,
-            ) + P_GAP;
-            y = paint_paragraph(
-                ui,
-                Pos2::new(body_left, y),
-                body_width,
-                "La connexion se fait sur le site, dans votre navigateur.",
-                &p_font,
-                TEXT_MUTED,
-                P_LINE,
-            );
-            y += ACTIONS_MARGIN_TOP;
-            let button_rect = Rect::from_min_size(
-                Pos2::new(body_left, y),
-                Vec2::new(body_width, BUTTON_HEIGHT),
-            );
-            if matches!(auth_status, AuthStatus::Connecting) {
-                // Une tentative est en cours (jeton stocké en cours de validation, ou code
-                // d'appairage demandé) : le bouton cède la place à un état d'attente.
-                paint_wait_row(
-                    ui,
-                    Pos2::new(body_left, y + (BUTTON_HEIGHT - WAIT_SIZE) / 2.0),
-                    "Connexion…",
-                    None,
-                    elapsed,
-                    state.animate,
-                );
-            } else if button(
-                ui,
-                button_rect,
-                "Se connecter",
-                ButtonKind::Primary,
-                "login-se-connecter",
-            ) {
-                tracing::info!("[connexion] « Se connecter » — appairage demandé.");
-                auth_command_tx.send(AuthCommand::Retry);
-            }
-            y += BUTTON_HEIGHT;
+    // Le compte en cours de vérification (`Connecting`) est un chargement comme les autres : la
+    // fenêtre ne dit « non connecté » qu'une fois la réponse connue.
+    let loading = state.loading || matches!(auth_status, AuthStatus::Connecting);
+    if loading {
+        // Le corps prend la place qu'il occuperait sur l'écran « non connecté » (même hauteur
+        // totale, voir `INITIAL_HEIGHT`), le rouage en son centre exact.
+        let body_height =
+            (INITIAL_HEIGHT - (y - card.top()) - BODY_PAD_BOTTOM - FOOT_HEIGHT).max(LOADER_SIZE);
+        let body_rect =
+            Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(body_width, body_height));
+        let loader_rect = Rect::from_center_size(body_rect.center(), Vec2::splat(LOADER_SIZE));
+        let mut loader = design::loader()
+            .size(design::LoaderSize::Px(LOADER_SIZE))
+            .log_name("login-chargement");
+        if !state.animate {
+            loader = loader.preview_frame(0);
         }
-        AuthStatus::PairingStarted {
-            pairing_code,
-            verification_url,
-            expires_at,
-        } => {
-            y = paint_paragraph(
-                ui,
-                Pos2::new(body_left, y),
-                body_width,
-                "Confirmez ce code sur le site",
-                &h2_font,
-                TEXT,
-                H2_LINE,
-            ) + H2_GAP;
-            y = paint_paragraph(
+        ui.put(loader_rect, loader);
+        y += body_height;
+    } else {
+        match auth_status {
+            AuthStatus::Disconnected { failure: None }
+            | AuthStatus::Connecting
+            | AuthStatus::Connected => {
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Vous n'êtes pas connecté",
+                    &h2_font,
+                    TEXT,
+                    H2_LINE,
+                ) + H2_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Associez ce poste à votre compte Wakfu Companion pour activer le suivi des \
+                 combats, du butin et de l'historique.",
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
+                ) + P_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "La connexion se fait sur le site, dans votre navigateur.",
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
+                );
+                y += ACTIONS_MARGIN_TOP;
+                let button_rect = Rect::from_min_size(
+                    Pos2::new(body_left, y),
+                    Vec2::new(body_width, BUTTON_HEIGHT),
+                );
+                if button(
+                    ui,
+                    button_rect,
+                    "Se connecter",
+                    ButtonKind::Primary,
+                    "login-se-connecter",
+                ) {
+                    tracing::info!("[connexion] « Se connecter » — appairage demandé.");
+                    auth_command_tx.send(AuthCommand::Retry);
+                }
+                y += BUTTON_HEIGHT;
+            }
+            AuthStatus::PairingStarted {
+                pairing_code,
+                verification_url,
+                expires_at,
+            } => {
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Confirmez ce code sur le site",
+                    &h2_font,
+                    TEXT,
+                    H2_LINE,
+                ) + H2_GAP;
+                y = paint_paragraph(
                 ui,
                 Pos2::new(body_left, y),
                 body_width,
@@ -395,224 +419,234 @@ pub fn show(
                 TEXT_MUTED,
                 P_LINE,
             );
-            // Encadré du code.
-            y += CODE_MARGIN_TOP;
-            let code_font = FontId::monospace(CODE_VALUE_SIZE);
-            let label_font = text::label_font(&ctx, CODE_LABEL_SIZE);
-            let label_galley = ui.fonts_mut(|f| {
-                f.layout_no_wrap("CODE D'APPAIRAGE".to_owned(), label_font.clone(), ACCENT)
-            });
-            let code_height = CODE_PAD_TOP
-                + CODE_VALUE_SIZE
-                + CODE_LABEL_GAP
-                + label_galley.rect.height()
-                + CODE_PAD_BOTTOM;
-            let code_rect =
-                Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(body_width, code_height));
-            ui.painter()
-                .rect_filled(code_rect, BUTTON_RADIUS, CODE_FILL);
-            ui.painter().rect_stroke(
-                code_rect.shrink(0.5),
-                BUTTON_RADIUS,
-                Stroke::new(1.0, CODE_BORDER),
-                egui::StrokeKind::Inside,
-            );
-            let code_width = spaced_width(ui, pairing_code, &code_font, CODE_VALUE_SPACING);
-            paint_spaced(
-                ui,
-                Pos2::new(
-                    center_x - code_width / 2.0,
-                    y + CODE_PAD_TOP + CODE_VALUE_SIZE / 2.0,
-                ),
-                pairing_code,
-                &code_font,
-                TEXT,
-                CODE_VALUE_SPACING,
-            );
-            let label_width = spaced_width(ui, "CODE D'APPAIRAGE", &label_font, 0.4);
-            paint_spaced(
-                ui,
-                Pos2::new(
-                    center_x - label_width / 2.0,
-                    y + CODE_PAD_TOP
-                        + CODE_VALUE_SIZE
-                        + CODE_LABEL_GAP
-                        + label_galley.rect.height() / 2.0,
-                ),
-                "CODE D'APPAIRAGE",
-                &label_font,
-                ACCENT,
-                0.4,
-            );
-            y += code_height;
-            // Ligne d'attente : points, libellé, compte à rebours.
-            y += WAIT_MARGIN_TOP;
-            let remaining = expires_at.saturating_duration_since(now);
-            let timer = format!(
-                "expire dans {:02}:{:02}",
-                remaining.as_secs() / 60,
-                remaining.as_secs() % 60
-            );
-            let row_height = paint_wait_row(
-                ui,
-                Pos2::new(body_left, y),
-                "En attente de confirmation",
-                Some((&timer, body_left + body_width)),
-                elapsed,
-                state.animate,
-            );
-            y += row_height;
-            // Deux boutons côte à côte.
-            y += ACTIONS_MARGIN_TOP;
-            let half = (body_width - ACTIONS_GAP) / 2.0;
-            let copy_rect =
-                Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(half, BUTTON_HEIGHT));
-            let reopen_rect = Rect::from_min_size(
-                Pos2::new(body_left + half + ACTIONS_GAP, y),
-                Vec2::new(half, BUTTON_HEIGHT),
-            );
-            if button(
-                ui,
-                copy_rect,
-                "Copier le code",
-                ButtonKind::Primary,
-                "login-copier",
-            ) {
-                tracing::info!("[connexion] code d'appairage copié.");
-                ctx.copy_text(pairing_code.clone());
-            }
-            if button(
-                ui,
-                reopen_rect,
-                "Rouvrir la page",
-                ButtonKind::Secondary,
-                "login-rouvrir",
-            ) {
-                tracing::info!(
-                    "[connexion] « Rouvrir la page » — page de vérification redemandée."
+                // Encadré du code.
+                y += CODE_MARGIN_TOP;
+                let code_font = FontId::monospace(CODE_VALUE_SIZE);
+                let label_font = text::label_font(&ctx, CODE_LABEL_SIZE);
+                let label_galley = ui.fonts_mut(|f| {
+                    f.layout_no_wrap("CODE D'APPAIRAGE".to_owned(), label_font.clone(), ACCENT)
+                });
+                let code_height = CODE_PAD_TOP
+                    + CODE_VALUE_SIZE
+                    + CODE_LABEL_GAP
+                    + label_galley.rect.height()
+                    + CODE_PAD_BOTTOM;
+                let code_rect = Rect::from_min_size(
+                    Pos2::new(body_left, y),
+                    Vec2::new(body_width, code_height),
                 );
-                outcome.open_url = Some(verification_url.clone());
+                ui.painter()
+                    .rect_filled(code_rect, BUTTON_RADIUS, CODE_FILL);
+                ui.painter().rect_stroke(
+                    code_rect.shrink(0.5),
+                    BUTTON_RADIUS,
+                    Stroke::new(1.0, CODE_BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                let code_width = spaced_width(ui, pairing_code, &code_font, CODE_VALUE_SPACING);
+                paint_spaced(
+                    ui,
+                    Pos2::new(
+                        center_x - code_width / 2.0,
+                        y + CODE_PAD_TOP + CODE_VALUE_SIZE / 2.0,
+                    ),
+                    pairing_code,
+                    &code_font,
+                    TEXT,
+                    CODE_VALUE_SPACING,
+                );
+                let label_width = spaced_width(ui, "CODE D'APPAIRAGE", &label_font, 0.4);
+                paint_spaced(
+                    ui,
+                    Pos2::new(
+                        center_x - label_width / 2.0,
+                        y + CODE_PAD_TOP
+                            + CODE_VALUE_SIZE
+                            + CODE_LABEL_GAP
+                            + label_galley.rect.height() / 2.0,
+                    ),
+                    "CODE D'APPAIRAGE",
+                    &label_font,
+                    ACCENT,
+                    0.4,
+                );
+                y += code_height;
+                // Ligne d'attente : points, libellé, compte à rebours.
+                y += WAIT_MARGIN_TOP;
+                let remaining = expires_at.saturating_duration_since(now);
+                let timer = format!(
+                    "expire dans {:02}:{:02}",
+                    remaining.as_secs() / 60,
+                    remaining.as_secs() % 60
+                );
+                let row_height = paint_wait_row(
+                    ui,
+                    Pos2::new(body_left, y),
+                    "En attente de confirmation",
+                    Some((&timer, body_left + body_width)),
+                    elapsed,
+                    state.animate,
+                );
+                y += row_height;
+                // Deux boutons côte à côte.
+                y += ACTIONS_MARGIN_TOP;
+                let half = (body_width - ACTIONS_GAP) / 2.0;
+                let copy_rect =
+                    Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(half, BUTTON_HEIGHT));
+                let reopen_rect = Rect::from_min_size(
+                    Pos2::new(body_left + half + ACTIONS_GAP, y),
+                    Vec2::new(half, BUTTON_HEIGHT),
+                );
+                if button(
+                    ui,
+                    copy_rect,
+                    "Copier le code",
+                    ButtonKind::Primary,
+                    "login-copier",
+                ) {
+                    tracing::info!("[connexion] code d'appairage copié.");
+                    ctx.copy_text(pairing_code.clone());
+                }
+                if button(
+                    ui,
+                    reopen_rect,
+                    "Rouvrir la page",
+                    ButtonKind::Secondary,
+                    "login-rouvrir",
+                ) {
+                    tracing::info!(
+                        "[connexion] « Rouvrir la page » — page de vérification redemandée."
+                    );
+                    outcome.open_url = Some(verification_url.clone());
+                }
+                y += BUTTON_HEIGHT;
+                // Lien centré.
+                y += LINK_MARGIN_TOP;
+                let link_height = link(
+                    ui,
+                    Pos2::new(center_x, y),
+                    "Annuler l'appairage",
+                    "login-annuler",
+                    || {
+                        tracing::info!("[connexion] appairage annulé par l'utilisateur.");
+                        auth_command_tx.send(AuthCommand::CancelPairing);
+                    },
+                );
+                y += link_height;
             }
-            y += BUTTON_HEIGHT;
-            // Lien centré.
-            y += LINK_MARGIN_TOP;
-            let link_height = link(
-                ui,
-                Pos2::new(center_x, y),
-                "Annuler l'appairage",
-                "login-annuler",
-                || {
-                    tracing::info!("[connexion] appairage annulé par l'utilisateur.");
-                    auth_command_tx.send(AuthCommand::CancelPairing);
-                },
-            );
-            y += link_height;
-        }
-        AuthStatus::Disconnected {
-            failure: Some(failure),
-        } => {
-            // Statut : point rouge auréolé + libellé en capitales.
-            let status_font = text::label_strong_font(&ctx, STATUS_SIZE);
-            let status_galley = ui.fonts_mut(|f| {
-                f.layout_no_wrap("CONNEXION IMPOSSIBLE".to_owned(), status_font, ERROR_TEXT)
-            });
-            let status_center_y = y + status_galley.rect.height() / 2.0;
-            ui.painter().circle_filled(
-                Pos2::new(body_left + STATUS_DOT / 2.0, status_center_y),
-                STATUS_DOT / 2.0 + 3.0,
-                ERROR_DOT_HALO,
-            );
-            ui.painter().circle_filled(
-                Pos2::new(body_left + STATUS_DOT / 2.0, status_center_y),
-                STATUS_DOT / 2.0,
-                ERROR_DOT,
-            );
-            ui.painter().galley(
-                Pos2::new(body_left + STATUS_DOT + STATUS_GAP, y),
-                status_galley.clone(),
-                ERROR_TEXT,
-            );
-            y += status_galley.rect.height() + STATUS_MARGIN_BOTTOM;
-            y = paint_paragraph(
-                ui,
-                Pos2::new(body_left, y),
-                body_width,
-                &failure.headline,
-                &h2_font,
-                TEXT,
-                H2_LINE,
-            ) + H2_GAP;
-            y = paint_paragraph(
-                ui,
-                Pos2::new(body_left, y),
-                body_width,
-                "L'overlay n'a pas pu se connecter au compte : le serveur Wakfu Companion n'a \
+            AuthStatus::Disconnected {
+                failure: Some(failure),
+            } => {
+                // Statut : point rouge auréolé + libellé en capitales.
+                let status_font = text::label_strong_font(&ctx, STATUS_SIZE);
+                let status_galley = ui.fonts_mut(|f| {
+                    f.layout_no_wrap("CONNEXION IMPOSSIBLE".to_owned(), status_font, ERROR_TEXT)
+                });
+                let status_center_y = y + status_galley.rect.height() / 2.0;
+                ui.painter().circle_filled(
+                    Pos2::new(body_left + STATUS_DOT / 2.0, status_center_y),
+                    STATUS_DOT / 2.0 + 3.0,
+                    ERROR_DOT_HALO,
+                );
+                ui.painter().circle_filled(
+                    Pos2::new(body_left + STATUS_DOT / 2.0, status_center_y),
+                    STATUS_DOT / 2.0,
+                    ERROR_DOT,
+                );
+                ui.painter().galley(
+                    Pos2::new(body_left + STATUS_DOT + STATUS_GAP, y),
+                    status_galley.clone(),
+                    ERROR_TEXT,
+                );
+                y += status_galley.rect.height() + STATUS_MARGIN_BOTTOM;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    &failure.headline,
+                    &h2_font,
+                    TEXT,
+                    H2_LINE,
+                ) + H2_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "L'overlay n'a pas pu se connecter au compte : le serveur Wakfu Companion n'a \
                  pas répondu comme attendu. Vérifiez votre connexion internet, puis réessayez.",
-                &p_font,
-                TEXT_MUTED,
-                P_LINE,
-            );
-            // Détail technique, sur une ligne, tronqué au besoin.
-            y += DETAIL_MARGIN_TOP;
-            let detail_font = FontId::monospace(DETAIL_SIZE);
-            let detail_galley = ui.fonts_mut(|f| {
-                let mut job = LayoutJob::simple(
-                    failure.detail.clone(),
-                    detail_font,
-                    TEXT_DIM,
-                    body_width - 2.0 * DETAIL_PAD_X,
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
                 );
-                job.wrap.max_rows = 1;
-                job.wrap.break_anywhere = true;
-                f.layout_job(job)
-            });
-            let detail_height = detail_galley.rect.height() + 2.0 * DETAIL_PAD_Y;
-            let detail_rect = Rect::from_min_size(
-                Pos2::new(body_left, y),
-                Vec2::new(body_width, detail_height),
-            );
-            ui.painter().rect_filled(detail_rect, 4.0, DETAIL_FILL);
-            ui.painter().rect_stroke(
-                detail_rect.shrink(0.5),
-                4.0,
-                Stroke::new(1.0, SECONDARY_BORDER),
-                egui::StrokeKind::Inside,
-            );
-            ui.painter().galley(
-                Pos2::new(body_left + DETAIL_PAD_X, y + DETAIL_PAD_Y),
-                detail_galley,
-                TEXT_DIM,
-            );
-            y += detail_height;
-            y += ACTIONS_MARGIN_TOP;
-            let button_rect = Rect::from_min_size(
-                Pos2::new(body_left, y),
-                Vec2::new(body_width, BUTTON_HEIGHT),
-            );
-            if button(
-                ui,
-                button_rect,
-                "Réessayer",
-                ButtonKind::Primary,
-                "login-reessayer",
-            ) {
-                tracing::info!("[connexion] « Réessayer » — nouvelle tentative demandée.");
-                auth_command_tx.send(AuthCommand::Retry);
+                // Détail technique, sur une ligne, tronqué au besoin.
+                y += DETAIL_MARGIN_TOP;
+                let detail_font = FontId::monospace(DETAIL_SIZE);
+                let detail_galley = ui.fonts_mut(|f| {
+                    let mut job = LayoutJob::simple(
+                        failure.detail.clone(),
+                        detail_font,
+                        TEXT_DIM,
+                        body_width - 2.0 * DETAIL_PAD_X,
+                    );
+                    job.wrap.max_rows = 1;
+                    job.wrap.break_anywhere = true;
+                    f.layout_job(job)
+                });
+                let detail_height = detail_galley.rect.height() + 2.0 * DETAIL_PAD_Y;
+                let detail_rect = Rect::from_min_size(
+                    Pos2::new(body_left, y),
+                    Vec2::new(body_width, detail_height),
+                );
+                ui.painter().rect_filled(detail_rect, 4.0, DETAIL_FILL);
+                ui.painter().rect_stroke(
+                    detail_rect.shrink(0.5),
+                    4.0,
+                    Stroke::new(1.0, SECONDARY_BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                ui.painter().galley(
+                    Pos2::new(body_left + DETAIL_PAD_X, y + DETAIL_PAD_Y),
+                    detail_galley,
+                    TEXT_DIM,
+                );
+                y += detail_height;
+                y += ACTIONS_MARGIN_TOP;
+                let button_rect = Rect::from_min_size(
+                    Pos2::new(body_left, y),
+                    Vec2::new(body_width, BUTTON_HEIGHT),
+                );
+                if button(
+                    ui,
+                    button_rect,
+                    "Réessayer",
+                    ButtonKind::Primary,
+                    "login-reessayer",
+                ) {
+                    tracing::info!("[connexion] « Réessayer » — nouvelle tentative demandée.");
+                    auth_command_tx.send(AuthCommand::Retry);
+                }
+                y += BUTTON_HEIGHT;
             }
-            y += BUTTON_HEIGHT;
         }
     }
     y += BODY_PAD_BOTTOM;
 
-    // ── Pied : numéro de version, au style de la bannière de la fenêtre Options ─────────────
-    text::paint_outlined_text(
+    // ── Pied : numéro de version, en bas à DROITE, au style exact du badge « beta » ──────────
+    // (demande utilisateur 2026-09-14 : « en bas à droite, en italique et de la même taille que
+    // le mot beta ») — même police, même corps, même gris, même italique simulé.
+    // Police résolue AVANT le verrou des fontes : `label_font` le prend aussi.
+    let version_font = text::label_font(&ctx, VERSION_SIZE);
+    let version_galley = ui.fonts_mut(|f| {
+        f.layout_no_wrap(build_info::banner_label().to_owned(), version_font, VERSION)
+    });
+    paint_italic(
         ui,
-        Pos2::new(card.left() + FOOT_PAD_SIDE, y + (FOOT_HEIGHT - 10.0) / 2.0),
-        Align2::LEFT_CENTER,
-        build_info::banner_label(),
-        text::title_font(&ctx, VERSION_SIZE),
+        Pos2::new(
+            card.right() - FOOT_PAD_SIDE - version_galley.rect.width(),
+            y + (FOOT_HEIGHT - 10.0) / 2.0 - version_galley.rect.height() / 2.0,
+        ),
+        version_galley,
         VERSION,
-        text::SHADOW_BOTTOM_RIGHT,
     );
     y += FOOT_HEIGHT;
 

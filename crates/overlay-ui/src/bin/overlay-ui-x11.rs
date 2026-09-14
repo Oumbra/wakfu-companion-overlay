@@ -7,27 +7,27 @@
 //! `with_x11_window_type`) — mêmes primitives déjà validées par `spikes/s3-window-linux/`, voir
 //! son README pour la preuve programmatique sous Xvfb (Shape, stacking, focus).
 //!
-//! **Portée volontairement réduite par rapport à `main.rs` (Windows), documentée honnêtement
-//! (§17.2 « État ») — mode INVITÉ uniquement pour cette première version :**
-//! - Pas de compte lié / synchro serveur (lots L4-L5) : aucun thread Auth/Sync/Catalogue/Donjons.
-//!   `catalog`/`dungeons` restent à leurs valeurs par défaut (vides), `auth_status` reste
-//!   `Connected` fixe, `auth_command_tx` est un `NoopAuthSink` (rien n'écoute de toute façon).
-//!   **La fenêtre de connexion (`OverlayKind::Login`, `panels::login`, 2026-09-14) n'est donc
-//!   pas câblée ici** — ni l'icône de zone de notification (`tray-icon`, dépendance Windows
-//!   seulement). Ce binaire est un harnais de rendu réel sous X11 ; l'obligation de compte, elle,
-//!   est celle du binaire Windows (`main.rs`, §9.1 undecies du plan). Le jour où le thread Auth y
-//!   sera porté, `panels::login` et `render_content` sont déjà partagés : seul le fenêtrage OS
-//!   (`main.rs::App::create_login_window`/`sync_session_windows`) reste à dupliquer.
-//! - Pas de hotkey rafraîchissement/déconnexion (`Ctrl+Shift+R`/`Ctrl+Alt+D`) : sans thread
-//!   Auth/Catalogue à redemander, ils n'auraient aucun effet ici. Seules les actions de
-//!   `overlay_ui::shortcuts::ShortcutAction::LINUX_SUPPORTED` sont câblées (bascule, sortie,
-//!   Options, sélection multiple du bandeau, invitation/suivi multicompte) — les autres restent
-//!   personnalisables et persistées, simplement inertes ici.
-//! - Icônes réelles d'objets/monstres : `RemoteIconStore::empty()` (pas de thread réseau, voir sa
-//!   doc) — le panneau Suivi retombe sur l'icône générique, comme en mode invité côté Windows.
+//! **Compte, synchro et catalogue depuis le 2026-09-14** : les threads de fond sont partagés avec
+//! Windows (`overlay_ui::background` — Auth, Sync, Catalogue, Donjons) et la fenêtre de connexion
+//! (`OverlayKind::Login`, `panels::login`, §9.1 undecies du plan) est câblée ici comme là-bas :
+//! écran de chargement au lancement, compte obligatoire (plus de mode invité), overlays de jeu
+//! seulement compte lié, retour à la fenêtre de connexion à la déconnexion
+//! (`App::sync_session_windows`). Le fenêtrage OS de cette fenêtre est dupliqué (comme tout le
+//! fenêtrage de ce fichier, voir `lib.rs`) : fenêtre X11 ordinaire (pas `Utility`), donc présente
+//! dans la barre des tâches, centrée sur l'écran principal, icône de fenêtre = logo du site.
+//!
+//! **Ce qui reste propre à Windows, documenté honnêtement (§17.2 « État ») :**
+//! - Pas d'icône de zone de notification : `tray-icon` tire GTK/libappindicator sous Linux et,
+//!   sous GNOME, une telle icône dépend d'une extension. « Quitter » passe par le raccourci
+//!   global, la fermeture de la fenêtre de connexion (`CloseRequested`) ou Ctrl+C ; « Déconnecter »
+//!   par la section « Compte » de la fenêtre Options.
+//! - Pas de hotkey rafraîchissement/détails (`ShortcutAction::LINUX_SUPPORTED` seulement :
+//!   bascule, sortie, Options, sélection multiple du bandeau, invitation/suivi multicompte) —
+//!   les autres restent personnalisables et persistées, simplement inertes ici.
 //!
 //! Ce que ce binaire couvre RÉELLEMENT (pas un stub, pas un panneau de diagnostic comme le spike
-//! S3) : ingestion + moteur réels sur un vrai `wakfu.log`, panneaux Combat/Suivi réels
+//! S3) : ingestion + moteur réels sur un vrai `wakfu.log`, icônes réelles d'objets/monstres
+//! (`RemoteIconStore::spawn`), panneaux Combat/Suivi réels
 //! (`paint_content`, la même fonction que Windows et qu'`overlay-testkit`), une fenêtre overlay
 //! PAR fenêtre de jeu trouvée créée/détruite dynamiquement (`sync_windows`, même politique que
 //! `main.rs::App::sync_windows`), ancrage identique (bord gauche pour Combat, bord haut pour
@@ -54,6 +54,7 @@ mod linux_main {
     use std::collections::HashMap;
     use std::env;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::sync::Arc;
     use std::thread;
@@ -65,29 +66,34 @@ mod linux_main {
     use overlay_ingest::discovery;
     use overlay_platform::linux::topmost::{self, TopmostAction, TopmostState};
     use overlay_platform::linux::x11::{GameRect, GameWindowTracker};
+    use overlay_ui::background::{
+        spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
+    };
     use overlay_ui::chat_command::{self, ChatCommand};
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
-        spawn_engine_thread, EngineCommand, EngineHandles, SyncCommand,
+        spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
     };
     use overlay_ui::frame::{render, GpuState};
     use overlay_ui::logging;
     use overlay_ui::panels;
-    use overlay_ui::panels::alerts_tab::AlertsAvailability;
-    use overlay_ui::panels::chat_tab::{self, ChatAvailability};
+    use overlay_ui::panels::alerts_tab;
+    use overlay_ui::panels::chat_tab;
     use overlay_ui::panels::combat::CombatSide;
     use overlay_ui::panels::combat_frame::CombatFrame;
+    use overlay_ui::panels::login::{self, LoginState};
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
-    use overlay_ui::panels::suivi_tab::SuiviAvailability;
+    use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
     use overlay_ui::render_content;
     use overlay_ui::render_content::{
-        AuthStatus, NoopAuthSink, OverlayKind, RenderContent, UserEvent,
+        AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent,
     };
     use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
-    use overlay_ui::ui_icons::UiIcons;
+    use overlay_ui::startup::StartupProgress;
+    use overlay_ui::ui_icons::{self, UiIcons};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -95,7 +101,7 @@ mod linux_main {
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
     use winit::keyboard::{KeyCode, PhysicalKey};
     use winit::platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11, WindowType};
-    use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
+    use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
     // Combinaisons : voir `overlay_ui::shortcuts` (personnalisables depuis le 2026-09-13, onglet
     // « Raccourcis » de la fenêtre Options). Ce binaire n'enregistre que les actions de
@@ -146,6 +152,15 @@ mod linux_main {
             }
     }
 
+    /// Voir `main.rs::format_alert_duration` — dupliqué, comme le reste du fenêtrage.
+    fn format_alert_duration(seconds: f32) -> String {
+        if seconds.fract().abs() < f32::EPSILON {
+            format!("{}", seconds as i64)
+        } else {
+            format!("{seconds:.1}").replace('.', ",")
+        }
+    }
+
     struct OverlayWindow {
         window: Arc<Window>,
         gpu: GpuState,
@@ -158,6 +173,11 @@ mod linux_main {
         /// État de la modale Options (2026-09-08) — `Some` UNIQUEMENT pour `kind ==
         /// OverlayKind::Options`, voir `App::open_options_modal`.
         options_state: Option<OptionsModalState>,
+        /// État de la fenêtre de connexion — `Some` UNIQUEMENT pour `kind == OverlayKind::Login`,
+        /// voir `App::create_login_window` (même règle qu'`options_state`).
+        login_state: Option<LoginState>,
+        /// Dernière hauteur demandée pour la fenêtre de connexion — voir `main.rs`.
+        last_login_height: Option<f32>,
         /// XID X11 de la fenêtre de jeu — équivalent du `hwnd` côté Windows (voir
         /// `overlay_platform::linux::x11::GameWindowInfo`).
         ///
@@ -198,9 +218,18 @@ mod linux_main {
         /// existe. Il n'y a de toute façon qu'un bandeau Suivi à la fois.
         watchlist_selection: panels::watchlist::WatchlistSelection,
         catalog: Arc<ArcSwap<CatalogIndex>>,
+        /// Voir `main.rs::App::catalog_stale` — indicateur « catalogue daté » de la zone Combat.
+        catalog_stale: Arc<AtomicBool>,
         remote_icons: RemoteIconStore,
-        auth_status: AuthStatus,
-        auth_command_tx: NoopAuthSink,
+        /// Publié par le thread Auth (`overlay_ui::background::spawn_auth_thread`) — pilote la
+        /// fenêtre de connexion et l'existence même des overlays de jeu.
+        auth_status: Arc<ArcSwap<AuthStatus>>,
+        auth_command_tx: mpsc::Sender<AuthCommand>,
+        /// Avancement des chargements initiaux — voir `overlay_ui::startup`.
+        startup: Arc<StartupProgress>,
+        /// Profil d'alerte et recherches de chat du compte — voir `main.rs::App::alert_profile`.
+        alert_profile: SharedAlertProfile,
+        chat_filters: SharedChatFilters,
         /// Voir la doc de `AppState::settings_tx` — permet à `validate_and_commit_options`
         /// d'envoyer `EngineCommand::ChangeLogPath` sans redémarrer tout le binaire.
         settings_tx: mpsc::Sender<EngineCommand>,
@@ -222,6 +251,11 @@ mod linux_main {
         /// voir `open_options_modal`), sondé sans bloquer à chaque `about_to_wait` (même motif que
         /// `hotkey_events`).
         pending_dialog: Option<mpsc::Receiver<Option<PathBuf>>>,
+        /// Résolution des ingrédients d'une recette en vol — voir `main.rs::App::pending_recipe`.
+        pending_recipe: Option<(
+            WindowId,
+            mpsc::Receiver<Vec<overlay_engine::RecipeIngredient>>,
+        )>,
     }
 
     struct AppState {
@@ -239,13 +273,16 @@ mod linux_main {
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
         catalog: Arc<ArcSwap<CatalogIndex>>,
+        catalog_stale: Arc<AtomicBool>,
         remote_icons: RemoteIconStore,
+        auth_status: Arc<ArcSwap<AuthStatus>>,
+        auth_command_tx: mpsc::Sender<AuthCommand>,
+        startup: Arc<StartupProgress>,
+        alert_profile: SharedAlertProfile,
+        chat_filters: SharedChatFilters,
         game_window: GameWindowTracker,
         /// Canal vers le thread Engine (2026-09-08, §9 du plan) — voir
-        /// `engine_thread::EngineCommand::ChangeLogPath`. Contrairement au reste de ce binaire
-        /// (mode invité fixe), CE canal est bien câblé côté thread Engine (`spawn_engine_thread`
-        /// l'accepte déjà, quel que soit le binaire) : seule sa moitié `settings_rx` était jusqu'ici
-        /// abandonnée sans jamais recevoir de commande, ce lot lui en donne enfin une à traiter.
+        /// `engine_thread::EngineCommand::ChangeLogPath`.
         settings_tx: mpsc::Sender<EngineCommand>,
     }
 
@@ -261,7 +298,13 @@ mod linux_main {
                 watchlist,
                 watchlist_toast,
                 catalog,
+                catalog_stale,
                 remote_icons,
+                auth_status,
+                auth_command_tx,
+                startup,
+                alert_profile,
+                chat_filters,
                 game_window,
                 settings_tx,
             } = state;
@@ -278,11 +321,13 @@ mod linux_main {
                 watchlist,
                 watchlist_toast,
                 catalog,
+                catalog_stale,
                 remote_icons,
-                // Fixe : aucun thread Auth ici (mode invité, voir la doc de module) — jamais
-                // `Disconnected`, donc jamais d'icône de relance d'appairage affichée.
-                auth_status: AuthStatus::Connected,
-                auth_command_tx: NoopAuthSink,
+                auth_status,
+                auth_command_tx,
+                startup,
+                alert_profile,
+                chat_filters,
                 settings_tx,
                 log_path,
                 combat_always_visible,
@@ -291,18 +336,172 @@ mod linux_main {
                 game_window,
                 banner_printed: false,
                 pending_dialog: None,
+                pending_recipe: None,
             }
         }
 
+        /// Voir `main.rs::App::session_ready` : chargements initiaux terminés ET compte lié.
+        fn session_ready(&self) -> bool {
+            self.startup.is_complete() && self.auth_status.load().is_connected()
+        }
+
+        /// Voir `main.rs::App::sync_session_windows` — même logique, mêmes trois situations
+        /// (chargement, compte lié, compte non lié), sans icône de zone de notification à
+        /// tenir à jour.
+        fn sync_session_windows(&mut self, event_loop: &ActiveEventLoop) {
+            let auth = self.auth_status.load();
+            let loading = !self.startup.is_complete() || matches!(**auth, AuthStatus::Connecting);
+            let connected = !loading && auth.is_connected();
+            let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
+            if connected {
+                if has_login {
+                    self.windows.retain(|_, w| w.kind != OverlayKind::Login);
+                    tracing::info!(
+                        "[connexion] compte lié et chargements terminés — fenêtre de connexion fermée, overlays de jeu activés."
+                    );
+                }
+            } else {
+                let had_options = self
+                    .windows
+                    .values()
+                    .any(|w| w.kind == OverlayKind::Options);
+                let before = self.windows.len();
+                self.windows.retain(|_, w| w.kind == OverlayKind::Login);
+                if self.windows.len() != before {
+                    if had_options {
+                        let _ = self.hotkeys.resume();
+                    }
+                    tracing::info!(
+                        "[connexion] aucun compte lié — {} fenêtre(s) de jeu fermée(s), retour à la fenêtre de connexion.",
+                        before - self.windows.len()
+                    );
+                }
+                if !has_login {
+                    self.create_login_window(event_loop);
+                }
+                for overlay in self.windows.values_mut() {
+                    if let Some(state) = overlay.login_state.as_mut() {
+                        if state.loading != loading {
+                            state.loading = loading;
+                            overlay.window.request_redraw();
+                            if !loading {
+                                tracing::info!(
+                                    "[connexion] chargements terminés — écran de connexion."
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Voir `main.rs::App::create_login_window` — fenêtre X11 ORDINAIRE (pas de type
+        /// `Utility`, contrairement aux overlays) : barre des tâches, bascule de fenêtres, focus,
+        /// z-order normal, centrée sur l'écran principal, sans décorations (la carte peint son
+        /// bord et se déplace par sa bannière). Icône de fenêtre = logo du site.
+        fn create_login_window(&mut self, event_loop: &ActiveEventLoop) {
+            let (rgba, width, height) = ui_icons::app_logo_rgba();
+            let icon = match Icon::from_rgba(rgba, width, height) {
+                Ok(icon) => Some(icon),
+                Err(err) => {
+                    tracing::warn!("[connexion] icône de fenêtre refusée : {err}");
+                    None
+                }
+            };
+            let attrs = WindowAttributes::default()
+                .with_title("Wakfu Companion Overlay")
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    login::WINDOW_WIDTH as f64,
+                    login::INITIAL_HEIGHT as f64,
+                ))
+                .with_transparent(true)
+                .with_decorations(false)
+                .with_window_level(WindowLevel::Normal)
+                .with_resizable(false)
+                .with_visible(true)
+                .with_window_icon(icon);
+            let window = event_loop
+                .create_window(attrs)
+                .expect("création de la fenêtre de connexion");
+            let window = Arc::new(window);
+            if let Err(err) = window.set_cursor_hittest(true) {
+                tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
+            }
+
+            let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
+            let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+            let combat_frame = CombatFrame::load(&gpu.egui_ctx);
+            let icons = UiIcons::load(&gpu.egui_ctx);
+
+            Self::center_on_primary_monitor(event_loop, &window);
+            window.focus_window();
+
+            let overlay = OverlayWindow {
+                window,
+                gpu,
+                kind: OverlayKind::Login,
+                portraits,
+                combat_frame,
+                icons,
+                remote_icon_textures: RemoteIconTextures::default(),
+                combat_side: CombatSide::default(),
+                options_state: None,
+                login_state: Some(LoginState::new(std::time::Instant::now())),
+                last_login_height: Some(login::INITIAL_HEIGHT),
+                game_window: 0,
+                game_rect: GameRect {
+                    left: 0,
+                    top: 0,
+                    width: 0,
+                    height: 0,
+                    client_top: 0,
+                },
+                character_name: "Connexion".to_string(),
+                last_position: None,
+                last_watchlist_width: None,
+                last_watchlist_height: None,
+                visible: true,
+                // Jamais promue : `sync_topmost` l'ignore, elle reste en z-order normal.
+                topmost_state: TopmostState::Normal,
+                next_redraw_at: None,
+            };
+            overlay.window.request_redraw();
+            tracing::info!("[connexion] fenêtre de connexion ouverte.");
+            self.windows.insert(overlay.window.id(), overlay);
+        }
+
+        /// Voir `main.rs::App::center_on_primary_monitor`.
+        fn center_on_primary_monitor(event_loop: &ActiveEventLoop, window: &Window) {
+            let monitor = event_loop
+                .primary_monitor()
+                .or_else(|| event_loop.available_monitors().next());
+            let Some(monitor) = monitor else {
+                return;
+            };
+            let origin = monitor.position();
+            let screen = monitor.size();
+            let outer = window.outer_size();
+            window.set_outer_position(PhysicalPosition::new(
+                origin.x + (screen.width as i32 - outer.width as i32) / 2,
+                origin.y + (screen.height as i32 - outer.height as i32) / 2,
+            ));
+        }
+
         /// Même politique que `main.rs::App::sync_windows` (voir sa doc) : converge `self.windows`
-        /// vers l'état actuel des fenêtres de jeu trouvées.
+        /// vers l'état actuel des fenêtres de jeu trouvées — **compte lié seulement**.
         fn sync_windows(&mut self, event_loop: &ActiveEventLoop) {
+            if !self.session_ready() {
+                return;
+            }
             let found = self.game_window.scan();
             // Une fenêtre `Combat` créée hors combat naît masquée quand l'option est décochée —
             // voir `sync_combat_visibility`. Lu ici une fois pour toute la passe.
             let snapshot = self.snapshot.load();
 
             self.windows.retain(|_, overlay| {
+                if overlay.kind == OverlayKind::Login {
+                    return true; // n'appartient à aucune fenêtre de jeu
+                }
                 // **La modale Options suit la même règle depuis le 2026-09-12** : rattachée à la
                 // fenêtre de jeu depuis laquelle on l'a ouverte, elle s'en va avec elle. Un écran
                 // de réglages qui survivrait au client qu'il configure n'aurait plus de raison
@@ -493,6 +692,8 @@ mod linux_main {
                 // Options` — `None` ici pour Combat/Suivi, jamais consulté (voir
                 // `RenderContent::options`).
                 options_state: (kind == OverlayKind::Options).then(OptionsModalState::default),
+                login_state: None,
+                last_login_height: None,
                 game_window,
                 game_rect: rect,
                 character_name,
@@ -544,6 +745,10 @@ mod linux_main {
         fn toggle_interactive(&mut self) {
             self.interactive = !self.interactive;
             for overlay in self.windows.values() {
+                // La fenêtre de connexion n'est pas un overlay : toujours interactive.
+                if overlay.kind == OverlayKind::Login {
+                    continue;
+                }
                 if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
                     tracing::warn!("set_cursor_hittest a échoué : {err}");
                 }
@@ -628,6 +833,9 @@ mod linux_main {
             // rend TOUS les overlays de CE personnage relevant, pas seulement celui cliqué.
             let mut relevant_game_windows: Vec<u32> = Vec::new();
             for overlay in self.windows.values() {
+                if overlay.kind == OverlayKind::Login {
+                    continue;
+                }
                 let this_relevant = active == Some(overlay.game_window)
                     || active == Some(Self::xid_of(&overlay.window));
                 if this_relevant && !relevant_game_windows.contains(&overlay.game_window) {
@@ -636,6 +844,10 @@ mod linux_main {
             }
 
             for overlay in self.windows.values_mut() {
+                // La fenêtre de connexion est une fenêtre ordinaire, jamais promue (2026-09-14).
+                if overlay.kind == OverlayKind::Login {
+                    continue;
+                }
                 // **La modale Options participe à ce calcul comme les autres depuis le
                 // 2026-09-12** — voir `main.rs::App::sync_topmost` pour le détail : rattachée à
                 // une vraie fenêtre de jeu, elle n'a plus besoin d'exception.
@@ -698,6 +910,13 @@ mod linux_main {
             {
                 return;
             }
+            // Compte non lié : la fenêtre de connexion est la seule interface (voir `main.rs`).
+            if !self.session_ready() {
+                tracing::info!(
+                    "[options] aucun compte lié — la fenêtre Options n'est accessible qu'une fois connecté."
+                );
+                return;
+            }
             // Sans ancre explicite (raccourci global), la fenêtre de jeu ACTIVE est la bonne
             // réponse : c'est celle que l'utilisateur regarde au moment où il appuie. Repli sur le
             // premier overlay connu si l'active n'est pas un client Wakfu.
@@ -736,54 +955,102 @@ mod linux_main {
                 // `Combat` peut naître masqué (voir `sync_combat_visibility`).
                 true,
             );
+            // **Brouillons pris sur le compte** — même logique que `main.rs::open_options_modal`
+            // (voir sa doc) : alertes, chat et suivi sont des COPIES de l'état du compte, renvoyées
+            // seulement à « Valider » ; et le compte est relu à l'ouverture, sur un thread.
+            let alerts_snapshot = self.alert_profile.load();
+            let (alerts_draft, alerts_availability) = match alerts_snapshot.as_ref() {
+                Some((profile, _)) => {
+                    (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready)
+                }
+                None if self.auth_status.load().is_connected() => {
+                    (None, alerts_tab::AlertsAvailability::Loading)
+                }
+                None => (None, alerts_tab::AlertsAvailability::NoAccount),
+            };
+            let chat_snapshot = self.chat_filters.load();
+            let (chat_draft, chat_availability) = match chat_snapshot.as_ref() {
+                Some(filters) => (
+                    Some(chat_tab::ChatDraft {
+                        filters: filters.clone(),
+                        toast: self.chat_toast,
+                    }),
+                    chat_tab::ChatAvailability::Ready,
+                ),
+                None if self.auth_status.load().is_connected() => {
+                    (None, chat_tab::ChatAvailability::Loading)
+                }
+                None => (None, chat_tab::ChatAvailability::NoAccount),
+            };
+            let suivi_snapshot = self.watchlist.load();
+            let (suivi_draft, suivi_availability) =
+                if suivi_snapshot.is_empty() && !self.auth_status.load().is_connected() {
+                    (None, suivi_tab::SuiviAvailability::Loading)
+                } else {
+                    (
+                        Some(suivi_snapshot.as_ref().clone()),
+                        suivi_tab::SuiviAvailability::Ready,
+                    )
+                };
+            let settings_tx = self.settings_tx.clone();
+            thread::spawn(move || {
+                let Some(token) = overlay_sync::token_store::load_token() else {
+                    return;
+                };
+                match overlay_sync::client::fetch_settings(&token) {
+                    Ok(settings) => {
+                        tracing::info!(
+                            entry_count = settings.watchlist.len(),
+                            "[options] réglages relus à l'ouverture de la fenêtre"
+                        );
+                        let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                    }
+                    Err(err) => {
+                        tracing::warn!(%err, "[options] relecture des réglages impossible")
+                    }
+                }
+            });
+
             overlay.options_state = Some(OptionsModalState {
                 path_input: self.log_path.display().to_string(),
                 error: None,
                 // Voir la doc de `open_options_modal` : le bouton « Options » du bandeau de
                 // suivi demande `Parametres`, le raccourci global le défaut d'`OptionsTab`.
                 tab: initial_tab,
-                // La case part du réglage EN VIGUEUR, pas du défaut : « Annuler » n'a rien à
-                // défaire tant qu'on n'y touche pas (voir `OptionsModalState::is_dirty`).
                 combat_always_visible: self.combat_always_visible,
                 turn_notification: self.turn_notification,
-                // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
-                // Aucun compte lié dans ce binaire (mode invité fixe, voir la doc de module) : le
-                // bouton « Déconnecter » de la section « Compte » reste désactivé, avec son
-                // infobulle qui le dit.
-                account_connected: false,
+                account_connected: self.auth_status.load().is_connected(),
                 pending_disconnect: false,
-                alerts: Default::default(),
-                // **Ce binaire n'a pas de compte** (mode invité fixe, voir la doc de module :
-                // aucun thread Auth ne tourne ici). Il n'y a donc ni liste à charger ni endroit où
-                // l'écrire, et l'onglet le dit au lieu d'afficher un rouage qui tournerait sans
-                // fin ou une liste qu'on ne pourrait pas enregistrer.
-                alerts_draft: None,
-                alerts_availability: AlertsAvailability::NoAccount,
-                // Même raison pour les recherches de chat : elles vivent au compte.
-                chat: Default::default(),
-                chat_draft: None,
-                chat_availability: ChatAvailability::NoAccount,
-                // **L'onglet « Suivi » s'ouvre quand même, sur une liste vide.** Il n'a pas d'état
-                // « sans compte » à peindre (l'overlay ne s'adresse qu'à des utilisateurs
-                // connectés, décision du 2026-09-13) et un rouage tournerait ici sans fin, aucun
-                // thread Auth ne tournant dans ce binaire. Une liste vide et modifiable est la
-                // seule forme utile : elle permet d'exercer l'écran en développement, et ce que
-                // l'on y compose n'est simplement écrit nulle part — comme le reste de ce binaire.
-                suivi: Default::default(),
-                suivi_draft: Some(Vec::new()),
-                suivi_availability: SuiviAvailability::Ready,
+                alerts: alerts_tab::AlertsTabState {
+                    duration_input: alerts_draft
+                        .as_ref()
+                        .map(|p| format_alert_duration(p.duration_seconds))
+                        .unwrap_or_default(),
+                    ..Default::default()
+                },
+                chat: chat_tab::ChatTabState {
+                    duration_input: format_alert_duration(self.chat_toast.duration_seconds),
+                    ..Default::default()
+                },
                 initial: options_modal::OptionsInitial {
                     path: self.log_path.display().to_string(),
-                    alerts: None,
-                    suivi: Some(Vec::new()),
-                    chat: None,
+                    alerts: alerts_draft.clone(),
+                    suivi: suivi_draft.clone(),
+                    chat: chat_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
                     turn_notification: self.turn_notification,
                     shortcuts: self.hotkeys.bindings().clone(),
                 },
                 pending_close: false,
+                alerts_draft,
+                alerts_availability,
+                chat_draft,
+                chat_availability,
+                suivi: Default::default(),
+                suivi_draft,
+                suivi_availability,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
@@ -791,6 +1058,132 @@ mod linux_main {
             // l'onglet « Raccourcis » essaie justement de capturer.
             self.hotkeys.suspend();
             tracing::info!("[options] modale ouverte — raccourcis globaux suspendus.");
+        }
+
+        /// Voir `main.rs::commit_chat`.
+        fn commit_chat(&mut self, options_window_id: WindowId) -> bool {
+            let Some(draft) = self
+                .windows
+                .get(&options_window_id)
+                .and_then(|overlay| overlay.options_state.as_ref())
+                .and_then(|state| state.chat_draft.clone())
+            else {
+                return false;
+            };
+            let toast_changed = draft.toast != self.chat_toast;
+            if toast_changed {
+                self.chat_toast = draft.toast;
+                let _ = self
+                    .settings_tx
+                    .send(EngineCommand::SetChatToast(draft.toast));
+            }
+            let reference = self.chat_filters.load();
+            if reference.as_ref().as_ref() == Some(&draft.filters) {
+                return toast_changed;
+            }
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetChatFilters(draft.filters.clone()));
+            let filters = draft.filters;
+            thread::spawn(move || {
+                match overlay_sync::token_store::load_token() {
+                Some(token) => match overlay_sync::client::patch_chat_filters(&token, &filters) {
+                    Ok(_) => {
+                        tracing::info!("[options] recherches de chat enregistrées sur le compte.")
+                    }
+                    Err(err) => tracing::warn!(
+                        %err,
+                        "[options] échec de l'enregistrement des recherches de chat"
+                    ),
+                },
+                None => tracing::info!(
+                    "[options] recherches de chat appliquées localement — aucun compte lié, rien n'est enregistré."
+                ),
+            }
+            });
+            toast_changed
+        }
+
+        /// Voir `main.rs::commit_alerts`.
+        fn commit_alerts(&mut self, options_window_id: WindowId) {
+            let Some(draft) = self
+                .windows
+                .get(&options_window_id)
+                .and_then(|overlay| overlay.options_state.as_ref())
+                .and_then(|state| state.alerts_draft.clone())
+            else {
+                return;
+            };
+            let connu = self.alert_profile.load();
+            let (reference, raw) = match connu.as_ref() {
+                Some((profile, raw)) => (Some(profile.clone()), raw.clone()),
+                None => (None, None),
+            };
+            if reference.as_ref() == Some(&draft) {
+                return;
+            }
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetAlertProfile(draft.clone()));
+            let profile_value = draft.patch_value(raw.as_ref());
+            thread::spawn(move || {
+                match overlay_sync::token_store::load_token() {
+                Some(token) => match overlay_sync::client::patch_profile(&token, &profile_value) {
+                    Ok(_) => tracing::info!("[options] alertes enregistrées sur le compte."),
+                    Err(err) => {
+                        tracing::warn!(%err, "[options] échec de l'enregistrement des alertes")
+                    }
+                },
+                None => tracing::info!(
+                    "[options] alertes appliquées localement — aucun compte lié, rien n'est enregistré."
+                ),
+            }
+            });
+        }
+
+        /// Voir `main.rs::commit_suivi`.
+        fn commit_suivi(&mut self, options_window_id: WindowId) {
+            let Some(state) = self
+                .windows
+                .get(&options_window_id)
+                .and_then(|overlay| overlay.options_state.as_ref())
+            else {
+                return;
+            };
+            let Some(draft) = state.suivi_draft.clone() else {
+                return;
+            };
+            if state.initial.suivi.as_ref() == Some(&draft) {
+                return;
+            }
+            tracing::info!(
+                entry_count = draft.len(),
+                "[options] liste de suivi validée"
+            );
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetWatchlistDefinitions(draft));
+        }
+
+        /// Voir `main.rs::start_recipe_resolution` — sur un thread, jamais sur la boucle winit.
+        fn start_recipe_resolution(&mut self, options_window_id: WindowId, item_id: i64) {
+            let (tx, rx) = mpsc::channel();
+            self.pending_recipe = Some((options_window_id, rx));
+            let catalog = Arc::clone(&self.catalog);
+            thread::Builder::new()
+                .name("overlay-ui-recipe".into())
+                .spawn(move || {
+                    let index = catalog.load();
+                    let mut fetch = |id: i64| overlay_sync::client::fetch_item_detail(id).ok();
+                    let ingredients = overlay_engine::resolve_recipe(item_id, &index, &mut fetch);
+                    tracing::info!(
+                        item_id,
+                        ingredient_count = ingredients.len(),
+                        "[options] recette résolue"
+                    );
+                    let _ = tx.send(ingredients);
+                })
+                .ok();
         }
 
         /// Voir `main.rs::close_options_modal` — unique point de fermeture, rend les raccourcis
@@ -905,7 +1298,13 @@ mod linux_main {
                     }
                     // La config est réécrite EN ENTIER, et seulement si l'un des réglages a bougé —
                     // même raison que `main.rs` : le fichier est réécrit d'un bloc.
-                    if path_changed || combat_changed || turn_changed || shortcuts_changed {
+                    let chat_toast_changed = self.commit_chat(options_window_id);
+                    if path_changed
+                        || combat_changed
+                        || turn_changed
+                        || shortcuts_changed
+                        || chat_toast_changed
+                    {
                         let mut saved = config::OverlayConfig {
                             log_path: Some(candidate),
                             combat_always_visible: self.combat_always_visible,
@@ -916,6 +1315,9 @@ mod linux_main {
                         saved.set_chat_toast(self.chat_toast);
                         config::save(&saved);
                     }
+                    // « Valider » commit TOUS les onglets — voir `main.rs`.
+                    self.commit_alerts(options_window_id);
+                    self.commit_suivi(options_window_id);
                     self.close_options_modal(options_window_id, "Valider");
                     // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
                     // d'`about_to_wait` — même raison que `main.rs`.
@@ -936,6 +1338,7 @@ mod linux_main {
 
     impl ApplicationHandler<UserEvent> for App {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.sync_session_windows(event_loop);
             self.sync_windows(event_loop);
             if !self.banner_printed {
                 tracing::info!("=== wakfu-companion-overlay (Linux/X11, §17.2 du plan) ===");
@@ -944,7 +1347,8 @@ mod linux_main {
                 // qui annoncerait les défauts à qui les a changés serait un contresens.
                 let bindings = self.hotkeys.bindings();
                 tracing::info!(
-                    "Mode invité uniquement (pas de compte lié, voir la doc de ce binaire). \
+                    "Un compte est obligatoire : la fenêtre de connexion reste seule à l'écran \
+                     tant qu'aucun n'est lié. \
                      {} pour basculer interactif / clic-traversant. \
                      {} ou Ctrl+C (dans ce terminal) pour quitter. \
                      {} pour la fenêtre Options, dont l'onglet « Raccourcis ».",
@@ -958,7 +1362,9 @@ mod linux_main {
 
         fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
             match event {
-                UserEvent::NewSnapshot | UserEvent::AuthStatusChanged => {
+                UserEvent::NewSnapshot
+                | UserEvent::AuthStatusChanged
+                | UserEvent::StartupProgress => {
                     for overlay in self.windows.values() {
                         overlay.window.request_redraw();
                     }
@@ -987,6 +1393,10 @@ mod linux_main {
                 /// Ce que « Valider » emporte de l'onglet « Paramètres » — voir
                 /// `options_modal::OptionsCommit`.
                 ValidateOptions(options_modal::OptionsCommit),
+                /// Bouton « Déconnecter » de la section « Compte », après confirmation.
+                DisconnectAccount,
+                /// Résoudre les ingrédients de cet objet pour la fenêtre de recette.
+                ResolveRecipe(i64),
             }
             let mut post_redraw = PostRedraw::None;
 
@@ -1033,7 +1443,10 @@ mod linux_main {
                     // `Entrée` valide — sont traitées par le panneau, qui les remonte en
                     // `OptionsModalAction` (voir `panels::options_modal::show`) ; ce filet les
                     // court-circuiterait en fermant l'overlay entier.
-                    if overlay.kind != OverlayKind::Options
+                    // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une
+                    // fenêtre ordinaire ne quitte pas l'application — sa fermeture (`CloseRequested`)
+                    // le fait.
+                    if !matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login)
                         && event.state == ElementState::Pressed
                         && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                     {
@@ -1092,11 +1505,14 @@ mod linux_main {
                     }
 
                     let catalog = self.catalog.load();
+                    let auth_status = self.auth_status.load();
                     // La modale Options force sa propre interactivité (voir
                     // `App::open_options_modal`) — jamais assujettie à `self.interactive` (mode
                     // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait
                     // elle-même traversable si l'utilisateur avait basculé ce mode juste avant.
-                    let interactive = overlay.kind == OverlayKind::Options || self.interactive;
+                    let interactive =
+                        matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login)
+                            || self.interactive;
                     let this_game_rect = overlay.game_rect;
                     let this_game_window = overlay.game_window;
                     let (repaint_delay, outcome) = render(
@@ -1114,19 +1530,55 @@ mod linux_main {
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,
                             catalog: &catalog,
-                            catalog_stale: false,
+                            catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
                             remote_icons: &self.remote_icons,
                             remote_icon_textures: &mut overlay.remote_icon_textures,
-                            auth_status: &self.auth_status,
+                            auth_status: &auth_status,
                             auth_command_tx: &self.auth_command_tx,
                             interactive,
                             shortcuts: self.hotkeys.bindings(),
                             now,
                             options: overlay.options_state.as_mut(),
-                            // Jamais de fenêtre de connexion ici (voir la doc de module).
-                            login: None,
+                            login: overlay.login_state.as_mut(),
                         },
                     );
+                    // Fenêtre de connexion : retaillée à la hauteur de la carte et recentrée —
+                    // voir `main.rs`. Sous X11, `request_inner_size` est asynchrone (le
+                    // `Resized` qui suit reconfigure la surface, voir plus haut) : le décalage de
+                    // recentrage se calcule donc sur les hauteurs LOGIQUES demandées, pas sur
+                    // `outer_size` qui n'a pas encore bougé.
+                    if overlay.kind == OverlayKind::Login {
+                        if let Some(height) = outcome.login_height {
+                            if overlay.last_login_height != Some(height) {
+                                let previous = overlay.last_login_height.unwrap_or(height);
+                                let _ = overlay.window.request_inner_size(
+                                    winit::dpi::LogicalSize::new(
+                                        login::WINDOW_WIDTH as f64,
+                                        height as f64,
+                                    ),
+                                );
+                                if let Ok(position) = overlay.window.outer_position() {
+                                    let shift =
+                                        ((height - previous) as f64 * overlay.window.scale_factor()
+                                            / 2.0)
+                                            .round() as i32;
+                                    overlay.window.set_outer_position(PhysicalPosition::new(
+                                        position.x,
+                                        position.y - shift,
+                                    ));
+                                }
+                                overlay.last_login_height = Some(height);
+                                overlay.window.request_redraw();
+                            }
+                        }
+                        if outcome.drag_window {
+                            if let Err(err) = overlay.window.drag_window() {
+                                tracing::warn!(
+                                    "[connexion] déplacement de la fenêtre refusé : {err}"
+                                );
+                            }
+                        }
+                    }
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
                     }
@@ -1184,22 +1636,11 @@ mod linux_main {
                         OptionsModalAction::TestChatSound => {
                             overlay_ui::alert_sound::play_chat_alert()
                         }
-                        // **Inatteignable ici** : ce binaire n'a pas de compte (mode invité fixe,
-                        // voir la doc de module), le bouton « Déconnecter » y est donc désactivé
-                        // (`OptionsModalState::account_connected`, posé à `false` à l'ouverture) et
-                        // sa confirmation ne s'ouvre jamais. Tracé plutôt qu'ignoré : si cette
-                        // ligne apparaît un jour dans un journal, c'est que le drapeau ment.
-                        OptionsModalAction::Disconnect => tracing::warn!(
-                            "[options] déconnexion demandée sans compte lié — sans effet."
-                        ),
-                        // Ce binaire n'a pas de réseau (voir sa doc de module) : la fenêtre de
-                        // recette reste sur son rouage, ce qui est la vérité — les ingrédients
-                        // n'arriveront pas.
+                        OptionsModalAction::Disconnect => {
+                            post_redraw = PostRedraw::DisconnectAccount
+                        }
                         OptionsModalAction::ResolveRecipe(id) => {
-                            tracing::info!(
-                                item_id = id,
-                                "[options] recette non résolue (binaire X11 sans réseau)"
-                            );
+                            post_redraw = PostRedraw::ResolveRecipe(id)
                         }
                     }
                     overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
@@ -1217,6 +1658,14 @@ mod linux_main {
                 PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
+                // Voir `main.rs` : la commande part au thread Auth, qui efface le jeton ; l'hôte
+                // verra `Disconnected` au prochain tick et reviendra à la fenêtre de connexion.
+                PostRedraw::DisconnectAccount => {
+                    let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+                    tracing::info!(">>> Déconnexion du compte demandée (fenêtre Options).");
+                    self.close_options_modal(id, "Déconnexion");
+                }
+                PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
             }
         }
 
@@ -1317,6 +1766,28 @@ mod linux_main {
                 }
             }
 
+            // Ingrédients d'une recette, même sondage non bloquant — voir `main.rs`.
+            if let Some((window_id, rx)) = &self.pending_recipe {
+                let window_id = *window_id;
+                match rx.try_recv() {
+                    Ok(ingredients) => {
+                        self.pending_recipe = None;
+                        if let Some(overlay) = self.windows.get_mut(&window_id) {
+                            if let Some(state) = &mut overlay.options_state {
+                                if let Some(dialogue) = state.suivi.recipe.as_mut() {
+                                    dialogue.ingredients = Some(ingredients);
+                                }
+                            }
+                            overlay.window.request_redraw();
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => self.pending_recipe = None,
+                }
+            }
+
+            // Fenêtre de connexion ou overlays de jeu, jamais les deux — voir `main.rs`.
+            self.sync_session_windows(event_loop);
             self.sync_windows(event_loop);
             // Apparition/disparition automatique du panneau Combat — entre les deux, même ordre
             // que `main.rs` : `sync_windows` vient peut-être de créer la fenêtre, `sync_topmost`
@@ -1480,7 +1951,12 @@ mod linux_main {
         let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
         let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
         let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
+        let catalog_stale = Arc::new(AtomicBool::new(false));
         let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
+        let alert_profile: SharedAlertProfile = Arc::new(ArcSwap::from_pointee(None));
+        let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
+        let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
+        let startup = Arc::new(StartupProgress::new());
 
         let game_window = GameWindowTracker::connect()
             .expect("connexion X11 pour la découverte de fenêtres ($DISPLAY défini ?)");
@@ -1490,25 +1966,38 @@ mod linux_main {
             .build()
             .expect("création de l'event loop");
         let proxy = event_loop.create_proxy();
-        // Mode invité fixe (voir la doc de module) pour `ApplySettings`/`Disconnect` : rien ne les
-        // envoie jamais ici (aucun thread Auth). `ChangeLogPath` (2026-09-08, §9 du plan) est en
-        // revanche bien émis par ce binaire — voir `App::validate_and_commit_options` — d'où
-        // `settings_tx` conservé (plus de `_`) plutôt qu'abandonné comme avant ce lot.
+        // Les mêmes threads de fond que Windows (`overlay_ui::background`, 2026-09-14) : compte,
+        // synchro, catalogue, donjons, icônes réseau.
         let (settings_tx, settings_rx) = mpsc::channel();
-        let (sync_tx, _sync_rx) = mpsc::channel::<SyncCommand>();
-        let remote_icons = RemoteIconStore::empty();
+        let (auth_command_tx, auth_command_rx) = mpsc::channel();
+        let (sync_tx, sync_rx) = mpsc::channel();
+        spawn_sync_thread(sync_rx);
+        spawn_auth_thread(
+            settings_tx.clone(),
+            sync_tx.clone(),
+            Arc::clone(&auth_status),
+            auth_command_rx,
+            proxy.clone(),
+        );
+        spawn_catalog_thread(
+            Arc::clone(&catalog),
+            Arc::clone(&catalog_stale),
+            Arc::clone(&startup),
+            proxy.clone(),
+        );
+        spawn_dungeon_thread(Arc::clone(&dungeons), Arc::clone(&startup), proxy.clone());
+        let remote_icons = RemoteIconStore::spawn(proxy.clone());
         spawn_engine_thread(
             log_path.clone(),
             EngineHandles {
                 snapshot: Arc::clone(&snapshot),
                 watchlist: Arc::clone(&watchlist),
                 watchlist_toast: Arc::clone(&watchlist_toast),
-                // Mode invité fixe : rien ne publiera jamais de profil ici (aucun thread Auth,
-                // voir la doc de module) — la poignée existe pour satisfaire le contrat du thread.
-                alert_profile: Arc::new(ArcSwap::from_pointee(None)),
-                chat_filters: Arc::new(ArcSwap::from_pointee(None)),
+                alert_profile: Arc::clone(&alert_profile),
+                chat_filters: Arc::clone(&chat_filters),
                 catalog: Arc::clone(&catalog),
                 dungeons,
+                startup: Arc::clone(&startup),
             },
             proxy,
             settings_rx,
@@ -1528,7 +2017,13 @@ mod linux_main {
             watchlist,
             watchlist_toast,
             catalog,
+            catalog_stale,
             remote_icons,
+            auth_status,
+            auth_command_tx,
+            startup,
+            alert_profile,
+            chat_filters,
             game_window,
             settings_tx,
         });
