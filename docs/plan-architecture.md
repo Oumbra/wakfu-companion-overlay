@@ -1263,8 +1263,9 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
 - **Son et carte** : le son du web (`chat-filter-c13da61f.mp3`, `alert_sound::play_chat_alert`),
   **une fois par lot** et pour le dernier message trouvé ; carte `WatchlistToastReason::Chat`
   dans le bandeau Suivi — **le gabarit des tuiles de recherche** (`design::LegendTile::paint_frame`,
-  révision du 2026-09-14) : le canal en légende sur la bordure haute, à gauche, dans la couleur
-  que le client lui donne (`tokens::chat_channel_color`) ; dedans « mot » en gris, l'auteur en doré
+  révision du 2026-09-14) : le canal en légende sur la bordure haute, **à droite, en 16 px et sur
+  fond** (sa moitié haute déborde du cadre par-dessus le jeu, sans fond elle s'y perdait — constat
+  en jeu), dans la couleur que le client lui donne (`tokens::chat_channel_color`) ; dedans « mot » en gris, l'auteur en doré
   puis le message complet (retour à la ligne à 420 px) ; **largeur fixe** (`CHAT_CARD_WIDTH`),
   hauteur au texte. Sans confettis. À droite, la bulle de message (`DsIcon::Message`, icône
   fournie par l'utilisateur, blanche puis cyan sur halo au survol) prépare la réponse en privé ;
