@@ -55,6 +55,10 @@ const LEARN_THRESHOLD: f64 = 0.93;
 const LEARN_WINDOW: Duration = Duration::from_millis(2500);
 /// Deux notifications pour la même fenêtre ne peuvent pas être plus rapprochées que ça.
 pub const NOTIFY_COOLDOWN: Duration = Duration::from_secs(8);
+/// Ticks consécutifs sans reconnaissance avant de considérer que le tour du personnage est fini.
+/// Un parasite d'un tick (halo de l'étincelle animée, capture au milieu d'une transition) ne doit
+/// pas produire un faux front descendant — puis un faux front montant, et un toast de trop.
+const INACTIVE_TICKS: u32 = 2;
 
 /// Ce que le moteur sait du combat du personnage, au moment du tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +96,8 @@ struct WindowState {
     learn_until: Option<Instant>,
     candidate: Option<(Glyph, u64)>,
     active: bool,
+    /// Ticks consécutifs sans reconnaissance pendant que `active` — voir `INACTIVE_TICKS`.
+    misses: u32,
     last_notified: Option<Instant>,
 }
 
@@ -163,7 +169,10 @@ impl Watcher {
         };
 
         let Some(glyph) = vision::extract_glyph(band, area) else {
-            state.active = false;
+            state.misses += 1;
+            if state.misses >= INACTIVE_TICKS {
+                state.active = false;
+            }
             return events;
         };
 
@@ -203,7 +212,14 @@ impl Watcher {
         let Some(template) = self.templates.get(input.character) else {
             return events;
         };
-        let is_active = vision::similarity(template, &glyph) >= MATCH_THRESHOLD;
+        let score = vision::similarity(template, &glyph);
+        let is_active = score >= MATCH_THRESHOLD;
+        tracing::trace!(
+            "[tour] {} : ressemblance {score:.2} ({}x{})",
+            input.character,
+            glyph.w,
+            glyph.h
+        );
         if is_active && !state.active {
             let cooled = state
                 .last_notified
@@ -225,7 +241,16 @@ impl Watcher {
                 );
             }
         }
-        state.active = is_active;
+        // Front descendant retardé : `INACTIVE_TICKS` ticks sans reconnaissance.
+        if is_active {
+            state.active = true;
+            state.misses = 0;
+        } else {
+            state.misses += 1;
+            if state.misses >= INACTIVE_TICKS {
+                state.active = false;
+            }
+        }
         events
     }
 }
@@ -345,15 +370,17 @@ mod tests {
             now: t0 + Duration::from_secs(4),
         });
         assert!(ev.is_empty(), "{ev:?}");
-        // Le tour passe à un autre : plus actif.
-        let ev = w.tick(TickInput {
-            character: "Oumbra",
-            band: Some(&autre),
-            fight: fight(2),
-            foreground: false,
-            now: t0 + Duration::from_secs(10),
-        });
-        assert!(ev.is_empty());
+        // Le tour passe à un autre : plus actif — après deux ticks, un seul serait un parasite.
+        for i in 0..2 {
+            let ev = w.tick(TickInput {
+                character: "Oumbra",
+                band: Some(&autre),
+                fight: fight(2),
+                foreground: false,
+                now: t0 + Duration::from_secs(10 + i),
+            });
+            assert!(ev.is_empty());
+        }
         // Il revient à Oumbra, fenêtre en arrière-plan : notification.
         let ev = w.tick(TickInput {
             character: "Oumbra",
@@ -386,13 +413,15 @@ mod tests {
         learn_oumbra(&mut w, t0);
         let repos = fixture("repos-oumbra");
         let autre = fixture("repos-pugio-t18");
-        w.tick(TickInput {
-            character: "Oumbra",
-            band: Some(&autre),
-            fight: fight(2),
-            foreground: true,
-            now: t0 + Duration::from_secs(10),
-        });
+        for i in 0..2 {
+            w.tick(TickInput {
+                character: "Oumbra",
+                band: Some(&autre),
+                fight: fight(2),
+                foreground: true,
+                now: t0 + Duration::from_secs(10 + i),
+            });
+        }
         let ev = w.tick(TickInput {
             character: "Oumbra",
             band: Some(&repos),
@@ -413,13 +442,15 @@ mod tests {
         let carte = fixture("carte-pugio");
         // Hypothèse du test : « Oumbra » est aussi surveillé par une fenêtre qui affiche la carte.
         let autre = fixture("repos-pugio-t18");
-        w.tick(TickInput {
-            character: "Oumbra",
-            band: Some(&autre),
-            fight: fight(2),
-            foreground: false,
-            now: t0 + Duration::from_secs(10),
-        });
+        for i in 0..2 {
+            w.tick(TickInput {
+                character: "Oumbra",
+                band: Some(&autre),
+                fight: fight(2),
+                foreground: false,
+                now: t0 + Duration::from_secs(10 + i),
+            });
+        }
         let ev = w.tick(TickInput {
             character: "Oumbra",
             band: Some(&carte),
