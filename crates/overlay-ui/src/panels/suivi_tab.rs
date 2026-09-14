@@ -278,7 +278,7 @@ pub fn show(
     let mut action = SuiviTabAction::None;
     let width = panel.inner.width();
 
-    ui.add(design::heading("Suivi").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Suivi"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 

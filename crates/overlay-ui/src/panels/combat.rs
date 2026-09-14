@@ -368,8 +368,13 @@
 //! de la valeur d'un combattant (`CombatMetric::value_of`), au lieu d'un `total_damage` lu en dur
 //! en quatre endroits. Un camp peuplé qui n'a rien produit de la grandeur choisie le dit
 //! (« Aucune armure donnée pour l'instant. ») plutôt que de laisser une colonne muette.
-//! Libellés en TEXTE et non en icônes : l'overlay n'a ni épée, ni bouclier, ni cœur dans son jeu
-//! d'icônes (voir `UiIcons`) — à basculer sur de vrais pictogrammes si le principe est validé.
+//! Icônes DU JEU (`assets/ui/metric-*.png`, voir `UiIcons`) plutôt que des libellés : ce sont
+//! celles du sélecteur équivalent du dépôt web, embarquées plutôt que chargées depuis le CDN — un
+//! contrôle permanent ne dépend pas du réseau. Le nom de la grandeur reste à l'infobulle.
+//!
+//! Le bloc « ligne de sorts » (`combat_spell_block`), lui, ne dépend PAS de ce switch : il montre
+//! les sorts du dernier tour dans l'ordre où ils ont été lancés, quelle que soit la grandeur
+//! regardée (décision utilisateur explicite, 14 sept. 2026).
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -434,18 +439,18 @@ impl CombatMetric {
     /// Dans l'ordre du switch — dégâts d'abord (le défaut), puis les deux grandeurs de soutien.
     pub const ALL: [Self; 3] = [Self::Damage, Self::Armor, Self::Heal];
 
-    /// Libellé du switch, au singulier de la grandeur mesurée (pas « Dégâts infligés » : le switch
-    /// est large de 59 px par option, voir `paint_metric_switch`).
-    pub fn label(self) -> &'static str {
+    /// Icône DU JEU de cette grandeur — les mêmes que le sélecteur `app-entity-stat-tabs` du dépôt
+    /// web (voir `UiIcons`), embarquées plutôt que chargées depuis le CDN.
+    pub fn icon(self, icons: &UiIcons) -> &egui::TextureHandle {
         match self {
-            Self::Damage => "Dégâts",
-            Self::Armor => "Armure",
-            Self::Heal => "Soins",
+            Self::Damage => icons.metric_damage(),
+            Self::Armor => icons.metric_armor(),
+            Self::Heal => icons.metric_heal(),
         }
     }
 
-    /// Infobulle du switch — dit ce que la grandeur compte VRAIMENT, là où le libellé seul reste
-    /// ambigu (l'armure est celle qu'on donne, pas celle qu'on encaisse).
+    /// Infobulle du switch — dit ce que la grandeur compte VRAIMENT, là où l'icône seule reste
+    /// ambiguë (l'armure est celle qu'on donne, pas celle qu'on encaisse).
     pub fn tooltip(self) -> &'static str {
         match self {
             Self::Damage => "Dégâts infligés",
@@ -548,15 +553,8 @@ pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 /// espacement interne avant l'encre visible : l'écart géométrique posé ici est bien symétrique,
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
-/// Hauteur du switch de grandeur (voir `paint_metric_switch`) — un peu plus plat que le switch de
-/// camp (26 px) : il porte du texte, pas des icônes, et une rangée de plus dans un bandeau flottant
-/// au-dessus du jeu se paie en pixels de décor masqués.
-const METRIC_SWITCH_HEIGHT: f32 = 22.0;
 /// Air entre la rangée camp/total et le switch de grandeur, DANS le bandeau leader.
 const METRIC_SWITCH_GAP: f32 = 5.0;
-/// Taille du libellé d'une option de grandeur — « Dégâts » (le plus large des trois) tient dans les
-/// 59 px d'une option à cette taille, marge comprise.
-const METRIC_FONT_SIZE: f32 = 12.0;
 /// Arrondi du fond opacifié de la ligne leader.
 pub(super) const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// Couleur du fond opacifié de la ligne leader — voir [`tokens::OVERLAY_BACKDROP`], qui la partage
@@ -792,8 +790,7 @@ fn show_leader_row(
 ) {
     let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
     let top_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
-    let row_height =
-        top_height + METRIC_SWITCH_GAP + METRIC_SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
+    let row_height = top_height + METRIC_SWITCH_GAP + SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
 
@@ -824,23 +821,29 @@ fn show_leader_row(
     let metric_rect = egui::Rect::from_min_size(
         egui::pos2(
             row_rect.min.x + LEADER_PANEL_PADDING,
-            row_rect.max.y - LEADER_PANEL_PADDING - METRIC_SWITCH_HEIGHT,
+            row_rect.max.y - LEADER_PANEL_PADDING - SWITCH_HEIGHT,
         ),
         egui::vec2(
-            BAR_MAX_WIDTH - LEADER_PANEL_PADDING * 2.0,
-            METRIC_SWITCH_HEIGHT,
+            SWITCH_OPTION_WIDTH * CombatMetric::ALL.len() as f32,
+            SWITCH_HEIGHT,
         ),
     );
-    paint_metric_switch(ui, metric_rect, metric);
+    paint_metric_switch(ui, metric_rect, metric, icons);
 }
 
-/// Switch de grandeur (Dégâts / Armure / Soins) — trois options de largeur égale, même vocabulaire
-/// visuel que `paint_side_switch` (piste `TINT_MEDIUM` bordée de `TINT_STRONG`, option active
-/// remplie d'`ACCENT`) mais libellées en TEXTE plutôt qu'en icônes : le jeu d'icônes de l'overlay
-/// n'a ni épée, ni bouclier, ni cœur à ce jour (voir `UiIcons`), et trois pictogrammes inventés au
-/// trait pour l'occasion auraient été moins lisibles qu'un mot — à remplacer par de vraies icônes
-/// du design system si l'utilisateur en valide le principe.
-fn paint_metric_switch(ui: &mut egui::Ui, rect: egui::Rect, metric: &mut CombatMetric) {
+/// Switch de grandeur (Dégâts / Armure / Soins) — même vocabulaire visuel et même gabarit
+/// d'option que `paint_side_switch` juste au-dessus (piste `TINT_MEDIUM` bordée de `TINT_STRONG`,
+/// option active remplie d'`ACCENT`, `SWITCH_OPTION_WIDTH` × `SWITCH_HEIGHT`) : les deux switches
+/// se lisent comme un seul bloc de contrôles, l'un sous l'autre, alignés à gauche du bandeau.
+///
+/// Icônes DU JEU (voir `CombatMetric::icon`), comme le sélecteur équivalent du dépôt web — le nom
+/// de la grandeur reste accessible à l'infobulle, exactement comme pour Alliés/Ennemis.
+fn paint_metric_switch(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    metric: &mut CombatMetric,
+    icons: &UiIcons,
+) {
     let painter = ui.painter();
     painter.rect_filled(rect, 5.0, TINT_MEDIUM);
     painter.rect_stroke(
@@ -851,7 +854,6 @@ fn paint_metric_switch(ui: &mut egui::Ui, rect: egui::Rect, metric: &mut CombatM
     );
 
     let option_width = rect.width() / CombatMetric::ALL.len() as f32;
-    let font = text::label_font(ui.ctx(), METRIC_FONT_SIZE);
     for (i, option) in CombatMetric::ALL.into_iter().enumerate() {
         let option_rect = egui::Rect::from_min_size(
             egui::pos2(rect.min.x + option_width * i as f32, rect.min.y),
@@ -861,15 +863,7 @@ fn paint_metric_switch(ui: &mut egui::Ui, rect: egui::Rect, metric: &mut CombatM
             ui.painter()
                 .rect_filled(option_rect.shrink(1.0), 4.0, ACCENT);
         }
-        text::paint_outlined_text(
-            ui,
-            option_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            option.label(),
-            font.clone(),
-            TEXT_COLOR,
-            text::OUTLINE_FULL,
-        );
+        draw_centered_icon(ui, option_rect, option.icon(icons));
         let response = ui
             .interact(
                 option_rect,

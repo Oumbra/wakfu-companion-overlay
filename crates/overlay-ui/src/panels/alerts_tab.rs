@@ -248,7 +248,7 @@ pub fn show(
     let mut action = AlertsTabAction::None;
     let width = panel.inner.width();
 
-    ui.add(design::heading("Alerte").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Alerte"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 
@@ -261,7 +261,7 @@ pub fn show(
 
     ui.add_space(SECTION_GAP);
     // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
-    ui.add(design::heading("Objets suivis").trailing_gap(SECTION_GAP * 0.5));
+    ui.add(design::heading("Objets suivis"));
     paragraph(ui, LIST_DESC);
     legend_row(ui);
     ui.add_space(SECTION_GAP);
