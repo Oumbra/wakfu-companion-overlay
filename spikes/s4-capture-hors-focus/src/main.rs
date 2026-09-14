@@ -283,6 +283,30 @@ fn main() {
     if cmd == "list" {
         return;
     }
+    if cmd == "dibtest" {
+        // Sens de `startScan` sur un DIB top-down : la lecture partielle des `band_h` dernières
+        // lignes doit être identique au bas de la capture complète.
+        let w = &windows[0];
+        let band_h = 200;
+        let Some((full, partial)) = printwindow::capture_partial_probe(w.hwnd, band_h) else {
+            eprintln!("capture impossible");
+            return;
+        };
+        let bottom = full.bottom_right(full.width, band_h as u32);
+        let top = Frame {
+            width: full.width,
+            height: band_h as u32,
+            rgba: full.rgba[..(full.width * band_h as u32 * 4) as usize].to_vec(),
+        };
+        println!(
+            "partiel vs BAS du plein : diff={:.3}   partiel vs HAUT du plein : diff={:.3}",
+            partial.mean_diff(&bottom),
+            partial.mean_diff(&top)
+        );
+        let _ = partial.save_png(&args.out.join("dibtest_partiel.png"));
+        let _ = bottom.save_png(&args.out.join("dibtest_bas_du_plein.png"));
+        return;
+    }
 
     fs::create_dir_all(&args.out).expect("création du dossier de sortie");
     println!(
