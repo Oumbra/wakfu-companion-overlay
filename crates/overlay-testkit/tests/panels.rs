@@ -3788,7 +3788,9 @@ fn login_states() -> Vec<(&'static str, AuthStatus)> {
                 }),
             },
         ),
-        ("login_connexion_en_cours", AuthStatus::Connecting),
+        // `Connecting` = écran de chargement (rouage centré), quel que soit `LoginState::loading`
+        // — la fenêtre ne dit « non connecté » qu'une fois la réponse du compte connue.
+        ("login_chargement", AuthStatus::Connecting),
     ]
 }
 
@@ -3807,12 +3809,14 @@ fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
     let auth_sink = NoopAuthSink;
     let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
-    // Animation FIGÉE (anneau et points à leur phase 0) : le harnais exige qu'une frame finisse
-    // par ne plus rien redemander, et une capture doit être reproductible. `started_at == now`
-    // fixe la phase quoi qu'il arrive.
+    // Animation FIGÉE (anneau, points et rouage à leur phase 0) : le harnais exige qu'une frame
+    // finisse par ne plus rien redemander, et une capture doit être reproductible. `started_at ==
+    // now` fixe la phase quoi qu'il arrive. `loading: false` : l'écran de chargement est exercé
+    // par `AuthStatus::Connecting`, qui vaut chargement à lui seul (voir `panels::login`).
     let mut login_state = overlay_ui::panels::login::LoginState {
         started_at: now,
         animate: false,
+        loading: false,
     };
     let measured = Rc::new(Cell::new(0.0_f32));
     let measured_in = Rc::clone(&measured);
@@ -3897,7 +3901,9 @@ fn fenetre_de_connexion_erreur() {
     verifie_login("login_erreur", 443.0);
 }
 
+/// L'écran de chargement fait exactement la hauteur de l'écran « non connecté » (voir
+/// `panels::login::INITIAL_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
 #[test]
-fn fenetre_de_connexion_en_cours() {
-    verifie_login("login_connexion_en_cours", 385.0);
+fn fenetre_de_connexion_chargement() {
+    verifie_login("login_chargement", 385.0);
 }

@@ -37,6 +37,7 @@
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
 
 pub mod alert_sound;
+pub mod background;
 pub mod build_info;
 pub mod chat_command;
 pub mod config;
@@ -52,5 +53,6 @@ pub mod rarity_bridge;
 pub mod remote_icons;
 pub mod render_content;
 pub mod shortcuts;
+pub mod startup;
 pub mod style;
 pub mod ui_icons;

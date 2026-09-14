@@ -146,6 +146,12 @@ pub struct EngineHandles {
     pub alert_profile: SharedAlertProfile,
     /// Publié par ce thread comme `alert_profile`, pour l'onglet « Chat ».
     pub chat_filters: SharedChatFilters,
+    /// Avancement du démarrage (voir `crate::startup`) : ce thread y marque la fin du rattrapage
+    /// initial de `wakfu.log` — au premier silence du watcher (200 ms sans lot), ou au premier lot
+    /// qui n'est plus étiqueté `is_initial_load`. Le watcher pousse les lots du rattrapage d'un
+    /// trait (voir `overlay_ingest::watcher::run`), un silence en marque donc la fin — et un
+    /// fichier vide ou absent ne bloque rien.
+    pub startup: Arc<crate::startup::StartupProgress>,
 }
 
 pub fn spawn_engine_thread(
@@ -156,6 +162,7 @@ pub fn spawn_engine_thread(
     sync_tx: mpsc::Sender<SyncCommand>,
 ) {
     let EngineHandles {
+        startup,
         snapshot,
         watchlist,
         watchlist_toast,
@@ -185,6 +192,9 @@ pub fn spawn_engine_thread(
             // chemin respawne un tailer flambant neuf sur CE `rx`, remplaçant l'ancien récepteur —
             // l'ancien thread watcher se termine de lui-même dès que son émetteur est abandonné ici.
             let mut rx = overlay_ingest::watcher::spawn(&log_path);
+            // Voir `EngineHandles::startup` — posé une seule fois, jamais remis à `false` (un
+            // changement de fichier en cours de session n'est pas un démarrage).
+            let mut log_replayed = false;
             // Les réglages du toast (durée, fermeture manuelle) — le repli du profil par défaut
             // tant qu'aucun compte n'a répondu. C'est ici qu'ils vivent parce que c'est ici que
             // `hide_at` se calcule, au moment où l'alerte naît.
@@ -326,6 +336,11 @@ pub fn spawn_engine_thread(
                 }
                 match rx.recv_timeout(std::time::Duration::from_millis(200)) {
                     Ok(Ok(batch)) => {
+                        if !batch.is_initial_load && !log_replayed {
+                            log_replayed = true;
+                            startup.mark_log_replayed();
+                            let _ = proxy.send_event(UserEvent::StartupProgress);
+                        }
                         if let Err(err) = engine.ingest_batch(&batch) {
                             tracing::warn!(%err, "échec d'ingestion d'un lot, ligne(s) ignorée(s)");
                             continue;
@@ -420,7 +435,15 @@ pub fn spawn_engine_thread(
                         let _ = proxy.send_event(UserEvent::NewSnapshot);
                     }
                     Ok(Err(err)) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
-                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Timeout) => {
+                        if !log_replayed {
+                            log_replayed = true;
+                            tracing::info!("rattrapage initial de wakfu.log terminé");
+                            startup.mark_log_replayed();
+                            let _ = proxy.send_event(UserEvent::StartupProgress);
+                        }
+                        continue;
+                    }
                     Err(RecvTimeoutError::Disconnected) => break, // watcher arrêté (process en fin de vie)
                 }
             }
