@@ -1451,11 +1451,11 @@ fn toast_card(
 
 /// Carte d'alerte de chat — **le gabarit des tuiles de recherche de l'onglet Chat**
 /// (`design::legend_tile`, demande utilisateur du 2026-09-14) : le cadre des champs du jeu, le
-/// canal en légende sur la bordure haute, **à droite**, dans sa couleur ; dedans, le mot trouvé
+/// canal en légende sur la bordure haute, à gauche comme sur les tuiles, dans sa couleur ; dedans, le mot trouvé
 /// entre guillemets en gris (une couleur de moins : le canal suffit), puis l'auteur en doré — ce
 /// qui précède les deux-points — et le message, qui retourne à la ligne au-delà de
 /// [`CHAT_CARD_TEXT_MAX_WIDTH`]. Ni icône ni confettis : c'est un message à lire, pas une
-/// célébration. La croix ferme ; la carte entière prépare la réponse en privé
+/// célébration. La croix ferme sans répondre ; la carte entière prépare la réponse en privé
 /// (`WatchlistOutcome::whisper_to`). Même fondu d'entrée que `toast_card`, même emplacement.
 fn chat_toast_card(
     ui: &mut egui::Ui,
@@ -1554,7 +1554,6 @@ fn chat_toast_card(
         frame,
         overlay_engine::channel_label(channel),
         design::tokens::chat_channel_color(channel),
-        design::LegendSide::Right,
         &fade,
     );
     let text_left = frame.left() + CARD_PAD_LEFT;
@@ -1570,11 +1569,13 @@ fn chat_toast_card(
         egui::Color32::WHITE,
     );
 
-    // --- Croix : à droite, centrée en hauteur — le coin haut-droit est pris par la légende ---
-    let close_rect = egui::Rect::from_center_size(
+    // --- Croix : coin haut-droit, comme sur la carte de ramassage. Elle ferme SANS répondre —
+    // indispensable en fermeture manuelle (`ChatToastSettings::manual_close`), où la carte ne
+    // part jamais d'elle-même et où cliquer la carte ouvrirait un `/w` non voulu. ---
+    let close_rect = egui::Rect::from_min_size(
         egui::pos2(
-            frame.right() - CLOSE_BTN_MARGIN - CLOSE_BTN_SIZE / 2.0,
-            frame.center().y,
+            frame.right() - CLOSE_BTN_MARGIN - CLOSE_BTN_SIZE,
+            frame.top() + CLOSE_BTN_MARGIN,
         ),
         egui::vec2(CLOSE_BTN_SIZE, CLOSE_BTN_SIZE),
     );
