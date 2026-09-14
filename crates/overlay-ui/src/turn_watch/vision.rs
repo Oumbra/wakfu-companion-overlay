@@ -205,6 +205,33 @@ pub fn name_area_above(panel: Rect, band: &Band) -> Rect {
     }
 }
 
+/// Le panneau doré porte-t-il « Fin du tour » plutôt que « Prêt » ? Distingue le combat engagé de
+/// la phase de placement, où le même emplacement montre le bouton « Prêt ».
+///
+/// Mesuré sur les captures S4, dans la bande centrale du panneau (40 % à 70 % de sa hauteur — sous
+/// la bordure, au-dessus du chrono) : le libellé sombre de « Fin du tour » couvre 90 % de la
+/// largeur du panneau, celui de « Prêt » 65 % (les épées croisées du filigrane comptent, sinon ce
+/// serait moins). Seuil à mi-chemin. Les proportions suivent l'échelle d'interface, pas la
+/// constante.
+pub fn panel_shows_end_turn(band: &Band, panel: Rect) -> bool {
+    let h = panel.height();
+    let (y0, y1) = (panel.y0 + h * 2 / 5, panel.y0 + h * 7 / 10);
+    let mut col_dark = vec![0u32; panel.width() as usize];
+    for y in y0..y1 {
+        for (i, x) in (panel.x0..panel.x1).enumerate() {
+            if band.luma(x, y) < 110 {
+                col_dark[i] += 1;
+            }
+        }
+    }
+    let first = col_dark.iter().position(|&n| n >= 2);
+    let last = col_dark.iter().rposition(|&n| n >= 2);
+    match (first, last) {
+        (Some(f), Some(l)) => (l - f + 1) as f32 / panel.width() as f32 >= 0.78,
+        _ => false,
+    }
+}
+
 /// Texte binarisé et rogné — ce qu'on compare. `bits` est row-major, `w * h`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Glyph {
@@ -438,6 +465,20 @@ mod tests {
         .unwrap();
         let s = similarity(&oumbra, &pugio);
         assert!(s < 0.2, "similarité {s}");
+    }
+
+    #[test]
+    fn fin_du_tour_se_distingue_de_pret() {
+        let repos = fixture("repos-oumbra");
+        let pret = fixture("repos-pugio-t18");
+        assert!(panel_shows_end_turn(
+            &repos,
+            find_gold_panel(&repos).unwrap()
+        ));
+        assert!(!panel_shows_end_turn(
+            &pret,
+            find_gold_panel(&pret).unwrap()
+        ));
     }
 
     #[test]
