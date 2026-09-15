@@ -882,6 +882,33 @@
         "es": "Quitar una Trampa",
         "pt": "Remover uma Armadilha",
         "picture": "https://vertylo.github.io/wakassets/spells/2433.png"
+      },
+      {
+        "id": 8505,
+        "fr": "Piège de Répulsion II",
+        "en": "Repulsion Trap II",
+        "es": "Trampa de repulsión II",
+        "pt": "Armadilha de Repulsão II",
+        "picture": "https://vertylo.github.io/wakassets/spells/5182.png",
+        "variantOf": 5182
+      },
+      {
+        "id": 8506,
+        "fr": "Piège d'Attraction II",
+        "en": "Attraction Trap II",
+        "es": "Trampa de atracción II",
+        "pt": "Armadilha de Atração II",
+        "picture": "https://vertylo.github.io/wakassets/spells/5183.png",
+        "variantOf": 5183
+      },
+      {
+        "id": 8507,
+        "fr": "Piège de Téléportation II",
+        "en": "Teleportation Trap II",
+        "es": "Trampa de teletransportación II",
+        "pt": "Armadilha de Teletransporte II",
+        "picture": "https://vertylo.github.io/wakassets/spells/5184.png",
+        "variantOf": 5184
       }
     ]
   },
