@@ -375,6 +375,25 @@
 //! Le bloc « ligne de sorts » (`combat_spell_block`), lui, ne dépend PAS de ce switch : il montre
 //! les sorts du dernier tour dans l'ordre où ils ont été lancés, quelle que soit la grandeur
 //! regardée (décision utilisateur explicite, 14 sept. 2026).
+//!
+//! **Refonte 2026-09-15 (échange des deux switches)** — demande utilisateur : le switch Alliés/
+//! Ennemis quitte le bandeau leader (colonne des barres) pour coiffer la colonne des PORTRAITS,
+//! dans un bandeau à lui (`show_side_row`) au même vocabulaire visuel — fond `LEADER_PANEL_FILL`,
+//! arrondi `LEADER_PANEL_ROUNDING`, marge intérieure `LEADER_PANEL_PADDING`, air `SIDE_ROW_GAP`
+//! en dessous — calé sur `combat_frame::FRAME_WIDTH`, le switch centré dedans. Le switch de
+//! grandeur prend sa place dans le bandeau leader, à gauche du total : le contrôle vit désormais
+//! au-dessus de ce qu'il commande (le camp au-dessus des portraits, la grandeur à côté du chiffre
+//! qu'elle qualifie), et le bandeau leader retrouve sa hauteur d'avant l'arrivée de la grandeur
+//! (une seule rangée, plus deux). Le switch de camp reste peint en toutes circonstances — combat
+//! absent, camp vide, ennemis nombreux en cadre défilant — et reste le tout premier widget du
+//! panneau, ce dont dépend la marge d'infobulle de `render_content`.
+//!
+//! **Les barres restent filtrées à `value_of(f) > 0` pour les trois grandeurs** — un combattant
+//! qui n'a rien produit de la grandeur affichée garde son portrait mais pas de barre. Le site
+//! (`Oumbra/wakfu-companion`) fait l'inverse et liste tout le roster, zéros compris : cet écart
+//! est voulu (décision utilisateur explicite, 15 sept. 2026, voir CLAUDE.md « Ce que l'overlay
+//! affiche diffère du site ») — temps réel ici, bilan de fin de combat là-bas. Ne pas aligner les
+//! deux.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -385,7 +404,7 @@ use crate::shortcuts::{ShortcutAction, ShortcutBindings};
 use crate::ui_icons::UiIcons;
 
 use super::combat_bars::DamageBars;
-use super::combat_frame::{CombatFrame, SelectionMarks, MAX_FRAME_SLOTS};
+use super::combat_frame::{CombatFrame, SelectionMarks, FRAME_WIDTH, MAX_FRAME_SLOTS};
 use super::combat_frame_scroll::EnemyFrameScroll;
 use super::combat_spell_block;
 
@@ -554,8 +573,10 @@ pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 /// espacement interne avant l'encre visible : l'écart géométrique posé ici est bien symétrique,
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
-/// Air entre la rangée camp/total et le switch de grandeur, DANS le bandeau leader.
-const METRIC_SWITCH_GAP: f32 = 5.0;
+/// Air sous le bandeau du switch Alliés/Ennemis, avant le cadre des portraits — même valeur que
+/// `TOTAL_GAP`, qui sépare le bandeau leader des barres dans l'autre colonne : les deux bandeaux
+/// sont le même objet visuel, ils respirent pareil (voir `show_side_row`).
+const SIDE_ROW_GAP: f32 = TOTAL_GAP;
 /// Arrondi du fond opacifié de la ligne leader.
 pub(super) const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// Couleur du fond opacifié de la ligne leader — voir [`tokens::OVERLAY_BACKDROP`], qui la partage
@@ -596,7 +617,9 @@ pub fn show(
         .unwrap_or_default();
 
     // Barres : liste SÉPARÉE, triée par dégâts décroissant, uniquement les combattants ayant
-    // infligé au moins 1 dégât (voir doc de module). `total_damage` est calculé sur TOUS les
+    // infligé au moins 1 dégât (voir doc de module) — et de même pour l'armure donnée et les
+    // soins. Filtre VOULU, à ne pas retirer pour « s'aligner » sur le site, qui garde lui ses
+    // lignes à zéro : voir la doc de module et CLAUDE.md. `total_damage` est calculé sur TOUS les
     // combattants affichés (y compris ceux à 0 dégât : ils comptent pour 0 dans la somme, le
     // résultat est identique, mais c'est bien le total du camp affiché qui a du sens ici) — seule
     // référence désormais pour le remplissage ET le pourcentage (voir doc de module, correctif de
@@ -660,6 +683,12 @@ pub fn show(
         // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
         // module.
         ui.vertical(|ui| {
+            // Switch Alliés/Ennemis : en tête de CETTE colonne depuis le 2026-09-15 (voir doc de
+            // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
+            // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
+            // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
+            show_side_row(ui, icons, side, shortcuts);
+            ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
             if !framed.is_empty() {
                 let marks = marks_in(framed, selection);
                 let clicked = frame.show(
@@ -738,7 +767,7 @@ pub fn show(
         // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
         // portrait »).
         ui.vertical(|ui| {
-            show_leader_row(ui, icons, side, metric, shortcuts, total_damage_raw);
+            show_leader_row(ui, icons, metric, shortcuts, total_damage_raw);
             ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
             if fighters.is_empty() || bars.is_empty() {
                 // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
@@ -772,57 +801,75 @@ pub fn show(
     });
 }
 
-/// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
-/// doc de module) qui la détache du reste de la colonne — switch Alliés/Ennemis à gauche (voir
-/// `paint_side_switch`, refonte 11e retour : remplace ici l'ancien bouton lien externe, déplacé en
-/// bas du panneau avec le nouveau bouton Options, voir `bottom_toolbar`), total de dégâts du camp
-/// affiché à droite (même alignement que les chiffres de dégâts de chaque groupe, voir
-/// `damage_bar_group`), sans libellé "Total" (retiré, demande utilisateur explicite : le contexte
-/// suffit déjà, la ligne est seule tout en haut de la colonne). Appelée par `show` dans TOUS les
-/// cas, y compris combat vide ou camp affiché sans combattant — voir sa doc — pour que le switch
-/// reste accessible en toute circonstance.
-fn show_leader_row(
+/// Bandeau du switch Alliés/Ennemis, en tête de la colonne des PORTRAITS (échange de place avec le
+/// switch de grandeur, 2026-09-15 — voir doc de module) : même fond opacifié, même arrondi et même
+/// marge intérieure que le bandeau leader de l'autre colonne (`LEADER_PANEL_FILL`/
+/// `LEADER_PANEL_ROUNDING`/`LEADER_PANEL_PADDING`), calé sur la largeur exacte du cadre
+/// (`combat_frame::FRAME_WIDTH`) avec le switch centré — le camp affiché se choisit donc au-dessus
+/// de ce qu'il commande, les portraits.
+///
+/// Appelée par `show` dans TOUS les cas, y compris sans combat ou camp vide (donc cadre non peint)
+/// : c'est la même exigence qu'avant le déplacement, le switch ne doit jamais devenir inatteignable.
+/// Reste aussi le TOUT PREMIER widget peint du panneau, ce dont dépend la marge supérieure réservée
+/// à son infobulle (voir `render_content::COMBAT_TOOLTIP_HEADROOM`).
+fn show_side_row(
     ui: &mut egui::Ui,
     icons: &UiIcons,
     side: &mut CombatSide,
+    shortcuts: &ShortcutBindings,
+) {
+    let row_height = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
+    let (row_rect, _) =
+        ui.allocate_exact_size(egui::vec2(FRAME_WIDTH, row_height), egui::Sense::hover());
+
+    ui.painter()
+        .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+
+    // Centré plutôt qu'aligné à gauche : le switch (2 options) est presque aussi large que le
+    // cadre, un alignement à gauche laisserait un vide asymétrique de quelques pixels à droite.
+    let switch_width = SWITCH_OPTION_WIDTH * 2.0;
+    let top_left = egui::pos2(
+        row_rect.center().x - switch_width / 2.0,
+        row_rect.min.y + LEADER_PANEL_PADDING,
+    );
+    paint_side_switch(ui, top_left, side, icons, shortcuts);
+}
+
+/// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
+/// doc de module) qui la détache du reste de la colonne — switch de grandeur à gauche (voir
+/// `paint_metric_switch`) depuis l'échange de place du 2026-09-15, total du camp affiché pour cette
+/// grandeur à droite (même alignement que les chiffres de chaque groupe, voir `damage_bar_group`),
+/// sans libellé "Total" (retiré, demande utilisateur explicite : le contexte suffit déjà, la ligne
+/// est seule tout en haut de la colonne).
+///
+/// Une SEULE rangée depuis cet échange : le switch de grandeur y remplace le switch Alliés/Ennemis
+/// (parti coiffer les portraits, voir `show_side_row`) au lieu de s'ajouter sous lui, ce qui rend au
+/// bandeau la hauteur qu'il avait avant l'arrivée de la grandeur. Il reste peint dans TOUS les cas,
+/// y compris combat vide ou camp sans combattant — la grandeur se choisit alors aussi.
+fn show_leader_row(
+    ui: &mut egui::Ui,
+    icons: &UiIcons,
     metric: &mut CombatMetric,
     shortcuts: &ShortcutBindings,
     total_damage: i64,
 ) {
     let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
-    let top_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
-    let row_height = top_height + METRIC_SWITCH_GAP + SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
+    let inner_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
+    let row_height = inner_height + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
 
     ui.painter()
         .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
 
-    // Rangée du haut — inchangée depuis la refonte du 11e retour : camp à gauche, total à droite.
-    let top_center_y = row_rect.min.y + LEADER_PANEL_PADDING + top_height / 2.0;
-    let switch_top_left = egui::pos2(
-        row_rect.min.x + LEADER_PANEL_PADDING,
-        top_center_y - SWITCH_HEIGHT / 2.0,
-    );
-    paint_side_switch(ui, switch_top_left, side, icons, shortcuts);
-
-    text::paint_outlined_text(
-        ui,
-        egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, top_center_y),
-        egui::Align2::RIGHT_CENTER,
-        &format_fr_thousands(total_damage),
-        total_font,
-        TEXT_COLOR,
-        text::OUTLINE_FULL,
-    );
-
-    // Rangée du bas — la grandeur mesurée, sur toute la largeur utile du bandeau : c'est elle qui
-    // décide de ce que raconte TOUT le reste du panneau (total ci-dessus, barres, pourcentages sur
-    // les portraits), elle ne peut pas être une petite icône de plus à côté du camp.
+    // Grandeur à gauche, total à droite, sur la même ligne : la grandeur décide de ce que raconte
+    // TOUT le reste du panneau (ce total, les barres, les pourcentages sur les portraits) — la
+    // poser juste à côté du chiffre qu'elle qualifie se lit d'un seul coup d'œil.
+    let center_y = row_rect.min.y + LEADER_PANEL_PADDING + inner_height / 2.0;
     let metric_rect = egui::Rect::from_min_size(
         egui::pos2(
             row_rect.min.x + LEADER_PANEL_PADDING,
-            row_rect.max.y - LEADER_PANEL_PADDING - SWITCH_HEIGHT,
+            center_y - SWITCH_HEIGHT / 2.0,
         ),
         egui::vec2(
             SWITCH_OPTION_WIDTH * CombatMetric::ALL.len() as f32,
@@ -830,6 +877,16 @@ fn show_leader_row(
         ),
     );
     paint_metric_switch(ui, metric_rect, metric, icons, shortcuts);
+
+    text::paint_outlined_text(
+        ui,
+        egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, center_y),
+        egui::Align2::RIGHT_CENTER,
+        &format_fr_thousands(total_damage),
+        total_font,
+        TEXT_COLOR,
+        text::OUTLINE_FULL,
+    );
 }
 
 /// Switch de grandeur (Dégâts / Armure / Soins) — même vocabulaire visuel et même gabarit

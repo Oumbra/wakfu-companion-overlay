@@ -1695,6 +1695,9 @@ mod linux_main {
                         OptionsModalAction::TestChatSound => {
                             overlay_ui::alert_sound::play_chat_alert()
                         }
+                        OptionsModalAction::TestCountdownSound => {
+                            overlay_ui::alert_sound::play_countdown_alert()
+                        }
                         OptionsModalAction::Disconnect => {
                             post_redraw = PostRedraw::DisconnectAccount
                         }
