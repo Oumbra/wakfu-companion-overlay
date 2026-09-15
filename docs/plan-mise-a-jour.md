@@ -228,6 +228,81 @@ semaine, pas par commit.
 **`ci.yml` ne change pas** (et `scripts/ci-local.sh` non plus) : le workflow de release est un
 fichier séparé, qui ne rejoue pas les tests — ils ont déjà tourné sur `dev` avant la fusion.
 
+### 6.1 Clés de signature — ce que c'est, comment les générer, où les ranger
+
+**Le principe.** `minisign` est un outil de signature de fichiers (Frank Denis, auteur de
+libsodium), basé sur la courbe ed25519. Une *paire de clés*, c'est deux fichiers texte :
+
+| Fichier | Contenu | Qui l'a | Rôle |
+| --- | --- | --- | --- |
+| `wakfu-overlay.key` (clé **privée**, dite *secrète*) | la clé, **chiffrée par un mot de passe** | le mainteneur seul, et le CI via un secret | sert à **signer** `latest.json` à chaque Release |
+| `wakfu-overlay.pub` (clé **publique**) | 2 lignes, ~56 caractères de base64 | tout le monde : commitée dans le dépôt, embarquée dans l'exe | sert à **vérifier** qu'un manifeste a bien été signé par la clé privée |
+
+Ce que ça garantit : un utilisateur dont l'overlay télécharge `latest.json` n'installera jamais
+un binaire que le CI du dépôt n'a pas publié — même si GitHub, le DNS ou un proxy intermédiaire
+lui servait un faux manifeste, la signature ne correspondrait pas et l'overlay répondrait
+`Unavailable` (rien d'installé). La clé privée ne quitte jamais deux endroits : un gestionnaire
+de mots de passe du mainteneur et les secrets GitHub Actions. **Jamais dans le dépôt, jamais dans
+une session Claude** (une clé qui transite par une conversation est à considérer comme brûlée).
+
+**Génération, pas à pas (sur le poste du mainteneur).** L'outil recommandé est `rsign2`, la
+réimplémentation Rust de minisign, même format, installable avec le `cargo` déjà présent :
+
+```bash
+# 1. Installer l'outil (une fois)
+cargo install rsign2
+
+# 2. Générer la paire, dans un dossier HORS du dépôt (ex. ~/wakfu-overlay-keys/)
+mkdir -p ~/wakfu-overlay-keys && cd ~/wakfu-overlay-keys
+rsign generate -p wakfu-overlay.pub -s wakfu-overlay.key
+#    → demande un mot de passe (deux fois) : c'est celui qui chiffre wakfu-overlay.key.
+#      Le choisir long et le ranger dans le gestionnaire de mots de passe AVANT de continuer.
+
+# 3. Vérifier que la paire fonctionne
+echo test > test.txt
+rsign sign   -s wakfu-overlay.key -x test.minisig test.txt      # demande le mot de passe
+rsign verify -p wakfu-overlay.pub -x test.minisig test.txt      # doit afficher : Signature and comment signature verified
+rm test.txt test.minisig
+
+# 4. Regarder la clé publique (c'est elle qui sera commitée)
+cat wakfu-overlay.pub
+#    untrusted comment: minisign public key: XXXXXXXXXXXXXXXX
+#    RWQ…………………………………………………………………………………………  ← 56 caractères
+```
+
+Équivalent avec le `minisign` d'origine (C) si on le préfère : `minisign -G -p wakfu-overlay.pub
+-s wakfu-overlay.key`, `minisign -Sm fichier`, `minisign -Vm fichier -p wakfu-overlay.pub`.
+
+**Où ranger quoi.**
+
+1. **`wakfu-overlay.pub` → dans le dépôt**, à la racine, commité sur `dev` (`chore: clé publique
+   de signature des Releases`). Elle est publique par nature ; la phase 2 l'embarque dans l'exe
+   par `include_str!("../../../wakfu-overlay.pub")` (`overlay_sync::update::PUBLIC_KEY`), et
+   n'importe qui peut vérifier un manifeste à la main avec `rsign verify`.
+2. **`wakfu-overlay.key` → deux copies, pas une de plus** :
+   - le **gestionnaire de mots de passe** du mainteneur (le fichier en pièce jointe + le mot de
+     passe dans la même entrée) — c'est la copie de référence, la seule qui survit à un
+     changement de machine ;
+   - les **secrets GitHub Actions** du dépôt `Oumbra/wakfu-companion-overlay` : *Settings →
+     Secrets and variables → Actions → New repository secret*, deux entrées :
+     `MINISIGN_SECRET_KEY` = le contenu **complet** du fichier `wakfu-overlay.key` (les deux
+     lignes, collées telles quelles), et `MINISIGN_PASSWORD` = le mot de passe.
+   Puis **supprimer** `~/wakfu-overlay-keys/wakfu-overlay.key` du disque : rien ne doit rester
+   en clair sur le poste. `*.key` est ignoré par git (`.gitignore`) au cas où le fichier
+   traînerait dans le dépôt par erreur.
+3. **Ce que fait le CI avec** (phase 1) : `cargo xtask dist` lit les deux secrets depuis
+   l'environnement, déchiffre la clé **en mémoire** le temps de signer `latest.json` (crate
+   `minisign`, même format), écrit `latest.json.minisig` et n'écrit jamais la clé sur le disque
+   du runner. Le secret reste donc chiffré partout où il est stocké.
+
+**Rotation** (si la clé fuit ou si le mot de passe est perdu) : générer une nouvelle paire,
+publier une version de l'overlay qui embarque **les deux** clés publiques (signée par l'ancienne,
+donc acceptée par les binaires en circulation), puis basculer les secrets sur la nouvelle et
+retirer l'ancienne à la version suivante. Un mot de passe perdu sans copie de la clé impose la
+même procédure, avec une version intermédiaire signée par… rien : dans ce cas les binaires en
+circulation refuseront la mise à jour, et il faudra une réinstallation manuelle unique. D'où la
+copie de référence dans le gestionnaire de mots de passe.
+
 **Profil release à ajouter dans `Cargo.toml`** avant la première publication, dans son propre
 commit `build:` :
 
