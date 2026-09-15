@@ -169,6 +169,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -236,6 +237,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -308,6 +310,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -463,6 +466,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &watchlist_entries,
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -532,6 +536,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -661,6 +666,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
@@ -802,6 +808,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
                     watchlist_enabled: true,
+                    spells_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -896,6 +903,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     // Ce que l'hôte passe quand la case « Activer le suivi » est décochée — il
                     // vide DÉJÀ la liste dans ce cas, d'où les deux ensemble.
                     watchlist_enabled: false,
+                    spells_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -994,6 +1002,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         combat_metric: &mut combat_metric,
                         watchlist: &entries,
                         watchlist_enabled: true,
+                        spells_enabled: true,
                         watchlist_selection: &mut selection.borrow_mut(),
                         watchlist_toast: None,
                         catalog: &catalog,
@@ -1107,6 +1116,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -1395,6 +1405,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
@@ -1490,6 +1501,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1570,6 +1582,7 @@ fn panneau_options_ne_panique_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1827,6 +1840,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -3887,6 +3901,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
@@ -4049,11 +4064,14 @@ fn capture_onglet_coupe(nom: &str, tab: OptionsTab) {
     let mut options_state = OptionsModalState {
         tab,
         // Les trois coupées d'un coup : chaque planche ne montre que son onglet, et l'état
-        // « tout coupé » est de toute façon celui qu'on veut pouvoir regarder.
+        // « tout coupé » est de toute façon celui qu'on veut pouvoir regarder. Les deux
+        // interrupteurs de la section « Combat » restent actifs — ces planches-ci ne montrent que
+        // les trois onglets, jamais l'onglet « Paramètres ».
         features: FeatureToggles {
             suivi: false,
             alerts: false,
             chat: false,
+            ..Default::default()
         },
         suivi_draft: Some(entrees_de_suivi()),
         suivi_availability: SuiviAvailability::Ready,
@@ -4182,6 +4200,86 @@ fn defile_les_parametres(harness: &mut Harness<'_>, points: f32) {
     // milieu de la capture, là où la molette a été actionnée.
     harness.event(egui::Event::PointerGone);
     harness.run();
+}
+
+/// **La case grisée ne répond plus au clic** — l'autre moitié de la dépendance « suivi des sorts →
+/// détail des combats » (2026-09-15), celle qu'une capture ne peut pas montrer.
+///
+/// Le test clique DEUX FOIS au même endroit : une fois le détail des combats actif, où la case
+/// doit basculer, une fois coupé, où elle ne doit plus bouger. La première moitié est ce qui
+/// empêche la seconde d'être une tautologie — un clic tombé à côté « ne changerait rien » tout
+/// aussi bien.
+///
+/// Coordonnées : mesurées sur `options_parametres_combat_coupe.png` (le harnais rend à 1 pixel par
+/// point, à la taille exacte de `WINDOW_SIZE`), au centre du carré de la case en retrait.
+#[test]
+fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
+    /// Centre de la case « Activer le suivi des sorts », deuxième ligne de la section « Combat ».
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 307.0);
+
+    let clic = |detail_actif: bool| -> bool {
+        let mut etat = parametres_avec_notifications();
+        etat.features.combat = detail_actif;
+        let etat = std::rc::Rc::new(std::cell::RefCell::new(etat));
+        let vu = std::rc::Rc::clone(&etat);
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                panels::options_modal::show(
+                    ui,
+                    &mut vu.borrow_mut(),
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                    },
+                );
+            });
+        harness.run();
+        assert!(
+            etat.borrow().features.spells,
+            "le suivi des sorts part coché, dans les deux cas"
+        );
+        harness.drag_at(CASE_DES_SORTS);
+        harness.drop_at(CASE_DES_SORTS);
+        harness.run();
+        let apres = etat.borrow().features.spells;
+        apres
+    };
+
+    assert!(
+        !clic(true),
+        "détail des combats actif : le clic doit décocher le suivi des sorts"
+    );
+    assert!(
+        clic(false),
+        "détail des combats coupé : la case est grisée, le clic ne doit rien changer — et surtout \
+         pas faire perdre le réglage à qui rallume l'interrupteur"
+    );
+}
+
+/// **Le détail des combats coupé grise ce qu'il commande** — cases « Activer le suivi des sorts »
+/// et « Afficher le panneau de combat en dehors des combats » (2026-09-15, section « Combat » de
+/// l'onglet « Paramètres »).
+///
+/// Ce que la capture doit montrer : les deux cases estompées MAIS toujours cochées. Une case qui
+/// se décocherait en perdant son interrupteur ferait perdre le réglage à qui rallume — voir
+/// `FeatureToggles::spells_visible`, qui combine les deux au moment de peindre plutôt que d'écraser
+/// la valeur. La notification de tour, elle, reste vive : elle ne dépend pas du panneau.
+#[test]
+fn options_parametres_combat_coupe() {
+    let mut etat = parametres_avec_notifications();
+    etat.features.combat = false;
+    capture_parametres("options_parametres_combat_coupe", etat);
 }
 
 #[test]
@@ -4362,6 +4460,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
@@ -4509,6 +4608,7 @@ fn capture_login_with_update(
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
                     watchlist_enabled: true,
+                    spells_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,

@@ -1012,6 +1012,7 @@ impl App {
                         &snapshot,
                         character_name,
                         self.combat_always_visible,
+                        self.features.combat,
                     );
                 let mut overlay = Self::create_overlay_window(
                     event_loop,
@@ -1172,11 +1173,16 @@ impl App {
     fn sync_combat_visibility(&mut self) {
         let snapshot = self.snapshot.load();
         let always = self.combat_always_visible;
+        // Le détail des combats coupé masque toutes les fenêtres Combat au prochain tick — c'est
+        // la validation de la fenêtre Options qui déclenche la passe (voir `apply_options`, qui
+        // appelle cette méthode sans attendre `about_to_wait`).
+        let enabled = self.features.combat;
         for overlay in self.windows.values_mut() {
             if overlay.kind != OverlayKind::Combat {
                 continue;
             }
-            let wanted = panels::combat::should_show(&snapshot, &overlay.character_name, always);
+            let wanted =
+                panels::combat::should_show(&snapshot, &overlay.character_name, always, enabled);
             if wanted == overlay.visible {
                 continue;
             }
@@ -2513,9 +2519,12 @@ impl App {
                         }
                     );
                 }
-                // **Les trois interrupteurs (2026-09-15)** — le thread Engine est prévenu dès
-                // qu'ils bougent : c'est lui qui joue (ou ne joue plus) les alertes. Le bandeau,
-                // lui, lit `self.features` directement au rendu (voir `render_window`).
+                // **Les interrupteurs (2026-09-15)** — le thread Engine est prévenu dès qu'ils
+                // bougent : c'est lui qui joue (ou ne joue plus) les alertes. Le bandeau, lui, lit
+                // `self.features` directement au rendu (voir `render_window`), et les deux cases
+                // de la section « Combat » ne concernent pas le moteur du tout : le détail des
+                // combats passe par `sync_combat_visibility` (appelée en fin de cette méthode) et
+                // le suivi des sorts par le rendu du panneau.
                 let features_changed = commit.features != self.features;
                 if features_changed {
                     self.features = commit.features;
@@ -2523,6 +2532,8 @@ impl App {
                         suivi = self.features.suivi,
                         alertes = self.features.alerts,
                         recherche = self.features.chat,
+                        combat = self.features.combat,
+                        sorts = self.features.spells,
                         "[options] fonctionnalités actives mises à jour"
                     );
                     let _ = self
@@ -2782,6 +2793,7 @@ impl App {
                 combat_metric: &mut overlay.combat_metric,
                 watchlist,
                 watchlist_enabled: self.features.suivi,
+                spells_enabled: self.features.spells_visible(),
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,
                 catalog: &catalog,

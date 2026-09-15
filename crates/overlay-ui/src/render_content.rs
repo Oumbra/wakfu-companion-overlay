@@ -234,6 +234,16 @@ pub struct RenderContent<'a> {
     /// `panels::watchlist::control_button_row`). Distinct de `watchlist.is_empty()`, que l'hôte
     /// force déjà dans ce cas : un bandeau vide Suivi ACTIF garde bien ses quatre boutons.
     pub watchlist_enabled: bool,
+    /// Le suivi des sorts est-il actif ? — case « Activer le suivi des sorts » de la section
+    /// « Combat » des Options (2026-09-15). `false` retire le bloc « ligne de sorts » du panneau
+    /// Combat et les marques qu'il pose sur les médaillons (voir `panels::combat::show`).
+    ///
+    /// **Déjà combiné avec la case dont il dépend** par l'hôte
+    /// (`panels::feature_switch::FeatureToggles::spells_visible`) : le panneau reçoit ce qu'il
+    /// doit peindre, pas deux booléens à recroiser. Le détail des combats coupé, lui, ne se voit
+    /// pas ici — la fenêtre Combat n'est alors pas montrée du tout
+    /// (`panels::combat::should_show`).
+    pub spells_enabled: bool,
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
     /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
     pub watchlist_selection: &'a mut panels::watchlist::WatchlistSelection,
@@ -391,6 +401,7 @@ pub fn build_ui(
                 combat_metric: &mut *content.combat_metric,
                 watchlist: content.watchlist,
                 watchlist_enabled: content.watchlist_enabled,
+                spells_enabled: content.spells_enabled,
                 watchlist_selection: &mut *content.watchlist_selection,
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
@@ -429,6 +440,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         combat_metric,
         watchlist,
         watchlist_enabled,
+        spells_enabled,
         watchlist_selection,
         watchlist_toast,
         catalog,
@@ -543,6 +555,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         combat_side,
                         combat_metric,
                         shortcuts,
+                        spells_enabled,
                     );
                 }
                 // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite

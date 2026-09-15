@@ -654,6 +654,7 @@ mod linux_main {
                             &snapshot,
                             character_name,
                             self.combat_always_visible,
+                            self.features.combat,
                         );
                     let overlay = Self::create_overlay_window(
                         event_loop,
@@ -682,12 +683,19 @@ mod linux_main {
         fn sync_combat_visibility(&mut self) {
             let snapshot = self.snapshot.load();
             let always = self.combat_always_visible;
+            // Voir `main.rs::App::sync_combat_visibility` : même rôle, le détail des combats
+            // coupé masque toutes les fenêtres Combat.
+            let enabled = self.features.combat;
             for overlay in self.windows.values_mut() {
                 if overlay.kind != OverlayKind::Combat {
                     continue;
                 }
-                let wanted =
-                    panels::combat::should_show(&snapshot, &overlay.character_name, always);
+                let wanted = panels::combat::should_show(
+                    &snapshot,
+                    &overlay.character_name,
+                    always,
+                    enabled,
+                );
                 if wanted == overlay.visible {
                     continue;
                 }
@@ -1445,6 +1453,8 @@ mod linux_main {
                             suivi = self.features.suivi,
                             alertes = self.features.alerts,
                             recherche = self.features.chat,
+                            combat = self.features.combat,
+                            sorts = self.features.spells,
                             "[options] fonctionnalités actives mises à jour"
                         );
                         let _ = self
@@ -1752,6 +1762,7 @@ mod linux_main {
                             combat_metric: &mut overlay.combat_metric,
                             watchlist,
                             watchlist_enabled: self.features.suivi,
+                            spells_enabled: self.features.spells_visible(),
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,
                             catalog: &catalog,

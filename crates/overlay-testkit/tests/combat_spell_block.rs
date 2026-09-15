@@ -319,6 +319,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -429,4 +430,94 @@ fn bloc_de_sorts_selection_par_le_cadre() {
             .is_some(),
         "l'épingle ennemie doit survivre à un aller-retour en vue Alliés"
     );
+}
+
+/// **« Activer le suivi des sorts » décoché : le bloc disparaît, et les marques avec lui**
+/// (2026-09-15, `panels::feature_switch::FeatureToggles::spells`).
+///
+/// Mêmes données que `bloc_de_sorts_selection_par_le_cadre` ci-dessus, dont la première capture
+/// (`combat_spell_block_suivi_auto`) montre l'état complet : c'est la comparaison des deux qui dit
+/// ce que la case retire — la colonne de droite s'arrête au dernier groupe de dégâts, et le
+/// médaillon d'Anonyme-Ouginak1 ne porte plus ni liseré ni point. Les portraits, les barres et le switch,
+/// eux, ne bougent pas : la case ne coupe QUE la ligne de sorts.
+///
+/// L'assertion double la capture sur le point qu'un œil ne vérifie pas : plus aucun nœud
+/// d'accessibilité de sort, donc plus rien à survoler ni à lire au lecteur d'écran.
+#[test]
+fn bloc_de_sorts_coupe_par_les_options() {
+    let snapshot = replay_real_log();
+    let fight: FightSnapshot = snapshot
+        .fights
+        .first()
+        .cloned()
+        .expect("au moins un combat dans le rejeu");
+    let auto_selected_first_spell = {
+        let idx = fight
+            .last_ally_caster
+            .expect("le premier combat du rejeu a au moins un sort allié");
+        let fighter = &fight.fighters[idx];
+        let cast = &fighter.last_turn_casts[0];
+        let name =
+            resolve_cast(fighter, &cast.spell).map_or(cast.spell.clone(), |r| r.name.to_string());
+        format!("Sort 1 : {name}")
+    };
+
+    let remote_icon_store = RemoteIconStore::empty();
+    preload_spell_fixtures(&remote_icon_store, &fight);
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let mut textures = Textures {
+        portraits: None,
+        combat_frame: None,
+        icons: None,
+    };
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Combat,
+                fight: Some(&fight),
+                portraits,
+                combat_frame,
+                icons,
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                // La seule différence avec le test ci-dessus.
+                spells_enabled: false,
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                options: None,
+                login: None,
+            },
+        );
+    });
+
+    harness.run();
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Image, auto_selected_first_spell.as_str())
+            .is_none(),
+        "suivi des sorts coupé : aucun sort ne doit rester déclaré à l'accessibilité"
+    );
+    harness.snapshot("combat_spell_block_coupe");
 }
