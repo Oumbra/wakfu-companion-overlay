@@ -1581,7 +1581,7 @@ commande (`Retry` reprend le jeton stocké s'il existe, sinon appaire).
 ### 9.1 duodecies Interrupteurs de fonctionnalité : Suivi, Alertes, Recherche (2026-09-15)
 
 Demande utilisateur : « permettre de désactiver les features Suivi, Alertes, Chat, via une option
-tout en haut, après le titre — "Activer le Suivi", "Activer les alertes", "Activer la recherche" ;
+tout en haut, après le titre — "Activer le suivi", "Activer la surveillance du drop", "Activer la recherche" ;
 activée par défaut ; lorsqu'elle est désactivée, tout le contenu devient grisé et désactivé,
 impossible d'interagir avec ».
 
