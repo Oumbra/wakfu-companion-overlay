@@ -326,7 +326,11 @@ fn measure_delta(source: &[u8], target: &[u8]) -> Result<u64, String> {
 }
 
 fn megabytes(bytes: u64) -> String {
-    format!("{:.1} Mo", bytes as f64 / 1_000_000.0)
+    if bytes < 1_000_000 {
+        format!("{:.0} Ko", bytes as f64 / 1_000.0)
+    } else {
+        format!("{:.1} Mo", bytes as f64 / 1_000_000.0)
+    }
 }
 
 fn measure_report(version: &str, measures: &[DeltaMeasure], skipped: &[String]) -> String {
