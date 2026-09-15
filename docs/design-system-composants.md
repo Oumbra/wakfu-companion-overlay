@@ -2484,7 +2484,7 @@ Ni urgent ni structurant, mais chacun retire du code d'un panneau.
 | **`design::toolbar`** | Le carré de contrôle du Suivi : fond translucide, gouttière, groupement de boutons icône. | `watchlist::PANEL_BACKDROP_FILL`, `menu-button-icon-first-plan.png` |
 | **`design::segmented`** | Le bascule « Objets mis en vente / Offres d'achat » ; le switch Alliés/Ennemis du panneau Combat en est une variante maison. | `tabs-with-first-tab-active.png` |
 | **`design::toast`** | `watchlist::toast_card` et ses confettis — ~300 lignes, avec son générateur pseudo-aléatoire maison. | Portage du web ; aucun asset de jeu correspondant. |
-| **`design::dialog`** | Rien — la boîte de confirmation qui manquera à la première action destructrice de l'overlay. | `interfaces/interface-confirm-box.png` |
+| ~~**`design::dialog`**~~ | **Résolu** — `design::confirm_dialog` existe depuis le 2026-09-12 et peint ses textures détourées depuis le 2026-09-15. | `confirm-box-{body,crest,foot}.png` |
 
 ### Écarts restants
 
@@ -2564,6 +2564,56 @@ elle est dans les captures de référence&nbsp;: `interface-confirm-box.png` (44
 exactement la même forme de question. Boîte autonome et centrée, fond gris **clair** (`#585955`
 mesuré), médaillon en crête débordant le corps.
 
+### Trois textures, et pourquoi pas une (2026-09-15)
+
+Le châssis n'est plus peint à la main. Il vient de la capture, détourée (`design-asset`) puis
+relevée au pixel (`ui-blueprint`, spec dans
+[`design-reference/confirm-box.spec.json`](design-reference/confirm-box.spec.json))&nbsp;:
+
+| Texture | Taille | Rendu |
+| --- | --- | --- |
+| `ConfirmBody` | 420 × 148 | 9-slice, marges **6 px**, `Stretch` sur les deux axes |
+| `ConfirmCrest` | 250 × 57 | **taille native**, centrée en haut, peinte après le corps |
+| `ConfirmFoot` | 98 × 9 | **taille native**, centré sous le corps |
+
+**Un seul 9-slice ne pouvait pas les réunir.** Les deux ornements sont centrés et de largeur fixe
+quand le corps s'étire&nbsp;: sur la capture, le bandeau doré de la crête s'arrête à 250 px alors que
+le corps en fait 420, et au-delà le corps n'a qu'un biseau clair comme sur ses trois autres côtés.
+Des marges assez larges pour contenir la crête — 250 px de chaque côté — ne laissent aucune bande
+médiane&nbsp;; la laisser dans la bande médiane l'étire. C'est la règle des embouts de bouton (§ du
+bouton texte), poussée jusqu'à la texture séparée parce que l'ornement **déborde** ici du rectangle
+du composant. Le figer plutôt que l'étirer est une décision utilisateur du 2026-09-15&nbsp;: une
+seule capture ne dit pas si le jeu l'allongerait sur une boîte plus large.
+
+**Six pixels de marge, pas cinquante.** Contrairement aux boutons, ce corps n'a pas d'embout
+décoratif&nbsp;: le filigrane en arcs de ses coins est mesuré à un écart de 2 niveaux au fond contre
+1 au centre, pour un bruit de 8 — sous le seuil du visible, et `component.py insets` rend un
+`decor_span` de 2 px. Les marges ne couvrent donc que le rayon (2 px) et le biseau (2 px), plus deux
+de sécurité.
+
+**La crête descend 21 px dans le corps** (pointe basse du losange et son cerne sombre). Le corps a
+donc été reconstruit sous elle&nbsp;: sans ce nettoyage il porterait une empreinte dorée en pleine
+bande supérieure, étirée avec lui.
+
+**C'est l'ensemble qui se centre, pas le corps** — la crête déborde de 36 px au-dessus et le filet
+de 9 px en dessous&nbsp;; centrer le seul corps ferait porter tout ce débordement d'un côté.
+
+### Ce que le relevé a corrigé
+
+| Valeur | Avant (estimée) | Après (mesurée) |
+| --- | --- | --- |
+| Hauteur du corps | 120 | **148** |
+| Largeur d'un bouton | 150 | **168** |
+| Gouttière entre boutons | 14 | **8** |
+| Marge latérale de la rangée | 26 | **38** (centrage strict) |
+| Rangée de boutons, depuis le haut | 68 | **82** |
+| Centre du bloc de la question | 46 | **42** |
+
+Le corps de police (15 px) et la largeur (420 px) étaient déjà justes. Deux relevés corrigent au
+passage l'exemple de référence du skill `ui-blueprint` : les boutons y étaient donnés à 166 et
+159 px (mesure prise sur le remplissage, liseré exclu — ils font 168 tous les deux), et le corps
+noté « sans bordure visible » alors qu'il porte un bandeau de 4 px, mais **en haut seulement**.
+
 Le centrage règle du même coup une réserve d'ergonomie&nbsp;: une popover recouvrait le bouton
 « Valider » de la fenêtre, et son bouton de confirmation tombait exactement là où « Valider »
 réapparaissait une fois la popover fermée — un double-clic un peu vif validait la fenêtre.
@@ -2591,6 +2641,20 @@ Peint d'abord dans la maquette de la page Alertes, puis dans `panels::alerts_tab
 au design system le jour où la **garde de fermeture** de la fenêtre Options lui a donné un second
 appelant. L'extraction est **à pixel constant** — aucun des trois snapshots de l'onglet Alertes n'a
 bougé.
+
+Ils sont **trois** aujourd'hui, et tous dans `panels::options_modal` : installation d'une mise à
+jour, déconnexion du compte, garde de fermeture. L'onglet Alertes a retiré la sienne (elle portait
+sur un brouillon qu'« Annuler » rattrapait). Le passage aux textures du 2026-09-15 n'a demandé
+**aucune modification chez eux** — c'est ce que ce composant achète.
+
+### Un paramètre caché, retiré (2026-09-15)
+
+Les deux réponses étaient posées par un `ui.horizontal()` dans un `Ui` enfant. Or `item_spacing` est
+**hérité**, et il s'ajoutait à `CONFIRM_BUTTON_GAP` : la galerie, qui pose `(10, 8)`, rendait une
+gouttière de 18 px pour 8 mesurés et décalait le groupe de 5 px à droite du centre. Un même dialogue
+prenait donc deux formes selon le panneau qui l'ouvrait. Les deux boutons sont désormais posés par
+`ui.put` sur des rectangles calculés : leurs positions sont des mesures, pas le résultat d'un layout
+dont l'appelant tient une variable.
 
 
 ## `design::label` — libellé élidé (2026-09-12)
