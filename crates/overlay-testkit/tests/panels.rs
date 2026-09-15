@@ -892,7 +892,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
-                    // Ce que l'hôte passe quand la case « Activer le Suivi » est décochée — il
+                    // Ce que l'hôte passe quand la case « Activer le suivi » est décochée — il
                     // vide DÉJÀ la liste dans ce cas, d'où les deux ensemble.
                     watchlist_enabled: false,
                     watchlist_selection: &mut Default::default(),
@@ -2688,7 +2688,7 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
 ///
 /// **Les ordonnées de ce fichier suivent la mise en page** : la grille est descendue de 48 px le
 /// 2026-09-13, quand la phrase « Cliquez une tuile… » et la légende du pictogramme se sont posées
-/// sous le titre « Objets suivis ».
+/// sous le titre « Objets surveillés ».
 ///
 /// Remplace, avec les deux tests suivants, les captures `..._infobulle_nom_elide` et
 /// `..._infobulle_nom_entier` : le nom ne se peint plus sous la tuile depuis la refonte du
@@ -2812,7 +2812,7 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
 
     // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
     // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
-    // « Objets suivis », pleine largeur du panneau.
+    // « Objets surveillés », pleine largeur du panneau.
     let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
@@ -3443,7 +3443,7 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// et rien d'autre — le panneau met `item_spacing.y` à zéro (`design::panel`), chaque écart y est
 /// posé explicitement. Ces points désignent des TUILES, pas des pixels d'une image — s'ils ne
 /// suivaient pas, les planches d'infobulle et de déplacement resteraient vertes en cessant de
-/// montrer ce pour quoi elles existent. Puis de la case « Activer le Suivi » le même jour, voir
+/// montrer ce pour quoi elles existent. Puis de la case « Activer le suivi » le même jour, voir
 /// [`INTERRUPTEUR_Y`].
 const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
 const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
@@ -3686,7 +3686,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
 
     // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne) — et sous la
     // ligne « Tester le son de l'alerte », qui a tout descendu de 57 px le 2026-09-15 (voir
-    // [`TUILE_0`]), elle-même sous la case « Activer le Suivi » (voir [`INTERRUPTEUR_Y`]).
+    // [`TUILE_0`]), elle-même sous la case « Activer le suivi » (voir [`INTERRUPTEUR_Y`]).
     let champ = egui::pos2(300.0, 357.0 + INTERRUPTEUR_Y + SOURDINE_Y);
     harness.drag_at(champ);
     harness.run();
@@ -4086,7 +4086,7 @@ fn options_onglet_suivi_desactive() {
 ///
 /// C'est là tout ce que cette planche verrouille, et c'est l'écart qu'on perdrait le plus
 /// facilement : le reste de l'onglet — formulaire, liste, tuiles — reste VIF, contrairement à
-/// `options_suivi_desactive` où la case « Activer le Suivi » estompe tout. Couper un son n'éteint
+/// `options_suivi_desactive` où la case « Activer le suivi » estompe tout. Couper un son n'éteint
 /// pas la fonctionnalité.
 #[test]
 fn options_onglet_suivi_son_coupe() {

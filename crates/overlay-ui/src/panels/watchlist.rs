@@ -544,7 +544,7 @@ enum ControlLayout {
     /// Aucune entrée, Suivi ACTIF : rangée 1×4 « + », « − », « Détails », « Options », infobulles
     /// en dessous.
     Row,
-    /// Suivi DÉSACTIVÉ (case « Activer le Suivi » décochée) : rangée 1×2 « Détails », « Options »
+    /// Suivi DÉSACTIVÉ (case « Activer le suivi » décochée) : rangée 1×2 « Détails », « Options »
     /// — voir [`ControlLayout::for_state`] et la doc de module (2026-09-15).
     RowTrackingOff,
 }
@@ -922,7 +922,7 @@ pub struct WatchlistAssets<'a> {
 /// même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même mécanisme, pour
 /// ouvrir la même fenêtre sur un autre onglet.
 ///
-/// `tracking_enabled` : état de la case « Activer le Suivi » (`panels::feature_switch`). Décochée,
+/// `tracking_enabled` : état de la case « Activer le suivi » (`panels::feature_switch`). Décochée,
 /// `entries` est vide (l'hôte n'en transmet aucune, voir `main.rs`) ET les boutons « + »/« − »
 /// disparaissent du bandeau — retour utilisateur du 2026-09-15, voir [`control_button_row`]. Les
 /// deux informations ne se déduisent pas l'une de l'autre : un bandeau vide Suivi ACTIF garde ses

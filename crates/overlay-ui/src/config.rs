@@ -80,7 +80,7 @@ pub struct OverlayConfig {
     /// est, qui décident si un son est bienvenu. `#[serde(default)]` comme ses voisines.
     #[serde(default)]
     pub turn_notification_muted: bool,
-    /// La fonctionnalité **Suivi** est-elle active ? — case « Activer le Suivi », tout en haut de
+    /// La fonctionnalité **Suivi** est-elle active ? — case « Activer le suivi », tout en haut de
     /// l'onglet du même nom (2026-09-15).
     ///
     /// Décochée, l'onglet entier est grisé et inerte (voir `panels::suivi_tab::show`), le bandeau
@@ -101,7 +101,7 @@ pub struct OverlayConfig {
     /// lancement de cette version.
     #[serde(default = "actif")]
     pub suivi_enabled: bool,
-    /// La fonctionnalité **Alertes** est-elle active ? — case « Activer les alertes ». Décochée,
+    /// La fonctionnalité **Alertes** est-elle active ? — case « Activer la surveillance du drop ». Décochée,
     /// l'onglet est grisé et inerte, et le ramassage d'un objet à son activé ne joue plus rien et
     /// n'affiche plus de carte. Même politique que [`Self::suivi_enabled`] pour le reste (liste
     /// conservée au compte, `true` par défaut).

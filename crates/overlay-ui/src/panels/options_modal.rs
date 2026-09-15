@@ -240,7 +240,7 @@ pub struct OptionsModalState {
     /// Couper le son de la notification de tour ? — case sous la précédente, dont elle dépend
     /// (`config::OverlayConfig::turn_notification_muted`), même mécanique de brouillon.
     pub turn_notification_muted: bool,
-    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le Suivi » / « Activer les
+    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le suivi » / « Activer les
     /// alertes » / « Activer la recherche », tout en haut de leur onglet respectif
     /// (`panels::feature_switch`, 2026-09-15). Même mécanique de brouillon que les cases
     /// ci-dessus : initialisés par l'hôte au réglage en vigueur (`config::OverlayConfig::
@@ -309,7 +309,7 @@ pub struct OptionsModalState {
     /// modale ne pourrait comparer qu'à elle-même.
     pub initial: OptionsInitial,
     /// Un compte est-il connecté ? — posé par l'hôte à l'ouverture (lui seul connaît
-    /// `AuthStatus`). Décide si le bouton « Déconnecter » de l'onglet « Paramètres » est actif : le
+    /// `AuthStatus`). Décide si le bouton « Se déconnecter » de l'onglet « Paramètres » est actif : le
     /// presser sans compte lié ne ferait rien de visible, mieux vaut que ça se voie avant le clic.
     pub account_connected: bool,
     /// La confirmation de déconnexion est ouverte — voir la section « Compte » de [`show`]. Un
@@ -840,62 +840,6 @@ pub fn show(
             );
         });
 
-        // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
-        // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
-        // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
-        //
-        // **Ce bouton n'est PAS un brouillon**, contrairement à tout le reste de cette fenêtre : il
-        // agit tout de suite (l'hôte efface le jeton et l'overlay revient à son écran de
-        // connexion), et « Annuler » ne le rattraperait pas. C'est précisément ce qui justifie la
-        // confirmation qu'il ouvre — là où l'onglet « Alertes » a pu retirer la sienne, son retrait
-        // d'objet étant annulable jusqu'à « Valider » (voir `alerts_tab`, règle 4).
-        ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Compte"));
-        ui.add(
-            design::info_text(
-                "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
-                 suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
-                 à son écran de connexion, et il faudra réappairer l'application pour le réutiliser.",
-            )
-            .tone(design::InfoTone::Info)
-            .width(inner_width)
-            .log_name("options-compte-info"),
-        );
-        ui.add_space(INFO_GAP);
-        // **Rouge et centré** (demande utilisateur, 2026-09-13), là où ce bouton était secondaire
-        // et aligné à gauche comme les réglages au-dessus. Les deux vont ensemble : c'est la seule
-        // action de cette fenêtre qui échappe à « Annuler », et noyée dans la colonne des réglages
-        // elle ne se distinguait pas d'un champ de plus. La couleur avertit, la confirmation
-        // rattrape le geste — l'une ne remplace pas l'autre.
-        //
-        // La texture `Danger` est native en **36 px**, soit exactement `ROW_HEIGHT` : ni dégradé
-        // étiré ni embout à la mauvaise échelle (voir `design::ButtonVariant::textures`).
-        //
-        // **Largeur naturelle**, jamais figée — même règle que la ligne de recherche de l'onglet
-        // « Raccourcis » : une largeur en dur écrête le libellé dès que la police ou le mot
-        // changent, ce qui s'est déjà vu (« Réinitialise »).
-        let disconnect = design::button("Déconnecter")
-            .variant(ButtonVariant::Danger)
-            .size(ButtonSize::Height(ROW_HEIGHT))
-            .enabled(state.account_connected)
-            .tooltip(if state.account_connected {
-                "Effacer la session enregistrée et revenir à l'écran de connexion"
-            } else {
-                "Aucun compte connecté"
-            })
-            .log_name("options-deconnecter");
-        let disconnect_size = disconnect.desired_size(ui);
-        let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-        if ui
-            .put(
-                egui::Rect::from_center_size(row.center(), disconnect_size),
-                disconnect,
-            )
-            .clicked()
-        {
-            state.pending_disconnect = true;
-        }
-
         // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
         // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la
         // porte déjà. Une ligne d'information (dernière vérification, version disponible et son
@@ -905,7 +849,7 @@ pub fn show(
         // rédigée aujourd'hui). L'habillage du bouton de recherche est à revoir avec le design
         // system, plus tard.
         //
-        // Comme « Déconnecter », « Mettre à jour » n'est PAS un brouillon : il ferme l'overlay
+        // Comme « Se déconnecter » (section « Compte », dessous), « Mettre à jour » n'est PAS un brouillon : il ferme l'overlay
         // de jeu le temps de l'installation — d'où sa confirmation. « Recherche », lui, ne touche
         // à rien.
         ui.add_space(SECTION_GAP);
@@ -952,6 +896,62 @@ pub fn show(
                 }
                 _ => action = OptionsModalAction::CheckUpdate,
             }
+        }
+
+        // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
+        // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
+        // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
+        //
+        // **Ce bouton n'est PAS un brouillon**, contrairement à tout le reste de cette fenêtre : il
+        // agit tout de suite (l'hôte efface le jeton et l'overlay revient à son écran de
+        // connexion), et « Annuler » ne le rattraperait pas. C'est précisément ce qui justifie la
+        // confirmation qu'il ouvre — là où l'onglet « Alertes » a pu retirer la sienne, son retrait
+        // d'objet étant annulable jusqu'à « Valider » (voir `alerts_tab`, règle 4).
+        ui.add_space(SECTION_GAP);
+        ui.add(design::heading("Compte"));
+        ui.add(
+            design::info_text(
+                "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
+                 suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
+                 à son écran de connexion, et il faudra réappairer l'application pour le réutiliser.",
+            )
+            .tone(design::InfoTone::Info)
+            .width(inner_width)
+            .log_name("options-compte-info"),
+        );
+        ui.add_space(INFO_GAP);
+        // **Rouge et centré** (demande utilisateur, 2026-09-13), là où ce bouton était secondaire
+        // et aligné à gauche comme les réglages au-dessus. Les deux vont ensemble : c'est la seule
+        // action de cette fenêtre qui échappe à « Annuler », et noyée dans la colonne des réglages
+        // elle ne se distinguait pas d'un champ de plus. La couleur avertit, la confirmation
+        // rattrape le geste — l'une ne remplace pas l'autre.
+        //
+        // La texture `Danger` est native en **36 px**, soit exactement `ROW_HEIGHT` : ni dégradé
+        // étiré ni embout à la mauvaise échelle (voir `design::ButtonVariant::textures`).
+        //
+        // **Largeur naturelle**, jamais figée — même règle que la ligne de recherche de l'onglet
+        // « Raccourcis » : une largeur en dur écrête le libellé dès que la police ou le mot
+        // changent, ce qui s'est déjà vu (« Réinitialise »).
+        let disconnect = design::button("Se déconnecter")
+            .variant(ButtonVariant::Danger)
+            .size(ButtonSize::Height(ROW_HEIGHT))
+            .enabled(state.account_connected)
+            .tooltip(if state.account_connected {
+                "Effacer la session enregistrée et revenir à l'écran de connexion"
+            } else {
+                "Aucun compte connecté"
+            })
+            .log_name("options-deconnecter");
+        let disconnect_size = disconnect.desired_size(ui);
+        let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+        if ui
+            .put(
+                egui::Rect::from_center_size(row.center(), disconnect_size),
+                disconnect,
+            )
+            .clicked()
+        {
+            state.pending_disconnect = true;
         }
     });
 
@@ -1343,7 +1343,7 @@ mod tests {
         state.features.suivi = false;
         assert!(
             state.is_dirty(),
-            "décocher « Activer le Suivi » doit ouvrir la garde de fermeture"
+            "décocher « Activer le suivi » doit ouvrir la garde de fermeture"
         );
         assert!(!state.commit().features.suivi, "« Valider » l'emporte");
 

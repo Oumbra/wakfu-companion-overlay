@@ -49,7 +49,7 @@
 //!
 //! Juste dessous, la case **« Couper le son des notifications »** (2026-09-15) : le décompte à
 //! zéro affiche toujours sa carte par-dessus le jeu, il ne fait plus de bruit. C'est le demi-pas
-//! qui manquait entre « tout actif » et la case « Activer le Suivi », qui, elle, coupe la carte
+//! qui manquait entre « tout actif » et la case « Activer le suivi », qui, elle, coupe la carte
 //! ET le son.
 //!
 //! Les deux vivent avant le formulaire d'ajout et non dans un des blocs qui composent la liste :
@@ -265,7 +265,7 @@ pub struct SuiviTabContext<'a> {
     pub remote_icon_textures: &'a mut RemoteIconTextures,
     /// Repli quand l'icône n'est pas encore descendue du CDN.
     pub icons: &'a UiIcons,
-    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer le Suivi » peinte tout
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer le suivi » peinte tout
     /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
@@ -341,7 +341,7 @@ pub fn show(
     feature_switch::show(
         ui,
         ctx.enabled,
-        "Activer le Suivi",
+        "Activer le suivi",
         "Décoché, le bandeau de suivi n'affiche plus rien par-dessus le jeu et l'alerte de \
          décompte ne se déclenche plus. Votre liste et vos compteurs sont conservés : les \
          rallumer les retrouve tels quels.",

@@ -229,7 +229,7 @@ pub struct RenderContent<'a> {
     /// `combat_side` : un état par fenêtre overlay, porté par l'hôte (voir `CombatMetric`).
     pub combat_metric: &'a mut CombatMetric,
     pub watchlist: &'a [WatchlistEntry],
-    /// État de la case « Activer le Suivi » (`panels::feature_switch`) — `false` retire les boutons
+    /// État de la case « Activer le suivi » (`panels::feature_switch`) — `false` retire les boutons
     /// « + » et « − » du bandeau (retour utilisateur 2026-09-15, voir
     /// `panels::watchlist::control_button_row`). Distinct de `watchlist.is_empty()`, que l'hôte
     /// force déjà dans ce cas : un bandeau vide Suivi ACTIF garde bien ses quatre boutons.

@@ -89,7 +89,7 @@ pub enum EngineCommand {
     /// Réglages de la carte d'alerte de chat (durée, fermeture manuelle) — locaux à la machine
     /// (voir `config::OverlayConfig`), envoyés au démarrage puis à chaque validation de l'onglet.
     SetChatToast(ChatToastSettings),
-    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le Suivi » / « Activer les
+    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le suivi » / « Activer les
     /// alertes » / « Activer la recherche » (`panels::feature_switch`, 2026-09-15). Locaux à la
     /// machine comme `SetChatToast`, envoyés au démarrage puis à chaque validation de la fenêtre
     /// Options.
