@@ -26,3 +26,8 @@ crates/overlay-testkit/tests/snapshots/*.new.png
 # Caches Python des scripts de skills
 __pycache__/
 *.py[cod]
+
+# Clé PRIVÉE de signature des Releases (minisign/rsign2, voir docs/plan-mise-a-jour.md §6.1) —
+# ne vit que dans le gestionnaire de mots de passe du mainteneur et les secrets GitHub Actions.
+# Seule la clé publique (wakfu-overlay.pub) est commitée.
+*.key
