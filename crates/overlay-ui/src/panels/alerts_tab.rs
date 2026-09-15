@@ -160,6 +160,16 @@ const LIST_DESC: &str = "Cliquez une tuile pour couper ou rétablir son alerte."
 const LEGEND_LABEL: &str = "silencieux";
 /// Écart entre le pictogramme de la légende et son libellé.
 const LEGEND_GAP: f32 = 8.0;
+/// Hauteur de la bande de légende — le pictogramme ou une ligne de corps, le plus haut des deux.
+const LEGEND_HEIGHT: f32 = if MUTE_BADGE > BODY_FONT_SIZE * 1.4 {
+    MUTE_BADGE
+} else {
+    BODY_FONT_SIZE * 1.4
+};
+/// Marge entre la base de la légende et le bord bas du panneau — **5 px, demande du 2026-09-16**
+/// (« en fix à 5px du bas ») ; la même marge la sépare de la grille au-dessus (voir
+/// [`design::PanelZones::footer`]).
+const LEGEND_BOTTOM_MARGIN: f32 = 5.0;
 
 // -------------------------------------------------------------------------------------------
 // État et contrat
@@ -234,6 +244,11 @@ pub fn show(
     ctx: &mut AlertsTabContext<'_>,
 ) {
     let width = panel.inner.width();
+    // **La légende est fixe, en pied de panneau** (2026-09-16) : la bande lui est retirée AVANT
+    // tout le reste, pour que ni le rouage de chargement ni la grille qui défile ne passent
+    // dessous. Tout ce qui suit se cale sur les zones réduites.
+    let (panel, legend) = panel.footer(LEGEND_HEIGHT, LEGEND_BOTTOM_MARGIN);
+    let panel = &panel;
 
     ui.add(design::heading("Alerte"));
     paragraph(ui, DESC);
@@ -249,13 +264,14 @@ pub fn show(
         "alertes.activer",
     );
 
+    // **Le champ d'ajout AVANT le titre de la liste** (demande du 2026-09-16) : on ajoute, puis
+    // on voit ce qu'on a — le titre coiffe la grille qu'il nomme, pas le champ qui l'alimente.
+    add_field(ui, state, ctx, width);
+    ui.add_space(SECTION_GAP);
+
     // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
     ui.add(design::heading("Objets surveillés"));
     paragraph(ui, LIST_DESC);
-    legend_row(ui);
-    ui.add_space(SECTION_GAP);
-
-    add_field(ui, state, ctx, width);
     ui.add_space(SECTION_GAP);
 
     match ctx.availability {
@@ -279,6 +295,7 @@ pub fn show(
     }
 
     tile_grid(ui, panel, ctx);
+    legend_row(ui, legend);
 }
 
 // -------------------------------------------------------------------------------------------
@@ -302,15 +319,21 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
 ///
 /// Une tuile muette ne porte qu'un pictogramme de 14 px dans son coin ; rien ne dit ce qu'il
 /// signifie, et une tuile au son actif ne porte AUCUNE marque à comparer. Demande utilisateur du
-/// 2026-09-13, dans la foulée du déplacement de [`LIST_DESC`] : la légende suit la phrase qui
-/// décrit le geste, juste au-dessus des tuiles.
+/// 2026-09-13, dans la foulée du déplacement de [`LIST_DESC`].
+///
+/// **Fixe, en pied de panneau, à gauche** (2026-09-16) : elle suivait la phrase du geste,
+/// au-dessus des tuiles ; elle est maintenant peinte dans la bande que
+/// [`design::PanelZones::footer`] réserve sous la grille, à [`LEGEND_BOTTOM_MARGIN`] du bord
+/// bas — et n'y bouge pas quand la grille défile. Peinte APRÈS la grille, avec un `Painter`
+/// dont le clip est posé sur la bande (celui du `Ui` s'arrête au bas de la zone défilable), et
+/// qui hérite du fondu de l'onglet grisé comme tout ce qui est peint après l'interrupteur.
 ///
 /// Le pictogramme y est peint **exactement comme sur une tuile** (même taille, même blanc, même
 /// cerné, voir [`paint_mute_badge`]) : une légende qui ne ressemblerait pas à ce qu'elle légende
 /// ne servirait à rien.
-fn legend_row(ui: &mut egui::Ui) {
-    let hauteur = MUTE_BADGE.max(BODY_FONT_SIZE * 1.4);
-    let (_, ligne) = ui.allocate_space(Vec2::new(ui.available_width(), hauteur));
+fn legend_row(ui: &egui::Ui, ligne: Rect) {
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(ligne);
     let ds = design::DesignSystem::get(ui.ctx());
     let glyphe = Rect::from_center_size(
         egui::pos2(ligne.left() + MUTE_BADGE / 2.0, ligne.center().y),
@@ -319,8 +342,8 @@ fn legend_row(ui: &mut egui::Ui) {
             MUTE_BADGE,
         ),
     );
-    paint_mute_badge(ui, &ds, glyphe);
-    ui.painter().text(
+    paint_mute_badge(&painter, &ds, glyphe);
+    painter.text(
         egui::pos2(glyphe.right() + LEGEND_GAP, ligne.center().y),
         egui::Align2::LEFT_CENTER,
         LEGEND_LABEL,
@@ -548,7 +571,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     // (décision du 2026-09-13, en remplacement de la bordure d'état cyan/gris).
     if !item.enabled {
         paint_mute_badge(
-            ui,
+            ui.painter(),
             &ds,
             badge_rect(
                 ds.icon_native_size(DsIcon::VolumeMute),
@@ -637,16 +660,16 @@ fn badge_rect(native: Vec2, tile: Rect, corner: Corner, side: f32) -> Rect {
 /// d'`icon-volume-mute.png` mesure déjà plus d'un pixel, une passe de plus bouche le creux du
 /// haut-parleur et le glyphe devient une tache blanche. C'est la COTE qui le rend lisible, pas le
 /// gras.
-fn paint_mute_badge(ui: &egui::Ui, ds: &design::DesignSystem, rect: Rect) {
+fn paint_mute_badge(painter: &egui::Painter, ds: &design::DesignSystem, rect: Rect) {
     for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
         ds.paint_icon(
-            ui.painter(),
+            painter,
             rect.translate(Vec2::new(dx, dy)),
             DsIcon::VolumeMute,
             MUTE_SHADOW,
         );
     }
-    ds.paint_icon(ui.painter(), rect, DsIcon::VolumeMute, TEXT);
+    ds.paint_icon(painter, rect, DsIcon::VolumeMute, TEXT);
 }
 
 /// La fenêtre de l'icône — **tout ce que le voile de survol a le droit de couvrir**.

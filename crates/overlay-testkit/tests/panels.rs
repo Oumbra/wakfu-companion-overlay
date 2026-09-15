@@ -736,6 +736,16 @@ fn bandeau_largeur_suivi(entry_count: usize, tracking_enabled: bool) -> f32 {
 /// de place ou de taille, c'est cette ligne-ci qu'on corrige, pas une vingtaine d'ordonnées.
 const INTERRUPTEUR_Y: f32 = 38.0;
 
+/// **Axe du champ d'ajout de l'onglet « Alertes »**, en ordonnée de fenêtre — la case
+/// « Activer … » comprise.
+///
+/// Il était à 364 (326 + [`INTERRUPTEUR_Y`]) sous le titre « Objets surveillés », sa phrase et la
+/// légende du pictogramme ; il est passé AVANT ce titre le 2026-09-16 (demande utilisateur), tout
+/// de suite sous la case, et remonte de 85 px : le titre (16 d'encre + 13 d'écart), la phrase
+/// (≈ 21), la légende (21) et le `SECTION_GAP` (18) qui fermait ce bloc. Le panneau de
+/// suggestions s'ouvre sous lui : bande de filtres, rangées et poignée suivent du même pas.
+const CHAMP_ALERTES_Y: f32 = 241.0 + INTERRUPTEUR_Y;
+
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
 const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0, 25.0);
@@ -2654,7 +2664,10 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
 ///
 /// **Les ordonnées de ce fichier suivent la mise en page** : la grille est descendue de 48 px le
 /// 2026-09-13, quand la phrase « Cliquez une tuile… » et la légende du pictogramme se sont posées
-/// sous le titre « Objets surveillés ».
+/// sous le titre « Objets surveillés » ; puis remontée de 21 px le 2026-09-16, quand la légende
+/// est partie se fixer en pied de panneau (`alerts_tab::LEGEND_HEIGHT`). Le champ d'ajout, lui,
+/// est passé AVANT le titre le même jour : il remonte de 85 px (titre, phrase, légende et l'écart
+/// de section qui les suivait), voir [`CHAMP_ALERTES_Y`].
 ///
 /// Remplace, avec les deux tests suivants, les captures `..._infobulle_nom_elide` et
 /// `..._infobulle_nom_entier` : le nom ne se peint plus sous la tuile depuis la refonte du
@@ -2665,7 +2678,7 @@ fn options_alertes_survol_d_une_tuile_retirable() {
     survole_l_onglet_alertes(
         "options_alertes_survol_retirable",
         231.0,
-        463.0 + INTERRUPTEUR_Y,
+        442.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2679,7 +2692,7 @@ fn options_alertes_survol_de_la_croix() {
     survole_l_onglet_alertes(
         "options_alertes_survol_croix",
         248.0,
-        446.0 + INTERRUPTEUR_Y,
+        425.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2694,7 +2707,7 @@ fn options_alertes_survol_d_un_objet_par_defaut() {
     survole_l_onglet_alertes(
         "options_alertes_survol_par_defaut",
         79.0,
-        387.0 + INTERRUPTEUR_Y,
+        366.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2779,7 +2792,7 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
     // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
     // « Objets surveillés », pleine largeur du panneau.
-    let champ = egui::pos2(300.0, 326.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, CHAMP_ALERTES_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2803,14 +2816,14 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // passent par le même `egui::Tooltip::for_enabled` (voir `Response::on_hover_ui` dans egui),
     // seul l'alignement diffère — et c'est lui qui envoyait le texte hors du cadre capturé. Cette
     // capture le prouve dans les deux sens : l'infobulle sort, et elle sort AU-DESSUS.
-    harness.hover_at(egui::pos2(68.0, 364.0 + INTERRUPTEUR_Y));
+    harness.hover_at(egui::pos2(68.0, CHAMP_ALERTES_Y + 38.0));
     harness.run();
     harness.snapshot("options_alertes_infobulle_filtre");
 
     // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
     // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
     // immédiatement sous le champ.
-    let suggestion = egui::pos2(300.0, 395.0 + INTERRUPTEUR_Y);
+    let suggestion = egui::pos2(300.0, CHAMP_ALERTES_Y + 69.0);
     // **Survol d'abord, clic ensuite** : egui rattache un appui au widget que le pointeur
     // survolait, et le pointeur n'est nulle part tant qu'aucun mouvement ne l'a placé. Sans cette
     // frame de survol, l'appui tombe sur un widget inconnu et la rangée n'est jamais cliquée.
@@ -2896,7 +2909,7 @@ fn options_alertes_croix_efface_la_saisie() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 328.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, CHAMP_ALERTES_Y + 2.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2909,7 +2922,7 @@ fn options_alertes_croix_efface_la_saisie() {
 
     // La croix : à 9 px du bord extérieur droit du champ, sur son axe — voir
     // `tokens::INPUT_CLEAR_INSET_RATIO`. Le champ s'arrête à x≈705 dans cette fenêtre.
-    let croix = egui::pos2(691.0, 328.0 + INTERRUPTEUR_Y);
+    let croix = egui::pos2(691.0, CHAMP_ALERTES_Y + 2.0);
     harness.hover_at(croix);
     harness.run();
     harness.drag_at(croix);
@@ -3005,7 +3018,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 326.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, CHAMP_ALERTES_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3027,7 +3040,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
     // Le pointeur SUR la poignée (colonne de droite du panneau, à mi-hauteur de la liste) : elle
     // prend la teinte des rangées survolées, sans s'élargir. egui ne passe en `hovered` que le
     // pointeur sur la poignée elle-même, pas seulement dans sa colonne.
-    harness.hover_at(egui::pos2(700.0, 493.0 + INTERRUPTEUR_Y));
+    harness.hover_at(egui::pos2(700.0, CHAMP_ALERTES_Y + 167.0));
     harness.run();
     harness.snapshot("options_alertes_poignee_survolee");
 
@@ -3621,7 +3634,7 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
     survole_l_onglet_alertes(
         "options_alertes_infobulle_tuile_coupee",
         459.0,
-        387.0 + INTERRUPTEUR_Y,
+        366.0 + INTERRUPTEUR_Y,
         Some("Influence III"),
     );
 }
@@ -4238,8 +4251,8 @@ fn options_onglet_chat_desactive() {
     capture_onglet_coupe("options_chat_desactive", OptionsTab::Chat);
 }
 
-/// **L'onglet « Chat »** : « Tester le son », fermeture automatique, formulaire canal → mot →
-/// « Ajouter », neuf recherches en tuiles à légende, quatre par rangée.
+/// **L'onglet « Chat »** : formulaire canal → mot → « Ajouter », puis le titre « Recherches » et
+/// neuf recherches en tuiles à légende, quatre par rangée.
 #[test]
 fn options_onglet_chat_recherches() {
     capture_onglet_chat(
@@ -4252,6 +4265,8 @@ fn options_onglet_chat_recherches() {
 
 /// Une tuile survolée : voile et croix de retrait, l'idiome des tuiles d'Alertes. La position
 /// vise le centre de la deuxième tuile (panneau à x ≈ 47, tuiles de ≈ 155 px et gouttière de 12).
+/// Descendue de 4 px le 2026-09-16 : le titre « Recherches » est passé entre le formulaire et la
+/// grille, et l'écart sous le formulaire est devenu un `SECTION_GAP` entier.
 #[test]
 fn options_onglet_chat_survol_d_une_tuile() {
     capture_onglet_chat(
@@ -4260,7 +4275,7 @@ fn options_onglet_chat_survol_d_une_tuile() {
         Default::default(),
         Some(egui::pos2(
             47.0 + 155.0 + 12.0 + 77.0,
-            316.0 + INTERRUPTEUR_Y,
+            320.0 + INTERRUPTEUR_Y,
         )),
     );
 }

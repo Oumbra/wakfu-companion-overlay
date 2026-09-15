@@ -249,7 +249,9 @@ pub fn show(
         ChatAvailability::Ready => {}
     }
 
-    ui.add(design::heading("Recherches"));
+    // **La ligne de création AVANT le titre de la liste** (demande du 2026-09-16, la même que
+    // pour le champ d'ajout des Alertes) : on ajoute, puis on voit ce qu'on a — le titre coiffe la
+    // grille qu'il nomme, pas le formulaire qui l'alimente.
     add_row(ui, state, ctx.draft, width);
     if let Some(notice) = state.notice {
         ui.add_space(6.0);
@@ -260,7 +262,9 @@ pub fn show(
                 .log_name("chat.ajout-refuse"),
         );
     }
-    ui.add_space(SECTION_GAP * 0.75);
+    ui.add_space(SECTION_GAP);
+
+    ui.add(design::heading("Recherches"));
 
     if ctx.draft.filters.is_empty() {
         ui.add(
