@@ -375,6 +375,13 @@
 //! Le bloc « ligne de sorts » (`combat_spell_block`), lui, ne dépend PAS de ce switch : il montre
 //! les sorts du dernier tour dans l'ordre où ils ont été lancés, quelle que soit la grandeur
 //! regardée (décision utilisateur explicite, 14 sept. 2026).
+//!
+//! **Les barres restent filtrées à `value_of(f) > 0` pour les trois grandeurs** — un combattant
+//! qui n'a rien produit de la grandeur affichée garde son portrait mais pas de barre. Le site
+//! (`Oumbra/wakfu-companion`) fait l'inverse et liste tout le roster, zéros compris : cet écart
+//! est voulu (décision utilisateur explicite, 15 sept. 2026, voir CLAUDE.md « Ce que l'overlay
+//! affiche diffère du site ») — temps réel ici, bilan de fin de combat là-bas. Ne pas aligner les
+//! deux.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -596,7 +603,9 @@ pub fn show(
         .unwrap_or_default();
 
     // Barres : liste SÉPARÉE, triée par dégâts décroissant, uniquement les combattants ayant
-    // infligé au moins 1 dégât (voir doc de module). `total_damage` est calculé sur TOUS les
+    // infligé au moins 1 dégât (voir doc de module) — et de même pour l'armure donnée et les
+    // soins. Filtre VOULU, à ne pas retirer pour « s'aligner » sur le site, qui garde lui ses
+    // lignes à zéro : voir la doc de module et CLAUDE.md. `total_damage` est calculé sur TOUS les
     // combattants affichés (y compris ceux à 0 dégât : ils comptent pour 0 dans la somme, le
     // résultat est identique, mais c'est bien le total du camp affiché qui a du sens ici) — seule
     // référence désormais pour le remplissage ET le pourcentage (voir doc de module, correctif de
