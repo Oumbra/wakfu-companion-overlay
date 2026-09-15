@@ -224,6 +224,11 @@ pub struct RenderContent<'a> {
     /// `combat_side` : un état par fenêtre overlay, porté par l'hôte (voir `CombatMetric`).
     pub combat_metric: &'a mut CombatMetric,
     pub watchlist: &'a [WatchlistEntry],
+    /// État de la case « Activer le Suivi » (`panels::feature_switch`) — `false` retire les boutons
+    /// « + » et « − » du bandeau (retour utilisateur 2026-09-15, voir
+    /// `panels::watchlist::control_button_row`). Distinct de `watchlist.is_empty()`, que l'hôte
+    /// force déjà dans ce cas : un bandeau vide Suivi ACTIF garde bien ses quatre boutons.
+    pub watchlist_enabled: bool,
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
     /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
     pub watchlist_selection: &'a mut panels::watchlist::WatchlistSelection,
@@ -377,6 +382,7 @@ pub fn build_ui(
                 combat_side: &mut *content.combat_side,
                 combat_metric: &mut *content.combat_metric,
                 watchlist: content.watchlist,
+                watchlist_enabled: content.watchlist_enabled,
                 watchlist_selection: &mut *content.watchlist_selection,
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
@@ -414,6 +420,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         combat_side,
         combat_metric,
         watchlist,
+        watchlist_enabled,
         watchlist_selection,
         watchlist_toast,
         catalog,
@@ -554,6 +561,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                             remote_icon_textures,
                         },
                         watchlist,
+                        watchlist_enabled,
                         watchlist_selection,
                         watchlist_toast,
                         now,

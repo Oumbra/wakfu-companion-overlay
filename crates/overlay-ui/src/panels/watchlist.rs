@@ -217,6 +217,26 @@
 //! de sa fenêtre ; ce qui l'éloigne encore du client (28 px) n'est plus que l'ancrage de la
 //! fenêtre elle-même (`main.rs::GAME_TOP_MARGIN_PX`). `CONTROL_TOOLTIP_RESERVE` est remesurée une
 //! dernière fois (voir sa doc) : plus rien à gauche, 88 px à droite.
+//!
+//! **Refonte 2026-09-15 (Suivi coupé : rangée 1×2)** — retour utilisateur explicite : « lorsque le
+//! suivi est désactivé, il faut retirer les boutons "+" et "-" du bandeau ». La case « Activer le
+//! Suivi » décochée (`panels::feature_switch`), l'hôte vidait déjà le bandeau de ses tuiles sans
+//! toucher au carré de contrôle — « + » restait offert alors qu'il n'y a plus rien à suivre, et
+//! « − » n'était que grisé faute de liste. Les deux boutons ne sont désormais plus peints du tout
+//! ([`ControlLayout::RowTrackingOff`]) et la rangée se referme sur les deux qui gardent un sens :
+//! ```text
+//! [🔗] [⚙]
+//! ```
+//! « Options » reste le seul accès à la fenêtre de réglages depuis le jeu, donc le seul moyen de
+//! RÉACTIVER le Suivi : le retirer lui aussi enfermerait dehors qui vient de décocher la case (même
+//! raisonnement que la refonte 2026-09-08, qui avait rendu le carré inconditionnel). La fenêtre
+//! rétrécit d'autant (`content_width`, deux boutons de moins) plutôt que de garder la place d'une
+//! rangée à demi vide — une fenêtre plus large que son contenu reste cliquable sur toute sa zone,
+//! le défaut que le dimensionnement dynamique corrige depuis le 2026-09-02. Le décompte d'entrées
+//! ne suffit pas à distinguer les deux cas : un bandeau vide Suivi ACTIF garde bien ses quatre
+//! boutons, d'où le `tracking_enabled` qui descend jusqu'ici depuis
+//! `render_content::RenderContent`. Capture de non-régression :
+//! `overlay-testkit/tests/panels.rs::panneau_suivi_coupe_sans_boutons_plus_et_moins`.
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -521,13 +541,21 @@ const CONTROL_ROW_TOOLTIP_RESERVE: f32 = 64.0;
 enum ControlLayout {
     /// Au moins une entrée suivie : carré 2×2, infobulles par ligne (dessus/dessous).
     Square,
-    /// Aucune entrée : rangée 1×4 « + », « − », « Détails », « Options », infobulles en dessous.
+    /// Aucune entrée, Suivi ACTIF : rangée 1×4 « + », « − », « Détails », « Options », infobulles
+    /// en dessous.
     Row,
+    /// Suivi DÉSACTIVÉ (case « Activer le Suivi » décochée) : rangée 1×2 « Détails », « Options »
+    /// — voir [`ControlLayout::for_state`] et la doc de module (2026-09-15).
+    RowTrackingOff,
 }
 
 impl ControlLayout {
-    fn for_entries(entry_count: usize) -> Self {
-        if entry_count == 0 {
+    /// Disposition à peindre : le Suivi coupé n'a que deux boutons à montrer, et l'emporte sur le
+    /// décompte d'entrées (qui vaut alors zéro de toute façon, voir `main.rs`, `features.suivi`).
+    fn for_state(entry_count: usize, tracking_enabled: bool) -> Self {
+        if !tracking_enabled {
+            ControlLayout::RowTrackingOff
+        } else if entry_count == 0 {
             ControlLayout::Row
         } else {
             ControlLayout::Square
@@ -539,13 +567,14 @@ impl ControlLayout {
         match self {
             ControlLayout::Square => 2.0,
             ControlLayout::Row => 4.0,
+            ControlLayout::RowTrackingOff => 2.0,
         }
     }
 
     fn rows(self) -> f32 {
         match self {
             ControlLayout::Square => 2.0,
-            ControlLayout::Row => 1.0,
+            ControlLayout::Row | ControlLayout::RowTrackingOff => 1.0,
         }
     }
 
@@ -566,7 +595,9 @@ impl ControlLayout {
     fn tooltip_reserve(self) -> f32 {
         match self {
             ControlLayout::Square => CONTROL_TOOLTIP_RESERVE,
-            ControlLayout::Row => CONTROL_ROW_TOOLTIP_RESERVE,
+            // La rangée du Suivi coupé n'affiche que « Détails » et « Options », deux libellés
+            // plus courts que le « Supprimer (Ctrl+Shift+S) » sur lequel la réserve a été mesurée.
+            ControlLayout::Row | ControlLayout::RowTrackingOff => CONTROL_ROW_TOOLTIP_RESERVE,
         }
     }
 }
@@ -618,8 +649,15 @@ impl ControlLayout {
 /// commence donc au premier pixel du fond translucide du carré de contrôle, comme demandé ; la
 /// marge interne gauche de la fenêtre Suivi (`render_content::paint_content`) est tombée à 0 dans
 /// le même mouvement, sans quoi il serait resté 6 px de vide avant ce premier pixel.
-pub fn content_width(entry_count: usize) -> f32 {
-    let layout = ControlLayout::for_entries(entry_count);
+///
+/// **Refonte 2026-09-15 (Suivi coupé : rangée 1×2)** : `tracking_enabled` dit si la case « Activer
+/// le Suivi » est cochée. Décochée, « + » et « − » ne sont plus peints du tout (voir doc de module
+/// et [`control_button_row`]) — la fenêtre rétrécit d'autant, deux boutons de moins
+/// ([`ControlLayout::RowTrackingOff`]), plutôt que de réserver la largeur d'une rangée dont la
+/// moitié serait vide. Le décompte d'entrées ne suffit pas à le déduire : `main.rs` passe déjà une
+/// liste vide dans ce cas, et un bandeau vide Suivi ACTIF garde bien ses quatre boutons.
+pub fn content_width(entry_count: usize, tracking_enabled: bool) -> f32 {
+    let layout = ControlLayout::for_state(entry_count, tracking_enabled);
     let entries_width = if entry_count == 0 {
         0.0
     } else {
@@ -665,7 +703,7 @@ fn control_row_height(layout: ControlLayout) -> f32 {
 fn control_row_centering(layout: ControlLayout) -> f32 {
     match layout {
         ControlLayout::Square => ((TILE_SIZE - control_row_height(layout)) / 2.0).max(0.0),
-        ControlLayout::Row => 0.0,
+        ControlLayout::Row | ControlLayout::RowTrackingOff => 0.0,
     }
 }
 
@@ -883,10 +921,17 @@ pub struct WatchlistAssets<'a> {
 /// exactement son rôle d'avant (fermeture du toast, voir plus bas). Le clic sur "+" remonte de la
 /// même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même mécanisme, pour
 /// ouvrir la même fenêtre sur un autre onglet.
+///
+/// `tracking_enabled` : état de la case « Activer le Suivi » (`panels::feature_switch`). Décochée,
+/// `entries` est vide (l'hôte n'en transmet aucune, voir `main.rs`) ET les boutons « + »/« − »
+/// disparaissent du bandeau — retour utilisateur du 2026-09-15, voir [`control_button_row`]. Les
+/// deux informations ne se déduisent pas l'une de l'autre : un bandeau vide Suivi ACTIF garde ses
+/// quatre boutons.
 pub fn show(
     ui: &mut egui::Ui,
     assets: WatchlistAssets<'_>,
     entries: &[WatchlistEntry],
+    tracking_enabled: bool,
     selection: &mut WatchlistSelection,
     toast: Option<&WatchlistToast>,
     now: std::time::Instant,
@@ -941,7 +986,7 @@ pub fn show(
     // actions du bandeau devenaient inatteignables tant qu'on ne revenait pas au début.
     let mut strip_rect = egui::Rect::NOTHING;
     ui.horizontal_top(|ui| {
-        let layout = ControlLayout::for_entries(entries.len());
+        let layout = ControlLayout::for_state(entries.len(), tracking_enabled);
         // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu de
         // deux hauteurs qui s'additionnent :
         //
@@ -1701,13 +1746,19 @@ struct ToastClick {
 /// Disposition selon `layout` (les deux données explicitement par l'utilisateur, voir doc de
 /// module) :
 /// ```text
-/// Square (au moins une entrée)   Row (aucune entrée)
-/// [+] [−]                        [+] [−] [🔗] [⚙]
+/// Square (au moins une entrée)   Row (aucune entrée)   RowTrackingOff (Suivi coupé)
+/// [+] [−]                        [+] [−] [🔗] [⚙]      [🔗] [⚙]
 /// [🔗] [⚙]
 /// ```
 /// En rangée, "−" est visuellement DÉSACTIVÉ (voir `control_button`, `ControlButtonState`) — rien
 /// à supprimer tant qu'aucune entrée n'est suivie ; les trois autres boutons restent toujours
-/// activés. **Les quatre infobulles s'ouvrent EN DESSOUS** (voir doc de module, refonte du soir du
+/// activés.
+///
+/// **Suivi coupé (2026-09-15, retour utilisateur explicite : « lorsque le suivi est désactivé, il
+/// faut retirer les boutons "+" et "-" du bandeau »)** : ces deux boutons ne sont plus peints du
+/// tout — ni activés, ni grisés — et la rangée se referme sur "Détails"/"Options", seuls boutons
+/// dont l'action garde un sens (la fenêtre Options reste le seul moyen de RÉACTIVER le Suivi
+/// depuis le jeu). `add`/`remove` de [`ControlRowClicks`] restent donc `false` toute la frame. **Les quatre infobulles s'ouvrent EN DESSOUS** (voir doc de module, refonte du soir du
 /// 2026-09-13) : en rangée sous leur bouton, en carré sous le CARRÉ (`anchor`) — sous un bouton du
 /// haut, elles recouvriraient celui du bas.
 /// Renvoie les clics de CETTE frame — voir [`ControlRowClicks`] et la doc de `show`.
@@ -1717,7 +1768,7 @@ fn control_button_row(
     layout: ControlLayout,
     select_open: bool,
 ) -> ControlRowClicks {
-    let watchlist_empty = layout == ControlLayout::Row;
+    let watchlist_empty = layout != ControlLayout::Square;
     let row_rect = ui
         .allocate_exact_size(
             egui::vec2(control_row_width(layout), control_row_height(layout)),
@@ -1749,27 +1800,37 @@ fn control_button_row(
             remove_top_left + egui::vec2(step * 2.0, 0.0),
             None,
         ),
+        // Suivi coupé : "+"/"−" ne sont pas peints, "Détails" prend la première place de la rangée
+        // (voir la doc ci-dessus). Même règle d'infobulle que la rangée complète.
+        ControlLayout::RowTrackingOff => (add_top_left, remove_top_left, None),
     };
 
-    let add_response = control_button(
-        ui,
-        add_top_left,
-        DsIcon::Plus,
-        "watchlist-add",
-        &format!(
-            "Ajouter ({})",
-            shortcuts.label(ShortcutAction::WatchlistAdd)
-        ),
-        ControlButtonState::Enabled,
-        anchor,
-    );
+    // Les deux boutons de suivi ne sont peints QUE si la fonctionnalité est active — voir la doc
+    // ci-dessus (2026-09-15). `Option` plutôt qu'un état `Disabled` : la demande est de les
+    // RETIRER, pas de les griser, et la rangée doit se refermer sur les deux qui restent.
+    let paint_tracking_buttons = layout != ControlLayout::RowTrackingOff;
+
+    let add_response = paint_tracking_buttons.then(|| {
+        control_button(
+            ui,
+            add_top_left,
+            DsIcon::Plus,
+            "watchlist-add",
+            &format!(
+                "Ajouter ({})",
+                shortcuts.label(ShortcutAction::WatchlistAdd)
+            ),
+            ControlButtonState::Enabled,
+            anchor,
+        )
+    });
     // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
     // bouton ouvrait la modale Options sur l'onglet « Suivi », son seul rôle possible, sans que
     // personne ne lise jamais son clic. `enabled` valait déjà `true` (voir la doc de
     // `control_button`, qui distingue « inerte » de « désactivé » : c'est l'appelant qui ignorait
     // le clic, pas le `Sense` du bouton qui l'empêchait), ce qui a laissé le défaut invisible
     // jusqu'au retour utilisateur.
-    let add = add_response.clicked();
+    let add = add_response.is_some_and(|r| r.clicked());
 
     // "−" à DROITE de "+" (pas en dessous, contrairement à l'ancienne disposition 1×2 — voir doc de
     // module) : désactivé tant que `watchlist_empty`, infobulle à DROITE (colonne droite).
@@ -1778,27 +1839,29 @@ fn control_button_row(
     // multiple de la bande, et reste ENFONCÉ tant qu'elle est ouverte — comme un onglet actif, et
     // comme son jumeau de l'onglet « Suivi ». Son infobulle dit alors le geste inverse, puisque
     // c'est ce que le prochain clic fera.
-    let remove_response = control_button(
-        ui,
-        remove_top_left,
-        DsIcon::Minus,
-        "watchlist-remove",
-        &format!(
-            "{} ({})",
-            if select_open {
-                "Quitter la sélection"
-            } else {
-                "Supprimer"
+    let remove_response = paint_tracking_buttons.then(|| {
+        control_button(
+            ui,
+            remove_top_left,
+            DsIcon::Minus,
+            "watchlist-remove",
+            &format!(
+                "{} ({})",
+                if select_open {
+                    "Quitter la sélection"
+                } else {
+                    "Supprimer"
+                },
+                shortcuts.label(ShortcutAction::WatchlistRemove)
+            ),
+            match (watchlist_empty, select_open) {
+                (true, _) => ControlButtonState::Disabled,
+                (false, true) => ControlButtonState::Active,
+                (false, false) => ControlButtonState::Enabled,
             },
-            shortcuts.label(ShortcutAction::WatchlistRemove)
-        ),
-        match (watchlist_empty, select_open) {
-            (true, _) => ControlButtonState::Disabled,
-            (false, true) => ControlButtonState::Active,
-            (false, false) => ControlButtonState::Enabled,
-        },
-        anchor,
-    );
+            anchor,
+        )
+    });
 
     // "Détails" sous "+" (colonne GAUCHE du carré) ou à la suite de "−" (rangée) — même
     // icône/action (ouvrir la web app) que l'ancien bouton "lien externe" de
@@ -1837,7 +1900,7 @@ fn control_button_row(
     );
     ControlRowClicks {
         add,
-        remove: remove_response.clicked(),
+        remove: remove_response.is_some_and(|r| r.clicked()),
         options: options_response.clicked(),
         details,
     }
