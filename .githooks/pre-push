@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Hook `pre-push` — refuse un push qui ferait rougir le CI sur un lint.
+#
+# Activé par `bash scripts/install-hooks.sh` (positionne `core.hooksPath` sur `.githooks/`) ; ce
+# dossier est versionné, donc le hook suit le dépôt au lieu de vivre dans le `.git/` de chacun.
+#
+# Ne rejoue QUE les lints (`--lint` : `cargo fmt --check` + `clippy -D warnings`), pas la suite de
+# tests : ce sont eux qui ont tenu le CI rouge en continu (un `fmt` sur session.rs), ils sont
+# rapides une fois `target/` chaud, et un hook lent finit contourné systématiquement.
+#
+# Contournement ponctuel assumé : `git push --no-verify`.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+if [ ! -f "$repo_root/scripts/ci-local.sh" ]; then
+  exit 0  # branche/état sans le script (ex. historique ancien) : ne jamais bloquer là-dessus.
+fi
+
+printf '\033[1m[pre-push]\033[0m vérification des lints avant push (contournement : --no-verify)\n'
+if bash "$repo_root/scripts/ci-local.sh" --lint; then
+  exit 0
+fi
+
+cat >&2 <<'MSG'
+
+╭──────────────────────────────────────────────────────────────────────╮
+│ Push INTERROMPU : ces lints feraient échouer le CI.                  │
+│                                                                      │
+│   • écart de format  →  cargo fmt --all                              │
+│   • clippy           →  corriger, puis relancer                      │
+│                                                                      │
+│   Revérifier :  bash scripts/ci-local.sh --lint                      │
+│   Forcer       :  git push --no-verify                               │
+╰──────────────────────────────────────────────────────────────────────╯
+MSG
+exit 1

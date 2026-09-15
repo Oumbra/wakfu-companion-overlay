@@ -1,0 +1,64 @@
+[package]
+name = "overlay-ui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Fenetre overlay transparente (Windows, DirectComposition — voir S1) rendant les deux premiers panneaux de L2 (degats du combat en cours, recap de session) a partir d'overlay-engine/overlay-ingest."
+
+[dependencies]
+overlay-engine = { path = "../overlay-engine" }
+overlay-ingest = { path = "../overlay-ingest" }
+overlay-sync = { path = "../overlay-sync" }
+overlay-platform = { path = "../overlay-platform" }
+
+arc-swap = "1"
+crossbeam-channel = "0.5"
+ctrlc = "3"
+directories = "5"
+egui = "0.36.1"
+egui-wgpu = "0.36.1"
+egui-winit = "0.36.1"
+global-hotkey = "0.8.0"
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+open = "5"
+pollster = "1.0.1"
+raw-window-handle = "0.6"
+rfd = "0.15"
+rodio = { version = "0.21", default-features = false, features = ["mp3", "playback"] }
+serde = { version = "1", features = ["derive"] }
+# Transporte l'objet `profile` BRUT du compte entre le thread Engine et la fenêtre Options :
+# réécrire les alertes sans repartir de cet objet effacerait le pseudo et l'avatar du compte
+# (voir `overlay_engine::AlertProfile::patch_value`).
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wgpu = { version = "30", features = ["dx12", "vulkan"] }
+winit = { version = "0.30", features = ["rwh_06"] }
+
+[target.'cfg(windows)'.dependencies]
+# Icône de zone de notification et son menu (Options / Mise à jour / Déconnecter / Quitter —
+# 2026-09-14, §9.1 undecies du plan). Mêmes auteurs que `global-hotkey` (tauri-apps), même modèle : un récepteur
+# d'événements sondé depuis la boucle winit. Windows uniquement : ses fonctionnalités par défaut
+# tirent GTK/libappindicator sous Linux, que le binaire X11 n'utilise pas (voir sa doc de module).
+tray-icon = { version = "0.25", default-features = false }
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  # `SendInput` — frappe clavier synthetique des raccourcis multicompte (`chat_command`).
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  # Surveillance de tour (`turn_watch`, §9.1 decies) : `PrintWindow` vit dans `Storage_Xps`
+  # (héritage de l'API d'impression), le toast dans WinRT `UI_Notifications` + `Data_Xml_Dom`.
+  "Win32_Storage_Xps",
+  "Win32_System_WinRT",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Shell",
+  "Foundation",
+  "UI_Notifications",
+  "Data_Xml_Dom",
+] }
