@@ -73,9 +73,10 @@ c'est un type **sans bump** :
 | Documentation, plans, `CLAUDE.md`, README | `docs:` | idem |
 
 Cas vécu (2026-09-15) : l'ajout de `wakfu-overlay.pub` (clé publique de vérification des mises
-à jour) a été commité en `feat:` et a fait passer la version de 0.20.4 à 0.21.0 — sans que rien
-ne change pour l'utilisateur, puisque le fichier n'est encore embarqué nulle part. C'était un
-`chore:`. Le jour où le code qui *utilise* cette clé arrive, ce commit-là est le `feat:`.
+à jour) a été commité en `feat:` — le hook n'était pas actif dans cette session, la version est
+donc restée à 0.20.4, mais avec le hook ce commit aurait déclenché un passage à 0.21.0 sans que
+rien ne change pour l'utilisateur, puisque le fichier n'est encore embarqué nulle part. C'était
+un `chore:`. Le jour où le code qui *utilise* cette clé arrive, ce commit-là est le `feat:`.
 
 ## Signature de commit en session cloud
 
