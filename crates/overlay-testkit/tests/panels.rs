@@ -724,6 +724,15 @@ fn bandeau_largeur(entry_count: usize) -> f32 {
 /// de place ou de taille, c'est cette ligne-ci qu'on corrige, pas une vingtaine d'ordonnées.
 const INTERRUPTEUR_Y: f32 = 38.0;
 
+/// **Décalage vertical apporté par la case « Couper le son des notifications »** des onglets Suivi
+/// et Chat (2026-09-15, voir `panels::sound_row`) : la hauteur d'une ligne simple, l'espacement du
+/// panneau étant nul. Tout ce que ces DEUX onglets peignent après la ligne « Tester le son de
+/// l'alerte » est descendu d'autant — l'onglet Alertes, lui, n'a pas la case (le son d'un
+/// ramassage s'y coupe tuile par tuile), ses ordonnées ne bougent donc pas.
+///
+/// Nommée plutôt que fondue dans chaque coordonnée, même raison que [`INTERRUPTEUR_Y`].
+const SOURDINE_Y: f32 = 39.0;
+
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
 const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0, 25.0);
@@ -1584,6 +1593,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Les trois cases « Activer … » n'ont pas été touchées non plus : elles sont
                 // emportées telles qu'elles ont été posées à l'ouverture, c'est-à-dire actives.
                 features: overlay_ui::panels::feature_switch::FeatureToggles::default(),
+                // Et pour les deux cases « Couper le son des notifications » : jamais touchées,
+                // donc emportées levées.
+                mutes: overlay_ui::panels::sound_row::AlertMutes::default(),
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -3125,7 +3137,7 @@ fn options_suivi_infobulle_de_bouton_au_dessus() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(252.0, 309.0 + INTERRUPTEUR_Y)),
+        Some(egui::pos2(252.0, 309.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
     );
 }
 
@@ -3143,7 +3155,7 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(240.0, 355.0 + INTERRUPTEUR_Y)),
+        Some(egui::pos2(240.0, 355.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
     );
 }
 
@@ -3275,10 +3287,10 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// suivaient pas, les planches d'infobulle et de déplacement resteraient vertes en cessant de
 /// montrer ce pour quoi elles existent. Puis de la case « Activer le Suivi » le même jour, voir
 /// [`INTERRUPTEUR_Y`].
-const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0 + INTERRUPTEUR_Y);
-const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0 + INTERRUPTEUR_Y);
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
-const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 442.0 + INTERRUPTEUR_Y);
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 442.0 + INTERRUPTEUR_Y + SOURDINE_Y);
 
 /// **Fonctionnalité coupée : le contenu de l'onglet ne répond plus** — l'autre moitié de la
 /// demande du 2026-09-15, celle qu'une capture ne peut pas montrer (`panels::feature_switch`).
@@ -3409,7 +3421,7 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(79.0, 505.0 + INTERRUPTEUR_Y)),
+        Some(egui::pos2(79.0, 505.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
     );
 }
 
@@ -3517,7 +3529,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
     // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne) — et sous la
     // ligne « Tester le son de l'alerte », qui a tout descendu de 57 px le 2026-09-15 (voir
     // [`TUILE_0`]), elle-même sous la case « Activer le Suivi » (voir [`INTERRUPTEUR_Y`]).
-    let champ = egui::pos2(300.0, 357.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, 357.0 + INTERRUPTEUR_Y + SOURDINE_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3536,7 +3548,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
     // Le panneau ouvre par sa bande de filtres, puis les rangées de 35 px.
     let rangee = egui::pos2(
         300.0,
-        357.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
+        357.0 + INTERRUPTEUR_Y + SOURDINE_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
     );
     harness.hover_at(rangee);
     harness.run();
@@ -3621,7 +3633,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     // Le bloc porte DEUX lignes en décompte : le champ descend d'autant, de la ligne « Tester le
     // son de l'alerte » posée au-dessus du formulaire (voir [`TUILE_0`]) et de la case « Activer le
     // Suivi » (voir [`INTERRUPTEUR_Y`]).
-    let champ = egui::pos2(300.0, 403.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, 403.0 + INTERRUPTEUR_Y + SOURDINE_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3631,7 +3643,10 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     }
     harness.run();
 
-    let rangee = egui::pos2(300.0, 403.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 17.0);
+    let rangee = egui::pos2(
+        300.0,
+        403.0 + INTERRUPTEUR_Y + SOURDINE_Y + 25.0 + 38.0 + 17.0,
+    );
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
@@ -3903,6 +3918,81 @@ fn capture_onglet_coupe(nom: &str, tab: OptionsTab) {
 #[test]
 fn options_onglet_suivi_desactive() {
     capture_onglet_coupe("options_suivi_desactive", OptionsTab::Suivi);
+}
+
+/// **Le son coupé, la fonctionnalité intacte** (2026-09-15, voir `panels::sound_row`) — la case
+/// « Couper le son des notifications » est cochée et, juste au-dessus, le bouton d'essai est
+/// GRISÉ : proposer d'écouter ce qu'on vient de faire taire serait une promesse que le jeu ne
+/// tiendra pas.
+///
+/// C'est là tout ce que cette planche verrouille, et c'est l'écart qu'on perdrait le plus
+/// facilement : le reste de l'onglet — formulaire, liste, tuiles — reste VIF, contrairement à
+/// `options_suivi_desactive` où la case « Activer le Suivi » estompe tout. Couper un son n'éteint
+/// pas la fonctionnalité.
+#[test]
+fn options_onglet_suivi_son_coupe() {
+    capture_onglet_son_coupe("options_suivi_son_coupe", OptionsTab::Suivi);
+}
+
+/// Le pendant pour l'onglet « Chat » — même case, même bouton grisé, même liste intacte.
+#[test]
+fn options_onglet_chat_son_coupe() {
+    capture_onglet_son_coupe("options_chat_son_coupe", OptionsTab::Chat);
+}
+
+/// Rend un onglet dont l'alerte est MUETTE, tout le reste étant actif — voir les deux tests
+/// ci-dessus. Calquée sur [`capture_onglet_coupe`], aux deux réglages près : `features` reste au
+/// défaut (« tout actif ») et ce sont les sourdines qui sont posées.
+fn capture_onglet_son_coupe(nom: &str, tab: OptionsTab) {
+    overlay_ui::build_info::freeze_for_snapshots();
+    use overlay_ui::panels::chat_tab::ChatTabState;
+    use overlay_ui::panels::sound_row::AlertMutes;
+    use overlay_ui::panels::suivi_tab::SuiviAvailability;
+
+    let mut options_state = OptionsModalState {
+        tab,
+        // Les deux coupées d'un coup, même raison que `capture_onglet_coupe` : chaque planche ne
+        // montre que son onglet.
+        mutes: AlertMutes {
+            suivi: true,
+            chat: true,
+        },
+        suivi_draft: Some(entrees_de_suivi()),
+        suivi_availability: SuiviAvailability::Ready,
+        chat: ChatTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        chat_draft: Some(recherches_de_chat()),
+        chat_availability: Default::default(),
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot(nom);
 }
 
 #[test]

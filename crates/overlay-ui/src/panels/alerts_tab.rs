@@ -60,8 +60,8 @@
 use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
-use crate::design::{self, DsIcon, IconContext, InputSize, SlotFrame};
-use crate::panels::feature_switch;
+use crate::design::{self, DsIcon, InputSize, SlotFrame};
+use crate::panels::{feature_switch, sound_row};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -144,8 +144,6 @@ const SETTING_ROW_RADIUS: u8 = 4;
 /// Hauteur d'une ligne de réglage — les lignes d'aptitude cadencent à 32, portée à 40 : la ligne
 /// porte une case à cocher de 20 px et un champ de 25, qu'un fond de 32 serrerait.
 const SETTING_ROW_HEIGHT: f32 = 40.0;
-/// Hauteur d'une ligne simple — mesurée sur `interface-options-commandes.png` (pas de 39 px).
-const ROW_HEIGHT: f32 = 39.0;
 
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, porté de 12 après un second retour utilisateur.
@@ -269,7 +267,10 @@ pub fn show(
     );
 
     // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite.
-    if test_sound_row(ui, width) {
+    // La ligne d'essai vit dans `panels::sound_row` depuis le 2026-09-15 — voir sa doc : elle
+    // était écrite trois fois à l'identique. `None` : **pas de case « Couper le son » ici**, le son
+    // d'un ramassage se coupe déjà objet par objet, à la tuile.
+    if sound_row::show(ui, width, "alertes", None) {
         action = AlertsTabAction::TestSound;
     }
     ui.add_space(SECTION_GAP);
@@ -356,31 +357,6 @@ fn legend_row(ui: &mut egui::Ui) {
         design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
         SUBDUED,
     );
-}
-
-/// La ligne « Tester le son de l'alerte » — l'alerte SONORE, et rien d'autre. Renvoie `true` au
-/// clic.
-fn test_sound_row(ui: &mut egui::Ui, width: f32) -> bool {
-    let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    let mut clicked = false;
-    cell.horizontal_centered(|ui| {
-        ui.label(
-            RichText::new("Tester le son de l'alerte")
-                .color(TEXT)
-                .size(BODY_FONT_SIZE),
-        );
-        ui.add_space(12.0);
-        clicked = ui
-            .add(
-                design::icon_button(DsIcon::Volume)
-                    .context(IconContext::Panel)
-                    .tooltip("Jouer le son d'alerte")
-                    .log_name("alertes.tester"),
-            )
-            .clicked();
-    });
-    clicked
 }
 
 /// Le bloc « Fermeture de l'alerte » — le TOAST, pas le son.

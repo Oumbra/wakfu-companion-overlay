@@ -18,6 +18,7 @@ pub mod login;
 pub mod options_modal;
 pub mod raccourcis_tab;
 pub mod recipe_dialog;
+pub mod sound_row;
 pub mod suivi_tab;
 pub mod tile_reorder;
 pub mod watchlist;
