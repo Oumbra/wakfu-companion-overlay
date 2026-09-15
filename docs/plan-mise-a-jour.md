@@ -388,6 +388,29 @@ n'a pas encore de combat en cours. Sous le budget de 300 Mo.
 
 ---
 
+### 7.1 Ce qui a été construit (2026-09-15)
+
+- `overlay_sync::update::{manifest, download, apply}` — `Manifest::parse_verified` (signature
+  AVANT le JSON, schéma 1 seulement), `Manifest::verdict` (`semver`, `minimumVersion` ⇒
+  obligatoire), `download::fetch_to_file` (flux 64 Kio, `.part`, SHA-256 au fil de l'eau,
+  `Content-Length` pour la progression), `apply::stage` (gunzip + taille + SHA-256 du binaire
+  installé), `apply::install_and_relaunch` (`self-replace` puis `--updated-from`),
+  `apply::check_writable_install_dir` (sonde avant tout téléchargement),
+  `apply::parse_args` (le drapeau n'est jamais pris pour un chemin de log). Clé publique
+  embarquée par `include_str!("wakfu-overlay.pub")`. Surcharge `WAKFU_OVERLAY_UPDATE_URL`
+  (dossier HTTP local servant la sortie de `xtask dist`) pour rejouer tout le mécanisme sans
+  publier.
+- `overlay_ui::background::spawn_update_thread` — commandes `Check { install_if_available }` et
+  `Download`, anti-rafale de 30 s sur les vérifications manuelles, publication `UpdateStatus`
+  au plus dix fois par seconde pendant un téléchargement. L'installation est faite par l'hôte
+  (`App::install_update_if_ready`, premier geste de chaque tick) : remplacement, relance, sortie.
+- `StartupProgress` : quatrième étape « vérification de mise à jour » (résolue en cinq secondes
+  au plus) et drapeau « mise à jour en cours » qui suspend le garde-fou de 45 s et sert aussi à
+  ramener l'écran de chargement depuis la fenêtre Options.
+- Pas fait, volontairement : re-vérification périodique en jeu (phase 4), entrée dans le menu
+  de zone de notification, annulation d'un téléchargement en cours, `previous.exe` conservé
+  (`self-replace` gère lui-même l'ancien fichier).
+
 ## 8. Flux visuel
 
 ### 8.1 Écran de chargement (carte de connexion, fenêtre logicielle 400 px)
@@ -552,7 +575,7 @@ version ». L'écran de chargement est à retravailler dans une itération dédi
 | --- | --- | --- | --- |
 | **0 — Préalables** ✅ (2026-09-15, sauf la paire de clés, à la charge du mainteneur) | `[profile.release]` ; `DEFAULT_BASE_URL` → prod (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décisions 1 et 7) | **Mesuré** sur `overlay-ui-x11` (Linux x86_64, session cloud) : sans profil **49,4 Mo brut / 18,0 Mo gzip**, avec `strip`+LTO+`codegen-units=1` **28,9 Mo brut / 14,0 Mo gzip** (−41 % brut, −22 % gzip ; compilation release 4 min 40 → 6 min 38). L'exe Windows sera du même ordre. | overlay |
 | **1 — Publication** ✅ outillage (2026-09-15) — première Release à la prochaine fusion sur `main` | `release.yml` ; `xtask dist` (gzip, SHA-256, `latest.json`, signature + revérification par `wakfu-overlay.pub`, mesure du delta) ; première Release `v0.x` | un exe Windows et un binaire Linux téléchargeables depuis `releases/latest`, manifeste signé vérifiable avec `minisign -V` | overlay |
-| **2 — Client** | `overlay_sync::update` ; `spawn_update_thread` ; `StartupProgress` typé ; écran de chargement avec étapes + jauge ; section Options ; relance `--updated-from` ; captures | installer volontairement une version N-1, lancer : elle se met à jour toute seule et se relance en N ; bouton Options testé dans les 5 états ; artefact des captures publié | overlay |
+| **2 — Client** ✅ code (2026-09-15) — validation bout en bout en attente de la première Release | `overlay_sync::update` (`manifest`/`download`/`apply`, 13 tests dont un serveur HTTP local) ; `background::spawn_update_thread` ; `StartupProgress` (étape « vérification », drapeau « mise à jour en cours » qui suspend le garde-fou) ; écran de chargement : ligne d'état + jauge sous le rouage, écran « Mise à jour requise » ; section Options « Mise à jour » (ligne d'info, case `auto_update`, bouton unique) ; `--updated-from` ; captures (4 nouvelles, 2 régénérées) | **Fait ici** : `cargo check` des deux binaires (X11 natif, Windows via `x86_64-pc-windows-gnu`), 220 tests `overlay-ui`, 33 `overlay-sync`, gate de captures vert (67). **Reste à faire sur une vraie machine** : installer une version N-1 et vérifier qu'elle se met à jour et se relance en N — impossible sans Release publiée, et `self-replace` sous Windows n'a pas été exercé depuis ce conteneur Linux. | overlay |
 | **3 — Différentiel** | `xtask dist` génère 3 deltas ; `apply.rs` applique `qbsdiff` quand `fromSha256` correspond | même test qu'en 2 avec le journal montrant « delta 3,1 Mo appliqué » ; repli asset complet vérifié sur un exe modifié | overlay |
 | **4 — Optionnel** | façade `GET /api/v1/overlay/release` (cache edge, `minimumVersion` pilotable, coupe-circuit) ; bouton « Télécharger l'overlay » sur le site ; re-vérification toutes les 6 h en jeu (badge, jamais d'installation en session) | Function testée sous `wrangler pages dev` ; lien sur le site | web + overlay |
 | **L6 — Installeur** (hors de ce plan) | NSIS/MSI par utilisateur, AppImage, raccourci, `AppUserModelID` | installation propre sur machine vierge | overlay |

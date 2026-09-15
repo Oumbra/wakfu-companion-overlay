@@ -1658,6 +1658,23 @@ l'alerte entière.
 **Captures** : `options_suivi_son_coupe` et `options_chat_son_coupe` — la case cochée, le bouton
 d'essai grisé, et le reste de l'onglet resté vif.
 
+### 9.1 tredecies Mise à jour automatique (2026-09-15)
+
+Plan, décisions et détail dans [`plan-mise-a-jour.md`](plan-mise-a-jour.md) (§7.1 pour ce qui est
+construit). Ce qui change dans l'overlay : une quatrième étape de démarrage (« vérification de
+mise à jour », `startup.rs`), un thread de fond de plus (`background::spawn_update_thread`,
+`overlay_sync::update`), l'écran de chargement qui montre sous son rouage le téléchargement
+(ligne d'état, jauge, compteur) ou « Mise à jour requise » quand une version minimale n'a pas pu
+s'installer, et une section « Mise à jour » dans Options › Paramètres (ligne d'information, case
+« Installer automatiquement… », bouton unique « Recherche de mise à jour » / « Mettre à jour vers
+X » / « Réessayer », confirmation avant installation). L'installation remplace l'exe en cours
+d'exécution (`self-replace`) et relance avec `--updated-from`, toujours derrière l'écran de
+chargement, jamais pendant une session. Captures : `login_telechargement`,
+`login_version_disponible`, `login_mise_a_jour_requise`, `options_parametres_mise_a_jour`.
+
+**À retravailler** (retour du mainteneur) : la mise en forme de l'écran de chargement, dans une
+itération dédiée — le mécanisme est en place, pas son dessin.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
