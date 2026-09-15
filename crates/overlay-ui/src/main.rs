@@ -2898,9 +2898,6 @@ impl App {
             OptionsModalAction::None => {}
             OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
-            OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
-            OptionsModalAction::TestChatSound => alert_sound::play_chat_alert(),
-            OptionsModalAction::TestCountdownSound => alert_sound::play_countdown_alert(),
             OptionsModalAction::Disconnect => post_redraw = PostRedraw::DisconnectAccount,
             OptionsModalAction::Validate(commit) => {
                 post_redraw = PostRedraw::ValidateOptions(commit)

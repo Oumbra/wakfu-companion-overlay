@@ -1862,17 +1862,6 @@ mod linux_main {
                         OptionsModalAction::Validate(commit) => {
                             post_redraw = PostRedraw::ValidateOptions(commit)
                         }
-                        // Le son d'alerte se joue par le même chemin qu'un vrai ramassage — c'est
-                        // tout l'intérêt du bouton : entendre ce qu'on entendra en jeu.
-                        OptionsModalAction::TestAlertSound => {
-                            overlay_ui::alert_sound::play_loot_alert()
-                        }
-                        OptionsModalAction::TestChatSound => {
-                            overlay_ui::alert_sound::play_chat_alert()
-                        }
-                        OptionsModalAction::TestCountdownSound => {
-                            overlay_ui::alert_sound::play_countdown_alert()
-                        }
                         OptionsModalAction::Disconnect => {
                             post_redraw = PostRedraw::DisconnectAccount
                         }

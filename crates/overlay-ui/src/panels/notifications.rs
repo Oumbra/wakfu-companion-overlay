@@ -1,11 +1,15 @@
-//! **Les notifications d'une fonctionnalité** — essayer le son, le couper, et régler la fermeture
-//! automatique de la carte, pour le Suivi, les Alertes et le Chat.
+//! **Les notifications d'une fonctionnalité** — couper le son, et régler la fermeture automatique
+//! de la carte, pour le Suivi, les Alertes et le Chat.
 //!
-//! Ces trois blocs vivent depuis le 2026-09-15 dans l'onglet « Paramètres », en **sections
-//! dédiées posées après « Combat »** (demande utilisateur) — plus dans chacun des trois onglets
-//! qu'ils concernent. Ce module les peint tous les trois ; il ne joue aucun son et n'écrit rien :
-//! il renvoie le clic d'essai et modifie des brouillons, comme tout le reste de cette fenêtre
-//! (§17.3 bis du plan).
+//! Ces blocs vivent depuis le 2026-09-15 dans l'onglet « Paramètres », en **sections dédiées
+//! posées après « Combat »** (demande utilisateur) — plus dans chacun des trois onglets qu'ils
+//! concernent. Ce module les peint tous les trois ; il ne joue aucun son et n'écrit rien : il
+//! modifie des brouillons, comme tout le reste de cette fenêtre (§17.3 bis du plan).
+//!
+//! **Plus de bouton d'essai** (2026-09-16) : la ligne « Tester le son des notifications » que
+//! chaque section ouvrait a été retirée à la demande de l'utilisateur, et avec elle les actions
+//! `TestAlertSound`/`TestChatSound`/`TestCountdownSound` que la fenêtre renvoyait à l'hôte. Les
+//! sons eux-mêmes ne bougent pas (`alert_sound`), ils ne se déclenchent plus qu'en jeu.
 //!
 //! ## Pourquoi tout regrouper dans « Paramètres »
 //!
@@ -25,12 +29,6 @@
 //! ([`crate::panels::feature_switch`]) et qui, elle, coupe les deux canaux. Une fonctionnalité
 //! éteinte grise sa section ici : ni son à essayer, ni carte à fermer.
 //!
-//! **Le bouton d'essai est grisé quand le son est coupé** : proposer d'écouter ce qu'on vient de
-//! faire taire serait une promesse que le jeu ne tiendra pas. C'est la même règle que le champ de
-//! durée grisé sous une « Fermeture automatique des notifications » décochée, et que la case de
-//! son grisée sous une notification de tour décochée (`panels::options_modal`) : un réglage qui
-//! n'a plus d'effet se voit avant le clic.
-//!
 //! ## Pas de fond de ligne sous la fermeture automatique
 //!
 //! Le couple case + durée était posé sur un pavé arrondi plus sombre (`#26282b`, l'idiome des
@@ -42,7 +40,7 @@
 use egui::{Color32, RichText, Vec2};
 use overlay_engine::AlertProfile;
 
-use crate::design::{self, DsIcon, IconContext, InputSize};
+use crate::design::{self, InputSize};
 
 /// **Les sourdines, ensemble** — Suivi et Chat.
 ///
@@ -65,9 +63,6 @@ pub struct AlertMutes {
     pub chat: bool,
 }
 
-/// Texte courant — blanc, comme tout texte de corps du jeu.
-const TEXT: Color32 = Color32::WHITE;
-
 /// Gris des unités — `#b8b9ba`, le gris unique du jeu (voir
 /// `panels::options_modal::SECTION_TITLE_TEXT`).
 const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
@@ -86,16 +81,13 @@ const DURATION_FIELD_WIDTH: f32 = 52.0;
 /// (`panels::options_modal::FIELD_TO_BROWSE_GAP` en pose la sœur à 10).
 const CONTROL_GAP: f32 = 12.0;
 
-/// Le libellé de la ligne d'essai — **« des notifications », pas « de l'alerte »** (2026-09-15) :
-/// les quatre sections de « Paramètres » parlent des mêmes objets, elles les nomment pareil.
-const TEST_LABEL: &str = "Tester le son des notifications";
-
 /// Le libellé de la sourdine — le même que celui de la section « Combat », écrit une seule fois
-/// ici et repris là-bas.
+/// ici et repris là-bas. **« des notifications », pas « de l'alerte »** (2026-09-15) : les quatre
+/// sections de « Paramètres » parlent des mêmes objets, elles les nomment pareil.
 pub const MUTE_LABEL: &str = "Couper le son des notifications";
 
 /// Le libellé de la fermeture automatique — « des notifications » pour la même raison que
-/// [`TEST_LABEL`] : « Fermeture automatique » seul ne disait pas de quoi.
+/// [`MUTE_LABEL`] : « Fermeture automatique » seul ne disait pas de quoi.
 const AUTO_CLOSE_LABEL: &str = "Fermeture automatique des notifications";
 
 /// **Ce qu'une carte d'alerte sait de sa fermeture** — le peu dont ce module a besoin, pour ne pas
@@ -156,7 +148,7 @@ pub struct Section<'a> {
     /// section vient le clic.
     pub log_prefix: &'a str,
     /// La fonctionnalité est-elle allumée (`panels::feature_switch`) ? Toute la section est grisée
-    /// sinon — il n'y a ni son à essayer ni carte à fermer quand rien ne se déclenche.
+    /// sinon — il n'y a ni son à couper ni carte à fermer quand rien ne se déclenche.
     pub enabled: bool,
     /// La sourdine, pour les fonctionnalités qui en ont une (Suivi et Chat — voir [`AlertMutes`]).
     pub muted: Option<&'a mut bool>,
@@ -168,9 +160,8 @@ pub struct Section<'a> {
 /// Peint le contenu d'une section de notifications — **sans son titre**, que l'appelant pose
 /// (`design::heading`) comme il pose celui de « Combat ».
 ///
-/// Renvoie `true` la frame où le bouton d'essai est cliqué ; c'est l'hôte qui a le périphérique
-/// audio et qui fait entendre le son de la fonctionnalité concernée.
-pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) -> bool {
+/// Ne renvoie rien : tout ce que la section règle est un brouillon, que « Valider » emporte.
+pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) {
     let Section {
         log_prefix,
         enabled,
@@ -184,44 +175,13 @@ pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) -> bool {
         if !enabled {
             ui.disable();
         }
-        let coupe = muted.as_ref().map(|muted| **muted).unwrap_or(false);
-        let clicked = test_row(ui, width, log_prefix, coupe);
         if let Some(muted) = muted {
             mute_row(ui, width, log_prefix, muted);
         }
         if let Some(auto_close) = auto_close {
             close_row(ui, width, log_prefix, auto_close);
         }
-        clicked
-    })
-    .inner
-}
-
-/// « Tester le son des notifications » et son bouton.
-fn test_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, coupe: bool) -> bool {
-    let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    let mut clicked = false;
-    cell.horizontal_centered(|ui| {
-        ui.label(RichText::new(TEST_LABEL).color(TEXT).size(BODY_FONT_SIZE));
-        ui.add_space(CONTROL_GAP);
-        clicked = ui
-            .add(
-                design::icon_button(DsIcon::Volume)
-                    .context(IconContext::Panel)
-                    // Voir la doc de module : grisé quand le son est coupé, et l'infobulle le dit
-                    // plutôt que de promettre un son qui ne viendrait pas.
-                    .enabled(!coupe)
-                    .tooltip(if coupe {
-                        "Le son est coupé pour cette alerte."
-                    } else {
-                        "Jouer le son d'alerte"
-                    })
-                    .log_name(format!("{log_prefix}.tester")),
-            )
-            .clicked();
     });
-    clicked
 }
 
 /// « Couper le son des notifications ».
