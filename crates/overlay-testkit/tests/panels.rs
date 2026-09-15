@@ -711,6 +711,17 @@ fn bandeau_largeur(entry_count: usize) -> f32 {
     panels::watchlist::content_width(entry_count) + 6.0 + 2.0 * MARGE_HARNAIS
 }
 
+/// **Décalage vertical apporté par la case « Activer … »** des onglets Suivi, Alertes et Chat
+/// (2026-09-15, voir `panels::feature_switch`) : sa hauteur (`design::tokens::CHECKBOX_SIZE`,
+/// 20 px, l'espacement du panneau étant nul — voir `design::components::panel`) plus les 18 px
+/// d'aération qui la séparent du premier bloc. Tout ce que ces trois onglets peignent après elle
+/// est descendu d'autant.
+///
+/// **Nommée plutôt que fondue dans chaque coordonnée** : les points de ce fichier désignent des
+/// WIDGETS, pas des pixels d'une image (même règle que [`TUILE_0`]) — le jour où cette case change
+/// de place ou de taille, c'est cette ligne-ci qu'on corrige, pas une vingtaine d'ordonnées.
+const INTERRUPTEUR_Y: f32 = 38.0;
+
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
 const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0, 25.0);
@@ -1568,6 +1579,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // à l'ouverture, elle est emportée décochée.
                 turn_notification: false,
                 turn_notification_muted: false,
+                // Les trois cases « Activer … » n'ont pas été touchées non plus : elles sont
+                // emportées telles qu'elles ont été posées à l'ouverture, c'est-à-dire actives.
+                features: overlay_ui::panels::feature_switch::FeatureToggles::default(),
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -2510,7 +2524,12 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
 /// ajouté du profil de ce test, donc le seul retirable — tuile 11, rangée 2, colonne 3.
 #[test]
 fn options_alertes_survol_d_une_tuile_retirable() {
-    survole_l_onglet_alertes("options_alertes_survol_retirable", 231.0, 578.0, None);
+    survole_l_onglet_alertes(
+        "options_alertes_survol_retirable",
+        231.0,
+        578.0 + INTERRUPTEUR_Y,
+        None,
+    );
 }
 
 /// **La croix sous le pointeur passe au rouge et dit ce qu'elle fait.**
@@ -2519,7 +2538,12 @@ fn options_alertes_survol_d_une_tuile_retirable() {
 /// son centre tombe donc à 15 px du coin.
 #[test]
 fn options_alertes_survol_de_la_croix() {
-    survole_l_onglet_alertes("options_alertes_survol_croix", 248.0, 561.0, None);
+    survole_l_onglet_alertes(
+        "options_alertes_survol_croix",
+        248.0,
+        561.0 + INTERRUPTEUR_Y,
+        None,
+    );
 }
 
 /// **Un objet PAR DÉFAUT ne change pas d'aspect au survol** — ni voile, ni croix.
@@ -2529,7 +2553,12 @@ fn options_alertes_survol_de_la_croix() {
 /// Seule l'infobulle de nom apparaît.
 #[test]
 fn options_alertes_survol_d_un_objet_par_defaut() {
-    survole_l_onglet_alertes("options_alertes_survol_par_defaut", 79.0, 502.0, None);
+    survole_l_onglet_alertes(
+        "options_alertes_survol_par_defaut",
+        79.0,
+        502.0 + INTERRUPTEUR_Y,
+        None,
+    );
 }
 
 /// **Le champ d'ajout, exercé de bout en bout** — retour utilisateur du 2026-09-12 : « j'ai essayé
@@ -2612,7 +2641,7 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
     // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
     // « Objets suivis », pleine largeur du panneau.
-    let champ = egui::pos2(300.0, 441.0);
+    let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2636,14 +2665,14 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // passent par le même `egui::Tooltip::for_enabled` (voir `Response::on_hover_ui` dans egui),
     // seul l'alignement diffère — et c'est lui qui envoyait le texte hors du cadre capturé. Cette
     // capture le prouve dans les deux sens : l'infobulle sort, et elle sort AU-DESSUS.
-    harness.hover_at(egui::pos2(68.0, 479.0));
+    harness.hover_at(egui::pos2(68.0, 479.0 + INTERRUPTEUR_Y));
     harness.run();
     harness.snapshot("options_alertes_infobulle_filtre");
 
     // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
     // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
     // immédiatement sous le champ.
-    let suggestion = egui::pos2(300.0, 510.0);
+    let suggestion = egui::pos2(300.0, 510.0 + INTERRUPTEUR_Y);
     // **Survol d'abord, clic ensuite** : egui rattache un appui au widget que le pointeur
     // survolait, et le pointeur n'est nulle part tant qu'aucun mouvement ne l'a placé. Sans cette
     // frame de survol, l'appui tombe sur un widget inconnu et la rangée n'est jamais cliquée.
@@ -2729,7 +2758,7 @@ fn options_alertes_croix_efface_la_saisie() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 443.0);
+    let champ = egui::pos2(300.0, 443.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2742,7 +2771,7 @@ fn options_alertes_croix_efface_la_saisie() {
 
     // La croix : à 9 px du bord extérieur droit du champ, sur son axe — voir
     // `tokens::INPUT_CLEAR_INSET_RATIO`. Le champ s'arrête à x≈705 dans cette fenêtre.
-    let croix = egui::pos2(691.0, 443.0);
+    let croix = egui::pos2(691.0, 443.0 + INTERRUPTEUR_Y);
     harness.hover_at(croix);
     harness.run();
     harness.drag_at(croix);
@@ -2838,7 +2867,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 441.0);
+    let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2860,7 +2889,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
     // Le pointeur SUR la poignée (colonne de droite du panneau, à mi-hauteur de la liste) : elle
     // prend la teinte des rangées survolées, sans s'élargir. egui ne passe en `hovered` que le
     // pointeur sur la poignée elle-même, pas seulement dans sa colonne.
-    harness.hover_at(egui::pos2(700.0, 608.0));
+    harness.hover_at(egui::pos2(700.0, 608.0 + INTERRUPTEUR_Y));
     harness.run();
     harness.snapshot("options_alertes_poignee_survolee");
 
@@ -3094,7 +3123,7 @@ fn options_suivi_infobulle_de_bouton_au_dessus() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(252.0, 252.0)),
+        Some(egui::pos2(252.0, 252.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3112,7 +3141,7 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(240.0, 298.0)),
+        Some(egui::pos2(240.0, 298.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3138,7 +3167,10 @@ fn options_suivi_deplacement_en_vol() {
 }
 
 fn capture_suivi_deplacement(nom: &str) {
-    let (mut harness, _etat) = harnais_suivi(overlay_ui::panels::suivi_tab::AddMode::Up);
+    let (mut harness, _etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        Default::default(),
+    );
     harness.run();
 
     // Première tuile prise près de son coin haut-gauche — pas en son centre : le fantôme se tient
@@ -3161,7 +3193,10 @@ fn capture_suivi_deplacement(nom: &str) {
 /// grille et à travers la vraie modale, arrive bien jusqu'à elle avec les bons rangs.
 #[test]
 fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
-    let (mut harness, etat) = harnais_suivi(overlay_ui::panels::suivi_tab::AddMode::Up);
+    let (mut harness, etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        Default::default(),
+    );
     harness.run();
 
     let avant: Vec<String> = etat
@@ -3234,16 +3269,74 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// points désignent des TUILES, pas des pixels d'une image — s'ils ne suivaient pas, les planches
 /// d'infobulle et de déplacement resteraient vertes en cessant de montrer ce pour quoi elles
 /// existent.
-const TUILE_0: egui::Pos2 = egui::pos2(79.0, 402.0);
-const TUILE_2: egui::Pos2 = egui::pos2(231.0, 402.0);
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 402.0 + INTERRUPTEUR_Y);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 402.0 + INTERRUPTEUR_Y);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
-const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 385.0);
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 385.0 + INTERRUPTEUR_Y);
+
+/// **Fonctionnalité coupée : le contenu de l'onglet ne répond plus** — l'autre moitié de la
+/// demande du 2026-09-15, celle qu'une capture ne peut pas montrer (`panels::feature_switch`).
+///
+/// Le geste choisi est le glisser-déposer d'une tuile, parce qu'il traverse tout l'onglet : la
+/// grille, le composant de réordonnancement et le brouillon. Le même geste réordonne réellement la
+/// liste quand le Suivi est actif — c'est
+/// `options_suivi_le_glisser_deposer_reordonne_comme_le_web`, juste au-dessus, qui le prouve, et
+/// c'est ce qui fait de ce test-ci autre chose qu'une tautologie.
+///
+/// Le curseur est vérifié en plus de l'ordre : une tuile inerte qui annoncerait encore « je me
+/// déplace » serait un mensonge, même sans effet.
+#[test]
+fn options_suivi_coupe_la_grille_ne_repond_plus() {
+    use overlay_ui::panels::feature_switch::FeatureToggles;
+
+    let (mut harness, etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        FeatureToggles {
+            suivi: false,
+            ..Default::default()
+        },
+    );
+    harness.run();
+
+    let noms = |etat: &std::rc::Rc<std::cell::RefCell<OptionsModalState>>| -> Vec<String> {
+        etat.borrow()
+            .suivi_draft
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|e| e.name.clone())
+            .collect()
+    };
+    let avant = noms(&etat);
+
+    harness.hover_at(TUILE_0);
+    harness.run();
+    assert_ne!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::Move,
+        "une tuile d'un onglet coupé ne doit plus annoncer qu'elle se déplace"
+    );
+
+    harness.drag_at(TUILE_0);
+    harness.run();
+    harness.hover_at(TUILE_2);
+    harness.run();
+    harness.drop_at(TUILE_2);
+    harness.run();
+
+    assert_eq!(
+        noms(&etat),
+        avant,
+        "Suivi coupé, le glisser-déposer ne doit rien réordonner"
+    );
+}
 
 /// Le harnais de l'onglet Suivi, avec son état rendu inspectable — voir [`capture_onglet_suivi`],
 /// dont c'est le même jeu d'entrées. Rendu partagé parce que deux tests ont maintenant besoin de
 /// LIRE le brouillon après coup, pas seulement de le peindre.
 fn harnais_suivi(
     mode: overlay_ui::panels::suivi_tab::AddMode,
+    features: overlay_ui::panels::feature_switch::FeatureToggles,
 ) -> (
     Harness<'static>,
     std::rc::Rc<std::cell::RefCell<OptionsModalState>>,
@@ -3256,6 +3349,7 @@ fn harnais_suivi(
             target: 250,
             ..Default::default()
         },
+        features,
         suivi_draft: Some(entrees_de_suivi()),
         suivi_availability: SuiviAvailability::Ready,
         path_input: String::new(),
@@ -3309,7 +3403,7 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(79.0, 448.0)),
+        Some(egui::pos2(79.0, 448.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3323,7 +3417,7 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
     survole_l_onglet_alertes(
         "options_alertes_infobulle_tuile_coupee",
         459.0,
-        502.0,
+        502.0 + INTERRUPTEUR_Y,
         Some("Influence III"),
     );
 }
@@ -3332,7 +3426,12 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
 /// un `design::icon_button` cette fois : son infobulle sortait sous le glyphe.
 #[test]
 fn options_alertes_infobulle_du_test_de_son_au_dessus() {
-    survole_l_onglet_alertes("options_alertes_infobulle_test_son", 240.0, 252.0, None);
+    survole_l_onglet_alertes(
+        "options_alertes_infobulle_test_son",
+        240.0,
+        252.0 + INTERRUPTEUR_Y,
+        None,
+    );
 }
 
 /// **Le champ d'ajout du Suivi, exercé de bout en bout — objets ET monstres.**
@@ -3410,7 +3509,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
     harness.run();
 
     // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne).
-    let champ = egui::pos2(300.0, 300.0);
+    let champ = egui::pos2(300.0, 300.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3427,7 +3526,10 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
 
     // Les objets d'abord, les monstres ensuite : la troisième rangée est « Tofu », un MONSTRE.
     // Le panneau ouvre par sa bande de filtres, puis les rangées de 35 px.
-    let rangee = egui::pos2(300.0, 300.0 + 25.0 + 38.0 + 35.0 * 2.0 + 17.0);
+    let rangee = egui::pos2(
+        300.0,
+        300.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
+    );
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
@@ -3509,7 +3611,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     harness.run();
 
     // Le bloc porte DEUX lignes en décompte : le champ descend d'autant.
-    let champ = egui::pos2(300.0, 346.0);
+    let champ = egui::pos2(300.0, 346.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3519,7 +3621,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     }
     harness.run();
 
-    let rangee = egui::pos2(300.0, 346.0 + 25.0 + 38.0 + 17.0);
+    let rangee = egui::pos2(300.0, 346.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 17.0);
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
@@ -3712,6 +3814,97 @@ fn capture_onglet_chat(
     harness.snapshot(nom);
 }
 
+/// **Un onglet dont la fonctionnalité est COUPÉE** — case « Activer … » décochée, tout ce qui suit
+/// estompé et inerte (2026-09-15, voir `panels::feature_switch`).
+///
+/// Ce que ces trois planches verrouillent, et qui ne se vérifie qu'à l'œil : la case elle-même, le
+/// titre et la phrase qui la précèdent restent VIFS — c'est par eux qu'on rallume — tandis que
+/// tout le reste, jusqu'aux tuiles peintes à la main au `Painter` et au contenu de la zone de
+/// défilement, passe à l'opacité des éléments désactivés. Un `Ui::disable` oublié quelque part se
+/// verrait ici comme un bloc resté net au milieu d'un onglet estompé.
+///
+/// La fenêtre est rendue avec du CONTENU (liste d'alertes, entrées suivies, recherches), sans quoi
+/// un onglet vide ne montrerait rien à estomper.
+fn capture_onglet_coupe(nom: &str, tab: OptionsTab) {
+    // La bannière peint le numéro de version : figé, sinon chaque bump périmerait ces planches —
+    // voir `options_croix_de_la_banniere_ferme_comme_annuler` pour le détail. Idempotent.
+    overlay_ui::build_info::freeze_for_snapshots();
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
+    use overlay_ui::panels::chat_tab::ChatTabState;
+    use overlay_ui::panels::feature_switch::FeatureToggles;
+    use overlay_ui::panels::suivi_tab::SuiviAvailability;
+
+    let mut profile = overlay_engine::AlertProfile::default();
+    profile.add("Combinaison Lardante", Some(4242));
+
+    let mut options_state = OptionsModalState {
+        tab,
+        // Les trois coupées d'un coup : chaque planche ne montre que son onglet, et l'état
+        // « tout coupé » est de toute façon celui qu'on veut pouvoir regarder.
+        features: FeatureToggles {
+            suivi: false,
+            alerts: false,
+            chat: false,
+        },
+        suivi_draft: Some(entrees_de_suivi()),
+        suivi_availability: SuiviAvailability::Ready,
+        alerts: AlertsTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        alerts_draft: Some(profile),
+        alerts_availability: AlertsAvailability::Ready,
+        chat: ChatTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        chat_draft: Some(recherches_de_chat()),
+        chat_availability: Default::default(),
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot(nom);
+}
+
+#[test]
+fn options_onglet_suivi_desactive() {
+    capture_onglet_coupe("options_suivi_desactive", OptionsTab::Suivi);
+}
+
+#[test]
+fn options_onglet_alertes_desactive() {
+    capture_onglet_coupe("options_alertes_desactive", OptionsTab::Alertes);
+}
+
+#[test]
+fn options_onglet_chat_desactive() {
+    capture_onglet_coupe("options_chat_desactive", OptionsTab::Chat);
+}
+
 /// **L'onglet « Chat »** : « Tester le son », fermeture automatique, formulaire canal → mot →
 /// « Ajouter », neuf recherches en tuiles à légende, quatre par rangée.
 #[test]
@@ -3732,7 +3925,10 @@ fn options_onglet_chat_survol_d_une_tuile() {
         "options_chat_survol_tuile",
         Some(recherches_de_chat()),
         Default::default(),
-        Some(egui::pos2(47.0 + 155.0 + 12.0 + 77.0, 470.0)),
+        Some(egui::pos2(
+            47.0 + 155.0 + 12.0 + 77.0,
+            470.0 + INTERRUPTEUR_Y,
+        )),
     );
 }
 

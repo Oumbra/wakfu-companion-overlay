@@ -50,7 +50,7 @@ use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
-use crate::panels::tile_reorder;
+use crate::panels::{feature_switch, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -237,6 +237,11 @@ pub struct SuiviTabContext<'a> {
     pub remote_icon_textures: &'a mut RemoteIconTextures,
     /// Repli quand l'icône n'est pas encore descendue du CDN.
     pub icons: &'a UiIcons,
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer le Suivi » peinte tout
+    /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
+    /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
+    /// contenu sous la case est grisé et inerte.
+    pub enabled: &'a mut bool,
     pub availability: SuiviAvailability,
 }
 
@@ -281,6 +286,19 @@ pub fn show(
     ui.add(design::heading("Suivi"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
+
+    // **L'interrupteur de la fonctionnalité**, avant le premier réglage — voir
+    // `panels::feature_switch` : décoché, tout ce qui est peint ensuite dans ce `Ui` est grisé et
+    // inerte, sans que la suite de cette fonction ait à s'en occuper.
+    feature_switch::show(
+        ui,
+        ctx.enabled,
+        "Activer le Suivi",
+        "Décoché, le bandeau de suivi n'affiche plus rien par-dessus le jeu et l'alerte de \
+         décompte ne se déclenche plus. Votre liste et vos compteurs sont conservés : les \
+         rallumer les retrouve tels quels.",
+        "suivi.activer",
+    );
 
     add_form(ui, state, width);
     ui.add_space(SECTION_GAP * 0.75);

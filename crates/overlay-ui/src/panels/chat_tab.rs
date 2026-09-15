@@ -34,6 +34,7 @@ use overlay_engine::{
 };
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize};
+use crate::panels::feature_switch;
 
 // -------------------------------------------------------------------------------------------
 // Jetons — repris TELS QUELS de `panels::alerts_tab`, pour que les deux onglets se ressemblent
@@ -166,6 +167,11 @@ impl Default for ChatTabState {
 /// Ce que l'onglet reçoit — le brouillon et sa disponibilité.
 pub struct ChatTabContext<'a> {
     pub draft: &'a mut ChatDraft,
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer la recherche » peinte tout
+    /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
+    /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
+    /// contenu sous la case est grisé et inerte.
+    pub enabled: &'a mut bool,
     pub availability: ChatAvailability,
 }
 
@@ -200,6 +206,16 @@ pub fn show(
     ui.add(design::heading("Chat"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
+
+    // Voir `panels::feature_switch` — l'interrupteur grise tout ce qui suit quand il est décoché.
+    feature_switch::show(
+        ui,
+        ctx.enabled,
+        "Activer la recherche",
+        "Décoché, aucun message du chat ne fait plus sonner l'overlay ni n'affiche de carte. \
+         Vos recherches sont conservées.",
+        "chat.activer",
+    );
 
     if test_sound_row(ui, width) {
         action = ChatTabAction::TestSound;
