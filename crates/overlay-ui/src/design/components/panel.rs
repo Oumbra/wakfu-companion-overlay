@@ -171,16 +171,20 @@ impl PanelZones {
     ///
     /// La bande fait `height` de haut, sa base est à `margin` du **bord bas du panneau** (pas de
     /// [`PanelZones::inner`], dont le rembourrage bas serait alors perdu deux fois), et la même
-    /// marge la sépare du contenu au-dessus. Renvoie les zones **réduites** — `inner` et la zone de
-    /// défilement s'arrêtent au-dessus de la bande — et le rectangle de la bande, aligné sur l'axe
-    /// des contrôles.
+    /// marge la sépare du contenu au-dessus. Elle court de l'axe des contrôles, à gauche, **à la
+    /// même distance du bord droit du panneau** ([`tokens::PANEL_PAD_CONTROL_X`]) — pas jusqu'à
+    /// `inner.right()`, qui s'arrête avant la réserve de barre de défilement : la bande n'est pas
+    /// dans la zone défilable, une réserve n'y a pas de sens, et ce qu'on y aligne à droite doit
+    /// être à la même distance du bord que ce qu'on aligne à gauche. Renvoie les zones
+    /// **réduites** — `inner` et la zone de défilement s'arrêtent au-dessus de la bande — et le
+    /// rectangle de la bande.
     ///
     /// **La bande déborde du `Ui` que le panneau a donné au contenu**, dont le clip s'arrête à
     /// `inner.bottom()` : la peindre demande un `Painter` dont le clip est posé sur ce rectangle
     /// (`Painter::set_clip_rect`), pas `ui.painter_at`, qui ne fait qu'intersecter.
     ///
-    /// Premier usage : la légende « silencieux » de l'onglet « Alertes » (2026-09-16), à 5 px du
-    /// bas, que le défilement de la grille ne doit pas emporter.
+    /// Premier usage : la légende « silencieux » de l'onglet « Alertes » (2026-09-16), que le
+    /// défilement de la grille ne doit pas emporter.
     pub fn footer(&self, height: f32, margin: f32) -> (PanelZones, Rect) {
         let bottom = self.frame.bottom() - margin;
         // Plancher au haut du contenu : un panneau trop bas pour la bande donnerait un rectangle
@@ -188,7 +192,10 @@ impl PanelZones {
         let top = (bottom - height).max(self.inner.top());
         let footer = Rect::from_min_max(
             egui::pos2(self.inner.left(), top),
-            egui::pos2(self.inner.right(), bottom.max(top)),
+            egui::pos2(
+                (self.frame.right() - tokens::PANEL_PAD_CONTROL_X).max(self.inner.left()),
+                bottom.max(top),
+            ),
         );
         let content_bottom = (top - margin).max(self.inner.top());
         let reduced = PanelZones {
@@ -300,7 +307,12 @@ mod tests {
         assert!((panneau_options().bottom() - pied.bottom() - 5.0).abs() < EPS);
         assert!((pied.height() - 21.0).abs() < EPS);
         assert!((pied.left() - z.inner.left()).abs() < EPS);
-        assert!((pied.right() - z.inner.right()).abs() < EPS);
+        // À droite, la bande va jusqu'à l'axe symétrique de celui des contrôles — pas jusqu'à
+        // `inner.right()`, qui laisse la réserve de barre de défilement (26 px) inutilisée.
+        assert!(
+            (panneau_options().right() - pied.right() - tokens::PANEL_PAD_CONTROL_X).abs() < EPS
+        );
+        assert!(pied.right() > z.inner.right());
         // Le contenu s'arrête à la même marge au-dessus de la bande, défilement compris : rien
         // ne passe sous la légende.
         assert!((pied.top() - reduit.inner.bottom() - 5.0).abs() < EPS);
