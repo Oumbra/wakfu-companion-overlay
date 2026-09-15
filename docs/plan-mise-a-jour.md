@@ -1,0 +1,471 @@
+# Mise à jour automatique de l'overlay — plan (2026-09-15)
+
+Objectif fixé par le mainteneur : **plus jamais réinstaller l'overlay à la main**. L'overlay
+cherche lui-même s'il existe une version plus récente — au démarrage, derrière l'écran de
+chargement, et à la demande depuis la fenêtre Options — la télécharge (en différentiel quand c'est
+possible), l'installe et se relance, en montrant à l'utilisateur ce qui se passe : quelles étapes
+chargent, où en est le téléchargement.
+
+Contraintes posées : Rust et l'architecture existante (threads bloquants, `ureq`, `ArcSwap`,
+`UserEvent`), l'API Cloudflare Pages du dépôt web, **aucune brique nouvelle** — ou alors gratuite et
+compatible avec ce qui tourne déjà. Ce document compare les solutions, en recommande une, décrit
+le flux visuel et découpe le travail. Il complète le §11 de [`plan-architecture.md`](plan-architecture.md)
+(« Mise à jour : vérification `GET` de la dernière Release au démarrage, téléchargement en tâche
+de fond, application au prochain lancement ») et le lot **L6 — Packaging** de sa feuille de route,
+seul lot jamais démarré.
+
+---
+
+## 0. En deux mots
+
+**Recommandation : GitHub Releases comme dépôt de binaires, un workflow de release déclenché par
+la fusion sur `main`, un module de mise à jour maison dans `overlay-sync` (`ureq` + `self-replace`
++ `minisign-verify`), un manifeste `latest.json` signé, l'installation au démarrage derrière
+l'écran de chargement existant, et le différentiel (`qbsdiff`) en seconde phase, une fois sa
+taille mesurée par le CI.**
+
+Rien de tout cela n'ajoute de service : GitHub (déjà l'hébergeur du code et du CI) et Cloudflare
+Pages (déjà l'API) suffisent, gratuitement, et les trois crates ajoutées sont pures Rust, sans
+runtime async, sans dépendance système.
+
+Ce qui reste au mainteneur : fusionner `dev` dans `main` quand il veut publier. Le reste est
+automatique.
+
+---
+
+## 1. État des lieux (vérifié dans les deux dépôts, pas supposé)
+
+| Fait | Où | Conséquence pour le plan |
+| --- | --- | --- |
+| **Les deux dépôts GitHub sont publics** (`"private": false` sur l'API GitHub, 2026-09-15) alors que `CLAUDE.md` dit encore « dépôt privé, minutes comptées » | `api.github.com/repos/Oumbra/*` | Les assets de Release sont téléchargeables sans jeton, et les minutes Actions sont **gratuites** sur les runners standard. À confirmer par le mainteneur (voir §10) ; le plan reste valable si le dépôt redevient privé (variante §3.2). |
+| Aucune Release, aucun tag, aucun job de release ; le CI ne compile jamais le produit en `--release` | `ci.yml` (5 jobs), `git tag` vide | Tout le lot L6 est à construire. |
+| Le binaire est **mono-fichier** : polices, sons, images, sorts, moteur JS et catalogue de repli sont embarqués par `include_bytes!` (~6,1 Mo de charge utile) ; aucun fichier à côté de l'exe | `design/assets.rs`, `fonts.rs`, `alert_sound.rs`, `catalog_cache.rs`… | Mettre à jour = remplacer **un** fichier. Pas besoin d'installeur pour la mise à jour elle-même. |
+| Aucun `[profile.release]` déclaré : pas de `strip`, pas de LTO | `Cargo.toml` racine | Le binaire livré est plus gros qu'il ne devrait (symboles, code mort inter-crates). Correction triviale, à faire avant la première release. |
+| Client HTTP : `ureq` 3 + rustls, **pas de tokio ni reqwest**, décision « définitive » (un seul modèle de concurrence : `std::thread` bloquants) | `overlay-sync/src/client.rs:1-4`, §7.3 du plan | Écarte la crate `self_update` (tire `reqwest`). Le téléchargement sera un thread bloquant de plus, comme Auth/Catalogue/Sync. |
+| `client::fetch_bytes(url)` télécharge n'importe quelle URL absolue mais **tout en mémoire**, sans progression | `client.rs:159-175` | À doubler d'une variante en flux vers un fichier, avec rappel de progression. |
+| `DEFAULT_BASE_URL` pointe sur **`claude-dev.wakfu-companion.com`** avec un TODO « à repointer avant toute release réelle » | `client.rs:17-29` | Dette bloquante avant la première Release. |
+| Écran de chargement **déjà en place** : `StartupProgress` (3 drapeaux atomiques `catalog`/`dungeons`/`log_replayed`, garde-fou 45 s, `pending()` liste les étapes restantes), carte `panels::login` avec rouage `design::loader` 72 px et version en pied | `startup.rs`, `login.rs:329-350`, §9.1 undecies | Point d'accroche naturel : une étape « Mise à jour » de plus, et une vraie liste d'étapes visible. |
+| `design::meter(ratio)` existe (jauge 0→1 du panneau Combat), `design::button`, `design::confirm_dialog`, `design::info_text`, `design::checkbox` aussi | `design/components/` | Aucun composant à créer pour la barre de progression ni pour la section Options. |
+| Fenêtre Options : onglet « Paramètres » = sections Fichier / Combat / Compte, motif « heading + info_text + bouton + confirm + `OptionsModalAction` traité par l'hôte » | `options_modal.rs:653-841` | La section « Mise à jour » suit exactement ce motif. |
+| Threads de fond nommés + `ArcSwap` + `EventLoopProxy<UserEvent>` + `backoff_delay` ; `UserEvent::{NewSnapshot, AuthStatusChanged, StartupProgress}` | `background.rs`, `render_content.rs:83-89` | Un `UserEvent::UpdateProgress` et un `spawn_update_thread` s'y ajoutent sans rien changer au modèle. |
+| Deux hôtes dupliquent la boucle d'événements : `main.rs` (Windows) et `bin/overlay-ui-x11.rs` (Linux) | — | Tout ce qui est partageable va dans la lib (`overlay_ui::background`, `startup`, `panels`), les deux hôtes ne font que brancher. |
+| Le binaire sait déjà **se relancer avec un argument spécial** et sortir aussitôt (URI de focus) ; `logging::log_session_end` est appelé à chaque sortie | `main.rs:3159-3166` | Précédent pour un argument `--updated-from <version>` et pour une sortie propre avant relance. |
+| `build.rs` accepte `WAKFU_OVERLAY_COMMIT` en surcharge, prévu pour « une chaîne de release qui construit sans `.git/` » | `overlay-ui/build.rs:28-33` | Déjà prêt pour le CI de release. |
+| Déjà dans l'arbre de dépendances : `sha2` 0.10 et `flate2` 1.1 (directes), `semver` 1.0 (transitive), `rustls`/`ring` (via `ureq`) | `Cargo.lock` | Intégrité SHA-256 et gzip gratuits. Absents : `minisign`/ed25519 (pourtant nommés au §10 du plan), `zstd`, `bsdiff`. |
+| Côté serveur : 25 routes `functions/api/v1/**`, aucun binding Cloudflare (ni R2, ni KV, ni D1 — décision documentée), gabarit `catalog_meta` + `GET /catalog/version` + `indexHash`, Functions free : **10 ms CPU/requête**, 100 000 requêtes/jour | `wrangler.toml`, `server/README.md` | Une façade `/api/v1/overlay/release` est possible sans base ni binding (§3.2), mais pas nécessaire au départ. |
+| Aucune page de téléchargement, aucun lien vers une Release sur le site | `src/` du dépôt web | À ajouter le jour de la première Release (hors périmètre de la mise à jour, mais logique). |
+| Le §11 du plan prévoit un « bundle moteur mis à jour sans nouvelle version du binaire » ; ce bundle fait **31 Ko** et est embarqué | `quickjs_engine.rs:15` | Un second canal signé pour 31 Ko n'a plus de sens une fois le binaire auto-mis à jour : à retirer du plan (§10, décision 7). |
+
+---
+
+## 2. Objectifs et non-objectifs
+
+**Objectifs**
+
+1. Au démarrage, l'overlay vérifie s'il existe une version plus récente ; si oui et si l'utilisateur
+   l'autorise (défaut : oui), il la télécharge, l'installe et se relance **avant** d'ouvrir les
+   overlays de jeu — jamais au milieu d'une session.
+2. Depuis Options › Paramètres, un bouton « Rechercher une mise à jour » qui devient « Mettre à
+   jour vers X » ; l'installation ferme les overlays, repasse par la fenêtre de chargement avec une
+   barre de progression, puis relance.
+3. L'écran de chargement montre **quoi** charge (sorts, catalogue, donjons, rattrapage du log,
+   compte, mise à jour) et, pendant un téléchargement, **combien** (Mo reçus / total).
+4. Différentiel : ne télécharger que ce qui change entre la version installée et la dernière,
+   quand ça vaut le coup.
+5. Intégrité : rien n'est jamais installé sans vérification de signature et de hachage (§10 du
+   plan : « un asset de Release non vérifié n'est jamais chargé »).
+6. Publication automatique : aucune étape manuelle au-delà de la fusion sur `main`.
+
+**Non-objectifs (v1)**
+
+- Installeur NSIS/MSI, AppImage, raccourci du menu Démarrer, `AppUserModelID` : c'est le reste du
+  lot L6, mené séparément. L'auto-update fonctionne sur un exe posé n'importe où par l'utilisateur.
+- Signature Authenticode (décision ouverte §14.4 du plan) : hors périmètre. À noter : une mise à
+  jour écrite par l'overlay lui-même **ne porte pas de Mark-of-the-Web**, SmartScreen ne se
+  redéclenche donc pas à chaque version — seul le tout premier téléchargement par navigateur y est
+  exposé.
+- Canal bêta / plusieurs canaux : le manifeste le prévoit (`channel`), l'UI non.
+- Retour à la version précédente depuis l'UI : le fichier précédent est conservé un cycle, la
+  commande n'est pas exposée.
+
+---
+
+## 3. Où vivent les binaires — solutions comparées
+
+| Critère | **A. GitHub Releases** (direct) | **B. Releases + façade API** `/api/v1/overlay/release` | C. Cloudflare R2 | D. `public/` du site Pages |
+| --- | --- | --- | --- | --- |
+| Brique nouvelle | aucune (le dépôt est déjà sur GitHub, le CI aussi) | aucune (une Function de plus dans le projet Pages existant) | **oui** : premier binding du projet, secrets `wrangler` en plus | aucune |
+| Coût | 0 (public : bande passante et stockage des assets illimités, 2 Gio par fichier) | 0 (1 requête par lancement, cache edge 5 min ; quota 100 000/jour) | 0 jusqu'à 10 Go et 10 M lectures/mois | 0 |
+| Dépôt privé possible ? | non (les assets exigent un jeton) | **oui** : la Function porte le jeton et renvoie une URL signée temporaire (GitHub répond 302 vers `objects.githubusercontent.com`) | oui | oui |
+| Historique des versions | toutes, une Release par version, notes de version incluses | idem | à gérer soi-même | non : une seule version, gonfle chaque déploiement du site |
+| Taille max par fichier | 2 Gio | 2 Gio | 5 Tio | **25 Mio** — un exe release peut le dépasser |
+| Contrôle (version minimale, coupe-circuit, statistiques) | via le manifeste signé publié avec la Release | **oui, côté serveur**, sans republier | non | non |
+| Delta | oui (assets supplémentaires) | oui | oui | non réaliste |
+| Complexité | la plus faible | faible (une Function de 60 lignes) | moyenne | faible mais couple les deux dépôts |
+
+**Recommandation : A pour démarrer, B comme extension optionnelle (phase 4).** Le client lit un
+manifeste à une URL stable qui ne dépend pas de l'API GitHub (donc sans quota de 60 requêtes/heure) :
+
+```
+https://github.com/Oumbra/wakfu-companion-overlay/releases/latest/download/latest.json
+https://github.com/Oumbra/wakfu-companion-overlay/releases/latest/download/latest.json.minisig
+https://github.com/Oumbra/wakfu-companion-overlay/releases/download/v0.20.0/<asset>
+```
+
+Pour passer de A à B, seule l'URL du manifeste change côté client : le format du manifeste, la
+signature et les assets restent identiques. C'est ce qui rend B une **extension**, pas une
+réécriture — et ce qui protège si le dépôt redevient privé.
+
+C est écarté : c'est précisément la brique supplémentaire que le mainteneur veut éviter, et elle
+n'apporte rien que A n'ait déjà. D est écarté par la limite de 25 Mio et parce qu'une Release du
+binaire forcerait un déploiement du site.
+
+---
+
+## 4. Mécanisme client — solutions comparées
+
+| | 1. Crate `self_update` | **2. Module maison** (`ureq` + `self-replace` + `minisign-verify`) | 3. Installeur qui se met à jour (MSI/winget, AppImageUpdate) |
+| --- | --- | --- | --- |
+| Colle à l'architecture | **non** : tire `reqwest` (donc `tokio`), second modèle de concurrence, contraire au §7.3 | oui : un `std::thread` bloquant de plus, `ureq` partagé | partiellement (mécanisme externe, expérience utilisateur hors overlay) |
+| Signature | non (hachage seulement) | oui, ed25519 (`minisign-verify`, pure Rust, minuscule) | dépend de l'outil |
+| Delta | non | oui (`qbsdiff`, phase 3) | zsync (AppImage), non (MSI) |
+| Progression dans notre UI | difficile | native | non |
+| Windows + Linux | oui | oui (`self-replace` gère le renommage d'un exe en cours d'exécution sous Windows) | deux outils différents |
+| Code à écrire | peu | ~600 lignes (téléchargement, vérification, application, thread, UI) | packaging + intégration |
+
+**Recommandation : 2.** Les trois crates à ajouter, toutes pures Rust :
+
+| Crate | Version (2026-09) | Rôle | Pourquoi celle-là |
+| --- | --- | --- | --- |
+| `self-replace` | 1.5 | remplacer l'exe en cours d'exécution (Windows : renommage de l'exe courant puis copie, nettoyage différé ; Linux : `rename` atomique) | seule façon fiable sous Windows sans processus tiers, 0 dépendance lourde |
+| `minisign-verify` | 0.2 | vérifier la signature ed25519 du manifeste | format `minisign` déjà nommé au §10 du plan ; vérification seule (la clé privée ne quitte jamais le CI) |
+| `semver` | 1.0 (passe en dépendance directe) | comparer `build_info::VERSION` à `manifest.version` | déjà dans l'arbre |
+| `qbsdiff` | 1.4 (phase 3) | générer (CI) et appliquer (client) un patch bsdiff | pure Rust, patch appliqué en flux vers un fichier, source (l'exe courant) lue en mémoire une fois |
+
+Ni `zstd` ni `tar` : les assets sont compressés en **gzip** via `flate2`, déjà présent. Sur un exe
+Rust, gzip perd ~15 % de compression face à zstd -19 ; c'est le prix de « pas de brique
+nouvelle », et le différentiel comble largement l'écart.
+
+---
+
+## 5. Le manifeste signé
+
+Un seul fichier décrit la dernière version ; il est généré par le CI et signé avec la clé
+`minisign` du projet (clé privée en secret GitHub Actions, clé publique embarquée dans le binaire).
+Le client ne fait confiance qu'à un manifeste dont la signature est valide ; les assets sont
+ensuite vérifiés par leur SHA-256 inscrit dans ce manifeste.
+
+```json
+{
+  "schema": 1,
+  "channel": "stable",
+  "version": "0.20.0",
+  "commit": "a1b2c3d",
+  "publishedAt": "2026-09-20T18:04:11Z",
+  "notesUrl": "https://github.com/Oumbra/wakfu-companion-overlay/releases/tag/v0.20.0",
+  "minimumVersion": "0.17.0",
+  "assets": {
+    "windows-x86_64": {
+      "name": "wakfu-companion-overlay-0.20.0-windows-x86_64.exe.gz",
+      "size": 11834112,
+      "sha256": "…",
+      "installed": { "size": 31457280, "sha256": "…" }
+    },
+    "linux-x86_64": { "name": "wakfu-companion-overlay-0.20.0-linux-x86_64.gz", "…": "…" }
+  },
+  "deltas": {
+    "windows-x86_64": [
+      { "from": "0.19.0", "fromSha256": "…", "name": "…-0.19.0-to-0.20.0-windows-x86_64.patch", "size": 3211264, "sha256": "…" },
+      { "from": "0.18.3", "…": "…" }
+    ]
+  }
+}
+```
+
+- `minimumVersion` : en dessous, la mise à jour est **obligatoire** même si l'utilisateur a
+  désactivé l'automatique (cas d'une rupture d'API côté serveur). Au-dessus, elle reste
+  proposée.
+- `installed.sha256` : hachage de l'exe décompressé — c'est lui qui est vérifié juste avant
+  `self_replace`, et c'est lui qui sert de `fromSha256` aux deltas de la version suivante.
+- `deltas[*].fromSha256` : le client n'applique un patch que si le hachage de **son propre exe**
+  correspond (un build local ou modifié retombe sur l'asset complet).
+- URL des assets : toujours reconstruite `releases/download/v{version}/{name}` — le manifeste ne
+  porte pas d'URL absolue, ce qui permet de le relayer par l'API (§3, B) sans le réécrire.
+
+---
+
+## 6. Chaîne de publication (CI)
+
+**Quand publier ?** Le hook `post-commit` incrémente la version à chaque commit sur `dev` : une
+Release par commit n'aurait aucun sens (et coûterait un build Windows à chaque `fix:`). La bonne
+granularité est celle qui existe déjà dans les règles du dépôt : **la fusion de `dev` dans `main`,
+faite par le mainteneur**. La version de la Release est celle que `Cargo.toml` porte à cet
+instant ; les sauts (`0.19.0` → `0.27.2`) sont normaux et sans conséquence.
+
+`.github/workflows/release.yml`, déclenché par `push` sur `main` et `workflow_dispatch` :
+
+1. **`version`** — lit `[workspace.package] version` ; si le tag `v{version}` existe déjà, s'arrête
+   (idempotent : un push sur `main` sans bump ne republie rien).
+2. **`build-windows`** / **`build-linux`** (parallèles) — `vendor-wgpu-hal`, cache, puis
+   `cargo build --release -p overlay-ui --bin overlay-ui` (Windows) et `--bin overlay-ui-x11`
+   (Linux), avec `WAKFU_OVERLAY_COMMIT=${{ github.sha }}`. Artefacts éphémères.
+3. **`publish`** — `cargo xtask dist` (nouvelle sous-commande de l'outillage existant) : télécharge
+   les assets des 3 Releases précédentes (`gh release download`, jeton du job), décompresse,
+   génère les deltas (`qbsdiff`, phase 3), compresse les exes en gzip, calcule les SHA-256, écrit
+   `latest.json`, le signe (`minisign` en ligne de commande depuis le secret
+   `MINISIGN_SECRET_KEY` + `MINISIGN_PASSWORD`), crée le tag et la Release
+   (`softprops/action-gh-release@v2`) avec le corps généré depuis les commits Conventional
+   Commits depuis le tag précédent (`feat:` → « Nouveautés », `fix:` → « Corrections »).
+
+Ce que le mainteneur fait, une fois pour toutes : générer la paire de clés (`minisign -G`),
+déposer les deux secrets, coller la clé publique dans `overlay_sync::update::PUBLIC_KEY`. Ce qu'il
+fait à chaque version : `git merge dev` sur `main`, `git push`.
+
+**Coût** : dépôt public ⇒ 0. S'il redevenait privé : ~15 min Windows (facturées ×2) + ~10 min
+Linux par Release, soit ~40 min de quota par publication — raisonnable à raison d'une Release par
+semaine, pas par commit.
+
+**`ci.yml` ne change pas** (et `scripts/ci-local.sh` non plus) : le workflow de release est un
+fichier séparé, qui ne rejoue pas les tests — ils ont déjà tourné sur `dev` avant la fusion.
+
+**Profil release à ajouter dans `Cargo.toml`** avant la première publication, dans son propre
+commit `build:` :
+
+```toml
+[profile.release]
+strip = true          # symboles : -30 à -50 % de taille
+lto = "fat"           # code mort inter-crates
+codegen-units = 1
+```
+
+---
+
+## 7. Côté overlay — architecture
+
+```
+                 GET latest.json (+ .minisig)        GET asset (gzip ou patch)
+overlay-sync ─────────────────────────────────▶ GitHub Releases ◀──────────────────
+   update/                                                                  │ flux vers
+   ├─ manifest.rs   parse + minisign-verify + semver                        │ <data_dir>/updates/
+   ├─ check.rs      décide : à jour / disponible / obligatoire              │
+   ├─ download.rs   fetch_to_file(url, path, on_progress)   ◀──────────────┘
+   └─ apply.rs      sha256 → gunzip / qbsdiff → self_replace → relance
+
+overlay-ui
+   ├─ background::spawn_update_thread   thread "overlay-update", commandes Check/Download/Install
+   ├─ startup::StartupProgress          + étape `update` (Checking → …), liste d'étapes typée
+   ├─ panels::login                     liste des étapes + design::meter
+   ├─ panels::options_modal             section « Mise à jour » (onglet Paramètres)
+   └─ main.rs / bin/overlay-ui-x11.rs   UserEvent::UpdateProgress, OptionsModalAction::InstallUpdate,
+                                        sortie propre + relance avec --updated-from
+```
+
+**État publié** (`Arc<ArcSwap<UpdateStatus>>`, même motif qu'`AuthStatus`) :
+
+```rust
+pub enum UpdateStatus {
+    Idle,
+    Checking,
+    UpToDate { checked_at: Instant },
+    Available { version: String, download_size: u64, mandatory: bool, notes_url: String },
+    Downloading { version: String, received: u64, total: u64 },
+    Verifying { version: String },
+    ReadyToInstall { version: String, staged: PathBuf },
+    Installing { version: String },
+    Unavailable { reason: String },       // hors ligne, manifeste illisible… : on continue
+    Failed { headline: String, detail: String },
+}
+```
+
+**Thread `overlay-update`** (`background::spawn_update_thread`), commandes reçues par canal comme
+le thread Auth : `Check`, `Download`, `Install`, `Cancel`. Il ne touche jamais à l'UI ; il publie
+`UpdateStatus` et réveille l'hôte par `UserEvent::UpdateProgress`. Délais : 5 s pour le manifeste
+(au-delà, `Unavailable` et le démarrage continue), délai global d'`ureq` levé pour le
+téléchargement du corps (borné par le débit, pas par les 10 s du client).
+
+**Téléchargement en flux** : `client::fetch_to_file(url, dest, on_progress)` lit `Content-Length`
+et écrit par blocs de 64 Kio dans `<data_dir>/updates/<version>/<asset>.part`, en appelant le
+rappel à chaque bloc ; renommé sans `.part` une fois complet et haché. Reprise par en-tête `Range`
+si un `.part` existe (GitHub la supporte) — bonus peu coûteux, pas obligatoire.
+
+**Application** (`apply.rs`) :
+
+1. vérifier le SHA-256 du fichier téléchargé contre le manifeste ;
+2. produire l'exe cible dans le même dossier de staging : `gunzip` (asset complet) **ou**
+   `qbsdiff::Bspatch` avec l'exe courant comme source (delta) ;
+3. vérifier `installed.sha256` sur le résultat ;
+4. `self_replace::self_replace(&staged)` — sous Windows, l'exe courant est renommé (pas écrasé)
+   puis le nouveau copié à sa place ; conserver l'ancien un cycle sous `<data_dir>/updates/previous.exe` ;
+5. `logging::log_session_end("mise à jour")`, `Command::new(current_exe()).arg("--updated-from")
+   .arg(build_info::VERSION).spawn()`, puis `event_loop.exit()`.
+
+Au relancement, `--updated-from 0.19.0` fait écrire « mis à jour 0.19.0 → 0.20.0 » au journal et
+nettoie `updates/`. Un exe dans un dossier non inscriptible (test d'écriture d'un fichier sonde au
+démarrage) donne `Failed { headline: "Dossier protégé", detail: "Déplacez l'overlay dans un dossier
+où vous pouvez écrire…" }` plutôt qu'un échec au moment de l'installation.
+
+**Mémoire** : pendant l'application d'un delta, l'exe courant (~30 Mo) est en mémoire, le patch
+lu en flux, la sortie écrite en flux — pic < 80 Mo, pendant l'écran de chargement où le moteur
+n'a pas encore de combat en cours. Sous le budget de 300 Mo.
+
+**Config** (`config.rs`, `#[serde(default)]` comme les autres champs) : `auto_update: bool`
+(défaut `true`), `last_update_check: Option<String>`.
+
+---
+
+## 8. Flux visuel
+
+### 8.1 Écran de chargement (carte de connexion, fenêtre logicielle 400 px)
+
+Aujourd'hui : logo, titre, séparateur, rouage 72 px, version. Demain, sous le rouage :
+
+```
+            ⚙  (rouage, inchangé)
+
+   ✓  Sorts                      (référentiel embarqué, instantané)
+   ✓  Catalogue                  (cache · réseau · repli)
+   ⟳  Donjons
+   ✓  Rattrapage de wakfu.log
+   ⟳  Compte
+   ✓  Mise à jour · vous êtes à jour
+
+   ████████████████░░░░░░░░  4 / 6
+```
+
+- Une ligne par étape, dans un ordre fixe ; glyphe **✓** terminé, **rouage** en cours, **–**
+  ignoré (« Mise à jour · vérification impossible (hors ligne) »). La liste est typée
+  (`StartupStep` enum + état), plus un `Vec<&str>` : `pending()` devient une vue dessus.
+- Sous la liste, un `design::meter` : ratio = étapes terminées / étapes totales. Il donne une
+  progression **globale** même sans téléchargement.
+- **Si une version est disponible et `auto_update` vaut vrai** (ou `mandatory`), la ligne
+  « Mise à jour » devient « Téléchargement de la version 0.20.0 » et la jauge passe en mode
+  téléchargement : ratio = reçus / total, libellé « 4,2 / 11,8 Mo ». Puis « Vérification… »,
+  « Installation… », et la fenêtre se ferme : l'overlay se relance et repasse par le même écran,
+  avec « ✓ Mis à jour vers 0.20.0 ».
+- **Si disponible mais `auto_update` faux** : « Mise à jour · version 0.20.0 disponible (Options
+  › Paramètres) », étape terminée, on continue.
+- Le **garde-fou de 45 s** ne s'applique pas à un téléchargement en cours : `is_complete()`
+  ignore l'étape `update` tant qu'elle est en `Downloading`/`Verifying`/`Installing` (un
+  téléchargement lent ne doit pas être coupé à mi-course) ; elle a son propre plafond de
+  10 min, puis `Failed` et le démarrage continue avec la version courante.
+- **Échec** (hachage faux, réseau coupé, signature invalide) : ligne rouge « Mise à jour
+  impossible — l'overlay démarre avec la version actuelle », journal détaillé, nouvel essai au
+  prochain lancement. Jamais bloquant, sauf `mandatory` : écran « Mise à jour requise » avec
+  bouton « Réessayer » (même carte, même anneau rouge que l'état *erreur* de la connexion).
+- **Captures** : quatre nouvelles références dans `tests/panels.rs` (`login_chargement_etapes`,
+  `login_telechargement`, `login_mise_a_jour_requise`, `login_mise_a_jour_echec`), version figée
+  par `freeze_for_snapshots` — et la **version « disponible »** affichée passe par la même
+  indirection (`0.0.0` figé), sinon le gate rougirait au premier bump.
+
+### 8.2 Fenêtre Options › Paramètres, nouvelle section « Mise à jour »
+
+Après « Compte », même rythme (`SECTION_GAP`, `heading`, `info_text`, `INFO_GAP`, ligne de
+`ROW_HEIGHT`) :
+
+```
+Mise à jour
+ⓘ Version 0.19.0 (a1b2c3d) · dernière vérification il y a 3 min · vous êtes à jour
+☑ Installer automatiquement les mises à jour au démarrage
+                     [ Rechercher une mise à jour ]
+```
+
+Le bouton change d'état avec `UpdateStatus` :
+
+| `UpdateStatus` | Bouton | Ligne d'info |
+| --- | --- | --- |
+| `Idle` / `UpToDate` / `Unavailable` | « Rechercher une mise à jour » (Secondary) | « vous êtes à jour » / « vérification impossible » |
+| `Checking` | « Recherche… » (désactivé, rouage 16 px à gauche) | — |
+| `Available` | **« Mettre à jour vers 0.20.0 »** (Primary, or) + lien « Notes de version » | « 11,8 Mo à télécharger » (ou « 3,1 Mo en différentiel ») |
+| `Downloading`… | (la modale n'est plus là : voir ci-dessous) | — |
+| `Failed` | « Réessayer » | `headline` en rouge, `detail` en infobulle |
+
+Clic sur « Mettre à jour » → `design::confirm_dialog("Fermer l'overlay et installer la version
+0.20.0 ?")` → `OptionsModalAction::InstallUpdate` → l'hôte : ferme la fenêtre Options et tous
+les overlays de jeu (même chemin que « Déconnecter », sans effacer le jeton), passe
+`StartupProgress` en mode *mise à jour* (toutes les autres étapes déjà ✓), et `sync_session_windows`
+recrée la fenêtre de connexion sur son écran de chargement, où le téléchargement s'affiche comme au
+§8.1. Ensuite relance : l'utilisateur revoit l'écran de chargement, puis ses overlays.
+
+Une vérification manuelle ne se lance pas si une est en cours (bouton désactivé), et la commande
+`Check` est refusée par le thread en dessous de 30 s entre deux appels (anti-rafale).
+
+### 8.3 Icône de zone de notification (Windows)
+
+Entrée « Mettre à jour vers 0.20.0 » ajoutée au menu quand `Available` (grisée sinon, comme
+« Options »), même action que le bouton. Optionnel, une ligne dans `sync_tray_menu`.
+
+---
+
+## 9. Différentiel — ce qu'il faut savoir avant de s'y engager
+
+- Un binaire Rust recompilé change **beaucoup** même pour un petit correctif (adresses,
+  réordonnancement du code) : sur la partie code, bsdiff donne typiquement 20 à 40 % de la
+  taille. La partie **données embarquées** (~6 Mo de polices, images, sons, JSON) est identique
+  d'une version à l'autre et pèse ~0 dans le patch. Attendu : **patch de 3 à 6 Mo contre 10 à 13
+  Mo pour l'asset complet gzip** — un gain réel (×2 à ×3), pas spectaculaire.
+- Il faut l'exe **exact** de la version de départ : `fromSha256` le garantit ; sinon asset complet.
+- Trois deltas par plateforme (depuis N-1, N-2, N-3) suffisent : au-delà, asset complet. Le CI
+  les génère en ~10 s chacun.
+- `qbsdiff` applique le patch en flux ; la mémoire reste sous le budget (§7).
+- **Décision recommandée** : phase 3, après avoir fait mesurer par le CI, dès la phase 1, la
+  taille qu'aurait eu le delta (`xtask dist --measure-delta`, une ligne dans le journal du job).
+  Si le gain mesuré est inférieur à ×2, on ne l'implémente pas côté client et on gagne 300 lignes.
+
+Alternative examinée et écartée : `zstd --patch-from` (delta par dictionnaire zstd) — meilleur
+ratio que bsdiff sur des binaires, mais exige la crate `zstd` (bibliothèque C) et une fenêtre
+mémoire de la taille de l'exe source ; `qbsdiff` reste pure Rust.
+
+---
+
+## 10. Décisions à trancher par le mainteneur
+
+1. **Dépôt public confirmé ?** L'API GitHub le dit public ; `CLAUDE.md` et le §11 du plan disent
+   privé. Si public : A tel quel, minutes gratuites, et corriger les deux documents. Si privé ou
+   destiné à le redevenir : B dès la phase 2 (la Function porte un jeton `GITHUB_RELEASES_TOKEN`
+   en lecture seule et renvoie l'URL signée de l'asset).
+2. **Déclencheur de Release** : push sur `main` (recommandé, colle aux règles du dépôt) ou tag
+   manuel `v*` ?
+3. **Installation automatique au démarrage par défaut** (recommandé : oui, avec la case dans
+   Options pour la désactiver) ou proposition seulement ?
+4. **Différentiel** : dès le départ, ou après mesure (recommandé) ?
+5. **Emplacement d'installation cible pour L6** : `%LOCALAPPDATA%\Programs\WakfuCompanionOverlay\`
+   (installation par utilisateur, sans élévation — c'est ce qui rend l'auto-update possible sans
+   UAC, modèle Discord/VS Code) plutôt que `Program Files`. À acter maintenant pour que
+   l'installeur futur ne casse pas la mise à jour.
+6. **`DEFAULT_BASE_URL`** : la première Release pointe-t-elle sur la prod (`wakfu-companion.com`,
+   il faut que l'appairage natif y soit déployé) ou assume-t-on `claude-dev` pour la bêta ?
+7. **Abandon du « bundle moteur mis à jour sans nouvelle version du binaire »** (§11 du plan) :
+   31 Ko embarqués, l'auto-update du binaire couvre le besoin. Recommandé : retirer ce point du
+   plan d'architecture.
+
+---
+
+## 11. Phasage
+
+| Phase | Contenu | Livrable vérifiable | Dépôt |
+| --- | --- | --- | --- |
+| **0 — Préalables** | `[profile.release]` ; `DEFAULT_BASE_URL` (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décision 1) | un `cargo build --release` local mesuré (taille avant/après `strip`+LTO) | overlay |
+| **1 — Publication** | `release.yml` ; `xtask dist` (gzip, SHA-256, `latest.json`, signature, mesure du delta) ; première Release `v0.x` | un exe Windows et un binaire Linux téléchargeables depuis `releases/latest`, manifeste signé vérifiable avec `minisign -V` | overlay |
+| **2 — Client** | `overlay_sync::update` ; `spawn_update_thread` ; `StartupProgress` typé ; écran de chargement avec étapes + jauge ; section Options ; relance `--updated-from` ; captures | installer volontairement une version N-1, lancer : elle se met à jour toute seule et se relance en N ; bouton Options testé dans les 5 états ; artefact des captures publié | overlay |
+| **3 — Différentiel** | `xtask dist` génère 3 deltas ; `apply.rs` applique `qbsdiff` quand `fromSha256` correspond | même test qu'en 2 avec le journal montrant « delta 3,1 Mo appliqué » ; repli asset complet vérifié sur un exe modifié | overlay |
+| **4 — Optionnel** | façade `GET /api/v1/overlay/release` (cache edge, `minimumVersion` pilotable, coupe-circuit) ; bouton « Télécharger l'overlay » sur le site ; re-vérification toutes les 6 h en jeu (badge, jamais d'installation en session) | Function testée sous `wrangler pages dev` ; lien sur le site | web + overlay |
+| **L6 — Installeur** (hors de ce plan) | NSIS/MSI par utilisateur, AppImage, raccourci, `AppUserModelID` | installation propre sur machine vierge | overlay |
+
+Chaque phase tient dans une à trois sessions ; 2 est la plus lourde (UI + captures + deux hôtes).
+L'ordre est contraint : 1 avant 2 (le client a besoin d'un manifeste réel à lire), 2 avant 3.
+
+---
+
+## 12. Risques et parades
+
+| Risque | Parade |
+| --- | --- |
+| Antivirus qui bloque le remplacement d'un exe par lui-même | `self-replace` renomme plutôt que d'écrire en place (le motif de Rust `rustup`, `uv`) ; en cas de refus, `Failed` explicite avec le chemin, l'ancienne version reste intacte |
+| Exe dans un dossier protégé (`Program Files`) | sonde d'écriture au démarrage → message clair ; décision 5 pour l'installeur |
+| Version installée « inconnue » (build local, hachage différent) | pas de delta, asset complet ; jamais d'échec silencieux |
+| Manifeste altéré / dépôt compromis | signature `minisign` obligatoire ; sans signature valide, `Unavailable`, jamais d'installation |
+| Fuite de la clé privée | rotation : nouvelle clé publique embarquée dans une version signée par l'ancienne, puis bascule ; la clé ne vit qu'en secret Actions |
+| Téléchargement coupé | `.part` + reprise `Range` ; sinon nouveau téléchargement au prochain lancement |
+| Deux instances de l'overlay pendant une installation | verrou fichier `<data_dir>/overlay.lock` (à vérifier : n'existe pas aujourd'hui, utile indépendamment de ce plan) |
+| Mise à jour cassée (l'exe N ne démarre plus) | `previous.exe` conservé un cycle ; procédure documentée « renommez previous.exe » ; option UI en phase ultérieure |
+| Gate de captures rouge à chaque bump | version affichée toujours via `build_info::banner_label()` / indirection figée à `0.0.0` |
