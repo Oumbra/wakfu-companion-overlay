@@ -141,6 +141,7 @@ fn zones(rect: Rect) -> PanelZones {
     // La zone de défilement part du même axe de contrôles, mais va jusqu'au bord du panneau : sa
     // propre réserve y remplace le retrait de droite, au lieu de s'y ajouter.
     PanelZones {
+        frame: rect,
         inner,
         scroll: Rect::from_min_max(
             inner.min,
@@ -151,6 +152,10 @@ fn zones(rect: Rect) -> PanelZones {
 
 /// Les zones d'un panneau, passées au contenu par [`Panel::show`].
 pub struct PanelZones {
+    /// Le rectangle du panneau lui-même, fond et bords compris — celui que [`Panel::show`] a
+    /// reçu. Privé : les mises en page se calent sur [`PanelZones::inner`] ; seule
+    /// [`PanelZones::footer`] a besoin du bord bas réel.
+    frame: Rect,
     /// Rectangle intérieur — rembourrages appliqués, réserve de défilement déduite à droite. C'est
     /// le `max_rect` du `Ui` que reçoit le contenu ; il est fourni ici pour les mises en page qui
     /// ont besoin de sa largeur autrement que par `ui.available_width()`.
@@ -161,6 +166,45 @@ pub struct PanelZones {
 }
 
 impl PanelZones {
+    /// Détache une **bande fixe en bas du panneau**, hors de toute zone défilable — pour une
+    /// légende ou une mention qui doit rester au même endroit quand le contenu défile.
+    ///
+    /// La bande fait `height` de haut, sa base est à `margin` du **bord bas du panneau** (pas de
+    /// [`PanelZones::inner`], dont le rembourrage bas serait alors perdu deux fois), et la même
+    /// marge la sépare du contenu au-dessus. Renvoie les zones **réduites** — `inner` et la zone de
+    /// défilement s'arrêtent au-dessus de la bande — et le rectangle de la bande, aligné sur l'axe
+    /// des contrôles.
+    ///
+    /// **La bande déborde du `Ui` que le panneau a donné au contenu**, dont le clip s'arrête à
+    /// `inner.bottom()` : la peindre demande un `Painter` dont le clip est posé sur ce rectangle
+    /// (`Painter::set_clip_rect`), pas `ui.painter_at`, qui ne fait qu'intersecter.
+    ///
+    /// Premier usage : la légende « silencieux » de l'onglet « Alertes » (2026-09-16), à 5 px du
+    /// bas, que le défilement de la grille ne doit pas emporter.
+    pub fn footer(&self, height: f32, margin: f32) -> (PanelZones, Rect) {
+        let bottom = self.frame.bottom() - margin;
+        // Plancher au haut du contenu : un panneau trop bas pour la bande donnerait un rectangle
+        // inversé, même règle que dans `zones`.
+        let top = (bottom - height).max(self.inner.top());
+        let footer = Rect::from_min_max(
+            egui::pos2(self.inner.left(), top),
+            egui::pos2(self.inner.right(), bottom.max(top)),
+        );
+        let content_bottom = (top - margin).max(self.inner.top());
+        let reduced = PanelZones {
+            frame: self.frame,
+            inner: Rect::from_min_max(
+                self.inner.min,
+                egui::pos2(self.inner.right(), content_bottom),
+            ),
+            scroll: Rect::from_min_max(
+                self.scroll.min,
+                egui::pos2(self.scroll.right(), content_bottom),
+            ),
+        };
+        (reduced, footer)
+    }
+
     /// Zone défilable occupant tout ce qui reste sous le curseur courant, barre comprise.
     ///
     /// La largeur utile au contenu — réserve déduite — est passée à la closure, pour que
@@ -244,6 +288,39 @@ mod tests {
         assert!(
             (panneau_options().bottom() - z.inner.bottom() - tokens::PANEL_PAD_CONTROL_X).abs()
                 < EPS
+        );
+    }
+
+    #[test]
+    fn la_bande_de_pied_se_cale_sur_le_bord_du_panneau_et_reduit_le_defilement() {
+        let z = zones(panneau_options());
+        let (reduit, pied) = z.footer(21.0, 5.0);
+        // La base de la bande est à 5 px du bord BAS DU PANNEAU — pas de `inner`, sinon les 19 px
+        // de rembourrage s'ajouteraient aux 5 demandés.
+        assert!((panneau_options().bottom() - pied.bottom() - 5.0).abs() < EPS);
+        assert!((pied.height() - 21.0).abs() < EPS);
+        assert!((pied.left() - z.inner.left()).abs() < EPS);
+        assert!((pied.right() - z.inner.right()).abs() < EPS);
+        // Le contenu s'arrête à la même marge au-dessus de la bande, défilement compris : rien
+        // ne passe sous la légende.
+        assert!((pied.top() - reduit.inner.bottom() - 5.0).abs() < EPS);
+        assert!((reduit.scroll.bottom() - reduit.inner.bottom()).abs() < EPS);
+        assert!((reduit.scroll.right() - z.scroll.right()).abs() < EPS);
+        assert_eq!(reduit.inner.min, z.inner.min);
+    }
+
+    #[test]
+    fn une_bande_de_pied_plus_haute_que_le_panneau_ne_produit_pas_de_rectangle_inverse() {
+        let z = zones(Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(100.0, 30.0),
+        ));
+        let (reduit, pied) = z.footer(50.0, 5.0);
+        assert!(pied.height() >= 0.0, "hauteur négative : {}", pied.height());
+        assert!(
+            reduit.inner.height() >= 0.0,
+            "hauteur négative : {}",
+            reduit.inner.height()
         );
     }
 
