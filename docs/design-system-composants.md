@@ -581,9 +581,10 @@ taille est valide » : en pratique une case est toujours peinte à sa taille nat
 l'état **désactivé** teinte la case et le libellé de `TEXT_DISABLED`, par cohérence avec le bouton
 désactivé.
 
-**Usages** : la section « Combat » de l'onglet « Paramètres » (trois lignes, dont la dernière en
-retrait sous celle dont elle dépend) et la case « Fermeture automatique » des onglets « Alertes » et
-« Chat », seule sur sa ligne de réglage.
+**Usages** : les quatre sections de l'onglet « Paramètres » — « Combat » (trois lignes, dont la
+dernière en retrait sous celle dont elle dépend) puis « Suivi », « Alertes » et « Chat », où les
+cases « Couper le son des notifications » et « Fermeture automatique des notifications » sont
+seules sur leur ligne (`panels::notifications`, 2026-09-15).
 
 ---
 
