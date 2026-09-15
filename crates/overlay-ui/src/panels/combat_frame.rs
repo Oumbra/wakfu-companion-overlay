@@ -78,8 +78,10 @@ pub struct SelectionMarks {
 }
 
 /// Largeur de canevas commune aux 6 templates — largeur NATIVE du PNG (70 px, commune aux 6),
-/// canevas non étiré à l'affichage (voir doc de module).
-const FRAME_WIDTH: f32 = 70.0;
+/// canevas non étiré à l'affichage (voir doc de module). Exposée au module `combat` depuis le
+/// 2026-09-15 : le bandeau du switch Alliés/Ennemis, désormais posé AU-DESSUS du cadre, se cale
+/// exactement sur cette largeur (voir `combat::show_side_row`).
+pub(super) const FRAME_WIDTH: f32 = 70.0;
 
 /// Rayon de rognage circulaire du portrait — moitié de `NATIVE_PORTRAIT_SIZE` (48/2), un carré
 /// aux coins arrondis à ce rayon devient un cercle parfait (voir doc de module). Les gabarits

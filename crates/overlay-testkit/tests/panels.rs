@@ -255,16 +255,18 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
 
     harness.run();
 
-    // Centre du bouton "Alliés" (moitié gauche du switch) : 8 (outer_margin) + 12 (x du switch) +
-    // 15 (moitié de `SWITCH_OPTION_WIDTH`, 30) = 35 ; 8 + 50 (y du switch, `COMBAT_TOP_MARGIN` +
-    // `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
-    harness.hover_at(egui::pos2(35.0, 71.0));
+    // Centre du bouton "Alliés" (moitié gauche du switch) — le switch coiffe désormais la colonne
+    // des portraits (échange du 15 sept., voir `panels::combat`), donc plus aucun `COLUMN_GAP` ni
+    // bandeau leader dans le compte : 8 (outer_margin) + 5 (switch centré dans les 70 px du cadre,
+    // (70 - 60) / 2) + 15 (moitié de `SWITCH_OPTION_WIDTH`, 30) = 28 ; 8 + 50 (y du switch,
+    // `COMBAT_TOP_MARGIN` + `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
+    harness.hover_at(egui::pos2(28.0, 71.0));
     harness.run();
     harness.snapshot("combat_tooltip_allies_au_dessus");
 
     // Centre du bouton "Ennemis" (moitié droite, décalée d'un `SWITCH_OPTION_WIDTH` complet) :
-    // 35 + 30 = 65 ; même y.
-    harness.hover_at(egui::pos2(65.0, 71.0));
+    // 28 + 30 = 58 ; même y.
+    harness.hover_at(egui::pos2(58.0, 71.0));
     harness.run();
     harness.snapshot("combat_tooltip_ennemis_au_dessus");
 }
