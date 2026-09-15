@@ -447,6 +447,13 @@ impl<'a> Autocomplete<'a> {
                 active = 0;
                 visible = self.visible(filter);
                 let _ = &visible;
+                // **Le champ reprend le focus que le clic vient de lui retirer.** Un bouton de
+                // filtre est dans le panneau, pas dans le champ : l'appui le défocalise, et le
+                // panneau ne tenait plus que par le pointeur posé dessus — il se refermait dès que
+                // la souris s'en écartait, et la frappe suivante tombait dans le vide. Mesuré sur
+                // `tests/autocomplete_filtre.rs` : la capture d'après-clic ne montrait plus qu'un
+                // champ nu. Même rattrapage que pour Entrée sur une entrée désactivée, plus bas.
+                field.request_focus();
             }
             if let Some(index) = outcome.hovered_row {
                 active = index;
