@@ -1,0 +1,234 @@
+# Publication d'une Release GitHub — docs/plan-mise-a-jour.md §6 (phase 1), décisions §10 :
+# déclenchée par la FUSION DE `dev` DANS `main` faite par le mainteneur (décision 2), jamais par un
+# commit sur `dev` (le hook `post-commit` y bumpe la version à chaque `feat:`/`fix:`, une Release
+# par commit n'aurait aucun sens). La version publiée est celle que `[workspace.package] version`
+# porte à cet instant ; les sauts (0.19.0 → 0.27.2) sont normaux.
+#
+# Ce que produit un run (assets de la Release `v{version}`) :
+#   wakfu-companion-overlay-{version}-windows-x86_64.exe.gz   binaire Windows, gzip
+#   wakfu-companion-overlay-{version}-linux-x86_64.gz         binaire Linux/X11, gzip
+#   latest.json                                               manifeste (schéma §5 du plan)
+#   latest.json.minisig                                       signature minisign du manifeste
+# L'overlay (phase 2) lit `releases/latest/download/latest.json` — une URL stable, hors API GitHub,
+# donc sans quota — vérifie la signature avec `wakfu-overlay.pub` (commité à la racine), puis
+# télécharge l'asset de sa plateforme et vérifie son SHA-256.
+#
+# Idempotent : si le tag `v{version}` existe déjà (push sur `main` sans bump, `workflow_dispatch`
+# relancé), rien n'est reconstruit ni republié.
+#
+# Signature : `MINISIGN_SECRET_KEY` (contenu du fichier de clé privée, chiffré) et
+# `MINISIGN_PASSWORD` sont des secrets du dépôt ; `xtask dist` déchiffre la clé EN MÉMOIRE, signe,
+# puis REVÉRIFIE avec `wakfu-overlay.pub` — un secret qui ne correspondrait pas à la clé publique
+# commitée fait échouer le job ici, pas chez l'utilisateur. Sans ces secrets, le job `publish`
+# échoue : une Release non signée ne part jamais.
+#
+# Différentiel (décision 4 du plan, « après mesure ») : le job télécharge les assets de la Release
+# précédente et `xtask dist --previous` MESURE ce qu'aurait pesé un patch bsdiff — rapport dans le
+# résumé du job, rien de publié. Le jour où le gain mesuré justifie la phase 3, ce même job
+# publiera les patchs.
+#
+# Volontairement SÉPARÉ de `ci.yml` (et donc hors du contrat de miroir avec `scripts/ci-local.sh`) :
+# les tests ont déjà tourné sur `dev` avant la fusion, ce workflow ne compile que les deux binaires
+# livrés, en release. Il partage l'action composite `vendor-wgpu-hal` et le cache cargo.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Une Release à la fois, jamais annulée en cours de route (un tag posé sans ses assets serait pire
+# qu'un run en attente).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: version à publier
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
+      exists: ${{ steps.tag.outputs.exists }}
+      commit: ${{ steps.read.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: lire [workspace.package] version
+        id: read
+        run: |
+          # Même règle que scripts/bump-version.sh : la PREMIÈRE ligne `version = "x.y.z"` du
+          # manifeste racine est celle de [workspace.package].
+          version="$(grep -m1 -E '^version = "[0-9]+\.[0-9]+\.[0-9]+"' Cargo.toml | sed -E 's/^version = "([^"]+)"/\1/')"
+          if [ -z "$version" ]; then
+            echo "::error::version introuvable dans Cargo.toml" ; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "version à publier : $version (${GITHUB_SHA::7})"
+      - name: le tag existe-t-il déjà ?
+        id: tag
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.read.outputs.tag }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ steps.read.outputs.tag }} existe déjà — rien à publier"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-windows:
+    name: binaire Windows (release)
+    needs: version
+    if: needs.version.outputs.exists == 'false'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          # Le cache des jobs de `ci.yml` est en profil dev : une clé distincte évite de le
+          # polluer avec des artefacts release (LTO fat) et réciproquement.
+          key: release
+      - name: cargo build --release (overlay-ui)
+        env:
+          # `build.rs` embarque ce hash dans `build_info` (bannière, journal, manifeste) — voir sa doc :
+          # surcharge prévue pour une chaîne de release, prioritaire sur `git`.
+          WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
+        run: cargo build --release -p overlay-ui --bin overlay-ui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: target/release/overlay-ui.exe
+          if-no-files-found: error
+          retention-days: 3
+
+  build-linux:
+    name: binaire Linux (release)
+    needs: version
+    if: needs.version.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - name: dépendances système (son rodio/alsa)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: release
+      - name: cargo build --release (overlay-ui-x11)
+        env:
+          WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
+        run: cargo build --release -p overlay-ui --bin overlay-ui-x11
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: target/release/overlay-ui-x11
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: assets, manifeste signé, Release
+    needs: [version, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: binaries
+      - name: assets de la Release précédente (mesure du différentiel)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p previous
+          # Première Release : aucune précédente, la mesure est simplement sautée.
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern '*.gz' --dir previous \
+            || echo "::notice::pas de Release précédente — pas de mesure du différentiel"
+          ls -l previous || true
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xtask -> target
+      - name: xtask dist
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          chmod +x binaries/linux-x86_64/overlay-ui-x11
+          cargo run --manifest-path xtask/Cargo.toml --release -- dist \
+            --version "${{ needs.version.outputs.version }}" \
+            --commit "${{ needs.version.outputs.commit }}" \
+            --asset "windows-x86_64=binaries/windows-x86_64/overlay-ui.exe" \
+            --asset "linux-x86_64=binaries/linux-x86_64/overlay-ui-x11" \
+            --previous previous \
+            --public-key wakfu-overlay.pub \
+            --notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/${{ needs.version.outputs.tag }}" \
+            --out dist
+          ls -l dist
+      - name: résumé du job (tailles, mesure du différentiel)
+        run: |
+          {
+            echo "## Release ${{ needs.version.outputs.tag }}"
+            echo
+            echo '| Asset | Taille |'
+            echo '|---|---|'
+            for f in dist/*; do
+              printf '| %s | %s |\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+            done
+            echo
+            cat dist/delta-measure.md 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: notes de version (commits Conventional Commits depuis la Release précédente)
+        run: |
+          previous="$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)"
+          range="${previous:+$previous..}HEAD"
+          {
+            echo "## Version ${{ needs.version.outputs.version }}"
+            echo
+            if [ -n "$previous" ]; then echo "Depuis $previous." ; else echo "Première publication." ; fi
+            echo
+            feats="$(git log --no-merges --format='%s' "$range" | grep -E '^feat(\(.+\))?!?:' | sed -E 's/^feat(\(.+\))?!?: */- /' || true)"
+            fixes="$(git log --no-merges --format='%s' "$range" | grep -E '^fix(\(.+\))?!?:' | sed -E 's/^fix(\(.+\))?!?: */- /' || true)"
+            if [ -n "$feats" ]; then echo "### Nouveautés"; echo; echo "$feats"; echo; fi
+            if [ -n "$fixes" ]; then echo "### Corrections"; echo; echo "$fixes"; echo; fi
+            echo "### Fichiers"
+            echo
+            echo '- `latest.json` / `latest.json.minisig` : manifeste signé lu par l'"'"'overlay pour se mettre à jour (clé publique : `wakfu-overlay.pub` à la racine du dépôt).'
+            echo '- Les binaires sont compressés en gzip ; l'"'"'overlay les télécharge et les installe seul.'
+          } > notes.md
+          cat notes.md
+      - name: Release GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body_path: notes.md
+          files: |
+            dist/wakfu-companion-overlay-*.gz
+            dist/latest.json
+            dist/latest.json.minisig
+          fail_on_unmatched_files: true
+          # Jamais `prerelease` : `releases/latest/download/…` ignore les pré-releases, et c'est
+          # cette URL que l'overlay lit. Un canal bêta passerait par un autre tag fixe, pas par ce
+          # drapeau (docs/plan-mise-a-jour.md §5, `channel`).
+          prerelease: false
