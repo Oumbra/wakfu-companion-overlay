@@ -14,12 +14,16 @@ use serde_json::Value;
 
 use crate::SyncError;
 
-// ⚠️ Pointe vers le déploiement DEV (`claude-dev.wakfu-companion.com`), PAS la prod
-// (`wakfu-companion.com`) — retour utilisateur 2026-09-01 : les routes d'appairage natif
-// (`/api/v1/auth/native/*`) ne sont pas encore déployées en prod à ce stade (confirmé : la prod
-// renvoie 405 sur `POST /api/v1/auth/native/pair`, le domaine dev répond 200). À repointer vers la
-// prod dès que l'appairage natif y est déployé — ne pas oublier avant toute release réelle.
-const DEFAULT_BASE_URL: &str = "https://claude-dev.wakfu-companion.com";
+// **Prod par défaut** (décision du mainteneur, 2026-09-15, docs/plan-mise-a-jour.md §10 point 6) :
+// un binaire de Release vise TOUJOURS `wakfu-companion.com`, jamais le déploiement dev. Le
+// domaine dev (`claude-dev.wakfu-companion.com`) n'est utilisé qu'en local, par les scripts de
+// prévisualisation (`crates/overlay-ui/preview.{ps1,sh}`), via `WAKFU_COMPANION_API_URL`.
+//
+// Historique : jusqu'au 2026-09-15 la constante pointait sur le domaine dev, parce que les routes
+// d'appairage natif (`/api/v1/auth/native/*`) n'y étaient déployées qu'en preview. Tant que ce
+// n'est pas le cas en prod, un binaire compilé avec cette valeur ne peut pas se connecter — c'est
+// une condition de sortie de la première Release, pas une raison de repointer la constante.
+const DEFAULT_BASE_URL: &str = "https://wakfu-companion.com";
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Origine de l'API — `WAKFU_COMPANION_API_URL` en priorité (utile contre un `wrangler pages dev`

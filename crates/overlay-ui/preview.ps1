@@ -61,6 +61,15 @@ Write-Host "=== overlay-ui — prévisualisation ($binName) ===" -ForegroundColo
 Write-Host "Ctrl+Shift+W = bascule interactif / clic-traversant  |  Ctrl+Shift+R = rafraîchir  |  Ctrl+Shift+Q ou Ctrl+C = quitter" -ForegroundColor Cyan
 Write-Host ""
 
+# Le binaire vise la PROD par défaut (`overlay_sync::client::DEFAULT_BASE_URL`, décision du
+# 2026-09-15) ; la prévisualisation locale reste le seul usage du déploiement dev. Une valeur déjà
+# posée dans l'environnement (ex. `wrangler pages dev` local) est respectée.
+if (-not $env:WAKFU_COMPANION_API_URL) {
+    $env:WAKFU_COMPANION_API_URL = "https://claude-dev.wakfu-companion.com"
+}
+Write-Host "API : $env:WAKFU_COMPANION_API_URL" -ForegroundColor DarkGray
+Write-Host ""
+
 $cargoArgs = @("run", "-p", "overlay-ui", "--bin", $binName)
 if (-not $Debug) { $cargoArgs += "--release" }
 if ($LogPath) { $cargoArgs += @("--", $LogPath) }
