@@ -44,10 +44,16 @@
 //! ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`). C'est la
 //! même ligne que dans « Alertes » et « Chat », au son près : chacun des trois écrans fait
 //! entendre celui qu'il commande, et aucun n'oblige à provoquer l'événement pour savoir ce qu'on
-//! entendra en jeu — un décompte se mérite, lui, en ramassant ce qu'on suit.
+//! entendra en jeu — un décompte se mérite, lui, en ramassant ce qu'on suit. Elle vit dans
+//! [`crate::panels::sound_row`], partagée avec les deux autres onglets.
 //!
-//! Elle vit avant le formulaire d'ajout et non dans un des blocs qui composent la liste : c'est un
-//! essai, pas un réglage de l'entrée qu'on est en train de créer.
+//! Juste dessous, la case **« Couper le son des notifications »** (2026-09-15) : le décompte à
+//! zéro affiche toujours sa carte par-dessus le jeu, il ne fait plus de bruit. C'est le demi-pas
+//! qui manquait entre « tout actif » et la case « Activer le Suivi », qui, elle, coupe la carte
+//! ET le son.
+//!
+//! Les deux vivent avant le formulaire d'ajout et non dans un des blocs qui composent la liste :
+//! c'est le son de l'onglet qu'elles règlent, pas l'entrée qu'on est en train de créer.
 //!
 //! ## Le brouillon ne porte QUE des définitions
 //!
@@ -62,7 +68,7 @@ use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
-use crate::panels::{feature_switch, tile_reorder};
+use crate::panels::{feature_switch, sound_row, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -86,10 +92,6 @@ const SETTING_ROW_RADIUS: u8 = 4;
 const FORM_ROW_HEIGHT: f32 = 40.0;
 const FORM_ROW_PAD_X: f32 = 12.0;
 const FORM_ROW_GAP: f32 = 6.0;
-/// Hauteur d'une ligne simple, sans fond — celle des onglets « Alertes » et « Chat »
-/// (`panels::alerts_tab::ROW_HEIGHT`, mesurée sur `interface-options-commandes.png`). La ligne
-/// « Tester le son » est la même dans les trois onglets, elle cadence pareil.
-const ROW_HEIGHT: f32 = 39.0;
 
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, la valeur arrêtée pour l'onglet Alertes.
@@ -258,6 +260,12 @@ pub struct SuiviTabContext<'a> {
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
+    /// **Le son de l'alerte de décompte est-il coupé ?** — brouillon de la case « Couper le son
+    /// des notifications » (voir `panels::sound_row`), posée juste sous la ligne d'essai. Coupé,
+    /// le décompte à zéro affiche toujours sa carte : c'est le SON qui se tait, pas la
+    /// fonctionnalité (celle-ci a sa propre case, [`Self::enabled`]). Comme tout le reste de la
+    /// fenêtre, c'est « Valider » qui l'emporte.
+    pub muted: &'a mut bool,
     pub availability: SuiviAvailability,
 }
 
@@ -308,8 +316,9 @@ pub fn show(
 
     // **L'interrupteur de la fonctionnalité**, avant le premier réglage — voir
     // `panels::feature_switch` : décoché, tout ce qui est peint ensuite dans ce `Ui` est grisé et
-    // inerte, sans que la suite de cette fonction ait à s'en occuper. « Tester le son » ci-dessous
-    // en fait partie : écouter l'alerte d'un Suivi coupé ne mènerait nulle part.
+    // inerte, sans que la suite de cette fonction ait à s'en occuper. La ligne de son ci-dessous
+    // en fait partie : écouter — ou faire taire — l'alerte d'un Suivi déjà coupé ne mènerait nulle
+    // part.
     feature_switch::show(
         ui,
         ctx.enabled,
@@ -320,7 +329,7 @@ pub fn show(
         "suivi.activer",
     );
 
-    if test_sound_row(ui, width) {
+    if sound_row::show(ui, width, "suivi", Some(ctx.muted)) {
         action = SuiviTabAction::TestSound;
     }
     ui.add_space(SECTION_GAP);
@@ -355,37 +364,6 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
         )
         .wrap_mode(egui::TextWrapMode::Wrap),
     );
-}
-
-/// La ligne « Tester le son de l'alerte » — la même que dans « Alertes » et « Chat »
-/// (`panels::alerts_tab::test_sound_row`), au son près : c'est ici celui du **décompte arrivé à
-/// 0**, la seule alerte que le suivi déclenche (`alert_sound::play_countdown_alert`, voir
-/// `overlay_engine::watchlist::WatchlistAlert`). Renvoie `true` au clic.
-///
-/// Posée juste sous la phrase de l'onglet, avant le formulaire d'ajout : c'est un essai, pas un
-/// réglage de la liste — l'intercaler dans les blocs qui composent cette liste la ferait passer
-/// pour l'un d'eux.
-fn test_sound_row(ui: &mut egui::Ui, width: f32) -> bool {
-    let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    let mut clicked = false;
-    cell.horizontal_centered(|ui| {
-        ui.label(
-            RichText::new("Tester le son de l'alerte")
-                .color(TEXT)
-                .size(BODY_FONT_SIZE),
-        );
-        ui.add_space(12.0);
-        clicked = ui
-            .add(
-                design::icon_button(DsIcon::Volume)
-                    .context(IconContext::Panel)
-                    .tooltip("Jouer le son d'alerte")
-                    .log_name("suivi.tester"),
-            )
-            .clicked();
-    });
-    clicked
 }
 
 /// **Le bloc de formulaire** : le mode, et en décompte la quantité de départ.

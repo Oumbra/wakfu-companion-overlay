@@ -112,6 +112,26 @@ pub struct OverlayConfig {
     /// sonner l'overlay ni n'affiche de carte. Même politique que [`Self::suivi_enabled`].
     #[serde(default = "actif")]
     pub chat_enabled: bool,
+    /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
+    /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
+    /// (2026-09-15, voir `panels::sound_row`).
+    ///
+    /// Cochée, le décompte arrivé à zéro affiche toujours sa carte par-dessus le jeu : c'est le
+    /// SON qui se tait, pas la fonctionnalité — celle-ci a sa propre clé ([`Self::suivi_enabled`]),
+    /// qui coupe les deux canaux.
+    ///
+    /// **Locale et non au compte**, comme ses voisines : un son bienvenu au casque ne l'est pas
+    /// forcément sur la machine du salon, et le serveur n'accepte que des clés connues (même
+    /// raison que `chat_alert_duration_seconds`).
+    ///
+    /// `#[serde(default)]` — et non `default = "actif"` comme les trois drapeaux ci-dessus : le
+    /// défaut d'une sourdine est d'être LEVÉE, c'est-à-dire `false`.
+    #[serde(default)]
+    pub suivi_alert_muted: bool,
+    /// L'alerte de **message trouvé** du Chat est-elle muette ? — même case, dans l'onglet
+    /// « Chat », et même politique que [`Self::suivi_alert_muted`] : la carte reste, le son part.
+    #[serde(default)]
+    pub chat_alert_muted: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -156,6 +176,8 @@ impl Default for OverlayConfig {
             suivi_enabled: actif(),
             alerts_enabled: actif(),
             chat_enabled: actif(),
+            suivi_alert_muted: false,
+            chat_alert_muted: false,
             shortcuts: BTreeMap::new(),
         }
     }
@@ -211,6 +233,23 @@ impl OverlayConfig {
         self.suivi_enabled = features.suivi;
         self.alerts_enabled = features.alerts;
         self.chat_enabled = features.chat;
+    }
+
+    /// Les deux sourdines de cette config — voir [`crate::panels::sound_row::AlertMutes`], qui les
+    /// fait voyager ensemble jusqu'au thread Engine comme `features` fait pour les interrupteurs.
+    /// Champs PLATS dans le TOML pour la même raison qu'eux.
+    pub fn alert_mutes(&self) -> crate::panels::sound_row::AlertMutes {
+        crate::panels::sound_row::AlertMutes {
+            suivi: self.suivi_alert_muted,
+            chat: self.chat_alert_muted,
+        }
+    }
+
+    /// Reporte les deux sourdines dans la config — appelée à la validation de la fenêtre Options,
+    /// jamais à chaque frame.
+    pub fn set_alert_mutes(&mut self, mutes: crate::panels::sound_row::AlertMutes) {
+        self.suivi_alert_muted = mutes.suivi;
+        self.chat_alert_muted = mutes.chat;
     }
 }
 
@@ -385,6 +424,35 @@ mod tests {
         assert!(!relu.suivi_enabled);
         assert!(relu.alerts_enabled);
         assert!(!relu.chat_enabled);
+    }
+
+    /// **Le défaut d'une sourdine est d'être levée** — `false` des deux côtés, y compris pour un
+    /// `config.toml` écrit avant ces deux clés : personne ne doit perdre le son d'une alerte au
+    /// premier lancement de cette version. Coupée, elle le reste après un aller-retour sur disque.
+    #[test]
+    fn aller_retour_des_sourdines() {
+        let neuve = OverlayConfig::default();
+        assert_eq!(
+            neuve.alert_mutes(),
+            crate::panels::sound_row::AlertMutes::default()
+        );
+        assert!(!neuve.suivi_alert_muted);
+        assert!(!neuve.chat_alert_muted);
+
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert!(!ancienne.suivi_alert_muted);
+        assert!(!ancienne.chat_alert_muted);
+
+        let mut config = OverlayConfig::default();
+        config.set_alert_mutes(crate::panels::sound_row::AlertMutes {
+            suivi: true,
+            chat: false,
+        });
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(relu.alert_mutes().suivi);
+        assert!(!relu.alert_mutes().chat);
     }
 
     #[test]

@@ -72,6 +72,7 @@ use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::feature_switch::FeatureToggles;
 use overlay_ui::panels::login::{self, LoginState};
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+use overlay_ui::panels::sound_row::AlertMutes;
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
@@ -442,6 +443,14 @@ struct App {
     /// (`EngineCommand::SetFeatures`, qui porte le détail de ce qui est coupé et de ce qui
     /// continue).
     features: FeatureToggles,
+    /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
+    /// « Chat » (`panels::sound_row`). Réglages LOCAUX persistés
+    /// (`config::OverlayConfig::alert_mutes`), même politique que `features` : lus au démarrage,
+    /// remplacés à la validation de la fenêtre Options.
+    ///
+    /// Un seul effet ici, et il est ailleurs : le thread Engine cesse de JOUER le son de l'alerte
+    /// concernée (`EngineCommand::SetAlertMutes`) — sa carte, elle, continue de s'afficher.
+    alert_mutes: AlertMutes,
     /// La surveillance de tour (§9.1 decies) — voir `sync_turn_watch`. Toujours construite, même
     /// option décochée : les gabarits chargés au démarrage servent dès qu'on la coche.
     turn_watcher: turn_watch::watcher::Watcher,
@@ -527,6 +536,8 @@ struct AppState {
     turn_notification_muted: bool,
     /// Voir `App::features` — lus de la config au démarrage (`main`).
     features: FeatureToggles,
+    /// Voir `App::alert_mutes` — lues de la config au démarrage (`main`).
+    alert_mutes: AlertMutes,
     /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`
     /// (`config::OverlayConfig::shortcuts`). Même provenance que `combat_always_visible` : lus une
     /// fois dans `main`, jamais redécouverts.
@@ -558,6 +569,7 @@ impl App {
             turn_notification,
             turn_notification_muted,
             features,
+            alert_mutes,
             shortcuts,
             snapshot,
             watchlist,
@@ -609,6 +621,7 @@ impl App {
             turn_notification,
             turn_notification_muted,
             features,
+            alert_mutes,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
@@ -2031,6 +2044,8 @@ impl App {
             turn_notification_muted: self.turn_notification_muted,
             // Idem pour les trois interrupteurs : les cases s'ouvrent sur l'état réel.
             features: self.features,
+            // Idem pour les deux sourdines.
+            mutes: self.alert_mutes,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -2060,6 +2075,7 @@ impl App {
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 features: self.features,
+                mutes: self.alert_mutes,
                 shortcuts: self.hotkeys.bindings().clone(),
             },
             pending_close: false,
@@ -2376,6 +2392,22 @@ impl App {
                         .settings_tx
                         .send(EngineCommand::SetFeatures(self.features));
                 }
+                // **Les deux sourdines (2026-09-15)** — même chemin que les interrupteurs, et
+                // même raison : c'est le thread Engine qui joue les sons, lui seul a besoin de
+                // savoir lesquels se taisent. Rien à rafraîchir côté rendu, une sourdine ne se
+                // voit pas.
+                let mutes_changed = commit.mutes != self.alert_mutes;
+                if mutes_changed {
+                    self.alert_mutes = commit.mutes;
+                    tracing::info!(
+                        suivi = self.alert_mutes.suivi,
+                        chat = self.alert_mutes.chat,
+                        "[options] sons d'alerte coupés mis à jour"
+                    );
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -2399,6 +2431,7 @@ impl App {
                     || shortcuts_changed
                     || chat_toast_changed
                     || features_changed
+                    || mutes_changed
                 {
                     let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
@@ -2410,6 +2443,7 @@ impl App {
                     saved.set_shortcuts(self.hotkeys.bindings());
                     saved.set_chat_toast(self.chat_toast);
                     saved.set_features(self.features);
+                    saved.set_alert_mutes(self.alert_mutes);
                     config::save(&saved);
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
@@ -3235,6 +3269,9 @@ fn main() {
     // son défaut « tout actif » et jouerait les alertes d'une fonctionnalité coupée jusqu'à la
     // prochaine validation de la fenêtre Options.
     let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
+    // Les sourdines de même : sans cet envoi, la première alerte d'une session sonnerait malgré
+    // une case cochée à la session précédente.
+    let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
 
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(AppState {
@@ -3243,6 +3280,7 @@ fn main() {
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),
+        alert_mutes: saved_config.alert_mutes(),
         shortcuts: saved_config.shortcuts(),
         snapshot,
         watchlist,

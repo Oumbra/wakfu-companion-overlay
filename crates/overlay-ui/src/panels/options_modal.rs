@@ -77,6 +77,7 @@ use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
 use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabAction, ChatTabState};
 use crate::panels::feature_switch::FeatureToggles;
+use crate::panels::sound_row::AlertMutes;
 use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
 use crate::shortcuts::ShortcutBindings;
 
@@ -248,6 +249,15 @@ pub struct OptionsModalState {
     /// les tests et le harnais de rendu — n'ouvre jamais une fenêtre dont les trois onglets
     /// seraient grisés.
     pub features: FeatureToggles,
+    /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
+    /// « Chat », sous leur ligne « Tester le son de l'alerte » (`panels::sound_row`, 2026-09-15).
+    /// Même mécanique de brouillon que les cases ci-dessus : initialisées par l'hôte au réglage en
+    /// vigueur (`config::OverlayConfig::alert_mutes`), prises en compte seulement à « Valider ».
+    ///
+    /// **Distinctes de [`Self::features`]** : une sourdine ne coupe que le SON, la carte de
+    /// l'alerte continue de s'afficher — c'est le demi-pas entre « tout actif » et une
+    /// fonctionnalité éteinte.
+    pub mutes: AlertMutes,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -333,6 +343,9 @@ pub struct OptionsInitial {
     /// Les trois interrupteurs tels qu'ils étaient à l'ouverture — même rôle que les champs
     /// ci-dessus : c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub features: FeatureToggles,
+    /// Les deux sourdines telles qu'elles étaient à l'ouverture — même rôle que les champs
+    /// ci-dessus.
+    pub mutes: AlertMutes,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -357,6 +370,7 @@ impl OptionsModalState {
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             features: self.features,
+            mutes: self.mutes,
             shortcuts: self.shortcuts.clone(),
         }
     }
@@ -392,6 +406,7 @@ impl OptionsModalState {
             || self.turn_notification != self.initial.turn_notification
             || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.features != self.initial.features
+            || self.mutes != self.initial.mutes
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -459,6 +474,10 @@ pub struct OptionsCommit {
     /// (`config::OverlayConfig::set_features`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetFeatures`).
     pub features: FeatureToggles,
+    /// État des deux cases « Couper le son des notifications » (`panels::sound_row`) — ce que
+    /// l'hôte persiste (`config::OverlayConfig::set_alert_mutes`) et transmet au thread Engine
+    /// (`engine_thread::EngineCommand::SetAlertMutes`).
+    pub mutes: AlertMutes,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -594,6 +613,7 @@ pub fn show(
                     draft,
                     availability,
                     enabled: &mut state.features.chat,
+                    muted: &mut state.mutes.chat,
                 },
             );
             return;
@@ -617,6 +637,7 @@ pub fn show(
                     icons: ctx.icons,
                     availability,
                     enabled: &mut state.features.suivi,
+                    muted: &mut state.mutes.suivi,
                 },
             );
             return;
@@ -1012,6 +1033,7 @@ mod tests {
                 turn_notification: true,
                 turn_notification_muted: false,
                 features: FeatureToggles::default(),
+                mutes: AlertMutes::default(),
                 shortcuts: ShortcutBindings::default(),
             }
         );
@@ -1038,6 +1060,31 @@ mod tests {
         assert!(
             !state.is_dirty(),
             "recocher ramène la fenêtre à son état d'ouverture"
+        );
+    }
+
+    /// **Couper le son d'une alerte est un brouillon comme le reste de la fenêtre** : la garde de
+    /// fermeture s'ouvre tant que « Valider » n'a pas emporté la bascule, et l'aller-retour la
+    /// referme. La sourdine du Suivi et celle du Chat sont indépendantes — couper l'une ne doit
+    /// pas faire taire l'autre.
+    #[test]
+    fn couper_le_son_dune_alerte_met_des_modifications_en_attente() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        assert!(!state.is_dirty());
+
+        state.mutes.suivi = true;
+        assert!(
+            state.is_dirty(),
+            "cocher « Couper le son des notifications » doit ouvrir la garde de fermeture"
+        );
+        let commit = state.commit();
+        assert!(commit.mutes.suivi, "« Valider » l'emporte");
+        assert!(!commit.mutes.chat, "l'autre onglet garde son son");
+
+        state.mutes.suivi = false;
+        assert!(
+            !state.is_dirty(),
+            "décocher ramène la fenêtre à son état d'ouverture"
         );
     }
 

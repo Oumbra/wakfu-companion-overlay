@@ -28,6 +28,7 @@ use crate::alert_sound;
 use crate::panels;
 use crate::panels::chat_tab::ChatToastSettings;
 use crate::panels::feature_switch::FeatureToggles;
+use crate::panels::sound_row::AlertMutes;
 use crate::panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use crate::render_content::UserEvent;
 
@@ -91,6 +92,14 @@ pub enum EngineCommand {
     /// log ; en échange, les alertes survenues pendant la coupure sont perdues, ce qui est
     /// exactement ce qu'on demande en coupant.
     SetFeatures(FeatureToggles),
+    /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
+    /// « Chat » (`panels::sound_row`, 2026-09-15). Locales à la machine comme `SetFeatures`,
+    /// envoyées au démarrage puis à chaque validation de la fenêtre Options.
+    ///
+    /// **Ce qu'elles coupent, et ce qu'elles ne coupent pas** : ce thread cesse de JOUER LE SON de
+    /// l'alerte concernée, et continue d'afficher sa carte par-dessus le jeu. C'est là toute la
+    /// différence avec [`Self::SetFeatures`], qui coupe les deux canaux à la fois.
+    SetAlertMutes(AlertMutes),
 }
 
 /// L'instant où une carte de chat doit disparaître — le pendant de [`toast_deadline`] pour les
@@ -232,6 +241,9 @@ pub fn spawn_engine_thread(
             // Les trois interrupteurs — tout actif tant que l'hôte n'a rien dit (voir
             // `FeatureToggles::default`), comme pour une installation neuve.
             let mut features = FeatureToggles::default();
+            // Les deux sourdines — aucune tant que l'hôte n'a rien dit (`AlertMutes::default`),
+            // c'est-à-dire tout sonne, comme pour une installation neuve.
+            let mut mutes = AlertMutes::default();
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
@@ -315,6 +327,14 @@ pub fn spawn_engine_thread(
                                 "[options] fonctionnalités actives"
                             );
                             features = toggles;
+                        }
+                        EngineCommand::SetAlertMutes(coupures) => {
+                            tracing::info!(
+                                suivi = coupures.suivi,
+                                chat = coupures.chat,
+                                "[options] sons d'alerte coupés"
+                            );
+                            mutes = coupures;
                         }
                         EngineCommand::SetChatToast(settings) => {
                             tracing::info!(
@@ -412,7 +432,11 @@ pub fn spawn_engine_thread(
                                 continue;
                             }
                             tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
-                            alert_sound::play_countdown_alert();
+                            // **La carte s'affiche quoi qu'il arrive** : la sourdine ne coupe que
+                            // le son (voir `EngineCommand::SetAlertMutes`).
+                            if !mutes.suivi {
+                                alert_sound::play_countdown_alert();
+                            }
                             let created_at = std::time::Instant::now();
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.name,
@@ -475,7 +499,10 @@ pub fn spawn_engine_thread(
                             );
                         }
                         if let Some(alert) = chat_alerts.into_iter().last() {
-                            alert_sound::play_chat_alert();
+                            // Même règle que pour le décompte : muette, l'alerte garde sa carte.
+                            if !mutes.chat {
+                                alert_sound::play_chat_alert();
+                            }
                             let created_at = std::time::Instant::now();
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.author.clone(),

@@ -10,6 +10,11 @@
 //! transactionnel : l'onglet travaille sur un brouillon ([`ChatDraft`]) que « Valider » commit
 //! avec tous les autres onglets (voir `main.rs::commit_chat`).
 //!
+//! La ligne d'essai vit dans [`crate::panels::sound_row`], partagée par les trois onglets, et
+//! porte ici la case **« Couper le son des notifications »** (2026-09-15) : cochée, un message
+//! trouvé affiche toujours sa carte par-dessus le jeu, il ne fait plus sonner l'overlay. La case
+//! « Activer la recherche » du haut, elle, coupe les deux.
+//!
 //! ## Ce qui vient du compte, et ce qui reste local
 //!
 //! Les **recherches** sont la clé `chatFilters` du compte (`/api/v1/settings`), au format du web
@@ -33,8 +38,8 @@ use overlay_engine::{
     MIN_ALERT_DURATION_SECONDS,
 };
 
-use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize};
-use crate::panels::feature_switch;
+use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, InputSize};
+use crate::panels::{feature_switch, sound_row};
 
 // -------------------------------------------------------------------------------------------
 // Jetons — repris TELS QUELS de `panels::alerts_tab`, pour que les deux onglets se ressemblent
@@ -46,7 +51,6 @@ const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 const SETTING_ROW_FILL: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
 const SETTING_ROW_RADIUS: u8 = 4;
 const SETTING_ROW_HEIGHT: f32 = 40.0;
-const ROW_HEIGHT: f32 = 39.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 const SECTION_GAP: f32 = 18.0;
 /// Gouttière entre deux tuiles — `panels::alerts_tab::TILE_GAP`, le pas de la grille d'Alertes.
@@ -172,6 +176,15 @@ pub struct ChatTabContext<'a> {
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
+    /// **Le son de l'alerte de recherche est-il coupé ?** — brouillon de la case « Couper le son
+    /// des notifications » (voir `panels::sound_row`), posée juste sous la ligne d'essai. Coupé,
+    /// un message trouvé affiche toujours sa carte : c'est le SON qui se tait, pas la recherche
+    /// (celle-ci a sa propre case, [`Self::enabled`]). « Valider » l'emporte, comme le reste.
+    ///
+    /// **Hors de [`ChatDraft`]**, et hors de [`ChatToastSettings`] : le brouillon porte ce qui
+    /// monte au compte, et les réglages de carte parlent de la CARTE. Une sourdine n'est ni l'un
+    /// ni l'autre — elle voyage avec celle du Suivi (`panels::sound_row::AlertMutes`).
+    pub muted: &'a mut bool,
     pub availability: ChatAvailability,
 }
 
@@ -217,7 +230,7 @@ pub fn show(
         "chat.activer",
     );
 
-    if test_sound_row(ui, width) {
+    if sound_row::show(ui, width, "chat", Some(ctx.muted)) {
         action = ChatTabAction::TestSound;
     }
     ui.add_space(SECTION_GAP);
@@ -282,31 +295,6 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
         )
         .wrap_mode(egui::TextWrapMode::Wrap),
     );
-}
-
-/// « Tester le son » — la même ligne que dans Alertes ; c'est le son du web
-/// (`chat-filter-*.mp3`) que l'hôte joue, voir `alert_sound::play_chat_alert`.
-fn test_sound_row(ui: &mut egui::Ui, width: f32) -> bool {
-    let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    let mut clicked = false;
-    cell.horizontal_centered(|ui| {
-        ui.label(
-            RichText::new("Tester le son de l'alerte")
-                .color(TEXT)
-                .size(BODY_FONT_SIZE),
-        );
-        ui.add_space(12.0);
-        clicked = ui
-            .add(
-                design::icon_button(DsIcon::Volume)
-                    .context(IconContext::Panel)
-                    .tooltip("Jouer le son d'alerte")
-                    .log_name("chat.tester"),
-            )
-            .clicked();
-    });
-    clicked
 }
 
 /// Le bloc « Fermeture automatique » — copie conforme de `panels::alerts_tab::close_settings_row`,

@@ -84,6 +84,7 @@ mod linux_main {
     use overlay_ui::panels::feature_switch::FeatureToggles;
     use overlay_ui::panels::login::{self, LoginState};
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+    use overlay_ui::panels::sound_row::AlertMutes;
     use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
@@ -252,6 +253,9 @@ mod linux_main {
         /// Les trois interrupteurs de fonctionnalité — voir `main.rs::App::features`, même
         /// politique et mêmes deux effets (bandeau sans tuile, alertes en sourdine).
         features: FeatureToggles,
+        /// Les deux sourdines — voir `main.rs::App::alert_mutes`, même politique et même effet
+        /// unique : le thread Engine ne joue plus le son de l'alerte concernée, sa carte reste.
+        alert_mutes: AlertMutes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         game_window: GameWindowTracker,
@@ -280,6 +284,8 @@ mod linux_main {
         turn_notification_muted: bool,
         /// Voir `App::features` — lus de la config au démarrage (`run`).
         features: FeatureToggles,
+        /// Voir `App::alert_mutes` — lues de la config au démarrage (`run`).
+        alert_mutes: AlertMutes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
@@ -310,6 +316,7 @@ mod linux_main {
                 turn_notification,
                 turn_notification_muted,
                 features,
+                alert_mutes,
                 chat_toast,
                 shortcuts,
                 snapshot,
@@ -352,6 +359,7 @@ mod linux_main {
                 turn_notification,
                 turn_notification_muted,
                 features,
+                alert_mutes,
                 chat_toast,
                 game_window,
                 banner_printed: false,
@@ -1042,8 +1050,10 @@ mod linux_main {
                 combat_always_visible: self.combat_always_visible,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
-                // Les cases « Activer … » s'ouvrent sur l'état réel — voir `main.rs`.
+                // Les cases « Activer … » s'ouvrent sur l'état réel — voir `main.rs`. Les deux
+                // cases « Couper le son des notifications » aussi.
                 features: self.features,
+                mutes: self.alert_mutes,
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
@@ -1068,6 +1078,7 @@ mod linux_main {
                     turn_notification: self.turn_notification,
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
+                    mutes: self.alert_mutes,
                     shortcuts: self.hotkeys.bindings().clone(),
                 },
                 pending_close: false,
@@ -1336,6 +1347,20 @@ mod linux_main {
                             .settings_tx
                             .send(EngineCommand::SetFeatures(self.features));
                     }
+                    // Les deux sourdines (2026-09-15) — voir `main.rs` : seul le thread Engine
+                    // a besoin de savoir quels sons se taisent, une sourdine ne se voit pas.
+                    let mutes_changed = commit.mutes != self.alert_mutes;
+                    if mutes_changed {
+                        self.alert_mutes = commit.mutes;
+                        tracing::info!(
+                            suivi = self.alert_mutes.suivi,
+                            chat = self.alert_mutes.chat,
+                            "[options] sons d'alerte coupés mis à jour"
+                        );
+                        let _ = self
+                            .settings_tx
+                            .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+                    }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.
                     let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
@@ -1353,6 +1378,7 @@ mod linux_main {
                         || shortcuts_changed
                         || chat_toast_changed
                         || features_changed
+                        || mutes_changed
                     {
                         let mut saved = config::OverlayConfig {
                             log_path: Some(candidate),
@@ -1364,6 +1390,7 @@ mod linux_main {
                         saved.set_shortcuts(self.hotkeys.bindings());
                         saved.set_chat_toast(self.chat_toast);
                         saved.set_features(self.features);
+                        saved.set_alert_mutes(self.alert_mutes);
                         config::save(&saved);
                     }
                     // « Valider » commit TOUS les onglets — voir `main.rs`.
@@ -2074,6 +2101,8 @@ mod linux_main {
         // pas attendre la première validation de la fenêtre Options.
         let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
         let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
+        // Les sourdines de même — voir `main.rs`.
+        let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
 
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = App::new(AppState {
@@ -2082,6 +2111,7 @@ mod linux_main {
             turn_notification: saved_config.turn_notification,
             turn_notification_muted: saved_config.turn_notification_muted,
             features: saved_config.features(),
+            alert_mutes: saved_config.alert_mutes(),
             chat_toast: saved_config.chat_toast(),
             shortcuts: saved_config.shortcuts(),
             snapshot,
