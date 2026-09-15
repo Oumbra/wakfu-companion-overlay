@@ -1562,6 +1562,54 @@ connexion, « Déconnecter » par la fenêtre Options.
 pas de mémorisation de la position de la fenêtre ; « Réessayer » et « Se connecter » sont la même
 commande (`Retry` reprend le jeton stocké s'il existe, sinon appaire).
 
+### 9.1 duodecies Interrupteurs de fonctionnalité : Suivi, Alertes, Recherche (2026-09-15)
+
+Demande utilisateur : « permettre de désactiver les features Suivi, Alertes, Chat, via une option
+tout en haut, après le titre — "Activer le Suivi", "Activer les alertes", "Activer la recherche" ;
+activée par défaut ; lorsqu'elle est désactivée, tout le contenu devient grisé et désactivé,
+impossible d'interagir avec ».
+
+**Ce qui existe maintenant :**
+
+- **Une case en tête de chaque onglet**, sous le titre et sa phrase de description, avant le
+  premier réglage — `panels::feature_switch`, partagé par les trois onglets pour que leur place,
+  leur aération et leur façon de griser ne divergent pas.
+- **Griser, c'est `egui::Ui::disable`** appelé sur le `Ui` de l'onglet juste après la case : il
+  retire l'interaction et multiplie l'opacité du `Painter`, dont héritent tous les enfants — y
+  compris les tuiles peintes à la main et le contenu des zones de défilement. Le titre, la phrase
+  et la case restent vifs : c'est par eux qu'on rallume.
+- **Un brouillon comme le reste de la fenêtre** (§5.1) : la bascule n'a d'effet qu'à « Valider »,
+  la garde de fermeture s'ouvre tant qu'elle n'est pas validée.
+- **Persistées en LOCAL** (`config::OverlayConfig::{suivi,alerts,chat}_enabled`, `features()` /
+  `set_features()`) et non au compte, comme `combat_always_visible` : ce qu'on accepte de voir
+  par-dessus son jeu dépend de la machine. `#[serde(default = "actif")]` et non le
+  `#[serde(default)]` de leurs voisines — un `bool` non renseigné vaudrait `false`, ce qui
+  couperait les trois fonctionnalités chez tous ceux qui les utilisent déjà.
+
+**Ce qu'une fonctionnalité coupée cesse de faire, et ce qu'elle continue de faire :**
+
+| Coupée | Ce qui s'arrête | Ce qui continue |
+| --- | --- | --- |
+| Suivi | Le bandeau in-game n'affiche plus aucune tuile (le carré de contrôle reste : c'est le seul accès à la fenêtre Options depuis le jeu) ; l'alerte de décompte à zéro ne sonne plus | Le moteur compte, suit et synchronise au compte |
+| Alertes | Le ramassage d'un objet à son activé ne joue plus rien et n'affiche plus de carte | La liste d'objets reste au compte |
+| Recherche | Aucun message du chat ne fait plus sonner l'overlay ni n'affiche de carte | Les recherches restent au compte |
+
+Le thread Engine reçoit les trois drapeaux par `EngineCommand::SetFeatures` (au démarrage depuis la
+config, puis à chaque validation) et **continue de drainer** les alertes qu'il ne joue pas : les
+laisser s'accumuler les ferait toutes sortir d'un coup à la réactivation, des heures après le
+ramassage qui les a produites. Recocher une case retrouve donc la liste et les compteurs tels
+quels, sans rattrapage ni relecture du log ; en échange, ce qui est survenu pendant la coupure est
+perdu — ce qui est exactement ce qu'on demande en coupant.
+
+**Captures** : `options_suivi_desactive`, `options_alertes_desactive`, `options_chat_desactive`, et
+le test `options_suivi_coupe_la_grille_ne_repond_plus` pour la moitié « impossible d'interagir »,
+qu'aucune image ne peut montrer.
+
+**Effet de bord corrigé au passage** : `panels::tile_reorder` posait la croix fléchée sur toute
+tuile survolée, `Response::contains_pointer()` ne disant que la géométrie — une tuile d'un onglet
+coupé annonçait donc encore un déplacement qu'aucun glissement n'aurait exécuté. Le curseur est
+désormais conditionné à `Response::enabled()`.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
