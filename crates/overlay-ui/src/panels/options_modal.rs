@@ -447,15 +447,6 @@ pub enum OptionsModalAction {
     /// Les réglages de l'onglet « Paramètres » tels qu'ils sont à l'instant du clic — voir
     /// [`OptionsCommit`].
     Validate(OptionsCommit),
-    /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
-    /// audio (`alert_sound::play_loot_alert`).
-    TestAlertSound,
-    /// « Tester le son » de l'onglet « Chat » : jouer le son de recherche
-    /// (`alert_sound::play_chat_alert`).
-    TestChatSound,
-    /// « Tester le son » de l'onglet « Suivi » : jouer le son du décompte arrivé à 0
-    /// (`alert_sound::play_countdown_alert`).
-    TestCountdownSound,
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -864,7 +855,7 @@ pub fn show(
             // n'y a ni son à essayer ni carte à fermer quand rien ne se déclenche.
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Suivi"));
-            if notifications::section(
+            notifications::section(
                 ui,
                 inner_width,
                 notifications::Section {
@@ -873,20 +864,17 @@ pub fn show(
                     muted: Some(&mut state.mutes.suivi),
                     auto_close: None,
                 },
-            ) {
-                action = OptionsModalAction::TestCountdownSound;
-            }
+            );
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Alertes"));
             // Le brouillon d'alertes descend du compte : tant qu'il n'est pas là, la ligne de
             // fermeture se peint grisée sur un profil de repli plutôt que d'apparaître en cours
-            // de route (voir `notifications::AutoClose::available`). Le son, lui, s'essaie sans
-            // compte — il ne dépend que du périphérique audio.
+            // de route (voir `notifications::AutoClose::available`).
             let mut alertes_repli = overlay_engine::AlertProfile::default();
             let alertes_prêtes = state.alerts_draft.is_some();
             let profil = state.alerts_draft.as_mut().unwrap_or(&mut alertes_repli);
-            if notifications::section(
+            notifications::section(
                 ui,
                 inner_width,
                 notifications::Section {
@@ -899,16 +887,14 @@ pub fn show(
                         input: &mut state.alerts.duration_input,
                     }),
                 },
-            ) {
-                action = OptionsModalAction::TestAlertSound;
-            }
+            );
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Chat"));
             let mut chat_repli = ChatDraft::default();
             let chat_prêt = state.chat_draft.is_some();
             let chat = state.chat_draft.as_mut().unwrap_or(&mut chat_repli);
-            if notifications::section(
+            notifications::section(
                 ui,
                 inner_width,
                 notifications::Section {
@@ -921,9 +907,7 @@ pub fn show(
                         input: &mut state.chat.duration_input,
                     }),
                 },
-            ) {
-                action = OptionsModalAction::TestChatSound;
-            }
+            );
 
             // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
             // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la

@@ -3626,48 +3626,6 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
     );
 }
 
-/// **Le bouton de test du son, dans la section « Suivi » de l'onglet « Paramètres »** — même
-/// bascule que les boutons du Suivi, sur un `design::icon_button` cette fois : son infobulle
-/// sortait sous le glyphe.
-///
-/// Il vivait dans l'onglet « Alertes » jusqu'au 2026-09-15, où les trois boutons d'essai l'ont
-/// rejoint ici (voir `panels::notifications`) ; un seul survol suffit, ils sont peints par le
-/// même code.
-#[test]
-fn options_parametres_infobulle_du_test_de_son_au_dessus() {
-    let mut options_state = parametres_avec_notifications();
-    options_state.account_connected = true;
-
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(
-            panels::options_modal::WINDOW_SIZE.0,
-            panels::options_modal::WINDOW_SIZE.1,
-        ))
-        .build_ui(move |ui| {
-            overlay_ui::style::apply(ui.ctx());
-            ui.style_mut().visuals.text_cursor.blink = false;
-            let icons = UiIcons::load(ui.ctx());
-            let remote_icons = RemoteIconStore::empty();
-            let mut remote_icon_textures = RemoteIconTextures::default();
-            let catalog = CatalogIndex::default();
-            panels::options_modal::show(
-                ui,
-                &mut options_state,
-                &mut panels::options_modal::OptionsModalContext {
-                    catalog: &catalog,
-                    remote_icons: &remote_icons,
-                    remote_icon_textures: &mut remote_icon_textures,
-                    icons: &icons,
-                },
-            );
-        });
-    harness.run();
-    // Le bouton de la section « Suivi », la première des trois : sous « Fichier » et « Combat ».
-    harness.hover_at(egui::pos2(282.0, 413.0));
-    harness.run();
-    harness.snapshot("options_parametres_infobulle_test_son");
-}
-
 /// **Le champ d'ajout du Suivi, exercé de bout en bout — objets ET monstres.**
 ///
 /// C'est la différence de fond avec celui des alertes, qui ne cherche que des objets : ici le
