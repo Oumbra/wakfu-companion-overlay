@@ -2373,19 +2373,29 @@ impl App {
         let Some(draft) = state.suivi_draft.clone() else {
             return;
         };
+        // Les entrées retirées pendant l'édition partent AVEC le brouillon : une entrée supprimée
+        // puis recréée y figure des deux côtés, et c'est la seule chose qui la distingue d'une
+        // entrée jamais touchée (voir `SuiviTabState::retirees`).
+        let retirees = state.suivi.retirees.clone();
         // Rien n'a bougé : ne pas réécrire une clé pour rien, et surtout ne pas repousser son
         // horodatage — le « dernier écrivain gagne » du serveur ferait alors perdre une
-        // modification faite depuis le site entre-temps.
-        if state.initial.suivi.as_ref() == Some(&draft) {
+        // modification faite depuis le site entre-temps. Une entrée supprimée puis recréée à
+        // l'identique laisse bien la liste inchangée, mais son compteur, lui, doit repartir : elle
+        // n'est pas « rien n'a bougé ».
+        if state.initial.suivi.as_ref() == Some(&draft) && retirees.is_empty() {
             return;
         }
         tracing::info!(
             entry_count = draft.len(),
+            removed_count = retirees.len(),
             "[options] liste de suivi validée"
         );
         let _ = self
             .settings_tx
-            .send(EngineCommand::SetWatchlistDefinitions(draft));
+            .send(EngineCommand::SetWatchlistDefinitions {
+                definitions: draft,
+                retirees,
+            });
     }
 
     /// Résout les ingrédients d'une recette pour la fenêtre de l'onglet « Suivi » — sur un thread,
@@ -2852,7 +2862,13 @@ impl App {
             );
             let _ = self
                 .settings_tx
-                .send(EngineCommand::SetWatchlistDefinitions(edition.definitions));
+                .send(EngineCommand::SetWatchlistDefinitions {
+                    definitions: edition.definitions,
+                    // Le bandeau n'a pas de brouillon : une entrée qu'il retire disparaît de la
+                    // liste dans la foulée, son compteur part avec elle (rien à oublier en plus),
+                    // et il ne peut en recréer aucune.
+                    retirees: Vec::new(),
+                });
         }
         // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "+"/"Options"
         // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale

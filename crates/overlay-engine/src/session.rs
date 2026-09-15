@@ -2290,8 +2290,16 @@ impl Engine {
     /// **Distinct de `set_watchlist_entries`**, qui applique ce que le COMPTE renvoie : celui-ci
     /// est ce que l'utilisateur vient de régler lui-même. Même distinction qu'entre
     /// `EngineCommand::ApplySettings` et `EngineCommand::SetAlertProfile`.
-    pub fn set_watchlist_definitions(&mut self, definitions: Vec<WatchlistEntry>) {
-        self.watchlist.apply_definitions(definitions);
+    ///
+    /// `retirees` porte les entrées que l'édition a RETIRÉES — une entrée qui y figure et revient
+    /// dans `definitions` a été supprimée puis recréée par l'utilisateur, son compteur ne la suit
+    /// donc pas (voir `apply_definitions`, point 2).
+    pub fn set_watchlist_definitions(
+        &mut self,
+        definitions: Vec<WatchlistEntry>,
+        retirees: &[WatchlistEntry],
+    ) {
+        self.watchlist.apply_definitions(definitions, retirees);
     }
 
     /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte
