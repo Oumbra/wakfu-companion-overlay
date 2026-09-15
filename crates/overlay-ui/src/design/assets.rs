@@ -73,6 +73,32 @@ pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretc
 /// seul qui ne déforme rien si un jour quelqu'un peint la planche par `DesignSystem::paint`.
 pub const LOADER_SLICE: NineSlice = ICON_SLICE;
 
+/// Découpage du **corps** d'une boîte de confirmation : 6px figés sur les quatre côtés.
+///
+/// Six et non cinquante : contrairement aux boutons, ce corps **n'a pas d'embout décoratif**. Le
+/// filigrane en arcs de ses coins est mesuré à un écart de 2 niveaux au fond, contre 1 au centre,
+/// pour un bruit de fond de 8 — sous le seuil du visible, et `component.py insets` rend d'ailleurs
+/// un `decor_span` de 2px. Les marges n'ont donc à couvrir que le rayon des coins (2px) et le
+/// biseau clair du bord (2px), plus deux pixels de sécurité ; étirer la bande médiane ne déforme
+/// rien qui se voie.
+///
+/// Ce qui **ne** s'étire pas, en revanche, ce sont les deux ornements — la crête et le filet de
+/// pied. Ils sont centrés et de largeur fixe, et ne sont pas dans cette texture : voir
+/// [`CONFIRM_ORNAMENT_SLICE`].
+pub const CONFIRM_BODY_SLICE: NineSlice =
+    NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
+
+/// Découpage d'un **ornement** de boîte de confirmation : aucune marge, et jamais d'étirement.
+///
+/// La crête (médaillon « ? », losange, volutes, bandeau doré) et le filet de pied sont peints à
+/// leur **taille native**, centrés sur le corps. C'est un relevé, pas un choix : sur la capture le
+/// bandeau de la crête s'arrête à 250px quand le corps en fait 420, et au-delà le corps n'a qu'un
+/// biseau clair comme sur ses trois autres côtés. Des marges assez larges pour contenir cet
+/// ornement (250px de chaque côté) ne laisseraient aucune bande médiane ; le laisser dans la bande
+/// médiane l'étirerait. Le sortir du 9-slice est la seule réponse juste — la même que pour les
+/// embouts de bouton, poussée jusqu'à une texture séparée.
+pub const CONFIRM_ORNAMENT_SLICE: NineSlice = ICON_SLICE;
+
 /// Découpage d'un onglet : **4px figés sur les quatre côtés**, tout le reste étiré.
 ///
 /// Pas de long embout ici, contrairement aux boutons : un onglet n'a pas de hachures d'extrémité,
@@ -367,6 +393,28 @@ pub enum DsTexture {
     /// dernière raison d'exister de `OptionsModalAssets`, de sa fonction de décodage et du champ
     /// `options_assets` que `RenderContent` promenait jusqu'au panneau.
     ModalHeader,
+    /// Corps d'une boîte de confirmation (`confirm-box-body.png`, 420 × 148) — le rectangle gris
+    /// clair qui porte la question et les deux réponses, **sans aucun de ses deux ornements**.
+    ///
+    /// Détouré de `interfaces/interface-confirm-box.png` le 2026-09-15, puis nettoyé de l'empreinte
+    /// dorée que la crête laisse sur ses 21 premiers pixels — sans ce nettoyage, le corps porterait
+    /// cette empreinte en pleine bande supérieure et l'étirerait avec lui.
+    ///
+    /// Étirable dans les deux sens ([`CONFIRM_BODY_SLICE`]). Ses quatre coins arrondis (rayon 2)
+    /// sont portés par l'alpha de la texture, comme ceux d'un bouton.
+    ConfirmBody,
+    /// Crête d'une boîte de confirmation (`confirm-box-crest.png`, 250 × 57) — médaillon « ? » sur
+    /// son losange, deux volutes, et le bandeau doré qui les relie.
+    ///
+    /// **Peinte à sa taille native, centrée** ([`CONFIRM_ORNAMENT_SLICE`]) : sur la capture ce
+    /// bandeau s'arrête à 250px quand le corps en fait 420. Elle descend de 21px DANS le corps —
+    /// la pointe basse du losange et son cerne sombre — et se peint donc **après** lui.
+    ConfirmCrest,
+    /// Filet de pied d'une boîte de confirmation (`confirm-box-foot.png`, 98 × 9) — le petit filet
+    /// beige et ses deux tirets, sous le bord inférieur du corps.
+    ///
+    /// Même règle que [`DsTexture::ConfirmCrest`] : taille native, centré, jamais étiré.
+    ConfirmFoot,
     /// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — le carré sombre qui porte le
     /// « − » et le « + » d'un pas numérique (`design::stepper`).
     ///
@@ -517,6 +565,9 @@ impl DsTexture {
         DsTexture::ModalBody,
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
+        DsTexture::ConfirmBody,
+        DsTexture::ConfirmCrest,
+        DsTexture::ConfirmFoot,
         DsTexture::ButtonStepper,
         DsTexture::CollapseBlock,
         DsTexture::CollapseBlockHover,
@@ -687,6 +738,21 @@ impl DsTexture {
                 name: "ds-modal-header",
                 bytes: ds_asset!("modal-header.png"),
                 slice: BANNER_SLICE,
+            },
+            DsTexture::ConfirmBody => DsTextureSpec {
+                name: "ds-confirm-body",
+                bytes: ds_asset!("confirm-box-body.png"),
+                slice: CONFIRM_BODY_SLICE,
+            },
+            DsTexture::ConfirmCrest => DsTextureSpec {
+                name: "ds-confirm-crest",
+                bytes: ds_asset!("confirm-box-crest.png"),
+                slice: CONFIRM_ORNAMENT_SLICE,
+            },
+            DsTexture::ConfirmFoot => DsTextureSpec {
+                name: "ds-confirm-foot",
+                bytes: ds_asset!("confirm-box-foot.png"),
+                slice: CONFIRM_ORNAMENT_SLICE,
             },
             DsTexture::ButtonStepper => DsTextureSpec {
                 name: "ds-button-stepper",

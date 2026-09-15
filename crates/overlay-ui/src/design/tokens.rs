@@ -1795,6 +1795,14 @@ pub const PAGINATION_ARROW_GAP: f32 = 4.0;
 // gagné un second appelant — la garde de fermeture de la fenêtre Options.
 // ---------------------------------------------------------------------------------------------
 
+// Les sept jetons qui suivent décrivaient la boîte de confirmation **peinte à la main**, avant que
+// `design::confirm_dialog` ne passe aux textures détourées (2026-09-15). Plus rien ne les peint :
+// le corps, la crête et le filet de pied viennent maintenant de `confirm-box-{body,crest,foot}.png`,
+// qui portent leur remplissage, leur liseré et leur arrondi dans leurs propres pixels.
+//
+// Ils sont conservés le temps que la comparaison avant/après soit validée — le skill `ui-component`
+// interdit de retirer les constantes de l'ancien rendu avant ce feu vert. À supprimer ensuite.
+
 /// Fond du corps — **`#585955`**, un gris CLAIR.
 ///
 /// Histogramme de x 40..410 / y 60..110 sur la capture : `#585955` dominant, puis `#595a56` et
@@ -1824,32 +1832,76 @@ pub const CONFIRM_CREST_GLYPH: f32 = 14.0;
 /// Largeur du corps — **420 px mesurés** (bords à x=13 et x=433 sur une capture de 449).
 pub const CONFIRM_WIDTH: f32 = 420.0;
 
-/// Hauteur du corps — 120 px.
+/// Hauteur du corps — **148 px mesurés** (y = 45..193 sur la capture).
 ///
-/// **Choix de mise en page, pas une mesure** : la capture donne ~144 px (y ≈ 47..191) pour une
-/// question sur deux lignes. Les questions posées ici tiennent sur une.
-pub const CONFIRM_HEIGHT: f32 = 120.0;
+/// C'était 120 px jusqu'au 2026-09-15, annoncé comme un « choix de mise en page, pas une mesure »
+/// au motif que les questions posées ici tiennent sur une ligne. Le relevé `ui-blueprint` a donné
+/// 148, et la texture du corps fait exactement cette hauteur : la garder évite d'étirer une bande
+/// médiane pour rien.
+pub const CONFIRM_HEIGHT: f32 = 148.0;
 
-/// Hauteur de la question, depuis le haut du corps — 46 px.
-pub const CONFIRM_QUESTION_TOP: f32 = 46.0;
+/// Largeur de la crête — 250 px, taille native de `confirm-box-crest.png`.
+///
+/// **Mesure, et volontairement figée** : sur la capture le bandeau doré s'arrête à 250 px quand le
+/// corps en fait 420. Une seule capture ne dit pas si le jeu l'allongerait sur une boîte plus
+/// large ; le figer est le choix retenu (décision utilisateur, 2026-09-15), cohérent avec les
+/// embouts de bouton qui ne s'étirent pas davantage.
+pub const CONFIRM_CREST_WIDTH: f32 = 250.0;
+
+/// Hauteur de la crête — 57 px, taille native de la texture.
+pub const CONFIRM_CREST_HEIGHT: f32 = 57.0;
+
+/// De combien la crête descend **dans** le corps — 21 px.
+///
+/// La pointe basse du losange s'arrête à y = 53 sur la capture et son cerne sombre à 55, quand le
+/// corps commence à y = 36 (repère de l'image détourée). La crête se peint donc APRÈS le corps, et
+/// ne déborde au-dessus de lui que de `CONFIRM_CREST_HEIGHT - CONFIRM_CREST_OVERLAP` = 36 px.
+pub const CONFIRM_CREST_OVERLAP: f32 = 21.0;
+
+/// Largeur du filet de pied — 98 px, taille native de `confirm-box-foot.png`.
+pub const CONFIRM_FOOT_WIDTH: f32 = 98.0;
+
+/// Hauteur de ce filet — 9 px, dont la totalité déborde sous le corps.
+pub const CONFIRM_FOOT_HEIGHT: f32 = 9.0;
+
+/// Centre du bloc de la question, depuis le haut du corps — 42 px.
+///
+/// Mesuré : le bloc occupe y = 58..98 sur la capture détourée, soit 22..62 sous le bord du corps,
+/// dont le milieu est à 42. C'est ce point que vise un `Align2::CENTER_CENTER`.
+pub const CONFIRM_QUESTION_TOP: f32 = 42.0;
 
 /// Corps de la question — 15 px, celui du texte courant du jeu.
+///
+/// Confirmé par le relevé : la hauteur de capitale mesurée est de 12 px, et le ratio d'egui est de
+/// 0,805 (et non les 0,72 de la police du jeu, qui donneraient 17 px). C'est exactement l'écart qui
+/// avait rendu un libellé de bouton 45 % trop gros.
 pub const CONFIRM_FONT_SIZE: f32 = 15.0;
 
-/// Marge latérale de la rangée de boutons — 26 px de chaque côté.
-pub const CONFIRM_BUTTONS_INSET: f32 = 26.0;
+/// Marge latérale de la rangée de boutons — 38 px de chaque côté.
+///
+/// **Centrage strict, là où la capture ne l'est pas** : elle donne 40 px à gauche et 36 à droite,
+/// un écart de 2 px qui tient au rendu du texte et non à une règle de mise en page — la deuxième
+/// ligne de la question est décalée du même côté et de la même quantité. 38 = (420 - 344) / 2,
+/// où 344 est la largeur du groupe.
+pub const CONFIRM_BUTTONS_INSET: f32 = 38.0;
 
-/// Hauteur de cette rangée, depuis le haut du corps — 68 px.
-pub const CONFIRM_BUTTONS_TOP: f32 = 68.0;
+/// Hauteur de cette rangée, depuis le haut du corps — **82 px mesurés** (y = 118 sur la capture
+/// détourée, dont le corps commence à 36).
+pub const CONFIRM_BUTTONS_TOP: f32 = 82.0;
 
-/// Hauteur des deux boutons.
+/// Hauteur des deux boutons — 36 px mesurés, soit exactement [`ButtonSize::Compact`].
+///
+/// [`ButtonSize::Compact`]: crate::design::ButtonSize::Compact
 pub const CONFIRM_BUTTON_HEIGHT: f32 = 36.0;
 
-/// Largeur de chacun.
-pub const CONFIRM_BUTTON_WIDTH: f32 = 150.0;
+/// Largeur de chacun — **168 px mesurés**, et la même pour les deux.
+///
+/// Le relevé de référence du skill `ui-blueprint` les donnait à 166 et 159 px, en attribuant
+/// l'écart au rendu du libellé : c'était une mesure prise sur le remplissage, liseré exclu.
+pub const CONFIRM_BUTTON_WIDTH: f32 = 168.0;
 
-/// Gouttière entre les deux — 14 px.
-pub const CONFIRM_BUTTON_GAP: f32 = 14.0;
+/// Gouttière entre les deux — **8 px mesurés** (x = 208..216 sur la capture détourée).
+pub const CONFIRM_BUTTON_GAP: f32 = 8.0;
 
 /// Opacité du voile posé sur ce que la boîte interrompt.
 ///
