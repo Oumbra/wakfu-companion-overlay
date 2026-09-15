@@ -4,9 +4,12 @@
 //! dépendances propres à l'outillage (`sysinfo`, `x11rb`) ne pèsent jamais sur la résolution de
 //! dépendances de production.
 //!
-//! Sous-commandes : `mem-budget` (voir sa doc) et `visual-check` (voir sa doc — jamais appelée
-//! par la CI par défaut, §17.2 : « jamais un gate CI par défaut » pour ce harnais précis).
+//! Sous-commandes : `mem-budget` (voir sa doc), `visual-check` (voir sa doc — jamais appelée par
+//! la CI par défaut, §17.2 : « jamais un gate CI par défaut » pour ce harnais précis) et `dist`
+//! (assets, manifeste signé et mesure du différentiel d'une Release — `.github/workflows/
+//! release.yml`, docs/plan-mise-a-jour.md §6).
 
+mod dist;
 mod mem_budget;
 mod visual_check;
 
@@ -15,14 +18,15 @@ fn main() {
     match args.next().as_deref() {
         Some("mem-budget") => mem_budget::run(),
         Some("visual-check") => visual_check::run(),
+        Some("dist") => dist::run(),
         Some(other) => {
             eprintln!(
-                "sous-commande inconnue : {other}\nusage : cargo run -p xtask -- mem-budget|visual-check"
+                "sous-commande inconnue : {other}\nusage : cargo run -p xtask -- mem-budget|visual-check|dist"
             );
             std::process::exit(2);
         }
         None => {
-            eprintln!("usage : cargo run -p xtask -- mem-budget|visual-check");
+            eprintln!("usage : cargo run -p xtask -- mem-budget|visual-check|dist");
             std::process::exit(2);
         }
     }
