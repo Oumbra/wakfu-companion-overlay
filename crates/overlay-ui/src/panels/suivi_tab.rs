@@ -715,9 +715,12 @@ fn list_header(
     let availability = ctx.availability;
     cell.horizontal_centered(|ui| {
         ui.add(design::heading("Éléments suivis"));
-        // **Rien à commander quand il n'y a rien à lister** : pendant que la liste descend, le
-        // bouton disparaît au lieu de rester grisé — le geste n'a pas d'objet.
-        if availability != SuiviAvailability::Ready {
+        // **Rien à commander quand il n'y a rien à lister** : pendant que la liste descend, et
+        // tant qu'elle est vide, le bouton disparaît au lieu de rester grisé — le geste n'a pas
+        // d'objet. Une liste vide au repos est l'état de départ de tout nouveau compte : y offrir
+        // une « suppression multiple » de rien du tout se lisait comme un bug (retour du
+        // 2026-09-16).
+        if availability != SuiviAvailability::Ready || total == 0 {
             return;
         }
         let mut droite = ui.new_child(
