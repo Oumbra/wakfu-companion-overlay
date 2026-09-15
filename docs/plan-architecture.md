@@ -1726,6 +1726,47 @@ chargement, jamais pendant une session. Captures : `login_telechargement`,
 **À retravailler** (retour du mainteneur) : la mise en forme de l'écran de chargement, dans une
 itération dédiée — le mécanisme est en place, pas son dessin.
 
+### 9.1 quaterdecies Interrupteurs du panneau Combat : détail des combats, suivi des sorts (2026-09-15)
+
+Demande utilisateur : « ajouter une option d'activation de l'overlay combat dans la section
+"Combat" de l'onglet "Paramètres" avec le libellé "Activer le détail des combats", active par
+défaut », et « ajouter une option d'activation de l'aperçu des sorts […] avec le libellé "Activer
+le suivi des sorts", active par défaut ; cette option est dépendante de l'option "Activer le détail
+des combats" ».
+
+**Ce qui existe maintenant :**
+
+- **Deux cases en tête de la section « Combat »**, avant les réglages qu'elles commandent — même
+  place qu'un interrupteur d'onglet (§9.1 duodecies). « Activer le suivi des sorts » est en
+  retrait sous « Activer le détail des combats », à l'aplomb de son libellé : la même géométrie
+  que la sourdine sous la notification de tour (§9.1 decies).
+- **Le même véhicule que les trois cases d'onglet** :
+  `panels::feature_switch::FeatureToggles::{combat, spells}`, brouillon jusqu'à « Valider »,
+  persisté en LOCAL (`config::OverlayConfig::{combat,spells}_enabled`, `#[serde(default =
+  "actif")]`). Pas d'appel à `feature_switch::show` en revanche : il n'y a pas d'onglet « Combat »
+  à griser, seulement deux cases ordinaires.
+- **Une dépendance qui grise sans écraser** : le détail des combats coupé grise « Activer le suivi
+  des sorts » ET « Afficher le panneau de combat en dehors des combats » — un réglage d'
+  encombrement ne peut pas rallumer un panneau que son interrupteur éteint. Les deux cases gardent
+  leur valeur : `FeatureToggles::spells_visible()` combine les deux au moment de peindre, et qui
+  rallume l'interrupteur retrouve ses réglages tels quels.
+
+| Coupée | Ce qui s'arrête | Ce qui continue |
+| --- | --- | --- |
+| Détail des combats | Aucune fenêtre Combat n'est montrée, combat en cours compris (`panels::combat::should_show`, appliquée par les deux hôtes) | Le moteur mesure les combats et synchronise l'historique au compte |
+| Suivi des sorts | Le bloc « ligne de sorts », les deux marques sur les médaillons et l'épinglage au clic (`render_content::RenderContent::spells_enabled` → `panels::combat::show`) | Portraits, barres, switches et infobulles du panneau |
+
+Ces deux drapeaux **ne concernent pas le thread Engine** : ils voyagent dans le même
+`EngineCommand::SetFeatures` que les trois autres, mais rien ne les y lit — le détail des combats
+est une affaire de fenêtre OS (`sync_combat_visibility`, appelée dès la validation pour que le
+geste et son effet soient dans la même passe), le suivi des sorts une affaire de rendu.
+
+**Captures** : `options_parametres_combat_coupe` (les deux cases grisées, toujours cochées),
+`combat_spell_block_coupe` (le panneau sans sa ligne de sorts ni ses marques, à comparer à
+`combat_spell_block_suivi_auto`), et le test
+`options_parametres_la_case_des_sorts_suit_le_detail_des_combats` pour la moitié « la case grisée
+ne répond plus », qu'aucune image ne montre.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
