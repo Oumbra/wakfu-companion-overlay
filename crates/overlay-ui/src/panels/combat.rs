@@ -573,10 +573,21 @@ pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 /// espacement interne avant l'encre visible : l'écart géométrique posé ici est bien symétrique,
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
-/// Air sous le bandeau du switch Alliés/Ennemis, avant le cadre des portraits — même valeur que
-/// `TOTAL_GAP`, qui sépare le bandeau leader des barres dans l'autre colonne : les deux bandeaux
-/// sont le même objet visuel, ils respirent pareil (voir `show_side_row`).
-const SIDE_ROW_GAP: f32 = TOTAL_GAP;
+/// Air sous le bandeau du switch Alliés/Ennemis, avant le cadre des portraits. Resserré à 5 px
+/// (demande utilisateur, 15 sept. 2026 : « rapproche-le du template, au moins 5 pixels ») plutôt
+/// que de reprendre `TOTAL_GAP` : ce bandeau n'introduit pas une liste comme le bandeau leader, il
+/// coiffe un objet unique — le cadre — dont il doit se lire comme la coiffe, pas comme un voisin.
+const SIDE_ROW_GAP: f32 = 5.0;
+
+/// Décalage vertical de la colonne des barres, qui démarre donc plus bas que celle des portraits.
+/// Vaut la hauteur du bandeau du switch de camp (`SWITCH_HEIGHT` + ses deux marges intérieures)
+/// plus l'air qui le sépare du cadre (`SIDE_ROW_GAP`) : le haut du bandeau leader tombe donc
+/// exactement sur la PREMIÈRE LIGNE DE PIXELS du gabarit de cadre, la décoration de son sommet —
+/// règle d'alignement demandée explicitement (15 sept. 2026), tracer une droite depuis ce premier
+/// pixel doit rencontrer le sommet du bloc de droite. Les deux bandeaux ne s'alignent donc pas
+/// entre eux : le switch de camp appartient visuellement aux portraits qu'il commande, la ligne du
+/// total appartient aux barres qu'elle chapeaute.
+const BARS_COLUMN_TOP_OFFSET: f32 = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0 + SIDE_ROW_GAP;
 /// Arrondi du fond opacifié de la ligne leader.
 pub(super) const LEADER_PANEL_ROUNDING: f32 = 6.0;
 /// Couleur du fond opacifié de la ligne leader — voir [`tokens::OVERLAY_BACKDROP`], qui la partage
@@ -767,6 +778,11 @@ pub fn show(
         // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
         // portrait »).
         ui.vertical(|ui| {
+            // Sans retrancher `item_spacing.y`, contrairement aux autres `add_space` de ce
+            // fichier : cet espace-ci OUVRE la colonne (rien avant lui dans le `vertical`), egui
+            // n'y glisse donc aucun espacement propre — le retrancher coûtait 3 px et laissait les
+            // barres 3 px trop haut (mesuré sur les captures avant/après).
+            ui.add_space(BARS_COLUMN_TOP_OFFSET);
             show_leader_row(ui, icons, metric, shortcuts, total_damage_raw);
             ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
             if fighters.is_empty() || bars.is_empty() {
