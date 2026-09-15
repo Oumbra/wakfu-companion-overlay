@@ -607,7 +607,12 @@ mod tests {
 
         assert_eq!(state.entries().len(), 1);
         assert_eq!(state.entries()[0].name, "Bwork");
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+        // `dir`, et surtout PAS `dir.parent()` : le parent est `std::env::temp_dir()` lui-même,
+        // et ce nettoyage effaçait donc tout `/tmp`. Il emportait au passage le `counts.json` de
+        // `merge_config_abandonne_un_compteur_local_au_dela_de_la_cible`, qui tourne en parallèle
+        // dans le même binaire — d'où son échec intermittent au CI (`left: 10, right: 4` : privé
+        // de son fichier, il repart de la cible au lieu du compteur qui y était écrit).
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
