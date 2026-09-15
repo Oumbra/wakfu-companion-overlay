@@ -1610,6 +1610,40 @@ tuile survolée, `Response::contains_pointer()` ne disant que la géométrie —
 coupé annonçait donc encore un déplacement qu'aucun glissement n'aurait exécuté. Le curseur est
 désormais conditionné à `Response::enabled()`.
 
+### 9.1 terdecies Couper le son d'une alerte : Suivi et Chat (2026-09-15)
+
+Demande utilisateur : « ajouter une option dans Suivi et Chat permettant de couper le son des
+notifications, juste en dessous de la ligne "Tester le son de l'alerte" ».
+
+**Ce qui existe maintenant :**
+
+- **Une case « Couper le son des notifications »** sous la ligne d'essai des onglets « Suivi » et
+  « Chat ». Cochée, l'alerte **ne joue plus aucun son et affiche toujours sa carte** par-dessus le
+  jeu : c'est le demi-pas qui manquait entre « tout actif » et l'interrupteur de fonctionnalité
+  (§9.1 duodecies), qui, lui, coupe les deux canaux.
+- **Le bouton d'essai est grisé quand le son est coupé** — proposer d'écouter ce qu'on vient de
+  faire taire serait une promesse que le jeu ne tiendra pas. Même règle que le champ de durée grisé
+  sous une « Fermeture automatique » décochée.
+- **La ligne d'essai est devenue un composant** (`panels::sound_row`) : elle était écrite trois
+  fois à l'identique dans les onglets Suivi, Alertes et Chat, et c'est elle qui porte désormais la
+  case. Même motif que `panels::feature_switch`.
+- **Pas de case dans « Alertes »**, et ce n'est pas un oubli : le son d'un ramassage s'y coupe déjà
+  objet par objet, à la tuile — une sourdine globale ferait double emploi avec un réglage plus fin.
+- **Un brouillon comme le reste de la fenêtre** (§5.1) : la bascule n'a d'effet qu'à « Valider », et
+  la garde de fermeture s'ouvre tant qu'elle n'est pas validée.
+- **Persistées en LOCAL** (`config::OverlayConfig::{suivi,chat}_alert_muted`, `alert_mutes()` /
+  `set_alert_mutes()`), comme les interrupteurs et pour la même raison — un son bienvenu au casque
+  ne l'est pas forcément sur la machine du salon. `#[serde(default)]` suffit ici, contrairement aux
+  interrupteurs : le défaut d'une sourdine est d'être LEVÉE, c'est-à-dire `false`.
+
+Le thread Engine reçoit les deux sourdines par `EngineCommand::SetAlertMutes` (au démarrage depuis
+la config, puis à chaque validation) et se contente de ne pas appeler `alert_sound::play_*` : le
+toast, lui, est publié comme avant. C'est toute la différence avec `SetFeatures`, qui saute
+l'alerte entière.
+
+**Captures** : `options_suivi_son_coupe` et `options_chat_son_coupe` — la case cochée, le bouton
+d'essai grisé, et le reste de l'onglet resté vif.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
