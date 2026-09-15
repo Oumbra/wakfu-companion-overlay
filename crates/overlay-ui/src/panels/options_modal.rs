@@ -6,6 +6,14 @@
 //! Tous sont persistés par `config::OverlayConfig`, jamais sur le compte — contrairement aux
 //! onglets "Suivi" et "Alertes".
 //!
+//! **Interrupteurs de fonctionnalité (2026-09-15, §9.1 duodecies)** : les onglets "Suivi",
+//! "Alertes" et "Chat" s'ouvrent chacun sur une case « Activer … » (`panels::feature_switch`) qui
+//! grise et rend inerte tout le reste de leur écran quand elle est décochée. Elles voyagent
+//! ensemble dans [`OptionsModalState::features`], sont un brouillon comme le reste de la fenêtre,
+//! et sont persistées en LOCAL (`config::OverlayConfig::features`) malgré leur place dans des
+//! onglets qui, eux, règlent le compte : ce qu'on accepte de voir par-dessus son jeu dépend de la
+//! machine, pas du joueur.
+//!
 //! **Refonte 2026-09-09 — chrome basé sur les VRAIES textures du jeu, plus des formes peintes à la
 //! main** (voir `panels::chamfer`, toujours utilisé ailleurs pour la barre de dégâts, mais plus
 //! ici) : chaque mesure ci-dessous vient d'une capture d'écran réelle de la fenêtre Options du jeu
@@ -68,6 +76,7 @@
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
 use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabAction, ChatTabState};
+use crate::panels::feature_switch::FeatureToggles;
 use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
 use crate::shortcuts::ShortcutBindings;
 
@@ -228,6 +237,17 @@ pub struct OptionsModalState {
     /// Couper le son de la notification de tour ? — case sous la précédente, dont elle dépend
     /// (`config::OverlayConfig::turn_notification_muted`), même mécanique de brouillon.
     pub turn_notification_muted: bool,
+    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le Suivi » / « Activer les
+    /// alertes » / « Activer la recherche », tout en haut de leur onglet respectif
+    /// (`panels::feature_switch`, 2026-09-15). Même mécanique de brouillon que les cases
+    /// ci-dessus : initialisés par l'hôte au réglage en vigueur (`config::OverlayConfig::
+    /// features`), pris en compte seulement à « Valider ».
+    ///
+    /// **`Default` vaut ici « tout actif »**, et non `false` comme pour un `bool` nu : c'est
+    /// [`FeatureToggles`] qui le garantit, pour que `OptionsModalState::default()` — utilisé par
+    /// les tests et le harnais de rendu — n'ouvre jamais une fenêtre dont les trois onglets
+    /// seraient grisés.
+    pub features: FeatureToggles,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -310,6 +330,9 @@ pub struct OptionsInitial {
     pub turn_notification: bool,
     /// Le son coupé tel qu'il était à l'ouverture — même rôle.
     pub turn_notification_muted: bool,
+    /// Les trois interrupteurs tels qu'ils étaient à l'ouverture — même rôle que les champs
+    /// ci-dessus : c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
+    pub features: FeatureToggles,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -333,6 +356,7 @@ impl OptionsModalState {
             combat_always_visible: self.combat_always_visible,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
+            features: self.features,
             shortcuts: self.shortcuts.clone(),
         }
     }
@@ -367,6 +391,7 @@ impl OptionsModalState {
             || self.combat_always_visible != self.initial.combat_always_visible
             || self.turn_notification != self.initial.turn_notification
             || self.turn_notification_muted != self.initial.turn_notification_muted
+            || self.features != self.initial.features
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -394,6 +419,9 @@ pub enum OptionsModalAction {
     /// « Tester le son » de l'onglet « Chat » : jouer le son de recherche
     /// (`alert_sound::play_chat_alert`).
     TestChatSound,
+    /// « Tester le son » de l'onglet « Suivi » : jouer le son du décompte arrivé à 0
+    /// (`alert_sound::play_countdown_alert`).
+    TestCountdownSound,
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -427,6 +455,10 @@ pub struct OptionsCommit {
     /// État de la case « Couper le son des notifications » — emporté tel quel même si la case
     /// au-dessus est décochée (il ne fait alors rien, et sera retrouvé si on la recoche).
     pub turn_notification_muted: bool,
+    /// État des trois cases « Activer … » (`panels::feature_switch`) — ce que l'hôte persiste
+    /// (`config::OverlayConfig::set_features`) et transmet au thread Engine
+    /// (`engine_thread::EngineCommand::SetFeatures`).
+    pub features: FeatureToggles,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -561,6 +593,7 @@ pub fn show(
                 &mut chat_tab::ChatTabContext {
                     draft,
                     availability,
+                    enabled: &mut state.features.chat,
                 },
             );
             return;
@@ -583,6 +616,7 @@ pub fn show(
                     remote_icon_textures: ctx.remote_icon_textures,
                     icons: ctx.icons,
                     availability,
+                    enabled: &mut state.features.suivi,
                 },
             );
             return;
@@ -606,6 +640,7 @@ pub fn show(
                     icons: ctx.icons,
                     availability,
                     window,
+                    enabled: &mut state.features.alerts,
                 },
             );
             return;
@@ -813,8 +848,12 @@ pub fn show(
     if chat_action == ChatTabAction::TestSound {
         action = OptionsModalAction::TestChatSound;
     }
-    if let suivi_tab::SuiviTabAction::ResolveRecipe(id) = suivi_action {
-        action = OptionsModalAction::ResolveRecipe(id);
+    match suivi_action {
+        suivi_tab::SuiviTabAction::TestSound => action = OptionsModalAction::TestCountdownSound,
+        suivi_tab::SuiviTabAction::ResolveRecipe(id) => {
+            action = OptionsModalAction::ResolveRecipe(id)
+        }
+        suivi_tab::SuiviTabAction::None => {}
     }
 
     // **La fenêtre de recette, peinte EN DERNIER et sur la fenêtre entière** : son voile doit
@@ -972,8 +1011,33 @@ mod tests {
                 combat_always_visible: true,
                 turn_notification: true,
                 turn_notification_muted: false,
+                features: FeatureToggles::default(),
                 shortcuts: ShortcutBindings::default(),
             }
+        );
+    }
+
+    /// **Décocher une fonctionnalité est un brouillon comme le reste de la fenêtre** : la garde de
+    /// fermeture s'ouvre tant que « Valider » n'a pas emporté la bascule, et l'aller-retour la
+    /// referme. Sans quoi couper le Suivi par erreur, puis fermer, le couperait pour de bon.
+    #[test]
+    fn couper_une_fonctionnalite_met_des_modifications_en_attente() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        // Une fenêtre qui s'ouvre sur « tout actif » n'a rien en attente — c'est le défaut de
+        // `FeatureToggles`, des deux côtés (brouillon et référence).
+        assert!(!state.is_dirty());
+
+        state.features.suivi = false;
+        assert!(
+            state.is_dirty(),
+            "décocher « Activer le Suivi » doit ouvrir la garde de fermeture"
+        );
+        assert!(!state.commit().features.suivi, "« Valider » l'emporte");
+
+        state.features.suivi = true;
+        assert!(
+            !state.is_dirty(),
+            "recocher ramène la fenêtre à son état d'ouverture"
         );
     }
 

@@ -69,6 +69,7 @@ use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::chat_tab;
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_ui::panels::feature_switch::FeatureToggles;
 use overlay_ui::panels::login::{self, LoginState};
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
 use overlay_ui::panels::suivi_tab;
@@ -431,6 +432,16 @@ struct App {
     /// La notification de tour sans son (`config::OverlayConfig::turn_notification_muted`) —
     /// même provenance.
     turn_notification_muted: bool,
+    /// **Les trois interrupteurs de fonctionnalité** — Suivi, Alertes, Recherche de chat (cases
+    /// « Activer … » de la fenêtre Options, voir `panels::feature_switch`). Réglages LOCAUX
+    /// persistés (`config::OverlayConfig::features`), même politique que `combat_always_visible` :
+    /// lus au démarrage, remplacés à la validation de la fenêtre Options.
+    ///
+    /// Deux effets ici : le bandeau de suivi n'affiche plus de tuile quand `suivi` est décoché
+    /// (voir `render_window`), et le thread Engine cesse de jouer les alertes correspondantes
+    /// (`EngineCommand::SetFeatures`, qui porte le détail de ce qui est coupé et de ce qui
+    /// continue).
+    features: FeatureToggles,
     /// La surveillance de tour (§9.1 decies) — voir `sync_turn_watch`. Toujours construite, même
     /// option décochée : les gabarits chargés au démarrage servent dès qu'on la coche.
     turn_watcher: turn_watch::watcher::Watcher,
@@ -514,6 +525,8 @@ struct AppState {
     turn_notification: bool,
     /// Voir `App::turn_notification_muted`.
     turn_notification_muted: bool,
+    /// Voir `App::features` — lus de la config au démarrage (`main`).
+    features: FeatureToggles,
     /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`
     /// (`config::OverlayConfig::shortcuts`). Même provenance que `combat_always_visible` : lus une
     /// fois dans `main`, jamais redécouverts.
@@ -544,6 +557,7 @@ impl App {
             combat_always_visible,
             turn_notification,
             turn_notification_muted,
+            features,
             shortcuts,
             snapshot,
             watchlist,
@@ -594,6 +608,7 @@ impl App {
             combat_always_visible,
             turn_notification,
             turn_notification_muted,
+            features,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
@@ -2014,6 +2029,8 @@ impl App {
             combat_always_visible: self.combat_always_visible,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
+            // Idem pour les trois interrupteurs : les cases s'ouvrent sur l'état réel.
+            features: self.features,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -2042,6 +2059,7 @@ impl App {
                 combat_always_visible: self.combat_always_visible,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
+                features: self.features,
                 shortcuts: self.hotkeys.bindings().clone(),
             },
             pending_close: false,
@@ -2342,6 +2360,22 @@ impl App {
                         }
                     );
                 }
+                // **Les trois interrupteurs (2026-09-15)** — le thread Engine est prévenu dès
+                // qu'ils bougent : c'est lui qui joue (ou ne joue plus) les alertes. Le bandeau,
+                // lui, lit `self.features` directement au rendu (voir `render_window`).
+                let features_changed = commit.features != self.features;
+                if features_changed {
+                    self.features = commit.features;
+                    tracing::info!(
+                        suivi = self.features.suivi,
+                        alertes = self.features.alerts,
+                        recherche = self.features.chat,
+                        "[options] fonctionnalités actives mises à jour"
+                    );
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::SetFeatures(self.features));
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -2364,6 +2398,7 @@ impl App {
                     || turn_muted_changed
                     || shortcuts_changed
                     || chat_toast_changed
+                    || features_changed
                 {
                     let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
@@ -2374,6 +2409,7 @@ impl App {
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
                     saved.set_chat_toast(self.chat_toast);
+                    saved.set_features(self.features);
                     config::save(&saved);
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
@@ -2463,7 +2499,19 @@ impl App {
         let now = std::time::Instant::now();
         let snapshot = self.snapshot.load();
         let fight = snapshot.fight_for_character(&overlay.character_name);
-        let watchlist = self.watchlist.load();
+        let watchlist_all = self.watchlist.load();
+        // **Suivi coupé : le bandeau n'affiche plus aucune tuile** — case « Activer le Suivi »
+        // (`panels::feature_switch`). Une liste vide plutôt qu'une fenêtre masquée, parce que le
+        // bandeau porte aussi le carré de contrôle, seul accès à la fenêtre Options depuis le jeu :
+        // la masquer enfermerait dehors qui vient de décocher la case. C'est exactement l'état
+        // « aucune entrée suivie », déjà rendu et dimensionné comme tel (voir
+        // `panels::watchlist::show` et `watchlist_target_width`) — le moteur, lui, continue de
+        // compter, rien n'est perdu (voir `EngineCommand::SetFeatures`).
+        let watchlist: &[WatchlistEntry] = if self.features.suivi {
+            &watchlist_all
+        } else {
+            &[]
+        };
         let watchlist_toast_guard = self.watchlist_toast.load();
         let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
         if overlay.kind == OverlayKind::Watchlist {
@@ -2522,7 +2570,7 @@ impl App {
                 icons: &overlay.icons,
                 combat_side: &mut overlay.combat_side,
                 combat_metric: &mut overlay.combat_metric,
-                watchlist: &watchlist,
+                watchlist,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,
                 catalog: &catalog,
@@ -2632,6 +2680,7 @@ impl App {
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
             OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
             OptionsModalAction::TestChatSound => alert_sound::play_chat_alert(),
+            OptionsModalAction::TestCountdownSound => alert_sound::play_countdown_alert(),
             OptionsModalAction::Disconnect => post_redraw = PostRedraw::DisconnectAccount,
             OptionsModalAction::Validate(commit) => {
                 post_redraw = PostRedraw::ValidateOptions(commit)
@@ -3182,6 +3231,10 @@ fn main() {
     );
     // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici, pas du compte.
     let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
+    // Les interrupteurs de fonctionnalité aussi — sans cet envoi, le thread Engine partirait sur
+    // son défaut « tout actif » et jouerait les alertes d'une fonctionnalité coupée jusqu'à la
+    // prochaine validation de la fenêtre Options.
+    let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
 
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(AppState {
@@ -3189,6 +3242,7 @@ fn main() {
         combat_always_visible: saved_config.combat_always_visible,
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
+        features: saved_config.features(),
         shortcuts: saved_config.shortcuts(),
         snapshot,
         watchlist,
