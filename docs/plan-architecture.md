@@ -1542,7 +1542,11 @@ session), portée telle quelle dans `panels::login`.
   (`App::install_tray`) : menu **Options / Déconnecter / Quitter** validé par l'utilisateur,
   « Options » et « Déconnecter » grisés tant qu'aucun compte n'est lié (`sync_tray_menu`), clics
   sondés dans `about_to_wait` comme les raccourcis. « Déconnecter » agit sans confirmation (un menu
-  contextuel n'en ouvre pas). C'est le seul accès à l'overlay quand ni jeu ni fenêtre de connexion
+  contextuel n'en ouvre pas). **« Mise à jour » ajoutée après « Options » (2026-09-15, demande de
+  l'utilisateur)** : lance la recherche de mise à jour (`UpdateCommand::Check`, même commande que
+  le bouton de la fenêtre Options — §8.3 de `docs/plan-mise-a-jour.md`), toujours active puisqu'une
+  recherche ne dépend pas du compte ; le résultat se lit dans la section « Mise à jour » de la
+  fenêtre Options. C'est le seul accès à l'overlay quand ni jeu ni fenêtre de connexion
   ne sont à l'écran, et le seul moyen de quitter proprement une fois connecté.
 - **L'ancienne carte d'appairage de la zone Combat** (code, icône de relance 🔌, « Connexion… »)
   est retirée : la zone Combat n'existe plus que compte lié.
