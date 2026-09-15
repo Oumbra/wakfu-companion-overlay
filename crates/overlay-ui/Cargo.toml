@@ -38,8 +38,8 @@ wgpu = { version = "30", features = ["dx12", "vulkan"] }
 winit = { version = "0.30", features = ["rwh_06"] }
 
 [target.'cfg(windows)'.dependencies]
-# Icône de zone de notification et son menu (Options / Déconnecter / Quitter — 2026-09-14, §9.1
-# undecies du plan). Mêmes auteurs que `global-hotkey` (tauri-apps), même modèle : un récepteur
+# Icône de zone de notification et son menu (Options / Mise à jour / Déconnecter / Quitter —
+# 2026-09-14, §9.1 undecies du plan). Mêmes auteurs que `global-hotkey` (tauri-apps), même modèle : un récepteur
 # d'événements sondé depuis la boucle winit. Windows uniquement : ses fonctionnalités par défaut
 # tirent GTK/libappindicator sous Linux, que le binaire X11 n'utilise pas (voir sa doc de module).
 tray-icon = { version = "0.25", default-features = false }

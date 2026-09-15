@@ -22,8 +22,9 @@
 //! tâches, jamais ancrée sur le jeu. Les overlays Combat/Suivi ne naissent qu'une fois le compte
 //! lié (`App::sync_windows` s'y refuse sinon) et sont TOUS fermés à la déconnexion, qui ramène
 //! à cette fenêtre (`App::sync_session_windows`). Le logo du site est l'icône de fenêtre et
-//! l'icône de zone de notification, dont le menu — Options / Déconnecter / Quitter — est le
-//! seul accès à l'overlay quand aucune fenêtre de jeu n'est ouverte (`App::install_tray`).
+//! l'icône de zone de notification, dont le menu — Options / Mise à jour / Déconnecter /
+//! Quitter — est le seul accès à l'overlay quand aucune fenêtre de jeu n'est ouverte
+//! (`App::install_tray`).
 //!
 //! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
 //! synchro serveur, L5). Pas de thème configurable ni de disposition repositionnable/persistée par
@@ -513,18 +514,24 @@ struct App {
     menu_events: &'static tray_icon::menu::MenuEventReceiver,
 }
 
-/// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les trois
+/// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
 /// entrées de son menu — gardées pour reconnaître leurs clics (`MenuEvent::id`) et pour activer
 /// ou griser « Options » et « Déconnecter » selon qu'un compte est lié (voir `sync_tray_menu`).
 ///
-/// **Menu validé par l'utilisateur (2026-09-14)** : Options / Déconnecter / Quitter, rien d'autre.
-/// C'est le seul accès à l'overlay quand ni fenêtre de jeu ni fenêtre de connexion ne sont à
-/// l'écran — et le seul moyen de quitter proprement une fois connecté (les overlays ancrés sur le
-/// jeu n'ont ni croix ni barre des tâches).
+/// **Menu validé par l'utilisateur (2026-09-14)** : Options / Déconnecter / Quitter, rien d'autre
+/// — puis **« Mise à jour » ajoutée après « Options » à sa demande (2026-09-15)** : un clic lance
+/// la recherche de mise à jour (`UpdateCommand::Check`, la même que le bouton « Recherche de mise
+/// à jour » de la fenêtre Options, §8 de `docs/plan-mise-a-jour.md`). Toujours active : une
+/// recherche n'a pas besoin de compte, et le thread ignore de lui-même une demande pendant une
+/// opération en cours ou à moins de trente secondes de la précédente. C'est le seul accès à
+/// l'overlay quand ni fenêtre de jeu ni fenêtre de connexion ne sont à l'écran — et le seul moyen
+/// de quitter proprement une fois connecté (les overlays ancrés sur le jeu n'ont ni croix ni
+/// barre des tâches).
 struct TrayMenu {
     /// Gardée en vie : l'icône disparaît de la zone de notification à la destruction.
     _icon: TrayIcon,
     options: MenuItem,
+    update: MenuItem,
     disconnect: MenuItem,
     quit: MenuItem,
     /// Dernier état appliqué à « Options » et « Déconnecter » — évite un aller-retour Win32 par
@@ -861,10 +868,12 @@ impl App {
         // « Options » et « Déconnecter » naissent grisés : rien à régler ni à quitter tant
         // qu'aucun compte n'est lié (voir `sync_tray_menu`).
         let options = MenuItem::new("Options", false, None);
+        let update = MenuItem::new("Mise à jour", true, None);
         let disconnect = MenuItem::new("Déconnecter", false, None);
         let quit = MenuItem::new("Quitter", true, None);
         if let Err(err) = menu.append_items(&[
             &options,
+            &update,
             &PredefinedMenuItem::separator(),
             &disconnect,
             &PredefinedMenuItem::separator(),
@@ -889,11 +898,12 @@ impl App {
         {
             Ok(tray) => {
                 tracing::info!(
-                    "[zone de notification] icône posée — menu Options / Déconnecter / Quitter."
+                    "[zone de notification] icône posée — menu Options / Mise à jour / Déconnecter / Quitter."
                 );
                 self.tray = Some(TrayMenu {
                     _icon: tray,
                     options,
+                    update,
                     disconnect,
                     quit,
                     enabled_for_account: false,
@@ -926,6 +936,11 @@ impl App {
             if event.id == *tray.options.id() {
                 tracing::info!(">>> Options (zone de notification)");
                 self.open_options_modal(event_loop, None, options_modal::OptionsTab::Parametres);
+            } else if event.id == *tray.update.id() {
+                tracing::info!(">>> Recherche de mise à jour (zone de notification).");
+                let _ = self.update_command_tx.send(UpdateCommand::Check {
+                    install_if_available: false,
+                });
             } else if event.id == *tray.disconnect.id() {
                 tracing::info!(">>> Déconnexion du compte demandée (zone de notification).");
                 let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
