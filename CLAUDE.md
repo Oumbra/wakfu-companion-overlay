@@ -123,19 +123,30 @@ Une étape ajoutée ou retirée dans `.github/workflows/ci.yml` doit l'être **a
 `scripts/ci-local.sh`, et réciproquement : les deux se doublent volontairement, un garde-fou ne
 protège que ce qu'il connaît.
 
-## Coût du CI (dépôt privé — minutes GitHub Actions comptées)
+## Coût du CI (dépôt public — minutes Actions gratuites, sobriété conservée)
 
-Le dépôt est **privé** : chaque run consomme le quota Actions du compte, les jobs `windows-latest`
-étant facturés **au double** des jobs Linux. Un quota épuisé ne se voit pas comme une erreur de
-build — **tous les jobs échouent en quelques secondes, sans log ni runner assigné** (c'est ce qui
-est arrivé à partir du 2026-09-09). Devant ce symptôme, vérifier la facturation du compte avant de
-chercher une régression dans le code.
+Le dépôt est **public** (vérifié sur l'API GitHub le 2026-09-15, `"private": false`) : les jobs
+sur runners standard ne consomment aucun quota. Il a été privé jusque-là, et le symptôme d'un
+quota épuisé reste bon à connaître si la visibilité changeait à nouveau : **tous les jobs échouent
+en quelques secondes, sans log ni runner assigné** (arrivé à partir du 2026-09-09). Devant ce
+symptôme, vérifier la visibilité et la facturation du compte avant de chercher une régression.
 
-Le workflow limite déjà la dépense : cache `cargo`/`vendor`, `concurrency` (une rafale de commits
-n'exécute que le dernier run), et `paths-ignore` sur `docs/**`, `**/*.md` et `.claude/**`. Ne pas
-étendre `paths-ignore` à `assets/**` : ces fichiers sont embarqués par `include_bytes!`
-(`design/assets.rs`, `design/fonts.rs`, `ui_icons.rs`…) et peuvent casser la compilation comme les
-snapshots d'`overlay-testkit`.
+Le workflow reste sobre par principe (durée d'attente du verdict, pas seulement coût) : cache
+`cargo`/`vendor`, `concurrency` (une rafale de commits n'exécute que le dernier run), et
+`paths-ignore` sur `docs/**`, `**/*.md` et `.claude/**`. Ne pas étendre `paths-ignore` à
+`assets/**` : ces fichiers sont embarqués par `include_bytes!` (`design/assets.rs`,
+`design/fonts.rs`, `ui_icons.rs`…) et peuvent casser la compilation comme les snapshots
+d'`overlay-testkit`.
+
+# Mise à jour automatique et publication
+
+Le plan de référence est [`docs/plan-mise-a-jour.md`](docs/plan-mise-a-jour.md) (décisions du
+mainteneur en §10) : GitHub Releases, workflow de release déclenché par la fusion sur `main`,
+manifeste `latest.json` signé `minisign`, module `overlay_sync::update`. **Un binaire de Release
+vise toujours la prod** (`overlay_sync::client::DEFAULT_BASE_URL`) ; le déploiement dev
+(`claude-dev.wakfu-companion.com`) n'est utilisé qu'en local via `crates/overlay-ui/preview.{ps1,sh}`
+(`WAKFU_COMPANION_API_URL`). La clé privée de signature ne vit **que** dans les secrets GitHub
+Actions — jamais dans le dépôt, jamais dans une session Claude.
 
 # Contexte projet
 
