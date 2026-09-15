@@ -3449,6 +3449,68 @@ const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y
 const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
 const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 442.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+/// Le bouton icône « Suppression multiple », à droite de l'en-tête « Éléments suivis » — même
+/// repère vertical que les tuiles, un rang plus haut (`suivi_tab::LIST_HEADER_HEIGHT` et sa
+/// gouttière).
+const BOUTON_SELECTION: egui::Pos2 = egui::pos2(688.0, 410.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+
+/// **Rien à supprimer, pas de bouton pour le faire.**
+///
+/// Avec une liste vide — l'état de départ de tout nouveau compte — le bouton « Suppression
+/// multiple » restait affiché et cliquable, ouvrant un mode de sélection sans rien à cocher
+/// (retour du 2026-09-16). Il n'apparaît plus qu'à partir d'une entrée suivie, comme il
+/// disparaissait déjà le temps que la liste descende du compte.
+///
+/// Le même point de l'écran est sondé dans les deux états : avec des entrées, le curseur y annonce
+/// un bouton et le clic ouvre la sélection ; sans entrée, ni l'un ni l'autre. Sans la première
+/// moitié, le test passerait aussi avec un repère posé à côté du bouton.
+#[test]
+fn options_suivi_pas_de_suppression_multiple_sur_liste_vide() {
+    use overlay_ui::panels::feature_switch::FeatureToggles;
+
+    let (mut harness, etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        FeatureToggles::default(),
+    );
+    harness.run();
+    harness.hover_at(BOUTON_SELECTION);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand,
+        "avec des entrées suivies, le repère doit tomber sur le bouton « Suppression multiple »"
+    );
+    harness.drag_at(BOUTON_SELECTION);
+    harness.run();
+    harness.drop_at(BOUTON_SELECTION);
+    harness.run();
+    assert!(
+        etat.borrow().suivi.select_mode,
+        "avec des entrées suivies, le clic doit ouvrir la sélection multiple"
+    );
+
+    let (mut harness, etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        FeatureToggles::default(),
+    );
+    etat.borrow_mut().suivi_draft = Some(Vec::new());
+    harness.run();
+    harness.hover_at(BOUTON_SELECTION);
+    harness.run();
+    assert_ne!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand,
+        "liste vide : aucun bouton ne doit répondre à l'emplacement de « Suppression multiple »"
+    );
+    harness.drag_at(BOUTON_SELECTION);
+    harness.run();
+    harness.drop_at(BOUTON_SELECTION);
+    harness.run();
+    assert!(
+        !etat.borrow().suivi.select_mode,
+        "liste vide : le clic ne doit pas ouvrir la sélection multiple"
+    );
+}
 
 /// **Fonctionnalité coupée : le contenu de l'onglet ne répond plus** — l'autre moitié de la
 /// demande du 2026-09-15, celle qu'une capture ne peut pas montrer (`panels::feature_switch`).
