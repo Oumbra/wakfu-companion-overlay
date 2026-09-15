@@ -80,6 +80,21 @@ SKIP_VERSION_BUMP=1 git commit -m "…"    # committer sans bump (échappatoire 
 Le hook s'abstient de lui-même pendant un `rebase`/`merge`/`cherry-pick` et sur un commit de
 fusion : rejouer un commit déjà versionné le bumperait une seconde fois.
 
+## Publication (Release GitHub) et mise à jour automatique
+
+Plan de référence : [`docs/plan-mise-a-jour.md`](docs/plan-mise-a-jour.md). Une Release se
+publie **en fusionnant `dev` dans `main`** : `.github/workflows/release.yml` lit la version du
+`Cargo.toml`, s'arrête si le tag `v{version}` existe déjà, compile les deux binaires en release
+(Windows `overlay-ui.exe`, Linux `overlay-ui-x11`), puis `cargo xtask dist` les compresse en gzip,
+écrit le manifeste `latest.json` (SHA-256 des assets et des binaires installés), le signe avec la
+clé privée `minisign` des secrets du dépôt et revérifie la signature avec
+[`wakfu-overlay.pub`](wakfu-overlay.pub) avant de créer la Release. Le différentiel n'est pour
+l'instant que **mesuré** (rapport dans le résumé du job) ; il sera publié quand la mesure le
+justifiera.
+
+Un binaire de Release vise toujours l'API de prod ; les scripts de prévisualisation pointent, eux,
+sur le déploiement dev via `WAKFU_COMPANION_API_URL`.
+
 ## Crates (`crates/`)
 
 | Crate | Lot | Contenu |
