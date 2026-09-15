@@ -1290,16 +1290,21 @@ mod linux_main {
             let Some(draft) = state.suivi_draft.clone() else {
                 return;
             };
-            if state.initial.suivi.as_ref() == Some(&draft) {
+            let retirees = state.suivi.retirees.clone();
+            if state.initial.suivi.as_ref() == Some(&draft) && retirees.is_empty() {
                 return;
             }
             tracing::info!(
                 entry_count = draft.len(),
+                removed_count = retirees.len(),
                 "[options] liste de suivi validée"
             );
             let _ = self
                 .settings_tx
-                .send(EngineCommand::SetWatchlistDefinitions(draft));
+                .send(EngineCommand::SetWatchlistDefinitions {
+                    definitions: draft,
+                    retirees,
+                });
         }
 
         /// Voir `main.rs::start_recipe_resolution` — sur un thread, jamais sur la boucle winit.
@@ -1822,7 +1827,13 @@ mod linux_main {
                         );
                         let _ = self
                             .settings_tx
-                            .send(EngineCommand::SetWatchlistDefinitions(edition.definitions));
+                            .send(EngineCommand::SetWatchlistDefinitions {
+                                definitions: edition.definitions,
+                                // Le bandeau n'a pas de brouillon : une entrée qu'il retire disparaît de la
+                                // liste dans la foulée, son compteur part avec elle (rien à oublier en plus),
+                                // et il ne peut en recréer aucune.
+                                retirees: Vec::new(),
+                            });
                     }
                     if outcome.open_watchlist {
                         post_redraw = PostRedraw::OpenOptions(

@@ -184,6 +184,15 @@ pub struct SuiviTabState {
     pub select_mode: bool,
     /// Clés des tuiles cochées — voir [`entry_key`].
     pub selected: Vec<String>,
+    /// **Les entrées que cette édition a retirées du brouillon**, dans l'ordre des gestes — voir
+    /// [`oublier`].
+    ///
+    /// Elles partent avec les définitions à la validation : le moteur ne peut pas deviner autrement
+    /// qu'une entrée du brouillon est la RECRÉATION d'une entrée supprimée, et lui garderait alors
+    /// son compteur (bug du 2026-09-15 : un décompte supprimé à 50 puis recréé à 10 affichait
+    /// 50/10). L'état est neuf à chaque ouverture de la fenêtre, comme le brouillon : « Annuler »
+    /// jette les deux ensemble.
+    pub retirees: Vec<WatchlistEntry>,
     /// La fenêtre « Objets de la recette », ouverte — `None` le reste du temps.
     pub recipe: Option<RecipeDialogState>,
 }
@@ -197,6 +206,7 @@ impl Default for SuiviTabState {
             target: TARGET_MIN,
             select_mode: false,
             selected: Vec::new(),
+            retirees: Vec::new(),
             recipe: None,
         }
     }
@@ -298,6 +308,15 @@ pub(crate) fn entry_key(entry: &WatchlistEntry) -> String {
             .map(|id| id.to_string())
             .unwrap_or_default()
     )
+}
+
+/// Note des entrées comme retirées de CETTE édition — voir [`SuiviTabState::retirees`].
+///
+/// Une même entrée peut y figurer plusieurs fois (supprimée, recréée, re-supprimée) : seule sa
+/// PRÉSENCE compte côté moteur, et dédoublonner ici coûterait une comparaison pour rien sur une
+/// liste qui tient toujours dans quelques dizaines d'entrées.
+fn oublier(state: &mut SuiviTabState, retirees: Vec<WatchlistEntry>) {
+    state.retirees.extend(retirees);
 }
 
 /// Peint l'onglet dans le panneau de section de la fenêtre Options.
@@ -748,11 +767,16 @@ fn list_header(
     if supprimer {
         // Sélection vide : on retire TOUT (aucune exclusion cochée) — voir [`bulk_label`].
         if state.selected.is_empty() {
+            oublier(state, ctx.entries.clone());
             ctx.entries.clear();
         } else {
             let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
-            ctx.entries
-                .retain(|entry| !cochees.contains(&entry_key(entry)));
+            let (retirees, restantes): (Vec<_>, Vec<_>) = ctx
+                .entries
+                .drain(..)
+                .partition(|entry| cochees.contains(&entry_key(entry)));
+            *ctx.entries = restantes;
+            oublier(state, retirees);
         }
         state.select_mode = false;
         state.selected.clear();
@@ -852,7 +876,14 @@ fn tile_grid(
     // réversible deux fois, une boîte de confirmation par-dessus n'ajoutait qu'un clic
     // (décision du 2026-09-13, appliquée du même coup à l'onglet Alertes).
     if let Some(cle) = retrait {
+        let retirees: Vec<WatchlistEntry> = ctx
+            .entries
+            .iter()
+            .filter(|entry| entry_key(entry) == cle)
+            .cloned()
+            .collect();
         ctx.entries.retain(|entry| entry_key(entry) != cle);
+        oublier(state, retirees);
         state.selected.retain(|k| *k != cle);
     }
     if let Some(cle) = bascule {

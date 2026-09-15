@@ -71,7 +71,17 @@ pub enum EngineCommand {
     /// les siens — voir `WatchlistState::apply_definitions`. Comme pour `SetAlertProfile`, la
     /// réplication au compte part en parallèle côté hôte, par le même chemin que les compteurs
     /// (`SyncCommand::SyncWatchlist`).
-    SetWatchlistDefinitions(Vec<WatchlistEntry>),
+    SetWatchlistDefinitions {
+        definitions: Vec<WatchlistEntry>,
+        /// Les entrées que l'édition a RETIRÉES — vide pour un geste qui ne peut rien recréer
+        /// (retrait groupé ou déplacement depuis le bandeau : la liste part telle qu'elle doit
+        /// être, dans la foulée du geste).
+        ///
+        /// Une entrée qui y figure ET revient dans `definitions` a été supprimée puis recréée
+        /// pendant la même édition : son compteur ne la suit pas (voir
+        /// `WatchlistState::apply_definitions`).
+        retirees: Vec<WatchlistEntry>,
+    },
     /// Recherches de chat validées depuis l'onglet « Chat » (2026-09-13) — même principe que
     /// `SetAlertProfile` : appliquées tout de suite, l'écriture au compte (`chatFilters`) part en
     /// parallèle côté hôte.
@@ -344,14 +354,19 @@ pub fn spawn_engine_thread(
                             );
                             chat_toast = settings;
                         }
-                        EngineCommand::SetWatchlistDefinitions(definitions) => {
+                        EngineCommand::SetWatchlistDefinitions {
+                            definitions,
+                            retirees,
+                        } => {
                             tracing::info!(
                                 entry_count = definitions.len(),
+                                removed_count = retirees.len(),
                                 "[options] liste de suivi appliquée depuis la fenêtre Options"
                             );
                             // Les compteurs vivants sont gardés par le moteur, jamais repris du
-                            // brouillon — voir la doc de la commande.
-                            engine.set_watchlist_definitions(definitions);
+                            // brouillon — sauf ceux des entrées retirées pendant l'édition, voir
+                            // la doc de la commande.
+                            engine.set_watchlist_definitions(definitions, &retirees);
                         }
                         EngineCommand::ChangeLogPath(new_path) => {
                             tracing::info!(

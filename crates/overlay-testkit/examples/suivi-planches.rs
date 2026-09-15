@@ -187,6 +187,8 @@ fn harnais(p: Planche) -> Harness<'static> {
             select_mode: p.select_mode,
             selected: p.selected,
             search: p.search,
+            // Une planche est un instantané : rien n'y a été retiré du brouillon.
+            retirees: Vec::new(),
             recipe: recette,
         },
         suivi_draft: Some(entrees()),
