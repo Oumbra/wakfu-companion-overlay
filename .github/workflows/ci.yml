@@ -1,0 +1,200 @@
+# CI de base — docs/plan-architecture.md §8/§11 : build Windows + Linux, tests (dont parité,
+# §2.2/§5.3), budget mémoire (`xtask mem-budget`, §8), lint `clippy -D warnings`.
+#
+# Ne couvre PAS le harnais comportemental Xvfb/X11 (`xtask visual-check`, §17.2) : il n'existe pas
+# encore (aucun rendu Linux réel à piloter, voir §17.2 « État ») et devra de toute façon rester
+# `workflow_dispatch` uniquement une fois écrit (§17.2 : « jamais un gate CI par défaut »
+# pour ce harnais précis) — le contenu de ce fichier n'a donc pas vocation à y faire de la place.
+#
+# `overlay-ui::main` (le binaire `overlay-ui`) importe `windows::` sans `cfg` et ne compile QUE
+# sous Windows — d'où le découpage par paquet/binaire plutôt que `--workspace` partout : sa LIB
+# (`--lib`) compile nativement sous Linux (voir `crates/overlay-ui/src/lib.rs`), tout comme le
+# second binaire du même paquet, `overlay-ui-x11` (§17.2 du plan) — build/clippy/test le ciblent
+# donc explicitement en plus de `--lib`.
+#
+# `--no-fail-fast` sur CHAQUE `cargo test` : sans lui, cargo s'arrête au premier BINAIRE de test en
+# échec et n'exécute pas les suivants. Ce n'est pas une subtilité théorique — `tests/design_gallery.rs`
+# passe avant `tests/panels.rs` dans l'ordre alphabétique, et deux captures périmées dans le premier
+# ont caché VINGT-ET-UNE captures périmées du second pendant une semaine : le journal du CI n'a
+# jamais montré la moindre ligne de `panels.rs`. Un seul run doit dire TOUT ce qui est cassé, sinon
+# chaque correctif ne révèle que le prochain échec, un aller-retour de CI à la fois. Même principe
+# que `scripts/ci-local.sh`, qui déroule toutes ses étapes avant de récapituler.
+#
+# ⚠ SOURCE DE VÉRITÉ PARTAGÉE : la liste des vérifications ci-dessous est dupliquée dans
+# `scripts/ci-local.sh`, qui les rejoue EN LOCAL avant un push (et que le hook `pre-push` de
+# `.githooks/` lance en mode `--lint`). Toute étape ajoutée/retirée ici doit l'être là-bas aussi —
+# ce script est le garde-fou qui évite de découvrir un `fmt`/`clippy` rouge après coup, et il ne
+# protège que ce qu'il connaît. UNE seule divergence assumée : le job `test-linux` tourne ici dans
+# un conteneur au rendu figé (voir sa doc), là où le script local tourne sur la machine du dev — il
+# se contente d'avertir quand son Mesa diffère de celui du CI.
+#
+# La version de Rust vient de `rust-toolchain.toml` (épinglée), pas d'un `@stable` flottant : voir
+# la doc de ce fichier — c'est la dérive de version qui a tenu ce CI rouge du 2026-09-01 au
+# 2026-09-10, sur un seul écart de `cargo fmt`.
+name: CI
+
+on:
+  push:
+    branches: [dev, main, master]
+    # Un commit qui ne touche QUE de la prose ne peut pas casser une compilation Rust : inutile de
+    # dépenser cinq jobs (dont un Windows, facturé double) pour lui. `assets/**` n'est
+    # VOLONTAIREMENT PAS dans cette liste — `assets/design-system/`, `assets/fonts/` et les assets
+    # de `crates/overlay-ui/assets/` sont embarqués par `include_bytes!` (design/assets.rs,
+    # design/fonts.rs, ui_icons.rs…) : les toucher peut casser la compilation ET les snapshots
+    # d'`overlay-testkit`. GitHub n'applique l'exclusion que si TOUS les fichiers du push
+    # correspondent — un push mêlant doc et code déclenche bien le CI.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
+  workflow_dispatch:
+
+# Le travail se fait par rafales de petits commits successifs sur `dev` (voir l'historique) : sans
+# ce garde-fou, chaque push d'une rafale lançait cinq jobs complets dont seul le dernier importait.
+# Seul le run le plus récent d'une même branche survit ; les précédents sont annulés.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Journal d'erreur exploitable quand un test panique en CI, sans avoir à repousser un commit
+  # « ajoute un backtrace » pour comprendre.
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - run: cargo fmt --all -- --check
+      - run: cargo fmt --manifest-path xtask/Cargo.toml -- --check
+
+  clippy-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - name: dépendances système (rendu logiciel egui_kittest + son rodio)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            xtask -> target
+      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
+      - run: cargo clippy -p overlay-ui --lib --bin overlay-ui-x11 -- -D warnings
+      - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
+
+  test-linux:
+    runs-on: ubuntu-latest
+    # **Conteneur ÉPINGLÉ PAR DIGEST, pas par tag** : le tag `ubuntu:24.04` désigne une image
+    # différente à chaque point release. Depuis que la comparaison de captures est un GATE (voir
+    # l'étape `overlay-testkit` plus bas), l'environnement de rendu ne peut plus bouger tout seul —
+    # `ubuntu-latest` bascule de version majeure sans prévenir, et son `apt-get` sert ce qui est
+    # publié le jour même. Deuxième verrou dans `scripts/setup-render-env.sh` : les paquets viennent
+    # d'un instantané daté de l'archive Ubuntu, pas de l'archive vivante.
+    #
+    # Seul CE job est conteneurisé : `clippy-linux` ne fait que compiler, aucun pixel n'en sort.
+    container:
+      image: ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
+    steps:
+      # AVANT `checkout` : une image Ubuntu nue n'a ni `git` ni `ca-certificates`, et `checkout`
+      # retomberait sur un téléchargement d'archive REST au lieu d'un vrai clone. Ces trois paquets
+      # ne participent à aucun rendu — leur version est sans importance, d'où l'archive par défaut
+      # ici et l'instantané épinglé pour tout le reste, après le clone.
+      - name: amorçage (git pour checkout — hors périmètre du rendu)
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git
+      - uses: actions/checkout@v4
+      - name: environnement de rendu épinglé (Mesa/lavapipe, instantané daté — voir le script)
+        run: bash scripts/setup-render-env.sh
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
+      - run: cargo test --no-fail-fast -p overlay-ui --lib
+      - name: overlay-ui-x11 — compile (pas de tests unitaires, voir bin/overlay-ui-x11.rs)
+        run: cargo build -p overlay-ui --bin overlay-ui-x11
+      # **GATE depuis le 2026-09-13** (§17.1 du plan). Ce n'était plus tenable en « informatif » :
+      # l'étape a caché vingt-et-une captures périmées pendant une semaine. Ce qui a rendu la
+      # promotion possible, c'est l'environnement de rendu figé ci-dessus — un gate sur un rendu
+      # flottant aurait rougi à la première mise à jour de Mesa, sur du code que personne n'a
+      # touché.
+      #
+      # Une capture en écart FAIT ÉCHOUER le CI. Deux issues, jamais une troisième : le rendu a
+      # régressé et on corrige le code, ou le changement visuel est voulu et on régénère les
+      # références DANS l'environnement de rendu (voir `.github/ci-image/Dockerfile`), dans son
+      # propre commit.
+      - name: "overlay-testkit — captures offscreen (GATE, voir §17.1)"
+        id: captures
+        run: cargo test --no-fail-fast -p overlay-testkit
+      # **Sans cette étape, un gate rouge est indéchiffrable.** Le journal ne dit que « Diff: 20563 »
+      # — un nombre de pixels, qui ne dit ni QUOI a changé ni si c'est une régression. Les images de
+      # diagnostic (`*.new.png`, le rendu OBTENU ; `*.diff.png`, les pixels en écart) sont produites
+      # sur le runner puis jetées avec lui. Les publier, c'est la différence entre « je regarde ce
+      # qui a changé » et « je reproduis l'environnement du CI en local pour le découvrir ».
+      #
+      # C'est aussi ce qui rend applicable la règle du §17.1 : une régénération de références se
+      # relit sur ces images, jamais sur le diff git — un PNG modifié s'y affiche « Bin 693015 ->
+      # 698936 bytes », et rien d'autre.
+      #
+      # `outcome` et non `conclusion` : `outcome` est le résultat BRUT de l'étape, avant toute
+      # réécriture. La condition ne vise donc que l'échec des captures — un `cargo test` en échec
+      # plus haut ne déclenche pas une publication vide. `if-no-files-found: error` assume le
+      # contrat : si le gate est rouge, ces images existent forcément.
+      - name: "captures en écart — rendu obtenu et diff (diagnostic)"
+        if: always() && steps.captures.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures-en-ecart
+          path: |
+            crates/overlay-testkit/tests/snapshots/*.new.png
+            crates/overlay-testkit/tests/snapshots/*.diff.png
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: ./.github/actions/vendor-wgpu-hal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - run: cargo build --workspace
+      - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
+        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
+
+  mem-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xtask -> target
+      - run: cargo run --manifest-path xtask/Cargo.toml --release -- mem-budget

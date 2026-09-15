@@ -1,0 +1,126 @@
+{
+  "title": "Section de contenu",
+  "subtitle": "Relevé du contenu de l'onglet Jeu, pris comme cas type : c'est celui qui combine tous les gabarits de ligne (titre de section, case à cocher, libellé + contrôle, contrôle pleine largeur).",
+  "source": "assets/design-system/interfaces/interface-options-jeu.png",
+  "canvas": [720, 561],
+  "scale": 1.75,
+  "nodes": [
+    {
+      "id": "panel",
+      "label": "Panneau de contenu",
+      "box": [17, 124, 705, 499],
+      "role": "surface",
+      "fill": "#15181c",
+      "padding": [12, 19, 26, 0],
+      "children": [
+        {
+          "id": "sec-jouabilite",
+          "label": "Section « Jouabilité »",
+          "box": [29, 143, 679, 269],
+          "role": "group",
+          "notes": "Une section = un titre suivi de ses lignes. Aucun fond, aucun filet : le regroupement ne tient qu'à l'espacement.",
+          "children": [
+            {
+              "id": "h-jouabilite",
+              "label": "Titre « Jouabilité »",
+              "box": [30, 143, 129, 164],
+              "role": "text",
+              "notes": "Serif gris clair #b8b9ba, hauteur d'encre 21 px. Aligné x=29/30 — soit 7 px à gauche des lignes d'option."
+            },
+            {
+              "id": "row-cb1",
+              "label": "Ligne : case décochée",
+              "box": [36, 173, 384, 194],
+              "role": "group",
+              "children": [
+                {"id": "cb1", "label": "Case décochée", "box": [36, 173, 56, 193], "role": "control", "fill": "#0b0d0e", "notes": "20 × 20, bord 2 px #595140."},
+                {"id": "cb1-label", "label": "« Autoriser les interactions au clic gauche »", "box": [62, 177, 384, 194], "role": "text", "notes": "Blanc #ffffff : le libellé d'une option décochée."}
+              ]
+            },
+            {
+              "id": "row-cb2",
+              "label": "Ligne : case cochée",
+              "box": [36, 204, 532, 225],
+              "role": "group",
+              "children": [
+                {"id": "cb2", "label": "Case cochée", "box": [36, 204, 56, 224], "role": "control", "fill": "#cea85c", "notes": "Même gabarit 20 × 20, bord doré, pastille centrale claire 8 × 8."},
+                {"id": "cb2-label", "label": "« Ajouter les semences et les graines… »", "box": [62, 208, 532, 225], "role": "text", "notes": "Doré #f4d89e : la couleur du libellé porte l'état, en plus de la case."}
+              ]
+            },
+            {
+              "id": "row-select",
+              "label": "Ligne : libellé + liste déroulante",
+              "box": [36, 233, 558, 269],
+              "role": "group",
+              "children": [
+                {"id": "sel-label", "label": "« Surbrillance à l'utilisation de graines : »", "box": [60, 245, 338, 262], "role": "text", "notes": "Le libellé précède le contrôle et se termine par « : ». Centré verticalement sur le contrôle."},
+                {"id": "sel-ctrl", "label": "Liste « Animée »", "box": [348, 233, 558, 269], "role": "control", "fill": "#6e644f", "notes": "210 × 36, posée à droite du libellé avec 10 px d'écart. Sa largeur suit le contenu, pas la colonne."}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-deplacement",
+          "label": "Section « Mode de déplacement »",
+          "box": [29, 286, 679, 350],
+          "role": "group",
+          "children": [
+            {"id": "h-depl", "label": "Titre « Mode de déplacement »", "box": [29, 286, 267, 307], "role": "text"},
+            {"id": "depl-ctrl", "label": "Liste « Courir »", "box": [36, 314, 244, 350], "role": "control", "fill": "#6f6550", "notes": "208 × 36, seule sur sa ligne, indentée à x=36 comme les cases à cocher."}
+          ]
+        },
+        {
+          "id": "sec-monture",
+          "label": "Section « Mode de déplacement sur une monture »",
+          "box": [29, 359, 679, 423],
+          "role": "group",
+          "children": [
+            {"id": "h-mont", "label": "Titre « … sur une monture »", "box": [29, 359, 450, 380], "role": "text"},
+            {"id": "mont-ctrl", "label": "Liste « Courir »", "box": [36, 387, 244, 423], "role": "control", "fill": "#6f6550"}
+          ]
+        },
+        {
+          "id": "sec-combat",
+          "label": "Section « Combat »",
+          "box": [29, 440, 679, 487],
+          "role": "group",
+          "children": [
+            {"id": "h-combat", "label": "Titre « Combat »", "box": [29, 440, 112, 454], "role": "text", "notes": "Hauteur d'encre 14 px seulement : « Combat » n'a aucun jambage. La hauteur d'encre varie donc avec le mot — c'est la ligne de base qui est stable, pas la boîte."},
+            {
+              "id": "row-cb3",
+              "label": "Ligne : case cochée",
+              "box": [36, 468, 383, 488],
+              "role": "group",
+              "children": [
+                {"id": "cb3", "label": "Case cochée", "box": [36, 468, 56, 487], "role": "control", "fill": "#cea85c"},
+                {"id": "cb3-label", "label": "« Affichage des barres de sort en escalier »", "box": [62, 476, 383, 488], "role": "text"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tokens": {
+    "color": {
+      "heading": "#b8b9ba",
+      "label-off": "#ffffff",
+      "label-on": "#f4d89e",
+      "checkbox-off-border": "#595140",
+      "checkbox-on-border": "#cea85c",
+      "control-face": "#6e644f"
+    },
+    "space": [6, 7, 9, 10, 11, 17, 21, 30, 31],
+    "radius": {"control": "2", "checkbox": "0"},
+    "type": [
+      {"name": "titre de section", "size": "~21", "weight": "regular", "color": "#b8b9ba", "usage": "serif, x=29"},
+      {"name": "libellé d'option", "size": "~15", "weight": "regular", "color": "#ffffff / #f4d89e", "usage": "sans-serif, x=62"}
+    ]
+  },
+  "notes": [
+    "Trois axes verticaux et trois seulement : x=29 pour les titres de section, x=36 pour tout contrôle indenté (case, liste, bouton), x=62 pour le texte qui suit une case. Aucun autre alignement n'a été relevé dans les six onglets.",
+    "Rythme : 31 px entre deux lignes d'option consécutives ; 30 px entre le haut d'un titre de section et le haut de la première ligne qui le suit ; 17 px entre la fin d'un bloc et le titre de section suivant ; 7 à 9 px seulement entre un titre et le contrôle pleine largeur qu'il coiffe.",
+    "Une section n'a ni fond, ni bordure, ni filet de séparation. Le seul signal de regroupement est l'espacement, et le seul signal de niveau est le retrait de 7 px du titre par rapport à ses lignes.",
+    "Les listes déroulantes ne partagent pas une largeur de colonne : 210 px pour « Animée », 208 px pour « Courir », 560 px pour le thème d'interface, 650 px pour le périphérique sonore. La largeur est décidée contrôle par contrôle."
+  ]
+}

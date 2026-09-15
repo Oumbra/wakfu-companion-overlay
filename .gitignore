@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/target/
+
+# Node (spikes)
+**/node_modules/
+
+# Sources tierces vendues + patchées, regénérées par patches/setup-vendor.sh — seul le patch
+# lui-même (patches/*.patch) est commité, pas la copie complète du crate.
+/vendor/
+spikes/*/vendor/
+
+# Artefact produit par `xtask visual-check` (voir §17.4 du plan : « jamais de blob vidéo/image
+# commité ») — même règle que `spikes/s3-window-linux/.gitignore` pour son `artifact.png`.
+xtask/visual-check.png
+
+# Artefacts de diagnostic générés par `egui_kittest` à chaque échec de comparaison de snapshot
+# (§17.1 du plan) — utiles seulement le temps d'inspecter un écart, jamais un fichier à committer
+# (seule l'image de référence sous tests/snapshots/*.png l'est).
+crates/overlay-testkit/tests/snapshots/*.diff.png
+crates/overlay-testkit/tests/snapshots/*.old.png
+# `*.new.png` manquait, et un `git add -A` l'a committé le 2026-09-13 : c'est le rendu OBTENU que
+# le harnais écrit à côté de la référence quand une capture diverge, jamais une référence.
+crates/overlay-testkit/tests/snapshots/*.new.png
+
+# Caches Python des scripts de skills
+__pycache__/
+*.py[cod]
+
+# Clé PRIVÉE de signature des Releases (minisign/rsign2, voir docs/plan-mise-a-jour.md §6.1) —
+# ne vit que dans le gestionnaire de mots de passe du mainteneur et les secrets GitHub Actions.
+# Seule la clé publique (wakfu-overlay.pub) est commitée.
+*.key

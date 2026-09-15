@@ -1,0 +1,122 @@
+{
+  "$comment": "Tokens extraits par analyse pixel de captures d'écran réelles du client Wakfu (2026-09-05). Voir docs/design-system.md pour le contexte, les états de composants et les incertitudes signalées (champ _uncertain).",
+  "neutrals": {
+    "panel_fill": "#181820",
+    "panel_fill_alt": "#1D2024",
+    "field_frame": "#26292F",
+    "border_dark": "#181818",
+    "border_darkest": "#101010",
+    "text_primary": "#F0F0F0",
+    "text_placeholder": { "value": "#7A7A7A", "_uncertain": true },
+    "text_disabled": "#8A8A8A",
+    "disabled_fill_light": "#646465",
+    "disabled_fill_dark": "#282A30"
+  },
+  "accent_warm": {
+    "gold_bright_top": "#F4D89E",
+    "gold_bright_bottom": "#E0C880",
+    "khaki_selected_top": "#A58E63",
+    "khaki_selected_bottom": "#675D46",
+    "input_border": "#595140",
+    "button_text_on_gold": "#3A3523",
+    "checkbox_checked_ring": "#D2AB5C"
+  },
+  "banner_teal": {
+    "gradient_start": "#0C6E80",
+    "gradient_end": "#1D8B9C",
+    "title_text": "#FFFFFF",
+    "_revision_2026_09_08": "mesure directe sur interface-options-jeu.png : haut #1A6E80, bas #176372 (plus SOMBRE en bas, cf. §9 du design-system.md) — gradient_start/gradient_end ci-dessus conservés tels quels (première mesure, §7 sources 2026-09-05) faute de reprise complète, mais l'ORDRE clair->sombre du haut vers le bas est la valeur à suivre en implémentation, pas gradient_end en tant que tel."
+  },
+  "accent_danger": {
+    "_note": "Bouton \"Annuler\" plein-largeur du pied de page d'une fenêtre modale (Options, voir §9 du design-system.md) — UNIQUEMENT ce pattern : le bouton \"Annuler\"/\"Non\" d'une boîte de dialogue simple reste kaki/gris (accent_warm), pas rouge.",
+    "top": "#C9524A",
+    "bottom": "#AF433C",
+    "border": "#0F1114",
+    "text": "#FFFFFF"
+  },
+  "tab_inactive_fill": "#353633",
+  "tab_inactive_text": "#BBA579",
+  "modal": {
+    "_note": "Révision 2026-09-09 (§9 bis du design-system.md) — mesures affinées via `.claude/skills/design-asset/scripts/dsimg.py analyze` sur les assets eux-mêmes plutôt qu'un échantillonnage manuel ; valeurs en px utilisées TELLES QUELLES par `panels::options_modal` (fenêtre overlay dédiée 560×436, pas une échelle d'interface du client).",
+    "window_size_px": [560, 436],
+    "corner_radius_modal_px": 12,
+    "corner_radius_section_px": 18,
+    "banner_height_px": 56,
+    "menu_height_px": 31,
+    "footer_button_height_px": [41, 42],
+    "gap_banner_to_menu_px": 14,
+    "gap_menu_to_section_px": 14,
+    "gap_section_to_footer_px": 14,
+    "residual_margin_below_footer_px": 12,
+    "modal_bg": "#1C2023",
+    "section_bg": "#13161B"
+  },
+  "rarity_borders": {
+    "commun": { "light": "#C4C5C5", "dark": "#67696B", "_note": "gris neutre sans teinte, identique au cadre d'un emplacement vide" },
+    "rare": { "light": "#28C080", "dark": "#0F6E3E" },
+    "mythique": { "light": "#C97E1E", "dark": "#3B230D" },
+    "legendaire": { "light": "#C4CC17", "dark": "#333B0E" },
+    "epique": { "light": "#E050A8", "dark": "#33132A" },
+    "relique": { "light": "#A878E8", "dark": "#2C1F42" },
+    "souvenir": { "light": "#2898C0", "dark": "#0C2838" },
+    "ancien_objet": { "light": null, "dark": null, "_note": "pas de rendu visuel propre pour cette categorie de filtre, rien a capturer" }
+  },
+  "scrollbar": {
+    "handle_active": "#C0AC83",
+    "handle_inactive": "#5C5E61",
+    "track": "#242327",
+    "track_width_px": 14,
+    "handle_width_px": 4
+  },
+  "status_pill_active": {
+    "fill": "#E6D290",
+    "text": "#101215"
+  },
+  "typography": {
+    "display": {
+      "style": "serif à empattements, caractère médiéval-fantastique",
+      "weight": "bold",
+      "usage": ["titres de bannière", "texte de bouton", "en-têtes de section repliable"],
+      "font_family_identified": false,
+      "source_font_available": false,
+      "substitution_candidates": ["IM Fell English", "Cinzel", "Pirata One"]
+    },
+    "body": {
+      "style": "sans-serif neutre",
+      "weight": "regular à semi-bold",
+      "usage": ["tooltip", "tableaux", "champs de saisie", "onglets inactifs"],
+      "font_family_identified": false,
+      "source_font_available": false,
+      "substitution_candidates": ["police sans-serif système"]
+    },
+    "sizes_px_approx": {
+      "window_title": [18, 20],
+      "button_text": [15, 16],
+      "section_header": [14, 15],
+      "body_text": 13,
+      "field_label": 13
+    }
+  },
+  "dimensions_px": {
+    "button_text_height": [63, 66],
+    "button_icon_square": [50, 54],
+    "checkbox": 28,
+    "input_standard_height": [41, 45],
+    "input_compact_height": [33, 36],
+    "stepper_height": [41, 48],
+    "stepper_button_square": 30,
+    "tab_row_height": [57, 58],
+    "collapse_header_height": [38, 45],
+    "item_slot_square": [63, 64],
+    "item_slot_gap": 2,
+    "item_slot_border": 2,
+    "input_border_width": 1,
+    "button_border_width": [1, 2],
+    "button_chamfer_cut": [8, 10]
+  },
+  "shape": {
+    "corner_style": "chamfer_octagonal_on_buttons_and_banners",
+    "corner_style_inputs_lists": "square_or_near_square",
+    "texture_overlay": "diagonal_crosshatch_weave_on_all_interactive_fills"
+  }
+}

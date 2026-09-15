@@ -1,0 +1,7 @@
+ INFO 22:36:50,755 [AWT-EventQueue-0] (faw:1405) - [_FL_] fightId=1632072591 El Pochito breed : 2443 [-1794402971074146] isControlledByAI=true obstacleId : -1 join the fight at {Point3 : (-70, -74, 4)}
+ INFO 22:36:50,755 [AWT-EventQueue-0] (faw:1405) - [_FL_] fightId=1632072591 Rey Mystroolrio breed : 2442 [-1794402971074143] isControlledByAI=true obstacleId : -1 join the fight at {Point3 : (-72, -71, 4)}
+ INFO 22:36:50,755 [AWT-EventQueue-0] (faw:1405) - [_FL_] fightId=1632072591 The Undertroolker breed : 2441 [-1794402971074144] isControlledByAI=true obstacleId : -1 join the fight at {Point3 : (-71, -76, 4)}
+ INFO 22:36:50,755 [AWT-EventQueue-0] (faw:1405) - [_FL_] fightId=1632072591 Troolk Hoogan breed : 2440 [-1794402971074145] isControlledByAI=true obstacleId : -1 join the fight at {Point3 : (-71, -72, 4)}
+ INFO 22:36:50,758 [AWT-EventQueue-0] (faw:1405) - [_FL_] fightId=1632072591 Oumbra Canin breed : 15 [11509724] isControlledByAI=false obstacleId : -1 join the fight at {Point3 : (-61, -68, 0)}
+ INFO 22:43:56,340 [AWT-EventQueue-0] (aPV:174) - [Information (jeu)] Vous avez ramassé 1x Cape d'El Pochito .
+ INFO 22:43:57,753 [AWT-EventQueue-0] (aWF:91) - [FIGHT] End fight with id 1632072591

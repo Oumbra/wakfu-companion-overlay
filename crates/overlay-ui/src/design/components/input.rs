@@ -1,0 +1,653 @@
+//! **Champ de saisie** du design system Wakfu — un champ de formulaire : une valeur qu'on lit et
+//! qu'on écrit, un texte indicatif quand elle est vide, une taille.
+//!
+//! ```ignore
+//! use overlay_ui::design::{self, InputSize};
+//!
+//! // La valeur vit chez l'appelant : le composant l'écrit, l'appelant la relit.
+//! ui.add(design::input(&mut state.chemin).placeholder("Chemin vers wakfu.log"));
+//!
+//! if ui.add(design::input(&mut state.recherche).width(240.0)).changed() {
+//!     // `Response::changed()` — la frame où la valeur vient d'être modifiée.
+//! }
+//! ```
+//!
+//! **Vide = le texte indicatif s'affiche.** Il n'y a pas de troisième état : une valeur est une
+//! `String`, et une `String` vide *est* l'absence de valeur pour un champ texte. Envelopper la
+//! valeur dans une `Option` n'ajouterait aucune information et obligerait chaque appelant à
+//! choisir entre `None` et `Some("")` sans savoir lequel veut dire quoi.
+//!
+//! ## Ce qui a été mesuré
+//!
+//! Sur la barre de recherche de l'onglet Commandes
+//! (`assets/design-system/interfaces/interface-options-commandes.png`, champ en x 30..500,
+//! y 138..163), recoupée avec les assets isolés via
+//! `.claude/skills/design-asset/scripts/dsimg.py analyze` :
+//!
+//! | Grandeur | Valeur | Source |
+//! | --- | --- | --- |
+//! | Hauteur native | **25 px** | capture (y 138..163) ET `large-input-text-width-placeholder.png` (composant 258 × 25) — deux sources indépendantes qui tombent d'accord |
+//! | Bord | **2 px `#595140`** | capture (y 138-139 et 161-162, x 30-31 et 498-499) ; même couleur sur les quatre assets de champ |
+//! | Rayon | **4** | `dsimg.py analyze`, ajustement parfait (IoU 1,0) sur deux assets |
+//! | Fond | **`#0e1115`** | capture — bien plus sombre que le panneau qui le porte |
+//! | Retrait du texte | **6 px** depuis le bord extérieur | premier glyphe de « Rechercher » à x=36 pour un champ à x=30 |
+//! | Corps | **17 px** (encre 13) | même encre que les libellés de bouton, donc même corps |
+//!
+//! **Une valeur saisie est OR (`#f4d89e`), pas blanche.** C'est le constat le plus contre-intuitif
+//! du relevé, et il tient sur trois assets indépendants : `input-search.png` (« aa »),
+//! `input-number.png` et `large-input-number.png` donnent tous le même pic `#f4d89e`. Le texte
+//! indicatif, lui, est un kaki éteint (`#83775b`) — la même famille chromatique que le bord, en
+//! plus sourd. Un champ dont la valeur serait blanche ne ressemblerait pas au jeu.
+//!
+//! ## Le champ fait 25 px là où un bouton en fait 36
+//!
+//! Ce n'est pas une incohérence à corriger : le jeu compose réellement des lignes où un champ est
+//! plus bas que le bouton d'à côté. La règle du design system s'applique telle quelle — **la
+//! hauteur d'un composant est celle de sa référence**, et c'est à la mise en page de centrer le
+//! plus petit sur la ligne.
+//!
+//! ## Ce qui n'a PAS de référence, et est donc inventé
+//!
+//! Deux états, signalés comme tels plutôt que présentés comme mesurés :
+//!
+//! - **Survolé** : aucune capture d'un champ survolé. Le composant ne change donc **rien** au
+//!   survol — inventer un éclaircissement serait inventer du design. Seul le curseur de la souris
+//!   change (`CursorIcon::Text`), ce qui est un comportement de plateforme, pas une décision
+//!   esthétique.
+//! - **Désactivé** : aucune capture non plus. Le bord et le texte passent à `TEXT_DISABLED`, par
+//!   cohérence avec le bouton désactivé. À remplacer par une mesure dès qu'une capture existe.
+//! - **Erreur** : aucune capture non plus — le client Wakfu ne refuse pas de saisie dans les écrans
+//!   relevés. La couleur, elle, n'est **pas** inventée : c'est [`tokens::INFO_ALERT`] (`#c9524a`),
+//!   le rouge mesuré du bouton « Annuler », déjà le seul rouge du design system et déjà celui du
+//!   message qui accompagne le champ (`InfoTone::Alert`). Ce qui est décidé ici, c'est *où* il se
+//!   pose : **sur le bord, et nulle part ailleurs**.
+//!
+//! ## Pourquoi un quatrième état plutôt qu'un ton
+//!
+//! Les trois états du design system décrivent ce que l'**interface** permet — repos, survol,
+//! désactivé — et un bouton les épuise. Un champ a quelque chose qu'un bouton n'a pas : une
+//! **valeur**, qui peut être refusée alors que le champ reste parfaitement actif. `Error` n'est donc
+//! pas une variante de `Disabled` mais son contraire : le champ est éditable, il faut justement
+//! qu'on y revienne.
+//!
+//! Le composant **ne valide rien** : il ne sait pas ce qu'est un chemin correct, un nombre dans les
+//! bornes, un nom déjà pris. La validation appartient à l'appelant, qui la possède déjà (la modale
+//! Options porte son `state.error`), et le champ se contente de la refléter.
+
+use egui::{Align2, Response, Sense, Ui, Vec2, Widget};
+
+use crate::design::{text, tokens};
+
+/// Gabarit de hauteur. `Standard` est la **hauteur native** relevée dans le jeu, pas un palier
+/// inventé — voir la doc de module.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum InputSize {
+    /// 25 px — la hauteur des champs de formulaire relevés (onglet Commandes, champs numériques).
+    Standard,
+    /// 28 px — la **barre de recherche** du jeu (`empty-input-search.png`, `input-search.png`),
+    /// voir [`tokens::INPUT_SEARCH_HEIGHT`]. Même encre de texte que `Standard` : c'est la boîte
+    /// qui est plus haute, pas le corps qui grandit — un « R » de 12 px dans 28, mesuré.
+    Search,
+    /// Hauteur libre. Le corps de police et le retrait du texte suivent
+    /// (`tokens::INPUT_FONT_SIZE_RATIO`), donc un champ de hauteur arbitraire reste proportionné.
+    Height(f32),
+}
+
+impl InputSize {
+    /// `const` pour qu'un panneau puisse en dériver une constante de mise en page — voir
+    /// `panels::options_modal::FIELD_HEIGHT`.
+    pub const fn height(self) -> f32 {
+        match self {
+            InputSize::Standard => 25.0,
+            InputSize::Search => tokens::INPUT_SEARCH_HEIGHT,
+            InputSize::Height(h) => h,
+        }
+    }
+
+    /// Corps du texte. Les deux gabarits relevés écrivent **la même encre** (12 px de capitale) :
+    /// 17 px de corps pour l'un comme pour l'autre. Seule une hauteur libre met le corps à
+    /// l'échelle.
+    pub fn font_size(self) -> f32 {
+        match self {
+            InputSize::Standard | InputSize::Search => 25.0 * tokens::INPUT_FONT_SIZE_RATIO,
+            InputSize::Height(h) => h * tokens::INPUT_FONT_SIZE_RATIO,
+        }
+    }
+
+    /// Retrait du texte depuis le bord — 6 px sur les deux gabarits relevés (le texte de la barre
+    /// de recherche démarre à 28 px, mais c'est l'ornement qui les occupe, voir `leading_icon`).
+    pub fn pad_x(self) -> f32 {
+        match self {
+            InputSize::Standard | InputSize::Search => 25.0 * tokens::INPUT_PADDING_X_RATIO,
+            InputSize::Height(h) => h * tokens::INPUT_PADDING_X_RATIO,
+        }
+    }
+}
+
+/// État visuel d'un champ — les trois états communs du design system (voir `components`), plus
+/// `Error`. `Hovered` est visuellement identique à `Idle` faute de référence (doc de module).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputState {
+    Idle,
+    Hovered,
+    Disabled,
+    /// Valeur refusée par l'appelant. **Quatrième état, propre au champ** : un bouton n'a pas de
+    /// valeur à invalider. Voir [`Input::error`] et la doc de module.
+    Error,
+}
+
+/// Construit un champ de saisie sur `text`. Point d'entrée unique — voir la doc de module.
+pub fn input(text: &mut String) -> Input<'_> {
+    Input::new(text)
+}
+
+pub struct Input<'a> {
+    text: &'a mut String,
+    placeholder: Option<String>,
+    size: InputSize,
+    width: Option<f32>,
+    enabled: bool,
+    error: bool,
+    read_only: bool,
+    box_height: Option<f32>,
+    tooltip: Option<String>,
+    log_name: Option<String>,
+    forced_state: Option<InputState>,
+    request_focus: bool,
+    leading_icon: Option<crate::design::DsIcon>,
+    clearable: bool,
+}
+
+impl<'a> Input<'a> {
+    pub fn new(text: &'a mut String) -> Self {
+        Self {
+            text,
+            placeholder: None,
+            size: InputSize::Standard,
+            width: None,
+            enabled: true,
+            error: false,
+            read_only: false,
+            box_height: None,
+            tooltip: None,
+            log_name: None,
+            forced_state: None,
+            request_focus: false,
+            leading_icon: None,
+            clearable: false,
+        }
+    }
+
+    /// Pose une **croix d'effacement** à droite du champ, visible dès qu'une valeur est saisie
+    /// (`input-search.png` : le « × » n'apparaît que sur le champ rempli, `empty-input-search.png`
+    /// n'en a pas). Un clic vide la valeur d'un geste et rend le focus au champ — plutôt qu'une
+    /// rafale de retours arrière (retour utilisateur du 2026-09-12 : « quelque chose de
+    /// fastidieux »).
+    ///
+    /// **Le composant réserve la place de la croix dès qu'elle est possible**, valeur ou pas :
+    /// sinon le texte se décalerait au premier caractère tapé. Sans effet sur un champ en lecture
+    /// seule ou désactivé — il n'y a rien à effacer qu'on soit autorisé à effacer.
+    pub fn clearable(mut self, clearable: bool) -> Self {
+        self.clearable = clearable;
+        self
+    }
+
+    /// Pose une icône **à l'intérieur** du champ, collée au bord gauche — la loupe d'une barre de
+    /// recherche, telle que le jeu la place partout (`interface-hdv-achat.png` x 27..39,
+    /// `interface-personnage-equiement.png` x 768..780, `interface-options-commandes.png`
+    /// x 36..48). Jamais un bouton icône posé à côté du champ : le jeu ne fait pas ça.
+    ///
+    /// **Le composant, et lui seul, réserve la gouttière** (`tokens::INPUT_LEADING_ICON_*`) en
+    /// avançant le bord gauche du texte — donc pour le texte indicatif ET pour la valeur saisie, et
+    /// l'icône est peinte dans le `clip_rect` du champ. C'est la différence avec le pis-aller qui a
+    /// précédé ce paramètre : des espaces de tête dans le texte indicatif, qui ne décalaient rien
+    /// d'autre et laissaient une valeur saisie démarrer sous l'icône.
+    ///
+    /// L'icône prend `INPUT_PLACEHOLDER` au repos et `TEXT_DISABLED` désactivée. Elle ne change pas
+    /// avec la présence d'une valeur : mesuré sur `empty-input-search.png` et `input-search.png`,
+    /// dont le profil de la colonne de la loupe est rigoureusement identique.
+    pub fn leading_icon(mut self, icon: crate::design::DsIcon) -> Self {
+        self.leading_icon = Some(icon);
+        self
+    }
+
+    /// Texte affiché tant que la valeur est vide.
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    pub fn size(mut self, size: InputSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Largeur imposée. **Sans elle, le champ prend toute la largeur disponible** — c'est l'inverse
+    /// du bouton, qui se cale sur son libellé, et c'est voulu : un champ de saisie n'a pas de
+    /// contenu au moment où on le place, sa largeur ne peut venir que de la mise en page.
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    /// **Étire la boîte en hauteur sans toucher à son contenu** — le corps du texte, les marges et
+    /// l'ornement restent ceux du gabarit choisi par [`Input::size`].
+    ///
+    /// À ne pas confondre avec `size(InputSize::Height(h))`, qui met tout à l'échelle : un champ de
+    /// 32 px y écrit en corps 22 au lieu de 17, et le texte grossit d'un tiers.
+    ///
+    /// Sert à aligner un champ sur un voisin plus haut. C'est le cas du champ central d'un
+    /// [`design::stepper`](super::stepper), qui prend la hauteur de ses boutons — mais dont le texte
+    /// doit rester celui que le jeu écrit : 12 px d'encre, mesurés sur `large-input-number.png`.
+    pub fn box_height(mut self, height: f32) -> Self {
+        self.box_height = Some(height);
+        self
+    }
+
+    /// Champ **non éditable, mais d'apparence normale** — à ne pas confondre avec
+    /// `enabled(false)`, qui grise la valeur pour dire « ce réglage ne s'applique pas ».
+    ///
+    /// Un champ en lecture seule affiche une valeur qui compte, et que l'utilisateur change par un
+    /// autre moyen : c'est le cas du champ central d'un [`design::stepper`](super::stepper), dont
+    /// la valeur se règle aux deux boutons. Le jeu l'écrit dans son or habituel, pas en gris.
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
+    /// Signale que la valeur a été **refusée par l'appelant** : le bord passe au rouge d'alerte.
+    ///
+    /// Le composant ne valide rien lui-même et ne porte aucun message — il ne sait pas ce qu'est une
+    /// valeur correcte, et le message appartient à [`design::info_text`](super::info_text), qui
+    /// sait le mettre en page. Le motif complet est celui de la modale Options :
+    ///
+    /// ```ignore
+    /// ui.add(design::input(&mut state.path_input).error(state.error.is_some()));
+    /// if let Some(err) = &state.error {
+    ///     ui.add(design::info_text(err).tone(design::InfoTone::Alert));
+    /// }
+    /// ```
+    ///
+    /// Un champ désactivé reste désactivé même en erreur — voir la résolution d'état dans
+    /// `Widget::ui`.
+    pub fn error(mut self, error: bool) -> Self {
+        self.error = error;
+        self
+    }
+
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    /// Nom d'instance pour la journalisation (défaut : le texte indicatif, puis `"input"`). À
+    /// renseigner dès qu'un formulaire porte plusieurs champs, sans quoi les lignes de
+    /// `overlay-ui.<date>.log` sont indiscernables.
+    pub fn log_name(mut self, name: impl Into<String>) -> Self {
+        self.log_name = Some(name.into());
+        self
+    }
+
+    /// Demande le focus clavier POUR CETTE FRAME. À n'appeler qu'une fois — sinon le champ
+    /// reprendrait le focus à chaque frame et l'utilisateur ne pourrait plus le quitter.
+    ///
+    /// C'est bien à l'appelant de décider *quand* (voir `panels::options_modal`, qui le fait à la
+    /// première frame de la modale) : le composant n'a aucun moyen de savoir si le formulaire vient
+    /// de s'ouvrir ou s'il est affiché depuis dix minutes.
+    pub fn request_focus(mut self, request: bool) -> Self {
+        self.request_focus = request;
+        self
+    }
+
+    /// Force l'état peint, **sans passer par l'interaction** — réservé à la galerie de contrôle et
+    /// aux captures de non-régression, où aucun pointeur ne survole quoi que ce soit. Même rôle que
+    /// `Button::preview_state`.
+    pub fn preview_state(mut self, state: InputState) -> Self {
+        self.forced_state = Some(state);
+        self
+    }
+
+    /// Taille que le champ occupera, sans le dessiner. `None` en largeur si elle n'est pas imposée :
+    /// elle dépend alors de la place disponible, que seul `ui` connaît au moment du rendu.
+    pub fn desired_size(&self) -> (Option<f32>, f32) {
+        (self.width, self.box_height.unwrap_or(self.size.height()))
+    }
+}
+
+impl Widget for Input<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        // Deux hauteurs, et c'est tout l'objet de `box_height` : `height` est le **gabarit**, dont
+        // dérivent le corps du texte, les marges et l'ornement ; `box_height` est la **boîte**
+        // réellement peinte. Elles ne diffèrent que lorsqu'un appelant étire le champ pour l'aligner
+        // sur un voisin plus haut, et alors le contenu ne doit pas grossir avec elle.
+        let height = self.size.height();
+        let box_height = self.box_height.unwrap_or(height);
+        let width = self.width.unwrap_or_else(|| ui.available_width());
+        let font = text::label_font(ui.ctx(), self.size.font_size());
+        let pad_x = self.size.pad_x();
+
+        let (rect, frame_response) =
+            ui.allocate_exact_size(Vec2::new(width, box_height), Sense::hover());
+
+        // **La croix d'effacement se joue AVANT la zone d'édition**, pour deux raisons : c'est
+        // elle qui décide de la place laissée au texte, et son clic doit vider la valeur avant que
+        // `TextEdit` ne l'emprunte. `interact` sur un rectangle plutôt qu'un bouton alloué : la
+        // croix vit DANS le champ, elle ne prend pas de place dans la mise en page.
+        let clear_possible = self.clearable && self.enabled && !self.read_only;
+        let mut clear_room = 0.0;
+        let mut cleared = false;
+        let mut clear_paint: Option<(egui::Rect, bool)> = None;
+        if clear_possible {
+            let side = height * tokens::INPUT_CLEAR_ICON_RATIO;
+            let inset = height * tokens::INPUT_CLEAR_INSET_RATIO;
+            let gap = height * tokens::INPUT_CLEAR_GAP_RATIO;
+            let native = crate::design::DesignSystem::get(ui.ctx())
+                .icon_native_size(crate::design::DsIcon::Close);
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - inset - side / 2.0, rect.center().y),
+                super::icon_button::glyph_fit(native, side),
+            );
+            clear_room = (inset + side + gap - pad_x).max(0.0);
+            if !self.text.is_empty() {
+                // La zone cliquable déborde de l'encre : une croix de 12 px se rate à la souris.
+                let hit = icon_rect.expand(4.0);
+                let response = ui
+                    .interact(
+                        hit,
+                        frame_response.id.with("ds-input-clear"),
+                        Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.clicked() {
+                    self.text.clear();
+                    cleared = true;
+                } else {
+                    clear_paint = Some((icon_rect, response.hovered()));
+                }
+            }
+        }
+
+        let state = self.forced_state.unwrap_or({
+            // **`Disabled` passe avant `Error`** : on ne corrige pas ce qu'on ne peut pas éditer,
+            // et un bord rouge sur un champ grisé promettrait une saisie qui n'aura pas lieu.
+            // `Error` passe avant `Hovered` — le survol ne doit pas masquer l'alerte.
+            if !self.enabled {
+                InputState::Disabled
+            } else if self.error {
+                InputState::Error
+            } else if frame_response.hovered() {
+                InputState::Hovered
+            } else {
+                InputState::Idle
+            }
+        });
+        let (border, value_color) = match state {
+            // `Hovered` est délibérément identique à `Idle` — voir la doc de module.
+            InputState::Idle | InputState::Hovered => (tokens::INPUT_BORDER, tokens::INPUT_TEXT),
+            InputState::Disabled => (tokens::TEXT_DISABLED, tokens::TEXT_DISABLED),
+            // **Seul le bord change.** La valeur reste or : c'est ce que l'utilisateur a tapé, et
+            // la teindre en rouge la donnerait à lire comme un message plutôt que comme une
+            // saisie — en plus de perdre le contraste voulu sur le fond très sombre du champ.
+            InputState::Error => (tokens::INPUT_BORDER_ERROR, tokens::INPUT_TEXT),
+        };
+
+        if ui.is_rect_visible(rect) {
+            ui.painter()
+                .rect_filled(rect, tokens::INPUT_RADIUS, tokens::INPUT_FILL);
+            ui.painter().rect_stroke(
+                rect,
+                tokens::INPUT_RADIUS,
+                egui::Stroke::new(tokens::INPUT_BORDER_WIDTH, border),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        // Ornement de gauche — peint AVANT le texte, et surtout : la place qu'il occupe est
+        // retirée de celle du texte juste après. Voir `Input::leading_icon`.
+        let leading = self.leading_icon.map(|icon| {
+            let side = height * tokens::INPUT_LEADING_ICON_RATIO;
+            let inset = height * tokens::INPUT_LEADING_ICON_INSET_RATIO;
+            let gap = height * tokens::INPUT_LEADING_ICON_GAP_RATIO;
+            // `glyph_fit` et non `Vec2::splat` : le paramètre accepte n'importe quel
+            // `DsTexture`, et un carré déformerait tout glyphe qui n'en est pas un. La règle est
+            // celle du design system, partagée avec le bouton icône — il ne doit y en avoir
+            // qu'une.
+            let native = crate::design::DesignSystem::get(ui.ctx()).icon_native_size(icon);
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.left() + inset + side / 2.0, rect.center().y),
+                super::icon_button::glyph_fit(native, side),
+            );
+            if ui.is_rect_visible(rect) {
+                let tint = match state {
+                    InputState::Disabled => tokens::TEXT_DISABLED,
+                    _ => tokens::INPUT_ICON,
+                };
+                // **En miroir.** Le glyphe du manifeste (`icon-search.png`) a son manche en bas à
+                // DROITE ; la barre de recherche du jeu (`empty-input-search.png`) le pose en bas
+                // à GAUCHE. Retour utilisateur du 2026-09-12 (« la loupe n'est pas dans le bon
+                // sens »). Le retournement se fait en coordonnées de texture, pas par un second
+                // fichier — voir `DesignSystem::paint_icon_flipped`.
+                crate::design::DesignSystem::get(ui.ctx()).paint_icon_flipped(
+                    &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
+                    icon_rect,
+                    icon,
+                    tint,
+                    true,
+                );
+            }
+            // Ce que le texte perd à gauche : le retrait, l'icône, la gouttière — moins le
+            // rembourrage que le champ lui donnait déjà.
+            (inset + side + gap - pad_x).max(0.0)
+        });
+        let leading_room = leading.unwrap_or(0.0);
+
+        // Une seule ligne de texte, centrée verticalement dans le champ. Le rectangle est calculé
+        // ici plutôt que laissé à egui : `TextEdit` prend la hauteur d'une ligne et se pose en haut
+        // de l'espace qu'on lui donne, ce qui collerait le texte au bord supérieur.
+        let row_height = ui.fonts_mut(|f| f.row_height(&font));
+        let text_rect = egui::Rect::from_center_size(
+            egui::pos2(
+                rect.center().x + (leading_room - clear_room) / 2.0,
+                rect.center().y,
+            ),
+            Vec2::new(
+                (width - 2.0 * pad_x - leading_room - clear_room).max(0.0),
+                row_height,
+            ),
+        );
+
+        let empty = self.text.is_empty();
+        let enabled = self.enabled;
+        // `interactive(false)` et non `add_enabled(false)` : le premier retire la saisie et le
+        // focus en laissant la valeur peinte de sa couleur normale, le second la grise. Un champ en
+        // lecture seule n'est pas un champ désactivé — voir `Input::read_only`.
+        let edit = egui::TextEdit::singleline(self.text)
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::ZERO)
+            .font(font.clone())
+            .text_color(value_color)
+            .interactive(!self.read_only)
+            .desired_width(text_rect.width());
+        // **Dans un ENFANT, jamais dans un scope du `ui` de l'appelant.** Un `scope_builder`
+        // avance le curseur du parent jusqu'à la fin de `text_rect` — plus court que le champ des
+        // marges, de la croix d'effacement et de l'icône de tête — et dans une rangée horizontale
+        // le widget suivant venait se poser 21 px trop à gauche, sur le champ (constaté le
+        // 2026-09-13 sur les maquettes de l'onglet Chat, voir `tests/input_row.rs` d'`overlay-
+        // testkit`). Un enfant a son propre curseur : la place du champ, c'est
+        // `allocate_exact_size` plus haut qui l'a prise, et elle seule.
+        let mut edit_child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
+        let mut edit_response = edit_child.add_enabled(enabled, edit);
+        if self.request_focus {
+            edit_response.request_focus();
+        }
+        if cleared {
+            // Effacer, c'est modifier : l'appelant qui écoute `changed()` doit le voir. Et le
+            // focus revient au champ — l'appui sur la croix le lui avait retiré, or on efface
+            // pour retaper, pas pour partir.
+            edit_response.mark_changed();
+            edit_response.request_focus();
+        }
+        if let Some((icon_rect, hovered)) = clear_paint {
+            if ui.is_rect_visible(rect) {
+                crate::design::DesignSystem::get(ui.ctx()).paint_icon(
+                    &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())),
+                    icon_rect,
+                    crate::design::DsIcon::Close,
+                    if hovered {
+                        tokens::INPUT_CLEAR_ICON_HOVERED
+                    } else {
+                        tokens::INPUT_CLEAR_ICON
+                    },
+                );
+            }
+        }
+
+        // Le texte indicatif est peint À LA MAIN plutôt que confié à `TextEdit::hint_text` :
+        // egui écrase la couleur d'un `hint_text` par `Visuals::weak_text_color()`
+        // (`text_edit/builder.rs`, « hint_text.map_texts(…) »), il est donc impossible de lui
+        // imposer le kaki éteint du jeu par cette voie.
+        if empty {
+            if let Some(placeholder) = &self.placeholder {
+                ui.painter()
+                    .with_clip_rect(text_rect.intersect(ui.clip_rect()))
+                    .text(
+                        text_rect.left_center(),
+                        Align2::LEFT_CENTER,
+                        placeholder,
+                        font.clone(),
+                        tokens::INPUT_PLACEHOLDER,
+                    );
+            }
+        }
+
+        let name = self
+            .log_name
+            .as_deref()
+            .or(self.placeholder.as_deref())
+            .unwrap_or("input");
+
+        // Champ trop étroit pour son propre texte indicatif : c'est un défaut de mise en page (la
+        // valeur saisie, elle, défile normalement, ce n'est pas un défaut). Signalé UNE fois par
+        // instance, comme le débordement d'un libellé de bouton.
+        if let Some(placeholder) = &self.placeholder {
+            let needed = ui
+                .painter()
+                .layout_no_wrap(placeholder.clone(), font, egui::Color32::PLACEHOLDER)
+                .size()
+                .x;
+            if needed > text_rect.width() + 0.5 {
+                let warned_id = frame_response.id.with("ds-input-overflow");
+                let already = ui.data_mut(|d| {
+                    let seen = d.get_temp::<bool>(warned_id).unwrap_or(false);
+                    d.insert_temp(warned_id, true);
+                    seen
+                });
+                if !already {
+                    tracing::warn!(
+                        component = "input",
+                        name,
+                        largeur = text_rect.width(),
+                        requise = needed,
+                        "texte indicatif écrêté : le champ est plus étroit que son contenu"
+                    );
+                }
+            }
+        }
+
+        if cleared {
+            tracing::debug!(component = "input", name, "valeur effacée par la croix");
+        } else if edit_response.changed() {
+            tracing::debug!(component = "input", name, "valeur modifiée");
+        }
+
+        // **L'ordre de cette union décide de l'`id` rendu, et cet `id` porte le FOCUS.**
+        //
+        // `Response::union` conserve l'id de l'opérande de GAUCHE, et `Response::has_focus()`
+        // interroge la mémoire d'egui avec cet id — pas un drapeau que l'union combinerait. Dans
+        // l'autre sens (`frame_response.union(edit_response)`, le code d'avant le 2026-09-12),
+        // l'appelant recevait donc l'id du CADRE, qui n'est pas focalisable : `has_focus()` était
+        // **toujours faux**.
+        //
+        // Le symptôme était à l'autre bout du design system — le panneau de `design::autocomplete`
+        // ne s'ouvrait jamais en conditions réelles (« j'ai essayé le champ d'auto-complétion mais
+        // celui-ci ne semblait pas fonctionner »), et rien ne le signalait parce que la galerie
+        // force l'état déplié par `preview_open`. Il a fallu un test qui clique et qui tape.
+        //
+        // Dans ce sens, l'id rendu est celui de la zone d'édition, ce qui est aussi le plus juste :
+        // la réponse d'un champ de saisie EST celle de ce qu'on y saisit.
+        let response = edit_response.union(frame_response);
+        let response = if enabled && !self.read_only {
+            response.on_hover_cursor(egui::CursorIcon::Text)
+        } else {
+            response
+        };
+        // L'infobulle passe par le composant du design system, jamais par `on_hover_text` :
+        // celui-ci aligne en `RectAlign::BOTTOM_START` (sous l'élément, voir `Popup::new`) et
+        // laisse au libellé le gris d'egui. Voir `components::tooltip`.
+        if let Some(tooltip) = self.tooltip {
+            crate::design::tooltip(&response).text(tooltip);
+        }
+        response
+    }
+}
+
+#[cfg(test)]
+mod geometrie_tests {
+    use super::*;
+
+    /// 25 px est **la hauteur relevée de tous les champs du jeu**, pas un palier choisi. Le corps
+    /// de police et le retrait du texte en dérivent (`tokens::INPUT_FONT_SIZE_RATIO`,
+    /// `INPUT_PADDING_X_RATIO`) : la changer désaccorde le champ entier.
+    #[test]
+    fn le_gabarit_standard_est_la_hauteur_relevee() {
+        assert_eq!(InputSize::Standard.height(), 25.0);
+        assert_eq!(InputSize::Height(36.0).height(), 36.0);
+    }
+
+    /// La largeur n'est connue qu'au rendu quand elle n'est pas imposée — c'est ce que dit le
+    /// `None`, et c'est ce qui permet à un appelant de mesurer un champ avant de le poser.
+    #[test]
+    fn la_largeur_desiree_n_existe_que_si_elle_est_imposee() {
+        let mut valeur = String::new();
+        assert_eq!(input(&mut valeur).desired_size(), (None, 25.0));
+
+        let mut valeur = String::new();
+        assert_eq!(
+            input(&mut valeur).width(320.0).desired_size(),
+            (Some(320.0), 25.0),
+        );
+
+        let mut valeur = String::new();
+        assert_eq!(
+            input(&mut valeur)
+                .size(InputSize::Height(36.0))
+                .desired_size(),
+            (None, 36.0),
+        );
+    }
+}
+
+#[cfg(test)]
+mod leading_icon_tests {
+    use crate::design::tokens;
+
+    /// **Les trois ratios de l'ornement somment à 1** : le texte d'un champ à ornement démarre
+    /// exactement à une hauteur de champ de son bord extérieur (`empty-input-search.png` : bord
+    /// x=2, premier glyphe x=30, champ de 28 px). Sans ce garde-fou, ajuster un ratio à l'œil
+    /// ferait cesser aux deux autres de dire ce que la capture dit.
+    #[test]
+    fn les_trois_ratios_de_l_ornement_somment_a_une_hauteur_de_champ() {
+        let somme = tokens::INPUT_LEADING_ICON_INSET_RATIO
+            + tokens::INPUT_LEADING_ICON_RATIO
+            + tokens::INPUT_LEADING_ICON_GAP_RATIO;
+        assert!(
+            (somme - 1.0).abs() < 1e-6,
+            "les ratios de l'ornement somment à {somme}, pas à 1 — voir empty-input-search.png"
+        );
+    }
+}
