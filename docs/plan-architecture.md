@@ -822,8 +822,7 @@ l'**écran de réglage** manquait — la liste ne se modifiait que depuis le sit
 validée (`crates/overlay-testkit/examples/alertes-mockups.rs`, trois versions, la première refusée
 par une revue à trois experts) à de vraies données.
 
-- **Contenu** : titre et description, bouton « Tester le son », bloc « Fermeture de l'alerte »
-  (case « Fermeture automatique » + durée en secondes), champ d'ajout par `design::autocomplete`
+- **Contenu** : titre et description, champ d'ajout par `design::autocomplete`
   sur le catalogue, et la grille de tuiles. Une tuile porte **deux informations qui ne se gênent
   pas** : bordure et pictogramme disent l'état du SON, emplacement de rareté et nom disent ce
   qu'est l'OBJET. Cliquer bascule le son ; la croix de retrait n'existe **pas** sur les dix objets
@@ -1254,8 +1253,8 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   au `GET` (`AccountSettings::chat_filters`) et réécrite en entier au `PATCH`
   (`client::patch_chat_filters`) au **format du web** — `[{ text, channel }]`, `channel` valant
   `global` ou la clé d'un canal, anciens éléments texte relus comme des recherches globales.
-- **Onglet** (`panels::chat_tab`, entre Alertes et Personnages) : « Tester le son », bloc
-  « Fermeture automatique » + durée, formulaire canal → mot → « Ajouter » (Entrée ajoute aussi ;
+- **Onglet** (`panels::chat_tab`, entre Alertes et Personnages) : formulaire canal → mot →
+  « Ajouter » (Entrée ajoute aussi ;
   vide et doublon refusés avec une phrase), grille de tuiles à légende
   (`design::legend_tile`, §9.2) quatre par rangée, croix au survol. **Sans couleur de canal** : les
   thèmes du jeu. Transactionnel comme les autres onglets (`OptionsModalState::chat_draft`,
@@ -1651,9 +1650,9 @@ notifications, juste en dessous de la ligne "Tester le son de l'alerte" ».
 - **Le bouton d'essai est grisé quand le son est coupé** — proposer d'écouter ce qu'on vient de
   faire taire serait une promesse que le jeu ne tiendra pas. Même règle que le champ de durée grisé
   sous une « Fermeture automatique » décochée.
-- **La ligne d'essai est devenue un composant** (`panels::sound_row`) : elle était écrite trois
-  fois à l'identique dans les onglets Suivi, Alertes et Chat, et c'est elle qui porte désormais la
-  case. Même motif que `panels::feature_switch`.
+- **La ligne d'essai est devenue un composant** (`panels::notifications`, `panels::sound_row`
+  jusqu'au 2026-09-15) : elle était écrite trois fois à l'identique dans les onglets Suivi, Alertes
+  et Chat, et c'est elle qui porte désormais la case. Même motif que `panels::feature_switch`.
 - **Pas de case dans « Alertes »**, et ce n'est pas un oubli : le son d'un ramassage s'y coupe déjà
   objet par objet, à la tuile — une sourdine globale ferait double emploi avec un réglage plus fin.
 - **Un brouillon comme le reste de la fenêtre** (§5.1) : la bascule n'a d'effet qu'à « Valider », et
@@ -1668,8 +1667,47 @@ la config, puis à chaque validation) et se contente de ne pas appeler `alert_so
 toast, lui, est publié comme avant. C'est toute la différence avec `SetFeatures`, qui saute
 l'alerte entière.
 
-**Captures** : `options_suivi_son_coupe` et `options_chat_son_coupe` — la case cochée, le bouton
-d'essai grisé, et le reste de l'onglet resté vif.
+**Captures** : `options_parametres_son_coupe` — les deux cases cochées, les deux boutons d'essai
+grisés, et le reste des sections resté vif. (Deux planches d'onglet, `options_suivi_son_coupe` et
+`options_chat_son_coupe`, jusqu'au regroupement du §9.1 quaterdecies.)
+
+### 9.1 quaterdecies Les notifications se règlent dans « Paramètres » (2026-09-15)
+
+Demande utilisateur, en quatre points : uniformiser « Tester le son de l'alerte » en **« Tester le
+son des notifications »** et « Fermeture automatique » en **« Fermeture automatique des
+notifications »**, sortir le couple case + durée de sa ligne à fond arrondi, et **déplacer les
+trois blocs (essai du son, sourdine, fermeture automatique) de tous les onglets dans des sections
+dédiées, après la section « Combat » de l'onglet « Paramètres »**.
+
+**Ce qui existe maintenant :**
+
+- **Quatre sections par fonctionnalité** dans « Paramètres » : « Combat » (inchangée, §9.1 decies),
+  puis « Suivi », « Alertes » et « Chat », dans l'ordre du menu d'onglets. Chacune porte ce que sa
+  fonctionnalité fait entendre et voir — et rien n'a été uniformisé de force : le Suivi n'a pas de
+  fermeture automatique (son alerte est un son et un bandeau permanent, pas une carte à fermer), les
+  Alertes n'ont pas de sourdine globale (le son d'un ramassage se coupe déjà objet par objet, à la
+  tuile, §9.1 terdecies).
+- **`panels::notifications`** (l'ancien `panels::sound_row`) peint ces sections. Il porte aussi le
+  trait `ToastClose`, que `AlertProfile` et `chat_tab::ChatToastSettings` implémentent : le bornage
+  de la durée reste chez eux, le peintre n'en refait pas un à lui.
+- **Les trois onglets ne gardent que ce qu'ils listent** — objets suivis, objets à alerte,
+  recherches. `AlertsTabAction` et `ChatTabAction` ont disparu avec le bouton d'essai, seule
+  intention que ces écrans produisaient ; `SuiviTabAction` ne garde que `ResolveRecipe`.
+- **Une fonctionnalité éteinte grise sa section** (`panels::feature_switch`) : ni son à essayer, ni
+  carte à fermer quand rien ne se déclenche. Un brouillon d'alertes ou de chat pas encore descendu
+  du compte grise sa seule ligne de fermeture, plutôt que de la faire apparaître en cours de route.
+- **Plus de fond de ligne sous la fermeture automatique** : le pavé arrondi `#26282b` venait de la
+  maquette d'« Alertes », où il tranchait sur le reste de l'onglet ; dans une section de
+  « Paramètres » il faisait de la durée le seul réglage encadré de la fenêtre.
+- **L'onglet « Paramètres » défile** (`design::PanelZones::scroll_area`, zone
+  « options-parametres ») : il porte sept sections, et « Mise à jour » tombait hors de la fenêtre
+  sans que rien ne le dise. Agrandir la fenêtre n'était pas une option — elle est posée par-dessus
+  un jeu. Corrigé au passage : la zone défilable rognait le retrait des titres de section, qui
+  rendaient « ichier », « ombat », « uivi ».
+
+**Captures** : `options_parametres_infobulle_test_son`, `options_parametres_son_coupe`,
+`options_parametres_fermeture_manuelle`, et `options_parametres_compte` /
+`options_parametres_mise_a_jour` après défilement.
 
 ### 9.1 tredecies Mise à jour automatique (2026-09-15)
 
