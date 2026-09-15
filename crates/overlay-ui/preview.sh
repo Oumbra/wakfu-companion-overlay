@@ -68,6 +68,12 @@ printf '\n\033[36m=== overlay-ui — prévisualisation (overlay-ui-x11) ===\033[
 printf '\033[36mCtrl+Shift+W = bascule interactif / clic-traversant  |  Ctrl+Shift+Q ou Ctrl+C = quitter\033[0m\n'
 printf '\033[36mLes fenêtres overlay ne s’affichent qu’au-dessus d’une fenêtre de jeu Wakfu ouverte.\033[0m\n\n'
 
+# Le binaire vise la PROD par défaut (`overlay_sync::client::DEFAULT_BASE_URL`, décision du
+# 2026-09-15) ; la prévisualisation locale reste le seul usage du déploiement dev. Une valeur déjà
+# posée dans l'environnement (ex. `wrangler pages dev` local) est respectée.
+export WAKFU_COMPANION_API_URL="${WAKFU_COMPANION_API_URL:-https://claude-dev.wakfu-companion.com}"
+printf '\033[90mAPI : %s\033[0m\n\n' "$WAKFU_COMPANION_API_URL"
+
 CARGO_ARGS=(run -p overlay-ui --bin overlay-ui-x11)
 [ "$BUILD_RELEASE" -eq 1 ] && CARGO_ARGS+=(--release)
 [ -n "$LOG_PATH" ] && CARGO_ARGS+=(-- "$LOG_PATH")
