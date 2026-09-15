@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::shortcuts::ShortcutBindings;
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OverlayConfig {
     /// Chemin explicite de `wakfu.log`, choisi par l'utilisateur via la modale Options — voir
     /// doc de module pour l'ordre de priorité au démarrage et
@@ -80,6 +80,38 @@ pub struct OverlayConfig {
     /// est, qui décident si un son est bienvenu. `#[serde(default)]` comme ses voisines.
     #[serde(default)]
     pub turn_notification_muted: bool,
+    /// La fonctionnalité **Suivi** est-elle active ? — case « Activer le Suivi », tout en haut de
+    /// l'onglet du même nom (2026-09-15).
+    ///
+    /// Décochée, l'onglet entier est grisé et inerte (voir `panels::suivi_tab::show`), le bandeau
+    /// in-game n'affiche plus aucune tuile suivie et l'alerte de décompte à zéro ne se déclenche
+    /// plus (voir `engine_thread::FeatureToggles`). **Le moteur, lui, continue de compter** : rien
+    /// n'est remis à zéro ni effacé du compte, et réactiver la case retrouve la liste et ses
+    /// compteurs exactement où ils en étaient. Désactiver une fonctionnalité met son affichage en
+    /// sourdine, ça ne détruit pas de données.
+    ///
+    /// **Locale et non au compte**, comme ses voisines : ce qu'on accepte de voir par-dessus son
+    /// jeu dépend de l'écran qu'on a devant soi — un multicompte qui n'ouvre l'overlay que pour
+    /// les combats sur une machine peut vouloir tout le Suivi sur l'autre. Le serveur, de plus,
+    /// n'accepte que des clés connues (même raison que `chat_alert_duration_seconds`).
+    ///
+    /// **`true` par défaut, y compris pour une config écrite avant ce champ** : d'où
+    /// `#[serde(default = "actif")]` et non le simple `#[serde(default)]` de ses voisines, qui
+    /// vaudrait `false` et couperait le Suivi de tous ceux qui l'utilisent déjà au premier
+    /// lancement de cette version.
+    #[serde(default = "actif")]
+    pub suivi_enabled: bool,
+    /// La fonctionnalité **Alertes** est-elle active ? — case « Activer les alertes ». Décochée,
+    /// l'onglet est grisé et inerte, et le ramassage d'un objet à son activé ne joue plus rien et
+    /// n'affiche plus de carte. Même politique que [`Self::suivi_enabled`] pour le reste (liste
+    /// conservée au compte, `true` par défaut).
+    #[serde(default = "actif")]
+    pub alerts_enabled: bool,
+    /// La fonctionnalité **Recherche de chat** est-elle active ? — case « Activer la recherche ».
+    /// Décochée, l'onglet « Chat » est grisé et inerte, et aucun message trouvé ne fait plus
+    /// sonner l'overlay ni n'affiche de carte. Même politique que [`Self::suivi_enabled`].
+    #[serde(default = "actif")]
+    pub chat_enabled: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -100,6 +132,33 @@ pub struct OverlayConfig {
     /// `aller_retour_toml_avec_raccourcis_personnalises`.
     #[serde(default)]
     pub shortcuts: BTreeMap<String, String>,
+}
+
+/// Valeur par défaut des trois drapeaux de fonctionnalité — **une fonction, parce que
+/// `#[serde(default)]` ne sait produire que `bool::default()`, c'est-à-dire `false`**. Voir
+/// `OverlayConfig::suivi_enabled` : le défaut d'une fonctionnalité est d'être active.
+fn actif() -> bool {
+    true
+}
+
+impl Default for OverlayConfig {
+    /// Écrit à la main, et non dérivé, pour la seule raison des trois drapeaux de fonctionnalité :
+    /// `bool::default()` vaut `false`, alors qu'une fonctionnalité non réglée est ACTIVE. Tous les
+    /// autres champs gardent le défaut que la dérivation leur donnait.
+    fn default() -> Self {
+        Self {
+            log_path: None,
+            combat_always_visible: false,
+            chat_alert_duration_seconds: None,
+            chat_alert_manual_close: false,
+            turn_notification: false,
+            turn_notification_muted: false,
+            suivi_enabled: actif(),
+            alerts_enabled: actif(),
+            chat_enabled: actif(),
+            shortcuts: BTreeMap::new(),
+        }
+    }
 }
 
 impl OverlayConfig {
@@ -131,6 +190,27 @@ impl OverlayConfig {
     pub fn set_chat_toast(&mut self, toast: crate::panels::chat_tab::ChatToastSettings) {
         self.chat_alert_duration_seconds = Some(toast.duration_seconds);
         self.chat_alert_manual_close = toast.manual_close;
+    }
+
+    /// Les trois interrupteurs de fonctionnalité de cette config — voir
+    /// [`crate::panels::feature_switch::FeatureToggles`], qui les fait voyager ensemble jusqu'au
+    /// thread Engine. Les champs restent PLATS dans le TOML (`suivi_enabled = false`) : un fichier
+    /// qu'on ouvre à la main se lit mieux sans table intermédiaire, et une table ne pourrait de
+    /// toute façon pas se glisser avant `[shortcuts]` sans déplacer les clés de racine.
+    pub fn features(&self) -> crate::panels::feature_switch::FeatureToggles {
+        crate::panels::feature_switch::FeatureToggles {
+            suivi: self.suivi_enabled,
+            alerts: self.alerts_enabled,
+            chat: self.chat_enabled,
+        }
+    }
+
+    /// Reporte les trois interrupteurs dans la config — appelée à la validation de la fenêtre
+    /// Options, jamais à chaque frame.
+    pub fn set_features(&mut self, features: crate::panels::feature_switch::FeatureToggles) {
+        self.suivi_enabled = features.suivi;
+        self.alerts_enabled = features.alerts;
+        self.chat_enabled = features.chat;
     }
 }
 
@@ -271,6 +351,40 @@ mod tests {
         let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
         assert_eq!(relu.chat_toast().duration_seconds, 7.5);
         assert!(relu.chat_toast().manual_close);
+    }
+
+    /// Le défaut d'une fonctionnalité est d'être ACTIVE — y compris pour un `config.toml` écrit
+    /// avant l'existence de ces trois clés (`#[serde(default = "actif")]`, voir le champ). Sans
+    /// cette fonction de défaut, `#[serde(default)]` les mettrait à `false` et couperait Suivi,
+    /// Alertes et Recherche chez tous ceux qui les utilisent déjà.
+    #[test]
+    fn fonctionnalites_actives_par_defaut() {
+        let neuve = OverlayConfig::default();
+        assert!(neuve.suivi_enabled);
+        assert!(neuve.alerts_enabled);
+        assert!(neuve.chat_enabled);
+
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert!(ancienne.suivi_enabled);
+        assert!(ancienne.alerts_enabled);
+        assert!(ancienne.chat_enabled);
+    }
+
+    /// Une fonctionnalité coupée le reste après un aller-retour sur disque : c'est tout l'intérêt
+    /// de la persister.
+    #[test]
+    fn aller_retour_des_fonctionnalites_coupees() {
+        let config = OverlayConfig {
+            suivi_enabled: false,
+            chat_enabled: false,
+            ..Default::default()
+        };
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(!relu.suivi_enabled);
+        assert!(relu.alerts_enabled);
+        assert!(!relu.chat_enabled);
     }
 
     #[test]

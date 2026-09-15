@@ -27,6 +27,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::alert_sound;
 use crate::panels;
 use crate::panels::chat_tab::ChatToastSettings;
+use crate::panels::feature_switch::FeatureToggles;
 use crate::panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use crate::render_content::UserEvent;
 
@@ -77,6 +78,19 @@ pub enum EngineCommand {
     /// Réglages de la carte d'alerte de chat (durée, fermeture manuelle) — locaux à la machine
     /// (voir `config::OverlayConfig`), envoyés au démarrage puis à chaque validation de l'onglet.
     SetChatToast(ChatToastSettings),
+    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le Suivi » / « Activer les
+    /// alertes » / « Activer la recherche » (`panels::feature_switch`, 2026-09-15). Locaux à la
+    /// machine comme `SetChatToast`, envoyés au démarrage puis à chaque validation de la fenêtre
+    /// Options.
+    ///
+    /// **Ce qu'ils coupent ici, et ce qu'ils ne coupent pas** : ce thread cesse de jouer le son et
+    /// d'afficher la carte des alertes concernées. Il continue en revanche à les DRAINER du moteur
+    /// (voir la boucle d'ingestion) et le moteur continue à compter, à suivre et à synchroniser —
+    /// une fonctionnalité coupée met son bruit en sourdine, elle ne fait perdre ni un ramassage ni
+    /// un compteur. Recocher la case retrouve donc tout en l'état, sans rattrapage ni relecture du
+    /// log ; en échange, les alertes survenues pendant la coupure sont perdues, ce qui est
+    /// exactement ce qu'on demande en coupant.
+    SetFeatures(FeatureToggles),
 }
 
 /// L'instant où une carte de chat doit disparaître — le pendant de [`toast_deadline`] pour les
@@ -215,6 +229,9 @@ pub fn spawn_engine_thread(
             // Même rôle pour la carte de chat — envoyés par l'hôte dès le démarrage
             // (`SetChatToast`, depuis la config locale).
             let mut chat_toast = ChatToastSettings::default();
+            // Les trois interrupteurs — tout actif tant que l'hôte n'a rien dit (voir
+            // `FeatureToggles::default`), comme pour une installation neuve.
+            let mut features = FeatureToggles::default();
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
                 // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
@@ -289,6 +306,15 @@ pub fn spawn_engine_thread(
                             );
                             engine.set_chat_filters(filters.clone());
                             chat_filters_out.store(Arc::new(Some(filters)));
+                        }
+                        EngineCommand::SetFeatures(toggles) => {
+                            tracing::info!(
+                                suivi = toggles.suivi,
+                                alertes = toggles.alerts,
+                                recherche = toggles.chat,
+                                "[options] fonctionnalités actives"
+                            );
+                            features = toggles;
                         }
                         EngineCommand::SetChatToast(settings) => {
                             tracing::info!(
@@ -376,7 +402,15 @@ pub fn spawn_engine_thread(
                         if let Some(entries) = engine.drain_watchlist_sync() {
                             let _ = sync_tx.send(SyncCommand::SyncWatchlist(entries));
                         }
+                        // **Toujours drainé, même Suivi coupé** : laisser les alertes
+                        // s'accumuler dans le moteur les ferait toutes sortir d'un coup à la
+                        // réactivation, des heures après le ramassage qui les a produites. Voir
+                        // `EngineCommand::SetFeatures` — l'interrupteur met en sourdine, il ne met
+                        // pas en file d'attente.
                         for alert in engine.drain_watchlist_alerts() {
+                            if !features.suivi {
+                                continue;
+                            }
                             tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
                             alert_sound::play_countdown_alert();
                             let created_at = std::time::Instant::now();
@@ -395,6 +429,11 @@ pub fn spawn_engine_thread(
                         // affiché à la fois : le plus récent des deux écrase l'autre, jamais de
                         // file d'attente — acceptable, ces alertes sont rares et ≤ 5 s chacune).
                         for alert in engine.drain_loot_alerts() {
+                            // Même règle que ci-dessus : drainé quoi qu'il arrive, silencieux
+                            // quand la fonctionnalité est coupée.
+                            if !features.alerts {
+                                continue;
+                            }
                             tracing::info!(
                                 name = %alert.name,
                                 quantity = alert.quantity,
@@ -419,7 +458,14 @@ pub fn spawn_engine_thread(
                         // **Un seul son par lot** (règle du web, `ChatPanelComponent`) et la
                         // carte du DERNIER message trouvé : un lot en rafale ne doit pas
                         // empiler cinq sons.
+                        // Drainé même recherche coupée (voir les deux blocs ci-dessus), puis
+                        // jeté : c'est `features.chat` qui décide si le lot fait du bruit.
                         let chat_alerts = engine.drain_chat_alerts();
+                        let chat_alerts = if features.chat {
+                            chat_alerts
+                        } else {
+                            Vec::new()
+                        };
                         for alert in &chat_alerts {
                             tracing::info!(
                                 author = %alert.author,
