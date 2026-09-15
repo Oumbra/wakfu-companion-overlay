@@ -37,6 +37,18 @@
 //! croix fléchée — vit dans [`crate::panels::tile_reorder`], partagée avec le bandeau : les deux
 //! écrans réordonnent la même liste.
 //!
+//! ## Écouter l'alerte avant de la mériter
+//!
+//! La ligne « Tester le son de l'alerte » (2026-09-15), posée juste sous la phrase de l'onglet,
+//! joue le son du **décompte arrivé à 0** — la seule alerte que le suivi déclenche
+//! ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`). C'est la
+//! même ligne que dans « Alertes » et « Chat », au son près : chacun des trois écrans fait
+//! entendre celui qu'il commande, et aucun n'oblige à provoquer l'événement pour savoir ce qu'on
+//! entendra en jeu — un décompte se mérite, lui, en ramassant ce qu'on suit.
+//!
+//! Elle vit avant le formulaire d'ajout et non dans un des blocs qui composent la liste : c'est un
+//! essai, pas un réglage de l'entrée qu'on est en train de créer.
+//!
 //! ## Le brouillon ne porte QUE des définitions
 //!
 //! Une entrée de suivi a deux moitiés qui ne vivent pas au même endroit : ses **définitions** (nom,
@@ -74,6 +86,10 @@ const SETTING_ROW_RADIUS: u8 = 4;
 const FORM_ROW_HEIGHT: f32 = 40.0;
 const FORM_ROW_PAD_X: f32 = 12.0;
 const FORM_ROW_GAP: f32 = 6.0;
+/// Hauteur d'une ligne simple, sans fond — celle des onglets « Alertes » et « Chat »
+/// (`panels::alerts_tab::ROW_HEIGHT`, mesurée sur `interface-options-commandes.png`). La ligne
+/// « Tester le son » est la même dans les trois onglets, elle cadence pareil.
+const ROW_HEIGHT: f32 = 39.0;
 
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, la valeur arrêtée pour l'onglet Alertes.
@@ -250,6 +266,9 @@ pub struct SuiviTabContext<'a> {
 pub enum SuiviTabAction {
     #[default]
     None,
+    /// « Tester le son » : jouer le son du décompte arrivé à 0
+    /// (`alert_sound::play_countdown_alert`) — l'appelant seul a le périphérique audio.
+    TestSound,
     /// Résoudre les ingrédients de cet objet — l'appelant seul a le réseau
     /// (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
@@ -289,7 +308,8 @@ pub fn show(
 
     // **L'interrupteur de la fonctionnalité**, avant le premier réglage — voir
     // `panels::feature_switch` : décoché, tout ce qui est peint ensuite dans ce `Ui` est grisé et
-    // inerte, sans que la suite de cette fonction ait à s'en occuper.
+    // inerte, sans que la suite de cette fonction ait à s'en occuper. « Tester le son » ci-dessous
+    // en fait partie : écouter l'alerte d'un Suivi coupé ne mènerait nulle part.
     feature_switch::show(
         ui,
         ctx.enabled,
@@ -299,6 +319,11 @@ pub fn show(
          rallumer les retrouve tels quels.",
         "suivi.activer",
     );
+
+    if test_sound_row(ui, width) {
+        action = SuiviTabAction::TestSound;
+    }
+    ui.add_space(SECTION_GAP);
 
     add_form(ui, state, width);
     ui.add_space(SECTION_GAP * 0.75);
@@ -330,6 +355,37 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
         )
         .wrap_mode(egui::TextWrapMode::Wrap),
     );
+}
+
+/// La ligne « Tester le son de l'alerte » — la même que dans « Alertes » et « Chat »
+/// (`panels::alerts_tab::test_sound_row`), au son près : c'est ici celui du **décompte arrivé à
+/// 0**, la seule alerte que le suivi déclenche (`alert_sound::play_countdown_alert`, voir
+/// `overlay_engine::watchlist::WatchlistAlert`). Renvoie `true` au clic.
+///
+/// Posée juste sous la phrase de l'onglet, avant le formulaire d'ajout : c'est un essai, pas un
+/// réglage de la liste — l'intercaler dans les blocs qui composent cette liste la ferait passer
+/// pour l'un d'eux.
+fn test_sound_row(ui: &mut egui::Ui, width: f32) -> bool {
+    let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
+    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
+    let mut clicked = false;
+    cell.horizontal_centered(|ui| {
+        ui.label(
+            RichText::new("Tester le son de l'alerte")
+                .color(TEXT)
+                .size(BODY_FONT_SIZE),
+        );
+        ui.add_space(12.0);
+        clicked = ui
+            .add(
+                design::icon_button(DsIcon::Volume)
+                    .context(IconContext::Panel)
+                    .tooltip("Jouer le son d'alerte")
+                    .log_name("suivi.tester"),
+            )
+            .clicked();
+    });
+    clicked
 }
 
 /// **Le bloc de formulaire** : le mode, et en décompte la quantité de départ.

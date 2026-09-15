@@ -419,6 +419,9 @@ pub enum OptionsModalAction {
     /// « Tester le son » de l'onglet « Chat » : jouer le son de recherche
     /// (`alert_sound::play_chat_alert`).
     TestChatSound,
+    /// « Tester le son » de l'onglet « Suivi » : jouer le son du décompte arrivé à 0
+    /// (`alert_sound::play_countdown_alert`).
+    TestCountdownSound,
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -845,8 +848,12 @@ pub fn show(
     if chat_action == ChatTabAction::TestSound {
         action = OptionsModalAction::TestChatSound;
     }
-    if let suivi_tab::SuiviTabAction::ResolveRecipe(id) = suivi_action {
-        action = OptionsModalAction::ResolveRecipe(id);
+    match suivi_action {
+        suivi_tab::SuiviTabAction::TestSound => action = OptionsModalAction::TestCountdownSound,
+        suivi_tab::SuiviTabAction::ResolveRecipe(id) => {
+            action = OptionsModalAction::ResolveRecipe(id)
+        }
+        suivi_tab::SuiviTabAction::None => {}
     }
 
     // **La fenêtre de recette, peinte EN DERNIER et sur la fenêtre entière** : son voile doit
