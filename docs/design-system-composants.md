@@ -1633,7 +1633,7 @@ repris de `design::select`** — fond, bord, filet de tête, surbrillance, caden
 C'est la même liste du jeu, il n'y avait pas de second relevé à faire. Ce que ce composant ajoute :
 la bande de filtres, une image par entrée, des entrées désactivées, et un seuil de déclenchement.
 
-### Les cinq règles de comportement, portées du web
+### Les six règles de comportement — cinq portées du web, une propre à l'overlay
 
 Le jeu n'a **pas** d'autocomplétion : aucune capture ne peut servir de référence, donc rien de tout
 ceci ne se vérifie à l'œil. Relevé sur `shared/wakfu-autocomplete` (`Oumbra/wakfu-companion`) le
@@ -1647,8 +1647,26 @@ ceci ne se vérifie à l'œil. Relevé sur `shared/wakfu-autocomplete` (`Oumbra/
 4. **La bande se calcule sur la liste NON filtrée** — l'appelant construit `filters` sans tenir
    compte du filtre actif. Sinon le bouton qui permettrait de relâcher un filtre sans résultat
    disparaîtrait avec les rangées, et l'utilisateur resterait coincé devant une liste vide.
-5. **Après une sélection** : le champ se vide, le panneau se ferme, l'entrée active repart à la
-   première, et **le filtre revient à « Tout »**.
+5. **Après une sélection** : le champ se vide, le panneau se ferme, et l'entrée active repart à la
+   première. Le filtre, lui, **reste** — voir la règle suivante.
+6. **Le filtre de catégorie vaut pour toute la session** — le seul ÉCART au web, demandé le
+   2026-09-15 (« enregistrer, pour la session, les filtres de catégorie sélectionnés »). Qui filtre
+   sur « Ressources » pour ajouter une alerte va en ajouter plusieurs : remettre le filtre à
+   « Tout » après chaque choix lui redemandait le même clic à chaque objet. Le filtre est mémorisé
+   sous une clé tirée de `log_name` — jamais sous l'id du champ, qui est un identifiant
+   **automatique** d'egui : un widget de plus au-dessus du champ le décale, et la mémoire tomberait
+   avec lui. La mémoire vit dans le `Context` d'egui, donc jusqu'à la fermeture de l'overlay et
+   nulle part sur le disque. Ce que la remise à zéro du web évitait — un filtre oublié qui vide une
+   recherche sans rapport — est écarté autrement : **un filtre dont la catégorie a quitté la bande
+   se relâche de lui-même**, et la bande dit exactement quelles catégories les résultats courants
+   portent (règle 4).
+
+**Cliquer un bouton de filtre rend le focus au champ** (2026-09-15). Le bouton est dans le panneau,
+pas dans le champ : l'appui le défocalisait, et le panneau ne tenait plus que par le pointeur posé
+dessus — il se refermait dès que la souris s'en écartait, et la frappe suivante tombait dans le
+vide. Même rattrapage que pour `Entrée` sur une entrée désactivée. Mesuré sur
+`crates/overlay-testkit/tests/autocomplete_filtre.rs`, dont la capture d'après-clic ne montrait
+jusque-là qu'un champ nu.
 
 Clavier : `↓`/`↑` sautent les entrées désactivées et bouclent, `Entrée` valide, `Échap` ferme. Les
 touches sont consommées **avant** le champ de saisie, sinon la flèche déplacerait le curseur de

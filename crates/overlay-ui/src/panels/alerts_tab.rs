@@ -61,6 +61,7 @@ use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
 use crate::design::{self, DsIcon, IconContext, InputSize, SlotFrame};
+use crate::panels::feature_switch;
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -207,6 +208,11 @@ pub struct AlertsTabContext<'a> {
     /// Le rectangle de la FENÊTRE entière, pas du panneau : le voile d'une confirmation doit
     /// couvrir la bannière, les onglets et le pied de page — c'est lui qui dit qu'ils sont
     /// inertes.
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer les alertes » peinte tout
+    /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
+    /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
+    /// contenu sous la case est grisé et inerte.
+    pub enabled: &'a mut bool,
     pub window: Rect,
 }
 
@@ -251,6 +257,16 @@ pub fn show(
     ui.add(design::heading("Alerte"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
+
+    // Voir `panels::feature_switch` — l'interrupteur grise tout ce qui suit quand il est décoché.
+    feature_switch::show(
+        ui,
+        ctx.enabled,
+        "Activer les alertes",
+        "Décoché, le ramassage d'un objet ne joue plus de son et n'affiche plus de carte \
+         par-dessus le jeu. Votre liste d'objets est conservée.",
+        "alertes.activer",
+    );
 
     // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite.
     if test_sound_row(ui, width) {

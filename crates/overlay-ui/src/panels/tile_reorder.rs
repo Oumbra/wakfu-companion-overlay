@@ -94,7 +94,12 @@ pub fn handle(ui: &egui::Ui, response: &egui::Response, tuile: Tile) -> Gesture 
     let Some(depuis) = egui::DragAndDrop::payload::<DragIndex>(ui.ctx()).map(|charge| charge.0)
     else {
         // Hors geste, la croix fléchée dit ce que la tuile permet — aucun autre signe ne l'annonce.
-        if response.contains_pointer() {
+        //
+        // **`enabled()` en plus de `contains_pointer()`** (2026-09-15) : `contains_pointer` ne dit
+        // que la géométrie, il reste vrai sur un `Ui` désactivé. Sans ce garde, une tuile d'un
+        // onglet dont la fonctionnalité est coupée (`panels::feature_switch`) annonçait encore un
+        // déplacement qu'aucun glissement n'aurait exécuté — un curseur qui ment.
+        if response.contains_pointer() && response.enabled() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
         }
         return Gesture::default();
