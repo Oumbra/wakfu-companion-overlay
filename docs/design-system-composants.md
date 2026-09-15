@@ -2647,6 +2647,50 @@ jour, déconnexion du compte, garde de fermeture. L'onglet Alertes a retiré la 
 sur un brouillon qu'« Annuler » rattrapait). Le passage aux textures du 2026-09-15 n'a demandé
 **aucune modification chez eux** — c'est ce que ce composant achète.
 
+### La question, relevée sur la lettre (2026-09-15)
+
+Retour utilisateur&nbsp;: «&nbsp;l'écriture est un peu trop grasse, peut-être un poil petite&nbsp;;
+il faudrait qu'elle soit plus light et un peu plus grande&nbsp;». Les trois réglages en cause
+(Ubuntu **Regular**, corps **15**, **blanc pur**) venaient du rendu à la main d'avant le détourage.
+
+La méthode, transposable&nbsp;: plutôt que de convertir une hauteur d'encre en corps — une
+convention qui dépend de la police et qui avait déjà produit un libellé 45&nbsp;% trop gros — on
+rejoue **les chaînes du jeu** dans chaque candidat, sur le même fond et dans la même couleur d'encre,
+puis on mesure des deux côtés avec le même seuillage
+(`cargo run -p overlay-testkit --example police-confirmation`).
+
+| | chasse l1 | chasse l2 | fût | encre/col |
+| --- | --- | --- | --- | --- |
+| **jeu** | **325 px** | **51 px** | **2,72 px** | **5,24** |
+| Regular 15 (avant) | 270 | 43 | 2,76 | 5,20 |
+| Medium 17 | 314 | 50 | 3,93 | 6,69 |
+| Regular 18 | 324 | 51 | 2,95 | 5,54 |
+| **Light 18 (retenu)** | **317** | **50** | **2,57** | **5,00** |
+
+Le corps 15 rendait la question **17&nbsp;% trop courte** — le retour était exact et mesurable.
+
+**Le piège du classement&nbsp;: Medium 17 arrive premier en chasse et hauteur** (3,7&nbsp;% d'écart
+contre 4,2 pour Light 18) tout en étant **44&nbsp;% trop gras**. Une police grasse compense sa
+graisse par une chasse plus courte, et un critère qui ne regarde que l'encombrement la couronne. La
+graisse se juge sur le **fût**, jamais sur la boîte. D'où une troisième graisse au design system,
+`fonts::LABEL_LIGHT` — le texte courant du jeu est plus léger que ses libellés de bouton.
+
+**L'encre est grise, pas blanche.** Mesurée au cœur des lettres&nbsp;: `#d0d1d0`. Le composant
+demandait 255, ce qui rendait la question à 220 au cœur et 213 sur ses franges, contre 208 et 197
+dans le jeu.
+
+**Il n'y avait pas de jaune**, contrairement à l'impression rapportée — et c'est la mesure qui le
+dit, pas un avis&nbsp;: cœur, franges d'antialiasing, halo et fond sont neutres à ±0,5 d'écart
+rouge&nbsp;− bleu **des deux côtés**. Le seul élément chaud de la boîte est la crête dorée posée
+juste au-dessus de la question (+8,2), conforme au jeu. Ce qui était réel, c'est l'excès de clarté
+ci-dessus, qui fait accrocher l'œil sous l'or du médaillon.
+
+**Le passage au corps 18 a rendu le retour à la ligne obligatoire**&nbsp;: «&nbsp;Fermer l'overlay et
+installer la version X&nbsp;?&nbsp;» demande environ 356 px pour 344 utiles. La question est donc
+mise en page (`LayoutJob`) et non plus posée d'un bloc, à l'interligne du jeu — **23 px**, mesuré de
+centre à centre, soit 2 de plus que l'interligne naturel d'Ubuntu au corps 18. Le point de relevé
+(`CONFIRM_QUESTION_TOP`) étant le **centre** du bloc, il vaut quel que soit le nombre de lignes.
+
 ### Un paramètre caché, retiré (2026-09-15)
 
 Les deux réponses étaient posées par un `ui.horizontal()` dans un `Ui` enfant. Or `item_spacing` est
