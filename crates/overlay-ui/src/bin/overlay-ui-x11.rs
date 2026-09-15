@@ -126,9 +126,14 @@ mod linux_main {
     /// Même calcul que `main.rs::watchlist_target_width` (voir sa doc pour le détail) — dupliqué
     /// plutôt que partagé : petite fonction pure, coût de duplication largement inférieur au coût
     /// d'une abstraction supplémentaire pour un si petit nombre de lignes.
-    fn watchlist_target_width(entry_count: usize, toast_active: bool, game_width_px: i32) -> f64 {
+    fn watchlist_target_width(
+        entry_count: usize,
+        tracking_enabled: bool,
+        toast_active: bool,
+        game_width_px: i32,
+    ) -> f64 {
         let ceiling = (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION).min(WATCHLIST_MAX_CEILING);
-        let tiles = panels::watchlist::content_width(entry_count) as f64;
+        let tiles = panels::watchlist::content_width(entry_count, tracking_enabled) as f64;
         let toast = if toast_active {
             panels::watchlist::TOAST_LAYER_WIDTH as f64
         } else {
@@ -653,7 +658,8 @@ mod linux_main {
             let size = match kind {
                 OverlayKind::Combat => WINDOW_SIZE,
                 OverlayKind::Watchlist => (
-                    watchlist_target_width(0, false, rect.width),
+                    // Suivi supposé actif à la création — voir `main.rs`, même repli.
+                    watchlist_target_width(0, true, false, rect.width),
                     watchlist_target_height(false, false),
                 ),
                 OverlayKind::Options => (
@@ -1563,6 +1569,7 @@ mod linux_main {
                         let toast_active = watchlist_toast.is_some();
                         let target_width = watchlist_target_width(
                             watchlist.len(),
+                            self.features.suivi,
                             toast_active,
                             overlay.game_rect.width,
                         );
@@ -1613,6 +1620,7 @@ mod linux_main {
                             combat_side: &mut overlay.combat_side,
                             combat_metric: &mut overlay.combat_metric,
                             watchlist,
+                            watchlist_enabled: self.features.suivi,
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,
                             catalog: &catalog,

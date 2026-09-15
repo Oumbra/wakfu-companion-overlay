@@ -168,6 +168,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -234,6 +235,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -305,6 +307,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -459,6 +462,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &watchlist_entries,
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -527,6 +531,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -655,6 +660,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
+                    watchlist_enabled: true,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
@@ -710,7 +716,13 @@ const BANDEAU_HAUTEUR: f32 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE + 
 /// 6 px à DROITE seulement depuis le 2026-09-13, voir `render_content::paint_content`), plus les
 /// deux marges du harnais.
 fn bandeau_largeur(entry_count: usize) -> f32 {
-    panels::watchlist::content_width(entry_count) + 6.0 + 2.0 * MARGE_HARNAIS
+    bandeau_largeur_suivi(entry_count, true)
+}
+
+/// Même calcul, Suivi ACTIF ou COUPÉ (2026-09-15) : coupé, le bandeau perd « + » et « − », donc
+/// deux boutons de large — voir `panels::watchlist::content_width`.
+fn bandeau_largeur_suivi(entry_count: usize, tracking_enabled: bool) -> f32 {
+    panels::watchlist::content_width(entry_count, tracking_enabled) + 6.0 + 2.0 * MARGE_HARNAIS
 }
 
 /// **Décalage vertical apporté par la case « Activer … »** des onglets Suivi, Alertes et Chat
@@ -788,6 +800,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
+                    watchlist_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -827,6 +840,87 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         harness.hover_at(egui::pos2(x, 25.0));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
+    }
+}
+
+/// **Suivi COUPÉ : plus de « + » ni de « − »** (retour utilisateur 2026-09-15 : « lorsque le suivi
+/// est désactivé, il faut retirer les boutons "+" et "-" du bandeau »). La case « Activer le
+/// Suivi » décochée, le bandeau n'a plus de tuile à ajouter ni à supprimer : les deux boutons
+/// disparaissent au lieu d'être grisés, et la rangée se referme sur « Détails » et « Options »,
+/// seuls à garder un sens — la fenêtre Options est d'ailleurs le seul moyen de RÉACTIVER le Suivi
+/// depuis le jeu, la masquer enfermerait dehors qui vient de décocher la case.
+///
+/// Le harnais prend la largeur EXACTE que `main.rs` calculerait alors ([`bandeau_largeur_suivi`],
+/// deux boutons de moins) : c'est elle qui prouve que la fenêtre rétrécit au lieu de garder la
+/// place d'une rangée à demi vide. Les deux centres restants tombent aux abscisses qu'occupaient
+/// « + » et « − » (25 et 55, voir le test précédent pour le détail du calcul) : c'est la rangée
+/// qui se referme, pas les boutons qui gardent leur place.
+#[test]
+fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+
+    let window_width = bandeau_largeur_suivi(0, false);
+    assert!(
+        window_width < bandeau_largeur(0),
+        "Suivi coupé, la fenêtre doit rétrécir de deux boutons : {window_width} \
+         px contre {} px",
+        bandeau_largeur(0)
+    );
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    // Ce que l'hôte passe quand la case « Activer le Suivi » est décochée — il
+                    // vide DÉJÀ la liste dans ce cas, d'où les deux ensemble.
+                    watchlist_enabled: false,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    options: None,
+                    login: None,
+                },
+            );
+        });
+
+    harness.run();
+    harness.snapshot("watchlist_suivi_coupe_rangee");
+
+    // Les deux boutons qui restent, survolés là où « + » et « − » se tenaient : leur infobulle dit
+    // « Détails » et « Options », et aucune ne dit « Ajouter » ni « Supprimer ».
+    for (x, nom) in [(25.0, "details"), (55.0, "options")] {
+        harness.hover_at(egui::pos2(x, 25.0));
+        harness.run();
+        harness.snapshot(format!("watchlist_suivi_coupe_tooltip_{nom}"));
     }
 }
 
@@ -898,6 +992,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         combat_side: &mut combat_side,
                         combat_metric: &mut combat_metric,
                         watchlist: &entries,
+                        watchlist_enabled: true,
                         watchlist_selection: &mut selection.borrow_mut(),
                         watchlist_toast: None,
                         catalog: &catalog,
@@ -1010,6 +1105,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
+                    watchlist_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -1297,6 +1393,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
+                    watchlist_enabled: true,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
@@ -1391,6 +1488,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1470,6 +1568,7 @@ fn panneau_options_ne_panique_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1725,6 +1824,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -3703,6 +3803,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
@@ -4113,6 +4214,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
+                watchlist_enabled: true,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
@@ -4247,6 +4349,7 @@ fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
+                    watchlist_enabled: true,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,

@@ -344,8 +344,9 @@ fn harnais(p: Planche) -> Harness<'static> {
     // **À la largeur EXACTE de la vraie fenêtre** (`content_width`, plus les deux marges) : la
     // colonne de contrôle est collée au bord gauche dans la fenêtre réelle, et une planche plus
     // large donnerait au « − » une marge qu'il n'a pas.
-    let largeur =
-        overlay_ui::panels::watchlist::content_width(total) + CONTENT_MARGIN_LEFT + CONTENT_MARGIN;
+    let largeur = overlay_ui::panels::watchlist::content_width(total, true)
+        + CONTENT_MARGIN_LEFT
+        + CONTENT_MARGIN;
     let hauteur = 92.0
         + overlay_ui::render_content::WATCHLIST_TOOLTIP_RESERVE
         + if select_mode { BULK_ROW_HEIGHT } else { 0.0 };
@@ -375,6 +376,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
+                    watchlist_enabled: true,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),

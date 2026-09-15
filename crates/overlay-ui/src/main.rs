@@ -170,9 +170,14 @@ const WATCHLIST_MAX_CEILING: f64 = 1000.0;
 /// voir `panels::watchlist::TOAST_LAYER_WIDTH`) et le plafond (`WATCHLIST_WIDTH_FRACTION` de la
 /// fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse : avec peu d'entrées et sans toast,
 /// la fenêtre reste étroite même si le plafond est large.
-fn watchlist_target_width(entry_count: usize, toast_active: bool, game_width_px: i32) -> f64 {
+fn watchlist_target_width(
+    entry_count: usize,
+    tracking_enabled: bool,
+    toast_active: bool,
+    game_width_px: i32,
+) -> f64 {
     let ceiling = (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION).min(WATCHLIST_MAX_CEILING);
-    let tiles = panels::watchlist::content_width(entry_count) as f64;
+    let tiles = panels::watchlist::content_width(entry_count, tracking_enabled) as f64;
     // La couche de confettis est centrée sur le MÊME axe que la bande de tuiles (voir
     // `panels::watchlist::toast_card`) : sans cette largeur minimale pendant qu'un toast est
     // affiché, ses confettis les plus excentrés seraient rognés par le bord de la fenêtre.
@@ -1203,10 +1208,14 @@ impl App {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
             // 0 entrée à la création : rien n'est encore chargé (compte/catalogue), la fenêtre
-            // démarre donc au plus étroit (juste les 2 tuiles "+"/"−") et s'élargit dès que
-            // `watchlist` se remplit (voir le redimensionnement dans `RedrawRequested`).
+            // démarre donc au plus étroit (juste la rangée de boutons) et s'élargit dès que
+            // `watchlist` se remplit (voir le redimensionnement dans `RedrawRequested`). Suivi
+            // supposé ACTIF ici (`true`) faute d'accès à `self` : c'est le défaut de la config, et
+            // le premier `RedrawRequested` rétrécit la fenêtre d'une rangée de quatre boutons à
+            // une rangée de deux si la case est décochée (2026-09-15) — la même frame que celle
+            // qui vide déjà le bandeau de ses tuiles.
             OverlayKind::Watchlist => (
-                watchlist_target_width(0, false, rect.width),
+                watchlist_target_width(0, true, false, rect.width),
                 watchlist_target_height(false, false),
             ),
             OverlayKind::Options => (
@@ -2557,8 +2566,12 @@ impl App {
             // à la taille réelle actuelle de la fenêtre, pour ne pas rappeler
             // `request_inner_size` en boucle tant que rien n'a changé.
             let toast_active = panels::watchlist::is_active(watchlist_toast, now);
-            let target_width =
-                watchlist_target_width(watchlist.len(), toast_active, overlay.game_rect.width);
+            let target_width = watchlist_target_width(
+                watchlist.len(),
+                self.features.suivi,
+                toast_active,
+                overlay.game_rect.width,
+            );
             let target_height =
                 watchlist_target_height(toast_active, self.watchlist_selection.is_open());
             if overlay.last_watchlist_width != Some(target_width)
@@ -2605,6 +2618,7 @@ impl App {
                 combat_side: &mut overlay.combat_side,
                 combat_metric: &mut overlay.combat_metric,
                 watchlist,
+                watchlist_enabled: self.features.suivi,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,
                 catalog: &catalog,
