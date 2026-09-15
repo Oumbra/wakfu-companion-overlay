@@ -155,12 +155,12 @@ const SECTION_GAP: f32 = 18.0;
 /// tuile ; deux corrections du 2026-09-13 :
 /// - **elle était incomplète** — un ramassage joue un son ET affiche une carte d'alerte à
 ///   l'écran (`panels::watchlist::toast_card`, confettis compris) ;
-/// - **la phrase sur le clic a déménagé** sous « Objets suivis » ([`LIST_DESC`]), où se trouvent
+/// - **la phrase sur le clic a déménagé** sous « Objets surveillés » ([`LIST_DESC`]), où se trouvent
 ///   justement les tuiles qu'elle décrit.
 const DESC: &str = "Au ramassage d'un des objets ci-dessous, un son est joué et une carte \
                     d'alerte s'affiche par-dessus le jeu.";
 
-/// La phrase sous le titre « Objets suivis » — le geste, à côté des tuiles qu'il concerne.
+/// La phrase sous le titre « Objets surveillés » — le geste, à côté des tuiles qu'il concerne.
 const LIST_DESC: &str = "Cliquez une tuile pour couper ou rétablir son alerte.";
 
 /// Le libellé de la légende, à droite du pictogramme.
@@ -206,7 +206,7 @@ pub struct AlertsTabContext<'a> {
     /// Le rectangle de la FENÊTRE entière, pas du panneau : le voile d'une confirmation doit
     /// couvrir la bannière, les onglets et le pied de page — c'est lui qui dit qu'ils sont
     /// inertes.
-    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer les alertes » peinte tout
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer la surveillance du drop » peinte tout
     /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
@@ -260,7 +260,7 @@ pub fn show(
     feature_switch::show(
         ui,
         ctx.enabled,
-        "Activer les alertes",
+        "Activer la surveillance du drop",
         "Décoché, le ramassage d'un objet ne joue plus de son et n'affiche plus de carte \
          par-dessus le jeu. Votre liste d'objets est conservée.",
         "alertes.activer",
@@ -278,7 +278,7 @@ pub fn show(
 
     ui.add_space(SECTION_GAP);
     // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
-    ui.add(design::heading("Objets suivis"));
+    ui.add(design::heading("Objets surveillés"));
     paragraph(ui, LIST_DESC);
     legend_row(ui);
     ui.add_space(SECTION_GAP);

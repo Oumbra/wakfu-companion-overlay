@@ -2695,7 +2695,7 @@ impl App {
         let snapshot = self.snapshot.load();
         let fight = snapshot.fight_for_character(&overlay.character_name);
         let watchlist_all = self.watchlist.load();
-        // **Suivi coupé : le bandeau n'affiche plus aucune tuile** — case « Activer le Suivi »
+        // **Suivi coupé : le bandeau n'affiche plus aucune tuile** — case « Activer le suivi »
         // (`panels::feature_switch`). Une liste vide plutôt qu'une fenêtre masquée, parce que le
         // bandeau porte aussi le carré de contrôle, seul accès à la fenêtre Options depuis le jeu :
         // la masquer enfermerait dehors qui vient de décocher la case. C'est exactement l'état
