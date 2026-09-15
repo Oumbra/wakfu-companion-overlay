@@ -53,6 +53,30 @@ conclure, même pour un travail intermédiaire.
 - Un commit = un changement cohérent ; ne pas mélanger documentation et code applicatif.
 - Ne pas ajouter d'attribution IA (pas de "Co-Authored-By: Claude")
 
+## Choisir le préfixe : « qu'est-ce qui change pour l'utilisateur du binaire livré ? »
+
+Le préfixe n'est pas un jugement sur l'importance du travail : il pilote la **montée de version**
+(hook `post-commit`, table ci-dessous) et, à terme, ce qu'annoncent les notes de Release. La
+question à se poser est donc : *si cet exe était livré demain, l'utilisateur verrait-il quelque
+chose de nouveau (`feat:`), de corrigé (`fix:`), ou rien du tout ?* Quand la réponse est « rien »,
+c'est un type **sans bump** :
+
+| Changement | Préfixe | Pourquoi |
+| --- | --- | --- |
+| Nouvelle fonctionnalité, nouveau panneau, nouvel onglet, nouvelle option visible | `feat:` | l'utilisateur voit quelque chose de nouveau |
+| Comportement corrigé, régression, valeur par défaut qui change (ex. base URL de l'API) | `fix:` | l'utilisateur voit quelque chose de corrigé |
+| Réorganisation interne sans effet visible, renommage, découpage de module | `refactor:` | le binaire change, patch, sans nouveauté visible |
+| Captures de référence, tests, golden files | `test:` | patch, par prudence (le harnais protège le binaire) |
+| Fichier d'outillage ou de configuration : **clé publique de signature**, `.gitignore`, hooks, scripts de dev, `rust-toolchain.toml` | `chore:` | rien ne change dans l'exe livré |
+| Workflow GitHub Actions (`.github/**`), actions composites, `scripts/ci-local.sh` | `ci:` | idem |
+| `Cargo.toml` hors dépendances applicatives : profil de compilation, métadonnées | `build:` | idem — une dépendance qui change le comportement est un `feat:`/`fix:` |
+| Documentation, plans, `CLAUDE.md`, README | `docs:` | idem |
+
+Cas vécu (2026-09-15) : l'ajout de `wakfu-overlay.pub` (clé publique de vérification des mises
+à jour) a été commité en `feat:` et a fait passer la version de 0.20.4 à 0.21.0 — sans que rien
+ne change pour l'utilisateur, puisque le fichier n'est encore embarqué nulle part. C'était un
+`chore:`. Le jour où le code qui *utilise* cette clé arrive, ce commit-là est le `feat:`.
+
 ## Signature de commit en session cloud
 
 **Décision explicite de l'utilisateur (2026-09-08).** En session cloud, le mécanisme de signature
