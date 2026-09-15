@@ -21,9 +21,10 @@
 //!    le premier.
 //! 2. **Les dix objets par défaut n'ont pas de croix de retrait** (`SoundItemEntry::is_default`),
 //!    parce que le web refuse structurellement de les supprimer. Leur son, lui, se coupe.
-//! 3. **Le son et le toast sont deux canaux**, réglés séparément : « Tester le son » d'un côté,
-//!    « Fermeture de l'alerte » de l'autre. Les empiler laissait entendre que la durée
-//!    s'appliquait au son.
+//! 3. **Le son et le toast sont deux canaux**, réglés séparément — règle tenue ailleurs depuis le
+//!    2026-09-15 : les deux blocs sont partis dans la section « Alertes » de l'onglet
+//!    « Paramètres » ([`crate::panels::notifications`]), où ils rejoignent ceux du Suivi, du Chat
+//!    et du Combat. Cet onglet ne garde que la liste des objets.
 //! 4. **Le retrait ne demande AUCUNE confirmation** — décision du 2026-09-13, qui revient sur la
 //!    boîte centrée que la maquette avait posée. La raison : cette fenêtre est déjà
 //!    transactionnelle, « Annuler » rattrape tout jusqu'à la validation, et « Valider » est une
@@ -60,8 +61,8 @@
 use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
-use crate::design::{self, DsIcon, InputSize, SlotFrame};
-use crate::panels::{feature_switch, sound_row};
+use crate::design::{self, DsIcon, SlotFrame};
+use crate::panels::feature_switch;
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -137,14 +138,6 @@ const MUTE_SHADOW: Color32 = Color32::from_black_alpha(0xB0);
 /// Rouge de la croix sous le pointeur — `INFO_ALERT`, le seul rouge mesuré du jeu.
 const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
 
-/// Fond d'une ligne de réglage mise en valeur — l'idiome des lignes d'aptitude du jeu
-/// (`interface-personnage-aptitudes.png`, `#26282b` sur un fond de section plus sombre).
-const SETTING_ROW_FILL: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
-const SETTING_ROW_RADIUS: u8 = 4;
-/// Hauteur d'une ligne de réglage — les lignes d'aptitude cadencent à 32, portée à 40 : la ligne
-/// porte une case à cocher de 20 px et un champ de 25, qu'un fond de 32 serrerait.
-const SETTING_ROW_HEIGHT: f32 = 40.0;
-
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, porté de 12 après un second retour utilisateur.
 const SECTION_GAP: f32 = 18.0;
@@ -180,13 +173,10 @@ const LEGEND_GAP: f32 = 8.0;
 pub struct AlertsTabState {
     /// Saisie du champ d'ajout.
     pub search: String,
-    /// Durée de fermeture **telle que tapée** — une chaîne, pas un nombre.
-    ///
-    /// **Bornée à la validation, jamais à la frappe.** Une version antérieure de la maquette la
-    /// bornait à chaque frame, ce qui rendait le champ inutilisable : taper `0.75` donnait `0` →
-    /// borné à `0.5` sous les doigts, puis `0.5.` → non parsable → `3.5`. Toute saisie décimale
-    /// passe par un état transitoire non parsable ; l'écraser avant qu'elle soit finie interdit
-    /// d'écrire la valeur voulue.
+    /// Durée de fermeture **telle que tapée** — une chaîne, pas un nombre (voir
+    /// `panels::notifications::AutoClose::input`). **Le champ qu'elle alimente est peint dans
+    /// l'onglet « Paramètres »** depuis le 2026-09-15 ; elle reste ici, avec le brouillon dont
+    /// elle règle la carte.
     pub duration_input: String,
 }
 
@@ -232,24 +222,17 @@ pub enum AlertsAvailability {
     NoAccount,
 }
 
-/// Ce que l'utilisateur vient de demander et que l'onglet ne sait pas faire lui-même.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum AlertsTabAction {
-    #[default]
-    None,
-    /// Jouer le son d'alerte — l'appelant seul a le périphérique audio
-    /// (`alert_sound::play_loot_alert`).
-    TestSound,
-}
-
 /// Peint l'onglet dans le panneau de section de la fenêtre Options.
+///
+/// **Ne renvoie plus rien** : « Tester le son » était la seule intention que cet écran produisait,
+/// et il est parti dans l'onglet « Paramètres » avec le reste des réglages de notification
+/// (2026-09-15, voir `panels::notifications`).
 pub fn show(
     ui: &mut egui::Ui,
     panel: &design::PanelZones,
     state: &mut AlertsTabState,
     ctx: &mut AlertsTabContext<'_>,
-) -> AlertsTabAction {
-    let mut action = AlertsTabAction::None;
+) {
     let width = panel.inner.width();
 
     ui.add(design::heading("Alerte"));
@@ -266,17 +249,6 @@ pub fn show(
         "alertes.activer",
     );
 
-    // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite.
-    // La ligne d'essai vit dans `panels::sound_row` depuis le 2026-09-15 — voir sa doc : elle
-    // était écrite trois fois à l'identique. `None` : **pas de case « Couper le son » ici**, le son
-    // d'un ramassage se coupe déjà objet par objet, à la tuile.
-    if sound_row::show(ui, width, "alertes", None) {
-        action = AlertsTabAction::TestSound;
-    }
-    ui.add_space(SECTION_GAP);
-    close_settings_row(ui, state, ctx.profile, width);
-
-    ui.add_space(SECTION_GAP);
     // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
     ui.add(design::heading("Objets surveillés"));
     paragraph(ui, LIST_DESC);
@@ -289,7 +261,7 @@ pub fn show(
     match ctx.availability {
         AlertsAvailability::Loading => {
             loading_row(ui, panel.inner);
-            return action;
+            return;
         }
         AlertsAvailability::NoAccount => {
             ui.add(
@@ -301,14 +273,12 @@ pub fn show(
                 .width(width)
                 .log_name("alertes.sans-compte"),
             );
-            return action;
+            return;
         }
         AlertsAvailability::Ready => {}
     }
 
     tile_grid(ui, panel, ctx);
-
-    action
 }
 
 // -------------------------------------------------------------------------------------------
@@ -357,81 +327,6 @@ fn legend_row(ui: &mut egui::Ui) {
         design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
         SUBDUED,
     );
-}
-
-/// Le bloc « Fermeture de l'alerte » — le TOAST, pas le son.
-///
-/// Case à cocher plutôt que le switch « Auto | Manuelle » du web : le jeu n'a pas de switch à deux
-/// positions, son idiome pour un choix binaire est la case.
-fn close_settings_row(
-    ui: &mut egui::Ui,
-    state: &mut AlertsTabState,
-    profile: &mut AlertProfile,
-    width: f32,
-) {
-    let row = ui.allocate_space(Vec2::new(width, SETTING_ROW_HEIGHT)).1;
-    ui.painter()
-        .rect_filled(row, SETTING_ROW_RADIUS, SETTING_ROW_FILL);
-
-    // La case dit « fermeture AUTOMATIQUE », le profil stocke son contraire (`manual_close`, le
-    // nom du champ web). La négation vit ici, au plus près de la case, plutôt que dans le moteur
-    // où elle rendrait le miroir du web illisible.
-    let mut auto = !profile.manual_close;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(12.0, 0.0))));
-    cell.horizontal_centered(|ui| {
-        if ui
-            .add(design::checkbox(&mut auto, "Fermeture automatique").log_name("alertes.auto"))
-            .clicked()
-        {
-            profile.manual_close = !auto;
-        }
-        ui.add_space(12.0);
-        // **Le champ suit la case** : décochée, la fermeture est manuelle, il n'y a plus de délai
-        // et la valeur n'a plus d'effet — le champ est grisé et non modifiable.
-        let response = ui.add(
-            design::input(&mut state.duration_input)
-                .size(InputSize::Standard)
-                .width(52.0)
-                .enabled(auto)
-                .log_name("alertes.duree"),
-        );
-        // La borne se pose à la PERTE DE FOCUS, pas à la frappe — voir
-        // `AlertsTabState::duration_input`. C'est le moment où la saisie est finie, et le seul où
-        // corriger « 0 » en « 0,5 » n'empêche pas d'écrire « 0,75 ».
-        if response.lost_focus() {
-            profile.set_duration(parse_duration(
-                &state.duration_input,
-                profile.duration_seconds,
-            ));
-            state.duration_input = format_duration(profile.duration_seconds);
-        }
-        ui.label(RichText::new("sec.").color(SUBDUED).size(BODY_FONT_SIZE));
-    });
-}
-
-/// Lit une durée tapée — virgule décimale comprise.
-///
-/// **La virgule est le séparateur décimal d'un clavier français**, et ce champ est rempli en jeu,
-/// au pavé numérique. La refuser renverrait la valeur de repli sur une saisie parfaitement
-/// légitime.
-///
-/// Une saisie vide ou illisible garde la valeur en place plutôt que de retomber sur le défaut :
-/// vider un champ par mégarde ne doit pas réécrire un réglage.
-fn parse_duration(raw: &str, actuelle: f32) -> f32 {
-    raw.trim()
-        .replace(',', ".")
-        .parse::<f32>()
-        .unwrap_or(actuelle)
-}
-
-/// Écrit une durée dans le champ — sans décimale inutile (« 4 » plutôt que « 4.0 »), et avec la
-/// virgule française qu'on vient d'accepter en entrée.
-fn format_duration(seconds: f32) -> String {
-    if (seconds.fract()).abs() < f32::EPSILON {
-        format!("{}", seconds as i64)
-    } else {
-        format!("{seconds:.1}").replace('.', ",")
-    }
 }
 
 /// Le champ d'ajout et son panneau de suggestions.
@@ -829,28 +724,6 @@ fn texture(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn une_duree_se_tape_a_la_virgule_comme_au_point() {
-        // Le champ est rempli en jeu, au pavé numérique d'un clavier français : refuser la virgule
-        // renverrait la valeur de repli sur une saisie parfaitement légitime.
-        assert_eq!(parse_duration("1,5", 3.5), 1.5);
-        assert_eq!(parse_duration("1.5", 3.5), 1.5);
-        assert_eq!(parse_duration(" 2 ", 3.5), 2.0);
-    }
-
-    #[test]
-    fn une_saisie_vide_garde_la_valeur_en_place() {
-        // Vider un champ par mégarde ne doit pas réécrire un réglage.
-        assert_eq!(parse_duration("", 2.0), 2.0);
-        assert_eq!(parse_duration("abc", 2.0), 2.0);
-    }
-
-    #[test]
-    fn une_duree_entiere_s_ecrit_sans_decimale() {
-        assert_eq!(format_duration(4.0), "4");
-        assert_eq!(format_duration(3.5), "3,5");
-    }
 
     #[test]
     fn chaque_categorie_a_sa_propre_cle_de_filtre() {

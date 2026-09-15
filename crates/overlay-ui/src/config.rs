@@ -114,7 +114,7 @@ pub struct OverlayConfig {
     pub chat_enabled: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
-    /// (2026-09-15, voir `panels::sound_row`).
+    /// (2026-09-15, voir `panels::notifications`).
     ///
     /// Cochée, le décompte arrivé à zéro affiche toujours sa carte par-dessus le jeu : c'est le
     /// SON qui se tait, pas la fonctionnalité — celle-ci a sa propre clé ([`Self::suivi_enabled`]),
@@ -249,11 +249,11 @@ impl OverlayConfig {
         self.chat_enabled = features.chat;
     }
 
-    /// Les deux sourdines de cette config — voir [`crate::panels::sound_row::AlertMutes`], qui les
+    /// Les deux sourdines de cette config — voir [`crate::panels::notifications::AlertMutes`], qui les
     /// fait voyager ensemble jusqu'au thread Engine comme `features` fait pour les interrupteurs.
     /// Champs PLATS dans le TOML pour la même raison qu'eux.
-    pub fn alert_mutes(&self) -> crate::panels::sound_row::AlertMutes {
-        crate::panels::sound_row::AlertMutes {
+    pub fn alert_mutes(&self) -> crate::panels::notifications::AlertMutes {
+        crate::panels::notifications::AlertMutes {
             suivi: self.suivi_alert_muted,
             chat: self.chat_alert_muted,
         }
@@ -261,7 +261,7 @@ impl OverlayConfig {
 
     /// Reporte les deux sourdines dans la config — appelée à la validation de la fenêtre Options,
     /// jamais à chaque frame.
-    pub fn set_alert_mutes(&mut self, mutes: crate::panels::sound_row::AlertMutes) {
+    pub fn set_alert_mutes(&mut self, mutes: crate::panels::notifications::AlertMutes) {
         self.suivi_alert_muted = mutes.suivi;
         self.chat_alert_muted = mutes.chat;
     }
@@ -448,7 +448,7 @@ mod tests {
         let neuve = OverlayConfig::default();
         assert_eq!(
             neuve.alert_mutes(),
-            crate::panels::sound_row::AlertMutes::default()
+            crate::panels::notifications::AlertMutes::default()
         );
         assert!(!neuve.suivi_alert_muted);
         assert!(!neuve.chat_alert_muted);
@@ -459,7 +459,7 @@ mod tests {
         assert!(!ancienne.chat_alert_muted);
 
         let mut config = OverlayConfig::default();
-        config.set_alert_mutes(crate::panels::sound_row::AlertMutes {
+        config.set_alert_mutes(crate::panels::notifications::AlertMutes {
             suivi: true,
             chat: false,
         });

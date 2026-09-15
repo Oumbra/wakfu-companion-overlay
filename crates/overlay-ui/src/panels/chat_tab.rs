@@ -5,15 +5,15 @@
 //! quand un message y correspond, un son et une carte par-dessus le jeu (`panels::watchlist::
 //! toast_card`, variante `WatchlistToastReason::Chat`), dont le clic prépare une réponse en privé.
 //!
-//! Construit sur le modèle de `panels::alerts_tab` — même squelette (titre, phrase, « Tester le
-//! son », ligne de fermeture, formulaire, grille défilable), mêmes jetons, même contrat
-//! transactionnel : l'onglet travaille sur un brouillon ([`ChatDraft`]) que « Valider » commit
-//! avec tous les autres onglets (voir `main.rs::commit_chat`).
+//! Construit sur le modèle de `panels::alerts_tab` — même squelette (titre, phrase, formulaire,
+//! grille défilable), mêmes jetons, même contrat transactionnel : l'onglet travaille sur un
+//! brouillon ([`ChatDraft`]) que « Valider » commit avec tous les autres onglets (voir
+//! `main.rs::commit_chat`).
 //!
-//! La ligne d'essai vit dans [`crate::panels::sound_row`], partagée par les trois onglets, et
-//! porte ici la case **« Couper le son des notifications »** (2026-09-15) : cochée, un message
-//! trouvé affiche toujours sa carte par-dessus le jeu, il ne fait plus sonner l'overlay. La case
-//! « Activer la recherche » du haut, elle, coupe les deux.
+//! **Le son et la fermeture de la carte ne se règlent plus ici** (2026-09-15) : l'essai du son, sa
+//! sourdine et la fermeture automatique sont partis dans la section « Chat » de l'onglet
+//! « Paramètres », avec celles du Suivi et des Alertes — voir [`crate::panels::notifications`].
+//! Cet onglet ne garde que ce qu'il liste : les recherches.
 //!
 //! ## Ce qui vient du compte, et ce qui reste local
 //!
@@ -39,7 +39,7 @@ use overlay_engine::{
 };
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, InputSize};
-use crate::panels::{feature_switch, sound_row};
+use crate::panels::{feature_switch, notifications};
 
 // -------------------------------------------------------------------------------------------
 // Jetons — repris TELS QUELS de `panels::alerts_tab`, pour que les deux onglets se ressemblent
@@ -47,10 +47,6 @@ use crate::panels::{feature_switch, sound_row};
 // -------------------------------------------------------------------------------------------
 
 const TEXT: Color32 = Color32::WHITE;
-const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
-const SETTING_ROW_FILL: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
-const SETTING_ROW_RADIUS: u8 = 4;
-const SETTING_ROW_HEIGHT: f32 = 40.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 const SECTION_GAP: f32 = 18.0;
 /// Gouttière entre deux tuiles — `panels::alerts_tab::TILE_GAP`, le pas de la grille d'Alertes.
@@ -96,6 +92,24 @@ impl ChatToastSettings {
         } else {
             DEFAULT_ALERT_DURATION_SECONDS
         };
+    }
+}
+
+/// Ce qu'il faut à la section « Chat » de l'onglet « Paramètres » pour régler la fermeture de
+/// cette carte — voir `panels::notifications::ToastClose` : le bornage reste ici, le peintre n'en
+/// refait pas un à lui.
+impl notifications::ToastClose for ChatToastSettings {
+    fn manual_close(&self) -> bool {
+        self.manual_close
+    }
+    fn set_manual_close(&mut self, manual: bool) {
+        self.manual_close = manual;
+    }
+    fn duration_seconds(&self) -> f32 {
+        self.duration_seconds
+    }
+    fn set_duration(&mut self, seconds: f32) {
+        ChatToastSettings::set_duration(self, seconds);
     }
 }
 
@@ -150,7 +164,9 @@ pub struct ChatTabState {
     pub scope: ChatFilterScope,
     /// Le mot en cours de saisie.
     pub input: String,
-    /// La durée telle que tapée — voir `AlertsTabState::duration_input` pour pourquoi une chaîne.
+    /// La durée telle que tapée — voir `panels::notifications::AutoClose::input` pour pourquoi
+    /// une chaîne. **Le champ qu'elle alimente est peint dans l'onglet « Paramètres »** depuis le
+    /// 2026-09-15 ; elle reste ici, avec le brouillon dont elle règle la carte.
     pub duration_input: String,
     /// La dernière raison pour laquelle « Ajouter » n'a rien ajouté, effacée à la prochaine
     /// frappe ou au prochain ajout réussi.
@@ -176,15 +192,6 @@ pub struct ChatTabContext<'a> {
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
-    /// **Le son de l'alerte de recherche est-il coupé ?** — brouillon de la case « Couper le son
-    /// des notifications » (voir `panels::sound_row`), posée juste sous la ligne d'essai. Coupé,
-    /// un message trouvé affiche toujours sa carte : c'est le SON qui se tait, pas la recherche
-    /// (celle-ci a sa propre case, [`Self::enabled`]). « Valider » l'emporte, comme le reste.
-    ///
-    /// **Hors de [`ChatDraft`]**, et hors de [`ChatToastSettings`] : le brouillon porte ce qui
-    /// monte au compte, et les réglages de carte parlent de la CARTE. Une sourdine n'est ni l'un
-    /// ni l'autre — elle voyage avec celle du Suivi (`panels::sound_row::AlertMutes`).
-    pub muted: &'a mut bool,
     pub availability: ChatAvailability,
 }
 
@@ -198,22 +205,15 @@ pub enum ChatAvailability {
     NoAccount,
 }
 
-/// Ce que l'onglet demande à l'hôte — jamais exécuté ici (§17.3 bis du plan).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum ChatTabAction {
-    #[default]
-    None,
-    /// « Tester le son » : jouer le son de recherche.
-    TestSound,
-}
-
+/// **Cet onglet ne demande plus rien à l'hôte** : « Tester le son » est parti dans l'onglet
+/// « Paramètres » avec le reste des réglages de notification (2026-09-15, voir
+/// `panels::notifications`), et il était la seule intention que cet écran produisait.
 pub fn show(
     ui: &mut egui::Ui,
     panel: &design::PanelZones,
     state: &mut ChatTabState,
     ctx: &mut ChatTabContext<'_>,
-) -> ChatTabAction {
-    let mut action = ChatTabAction::None;
+) {
     let width = panel.inner.width();
 
     ui.add(design::heading("Chat"));
@@ -230,15 +230,10 @@ pub fn show(
         "chat.activer",
     );
 
-    if sound_row::show(ui, width, "chat", Some(ctx.muted)) {
-        action = ChatTabAction::TestSound;
-    }
-    ui.add_space(SECTION_GAP);
-
     match ctx.availability {
         ChatAvailability::Loading => {
             loading_row(ui, panel.inner);
-            return action;
+            return;
         }
         ChatAvailability::NoAccount => {
             ui.add(
@@ -249,13 +244,10 @@ pub fn show(
                 .width(width)
                 .log_name("chat.sans-compte"),
             );
-            return action;
+            return;
         }
         ChatAvailability::Ready => {}
     }
-
-    close_settings_row(ui, state, &mut ctx.draft.toast, width);
-    ui.add_space(SECTION_GAP);
 
     ui.add(design::heading("Recherches"));
     add_row(ui, state, ctx.draft, width);
@@ -278,11 +270,10 @@ pub fn show(
             .width(width)
             .log_name("chat.vide"),
         );
-        return action;
+        return;
     }
 
     tile_grid(ui, panel, ctx.draft);
-    action
 }
 
 /// Un paragraphe, pas un bloc d'information — même règle que `panels::alerts_tab::paragraph`.
@@ -295,63 +286,6 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
         )
         .wrap_mode(egui::TextWrapMode::Wrap),
     );
-}
-
-/// Le bloc « Fermeture automatique » — copie conforme de `panels::alerts_tab::close_settings_row`,
-/// sur les réglages de la carte de chat.
-fn close_settings_row(
-    ui: &mut egui::Ui,
-    state: &mut ChatTabState,
-    toast: &mut ChatToastSettings,
-    width: f32,
-) {
-    let row = ui.allocate_space(Vec2::new(width, SETTING_ROW_HEIGHT)).1;
-    ui.painter()
-        .rect_filled(row, SETTING_ROW_RADIUS, SETTING_ROW_FILL);
-    let mut auto = !toast.manual_close;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(12.0, 0.0))));
-    cell.horizontal_centered(|ui| {
-        if ui
-            .add(design::checkbox(&mut auto, "Fermeture automatique").log_name("chat.auto"))
-            .clicked()
-        {
-            toast.manual_close = !auto;
-        }
-        ui.add_space(12.0);
-        let response = ui.add(
-            design::input(&mut state.duration_input)
-                .size(InputSize::Standard)
-                .width(52.0)
-                .enabled(auto)
-                .log_name("chat.duree"),
-        );
-        if response.lost_focus() {
-            toast.set_duration(parse_duration(
-                &state.duration_input,
-                toast.duration_seconds,
-            ));
-            state.duration_input = format_duration(toast.duration_seconds);
-        }
-        ui.label(RichText::new("sec.").color(SUBDUED).size(BODY_FONT_SIZE));
-    });
-}
-
-/// Lit une durée tapée — virgule décimale comprise ; une saisie illisible garde la valeur en
-/// place (voir `panels::alerts_tab::parse_duration`).
-pub fn parse_duration(raw: &str, actuelle: f32) -> f32 {
-    raw.trim()
-        .replace(',', ".")
-        .parse::<f32>()
-        .unwrap_or(actuelle)
-}
-
-/// Écrit une durée dans le champ — sans décimale inutile, avec la virgule française.
-pub fn format_duration(seconds: f32) -> String {
-    if seconds.fract().abs() < f32::EPSILON {
-        format!("{}", seconds as i64)
-    } else {
-        format!("{seconds:.1}").replace('.', ",")
-    }
 }
 
 /// Canal, mot, « Ajouter » — **dans cet ordre** (demande explicite) : on dit d'abord OÙ chercher,
@@ -568,16 +502,18 @@ mod tests {
         assert_eq!(draft.filters.len(), 1);
     }
 
+    /// La lecture d'une durée tapée vit désormais dans `panels::notifications`, qui la teste ;
+    /// ce qui reste ici est le bornage, qui appartient à ces réglages-ci.
     #[test]
-    fn la_duree_est_bornee_et_survit_a_une_saisie_illisible() {
+    fn la_duree_est_bornee() {
         let mut toast = ChatToastSettings::default();
         toast.set_duration(0.0);
         assert_eq!(toast.duration_seconds, MIN_ALERT_DURATION_SECONDS);
         toast.set_duration(999.0);
         assert_eq!(toast.duration_seconds, MAX_ALERT_DURATION_SECONDS);
-        assert_eq!(parse_duration("3,5", 1.0), 3.5);
-        assert_eq!(parse_duration("abc", 1.0), 1.0);
-        assert_eq!(format_duration(4.0), "4");
-        assert_eq!(format_duration(3.5), "3,5");
+        assert_eq!(
+            notifications::ToastClose::duration_seconds(&toast),
+            MAX_ALERT_DURATION_SECONDS
+        );
     }
 }

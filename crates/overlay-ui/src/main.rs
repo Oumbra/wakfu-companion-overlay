@@ -75,8 +75,8 @@ use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::feature_switch::FeatureToggles;
 use overlay_ui::panels::login::{self, LoginState};
+use overlay_ui::panels::notifications::AlertMutes;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
-use overlay_ui::panels::sound_row::AlertMutes;
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
@@ -466,7 +466,7 @@ struct App {
     /// continue).
     features: FeatureToggles,
     /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
-    /// « Chat » (`panels::sound_row`). Réglages LOCAUX persistés
+    /// « Chat » (`panels::notifications`). Réglages LOCAUX persistés
     /// (`config::OverlayConfig::alert_mutes`), même politique que `features` : lus au démarrage,
     /// remplacés à la validation de la fenêtre Options.
     ///

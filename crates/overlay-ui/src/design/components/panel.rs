@@ -178,7 +178,22 @@ impl PanelZones {
         );
         let content_width = rect.width() - scroll_area::RESERVE_X;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        child.set_clip_rect(rect.intersect(ui.clip_rect()));
+        // Clip élargi à GAUCHE du retrait des titres, comme celui du panneau lui-même et pour la
+        // même raison : un titre de section se peint en retrait de son axe de contrôles (voir
+        // `design::heading`). Tant que seules des GRILLES défilaient, la question ne se posait
+        // pas ; l'onglet « Paramètres » a mis ses sept sections — titres compris — dans une zone
+        // défilable le 2026-09-15, et « Fichier » y rendait « ichier ».
+        //
+        // Le rectangle de mise en page, lui, ne bouge pas : élargir le clip montre ce qui déborde,
+        // élargir le rect déplacerait tout le contenu.
+        const TITLE_OUTDENT: f32 = tokens::PANEL_PAD_CONTROL_X - tokens::PANEL_PAD_TITLE_X;
+        child.set_clip_rect(
+            Rect::from_min_max(
+                egui::pos2(rect.left() - TITLE_OUTDENT, rect.top()),
+                rect.max,
+            )
+            .intersect(ui.clip_rect()),
+        );
         scroll_area::scroll_area(id_salt)
             .auto_shrink(false)
             .show(&mut child, |ui| add_contents(ui, content_width))

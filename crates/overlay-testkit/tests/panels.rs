@@ -736,15 +736,6 @@ fn bandeau_largeur_suivi(entry_count: usize, tracking_enabled: bool) -> f32 {
 /// de place ou de taille, c'est cette ligne-ci qu'on corrige, pas une vingtaine d'ordonnées.
 const INTERRUPTEUR_Y: f32 = 38.0;
 
-/// **Décalage vertical apporté par la case « Couper le son des notifications »** des onglets Suivi
-/// et Chat (2026-09-15, voir `panels::sound_row`) : la hauteur d'une ligne simple, l'espacement du
-/// panneau étant nul. Tout ce que ces DEUX onglets peignent après la ligne « Tester le son de
-/// l'alerte » est descendu d'autant — l'onglet Alertes, lui, n'a pas la case (le son d'un
-/// ramassage s'y coupe tuile par tuile), ses ordonnées ne bougent donc pas.
-///
-/// Nommée plutôt que fondue dans chaque coordonnée, même raison que [`INTERRUPTEUR_Y`].
-const SOURDINE_Y: f32 = 39.0;
-
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
 const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0, 25.0);
@@ -1694,7 +1685,7 @@ fn modale_options_echap_annule_et_entree_valide() {
                 features: overlay_ui::panels::feature_switch::FeatureToggles::default(),
                 // Et pour les deux cases « Couper le son des notifications » : jamais touchées,
                 // donc emportées levées.
-                mutes: overlay_ui::panels::sound_row::AlertMutes::default(),
+                mutes: overlay_ui::panels::notifications::AlertMutes::default(),
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -1862,12 +1853,11 @@ fn modale_options_sur_damier_ne_panique_pas() {
 /// **Un `Harness` par test, jamais plusieurs** : `egui_kittest` refuse que deux jeux de résultats
 /// de snapshot soient abandonnés séparément dans le même test (« Multiple SnapshotResults were
 /// dropped without being handled »), ce qui casserait la mise à jour groupée des images.
-fn capture_onglet_alertes(nom: &str, manual_close: bool) {
+fn capture_onglet_alertes(nom: &str) {
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     let mut profile = overlay_engine::AlertProfile::default();
     profile.add("Combinaison Lardante", Some(4242));
-    profile.manual_close = manual_close;
     // Un objet au son coupé dans la capture : c'est l'autre moitié de ce que la tuile dit.
     profile.toggle("Influence III", None);
 
@@ -1923,14 +1913,7 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool) {
 /// existait, mais l'entrée de menu était désactivée et la liste ne se réglait que depuis le site.
 #[test]
 fn options_onglet_alertes_liste() {
-    capture_onglet_alertes("options_alertes_liste", false);
-}
-
-/// Fermeture manuelle : le champ de durée se grise. La logique existait (`.enabled`), aucun rendu
-/// ne la montrait.
-#[test]
-fn options_onglet_alertes_fermeture_manuelle() {
-    capture_onglet_alertes("options_alertes_fermeture_manuelle", true);
+    capture_onglet_alertes("options_alertes_liste");
 }
 
 /// **L'onglet « Raccourcis »** (2026-09-13) — celui qui personnalise les raccourcis clavier
@@ -2019,24 +2002,13 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
 #[test]
 fn options_parametres_section_compte() {
     // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
-    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
-    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
-    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
-    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
-    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
-    overlay_ui::build_info::freeze_for_snapshots();
-    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
-
-    let mut options_state = OptionsModalState {
-        tab: OptionsTab::Parametres,
-        path_input: CHEMIN.to_string(),
-        account_connected: true,
-        initial: overlay_ui::panels::options_modal::OptionsInitial {
-            path: CHEMIN.to_string(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    // `parametres_avec_notifications` pose donc le gel de version lui-même. Sans lui, la bannière
+    // de la fenêtre porterait la version RÉELLE du moment — au petit bonheur de l'ordre
+    // d'exécution, puisque le gel est global au process. Vécu le 2026-09-14 : une référence
+    // régénérée test par test (`--test panels <nom>`) est revenue avec un vrai numéro de version,
+    // que le run suivant, complet, aurait rejeté.
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
 
     let mut harness = Harness::builder()
         .with_size(egui::vec2(
@@ -2062,6 +2034,9 @@ fn options_parametres_section_compte() {
             );
         });
     harness.run();
+    // Cette section est passée sous le pli le 2026-09-15, quand les trois sections de
+    // notifications se sont posées au-dessus d'elle — voir [`defile_les_parametres`].
+    defile_les_parametres(&mut harness, 600.0);
     harness.snapshot("options_parametres_compte");
 }
 
@@ -2072,27 +2047,15 @@ fn options_parametres_section_compte() {
 /// version » (décisions du mainteneur).
 #[test]
 fn options_parametres_section_mise_a_jour() {
-    overlay_ui::build_info::freeze_for_snapshots();
-    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
-
-    let mut options_state = OptionsModalState {
-        tab: OptionsTab::Parametres,
-        path_input: CHEMIN.to_string(),
-        account_connected: true,
-        auto_update: true,
-        update: overlay_ui::update::UpdateStatus::Available {
-            version: "0.21.0".to_string(),
-            download_size: 3_100_000,
-            mandatory: false,
-            notes_url: None,
-            checked_at: std::time::Instant::now(),
-        },
-        initial: overlay_ui::panels::options_modal::OptionsInitial {
-            path: CHEMIN.to_string(),
-            auto_update: true,
-            ..Default::default()
-        },
-        ..Default::default()
+    let mut options_state = parametres_avec_notifications();
+    options_state.auto_update = true;
+    options_state.initial.auto_update = true;
+    options_state.update = overlay_ui::update::UpdateStatus::Available {
+        version: "0.21.0".to_string(),
+        download_size: 3_100_000,
+        mandatory: false,
+        notes_url: None,
+        checked_at: std::time::Instant::now(),
     };
 
     let mut harness = Harness::builder()
@@ -2119,6 +2082,9 @@ fn options_parametres_section_mise_a_jour() {
             );
         });
     harness.run();
+    // Dernière section de l'onglet : elle ne se voit qu'après un défilement depuis le 2026-09-15
+    // — voir [`defile_les_parametres`].
+    defile_les_parametres(&mut harness, 900.0);
     harness.snapshot("options_parametres_mise_a_jour");
 }
 
@@ -2699,7 +2665,7 @@ fn options_alertes_survol_d_une_tuile_retirable() {
     survole_l_onglet_alertes(
         "options_alertes_survol_retirable",
         231.0,
-        578.0 + INTERRUPTEUR_Y,
+        463.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2713,7 +2679,7 @@ fn options_alertes_survol_de_la_croix() {
     survole_l_onglet_alertes(
         "options_alertes_survol_croix",
         248.0,
-        561.0 + INTERRUPTEUR_Y,
+        446.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2728,7 +2694,7 @@ fn options_alertes_survol_d_un_objet_par_defaut() {
     survole_l_onglet_alertes(
         "options_alertes_survol_par_defaut",
         79.0,
-        502.0 + INTERRUPTEUR_Y,
+        387.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2813,7 +2779,7 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
     // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
     // « Objets surveillés », pleine largeur du panneau.
-    let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, 326.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2837,14 +2803,14 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // passent par le même `egui::Tooltip::for_enabled` (voir `Response::on_hover_ui` dans egui),
     // seul l'alignement diffère — et c'est lui qui envoyait le texte hors du cadre capturé. Cette
     // capture le prouve dans les deux sens : l'infobulle sort, et elle sort AU-DESSUS.
-    harness.hover_at(egui::pos2(68.0, 479.0 + INTERRUPTEUR_Y));
+    harness.hover_at(egui::pos2(68.0, 364.0 + INTERRUPTEUR_Y));
     harness.run();
     harness.snapshot("options_alertes_infobulle_filtre");
 
     // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
     // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
     // immédiatement sous le champ.
-    let suggestion = egui::pos2(300.0, 510.0 + INTERRUPTEUR_Y);
+    let suggestion = egui::pos2(300.0, 395.0 + INTERRUPTEUR_Y);
     // **Survol d'abord, clic ensuite** : egui rattache un appui au widget que le pointeur
     // survolait, et le pointeur n'est nulle part tant qu'aucun mouvement ne l'a placé. Sans cette
     // frame de survol, l'appui tombe sur un widget inconnu et la rangée n'est jamais cliquée.
@@ -2930,7 +2896,7 @@ fn options_alertes_croix_efface_la_saisie() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 443.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, 328.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2943,7 +2909,7 @@ fn options_alertes_croix_efface_la_saisie() {
 
     // La croix : à 9 px du bord extérieur droit du champ, sur son axe — voir
     // `tokens::INPUT_CLEAR_INSET_RATIO`. Le champ s'arrête à x≈705 dans cette fenêtre.
-    let croix = egui::pos2(691.0, 443.0 + INTERRUPTEUR_Y);
+    let croix = egui::pos2(691.0, 328.0 + INTERRUPTEUR_Y);
     harness.hover_at(croix);
     harness.run();
     harness.drag_at(croix);
@@ -3039,7 +3005,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, 326.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3061,7 +3027,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
     // Le pointeur SUR la poignée (colonne de droite du panneau, à mi-hauteur de la liste) : elle
     // prend la teinte des rangées survolées, sans s'élargir. egui ne passe en `hovered` que le
     // pointeur sur la poignée elle-même, pas seulement dans sa colonne.
-    harness.hover_at(egui::pos2(700.0, 608.0 + INTERRUPTEUR_Y));
+    harness.hover_at(egui::pos2(700.0, 493.0 + INTERRUPTEUR_Y));
     harness.run();
     harness.snapshot("options_alertes_poignee_survolee");
 
@@ -3295,7 +3261,7 @@ fn options_suivi_infobulle_de_bouton_au_dessus() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(252.0, 309.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
+        Some(egui::pos2(252.0, 252.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3313,7 +3279,7 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(240.0, 355.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
+        Some(egui::pos2(240.0, 298.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3445,14 +3411,14 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// suivaient pas, les planches d'infobulle et de déplacement resteraient vertes en cessant de
 /// montrer ce pour quoi elles existent. Puis de la case « Activer le suivi » le même jour, voir
 /// [`INTERRUPTEUR_Y`].
-const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
-const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 402.0 + INTERRUPTEUR_Y);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 402.0 + INTERRUPTEUR_Y);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
-const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 442.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 385.0 + INTERRUPTEUR_Y);
 /// Le bouton icône « Suppression multiple », à droite de l'en-tête « Éléments suivis » — même
 /// repère vertical que les tuiles, un rang plus haut (`suivi_tab::LIST_HEADER_HEIGHT` et sa
 /// gouttière).
-const BOUTON_SELECTION: egui::Pos2 = egui::pos2(688.0, 410.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+const BOUTON_SELECTION: egui::Pos2 = egui::pos2(688.0, 353.0 + INTERRUPTEUR_Y);
 
 /// **Rien à supprimer, pas de bouton pour le faire.**
 ///
@@ -3641,7 +3607,7 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(79.0, 505.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
+        Some(egui::pos2(79.0, 448.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3655,21 +3621,51 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
     survole_l_onglet_alertes(
         "options_alertes_infobulle_tuile_coupee",
         459.0,
-        502.0 + INTERRUPTEUR_Y,
+        387.0 + INTERRUPTEUR_Y,
         Some("Influence III"),
     );
 }
 
-/// **Le bouton de test du son, dans l'onglet Alertes** — même bascule que les boutons du Suivi, sur
-/// un `design::icon_button` cette fois : son infobulle sortait sous le glyphe.
+/// **Le bouton de test du son, dans la section « Suivi » de l'onglet « Paramètres »** — même
+/// bascule que les boutons du Suivi, sur un `design::icon_button` cette fois : son infobulle
+/// sortait sous le glyphe.
+///
+/// Il vivait dans l'onglet « Alertes » jusqu'au 2026-09-15, où les trois boutons d'essai l'ont
+/// rejoint ici (voir `panels::notifications`) ; un seul survol suffit, ils sont peints par le
+/// même code.
 #[test]
-fn options_alertes_infobulle_du_test_de_son_au_dessus() {
-    survole_l_onglet_alertes(
-        "options_alertes_infobulle_test_son",
-        240.0,
-        252.0 + INTERRUPTEUR_Y,
-        None,
-    );
+fn options_parametres_infobulle_du_test_de_son_au_dessus() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    // Le bouton de la section « Suivi », la première des trois : sous « Fichier » et « Combat ».
+    harness.hover_at(egui::pos2(282.0, 413.0));
+    harness.run();
+    harness.snapshot("options_parametres_infobulle_test_son");
 }
 
 /// **Le champ d'ajout du Suivi, exercé de bout en bout — objets ET monstres.**
@@ -3746,10 +3742,9 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
         });
     harness.run();
 
-    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne) — et sous la
-    // ligne « Tester le son de l'alerte », qui a tout descendu de 57 px le 2026-09-15 (voir
-    // [`TUILE_0`]), elle-même sous la case « Activer le suivi » (voir [`INTERRUPTEUR_Y`]).
-    let champ = egui::pos2(300.0, 357.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne), lui-même
+    // sous la case « Activer le suivi » (voir [`INTERRUPTEUR_Y`]).
+    let champ = egui::pos2(300.0, 300.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3768,7 +3763,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
     // Le panneau ouvre par sa bande de filtres, puis les rangées de 35 px.
     let rangee = egui::pos2(
         300.0,
-        357.0 + INTERRUPTEUR_Y + SOURDINE_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
+        300.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
     );
     harness.hover_at(rangee);
     harness.run();
@@ -3853,7 +3848,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     // Le bloc porte DEUX lignes en décompte : le champ descend d'autant, de la ligne « Tester le
     // son de l'alerte » posée au-dessus du formulaire (voir [`TUILE_0`]) et de la case « Activer le
     // Suivi » (voir [`INTERRUPTEUR_Y`]).
-    let champ = egui::pos2(300.0, 403.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+    let champ = egui::pos2(300.0, 346.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3863,10 +3858,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     }
     harness.run();
 
-    let rangee = egui::pos2(
-        300.0,
-        403.0 + INTERRUPTEUR_Y + SOURDINE_Y + 25.0 + 38.0 + 17.0,
-    );
+    let rangee = egui::pos2(300.0, 346.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 17.0);
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
@@ -4141,54 +4133,116 @@ fn options_onglet_suivi_desactive() {
     capture_onglet_coupe("options_suivi_desactive", OptionsTab::Suivi);
 }
 
-/// **Le son coupé, la fonctionnalité intacte** (2026-09-15, voir `panels::sound_row`) — la case
-/// « Couper le son des notifications » est cochée et, juste au-dessus, le bouton d'essai est
-/// GRISÉ : proposer d'écouter ce qu'on vient de faire taire serait une promesse que le jeu ne
-/// tiendra pas.
+/// **Le son coupé, la fonctionnalité intacte** (2026-09-15, voir `panels::notifications`) — les
+/// deux cases « Couper le son des notifications » des sections « Suivi » et « Chat » sont cochées
+/// et, juste au-dessus de chacune, le bouton d'essai est GRISÉ : proposer d'écouter ce qu'on vient
+/// de faire taire serait une promesse que le jeu ne tiendra pas.
 ///
 /// C'est là tout ce que cette planche verrouille, et c'est l'écart qu'on perdrait le plus
-/// facilement : le reste de l'onglet — formulaire, liste, tuiles — reste VIF, contrairement à
-/// `options_suivi_desactive` où la case « Activer le suivi » estompe tout. Couper un son n'éteint
-/// pas la fonctionnalité.
-#[test]
-fn options_onglet_suivi_son_coupe() {
-    capture_onglet_son_coupe("options_suivi_son_coupe", OptionsTab::Suivi);
-}
-
-/// Le pendant pour l'onglet « Chat » — même case, même bouton grisé, même liste intacte.
-#[test]
-fn options_onglet_chat_son_coupe() {
-    capture_onglet_son_coupe("options_chat_son_coupe", OptionsTab::Chat);
-}
-
-/// Rend un onglet dont l'alerte est MUETTE, tout le reste étant actif — voir les deux tests
-/// ci-dessus. Calquée sur [`capture_onglet_coupe`], aux deux réglages près : `features` reste au
-/// défaut (« tout actif ») et ce sont les sourdines qui sont posées.
-fn capture_onglet_son_coupe(nom: &str, tab: OptionsTab) {
+/// facilement : le reste des sections — la fermeture automatique du Chat, la section « Alertes »
+/// — reste VIF, contrairement à `options_suivi_desactive` où la case « Activer le suivi » estompe
+/// tout son onglet. Couper un son n'éteint pas la fonctionnalité.
+///
+/// **Une seule planche depuis le 2026-09-15**, là où il en fallait deux (une par onglet) : les
+/// deux sourdines vivent désormais côte à côte dans « Paramètres ».
+/// **L'onglet « Paramètres » avec ses quatre sections de notification vivantes** — brouillons
+/// d'alertes et de chat descendus du compte, durées déjà tapées, tout allumé.
+///
+/// Sans brouillon, les deux lignes « Fermeture automatique des notifications » se peindraient
+/// grisées (voir `panels::notifications::AutoClose::available`) et les planches ne montreraient
+/// pas ce qu'elles sont censées montrer.
+fn parametres_avec_notifications() -> OptionsModalState {
     overlay_ui::build_info::freeze_for_snapshots();
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
     use overlay_ui::panels::chat_tab::ChatTabState;
-    use overlay_ui::panels::sound_row::AlertMutes;
-    use overlay_ui::panels::suivi_tab::SuiviAvailability;
 
-    let mut options_state = OptionsModalState {
-        tab,
-        // Les deux coupées d'un coup, même raison que `capture_onglet_coupe` : chaque planche ne
-        // montre que son onglet.
-        mutes: AlertMutes {
-            suivi: true,
-            chat: true,
-        },
-        suivi_draft: Some(entrees_de_suivi()),
-        suivi_availability: SuiviAvailability::Ready,
-        chat: ChatTabState {
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+    let mut profile = overlay_engine::AlertProfile::default();
+    profile.add("Combinaison Lardante", Some(4242));
+
+    OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        alerts: AlertsTabState {
             duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        alerts_draft: Some(profile),
+        alerts_availability: AlertsAvailability::Ready,
+        chat: ChatTabState {
+            duration_input: "5".to_string(),
             ..Default::default()
         },
         chat_draft: Some(recherches_de_chat()),
         chat_availability: Default::default(),
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
         ..Default::default()
-    };
+    }
+}
 
+/// **Fait défiler le contenu de l'onglet « Paramètres »** de `points` vers le bas.
+///
+/// L'onglet porte sept sections depuis le 2026-09-15 et ne tient plus d'un écran : ce qui suit la
+/// section « Chat » — « Compte », « Mise à jour » — ne se capture qu'après un défilement (voir
+/// `panels::options_modal`, zone défilable « options-parametres »).
+///
+/// **La molette, pas un état interne d'egui** : c'est le geste réel, et il passe par le lissage du
+/// défilement — d'où les frames de repos, sans lesquelles la capture attraperait l'animation en
+/// cours de route.
+fn defile_les_parametres(harness: &mut Harness<'_>, points: f32) {
+    harness.event(egui::Event::PointerMoved(egui::pos2(380.0, 450.0)));
+    harness.run();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -points),
+        // `Move` : la molette d'une souris n'a pas les phases d'un pavé tactile (voir la doc du
+        // champ côté egui).
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    for _ in 0..12 {
+        harness.run();
+    }
+    // Le pointeur repart : sans cela, le curseur du jeu (`overlay_ui::cursor`) resterait peint au
+    // milieu de la capture, là où la molette a été actionnée.
+    harness.event(egui::Event::PointerGone);
+    harness.run();
+}
+
+#[test]
+fn options_parametres_son_coupe() {
+    let mut etat = parametres_avec_notifications();
+    etat.mutes = overlay_ui::panels::notifications::AlertMutes {
+        suivi: true,
+        chat: true,
+    };
+    capture_parametres("options_parametres_son_coupe", etat);
+}
+
+/// **Fermeture manuelle : le champ de durée se grise** — la logique existait (`.enabled`), aucun
+/// rendu ne la montrait. Posée sur les DEUX sections qui en ont une, Alertes et Chat.
+///
+/// Cette planche vivait dans l'onglet « Alertes » (`options_alertes_fermeture_manuelle`) jusqu'au
+/// 2026-09-15, où le bloc a déménagé dans « Paramètres » — voir `panels::notifications`.
+#[test]
+fn options_parametres_fermeture_manuelle() {
+    let mut etat = parametres_avec_notifications();
+    if let Some(profil) = etat.alerts_draft.as_mut() {
+        profil.manual_close = true;
+    }
+    if let Some(chat) = etat.chat_draft.as_mut() {
+        chat.toast.manual_close = true;
+    }
+    capture_parametres("options_parametres_fermeture_manuelle", etat);
+}
+
+/// Rend l'onglet « Paramètres » dans l'état qu'on lui donne, sans défilement — le haut de
+/// l'onglet, jusqu'à la section « Chat ». Calquée sur [`capture_onglet_coupe`].
+fn capture_parametres(nom: &str, mut options_state: OptionsModalState) {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(
             panels::options_modal::WINDOW_SIZE.0,
@@ -4248,7 +4302,7 @@ fn options_onglet_chat_survol_d_une_tuile() {
         Default::default(),
         Some(egui::pos2(
             47.0 + 155.0 + 12.0 + 77.0,
-            470.0 + INTERRUPTEUR_Y,
+            316.0 + INTERRUPTEUR_Y,
         )),
     );
 }

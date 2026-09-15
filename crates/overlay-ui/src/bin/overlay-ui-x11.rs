@@ -86,8 +86,8 @@ mod linux_main {
     use overlay_ui::panels::combat_frame::CombatFrame;
     use overlay_ui::panels::feature_switch::FeatureToggles;
     use overlay_ui::panels::login::{self, LoginState};
+    use overlay_ui::panels::notifications::AlertMutes;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
-    use overlay_ui::panels::sound_row::AlertMutes;
     use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
