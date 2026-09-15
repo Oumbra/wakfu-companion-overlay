@@ -73,6 +73,8 @@
 //! valide via `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`]
 //! en retour pour le prochain redessin.
 
+use overlay_sync::update::{self, UpdateStatus};
+
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
 use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabAction, ChatTabState};
@@ -314,6 +316,19 @@ pub struct OptionsModalState {
     /// champ distinct de [`Self::pending_close`] : les deux boîtes posent des questions
     /// différentes, et une seule peut être ouverte à la fois (voir `show`).
     pub pending_disconnect: bool,
+    /// Où en est la mise à jour automatique — copié par l'hôte depuis l'état publié par le
+    /// thread de mise à jour AVANT chaque rendu (jamais figé à l'ouverture : une vérification
+    /// lancée depuis cette fenêtre doit s'y voir aboutir). Décide de la ligne d'information et
+    /// du bouton de la section « Mise à jour » (2026-09-15, `docs/plan-mise-a-jour.md` §8.2).
+    pub update: UpdateStatus,
+    /// Installer automatiquement les mises à jour au démarrage ? — case de la section « Mise à
+    /// jour », même mécanique de brouillon que les autres cases : initialisée par l'hôte au
+    /// réglage en vigueur (`config::OverlayConfig::auto_update`), prise en compte à « Valider ».
+    pub auto_update: bool,
+    /// La confirmation d'installation est ouverte, pour cette version — « Mettre à jour vers X »
+    /// ferme l'overlay de jeu le temps de l'installation, ce qui mérite un « oui » explicite.
+    /// Troisième boîte exclusive avec les deux autres (voir `show`).
+    pub pending_install: Option<String>,
     /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
     ///
     /// Posée par le clic sur « Annuler », par la croix de la bannière (2026-09-13), par Échap, **ou
@@ -349,6 +364,8 @@ pub struct OptionsInitial {
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
+    /// La mise à jour automatique telle qu'elle était à l'ouverture — même rôle.
+    pub auto_update: bool,
 }
 
 impl OptionsModalState {
@@ -372,6 +389,7 @@ impl OptionsModalState {
             features: self.features,
             mutes: self.mutes,
             shortcuts: self.shortcuts.clone(),
+            auto_update: self.auto_update,
         }
     }
 
@@ -411,6 +429,7 @@ impl OptionsModalState {
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
             || self.shortcuts != self.initial.shortcuts
+            || self.auto_update != self.initial.auto_update
     }
 }
 
@@ -448,6 +467,16 @@ pub enum OptionsModalAction {
     /// Résoudre les ingrédients de cet objet, depuis l'onglet « Suivi » — l'appelant seul a le
     /// réseau (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
+    /// « Recherche de mise à jour » (section « Mise à jour ») : l'hôte demande au thread de mise
+    /// à jour une vérification sans installation (`background::UpdateCommand::Check`). Immédiat,
+    /// comme `Disconnect` — mais sans rien à confirmer, il ne change rien à la machine.
+    CheckUpdate,
+    /// « Mettre à jour vers X », **confirmé** : l'hôte referme cette fenêtre et les overlays de
+    /// jeu, repasse par l'écran de chargement et laisse le thread de mise à jour télécharger,
+    /// mettre en place, puis installe et relance (`App::install_update_if_ready`). Immédiat et
+    /// sans retour : ce que cette fenêtre avait en brouillon est abandonné, comme à la
+    /// déconnexion.
+    InstallUpdate,
 }
 
 /// Ce que « Valider » emporte de l'onglet « Paramètres ».
@@ -483,6 +512,10 @@ pub struct OptionsCommit {
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
     /// (`shortcuts::ShortcutRegistry::apply`).
     pub shortcuts: ShortcutBindings,
+    /// État de la case « Installer automatiquement les mises à jour au démarrage » — ce que
+    /// l'hôte persiste (`config::OverlayConfig::auto_update`) ; il ne s'applique qu'au prochain
+    /// lancement.
+    pub auto_update: bool,
 }
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
@@ -524,7 +557,8 @@ pub fn show(
     // 2026-09-13, la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »).
     // Elles s'excluent par construction (voir leur `else if` plus bas) ; la capture ci-dessus vaut
     // pour l'une comme pour l'autre — c'est le double appui d'Échap qu'elle empêche.
-    let dialogue_a_l_entree = state.pending_close || state.pending_disconnect;
+    let dialogue_a_l_entree =
+        state.pending_close || state.pending_disconnect || state.pending_install.is_some();
 
     // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
     // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
@@ -861,6 +895,64 @@ pub fn show(
         {
             state.pending_disconnect = true;
         }
+
+        // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
+        // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la
+        // porte déjà. Une ligne d'information (dernière vérification, version disponible et son
+        // poids), la case d'installation automatique, et UN bouton dont le libellé suit l'état :
+        // « Recherche de mise à jour » → « Recherche… » → « Mettre à jour vers X » /
+        // « Réessayer ». Pas de bouton « Notes de version » pour l'instant (aucune note n'est
+        // rédigée aujourd'hui). L'habillage du bouton de recherche est à revoir avec le design
+        // system, plus tard.
+        //
+        // Comme « Déconnecter », « Mettre à jour » n'est PAS un brouillon : il ferme l'overlay
+        // de jeu le temps de l'installation — d'où sa confirmation. « Recherche », lui, ne touche
+        // à rien.
+        ui.add_space(SECTION_GAP);
+        ui.add(design::heading("Mise à jour"));
+        let (info, tone) = update_info_line(&state.update, std::time::Instant::now());
+        ui.add(
+            design::info_text(info)
+                .tone(tone)
+                .width(inner_width)
+                .log_name("options-mise-a-jour-info"),
+        );
+        ui.add_space(INFO_GAP);
+        ui.add(
+            design::checkbox(
+                &mut state.auto_update,
+                "Installer automatiquement les mises à jour au démarrage",
+            )
+            .tooltip(
+                "Au lancement, une version plus récente est téléchargée et installée avant \
+                 d'ouvrir l'overlay. Décochée, elle est seulement signalée ici.",
+            )
+            .log_name("options-mise-a-jour-auto"),
+        );
+        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+        let button_spec = update_button(&state.update);
+        let update_button = design::button(button_spec.label)
+            .variant(button_spec.variant)
+            .size(ButtonSize::Height(ROW_HEIGHT))
+            .enabled(button_spec.enabled)
+            .tooltip(button_spec.tooltip)
+            .log_name("options-mise-a-jour-bouton");
+        let update_size = update_button.desired_size(ui);
+        let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+        if ui
+            .put(
+                egui::Rect::from_center_size(row.center(), update_size),
+                update_button,
+            )
+            .clicked()
+        {
+            match &state.update {
+                UpdateStatus::Available { version, .. } => {
+                    state.pending_install = Some(version.clone());
+                }
+                _ => action = OptionsModalAction::CheckUpdate,
+            }
+        }
     });
 
     if alerts_action == AlertsTabAction::TestSound {
@@ -902,7 +994,22 @@ pub fn show(
     // Pourquoi confirmer ici, alors que l'onglet « Alertes » a retiré sa confirmation de retrait :
     // celle-là portait sur un brouillon qu'« Annuler » rattrapait ; celle-ci efface la session et
     // renvoie l'overlay à son écran de connexion, sans retour possible sans réappairer.
-    if state.pending_disconnect {
+    if let Some(version) = state.pending_install.clone() {
+        let choix = design::confirm_dialog(format!(
+            "Fermer l'overlay et installer la version {version} ?"
+        ))
+        .over(window)
+        .log_name("options.mise-a-jour")
+        .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_install = None;
+                action = OptionsModalAction::InstallUpdate;
+            }
+            design::ConfirmChoice::No => state.pending_install = None,
+            design::ConfirmChoice::Pending => {}
+        }
+    } else if state.pending_disconnect {
         let choix = design::confirm_dialog("Déconnecter le compte de l'overlay ?")
             .over(window)
             .log_name("options.deconnexion")
@@ -979,6 +1086,134 @@ pub fn show(
     action
 }
 
+/// La ligne d'information de la section « Mise à jour » et son ton — une fonction libre, pour
+/// que ses formulations soient testées sans peindre.
+pub fn update_info_line(
+    status: &UpdateStatus,
+    now: std::time::Instant,
+) -> (String, design::InfoTone) {
+    let since = |at: std::time::Instant| {
+        let secs = now.saturating_duration_since(at).as_secs();
+        if secs < 60 {
+            "à l'instant".to_string()
+        } else if secs < 3600 {
+            format!("il y a {} min", secs / 60)
+        } else {
+            format!("il y a {} h", secs / 3600)
+        }
+    };
+    match status {
+        UpdateStatus::Idle => (
+            "Aucune vérification depuis le lancement.".to_string(),
+            design::InfoTone::Info,
+        ),
+        UpdateStatus::Checking => ("Recherche en cours…".to_string(), design::InfoTone::Info),
+        UpdateStatus::UpToDate { checked_at } => (
+            format!(
+                "Dernière vérification {} · vous êtes à jour.",
+                since(*checked_at)
+            ),
+            design::InfoTone::Info,
+        ),
+        UpdateStatus::Available {
+            version,
+            download_size,
+            mandatory,
+            checked_at,
+            ..
+        } => (
+            format!(
+                "Dernière vérification {} · version {version} disponible · {}{}",
+                since(*checked_at),
+                update::human_size(*download_size),
+                if *mandatory { " · obligatoire" } else { "" }
+            ),
+            design::InfoTone::Info,
+        ),
+        UpdateStatus::Downloading {
+            version,
+            received,
+            total,
+        } => (
+            format!(
+                "Téléchargement de la version {version} : {} / {}",
+                update::human_size(*received),
+                update::human_size(*total)
+            ),
+            design::InfoTone::Info,
+        ),
+        UpdateStatus::Verifying { version } => (
+            format!("Vérification de la version {version}…"),
+            design::InfoTone::Info,
+        ),
+        UpdateStatus::ReadyToInstall { version, .. } | UpdateStatus::Installing { version } => (
+            format!("Installation de la version {version}…"),
+            design::InfoTone::Info,
+        ),
+        UpdateStatus::Unavailable { reason, checked_at } => (
+            format!(
+                "Dernière vérification {} · impossible ({reason}).",
+                since(*checked_at)
+            ),
+            design::InfoTone::Alert,
+        ),
+        UpdateStatus::Failed {
+            headline, detail, ..
+        } => (
+            format!("Mise à jour impossible : {headline} ({detail})"),
+            design::InfoTone::Alert,
+        ),
+    }
+}
+
+/// Le bouton unique de la section « Mise à jour », selon l'état.
+pub struct UpdateButtonSpec {
+    pub label: String,
+    pub variant: ButtonVariant,
+    pub enabled: bool,
+    pub tooltip: &'static str,
+}
+
+pub fn update_button(status: &UpdateStatus) -> UpdateButtonSpec {
+    match status {
+        UpdateStatus::Available { version, .. } => UpdateButtonSpec {
+            label: format!("Mettre à jour vers {version}"),
+            variant: ButtonVariant::Primary,
+            enabled: true,
+            tooltip: "Ferme l'overlay, installe la nouvelle version et le relance",
+        },
+        UpdateStatus::Checking => UpdateButtonSpec {
+            label: "Recherche…".to_string(),
+            variant: ButtonVariant::Secondary,
+            enabled: false,
+            tooltip: "Lecture de la dernière version publiée",
+        },
+        UpdateStatus::Downloading { .. }
+        | UpdateStatus::Verifying { .. }
+        | UpdateStatus::ReadyToInstall { .. }
+        | UpdateStatus::Installing { .. } => UpdateButtonSpec {
+            label: "Mise à jour en cours…".to_string(),
+            variant: ButtonVariant::Secondary,
+            enabled: false,
+            tooltip: "L'overlay se relancera une fois la version installée",
+        },
+        UpdateStatus::Failed { .. } => UpdateButtonSpec {
+            label: "Réessayer".to_string(),
+            variant: ButtonVariant::Secondary,
+            enabled: true,
+            tooltip: "Rechercher à nouveau la dernière version publiée",
+        },
+        UpdateStatus::Idle | UpdateStatus::UpToDate { .. } | UpdateStatus::Unavailable { .. } => {
+            UpdateButtonSpec {
+                label: "Recherche de mise à jour".to_string(),
+                variant: ButtonVariant::Secondary,
+                enabled: true,
+                tooltip: "Lire la dernière version publiée, sans rien installer",
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -996,6 +1231,61 @@ mod tests {
             },
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn la_case_de_mise_a_jour_automatique_est_un_brouillon() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.auto_update = true;
+        state.initial.auto_update = true;
+        assert!(!state.is_dirty());
+        state.auto_update = false;
+        assert!(state.is_dirty());
+        assert!(!state.commit().auto_update);
+    }
+
+    #[test]
+    fn ligne_et_bouton_de_la_section_mise_a_jour_suivent_l_etat() {
+        use overlay_sync::update::UpdateStatus;
+        let now = std::time::Instant::now();
+        let (ligne, _) = update_info_line(
+            &UpdateStatus::UpToDate { checked_at: now },
+            now + std::time::Duration::from_secs(185),
+        );
+        assert_eq!(
+            ligne,
+            "Dernière vérification il y a 3 min · vous êtes à jour."
+        );
+        assert_eq!(
+            update_button(&UpdateStatus::Idle).label,
+            "Recherche de mise à jour"
+        );
+        let disponible = UpdateStatus::Available {
+            version: "0.21.0".into(),
+            download_size: 3_100_000,
+            mandatory: false,
+            notes_url: None,
+            checked_at: now,
+        };
+        let (ligne, tone) = update_info_line(&disponible, now);
+        assert_eq!(
+            ligne,
+            "Dernière vérification à l'instant · version 0.21.0 disponible · 3,1 Mo"
+        );
+        assert_eq!(tone, design::InfoTone::Info);
+        let bouton = update_button(&disponible);
+        assert_eq!(bouton.label, "Mettre à jour vers 0.21.0");
+        assert!(bouton.enabled);
+        assert_eq!(bouton.variant, ButtonVariant::Primary);
+        assert!(!update_button(&UpdateStatus::Checking).enabled);
+        let (_, tone) = update_info_line(
+            &UpdateStatus::Unavailable {
+                reason: "hors ligne".into(),
+                checked_at: now,
+            },
+            now,
+        );
+        assert_eq!(tone, design::InfoTone::Alert);
     }
 
     #[test]
@@ -1035,6 +1325,7 @@ mod tests {
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
                 shortcuts: ShortcutBindings::default(),
+                auto_update: false,
             }
         );
     }

@@ -52,10 +52,13 @@ use egui_wgpu::wgpu;
 use global_hotkey::GlobalHotKeyEvent;
 use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
+use overlay_sync::update::{apply as update_apply, UpdateStatus};
 use overlay_ui::alert_sound;
 use overlay_ui::background::{
     spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
+    spawn_update_thread, UpdateCommand,
 };
+use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
@@ -424,6 +427,19 @@ struct App {
     /// `overlay_ui::startup`) : tant qu'il n'est pas complet, la fenêtre de connexion montre son
     /// écran de chargement et rien d'autre n'existe (voir `sync_session_windows`).
     startup: Arc<StartupProgress>,
+    /// État de la mise à jour automatique, publié par le thread de mise à jour
+    /// (`background::spawn_update_thread`, 2026-09-15, `docs/plan-mise-a-jour.md` §7) — lu à
+    /// chaque tick par `install_update_if_ready`, copié dans la fenêtre de connexion et la
+    /// fenêtre Options avant chaque rendu.
+    update_status: Arc<ArcSwap<UpdateStatus>>,
+    /// Commandes au thread de mise à jour : vérification (bouton « Recherche de mise à jour »),
+    /// téléchargement (« Mettre à jour vers X »), nouvelle tentative (« Réessayer »).
+    update_command_tx: mpsc::Sender<UpdateCommand>,
+    /// Installer automatiquement au démarrage — réglage LOCAL persisté
+    /// (`config::OverlayConfig::auto_update`), même politique que `combat_always_visible` : lu
+    /// au démarrage (où il décide de la première commande envoyée au thread), remplacé à la
+    /// validation de la fenêtre Options, effectif au prochain lancement.
+    auto_update: bool,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
     log_path: PathBuf,
@@ -561,6 +577,10 @@ struct AppState {
     auth_command_tx: mpsc::Sender<AuthCommand>,
     /// Voir `App::startup`.
     startup: Arc<StartupProgress>,
+    /// Voir `App::update_status`, `App::update_command_tx`, `App::auto_update`.
+    update_status: Arc<ArcSwap<UpdateStatus>>,
+    update_command_tx: mpsc::Sender<UpdateCommand>,
+    auto_update: bool,
     /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
     /// redemander les réglages de compte à la volée — voir sa doc.
     settings_tx: mpsc::Sender<EngineCommand>,
@@ -588,6 +608,9 @@ impl App {
             auth_status,
             auth_command_tx,
             startup,
+            update_status,
+            update_command_tx,
+            auto_update,
             settings_tx,
         } = state;
 
@@ -620,6 +643,9 @@ impl App {
             auth_status,
             auth_command_tx,
             startup,
+            update_status,
+            update_command_tx,
+            auto_update,
             settings_tx,
             log_path,
             combat_always_visible,
@@ -1556,6 +1582,77 @@ impl App {
         tracing::info!(">>> Déconnexion du compte demandée (fenêtre Options).");
     }
 
+    /// **Installe la mise à jour prête et relance** — appelé à chaque tick d'`about_to_wait`, AVANT
+    /// tout le reste. Le thread de mise à jour s'arrête à `ReadyToInstall` (exe vérifié sur le
+    /// disque, voir `background::spawn_update_thread`) : le remplacement de l'exe courant et la
+    /// relance doivent précéder `event_loop.exit()`, que seul ce thread peut appeler. À ce moment,
+    /// `StartupProgress::is_update_blocking` est levé depuis le début du téléchargement : seule la
+    /// fenêtre de connexion existe (voir `sync_session_windows`), aucun overlay de jeu n'est
+    /// interrompu. Un échec de remplacement (antivirus, dossier protégé) repasse en `Failed` et
+    /// rend la main : l'overlay continue avec sa version, ou reste sur « Mise à jour requise » si
+    /// elle était obligatoire.
+    fn install_update_if_ready(&mut self, event_loop: &ActiveEventLoop) {
+        let status = self.update_status.load();
+        let UpdateStatus::ReadyToInstall {
+            version,
+            staged,
+            mandatory,
+        } = &**status
+        else {
+            return;
+        };
+        tracing::info!(
+            "[mise à jour] installation de {} depuis {} — l'overlay va se relancer.",
+            version,
+            staged.display()
+        );
+        self.update_status.store(Arc::new(UpdateStatus::Installing {
+            version: version.clone(),
+        }));
+        match update_apply::install_and_relaunch(staged, build_info::VERSION) {
+            Ok(()) => {
+                logging::log_session_end(&format!(
+                    "mise à jour {} → {version}",
+                    build_info::VERSION
+                ));
+                event_loop.exit();
+            }
+            Err(err) => {
+                tracing::warn!("[mise à jour] installation impossible : {err}");
+                self.update_status.store(Arc::new(UpdateStatus::Failed {
+                    headline: "Installation impossible".to_string(),
+                    detail: err.to_string(),
+                    mandatory: *mandatory,
+                }));
+                self.startup.set_update_blocking(*mandatory);
+                if !*mandatory {
+                    self.startup.mark_update_resolved();
+                }
+                self.request_all_redraw();
+            }
+        }
+    }
+
+    /// « Mettre à jour vers X » confirmé dans la fenêtre Options (`OptionsModalAction::InstallUpdate`)
+    /// : la fenêtre se ferme, le démarrage repasse en « mise à jour en cours » (ce qui ferme les
+    /// overlays de jeu et ramène la fenêtre de connexion sur son écran de chargement au prochain
+    /// tick, voir `sync_session_windows`), et le thread de mise à jour télécharge. L'installation
+    /// suit dans `install_update_if_ready`.
+    /// Redessine toutes les fenêtres au prochain tick — un état partagé vient de changer hors
+    /// d'un événement (même effet qu'un `UserEvent`, voir `user_event`).
+    fn request_all_redraw(&mut self) {
+        for overlay in self.windows.values_mut() {
+            overlay.next_redraw_at = Some(std::time::Instant::now());
+        }
+    }
+
+    fn request_update_install(&mut self, options_window_id: WindowId) {
+        tracing::info!(">>> Mise à jour demandée (fenêtre Options).");
+        self.startup.set_update_blocking(true);
+        let _ = self.update_command_tx.send(UpdateCommand::Download);
+        self.close_options_modal(options_window_id, "Mise à jour");
+    }
+
     /// `ShortcutAction::Details` : même action que le clic sur le bouton "Détails" (lien externe)
     /// du carré de contrôle (`panels::watchlist::control_button_row`) — voir sa doc pour
     /// `base_url()`. `open::that` est best-effort (résultat ignoré, même choix que le clic direct) :
@@ -2062,6 +2159,11 @@ impl App {
             // lié — l'hôte est seul à connaître `AuthStatus` (voir `spawn_auth_thread`).
             account_connected: matches!(**self.auth_status.load(), AuthStatus::Connected),
             pending_disconnect: false,
+            // La section « Mise à jour » lit l'état publié par le thread de mise à jour ; rafraîchi
+            // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
+            update: (**self.update_status.load()).clone(),
+            auto_update: self.auto_update,
+            pending_install: None,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -2086,6 +2188,7 @@ impl App {
                 features: self.features,
                 mutes: self.alert_mutes,
                 shortcuts: self.hotkeys.bindings().clone(),
+                auto_update: self.auto_update,
             },
             pending_close: false,
             alerts_draft,
@@ -2427,6 +2530,20 @@ impl App {
                     tracing::info!("[options] raccourcis personnalisés mis à jour.");
                     self.hotkeys.apply(commit.shortcuts);
                 }
+                // **La mise à jour automatique (2026-09-15)** — persistée, effective au prochain lancement :
+                // c'est là que la première commande au thread de mise à jour se décide.
+                let auto_update_changed = commit.auto_update != self.auto_update;
+                if auto_update_changed {
+                    self.auto_update = commit.auto_update;
+                    tracing::info!(
+                        "[options] mise à jour automatique au démarrage : {}",
+                        if self.auto_update {
+                            "activée"
+                        } else {
+                            "désactivée"
+                        }
+                    );
+                }
                 // **La config est réécrite EN ENTIER**, et seulement si l'un des réglages a bougé :
                 // le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que le réglage
                 // modifié effacerait les autres.
@@ -2441,12 +2558,14 @@ impl App {
                     || chat_toast_changed
                     || features_changed
                     || mutes_changed
+                    || auto_update_changed
                 {
                     let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
                         combat_always_visible: self.combat_always_visible,
                         turn_notification: self.turn_notification,
                         turn_notification_muted: self.turn_notification_muted,
+                        auto_update: self.auto_update,
                         ..Default::default()
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
@@ -2504,6 +2623,14 @@ enum PostRedraw {
     DisconnectAccount,
     /// Résoudre les ingrédients de cet objet pour la fenêtre de recette de l'onglet « Suivi ».
     ResolveRecipe(i64),
+    /// « Recherche de mise à jour » (section « Mise à jour » de l'onglet « Paramètres ») :
+    /// une vérification sans installation, demandée au thread de mise à jour.
+    CheckUpdate,
+    /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
+    InstallUpdate,
+    /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
+    /// vérification, avec installation.
+    RetryUpdate,
 }
 
 impl App {
@@ -2605,6 +2732,17 @@ impl App {
             matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login) || self.interactive;
         let this_game_rect = overlay.game_rect;
         let this_game_hwnd = overlay.game_hwnd;
+        // L'état de la mise à jour, copié dans la fenêtre qui l'affiche AVANT chaque rendu
+        // (jamais figé à l'ouverture, voir `OptionsModalState::update`).
+        let update_status = self.update_status.load();
+        if let Some(state) = overlay.login_state.as_mut() {
+            if state.update != **update_status {
+                state.update = (**update_status).clone();
+            }
+        }
+        if let Some(state) = overlay.options_state.as_mut() {
+            state.update = (**update_status).clone();
+        }
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
             &overlay.window,
@@ -2668,6 +2806,9 @@ impl App {
                 if let Err(err) = overlay.window.drag_window() {
                     tracing::warn!("[connexion] déplacement de la fenêtre refusé : {err}");
                 }
+            }
+            if outcome.retry_update {
+                post_redraw = PostRedraw::RetryUpdate;
             }
         }
         // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
@@ -2734,6 +2875,8 @@ impl App {
                 post_redraw = PostRedraw::ValidateOptions(commit)
             }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
+            OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+            OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -2759,6 +2902,18 @@ impl App {
             PostRedraw::BrowseOptions => self.start_file_dialog(),
             PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
             PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
+            PostRedraw::CheckUpdate => {
+                tracing::info!(">>> Recherche de mise à jour (fenêtre Options).");
+                let _ = self.update_command_tx.send(UpdateCommand::Check {
+                    install_if_available: false,
+                });
+            }
+            PostRedraw::InstallUpdate => self.request_update_install(id),
+            PostRedraw::RetryUpdate => {
+                let _ = self.update_command_tx.send(UpdateCommand::Check {
+                    install_if_available: true,
+                });
+            }
         }
     }
 }
@@ -2798,7 +2953,10 @@ impl ApplicationHandler<UserEvent> for App {
             // de combat, ou statut de connexion au compte), toutes les fenêtres doivent redessiner
             // pour le refléter (le statut de connexion pilote la fenêtre de connexion — et, au
             // prochain tick, quelles fenêtres existent, voir `sync_session_windows`).
-            UserEvent::NewSnapshot | UserEvent::AuthStatusChanged | UserEvent::StartupProgress => {
+            UserEvent::NewSnapshot
+            | UserEvent::AuthStatusChanged
+            | UserEvent::StartupProgress
+            | UserEvent::UpdateProgress => {
                 for overlay in self.windows.values_mut() {
                     overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
@@ -2894,6 +3052,12 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Une mise à jour prête s'installe AVANT tout le reste du tick : l'exe est remplacé,
+        // l'overlay relancé, et cette boucle se termine (voir `install_update_if_ready`).
+        self.install_update_if_ready(event_loop);
+        if event_loop.exiting() {
+            return;
+        }
         // Hotkey global : thread OS dédié, sondé ici sans bloquer (voir S1). `while let` (pas un
         // simple `if`) : chaque appui PHYSIQUE produit deux événements (`Pressed` PUIS `Released`,
         // voir `HotKeyState`) — les deux peuvent être en file au même tick à ~20 Hz. Filtré sur
@@ -3180,8 +3344,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
 /// config, aucun chemin connu du système) — dans ce cas SEULEMENT, ce binaire refuse encore de
 /// démarrer sans chemin explicite (l'Engine a besoin d'un chemin dès `spawn_engine_thread`, voir
 /// `main`).
-fn resolve_path(config: &config::OverlayConfig) -> PathBuf {
-    let cli_arg = env::args().nth(1).map(PathBuf::from);
+fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> PathBuf {
     match config::resolve_log_path(cli_arg, config) {
         Some(path) => path,
         None => {
@@ -3224,7 +3387,23 @@ fn main() {
     tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
     let saved_config = config::load();
-    let log_path = resolve_path(&saved_config);
+
+    // `--updated-from X` (relance après une mise à jour, voir `overlay_sync::update::apply`)
+
+    // n'est pas un chemin de log : les arguments sont triés avant de résoudre le fichier.
+
+    let cli = update_apply::parse_args(env::args().skip(1));
+
+    if let Some(from) = &cli.updated_from {
+        tracing::info!(
+            "[mise à jour] mis à jour {from} → {} — nettoyage du dossier de mise à jour.",
+            build_info::VERSION
+        );
+
+        update_apply::cleanup(&overlay_sync::update::updates_dir());
+    }
+
+    let log_path = resolve_path(&saved_config, cli.log_path);
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
@@ -3236,6 +3415,7 @@ fn main() {
     let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
     let startup = Arc::new(StartupProgress::new());
+    let update_status = Arc::new(ArcSwap::from_pointee(UpdateStatus::Idle));
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
@@ -3259,6 +3439,19 @@ fn main() {
         proxy.clone(),
     );
     spawn_dungeon_thread(Arc::clone(&dungeons), Arc::clone(&startup), proxy.clone());
+    // Mise à jour automatique (2026-09-15, `docs/plan-mise-a-jour.md` §7) : la vérification part
+    // tout de suite, derrière l'écran de chargement ; avec « Installer automatiquement » coché,
+    // une version plus récente est installée avant d'ouvrir le moindre overlay de jeu.
+    let (update_command_tx, update_command_rx) = mpsc::channel();
+    spawn_update_thread(
+        Arc::clone(&update_status),
+        Arc::clone(&startup),
+        update_command_rx,
+        proxy.clone(),
+    );
+    let _ = update_command_tx.send(UpdateCommand::Check {
+        install_if_available: saved_config.auto_update,
+    });
     let remote_icons = RemoteIconStore::spawn(proxy.clone());
     spawn_engine_thread(
         log_path.clone(),
@@ -3308,6 +3501,9 @@ fn main() {
         auth_status,
         auth_command_tx,
         startup,
+        update_status,
+        update_command_tx,
+        auto_update: saved_config.auto_update,
         settings_tx,
     });
     event_loop.run_app(&mut app).expect("boucle d'événements");

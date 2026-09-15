@@ -9,6 +9,7 @@ pub mod pairing;
 pub mod queue;
 pub mod reference_data_cache;
 pub mod token_store;
+pub mod update;
 
 pub use client::{
     fetch_account_id, fetch_catalog_index, fetch_catalog_version, fetch_dungeons,

@@ -1698,6 +1698,7 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
+                auto_update: false,
             }
         )],
         "Entrée doit valider les réglages courants, comme le bouton « Valider » du pied de page"
@@ -2062,6 +2063,63 @@ fn options_parametres_section_compte() {
         });
     harness.run();
     harness.snapshot("options_parametres_compte");
+}
+
+/// **La section « Mise à jour »** de l'onglet « Paramètres » (2026-09-15, `docs/plan-mise-a-jour.md`
+/// §8.2), capturée dans l'état qui compte : une version disponible, le bouton or « Mettre à jour
+/// vers 0.21.0 », la ligne d'information avec le poids du téléchargement, la case d'installation
+/// automatique cochée. La version courante n'y est pas répétée (bannière), pas de « Notes de
+/// version » (décisions du mainteneur).
+#[test]
+fn options_parametres_section_mise_a_jour() {
+    overlay_ui::build_info::freeze_for_snapshots();
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        auto_update: true,
+        update: overlay_ui::update::UpdateStatus::Available {
+            version: "0.21.0".to_string(),
+            download_size: 3_100_000,
+            mandatory: false,
+            notes_url: None,
+            checked_at: std::time::Instant::now(),
+        },
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            auto_update: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_parametres_mise_a_jour");
 }
 
 /// **La confirmation de déconnexion** — l'autre moitié de la section « Compte ». Le bouton est la
@@ -4304,6 +4362,17 @@ fn login_states() -> Vec<(&'static str, AuthStatus)> {
 /// et rend la hauteur mesurée (`LoginOutcome::content_height`) — la même que `main.rs` applique
 /// à la fenêtre OS.
 fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
+    capture_login_with_update(nom, auth_status, Default::default(), height)
+}
+
+/// Même capture, avec un état de mise à jour (`overlay_ui::update::UpdateStatus`) posé sur la
+/// carte — ce que `main.rs` copie depuis le thread de mise à jour avant chaque rendu.
+fn capture_login_with_update(
+    nom: &str,
+    auth_status: AuthStatus,
+    update: overlay_ui::update::UpdateStatus,
+    height: f32,
+) -> f32 {
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -4324,6 +4393,7 @@ fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
         started_at: now,
         animate: false,
         loading: false,
+        update,
     };
     let measured = Rc::new(Cell::new(0.0_f32));
     let measured_in = Rc::clone(&measured);
@@ -4416,3 +4486,69 @@ fn fenetre_de_connexion_erreur() {
 fn fenetre_de_connexion_chargement() {
     verifie_login("login_chargement", 385.0);
 }
+
+// ── Mise à jour automatique (2026-09-15, docs/plan-mise-a-jour.md §8.1) ────────────────────────
+//
+// Mécanisme seulement : la mise en forme de l'écran de chargement est à retravailler dans une
+// itération dédiée (retour du mainteneur). Ces captures verrouillent ce qui existe : la ligne
+// d'état et la jauge sous le rouage, et l'écran « Mise à jour requise ».
+
+/// Téléchargement en cours derrière l'écran de chargement : ligne d'état, jauge à 36 % et
+/// compteur « 4,2 Mo / 11,8 Mo » sous le rouage. Même hauteur que l'écran de chargement nu.
+#[test]
+fn fenetre_de_connexion_telechargement() {
+    let measured = capture_login_with_update(
+        "login_telechargement",
+        AuthStatus::Connecting,
+        overlay_ui::update::UpdateStatus::Downloading {
+            version: "0.21.0".to_string(),
+            received: 4_200_000,
+            total: 11_800_000,
+        },
+        385.0,
+    );
+    assert_eq!(measured, 385.0);
+}
+
+/// Une version disponible que l'on n'installe pas automatiquement : signalée sous le rouage,
+/// l'écran de chargement continue.
+#[test]
+fn fenetre_de_connexion_version_disponible() {
+    let measured = capture_login_with_update(
+        "login_version_disponible",
+        AuthStatus::Connecting,
+        overlay_ui::update::UpdateStatus::Available {
+            version: "0.21.0".to_string(),
+            download_size: 11_800_000,
+            mandatory: false,
+            notes_url: None,
+            checked_at: std::time::Instant::now(),
+        },
+        385.0,
+    );
+    assert_eq!(measured, 385.0);
+}
+
+/// Mise à jour OBLIGATOIRE en échec : la carte passe au rouge, « MISE À JOUR REQUISE », le détail
+/// technique et « Réessayer » remplacent le rouage. La hauteur est celle que `main.rs` donnera à
+/// la fenêtre (mesurée par la carte, vérifiée ici comme pour les autres états).
+#[test]
+fn fenetre_de_connexion_mise_a_jour_requise() {
+    let measured = capture_login_with_update(
+        "login_mise_a_jour_requise",
+        AuthStatus::Connecting,
+        overlay_ui::update::UpdateStatus::Failed {
+            headline: "Serveur de mise à jour injoignable".to_string(),
+            detail: "réseau : délai dépassé après 5 s".to_string(),
+            mandatory: true,
+        },
+        LOGIN_UPDATE_REQUIRED_HEIGHT,
+    );
+    assert_eq!(
+        measured, LOGIN_UPDATE_REQUIRED_HEIGHT,
+        "login_mise_a_jour_requise : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Hauteur de l'écran « Mise à jour requise », mesurée par la carte elle-même.
+const LOGIN_UPDATE_REQUIRED_HEIGHT: f32 = 443.0;
