@@ -219,12 +219,14 @@ fn last_ally_caster_name(fight: &FightSnapshot) -> &str {
 }
 
 /// Coordonnées des deux boutons du switch Alliés/Ennemis dans le harnais — mêmes repères que
-/// `tests/panels.rs::panneau_combat_tooltip_switch_allies_ennemis_au_dessus`, décalés de la
-/// colonne des portraits, présente ici. Abscisse : 8 de marge du harnais, 8, 70 (cadre), 6
-/// (`COLUMN_GAP`), 6 (`LEADER_PANEL_PADDING`) et 15, soit 113 pour « Alliés », 30 de plus (143)
-/// pour « Ennemis ». Ordonnée : 8, 50 et 13, soit 71.
-const SWITCH_ALLIES: egui::Pos2 = egui::pos2(113.0, 71.0);
-const SWITCH_ENEMIES: egui::Pos2 = egui::pos2(143.0, 71.0);
+/// `tests/panels.rs::panneau_combat_tooltip_switch_allies_ennemis_au_dessus`. Depuis l'échange du
+/// 15 sept. (voir `panels::combat`), le switch coiffe la colonne des PORTRAITS : il ne dépend plus
+/// de la largeur du cadre ni du `COLUMN_GAP` qui menaient jusqu'au bandeau leader, et les deux
+/// tests retombent donc sur la même abscisse. Abscisse : 8 de marge du harnais, 5 (switch centré
+/// dans les 70 px du cadre) et 15 (moitié de `SWITCH_OPTION_WIDTH`), soit 28 pour « Alliés », 30 de
+/// plus (58) pour « Ennemis ». Ordonnée : 8, 50 et 13, soit 71.
+const SWITCH_ALLIES: egui::Pos2 = egui::pos2(28.0, 71.0);
+const SWITCH_ENEMIES: egui::Pos2 = egui::pos2(58.0, 71.0);
 
 fn click_at(harness: &mut Harness<'_>, pos: egui::Pos2) {
     harness.remove_cursor();
