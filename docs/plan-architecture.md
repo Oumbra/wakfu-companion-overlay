@@ -1495,6 +1495,15 @@ session), portée telle quelle dans `panels::login`.
   `AuthStatus::Connecting`. Garde-fou de 45 s, puis l'écran suivant quoi qu'il arrive. Compte lié
   ⇒ la fenêtre cède la place aux overlays ; sinon ⇒ « Vous n'êtes pas connecté ». Même hauteur
   que cet écran-là : le passage ne fait pas bouger la fenêtre.
+- **Plancher d'affichage de 5 s** (`startup::MIN_DISPLAY`, demande utilisateur du 2026-09-15) :
+  tout en cache et un jeton qui répond du premier coup, et l'écran ne durait qu'une poignée
+  d'images — un clignotement au lancement, pas un écran de chargement. `is_complete` reste donc
+  faux tant que l'écran n'a pas tenu cinq secondes, avant même le garde-fou ; l'hôte, qui ne
+  connaît que lui, garde la fenêtre de connexion sans rien savoir de ce délai. Le plancher court
+  depuis l'**apparition** de l'écran et repart quand `set_update_blocking(true)` le rouvre sur une
+  session déjà ouverte (« Mettre à jour » des Options), sinon une mise à jour qui échoue d'emblée
+  — dossier d'installation non inscriptible, manifeste injoignable — rendrait la main aussi vite
+  qu'elle l'a prise.
 - **`OverlayKind::Login` / `panels::login`** — une carte de 400 px sur fond noir translucide :
   logo du site (`assets/ui/logo-purple.png`, copie de `public/logo-purple.png` du dépôt web),
   titre « WAKFU COMPANION » en accent cyan `#00d2ff` suivi d'« OVERLAY » en italique gris, badge
