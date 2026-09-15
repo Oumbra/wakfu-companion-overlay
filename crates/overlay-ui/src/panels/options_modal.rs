@@ -1,14 +1,17 @@
 //! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
 //! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
 //! (voir `main.rs`/`bin/overlay-ui-x11.rs`). L'onglet "Paramètres" expose les réglages LOCAUX de
-//! l'overlay : le chemin de `wakfu.log` à suivre, et la section « Combat » — l'affichage du
-//! panneau de combat en dehors des combats (2026-09-13) et la notification de tour (2026-09-14).
-//! Tous sont persistés par `config::OverlayConfig`, jamais sur le compte — contrairement aux
-//! onglets "Suivi" et "Alertes".
+//! l'overlay : le chemin de `wakfu.log` à suivre, et la section « Combat » — le détail des
+//! combats et le suivi des sorts (2026-09-15), l'affichage du panneau de combat en dehors des
+//! combats (2026-09-13) et la notification de tour (2026-09-14). Tous sont persistés par
+//! `config::OverlayConfig`, jamais sur le compte — contrairement aux onglets "Suivi" et "Alertes".
 //!
 //! **Interrupteurs de fonctionnalité (2026-09-15, §9.1 duodecies)** : les onglets "Suivi",
 //! "Alertes" et "Chat" s'ouvrent chacun sur une case « Activer … » (`panels::feature_switch`) qui
-//! grise et rend inerte tout le reste de leur écran quand elle est décochée. Elles voyagent
+//! grise et rend inerte tout le reste de leur écran quand elle est décochée ; la section
+//! « Combat » de cet onglet-ci en porte deux de plus — « Activer le détail des combats », qui
+//! commande le panneau Combat entier, et « Activer le suivi des sorts », qui commande son bloc de
+//! sorts et dépend de la première. Elles voyagent
 //! ensemble dans [`OptionsModalState::features`], sont un brouillon comme le reste de la fenêtre,
 //! et sont persistées en LOCAL (`config::OverlayConfig::features`) malgré leur place dans des
 //! onglets qui, eux, règlent le compte : ce qu'on accepte de voir par-dessus son jeu dépend de la
@@ -240,16 +243,17 @@ pub struct OptionsModalState {
     /// Couper le son de la notification de tour ? — case sous la précédente, dont elle dépend
     /// (`config::OverlayConfig::turn_notification_muted`), même mécanique de brouillon.
     pub turn_notification_muted: bool,
-    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le suivi » / « Activer les
-    /// alertes » / « Activer la recherche », tout en haut de leur onglet respectif
-    /// (`panels::feature_switch`, 2026-09-15). Même mécanique de brouillon que les cases
-    /// ci-dessus : initialisés par l'hôte au réglage en vigueur (`config::OverlayConfig::
-    /// features`), pris en compte seulement à « Valider ».
+    /// **Les interrupteurs de fonctionnalité** — cases « Activer le suivi » / « Activer les
+    /// alertes » / « Activer la recherche », tout en haut de leur onglet respectif, et depuis le
+    /// 2026-09-15 « Activer le détail des combats » / « Activer le suivi des sorts », en tête de
+    /// la section « Combat » de cet onglet-ci (`panels::feature_switch`). Même mécanique de
+    /// brouillon que les cases ci-dessus : initialisés par l'hôte au réglage en vigueur
+    /// (`config::OverlayConfig::features`), pris en compte seulement à « Valider ».
     ///
     /// **`Default` vaut ici « tout actif »**, et non `false` comme pour un `bool` nu : c'est
     /// [`FeatureToggles`] qui le garantit, pour que `OptionsModalState::default()` — utilisé par
-    /// les tests et le harnais de rendu — n'ouvre jamais une fenêtre dont les trois onglets
-    /// seraient grisés.
+    /// les tests et le harnais de rendu — n'ouvre jamais une fenêtre dont les onglets seraient
+    /// grisés ni un panneau de combat éteint.
     pub features: FeatureToggles,
     /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
     /// « Chat », sous leur ligne « Tester le son de l'alerte » (`panels::notifications`, 2026-09-15).
@@ -355,8 +359,8 @@ pub struct OptionsInitial {
     pub turn_notification: bool,
     /// Le son coupé tel qu'il était à l'ouverture — même rôle.
     pub turn_notification_muted: bool,
-    /// Les trois interrupteurs tels qu'ils étaient à l'ouverture — même rôle que les champs
-    /// ci-dessus : c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
+    /// Les interrupteurs tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
+    /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub features: FeatureToggles,
     /// Les deux sourdines telles qu'elles étaient à l'ouverture — même rôle que les champs
     /// ci-dessus.
@@ -490,9 +494,12 @@ pub struct OptionsCommit {
     /// État de la case « Couper le son des notifications » — emporté tel quel même si la case
     /// au-dessus est décochée (il ne fait alors rien, et sera retrouvé si on la recoche).
     pub turn_notification_muted: bool,
-    /// État des trois cases « Activer … » (`panels::feature_switch`) — ce que l'hôte persiste
+    /// État des cases « Activer … » (`panels::feature_switch`) — ce que l'hôte persiste
     /// (`config::OverlayConfig::set_features`) et transmet au thread Engine
-    /// (`engine_thread::EngineCommand::SetFeatures`).
+    /// (`engine_thread::EngineCommand::SetFeatures`). Les deux dernières (détail des combats,
+    /// suivi des sorts) ne concernent pas le moteur : c'est l'hôte qui montre ou masque la
+    /// fenêtre Combat (`panels::combat::should_show`) et le panneau qui peint ou non son bloc de
+    /// sorts.
     pub features: FeatureToggles,
     /// État des deux cases « Couper le son des notifications » (`panels::notifications`) — ce que
     /// l'hôte persiste (`config::OverlayConfig::set_alert_mutes`) et transmet au thread Engine
@@ -788,11 +795,56 @@ pub fn show(
             // notification ensuite (ce qui arrive pendant) — du plus passif au plus intrusif.
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Combat"));
+            // **Les deux interrupteurs de la section** (2026-09-15) — « Activer le détail des
+            // combats » commande le panneau Combat tout entier, « Activer le suivi des sorts »
+            // commande son bloc « ligne de sorts » et DÉPEND du premier (demande utilisateur
+            // explicite). Ils vivent dans `state.features` avec les trois cases d'onglet
+            // (`panels::feature_switch::FeatureToggles`) : même nature — couper une
+            // fonctionnalité sans rien détruire — et même chemin jusqu'à l'hôte, donc même
+            // véhicule. Ce qui les distingue est qu'il n'y a pas d'onglet « Combat » à griser :
+            // ce sont deux cases ordinaires en tête de section, pas un appel à
+            // `feature_switch::show`.
+            //
+            // **En tête, avant les réglages qu'ils commandent** : c'est la place qu'occupe déjà
+            // l'interrupteur d'un onglet, et la seule qui se lise — une case maîtresse après les
+            // réglages qu'elle éteint ferait chercher pourquoi ceux-ci sont grisés.
+            ui.add(
+                design::checkbox(&mut state.features.combat, "Activer le détail des combats")
+                    .tooltip(
+                        "Décoché, le panneau de combat ne s'affiche plus du tout. Les combats \
+                         continuent d'être mesurés et envoyés à votre historique.",
+                    )
+                    .log_name("options-combat-actif"),
+            );
+            // Le suivi des sorts, sous son interrupteur et en retrait — même géométrie que la
+            // sourdine sous la notification de tour (voir plus bas) : la case commence là où
+            // commence le LIBELLÉ de celle du dessus. Grisée sans changer de valeur quand le
+            // détail des combats est coupé : on la retrouve telle quelle en le rallumant
+            // (`FeatureToggles::spells_visible` combine les deux au moment de peindre).
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.horizontal(|ui| {
+                ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+                ui.add(
+                    design::checkbox(&mut state.features.spells, "Activer le suivi des sorts")
+                        .enabled(state.features.combat)
+                        .tooltip(
+                            "Les sorts lancés au dernier tour, sous les barres du panneau de \
+                             combat. Décoché, le panneau garde ses portraits et ses barres.",
+                        )
+                        .log_name("options-combat-sorts"),
+                );
+            });
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
             ui.add(
                 design::checkbox(
                     &mut state.combat_always_visible,
                     "Afficher le panneau de combat en dehors des combats",
                 )
+                // Sans panneau de combat, il n'y a rien à garder affiché : la case est grisée,
+                // valeur conservée, comme le suivi des sorts au-dessus. Pas de retrait en
+                // revanche — elle réglait déjà l'encombrement à l'écran avant l'arrivée de
+                // l'interrupteur, et la déplacer d'un cran ferait croire à un réglage nouveau.
+                .enabled(state.features.combat)
                 .tooltip(
                     "Décoché, le panneau de combat n'apparaît qu'au début d'un combat et se referme \
                      quand il est terminé.",

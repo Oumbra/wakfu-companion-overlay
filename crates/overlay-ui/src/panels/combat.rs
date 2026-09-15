@@ -394,6 +394,17 @@
 //! est voulu (décision utilisateur explicite, 15 sept. 2026, voir CLAUDE.md « Ce que l'overlay
 //! affiche diffère du site ») — temps réel ici, bilan de fin de combat là-bas. Ne pas aligner les
 //! deux.
+//!
+//! **Deux interrupteurs le commandent (2026-09-15)**, section « Combat » de l'onglet
+//! « Paramètres » (`panels::feature_switch::FeatureToggles`) :
+//!
+//! - « Activer le détail des combats » coupe le panneau ENTIER — c'est [`should_show`] qui le dit,
+//!   et les deux hôtes qui masquent la fenêtre OS (`main.rs`/`bin/overlay-ui-x11.rs`). Ce module
+//!   ne peint donc jamais avec cette case décochée.
+//! - « Activer le suivi des sorts » coupe la seule ligne de sorts (paramètre `spells_enabled` de
+//!   [`show`], déjà combiné avec la case ci-dessus par l'hôte) : le bloc `combat_spell_block`,
+//!   mais aussi les marques qu'il pose sur les médaillons et l'épinglage au clic — sans bloc à
+//!   lire, un liseré ne désignerait plus rien. Portraits, barres et switches ne bougent pas.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -611,6 +622,12 @@ pub fn show(
     // Voir `panels::watchlist::WatchlistAssets::shortcuts` : même raison, ici pour l'infobulle du
     // switch Alliés/Ennemis.
     shortcuts: &ShortcutBindings,
+    // Le suivi des sorts est-il actif ? — case « Activer le suivi des sorts » de la section
+    // « Combat » des Options (2026-09-15, `feature_switch::FeatureToggles::spells_visible`, qui
+    // combine déjà cette case avec celle dont elle dépend). `false` retire le bloc « ligne de
+    // sorts » ET les deux marques qu'il pose sur les médaillons : sans bloc à lire, un liseré et
+    // un point sur un portrait ne désigneraient plus rien.
+    spells_enabled: bool,
 ) {
     // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`) — c'est
     // l'ordre des PORTRAITS, cadre et liste plate confondus. Calculé ICI, avant toute mise en page
@@ -675,11 +692,16 @@ pub fn show(
     // même frame. Les marques s'expriment en positions dans la tranche du cadre qui les peint :
     // `framed` (gabarit exact) ou `enemy_scroll` (ennemis nombreux) — jamais les deux.
     let is_ally = *side == CombatSide::Allies;
+    // **Le combat vu par le bloc de sorts** — le même, sauf quand le suivi des sorts est coupé :
+    // `None` retire d'un coup la sélection, les deux marques sur les médaillons, l'épinglage au
+    // clic et le bloc lui-même. Tout ce qui sert la ligne de sorts passe par cette variable, et
+    // rien d'autre : les portraits, leurs infobulles et les barres continuent de lire `fight`.
+    let spell_fight = fight.filter(|_| spells_enabled);
     let mut selection =
-        fight.and_then(|fight| combat_spell_block::selection(ui.ctx(), fight, is_ally));
+        spell_fight.and_then(|fight| combat_spell_block::selection(ui.ctx(), fight, is_ally));
     let slot_of = |list: &[&FighterDamage], sel: usize| {
         list.iter().position(|f| {
-            Some(sel) == fight.and_then(|fight| combat_spell_block::fighter_index(fight, f))
+            Some(sel) == spell_fight.and_then(|fight| combat_spell_block::fighter_index(fight, f))
         })
     };
     let marks_in = |list: &[&FighterDamage], sel: Option<combat_spell_block::SpellSelection>| {
@@ -714,7 +736,7 @@ pub fn show(
                     total_damage,
                     marks,
                 );
-                if let (Some(slot), Some(fight)) = (clicked, fight) {
+                if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
                     if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
                         combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
                         selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
@@ -736,7 +758,7 @@ pub fn show(
                     total_damage,
                     marks,
                 );
-                if let (Some(slot), Some(fight)) = (clicked, fight) {
+                if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
                     if let Some(idx) = combat_spell_block::fighter_index(fight, enemy_scroll[slot])
                     {
                         combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
@@ -809,7 +831,7 @@ pub fn show(
             // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
             // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
             // deux fois.
-            if let (Some(fight), Some(sel)) = (fight, selection) {
+            if let (Some(fight), Some(sel)) = (spell_fight, selection) {
                 ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
                 combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
             }
@@ -1259,14 +1281,25 @@ fn draw_centered_icon(ui: &egui::Ui, rect: egui::Rect, texture: &egui::TextureHa
 /// affiché après la victoire) : se contenter de `is_some()` laisserait donc le panneau ouvert
 /// jusqu'au combat suivant, exactement ce que ce réglage doit éviter.
 ///
+/// **`enabled == false` masque en toute circonstance** — case « Activer le détail des combats »
+/// décochée (2026-09-15, `panels::feature_switch::FeatureToggles::combat`) : la fonctionnalité
+/// entière est coupée, et une case d'encombrement (`always_visible`) ne peut pas rallumer un
+/// panneau que son interrupteur éteint. C'est la raison de l'ordre des deux tests ci-dessous.
+///
 /// Vit ici, et pas dans les deux hôtes qui l'appliquent (`main.rs`/`bin/overlay-ui-x11.rs`, où le
 /// fenêtrage OS est délibérément dupliqué — voir la doc de `lib.rs`) : c'est une règle du panneau
 /// Combat, la même sous Windows et sous X11, et elle se teste sans fenêtre.
-pub fn should_show(snapshot: &SessionSnapshot, character_name: &str, always_visible: bool) -> bool {
-    always_visible
-        || snapshot
-            .fight_for_character(character_name)
-            .is_some_and(|fight| fight.ongoing)
+pub fn should_show(
+    snapshot: &SessionSnapshot,
+    character_name: &str,
+    always_visible: bool,
+    enabled: bool,
+) -> bool {
+    enabled
+        && (always_visible
+            || snapshot
+                .fight_for_character(character_name)
+                .is_some_and(|fight| fight.ongoing))
 }
 
 #[cfg(test)]
@@ -1312,13 +1345,13 @@ mod tests {
 
     #[test]
     fn masque_hors_combat_quand_l_option_est_decochee() {
-        assert!(!should_show(&session(Vec::new()), "Oumbra", false));
+        assert!(!should_show(&session(Vec::new()), "Oumbra", false, true));
     }
 
     #[test]
     fn affiche_pendant_un_combat_en_cours() {
         let snapshot = session(vec![combat_de("Oumbra", true)]);
-        assert!(should_show(&snapshot, "Oumbra", false));
+        assert!(should_show(&snapshot, "Oumbra", false, true));
     }
 
     #[test]
@@ -1326,21 +1359,33 @@ mod tests {
         // Le combat reste dans le snapshot une fois fini (c'est lui que `fight_for_character` rend
         // alors) : c'est exactement le cas que `is_some()` aurait raté.
         let snapshot = session(vec![combat_de("Oumbra", false)]);
-        assert!(!should_show(&snapshot, "Oumbra", false));
+        assert!(!should_show(&snapshot, "Oumbra", false, true));
     }
 
     #[test]
     fn ignore_le_combat_d_un_autre_personnage() {
         // Multi-compte : chaque fenêtre suit SON personnage, jamais le combat du voisin.
         let snapshot = session(vec![combat_de("Oumbra", true)]);
-        assert!(!should_show(&snapshot, "Kaelis", false));
+        assert!(!should_show(&snapshot, "Kaelis", false, true));
     }
 
     #[test]
     fn l_option_cochee_affiche_en_toute_circonstance() {
-        assert!(should_show(&session(Vec::new()), "Oumbra", true));
+        assert!(should_show(&session(Vec::new()), "Oumbra", true, true));
         let termine = session(vec![combat_de("Oumbra", false)]);
-        assert!(should_show(&termine, "Oumbra", true));
+        assert!(should_show(&termine, "Oumbra", true, true));
+    }
+
+    /// « Activer le détail des combats » décoché : rien ne s'affiche, pas même pendant un combat
+    /// en cours — et l'affichage permanent, qui coche pourtant « en toute circonstance » ci-dessus,
+    /// ne le rattrape pas. C'est l'interrupteur de la fonctionnalité, pas un réglage
+    /// d'encombrement.
+    #[test]
+    fn le_detail_des_combats_coupe_masque_meme_en_combat() {
+        let en_cours = session(vec![combat_de("Oumbra", true)]);
+        assert!(!should_show(&en_cours, "Oumbra", false, false));
+        assert!(!should_show(&en_cours, "Oumbra", true, false));
+        assert!(!should_show(&session(Vec::new()), "Oumbra", true, false));
     }
 
     #[test]

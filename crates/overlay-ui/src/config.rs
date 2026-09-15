@@ -112,6 +112,31 @@ pub struct OverlayConfig {
     /// sonner l'overlay ni n'affiche de carte. Même politique que [`Self::suivi_enabled`].
     #[serde(default = "actif")]
     pub chat_enabled: bool,
+    /// Le **détail des combats** est-il actif ? — case « Activer le détail des combats », en tête
+    /// de la section « Combat » de l'onglet « Paramètres » (2026-09-15).
+    ///
+    /// Décochée, **aucune fenêtre Combat n'est montrée**, combat en cours compris (voir
+    /// `panels::combat::should_show`) : c'est l'interrupteur de la fonctionnalité entière, pas un
+    /// réglage d'encombrement comme [`Self::combat_always_visible`] — que cette case commande
+    /// d'ailleurs, et grise, dans la fenêtre Options.
+    ///
+    /// **Le moteur continue de compter** : les combats sont toujours mesurés et synchronisés vers
+    /// le compte, exactement comme pour les trois interrupteurs ci-dessus. Recocher la case
+    /// retrouve le panneau en l'état, sans relire le log.
+    ///
+    /// **Locale et non au compte**, comme ses voisines, et `#[serde(default = "actif")]` pour la
+    /// même raison qu'elles : une config écrite avant ce champ garde son panneau de combat.
+    #[serde(default = "actif")]
+    pub combat_enabled: bool,
+    /// Le **suivi des sorts** est-il actif ? — case « Activer le suivi des sorts », sous la
+    /// précédente **dont elle dépend** (grisée tant que le détail des combats est décoché, sans
+    /// changer de valeur : on la retrouve telle quelle en le rallumant).
+    ///
+    /// Décochée, le panneau Combat garde ses portraits et ses barres et perd le bloc « ligne de
+    /// sorts » (`panels::combat_spell_block`) ainsi que les marques qu'il pose sur les médaillons.
+    /// Même politique que [`Self::combat_enabled`] pour le reste.
+    #[serde(default = "actif")]
+    pub spells_enabled: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -167,7 +192,7 @@ pub struct OverlayConfig {
     pub shortcuts: BTreeMap<String, String>,
 }
 
-/// Valeur par défaut des trois drapeaux de fonctionnalité — **une fonction, parce que
+/// Valeur par défaut des drapeaux de fonctionnalité — **une fonction, parce que
 /// `#[serde(default)]` ne sait produire que `bool::default()`, c'est-à-dire `false`**. Voir
 /// `OverlayConfig::suivi_enabled` : le défaut d'une fonctionnalité est d'être active.
 fn actif() -> bool {
@@ -175,7 +200,7 @@ fn actif() -> bool {
 }
 
 impl Default for OverlayConfig {
-    /// Écrit à la main, et non dérivé, pour la seule raison des trois drapeaux de fonctionnalité :
+    /// Écrit à la main, et non dérivé, pour la seule raison des drapeaux de fonctionnalité :
     /// `bool::default()` vaut `false`, alors qu'une fonctionnalité non réglée est ACTIVE. Tous les
     /// autres champs gardent le défaut que la dérivation leur donnait.
     fn default() -> Self {
@@ -189,6 +214,8 @@ impl Default for OverlayConfig {
             suivi_enabled: actif(),
             alerts_enabled: actif(),
             chat_enabled: actif(),
+            combat_enabled: actif(),
+            spells_enabled: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
@@ -238,6 +265,8 @@ impl OverlayConfig {
             suivi: self.suivi_enabled,
             alerts: self.alerts_enabled,
             chat: self.chat_enabled,
+            combat: self.combat_enabled,
+            spells: self.spells_enabled,
         }
     }
 
@@ -247,6 +276,8 @@ impl OverlayConfig {
         self.suivi_enabled = features.suivi;
         self.alerts_enabled = features.alerts;
         self.chat_enabled = features.chat;
+        self.combat_enabled = features.combat;
+        self.spells_enabled = features.spells;
     }
 
     /// Les deux sourdines de cette config — voir [`crate::panels::notifications::AlertMutes`], qui les
@@ -407,21 +438,30 @@ mod tests {
     }
 
     /// Le défaut d'une fonctionnalité est d'être ACTIVE — y compris pour un `config.toml` écrit
-    /// avant l'existence de ces trois clés (`#[serde(default = "actif")]`, voir le champ). Sans
-    /// cette fonction de défaut, `#[serde(default)]` les mettrait à `false` et couperait Suivi,
-    /// Alertes et Recherche chez tous ceux qui les utilisent déjà.
+    /// avant l'existence de ces clés (`#[serde(default = "actif")]`, voir le champ). Sans cette
+    /// fonction de défaut, `#[serde(default)]` les mettrait à `false` et couperait Suivi, Alertes,
+    /// Recherche, le panneau de combat et le suivi des sorts chez tous ceux qui les utilisent
+    /// déjà.
     #[test]
     fn fonctionnalites_actives_par_defaut() {
         let neuve = OverlayConfig::default();
         assert!(neuve.suivi_enabled);
         assert!(neuve.alerts_enabled);
         assert!(neuve.chat_enabled);
+        assert!(neuve.combat_enabled);
+        assert!(neuve.spells_enabled);
+        assert_eq!(
+            neuve.features(),
+            crate::panels::feature_switch::FeatureToggles::default()
+        );
 
         let ancienne: OverlayConfig =
             toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
         assert!(ancienne.suivi_enabled);
         assert!(ancienne.alerts_enabled);
         assert!(ancienne.chat_enabled);
+        assert!(ancienne.combat_enabled);
+        assert!(ancienne.spells_enabled);
     }
 
     /// Une fonctionnalité coupée le reste après un aller-retour sur disque : c'est tout l'intérêt
@@ -431,6 +471,7 @@ mod tests {
         let config = OverlayConfig {
             suivi_enabled: false,
             chat_enabled: false,
+            spells_enabled: false,
             ..Default::default()
         };
         let raw = toml::to_string_pretty(&config).expect("sérialisation");
@@ -438,6 +479,28 @@ mod tests {
         assert!(!relu.suivi_enabled);
         assert!(relu.alerts_enabled);
         assert!(!relu.chat_enabled);
+        // Le détail des combats reste actif, seul le suivi des sorts est coupé : les deux cases
+        // de la section « Combat » sont bien deux clés distinctes.
+        assert!(relu.combat_enabled);
+        assert!(!relu.spells_enabled);
+        assert!(!relu.features().spells_visible());
+    }
+
+    /// **Le suivi des sorts coupé se retrouve tel quel**, même si le détail des combats l'éteint
+    /// entre-temps : c'est `FeatureToggles::spells_visible` qui combine les deux, la config
+    /// garde les deux cases séparément (voir le champ `spells_enabled`).
+    #[test]
+    fn detail_des_combats_coupe_garde_la_case_des_sorts() {
+        let mut config = OverlayConfig::default();
+        config.set_features(crate::panels::feature_switch::FeatureToggles {
+            combat: false,
+            ..Default::default()
+        });
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(!relu.combat_enabled);
+        assert!(relu.spells_enabled);
+        assert!(!relu.features().spells_visible());
     }
 
     /// **Le défaut d'une sourdine est d'être levée** — `false` des deux côtés, y compris pour un

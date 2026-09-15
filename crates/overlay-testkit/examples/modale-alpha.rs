@@ -105,6 +105,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
