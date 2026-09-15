@@ -86,6 +86,11 @@ pub enum UserEvent {
     /// Un chargement initial vient de se terminer (voir `crate::startup::StartupProgress`) — la
     /// fenêtre de connexion doit réévaluer son écran de chargement.
     StartupProgress,
+    /// Le thread de mise à jour a publié un nouvel `overlay_sync::update::UpdateStatus` (verdict,
+    /// bloc téléchargé, fichier prêt, échec — voir `background::spawn_update_thread`) : la
+    /// fenêtre de connexion et la fenêtre Options doivent redessiner ; l'hôte, lui, regarde à
+    /// chaque tick si un exe est prêt à être installé.
+    UpdateProgress,
 }
 
 /// Zone d'overlay indépendante ancrée sur une même fenêtre de jeu — demande utilisateur explicite
@@ -315,6 +320,9 @@ pub struct RenderOutcome {
     /// La fenêtre de connexion demande à être déplacée à la souris (appui sur sa bannière, voir
     /// `panels::login`) — sans décorations OS, c'est l'hôte qui appelle `Window::drag_window`.
     pub drag_window: bool,
+    /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion — l'hôte
+    /// relance la vérification avec installation (voir `panels::login::LoginOutcome`).
+    pub retry_update: bool,
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
@@ -595,6 +603,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         );
                         outcome.open_url = login_outcome.open_url;
                         outcome.drag_window = login_outcome.drag_window;
+                        outcome.retry_update = login_outcome.retry_update;
                         outcome.login_height = Some(login_outcome.content_height);
                     }
                 }

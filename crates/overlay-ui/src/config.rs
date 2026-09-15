@@ -132,6 +132,19 @@ pub struct OverlayConfig {
     /// « Chat », et même politique que [`Self::suivi_alert_muted`] : la carte reste, le son part.
     #[serde(default)]
     pub chat_alert_muted: bool,
+    /// **Installer automatiquement les mises à jour au démarrage** — case de la section « Mise à
+    /// jour » de l'onglet « Paramètres » (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décision 3
+    /// du mainteneur : oui par défaut). Cochée, une version plus récente trouvée derrière l'écran
+    /// de chargement est téléchargée, installée et l'overlay se relance avant d'ouvrir le moindre
+    /// overlay de jeu ; décochée, l'écran de chargement se contente de la signaler et le bouton
+    /// « Mettre à jour » de cette même section fait le reste à la demande. Une mise à jour
+    /// **obligatoire** (`minimumVersion` du manifeste) s'installe dans les deux cas.
+    ///
+    /// **Locale et non au compte**, comme ses voisines : c'est la machine qui se met à jour, pas le
+    /// compte. `#[serde(default = "actif")]` — le défaut d'une mise à jour automatique est d'être
+    /// active, une config écrite avant ce champ comprise.
+    #[serde(default = "actif")]
+    pub auto_update: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -178,6 +191,7 @@ impl Default for OverlayConfig {
             chat_enabled: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
+            auto_update: actif(),
             shortcuts: BTreeMap::new(),
         }
     }

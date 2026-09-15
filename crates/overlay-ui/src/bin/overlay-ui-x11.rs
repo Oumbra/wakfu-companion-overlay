@@ -66,9 +66,12 @@ mod linux_main {
     use overlay_ingest::discovery;
     use overlay_platform::linux::topmost::{self, TopmostAction, TopmostState};
     use overlay_platform::linux::x11::{GameRect, GameWindowTracker};
+    use overlay_sync::update::{apply as update_apply, UpdateStatus};
     use overlay_ui::background::{
         spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
+        spawn_update_thread, UpdateCommand,
     };
+    use overlay_ui::build_info;
     use overlay_ui::chat_command::{self, ChatCommand};
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
@@ -238,6 +241,11 @@ mod linux_main {
         auth_command_tx: mpsc::Sender<AuthCommand>,
         /// Avancement des chargements initiaux — voir `overlay_ui::startup`.
         startup: Arc<StartupProgress>,
+        /// État de la mise à jour automatique — voir `main.rs::App::update_status`.
+        update_status: Arc<ArcSwap<UpdateStatus>>,
+        update_command_tx: mpsc::Sender<UpdateCommand>,
+        /// Voir `main.rs::App::auto_update`.
+        auto_update: bool,
         /// Profil d'alerte et recherches de chat du compte — voir `main.rs::App::alert_profile`.
         alert_profile: SharedAlertProfile,
         chat_filters: SharedChatFilters,
@@ -305,6 +313,9 @@ mod linux_main {
         auth_status: Arc<ArcSwap<AuthStatus>>,
         auth_command_tx: mpsc::Sender<AuthCommand>,
         startup: Arc<StartupProgress>,
+        update_status: Arc<ArcSwap<UpdateStatus>>,
+        update_command_tx: mpsc::Sender<UpdateCommand>,
+        auto_update: bool,
         alert_profile: SharedAlertProfile,
         chat_filters: SharedChatFilters,
         game_window: GameWindowTracker,
@@ -333,6 +344,9 @@ mod linux_main {
                 auth_status,
                 auth_command_tx,
                 startup,
+                update_status,
+                update_command_tx,
+                auto_update,
                 alert_profile,
                 chat_filters,
                 game_window,
@@ -356,6 +370,9 @@ mod linux_main {
                 auth_status,
                 auth_command_tx,
                 startup,
+                update_status,
+                update_command_tx,
+                auto_update,
                 alert_profile,
                 chat_filters,
                 settings_tx,
@@ -371,6 +388,76 @@ mod linux_main {
                 pending_dialog: None,
                 pending_recipe: None,
             }
+        }
+
+        /// **Installe la mise à jour prête et relance** — appelé à chaque tick d'`about_to_wait`, AVANT
+        /// tout le reste. Le thread de mise à jour s'arrête à `ReadyToInstall` (exe vérifié sur le
+        /// disque, voir `background::spawn_update_thread`) : le remplacement de l'exe courant et la
+        /// relance doivent précéder `event_loop.exit()`, que seul ce thread peut appeler. À ce moment,
+        /// `StartupProgress::is_update_blocking` est levé depuis le début du téléchargement : seule la
+        /// fenêtre de connexion existe (voir `sync_session_windows`), aucun overlay de jeu n'est
+        /// interrompu. Un échec de remplacement (antivirus, dossier protégé) repasse en `Failed` et
+        /// rend la main : l'overlay continue avec sa version, ou reste sur « Mise à jour requise » si
+        /// elle était obligatoire.
+        fn install_update_if_ready(&mut self, event_loop: &ActiveEventLoop) {
+            let status = self.update_status.load();
+            let UpdateStatus::ReadyToInstall {
+                version,
+                staged,
+                mandatory,
+            } = &**status
+            else {
+                return;
+            };
+            tracing::info!(
+                "[mise à jour] installation de {} depuis {} — l'overlay va se relancer.",
+                version,
+                staged.display()
+            );
+            self.update_status.store(Arc::new(UpdateStatus::Installing {
+                version: version.clone(),
+            }));
+            match update_apply::install_and_relaunch(staged, build_info::VERSION) {
+                Ok(()) => {
+                    logging::log_session_end(&format!(
+                        "mise à jour {} → {version}",
+                        build_info::VERSION
+                    ));
+                    event_loop.exit();
+                }
+                Err(err) => {
+                    tracing::warn!("[mise à jour] installation impossible : {err}");
+                    self.update_status.store(Arc::new(UpdateStatus::Failed {
+                        headline: "Installation impossible".to_string(),
+                        detail: err.to_string(),
+                        mandatory: *mandatory,
+                    }));
+                    self.startup.set_update_blocking(*mandatory);
+                    if !*mandatory {
+                        self.startup.mark_update_resolved();
+                    }
+                    self.request_all_redraw();
+                }
+            }
+        }
+
+        /// « Mettre à jour vers X » confirmé dans la fenêtre Options (`OptionsModalAction::InstallUpdate`)
+        /// : la fenêtre se ferme, le démarrage repasse en « mise à jour en cours » (ce qui ferme les
+        /// overlays de jeu et ramène la fenêtre de connexion sur son écran de chargement au prochain
+        /// tick, voir `sync_session_windows`), et le thread de mise à jour télécharge. L'installation
+        /// suit dans `install_update_if_ready`.
+        /// Redessine toutes les fenêtres — un état partagé vient de changer hors d'un événement.
+        fn request_all_redraw(&self) {
+            for overlay in self.windows.values() {
+                overlay.window.request_redraw();
+            }
+        }
+
+        fn request_update_install(&mut self, options_window_id: WindowId) {
+            tracing::info!(">>> Mise à jour demandée (fenêtre Options).");
+            self.startup.set_update_blocking(true);
+            let _ = self.update_command_tx.send(UpdateCommand::Download);
+            self.close_options_modal(options_window_id, "Mise à jour");
         }
 
         /// Voir `main.rs::App::session_ready` : chargements initiaux terminés ET compte lié.
@@ -1064,6 +1151,11 @@ mod linux_main {
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
                 pending_disconnect: false,
+                // La section « Mise à jour » lit l'état publié par le thread de mise à jour ; rafraîchi
+                // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
+                update: (**self.update_status.load()).clone(),
+                auto_update: self.auto_update,
+                pending_install: None,
                 alerts: alerts_tab::AlertsTabState {
                     duration_input: alerts_draft
                         .as_ref()
@@ -1086,6 +1178,7 @@ mod linux_main {
                     features: self.features,
                     mutes: self.alert_mutes,
                     shortcuts: self.hotkeys.bindings().clone(),
+                    auto_update: self.auto_update,
                 },
                 pending_close: false,
                 alerts_draft,
@@ -1374,6 +1467,20 @@ mod linux_main {
                         tracing::info!("[options] raccourcis personnalisés mis à jour.");
                         self.hotkeys.apply(commit.shortcuts);
                     }
+                    // **La mise à jour automatique (2026-09-15)** — persistée, effective au prochain lancement :
+                    // c'est là que la première commande au thread de mise à jour se décide.
+                    let auto_update_changed = commit.auto_update != self.auto_update;
+                    if auto_update_changed {
+                        self.auto_update = commit.auto_update;
+                        tracing::info!(
+                            "[options] mise à jour automatique au démarrage : {}",
+                            if self.auto_update {
+                                "activée"
+                            } else {
+                                "désactivée"
+                            }
+                        );
+                    }
                     // La config est réécrite EN ENTIER, et seulement si l'un des réglages a bougé —
                     // même raison que `main.rs` : le fichier est réécrit d'un bloc.
                     let chat_toast_changed = self.commit_chat(options_window_id);
@@ -1385,12 +1492,14 @@ mod linux_main {
                         || chat_toast_changed
                         || features_changed
                         || mutes_changed
+                        || auto_update_changed
                     {
                         let mut saved = config::OverlayConfig {
                             log_path: Some(candidate),
                             combat_always_visible: self.combat_always_visible,
                             turn_notification: self.turn_notification,
                             turn_notification_muted: self.turn_notification_muted,
+                            auto_update: self.auto_update,
                             ..Default::default()
                         };
                         saved.set_shortcuts(self.hotkeys.bindings());
@@ -1448,7 +1557,8 @@ mod linux_main {
             match event {
                 UserEvent::NewSnapshot
                 | UserEvent::AuthStatusChanged
-                | UserEvent::StartupProgress => {
+                | UserEvent::StartupProgress
+                | UserEvent::UpdateProgress => {
                     for overlay in self.windows.values() {
                         overlay.window.request_redraw();
                     }
@@ -1481,6 +1591,11 @@ mod linux_main {
                 DisconnectAccount,
                 /// Résoudre les ingrédients de cet objet pour la fenêtre de recette.
                 ResolveRecipe(i64),
+                /// Section « Mise à jour » de la fenêtre Options — voir `main.rs`.
+                CheckUpdate,
+                InstallUpdate,
+                /// « Réessayer » de l'écran « Mise à jour requise ».
+                RetryUpdate,
             }
             let mut post_redraw = PostRedraw::None;
 
@@ -1607,6 +1722,17 @@ mod linux_main {
                             || self.interactive;
                     let this_game_rect = overlay.game_rect;
                     let this_game_window = overlay.game_window;
+                    // L'état de la mise à jour, copié dans la fenêtre qui l'affiche AVANT chaque rendu
+                    // (jamais figé à l'ouverture, voir `OptionsModalState::update`).
+                    let update_status = self.update_status.load();
+                    if let Some(state) = overlay.login_state.as_mut() {
+                        if state.update != **update_status {
+                            state.update = (**update_status).clone();
+                        }
+                    }
+                    if let Some(state) = overlay.options_state.as_mut() {
+                        state.update = (**update_status).clone();
+                    }
                     let (repaint_delay, outcome) = render(
                         &mut overlay.gpu,
                         &overlay.window,
@@ -1671,6 +1797,9 @@ mod linux_main {
                                     "[connexion] déplacement de la fenêtre refusé : {err}"
                                 );
                             }
+                        }
+                        if outcome.retry_update {
+                            post_redraw = PostRedraw::RetryUpdate;
                         }
                     }
                     if outcome.close_toast {
@@ -1739,6 +1868,10 @@ mod linux_main {
                         OptionsModalAction::ResolveRecipe(id) => {
                             post_redraw = PostRedraw::ResolveRecipe(id)
                         }
+                        OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+                        OptionsModalAction::InstallUpdate => {
+                            post_redraw = PostRedraw::InstallUpdate
+                        }
                     }
                     overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
                         .then(|| std::time::Instant::now() + repaint_delay);
@@ -1763,10 +1896,27 @@ mod linux_main {
                     self.close_options_modal(id, "Déconnexion");
                 }
                 PostRedraw::ResolveRecipe(item_id) => self.start_recipe_resolution(id, item_id),
+                PostRedraw::CheckUpdate => {
+                    tracing::info!(">>> Recherche de mise à jour (fenêtre Options).");
+                    let _ = self.update_command_tx.send(UpdateCommand::Check {
+                        install_if_available: false,
+                    });
+                }
+                PostRedraw::InstallUpdate => self.request_update_install(id),
+                PostRedraw::RetryUpdate => {
+                    let _ = self.update_command_tx.send(UpdateCommand::Check {
+                        install_if_available: true,
+                    });
+                }
             }
         }
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            // Une mise à jour prête s'installe avant tout le reste — voir `main.rs`.
+            self.install_update_if_ready(event_loop);
+            if event_loop.exiting() {
+                return;
+            }
             // Bug réel trouvé côté X11 (spike S3, 2026-09-03, voir son README « Bugs réels
             // trouvés » n°3) : `global-hotkey` (XGrabKey) remonte DEUX événements par pression
             // (`Pressed` ET `Released`), contrairement à `WM_HOTKEY` sous Windows. Filtré sur
@@ -2011,8 +2161,7 @@ mod linux_main {
     /// de démarrer sans chemin explicite : un futur lot pourrait démarrer quand même et laisser la
     /// modale Options seule responsable de fixer un premier chemin, mais ce n'est pas encore câblé
     /// ainsi (l'Engine a besoin d'un chemin dès `spawn_engine_thread`, voir `run`).
-    fn resolve_path(config: &config::OverlayConfig) -> PathBuf {
-        let cli_arg = env::args().nth(1).map(PathBuf::from);
+    fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> PathBuf {
         match config::resolve_log_path(cli_arg, config) {
             Some(path) => path,
             None => {
@@ -2043,7 +2192,23 @@ mod linux_main {
         tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
         let saved_config = config::load();
-        let log_path = resolve_path(&saved_config);
+
+        // `--updated-from X` (relance après une mise à jour, voir `overlay_sync::update::apply`)
+
+        // n'est pas un chemin de log : les arguments sont triés avant de résoudre le fichier.
+
+        let cli = update_apply::parse_args(env::args().skip(1));
+
+        if let Some(from) = &cli.updated_from {
+            tracing::info!(
+                "[mise à jour] mis à jour {from} → {} — nettoyage du dossier de mise à jour.",
+                build_info::VERSION
+            );
+
+            update_apply::cleanup(&overlay_sync::update::updates_dir());
+        }
+
+        let log_path = resolve_path(&saved_config, cli.log_path);
         let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
         let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
         let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
@@ -2057,6 +2222,7 @@ mod linux_main {
         let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
         let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
         let startup = Arc::new(StartupProgress::new());
+        let update_status = Arc::new(ArcSwap::from_pointee(UpdateStatus::Idle));
 
         let game_window = GameWindowTracker::connect()
             .expect("connexion X11 pour la découverte de fenêtres ($DISPLAY défini ?)");
@@ -2086,6 +2252,19 @@ mod linux_main {
             proxy.clone(),
         );
         spawn_dungeon_thread(Arc::clone(&dungeons), Arc::clone(&startup), proxy.clone());
+        // Mise à jour automatique (2026-09-15, `docs/plan-mise-a-jour.md` §7) : la vérification part
+        // tout de suite, derrière l'écran de chargement ; avec « Installer automatiquement » coché,
+        // une version plus récente est installée avant d'ouvrir le moindre overlay de jeu.
+        let (update_command_tx, update_command_rx) = mpsc::channel();
+        spawn_update_thread(
+            Arc::clone(&update_status),
+            Arc::clone(&startup),
+            update_command_rx,
+            proxy.clone(),
+        );
+        let _ = update_command_tx.send(UpdateCommand::Check {
+            install_if_available: saved_config.auto_update,
+        });
         let remote_icons = RemoteIconStore::spawn(proxy.clone());
         spawn_engine_thread(
             log_path.clone(),
@@ -2131,6 +2310,9 @@ mod linux_main {
             auth_status,
             auth_command_tx,
             startup,
+            update_status,
+            update_command_tx,
+            auto_update: saved_config.auto_update,
             alert_profile,
             chat_filters,
             game_window,

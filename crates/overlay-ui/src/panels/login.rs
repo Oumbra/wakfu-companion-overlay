@@ -43,6 +43,8 @@ use std::time::{Duration, Instant};
 use egui::text::LayoutJob;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
+use overlay_sync::update::{self, UpdateStatus};
+
 use crate::build_info;
 use crate::design::{self, text};
 use crate::render_content::{AuthCommand, AuthCommandSink, AuthStatus};
@@ -145,6 +147,18 @@ const FOOT_HEIGHT: f32 = 30.0;
 /// l'écraser.
 const LOADER_SIZE: f32 = 72.0;
 const FOOT_PAD_SIDE: f32 = 12.0;
+// ── Mise à jour (2026-09-15, docs/plan-mise-a-jour.md §8.1 — mécanisme seulement, la mise en
+// forme de l'écran de chargement est à retravailler dans une itération dédiée) ─────────────────
+/// Écart entre le bas du rouage et la ligne d'état de mise à jour.
+const UPDATE_LABEL_MARGIN_TOP: f32 = 14.0;
+const UPDATE_LABEL_SIZE: f32 = 12.0;
+const UPDATE_LABEL_LINE: f32 = 16.0;
+/// Jauge de téléchargement : sous la ligne d'état, aux deux tiers de la largeur du corps.
+const UPDATE_METER_MARGIN_TOP: f32 = 8.0;
+const UPDATE_METER_HEIGHT: f32 = 8.0;
+const UPDATE_METER_WIDTH_RATIO: f32 = 0.66;
+const UPDATE_COUNT_MARGIN_TOP: f32 = 5.0;
+const UPDATE_COUNT_SIZE: f32 = 10.0;
 /// Le corps du badge « beta » (`BETA_HEIGHT`) : la version est son pendant, en bas à droite.
 const VERSION_SIZE: f32 = BETA_HEIGHT;
 /// Inclinaison de l'italique simulé (voir [`paint_italic`]) — proche des 12° d'une vraie italique.
@@ -163,6 +177,12 @@ pub struct LoginState {
     /// initiaux ne sont pas terminés (`crate::startup::StartupProgress::is_complete`). `true` à la
     /// création : la fenêtre naît sur le rouage.
     pub loading: bool,
+    /// Où en est la mise à jour automatique (`overlay_sync::update::UpdateStatus`) — copié par
+    /// l'hôte depuis l'état publié par le thread de mise à jour à chaque passage de
+    /// `sync_session_windows`. Sous le rouage, l'écran de chargement en montre l'avancement
+    /// (téléchargement, vérification, installation) ; une mise à jour **obligatoire** en échec
+    /// remplace le rouage par « Mise à jour requise » et son bouton « Réessayer ».
+    pub update: UpdateStatus,
 }
 
 impl LoginState {
@@ -171,6 +191,7 @@ impl LoginState {
             started_at,
             animate: true,
             loading: true,
+            update: UpdateStatus::Idle,
         }
     }
 }
@@ -185,6 +206,9 @@ pub struct LoginOutcome {
     /// Hauteur exacte que la carte vient d'occuper — l'hôte y ajuste la fenêtre OS (chaque état
     /// a la sienne : la carte d'appairage est plus haute que l'écran d'accueil).
     pub content_height: f32,
+    /// « Réessayer » de l'écran « Mise à jour requise » : l'hôte relance la vérification avec
+    /// installation (`background::UpdateCommand::Check { install_if_available: true }`).
+    pub retry_update: bool,
 }
 
 /// Peint la fenêtre de connexion dans tout `ui` et rend ce qu'elle demande à l'hôte.
@@ -202,7 +226,21 @@ pub fn show(
     let ctx = ui.ctx().clone();
 
     // Fond et liseré de la carte — sur TOUTE la fenêtre : c'est l'hôte qui la taille à la carte.
+    let update_required = matches!(
+        state.update,
+        UpdateStatus::Failed {
+            mandatory: true,
+            ..
+        }
+    );
     let (border, ring, ring_soft) = match auth_status {
+        // Mise à jour obligatoire en échec : la carte passe au rouge de l'erreur, quel que soit
+        // l'état du compte (voir `paint_update_required`).
+        _ if update_required => (
+            CARD_BORDER_ERROR,
+            Color32::from_rgb(0xff, 0x5f, 0x57),
+            Color32::from_rgba_premultiplied(41, 15, 13, 46),
+        ),
         AuthStatus::PairingStarted { .. } => (
             CARD_BORDER_PAIRING,
             ACCENT,
@@ -329,7 +367,28 @@ pub fn show(
     // Le compte en cours de vérification (`Connecting`) est un chargement comme les autres : la
     // fenêtre ne dit « non connecté » qu'une fois la réponse connue.
     let loading = state.loading || matches!(auth_status, AuthStatus::Connecting);
-    if loading {
+    // Une mise à jour OBLIGATOIRE qui a échoué prend toute la place de l'écran de chargement :
+    // la version en cours ne peut pas continuer, et « Réessayer » est la seule issue (le
+    // démarrage reste bloqué par `StartupProgress::set_update_blocking`, voir
+    // `background::download_and_stage`).
+    if let UpdateStatus::Failed {
+        headline,
+        detail,
+        mandatory: true,
+    } = &state.update
+    {
+        y = paint_update_required(
+            ui,
+            body_left,
+            body_width,
+            y,
+            headline,
+            detail,
+            &h2_font,
+            &p_font,
+            &mut outcome,
+        );
+    } else if loading {
         // Le corps prend la place qu'il occuperait sur l'écran « non connecté » (même hauteur
         // totale, voir `INITIAL_HEIGHT`), le rouage en son centre exact.
         let body_height =
@@ -344,6 +403,9 @@ pub fn show(
             loader = loader.preview_frame(0);
         }
         ui.put(loader_rect, loader);
+        // L'avancement de la mise à jour, sous le rouage — rien tant qu'il n'y a rien à dire
+        // (l'écran de chargement d'origine reste identique au pixel près).
+        paint_update_progress(ui, &ctx, body_rect, loader_rect, &state.update);
         y += body_height;
     } else {
         match auth_status {
@@ -652,6 +714,210 @@ pub fn show(
 
     outcome.content_height = (y - card.top()).round();
     outcome
+}
+
+/// Ce que l'écran de chargement dit de la mise à jour sous son rouage — une ligne, plus une jauge
+/// pendant le téléchargement. Silencieux pour `Idle`, `Checking` (le rouage tourne déjà) et
+/// `UpToDate` (rien à annoncer).
+fn paint_update_progress(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    body_rect: Rect,
+    loader_rect: Rect,
+    status: &UpdateStatus,
+) {
+    let (label, color, meter): (String, Color32, Option<(f32, String)>) = match status {
+        UpdateStatus::Available {
+            version,
+            mandatory: false,
+            ..
+        } => (
+            format!("Version {version} disponible — Options › Paramètres"),
+            TEXT_MUTED,
+            None,
+        ),
+        UpdateStatus::Downloading {
+            version,
+            received,
+            total,
+        } => {
+            let fraction = if *total == 0 {
+                0.0
+            } else {
+                (*received as f32 / *total as f32).clamp(0.0, 1.0)
+            };
+            (
+                format!("Téléchargement de la version {version}"),
+                TEXT,
+                Some((
+                    fraction,
+                    format!(
+                        "{} / {}",
+                        update::human_size(*received),
+                        update::human_size(*total)
+                    ),
+                )),
+            )
+        }
+        UpdateStatus::Verifying { version } => {
+            (format!("Vérification de la version {version}…"), TEXT, None)
+        }
+        UpdateStatus::ReadyToInstall { version, .. } | UpdateStatus::Installing { version } => {
+            (format!("Installation de la version {version}…"), TEXT, None)
+        }
+        UpdateStatus::Unavailable { .. } => (
+            "Mise à jour : vérification impossible (hors ligne ?)".to_string(),
+            TEXT_DIM,
+            None,
+        ),
+        UpdateStatus::Failed {
+            headline,
+            mandatory: false,
+            ..
+        } => (
+            format!("Mise à jour impossible ({headline}) — démarrage avec la version actuelle"),
+            ERROR_TEXT,
+            None,
+        ),
+        UpdateStatus::Idle
+        | UpdateStatus::Checking
+        | UpdateStatus::UpToDate { .. }
+        | UpdateStatus::Available { .. }
+        | UpdateStatus::Failed { .. } => return,
+    };
+    let font = text::label_font(ctx, UPDATE_LABEL_SIZE);
+    let mut y = loader_rect.bottom() + UPDATE_LABEL_MARGIN_TOP;
+    let galley = ui.fonts_mut(|f| {
+        let mut job = LayoutJob::simple(label, font.clone(), color, body_rect.width());
+        job.sections[0].format.line_height = Some(UPDATE_LABEL_LINE);
+        job.halign = egui::Align::Center;
+        f.layout_job(job)
+    });
+    ui.painter()
+        .galley(Pos2::new(body_rect.center().x, y), galley.clone(), color);
+    y += galley.rect.height();
+    if let Some((fraction, count)) = meter {
+        y += UPDATE_METER_MARGIN_TOP;
+        let width = (body_rect.width() * UPDATE_METER_WIDTH_RATIO).round();
+        let meter_rect = Rect::from_min_size(
+            Pos2::new((body_rect.center().x - width / 2.0).round(), y),
+            Vec2::new(width, UPDATE_METER_HEIGHT),
+        );
+        design::components::meter::paint(ui, meter_rect, fraction, ACCENT);
+        y += UPDATE_METER_HEIGHT + UPDATE_COUNT_MARGIN_TOP;
+        let count_font = text::label_font(ctx, UPDATE_COUNT_SIZE);
+        let count_galley = ui.fonts_mut(|f| f.layout_no_wrap(count, count_font, TEXT_DIM));
+        ui.painter().galley(
+            Pos2::new(body_rect.center().x - count_galley.rect.width() / 2.0, y),
+            count_galley,
+            TEXT_DIM,
+        );
+    }
+}
+
+/// L'écran « Mise à jour requise » — même composition que l'écran d'erreur de connexion (point
+/// rouge, titre, explication, détail technique, bouton), pour une mise à jour obligatoire qui n'a
+/// pas pu s'installer. Rend la position sous le bloc.
+#[allow(clippy::too_many_arguments)]
+fn paint_update_required(
+    ui: &mut egui::Ui,
+    body_left: f32,
+    body_width: f32,
+    mut y: f32,
+    headline: &str,
+    detail: &str,
+    h2_font: &FontId,
+    p_font: &FontId,
+    outcome: &mut LoginOutcome,
+) -> f32 {
+    let ctx = ui.ctx().clone();
+    let status_font = text::label_strong_font(&ctx, STATUS_SIZE);
+    let status_galley = ui
+        .fonts_mut(|f| f.layout_no_wrap("MISE À JOUR REQUISE".to_owned(), status_font, ERROR_TEXT));
+    let status_center_y = y + status_galley.rect.height() / 2.0;
+    ui.painter().circle_filled(
+        Pos2::new(body_left + STATUS_DOT / 2.0, status_center_y),
+        STATUS_DOT / 2.0 + 3.0,
+        ERROR_DOT_HALO,
+    );
+    ui.painter().circle_filled(
+        Pos2::new(body_left + STATUS_DOT / 2.0, status_center_y),
+        STATUS_DOT / 2.0,
+        ERROR_DOT,
+    );
+    ui.painter().galley(
+        Pos2::new(body_left + STATUS_DOT + STATUS_GAP, y),
+        status_galley.clone(),
+        ERROR_TEXT,
+    );
+    y += status_galley.rect.height() + STATUS_MARGIN_BOTTOM;
+    y = paint_paragraph(
+        ui,
+        Pos2::new(body_left, y),
+        body_width,
+        headline,
+        h2_font,
+        TEXT,
+        H2_LINE,
+    ) + H2_GAP;
+    y = paint_paragraph(
+        ui,
+        Pos2::new(body_left, y),
+        body_width,
+        "Cette version de l'overlay ne peut plus être utilisée avec le serveur : une mise à jour \
+         est nécessaire, et elle n'a pas pu s'installer. Vérifiez votre connexion internet, puis \
+         réessayez.",
+        p_font,
+        TEXT_MUTED,
+        P_LINE,
+    );
+    y += DETAIL_MARGIN_TOP;
+    let detail_font = FontId::monospace(DETAIL_SIZE);
+    let detail_galley = ui.fonts_mut(|f| {
+        let mut job = LayoutJob::simple(
+            detail.to_owned(),
+            detail_font,
+            TEXT_DIM,
+            body_width - 2.0 * DETAIL_PAD_X,
+        );
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        f.layout_job(job)
+    });
+    let detail_height = detail_galley.rect.height() + 2.0 * DETAIL_PAD_Y;
+    let detail_rect = Rect::from_min_size(
+        Pos2::new(body_left, y),
+        Vec2::new(body_width, detail_height),
+    );
+    ui.painter().rect_filled(detail_rect, 4.0, DETAIL_FILL);
+    ui.painter().rect_stroke(
+        detail_rect.shrink(0.5),
+        4.0,
+        Stroke::new(1.0, SECONDARY_BORDER),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        Pos2::new(body_left + DETAIL_PAD_X, y + DETAIL_PAD_Y),
+        detail_galley,
+        TEXT_DIM,
+    );
+    y += detail_height;
+    y += ACTIONS_MARGIN_TOP;
+    let button_rect = Rect::from_min_size(
+        Pos2::new(body_left, y),
+        Vec2::new(body_width, BUTTON_HEIGHT),
+    );
+    if button(
+        ui,
+        button_rect,
+        "Réessayer",
+        ButtonKind::Primary,
+        "login-reessayer-mise-a-jour",
+    ) {
+        tracing::info!("[mise à jour] « Réessayer » — nouvelle tentative demandée.");
+        outcome.retry_update = true;
+    }
+    y + BUTTON_HEIGHT
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

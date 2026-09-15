@@ -646,3 +646,245 @@ fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
         }
     }
 }
+
+// ── Mise à jour automatique (2026-09-15, docs/plan-mise-a-jour.md §7) ──────────────────────────
+
+/// Ce que l'hôte demande au thread de mise à jour — voir [`spawn_update_thread`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateCommand {
+    /// Lire le manifeste et rendre un verdict. `install_if_available` : télécharger et mettre en
+    /// place aussitôt si une version plus récente existe (démarrage avec « Installer
+    /// automatiquement » coché, ou « Réessayer » d'une mise à jour obligatoire) ; sinon se
+    /// contenter de la signaler (bouton « Recherche de mise à jour »).
+    Check { install_if_available: bool },
+    /// Télécharger et mettre en place la version signalée disponible par la dernière
+    /// vérification — bouton « Mettre à jour vers X » de la fenêtre Options. Sans verdict
+    /// « disponible » en mémoire, revient à `Check { install_if_available: true }`.
+    Download,
+}
+
+/// Deux vérifications manuelles ne se suivent pas à moins de trente secondes (anti-rafale sur le
+/// bouton) ; une demande d'installation, elle, passe toujours.
+const MANUAL_CHECK_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Le thread de mise à jour — `std::thread` bloquant comme ses voisins, un seul modèle de
+/// concurrence dans le binaire (§7.3 du plan d'architecture). Il ne fait que ce que
+/// `overlay_sync::update` sait faire, dans l'ordre du §7 du plan de mise à jour, et publie chaque
+/// pas dans `status` (réveil de l'hôte par `UserEvent::UpdateProgress`) :
+///
+/// 1. `Check` : `Checking` → `UpToDate` / `Available` / `Unavailable`. L'étape de démarrage est
+///    résolue (`StartupProgress::mark_update_resolved`) sauf si l'installation suit.
+/// 2. `Download` (ou `Check` avec installation) : `Downloading { received, total }` par bloc →
+///    `Verifying` → `ReadyToInstall { staged }`. Pendant tout ce temps
+///    `StartupProgress::set_update_blocking(true)` : l'écran de chargement reste, garde-fou
+///    compris, et la fenêtre Options a rendu la main.
+/// 3. C'est l'**hôte** qui installe (`App::install_update_if_ready`, à chaque tick) : le
+///    remplacement de l'exe et la relance doivent précéder `event_loop.exit()`, que seul le thread
+///    principal peut appeler. Le thread, lui, a fini son travail à `ReadyToInstall`.
+///
+/// Un échec publie `Failed { headline, detail, mandatory }` ; si la mise à jour n'était pas
+/// obligatoire, le démarrage est débloqué et résolu (l'overlay repart avec sa version, on
+/// réessaiera au prochain lancement) ; si elle l'était, l'écran reste sur « Mise à jour requise »
+/// jusqu'à un `Check { install_if_available: true }` (« Réessayer »).
+///
+/// **Le dossier de l'exe est sondé avant tout téléchargement** (`check_writable_install_dir`,
+/// §12 du plan) : un exe posé dans un dossier protégé donne un échec explicite tout de suite,
+/// jamais un téléchargement de quinze mégaoctets suivi d'un « accès refusé ».
+pub fn spawn_update_thread(
+    status: Arc<ArcSwap<overlay_sync::update::UpdateStatus>>,
+    startup: Arc<StartupProgress>,
+    command_rx: mpsc::Receiver<UpdateCommand>,
+    proxy: EventLoopProxy<UserEvent>,
+) {
+    use overlay_sync::update::{self, UpdateStatus, Verdict};
+
+    thread::Builder::new()
+        .name("overlay-update".into())
+        .spawn(move || {
+            let publish = |next: UpdateStatus| {
+                status.store(Arc::new(next));
+                let _ = proxy.send_event(UserEvent::UpdateProgress);
+            };
+            let resolve_startup = || {
+                startup.mark_update_resolved();
+                let _ = proxy.send_event(UserEvent::StartupProgress);
+            };
+            // Verdict « disponible » de la dernière vérification, gardé pour un `Download`.
+            let mut available: Option<(update::Manifest, update::Asset, bool)> = None;
+            let mut last_manual_check: Option<std::time::Instant> = None;
+
+            while let Ok(command) = command_rx.recv() {
+                if status.load().is_busy() {
+                    continue; // une opération à la fois — commande ignorée
+                }
+                let (need_check, install) = match command {
+                    UpdateCommand::Check {
+                        install_if_available,
+                    } => (true, install_if_available),
+                    UpdateCommand::Download => (available.is_none(), true),
+                };
+                if need_check {
+                    if !install {
+                        if let Some(at) = last_manual_check {
+                            if at.elapsed() < MANUAL_CHECK_COOLDOWN {
+                                tracing::info!(
+                                    "[mise à jour] vérification demandée trop tôt après la précédente — ignorée."
+                                );
+                                continue;
+                            }
+                        }
+                        last_manual_check = Some(std::time::Instant::now());
+                    }
+                    publish(UpdateStatus::Checking);
+                    tracing::info!(
+                        "[mise à jour] lecture de {}",
+                        update::manifest_url(update::MANIFEST_NAME)
+                    );
+                    match update::manifest::check(crate::build_info::VERSION) {
+                        Ok(Verdict::UpToDate) => {
+                            tracing::info!(
+                                "[mise à jour] {} est la dernière version publiée.",
+                                crate::build_info::VERSION
+                            );
+                            available = None;
+                            publish(UpdateStatus::UpToDate {
+                                checked_at: std::time::Instant::now(),
+                            });
+                            resolve_startup();
+                            continue;
+                        }
+                        Ok(Verdict::Available {
+                            manifest,
+                            asset,
+                            mandatory,
+                        }) => {
+                            tracing::info!(
+                                "[mise à jour] version {} disponible ({} à télécharger{})",
+                                manifest.version,
+                                update::human_size(asset.size),
+                                if mandatory { ", obligatoire" } else { "" }
+                            );
+                            publish(UpdateStatus::Available {
+                                version: manifest.version.clone(),
+                                download_size: asset.size,
+                                mandatory,
+                                notes_url: manifest.notes_url.clone(),
+                                checked_at: std::time::Instant::now(),
+                            });
+                            available = Some((*manifest, asset, mandatory));
+                            if !(install || mandatory) {
+                                resolve_startup();
+                                continue;
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "[mise à jour] vérification impossible : {err} — l'overlay continue avec sa version."
+                            );
+                            publish(UpdateStatus::Unavailable {
+                                reason: err.to_string(),
+                                checked_at: std::time::Instant::now(),
+                            });
+                            resolve_startup();
+                            continue;
+                        }
+                    }
+                }
+                if let Some(entry) = available.clone() {
+                    download_and_stage(&publish, &startup, entry);
+                }
+            }
+        })
+        .expect("échec de création du thread de mise à jour");
+}
+
+/// Téléchargement, vérification et mise en place d'une version — voir [`spawn_update_thread`].
+fn download_and_stage(
+    publish: &dyn Fn(overlay_sync::update::UpdateStatus),
+    startup: &StartupProgress,
+    (manifest, asset, mandatory): (
+        overlay_sync::update::Manifest,
+        overlay_sync::update::Asset,
+        bool,
+    ),
+) {
+    use overlay_sync::update::{self, UpdateStatus};
+
+    let version = manifest.version.clone();
+    let fail = |err: &update::UpdateError| {
+        tracing::warn!("[mise à jour] échec vers {version} : {err}");
+        publish(UpdateStatus::Failed {
+            headline: update::headline(err).to_string(),
+            detail: err.to_string(),
+            mandatory,
+        });
+        // Non obligatoire : l'overlay démarre (ou continue) avec sa version. Obligatoire : l'écran
+        // reste bloqué sur « Mise à jour requise » jusqu'à « Réessayer ».
+        startup.set_update_blocking(mandatory);
+        if !mandatory {
+            startup.mark_update_resolved();
+        }
+    };
+
+    startup.set_update_blocking(true);
+    if let Err(reason) = update::apply::check_writable_install_dir() {
+        fail(&update::UpdateError::Io(reason));
+        return;
+    }
+    let dir = update::updates_dir();
+    let dest = dir.join(&asset.name);
+    let url = update::asset_url(&version, &asset.name);
+    tracing::info!(
+        "[mise à jour] téléchargement de {url} ({})",
+        update::human_size(asset.size)
+    );
+    publish(UpdateStatus::Downloading {
+        version: version.clone(),
+        received: 0,
+        total: asset.size,
+    });
+    // Un état publié par bloc de 64 Kio ferait redessiner la fenêtre à chaque bloc : au plus dix
+    // publications par seconde, et toujours la dernière.
+    let mut last_publish = std::time::Instant::now();
+    let mut on_progress = |received: u64, total: u64| {
+        if received == total || last_publish.elapsed() >= std::time::Duration::from_millis(100) {
+            last_publish = std::time::Instant::now();
+            publish(UpdateStatus::Downloading {
+                version: version.clone(),
+                received,
+                total,
+            });
+        }
+    };
+    if let Err(err) =
+        update::download::fetch_to_file(&url, &dest, asset.size, &asset.sha256, &mut on_progress)
+    {
+        fail(&err);
+        return;
+    }
+    publish(UpdateStatus::Verifying {
+        version: version.clone(),
+    });
+    match update::apply::stage(
+        &dest,
+        &version,
+        asset.installed.size,
+        &asset.installed.sha256,
+        &dir,
+    ) {
+        Ok(staged) => {
+            let _ = std::fs::remove_file(&dest);
+            tracing::info!(
+                "[mise à jour] {} vérifiée et prête : {}",
+                version,
+                staged.display()
+            );
+            publish(UpdateStatus::ReadyToInstall {
+                version,
+                staged,
+                mandatory,
+            });
+        }
+        Err(err) => fail(&err),
+    }
+}
