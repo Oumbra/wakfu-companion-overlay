@@ -28,7 +28,7 @@ use crate::alert_sound;
 use crate::panels;
 use crate::panels::chat_tab::ChatToastSettings;
 use crate::panels::feature_switch::FeatureToggles;
-use crate::panels::sound_row::AlertMutes;
+use crate::panels::notifications::AlertMutes;
 use crate::panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use crate::render_content::UserEvent;
 
@@ -103,7 +103,7 @@ pub enum EngineCommand {
     /// exactement ce qu'on demande en coupant.
     SetFeatures(FeatureToggles),
     /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
-    /// « Chat » (`panels::sound_row`, 2026-09-15). Locales à la machine comme `SetFeatures`,
+    /// « Chat » (`panels::notifications`, 2026-09-15). Locales à la machine comme `SetFeatures`,
     /// envoyées au démarrage puis à chaque validation de la fenêtre Options.
     ///
     /// **Ce qu'elles coupent, et ce qu'elles ne coupent pas** : ce thread cesse de JOUER LE SON de

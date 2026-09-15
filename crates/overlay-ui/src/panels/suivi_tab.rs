@@ -37,23 +37,14 @@
 //! croix fléchée — vit dans [`crate::panels::tile_reorder`], partagée avec le bandeau : les deux
 //! écrans réordonnent la même liste.
 //!
-//! ## Écouter l'alerte avant de la mériter
+//! ## Le son de l'alerte se règle ailleurs
 //!
-//! La ligne « Tester le son de l'alerte » (2026-09-15), posée juste sous la phrase de l'onglet,
-//! joue le son du **décompte arrivé à 0** — la seule alerte que le suivi déclenche
-//! ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`). C'est la
-//! même ligne que dans « Alertes » et « Chat », au son près : chacun des trois écrans fait
-//! entendre celui qu'il commande, et aucun n'oblige à provoquer l'événement pour savoir ce qu'on
-//! entendra en jeu — un décompte se mérite, lui, en ramassant ce qu'on suit. Elle vit dans
-//! [`crate::panels::sound_row`], partagée avec les deux autres onglets.
-//!
-//! Juste dessous, la case **« Couper le son des notifications »** (2026-09-15) : le décompte à
-//! zéro affiche toujours sa carte par-dessus le jeu, il ne fait plus de bruit. C'est le demi-pas
-//! qui manquait entre « tout actif » et la case « Activer le suivi », qui, elle, coupe la carte
-//! ET le son.
-//!
-//! Les deux vivent avant le formulaire d'ajout et non dans un des blocs qui composent la liste :
-//! c'est le son de l'onglet qu'elles règlent, pas l'entrée qu'on est en train de créer.
+//! L'essai du son du **décompte arrivé à 0** — la seule alerte que le suivi déclenche
+//! ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`) — et sa
+//! sourdine ont quitté cet onglet le 2026-09-15 pour la section « Suivi » de l'onglet
+//! « Paramètres », avec celles des Alertes, du Chat et du Combat
+//! ([`crate::panels::notifications`]). Cet onglet ne garde que ce qu'il liste : les objets suivis
+//! et leurs compteurs.
 //!
 //! ## Le brouillon ne porte QUE des définitions
 //!
@@ -68,7 +59,7 @@ use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
-use crate::panels::{feature_switch, sound_row, tile_reorder};
+use crate::panels::{feature_switch, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -270,12 +261,6 @@ pub struct SuiviTabContext<'a> {
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
-    /// **Le son de l'alerte de décompte est-il coupé ?** — brouillon de la case « Couper le son
-    /// des notifications » (voir `panels::sound_row`), posée juste sous la ligne d'essai. Coupé,
-    /// le décompte à zéro affiche toujours sa carte : c'est le SON qui se tait, pas la
-    /// fonctionnalité (celle-ci a sa propre case, [`Self::enabled`]). Comme tout le reste de la
-    /// fenêtre, c'est « Valider » qui l'emporte.
-    pub muted: &'a mut bool,
     pub availability: SuiviAvailability,
 }
 
@@ -284,9 +269,6 @@ pub struct SuiviTabContext<'a> {
 pub enum SuiviTabAction {
     #[default]
     None,
-    /// « Tester le son » : jouer le son du décompte arrivé à 0
-    /// (`alert_sound::play_countdown_alert`) — l'appelant seul a le périphérique audio.
-    TestSound,
     /// Résoudre les ingrédients de cet objet — l'appelant seul a le réseau
     /// (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
@@ -347,11 +329,6 @@ pub fn show(
          rallumer les retrouve tels quels.",
         "suivi.activer",
     );
-
-    if sound_row::show(ui, width, "suivi", Some(ctx.muted)) {
-        action = SuiviTabAction::TestSound;
-    }
-    ui.add_space(SECTION_GAP);
 
     add_form(ui, state, width);
     ui.add_space(SECTION_GAP * 0.75);
