@@ -317,6 +317,10 @@ n'a pas encore de combat en cours. Sous le budget de 300 Mo.
 
 ### 8.1 Écran de chargement (carte de connexion, fenêtre logicielle 400 px)
 
+> **Retour du mainteneur (2026-09-15)** : la maquette ci-dessous ne convient pas en l'état et fera
+> l'objet d'une itération dédiée plus tard. Ce qui suit reste la description du **mécanisme**
+> (étapes, jauge, cas d'échec) ; la mise en forme est à reprendre.
+
 Aujourd'hui : logo, titre, séparateur, rouage 72 px, version. Demain, sous le rouage :
 
 ```
@@ -364,18 +368,22 @@ Après « Compte », même rythme (`SECTION_GAP`, `heading`, `info_text`, `INFO_
 
 ```
 Mise à jour
-ⓘ Version 0.19.0 (a1b2c3d) · dernière vérification il y a 3 min · vous êtes à jour
+ⓘ Dernière vérification il y a 3 min · vous êtes à jour
 ☑ Installer automatiquement les mises à jour au démarrage
-                     [ Rechercher une mise à jour ]
+                     [ Recherche de mise à jour ]
 ```
+
+La version courante n'est **pas** répétée ici : elle est déjà dans la bannière de la fenêtre
+(`design::window(...).version(true)`). Pas de bouton « Notes de version » pour l'instant (aucune
+note n'est rédigée aujourd'hui ; `notesUrl` reste dans le manifeste pour plus tard).
 
 Le bouton change d'état avec `UpdateStatus` :
 
 | `UpdateStatus` | Bouton | Ligne d'info |
 | --- | --- | --- |
-| `Idle` / `UpToDate` / `Unavailable` | « Rechercher une mise à jour » (Secondary) | « vous êtes à jour » / « vérification impossible » |
+| `Idle` / `UpToDate` / `Unavailable` | « Recherche de mise à jour » (Secondary — habillage à revoir avec le design system, plus tard) | « vous êtes à jour » / « vérification impossible » |
 | `Checking` | « Recherche… » (désactivé, rouage 16 px à gauche) | — |
-| `Available` | **« Mettre à jour vers 0.20.0 »** (Primary, or) + lien « Notes de version » | « 11,8 Mo à télécharger » (ou « 3,1 Mo en différentiel ») |
+| `Available` | **« Mettre à jour vers 0.20.0 »** (Primary, or) | « version 0.20.0 disponible · 11,8 Mo » (ou « 3,1 Mo en différentiel ») |
 | `Downloading`… | (la modale n'est plus là : voir ci-dessous) | — |
 | `Failed` | « Réessayer » | `headline` en rouge, `detail` en infobulle |
 
@@ -417,26 +425,49 @@ mémoire de la taille de l'exe source ; `qbsdiff` reste pure Rust.
 
 ---
 
-## 10. Décisions à trancher par le mainteneur
+## 10. Décisions du mainteneur (2026-09-15)
 
-1. **Dépôt public confirmé ?** L'API GitHub le dit public ; `CLAUDE.md` et le §11 du plan disent
-   privé. Si public : A tel quel, minutes gratuites, et corriger les deux documents. Si privé ou
-   destiné à le redevenir : B dès la phase 2 (la Function porte un jeton `GITHUB_RELEASES_TOKEN`
-   en lecture seule et renvoie l'URL signée de l'asset).
-2. **Déclencheur de Release** : push sur `main` (recommandé, colle aux règles du dépôt) ou tag
-   manuel `v*` ?
-3. **Installation automatique au démarrage par défaut** (recommandé : oui, avec la case dans
-   Options pour la désactiver) ou proposition seulement ?
-4. **Différentiel** : dès le départ, ou après mesure (recommandé) ?
-5. **Emplacement d'installation cible pour L6** : `%LOCALAPPDATA%\Programs\WakfuCompanionOverlay\`
-   (installation par utilisateur, sans élévation — c'est ce qui rend l'auto-update possible sans
-   UAC, modèle Discord/VS Code) plutôt que `Program Files`. À acter maintenant pour que
-   l'installeur futur ne casse pas la mise à jour.
-6. **`DEFAULT_BASE_URL`** : la première Release pointe-t-elle sur la prod (`wakfu-companion.com`,
-   il faut que l'appairage natif y soit déployé) ou assume-t-on `claude-dev` pour la bêta ?
-7. **Abandon du « bundle moteur mis à jour sans nouvelle version du binaire »** (§11 du plan) :
-   31 Ko embarqués, l'auto-update du binaire couvre le besoin. Recommandé : retirer ce point du
-   plan d'architecture.
+| # | Question | Décision |
+| --- | --- | --- |
+| 1 | Dépôt public ? | **Oui, les deux dépôts sont publics.** Solution A telle quelle ; `CLAUDE.md` et le §11 du plan d'architecture sont à corriger (phase 0). |
+| 2 | Déclencheur de Release | **Push sur `main`.** |
+| 3 | Installation automatique au démarrage | **Oui par défaut**, désactivable dans Options. |
+| 4 | Différentiel dès le départ ou après mesure | **Après mesure** (recommandation retenue) — voir l'explication ci-dessous. |
+| 5 | Emplacement d'installation pour L6 | à acter avec l'installeur (`%LOCALAPPDATA%\Programs\…` recommandé, sans UAC). |
+| 6 | `DEFAULT_BASE_URL` | **Un binaire de Release vise toujours la prod, jamais `claude-dev`.** `claude-dev` n'est disponible qu'en local via le script de preview. Conséquence : la première Release attend le déploiement de l'appairage natif en prod ; d'ici là, `release.yml` peut être en place mais la Release publiée n'est pas distribuée. Le binaire compile la base URL de prod par défaut, `WAKFU_COMPANION_API_URL` reste la surcharge de dev. |
+| 7 | « Bundle moteur mis à jour sans nouvelle version du binaire » | **Retiré** (recommandation retenue) — voir l'explication ci-dessous. |
+
+**Décision 4, ce que les deux options voulaient dire.** « Dès le départ » : on écrit tout de suite
+les deux moitiés du différentiel — la génération des patchs par le CI (`xtask dist`) **et** leur
+application côté client (`qbsdiff` dans `apply.rs`, le choix patch/complet selon `fromSha256`, le
+repli, les tests) — dans le même lot que le client, pour que la toute première mise à jour reçue
+par un utilisateur soit déjà un patch. « Après mesure » : en phase 1 le CI ne fait que **calculer
+et journaliser** la taille qu'aurait eu le patch entre la Release précédente et la nouvelle (une
+ligne dans le journal du job, rien de publié) ; on lit ce nombre sur deux ou trois Releases
+réelles, et on n'écrit la partie client que si le gain est au moins ×2 par rapport à l'asset
+complet gzip. La différence est le risque de travail perdu : ~300 lignes côté client, une crate,
+un chemin d'erreur de plus à tester, pour un gain que je n'ai qu'estimé (×2 à ×3). Et dans les
+deux cas un patch ne peut exister qu'à partir de la **deuxième** Release : « dès le départ » ne
+fait donc rien gagner sur la première.
+
+**Décision 7, de quoi il s'agissait.** Le « bundle moteur » est `engine.bundle.js` (31 Ko), le
+`LogParser` TypeScript du dépôt web compilé et exécuté par QuickJS dans `overlay-engine`. Le plan
+d'architecture (§11, et §2.1 point 4) prévoyait qu'une correction de parsing faite côté web soit
+publiée comme un **asset séparé** de Release, signé à part, que l'overlay télécharge et charge à
+chaud — pour suivre le parser du web sans recompiler l'exe. Deux choses ont changé depuis :
+l'exe se met maintenant à jour tout seul (une correction de parser = un commit dans le dépôt
+overlay, fusion sur `main`, Release, et l'utilisateur l'a), et le bundle est **vendu et diverge
+volontairement** du dépôt web (`engine-js/VENDORED_FROM.txt`, décision du 2026-09-13) — il n'y a
+plus de « version du web » à suivre. Garder ce canal aurait coûté un second fichier signé, un
+second chemin téléchargement/vérification/chargement, et une matrice exe × bundle à gérer, pour
+31 Ko embarqués dans un exe qui se met déjà à jour. Le §11 du plan d'architecture est à amender en
+phase 0.
+
+**Interface (même jour)** : section « Mise à jour » sans rappel de la version (déjà dans la
+bannière), ligne d'info « dernière vérification il y a X · version Y disponible · Z Mo (différentiel) »,
+case « Installer automatiquement… », bouton « Recherche de mise à jour » (habillage à revoir avec
+le design system plus tard) qui devient « Mettre à jour vers Y » ; pas de bouton « Notes de
+version ». L'écran de chargement est à retravailler dans une itération dédiée (§8.1).
 
 ---
 
@@ -444,7 +475,7 @@ mémoire de la taille de l'exe source ; `qbsdiff` reste pure Rust.
 
 | Phase | Contenu | Livrable vérifiable | Dépôt |
 | --- | --- | --- | --- |
-| **0 — Préalables** | `[profile.release]` ; `DEFAULT_BASE_URL` (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décision 1) | un `cargo build --release` local mesuré (taille avant/après `strip`+LTO) | overlay |
+| **0 — Préalables** | `[profile.release]` ; `DEFAULT_BASE_URL` → prod (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décisions 1 et 7) | un `cargo build --release` local mesuré (taille avant/après `strip`+LTO) | overlay |
 | **1 — Publication** | `release.yml` ; `xtask dist` (gzip, SHA-256, `latest.json`, signature, mesure du delta) ; première Release `v0.x` | un exe Windows et un binaire Linux téléchargeables depuis `releases/latest`, manifeste signé vérifiable avec `minisign -V` | overlay |
 | **2 — Client** | `overlay_sync::update` ; `spawn_update_thread` ; `StartupProgress` typé ; écran de chargement avec étapes + jauge ; section Options ; relance `--updated-from` ; captures | installer volontairement une version N-1, lancer : elle se met à jour toute seule et se relance en N ; bouton Options testé dans les 5 états ; artefact des captures publié | overlay |
 | **3 — Différentiel** | `xtask dist` génère 3 deltas ; `apply.rs` applique `qbsdiff` quand `fromSha256` correspond | même test qu'en 2 avec le journal montrant « delta 3,1 Mo appliqué » ; repli asset complet vérifié sur un exe modifié | overlay |
