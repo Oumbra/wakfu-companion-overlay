@@ -68,6 +68,39 @@
 //! au-dessus de 0,50 de recouvrement sur les **deux**, d'où le choix — arbitré à la publication de
 //! l'artefact du 2026-09-09, l'autre option défendable étant Regular, plus léger.
 //!
+//! ## Une troisième graisse — le texte courant, plus léger qu'un libellé (2026-09-15)
+//!
+//! Les deux graisses ci-dessus sont celles des **libellés de bouton**. Le texte courant du jeu est
+//! plus léger, et la question d'une boîte de confirmation le montre : mesurée sur
+//! `interface-confirm-box-cutout.png`, son fût moyen est de **2,72 px** pour 5,24 d'encre par
+//! colonne. Rendues dans les mêmes conditions — même chaîne, même fond, même couleur d'encre, donc
+//! même seuillage — les trois graisses donnent :
+//!
+//! | Candidat, à chasse comparable | fût moyen | encre par colonne |
+//! | --- | --- | --- |
+//! | jeu (référence) | 2,72 px | 5,24 |
+//! | **Light 18** | **2,57 px** | **5,00** |
+//! | Regular 18 | 2,95 px | 5,54 |
+//! | Medium 17 | 3,93 px | 6,69 |
+//!
+//! Medium 17 gagne pourtant le classement en **chasse et hauteur** (3,7 % d'écart contre 4,2 % pour
+//! Light 18) : c'est précisément le piège. Une police trop grasse compense sa graisse par une chasse
+//! plus courte, et un classement qui ne regarde que l'encombrement la couronne. **La graisse se juge
+//! sur le fût, pas sur la boîte** — et Medium est 44 % trop gras.
+//!
+//! Regular 18 colle exactement en chasse (324 px contre 325, et 51 contre 51) au prix de 8 % de
+//! graisse en trop ; Light 18 rend 317 px, soit 2 % trop court, pour 5,5 % de graisse en moins.
+//! L'arbitrage entre ces deux-là revenait à l'utilisateur, qui avait demandé « plus light » — d'où
+//! [`LABEL_LIGHT`]. Le balayage complet se rejoue par
+//! `cargo run -p overlay-testkit --example police-confirmation`.
+//!
+//! **Le fichier est le même que la proportionnelle par défaut d'`egui`** (`epaint_default_fonts`
+//! n'embarque qu'`Ubuntu-Light.ttf`), et il aurait donc été tentant de viser `FontFamily::Proportional`
+//! sans rien ajouter au dépôt. C'est ce que fait l'outil de balayage, et c'est ce qu'un composant ne
+//! doit pas faire : ce choix appartient à `egui`, pas à nous, et le jour où il change, la question
+//! d'une boîte de confirmation changerait de graisse sans qu'aucune ligne du design system ne bouge.
+//! 350 Ko règlent la question.
+//!
 //! ## Pourquoi PT Serif Bold pour les titres
 //!
 //! Le jeu n'utilise **pas une seule police** : ses libellés de bouton sont dans une linéale, mais
@@ -94,7 +127,8 @@
 //!
 //! ## Portée : les libellés du design system, pas toute l'application
 //!
-//! Seules les familles nommées [`LABEL`], [`LABEL_STRONG`] et [`TITLE`] sont ajoutées. La proportionnelle par défaut d'`egui`
+//! Seules les familles nommées [`LABEL_LIGHT`], [`LABEL`], [`LABEL_STRONG`] et [`TITLE`] sont
+//! ajoutées. La proportionnelle par défaut d'`egui`
 //! (Ubuntu Light) reste celle de tout le reste de l'interface — panneaux Combat et Suivi compris.
 //! Basculer aussi le texte courant demanderait de mesurer la graisse du texte courant du jeu, ce
 //! qui n'a pas été fait ; le faire au passage aurait changé toutes les captures de non-régression
@@ -120,11 +154,16 @@ pub const LABEL: &str = "ds-label";
 /// module : ce n'est pas un effet de style, les deux graisses sont mesurées dans le jeu.
 pub const LABEL_STRONG: &str = "ds-label-strong";
 
+/// Graisse LÉGÈRE d'un texte de composant — celle du texte courant du jeu, mesurée sur la question
+/// d'une boîte de confirmation. Voir la doc de module, section « Une troisième graisse ».
+pub const LABEL_LIGHT: &str = "ds-label-light";
+
 /// Nom de la famille des titres du design system (bannière de modale, titre de section) — la
 /// serif grasse du jeu, distincte de la linéale des libellés. Voir la doc de module.
 pub const TITLE: &str = "ds-title";
 
-/// Fichiers embarqués — voir la doc de module pour le pourquoi de ces deux graisses précises.
+/// Fichiers embarqués — voir la doc de module pour le pourquoi de ces trois graisses précises.
+const UBUNTU_LIGHT: &[u8] = include_bytes!("../../../../assets/fonts/Ubuntu-Light.ttf");
 const UBUNTU_REGULAR: &[u8] = include_bytes!("../../../../assets/fonts/Ubuntu-Regular.ttf");
 const UBUNTU_MEDIUM: &[u8] = include_bytes!("../../../../assets/fonts/Ubuntu-Medium.ttf");
 
@@ -142,6 +181,7 @@ const PT_SERIF_BOLD: &[u8] = include_bytes!("../../../../assets/fonts/PTSerif-Bo
 pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     for (nom, fichier) in [
+        (LABEL_LIGHT, UBUNTU_LIGHT),
         (LABEL, UBUNTU_REGULAR),
         (LABEL_STRONG, UBUNTU_MEDIUM),
         (TITLE, PT_SERIF_BOLD),

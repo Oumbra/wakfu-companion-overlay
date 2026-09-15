@@ -75,6 +75,15 @@ pub fn label_strong_font(ctx: &Context, size: f32) -> FontId {
     famille(ctx, super::fonts::LABEL_STRONG, size)
 }
 
+/// Police d'un texte COURANT de composant, au corps demandé — plus légère qu'un libellé de bouton.
+/// C'est la graisse mesurée sur la question d'une boîte de confirmation ; voir [`super::fonts`].
+///
+/// Ne pas la confondre avec la proportionnelle par défaut d'`egui`, qui est aujourd'hui le même
+/// fichier : ici la famille est **nommée**, donc choisie par le design system et non par `egui`.
+pub fn label_light_font(ctx: &Context, size: f32) -> FontId {
+    famille(ctx, super::fonts::LABEL_LIGHT, size)
+}
+
 /// Police d'un titre (bannière de modale, titre de section), au corps demandé — la serif grasse du
 /// jeu, voir [`super::fonts`]. Même repli que [`label_font`].
 pub fn title_font(ctx: &Context, size: f32) -> FontId {

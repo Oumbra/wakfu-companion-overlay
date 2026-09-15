@@ -1870,12 +1870,57 @@ pub const CONFIRM_FOOT_HEIGHT: f32 = 9.0;
 /// dont le milieu est à 42. C'est ce point que vise un `Align2::CENTER_CENTER`.
 pub const CONFIRM_QUESTION_TOP: f32 = 42.0;
 
-/// Corps de la question — 15 px, celui du texte courant du jeu.
+/// Corps de la question — 18 px.
 ///
-/// Confirmé par le relevé : la hauteur de capitale mesurée est de 12 px, et le ratio d'egui est de
-/// 0,805 (et non les 0,72 de la police du jeu, qui donneraient 17 px). C'est exactement l'écart qui
-/// avait rendu un libellé de bouton 45 % trop gros.
-pub const CONFIRM_FONT_SIZE: f32 = 15.0;
+/// **Ce jeton valait 15, sur une provenance fausse.** Elle invoquait « une hauteur de capitale
+/// mesurée de 12 px » et le ratio d'egui de 0,805 ; une hauteur de capitale se lit sur un seul
+/// glyphe, dépend de l'accent qui le surmonte et du seuil qui l'isole, et elle avait été relevée
+/// sur le rendu à la main d'avant le détourage — pas sur la capture. Retour utilisateur du
+/// 2026-09-15 : « un poil petite ».
+///
+/// La mesure qui le remplace ne dépend d'aucune conversion encre → corps, parce qu'elle compare
+/// deux rendus de la **même chaîne** : les deux lignes du jeu sont rejouées dans chaque police
+/// candidate par `cargo run -p overlay-testkit --example police-confirmation`, puis mesurées comme
+/// la capture l'a été.
+///
+/// | | « Êtes-vous sûr(e) de vouloir supprimer ce » | « build ? » |
+/// | --- | --- | --- |
+/// | jeu | 325 px | 51 px |
+/// | Light 15 (l'ancien corps) | 264 px | 41 px |
+/// | **Light 18** | **317 px** | **50 px** |
+/// | Light 19 | 334 px | 53 px |
+///
+/// Le corps 15 rendait la question **17 % trop courte**. Dix-huit l'amène à 2 % du jeu ; 19 la
+/// dépasse de 3 % et gonfle la hauteur d'encre de la seconde ligne à 15 px pour 13 mesurés.
+pub const CONFIRM_FONT_SIZE: f32 = 18.0;
+
+/// Couleur de l'encre de la question — **gris clair, pas blanc**.
+///
+/// Mesurée au cœur des lettres de la capture (érosion 2×2, 463 px) : R 208,5 G 208,8 B 208,4. Le
+/// composant demandait `Color32::WHITE`, ce qui rendait la question à 220 au cœur et 213 sur ses
+/// franges, contre 208 et 197 dans le jeu — plus claire et plus dense, donc plus accrocheuse juste
+/// sous l'or du médaillon.
+///
+/// **Elle est rigoureusement neutre**, et c'est la réponse à l'impression de jaune rapportée le
+/// 2026-09-15 : mesurés, le cœur, les franges d'antialiasing, le halo et le fond sont neutres à
+/// ±0,5 d'écart rouge − bleu **des deux côtés**. Le seul élément chaud de la boîte est la crête
+/// dorée posée au-dessus de la question (+8,2), et elle est conforme au jeu.
+pub const CONFIRM_INK: Color32 = Color32::from_rgb(0xD0, 0xD1, 0xD0);
+
+/// Largeur où la question passe à la ligne — 344 px, la largeur utile du corps.
+///
+/// `CONFIRM_WIDTH - 40 - 36`, les deux paddings mesurés sur la capture. Le jeu coupe bien dans cet
+/// intervalle : sa première ligne fait 325 px, et « build » (51 px) n'y tiendrait pas.
+///
+/// **Sans ce retour à la ligne, le passage au corps 18 déborderait.** La plus longue des trois
+/// questions posées par `panels::options_modal` — « Fermer l'overlay et installer la version X ? »
+/// — demande environ 356 px à ce corps, pour 344 disponibles.
+pub const CONFIRM_TEXT_WIDTH: f32 = 344.0;
+
+/// Interligne de la question — 23 px, mesuré de centre à centre entre les deux lignes de la
+/// capture. C'est plus que l'interligne naturel d'Ubuntu au corps 18 (≈ 21 px), d'où un réglage
+/// explicite plutôt que la valeur par défaut d'`egui`.
+pub const CONFIRM_LINE_HEIGHT: f32 = 23.0;
 
 /// Marge latérale de la rangée de boutons — 38 px de chaque côté.
 ///

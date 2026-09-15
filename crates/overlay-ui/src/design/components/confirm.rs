@@ -74,7 +74,7 @@
 //! retiré la sienne — elle portait sur un brouillon qu'« Annuler » rattrapait. C'est ce qui rend ce
 //! composant intéressant à corriger une fois : les trois ont suivi sans changer d'appel.
 
-use egui::{Align2, Color32, Rect, Sense, Ui, Vec2};
+use egui::{Color32, Rect, Sense, Ui, Vec2};
 
 use crate::design::{button, text, tokens, ButtonSize, ButtonVariant, DesignSystem, DsTexture};
 
@@ -212,12 +212,32 @@ impl ConfirmDialog {
             Color32::WHITE,
         );
 
-        ui.painter().text(
-            egui::pos2(rect.center().x, rect.top() + tokens::CONFIRM_QUESTION_TOP),
-            Align2::CENTER_CENTER,
-            &self.question,
-            text::label_font(ui.ctx(), tokens::CONFIRM_FONT_SIZE),
-            Color32::WHITE,
+        // **La question est mise en page, pas simplement posée.** `Painter::text` n'aurait qu'une
+        // ligne, et au corps mesuré la plus longue des trois questions de `panels::options_modal`
+        // déborderait du corps (voir `tokens::CONFIRM_TEXT_WIDTH`). Le jeu, lui, coupe : sa capture
+        // montre deux lignes à 23 px de rythme, et c'est cet interligne qui est posé ici — celui
+        // d'Ubuntu au corps 18 vaut 2 px de moins.
+        let mut job = egui::text::LayoutJob::simple(
+            self.question.clone(),
+            text::label_light_font(ui.ctx(), tokens::CONFIRM_FONT_SIZE),
+            tokens::CONFIRM_INK,
+            tokens::CONFIRM_TEXT_WIDTH,
+        );
+        job.halign = egui::Align::Center;
+        for section in &mut job.sections {
+            section.format.line_height = Some(tokens::CONFIRM_LINE_HEIGHT);
+        }
+        let galley = ui.painter().layout_job(job);
+        // `halign: Center` centre chaque ligne sur l'origine en x ; en y la galley se pose par son
+        // haut, d'où la demi-hauteur retirée pour que son MILIEU tombe sur la cote du relevé —
+        // laquelle est le centre du bloc, et vaut donc quel que soit le nombre de lignes.
+        ui.painter().galley(
+            egui::pos2(
+                rect.center().x,
+                rect.top() + tokens::CONFIRM_QUESTION_TOP - galley.size().y / 2.0,
+            ),
+            galley,
+            tokens::CONFIRM_INK,
         );
 
         // **Les deux réponses sont POSÉES, pas mises en page.** Leurs positions sont des mesures du
