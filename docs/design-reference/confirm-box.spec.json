@@ -1,0 +1,132 @@
+{
+  "title": "Boîte de confirmation",
+  "subtitle": "Relevé au pixel de la boîte de confirmation du client Wakfu, sur la capture détourée — le décor de jeu retiré, les cotes se lisent enfin depuis le bord du châssis et non depuis un bord d'écran arbitraire.",
+  "source": "assets/design-system/interfaces/interface-confirm-box-cutout.png",
+  "canvas": [420, 193],
+  "scale": 1.8,
+  "nodes": [
+    {
+      "id": "crest",
+      "label": "Crête",
+      "box": [134, 0, 286, 36],
+      "role": "icon",
+      "notes": "Médaillon « ? » sur un losange, flanqué de deux volutes. Déborde le corps de 36 px vers le haut et n'est jamais rogné : la zone de dessin est plus haute que le corps. Centre en x = 210, celui du corps."
+    },
+    {
+      "id": "panel",
+      "label": "Corps",
+      "box": [0, 36, 420, 184],
+      "role": "surface",
+      "radius": 2,
+      "fill": "#595a58",
+      "padding": [40, 22, 36, 30],
+      "notes": "420 × 148. Bandeau doré de 4 px en haut (clair 1 px, sombre 1 px, noir 2 px) ; côtés et bas n'ont qu'un biseau clair de 1 px, sans liseré. Filigrane décoratif en arcs dans les quatre coins, écart au fond ≤ 7 niveaux.",
+      "children": [
+        {
+          "id": "message",
+          "label": "Question",
+          "box": [48, 58, 374, 98],
+          "role": "text",
+          "notes": "Deux lignes centrées. Hauteur de capitale 12 px, hauteur d'x 9 px, interligne (ligne de base à ligne de base) 23 px. Bloc centré sur x = 210,5 — le centre du corps à un demi-pixel près.",
+          "children": [
+            {
+              "id": "message-l1",
+              "label": "« Êtes-vous sûr(e) de vouloir supprimer ce »",
+              "box": [48, 58, 374, 79],
+              "role": "text",
+              "notes": "L'accent du Ê monte à y = 58, la capitale à 61, le jambage du p descend à 78."
+            },
+            {
+              "id": "message-l2",
+              "label": "« build ? »",
+              "box": [187, 85, 239, 98],
+              "role": "text",
+              "notes": "Centre en x = 212,5 : le point d'interrogation final tire le bloc de 2 px à droite du centre géométrique."
+            }
+          ]
+        },
+        {
+          "id": "actions",
+          "label": "Barre de réponses",
+          "box": [40, 118, 384, 154],
+          "role": "group",
+          "notes": "Deux boutons de taille identique, gouttière 8 px. Le groupe fait 344 px, centré sur x = 212 — 2 px à droite du centre du corps, et marges latérales inégales (40 à gauche, 36 à droite).",
+          "children": [
+            {
+              "id": "btn-no",
+              "label": "Non",
+              "box": [40, 118, 208, 154],
+              "role": "control",
+              "radius": 3,
+              "fill": "#6b624d",
+              "notes": "168 × 36 — la taille Compact du design system. Liseré #161617 de 2 px. Libellé #dcdad4 centré, capitale 12 px, boîte d'encre [108, 131, 138, 143]."
+            },
+            {
+              "id": "btn-yes",
+              "label": "Oui",
+              "box": [216, 118, 384, 154],
+              "role": "control",
+              "radius": 3,
+              "fill": "#e2c77a",
+              "notes": "168 × 36, strictement la même que « Non ». Libellé #5a5033, boîte d'encre [285, 130, 312, 143]."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "foot",
+      "label": "Ornement de pied",
+      "box": [161, 184, 259, 193],
+      "role": "icon",
+      "fill": "#998a6c",
+      "notes": "Filet beige de 98 × 4 sous le corps, prolongé par deux tirets qui descendent à y = 192. Centre en x = 210."
+    }
+  ],
+  "tokens": {
+    "color": {
+      "surface": "#595a58",
+      "surface-bevel": "#676868",
+      "crest-rail-light": "#d1c694",
+      "crest-rail-dark": "#6b6047",
+      "panel-band": "#2f2f2f",
+      "foot": "#998a6c",
+      "border": "#161617",
+      "primary": "#e2c77a",
+      "primary-light": "#e8d28b",
+      "secondary": "#6b624d",
+      "secondary-light": "#746a53",
+      "text-message": "#fbfbfb",
+      "text-on-secondary": "#dcdad4",
+      "text-on-primary": "#5a5033"
+    },
+    "space": [2, 4, 8, 20, 23, 25, 30, 36, 40],
+    "radius": {
+      "panel": "2",
+      "control": "3"
+    },
+    "type": [
+      {
+        "name": "message",
+        "size": "17",
+        "weight": "regular",
+        "color": "#fbfbfb",
+        "usage": "question, centrée, deux lignes — capitale 12 px mesurée ; 17 px vaut pour la police du jeu (12 / 0,72), 15 px pour egui (12 / 0,805, ratio mesuré par le skill ui-component)"
+      },
+      {
+        "name": "action",
+        "size": "17",
+        "weight": "semibold",
+        "color": "#dcdad4",
+        "usage": "libellé de bouton — même hauteur de capitale que la question, 12 px"
+      }
+    ]
+  },
+  "notes": [
+    "Les deux boutons font exactement 168 × 36. L'exemple de référence du skill les donnait à 166 et 159 px en attribuant l'écart au rendu du libellé : c'était une mesure faite sur le remplissage, liseré exclu.",
+    "Le corps porte bien une bordure, mais sur un seul côté : le bandeau doré de 4 px en haut, dont le filet clair ne court QUE de x = 86 à x = 334 — 248 px, moins large que le corps. Un 9-slice qui étirerait ce filet sur toute la largeur allongerait un ornement qui, dans le jeu, reste centré.",
+    "Rien n'est parfaitement centré : le groupe de boutons est à +2 px du centre du corps, la deuxième ligne du message à +2,5 px. Les deux écarts vont dans le même sens et tiennent au rendu du texte, pas à une règle de mise en page — un portage qui centre strictement sera plus régulier que la capture, ce qui est acceptable.",
+    "La crête et le pied débordent le corps de 36 px en haut et de 9 px en bas. Une implémentation qui alloue au dialogue la seule taille du corps les fera rogner.",
+    "Le filigrane des coins n'a pas de contrepartie au centre : le fond y est uni à ±7 niveaux. Une texture 9-slice dont les marges contiennent les quatre coins peut donc étirer sa bande médiane sans rien déformer de visible."
+  ]
+}
