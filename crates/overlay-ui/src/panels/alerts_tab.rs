@@ -160,16 +160,16 @@ const LIST_DESC: &str = "Cliquez une tuile pour couper ou rétablir son alerte."
 const LEGEND_LABEL: &str = "silencieux";
 /// Écart entre le pictogramme de la légende et son libellé.
 const LEGEND_GAP: f32 = 8.0;
-/// Hauteur de la bande de légende — le pictogramme ou une ligne de corps, le plus haut des deux.
-const LEGEND_HEIGHT: f32 = if MUTE_BADGE > BODY_FONT_SIZE * 1.4 {
-    MUTE_BADGE
-} else {
-    BODY_FONT_SIZE * 1.4
-};
-/// Marge entre la base de la légende et le bord bas du panneau — **5 px, demande du 2026-09-16**
-/// (« en fix à 5px du bas ») ; la même marge la sépare de la grille au-dessus (voir
-/// [`design::PanelZones::footer`]).
-const LEGEND_BOTTOM_MARGIN: f32 = 5.0;
+/// Hauteur de la bande de légende — **celle du pictogramme, exactement** : c'est le bas du glyphe
+/// qui doit tomber à [`LEGEND_MARGIN`] du bord, pas celui d'une ligne de texte plus haute que lui.
+/// Le libellé, plus bas que 20 px, se centre sur cette bande.
+const LEGEND_HEIGHT: f32 = MUTE_BADGE;
+/// Marge entre la légende et les bords du panneau — **la même en bas qu'à droite, et c'est celle
+/// des côtés** ([`design::tokens::PANEL_PAD_CONTROL_X`], 19 px). Demande du 2026-09-16, en deux
+/// temps : d'abord « fixe à 5 px du bas », puis « le même écart en bas que latéralement, alignée à
+/// droite, et le même écart entre la fin du mot et la bordure ». Elle sépare aussi la bande de la
+/// grille au-dessus (voir [`design::PanelZones::footer`]).
+const LEGEND_MARGIN: f32 = design::tokens::PANEL_PAD_CONTROL_X;
 
 // -------------------------------------------------------------------------------------------
 // État et contrat
@@ -247,7 +247,7 @@ pub fn show(
     // **La légende est fixe, en pied de panneau** (2026-09-16) : la bande lui est retirée AVANT
     // tout le reste, pour que ni le rouage de chargement ni la grille qui défile ne passent
     // dessous. Tout ce qui suit se cale sur les zones réduites.
-    let (panel, legend) = panel.footer(LEGEND_HEIGHT, LEGEND_BOTTOM_MARGIN);
+    let (panel, legend) = panel.footer(LEGEND_HEIGHT, LEGEND_MARGIN);
     let panel = &panel;
 
     ui.add(design::heading("Alerte"));
@@ -321,10 +321,11 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
 /// signifie, et une tuile au son actif ne porte AUCUNE marque à comparer. Demande utilisateur du
 /// 2026-09-13, dans la foulée du déplacement de [`LIST_DESC`].
 ///
-/// **Fixe, en pied de panneau, à gauche** (2026-09-16) : elle suivait la phrase du geste,
-/// au-dessus des tuiles ; elle est maintenant peinte dans la bande que
-/// [`design::PanelZones::footer`] réserve sous la grille, à [`LEGEND_BOTTOM_MARGIN`] du bord
-/// bas — et n'y bouge pas quand la grille défile. Peinte APRÈS la grille, avec un `Painter`
+/// **Fixe, en pied de panneau, alignée à droite** (2026-09-16) : elle suivait la phrase du
+/// geste, au-dessus des tuiles ; elle est maintenant peinte dans la bande que
+/// [`design::PanelZones::footer`] réserve sous la grille, calée dans le coin bas-droit à
+/// [`LEGEND_MARGIN`] des deux bords — le bas du pictogramme et la fin du mot à la même distance
+/// du cadre — et n'y bouge pas quand la grille défile. Peinte APRÈS la grille, avec un `Painter`
 /// dont le clip est posé sur la bande (celui du `Ui` s'arrête au bas de la zone défilable), et
 /// qui hérite du fondu de l'onglet grisé comme tout ce qui est peint après l'interrupteur.
 ///
@@ -335,21 +336,22 @@ fn legend_row(ui: &egui::Ui, ligne: Rect) {
     let mut painter = ui.painter().clone();
     painter.set_clip_rect(ligne);
     let ds = design::DesignSystem::get(ui.ctx());
+    // Le mot d'abord, contre le bord droit ; le pictogramme se pose à sa gauche.
+    let mot = painter.text(
+        egui::pos2(ligne.right(), ligne.center().y),
+        egui::Align2::RIGHT_CENTER,
+        LEGEND_LABEL,
+        design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
+        SUBDUED,
+    );
     let glyphe = Rect::from_center_size(
-        egui::pos2(ligne.left() + MUTE_BADGE / 2.0, ligne.center().y),
+        egui::pos2(mot.left() - LEGEND_GAP - MUTE_BADGE / 2.0, ligne.center().y),
         design::components::icon_button::glyph_fit(
             ds.icon_native_size(DsIcon::VolumeMute),
             MUTE_BADGE,
         ),
     );
     paint_mute_badge(&painter, &ds, glyphe);
-    painter.text(
-        egui::pos2(glyphe.right() + LEGEND_GAP, ligne.center().y),
-        egui::Align2::LEFT_CENTER,
-        LEGEND_LABEL,
-        design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
-        SUBDUED,
-    );
 }
 
 /// Le champ d'ajout et son panneau de suggestions.
