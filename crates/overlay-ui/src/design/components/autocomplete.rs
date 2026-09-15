@@ -45,9 +45,18 @@
 //!    entière quand le filtre ne laisse rien passer, sinon le bouton qui permettrait de le relâcher
 //!    disparaîtrait avec les résultats, et l'utilisateur resterait coincé devant une liste vide.
 //!    Dans ce cas le panneau affiche [`Autocomplete::empty_filter_label`] à la place des rangées.
-//! 5. **Après une sélection** : le champ se vide, le panneau se ferme, l'entrée active repart à la
-//!    première, et **le filtre revient à « Tout »**. Un filtre resté actif ferait disparaître des
-//!    résultats d'une recherche sans rapport, sans que rien ne l'explique.
+//! 5. **Après une sélection** : le champ se vide, le panneau se ferme, et l'entrée active repart
+//!    à la première. **Le filtre, lui, reste** — voir la règle suivante.
+//! 6. **Le filtre choisi vaut pour toute la session** — écart au web, demandé le 2026-09-15. Qui
+//!    filtre sur « Ressources » pour ajouter une alerte va en ajouter plusieurs : remettre le
+//!    filtre à « Tout » après chaque choix lui redemandait le même clic à chaque objet. Il est
+//!    donc mémorisé sous une clé tirée de [`Autocomplete::log_name`] — stable d'une ouverture de
+//!    la fenêtre à l'autre, et perdue avec le processus, c'est-à-dire « tant que l'overlay n'est
+//!    pas fermé ». Ce que la remise à zéro du web évitait (un filtre oublié qui vide une recherche
+//!    sans rapport) est écarté autrement : **un filtre dont la catégorie a quitté la bande se
+//!    relâche de lui-même**. La bande dit exactement quelles catégories les résultats courants
+//!    portent (règle 4) ; une catégorie absente de la bande ne peut que vider le panneau, et sans
+//!    son bouton l'utilisateur n'aurait même plus de quoi la relâcher.
 //!
 //! ## Deux écarts au contrat, assumés
 //!
@@ -339,7 +348,16 @@ impl<'a> Autocomplete<'a> {
         // composant), c'est du même ordre que « ce widget a le focus ». L'appelant n'a rien à
         // stocker et rien à remettre à zéro.
         let active_id = field.id.with("ds-autocomplete-active");
-        let filter_id = field.id.with("ds-autocomplete-filter");
+        // **Le filtre ne vit PAS sur l'id du champ**, contrairement au reste de cet état (règle 6).
+        // Cet id est un identifiant AUTOMATIQUE d'egui, tiré du rang du widget dans son parent : il
+        // change dès qu'un widget apparaît avant lui, et la mémoire du filtre tomberait avec lui.
+        // `log_name` est le seul nom stable dont le composant dispose — « alertes.ajout » et
+        // « suivi.ajout » gardent ainsi chacun le sien pour toute la session. Sans `log_name`,
+        // repli sur l'id du champ : deux champs anonymes partageraient sinon la même mémoire.
+        let filter_id = match self.log_name.as_deref() {
+            Some(nom) => egui::Id::new(("ds-autocomplete-filter", nom)),
+            None => field.id.with("ds-autocomplete-filter"),
+        };
         let mut active = self
             .forced_active
             .unwrap_or_else(|| ui.data(|d| d.get_temp::<usize>(active_id).unwrap_or(0)));
@@ -395,6 +413,20 @@ impl<'a> Autocomplete<'a> {
         let mut action_on = None;
         let mut panel_rect = None;
         if open {
+            // **Le garde-fou de la mémorisation** (règle 6) : un filtre dont la catégorie n'est
+            // plus dans la bande se relâche. La bande porte les catégories des résultats courants
+            // (règle 4) ; celle qui n'y est pas ne laisserait passer aucune entrée, et son bouton
+            // n'étant plus peint, rien ne dirait à l'utilisateur ce qui vide son panneau. Le
+            // forçage de galerie est exempté : `preview_filter` montre EXPRÈS un filtre sans
+            // résultat, c'est son objet.
+            if self.forced_filter.is_none()
+                && filter.is_some_and(|categorie| {
+                    !self.filters.iter().any(|f| f.category == Some(categorie))
+                })
+            {
+                filter = None;
+                active = 0;
+            }
             let mut visible = self.visible(filter);
             if active >= visible.len() {
                 active = 0;
@@ -473,11 +505,11 @@ impl<'a> Autocomplete<'a> {
                 entree = %self.entries[index].label,
                 "entrée choisie"
             );
-            // Les cinq effets d'une sélection — voir la doc de module. Le filtre revient à « Tout » :
-            // le garder ferait disparaître des résultats d'une recherche sans rapport.
+            // Les effets d'une sélection — voir la doc de module. **Le filtre n'en fait pas
+            // partie** : il est gardé pour la session (règle 6), parce qu'on n'ajoute presque
+            // jamais un seul objet d'une catégorie.
             self.query.clear();
             active = 0;
-            filter = None;
             field.surrender_focus();
         }
 
