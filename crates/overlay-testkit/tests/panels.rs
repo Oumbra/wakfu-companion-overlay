@@ -255,16 +255,18 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
 
     harness.run();
 
-    // Centre du bouton "Alliés" (moitié gauche du switch) : 8 (outer_margin) + 12 (x du switch) +
-    // 15 (moitié de `SWITCH_OPTION_WIDTH`, 30) = 35 ; 8 + 50 (y du switch, `COMBAT_TOP_MARGIN` +
-    // `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
-    harness.hover_at(egui::pos2(35.0, 71.0));
+    // Centre du bouton "Alliés" (moitié gauche du switch) — le switch coiffe désormais la colonne
+    // des portraits (échange du 15 sept., voir `panels::combat`), donc plus aucun `COLUMN_GAP` ni
+    // bandeau leader dans le compte : 8 (outer_margin) + 5 (switch centré dans les 70 px du cadre,
+    // (70 - 60) / 2) + 15 (moitié de `SWITCH_OPTION_WIDTH`, 30) = 28 ; 8 + 50 (y du switch,
+    // `COMBAT_TOP_MARGIN` + `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
+    harness.hover_at(egui::pos2(28.0, 71.0));
     harness.run();
     harness.snapshot("combat_tooltip_allies_au_dessus");
 
     // Centre du bouton "Ennemis" (moitié droite, décalée d'un `SWITCH_OPTION_WIDTH` complet) :
-    // 35 + 30 = 65 ; même y.
-    harness.hover_at(egui::pos2(65.0, 71.0));
+    // 28 + 30 = 58 ; même y.
+    harness.hover_at(egui::pos2(58.0, 71.0));
     harness.run();
     harness.snapshot("combat_tooltip_ennemis_au_dessus");
 }
@@ -3094,7 +3096,7 @@ fn options_suivi_infobulle_de_bouton_au_dessus() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(252.0, 252.0)),
+        Some(egui::pos2(252.0, 309.0)),
     );
 }
 
@@ -3112,7 +3114,7 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(240.0, 298.0)),
+        Some(egui::pos2(240.0, 355.0)),
     );
 }
 
@@ -3230,14 +3232,17 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// 12, donc un pas de 76 px.
 ///
 /// Descendus de 8 px le 2026-09-14 : l'en-tête de la liste a gagné la hauteur qui manquait à son
-/// bouton icône et la gouttière qui le sépare de la grille (`suivi_tab::LIST_HEADER_GAP`). Ces
-/// points désignent des TUILES, pas des pixels d'une image — s'ils ne suivaient pas, les planches
-/// d'infobulle et de déplacement resteraient vertes en cessant de montrer ce pour quoi elles
-/// existent.
-const TUILE_0: egui::Pos2 = egui::pos2(79.0, 402.0);
-const TUILE_2: egui::Pos2 = egui::pos2(231.0, 402.0);
+/// bouton icône et la gouttière qui le sépare de la grille (`suivi_tab::LIST_HEADER_GAP`). Puis de
+/// 57 px le 2026-09-15, quand la ligne « Tester le son de l'alerte » s'est posée sous la phrase de
+/// l'onglet : sa hauteur (`suivi_tab::ROW_HEIGHT`, 39) plus le `SECTION_GAP` (18) qui l'en sépare,
+/// et rien d'autre — le panneau met `item_spacing.y` à zéro (`design::panel`), chaque écart y est
+/// posé explicitement. Ces points désignent des TUILES, pas des pixels d'une image — s'ils ne
+/// suivaient pas, les planches d'infobulle et de déplacement resteraient vertes en cessant de
+/// montrer ce pour quoi elles existent.
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
-const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 385.0);
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 442.0);
 
 /// Le harnais de l'onglet Suivi, avec son état rendu inspectable — voir [`capture_onglet_suivi`],
 /// dont c'est le même jeu d'entrées. Rendu partagé parce que deux tests ont maintenant besoin de
@@ -3309,7 +3314,7 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(79.0, 448.0)),
+        Some(egui::pos2(79.0, 505.0)),
     );
 }
 
@@ -3409,8 +3414,10 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
         });
     harness.run();
 
-    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne).
-    let champ = egui::pos2(300.0, 300.0);
+    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne) — et sous la
+    // ligne « Tester le son de l'alerte », qui a tout descendu de 57 px le 2026-09-15 (voir
+    // [`TUILE_0`]).
+    let champ = egui::pos2(300.0, 357.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3427,7 +3434,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
 
     // Les objets d'abord, les monstres ensuite : la troisième rangée est « Tofu », un MONSTRE.
     // Le panneau ouvre par sa bande de filtres, puis les rangées de 35 px.
-    let rangee = egui::pos2(300.0, 300.0 + 25.0 + 38.0 + 35.0 * 2.0 + 17.0);
+    let rangee = egui::pos2(300.0, 357.0 + 25.0 + 38.0 + 35.0 * 2.0 + 17.0);
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
@@ -3508,8 +3515,9 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
         });
     harness.run();
 
-    // Le bloc porte DEUX lignes en décompte : le champ descend d'autant.
-    let champ = egui::pos2(300.0, 346.0);
+    // Le bloc porte DEUX lignes en décompte : le champ descend d'autant, et de la ligne
+    // « Tester le son de l'alerte » posée au-dessus du formulaire (voir [`TUILE_0`]).
+    let champ = egui::pos2(300.0, 403.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3519,7 +3527,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     }
     harness.run();
 
-    let rangee = egui::pos2(300.0, 346.0 + 25.0 + 38.0 + 17.0);
+    let rangee = egui::pos2(300.0, 403.0 + 25.0 + 38.0 + 17.0);
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
