@@ -1590,9 +1590,20 @@ impossible d'interagir avec ».
 
 | Coupée | Ce qui s'arrête | Ce qui continue |
 | --- | --- | --- |
-| Suivi | Le bandeau in-game n'affiche plus aucune tuile (le carré de contrôle reste : c'est le seul accès à la fenêtre Options depuis le jeu) ; l'alerte de décompte à zéro ne sonne plus | Le moteur compte, suit et synchronise au compte |
+| Suivi | Le bandeau in-game n'affiche plus aucune tuile, ni les boutons « + » et « − » (2026-09-15, voir ci-dessous) ; l'alerte de décompte à zéro ne sonne plus | Le moteur compte, suit et synchronise au compte |
 | Alertes | Le ramassage d'un objet à son activé ne joue plus rien et n'affiche plus de carte | La liste d'objets reste au compte |
 | Recherche | Aucun message du chat ne fait plus sonner l'overlay ni n'affiche de carte | Les recherches restent au compte |
+
+**Bandeau du Suivi coupé : deux boutons, pas quatre (2026-09-15)** — retour utilisateur : « lorsque
+le suivi est désactivé, il faut retirer les boutons "+" et "-" du bandeau ». Le carré de contrôle
+restait entier alors que « + » n'a plus rien à ajouter et que « − » n'était que grisé faute de
+liste. Ces deux boutons ne sont désormais plus peints du tout, la rangée se referme sur
+« Détails » et « Options », et la fenêtre Suivi rétrécit d'autant
+(`panels::watchlist::ControlLayout::RowTrackingOff` / `content_width`). « Options » reste, lui :
+c'est le seul accès à la fenêtre de réglages depuis le jeu, donc le seul moyen de rallumer le
+Suivi. L'état de la case descend jusqu'au panneau par `render_content::RenderContent::
+watchlist_enabled` — une liste vide ne suffit pas à le déduire, un bandeau vide Suivi ACTIF garde
+ses quatre boutons. Capture : `watchlist_suivi_coupe_rangee`.
 
 Le thread Engine reçoit les trois drapeaux par `EngineCommand::SetFeatures` (au démarrage depuis la
 config, puis à chaque validation) et **continue de drainer** les alertes qu'il ne joue pas : les
