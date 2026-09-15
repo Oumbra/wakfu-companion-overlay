@@ -497,8 +497,15 @@ Une vérification manuelle ne se lance pas si une est en cours (bouton désactiv
 
 ### 8.3 Icône de zone de notification (Windows)
 
-Entrée « Mettre à jour vers 0.20.0 » ajoutée au menu quand `Available` (grisée sinon, comme
-« Options »), même action que le bouton. Optionnel, une ligne dans `sync_tray_menu`.
+**Fait (2026-09-15, demande de l'utilisateur)** : entrée « Mise à jour » juste après « Options »
+(menu Options / Mise à jour / Déconnecter / Quitter, `App::install_tray`). Un clic lance la
+recherche (`UpdateCommand::Check { install_if_available: false }`, la même commande que le bouton
+« Recherche de mise à jour » de la fenêtre Options — même anti-rafale de 30 s, même refus pendant
+une opération en cours). Toujours active : une recherche ne dépend pas du compte. Le verdict se lit
+dans la section « Mise à jour » de la fenêtre Options ; le menu, lui, ne change pas de libellé.
+
+Non fait, à décider plus tard : un libellé qui suit l'état (« Mettre à jour vers X » quand une
+version est disponible, même action que le bouton) — une ligne dans `sync_tray_menu`.
 
 ---
 
