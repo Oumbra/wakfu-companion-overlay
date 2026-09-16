@@ -1683,10 +1683,11 @@ dédiées, après la section « Combat » de l'onglet « Paramètres »**.
 
 - **Quatre sections par fonctionnalité** dans « Paramètres » : « Combat » (inchangée, §9.1 decies),
   puis « Suivi », « Alertes » et « Chat », dans l'ordre du menu d'onglets. Chacune porte ce que sa
-  fonctionnalité fait entendre et voir — et rien n'a été uniformisé de force : le Suivi n'a pas de
-  fermeture automatique (son alerte est un son et un bandeau permanent, pas une carte à fermer), les
-  Alertes n'ont pas de sourdine globale (le son d'un ramassage se coupe déjà objet par objet, à la
-  tuile, §9.1 terdecies).
+  fonctionnalité fait entendre et voir — et rien n'a été uniformisé de force : les Alertes n'ont
+  pas de sourdine globale (le son d'un ramassage se coupe déjà objet par objet, à la tuile, §9.1
+  terdecies). Le Suivi n'avait pas de fermeture automatique à cette date, au motif que « son alerte
+  est un son et un bandeau permanent, pas une carte à fermer » — c'était faux, et §9.1 quindecies
+  le corrige.
 - **`panels::notifications`** (l'ancien `panels::sound_row`) peint ces sections. Il porte aussi le
   trait `ToastClose`, que `AlertProfile` et `chat_tab::ChatToastSettings` implémentent : le bornage
   de la durée reste chez eux, le peintre n'en refait pas un à lui.
@@ -1766,6 +1767,58 @@ geste et son effet soient dans la même passe), le suivi des sorts une affaire d
 `combat_spell_block_suivi_auto`), et le test
 `options_parametres_la_case_des_sorts_suit_le_detail_des_combats` pour la moitié « la case grisée
 ne répond plus », qu'aucune image ne montre.
+
+### 9.1 quindecies Fermeture automatique des notifications de décompte (2026-09-16)
+
+Demande utilisateur : « ajouter une option de gestion du temps d'affichage des notifications de
+décompte dans la section "Suivi" de l'onglet "Paramètres", à l'image de celles des sections
+"Alertes" et "Chat" […] le libellé changera légèrement pour devenir "Fermeture automatique des
+notifications de décompte" ».
+
+**Ce que §9.1 quaterdecies avait manqué** : la section « Suivi » était la seule sans ligne de
+fermeture, parce que son alerte passait pour « un son et un bandeau permanent, pas une carte à
+fermer ». Le décompte arrivé à zéro affiche pourtant bien une carte par-dessus le jeu
+(`panels::watchlist::WatchlistToastReason::Countdown`) — elle empruntait simplement la durée du
+**profil d'alertes de ramassage** descendu du compte (`AlertProfile`), et n'était donc réglable
+que depuis la section d'à côté, pour les deux alertes à la fois.
+
+**Ce qui existe maintenant :**
+
+- **Une ligne de plus dans la section « Suivi »**, sous sa sourdine : case, champ de durée, unité
+  « sec. » — la ligne des deux autres sections, aux mêmes règles (case décochée = fermeture
+  manuelle, champ grisé ; durée bornée à 0,5–30 s à la PERTE DE FOCUS, jamais à la frappe ;
+  virgule décimale acceptée). Seul le libellé change :
+  `notifications::COUNTDOWN_AUTO_CLOSE_LABEL`, parce que le Suivi est la seule fonctionnalité dont
+  deux cartes de nature différente peuvent s'afficher (son décompte ici, un ramassage réglé dans
+  « Alertes »).
+- **Un réglage propre, `suivi_tab::CountdownToastSettings`** — le pendant de
+  `chat_tab::ChatToastSettings`, qui implémente le même trait `notifications::ToastClose` et borne
+  sa durée lui-même. Brouillon jusqu'à « Valider » (`OptionsModalState::countdown_toast`,
+  `OptionsCommit::countdown_toast`), **persisté en LOCAL**
+  (`config::OverlayConfig::{countdown_alert_duration_seconds, countdown_alert_manual_close}`,
+  `countdown_toast()` / `set_countdown_toast()`) : ce réglage n'a pas d'équivalent web et le
+  serveur n'accepte que des clés connues, même exception que la carte de chat.
+- **Sa ligne n'est jamais grisée par une attente** (`AutoClose::available: true`) : un réglage
+  local n'a aucun brouillon de compte à attendre, contrairement à ceux des Alertes et du Chat.
+- **Le thread Engine le reçoit par `EngineCommand::SetCountdownToast`** (au démarrage depuis la
+  config, puis à chaque validation) et s'en sert pour poser le `hide_at` de la carte au moment où
+  l'alerte naît. `chat_toast_deadline` devient `local_toast_deadline`, générique sur `ToastClose` :
+  les deux réglages locaux calculent leur échéance par la même fonction, `toast_deadline` restant
+  celle du profil de compte.
+
+**Un bug de rendu trouvé en chemin, et corrigé** (`design::components::input`) : la zone d'édition
+d'un champ prenait l'identifiant AUTOMATIQUE de son `Ui` parent. Un widget que le défilement sort
+du champ visible ne consomme pas les mêmes identifiants, et ceux de tous les champs suivants se
+décalent d'une frame à l'autre — un champ héritait alors de l'état mémorisé d'un autre, dont son
+défilement horizontal (`TextEditState::text_offset`), et **se peignait vide alors que sa valeur
+était bien là**. Le nouveau champ du Suivi l'a révélé (fenêtre défilée au point de sortir le champ
+« Fichier », long et focalisé). La zone d'édition porte désormais un `id_salt` NOMMÉ, dérivé du
+`log_name` du champ, et les rangées de `panels::notifications` nomment la leur de la même façon.
+
+**Captures** : `options_parametres_son_coupe` (la ligne vive, durée à 3,5 s),
+`options_parametres_fermeture_manuelle` (les TROIS champs grisés, valeur conservée),
+`options_parametres_compte` et `options_parametres_mise_a_jour` (la même ligne, après défilement —
+les deux planches qui montraient le champ vide).
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
