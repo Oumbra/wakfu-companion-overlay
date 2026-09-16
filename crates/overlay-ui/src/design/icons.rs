@@ -193,6 +193,15 @@ ds_icons! {
         /// socle de bouton icône (`interface-personnage-equiement.png`, barre d'outils du build).
         Delete => "icon-delete", socle;
 
+        /// Crayon (`icons/icon-edit.png`, 14 × 14) — **modifier une entrée d'une liste**, le
+        /// pendant de [`DsIcon::Delete`] avec qui il partage la barre d'outils d'une tuile.
+        ///
+        /// Détouré par l'utilisateur le 2026-09-16 (démélange direct fond → glyphe) pour l'onglet
+        /// « Personnages », où le bouton de modification portait jusque-là [`DsIcon::Option`] faute
+        /// de crayon au registre. Le trait diagonal est le crayon ; les trois tirets sous lui
+        /// appartiennent au dessin, ce n'est pas une frange de détourage.
+        Edit => "icon-edit", socle;
+
         /// Point d'interrogation (`icons/icon-help.png`, 12 × 12) — le bouton d'aide en tête de
         /// fenêtre (`interface-personnage-equiement.png`, coin haut-droit).
         Help => "icon-help", socle;

@@ -25,12 +25,12 @@
 //! | « Sans compte lié » | **supprimé** — l'overlay ne s'utilise pas déconnecté |
 //! | Comptes | une modale de **création de compte**, et une suppression qui annonce son décompte |
 //!
-//! ## Ce qui manque encore au design system
+//! ## Le crayon est arrivé
 //!
-//! **Aucune icône de crayon.** Les quarante-quatre glyphes versés n'en ont pas, et le jeu n'a pas
-//! de bouton « modifier » dans les interfaces relevées. Le badge de modification porte donc
-//! [`DsIcon::Option`] — la roue crantée du bouton Options — en attendant un asset détouré d'une
-//! capture. C'est un repli, pas un choix.
+//! Le badge de modification a porté [`DsIcon::Option`] — la roue crantée du bouton Options —
+//! pendant une journée, faute de crayon au registre. L'utilisateur en a détouré un le 2026-09-16
+//! (`assets/design-system/icons/icon-edit.png`) ; il est entré au registre sous
+//! [`DsIcon::Edit`] et c'est lui que la tuile porte désormais.
 //!
 //! ## D'où vient chaque chose
 //!
@@ -824,14 +824,11 @@ fn hero_tile(
         // CENTRE — c'est là que le pointeur arrive quand on vise une tuile — et « retirer » reste
         // au coin, où l'on ne va que si on y va exprès.
         //
-        // Le glyphe de modification devrait être un crayon : aucun des 44 glyphes du design system
-        // n'en est un et le jeu n'en montre pas, la roue crantée du bouton Options tient donc la
-        // place en attendant un asset détouré.
         let modifier = tile_button(
             ui,
             rect,
             egui::pos2(rect.center().x, band.top() - AVATAR_SIZE / 2.0 - 4.0),
-            DsIcon::Option,
+            DsIcon::Edit,
             "Modifier",
             true,
             egui::Id::new(("personnages.modifier", index)),
