@@ -248,8 +248,13 @@ impl<'a> Input<'a> {
     /// `enabled(false)`, qui grise la valeur pour dire « ce réglage ne s'applique pas ».
     ///
     /// Un champ en lecture seule affiche une valeur qui compte, et que l'utilisateur change par un
-    /// autre moyen : c'est le cas du champ central d'un [`design::stepper`](super::stepper), dont
-    /// la valeur se règle aux deux boutons. Le jeu l'écrit dans son or habituel, pas en gris.
+    /// autre moyen : c'est le cas du champ de combinaison de l'onglet « Raccourcis », qui se
+    /// remplit en pressant les touches, pas en les écrivant. Le jeu l'écrit dans son or habituel,
+    /// pas en gris.
+    ///
+    /// **Le champ d'un [`design::stepper`](super::stepper) ne l'est plus** depuis le 2026-09-16 :
+    /// il accepte la saisie au clavier, comme dans le jeu (voir la doc de ce composant pour les
+    /// règles de validation que cela demande).
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self

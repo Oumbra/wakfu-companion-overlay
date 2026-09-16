@@ -15,7 +15,7 @@ members = ["crates/*"]
 # `xtask/` a volontairement sa PROPRE version, figée : c'est de l'outillage de CI jamais distribué
 # (son `[workspace]` vide le tient hors de ce workspace, voir son Cargo.toml), rien n'y est versionné
 # pour l'utilisateur.
-version = "0.37.1"
+version = "0.38.0"
 edition = "2021"
 publish = false
 

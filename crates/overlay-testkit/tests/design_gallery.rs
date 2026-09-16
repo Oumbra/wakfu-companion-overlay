@@ -1081,7 +1081,11 @@ fn gallery(ui: &mut egui::Ui) {
                 .size(cote)
                 .field_width(champ)
                 .range(borne)
-                .log_name("galerie.pas"),
+                // **Un nom par instance**, et pas trois fois « galerie.pas » : depuis que le champ
+                // est éditable (2026-09-16), le `log_name` porte aussi l'identité du champ et son
+                // brouillon de saisie — trois pas homonymes dans le même `Ui` se les
+                // partageraient. Voir la doc de module de `design::stepper`.
+                .log_name(format!("galerie.pas-{cote}")),
         );
     }
     // Les deux bornes : à la borne basse le « − » est désactivé, à la haute le « + ».
