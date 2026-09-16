@@ -426,9 +426,15 @@
 //!   des colonnes (retour utilisateur : les marges latérales du bandeau doivent rester celles du
 //!   design, pas se résorber sur la gauche) — sans rencontrer le bandeau leader, qui commence
 //!   plus bas (`BARS_COLUMN_TOP_OFFSET`).
-//! - **Le total du bandeau leader** dispose de 69px (190 − 12 de marges − 109 de switch) :
-//!   assez pour six chiffres au corps de 18, pas pour sept (79px). Recadrage à venir, décision
-//!   utilisateur sur rendu.
+//! - **Le total du bandeau leader** ne disposait que de 69px (190 − 12 de marges − 109 de
+//!   switch) : assez pour six chiffres au corps de 18, pas pour sept (« 1 047 404 » = 79px,
+//!   qui mordait de 10px sur la case Soins — capture utilisateur du même jour). Décision sur
+//!   rendu (huit variantes en artefact) : le bandeau **déborde de 6px de chaque côté**
+//!   (`LEADER_PANEL_OVERHANG`, en permanence — pas de saut de largeur en cours de combat) et le
+//!   total passe au **corps 16 au-delà de six chiffres** (`TOTAL_FONT_SIZE_COMPACT`) : 71px
+//!   dans 81, 10px d'air. Réduire seul aurait demandé 15px de corps (3px d'air, le total ne se
+//!   détache plus des lignes), élargir seul 8px de chaque côté au moins, au-delà de la
+//!   gouttière de 6 — le bandeau montait sur l'ornement du cadre des portraits.
 //! - **Icônes en couleurs** : les cinq glyphes (`DsIcon::Allies`/`Enemies`/`Metric*`, catégorie
 //!   `couleur`) restent ceux du jeu et du site, peints tels quels sur la case active et
 //!   atténués ailleurs. Passés au monochrome du design system, alliés et ennemis ne se
@@ -602,6 +608,16 @@ pub(super) const GROUP_NAME_BAR_GAP: f32 = 0.0;
 use crate::design::tokens::OVERLAY_TEXT as TEXT_COLOR;
 
 const TOTAL_FONT_SIZE: f32 = 18.0;
+/// Corps du total au-delà de `TOTAL_FULL_SIZE_MAX_DIGITS` chiffres. Mesuré par egui sur
+/// « 1 047 404 » (16 sept. 2026) : 79px au corps de 18, 71 à 16, 66 à 15, 62 à 14 — dans les
+/// 81px laissés au total (190 + 12 de débord − 12 de marges − 109 de switch), 16 laisse 10px
+/// d'air ; 15 aurait tenu sans débord du bandeau mais avec 3px seulement, et à 14 le total ne se
+/// détache plus des chiffres des lignes (13px).
+const TOTAL_FONT_SIZE_COMPACT: f32 = 16.0;
+/// Nombre de chiffres jusqu'auquel le total garde `TOTAL_FONT_SIZE` : six chiffres (« 999 999 »,
+/// ≈ 9,9px par chiffre et 4,7 par espace au corps de 18, soit 64px) tiennent dans la place
+/// disponible ; sept ne tiennent qu'au corps compact.
+const TOTAL_FULL_SIZE_MAX_DIGITS: usize = 6;
 /// Air VISIBLE entre la ligne leader et le premier groupe — 10 px depuis le 12 sept. 2026 (retour
 /// utilisateur : le même écart que `combat_spell_block::BLOCK_GAP` entre le dernier groupe et le
 /// bloc de sorts, « pour l'homogénéité entre les blocs »). `show` en retranche l'`item_spacing`
@@ -615,6 +631,14 @@ pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 /// espacement interne avant l'encre visible : l'écart géométrique posé ici est bien symétrique,
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
+/// Débord du bandeau leader de chaque côté de la colonne des barres — **permanent**, pas
+/// seulement au million (décision utilisateur du 16 sept. 2026 : le bandeau ne change pas de
+/// largeur en cours de combat, seul le corps du total bascule). Vaut la gouttière des colonnes :
+/// à gauche le bandeau la remplit exactement sans monter sur l'ornement du cadre des portraits
+/// (dès 7px il le touchait, vu sur rendu), à droite il déborde d'autant pour rester centré sur
+/// la colonne. Le switch de grandeur, calé à `LEADER_PANEL_PADDING` du bord du bandeau, tombe
+/// donc au ras de la colonne. Peint hors allocation, comme le débord du bandeau de camp.
+const LEADER_PANEL_OVERHANG: f32 = COLUMN_GAP;
 /// Air sous le bandeau du switch Alliés/Ennemis, avant le cadre des portraits. Resserré à 5 px
 /// (demande utilisateur, 15 sept. 2026 : « rapproche-le du template, au moins 5 pixels ») plutôt
 /// que de reprendre `TOTAL_GAP` : ce bandeau n'introduit pas une liste comme le bandeau leader, il
@@ -928,17 +952,30 @@ fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutB
 /// (parti coiffer les portraits, voir `show_side_row`) au lieu de s'ajouter sous lui, ce qui rend au
 /// bandeau la hauteur qu'il avait avant l'arrivée de la grandeur. Il reste peint dans TOUS les cas,
 /// y compris combat vide ou camp sans combattant — la grandeur se choisit alors aussi.
+///
+/// Le bandeau déborde de `LEADER_PANEL_OVERHANG` de chaque côté de la colonne, et le total passe
+/// au corps `TOTAL_FONT_SIZE_COMPACT` au-delà de `TOTAL_FULL_SIZE_MAX_DIGITS` chiffres — les deux
+/// ensemble font tenir un total à sept chiffres à côté du switch de grandeur (voir doc de module,
+/// refonte 2026-09-16). La hauteur du bandeau ne bouge pas : c'est le switch qui la fixe.
 fn show_leader_row(
     ui: &mut egui::Ui,
     metric: &mut CombatMetric,
     shortcuts: &ShortcutBindings,
     total_damage: i64,
 ) {
-    let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
+    let total_text = format_fr_thousands(total_damage);
+    let digits = total_text.chars().filter(char::is_ascii_digit).count();
+    let total_font_size = if digits > TOTAL_FULL_SIZE_MAX_DIGITS {
+        TOTAL_FONT_SIZE_COMPACT
+    } else {
+        TOTAL_FONT_SIZE
+    };
+    let total_font = text::label_font(ui.ctx(), total_font_size);
     let inner_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
     let row_height = inner_height + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
+    let row_rect = row_rect.expand2(egui::vec2(LEADER_PANEL_OVERHANG, 0.0));
 
     ui.painter()
         .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
@@ -972,7 +1009,7 @@ fn show_leader_row(
         ui,
         egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, center_y),
         egui::Align2::RIGHT_CENTER,
-        &format_fr_thousands(total_damage),
+        &total_text,
         total_font,
         TEXT_COLOR,
         text::OUTLINE_FULL,
