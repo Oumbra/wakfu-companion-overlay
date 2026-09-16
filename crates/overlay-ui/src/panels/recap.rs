@@ -1,4 +1,4 @@
-//! **Récap de session** — la bande posée en haut à gauche de la fenêtre de jeu, sous les boutons
+//! **Récap de session** — le bloc posé en haut à gauche de la fenêtre de jeu, sous les boutons
 //! d'interface du client (2026-09-16, demande utilisateur).
 //!
 //! Cinq chiffres, et cinq seulement : XP gagnée, kamas nets, combats gagnés − perdus, challenges
@@ -6,6 +6,23 @@
 //! (`session-recap.component.html`, bloc `.recap-bandeau`), réduite à ce qui se lit d'un regard
 //! par-dessus un jeu : le site, lui, déplie sous cette bande l'XP par personnage, le détail des
 //! kamas, le butin et les accordéons par donjon — de la consultation APRÈS coup, pas du temps réel.
+//!
+//! ## Mise en page : deux colonnes, trois lignes (2026-09-16, soir)
+//!
+//! La première version alignait les cinq cases sur une seule ligne, séparées par des filets.
+//! Refaite le soir même sur maquette de l'utilisateur :
+//!
+//! ```text
+//! EXPERIENCE        KAMAS
+//! COMBATS           CHALLENGES
+//!           DUREE
+//! ```
+//!
+//! Deux colonnes calées à gauche (XP au-dessus des combats, kamas au-dessus des challenges), et la
+//! durée seule sur une troisième ligne, centrée sur la largeur du bloc. Chaque case garde son
+//! glyphe à gauche de son chiffre, et le glyphe prend la couleur du chiffre : accent pour l'XP et
+//! la durée, or pour les kamas, blanc pour les deux cases « gagné − perdu » dont les chiffres
+//! portent eux-mêmes leur couleur (vert/rouge).
 //!
 //! **Une section « Recap » commande son affichage** (onglet « Paramètres » de la fenêtre Options,
 //! juste après « Combat ») — voir `panels::feature_switch::FeatureToggles::recap`, active par
@@ -31,10 +48,10 @@
 //!
 //! ## Ce que ce module ne fait pas
 //!
-//! Pas de bouton, pas d'état, aucune intention remontée : cette bande ne fait qu'afficher. Elle
-//! renvoie la **largeur** qu'elle vient d'occuper, pour que l'hôte ajuste sa fenêtre OS à son
+//! Pas de bouton, pas d'état, aucune intention remontée : ce bloc ne fait qu'afficher. Il
+//! renvoie la **largeur** qu'il vient d'occuper, pour que l'hôte ajuste sa fenêtre OS à son
 //! contenu (même mécanique que `panels::login::LoginOutcome::content_height`) — une fenêtre plus
-//! large que sa bande capterait les clics sur du vide en mode interactif.
+//! large que son bloc capterait les clics sur du vide en mode interactif.
 
 use egui::Color32;
 use overlay_engine::SessionTotals;
@@ -42,15 +59,23 @@ use overlay_engine::SessionTotals;
 use crate::design::{self, text, tokens, DsIcon, TooltipSide};
 use crate::panels::combat::format_fr_thousands;
 
-/// Hauteur de la bande, fond compris — la fenêtre OS est dimensionnée dessus
-/// (`main.rs::window_spec`).
-///
-/// 32 px : la rangée du jeu la plus proche par la fonction (une bande d'information posée sur
-/// l'écran, pas un contrôle) est le carré de boutons du Suivi, dont le socle fait 30 px de côté.
-/// Deux de plus pour que le cerne du texte ne touche pas le bord du fond.
-pub const HEIGHT: f32 = 32.0;
+/// Hauteur d'une ligne du bloc. 22 px : le corps de 15 px des chiffres (voir [`FONT_SIZE`]) plus
+/// le cerne d'un pixel de chaque côté, et assez d'interligne pour que deux lignes de glyphes de
+/// 16 px ne se touchent pas.
+const ROW_HEIGHT: f32 = 22.0;
 
-/// Rembourrage horizontal du fond translucide, de chaque côté de la rangée de cellules.
+/// Rembourrage vertical du fond translucide, au-dessus de la première ligne et sous la dernière.
+const PADDING_Y: f32 = 6.0;
+
+/// Nombre de lignes du bloc — deux lignes de deux cases, plus la durée seule sur la troisième
+/// (voir la doc de module).
+const ROWS: f32 = 3.0;
+
+/// Hauteur du bloc, fond compris — la fenêtre OS est dimensionnée dessus
+/// (`main.rs::window_spec`).
+pub const HEIGHT: f32 = 2.0 * PADDING_Y + ROWS * ROW_HEIGHT;
+
+/// Rembourrage horizontal du fond translucide, de chaque côté de la grille.
 const PADDING_X: f32 = 10.0;
 
 /// Côté du glyphe de chaque cellule. `tokens::SWITCH_ICON_SIZE` (16 px) — la taille à laquelle
@@ -61,24 +86,10 @@ const ICON_SIZE: f32 = tokens::SWITCH_ICON_SIZE;
 /// Écart entre le glyphe d'une cellule et son chiffre.
 const ICON_GAP: f32 = 6.0;
 
-/// Demi-écart entre deux cellules : il y en a un de chaque côté du filet qui les sépare.
-const CELL_GAP: f32 = 9.0;
-
-/// Épaisseur du filet vertical entre deux cellules — `tokens::SWITCH_SEPARATOR_WIDTH` (2 px), la
-/// valeur que le jeu emploie entre deux cases d'un même switch. Un filet d'un seul pixel, posé à
-/// une abscisse fractionnaire, se serait étalé en deux colonnes grises par anti-aliasing (et aurait
-/// rendu la capture de non-régression sensible au sous-pixel, voir `show`, qui arrondit ses
-/// abscisses pour cette raison).
-const SEPARATOR_WIDTH: f32 = tokens::SWITCH_SEPARATOR_WIDTH;
-
-/// Hauteur du filet, en fraction de celle de la bande — il ne touche ni le haut ni le bas, comme
-/// le séparateur d'onglets du jeu (`tokens::TAB_SEPARATOR_RAMP_*`, même intention : marquer sans
-/// cloisonner).
-const SEPARATOR_HEIGHT_RATIO: f32 = 0.55;
-
-/// Couleur du filet — la bordure de switch du design system, la teinte que cette interface emploie
-/// déjà pour séparer deux cases voisines d'une même rangée.
-const SEPARATOR_COLOR: Color32 = tokens::SWITCH_SEPARATOR;
+/// Gouttière entre les deux colonnes de la grille. Deux fois l'écart glyphe/chiffre — assez pour
+/// que le dernier chiffre de la colonne de gauche ne se lise pas comme le début de la case de
+/// droite, sans étirer le bloc.
+const COLUMN_GAP: f32 = 18.0;
 
 /// Rayon d'angle du fond translucide — celui du carré de contrôle du Suivi
 /// (`panels::watchlist::PANEL_BACKDROP_ROUNDING`), la même bande posée sur le même jeu.
@@ -88,12 +99,19 @@ const BACKDROP_ROUNDING: f32 = 6.0;
 /// cette interface emploie pour du texte à lire, pas pour un badge.
 const FONT_SIZE: f32 = tokens::CHECKBOX_FONT_SIZE;
 
-/// Couleur d'un chiffre neutre (XP, durée) — le blanc cassé des noms de combattants du panneau
-/// Combat.
+/// Blanc cassé des noms de combattants du panneau Combat — la teinte des glyphes des deux cases
+/// « gagné − perdu », dont les chiffres portent leur propre couleur.
 const TEXT_COLOR: Color32 = Color32::from_rgb(0xE8, 0xED, 0xF2);
 
-/// Couleur des kamas — l'or du design system, celui de la monnaie partout dans cette interface.
-const KAMAS_COLOR: Color32 = tokens::TEXT_GOLD;
+/// Couleur de l'XP et de la durée, glyphe et chiffre — l'accent cyan du contenu flottant
+/// (`tokens::OVERLAY_ACCENT`), demandé tel quel par l'utilisateur (« de la couleur accent »).
+const ACCENT_COLOR: Color32 = tokens::OVERLAY_ACCENT;
+
+/// Couleur des kamas, glyphe et chiffre — **`#FFD700` demandé explicitement par l'utilisateur
+/// (2026-09-16)**, l'or franc, pas le `tokens::TEXT_GOLD` sable (`#F4D89E`) du design system. Ce
+/// bloc flotte sur l'écran de jeu, où l'or du client se lit mal ; l'or saturé, lui, dit
+/// « monnaie » d'un regard, comme le jaune de la pile de kamas dans l'inventaire du jeu.
+const KAMAS_COLOR: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00);
 
 /// Vert d'un compteur favorable (combats gagnés, challenges réussis) — `--btn-active-green` du
 /// thème sombre du web (`styles.css`), pour que les deux applications disent la même chose de la
@@ -114,33 +132,38 @@ struct Segment {
     color: Color32,
 }
 
-/// Une case de la bande : son glyphe, ce qu'elle affiche, et ce que son infobulle en dit.
+/// Une case du bloc : son glyphe et la teinte qu'il prend, ce qu'elle affiche, et ce que son
+/// infobulle en dit.
 struct Cell {
     icon: DsIcon,
+    tint: Color32,
     tooltip: &'static str,
     segments: Vec<Segment>,
 }
 
-/// Les cinq cases, dans l'ordre du web (`.recap-bandeau`) : XP, Kamas, Combats, Challenges, Durée.
+/// Les cinq cases, dans l'ordre du web (`.recap-bandeau`) : XP, Kamas, Combats, Challenges, Durée
+/// — c'est aussi l'ordre de lecture de la grille (voir [`show`]).
 ///
 /// **Aucune icône inventée** — les cinq viennent du registre `design::DsIcon`, donc du jeu :
-/// `Xp` et `Kamas` sont les glyphes évidents, `MetricDamage` (la dague du switch de grandeur du
-/// panneau Combat) tient pour les combats et `Trophy` pour les challenges. La durée prend
-/// `Calendar`, la seule notion de temps que le registre porte — le jeu n'a pas de cadran, et en
-/// dessiner un ici serait la première icône de cette interface à ne venir de nulle part.
+/// `Xp` et `Kamas` sont les glyphes évidents, `Sword` tient pour les combats, `Trophy` pour les
+/// challenges et `Clock` pour la durée. Les deux derniers ont été détourés le 2026-09-16 pour ce
+/// bloc, qui empruntait jusque-là la dague colorée du switch de grandeur du panneau Combat et la
+/// grille de calendrier.
 fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
     let net_kamas = totals.kamas_gained - totals.kamas_lost;
     vec![
         Cell {
             icon: DsIcon::Xp,
+            tint: ACCENT_COLOR,
             tooltip: "Expérience gagnée depuis le début de la session",
             segments: vec![Segment {
                 text: format!("+{}", format_fr_thousands(totals.xp_gained)),
-                color: TEXT_COLOR,
+                color: ACCENT_COLOR,
             }],
         },
         Cell {
             icon: DsIcon::Kamas,
+            tint: KAMAS_COLOR,
             // Le web ouvre ici une infobulle détaillée (combat, ventes HDV, achats, échanges) que
             // le moteur de l'overlay ne ventile pas : `SessionTotals` ne porte qu'un gagné et un
             // dépensé. L'infobulle dit donc ce qu'elle sait, sans promettre le détail du site.
@@ -150,27 +173,33 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
             // version de cette bande affichait un « ? » à sa place, vu sur la capture du harnais.
             // Le glyphe Kamas à gauche dit déjà de quelle monnaie il s'agit — ajouter une police
             // entière pour un caractère serait payer 100 % du poids pour 0,5 % du signe.
+            //
+            // Le signe « - » d'un solde négatif vient de `format_fr_thousands` ; un solde positif
+            // s'écrit sans « + », à la différence de l'XP qui ne peut que croître.
             segments: vec![Segment {
                 text: format_fr_thousands(net_kamas),
                 color: KAMAS_COLOR,
             }],
         },
         Cell {
-            icon: DsIcon::MetricDamage,
+            icon: DsIcon::Sword,
+            tint: TEXT_COLOR,
             tooltip: "Combats gagnés − combats perdus",
             segments: win_loss(totals.fights_won, totals.fights_lost),
         },
         Cell {
             icon: DsIcon::Trophy,
+            tint: TEXT_COLOR,
             tooltip: "Challenges réussis − challenges échoués",
             segments: win_loss(totals.challenges_passed, totals.challenges_failed),
         },
         Cell {
-            icon: DsIcon::Calendar,
+            icon: DsIcon::Clock,
+            tint: ACCENT_COLOR,
             tooltip: "Durée de la session — temps écoulé depuis le lancement de l'overlay",
             segments: vec![Segment {
                 text: format_duration(uptime),
-                color: TEXT_COLOR,
+                color: ACCENT_COLOR,
             }],
         },
     ]
@@ -202,10 +231,10 @@ pub fn format_duration(uptime: std::time::Duration) -> String {
     format!("{h:02}:{m:02}:{s:02}")
 }
 
-/// Peint la bande et renvoie la largeur qu'elle occupe, fond compris — voir la doc de module pour
+/// Peint le bloc et renvoie la largeur qu'il occupe, fond compris — voir la doc de module pour
 /// ce que l'hôte en fait.
 ///
-/// Le contenu est calé en HAUT À GAUCHE de `ui` : la fenêtre OS peut être plus grande que la bande
+/// Le contenu est calé en HAUT À GAUCHE de `ui` : la fenêtre OS peut être plus grande que le bloc
 /// (elle l'est, entre deux ajustements de largeur), le vide qui reste est transparent.
 pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Duration) -> f32 {
     // **Le chrono avance tout seul.** Cette architecture ne rend une frame que lorsque quelque
@@ -240,7 +269,7 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
         })
         .collect();
     // **Largeurs ARRONDIES au pixel.** La largeur d'un texte est fractionnaire ; en la propageant
-    // telle quelle, chaque filet et chaque glyphe de la bande atterrirait à une abscisse fractionnaire,
+    // telle quelle, chaque glyphe de la colonne de droite atterrirait à une abscisse fractionnaire,
     // donc étalé sur deux colonnes de pixels par anti-aliasing. Sur un overlay posé par-dessus un
     // jeu, un trait net vaut mieux qu'un trait juste à un demi-pixel près — et c'est aussi ce qui
     // rend la capture de non-régression reproductible d'une machine de rendu à l'autre.
@@ -250,8 +279,14 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
             (ICON_SIZE + ICON_GAP + segments.iter().map(|g| g.size().x).sum::<f32>()).ceil()
         })
         .collect();
-    let content_width: f32 = cell_widths.iter().sum::<f32>()
-        + (cell_widths.len().saturating_sub(1) as f32) * (2.0 * CELL_GAP + SEPARATOR_WIDTH);
+
+    // La grille : XP (0) et combats (2) dans la colonne de gauche, kamas (1) et challenges (3)
+    // dans celle de droite, chaque colonne aussi large que sa case la plus large pour que les
+    // glyphes s'alignent verticalement ; la durée (4) seule sur la troisième ligne, centrée.
+    let left_width = cell_widths[0].max(cell_widths[2]);
+    let right_width = cell_widths[1].max(cell_widths[3]);
+    let grid_width = left_width + COLUMN_GAP + right_width;
+    let content_width = grid_width.max(cell_widths[4]);
     let total_width = content_width + 2.0 * PADDING_X;
 
     let origin = ui.max_rect().min;
@@ -259,27 +294,24 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
     ui.painter()
         .rect_filled(band, BACKDROP_ROUNDING, tokens::OVERLAY_BACKDROP);
 
-    let mut x = band.min.x + PADDING_X;
-    for (index, (cell, segments)) in cells.iter().zip(&galleys).enumerate() {
-        if index > 0 {
-            x += CELL_GAP;
-            let half = (band.height() * SEPARATOR_HEIGHT_RATIO / 2.0).round();
-            ui.painter().rect_filled(
-                egui::Rect::from_min_size(
-                    egui::pos2(x.round(), (band.center().y - half).round()),
-                    egui::vec2(SEPARATOR_WIDTH, half * 2.0),
-                ),
-                0.0,
-                SEPARATOR_COLOR,
-            );
-            x += SEPARATOR_WIDTH + CELL_GAP;
-        }
-        let cell_rect = egui::Rect::from_min_size(
-            egui::pos2(x, band.min.y),
-            egui::vec2(cell_widths[index], HEIGHT),
-        );
-        paint_cell(ui, &ds, cell_rect, cell, segments);
-        x += cell_widths[index];
+    let content_left = band.min.x + PADDING_X;
+    let right_column = content_left + left_width + COLUMN_GAP;
+    let row_top = |row: usize| band.min.y + PADDING_Y + row as f32 * ROW_HEIGHT;
+    let placements = [
+        (0, content_left, row_top(0)),
+        (1, right_column, row_top(0)),
+        (2, content_left, row_top(1)),
+        (3, right_column, row_top(1)),
+        (
+            4,
+            content_left + ((content_width - cell_widths[4]) / 2.0).round(),
+            row_top(2),
+        ),
+    ];
+    for (index, x, y) in placements {
+        let cell_rect =
+            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cell_widths[index], ROW_HEIGHT));
+        paint_cell(ui, &ds, cell_rect, &cells[index], &galleys[index]);
     }
 
     total_width
@@ -288,9 +320,10 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
 /// Glyphe puis chiffres d'une cellule, centrés verticalement dans `rect`, et l'infobulle qui dit
 /// de quoi il s'agit.
 ///
-/// **Infobulle EN DESSOUS** (`TooltipSide::Below`) : cette bande est collée au bord haut de la
-/// fenêtre de jeu, il n'y a rien au-dessus d'elle — la même raison qui a fait passer toutes les
-/// infobulles du Suivi sous sa bande (voir `render_content::WATCHLIST_TOOLTIP_RESERVE`).
+/// **Infobulle EN DESSOUS** (`TooltipSide::Below`) : ce bloc est posé sous les boutons du jeu,
+/// près du bord haut de la fenêtre de jeu, et une infobulle ouverte au-dessus viendrait couvrir
+/// ces boutons — la même raison qui a fait passer toutes les infobulles du Suivi sous sa bande
+/// (voir `render_content::WATCHLIST_TOOLTIP_RESERVE`).
 fn paint_cell(
     ui: &mut egui::Ui,
     ds: &design::DesignSystem,
@@ -302,20 +335,14 @@ fn paint_cell(
         egui::pos2(rect.min.x + ICON_SIZE / 2.0, rect.center().y),
         fit(ds.icon_native_size(cell.icon), ICON_SIZE),
     );
-    // Ces trois glyphes portent leurs couleurs natives (catégorie `couleur` du registre) : les
-    // teinter effacerait ce qu'elles disent. Les autres sont blancs dans le fichier et prennent la
-    // teinte demandée — ici le blanc neutre du texte, pour que glyphe et chiffre aillent ensemble.
-    let tint = if cell.icon.native_color() {
-        Color32::WHITE
-    } else {
-        TEXT_COLOR
-    };
-    ds.paint_icon(ui.painter(), icon_rect, cell.icon, tint);
+    // Les cinq glyphes sont blancs dans le fichier (catégorie `libre` du registre) et prennent la
+    // teinte de la case — celle de son chiffre, pour que glyphe et chiffre aillent ensemble.
+    ds.paint_icon(ui.painter(), icon_rect, cell.icon, cell.tint);
 
     let mut x = rect.min.x + ICON_SIZE + ICON_GAP;
     for (segment, galley) in cell.segments.iter().zip(galleys) {
         let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
-        // Cerne COMPLET : cette bande flotte sur l'écran de jeu, dont le fond est arbitraire — voir
+        // Cerne COMPLET : ce bloc flotte sur l'écran de jeu, dont le fond est arbitraire — voir
         // `design::text::OUTLINE_FULL`.
         text::paint_outlined_galley(
             ui.painter(),
@@ -380,9 +407,9 @@ mod tests {
     }
 
     /// Cinq cases, toujours — c'est le contrat de la demande (XP, kamas, combats, challenges,
-    /// durée), et l'ordre de la bande du web.
+    /// durée), et l'ordre de la bande du web, que la grille lit ligne par ligne.
     #[test]
-    fn la_bande_porte_cinq_cases_dans_l_ordre_du_web() {
+    fn le_bloc_porte_cinq_cases_dans_l_ordre_du_web() {
         let totals = SessionTotals {
             kamas_gained: 1_500,
             kamas_lost: 500,
@@ -400,9 +427,9 @@ mod tests {
             vec![
                 DsIcon::Xp,
                 DsIcon::Kamas,
-                DsIcon::MetricDamage,
+                DsIcon::Sword,
                 DsIcon::Trophy,
-                DsIcon::Calendar
+                DsIcon::Clock
             ]
         );
         // Les kamas sont NETS, jamais le seul gagné (le web affiche `stats.netKamas()`).
@@ -414,5 +441,29 @@ mod tests {
         assert_eq!(cells[3].segments[0].text, "4");
         assert_eq!(cells[3].segments[2].text, "1");
         assert_eq!(cells[4].segments[0].text, "01:00:00");
+    }
+
+    /// Glyphe et chiffre d'une case vont ensemble : accent pour l'XP et la durée, or `#FFD700`
+    /// pour les kamas (demande utilisateur), et un solde négatif garde son signe.
+    #[test]
+    fn les_couleurs_suivent_la_maquette() {
+        let totals = SessionTotals {
+            kamas_gained: 100,
+            kamas_lost: 350,
+            ..Default::default()
+        };
+        let cells = cells(&totals, std::time::Duration::ZERO);
+        assert_eq!(cells[0].tint, ACCENT_COLOR);
+        assert_eq!(cells[0].segments[0].color, ACCENT_COLOR);
+        assert_eq!(cells[1].tint, KAMAS_COLOR);
+        assert_eq!(
+            cells[1].segments[0].color,
+            Color32::from_rgb(0xFF, 0xD7, 0x00)
+        );
+        assert_eq!(cells[1].segments[0].text, "-250");
+        assert_eq!(cells[2].segments[0].color, GAIN_COLOR);
+        assert_eq!(cells[2].segments[2].color, LOSS_COLOR);
+        assert_eq!(cells[4].tint, ACCENT_COLOR);
+        assert_eq!(cells[4].segments[0].color, ACCENT_COLOR);
     }
 }

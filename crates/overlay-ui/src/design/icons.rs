@@ -375,6 +375,20 @@ ds_icons! {
         /// [`DsIcon::BagIn`].
         Xp => "icon-xp", libre;
 
+        /// Épée (`icons/icon-sword.png`, 24 × 25) — combat. Détourée le 2026-09-16 par
+        /// `demix_flat` (glyphe blanc à même le décor uni, sans bouton porteur — voir
+        /// `references/recettes-icones.md` du skill `design-asset`), d'où `libre`. Premier
+        /// appelant : la case « combats gagnés − perdus » de la bande Récap (`panels::recap`), où
+        /// elle remplace la dague colorée [`DsIcon::MetricDamage`] par un glyphe blanc à teinter
+        /// comme ses voisins.
+        Sword => "icon-sword", libre;
+
+        /// Horloge (`icons/icon-clock.png`, 19 × 19) — durée. Même provenance, même recette et même
+        /// statut que [`DsIcon::Sword`]. Premier appelant : la case « durée de session » de la bande
+        /// Récap, où elle remplace [`DsIcon::Calendar`] — le registre porte enfin un cadran, la
+        /// bande n'a plus à emprunter une grille de calendrier pour dire une heure.
+        Clock => "icon-clock", libre;
+
         /// Signe ♂ (`icons/icon-male.png`, 14 × 14) — genre masculin, case gauche du switch de
         /// genre du jeu. Détouré le 2026-09-16 SANS `--from-button` (glyphe posé sur le décor
         /// sombre de la capture, réglages par défaut, `luma-light`). Pas de `DsIcon::content_size` :
