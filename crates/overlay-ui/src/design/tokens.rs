@@ -355,12 +355,16 @@ pub const TAB_FONT_SIZE: f32 = 17.0;
 /// hauteur est celle de la texture, jamais déduite de la largeur.
 pub const SWITCH_HEIGHT: f32 = 44.0;
 
-/// Largeur native d'un switch — **88px** : liseré 2 + case active 40 + séparateur 2 + case
-/// inactive 42 + liseré 2. C'est la largeur par défaut ; `Switch::width` l'étire.
+/// Largeur d'une case, par défaut — **43px**, la moitié des 88px du switch du jeu une fois le
+/// séparateur déduit : liseré 2 + case active 40 + séparateur 2 + case inactive 42 + liseré 2.
+/// Un switch à `n` cases fait donc `43 × n + 2 × (n − 1)` par défaut ; `Switch::width` l'étire.
 ///
-/// La capture « première case active » mesurait 87px (case inactive à 41, ombre intérieure sur
-/// 1px) contre 88 pour l'autre : écart de rendu du jeu, égalisé à 88 au traitement de l'asset.
-pub const SWITCH_WIDTH: f32 = 88.0;
+/// 43 et non 40 ou 42 : la case active du jeu fait 40 de remplissage, l'inactive 42, et chacune
+/// porte un liseré de 2 à son extrémité. Donner la même largeur aux deux laisse le 9-slice
+/// absorber un pixel de chaque côté. La capture « première case active » mesurait 87px (case
+/// inactive à 41) contre 88 pour l'autre : écart de rendu du jeu, égalisé à 88 au traitement de
+/// l'asset.
+pub const SWITCH_SLOT_WIDTH: f32 = 43.0;
 
 /// Largeur du séparateur entre les deux cases — **2px**, colonnes x 42–43 de la capture.
 pub const SWITCH_SEPARATOR_WIDTH: f32 = 2.0;

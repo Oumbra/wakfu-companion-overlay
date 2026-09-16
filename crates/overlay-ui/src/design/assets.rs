@@ -166,8 +166,12 @@ const fn switch_slot_slice(left: f32, right: f32) -> NineSlice {
 /// Première case d'un switch — arrondie à gauche.
 pub const SWITCH_SLICE_FIRST: NineSlice = switch_slot_slice(8.0, 4.0);
 
-/// Seconde case d'un switch — arrondie à droite.
+/// Dernière case d'un switch — arrondie à droite.
 pub const SWITCH_SLICE_LAST: NineSlice = switch_slot_slice(4.0, 8.0);
+
+/// Case du **milieu** d'un switch à trois positions ou plus — 4px de chaque côté, rien
+/// d'arrondi : la texture n'a que ses liserés haut et bas et du remplissage.
+pub const SWITCH_SLICE: NineSlice = switch_slot_slice(4.0, 4.0);
 
 /// Découpage d'une case à cocher : **5px figés sur les quatre côtés**.
 ///
@@ -396,6 +400,17 @@ pub enum DsTexture {
     /// Case INACTIVE en SECONDE position (`switch-slot-inactive-last.png`, 44 × 44) — découpée de
     /// `switch-first-slot-active.png` sur `x 44..88`.
     SwitchSlotInactiveLast,
+    /// Case ACTIVE du MILIEU (`switch-slot-active.png`, 40 × 44) — les 40px de remplissage de
+    /// [`DsTexture::SwitchSlotActiveFirst`] (`x 2..42`), **coin redressé** : les dix pixels
+    /// d'escalier d'alpha que l'arrondi laissait dans ces colonnes ont été recopiés depuis
+    /// l'intérieur, la même opération que pour `tab-active.png`. Le jeu n'a pas de switch à trois
+    /// cases dans les captures relevées ; cette texture est une dérivation, pas un relevé.
+    SwitchSlotActive,
+    /// Case INACTIVE du MILIEU (`switch-slot-inactive.png`, 40 × 44) — les 40 premiers pixels de
+    /// [`DsTexture::SwitchSlotInactiveLast`], avant son ombre intérieure et son liseré, coin
+    /// redressé de même. Une case inactive du milieu n'a donc pas d'ombre : l'ombre des captures
+    /// est toujours du côté du liseré extérieur, une case sans liseré n'en porte pas.
+    SwitchSlotInactive,
     /// Case à cocher COCHÉE (`checkbox-true.png`, 20 × 20) — cadre doré vif, carré blanc plein.
     CheckboxChecked,
     /// Case à cocher DÉCOCHÉE (`checkbox-false.png`, 20 × 20) — cadre kaki sombre, intérieur noir.
@@ -615,6 +630,8 @@ impl DsTexture {
         DsTexture::SwitchSlotActiveLast,
         DsTexture::SwitchSlotInactiveFirst,
         DsTexture::SwitchSlotInactiveLast,
+        DsTexture::SwitchSlotActive,
+        DsTexture::SwitchSlotInactive,
         DsTexture::CheckboxChecked,
         DsTexture::CheckboxUnchecked,
         DsTexture::SelectFace,
@@ -764,6 +781,16 @@ impl DsTexture {
                 name: "ds-switch-slot-inactive-last",
                 bytes: ds_asset!("switch-slot-inactive-last.png"),
                 slice: SWITCH_SLICE_LAST,
+            },
+            DsTexture::SwitchSlotActive => DsTextureSpec {
+                name: "ds-switch-slot-active",
+                bytes: ds_asset!("switch-slot-active.png"),
+                slice: SWITCH_SLICE,
+            },
+            DsTexture::SwitchSlotInactive => DsTextureSpec {
+                name: "ds-switch-slot-inactive",
+                bytes: ds_asset!("switch-slot-inactive.png"),
+                slice: SWITCH_SLICE,
             },
             DsTexture::CheckboxChecked => DsTextureSpec {
                 name: "ds-checkbox-checked",
