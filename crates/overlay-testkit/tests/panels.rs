@@ -263,15 +263,15 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
     // des portraits (échange du 15 sept., voir `panels::combat`), donc plus aucun `COLUMN_GAP` ni
     // bandeau leader dans le compte, et depuis le 16 sept. (`design::switch`) son bandeau est
     // calé à gauche sur le cadre : 8 (outer_margin) + 6 (`LEADER_PANEL_PADDING`) + 17,5 (moitié
-    // d'une case de `SWITCH_SLOT_WIDTH`, 35) = 31,5 ; 8 + 50 (y du switch, `COMBAT_TOP_MARGIN` +
-    // `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
-    harness.hover_at(egui::pos2(31.0, 71.0));
+    // d'une case à l'échelle 36/44, 35) = 31,5 ; 8 + 50 (y du switch, `COMBAT_TOP_MARGIN` +
+    // `LEADER_PANEL_PADDING`) + 18 (moitié de `SWITCH_HEIGHT`, 36) = 76.
+    harness.hover_at(egui::pos2(31.0, 76.0));
     harness.run();
     harness.snapshot("combat_tooltip_allies_au_dessus");
 
     // Centre de la case "Ennemis" (moitié droite, décalée d'une case et du séparateur de 2) :
     // 31 + 37 = 68 ; même y.
-    harness.hover_at(egui::pos2(68.0, 71.0));
+    harness.hover_at(egui::pos2(68.0, 76.0));
     harness.run();
     harness.snapshot("combat_tooltip_ennemis_au_dessus");
 }
@@ -3991,7 +3991,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
     // Bouton « Alliés » (main) : l'éclair d'abord, et un redessin réclamé AU PLUS TARD pour la
     // prochaine bascule (l'infobulle du switch en réclame un plus tôt encore, d'où `<=` et non
     // `==`) — `now` est figé dans ce harnais, la phase ne progresse donc pas d'une frame à l'autre.
-    harness.hover_at(egui::pos2(35.0, 71.0));
+    harness.hover_at(egui::pos2(31.0, 76.0));
     harness.run();
     assert!(
         same(&published(&harness), &images.flash),
