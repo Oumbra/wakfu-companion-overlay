@@ -1691,12 +1691,13 @@ fn galerie_de_la_tuile_a_legende() {
     harness.snapshot("design_gallery_legend_tile");
 }
 
-/// Le switch à deux cases — sa propre planche, la principale ayant atteint le plafond de 8192 px.
+/// Le switch à cases — sa propre planche, la principale ayant atteint le plafond de 8192 px.
 ///
 /// Les deux états du jeu aux 88 px de la capture (c'est LA rangée à comparer à
 /// `switch-first-slot-active.png` / `switch-second-slot-active.png`), puis ce que le jeu n'a pas
 /// montré — survol, désactivé —, un switch étiré portant des pictogrammes plus grands que le carré
-/// de 16, et le repli sans pictogramme.
+/// de 16, le repli sans pictogramme, et les switches à trois cases — le cas du sélecteur de
+/// grandeur du panneau Combat, que le jeu n'a pas capturé (cases du milieu dérivées des bouts).
 #[test]
 fn galerie_du_switch() {
     #[derive(Clone, Copy, PartialEq)]
@@ -1705,7 +1706,7 @@ fn galerie_du_switch() {
         Feminin,
     }
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 420.0))
+        .with_size(Vec2::new(760.0, 600.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1722,17 +1723,17 @@ fn galerie_du_switch() {
                     ui.horizontal(|ui| {
                         let mut masculin = Genre::Masculin;
                         design::switch(&mut masculin)
-                            .first(Genre::Masculin, "Masculin")
+                            .slot(Genre::Masculin, "Masculin")
                             .icon(DsIcon::Male)
-                            .second(Genre::Feminin, "Féminin")
+                            .slot(Genre::Feminin, "Féminin")
                             .icon(DsIcon::Female)
                             .log_name("galerie.switch.masculin")
                             .show(ui);
                         let mut feminin = Genre::Feminin;
                         design::switch(&mut feminin)
-                            .first(Genre::Masculin, "Masculin")
+                            .slot(Genre::Masculin, "Masculin")
                             .icon(DsIcon::Male)
-                            .second(Genre::Feminin, "Féminin")
+                            .slot(Genre::Feminin, "Féminin")
                             .icon(DsIcon::Female)
                             .log_name("galerie.switch.feminin")
                             .show(ui);
@@ -1750,18 +1751,18 @@ fn galerie_du_switch() {
                     ui.horizontal(|ui| {
                         let mut survol = Genre::Masculin;
                         design::switch(&mut survol)
-                            .first(Genre::Masculin, "Masculin")
+                            .slot(Genre::Masculin, "Masculin")
                             .icon(DsIcon::Male)
-                            .second(Genre::Feminin, "Féminin")
+                            .slot(Genre::Feminin, "Féminin")
                             .icon(DsIcon::Female)
                             .preview_state(SwitchState::Hovered)
                             .log_name("galerie.switch.survol")
                             .show(ui);
                         let mut inactif = Genre::Feminin;
                         design::switch(&mut inactif)
-                            .first(Genre::Masculin, "Masculin")
+                            .slot(Genre::Masculin, "Masculin")
                             .icon(DsIcon::Male)
-                            .second(Genre::Feminin, "Féminin")
+                            .slot(Genre::Feminin, "Féminin")
                             .icon(DsIcon::Female)
                             .enabled(false)
                             .log_name("galerie.switch.desactive")
@@ -1780,22 +1781,53 @@ fn galerie_du_switch() {
                     ui.horizontal(|ui| {
                         let mut vue = 0_u8;
                         design::switch(&mut vue)
-                            .first(0, "Combat")
+                            .slot(0, "Combat")
                             .icon(DsIcon::Cards)
-                            .second(1, "Suivi")
+                            .slot(1, "Suivi")
                             .icon(DsIcon::Trophy)
                             .width(160.0)
                             .log_name("galerie.switch.etire")
                             .show(ui);
                         let mut periode = 1_u8;
                         design::switch(&mut periode)
-                            .first(0, "Jour")
-                            .second(1, "Nuit")
+                            .slot(0, "Jour")
+                            .slot(1, "Nuit")
                             .width(160.0)
                             .log_name("galerie.switch.texte")
                             .show(ui);
                         ui.label(
                             RichText::new("160 px, pictogrammes de 22 px · 160 px, libellés")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Trois cases — une seule active, cases du milieu dérivées des bouts",
+                        "Le sélecteur de grandeur du panneau Combat. La case du milieu n'a ni coin ni liseré latéral : 40 px de remplissage recopiés des cases d'extrémité, coin redressé comme tab-active.png.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut degats = 0_u8;
+                        design::switch(&mut degats)
+                            .slot(0, "Dégâts")
+                            .slot(1, "Armure")
+                            .slot(2, "Soins")
+                            .width(260.0)
+                            .log_name("galerie.switch.trois-libelles")
+                            .show(ui);
+                        let mut milieu = 1_u8;
+                        design::switch(&mut milieu)
+                            .slot(0, "Combat")
+                            .icon(DsIcon::Cards)
+                            .slot(1, "Suivi")
+                            .icon(DsIcon::Trophy)
+                            .slot(2, "Objets")
+                            .icon(DsIcon::BagIn)
+                            .preview_state(SwitchState::Hovered)
+                            .log_name("galerie.switch.trois-milieu")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("260 px, première active · 133 px (natif), milieu actif, dernière survolée")
                                 .color(CAPTION)
                                 .size(12.0),
                         );
