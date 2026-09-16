@@ -1874,6 +1874,44 @@ défilement horizontal (`TextEditState::text_offset`), et **se peignait vide alo
 `options_parametres_compte` et `options_parametres_mise_a_jour` (la même ligne, après défilement —
 les deux planches qui montraient le champ vide).
 
+### 9.1 septdecies Le bouton d'essai revient, sur la ligne de sourdine (2026-09-16)
+
+Demande utilisateur : « ajouter le bouton de test du son des notifications sur la ligne de coupure
+du son des notifications. Pour la section "Alertes", ajouter une ligne "Tester le son des
+notifications" avec le bouton pour écouter le son » — et, dans l'onglet « Alertes », « déplacer
+l'icône mute en bas à droite des item_slot ».
+
+**Contexte** : la ligne « Tester le son des notifications » que chaque section de « Paramètres »
+ouvrait (§9.1 quaterdecies) avait été retirée le matin même, à la demande de l'utilisateur, avec
+les actions `Test*Sound` de la fenêtre. Elle revient sous une autre forme, plus courte d'une ligne
+par section.
+
+**Ce qui existe maintenant :**
+
+- **Le haut-parleur d'essai à droite de la case « Couper le son des notifications »**, sur la
+  même ligne — sections « Combat » (son de tour), « Suivi » (décompte) et « Chat » (recherche).
+  C'est le même son qu'on coupe et qu'on essaie, il n'occupe plus deux lignes. **Grisé quand le
+  son ne viendrait pas** (sourdine cochée, ou notification de tour décochée pour Combat), et
+  l'infobulle le dit — la règle de §9.1 quaterdecies, inchangée.
+- **Les Alertes gardent une ligne à elles**, « Tester le son des notifications »
+  (`notifications::TEST_LABEL`) : elles n'ont pas de sourdine globale (§9.1 terdecies), le bouton
+  n'a aucune ligne où se poser. Il y est toujours vif.
+- **`notifications::section` renvoie de nouveau le clic**, et `notifications::test_sound_button`
+  est public pour la section « Combat », qui peint sa sourdine de tour elle-même
+  (`panels::options_modal`). Sa ligne prend la hauteur des lignes de section
+  (`notifications::ROW_HEIGHT`, 39 px) : dans un simple `horizontal`, la case restait calée en
+  haut d'un bouton plus grand qu'elle. Les hôtes (`main.rs`, `overlay-ui-x11.rs`) rejouent les
+  quatre actions `TestAlertSound` / `TestChatSound` / `TestCountdownSound` / `TestTurnSound` par
+  `alert_sound`, le chemin exact du jeu.
+- **Le pictogramme « son coupé » d'une tuile d'alerte est en bas à droite** (`alerts_tab`,
+  `Corner::BottomRight`), et non plus en haut à gauche : ce coin est celui de la case du mode
+  sélection (`item_slot`), qui recouvrait le haut-parleur d'une tuile coupée dès qu'on entrait
+  dans le mode. La croix garde le haut droit ; même retrait de 8 px.
+
+**Captures** : `options_parametres_son_coupe` (Suivi coupé → bouton grisé, ligne d'essai des
+Alertes), `options_parametres_combat_coupe` (tour cochée, son coupé), `options_alertes_liste` et
+`options_alertes_selection` (la tuile coupée, badge en bas à droite).
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
