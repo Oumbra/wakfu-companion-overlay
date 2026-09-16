@@ -200,3 +200,12 @@ trait fin ou une rangée de pixels **manquants** par rapport à la source, pas u
 `icon` par défaut écrase la frange d'antialiasing (pointe de la lame 47 → 1, garde 58 → 15, pommeau
 28 → 0) : mêmes pixels manquants qu'`icon-edit`. Retenu `demix_flat` sur la boîte `9,9,33,34` du
 `glyph_bbox` — `residual_max` 1,7 sur 238 pixels, la frange est conservée à l'unité près.
+
+## `icon-clock` (2026-09-16) — même cas qu'`icon-edit`
+
+Horloge grise (187,187,187) capturée à même le décor uni (24,24,24) en 37 × 36 px, glyphe de
+19 × 19 natifs, sans bouton porteur (`analyze` : composant de la taille du glyphe, rayon 9 — le
+cercle lui-même). Cercle d'un pixel d'épaisseur et deux aiguilles, donc entièrement porté par
+l'antialiasing : `icon` par défaut sort correct mais amincit la frange (ligne haute 21 contre 51).
+Retenu `demix_flat` sur la boîte `11,9,30,28` du `glyph_bbox` — `residual_max` 0,0 sur
+156 pixels, 44 opaques et 112 partiels.
