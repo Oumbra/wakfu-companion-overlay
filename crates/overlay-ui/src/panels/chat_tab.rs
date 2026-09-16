@@ -31,6 +31,14 @@
 //! l'utilisateur contre la liste en lignes) : canal d'abord, mot ensuite, « Ajouter » enfin, ancré
 //! au bord droit ; tuiles à légende ([`design::legend_tile`]) quatre par rangée, croix révélée au
 //! survol comme les tuiles d'Alertes ; aucune couleur de canal (les thèmes du jeu).
+//!
+//! ## La suppression multiple, 2026-09-16
+//!
+//! Demande utilisateur : « ajouter le système de la suppression multiple, comme dans l'onglet
+//! Suivi ». La mécanique est **partagée** — elle vit dans [`crate::panels::bulk_select`], avec les
+//! onglets « Suivi » et « Alertes ». Ici toutes les recherches se retirent (aucune n'est
+//! « par défaut », contrairement aux Alertes), et la case à cocher se pose au coin **haut-droit**
+//! de la tuile, celui de la croix qu'elle remplace : le haut-gauche porte la légende.
 
 use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{
@@ -39,7 +47,7 @@ use overlay_engine::{
 };
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, InputSize};
-use crate::panels::{feature_switch, notifications};
+use crate::panels::{bulk_select, feature_switch, notifications};
 
 // -------------------------------------------------------------------------------------------
 // Jetons — repris TELS QUELS de `panels::alerts_tab`, pour que les deux onglets se ressemblent
@@ -137,6 +145,24 @@ impl ChatDraft {
             self.filters.remove(index);
         }
     }
+
+    /// Retire les recherches dont la clé ([`filter_key`]) est cochée. Rend combien sont parties.
+    pub fn remove_keys(&mut self, keys: &[String]) -> usize {
+        let cochees: std::collections::HashSet<&String> = keys.iter().collect();
+        let avant = self.filters.len();
+        self.filters
+            .retain(|filter| !cochees.contains(&filter_key(filter)));
+        avant - self.filters.len()
+    }
+}
+
+/// Identifie une recherche — la clé de coche du mode sélection, jumelle de
+/// `panels::suivi_tab::entry_key` et `panels::alerts_tab::entry_key`.
+///
+/// Le couple (canal, mot) est déjà ce qui rend une recherche unique : `ChatDraft::add` refuse le
+/// doublon sur ce couple exact, et rien d'autre ne distingue deux entrées.
+pub(crate) fn filter_key(filter: &ChatFilter) -> String {
+    format!("{}::{}", filter.scope.label(), filter.text)
 }
 
 /// Pourquoi une recherche n'a pas été ajoutée — chaque cas a sa phrase, aucun n'est une erreur
@@ -171,6 +197,10 @@ pub struct ChatTabState {
     /// La dernière raison pour laquelle « Ajouter » n'a rien ajouté, effacée à la prochaine
     /// frappe ou au prochain ajout réussi.
     pub notice: Option<AddError>,
+    /// Mode « sélection multiple » ouvert — voir [`crate::panels::bulk_select`].
+    pub select_mode: bool,
+    /// Clés des tuiles cochées — voir [`filter_key`].
+    pub selected: Vec<String>,
 }
 
 impl Default for ChatTabState {
@@ -180,6 +210,8 @@ impl Default for ChatTabState {
             input: String::new(),
             duration_input: String::new(),
             notice: None,
+            select_mode: false,
+            selected: Vec::new(),
         }
     }
 }
@@ -264,9 +296,41 @@ pub fn show(
     }
     ui.add_space(SECTION_GAP);
 
-    ui.add(design::heading("Recherches"));
+    // **Les commandes de suppression multiple sont dans cette ligne** depuis le 2026-09-16 —
+    // mécanique partagée, voir `panels::bulk_select`. Toutes les recherches se retirent : le
+    // nombre de tuiles EST le nombre de retirables, et une liste vide ne montre aucun bouton.
+    let demande = bulk_select::show(
+        ui,
+        width,
+        bulk_select::BulkHeader {
+            title: "Recherches",
+            removable: ctx.draft.filters.len(),
+            bulk_tooltip:
+                "Retire les recherches cochées — annulable tant que la fenêtre n'est pas \
+                           validée",
+            log_prefix: "chat",
+            enabled: true,
+        },
+        bulk_select::BulkSelection {
+            mode: &mut state.select_mode,
+            keys: &mut state.selected,
+        },
+    );
+    match demande {
+        bulk_select::BulkRequest::None => {}
+        bulk_select::BulkRequest::All => {
+            let retirees = ctx.draft.filters.len();
+            ctx.draft.filters.clear();
+            tracing::info!(retirees, "[options] recherches de chat retirées en bloc");
+        }
+        bulk_select::BulkRequest::Keys(cles) => {
+            let retirees = ctx.draft.remove_keys(&cles);
+            tracing::info!(retirees, "[options] recherches de chat retirées en bloc");
+        }
+    }
 
     if ctx.draft.filters.is_empty() {
+        ui.add_space(bulk_select::HEADER_TO_PARAGRAPH);
         ui.add(
             design::info_text(
                 "Aucune recherche. Choisissez un canal, saisissez un mot, puis cliquez sur Ajouter.",
@@ -276,8 +340,9 @@ pub fn show(
         );
         return;
     }
+    ui.add_space(bulk_select::HEADER_GAP);
 
-    tile_grid(ui, panel, ctx.draft);
+    tile_grid(ui, panel, state, ctx.draft);
 }
 
 /// Un paragraphe, pas un bloc d'information — même règle que `panels::alerts_tab::paragraph`.
@@ -376,11 +441,16 @@ fn add_row(ui: &mut egui::Ui, state: &mut ChatTabState, draft: &mut ChatDraft, w
 
 /// La grille de recherches : des tuiles à légende, quatre par rangée, la croix de retrait révélée
 /// au survol — l'idiome des tuiles d'Alertes (`panels::alerts_tab::alert_item`).
-fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraft) {
+fn tile_grid(
+    ui: &mut egui::Ui,
+    panel: &design::PanelZones,
+    state: &mut ChatTabState,
+    draft: &mut ChatDraft,
+) {
     // Collecter avant de muter : le rendu lit le brouillon, le geste le modifie.
     // La légende prend la couleur du canal (celle du client, `tokens::chat_channel_color`) ;
     // « Tous les canaux » garde le gris des légendes.
-    let items: Vec<(String, Option<Color32>, String)> = draft
+    let items: Vec<TileData> = draft
         .filters
         .iter()
         .map(|f| {
@@ -390,49 +460,113 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraf
                     Some(design::tokens::chat_channel_color(channel))
                 }
             };
-            (f.scope.label().to_owned(), color, f.text.clone())
+            TileData {
+                key: filter_key(f),
+                legend: f.scope.label().to_owned(),
+                legend_color: color,
+                text: f.text.clone(),
+            }
         })
         .collect();
     let mut removed: Option<usize> = None;
+    let mut coche: Option<String> = None;
+    let select_mode = state.select_mode;
+    let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
     panel.scroll_area(ui, "chat.recherches", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
         let tile_width =
             (content_width - TILE_GAP * (TILES_PER_ROW as f32 - 1.0)) / TILES_PER_ROW as f32;
         for (row_index, chunk) in items.chunks(TILES_PER_ROW).enumerate() {
             ui.horizontal(|ui| {
-                for (col, (legend, color, text)) in chunk.iter().enumerate() {
+                for (col, tuile) in chunk.iter().enumerate() {
                     let index = row_index * TILES_PER_ROW + col;
-                    if filter_tile(ui, legend, *color, text, tile_width) {
-                        removed = Some(index);
+                    match filter_tile(
+                        ui,
+                        tuile,
+                        tile_width,
+                        select_mode,
+                        cochees.contains(&tuile.key),
+                    ) {
+                        TileClick::Remove => removed = Some(index),
+                        TileClick::Check => coche = Some(tuile.key.clone()),
+                        TileClick::None => {}
                     }
                 }
             });
         }
     });
+    if let Some(cle) = coche {
+        bulk_select::toggle(&mut state.selected, &cle);
+    }
     if let Some(index) = removed {
         tracing::info!(index, "[options] recherche de chat retirée");
+        // Une clé cochée qui ne désigne plus rien ferait mentir le compteur du bouton groupé.
+        if let Some(filter) = draft.filters.get(index) {
+            let cle = filter_key(filter);
+            state.selected.retain(|k| *k != cle);
+        }
         draft.remove(index);
     }
 }
 
-/// Une tuile, et sa croix. `true` quand la croix vient d'être cliquée.
+/// Ce qu'une tuile a besoin de savoir — assemblé avant la boucle, voir [`tile_grid`].
+struct TileData {
+    key: String,
+    legend: String,
+    legend_color: Option<Color32>,
+    text: String,
+}
+
+/// Ce qu'un clic sur une tuile signifie.
+enum TileClick {
+    None,
+    /// Retirer la recherche, à la croix du survol.
+    Remove,
+    /// Cocher ou décocher — le geste de la tuile **en mode sélection**, où il remplace la croix.
+    Check,
+}
+
+/// Une tuile, et sa croix — ou, en mode sélection, sa case à cocher.
+///
+/// **La case remplace la croix** : les deux vivent au même coin, et les deux gestes s'excluent
+/// (règle reprise du Suivi). La case est peinte par le composant, pas ici — voir
+/// [`design::LegendTile::selection`].
 fn filter_tile(
     ui: &mut egui::Ui,
-    legend: &str,
-    legend_color: Option<Color32>,
-    text: &str,
+    tuile: &TileData,
     width: f32,
-) -> bool {
-    let mut tile = design::legend_tile(legend, text).width(width);
+    select_mode: bool,
+    cochee: bool,
+) -> TileClick {
+    let TileData {
+        legend,
+        legend_color,
+        text,
+        ..
+    } = tuile;
+    let mut tile = design::legend_tile(legend, text)
+        .width(width)
+        .selection(select_mode.then_some(cochee))
+        // **Le ton destructif**, comme au Suivi et aux Alertes : cocher ici ne mène qu'au bouton
+        // « Supprimer », jamais à une autre action.
+        .selection_tone(design::SelectionTone::Danger);
     if let Some(color) = legend_color {
-        tile = tile.legend_color(color);
+        tile = tile.legend_color(*color);
     }
     let response = ui.add(tile.log_name(format!("chat.recherche.{text}")));
+    if select_mode {
+        // Dans le mode, le geste de la tuile est de cocher — et la croix ne se révèle plus.
+        return if response.clicked() {
+            TileClick::Check
+        } else {
+            TileClick::None
+        };
+    }
     // **`contains_pointer` et NON `hovered`** : la croix a sa propre zone, posée par-dessus la
     // tuile — dès que le pointeur l'atteint, egui lui donne le survol. Piège déjà payé au Suivi
     // et dans Alertes.
     if !response.contains_pointer() {
-        return false;
+        return TileClick::None;
     }
     let frame_top = response.rect.top() + design::LegendTile::legend_overshoot(ui);
     let frame = Rect::from_min_max(
@@ -463,7 +597,11 @@ fn filter_tile(
         if croix.hovered() { REMOVE_HOVER } else { TEXT },
     );
     design::tooltip(&croix).text("Retirer");
-    croix.clicked()
+    if croix.clicked() {
+        TileClick::Remove
+    } else {
+        TileClick::None
+    }
 }
 
 /// Le rouage de chargement, centré dans la zone que la grille occuperait — même geste que

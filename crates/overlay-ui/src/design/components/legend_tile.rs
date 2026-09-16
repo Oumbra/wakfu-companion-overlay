@@ -34,9 +34,15 @@
 //!   la croix est un second clic sur une zone à part.
 //! - Cliquable : `Sense::click()`, comme toute tuile du jeu ; c'est l'appelant qui décide de ce
 //!   que le clic fait.
+//! - Elle sait porter une **sélection multiple** ([`LegendTile::selection`], 2026-09-16) : une case
+//!   à cocher dans le coin haut-droit du cadre — celui de la croix, qu'elle remplace — et la
+//!   bordure repeinte au ton de la sélection quand elle est cochée. Comme sur
+//!   [`crate::design::item_slot`], **les deux appartiennent au composant** : la case n'est pas un
+//!   widget, elle ne prend aucun geste, et c'est le clic de la tuile qui coche.
 
 use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 
+use crate::design::components::item_slot::SelectionTone;
 use crate::design::{text, tokens};
 
 /// État de rendu, forcé par [`LegendTile::preview_state`] — galerie et captures seulement.
@@ -79,6 +85,8 @@ pub fn legend_tile(legend: impl Into<String>, text: impl Into<String>) -> Legend
         legend_color: None,
         log_name: None,
         forced_state: None,
+        selection: None,
+        selection_tone: SelectionTone::Neutral,
     }
 }
 
@@ -92,6 +100,8 @@ pub struct LegendTile {
     legend_color: Option<Color32>,
     log_name: Option<String>,
     forced_state: Option<LegendTileState>,
+    selection: Option<bool>,
+    selection_tone: SelectionTone,
 }
 
 impl LegendTile {
@@ -125,6 +135,30 @@ impl LegendTile {
         self
     }
 
+    /// **Mode « sélection multiple »** : `None` hors du mode, `Some(cochée)` dedans.
+    ///
+    /// Dans le mode, la tuile porte une **case à cocher** au coin haut-droit de son cadre et sa
+    /// **bordure prend le ton de la sélection** quand elle est cochée. L'appel s'écrit
+    /// `.selection(select_mode.then_some(cochée))`.
+    ///
+    /// **Le coin haut-DROIT, et pas le gauche** (où `item_slot` pose la sienne) : celui-là porte la
+    /// légende, qui est posée sur la bordure haute. C'est aussi le coin de la croix de retrait que
+    /// le panneau pose au survol — et les deux ne s'affichent jamais ensemble, la case la remplace.
+    ///
+    /// La case ne prend aucun geste : **cocher est le clic de la tuile**, que l'appelant lit sur la
+    /// [`Response`] rendue.
+    pub fn selection(mut self, selection: Option<bool>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// Ton de la sélection — voir [`SelectionTone`]. Par défaut [`SelectionTone::Neutral`], l'or.
+    /// Sans effet hors du mode sélection.
+    pub fn selection_tone(mut self, tone: SelectionTone) -> Self {
+        self.selection_tone = tone;
+        self
+    }
+
     /// Force l'état peint — **galerie et captures uniquement** : en rendu offscreen, aucun pointeur
     /// ne survole quoi que ce soit.
     pub fn preview_state(mut self, state: LegendTileState) -> Self {
@@ -143,6 +177,30 @@ impl LegendTile {
         frame: Rect,
         legend: FrameLegend<'_>,
         tint: &dyn Fn(Color32) -> Color32,
+    ) {
+        Self::paint_frame_bordered(
+            painter,
+            ctx,
+            frame,
+            legend,
+            tint,
+            tokens::LEGEND_TILE_BORDER,
+        );
+    }
+
+    /// [`Self::paint_frame`] avec une **couleur de bordure** choisie — le liseré d'une tuile
+    /// cochée, qui prend le ton de la sélection.
+    ///
+    /// Repeindre un rectangle par-dessus le cadre ne marcherait pas : la bordure haute
+    /// **s'interrompt sous la légende**, et un trait plein la traverserait. C'est donc la même
+    /// suite de segments qui se peint, dans une autre couleur.
+    fn paint_frame_bordered(
+        painter: &egui::Painter,
+        ctx: &egui::Context,
+        frame: Rect,
+        legend: FrameLegend<'_>,
+        tint: &dyn Fn(Color32) -> Color32,
+        border: Color32,
     ) {
         painter.rect_filled(frame, 0.0, tint(tokens::LEGEND_TILE_FILL));
 
@@ -165,10 +223,7 @@ impl LegendTile {
             LegendSide::Right => frame.right() - inset - legend_width,
         };
         let legend_right = legend_left + legend_width;
-        let stroke = Stroke::new(
-            tokens::LEGEND_TILE_BORDER_WIDTH,
-            tint(tokens::LEGEND_TILE_BORDER),
-        );
+        let stroke = Stroke::new(tokens::LEGEND_TILE_BORDER_WIDTH, tint(border));
         let half = tokens::LEGEND_TILE_BORDER_WIDTH / 2.0;
         let (top, bottom) = (frame.top() + half, frame.bottom() - half);
         let (left, right) = (frame.left() + half, frame.right() - half);
@@ -275,7 +330,7 @@ impl Widget for LegendTile {
                 }
             };
 
-            Self::paint_frame(
+            Self::paint_frame_bordered(
                 &painter,
                 ui.ctx(),
                 frame,
@@ -287,6 +342,12 @@ impl Widget for LegendTile {
                     backing: None,
                 },
                 &dim,
+                // Cochée, la bordure DEVIENT le liseré de sélection : elle n'en gagne pas un
+                // second à côté — même règle que l'anneau d'`item_slot`.
+                match self.selection {
+                    Some(true) => self.selection_tone.border(),
+                    _ => tokens::LEGEND_TILE_BORDER,
+                },
             );
             let half = tokens::LEGEND_TILE_BORDER_WIDTH / 2.0;
 
@@ -332,6 +393,25 @@ impl Widget for LegendTile {
                     frame.shrink(tokens::LEGEND_TILE_BORDER_WIDTH),
                     0.0,
                     tokens::LEGEND_TILE_HOVER_SCRIM,
+                );
+            }
+
+            // La case vient APRÈS le voile de survol : cochée ou non, elle doit rester lisible sur
+            // la tuile qu'on vise.
+            if let Some(checked) = self.selection {
+                crate::design::components::checkbox::paint(
+                    ui,
+                    Rect::from_min_size(
+                        egui::pos2(
+                            frame.right()
+                                - tokens::LEGEND_TILE_SELECTION_INSET
+                                - tokens::CHECKBOX_SIZE,
+                            frame.top() + tokens::LEGEND_TILE_SELECTION_INSET,
+                        ),
+                        Vec2::splat(tokens::CHECKBOX_SIZE),
+                    ),
+                    checked,
+                    dim(self.selection_tone.checkbox_tint(checked)),
                 );
             }
         }
