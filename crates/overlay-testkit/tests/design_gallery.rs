@@ -26,7 +26,7 @@ use overlay_engine::ChatChannel;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, DsTexture,
     IconButtonState, IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep,
-    SelectState, SliderState, TabState, TableAlign, TableBody, TableColumn,
+    SelectState, SliderState, SwitchState, TabState, TableAlign, TableBody, TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -1689,6 +1689,122 @@ fn galerie_de_la_tuile_a_legende() {
 
     harness.run();
     harness.snapshot("design_gallery_legend_tile");
+}
+
+/// Le switch à deux cases — sa propre planche, la principale ayant atteint le plafond de 8192 px.
+///
+/// Les deux états du jeu aux 88 px de la capture (c'est LA rangée à comparer à
+/// `switch-first-slot-active.png` / `switch-second-slot-active.png`), puis ce que le jeu n'a pas
+/// montré — survol, désactivé —, un switch étiré portant des pictogrammes plus grands que le carré
+/// de 16, et le repli sans pictogramme.
+#[test]
+fn galerie_du_switch() {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Genre {
+        Masculin,
+        Feminin,
+    }
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(760.0, 420.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 8.0);
+                    heading(
+                        ui,
+                        "Switch à deux cases — les deux états du jeu, 88 × 44",
+                        "Le sélecteur de genre : case active kaki au glyphe doré, case inactive gris-brun au glyphe gris. Le pictogramme remplace le libellé, qui devient l'infobulle.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut masculin = Genre::Masculin;
+                        design::switch(&mut masculin)
+                            .first(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .second(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .log_name("galerie.switch.masculin")
+                            .show(ui);
+                        let mut feminin = Genre::Feminin;
+                        design::switch(&mut feminin)
+                            .first(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .second(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .log_name("galerie.switch.feminin")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("première case active · seconde case active")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Ce que le jeu n'a pas montré — survol et désactivé",
+                        "Survolée, la case inactive prend le glyphe doré sans changer de fond (inventé). Désactivé : fonds atténués, glyphes gris, la case sélectionnée reste reconnaissable.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut survol = Genre::Masculin;
+                        design::switch(&mut survol)
+                            .first(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .second(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .preview_state(SwitchState::Hovered)
+                            .log_name("galerie.switch.survol")
+                            .show(ui);
+                        let mut inactif = Genre::Feminin;
+                        design::switch(&mut inactif)
+                            .first(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .second(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .enabled(false)
+                            .log_name("galerie.switch.desactive")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("seconde case survolée · désactivé")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Étiré, autres pictogrammes, et le repli sans pictogramme",
+                        "Toute largeur est valide (9-slice par case). Un glyphe plus grand que 16 px y est ramené ; les deux du jeu restent à leur taille native. Sans pictogramme, le libellé est peint dans la case — non vérifié contre une capture.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut vue = 0_u8;
+                        design::switch(&mut vue)
+                            .first(0, "Combat")
+                            .icon(DsIcon::Cards)
+                            .second(1, "Suivi")
+                            .icon(DsIcon::Trophy)
+                            .width(160.0)
+                            .log_name("galerie.switch.etire")
+                            .show(ui);
+                        let mut periode = 1_u8;
+                        design::switch(&mut periode)
+                            .first(0, "Jour")
+                            .second(1, "Nuit")
+                            .width(160.0)
+                            .log_name("galerie.switch.texte")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("160 px, pictogrammes de 22 px · 160 px, libellés")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_switch");
 }
 
 /// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
