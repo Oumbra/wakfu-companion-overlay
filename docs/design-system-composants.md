@@ -1624,10 +1624,32 @@ if let Some(index) = issue.selected {
 | `min_query_len` | seuil de déclenchement | `AUTOCOMPLETE_MIN_QUERY_LEN` = 3 |
 | `max_visible_rows` | au-delà, la liste défile | `AUTOCOMPLETE_MAX_VISIBLE_ROWS` = 5 |
 | `enabled` | `bool` | `true` |
+| `search_icon` | la loupe en tête de champ | `true` |
+| `fill_on_select` | la sélection **remplit** le champ au lieu de le vider | `false` |
 | `preview_open` / `preview_active` / `preview_filter` | aperçu de galerie | fermé / 0 / aucun |
 
 Rend un **`AutocompleteOutcome`** : la `Response` du champ **et** `selected: Option<usize>`, l'indice
 dans `entries` de l'entrée choisie.
+
+### Deux usages, deux réglages (2026-09-16)
+
+Le composant sert deux choses qui n'ont ni le même décor ni la même fin de geste :
+
+| | Champ d'**ajout** (Suivi, Alertes) | **Saisie assistée** (nom d'un personnage) |
+| --- | --- | --- |
+| Décor | loupe — c'est une recherche | `search_icon(false)` : le nom s'écrit, il ne se cherche pas |
+| Après une sélection | le champ se vide, il a fini | `fill_on_select(true)` : le libellé reste dans le champ, qui garde son focus |
+| Ce qui compte | `selected`, l'entrée passée à la liste | `query`, la valeur du formulaire |
+
+**Dans les deux cas le texte libre est accepté** : le composant ne valide rien, n'efface jamais ce
+qui ne correspond à aucune entrée, et `selected` vaut simplement `None`. Les suggestions sont une
+aide à la saisie, pas une liste fermée — pour une liste fermée, c'est `design::select`. Deux champs
+à loupe sur un même écran, dont un qui n'en est pas une, ne se distinguent plus que par leur invite
+(retour utilisateur du 2026-09-16, modale « Personnage »).
+
+Planche dédiée : `design_gallery_autocomplete_saisie.png` (`galerie_de_la_saisie_assistee`) — la
+grande galerie est pleine, son contenu dépasse déjà le plafond de 8192 px de wgpu et sa section
+« Autocomplétion » y est tronquée en bas.
 
 Décor résolu en interne (socle et loupe d'`InputSize::Standard`) ; **panneau déplié entièrement
 repris de `design::select`** — fond, bord, filet de tête, surbrillance, cadence de rangée de 28 px.
