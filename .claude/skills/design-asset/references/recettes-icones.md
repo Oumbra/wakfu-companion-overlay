@@ -47,6 +47,8 @@ appliquée en fin de pipeline (défaut).
 | `icon-kamas` | *sans* `--from-button` | 14 × 12 |
 | `icon-xp` | *sans* `--from-button` | 16 × 11 |
 | `icon-info` | *sans* `--from-button` | 27 × 28 |
+| `icon-male` | *sans* `--from-button` | 14 × 14 |
+| `icon-female` | *sans* `--from-button` | 10 × 16 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -135,3 +137,11 @@ même pastille cerclée, extraite d'une capture plus petite (12 × 12).
 **`--size 24` testé et écarté.** La capture fait déjà 27 px : normaliser à 24 la
 rééchantillonne pour rien et écrase la barre du « i », dont l'épaisseur ne fait que 4 px.
 Taille native conservée, comme sur le reste du lot.
+
+## `icon-male` / `icon-female` (2026-09-16) — deux glyphes sans socle, cas nominal
+
+Les signes ♂ et ♀ du sélecteur de genre, capturés chacun à même le décor sombre (16 × 18 et
+18 × 18). `analyze` rend un « composant » de la taille du glyphe et `border: null` — le signe
+distinctif d'`icon-pin`. Réglages par défaut, `luma-light` en polarité automatique, aucun halo sur
+la bande sombre de la planche (`band_rejected` 72 et 78 : la frange antialiasée est correctement
+rejetée). Rien à consigner de plus : c'est le cas nominal du second lot.

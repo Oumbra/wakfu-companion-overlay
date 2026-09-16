@@ -2885,3 +2885,95 @@ magenta…) : jetons `CHAT_CHANNEL_*` et `tokens::chat_channel_color(ChatChannel
 sur une capture fournie par l'utilisateur puis corrigés par lui pour cinq canaux (Commerce reste
 le relevé). La carte d'alerte du Suivi (`panels::watchlist::chat_toast_card`) reprend le cadre via
 `paint_frame`, canal en haut à droite, plus grand, sur fond. « Tous les canaux » n'est pas un canal : la légende garde son gris.
+
+---
+
+## `design::switch` — switch à deux cases (2026-09-16)
+
+`crates/overlay-ui/src/design/components/switch.rs`
+
+```rust
+use overlay_ui::design::{self, DsIcon};
+
+design::switch(&mut personnage.genre)
+    .first(Genre::Masculin, "Masculin").icon(DsIcon::Male)
+    .second(Genre::Feminin, "Féminin").icon(DsIcon::Female)
+    .log_name("personnages.genre")
+    .show(ui);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `first(valeur, libellé)` / `second(valeur, libellé)` | les deux cases, dans cet ordre — **obligatoires toutes les deux** | — |
+| `icon` | pictogramme de **la dernière case déclarée** ; remplace le libellé au rendu, qui devient l'infobulle | libellé peint |
+| `width` | largeur totale, partagée à égalité entre les cases | `SWITCH_WIDTH` = 88 |
+| `enabled` | le switch **entier** | `true` |
+| `preview_state` | `Idle` / `Hovered` / `Active` / `Disabled`, sur la dernière case — **galerie et captures uniquement** | état réel |
+| `log_name` | nom d'instance pour le journal | `"switch"` |
+
+La valeur sélectionnée vit chez l'appelant, comme celle de `design::tabs` ; `Response::changed()`
+dit à quelle frame elle a bougé. Un switch auquel il manque une case n'est pas peint, et le dit
+une fois au journal (`warn!`, « switch incomplet »).
+
+**Ce n'est pas un `tabs` à deux entrées**, et la question a été posée avant d'écrire le fichier :
+le sélecteur de genre du jeu est un autre élément — cadre propre (liseré `#221f24`, rayon 6 aux
+quatre coins), séparateur plat, exactement deux cases, et des glyphes qui changent de couleur
+(doré sur la case active, gris sur l'inactive) là où l'onglet actif **blanchit** son libellé sur le
+même kaki. Aucune texture n'est partagée avec les onglets.
+
+**Mesures** (relevé `ui-blueprint` du 2026-09-16 sur l'asset générique 88 × 44, artefact
+« Switch à deux cases ») :
+
+| Grandeur | Valeur | Jeton |
+| --- | --- | --- |
+| Cadre | 88 × 44, liseré 2 px `#221f24`, rayon 6 | `SWITCH_WIDTH`, `SWITCH_HEIGHT`, `SWITCH_BORDER` |
+| Case active | 40 × 40, kaki `#635a47`, biseau clair 2 px en haut et en bas | texture |
+| Case inactive | **42** × 40, gris-brun `#514b44`, ombre intérieure 2 px côté liseré | texture |
+| Séparateur | 2 px, aplat `#312d2d`, entre les deux liserés (y 2..42) | `SWITCH_SEPARATOR_WIDTH`, `SWITCH_SEPARATOR`, `SWITCH_BORDER_Y` |
+| Glyphe actif / inactif | `#f4d89f` / `#a9a5a2` | `SWITCH_ICON_ACTIVE`, `SWITCH_ICON_INACTIVE` |
+| Glyphes | ♂ 14 × 14 et ♀ 10 × 16, **à leur taille native**, centrés | `SWITCH_ICON_SIZE` = 16 |
+
+**La case inactive est 2 px plus large que l'active**, et le séparateur se déplace donc de 2 px
+selon l'état — c'est ce que disent les deux captures. Le composant donne 43 px à chaque case et
+laisse le 9-slice absorber l'écart d'un pixel de chaque côté.
+
+**Un glyphe qui tient dans le carré de 16 reste à sa taille native.** Un étalon commun (comme
+`ICON_BUTTON_CONTENT`) grossirait le ♂ de 14 à 16, deux pixels de plus que dans le jeu. Seul un
+pictogramme plus grand — un `DsIcon::Cards` de 22 px emprunté à une autre famille — est ramené
+dans le carré, rapport conservé. Le glyphe est calé sur la grille de pixels : une case de 43 px
+met son centre à une demi-position, et un glyphe peint à x + 0,5 s'étale sur deux colonnes.
+
+**Textures** — quatre, tirées des deux captures du jeu, parce que l'arrondi du cadre est porté par
+l'alpha des cases d'extrémité (même raison que pour les onglets) :
+
+| Fichier | Origine | Taille |
+| --- | --- | --- |
+| `switch-slot-active-first.png` | `switch-first-slot-active.png` x 0..42 | 42 × 44 |
+| `switch-slot-inactive-last.png` | idem, x 44..88 | 44 × 44 |
+| `switch-slot-inactive-first.png` | `switch-second-slot-active.png` x 0..44 | 44 × 44 |
+| `switch-slot-active-last.png` | idem, x 46..88 | 42 × 44 |
+
+Aucun miroir : le jeu a capturé les deux états. Découpage `SWITCH_SLICE_FIRST` / `_LAST` : 8 px
+côté arrondi (liseré 2 + escalier d'alpha 5 + 1), 4 côté séparateur, 6 en haut et en bas (liseré
+2 + biseau 2 + 2) ; `decor_span` au niveau du bruit, `Stretch` sur les deux axes. Les deux barres
+génériques 88 × 44 restent dans `assets/design-system/` comme référence de comparaison.
+
+**Inventé, faute de référence** — à remplacer par une mesure dès qu'une capture existera :
+
+- **Le survol.** La case inactive survolée prend le glyphe doré sans changer de fond — le signal
+  du bouton icône de premier plan (gris → or).
+- **L'état désactivé.** Fonds atténués comme un bouton désactivé (alpha 190/255), glyphes
+  `TEXT_DISABLED`, gouttière atténuée de même ; la case sélectionnée garde son fond actif pour
+  rester reconnaissable.
+- **Le repli sans pictogramme.** Le libellé est peint dans la case au corps des libellés du jeu
+  (`SWITCH_FONT_SIZE` = `TAB_FONT_SIZE`, 17 px) : le jeu n'a pas de switch texte dans les
+  interfaces relevées.
+
+### Vérification
+
+Planche dédiée `design_gallery_switch.png` (la galerie principale est au plafond des 8192 px) :
+les deux états du jeu à 88 px, le survol et le désactivé, un switch de 160 px à pictogrammes de
+22 px, et le repli à libellés. Comparaison au jeu à la même taille : écart moyen 4,4 et 3,4/255
+sur les deux états — le cerne sombre des glyphes du jeu, absorbé par la teinte comme sur toutes
+les icônes, fait l'essentiel des pixels en écart. Boîtes d'encre : ♂ au pixel près, ♀ décalé de
+1 px (le jeu le pose lui-même 1 px à droite du centre de sa case de 42).
