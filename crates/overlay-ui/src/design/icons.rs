@@ -34,6 +34,15 @@
 //!   connue et comparable — [`tokens::ICON_BUTTON_CONTENT`] — ce qui permet de le normaliser.
 //! - **`libre`** : détouré sans bouton porteur, ou sans mesure consignée. Le normaliser sur un
 //!   étalon qu'il ne partage pas le rendrait faux ; il garde sa taille native.
+//! - **`couleur`** (2026-09-16) : un glyphe **en couleurs**, pas un blanc à teinter — libre de
+//!   taille, et peint tel quel. C'est l'exception à la règle « toutes les icônes sont
+//!   monochromes » du skill `design-asset`, réservée aux glyphes dont la couleur porte le sens :
+//!   les cinq du panneau Combat (vert = alliés, orange = ennemis ; dague, cœur vert d'armure, cœur
+//!   rouge de soin). Passés au blanc par transfert de luminance (essai du 2026-09-16), les deux
+//!   silhouettes ne se distinguaient plus que par la position des bras, et les deux cœurs
+//!   devenaient des taches. Un composant qui teinte ses glyphes (`design::switch`) peint ceux-ci
+//!   en blanc et les **atténue** hors sélection ([`tokens::ICON_NATIVE_DIM`]) au lieu de les
+//!   colorer.
 
 use crate::design::tokens;
 
@@ -82,10 +91,22 @@ macro_rules! ds_icons {
                     $(DsIcon::$variant => ds_icons!(@etalon $etalon),)*
                 }
             }
+
+            /// Le glyphe est-il en couleurs natives (catégorie `couleur`, voir la doc de
+            /// module) ? Un composant qui teinte ses glyphes ne doit pas teinter celui-ci.
+            pub fn native_color(self) -> bool {
+                match self {
+                    $(DsIcon::$variant => ds_icons!(@couleur $etalon),)*
+                }
+            }
         }
     };
     (@etalon socle) => { Some(tokens::ICON_BUTTON_CONTENT) };
     (@etalon libre) => { None };
+    (@etalon couleur) => { None };
+    (@couleur couleur) => { true };
+    (@couleur socle) => { false };
+    (@couleur libre) => { false };
 }
 
 /// Description statique d'un glyphe : nom de cache egui et octets PNG embarqués.
@@ -355,4 +376,29 @@ ds_icons! {
         /// Signe ♀ (`icons/icon-female.png`, 10 × 16) — genre féminin, case droite du même switch.
         /// Même provenance, même réglage et même statut que [`DsIcon::Male`].
         Female => "icon-female", libre;
+
+        /// Silhouette verte d'allié (`icons/icon-allies.png`, 18 × 22) — case gauche du switch
+        /// de camp du panneau Combat. Le fichier du dépôt web (`header-allies.png`), rogné à sa
+        /// boîte d'encre, entré au design system le 2026-09-16 avec la migration du switch ; il
+        /// vivait jusque-là dans `ui_icons.rs`. En couleurs : voir la catégorie `couleur`.
+        Allies => "icon-allies", couleur;
+
+        /// Silhouette orange d'ennemi (`icons/icon-enemies.png`, 20 × 22) — case droite du même
+        /// switch. Même provenance et même statut que [`DsIcon::Allies`].
+        Enemies => "icon-enemies", couleur;
+
+        /// Dague (`icons/icon-metric-damage.png`, 18 × 17) — dégâts infligés, première case du
+        /// switch de grandeur du panneau Combat. Icône DU JEU, celle du sélecteur web
+        /// `app-entity-stat-tabs` (`icons/di.png` du dépôt communautaire `Vertylo/wakassets`),
+        /// embarquée depuis le 2026-09-14 (`ui_icons.rs`), au design system depuis le
+        /// 2026-09-16. En couleurs : voir la catégorie `couleur`.
+        MetricDamage => "icon-metric-damage", couleur;
+
+        /// Cœur vert à flèche (`icons/icon-metric-armor.png`, 22 × 20) — armure donnée, case du
+        /// milieu. `aptitudes/234.png` du même dépôt ; même statut que [`DsIcon::MetricDamage`].
+        MetricArmor => "icon-metric-armor", couleur;
+
+        /// Cœur rouge à croix (`icons/icon-metric-heal.png`, 22 × 20) — soins prodigués, dernière
+        /// case. `aptitudes/12.png` du même dépôt ; même statut que [`DsIcon::MetricDamage`].
+        MetricHeal => "icon-metric-heal", couleur;
 }

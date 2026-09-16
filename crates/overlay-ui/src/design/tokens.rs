@@ -352,7 +352,9 @@ pub const TAB_FONT_SIZE: f32 = 17.0;
 // `design::components::switch`.
 
 /// Hauteur native d'un switch — **44px**, celle des deux captures. Comme pour un onglet, la
-/// hauteur est celle de la texture, jamais déduite de la largeur.
+/// hauteur est celle de la texture, jamais déduite de la largeur. `Switch::height` peut
+/// l'abaisser : les 6px hauts et bas du 9-slice (coins, liseré, biseau) restent figés, seul le
+/// corps s'étire — le panneau Combat le tient à 26px (`panels::combat::SWITCH_HEIGHT`).
 pub const SWITCH_HEIGHT: f32 = 44.0;
 
 /// Largeur d'une case, par défaut — **43px**, la moitié des 88px du switch du jeu une fois le
@@ -394,6 +396,16 @@ pub const SWITCH_ICON_ACTIVE: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
 /// [`ICON_TINT`] (`#c5cbcc`, gris froid du premier plan) : le jeu grise le glyphe non
 /// sélectionné plus franchement.
 pub const SWITCH_ICON_INACTIVE: Color32 = Color32::from_rgb(0xA9, 0xA5, 0xA2);
+
+/// Atténuation d'un glyphe **en couleurs** (`DsIcon::native_color`) là où un glyphe blanc serait
+/// teinté [`SWITCH_ICON_INACTIVE`] : multiplicateur 150/255 (≈ 59 %) sur ses trois canaux.
+///
+/// **Estimation, pas une mesure** : le jeu n'a pas de switch à glyphes en couleurs dans les
+/// interfaces relevées. 150 est le rapport de luminance entre [`SWITCH_ICON_INACTIVE`] et
+/// [`SWITCH_ICON_ACTIVE`] (`#a9a5a2` sur `#f4d89f`, ≈ 0,68) arrondi vers le bas pour que
+/// l'atténuation se lise aussi sur un glyphe déjà sombre (la dague des dégâts). Validé sur le
+/// rendu du panneau Combat (2026-09-16), à remplacer par une mesure si le jeu en fournit une.
+pub const ICON_NATIVE_DIM: Color32 = Color32::from_rgb(150, 150, 150);
 
 /// Côté du carré englobant d'un glyphe de switch — **16px**.
 ///

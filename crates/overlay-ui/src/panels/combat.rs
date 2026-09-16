@@ -405,6 +405,32 @@
 //!   [`show`], déjà combiné avec la case ci-dessus par l'hôte) : le bloc `combat_spell_block`,
 //!   mais aussi les marques qu'il pose sur les médaillons et l'épinglage au clic — sans bloc à
 //!   lire, un liseré ne désignerait plus rien. Portraits, barres et switches ne bougent pas.
+//!
+//! **Refonte 2026-09-16 (switches au design system)** — les deux switches, peints à la main
+//! jusque-là (piste `TINT_MEDIUM` bordée de `TINT_STRONG`, option active `ACCENT`, 30 × 26 par
+//! option), sont désormais `design::switch` : le sélecteur exclusif du jeu, ses six textures, ses
+//! cases de fond kaki biseauté (active) ou gris-brun (inactive). Décisions prises sur rendu du
+//! harnais (avant / après en artefact, quatre variantes) :
+//!
+//! - **Hauteur 26px conservée** (`SWITCH_HEIGHT`, hauteur imposée via `Switch::height`) plutôt
+//!   que les 44 du jeu : « à 44 on a l'impression d'avoir compressé le switch » — et les deux
+//!   bandeaux gardent ainsi leurs 38px, cadre, barres et sorts ne bougent pas d'un pixel.
+//! - **Cases de 35px** (`SWITCH_SLOT_WIDTH`) au lieu des 43 du jeu : deux cases = 70px, la
+//!   largeur exacte du cadre ; trois = 109px, ce qui laisse 69px au total du bandeau leader,
+//!   assez pour six chiffres. Le 9-slice absorbe l'écart, biseaux et liseré restent ceux du jeu.
+//! - **Bandeaux opacifiés conservés** (`LEADER_PANEL_FILL`), avec leurs marges de 6px. Le
+//!   bandeau de camp, qui faisait la largeur du cadre, s'élargit à 82px pour loger le switch de
+//!   70 avec ses marges : **calé à gauche sur le cadre**, il déborde de 12px vers la gouttière
+//!   des colonnes (retour utilisateur : les marges latérales du bandeau doivent rester celles
+//!   du design, pas se résorber sur la gauche) — sans rencontrer le bandeau leader, qui commence
+//!   plus bas (`BARS_COLUMN_TOP_OFFSET`).
+//! - **Icônes en couleurs** : les cinq glyphes (`DsIcon::Allies`/`Enemies`/`Metric*`, catégorie
+//!   `couleur`) restent ceux du jeu et du site, peints tels quels sur la case active et
+//!   atténués ailleurs. Passés au monochrome du design system, alliés et ennemis ne se
+//!   distinguaient plus que par la position des bras, et les deux cœurs devenaient des taches.
+//!
+//! Les infobulles (« Alliés (F2) », « Dégâts infligés (F3) »…) sont les libellés des cases, portés
+//! par le composant ; `UiIcons` ne porte plus ces cinq textures.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -435,7 +461,7 @@ pub enum CombatSide {
 
 impl CombatSide {
     /// Inverse le camp affiché — utilisé par le raccourci global `ShortcutAction::CombatSide`
-    /// (`main.rs::App::toggle_combat_side`) en plus du clic direct sur `paint_side_switch` : retour
+    /// (`main.rs::App::toggle_combat_side`) en plus du clic direct sur le switch de camp : retour
     /// utilisateur explicite (« en mode toggle, c'est-à-dire que quand on appuie, ça inverse la
     /// sélection »), un seul raccourci pour les deux camps plutôt qu'un par camp.
     pub fn toggled(self) -> Self {
@@ -470,12 +496,12 @@ impl CombatMetric {
     pub const ALL: [Self; 3] = [Self::Damage, Self::Armor, Self::Heal];
 
     /// Icône DU JEU de cette grandeur — les mêmes que le sélecteur `app-entity-stat-tabs` du dépôt
-    /// web (voir `UiIcons`), embarquées plutôt que chargées depuis le CDN.
-    pub fn icon(self, icons: &UiIcons) -> &egui::TextureHandle {
+    /// web, au registre du design system (catégorie `couleur`, voir `design::icons`).
+    pub fn icon(self) -> design::DsIcon {
         match self {
-            Self::Damage => icons.metric_damage(),
-            Self::Armor => icons.metric_armor(),
-            Self::Heal => icons.metric_heal(),
+            Self::Damage => design::DsIcon::MetricDamage,
+            Self::Armor => design::DsIcon::MetricArmor,
+            Self::Heal => design::DsIcon::MetricHeal,
         }
     }
 
@@ -522,9 +548,20 @@ impl CombatMetric {
     }
 }
 
+/// Hauteur des deux switches — **26px**, celle des switches peints à la main qu'ils remplacent
+/// (refonte 2026-09-16, voir doc de module) et non les 44 du jeu (`tokens::SWITCH_HEIGHT`) :
+/// imposée via `Switch::height`, le 9-slice n'étire que le corps des cases.
 const SWITCH_HEIGHT: f32 = 26.0;
-const SWITCH_OPTION_WIDTH: f32 = 30.0;
-const SWITCH_ICON_SIZE: f32 = 15.0;
+/// Largeur d'une case — **35px** et non les 43 du jeu (`tokens::SWITCH_SLOT_WIDTH`) : deux cases
+/// et leur séparateur font 70px, la largeur du cadre (`FRAME_WIDTH`) ; trois font 109px et
+/// laissent 69px au total du bandeau leader. Voir doc de module.
+const SWITCH_SLOT_WIDTH: f32 = 35.0;
+
+/// Largeur d'un switch à `slots` cases : cases de `SWITCH_SLOT_WIDTH` et séparateurs du jeu.
+fn switch_width(slots: usize) -> f32 {
+    SWITCH_SLOT_WIDTH * slots as f32
+        + design::tokens::SWITCH_SEPARATOR_WIDTH * slots.saturating_sub(1) as f32
+}
 /// Écart vertical entre deux portraits de la liste "plate", et entre deux groupes nom+barre de la
 /// colonne de droite (même rythme pour les deux colonnes, demande utilisateur explicite). Resserré
 /// une 4e fois (6 px → 4 px → 2 px → 1 px, retour utilisateur répété : « il y a un écart non
@@ -541,11 +578,9 @@ const COLUMN_GAP: f32 = 6.0;
 //
 // `DAMAGE_ACCENT` a disparu le 2026-09-12 : c'était un doublon pur de `tokens::METER_FILL`, dont
 // la doc porte déjà l'historique des neuf retours utilisateur qui ont séparé, fusionné puis
-// re-séparé cette teinte de l'accent.
-use crate::design::tokens::{
-    METER_FILL as DAMAGE_ACCENT, OVERLAY_ACCENT as ACCENT, OVERLAY_TINT_MEDIUM as TINT_MEDIUM,
-    OVERLAY_TINT_STRONG as TINT_STRONG,
-};
+// re-séparé cette teinte de l'accent. `ACCENT`, `TINT_MEDIUM` et `TINT_STRONG` ne servaient plus
+// ici qu'aux deux switches peints à la main, partis dans `design::switch` le 2026-09-16.
+use crate::design::tokens::METER_FILL as DAMAGE_ACCENT;
 
 /// Hauteur d'une barre de dégâts — mesurée sur la maquette fournie par l'utilisateur (capture
 /// d'écran 2026-09-02, ~16 px de haut). Une première itération l'avait portée à 18 px sans
@@ -720,7 +755,7 @@ pub fn show(
             // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
             // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
             // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
-            show_side_row(ui, icons, side, shortcuts);
+            show_side_row(ui, side, shortcuts);
             ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
             if !framed.is_empty() {
                 let marks = marks_in(framed, selection);
@@ -805,7 +840,7 @@ pub fn show(
             // n'y glisse donc aucun espacement propre — le retrancher coûtait 3 px et laissait les
             // barres 3 px trop haut (mesuré sur les captures avant/après).
             ui.add_space(BARS_COLUMN_TOP_OFFSET);
-            show_leader_row(ui, icons, metric, shortcuts, total_damage_raw);
+            show_leader_row(ui, metric, shortcuts, total_damage_raw);
             ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
             if fighters.is_empty() || bars.is_empty() {
                 // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
@@ -842,35 +877,49 @@ pub fn show(
 /// Bandeau du switch Alliés/Ennemis, en tête de la colonne des PORTRAITS (échange de place avec le
 /// switch de grandeur, 2026-09-15 — voir doc de module) : même fond opacifié, même arrondi et même
 /// marge intérieure que le bandeau leader de l'autre colonne (`LEADER_PANEL_FILL`/
-/// `LEADER_PANEL_ROUNDING`/`LEADER_PANEL_PADDING`), calé sur la largeur exacte du cadre
-/// (`combat_frame::FRAME_WIDTH`) avec le switch centré — le camp affiché se choisit donc au-dessus
-/// de ce qu'il commande, les portraits.
+/// `LEADER_PANEL_ROUNDING`/`LEADER_PANEL_PADDING`) — le camp affiché se choisit donc au-dessus de
+/// ce qu'il commande, les portraits.
+///
+/// **Calé à gauche sur le cadre, plus large que lui** depuis le passage à `design::switch`
+/// (2026-09-16) : le switch fait `FRAME_WIDTH` à lui seul, ses marges de 6px portent le bandeau à
+/// 82px, et c'est vers la gouttière des colonnes qu'il déborde — le bord gauche du panneau reste
+/// celui du cadre. La colonne, elle, n'alloue que `FRAME_WIDTH` : le débord est peint hors
+/// allocation, sans décaler la colonne des barres, dont le bandeau commence plus bas
+/// (`BARS_COLUMN_TOP_OFFSET`).
 ///
 /// Appelée par `show` dans TOUS les cas, y compris sans combat ou camp vide (donc cadre non peint)
 /// : c'est la même exigence qu'avant le déplacement, le switch ne doit jamais devenir inatteignable.
 /// Reste aussi le TOUT PREMIER widget peint du panneau, ce dont dépend la marge supérieure réservée
 /// à son infobulle (voir `render_content::COMBAT_TOOLTIP_HEADROOM`).
-fn show_side_row(
-    ui: &mut egui::Ui,
-    icons: &UiIcons,
-    side: &mut CombatSide,
-    shortcuts: &ShortcutBindings,
-) {
+fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutBindings) {
     let row_height = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(FRAME_WIDTH, row_height), egui::Sense::hover());
-
-    ui.painter()
-        .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
-
-    // Centré plutôt qu'aligné à gauche : le switch (2 options) est presque aussi large que le
-    // cadre, un alignement à gauche laisserait un vide asymétrique de quelques pixels à droite.
-    let switch_width = SWITCH_OPTION_WIDTH * 2.0;
-    let top_left = egui::pos2(
-        row_rect.center().x - switch_width / 2.0,
-        row_rect.min.y + LEADER_PANEL_PADDING,
+    let switch_width = switch_width(2);
+    let backdrop = egui::Rect::from_min_size(
+        row_rect.min,
+        egui::vec2(switch_width + LEADER_PANEL_PADDING * 2.0, row_height),
     );
-    paint_side_switch(ui, top_left, side, icons, shortcuts);
+    ui.painter()
+        .rect_filled(backdrop, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+
+    let switch_rect = egui::Rect::from_min_size(
+        backdrop.min + egui::vec2(LEADER_PANEL_PADDING, LEADER_PANEL_PADDING),
+        egui::vec2(switch_width, SWITCH_HEIGHT),
+    );
+    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`),
+    // dans l'infobulle de chaque case — le libellé de la case EST son infobulle.
+    let hotkey = shortcuts.label(ShortcutAction::CombatSide);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+    design::switch(side)
+        .slot(CombatSide::Allies, format!("Alliés ({hotkey})"))
+        .icon(design::DsIcon::Allies)
+        .slot(CombatSide::Enemies, format!("Ennemis ({hotkey})"))
+        .icon(design::DsIcon::Enemies)
+        .width(switch_width)
+        .height(SWITCH_HEIGHT)
+        .log_name("combat.camp")
+        .show(&mut child);
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
@@ -886,7 +935,6 @@ fn show_side_row(
 /// y compris combat vide ou camp sans combattant — la grandeur se choisit alors aussi.
 fn show_leader_row(
     ui: &mut egui::Ui,
-    icons: &UiIcons,
     metric: &mut CombatMetric,
     shortcuts: &ShortcutBindings,
     total_damage: i64,
@@ -904,17 +952,29 @@ fn show_leader_row(
     // TOUT le reste du panneau (ce total, les barres, les pourcentages sur les portraits) — la
     // poser juste à côté du chiffre qu'elle qualifie se lit d'un seul coup d'œil.
     let center_y = row_rect.min.y + LEADER_PANEL_PADDING + inner_height / 2.0;
-    let metric_rect = egui::Rect::from_min_size(
+    let switch_width = switch_width(CombatMetric::ALL.len());
+    let switch_rect = egui::Rect::from_min_size(
         egui::pos2(
             row_rect.min.x + LEADER_PANEL_PADDING,
             center_y - SWITCH_HEIGHT / 2.0,
         ),
-        egui::vec2(
-            SWITCH_OPTION_WIDTH * CombatMetric::ALL.len() as f32,
-            SWITCH_HEIGHT,
-        ),
+        egui::vec2(switch_width, SWITCH_HEIGHT),
     );
-    paint_metric_switch(ui, metric_rect, metric, icons, shortcuts);
+    // Même convention d'infobulle que le switch de camp : le nom de la grandeur (ce qu'elle
+    // compte VRAIMENT, voir `CombatMetric::tooltip`) et sa combinaison.
+    let hotkey = shortcuts.label(ShortcutAction::CombatMetric);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+    let mut switch = design::switch(metric);
+    for option in CombatMetric::ALL {
+        switch = switch
+            .slot(option, format!("{} ({hotkey})", option.tooltip()))
+            .icon(option.icon());
+    }
+    switch
+        .width(switch_width)
+        .height(SWITCH_HEIGHT)
+        .log_name("combat.grandeur")
+        .show(&mut child);
 
     text::paint_outlined_text(
         ui,
@@ -925,57 +985,6 @@ fn show_leader_row(
         TEXT_COLOR,
         text::OUTLINE_FULL,
     );
-}
-
-/// Switch de grandeur (Dégâts / Armure / Soins) — même vocabulaire visuel et même gabarit
-/// d'option que `paint_side_switch` juste au-dessus (piste `TINT_MEDIUM` bordée de `TINT_STRONG`,
-/// option active remplie d'`ACCENT`, `SWITCH_OPTION_WIDTH` × `SWITCH_HEIGHT`) : les deux switches
-/// se lisent comme un seul bloc de contrôles, l'un sous l'autre, alignés à gauche du bandeau.
-///
-/// Icônes DU JEU (voir `CombatMetric::icon`), comme le sélecteur équivalent du dépôt web — le nom
-/// de la grandeur reste accessible à l'infobulle, exactement comme pour Alliés/Ennemis.
-fn paint_metric_switch(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    metric: &mut CombatMetric,
-    icons: &UiIcons,
-    shortcuts: &ShortcutBindings,
-) {
-    let painter = ui.painter();
-    painter.rect_filled(rect, 5.0, TINT_MEDIUM);
-    painter.rect_stroke(
-        rect,
-        5.0,
-        egui::Stroke::new(1.0, TINT_STRONG),
-        egui::StrokeKind::Inside,
-    );
-
-    let option_width = rect.width() / CombatMetric::ALL.len() as f32;
-    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`) —
-    // même convention que l'infobulle du switch Alliés/Ennemis juste au-dessus.
-    let metric_hotkey = shortcuts.label(ShortcutAction::CombatMetric);
-    for (i, option) in CombatMetric::ALL.into_iter().enumerate() {
-        let option_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.min.x + option_width * i as f32, rect.min.y),
-            egui::vec2(option_width, rect.height()),
-        );
-        if option == *metric {
-            ui.painter()
-                .rect_filled(option_rect.shrink(1.0), 4.0, ACCENT);
-        }
-        draw_centered_icon(ui, option_rect, option.icon(icons));
-        let response = ui
-            .interact(
-                option_rect,
-                ui.id().with(("combat-metric", i)),
-                egui::Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        design::tooltip(&response).text(format!("{} ({metric_hotkey})", option.tooltip()));
-        if response.clicked() {
-            *metric = option;
-        }
-    }
 }
 
 /// Texture résolue pour un combattant — voir `resolve_fighter_texture`. Distingue les deux
@@ -1193,81 +1202,11 @@ fn format_fr_thousands(n: i64) -> String {
 
 // La doc de `show_tooltip_above` tenait ici : quatre retours utilisateur sur le placement d'une
 // infobulle et l'ordre de ses replis. Elle est partie avec la fonction le 2026-09-11, dans
-// `design::tooltip`, qui la porte intégralement — y compris le cas du switch ci-dessous, seul
-// widget de l'interface à n'avoir RÉELLEMENT aucune place au-dessus de lui, et dont la réponse
-// n'est pas un repli mais `render_content::COMBAT_TOP_MARGIN`.
-
-/// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du
-/// dépôt web (`styles.css`), portée en dessin egui direct (peintre + zones cliquables) puisqu'il
-/// n'y a pas de CSS ici pour l'obtenir gratuitement. Peint à un `top_left` donné, SANS allocation
-/// via `ui.allocate_exact_size` (même logique que `paint_icon_button`) — depuis la refonte 11e
-/// retour, ce switch est logé dans la ligne leader (`show_leader_row`) à la place de l'ancien
-/// bouton lien externe, retour utilisateur explicite (« meilleur emplacement que là où est le
-/// switch actuellement ») ; l'ancienne rangée pleine largeur en tête de panneau (qui s'allouait
-/// elle-même son espace) a disparu.
-fn paint_side_switch(
-    ui: &mut egui::Ui,
-    top_left: egui::Pos2,
-    side: &mut CombatSide,
-    icons: &UiIcons,
-    shortcuts: &ShortcutBindings,
-) {
-    let option_size = egui::vec2(SWITCH_OPTION_WIDTH, SWITCH_HEIGHT);
-    let allies_rect = egui::Rect::from_min_size(top_left, option_size);
-    let enemies_rect =
-        egui::Rect::from_min_size(top_left + egui::vec2(option_size.x, 0.0), option_size);
-    let rect = allies_rect.union(enemies_rect);
-
-    let painter = ui.painter();
-    painter.rect_filled(rect, 5.0, TINT_MEDIUM);
-    painter.rect_stroke(
-        rect,
-        5.0,
-        egui::Stroke::new(1.0, TINT_STRONG),
-        egui::StrokeKind::Inside,
-    );
-    let highlight_rect = if *side == CombatSide::Allies {
-        allies_rect
-    } else {
-        enemies_rect
-    };
-    painter.rect_filled(highlight_rect.shrink(1.0), 4.0, ACCENT);
-
-    draw_centered_icon(ui, allies_rect, icons.allies());
-    draw_centered_icon(ui, enemies_rect, icons.enemies());
-
-    let allies_response = ui
-        .interact(
-            allies_rect,
-            ui.id().with("combat-side-allies"),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let side_hotkey = shortcuts.label(ShortcutAction::CombatSide);
-    design::tooltip(&allies_response).text(format!("Alliés ({side_hotkey})"));
-    let enemies_response = ui
-        .interact(
-            enemies_rect,
-            ui.id().with("combat-side-enemies"),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    design::tooltip(&enemies_response).text(format!("Ennemis ({side_hotkey})"));
-    if allies_response.clicked() {
-        *side = CombatSide::Allies;
-    }
-    if enemies_response.clicked() {
-        *side = CombatSide::Enemies;
-    }
-}
-
-fn draw_centered_icon(ui: &egui::Ui, rect: egui::Rect, texture: &egui::TextureHandle) {
-    let icon_rect = egui::Rect::from_center_size(
-        rect.center(),
-        egui::vec2(SWITCH_ICON_SIZE, SWITCH_ICON_SIZE),
-    );
-    egui::Image::new(texture).paint_at(ui, icon_rect);
-}
+// `design::tooltip`, qui la porte intégralement — y compris le cas du switch de camp, seul widget
+// de l'interface à n'avoir RÉELLEMENT aucune place au-dessus de lui, et dont la réponse n'est pas
+// un repli mais `render_content::COMBAT_TOP_MARGIN`. Les deux switches eux-mêmes
+// (`paint_side_switch`, `paint_metric_switch`, ex-`.icon-switch` du dépôt web porté en dessin
+// egui direct) sont partis le 2026-09-16 dans `design::switch` — voir doc de module.
 
 /// Le panneau Combat doit-il être affiché pour ce personnage ? — demande du 2026-09-13.
 ///

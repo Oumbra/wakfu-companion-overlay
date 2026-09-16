@@ -80,6 +80,15 @@
 //! - **L'état désactivé.** Aucune capture. Fonds atténués comme un bouton désactivé, glyphes
 //!   [`tokens::TEXT_DISABLED`] ; la case sélectionnée reste reconnaissable à son fond.
 //! - **Le milieu.** Voir plus haut : dérivé des extrémités.
+//! - **Une hauteur autre que 44.** `Switch::height` l'impose (le panneau Combat le tient à 26px,
+//!   la hauteur de son ancien switch peint à la main — décision utilisateur du 2026-09-16, « à
+//!   44 on a l'impression d'avoir compressé le switch »). Les 6px hauts et bas du 9-slice sont
+//!   recopiés tels quels, seul le corps s'étire : à 26px il reste 14px de dégradé au lieu de 32,
+//!   plus raide mais sans déformation des coins ni du liseré. Un glyphe de 16px y garde 5px
+//!   d'air.
+//! - **Des glyphes en couleurs.** Le jeu teinte ses glyphes (doré / gris) ; un glyphe
+//!   `DsIcon::native_color` est peint tel quel sur la case active et atténué
+//!   ([`tokens::ICON_NATIVE_DIM`]) ailleurs — voir la catégorie `couleur` de `design::icons`.
 
 use egui::emath::GuiRounding as _;
 use egui::{Align2, Color32, Response, Sense, Ui, Vec2, Widget};
@@ -106,6 +115,17 @@ impl SwitchState {
             SwitchState::Active | SwitchState::Hovered => tokens::SWITCH_ICON_ACTIVE,
             SwitchState::Idle => tokens::SWITCH_ICON_INACTIVE,
             SwitchState::Disabled => tokens::TEXT_DISABLED,
+        }
+    }
+
+    /// Teinte d'un glyphe **en couleurs** (`DsIcon::native_color`) : blanc — c'est-à-dire tel
+    /// quel — sur la case active ou survolée, atténué ailleurs. Le désactivé cumule les deux
+    /// atténuations (celle-ci et [`DISABLED_TINT`] sur le fond), comme un glyphe blanc y perd à
+    /// la fois sa teinte et son fond.
+    fn native_glyph_color(self) -> Color32 {
+        match self {
+            SwitchState::Active | SwitchState::Hovered => Color32::WHITE,
+            SwitchState::Idle | SwitchState::Disabled => tokens::ICON_NATIVE_DIM,
         }
     }
 }
@@ -154,6 +174,8 @@ pub struct Switch<'a, T> {
     slots: Vec<Slot<T>>,
     /// Largeur totale imposée — sinon [`Switch::natural_width`].
     width: Option<f32>,
+    /// Hauteur imposée — sinon [`tokens::SWITCH_HEIGHT`].
+    height: Option<f32>,
     enabled: bool,
     log_name: Option<String>,
 }
@@ -164,6 +186,7 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             selected,
             slots: Vec::new(),
             width: None,
+            height: None,
             enabled: true,
             log_name: None,
         }
@@ -191,10 +214,17 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
     }
 
     /// Largeur totale imposée. Les cases se la partagent à égalité, séparateurs déduits. Sans
-    /// elle, chaque case fait [`tokens::SWITCH_SLOT_WIDTH`] — les 88px du jeu pour deux cases. La
-    /// hauteur, elle, est toujours celle de la texture.
+    /// elle, chaque case fait [`tokens::SWITCH_SLOT_WIDTH`] — les 88px du jeu pour deux cases.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Hauteur imposée — sinon [`tokens::SWITCH_HEIGHT`], celle de la texture. Voir « une hauteur
+    /// autre que 44 » dans la doc de module : pas en dessous des 12px de marges figées du 9-slice
+    /// plus un glyphe.
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
         self
     }
 
@@ -238,7 +268,7 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
     pub fn desired_size(&self) -> Vec2 {
         Vec2::new(
             self.width.unwrap_or_else(|| self.natural_width()),
-            tokens::SWITCH_HEIGHT,
+            self.height.unwrap_or(tokens::SWITCH_HEIGHT),
         )
     }
 }
@@ -356,8 +386,12 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                 let painter = ui
                     .painter()
                     .with_clip_rect(slot_rect.intersect(ui.clip_rect()));
-                let color = state.glyph_color();
                 if let Some(icon) = slot.icon {
+                    let color = if icon.native_color() {
+                        state.native_glyph_color()
+                    } else {
+                        state.glyph_color()
+                    };
                     let drawn = glyph_size(design.icon_native_size(icon));
                     // Calé sur la grille de pixels : une case de 43px met son centre à une
                     // demi-position, et un glyphe de 14px peint à x + 0,5 s'étale sur deux
@@ -366,6 +400,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                         (slot_rect.center() - drawn * 0.5).round_to_pixels(ui.pixels_per_point());
                     design.paint_icon(&painter, egui::Rect::from_min_size(min, drawn), icon, color);
                 } else {
+                    let color = state.glyph_color();
                     let font = text::label_font(ui.ctx(), tokens::SWITCH_FONT_SIZE);
                     let galley = painter.layout_no_wrap(slot.label.clone(), font, color);
                     let pos = Align2::CENTER_CENTER
@@ -532,5 +567,24 @@ mod tests {
             .slot(1, "B")
             .width(200.0);
         assert_eq!(impose.desired_size(), Vec2::new(200.0, 44.0));
+        let mut selected = 0_u8;
+        let abaisse = Switch::new(&mut selected)
+            .slot(0, "A")
+            .slot(1, "B")
+            .width(70.0)
+            .height(26.0);
+        assert_eq!(abaisse.desired_size(), Vec2::new(70.0, 26.0));
+    }
+
+    #[test]
+    fn un_glyphe_en_couleurs_est_peint_tel_quel_puis_attenue() {
+        assert!(DsIcon::Allies.native_color());
+        assert!(!DsIcon::Male.native_color());
+        assert_eq!(SwitchState::Active.native_glyph_color(), Color32::WHITE);
+        assert_eq!(SwitchState::Hovered.native_glyph_color(), Color32::WHITE);
+        assert_eq!(
+            SwitchState::Idle.native_glyph_color(),
+            tokens::ICON_NATIVE_DIM
+        );
     }
 }

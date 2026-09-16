@@ -1,20 +1,24 @@
 //! Icônes d'interface embarquées — ce qui reste de textures chargées à la main dans ce crate.
 //!
-//! **Deux** familles, toutes hors du design system :
+//! **Deux** textures, toutes hors du design system :
 //!
-//! - **Switch Alliés/Ennemis** du panneau Combat (`header-allies.png`/`header-enemies.png`) : les
-//!   mêmes fichiers que le dépôt web, hash de cache retiré du nom (inutile sans navigateur).
-//! - **Switch Dégâts/Armure/Soins** du même panneau (`metric-damage.png`, `metric-armor.png`,
-//!   `metric-heal.png`, 14 sept. 2026) : les icônes DU JEU, celles-là mêmes que le web affiche sur
-//!   son sélecteur `app-entity-stat-tabs` (`icons/di.png`, `aptitudes/234.png`, `aptitudes/12.png`
-//!   du dépôt communautaire `Vertylo/wakassets`). Embarquées plutôt que chargées depuis le CDN
-//!   comme côté web : un élément d'interface permanent ne doit pas dépendre du réseau, et
-//!   `RemoteIconStore` est réservé aux icônes de monstres, que le catalogue seul peut résoudre.
 //! - **Portrait de repli pour un ennemi** (`unknown-entity.png`) : un ennemi n'a jamais de classe
 //!   résolue (`breed` non déterministe côté ennemi, voir `overlay_engine::class_breed`), donc
 //!   jamais de portrait de `class-avatars-sheet.png` — voir `portraits.rs`.
+//! - **Logo du projet** (`logo-purple.png`), voir `LOGO_BYTES`.
 //!
 //! Chargées une fois par fenêtre overlay, même logique que `PortraitAtlas`.
+//!
+//! **Retrait 2026-09-16 (switches du panneau Combat au design system).** Ce module portait aussi
+//! les cinq glyphes des deux switches du panneau Combat : Alliés/Ennemis (`header-allies.png`/
+//! `header-enemies.png`, les fichiers du dépôt web) et Dégâts/Armure/Soins (`metric-*.png`, les
+//! icônes DU JEU que le web affiche sur son sélecteur `app-entity-stat-tabs` — `icons/di.png`,
+//! `aptitudes/234.png`, `aptitudes/12.png` du dépôt communautaire `Vertylo/wakassets`, embarquées
+//! plutôt que chargées depuis le CDN : un élément d'interface permanent ne dépend pas du réseau,
+//! et `RemoteIconStore` est réservé aux icônes de monstres). Les deux switches sont désormais
+//! `design::switch`, et ces cinq glyphes vivent au registre `design::DsIcon` (catégorie
+//! `couleur`, `assets/design-system/icons/icon-allies.png`…), rognés à leur boîte d'encre. Les
+//! fichiers d'`assets/ui/` ont été supprimés.
 //!
 //! **Retrait 2026-09-11 (fin de la migration `design::item_slot`).** Ce module portait aussi les
 //! sept emplacements d'objet par rareté (`assets/items/Border-<RARETÉ>.webp`), chargés ici ET au
@@ -34,25 +38,13 @@
 //! correspondants ont été supprimés d'`assets/ui/` — deux d'entre eux étaient d'ailleurs, octet
 //! pour octet, ceux d'`assets/design-system/`.
 
-const ALLIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-allies.png");
-const ENEMIES_ICON_BYTES: &[u8] = include_bytes!("../assets/ui/header-enemies.png");
 const UNKNOWN_ENTITY_BYTES: &[u8] = include_bytes!("../assets/ui/unknown-entity.png");
-/// Voir la doc de module : les trois grandeurs du switch du panneau Combat, dans l'ordre du
-/// sélecteur web (dégâts, armure, soin).
-const METRIC_DAMAGE_BYTES: &[u8] = include_bytes!("../assets/ui/metric-damage.png");
-const METRIC_ARMOR_BYTES: &[u8] = include_bytes!("../assets/ui/metric-armor.png");
-const METRIC_HEAL_BYTES: &[u8] = include_bytes!("../assets/ui/metric-heal.png");
 /// Logo du projet — copie conforme de `public/logo-purple.png` du dépôt web (128×128). Sert de
 /// logo à la fenêtre de connexion (`panels::login`), d'icône de fenêtre (barre des tâches) et
 /// d'icône de zone de notification (voir `app_logo_rgba`).
 const LOGO_BYTES: &[u8] = include_bytes!("../assets/ui/logo-purple.png");
 
 pub struct UiIcons {
-    allies: egui::TextureHandle,
-    enemies: egui::TextureHandle,
-    metric_damage: egui::TextureHandle,
-    metric_armor: egui::TextureHandle,
-    metric_heal: egui::TextureHandle,
     unknown_entity: egui::TextureHandle,
     logo: egui::TextureHandle,
 }
@@ -60,11 +52,6 @@ pub struct UiIcons {
 impl UiIcons {
     pub fn load(ctx: &egui::Context) -> Self {
         Self {
-            allies: load_texture(ctx, "icon-header-allies", ALLIES_ICON_BYTES),
-            enemies: load_texture(ctx, "icon-header-enemies", ENEMIES_ICON_BYTES),
-            metric_damage: load_texture(ctx, "icon-metric-damage", METRIC_DAMAGE_BYTES),
-            metric_armor: load_texture(ctx, "icon-metric-armor", METRIC_ARMOR_BYTES),
-            metric_heal: load_texture(ctx, "icon-metric-heal", METRIC_HEAL_BYTES),
             unknown_entity: load_texture(ctx, "icon-unknown-entity", UNKNOWN_ENTITY_BYTES),
             logo: load_texture(ctx, "icon-logo", LOGO_BYTES),
         }
@@ -73,28 +60,6 @@ impl UiIcons {
     /// Logo du projet (voir `LOGO_BYTES`) — peint à 56 px par la fenêtre de connexion.
     pub fn logo(&self) -> &egui::TextureHandle {
         &self.logo
-    }
-
-    pub fn allies(&self) -> &egui::TextureHandle {
-        &self.allies
-    }
-
-    pub fn enemies(&self) -> &egui::TextureHandle {
-        &self.enemies
-    }
-
-    /// Icône de la grandeur mesurée par le panneau Combat — voir `panels::combat::CombatMetric`,
-    /// seul appelant. L'ordre des arguments n'existe pas : c'est le panneau qui dit laquelle.
-    pub fn metric_damage(&self) -> &egui::TextureHandle {
-        &self.metric_damage
-    }
-
-    pub fn metric_armor(&self) -> &egui::TextureHandle {
-        &self.metric_armor
-    }
-
-    pub fn metric_heal(&self) -> &egui::TextureHandle {
-        &self.metric_heal
     }
 
     /// Portrait de repli pour un ennemi (jamais de classe, voir doc de module) — dessiné à la même
