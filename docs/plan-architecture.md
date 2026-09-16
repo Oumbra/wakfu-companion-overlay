@@ -1932,19 +1932,36 @@ C'est la « bande coup d'œil » du web (`session-recap.component.html`, `.recap
 plus : le site déplie sous elle l'XP par personnage, la ventilation des kamas, le butin et les
 accordéons par donjon — de la consultation APRÈS coup, pas du temps réel par-dessus un jeu.
 
-**La durée est celle de l'overlay, jamais celle du fichier** — décision explicite de
-l'utilisateur : « c'est par rapport à la durée d'uptime de l'overlay [...] plutôt que de se baser
-sur le fichier ». Le web fait l'inverse (`StatsStoreService.accumulateSessionDuration` : somme des
-écarts entre lignes horodatées, coupée au-delà de cinq minutes de silence), et ça ne convient pas
-ici : un `wakfu.log` porte plusieurs sessions de jeu et l'overlay le relit en entier à son
-démarrage, la durée annoncerait donc du temps de jeu d'avant-hier. Le chrono part au lancement du
-processus (`App::started_at`) et avance tant qu'il tourne.
+**La session, c'est ce que l'overlay a vu du jeu** (2026-09-17, `overlay_ui::recap_session` —
+voir sa doc de module pour le détail). Le premier jour, la durée était le temps d'exécution du
+processus (`App::started_at`) et les quatre autres chiffres couvraient tout le fichier relu — un
+écart assumé faute d'avoir tranché ce qu'est « la session ». L'utilisateur l'a tranché le
+lendemain, en cinq décisions :
 
-**Écart assumé, à connaître avant de croire à un bug** : les quatre autres chiffres, eux, couvrent
-tout le fichier relu (`overlay_engine::SessionTotals`, alimenté par le rattrapage initial comme par
-les lignes lues en direct). Un overlay lancé au milieu d'une partie affiche l'XP de toute la partie
-en face d'une durée qui démarre à zéro. Les aligner demanderait de trancher ce qu'est « la
-session » côté moteur : un autre chantier, et une décision qui n'a pas été prise.
+- **Le chrono avance tant qu'une fenêtre de jeu est à l'écran** — le balayage de `sync_windows`,
+  celui qui journalise « [fenêtre de jeu] X trouvée / fermée ». Plus aucune fenêtre : pause. Une
+  seule session même en multi-compte. Un saut d'horloge de plus de deux minutes entre deux ticks
+  (machine en veille) n'est pas du jeu et vaut une pause.
+- **Reprise après une pause tolérée** : au retour d'une fenêtre (overlay resté allumé ou
+  relancé), la pause se mesure contre le dernier instant actif ; en deçà de la tolérance, chrono
+  et compteurs continuent, au-delà tout repart de zéro. La tolérance est un réglage local
+  (section « Recap », case « Reprendre la session après une pause de moins de … min », pas
+  numérique, **60 min par défaut**, `config::OverlayConfig::recap_resume`).
+- **Les compteurs suivent le chrono** : le moteur garde ses totaux de fichier (l'historique en a
+  besoin) ; la session retient un point de référence et affiche `session + (moteur − référence)`.
+  Conséquence acceptée : overlay éteint mais jeu ouvert, ni le temps ni les gains de ce trou
+  n'entrent dans la session — « ce que l'overlay a vu », une seule règle pour les deux.
+- **Persistée** dans `recap-session.json` à côté des `fight-*.json` (début, dernier instant actif,
+  secondes cumulées, totaux pliés, nombre de reprises), écrite à chaque pause et toutes les 30 s.
+- **Remise à zéro** par le glyphe `Undo` au bout de la ligne de la durée, **après confirmation** :
+  la boîte du design system sous un voile qui couvre toute la fenêtre de jeu, overlays compris
+  (`OverlayKind::RecapReset`, une fenêtre OS de la taille de celle du jeu, focalisable pour
+  qu'Échap réponde « Non », réaffirmée en dernier dans `sync_topmost` pour rester devant). Le
+  bloc ne fait que remonter l'intention (`RenderOutcome::recap_reset_requested`).
+
+L'infobulle de la durée dit « Session depuis HH:MM », et « reprise N fois » sur une seconde ligne
+dès la première reprise. Chaque décision de la session laisse une ligne `[session]` au journal
+avec ce qui l'a produite (pause mesurée, tolérance, ce qui est conservé ou effacé).
 
 **Ce que le moteur a gagné** : `SessionTotals::challenges_passed`/`challenges_failed`, les
 challenges de TOUTE la session — `FightSnapshot` ne comptait que ceux d'un combat, et
@@ -1961,8 +1978,10 @@ résolu de `fightId`, miroir exact du web.
 - **Largeur pilotée par le contenu** : la bande mesure ce qu'elle occupe et le renvoie
   (`RenderOutcome::recap_width`), l'hôte y ajuste la fenêtre OS — même raison que le Suivi, une
   fenêtre plus large que sa bande capte les clics sur du vide en mode interactif.
-- **Infobulles en dessous** (`TooltipSide::Below`, `RECAP_TOOLTIP_RESERVE`) : la bande est collée en
-  haut, il n'y a rien au-dessus d'elle — la règle de §9.1 octies, à l'identique.
+- **Infobulles au-dessus** (`TooltipSide::Above`, `RECAP_TOOLTIP_RESERVE` en marge HAUTE du
+  contenu, la fenêtre OS ancrée d'autant plus haut) — elles se sont ouvertes en dessous une
+  journée ; la durée, dernière ligne, retombait déjà au-dessus faute de place, et c'est ce rendu
+  qui a plu (2026-09-16 tard). Textes de deux mots : la fenêtre fait 206 px.
 - **Le chrono se redessine tout seul** : `request_repaint_after(1 s)` depuis le panneau. Cette
   architecture ne rend une frame que lorsque quelque chose change (§6.1) ; la durée, elle, change
   sans que rien d'autre ne bouge.
@@ -1977,8 +1996,11 @@ résolu de `fightId`, miroir exact du web.
   `config.toml` écrit avant ce champ). Décochée, la fenêtre est **masquée, jamais détruite** —
   `App::sync_panel_visibility`, qui porte désormais Combat ET Récap, même politique.
 
-**Capture** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, durée fixée à 1 h 23 min 45 s — elle
-n'existe pas dans le fichier par construction).
+**Captures** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, paire Kamas/XP empilée),
+`recap_session_ordinaire` (XP ramenée, trois lignes), `recap_tooltip_kamas_au_dessus`,
+`recap_tooltip_duree_reprises`, `recap_tooltip_remise_a_zero`, `recap_confirmation_remise_a_zero` —
+chrono et heure de début fixés (1 h 23 min 45 s, 20:12), ils n'existent pas dans le fichier par
+construction.
 
 ### 9.1 novodecies Démarrage actif par défaut, bouton « Fermer l'overlay » (2026-09-16)
 
