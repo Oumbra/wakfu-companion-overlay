@@ -2938,9 +2938,10 @@ design::switch(&mut metric)
 | Paramètre | Valeurs | Défaut |
 | --- | --- | --- |
 | `slot(valeur, libellé)` | une case, dans l'ordre d'affichage — **deux au moins** | — |
+| `variant` | `Frame` (le cadre du jeu) ou `FirstPlan` (le socle de bouton icône de premier plan) | `Frame` |
 | `icon` | pictogramme de **la dernière case déclarée** ; remplace le libellé au rendu, qui devient l'infobulle | libellé peint |
-| `width` | largeur totale, partagée à égalité entre les cases | `SWITCH_SLOT_WIDTH` × n + 2 × (n − 1) — 88 pour deux |
-| `height` | hauteur imposée ; le 9-slice n'étire que le corps des cases (marges figées 6 + 6) | `SWITCH_HEIGHT` = 44 |
+| `width` | largeur totale, partagée à égalité entre les cases | largeur native de la variante × n + 2 × (n − 1) — 88 en `Frame`, 74 en `FirstPlan`, pour deux |
+| `height` | hauteur imposée ; le 9-slice n'étire que le corps des cases (marges figées 6 + 6) | `SWITCH_HEIGHT` = 44 en `Frame`, `SWITCH_FIRST_PLAN_SIZE` = 36 en `FirstPlan` |
 | `scale` | **réduction homothétique** de tout le switch — cases, séparateur, liseré, biseaux, glyphes — chaque case en un quad filtré, sans 9-slice ; dimensions arrondies au pixel | `1.0` |
 | `enabled` | le switch **entier** | `true` |
 | `preview_state` | `Idle` / `Hovered` / `Active` / `Disabled`, sur la dernière case — **galerie et captures uniquement** | état réel |
@@ -3040,6 +3041,46 @@ le glyphe seul sans toucher au fond — inventé faute de capture, et faux.
   luminance, les silhouettes ne se distinguaient plus que par les bras et les cœurs devenaient
   des taches (planche d'essai du 2026-09-16).
 
+### `SwitchVariant::FirstPlan` — le socle de bouton icône du jeu (2026-09-16, plus tard le même jour)
+
+Demande utilisateur, une fois la variante `Frame` en place sur les deux switches du panneau
+Combat : **« permettre au composant switch la texture `button-icon-first-plan[-hover].png` »**, puis
+l'appliquer aux switches Alliés/Ennemis et Dégâts/Armure/Soins.
+
+Un paramètre du composant existant, **pas un second composant** : c'est la réponse que le contrat
+impose à « il me faut ce contrôle, mais dans une autre matière ». Et ce n'est pas un habillage de
+plus par goût — ces deux switches sont les seuls de l'overlay à flotter **par-dessus le jeu**, à
+côté des boutons icône du carré de contrôle du Suivi, et non dans une fenêtre du design system. Le
+cadre kaki du sélecteur de genre y est un meuble d'interface posé sur la scène ; le socle de
+premier plan est la matière que le jeu emploie à cet endroit.
+
+| | `Frame` | `FirstPlan` |
+| --- | --- | --- |
+| Fond d'une case | six textures de cadre, selon sa position | **un socle carré**, le même pour toutes |
+| Gouttière | liseré `SWITCH_BORDER` + séparateur `SWITCH_SEPARATOR` peints dedans | **rien** — chaque socle porte ses quatre coins |
+| Case native | 43 × 44 | **36 × 36** (`SWITCH_FIRST_PLAN_SIZE` = `ICON_BUTTON_SIZE`) |
+| Glyphe | sa taille native sous 16 px (`SWITCH_ICON_SIZE`) | la grille du bouton icône (`ICON_BUTTON_CONTENT`, 18 sur 36) |
+| Glyphe actif / survolé / repos | doré / doré / gris chaud | **blanc** / or `ICON_TINT_HOVER` / gris froid `ICON_TINT` |
+
+**Aucune texture nouvelle** : `button-icon-first-plan.png` et son `-hover` sont au manifeste depuis
+`design::icon_button` (36 × 36, `ICON_BUTTON_SLICE`, marges figées de 6). Aucun jeton mesuré non
+plus — la variante emprunte ceux du bouton icône, c'est tout l'intérêt de partager une texture.
+Deux alias les nomment pour ce composant : `SWITCH_FIRST_PLAN_SIZE` et
+`SWITCH_FIRST_PLAN_ICON_ACTIVE`.
+
+**Le piège est le même que dans `Frame`, et que dans `design::tabs`** : le jeu n'a qu'une texture
+survolée, et c'est elle qui sert de case active. L'actif et le survolé partagent donc leur socle,
+et **seule la teinte du glyphe les distingue**. Sur un glyphe monochrome : blanc (actif), or
+(survolé), gris froid (repos). Sur un glyphe **en couleurs** — les cinq du panneau Combat — une
+teinte egui multiplie, donc le blanc est sa couleur vraie et l'or le dorerait : sa case active le
+peint tel quel, **toutes les autres l'atténuent** (`ICON_NATIVE_DIM`), survol compris. Là, c'est le
+socle éclairci qui porte seul le survol, et la couleur pleine reste le signal de la case choisie.
+
+**Ce que le panneau Combat y gagne** : plus d'échelle à régler. `SWITCH_SCALE` (36/44, la réduction
+homothétique du cadre) a disparu — la variante est déjà à 36, sa taille native. Les switches passent
+de 72 et 109 px à **74 et 112** (deux pixels de plus par gouttière conservée), la hauteur ne bouge
+pas d'un pixel, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET` en dérivent sans être touchés.
+
 ### Vérification
 
 Planche dédiée `design_gallery_switch.png` (la galerie principale est au plafond des 8192 px) :
@@ -3047,7 +3088,11 @@ les deux états du jeu à 88 px, le survol (comparé à sa capture, ci-dessus) e
 22 px, le repli à libellés, et deux switches à trois cases (libellés à 260 px ; pictogrammes à la
 largeur native de 133 px, milieu actif, dernière survolée), et les deux switches du panneau Combat
 à l'échelle 36/44 (glyphes en couleurs, dernière case survolée, puis désactivé), suivis du même
-switch de camp à 72 × 36 par `height` pour comparer les deux voies. Comparaison au jeu à la même
+switch de camp à 72 × 36 par `height` pour comparer les deux voies. Deux rangées de plus pour
+`SwitchVariant::FirstPlan` : les deux switches du panneau Combat tels qu'ils sont appelés (74 et
+112 px, une case survolée, un switch désactivé), et les **quatre états côte à côte** sur un switch
+portant un glyphe monochrome et un glyphe en couleurs — la seule disposition qui permette de juger
+le couple actif / survolé, puisqu'ils partagent leur socle. Comparaison au jeu à la même
 taille : écart moyen 4,4 et 3,4/255 sur les deux états — le cerne sombre des glyphes du jeu,
 absorbé par la teinte comme sur toutes les icônes, fait l'essentiel des pixels en écart. Boîtes
 d'encre : ♂ au pixel près, ♀ décalé de 1 px (le jeu le pose lui-même 1 px à droite du centre de
@@ -3069,3 +3114,7 @@ sa case de 42).
   Les cinq glyphes sont entrés au registre `DsIcon` (`Allies`, `Enemies`, `MetricDamage`,
   `MetricArmor`, `MetricHeal`, catégorie `couleur`), et les fichiers d'`assets/ui/` qu'`UiIcons`
   chargeait ont été supprimés.
+  **Puis, le même jour** : `variant(SwitchVariant::FirstPlan)` sur les deux (demande utilisateur,
+  voir la section de la variante ci-dessus). `SWITCH_SCALE` disparaît — la variante est native à
+  36 px —, les switches passent à 74 et 112 px, tout le reste de la mise en page est dérivé et ne
+  bouge pas.
