@@ -425,6 +425,67 @@ pub const SWITCH_ICON_SIZE: f32 = 16.0;
 /// barre de premier plan.
 pub const SWITCH_FIRST_PLAN_SIZE: f32 = ICON_BUTTON_SIZE;
 
+/// Liseré de la case CHOISIE en variante premier plan — **`#126068`, la teinte la plus vive de
+/// `button-icon-first-plan-hover.png`** (relevé de sa palette, 2026-09-16 : 10 px de la texture).
+///
+/// Il devient le signal de la case choisie depuis que le survol allume l'icône ET le socle : sans
+/// lui, une case survolée et la case choisie sont identiques. Ni or, ni gris — **une couleur de la
+/// texture elle-même**, choisie sur rendu comparatif des six teintes de son corps (artefact du
+/// 2026-09-16, décision utilisateur).
+///
+/// Le socle sélectionné est un **dégradé**, clair en haut (`#428087`) et sombre en bas
+/// (`#18383e`) : une teinte prise dans sa moitié basse (`#164047`, essayée) se dissout dans le
+/// haut de la case. `#126068` tient sur toute la hauteur.
+///
+/// **Il remplace la bordure du socle, il ne s'y ajoute pas** : même épaisseur
+/// ([`SWITCH_FIRST_PLAN_RIM_WIDTH`]), même arrondi ([`SWITCH_FIRST_PLAN_RIM_ROUNDING`]), posé SUR
+/// elle (retrait nul). Peint après toutes les cases, il recouvre aussi les bordures des voisines
+/// qui chevauchent la case choisie.
+pub const SWITCH_FIRST_PLAN_RIM: Color32 = Color32::from_rgb(0x12, 0x60, 0x68);
+
+/// Épaisseur du liseré de la case choisie — **2 px, celle de la bordure de la texture**, mesurée :
+/// sur `button-icon-first-plan.png`, les colonnes x 0–1 et les lignes y 0–1 sont à `#141519`, le
+/// corps commence en 2. Un liseré d'un pixel laisserait la moitié de la bordure noire visible.
+pub const SWITCH_FIRST_PLAN_RIM_WIDTH: f32 = 2.0;
+
+/// Opacité du liseré de la case choisie — **85 % (216/255)**, choisie sur rendu comparatif
+/// (100 / 85 / 70 %) : elle retire au trait ce qu'il a de tranchant sans l'effacer. Décision
+/// utilisateur du 2026-09-16.
+pub const SWITCH_FIRST_PLAN_RIM_ALPHA: u8 = 216;
+
+/// Opacité du halo d'un pixel peint juste à l'intérieur du liseré, de la même couleur —
+/// **35 % (90/255)**, choisie sur rendu comparatif (0 / 25 / 35 / 50 / 70 %).
+///
+/// Il adoucit la marche entre le liseré et le corps du socle. Au-delà de 50 %, il cesse d'être un
+/// halo : il se lit comme un liseré de trois pixels.
+pub const SWITCH_FIRST_PLAN_HALO_ALPHA: u8 = 90;
+
+/// Épaisseur du halo : **un pixel**, pas plus — demande utilisateur explicite.
+pub const SWITCH_FIRST_PLAN_HALO_WIDTH: f32 = 1.0;
+
+/// Arrondi du halo : celui du liseré moins son épaisseur, donc quasi nul ; 1 garde un coin adouci
+/// plutôt qu'un angle droit sous l'arrondi du liseré.
+pub const SWITCH_FIRST_PLAN_HALO_ROUNDING: u8 = 1;
+
+/// Arrondi du liseré de la case choisie — **2, celui des coins de la texture**, mesuré sur le
+/// coin haut-gauche de `button-icon-first-plan.png` : l'alpha y vaut 24/255 en (0,0), 32 et 42 sur
+/// ses deux voisins, puis 236 en (0,2). Un liseré à angle droit dépasserait du socle dans les
+/// quatre coins.
+pub const SWITCH_FIRST_PLAN_RIM_ROUNDING: u8 = 2;
+
+/// Chevauchement de deux socles voisins en variante premier plan (2026-09-16).
+///
+/// Chaque socle porte un liseré de 2 px : deux socles côte à côte en alignent quatre, plus la
+/// gouttière du fond, soit 6 px de sombre entre deux glyphes (retour utilisateur : « ça fait comme
+/// s'il y avait une bordure de 2 pixels », là où le jeu n'en montre qu'une, fine). Les faire se
+/// chevaucher superpose les deux liserés en un seul.
+pub const SWITCH_FIRST_PLAN_OVERLAP: f32 = 2.0;
+
+/// Trait peint sur la jointure de deux socles qui se chevauchent. Un gris sombre
+/// mais franchement plus clair que le fond du socle (`#141519`) : superposés, les deux liserés
+/// noirs ne se distinguent plus de lui.
+pub const SWITCH_FIRST_PLAN_SEAM: Color32 = Color32::from_rgb(0x4A, 0x4E, 0x54);
+
 /// Glyphe de la case CHOISIE en variante premier plan — **blanc pur**, donc la couleur vraie du
 /// fichier.
 ///
