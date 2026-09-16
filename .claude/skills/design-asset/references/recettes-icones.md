@@ -192,3 +192,11 @@ résidu qui monte (texture de bouton, second ton dans le glyphe) renvoie vers `i
 Ne pas en faire la voie par défaut des glyphes sans socle : ♂/♀ et le second lot sortent
 correctement par `icon`. Comparer sur la planche ; le symptôme qui déclenche `demix_flat` est un
 trait fin ou une rangée de pixels **manquants** par rapport à la source, pas un halo.
+
+## `icon-sword` (2026-09-16) — même cas qu'`icon-edit`
+
+Épée blanche (255,255,255) capturée à même le décor uni (27,52,58) en 38 × 39 px, glyphe de
+24 × 25 natifs, pas de bouton porteur (`analyze` : composant de la taille du glyphe). La voie
+`icon` par défaut écrase la frange d'antialiasing (pointe de la lame 47 → 1, garde 58 → 15, pommeau
+28 → 0) : mêmes pixels manquants qu'`icon-edit`. Retenu `demix_flat` sur la boîte `9,9,33,34` du
+`glyph_bbox` — `residual_max` 1,7 sur 238 pixels, la frange est conservée à l'unité près.
