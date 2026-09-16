@@ -789,10 +789,13 @@ mod linux_main {
                     rect.client_top + GAME_TOP_MARGIN_PX,
                 ),
                 // Récap : aligné sur les boutons du jeu, sous eux et leurs infobulles — voir
-                // `GAME_RECAP_*_MARGIN_PX` et `main.rs::App::anchor_position`.
+                // `GAME_RECAP_*_MARGIN_PX` et `main.rs::App::anchor_position` ; la fenêtre
+                // commence `RECAP_TOOLTIP_RESERVE` px au-dessus du bloc (marge haute des
+                // infobulles), le bloc lui-même reste à `GAME_RECAP_TOP_MARGIN_PX`.
                 OverlayKind::Recap => PhysicalPosition::new(
                     rect.left + GAME_RECAP_EDGE_MARGIN_PX,
-                    rect.client_top + GAME_RECAP_TOP_MARGIN_PX,
+                    rect.client_top + GAME_RECAP_TOP_MARGIN_PX
+                        - render_content::RECAP_TOOLTIP_RESERVE as i32,
                 ),
                 // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
                 // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent

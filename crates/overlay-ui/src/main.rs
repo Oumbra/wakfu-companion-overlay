@@ -260,6 +260,10 @@ const GAME_TOP_MARGIN_PX: i32 = 28;
 /// remplacées par ce relevé au pixel.
 ///
 /// À corriger sur retour d'écran si une infobulle du jeu sur deux lignes passait dessous.
+///
+/// C'est l'ordonnée du **bloc**, pas de sa fenêtre OS : celle-ci commence
+/// `render_content::RECAP_TOOLTIP_RESERVE` px plus haut, pour que les infobulles des cases de la
+/// première ligne, qui s'ouvrent au-dessus, aient où s'afficher (voir `anchor_position`).
 const GAME_RECAP_TOP_MARGIN_PX: i32 = 112;
 /// Marge, en pixels physiques, entre le bord gauche de la fenêtre de jeu et le bord gauche du
 /// bloc Récap — **le même écart que les boutons du jeu** (demande utilisateur 2026-09-16 au soir),
@@ -1333,10 +1337,13 @@ impl App {
             // leurs infobulles — « en haut à gauche, en dessous des boutons du jeu » (2026-09-16).
             // Voir `GAME_RECAP_EDGE_MARGIN_PX`/`GAME_RECAP_TOP_MARGIN_PX` pour d'où viennent ces
             // pixels, et `client_top` (pas `top`) pour la même raison que le Suivi : le client
-            // dessine sa fausse barre de titre dans sa propre zone cliente.
+            // dessine sa fausse barre de titre dans sa propre zone cliente. La fenêtre commence
+            // `RECAP_TOOLTIP_RESERVE` px au-dessus du bloc — la marge haute que `paint_content`
+            // lui donne pour ses infobulles ; le BLOC, lui, reste à `GAME_RECAP_TOP_MARGIN_PX`.
             OverlayKind::Recap => PhysicalPosition::new(
                 rect.left + GAME_RECAP_EDGE_MARGIN_PX,
-                rect.client_top + GAME_RECAP_TOP_MARGIN_PX,
+                rect.client_top + GAME_RECAP_TOP_MARGIN_PX
+                    - render_content::RECAP_TOOLTIP_RESERVE as i32,
             ),
             // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
             // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent ancrés
@@ -1381,7 +1388,7 @@ impl App {
             // Récap : largeur FIXE, celle de la rangée de boutons du jeu (`panels::recap::WIDTH`) ;
             // la hauteur naît à trois lignes et suit le contenu (voir le redimensionnement dans
             // `RedrawRequested`, même mécanique que le Suivi), plus la réserve des infobulles,
-            // qui s'ouvrent en dessous.
+            // qui s'ouvrent au-dessus (marge haute du contenu).
             OverlayKind::Recap => (
                 panels::recap::WIDTH as f64,
                 panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,

@@ -75,16 +75,29 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// d'interface du jeu) plus les 6 px de marge interne — 34 px au lieu de 62.
 pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
 
-/// Espace réservé **sous** la bande Récap (`OverlayKind::Recap`, 2026-09-16) pour ses cinq
-/// infobulles — exactement le même besoin, la même valeur et la même raison que
-/// [`WATCHLIST_TOOLTIP_RESERVE`] : la bande est collée au bord haut de la fenêtre de jeu, ses
-/// infobulles s'ouvrent donc en dessous (`TooltipSide::Below`, voir `panels::recap::paint_cell`)
-/// et il faut que la fenêtre OS descende assez bas pour les contenir.
+/// Espace réservé **au-dessus** du bloc Récap (`OverlayKind::Recap`) pour ses cinq infobulles,
+/// qui s'ouvrent au-dessus de la case survolée (`TooltipSide::Above`, voir
+/// `panels::recap::paint_cell`) — le même principe que [`COMBAT_TOP_MARGIN`] : sans place là-haut,
+/// `RectAlign::TOP` retombe sur un repli en dessous.
 ///
-/// Un seul jeton partagé aurait été tentant ; deux constantes distinctes disent que ce sont deux
-/// panneaux dont les infobulles peuvent diverger (plusieurs lignes ici un jour, une seule là-bas),
-/// comme `COMBAT_TOP_MARGIN` reste séparée bien qu'elle mesure la même chose retournée.
-pub const RECAP_TOOLTIP_RESERVE: f32 = 28.0;
+/// **Ce fut une réserve BASSE** (28 px, le soir du 2026-09-16, infobulles `Below`) : le bloc est
+/// posé sous les boutons du jeu, une infobulle ouverte au-dessus de sa première ligne recouvre
+/// donc la zone où le jeu ouvre les siennes, et le Suivi venait de faire le chemin inverse. Retour
+/// utilisateur le même soir : « toutes les infobulles au-dessus des éléments, à l'image de la
+/// durée » — la durée, dernière ligne, retombait déjà au-dessus faute de place en dessous, et
+/// c'est ce rendu-là qui a plu. La réserve change donc de côté ; c'est une marge HAUTE du contenu
+/// (voir `paint_content`), et l'hôte remonte l'ancrage de la fenêtre d'autant
+/// (`main.rs::GAME_RECAP_TOP_MARGIN_PX` reste l'ordonnée du BLOC, pas de la fenêtre) pour que le
+/// bloc ne bouge pas d'un pixel.
+///
+/// Valeur relevée sur la capture `recap_tooltip_kamas_au_dessus` (`overlay-testkit`) : une
+/// infobulle d'une ligne (« Kamas gagnés ») fait 33 px de haut, plus `design::tokens::TOOLTIP_GAP`
+/// (5 px) d'écart avec la case, soit 38 px au-dessus de la première ligne ; `panels::recap::
+/// PADDING_Y` (6 px) en fournit déjà une partie, 32 px complètent, et 4 px de garde font 36.
+///
+/// Un seul jeton partagé avec [`WATCHLIST_TOOLTIP_RESERVE`] aurait été tentant ; deux constantes
+/// distinctes disent que ce sont deux panneaux dont les infobulles divergent (de côté, déjà).
+pub const RECAP_TOOLTIP_RESERVE: f32 = 36.0;
 
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
@@ -547,13 +560,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,
-        // Récap : collé au coin haut-gauche de sa fenêtre, sans la moindre marge — la bande peint
-        // son propre fond et se place elle-même (voir `panels::recap::show`), et la place pour ses
-        // infobulles est prise SOUS elle, dans la hauteur de fenêtre
-        // ([`RECAP_TOOLTIP_RESERVE`]), jamais en la décalant vers le bas. Même arbitrage que le
-        // Suivi, et pour le même retour utilisateur : une bande qui flotte loin du bord du jeu
-        // dérange.
-        OverlayKind::Recap => egui::Margin::ZERO,
+        // Récap : calé à gauche de sa fenêtre, et SEUL le haut gagne une marge, celle des
+        // infobulles ([`RECAP_TOOLTIP_RESERVE`], même principe que `COMBAT_TOP_MARGIN`) — le bloc
+        // peint son propre fond et se place lui-même sous cette marge (voir `panels::recap::show`).
+        // Cette marge ne décale PAS le bloc dans le jeu : l'hôte ancre la fenêtre d'autant plus
+        // haut (voir `main.rs::anchor_position`), le bloc reste à `GAME_RECAP_TOP_MARGIN_PX`.
+        OverlayKind::Recap => egui::Margin {
+            left: 0,
+            right: 0,
+            top: RECAP_TOOLTIP_RESERVE as i8,
+            bottom: 0,
+        },
         // La fenêtre de connexion peint sa carte jusqu'aux bords de sa fenêtre OS (fond
         // translucide, anneau animé sur le pourtour) — voir `panels::login`.
         OverlayKind::Login => egui::Margin::ZERO,

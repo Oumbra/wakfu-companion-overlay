@@ -433,6 +433,15 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
 
     harness.run();
     harness.snapshot("recap_session_ordinaire");
+
+    // Survol de la case Kamas (moitié gauche de la première ligne : le bloc est à (8, 8 + 36),
+    // sous la marge haute `RECAP_TOOLTIP_RESERVE` ; sa moitié gauche va de x = 18 à 111, la ligne
+    // de y = 50 à 72) : l'infobulle s'ouvre AU-DESSUS de la case, dans cette marge — et tient dans
+    // les 206 px de la fenêtre OS du bloc, c'est pour ça qu'elle ne dit que « Kamas gagnés »
+    // (voir `panels::recap::Cell`).
+    harness.hover_at(egui::pos2(64.0, 61.0));
+    harness.run();
+    harness.snapshot("recap_tooltip_kamas_au_dessus");
 }
 
 #[test]

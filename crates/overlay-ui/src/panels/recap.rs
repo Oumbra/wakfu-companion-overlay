@@ -18,19 +18,21 @@
 //!           DUREE
 //! ```
 //!
-//! Deux colonnes calées à gauche (kamas au-dessus des combats, XP au-dessus des challenges), et la
-//! durée seule sur une troisième ligne, centrée sur la largeur du bloc. Chaque case garde son
-//! glyphe à gauche de son chiffre ; **les glyphes restent blancs**, seul le chiffre porte une
-//! couleur : or pour les kamas, accent pour l'XP et la durée, vert/rouge pour les deux cases
-//! « gagné − perdu ». (La version du soir teintait le glyphe comme son chiffre — retirée sur
-//! retour utilisateur : « les icônes doivent être en blanc ».)
+//! Les deux premières lignes sont coupées en **deux moitiés égales**, et chaque case est centrée
+//! dans sa moitié (« comme le système flex », retour utilisateur du 2026-09-16 tard) : kamas et
+//! combats dans la moitié gauche, XP et challenges dans la droite. La durée, seule sur la
+//! troisième ligne, est centrée sur toute la largeur. Chaque case garde son glyphe à gauche de son
+//! chiffre ; **les glyphes restent blancs**, seul le chiffre porte une couleur : or pour les
+//! kamas, accent pour l'XP et la durée, vert/rouge pour les deux cases « gagné − perdu ». (La
+//! version du soir teintait le glyphe comme son chiffre — retirée sur retour utilisateur : « les
+//! icônes doivent être en blanc ».)
 //!
 //! **Largeur FIXE** ([`WIDTH`]) : le bloc fait exactement la largeur de la rangée de boutons du
 //! jeu sous laquelle il est posé (Menu … Boutique), bord à bord — c'est ce que l'utilisateur a
 //! tracé sur sa capture. La largeur ne suit donc plus les chiffres ; c'est la HAUTEUR qui bouge :
-//! quand une ligne de deux cases ne tient plus dans cette largeur (des milliards d'XP, des
-//! millions de kamas), ses deux cases s'empilent l'une au-dessus de l'autre, calées à gauche, et
-//! le bloc gagne une ligne — plutôt que deux chiffres qui se chevauchent. Voir [`show`].
+//! dès qu'une case déborde de sa moitié (des millions d'XP, des millions de kamas), les deux cases
+//! de sa ligne s'empilent l'une au-dessus de l'autre, chacune centrée sur toute la largeur, et le
+//! bloc gagne une ligne — plutôt que deux chiffres qui se chevauchent. Voir [`show`].
 //!
 //! **Une section « Recap » commande son affichage** (onglet « Paramètres » de la fenêtre Options,
 //! juste après « Combat ») — voir `panels::feature_switch::FeatureToggles::recap`, active par
@@ -113,11 +115,6 @@ const ICON_SIZE: f32 = tokens::SWITCH_ICON_SIZE;
 /// Écart entre le glyphe d'une cellule et son chiffre.
 const ICON_GAP: f32 = 6.0;
 
-/// Gouttière entre les deux colonnes de la grille. Deux fois l'écart glyphe/chiffre — assez pour
-/// que le dernier chiffre de la colonne de gauche ne se lise pas comme le début de la case de
-/// droite, sans étirer le bloc.
-const COLUMN_GAP: f32 = 18.0;
-
 /// Rayon d'angle du fond translucide — celui du carré de contrôle du Suivi
 /// (`panels::watchlist::PANEL_BACKDROP_ROUNDING`), la même bande posée sur le même jeu.
 const BACKDROP_ROUNDING: f32 = 6.0;
@@ -161,6 +158,12 @@ struct Segment {
 
 /// Une case du bloc : son glyphe (toujours peint en [`TEXT_COLOR`]), ce qu'elle affiche, et ce
 /// que son infobulle en dit.
+///
+/// **Infobulles de deux ou trois mots, pas une phrase** (retour utilisateur 2026-09-16 tard) : la
+/// fenêtre OS du bloc fait 206 px de large ([`WIDTH`]), et une infobulle d'egui ne peut pas en
+/// sortir — la première version (« Kamas gagnés moins kamas dépensés depuis le début de la
+/// session ») était tronquée à l'écran. Le détail (kamas NETS, durée depuis le lancement de
+/// l'overlay) reste documenté dans [`cells`] et la doc de module, pas à l'écran.
 struct Cell {
     icon: DsIcon,
     tooltip: &'static str,
@@ -181,10 +184,7 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
     vec![
         Cell {
             icon: DsIcon::Kamas,
-            // Le web ouvre ici une infobulle détaillée (combat, ventes HDV, achats, échanges) que
-            // le moteur de l'overlay ne ventile pas : `SessionTotals` ne porte qu'un gagné et un
-            // dépensé. L'infobulle dit donc ce qu'elle sait, sans promettre le détail du site.
-            tooltip: "Kamas gagnés moins kamas dépensés depuis le début de la session",
+            tooltip: "Kamas gagnés",
             // **Pas de symbole « ₭ » derrière le nombre**, contrairement au web. Ubuntu, la police
             // embarquée de cette interface (`design::fonts`), ne couvre pas U+20AD : la première
             // version de cette bande affichait un « ? » à sa place, vu sur la capture du harnais.
@@ -200,7 +200,7 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
         },
         Cell {
             icon: DsIcon::Xp,
-            tooltip: "Expérience gagnée depuis le début de la session",
+            tooltip: "XP gagnée",
             segments: vec![Segment {
                 text: format!("+{}", format_fr_thousands(totals.xp_gained)),
                 color: ACCENT_COLOR,
@@ -208,17 +208,17 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
         },
         Cell {
             icon: DsIcon::Sword,
-            tooltip: "Combats gagnés − combats perdus",
+            tooltip: "Combats",
             segments: win_loss(totals.fights_won, totals.fights_lost),
         },
         Cell {
             icon: DsIcon::Trophy,
-            tooltip: "Challenges réussis − challenges échoués",
+            tooltip: "Challenges",
             segments: win_loss(totals.challenges_passed, totals.challenges_failed),
         },
         Cell {
             icon: DsIcon::Clock,
-            tooltip: "Durée de la session — temps écoulé depuis le lancement de l'overlay",
+            tooltip: "Durée de session",
             segments: vec![Segment {
                 text: format_duration(uptime),
                 color: ACCENT_COLOR,
@@ -303,8 +303,9 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
         .collect();
 
     let content_width = WIDTH - 2.0 * PADDING_X;
-    let layout = layout_rows(&cell_widths, content_width);
-    let rows = layout.rows.len() + 1;
+    let half_width = content_width / 2.0;
+    let rows_layout = layout_rows(&cell_widths, half_width);
+    let rows = rows_layout.len() + 1;
 
     let origin = ui.max_rect().min;
     let band = egui::Rect::from_min_size(origin, egui::vec2(WIDTH, height(rows)));
@@ -312,29 +313,28 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
         .rect_filled(band, BACKDROP_ROUNDING, tokens::OVERLAY_BACKDROP);
 
     let content_left = band.min.x + PADDING_X;
-    let right_column = content_left + layout.left_width + COLUMN_GAP;
     let row_top = |row: usize| band.min.y + PADDING_Y + row as f32 * (ROW_HEIGHT + ROW_GAP);
-    let mut placements: Vec<(usize, f32, f32)> = layout
-        .rows
+    // Une case centrée dans une tranche de la ligne : sa moitié quand elle en partage la ligne
+    // avec une autre, toute la largeur quand elle est seule (empilée, ou la durée).
+    let centered = |slot_left: f32, slot_width: f32, cell: usize| {
+        content_left + slot_left + ((slot_width - cell_widths[cell]) / 2.0).round()
+    };
+    let mut placements: Vec<(usize, f32, f32)> = rows_layout
         .iter()
         .enumerate()
         .flat_map(|(row, cells)| {
-            cells.iter().enumerate().map(move |(column, &cell)| {
-                let x = if column == 0 {
-                    content_left
-                } else {
-                    right_column
-                };
-                (cell, x, row_top(row))
-            })
+            let y = row_top(row);
+            match cells[..] {
+                [left, right] => vec![
+                    (left, centered(0.0, half_width, left), y),
+                    (right, centered(half_width, half_width, right), y),
+                ],
+                [alone] => vec![(alone, centered(0.0, content_width, alone), y)],
+                _ => unreachable!("une ligne porte une ou deux cases"),
+            }
         })
         .collect();
-    // La durée, seule, centrée sur le bloc.
-    placements.push((
-        4,
-        content_left + ((content_width - cell_widths[4]) / 2.0).round(),
-        row_top(rows - 1),
-    ));
+    placements.push((4, centered(0.0, content_width, 4), row_top(rows - 1)));
     for (index, x, y) in placements {
         let cell_rect =
             egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cell_widths[index], ROW_HEIGHT));
@@ -344,72 +344,42 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
     band.height()
 }
 
-/// La grille des quatre premières cases, une fois décidé ce qui tient sur une ligne.
-struct RowLayout {
-    /// Les lignes, de haut en bas : les indices (dans [`cells`]) des cases qu'elles portent, une
-    /// ou deux — la durée n'y figure pas, elle a toujours sa ligne à elle.
-    rows: Vec<Vec<usize>>,
-    /// Largeur de la colonne de gauche : la plus large des cases de gauche des lignes à DEUX
-    /// cases, pour que la colonne de droite s'aligne d'une ligne à l'autre.
-    left_width: f32,
-}
-
-/// Décide, paire par paire (Kamas/XP, Combats/Challenges), si les deux cases tiennent côte à côte
-/// dans `content_width` ou si elles s'empilent — la règle « responsive » demandée le 2026-09-16 :
-/// des chiffres trop longs (milliards d'XP, millions de kamas) passent l'un au-dessus de l'autre
-/// plutôt que de se chevaucher.
+/// Les lignes des quatre premières cases, de haut en bas : les indices (dans [`cells`]) des cases
+/// qu'elles portent, deux quand la paire tient côte à côte, une quand elle s'empile. La durée n'y
+/// figure pas, elle a toujours sa ligne à elle.
 ///
-/// La colonne de droite est calée après la case de gauche la plus large des lignes qui restent à
-/// deux cases ; empiler une ligne peut donc rétrécir cette colonne et rendre de la place à une
-/// autre. D'où une ligne empilée à la fois — la plus large en propre d'abord, celle qui
-/// déborderait de toute façon — et la colonne recalculée entre deux, jusqu'à ce que tout tienne.
-fn layout_rows(cell_widths: &[f32], content_width: f32) -> RowLayout {
+/// Décide, paire par paire (Kamas/XP, Combats/Challenges), si les deux cases tiennent chacune
+/// dans sa moitié de ligne (`half_width`) ou si elles s'empilent — la règle « responsive »
+/// demandée le 2026-09-16 : un chiffre trop long pour sa moitié fait passer la paire l'un
+/// au-dessus de l'autre plutôt que de chevaucher son voisin. Les deux paires se décident
+/// indépendamment : chaque case a sa moitié à elle, l'une n'empiète jamais sur l'autre.
+fn layout_rows(cell_widths: &[f32], half_width: f32) -> Vec<Vec<usize>> {
     const PAIRS: [(usize, usize); 2] = [(0, 1), (2, 3)];
-    let mut stacked = [false; PAIRS.len()];
-    let left_width = loop {
-        let left_width = PAIRS
-            .iter()
-            .zip(&stacked)
-            .filter(|(_, stacked)| !**stacked)
-            .map(|((left, _), _)| cell_widths[*left])
-            .fold(0.0_f32, f32::max);
-        let widest_overflowing = PAIRS
-            .iter()
-            .enumerate()
-            .filter(|(i, (_, right))| {
-                !stacked[*i] && left_width + COLUMN_GAP + cell_widths[*right] > content_width
-            })
-            .max_by(|(_, a), (_, b)| {
-                let own = |(left, right): &(usize, usize)| cell_widths[*left] + cell_widths[*right];
-                own(a).total_cmp(&own(b))
-            })
-            .map(|(i, _)| i);
-        match widest_overflowing {
-            Some(i) => stacked[i] = true,
-            None => break left_width,
-        }
-    };
-    let rows = PAIRS
+    PAIRS
         .iter()
-        .zip(&stacked)
-        .flat_map(|((left, right), stacked)| {
-            if *stacked {
-                vec![vec![*left], vec![*right]]
+        .flat_map(|&(left, right)| {
+            if cell_widths[left] > half_width || cell_widths[right] > half_width {
+                vec![vec![left], vec![right]]
             } else {
-                vec![vec![*left, *right]]
+                vec![vec![left, right]]
             }
         })
-        .collect();
-    RowLayout { rows, left_width }
+        .collect()
 }
 
 /// Glyphe puis chiffres d'une cellule, centrés verticalement dans `rect`, et l'infobulle qui dit
 /// de quoi il s'agit.
 ///
-/// **Infobulle EN DESSOUS** (`TooltipSide::Below`) : ce bloc est posé sous les boutons du jeu,
-/// près du bord haut de la fenêtre de jeu, et une infobulle ouverte au-dessus viendrait couvrir
-/// ces boutons — la même raison qui a fait passer toutes les infobulles du Suivi sous sa bande
-/// (voir `render_content::WATCHLIST_TOOLTIP_RESERVE`).
+/// **Infobulle AU-DESSUS** (`TooltipSide::Above`, le défaut du design system) pour les cinq
+/// cases. Elles se sont ouvertes EN DESSOUS pendant une journée (2026-09-16 : le bloc est posé
+/// sous les boutons du jeu, une infobulle au-dessus de la première ligne recouvre donc la zone où
+/// le jeu ouvre les siennes) — mais avec une fenêtre OS qui ne laissait sous le bloc que 28 px, la
+/// durée, dernière ligne, retombait déjà sur le repli « au-dessus », et le retour a tranché : « je
+/// voudrais toutes les infobulles au-dessus des éléments, à l'image de la durée ». La place
+/// nécessaire au-dessus de la première ligne est réservée par l'hôte
+/// (`render_content::RECAP_TOOLTIP_RESERVE`, marge haute du contenu) ; une infobulle d'une case
+/// de la deuxième ligne recouvre la première, comme celle de la durée recouvre la deuxième — c'est
+/// le comportement demandé, pas un repli.
 fn paint_cell(
     ui: &mut egui::Ui,
     ds: &design::DesignSystem,
@@ -447,7 +417,7 @@ fn paint_cell(
         egui::Sense::hover(),
     );
     design::tooltip(&response)
-        .side(TooltipSide::Below)
+        .side(TooltipSide::Above)
         .text(cell.tooltip);
 }
 
@@ -550,42 +520,27 @@ mod tests {
         assert_eq!(cells[4].segments[0].color, ACCENT_COLOR);
     }
 
-    /// Tout tient : deux lignes de deux cases, la colonne de droite calée après la case de gauche
-    /// la plus large.
+    /// Tout tient : deux lignes de deux cases, chacune dans sa moitié de 93 px.
     #[test]
     fn deux_paires_qui_tiennent_restent_sur_deux_lignes() {
-        let layout = layout_rows(&[40.0, 60.0, 50.0, 45.0, 70.0], 186.0);
-        assert_eq!(layout.rows, vec![vec![0, 1], vec![2, 3]]);
-        assert_eq!(layout.left_width, 50.0);
+        let rows = layout_rows(&[40.0, 93.0, 50.0, 45.0, 70.0], 93.0);
+        assert_eq!(rows, vec![vec![0, 1], vec![2, 3]]);
     }
 
-    /// Une paire trop large pour la ligne s'empile (la case de gauche au-dessus), l'autre reste
-    /// côte à côte — et la colonne de droite ne compte plus que les lignes à deux cases.
+    /// Une case qui déborde de sa moitié empile SA paire (la case de gauche au-dessus), l'autre
+    /// paire reste côte à côte — et le bloc gagne une ligne.
     #[test]
-    fn une_paire_trop_large_s_empile_seule() {
-        let layout = layout_rows(&[120.0, 110.0, 50.0, 45.0, 70.0], 186.0);
-        assert_eq!(layout.rows, vec![vec![0], vec![1], vec![2, 3]]);
-        assert_eq!(layout.left_width, 50.0);
-        assert_eq!(height(layout.rows.len() + 1), height(4));
-    }
-
-    /// Empiler une paire peut rendre de la place à l'autre : ici la seconde ne déborde qu'à cause
-    /// de la large case de gauche de la première, et retrouve sa ligne une fois celle-ci empilée.
-    #[test]
-    fn empiler_une_paire_rend_de_la_place_a_l_autre() {
-        // 150 + 18 + 60 = 228 > 186 : la première s'empile. Avant, la colonne de droite était à
-        // 150 + 18 et 168 + 45 = 213 > 186 aurait aussi empilé la seconde ; après, 50 + 18 + 45.
-        let layout = layout_rows(&[150.0, 60.0, 50.0, 45.0, 70.0], 186.0);
-        assert_eq!(layout.rows, vec![vec![0], vec![1], vec![2, 3]]);
-        assert_eq!(layout.left_width, 50.0);
+    fn une_case_trop_large_empile_sa_paire_seule() {
+        let rows = layout_rows(&[40.0, 94.0, 50.0, 45.0, 70.0], 93.0);
+        assert_eq!(rows, vec![vec![0], vec![1], vec![2, 3]]);
+        assert_eq!(height(rows.len() + 1), height(4));
     }
 
     /// Les deux paires empilées : cinq lignes, une par case.
     #[test]
     fn les_deux_paires_empilees_font_cinq_lignes() {
-        let layout = layout_rows(&[120.0, 110.0, 100.0, 100.0, 70.0], 186.0);
-        assert_eq!(layout.rows, vec![vec![0], vec![1], vec![2], vec![3]]);
-        assert_eq!(layout.left_width, 0.0);
+        let rows = layout_rows(&[120.0, 110.0, 100.0, 45.0, 70.0], 93.0);
+        assert_eq!(rows, vec![vec![0], vec![1], vec![2], vec![3]]);
         assert_eq!(height(5), 2.0 * 6.0 + 5.0 * 22.0 + 4.0 * 8.0);
     }
 }
