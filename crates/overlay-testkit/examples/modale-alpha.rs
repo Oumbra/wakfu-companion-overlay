@@ -101,6 +101,8 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 portraits: p,
                 combat_frame: f,
                 icons: i,
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],

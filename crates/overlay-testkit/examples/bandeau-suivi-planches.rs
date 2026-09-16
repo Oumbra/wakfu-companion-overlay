@@ -373,6 +373,8 @@ fn harnais(p: Planche) -> Harness<'static> {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,

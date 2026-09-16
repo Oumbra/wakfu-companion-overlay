@@ -127,6 +127,10 @@ fn harness_with(fight: FightSnapshot, side: CombatSide, metric: CombatMetric) ->
                 portraits,
                 combat_frame,
                 icons,
+                // Le panneau Combat n'a ni bustes de classe ni serveurs de jeu à peindre — ils
+                // n'existent que pour l'onglet « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -228,6 +232,10 @@ fn grandeur_sans_valeur_affiche_son_message() {
                 portraits,
                 combat_frame,
                 icons,
+                // Le panneau Combat n'a ni bustes de classe ni serveurs de jeu à peindre — ils
+                // n'existent que pour l'onglet « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],

@@ -117,6 +117,10 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 portraits,
                 combat_frame,
                 icons,
+                // Ni bustes de classe ni serveurs de jeu ici : ils n'existent que pour l'onglet
+                // « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],

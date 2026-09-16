@@ -33,6 +33,7 @@ use overlay_engine::{
     WatchlistMode,
 };
 use overlay_ingest::Tailer;
+use overlay_ui::avatars::AvatarAtlas;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
@@ -95,6 +96,10 @@ struct Textures {
     portraits: Option<PortraitAtlas>,
     combat_frame: Option<CombatFrame>,
     icons: Option<UiIcons>,
+    /// Les bustes de classe de l'onglet « Personnages » — chargés comme les autres atlas, une
+    /// fois, et gardés vivants entre les frames : un `TextureHandle` libère sa texture dès que son
+    /// dernier exemplaire tombe, et la capture sortirait avec des tuiles vides.
+    avatars: Option<AvatarAtlas>,
 }
 
 impl Textures {
@@ -103,10 +108,14 @@ impl Textures {
             portraits: None,
             combat_frame: None,
             icons: None,
+            avatars: None,
         }
     }
 
-    fn get_or_load(&mut self, ctx: &egui::Context) -> (&PortraitAtlas, &CombatFrame, &UiIcons) {
+    fn get_or_load(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> (&PortraitAtlas, &CombatFrame, &UiIcons, &AvatarAtlas) {
         // `overlay_ui::style::apply` — MÊME style que les deux binaires (`main.rs`, `bin/
         // overlay-ui-x11.rs`, voir sa doc), sans quoi ces snapshots resteraient sur le thème PAR
         // DÉFAUT d'egui pour les tooltips (`egui_kittest::Harness::new_ui` crée son propre
@@ -130,7 +139,8 @@ impl Textures {
             .combat_frame
             .get_or_insert_with(|| CombatFrame::load(ctx));
         let icons = self.icons.get_or_insert_with(|| UiIcons::load(ctx));
-        (portraits, combat_frame, icons)
+        let avatars = self.avatars.get_or_insert_with(|| AvatarAtlas::load(ctx));
+        (portraits, combat_frame, icons, avatars)
     }
 }
 
@@ -156,7 +166,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -165,6 +175,8 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -224,7 +236,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -233,6 +245,8 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -298,7 +312,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -307,6 +321,8 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -454,7 +470,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -463,6 +479,8 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &watchlist_entries,
@@ -524,7 +542,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -533,6 +551,8 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
@@ -654,7 +674,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -663,6 +683,8 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
@@ -796,7 +818,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -805,6 +827,8 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
@@ -889,7 +913,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -898,6 +922,8 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
@@ -990,7 +1016,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
             let edition = Rc::clone(&edition);
             move |ui| {
                 let ctx = ui.ctx().clone();
-                let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
                 let outcome = paint_content(
                     ui,
                     RenderContent {
@@ -999,6 +1025,8 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         portraits,
                         combat_frame,
                         icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
                         combat_side: &mut combat_side,
                         combat_metric: &mut combat_metric,
                         watchlist: &entries,
@@ -1104,7 +1132,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
         .with_size(egui::Vec2::new(LARGEUR_PLAFONNEE, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -1113,6 +1141,8 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
@@ -1393,7 +1423,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -1402,6 +1432,8 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
@@ -1489,7 +1521,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -1498,6 +1530,8 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
@@ -1570,7 +1604,7 @@ fn panneau_options_ne_panique_pas() {
         // c'est-à-dire d'un détail d'implémentation du harnais. Seul le test est concerné : en
         // production, le curseur clignote normalement.
         ui.style_mut().visuals.text_cursor.blink = false;
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -1579,6 +1613,8 @@ fn panneau_options_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -1677,6 +1713,8 @@ fn modale_options_echap_annule_et_entree_valide() {
                 remote_icons: &remote_icons,
                 remote_icon_textures: &mut remote_icon_textures,
                 icons: &icons,
+                avatars: None,
+                game_servers: &Default::default(),
             },
         );
         if action != OptionsModalAction::None {
@@ -1831,7 +1869,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
             ligne += 1;
         }
 
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -1840,6 +1878,8 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -1966,6 +2006,8 @@ fn capture_onglet_alertes_selection(nom: &str, select_mode: bool) {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2039,6 +2081,8 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
                 remote_icons: &remote_icons,
                 remote_icon_textures: &mut remote_icon_textures,
                 icons: &icons,
+                avatars: None,
+                game_servers: &Default::default(),
             },
         );
         if action != OptionsModalAction::None {
@@ -2105,6 +2149,8 @@ fn options_parametres_section_compte() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2153,6 +2199,8 @@ fn options_parametres_section_mise_a_jour() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2213,6 +2261,8 @@ fn options_deconnexion_confirmation() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2272,6 +2322,8 @@ fn options_onglet_raccourcis() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2325,6 +2377,8 @@ fn options_raccourcis_section_multicompte() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2438,6 +2492,8 @@ fn options_garde_de_fermeture_a_l_ecran() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2498,6 +2554,8 @@ fn options_garde_de_fermeture_au_clavier() {
                 remote_icons: &remote_icons,
                 remote_icon_textures: &mut remote_icon_textures,
                 icons: &icons,
+                avatars: None,
+                game_servers: &Default::default(),
             },
         );
         if action != OptionsModalAction::None {
@@ -2613,6 +2671,8 @@ fn options_croix_de_la_banniere_ferme_comme_annuler() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
             if action != OptionsModalAction::None {
@@ -2714,6 +2774,8 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2849,6 +2911,8 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2969,6 +3033,8 @@ fn options_alertes_croix_efface_la_saisie() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3078,6 +3144,8 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3237,6 +3305,8 @@ fn capture_onglet_suivi(
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3666,6 +3736,8 @@ fn harnais_suivi(
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3773,6 +3845,8 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3876,6 +3950,8 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3939,7 +4015,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -3948,6 +4024,8 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -4104,6 +4182,8 @@ fn capture_onglet_chat_selection(
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -4187,6 +4267,8 @@ fn capture_onglet_coupe(nom: &str, tab: OptionsTab) {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -4325,6 +4407,8 @@ fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
                         remote_icons: &remote_icons,
                         remote_icon_textures: &mut remote_icon_textures,
                         icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
                     },
                 );
             });
@@ -4418,6 +4502,8 @@ fn capture_parametres(nom: &str, mut options_state: OptionsModalState) {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -4550,7 +4636,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -4559,6 +4645,8 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -4698,7 +4786,7 @@ fn capture_login_with_update(
         ))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             let outcome = paint_content(
                 ui,
                 RenderContent {
@@ -4707,6 +4795,8 @@ fn capture_login_with_update(
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
@@ -4844,3 +4934,297 @@ fn fenetre_de_connexion_mise_a_jour_requise() {
 
 /// Hauteur de l'écran « Mise à jour requise », mesurée par la carte elle-même.
 const LOGIN_UPDATE_REQUIRED_HEIGHT: f32 = 443.0;
+
+// ---------------------------------------------------------------------------------------------
+// Onglet « Personnages » (2026-09-16) — voir `panels::personnages_tab`.
+// ---------------------------------------------------------------------------------------------
+
+/// Le roster de démonstration : douze personnages sur le compte principal, deux comptes de plus.
+/// Les mêmes que les maquettes (`examples/personnages-mockups.rs`), pour que les planches se
+/// comparent d'un jet à l'autre.
+fn roster_de_demonstration() -> overlay_engine::Roster {
+    let personnages = [
+        ("Pugio Letalis", "sram", "m"),
+        ("Sagitta Lucis", "cra", "f"),
+        ("Ensis Orientalis", "iop", "m"),
+        ("Canis Furiosus", "ouginak", "m"),
+        ("Rota Metallica", "foggernaut", "f"),
+        ("Imago Speculi", "zobal", "f"),
+        ("Ignis Dolosus", "rogue", "m"),
+        ("Monstrum Amoris", "osamodas", "m"),
+        ("Bursa Auri", "enutrof", "m"),
+        ("Penicillus Vitae", "eniripsa", "f"),
+        ("Aegis Feminea", "feca", "f"),
+        ("Arbovenenum", "sadida", "m"),
+    ];
+    let characters: Vec<serde_json::Value> = personnages
+        .iter()
+        .map(|(name, class, gender)| {
+            serde_json::json!({ "name": name, "className": class, "gender": gender })
+        })
+        .collect();
+    overlay_engine::Roster::from_settings_json(&serde_json::json!({ "roster": [
+        { "id": "acc-1", "label": "", "isDefault": true, "gameServer": "pandora",
+          "characters": characters },
+        { "id": "acc-2", "label": "Mules", "gameServer": "rubilax", "characters": [] },
+        { "id": "acc-3", "label": "Métiers", "characters": [] },
+    ]}))
+}
+
+/// Les serveurs de jeu tels que `GET /api/v1/game-servers` les sert.
+fn serveurs_de_jeu() -> overlay_ui::game_servers::GameServers {
+    overlay_ui::game_servers::GameServers::from_json(&serde_json::json!([
+        { "code": "pandora", "label": "Pandora", "isActive": true },
+        { "code": "rubilax", "label": "Rubilax", "isActive": true },
+    ]))
+}
+
+/// Ce que la planche montre de l'onglet — le reste (compte affiché, mode, modales) vit dans l'état.
+struct PersonnagesPlanche {
+    roster: Option<overlay_engine::Roster>,
+    state: overlay_ui::panels::personnages_tab::PersonnagesTabState,
+    survol: Option<egui::Pos2>,
+}
+
+impl Default for PersonnagesPlanche {
+    fn default() -> Self {
+        Self {
+            roster: Some(roster_de_demonstration()),
+            state: Default::default(),
+            survol: None,
+        }
+    }
+}
+
+fn capture_onglet_personnages(nom: &str, planche: PersonnagesPlanche) {
+    use overlay_ui::panels::personnages_tab::PersonnagesAvailability;
+
+    let PersonnagesPlanche {
+        roster,
+        state,
+        survol,
+    } = planche;
+    let availability = if roster.is_some() {
+        PersonnagesAvailability::Ready
+    } else {
+        PersonnagesAvailability::Loading
+    };
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Personnages,
+        personnages: state,
+        personnages_draft: roster,
+        personnages_availability: availability,
+        ..Default::default()
+    };
+    let servers = serveurs_de_jeu();
+
+    // Chargés UNE fois et gardés vivants entre les frames : un `TextureHandle` libère sa texture
+    // dès que son dernier exemplaire tombe, et la planche sortirait avec des tuiles vides.
+    let mut avatars: Option<AvatarAtlas> = None;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            overlay_ui::build_info::freeze_for_snapshots();
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let avatars = avatars.get_or_insert_with(|| AvatarAtlas::load(ui.ctx()));
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: Some(avatars),
+                    game_servers: &servers,
+                },
+            );
+        });
+    // **`step` et non `run` quand le rouage tourne** : `run` attend que l'interface cesse de
+    // demander un redessin, et une animation ne cesse jamais (`Harness::run exceeded max_steps`).
+    // Deux pas suffisent à poser le rouage à une phase, et le harnais simule son horloge — la
+    // planche est donc reproductible.
+    if availability == PersonnagesAvailability::Loading {
+        harness.step();
+        harness.step();
+        harness.snapshot(nom);
+        return;
+    }
+    harness.run();
+    if let Some(pos) = survol {
+        harness.hover_at(pos);
+        // Deux tours : le premier ouvre l'infobulle, le second la peint à sa place définitive.
+        harness.run();
+        harness.run();
+    }
+    harness.snapshot(nom);
+}
+
+/// **L'écran au repos** : la ligne de compte, le titre « Personnages du compte » avec ses
+/// commandes, la tuile « + » en tête de grille et les douze bustes.
+#[test]
+fn options_onglet_personnages_liste() {
+    capture_onglet_personnages("options_personnages_liste", PersonnagesPlanche::default());
+}
+
+/// **Une tuile survolée** : le voile s'arrête au bandeau de nom, le crayon prend le centre du
+/// buste sur son socle, la croix reste nue au coin. Vise le centre de la deuxième tuile de la
+/// première rangée — la première étant la tuile « + ».
+#[test]
+fn options_onglet_personnages_survol() {
+    capture_onglet_personnages(
+        "options_personnages_survol",
+        PersonnagesPlanche {
+            survol: Some(egui::pos2(47.0 + 100.0 + 24.0 + 50.0, 395.0)),
+            ..Default::default()
+        },
+    );
+}
+
+/// **Sélection multiple** : la case à cocher remplace les badges de survol, la tuile « + »
+/// disparaît (le mode est exclusif), et le bouton de suppression groupée prend le libellé du
+/// nombre coché.
+#[test]
+fn options_onglet_personnages_selection() {
+    use overlay_ui::panels::personnages_tab::PersonnagesTabState;
+    capture_onglet_personnages(
+        "options_personnages_selection",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                select_mode: true,
+                selected: vec![
+                    "Sagitta Lucis".to_string(),
+                    "Rota Metallica".to_string(),
+                    "Monstrum Amoris".to_string(),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **Aucun personnage** : le bloc d'information dit quoi faire, et la tuile « + » reste là.
+#[test]
+fn options_onglet_personnages_vide() {
+    capture_onglet_personnages(
+        "options_personnages_vide",
+        PersonnagesPlanche {
+            roster: Some(overlay_engine::Roster::from_settings_json(
+                &serde_json::json!({}),
+            )),
+            ..Default::default()
+        },
+    );
+}
+
+/// **Le roster pas encore descendu du compte** : le rouage, jamais une liste vide qui se lirait
+/// « vous n'avez déclaré personne ».
+#[test]
+fn options_onglet_personnages_chargement() {
+    capture_onglet_personnages(
+        "options_personnages_chargement",
+        PersonnagesPlanche {
+            roster: None,
+            ..Default::default()
+        },
+    );
+}
+
+/// **La modale « Personnage », vierge** : le champ de nom sans loupe, le switch ♂/♀ sur le
+/// masculin, la recherche de classe, et les dix-huit bustes en gris.
+#[test]
+fn options_onglet_personnages_modale() {
+    use overlay_ui::panels::personnages_tab::{CharacterEditor, PersonnagesTabState};
+    capture_onglet_personnages(
+        "options_personnages_modale",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                editor: Some(CharacterEditor {
+                    index: None,
+                    name: String::new(),
+                    search: String::new(),
+                    gender: overlay_engine::Gender::M,
+                    class: None,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La même modale, en modification** : les trois champs pré-remplis, la classe retenue en
+/// couleur et cerclée d'or, et la recherche qui ne laisse passer qu'elle.
+#[test]
+fn options_onglet_personnages_modale_remplie() {
+    use overlay_ui::panels::personnages_tab::{CharacterEditor, PersonnagesTabState};
+    capture_onglet_personnages(
+        "options_personnages_modale_remplie",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                editor: Some(CharacterEditor {
+                    index: Some(1),
+                    name: "Sagitta Lucis".to_string(),
+                    // Trois caractères : le seuil du filtre, et « cra » doit trouver « Crâ ».
+                    search: "cra".to_string(),
+                    gender: overlay_engine::Gender::F,
+                    class: Some(8),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La modale de compte** : un libellé, un serveur de jeu, et l'aide qui dit à quoi il sert.
+#[test]
+fn options_onglet_personnages_modale_compte() {
+    use overlay_ui::panels::personnages_tab::{AccountEditor, PersonnagesTabState};
+    capture_onglet_personnages(
+        "options_personnages_modale_compte",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                account_editor: Some(AccountEditor {
+                    name: "Mules".to_string(),
+                    server: Some("pandora".to_string()),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La suppression d'un compte** : la question porte le nom ET le décompte de ce qu'elle emporte.
+#[test]
+fn options_onglet_personnages_suppression_compte() {
+    use overlay_ui::panels::personnages_tab::PersonnagesTabState;
+    // Six personnages déplacés sur « Mules » : la question doit porter le décompte de ce qu'elle
+    // emporte, et un compte vide ne le montrerait pas.
+    let mut roster = roster_de_demonstration();
+    let deplaces: Vec<_> = roster.accounts[0].characters.drain(..6).collect();
+    roster.accounts[1].characters = deplaces;
+    capture_onglet_personnages(
+        "options_personnages_suppression_compte",
+        PersonnagesPlanche {
+            roster: Some(roster),
+            state: PersonnagesTabState {
+                // Le compte « Mules », le seul que la corbeille accepte de retirer.
+                account: 1,
+                pending_account_removal: Some(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}

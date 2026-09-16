@@ -234,6 +234,10 @@ fn harnais(p: Planche) -> Harness<'static> {
                     remote_icons,
                     remote_icon_textures,
                     icons,
+                    // Ces planches ne montrent que l'onglet « Suivi » : ni bustes de classe ni
+                    // serveurs de jeu à peindre.
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         })

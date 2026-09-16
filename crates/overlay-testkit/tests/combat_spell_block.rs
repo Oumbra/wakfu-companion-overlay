@@ -316,6 +316,10 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 portraits,
                 combat_frame,
                 icons,
+                // Ni bustes de classe ni serveurs de jeu ici : ils n'existent que pour l'onglet
+                // « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
@@ -490,6 +494,10 @@ fn bloc_de_sorts_coupe_par_les_options() {
                 portraits,
                 combat_frame,
                 icons,
+                // Ni bustes de classe ni serveurs de jeu ici : ils n'existent que pour l'onglet
+                // « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
