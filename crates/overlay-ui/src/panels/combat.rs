@@ -435,8 +435,13 @@
 //!   n'y a plus rien à réduire. Les switches passent de 72 et 109px à **74 et 112** (une gouttière
 //!   de 2px subsiste entre deux socles, qui portent chacun leurs quatre coins), la hauteur ne bouge
 //!   pas, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET` en dérivent sans être touchés. La
-//!   case choisie ne se lit plus à un fond kaki mais au socle éclairci ET à son icône en couleur
-//!   pleine — les autres sont atténuées, survol compris (voir `design::SwitchVariant`).
+//!   case choisie ne se lit plus à un fond kaki mais au socle éclairci, à son icône en couleur
+//!   pleine et à son liseré (voir `design::SwitchVariant`). Quatre allers-retours sur rendu ont
+//!   réglé le détail le même jour : glyphe ramené au plafond commun (il avait grossi de 68 %,
+//!   faute d'étalon d'encre sur les glyphes en couleurs), socles collés par un chevauchement de
+//!   2 px, survol qui allume le glyphe EN MÊME TEMPS que le socle (sans quoi l'icône restait
+//!   éteinte sur un fond allumé), et liseré `#126068` de la case choisie — devenu nécessaire,
+//!   justement, parce que le survol allume tout.
 //! - **Le total du bandeau leader** ne disposait que de 69px (190 − 12 de marges − 109 de
 //!   switch) : assez pour six chiffres au corps de 18, pas pour sept (« 1 047 404 » = 79px,
 //!   qui mordait de 10px sur la case Soins — capture utilisateur du même jour). Décision sur
