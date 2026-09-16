@@ -55,17 +55,20 @@ use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry
 use overlay_ingest::discovery;
 use overlay_sync::update::{apply as update_apply, UpdateStatus};
 use overlay_ui::alert_sound;
+use overlay_ui::avatars::AvatarAtlas;
 use overlay_ui::background::{
-    spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
-    spawn_update_thread, UpdateCommand,
+    spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_game_servers_thread,
+    spawn_sync_thread, spawn_update_thread, UpdateCommand,
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
+    SharedRosterDraft,
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
+use overlay_ui::game_servers::GameServers;
 use overlay_ui::game_window::{GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
@@ -77,6 +80,7 @@ use overlay_ui::panels::feature_switch::FeatureToggles;
 use overlay_ui::panels::login::{self, LoginState};
 use overlay_ui::panels::notifications::AlertMutes;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+use overlay_ui::panels::personnages_tab::{self, PersonnagesAvailability, PersonnagesTabState};
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
@@ -278,6 +282,10 @@ struct OverlayWindow {
     /// Icônes du switch Alliés/Ennemis + portrait générique d'ennemi — même remarque que
     /// `portraits` (une texture par fenêtre, coût négligeable).
     icons: UiIcons,
+    /// Les bustes de classe de l'onglet « Personnages » — **`Some` seulement pour la fenêtre
+    /// Options**, la seule qui les affiche (voir `overlay_ui::avatars`, doc de module) : 36 PNG
+    /// décodés et 1,8 Mo de textures par fenêtre de jeu seraient payés pour rien.
+    avatars: Option<AvatarAtlas>,
     /// Cache PAR FENÊTRE des icônes réelles d'objets/monstres déjà uploadées (voir
     /// `remote_icons::RemoteIconTextures`) — sans objet pour une fenêtre `Combat`.
     remote_icon_textures: RemoteIconTextures,
@@ -397,6 +405,12 @@ struct App {
     /// Les recherches de chat du compte, même provenance et même usage que `alert_profile` — le
     /// brouillon de l'onglet « Chat ».
     chat_filters: SharedChatFilters,
+    /// Le roster du compte sous sa forme éditable — le brouillon de l'onglet « Personnages » (voir
+    /// `engine_thread::SharedRosterDraft`).
+    roster_draft: SharedRosterDraft,
+    /// Les serveurs de jeu proposés par le sélecteur de ce même onglet — voir
+    /// `background::spawn_game_servers_thread`.
+    game_servers: Arc<ArcSwap<GameServers>>,
     /// Réglages de la carte d'alerte de chat EN VIGUEUR (durée, fermeture manuelle) — lus de la
     /// config locale au démarrage, réécrits à la validation de l'onglet « Chat ».
     chat_toast: chat_tab::ChatToastSettings,
@@ -579,6 +593,8 @@ struct AppState {
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     alert_profile: SharedAlertProfile,
     chat_filters: SharedChatFilters,
+    roster_draft: SharedRosterDraft,
+    game_servers: Arc<ArcSwap<GameServers>>,
     /// Voir `App::chat_toast` — lu de la config au démarrage.
     chat_toast: chat_tab::ChatToastSettings,
     /// Voir `App::countdown_toast` — lu de la config au démarrage.
@@ -614,6 +630,8 @@ impl App {
             watchlist_toast,
             alert_profile,
             chat_filters,
+            roster_draft,
+            game_servers,
             chat_toast,
             countdown_toast,
             catalog,
@@ -650,6 +668,8 @@ impl App {
             watchlist_toast,
             alert_profile,
             chat_filters,
+            roster_draft,
+            game_servers,
             chat_toast,
             countdown_toast,
             catalog,
@@ -812,6 +832,7 @@ impl App {
             window,
             gpu,
             kind: OverlayKind::Login,
+            avatars: None,
             portraits,
             combat_frame,
             icons,
@@ -1331,6 +1352,8 @@ impl App {
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
         let combat_frame = CombatFrame::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
+        // Payés seulement là où ils servent — voir le champ `avatars` d'`OverlayWindow`.
+        let avatars = (kind == OverlayKind::Options).then(|| AvatarAtlas::load(&gpu.egui_ctx));
 
         let outer = window.outer_size();
         let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
@@ -1358,6 +1381,7 @@ impl App {
             portraits,
             combat_frame,
             icons,
+            avatars,
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
             combat_metric: CombatMetric::default(),
@@ -2166,6 +2190,16 @@ impl App {
             }
         });
 
+        // **Le brouillon du roster**, même principe que les alertes et le chat : une copie de ce
+        // que le compte porte, prise ici, modifiée librement, renvoyée à « Valider ».
+        let roster_snapshot = self.roster_draft.load();
+        let (personnages_draft, personnages_availability) = match roster_snapshot.as_ref() {
+            Some(roster) => (Some(roster.clone()), PersonnagesAvailability::Ready),
+            None => (None, PersonnagesAvailability::Loading),
+        };
+        // Les noms déjà vus dans `wakfu.log` cette session, que le champ de nom propose.
+        let journal = personnages_tab::journal_from_session(&self.snapshot.load());
+
         overlay.options_state = Some(OptionsModalState {
             path_input: self.log_path.display().to_string(),
             error: None,
@@ -2191,6 +2225,15 @@ impl App {
             // lié — l'hôte est seul à connaître `AuthStatus` (voir `spawn_auth_thread`).
             account_connected: matches!(**self.auth_status.load(), AuthStatus::Connected),
             pending_disconnect: false,
+            personnages: PersonnagesTabState {
+                // Le compte affiché à l'ouverture est le principal, celui que tout roster a.
+                account: personnages_draft
+                    .as_ref()
+                    .map(|roster| roster.default_index())
+                    .unwrap_or(0),
+                journal,
+                ..Default::default()
+            },
             // La section « Mise à jour » lit l'état publié par le thread de mise à jour ; rafraîchi
             // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
             update: (**self.update_status.load()).clone(),
@@ -2214,6 +2257,7 @@ impl App {
                 alerts: alerts_draft.clone(),
                 suivi: suivi_draft.clone(),
                 chat: chat_draft.clone(),
+                personnages: personnages_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
@@ -2228,6 +2272,8 @@ impl App {
             alerts_availability,
             chat_draft,
             chat_availability,
+            personnages_draft,
+            personnages_availability,
             suivi: suivi_tab::SuiviTabState {
                 // Comme pour les Alertes et le Chat : le champ de durée s'ouvre sur la valeur en
                 // place, pas vide — c'est un réglage existant qu'on vient modifier.
@@ -2314,6 +2360,41 @@ impl App {
         }
         });
         toast_changed
+    }
+
+    /// Commit du brouillon de l'onglet « Personnages » — calqué sur [`Self::commit_chat`] : le
+    /// roster est appliqué localement d'abord (le combat en cours doit reconnaître le personnage
+    /// déclaré sans attendre le réseau), puis écrit sur le compte depuis un thread.
+    ///
+    /// **La clé `roster` est remplacée en entier**, d'où le brouillon fidèle — voir
+    /// `overlay_engine::roster`, doc de module, et `overlay_sync::client::patch_roster`.
+    fn commit_personnages(&mut self, options_window_id: WindowId) {
+        let Some(roster) = self
+            .windows
+            .get(&options_window_id)
+            .and_then(|overlay| overlay.options_state.as_ref())
+            .and_then(|state| state.personnages_draft.clone())
+        else {
+            return;
+        };
+        let reference = self.roster_draft.load();
+        if reference.as_ref().as_ref() == Some(&roster) {
+            return;
+        }
+        let _ = self
+            .settings_tx
+            .send(EngineCommand::SetRoster(roster.clone()));
+        thread::spawn(move || match overlay_sync::token_store::load_token() {
+            Some(token) => match overlay_sync::client::patch_roster(&token, &roster) {
+                Ok(_) => tracing::info!("[options] roster enregistré sur le compte."),
+                Err(err) => {
+                    tracing::warn!(%err, "[options] échec de l'enregistrement du roster")
+                }
+            },
+            None => tracing::info!(
+                "[options] roster appliqué localement — aucun compte lié, rien n'est enregistré."
+            ),
+        });
     }
 
     /// Valide `raw` (contenu du champ texte au moment du clic sur "Valider", ou chemin choisi par
@@ -2618,6 +2699,7 @@ impl App {
                 // Les réglages de la carte de chat vivent dans la même config : commités AVANT
                 // l'écriture, pour qu'elle les emporte (voir `commit_chat`).
                 let chat_toast_changed = self.commit_chat(options_window_id);
+                self.commit_personnages(options_window_id);
                 if path_changed
                     || combat_changed
                     || turn_changed
@@ -2793,6 +2875,7 @@ impl App {
             }
         }
         let catalog = self.catalog.load();
+        let game_servers = self.game_servers.load();
         let auth_status = self.auth_status.load();
         // La modale Options force sa propre interactivité (voir `App::
         // open_options_modal`) — jamais assujettie à `self.interactive` (mode
@@ -2823,6 +2906,8 @@ impl App {
                 portraits: &overlay.portraits,
                 combat_frame: &overlay.combat_frame,
                 icons: &overlay.icons,
+                avatars: overlay.avatars.as_ref(),
+                game_servers: &game_servers,
                 combat_side: &mut overlay.combat_side,
                 combat_metric: &mut overlay.combat_metric,
                 watchlist,
@@ -3489,6 +3574,11 @@ fn main() {
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let alert_profile = Arc::new(ArcSwap::from_pointee(None));
     let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
+    let roster_draft: SharedRosterDraft = Arc::new(ArcSwap::from_pointee(None));
+    // Les serveurs de jeu ne sont pas un jalon de démarrage : voir la doc du thread.
+    let game_servers: Arc<ArcSwap<GameServers>> =
+        Arc::new(ArcSwap::from_pointee(GameServers::default()));
+    spawn_game_servers_thread(Arc::clone(&game_servers));
     let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
@@ -3542,6 +3632,7 @@ fn main() {
             alert_profile: Arc::clone(&alert_profile),
             chat_filters: Arc::clone(&chat_filters),
             roster: Arc::clone(&roster),
+            roster_draft: Arc::clone(&roster_draft),
             catalog: Arc::clone(&catalog),
             dungeons,
             startup: Arc::clone(&startup),
@@ -3577,6 +3668,8 @@ fn main() {
         watchlist_toast,
         alert_profile,
         chat_filters,
+        roster_draft,
+        game_servers,
         chat_toast: saved_config.chat_toast(),
         countdown_toast: saved_config.countdown_toast(),
         catalog,

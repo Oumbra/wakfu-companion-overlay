@@ -18,6 +18,7 @@ pub mod feature_switch;
 pub mod login;
 pub mod notifications;
 pub mod options_modal;
+pub mod personnages_tab;
 pub mod raccourcis_tab;
 pub mod recipe_dialog;
 pub mod suivi_tab;

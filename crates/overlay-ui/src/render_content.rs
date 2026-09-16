@@ -224,6 +224,11 @@ pub struct RenderContent<'a> {
     pub portraits: &'a PortraitAtlas,
     pub combat_frame: &'a CombatFrame,
     pub icons: &'a UiIcons,
+    /// Les bustes de classe de l'onglet « Personnages » — `Some` pour la seule fenêtre Options,
+    /// qui est la seule à les charger (voir `crate::avatars`, doc de module).
+    pub avatars: Option<&'a crate::avatars::AvatarAtlas>,
+    /// Les serveurs de jeu (`crate::game_servers`), pour le sélecteur de compte du même onglet.
+    pub game_servers: &'a crate::game_servers::GameServers,
     pub combat_side: &'a mut CombatSide,
     /// Grandeur mesurée par le panneau Combat (dégâts / armure donnée / soins) — même statut que
     /// `combat_side` : un état par fenêtre overlay, porté par l'hôte (voir `CombatMetric`).
@@ -397,6 +402,8 @@ pub fn build_ui(
                 portraits: content.portraits,
                 combat_frame: content.combat_frame,
                 icons: content.icons,
+                avatars: content.avatars,
+                game_servers: content.game_servers,
                 combat_side: &mut *content.combat_side,
                 combat_metric: &mut *content.combat_metric,
                 watchlist: content.watchlist,
@@ -434,6 +441,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         kind,
         fight,
         portraits,
+        avatars,
+        game_servers,
         combat_frame,
         icons,
         combat_side,
@@ -633,6 +642,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                                 remote_icons,
                                 remote_icon_textures,
                                 icons,
+                                avatars,
+                                game_servers,
                             },
                         );
                     }

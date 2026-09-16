@@ -67,6 +67,7 @@ mod linux_main {
     use overlay_platform::linux::topmost::{self, TopmostAction, TopmostState};
     use overlay_platform::linux::x11::{GameRect, GameWindowTracker};
     use overlay_sync::update::{apply as update_apply, UpdateStatus};
+    use overlay_ui::avatars::AvatarAtlas;
     use overlay_ui::background::{
         spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
         spawn_update_thread, UpdateCommand,
@@ -76,8 +77,10 @@ mod linux_main {
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
         spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
+        SharedRosterDraft,
     };
     use overlay_ui::frame::{render, GpuState};
+    use overlay_ui::game_servers::GameServers;
     use overlay_ui::logging;
     use overlay_ui::panels;
     use overlay_ui::panels::alerts_tab;
@@ -88,6 +91,7 @@ mod linux_main {
     use overlay_ui::panels::login::{self, LoginState};
     use overlay_ui::panels::notifications::AlertMutes;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
+    use overlay_ui::panels::personnages_tab::{self, PersonnagesAvailability, PersonnagesTabState};
     use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
@@ -178,6 +182,10 @@ mod linux_main {
         portraits: PortraitAtlas,
         combat_frame: CombatFrame,
         icons: UiIcons,
+        /// Les bustes de classe de l'onglet « Personnages » — **`Some` seulement pour la fenêtre
+        /// Options**, la seule qui les affiche (voir `overlay_ui::avatars`, doc de module) : 36 PNG
+        /// décodés et 1,8 Mo de textures par fenêtre de jeu seraient payés pour rien.
+        avatars: Option<AvatarAtlas>,
         remote_icon_textures: RemoteIconTextures,
         combat_side: CombatSide,
         /// Grandeur mesurée par le panneau Combat — dégâts, armure donnée ou soins (voir
@@ -249,6 +257,12 @@ mod linux_main {
         /// Profil d'alerte et recherches de chat du compte — voir `main.rs::App::alert_profile`.
         alert_profile: SharedAlertProfile,
         chat_filters: SharedChatFilters,
+        /// Le roster du compte sous sa forme éditable, pour l'onglet « Personnages » — voir
+        /// `engine_thread::SharedRosterDraft`.
+        roster_draft: SharedRosterDraft,
+        /// Les serveurs de jeu proposés par le sélecteur du même onglet — voir
+        /// `background::spawn_game_servers_thread`.
+        game_servers: Arc<ArcSwap<GameServers>>,
         /// Voir la doc de `AppState::settings_tx` — permet à `validate_and_commit_options`
         /// d'envoyer `EngineCommand::ChangeLogPath` sans redémarrer tout le binaire.
         settings_tx: mpsc::Sender<EngineCommand>,
@@ -324,6 +338,8 @@ mod linux_main {
         auto_update: bool,
         alert_profile: SharedAlertProfile,
         chat_filters: SharedChatFilters,
+        roster_draft: SharedRosterDraft,
+        game_servers: Arc<ArcSwap<GameServers>>,
         game_window: GameWindowTracker,
         /// Canal vers le thread Engine (2026-09-08, §9 du plan) — voir
         /// `engine_thread::EngineCommand::ChangeLogPath`.
@@ -356,6 +372,8 @@ mod linux_main {
                 auto_update,
                 alert_profile,
                 chat_filters,
+                roster_draft,
+                game_servers,
                 game_window,
                 settings_tx,
             } = state;
@@ -382,6 +400,8 @@ mod linux_main {
                 auto_update,
                 alert_profile,
                 chat_filters,
+                roster_draft,
+                game_servers,
                 settings_tx,
                 log_path,
                 combat_always_visible,
@@ -571,6 +591,7 @@ mod linux_main {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: None,
                 remote_icon_textures: RemoteIconTextures::default(),
                 combat_side: CombatSide::default(),
                 combat_metric: CombatMetric::default(),
@@ -811,6 +832,8 @@ mod linux_main {
             let portraits = PortraitAtlas::load(&gpu.egui_ctx);
             let combat_frame = CombatFrame::load(&gpu.egui_ctx);
             let icons = UiIcons::load(&gpu.egui_ctx);
+            // Payés seulement là où ils servent — voir le champ `avatars` d'`OverlayWindow`.
+            let avatars = (kind == OverlayKind::Options).then(|| AvatarAtlas::load(&gpu.egui_ctx));
 
             let outer = window.outer_size();
             let position =
@@ -824,6 +847,7 @@ mod linux_main {
                 portraits,
                 combat_frame,
                 icons,
+                avatars,
                 remote_icon_textures: RemoteIconTextures::default(),
                 combat_side: CombatSide::default(),
                 combat_metric: CombatMetric::default(),
@@ -1150,6 +1174,16 @@ mod linux_main {
                 }
             });
 
+            // **Le brouillon du roster**, même principe que les alertes et le chat : une copie
+            // de ce que le compte porte, prise ici, modifiée librement, renvoyée à « Valider ».
+            let roster_snapshot = self.roster_draft.load();
+            let (personnages_draft, personnages_availability) = match roster_snapshot.as_ref() {
+                Some(roster) => (Some(roster.clone()), PersonnagesAvailability::Ready),
+                None => (None, PersonnagesAvailability::Loading),
+            };
+            // Les noms déjà vus dans `wakfu.log` cette session, que le champ de nom propose.
+            let journal = personnages_tab::journal_from_session(&self.snapshot.load());
+
             overlay.options_state = Some(OptionsModalState {
                 path_input: self.log_path.display().to_string(),
                 error: None,
@@ -1170,6 +1204,15 @@ mod linux_main {
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
                 pending_disconnect: false,
+                personnages: PersonnagesTabState {
+                    // Le compte affiché à l'ouverture est le principal, celui que tout roster a.
+                    account: personnages_draft
+                        .as_ref()
+                        .map(|roster| roster.default_index())
+                        .unwrap_or(0),
+                    journal,
+                    ..Default::default()
+                },
                 // La section « Mise à jour » lit l'état publié par le thread de mise à jour ; rafraîchi
                 // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
                 update: (**self.update_status.load()).clone(),
@@ -1191,6 +1234,7 @@ mod linux_main {
                     alerts: alerts_draft.clone(),
                     suivi: suivi_draft.clone(),
                     chat: chat_draft.clone(),
+                    personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
                     turn_notification: self.turn_notification,
                     turn_notification_muted: self.turn_notification_muted,
@@ -1205,6 +1249,8 @@ mod linux_main {
                 alerts_availability,
                 chat_draft,
                 chat_availability,
+                personnages_draft,
+                personnages_availability,
                 suivi: suivi_tab::SuiviTabState {
                     duration_input: format_alert_duration(self.countdown_toast.duration_seconds),
                     ..Default::default()
@@ -1265,6 +1311,42 @@ mod linux_main {
         }
 
         /// Voir `main.rs::commit_alerts`.
+        /// Voir `main.rs::commit_personnages`.
+        fn commit_personnages(&mut self, options_window_id: WindowId) {
+            let Some(roster) = self
+                .windows
+                .get(&options_window_id)
+                .and_then(|overlay| overlay.options_state.as_ref())
+                .and_then(|state| state.personnages_draft.clone())
+            else {
+                return;
+            };
+            let reference = self.roster_draft.load();
+            if reference.as_ref().as_ref() == Some(&roster) {
+                return;
+            }
+            // Appliqué localement d'abord : le combat en cours doit reconnaître le personnage
+            // déclaré sans attendre le réseau.
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetRoster(roster.clone()));
+            thread::spawn(move || {
+                match overlay_sync::token_store::load_token() {
+                    Some(token) => match overlay_sync::client::patch_roster(&token, &roster) {
+                        Ok(_) => {
+                            tracing::info!("[options] roster enregistré sur le compte.")
+                        }
+                        Err(err) => {
+                            tracing::warn!(%err, "[options] échec de l'enregistrement du roster")
+                        }
+                    },
+                    None => tracing::info!(
+                        "[options] roster appliqué localement — aucun compte lié, rien n'est enregistré."
+                    ),
+                }
+            });
+        }
+
         fn commit_alerts(&mut self, options_window_id: WindowId) {
             let Some(draft) = self
                 .windows
@@ -1528,6 +1610,7 @@ mod linux_main {
                     // La config est réécrite EN ENTIER, et seulement si l'un des réglages a bougé —
                     // même raison que `main.rs` : le fichier est réécrit d'un bloc.
                     let chat_toast_changed = self.commit_chat(options_window_id);
+                    self.commit_personnages(options_window_id);
                     if path_changed
                         || combat_changed
                         || turn_changed
@@ -1758,6 +1841,7 @@ mod linux_main {
                     }
 
                     let catalog = self.catalog.load();
+                    let game_servers = self.game_servers.load();
                     let auth_status = self.auth_status.load();
                     // La modale Options force sa propre interactivité (voir
                     // `App::open_options_modal`) — jamais assujettie à `self.interactive` (mode
@@ -1789,6 +1873,8 @@ mod linux_main {
                             portraits: &overlay.portraits,
                             combat_frame: &overlay.combat_frame,
                             icons: &overlay.icons,
+                            avatars: overlay.avatars.as_ref(),
+                            game_servers: &game_servers,
                             combat_side: &mut overlay.combat_side,
                             combat_metric: &mut overlay.combat_metric,
                             watchlist,
@@ -2273,6 +2359,11 @@ mod linux_main {
         let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
         let alert_profile: SharedAlertProfile = Arc::new(ArcSwap::from_pointee(None));
         let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
+        let roster_draft: SharedRosterDraft = Arc::new(ArcSwap::from_pointee(None));
+        // Les serveurs de jeu ne sont pas un jalon de démarrage : voir la doc du thread.
+        let game_servers: Arc<ArcSwap<GameServers>> =
+            Arc::new(ArcSwap::from_pointee(GameServers::default()));
+        overlay_ui::background::spawn_game_servers_thread(Arc::clone(&game_servers));
         // Publié par le thread Engine pour la surveillance de tour — sans effet sous X11 pour
         // l'instant (voir `turn_notification`), mais le thread l'attend.
         let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
@@ -2331,6 +2422,7 @@ mod linux_main {
                 alert_profile: Arc::clone(&alert_profile),
                 chat_filters: Arc::clone(&chat_filters),
                 roster,
+                roster_draft: Arc::clone(&roster_draft),
                 catalog: Arc::clone(&catalog),
                 dungeons,
                 startup: Arc::clone(&startup),
@@ -2375,6 +2467,8 @@ mod linux_main {
             auto_update: saved_config.auto_update,
             alert_profile,
             chat_filters,
+            roster_draft,
+            game_servers,
             game_window,
             settings_tx,
         });

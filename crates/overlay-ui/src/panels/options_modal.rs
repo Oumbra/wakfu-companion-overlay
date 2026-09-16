@@ -83,6 +83,9 @@ use crate::panels::alerts_tab::{self, AlertsTabContext, AlertsTabState};
 use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabState};
 use crate::panels::feature_switch::FeatureToggles;
 use crate::panels::notifications::{self, AlertMutes};
+use crate::panels::personnages_tab::{
+    self, PersonnagesAvailability, PersonnagesTabContext, PersonnagesTabState,
+};
 use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
 use crate::shortcuts::ShortcutBindings;
 
@@ -314,6 +317,14 @@ pub struct OptionsModalState {
     /// compte n'a pas répondu.
     pub chat_draft: Option<ChatDraft>,
     pub chat_availability: ChatAvailability,
+    /// Le compte affiché, les modales ouvertes, le mode de suppression multiple — voir
+    /// `panels::personnages_tab`.
+    pub personnages: PersonnagesTabState,
+    /// **Le brouillon du roster** — même principe que `alerts_draft` : une copie de ce que le
+    /// compte porte, modifiée librement, renvoyée seulement à « Valider ». `None` tant que le
+    /// compte n'a pas répondu, et l'onglet affiche alors son rouage.
+    pub personnages_draft: Option<overlay_engine::Roster>,
+    pub personnages_availability: PersonnagesAvailability,
     /// **L'état de référence**, figé à l'ouverture : le chemin de log et le profil d'alerte tels
     /// qu'ils étaient avant que l'utilisateur ne touche à quoi que ce soit.
     ///
@@ -359,6 +370,9 @@ pub struct OptionsInitial {
     /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
     pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
     pub chat: Option<ChatDraft>,
+    /// Le roster tel qu'il était à l'ouverture — c'est lui que « Annuler » abandonne, et sa
+    /// comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
+    pub personnages: Option<overlay_engine::Roster>,
     /// L'affichage permanent du panneau Combat tel qu'il était à l'ouverture — une case cochée
     /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
     /// pas pour rien.
@@ -445,6 +459,7 @@ impl OptionsModalState {
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
+            || self.personnages_draft != self.initial.personnages
             || self.shortcuts != self.initial.shortcuts
             || self.auto_update != self.initial.auto_update
     }
@@ -565,6 +580,13 @@ pub struct OptionsModalContext<'a> {
     pub remote_icon_textures: &'a mut crate::remote_icons::RemoteIconTextures,
     /// Repli quand l'icône d'un objet n'est pas encore descendue.
     pub icons: &'a crate::ui_icons::UiIcons,
+    /// Les bustes de classe de l'onglet « Personnages » — **chargés seulement pour la fenêtre
+    /// Options** (voir `crate::avatars`, doc de module), donc `None` partout ailleurs. Cet onglet
+    /// attend alors, comme il attend le roster : peindre des tuiles sans buste serait pire.
+    pub avatars: Option<&'a crate::avatars::AvatarAtlas>,
+    /// Les serveurs de jeu proposés au compte — vide tant que la liste n'est pas descendue, ce qui
+    /// n'empêche ni d'afficher ni de garder celui que le compte porte déjà.
+    pub game_servers: &'a crate::game_servers::GameServers,
 }
 
 /// Clé mémoire « le focus initial a déjà été donné » — voir [`show`].
@@ -624,9 +646,8 @@ pub fn show(
         .log_name("options")
         .show(ui);
 
-    // « Personnages » est le dernier onglet sans contenu porté. Il reste affiché désactivé plutôt
-    // que masqué — un onglet qui apparaît est un changement de mise en page, pas un changement
-    // d'état.
+    // Les six onglets sont désormais tous câblés — « Personnages » a reçu son contenu le
+    // 2026-09-16 (`panels::personnages_tab`), et avec lui la dernière entrée grisée du menu.
     chrome.tabs(
         ui,
         design::tabs(&mut state.tab)
@@ -634,7 +655,6 @@ pub fn show(
             .entry(OptionsTab::Alertes, "Alertes")
             .entry(OptionsTab::Chat, "Chat")
             .entry(OptionsTab::Personnages, "Personnages")
-            .enabled(false)
             .entry(OptionsTab::Raccourcis, "Raccourcis")
             .entry(OptionsTab::Parametres, "Paramètres")
             .log_name("options-onglets"),
@@ -730,6 +750,38 @@ pub fn show(
                     enabled: &mut state.features.alerts,
                 },
             );
+            return;
+        }
+        if state.tab == OptionsTab::Personnages {
+            // Même arbitrage que pour les alertes et le chat : tant que le roster n'est pas
+            // descendu du compte, l'onglet affiche son rouage. Un roster vide servi en attendant se
+            // lirait comme « vous n'avez déclaré personne ».
+            //
+            // **Les bustes comptent autant que le roster** : sans eux, chaque tuile tomberait sur
+            // le portrait générique et la grille de classes ne dirait plus rien. Leur absence est
+            // donc une attente, pas un repli (voir `OptionsModalContext::avatars`).
+            let mut vide = overlay_engine::Roster::default();
+            let disponible = state.personnages_draft.is_some() && ctx.avatars.is_some();
+            let roster = state.personnages_draft.as_mut().unwrap_or(&mut vide);
+            if let Some(avatars) = ctx.avatars {
+                personnages_tab::show(
+                    ui,
+                    panel,
+                    &mut state.personnages,
+                    &mut PersonnagesTabContext {
+                        roster,
+                        servers: ctx.game_servers,
+                        avatars,
+                        icons: ctx.icons,
+                        availability: if disponible {
+                            PersonnagesAvailability::Ready
+                        } else {
+                            PersonnagesAvailability::Loading
+                        },
+                        window,
+                    },
+                );
+            }
             return;
         }
         if state.tab == OptionsTab::Raccourcis {

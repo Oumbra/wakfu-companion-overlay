@@ -90,6 +90,14 @@ pub enum EngineCommand {
     /// Réglages de la carte d'alerte de chat (durée, fermeture manuelle) — locaux à la machine
     /// (voir `config::OverlayConfig`), envoyés au démarrage puis à chaque validation de l'onglet.
     SetChatToast(ChatToastSettings),
+    /// **Le roster validé depuis l'onglet « Personnages »** (2026-09-16) — même principe que
+    /// `SetChatFilters` : appliqué tout de suite, l'écriture au compte (clé `roster`) part en
+    /// parallèle côté hôte.
+    ///
+    /// Sans cette commande, un personnage déclaré ne serait reconnu qu'au prochain `ApplySettings`
+    /// — c'est-à-dire, en pratique, à la prochaine ouverture de la fenêtre Options : le combat en
+    /// cours continuerait de le classer sur son seul `breed`.
+    SetRoster(overlay_engine::Roster),
     /// Réglages de la carte de **décompte arrivé à zéro** (durée, fermeture manuelle) — locaux à
     /// la machine comme [`Self::SetChatToast`], envoyés au démarrage puis à chaque validation de
     /// la fenêtre Options (section « Suivi » de l'onglet « Paramètres », 2026-09-16).
@@ -187,6 +195,12 @@ pub type SharedChatFilters = Arc<ArcSwap<Option<Vec<overlay_engine::ChatFilter>>
 /// de tour (`turn_watch`) y lit les personnages du compte de chaque fenêtre (titulaire + héros).
 /// `None` sans compte lié.
 pub type SharedRoster = Arc<ArcSwap<Option<overlay_engine::RosterIndex>>>;
+/// **Le même roster, sous sa forme éditable** — ce que l'onglet « Personnages » prend en brouillon
+/// à l'ouverture de la fenêtre Options (2026-09-16). Publié par le même `ApplySettings` que
+/// [`SharedRoster`], donc jamais désynchronisé de lui ; distinct parce que l'index de lecture jette
+/// l'identité des comptes, que l'écriture ne peut pas se permettre de perdre (voir
+/// `overlay_engine::roster`, doc de module).
+pub type SharedRosterDraft = Arc<ArcSwap<Option<overlay_engine::Roster>>>;
 
 pub struct EngineHandles {
     pub snapshot: Arc<ArcSwap<SessionSnapshot>>,
@@ -205,6 +219,8 @@ pub struct EngineHandles {
     pub chat_filters: SharedChatFilters,
     /// Publié par ce thread comme `alert_profile`, pour la surveillance de tour.
     pub roster: SharedRoster,
+    /// Publié par ce thread comme `roster`, pour l'onglet « Personnages ».
+    pub roster_draft: SharedRosterDraft,
     /// Avancement du démarrage (voir `crate::startup`) : ce thread y marque la fin du rattrapage
     /// initial de `wakfu.log` — au premier silence du watcher (200 ms sans lot), ou au premier lot
     /// qui n'est plus étiqueté `is_initial_load`. Le watcher pousse les lots du rattrapage d'un
@@ -230,6 +246,7 @@ pub fn spawn_engine_thread(
         dungeons,
         chat_filters: chat_filters_out,
         roster: roster_out,
+        roster_draft: roster_draft_out,
     } = handles;
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -286,6 +303,7 @@ pub fn spawn_engine_thread(
                                 "réglages de compte appliqués à l'Engine (lot L4)"
                             );
                             roster_out.store(Arc::new(Some(settings.roster.clone())));
+                            roster_draft_out.store(Arc::new(Some(settings.roster_draft)));
                             engine.set_roster(Some(settings.roster));
                             engine.set_watchlist_entries(settings.watchlist);
                             alert_profile = settings.alerts;
@@ -308,6 +326,7 @@ pub fn spawn_engine_thread(
                                 "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé)"
                             );
                             roster_out.store(Arc::new(None));
+                            roster_draft_out.store(Arc::new(None));
                             engine.set_roster(None);
                             engine.set_watchlist_entries(Vec::new());
                             engine.set_sound_items(Vec::new());
@@ -345,6 +364,25 @@ pub fn spawn_engine_thread(
                             );
                             engine.set_chat_filters(filters.clone());
                             chat_filters_out.store(Arc::new(Some(filters)));
+                        }
+                        EngineCommand::SetRoster(roster) => {
+                            let account_count = roster.accounts.len();
+                            let character_count: usize =
+                                roster.accounts.iter().map(|a| a.characters.len()).sum();
+                            tracing::info!(
+                                account_count,
+                                character_count,
+                                "[options] roster appliqué depuis la fenêtre Options"
+                            );
+                            // L'index de lecture se REFAIT depuis le roster édité : les deux
+                            // publications viennent de la même valeur, elles ne peuvent pas
+                            // diverger (voir `SharedRosterDraft`).
+                            let index = overlay_engine::RosterIndex::from_settings_json(
+                                &serde_json::json!({ "roster": roster.patch_value() }),
+                            );
+                            roster_out.store(Arc::new(Some(index.clone())));
+                            engine.set_roster(Some(index));
+                            roster_draft_out.store(Arc::new(Some(roster)));
                         }
                         EngineCommand::SetFeatures(toggles) => {
                             tracing::info!(
