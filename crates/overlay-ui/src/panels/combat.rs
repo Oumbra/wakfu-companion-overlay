@@ -426,6 +426,17 @@
 //!   des colonnes (retour utilisateur : les marges latérales du bandeau doivent rester celles du
 //!   design, pas se résorber sur la gauche) — sans rencontrer le bandeau leader, qui commence
 //!   plus bas (`BARS_COLUMN_TOP_OFFSET`).
+//! - **Variante premier plan** (demande utilisateur du même jour, après les décisions ci-dessus) :
+//!   `SwitchVariant::FirstPlan` remplace le cadre kaki du sélecteur de genre par le socle de
+//!   bouton icône de premier plan du jeu (`button-icon-first-plan.png` et son `-hover`), celui des
+//!   boutons du carré de contrôle du Suivi. Ces deux switches sont les seuls contrôles de
+//!   l'overlay à flotter PAR-DESSUS la scène : ils portent désormais la matière que le jeu emploie
+//!   à cet endroit. `SWITCH_SCALE` disparaît avec ce changement — la variante est native à 36px, il
+//!   n'y a plus rien à réduire. Les switches passent de 72 et 109px à **74 et 112** (une gouttière
+//!   de 2px subsiste entre deux socles, qui portent chacun leurs quatre coins), la hauteur ne bouge
+//!   pas, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET` en dérivent sans être touchés. La
+//!   case choisie ne se lit plus à un fond kaki mais au socle éclairci ET à son icône en couleur
+//!   pleine — les autres sont atténuées, survol compris (voir `design::SwitchVariant`).
 //! - **Le total du bandeau leader** ne disposait que de 69px (190 − 12 de marges − 109 de
 //!   switch) : assez pour six chiffres au corps de 18, pas pour sept (« 1 047 404 » = 79px,
 //!   qui mordait de 10px sur la case Soins — capture utilisateur du même jour). Décision sur
@@ -559,11 +570,15 @@ impl CombatMetric {
     }
 }
 
-/// Échelle des deux switches — **36px de haut** pour les 44 du jeu, réduction homothétique
-/// (`Switch::scale`, voir doc de module) : cases de 35 × 36, décision utilisateur du 2026-09-16.
-const SWITCH_SCALE: f32 = 36.0 / design::tokens::SWITCH_HEIGHT;
-/// Hauteur des deux switches à cette échelle — 36px, celle qu'annonce `Switch::desired_size`.
-const SWITCH_HEIGHT: f32 = 36.0;
+/// Hauteur des deux switches — **36px**, et elle n'est plus réglée ici : c'est le côté natif du
+/// socle de premier plan (`design::tokens::SWITCH_FIRST_PLAN_SIZE`), donc ce qu'annonce
+/// `Switch::desired_size` sans échelle ni hauteur imposée.
+///
+/// L'échelle 36/44 qui précédait (`SWITCH_SCALE`, réduction homothétique du cadre du jeu de 44 à
+/// 36) a disparu avec elle : la variante premier plan n'a rien à réduire, elle est déjà à sa
+/// taille. La valeur, elle, ne change pas d'un pixel — les deux bandeaux et
+/// `BARS_COLUMN_TOP_OFFSET` en dérivent et ne bougent donc pas non plus.
+const SWITCH_HEIGHT: f32 = design::tokens::SWITCH_FIRST_PLAN_SIZE;
 /// Écart vertical entre deux portraits de la liste "plate", et entre deux groupes nom+barre de la
 /// colonne de droite (même rythme pour les deux colonnes, demande utilisateur explicite). Resserré
 /// une 4e fois (6 px → 4 px → 2 px → 1 px, retour utilisateur répété : « il y a un écart non
@@ -923,7 +938,7 @@ fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutB
         .icon(design::DsIcon::Allies)
         .slot(CombatSide::Enemies, format!("Ennemis ({hotkey})"))
         .icon(design::DsIcon::Enemies)
-        .scale(SWITCH_SCALE)
+        .variant(design::SwitchVariant::FirstPlan)
         .log_name("combat.camp");
     let switch_size = switch.desired_size();
     let backdrop = egui::Rect::from_min_size(
@@ -993,7 +1008,9 @@ fn show_leader_row(
             .slot(option, format!("{} ({hotkey})", option.tooltip()))
             .icon(option.icon());
     }
-    let switch = switch.scale(SWITCH_SCALE).log_name("combat.grandeur");
+    let switch = switch
+        .variant(design::SwitchVariant::FirstPlan)
+        .log_name("combat.grandeur");
     let switch_size = switch.desired_size();
     let switch_rect = egui::Rect::from_min_size(
         egui::pos2(
