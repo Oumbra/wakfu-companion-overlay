@@ -474,8 +474,8 @@ fn paint_avatar(
     );
 }
 
-/// Un glyphe posé sur une tuile, sans socle — les badges révélés au survol.
-fn paint_badge(ui: &egui::Ui, center: Pos2, icon: DsIcon, side: f32, tint: Color32) {
+/// Un glyphe peint à l'échelle demandée, sans socle — le « + » de la tuile d'ajout.
+fn paint_glyph(ui: &egui::Ui, center: Pos2, icon: DsIcon, side: f32, tint: Color32) {
     let ds = design::DesignSystem::get(ui.ctx());
     let native = ds.icon_native_size(icon);
     let fit = native.x.max(native.y);
@@ -485,6 +485,55 @@ fn paint_badge(ui: &egui::Ui, center: Pos2, icon: DsIcon, side: f32, tint: Color
         icon,
         tint,
     );
+}
+
+/// **Un bouton de tuile** : un socle rond, un liseré plus clair, un glyphe au centre, une
+/// infobulle.
+///
+/// Le glyphe nu du premier jet ne disait pas qu'il était cliquable — sur une tuile déjà cliquable
+/// de partout, rien ne distinguait « la zone où l'on clique pour retirer » du reste. Le socle est
+/// **le même pour les deux**, et c'est voulu : ce qui les sépare, c'est leur PLACE (voir
+/// [`hero_tile`]), pas leur forme.
+fn tile_button(
+    ui: &mut egui::Ui,
+    tuile: Rect,
+    center: Pos2,
+    icon: DsIcon,
+    tooltip: &str,
+    id: egui::Id,
+) -> egui::Response {
+    let disc = Rect::from_center_size(center, Vec2::splat(BADGE_DISC));
+    let response = ui.interact(disc, id, egui::Sense::click());
+    let survol = response.contains_pointer();
+    let painter = ui.painter();
+    painter.circle_filled(center, BADGE_DISC / 2.0, BADGE_DISC_FILL);
+    painter.circle_stroke(
+        center,
+        BADGE_DISC / 2.0,
+        egui::Stroke::new(
+            1.0,
+            if survol {
+                design::tokens::TEXT_GOLD
+            } else {
+                TILE_BORDER_HOVER
+            },
+        ),
+    );
+    paint_glyph(
+        ui,
+        center,
+        icon,
+        BADGE,
+        if survol {
+            design::tokens::TEXT_GOLD
+        } else {
+            design::tokens::ICON_TINT
+        },
+    );
+    // **Ancrée sur la tuile, pas sur le bouton** : ancrée sur lui, l'infobulle de « Modifier »
+    // s'ouvrait juste au-dessus de son socle, c'est-à-dire par-dessus le bouton « Supprimer ».
+    design::tooltip(&response).anchor(tuile).text(tooltip);
+    response
 }
 
 /// La ligne « compte + serveur ». Les deux boutons de droite portent sur le COMPTE, jamais sur un
@@ -568,17 +617,27 @@ const TILE_PAD: f32 = 10.0;
 const TILE_BAND: f32 = 22.0;
 /// 2 de cadre + 10 + 80 de buste + 2 + 22 de bandeau + 2 de cadre.
 const TILE_H: f32 = 118.0;
-/// Côté des badges révélés au survol.
-const BADGE: f32 = 15.0;
-const BADGE_INSET: f32 = 7.0;
+/// Côté du glyphe d'un badge révélé au survol.
+const BADGE: f32 = 14.0;
+/// Diamètre du socle rond qui le porte — **les deux badges ont le même** (2026-09-16) : c'est ce
+/// socle qui dit « ceci est un bouton », et deux formats différents diraient deux choses.
+const BADGE_DISC: f32 = 26.0;
+/// Distance du socle au coin haut-droit de la tuile.
+const BADGE_INSET: f32 = 6.0;
+/// Fond du socle — assez opaque pour détacher le glyphe du buste, assez sombre pour rester du jeu.
+const BADGE_DISC_FILL: Color32 = Color32::from_black_alpha(0xB4);
 
 /// Ce que la planche montre — un seul état à la fois, forcé plutôt que simulé au pointeur : une
 /// position de souris en dur dans une planche se décale au premier ajustement de cote.
 #[derive(Clone, Copy, PartialEq)]
 enum Etat {
     Repos,
-    /// Tuile survolée : voile, crayon et croix.
+    /// Tuile survolée, pointeur sur le **bandeau de nom** : voile, deux boutons, et l'infobulle du
+    /// nom complet si l'ellipse a mordu.
     Survol(usize),
+    /// Tuile survolée, pointeur sur le **bouton de modification** : son infobulle, et pas celle du
+    /// nom — deux infobulles à la fois se recouvriraient.
+    SurvolBouton(usize),
     /// Mode « suppression multiple » : cases à cocher, et ces rangs-là cochés.
     Selection(&'static [usize]),
     /// Déplacement en vol — `pris` a quitté sa place, `vise` est la destination sous le pointeur.
@@ -589,8 +648,13 @@ enum Etat {
 }
 
 impl Etat {
+    /// La tuile est-elle survolée, quel que soit l'endroit ?
     fn survol(self, index: usize) -> bool {
-        matches!(self, Etat::Survol(i) if i == index)
+        matches!(self, Etat::Survol(i) | Etat::SurvolBouton(i) if i == index)
+    }
+    /// Le pointeur est-il sur le bouton de modification de cette tuile ?
+    fn sur_bouton(self, index: usize) -> bool {
+        matches!(self, Etat::SurvolBouton(i) if i == index)
     }
     fn selection(self) -> Option<&'static [usize]> {
         match self {
@@ -615,11 +679,20 @@ fn band_rect(tile: Rect) -> Rect {
 
 /// **La tuile « + », toujours la première de la grille.** À quarante personnages, une tuile d'ajout
 /// posée à la fin obligerait à défiler jusqu'en bas pour en créer un de plus — décision du
-/// 2026-09-16. Elle ouvre la modale de création.
+/// 2026-09-16. Elle ouvre la modale de personnage.
+///
+/// **Ni bandeau ni libellé** (2026-09-16) : elle n'a pas de nom à porter, et un bandeau vide en
+/// bas de cadre lui donnait l'air d'une tuile de personnage à qui il manquerait quelque chose. Le
+/// « + » est donc centré dans le cadre entier, sur les deux axes.
 fn add_tile(ui: &mut egui::Ui, size: Vec2, survolee: bool) {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let painter = ui.painter().clone();
     let survol = survolee || response.contains_pointer();
+    let teinte = if survol {
+        design::tokens::TEXT_GOLD
+    } else {
+        design::tokens::ICON_TINT
+    };
     painter.rect_filled(rect, TILE_RADIUS, TILE_FILL);
     painter.rect_stroke(
         rect,
@@ -634,33 +707,7 @@ fn add_tile(ui: &mut egui::Ui, size: Vec2, survolee: bool) {
         ),
         egui::StrokeKind::Inside,
     );
-    paint_badge(
-        ui,
-        egui::pos2(rect.center().x, rect.top() + TILE_PAD + AVATAR_SIZE / 2.0),
-        DsIcon::Plus,
-        26.0,
-        if survol {
-            design::tokens::TEXT_GOLD
-        } else {
-            design::tokens::ICON_TINT
-        },
-    );
-    let band = band_rect(rect);
-    painter.rect_filled(band, 0.0, BAND);
-    painted_ellipsed(
-        ui,
-        &painter,
-        "Nouveau",
-        band.center(),
-        band.width() - 10.0,
-        design::text::label_strong_font(ui.ctx(), 12.5),
-        if survol {
-            design::tokens::TEXT_GOLD
-        } else {
-            TEXT
-        },
-        true,
-    );
+    paint_glyph(ui, rect.center(), DsIcon::Plus, 30.0, teinte);
     design::tooltip(&response).text("Ajouter un personnage à ce compte");
 }
 
@@ -729,9 +776,9 @@ fn hero_tile(
         TEXT,
         true,
     );
-    if coupe {
+    if coupe && !etat.sur_bouton(index) {
         design::tooltip(&response).anchor(rect).text(perso.name);
-        viser(rect, survol);
+        viser(band, matches!(etat, Etat::Survol(i) if i == index));
     }
 
     if let Some(cochee) = cochee {
@@ -766,23 +813,41 @@ fn hero_tile(
             0.0,
             TILE_HOVER_SCRIM,
         );
-        // **Deux badges : modifier, retirer.** Le crayon manque au design system (aucun des 44
-        // glyphes n'en est un, le jeu n'en montre pas) — la roue crantée du bouton Options tient
-        // la place en attendant un asset détouré.
-        let y = rect.top() + BADGE_INSET + BADGE / 2.0;
-        paint_badge(
+        // **Les deux boutons sont LOIN l'un de l'autre, et c'est la règle** (2026-09-16) :
+        // modifier est le geste courant, retirer est celui qui ouvre une confirmation. Côte à
+        // côte, un pointeur qui glisse d'un pixel demande à supprimer. « Modifier » prend donc le
+        // CENTRE — c'est là que le pointeur arrive quand on vise une tuile — et « retirer » reste
+        // au coin, où l'on ne va que si on y va exprès.
+        //
+        // Le glyphe de modification devrait être un crayon : aucun des 44 glyphes du design system
+        // n'en est un et le jeu n'en montre pas, la roue crantée du bouton Options tient donc la
+        // place en attendant un asset détouré.
+        let modifier = tile_button(
             ui,
-            egui::pos2(rect.right() - BADGE_INSET - BADGE / 2.0, y),
-            DsIcon::Close,
-            BADGE,
-            design::tokens::ICON_TINT,
-        );
-        paint_badge(
-            ui,
-            egui::pos2(rect.right() - BADGE_INSET - BADGE * 1.5 - 8.0, y),
+            rect,
+            egui::pos2(rect.center().x, band.top() - AVATAR_SIZE / 2.0 - 4.0),
             DsIcon::Option,
-            BADGE,
-            design::tokens::TEXT_GOLD,
+            "Modifier",
+            egui::Id::new(("personnages.modifier", index)),
+        );
+        tile_button(
+            ui,
+            rect,
+            egui::pos2(
+                rect.right() - BADGE_INSET - BADGE_DISC / 2.0,
+                rect.top() + BADGE_INSET + BADGE_DISC / 2.0,
+            ),
+            DsIcon::Close,
+            "Supprimer",
+            egui::Id::new(("personnages.retirer", index)),
+        );
+        let _ = modifier;
+        viser(
+            Rect::from_center_size(
+                egui::pos2(rect.center().x, band.top() - AVATAR_SIZE / 2.0 - 4.0),
+                Vec2::splat(BADGE_DISC),
+            ),
+            etat.sur_bouton(index),
         );
     }
 }
@@ -832,6 +897,22 @@ fn ecran(
         },
     );
     ui.add_space(bulk_select::HEADER_GAP);
+
+    // **Avant la grille, jamais après** : la zone défilable prend toute la hauteur restante, et
+    // un bloc ajouté à sa suite se peignait PAR-DESSUS la tuile « Nouveau » (relevé le
+    // 2026-09-16). Ce n'était pas un artefact de planche, c'était le rendu réel.
+    if liste.is_empty() {
+        ui.add(
+            design::info_text(
+                "Aucun personnage sur ce compte. Cliquez sur la tuile « + » : le nom demandé est \
+                 celui qui apparaît en jeu, au caractère près — c'est ce que l'overlay cherche \
+                 dans le journal.",
+            )
+            .width(width)
+            .log_name("personnages.vide"),
+        );
+        ui.add_space(SECTION_GAP * 0.75);
+    }
 
     let mut fantome: Option<(Rect, usize)> = None;
     scene
@@ -887,19 +968,6 @@ fn ecran(
                 rang += 1;
             }
         });
-
-    if liste.is_empty() {
-        ui.add_space(SECTION_GAP);
-        ui.add(
-            design::info_text(
-                "Aucun personnage sur ce compte. Cliquez sur « Nouveau » : le nom demandé est \
-                 celui qui apparaît en jeu, au caractère près — c'est ce que l'overlay cherche \
-                 dans le journal.",
-            )
-            .width(width)
-            .log_name("personnages.vide"),
-        );
-    }
 
     // Le fantôme, peint EN DERNIER et au-dessus de tout : c'est ce qu'on tient, il ne peut pas
     // passer sous une tuile voisine.
@@ -974,62 +1042,113 @@ fn couche_modale(ui: &mut egui::Ui, window: Rect, nom: &str) -> egui::Ui {
     couche
 }
 
-/// Taille de la modale de personnage — six colonnes de bustes NATIFS et leurs trois rangées, sans
-/// défilement : les dix-huit classes tiennent d'un coup, et c'est tout l'intérêt.
-const PERSO_MODALE: Vec2 = Vec2::new(600.0, 620.0);
+/// Taille de la modale de personnage. **640 de large et non 600** : la largeur est commandée par
+/// la grille de classes (voir [`COLONNE`]), et il faut qu'elle tienne avec de la marge des deux
+/// côtés.
+const PERSO_MODALE: Vec2 = Vec2::new(640.0, 620.0);
 const CLASSE_COLS: usize = 6;
 const CLASSE_GAP: f32 = 10.0;
 
+/// **Largeur utile de la modale — celle de la grille de classes, et elle commande tout le reste.**
+///
+/// Décision du 2026-09-16, après un rendu où le champ de saisie s'arrêtait 16 points avant la
+/// dernière colonne de portraits : les marges doivent être les MÊMES pour les champs, le switch et
+/// les portraits. Comme une tuile de classe a une largeur fixe (le buste natif) et que leur nombre
+/// est fixe, c'est la grille qui donne la mesure — et non l'inverse. Tout se pose donc dans une
+/// colonne de cette largeur, **centrée** dans le panneau, quitte à ne pas coller aux marges
+/// standard de section.
+const COLONNE: f32 = CLASSE_COLS as f32 * AVATAR_SIZE + (CLASSE_COLS as f32 - 1.0) * CLASSE_GAP;
+
+/// Les personnages **déjà vus dans `wakfu.log`**, avec la classe et le sexe lus sur leur ligne
+/// `[_FL_]` d'entrée en combat. Relevés sur le fichier de référence de l'utilisateur.
+const VUS_AU_JOURNAL: &[(&str, &str, Gender)] = &[
+    ("Anonyme-Zobal1", "zobal", Gender::F),
+    ("Anonyme-Sadida1", "sadida", Gender::M),
+    ("Anonyme-Huppermage1", "huppermage", Gender::F),
+    ("Anonyme-Ecaflip1", "ecaflip", Gender::M),
+    ("Anonyme-Ouginak1", "ouginak", Gender::M),
+];
+
 /// **La modale de personnage — création ET modification.** Une seule, décision du 2026-09-16 :
-/// modifier, c'est reprendre les trois mêmes champs (nom, sexe, classe) déjà remplis. L'utilisateur
-/// n'a qu'un écran à apprendre, et le code qu'un seul à tenir.
+/// modifier, c'est reprendre les trois mêmes champs (nom, sexe, classe) déjà remplis.
+///
+/// Elle s'intitule **« Personnage »**, sans « Nouveau » : la même fenêtre sert aux deux, et un
+/// titre qui annoncerait une création mentirait une fois sur deux.
 #[allow(clippy::too_many_arguments)]
 fn modale_personnage(
     ui: &mut egui::Ui,
     window: Rect,
-    titre: &str,
     nom: &mut String,
     recherche: &mut String,
     genre: &mut Gender,
     choisie: Option<usize>,
     survolee: Option<usize>,
+    suggestions: bool,
     avatars: &Avatars,
     icons: &UiIcons,
 ) {
-    let mut couche = couche_modale(ui, window, titre);
+    let mut couche = couche_modale(ui, window, "personnage");
     let rect = Rect::from_center_size(window.center(), PERSO_MODALE);
     let mut modale = couche.new_child(egui::UiBuilder::new().max_rect(rect));
     modale.set_clip_rect(Rect::EVERYTHING);
-    let chrome = design::window(titre)
+    let chrome = design::window("Personnage")
         .footer("Annuler", "Valider")
         .close_button(true)
         .log_name("personnages.modale")
         .show(&mut modale);
 
-    design::panel().show(&mut modale, chrome.content, |ui, panel| {
-        let width = panel.inner.width();
+    design::panel().show(&mut modale, chrome.content, |ui, _panel| {
+        // La colonne centrée : tout ce qui suit s'y pose, donc tout est aligné sur la grille.
+        let zone = ui.max_rect();
+        let colonne = Rect::from_min_max(
+            egui::pos2(zone.center().x - COLONNE / 2.0, zone.top()),
+            egui::pos2(zone.center().x + COLONNE / 2.0, zone.bottom()),
+        );
+        let mut ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(colonne)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        let ui = &mut ui;
 
         // 1. Le nom, en tête : c'est ce qu'on vient écrire.
-        ui.add(
-            design::input(nom)
-                .size(InputSize::Search)
-                .placeholder("Nom du personnage, tel qu'il apparaît en jeu…")
-                .width(width)
-                .log_name("personnages.modale.nom"),
-        );
+        //
+        // **Un `design::autocomplete` et non un champ nu** (décision du 2026-09-16) : l'overlay lit
+        // `wakfu.log`, il connaît donc des noms — avec leur classe et leur sexe — que le site ne
+        // connaîtra jamais. Il les PROPOSE, il ne les déclare pas : un allié d'un autre joueur peut
+        // figurer dans la liste, il n'y fera jamais qu'y figurer. Et la faute de frappe disparaît,
+        // alors que c'est la seule erreur de cet écran qui soit invisible et casse tout.
+        let entrees: Vec<design::AutocompleteEntry> = VUS_AU_JOURNAL
+            .iter()
+            .map(|(vu, class, gender)| {
+                let mut entree = design::AutocompleteEntry::new(*vu, 0);
+                entree.image = avatars.texture(class, *gender, false);
+                entree
+            })
+            .collect();
+        let mut champ = design::autocomplete(nom)
+            .placeholder("Nom du personnage, exactement comme en jeu…")
+            .entries(&entrees)
+            .width(COLONNE)
+            .log_name("personnages.modale.nom");
+        if suggestions {
+            champ = champ.preview_open(true).preview_active(0);
+        }
+        champ.show(ui);
         ui.add_space(12.0);
 
         // 2. Sexe à gauche, recherche de classe à droite — une seule ligne, les deux filtres de la
         //    grille qui suit.
         let row = ui
-            .allocate_space(Vec2::new(width, design::tokens::SWITCH_HEIGHT))
+            .allocate_space(Vec2::new(COLONNE, design::tokens::SWITCH_HEIGHT))
             .1;
         let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
         cell.spacing_mut().item_spacing.x = 0.0;
         cell.horizontal_centered(|ui| {
             // **Le premier slot est le masculin, et c'est le défaut.** Le choix vit chez l'appelant
-            // et NE SE RÉINITIALISE PAS d'une création à la suivante : qui déclare six mules
-            // féminines ne reclique pas six fois.
+            // et ne se réinitialise pas d'une création à la suivante : qui déclare six mules
+            // féminines ne reclique pas six fois. Il ne survit PAS à la fermeture de l'overlay
+            // (décision du 2026-09-16) — au démarrage suivant, le défaut revient.
             ui.add(
                 design::switch(genre)
                     .slot(Gender::M, "Masculin")
@@ -1056,9 +1175,9 @@ fn modale_personnage(
         ui.add_space(16.0);
 
         // 3. Les classes. **Le filtre ne mord qu'à trois caractères** — le seuil de
-        //    `tokens::AUTOCOMPLETE_MIN_QUERY_LEN`, déjà celui du champ d'autocomplétion — et
-        //    compare sur une forme sans casse ni accents (voir `normalise`), sans quoi « crâ » ne
-        //    trouverait pas « Crâ » et « eli » manquerait « Éliotrope ».
+        //    `tokens::AUTOCOMPLETE_MIN_QUERY_LEN`, déjà celui du champ ci-dessus — et compare sur
+        //    une forme sans casse ni accents (voir `normalise`), sans quoi « cra » ne trouverait
+        //    pas « Crâ » et « eli » manquerait « Éliotrope ».
         let requete = normalise(recherche);
         let filtre = (requete.chars().count() >= design::tokens::AUTOCOMPLETE_MIN_QUERY_LEN)
             .then_some(requete.as_str());
@@ -1116,7 +1235,7 @@ fn modale_personnage(
             ui.add_space(20.0);
             ui.add(
                 design::info_text("Aucune classe ne porte ce nom.")
-                    .width(width)
+                    .width(COLONNE)
                     .log_name("personnages.modale.vide"),
             );
         }
@@ -1215,16 +1334,16 @@ fn planche_ecran(fichier: &str, etat: Etat, liste: &'static [Perso]) {
     write_mockup(&mut harness, fichier);
 }
 
-/// L'écran, plus une modale de personnage par-dessus.
+/// L'écran, plus la modale de personnage par-dessus.
 #[allow(clippy::too_many_arguments)]
 fn planche_modale(
     fichier: &str,
-    titre: &'static str,
     nom: &'static str,
     recherche: &'static str,
     genre: Gender,
     choisie: Option<usize>,
     survolee: Option<usize>,
+    suggestions: bool,
 ) {
     let mut compte = 0usize;
     let mut serveur = 0usize;
@@ -1247,17 +1366,25 @@ fn planche_modale(
         modale_personnage(
             ui,
             scene.window,
-            titre,
             &mut nom,
             &mut recherche,
             &mut genre,
             choisie,
             survolee,
+            suggestions,
             scene.avatars,
             scene.icons,
         );
     });
-    survoler(&mut harness);
+    if suggestions {
+        // Le panneau de suggestions est une `egui::Area` : sa taille n'est connue qu'après une
+        // première passe, et une planche rendue en une seule frame le montrerait mal placé.
+        harness.run();
+        harness.run();
+        harness.run();
+    } else {
+        survoler(&mut harness);
+    }
     write_mockup(&mut harness, fichier);
 }
 
@@ -1290,7 +1417,7 @@ fn planche_compte() {
         );
     });
     harness.run();
-    write_mockup(&mut harness, "personnages_b9_compte");
+    write_mockup(&mut harness, "personnages_b10_compte");
 }
 
 /// **La suppression d'un compte** — la question porte le nom du compte ET son décompte : un
@@ -1317,169 +1444,88 @@ fn planche_compte_suppression() {
             .show(ui);
     });
     harness.run();
-    write_mockup(&mut harness, "personnages_b10_compte_suppression");
-}
-
-/// **La piste de saisie assistée** (question 3 du 2026-09-16, laissée ouverte).
-///
-/// Le champ de nom devient un `design::autocomplete` sur les personnages **déjà vus dans
-/// `wakfu.log`** : trois caractères, et la liste propose. Elle ne DÉCLARE rien toute seule — c'est
-/// ce qui règle la réserve exprimée : un allié d'un autre joueur peut apparaître dans la liste, il
-/// n'entre au roster que si on le choisit.
-///
-/// Trois sources, de la plus sûre à la moins sûre, et c'est l'ordre du tri :
-/// 1. **`X : +N points d'XP`** — sur le vrai `wakfu.log` de référence, quatre noms seulement en
-///    reçoivent, quand six combattants humains distincts ont rejoint des combats. Le canal
-///    « Information (combat) » est personnel au client.
-/// 2. **`TradeCompleted`, côté « soi »** — déjà exploité par `Engine::notice_character`.
-/// 3. `[_FL_] … isControlledByAI=false` — tous les alliés humains, les autres joueurs compris.
-///
-/// La classe et le sexe sont lus sur la même ligne `[_FL_]`, donc le portrait est déjà connu.
-fn planche_suggestion() {
-    let mut compte = 0usize;
-    let mut serveur = 0usize;
-    let mut mode = false;
-    let mut keys: Vec<String> = Vec::new();
-    let mut saisie = String::from("erz");
-    let mut genre = Gender::M;
-    let mut harness = options_harness(move |ui, scene| {
-        ecran(
-            ui,
-            &scene,
-            &mut compte,
-            &mut serveur,
-            &mut mode,
-            &mut keys,
-            Etat::Repos,
-            COMPTE_PRINCIPAL,
-        );
-        let mut couche = couche_modale(ui, scene.window, "suggestion");
-        let rect = Rect::from_center_size(scene.window.center(), PERSO_MODALE);
-        let mut modale = couche.new_child(egui::UiBuilder::new().max_rect(rect));
-        modale.set_clip_rect(Rect::EVERYTHING);
-        let chrome = design::window("Nouveau personnage")
-            .footer("Annuler", "Valider")
-            .close_button(true)
-            .log_name("personnages.suggestion")
-            .show(&mut modale);
-        design::panel().show(&mut modale, chrome.content, |ui, panel| {
-            // Les noms relevés dans le journal, portrait déjà résolu depuis la ligne `[_FL_]`.
-            let vus: &[(&str, &str, Gender)] = &[
-                ("Anonyme-Zobal1", "zobal", Gender::F),
-                ("Anonyme-Sadida1", "sadida", Gender::M),
-                ("Anonyme-Huppermage1", "huppermage", Gender::F),
-                ("Anonyme-Ecaflip1", "ecaflip", Gender::M),
-                ("Anonyme-Ouginak1", "ouginak", Gender::M),
-            ];
-            let entrees: Vec<design::AutocompleteEntry> = vus
-                .iter()
-                .map(|(nom, class, gender)| {
-                    let mut entree = design::AutocompleteEntry::new(*nom, 0);
-                    entree.image = scene.avatars.texture(class, *gender, false);
-                    entree
-                })
-                .collect();
-            design::autocomplete(&mut saisie)
-                .placeholder("Nom du personnage, tel qu'il apparaît en jeu…")
-                .entries(&entrees)
-                .width(panel.inner.width())
-                .preview_open(true)
-                .preview_active(0)
-                .log_name("personnages.modale.nom")
-                .show(ui);
-            ui.add_space(12.0);
-            let row = ui
-                .allocate_space(Vec2::new(
-                    panel.inner.width(),
-                    design::tokens::SWITCH_HEIGHT,
-                ))
-                .1;
-            let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-            cell.horizontal_centered(|ui| {
-                ui.add(
-                    design::switch(&mut genre)
-                        .slot(Gender::M, "Masculin")
-                        .icon(DsIcon::Male)
-                        .slot(Gender::F, "Féminin")
-                        .icon(DsIcon::Female)
-                        .log_name("personnages.suggestion.sexe"),
-                );
-            });
-        });
-    });
-    // Le panneau de suggestions est une `egui::Area` : sa taille n'est connue qu'après une
-    // première passe, et une planche rendue en une seule frame le montrerait mal placé.
-    harness.run();
-    harness.run();
-    harness.run();
-    write_mockup(&mut harness, "personnages_b8_suggestion");
+    write_mockup(&mut harness, "personnages_b11_compte_suppression");
 }
 
 fn main() {
     planche_ecran("personnages_b1_ecran", Etat::Repos, COMPTE_PRINCIPAL);
     println!("  b1 — l'écran au repos");
     planche_ecran("personnages_b2_survol", Etat::Survol(9), COMPTE_PRINCIPAL);
-    println!("  b2 — tuile survolée, nom ellipsé et son infobulle");
+    println!("  b2 — survol : le nom complet en infobulle");
     planche_ecran(
-        "personnages_b3_selection",
+        "personnages_b3_boutons",
+        Etat::SurvolBouton(9),
+        COMPTE_PRINCIPAL,
+    );
+    println!("  b3 — le bouton « Modifier », au centre");
+    planche_ecran(
+        "personnages_b4_selection",
         Etat::Selection(&[1, 4, 7]),
         COMPTE_PRINCIPAL,
     );
-    println!("  b3 — suppression multiple");
+    println!("  b4 — suppression multiple");
     planche_modale(
-        "personnages_b4_creation",
-        "Nouveau personnage",
+        "personnages_b5_personnage",
         "",
         "",
         Gender::M,
         None,
         None,
+        false,
     );
-    println!("  b4 — modale de création");
+    println!("  b5 — la modale « Personnage », vierge");
     planche_modale(
-        "personnages_b5_creation_survol",
-        "Nouveau personnage",
+        "personnages_b6_suggestion",
+        "erz",
+        "",
+        Gender::M,
+        None,
+        None,
+        true,
+    );
+    println!("  b6 — le nom se complète depuis le journal");
+    planche_modale(
+        "personnages_b7_classe",
         "Telum Novum",
         "",
         Gender::F,
         None,
         Some(8),
+        false,
     );
-    println!("  b5 — une classe sous le curseur");
+    println!("  b7 — une classe sous le curseur");
     planche_modale(
-        "personnages_b6_recherche",
-        "Nouveau personnage",
+        "personnages_b8_recherche",
         "Telum Novum",
         "eli",
         Gender::F,
         None,
         Some(15),
+        false,
     );
-    println!("  b6 — recherche de classe");
+    println!("  b8 — recherche de classe");
     planche_modale(
-        "personnages_b7_modification",
-        "Modifier le personnage",
+        "personnages_b9_modification",
         "Sagitta Lucis",
         "",
         Gender::F,
         Some(8),
         None,
+        false,
     );
-    println!("  b7 — modale de modification");
-    planche_suggestion();
-    println!("  b8 — saisie assistée par le journal");
+    println!("  b9 — la même modale, pré-remplie");
     planche_compte();
-    println!("  b9 — création de compte");
+    println!("  b10 — création de compte");
     planche_compte_suppression();
-    println!("  b10 — suppression d'un compte");
+    println!("  b11 — suppression d'un compte");
     planche_ecran(
-        "personnages_b11_deplacement",
+        "personnages_b12_deplacement",
         Etat::Deplacement { pris: 9, vise: 5 },
         COMPTE_PRINCIPAL,
     );
-    println!("  b11 — déplacement en vol");
-    planche_ecran("personnages_b12_vide", Etat::Repos, &[]);
-    println!("  b12 — aucun personnage");
+    println!("  b12 — déplacement en vol");
+    planche_ecran("personnages_b13_vide", Etat::Repos, &[]);
+    println!("  b13 — aucun personnage");
     let dir = mockup_dir();
     let ecrites = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
     let affiche = dir.canonicalize().unwrap_or_else(|_| dir.clone());
