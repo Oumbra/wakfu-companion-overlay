@@ -59,6 +59,21 @@ pub struct OverlayConfig {
     /// La carte d'alerte de chat ne se ferme qu'à la main — même exception, même raison.
     #[serde(default)]
     pub chat_alert_manual_close: bool,
+    /// Durée d'affichage de la carte de **décompte arrivé à zéro** du Suivi, en secondes — ligne
+    /// « Fermeture automatique des notifications de décompte » de la section « Suivi » de l'onglet
+    /// « Paramètres » (2026-09-16, voir `panels::suivi_tab::CountdownToastSettings`).
+    ///
+    /// **Ici et non au compte**, même exception et même raison que
+    /// [`Self::chat_alert_duration_seconds`] : ce réglage n'a pas d'équivalent web, et le serveur
+    /// n'accepte que des clés connues. `None` = défaut (3,5 s).
+    ///
+    /// Avant cette clé, la carte du décompte empruntait la durée du **profil d'alertes de
+    /// ramassage** (`AlertProfile`, descendue du compte) : régler l'une réglait l'autre.
+    #[serde(default)]
+    pub countdown_alert_duration_seconds: Option<f32>,
+    /// La carte de décompte ne se ferme qu'à la main — même exception, même raison.
+    #[serde(default)]
+    pub countdown_alert_manual_close: bool,
     /// Prévenir par une **notification du système** qu'un personnage du joueur doit jouer
     /// (section « Combat » de l'onglet Paramètres, 2026-09-14).
     ///
@@ -209,6 +224,8 @@ impl Default for OverlayConfig {
             combat_always_visible: false,
             chat_alert_duration_seconds: None,
             chat_alert_manual_close: false,
+            countdown_alert_duration_seconds: None,
+            countdown_alert_manual_close: false,
             turn_notification: false,
             turn_notification_muted: false,
             suivi_enabled: actif(),
@@ -253,6 +270,25 @@ impl OverlayConfig {
     pub fn set_chat_toast(&mut self, toast: crate::panels::chat_tab::ChatToastSettings) {
         self.chat_alert_duration_seconds = Some(toast.duration_seconds);
         self.chat_alert_manual_close = toast.manual_close;
+    }
+
+    /// Réglages de la carte de décompte effectifs — défaut pour une config qui ne les porte pas,
+    /// exactement comme [`Self::chat_toast`].
+    pub fn countdown_toast(&self) -> crate::panels::suivi_tab::CountdownToastSettings {
+        let mut toast = crate::panels::suivi_tab::CountdownToastSettings {
+            manual_close: self.countdown_alert_manual_close,
+            ..Default::default()
+        };
+        if let Some(seconds) = self.countdown_alert_duration_seconds {
+            toast.set_duration(seconds);
+        }
+        toast
+    }
+
+    /// Reporte les réglages de la carte de décompte dans la config.
+    pub fn set_countdown_toast(&mut self, toast: crate::panels::suivi_tab::CountdownToastSettings) {
+        self.countdown_alert_duration_seconds = Some(toast.duration_seconds);
+        self.countdown_alert_manual_close = toast.manual_close;
     }
 
     /// Les trois interrupteurs de fonctionnalité de cette config — voir

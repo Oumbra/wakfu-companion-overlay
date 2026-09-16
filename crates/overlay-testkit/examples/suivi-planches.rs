@@ -190,6 +190,9 @@ fn harnais(p: Planche) -> Harness<'static> {
             // Une planche est un instantané : rien n'y a été retiré du brouillon.
             retirees: Vec::new(),
             recipe: recette,
+            // Le champ de durée que cette planche ne montre pas : il est peint dans l'onglet
+            // « Paramètres », section « Suivi » (`panels::notifications`).
+            duration_input: String::new(),
         },
         suivi_draft: Some(entrees()),
         suivi_availability: p.availability,

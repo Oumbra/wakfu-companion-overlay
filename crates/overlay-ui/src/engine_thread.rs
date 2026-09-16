@@ -28,7 +28,8 @@ use crate::alert_sound;
 use crate::panels;
 use crate::panels::chat_tab::ChatToastSettings;
 use crate::panels::feature_switch::FeatureToggles;
-use crate::panels::notifications::AlertMutes;
+use crate::panels::notifications::{AlertMutes, ToastClose};
+use crate::panels::suivi_tab::CountdownToastSettings;
 use crate::panels::watchlist::{WatchlistToast, WatchlistToastReason};
 use crate::render_content::UserEvent;
 
@@ -89,6 +90,13 @@ pub enum EngineCommand {
     /// Réglages de la carte d'alerte de chat (durée, fermeture manuelle) — locaux à la machine
     /// (voir `config::OverlayConfig`), envoyés au démarrage puis à chaque validation de l'onglet.
     SetChatToast(ChatToastSettings),
+    /// Réglages de la carte de **décompte arrivé à zéro** (durée, fermeture manuelle) — locaux à
+    /// la machine comme [`Self::SetChatToast`], envoyés au démarrage puis à chaque validation de
+    /// la fenêtre Options (section « Suivi » de l'onglet « Paramètres », 2026-09-16).
+    ///
+    /// Avant cette commande, la carte du décompte prenait la durée du **profil d'alertes de
+    /// ramassage** descendu du compte : les deux alertes partageaient un seul réglage.
+    SetCountdownToast(CountdownToastSettings),
     /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le suivi » / « Activer les
     /// alertes » / « Activer la recherche » (`panels::feature_switch`, 2026-09-15). Locaux à la
     /// machine comme `SetChatToast`, envoyés au démarrage puis à chaque validation de la fenêtre
@@ -112,16 +120,22 @@ pub enum EngineCommand {
     SetAlertMutes(AlertMutes),
 }
 
-/// L'instant où une carte de chat doit disparaître — le pendant de [`toast_deadline`] pour les
-/// réglages propres à l'onglet Chat.
-fn chat_toast_deadline(
+/// L'instant où une carte réglée LOCALEMENT doit disparaître — le pendant de [`toast_deadline`]
+/// pour les réglages qui ne descendent pas du compte : la carte de chat
+/// (`panels::chat_tab::ChatToastSettings`) et celle du décompte à zéro
+/// (`panels::suivi_tab::CountdownToastSettings`).
+///
+/// Générique sur [`ToastClose`], le trait que la fenêtre Options utilise déjà pour peindre les
+/// trois lignes « Fermeture automatique » : les deux types bornent leur durée eux-mêmes, il n'y a
+/// rien à revalider ici.
+fn local_toast_deadline<T: ToastClose>(
     created_at: std::time::Instant,
-    settings: &ChatToastSettings,
+    settings: &T,
 ) -> Option<std::time::Instant> {
-    if settings.manual_close {
+    if settings.manual_close() {
         return None;
     }
-    Some(created_at + std::time::Duration::from_secs_f32(settings.duration_seconds))
+    Some(created_at + std::time::Duration::from_secs_f32(settings.duration_seconds()))
 }
 
 /// L'instant où un toast doit disparaître, d'après le profil d'alerte — `None` quand le compte a
@@ -248,6 +262,9 @@ pub fn spawn_engine_thread(
             // Même rôle pour la carte de chat — envoyés par l'hôte dès le démarrage
             // (`SetChatToast`, depuis la config locale).
             let mut chat_toast = ChatToastSettings::default();
+            // Même rôle pour la carte du décompte à zéro — jusqu'au 2026-09-16, elle prenait la
+            // durée d'`alert_profile` ci-dessus, c'est-à-dire celle des alertes de ramassage.
+            let mut countdown_toast = CountdownToastSettings::default();
             // Les trois interrupteurs — tout actif tant que l'hôte n'a rien dit (voir
             // `FeatureToggles::default`), comme pour une installation neuve.
             let mut features = FeatureToggles::default();
@@ -353,6 +370,14 @@ pub fn spawn_engine_thread(
                                 "[options] réglages de la carte de chat appliqués"
                             );
                             chat_toast = settings;
+                        }
+                        EngineCommand::SetCountdownToast(settings) => {
+                            tracing::info!(
+                                duration_seconds = settings.duration_seconds,
+                                manual_close = settings.manual_close,
+                                "[options] réglages de la carte de décompte appliqués"
+                            );
+                            countdown_toast = settings;
                         }
                         EngineCommand::SetWatchlistDefinitions {
                             definitions,
@@ -460,7 +485,7 @@ pub fn spawn_engine_thread(
                                 catalog_id: alert.catalog_id,
                                 created_at,
                                 confetti: panels::watchlist::build_confetti(),
-                                hide_at: toast_deadline(created_at, &alert_profile),
+                                hide_at: local_toast_deadline(created_at, &countdown_toast),
                             })));
                         }
                         // Ramassage d'un objet à son activé (compte) — INDÉPENDANT de la
@@ -532,7 +557,7 @@ pub fn spawn_engine_thread(
                                 created_at,
                                 // Pas de confettis : ce n'est pas une célébration.
                                 confetti: Vec::new(),
-                                hide_at: chat_toast_deadline(created_at, &chat_toast),
+                                hide_at: local_toast_deadline(created_at, &chat_toast),
                             })));
                         }
                         let _ = proxy.send_event(UserEvent::NewSnapshot);

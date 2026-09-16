@@ -271,6 +271,9 @@ mod linux_main {
         alert_mutes: AlertMutes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
+        /// Réglages de la carte de décompte à zéro en vigueur — voir
+        /// `main.rs::App::countdown_toast`.
+        countdown_toast: suivi_tab::CountdownToastSettings,
         game_window: GameWindowTracker,
         banner_printed: bool,
         /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir
@@ -301,6 +304,9 @@ mod linux_main {
         alert_mutes: AlertMutes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
+        /// Réglages de la carte de décompte à zéro en vigueur — voir
+        /// `main.rs::App::countdown_toast`.
+        countdown_toast: suivi_tab::CountdownToastSettings,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
         /// Même provenance que `combat_always_visible`.
         shortcuts: ShortcutBindings,
@@ -334,6 +340,7 @@ mod linux_main {
                 features,
                 alert_mutes,
                 chat_toast,
+                countdown_toast,
                 shortcuts,
                 snapshot,
                 watchlist,
@@ -383,6 +390,7 @@ mod linux_main {
                 features,
                 alert_mutes,
                 chat_toast,
+                countdown_toast,
                 game_window,
                 banner_printed: false,
                 pending_dialog: None,
@@ -1155,6 +1163,9 @@ mod linux_main {
                 // cases « Couper le son des notifications » aussi.
                 features: self.features,
                 mutes: self.alert_mutes,
+                // La fermeture de la carte de décompte (2026-09-16) — réglage local, la ligne
+                // s'ouvre directement sur sa valeur, voir `main.rs`.
+                countdown_toast: self.countdown_toast,
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
@@ -1185,6 +1196,7 @@ mod linux_main {
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
                     mutes: self.alert_mutes,
+                    countdown_toast: self.countdown_toast,
                     shortcuts: self.hotkeys.bindings().clone(),
                     auto_update: self.auto_update,
                 },
@@ -1193,7 +1205,10 @@ mod linux_main {
                 alerts_availability,
                 chat_draft,
                 chat_availability,
-                suivi: Default::default(),
+                suivi: suivi_tab::SuiviTabState {
+                    duration_input: format_alert_duration(self.countdown_toast.duration_seconds),
+                    ..Default::default()
+                },
                 suivi_draft,
                 suivi_availability,
             });
@@ -1475,6 +1490,20 @@ mod linux_main {
                             .settings_tx
                             .send(EngineCommand::SetAlertMutes(self.alert_mutes));
                     }
+                    // La fermeture de la carte de décompte (2026-09-16) — voir `main.rs` : c'est
+                    // le thread Engine qui pose `hide_at` quand l'alerte naît.
+                    let countdown_toast_changed = commit.countdown_toast != self.countdown_toast;
+                    if countdown_toast_changed {
+                        self.countdown_toast = commit.countdown_toast;
+                        tracing::info!(
+                            duration_seconds = self.countdown_toast.duration_seconds,
+                            manual_close = self.countdown_toast.manual_close,
+                            "[options] fermeture de la carte de décompte mise à jour"
+                        );
+                        let _ = self
+                            .settings_tx
+                            .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+                    }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.
                     let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
@@ -1507,6 +1536,7 @@ mod linux_main {
                         || chat_toast_changed
                         || features_changed
                         || mutes_changed
+                        || countdown_toast_changed
                         || auto_update_changed
                     {
                         let mut saved = config::OverlayConfig {
@@ -1519,6 +1549,7 @@ mod linux_main {
                         };
                         saved.set_shortcuts(self.hotkeys.bindings());
                         saved.set_chat_toast(self.chat_toast);
+                        saved.set_countdown_toast(self.countdown_toast);
                         saved.set_features(self.features);
                         saved.set_alert_mutes(self.alert_mutes);
                         config::save(&saved);
@@ -2298,6 +2329,9 @@ mod linux_main {
         // interrupteurs de fonctionnalité aussi — voir `main.rs` pour pourquoi cet envoi ne peut
         // pas attendre la première validation de la fenêtre Options.
         let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
+        let _ = settings_tx.send(EngineCommand::SetCountdownToast(
+            saved_config.countdown_toast(),
+        ));
         let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
         // Les sourdines de même — voir `main.rs`.
         let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
@@ -2311,6 +2345,7 @@ mod linux_main {
             features: saved_config.features(),
             alert_mutes: saved_config.alert_mutes(),
             chat_toast: saved_config.chat_toast(),
+            countdown_toast: saved_config.countdown_toast(),
             shortcuts: saved_config.shortcuts(),
             snapshot,
             watchlist,

@@ -480,7 +480,22 @@ impl Widget for Input<'_> {
         // 2026-09-13 sur les maquettes de l'onglet Chat, voir `tests/input_row.rs` d'`overlay-
         // testkit`). Un enfant a son propre curseur : la place du champ, c'est
         // `allocate_exact_size` plus haut qui l'a prise, et elle seule.
-        let mut edit_child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
+        // **Un `id_salt` NOMMÉ pour la zone d'édition** (2026-09-16) : sans lui, l'identité du
+        // `TextEdit` dérive du compteur d'identifiants automatiques du `Ui` parent, qui **n'est
+        // pas stable** — un widget que le défilement sort du champ visible ne consomme pas les
+        // mêmes identifiants, et ceux de tous les champs qui suivent se décalent d'une frame à
+        // l'autre. Le champ hérite alors de l'état mémorisé d'un AUTRE champ, dont son
+        // DÉFILEMENT HORIZONTAL (`TextEditState::text_offset`) : la valeur se peint hors du
+        // cadre, et le champ paraît vide alors qu'il ne l'est pas.
+        //
+        // Vécu le 2026-09-16 sur la ligne « Fermeture automatique des notifications de décompte »
+        // de l'onglet « Paramètres » : son champ se peignait vide dès que la fenêtre était
+        // défilée assez pour sortir le champ « Fichier » (long, focalisé) du champ visible.
+        let mut edit_child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(text_rect)
+                .id_salt(self.log_name.as_deref().unwrap_or("ds-input")),
+        );
         let mut edit_response = edit_child.add_enabled(enabled, edit);
         if self.request_focus {
             edit_response.request_focus();

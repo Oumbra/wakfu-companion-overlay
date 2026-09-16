@@ -264,6 +264,15 @@ pub struct OptionsModalState {
     /// l'alerte continue de s'afficher — c'est le demi-pas entre « tout actif » et une
     /// fonctionnalité éteinte.
     pub mutes: AlertMutes,
+    /// **La fermeture automatique de la carte de décompte** — ligne « Fermeture automatique des
+    /// notifications de décompte » de la section « Suivi » (2026-09-16, voir
+    /// [`suivi_tab::CountdownToastSettings`]).
+    ///
+    /// Réglage LOCAL, jamais descendu du compte : il ne passe donc pas par un brouillon
+    /// `Option<…>` comme celui des alertes ou du chat — il est posé par l'hôte au réglage en
+    /// vigueur (`config::OverlayConfig::countdown_toast`) et pris en compte à « Valider », comme
+    /// [`Self::mutes`] et [`Self::features`].
+    pub countdown_toast: suivi_tab::CountdownToastSettings,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -365,6 +374,8 @@ pub struct OptionsInitial {
     /// Les deux sourdines telles qu'elles étaient à l'ouverture — même rôle que les champs
     /// ci-dessus.
     pub mutes: AlertMutes,
+    /// La fermeture de la carte de décompte telle qu'elle était à l'ouverture — même rôle.
+    pub countdown_toast: suivi_tab::CountdownToastSettings,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -392,6 +403,7 @@ impl OptionsModalState {
             turn_notification_muted: self.turn_notification_muted,
             features: self.features,
             mutes: self.mutes,
+            countdown_toast: self.countdown_toast,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
         }
@@ -429,6 +441,7 @@ impl OptionsModalState {
             || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.features != self.initial.features
             || self.mutes != self.initial.mutes
+            || self.countdown_toast != self.initial.countdown_toast
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -440,7 +453,11 @@ impl OptionsModalState {
 /// Ce que l'utilisateur vient de demander CETTE frame — `None` la plupart du temps (aucun bouton
 /// cliqué). Voir doc de module : ne porte aucune garantie de validité, c'est à l'appelant de
 /// vérifier avant d'agir.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+///
+/// **`PartialEq` seul, plus `Eq`** depuis le 2026-09-16 : [`OptionsCommit`] porte désormais une
+/// durée en secondes (voir sa doc), et un `f32` n'est pas `Eq`. Personne n'en avait besoin — les
+/// comparaisons de cette fenêtre, tests compris, se font toutes à `==`.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum OptionsModalAction {
     #[default]
     None,
@@ -483,7 +500,10 @@ pub enum OptionsModalAction {
 /// Ne porte aucune garantie de validité (voir doc de module) : `path` est le texte BRUT du champ,
 /// pas un `PathBuf` vérifié — c'est l'hôte qui tranche, via
 /// `overlay_ingest::discovery::validate_log_path`.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+///
+/// **`PartialEq` seul, plus `Eq`** : `countdown_toast` porte une durée en secondes, et un `f32`
+/// n'est pas `Eq` — voir [`OptionsModalAction`], qui perd le sien pour la même raison.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct OptionsCommit {
     /// Chemin brut tel que tapé/affiché dans le champ au moment du clic.
     pub path: String,
@@ -505,6 +525,11 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::set_alert_mutes`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetAlertMutes`).
     pub mutes: AlertMutes,
+    /// La durée d'affichage de la carte de décompte et sa fermeture manuelle
+    /// (`panels::suivi_tab::CountdownToastSettings`) — ce que l'hôte persiste
+    /// (`config::OverlayConfig::set_countdown_toast`) et transmet au thread Engine
+    /// (`engine_thread::EngineCommand::SetCountdownToast`).
+    pub countdown_toast: suivi_tab::CountdownToastSettings,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -898,10 +923,16 @@ pub fn show(
             // disent maintenant la même chose de la même façon, fonctionnalité par fonctionnalité.
             //
             // Ce que chaque section porte dépend de ce que sa fonctionnalité fait entendre et
-            // voir, et rien n'a été uniformisé de force : le Suivi n'affiche pas de carte à
-            // fermer (son alerte est un son et un bandeau permanent), et les Alertes n'ont pas de
-            // sourdine globale — le son d'un ramassage se coupe déjà objet par objet, à la tuile
+            // voir, et rien n'a été uniformisé de force : les Alertes n'ont pas de sourdine
+            // globale — le son d'un ramassage se coupe déjà objet par objet, à la tuile
             // (`panels::alerts_tab`).
+            //
+            // **Le Suivi a gagné sa fermeture automatique le 2026-09-16** (demande utilisateur) :
+            // sa section était la seule sans, au motif que « son alerte est un son et un bandeau
+            // permanent ». Le décompte arrivé à zéro affiche pourtant bien une carte
+            // (`panels::watchlist::WatchlistToastReason::Countdown`) — elle empruntait la durée
+            // du profil d'alertes de ramassage, et n'était donc réglable que depuis la section
+            // d'à côté, pour les deux à la fois.
             //
             // Une fonctionnalité éteinte (`panels::feature_switch`) grise sa section entière : il
             // n'y a ni son à essayer ni carte à fermer quand rien ne se déclenche.
@@ -914,7 +945,15 @@ pub fn show(
                     log_prefix: "suivi",
                     enabled: state.features.suivi,
                     muted: Some(&mut state.mutes.suivi),
-                    auto_close: None,
+                    // `available: true` sans condition, contrairement aux deux sections
+                    // suivantes : ce réglage est LOCAL (`config::OverlayConfig`), il n'y a aucun
+                    // brouillon de compte à attendre et donc jamais de ligne grisée.
+                    auto_close: Some(notifications::AutoClose {
+                        available: true,
+                        label: notifications::COUNTDOWN_AUTO_CLOSE_LABEL,
+                        settings: &mut state.countdown_toast,
+                        input: &mut state.suivi.duration_input,
+                    }),
                 },
             );
 
@@ -935,6 +974,7 @@ pub fn show(
                     muted: None,
                     auto_close: Some(notifications::AutoClose {
                         available: alertes_prêtes,
+                        label: notifications::AUTO_CLOSE_LABEL,
                         settings: profil,
                         input: &mut state.alerts.duration_input,
                     }),
@@ -955,6 +995,7 @@ pub fn show(
                     muted: Some(&mut state.mutes.chat),
                     auto_close: Some(notifications::AutoClose {
                         available: chat_prêt,
+                        label: notifications::AUTO_CLOSE_LABEL,
                         settings: &mut chat.toast,
                         input: &mut state.chat.duration_input,
                     }),
@@ -1439,6 +1480,7 @@ mod tests {
                 turn_notification_muted: false,
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
+                countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
             }

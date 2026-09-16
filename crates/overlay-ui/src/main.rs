@@ -400,6 +400,10 @@ struct App {
     /// Réglages de la carte d'alerte de chat EN VIGUEUR (durée, fermeture manuelle) — lus de la
     /// config locale au démarrage, réécrits à la validation de l'onglet « Chat ».
     chat_toast: chat_tab::ChatToastSettings,
+    /// Réglages de la carte de **décompte arrivé à zéro** EN VIGUEUR — même provenance et même
+    /// politique que `chat_toast` : lus de la config locale au démarrage, réécrits à la validation
+    /// de la fenêtre Options (section « Suivi » de l'onglet « Paramètres », 2026-09-16).
+    countdown_toast: suivi_tab::CountdownToastSettings,
     /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
     /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
     /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
@@ -577,6 +581,8 @@ struct AppState {
     chat_filters: SharedChatFilters,
     /// Voir `App::chat_toast` — lu de la config au démarrage.
     chat_toast: chat_tab::ChatToastSettings,
+    /// Voir `App::countdown_toast` — lu de la config au démarrage.
+    countdown_toast: suivi_tab::CountdownToastSettings,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
@@ -609,6 +615,7 @@ impl App {
             alert_profile,
             chat_filters,
             chat_toast,
+            countdown_toast,
             catalog,
             catalog_stale,
             remote_icons,
@@ -644,6 +651,7 @@ impl App {
             alert_profile,
             chat_filters,
             chat_toast,
+            countdown_toast,
             catalog,
             catalog_stale,
             remote_icons,
@@ -2173,6 +2181,9 @@ impl App {
             features: self.features,
             // Idem pour les deux sourdines.
             mutes: self.alert_mutes,
+            // Idem pour la fermeture de la carte de décompte (2026-09-16) — réglage local, donc
+            // rien à attendre d'un compte : la ligne s'ouvre directement sur sa valeur.
+            countdown_toast: self.countdown_toast,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -2208,6 +2219,7 @@ impl App {
                 turn_notification_muted: self.turn_notification_muted,
                 features: self.features,
                 mutes: self.alert_mutes,
+                countdown_toast: self.countdown_toast,
                 shortcuts: self.hotkeys.bindings().clone(),
                 auto_update: self.auto_update,
             },
@@ -2216,7 +2228,12 @@ impl App {
             alerts_availability,
             chat_draft,
             chat_availability,
-            suivi: Default::default(),
+            suivi: suivi_tab::SuiviTabState {
+                // Comme pour les Alertes et le Chat : le champ de durée s'ouvre sur la valeur en
+                // place, pas vide — c'est un réglage existant qu'on vient modifier.
+                duration_input: format_alert_duration(self.countdown_toast.duration_seconds),
+                ..Default::default()
+            },
             suivi_draft,
             suivi_availability,
         });
@@ -2556,6 +2573,21 @@ impl App {
                         .settings_tx
                         .send(EngineCommand::SetAlertMutes(self.alert_mutes));
                 }
+                // **La fermeture de la carte de décompte (2026-09-16)** — même chemin que les
+                // sourdines ci-dessus : c'est le thread Engine qui pose `hide_at` au moment où
+                // l'alerte naît, lui seul a besoin de connaître le délai.
+                let countdown_toast_changed = commit.countdown_toast != self.countdown_toast;
+                if countdown_toast_changed {
+                    self.countdown_toast = commit.countdown_toast;
+                    tracing::info!(
+                        duration_seconds = self.countdown_toast.duration_seconds,
+                        manual_close = self.countdown_toast.manual_close,
+                        "[options] fermeture de la carte de décompte mise à jour"
+                    );
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -2594,6 +2626,7 @@ impl App {
                     || chat_toast_changed
                     || features_changed
                     || mutes_changed
+                    || countdown_toast_changed
                     || auto_update_changed
                 {
                     let mut saved = config::OverlayConfig {
@@ -2606,6 +2639,7 @@ impl App {
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
                     saved.set_chat_toast(self.chat_toast);
+                    saved.set_countdown_toast(self.countdown_toast);
                     saved.set_features(self.features);
                     saved.set_alert_mutes(self.alert_mutes);
                     config::save(&saved);
@@ -3512,6 +3546,9 @@ fn main() {
     );
     // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici, pas du compte.
     let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
+    let _ = settings_tx.send(EngineCommand::SetCountdownToast(
+        saved_config.countdown_toast(),
+    ));
     // Les interrupteurs de fonctionnalité aussi — sans cet envoi, le thread Engine partirait sur
     // son défaut « tout actif » et jouerait les alertes d'une fonctionnalité coupée jusqu'à la
     // prochaine validation de la fenêtre Options.
@@ -3535,6 +3572,7 @@ fn main() {
         alert_profile,
         chat_filters,
         chat_toast: saved_config.chat_toast(),
+        countdown_toast: saved_config.countdown_toast(),
         catalog,
         catalog_stale,
         remote_icons,

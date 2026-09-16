@@ -56,10 +56,13 @@
 //! brouillon** et garde celui du moteur — valider ne doit pas annuler un ramassage.
 
 use egui::{Color32, Rect, RichText, Vec2};
-use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
+use overlay_engine::{
+    CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode,
+    DEFAULT_ALERT_DURATION_SECONDS, MAX_ALERT_DURATION_SECONDS, MIN_ALERT_DURATION_SECONDS,
+};
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
-use crate::panels::{feature_switch, tile_reorder};
+use crate::panels::{feature_switch, notifications, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -162,6 +165,67 @@ impl AddMode {
     }
 }
 
+/// Réglages de la carte de **décompte arrivé à zéro** — durée d'affichage et fermeture manuelle.
+///
+/// Le pendant, pour le Suivi, de [`crate::panels::chat_tab::ChatToastSettings`] : la carte que
+/// `engine_thread` pose quand un compteur en mode `down` atteint 0
+/// (`panels::watchlist::WatchlistToastReason::Countdown`) se réglait jusqu'ici avec celle des
+/// ramassages, sur la durée du profil de compte — deux alertes différentes partageaient un seul
+/// réglage, et le Suivi n'avait aucun moyen de tenir sa carte plus longtemps que celle d'une
+/// alerte de drop. Demande utilisateur du 2026-09-16 : la section « Suivi » de l'onglet
+/// « Paramètres » gagne sa ligne « Fermeture automatique des notifications de décompte », à
+/// l'image de celles des sections « Alertes » et « Chat ».
+///
+/// **Persisté localement** (`config::OverlayConfig::countdown_alert_duration_seconds`), pour la
+/// même raison que le réglage du chat : il n'a pas d'équivalent web, et le serveur n'accepte que
+/// des clés connues. Les bornes, elles, sont celles du web (0,5 à 30 s) — une carte du Suivi n'a
+/// pas de raison de se régler autrement qu'une carte d'alerte.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CountdownToastSettings {
+    /// Durée d'affichage de la carte, en secondes. Ignorée quand [`Self::manual_close`] est vrai.
+    pub duration_seconds: f32,
+    /// La carte ne se ferme qu'à la main.
+    pub manual_close: bool,
+}
+
+impl Default for CountdownToastSettings {
+    fn default() -> Self {
+        Self {
+            duration_seconds: DEFAULT_ALERT_DURATION_SECONDS,
+            manual_close: false,
+        }
+    }
+}
+
+impl CountdownToastSettings {
+    /// Pose une durée, bornée aux mêmes limites que celle des alertes de ramassage.
+    pub fn set_duration(&mut self, seconds: f32) {
+        self.duration_seconds = if seconds.is_finite() {
+            seconds.clamp(MIN_ALERT_DURATION_SECONDS, MAX_ALERT_DURATION_SECONDS)
+        } else {
+            DEFAULT_ALERT_DURATION_SECONDS
+        };
+    }
+}
+
+/// Ce qu'il faut à la section « Suivi » de l'onglet « Paramètres » pour régler la fermeture de
+/// cette carte — voir `panels::notifications::ToastClose` : le bornage reste ici, le peintre n'en
+/// refait pas un à lui.
+impl notifications::ToastClose for CountdownToastSettings {
+    fn manual_close(&self) -> bool {
+        self.manual_close
+    }
+    fn set_manual_close(&mut self, manual: bool) {
+        self.manual_close = manual;
+    }
+    fn duration_seconds(&self) -> f32 {
+        self.duration_seconds
+    }
+    fn set_duration(&mut self, seconds: f32) {
+        CountdownToastSettings::set_duration(self, seconds);
+    }
+}
+
 /// Ce que l'onglet garde d'une frame à l'autre, et qui n'appartient PAS au brouillon.
 #[derive(Debug, Clone)]
 pub struct SuiviTabState {
@@ -186,6 +250,12 @@ pub struct SuiviTabState {
     pub retirees: Vec<WatchlistEntry>,
     /// La fenêtre « Objets de la recette », ouverte — `None` le reste du temps.
     pub recipe: Option<RecipeDialogState>,
+    /// La durée d'affichage de la carte de décompte **telle que tapée** — voir
+    /// `panels::notifications::AutoClose::input` pour pourquoi une chaîne et non un nombre.
+    /// **Le champ qu'elle alimente est peint dans l'onglet « Paramètres »**, section « Suivi » ;
+    /// elle vit ici, avec le reste de ce que l'onglet du même nom garde entre deux frames, comme
+    /// `chat_tab::ChatTabState::duration_input` pour la carte de chat.
+    pub duration_input: String,
 }
 
 impl Default for SuiviTabState {
@@ -199,6 +269,7 @@ impl Default for SuiviTabState {
             selected: Vec::new(),
             retirees: Vec::new(),
             recipe: None,
+            duration_input: String::new(),
         }
     }
 }

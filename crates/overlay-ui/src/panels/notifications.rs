@@ -88,7 +88,16 @@ pub const MUTE_LABEL: &str = "Couper le son des notifications";
 
 /// Le libellé de la fermeture automatique — « des notifications » pour la même raison que
 /// [`MUTE_LABEL`] : « Fermeture automatique » seul ne disait pas de quoi.
-const AUTO_CLOSE_LABEL: &str = "Fermeture automatique des notifications";
+pub const AUTO_CLOSE_LABEL: &str = "Fermeture automatique des notifications";
+
+/// Le libellé de la fermeture automatique **du Suivi** — « de décompte » en plus (2026-09-16).
+///
+/// La section « Suivi » est la seule à porter DEUX notifications de nature différente : la carte
+/// d'un compteur arrivé à zéro, réglée par cette ligne, et — pour qui suit aussi des objets à
+/// alerte — celle d'un ramassage, qui se règle dans « Alertes ». Le libellé générique des deux
+/// autres sections laisserait croire que la ligne commande tout ce que le Suivi affiche ; il dit
+/// donc ici exactement quelle carte se ferme.
+pub const COUNTDOWN_AUTO_CLOSE_LABEL: &str = "Fermeture automatique des notifications de décompte";
 
 /// **Ce qu'une carte d'alerte sait de sa fermeture** — le peu dont ce module a besoin, pour ne pas
 /// dupliquer le bornage de la durée.
@@ -122,8 +131,14 @@ impl ToastClose for AlertProfile {
     }
 }
 
-/// La fermeture automatique d'une section — absente pour le Suivi, qui n'affiche pas de carte à
-/// fermer (son alerte est un son et un bandeau permanent, pas un toast).
+/// La fermeture automatique d'une section — la carte que la fonctionnalité pose par-dessus le
+/// jeu, et le délai au bout duquel elle s'efface.
+///
+/// **Le Suivi en a une depuis le 2026-09-16** : la doc de ce module l'a longtemps dit absente,
+/// « son alerte est un son et un bandeau permanent, pas un toast ». C'était faux pour le décompte
+/// arrivé à zéro, qui affiche bel et bien une carte
+/// (`panels::watchlist::WatchlistToastReason::Countdown`) — elle empruntait simplement la durée du
+/// profil d'alertes de ramassage, faute de réglage à elle.
 pub struct AutoClose<'a> {
     /// **Le brouillon est-il descendu du compte ?** Sinon la ligne se peint grisée plutôt que de
     /// disparaître : une ligne qui apparaît quelques centaines de millisecondes après l'ouverture
@@ -131,6 +146,9 @@ pub struct AutoClose<'a> {
     pub available: bool,
     /// Les réglages de fermeture eux-mêmes — brouillon, comme le reste de la fenêtre.
     pub settings: &'a mut dyn ToastClose,
+    /// Le libellé de la case — [`AUTO_CLOSE_LABEL`] pour les sections qui n'affichent qu'une
+    /// sorte de carte, [`COUNTDOWN_AUTO_CLOSE_LABEL`] pour le Suivi (voir sa doc).
+    pub label: &'a str,
     /// La durée **telle que tapée** — une chaîne, pas un nombre.
     ///
     /// **Bornée à la perte de focus, jamais à la frappe.** Une version antérieure la bornait à
@@ -152,8 +170,9 @@ pub struct Section<'a> {
     pub enabled: bool,
     /// La sourdine, pour les fonctionnalités qui en ont une (Suivi et Chat — voir [`AlertMutes`]).
     pub muted: Option<&'a mut bool>,
-    /// La fermeture automatique de la carte, pour les fonctionnalités qui en affichent une
-    /// (Alertes et Chat).
+    /// La fermeture automatique de la carte, pour les fonctionnalités qui en affichent une —
+    /// le Suivi, les Alertes et le Chat (toutes, depuis le 2026-09-16 ; voir
+    /// [`COUNTDOWN_AUTO_CLOSE_LABEL`]).
     pub auto_close: Option<AutoClose<'a>>,
 }
 
@@ -187,7 +206,11 @@ pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) {
 /// « Couper le son des notifications ».
 fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) {
     let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .id_salt((log_prefix, "sourdine")),
+    );
     cell.horizontal_centered(|ui| {
         ui.add(
             design::checkbox(muted, MUTE_LABEL)
@@ -205,11 +228,21 @@ fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) {
 fn close_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, auto_close: AutoClose<'_>) {
     let AutoClose {
         available,
+        label,
         settings,
         input,
     } = auto_close;
+
     let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
+    // **Un `id_salt` NOMMÉ, jamais l'identifiant automatique** — chaque section nomme sa rangée,
+    // pour que l'identité du champ de durée ne dépende pas du compteur du `Ui` parent. La raison
+    // complète, et le symptôme qui l'a révélée, sont dans `design::components::input` : un champ
+    // qui hérite de l'état d'un autre se peint VIDE.
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .id_salt((log_prefix, "fermeture")),
+    );
     if !available {
         cell.disable();
     }
@@ -220,7 +253,7 @@ fn close_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, auto_close: AutoCl
     cell.horizontal_centered(|ui| {
         if ui
             .add(
-                design::checkbox(&mut auto, AUTO_CLOSE_LABEL)
+                design::checkbox(&mut auto, label)
                     .tooltip(
                         "Décoché, la carte reste à l'écran jusqu'à ce que vous la fermiez \
                          vous-même.",

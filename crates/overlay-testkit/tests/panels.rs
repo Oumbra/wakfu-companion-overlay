@@ -1709,6 +1709,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Et pour les deux cases « Couper le son des notifications » : jamais touchées,
                 // donc emportées levées.
                 mutes: overlay_ui::panels::notifications::AlertMutes::default(),
+                // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
+                // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
+                countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -4137,9 +4140,12 @@ fn options_onglet_suivi_desactive() {
 /// **L'onglet « Paramètres » avec ses quatre sections de notification vivantes** — brouillons
 /// d'alertes et de chat descendus du compte, durées déjà tapées, tout allumé.
 ///
-/// Sans brouillon, les deux lignes « Fermeture automatique des notifications » se peindraient
-/// grisées (voir `panels::notifications::AutoClose::available`) et les planches ne montreraient
-/// pas ce qu'elles sont censées montrer.
+/// Sans brouillon, les lignes « Fermeture automatique des notifications » des sections
+/// « Alertes » et « Chat » se peindraient grisées (voir
+/// `panels::notifications::AutoClose::available`) et les planches ne montreraient pas ce qu'elles
+/// sont censées montrer. Celle du **Suivi** (2026-09-16) n'a rien à attendre : son réglage est
+/// local, sa ligne est toujours vive — seule sa durée tapée est posée ici, comme pour les deux
+/// autres.
 fn parametres_avec_notifications() -> OptionsModalState {
     overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
@@ -4165,6 +4171,10 @@ fn parametres_avec_notifications() -> OptionsModalState {
         },
         chat_draft: Some(recherches_de_chat()),
         chat_availability: Default::default(),
+        suivi: overlay_ui::panels::suivi_tab::SuiviTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
         initial: overlay_ui::panels::options_modal::OptionsInitial {
             path: CHEMIN.to_string(),
             ..Default::default()
@@ -4293,13 +4303,15 @@ fn options_parametres_son_coupe() {
 }
 
 /// **Fermeture manuelle : le champ de durée se grise** — la logique existait (`.enabled`), aucun
-/// rendu ne la montrait. Posée sur les DEUX sections qui en ont une, Alertes et Chat.
+/// rendu ne la montrait. Posée sur les TROIS sections qui en ont une : Suivi (2026-09-16),
+/// Alertes et Chat.
 ///
 /// Cette planche vivait dans l'onglet « Alertes » (`options_alertes_fermeture_manuelle`) jusqu'au
 /// 2026-09-15, où le bloc a déménagé dans « Paramètres » — voir `panels::notifications`.
 #[test]
 fn options_parametres_fermeture_manuelle() {
     let mut etat = parametres_avec_notifications();
+    etat.countdown_toast.manual_close = true;
     if let Some(profil) = etat.alerts_draft.as_mut() {
         profil.manual_close = true;
     }
