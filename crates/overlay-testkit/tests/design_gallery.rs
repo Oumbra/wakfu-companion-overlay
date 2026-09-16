@@ -1594,8 +1594,11 @@ fn galerie_de_la_confirmation() {
 #[test]
 fn galerie_de_la_tuile_a_legende() {
     use overlay_ui::design::LegendTileState;
+    // 480 et non 330 : la rangée « Sélection multiple » (2026-09-16) s'est intercalée entre les
+    // deux sections d'origine, et à l'ancienne hauteur elle poussait celle du contenu élidé hors
+    // du cadre — une section peinte mais invisible dans la capture ne verrouille rien.
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 330.0))
+        .with_size(Vec2::new(760.0, 480.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1633,6 +1636,26 @@ fn galerie_de_la_tuile_a_legende() {
                                 tile = tile.legend_color(color);
                             }
                             ui.add(tile);
+                        }
+                    });
+                    heading(
+                        ui,
+                        "Sélection multiple",
+                        "Case à cocher au coin haut-DROIT — le haut-gauche porte la légende — et bordure au ton de la sélection quand la tuile est cochée. La case ne prend aucun geste : cocher est le clic de la tuile.",
+                    );
+                    ui.horizontal(|ui| {
+                        for (checked, tone, legend, text) in [
+                            (false, design::SelectionTone::Danger, "Commerce", "gelano"),
+                            (true, design::SelectionTone::Danger, "Guilde", "wa wabbit"),
+                            (true, design::SelectionTone::Neutral, "Proximité", "archi"),
+                        ] {
+                            ui.add(
+                                design::legend_tile(legend, text)
+                                    .width(160.0)
+                                    .selection(Some(checked))
+                                    .selection_tone(tone)
+                                    .log_name(format!("galerie.tuile.selection.{text}")),
+                            );
                         }
                     });
                     heading(
