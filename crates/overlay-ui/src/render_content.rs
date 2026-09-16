@@ -142,6 +142,16 @@ pub enum OverlayKind {
     /// masquée — jamais détruite — quand la case « Activer le récap de session » est décochée,
     /// même mécanique que le panneau Combat (`main.rs::App::sync_panel_visibility`).
     Recap,
+    /// **Confirmation de remise à zéro du Récap** (2026-09-17) — la boîte du design system
+    /// (`design::confirm_dialog`) sous un voile qui couvre TOUTE la fenêtre de jeu, overlays
+    /// compris, centrée sur elle. Décision utilisateur : « impose une confirmBox centrée au jeu
+    /// (verticalement et horizontalement) avec un fond voilé sur toute la fenêtre du jeu et des
+    /// overlays (sauf cette confirmBox) ». Une fenêtre OS de la taille de la fenêtre de jeu,
+    /// ouverte par l'hôte quand le glyphe du bloc est cliqué (`RenderOutcome::
+    /// recap_reset_requested`), fermée à la réponse (`RenderOutcome::recap_reset_choice`) — le
+    /// modèle est `Options` : à la demande, focalisable (Échap répond « Non »), toujours
+    /// interactive.
+    RecapReset,
     /// Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) — voir `panels::login`. **La
     /// première interface de l'overlay**, et la seule tant que `AuthStatus` n'est pas `Connected` :
     /// une fenêtre logicielle classique (barre des tâches, focus, centrée sur l'écran), jamais un
@@ -315,24 +325,16 @@ pub struct RenderContent<'a> {
     /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
     /// `panels::options_modal::OptionsModalState`.
     /// Totaux de la session tels que le moteur les tient (`overlay_engine::SessionTotals`) — ce
-    /// que peint la bande Récap (`kind == OverlayKind::Recap`), ignoré par les autres zones.
-    ///
-    /// Une RÉFÉRENCE sur le snapshot chargé par l'hôte plutôt qu'une copie : `SessionTotals` est
-    /// `Copy`, mais le passer par valeur inviterait à le construire à la main au site d'appel —
-    /// ce que le harnais de captures s'interdit justement (voir la doc de `tests/panels.rs`).
-    pub session_totals: &'a overlay_engine::SessionTotals,
-    /// Depuis combien de temps l'overlay tourne — la « durée de la session » de la bande Récap.
-    ///
-    /// **Jamais dérivée de `wakfu.log`**, contrairement au web : décision explicite de
-    /// l'utilisateur, voir la doc de module de `panels::recap`. L'hôte la calcule à partir de
-    /// l'instant de lancement du processus (`main.rs::App::started_at`), ce qui la rend aussi
-    /// figeable par un harnais de test, comme `now`.
-    pub session_uptime: std::time::Duration,
     /// Les cases facultatives de la bande Récap — durée, combats, challenges (cases « Afficher
     /// … » de la section « Recap » des Options, 2026-09-16). Voir `panels::recap::RecapCells`.
     /// L'interrupteur de la bande lui-même ne se voit pas ici : la fenêtre Récap n'est alors pas
     /// montrée du tout (même règle que le détail des combats).
     pub recap_cells: panels::recap::RecapCells,
+    /// La vue de la session (`crate::recap_session::RecapSession`, 2026-09-17) : compteurs et
+    /// chrono de LA SESSION — pas ceux du fichier relu ni du processus —, heure de début et
+    /// nombre de reprises. Construite par l'hôte à chaque frame, ce qui la rend figeable par un
+    /// harnais de test, comme `now`.
+    pub recap: &'a panels::recap::RecapView,
     pub options: Option<&'a mut OptionsModalState>,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
@@ -395,6 +397,12 @@ pub struct RenderOutcome {
     /// interactif. La largeur, elle, est fixe (`panels::recap::WIDTH`) ; c'est la hauteur qui
     /// bouge, quand une ligne trop large s'empile. Voir `panels::recap::show`.
     pub recap_height: Option<f32>,
+    /// Le glyphe de remise à zéro du bloc Récap vient d'être cliqué (`kind == Recap`) : l'hôte
+    /// ouvre la fenêtre de confirmation (`OverlayKind::RecapReset`). Voir `panels::recap`.
+    pub recap_reset_requested: bool,
+    /// Ce que la fenêtre de confirmation vient d'obtenir (`kind == RecapReset`) : `Yes` remet la
+    /// session à zéro et ferme la fenêtre, `No` la ferme seulement, `Pending` la garde.
+    pub recap_reset_choice: crate::design::ConfirmChoice,
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
@@ -477,9 +485,8 @@ pub fn build_ui(
                 interactive: content.interactive,
                 shortcuts: content.shortcuts,
                 now: content.now,
-                session_totals: content.session_totals,
-                session_uptime: content.session_uptime,
                 recap_cells: content.recap_cells,
+                recap: content.recap,
                 options: content.options.as_deref_mut(),
                 login: content.login.as_deref_mut(),
             },
@@ -521,9 +528,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         interactive,
         shortcuts,
         now,
-        session_totals,
-        session_uptime,
         recap_cells,
+        recap,
         options,
         login,
     } = content;
@@ -567,6 +573,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,
+        // La confirmation couvre sa fenêtre entière : le voile va bord à bord.
+        OverlayKind::RecapReset => egui::Margin::ZERO,
         // Récap : calé à gauche de sa fenêtre, et SEUL le haut gagne une marge, celle des
         // infobulles ([`RECAP_TOOLTIP_RESERVE`], même principe que `COMBAT_TOP_MARGIN`) — le bloc
         // peint son propre fond et se place lui-même sous cette marge (voir `panels::recap::show`).
@@ -703,16 +711,22 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         outcome.login_height = Some(login_outcome.content_height);
                     }
                 }
-                // Récap de session (2026-09-16) — voir `panels::recap`. Aucune intention
-                // remontée : ce bloc n'a ni bouton ni état, seulement la hauteur qu'il vient
-                // d'occuper, dont l'hôte se sert pour redimensionner la fenêtre OS.
+                // Récap de session (2026-09-16) — voir `panels::recap`. Deux choses remontent :
+                // la hauteur qu'il vient d'occuper, dont l'hôte se sert pour redimensionner la
+                // fenêtre OS, et le clic sur son glyphe de remise à zéro (2026-09-17).
                 OverlayKind::Recap => {
-                    outcome.recap_height = Some(panels::recap::show(
-                        ui,
-                        session_totals,
-                        session_uptime,
-                        recap_cells,
-                    ));
+                    let recap_outcome = panels::recap::show(ui, recap, recap_cells);
+                    outcome.recap_height = Some(recap_outcome.height);
+                    outcome.recap_reset_requested = recap_outcome.reset_requested;
+                }
+                // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::RecapReset`.
+                // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.
+                OverlayKind::RecapReset => {
+                    outcome.recap_reset_choice =
+                        crate::design::confirm_dialog("Remettre le récap de session à zéro ?")
+                            .over(ui.max_rect())
+                            .log_name("recap.remise-a-zero")
+                            .show(ui);
                 }
                 OverlayKind::Options => {
                     if let Some(state) = options {

@@ -195,8 +195,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -268,8 +267,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -301,9 +299,10 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
 ///
 /// **Les totaux viennent du rejeu réel**, comme tout le reste de ce fichier (voir sa doc de
 /// module) : XP, kamas, combats gagnés/perdus et challenges sont ceux que le vrai `wakfu.log`
-/// produit à travers le vrai moteur. Seule la DURÉE est fixée ici — et elle doit l'être : c'est le
-/// temps d'exécution de l'overlay, qui n'existe pas dans le fichier par construction (voir la doc
-/// de module de `panels::recap`), et qui rendrait cette capture différente à chaque exécution.
+/// produit à travers le vrai moteur. Seuls le CHRONO et l'heure de début sont fixés ici — et ils
+/// doivent l'être : ils viennent de la session de l'overlay (`overlay_ui::recap_session`), qui
+/// n'existe pas dans le fichier par construction, et qui rendrait cette capture différente à
+/// chaque exécution.
 #[test]
 fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
     let snapshot = replay_real_log();
@@ -321,45 +320,58 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
     // 1 h 23 min 45 s — une durée qui exerce les trois champs de `HH:MM:SS` d'un coup, plutôt
     // qu'un compte rond où une erreur de minutes ou de secondes passerait inaperçue.
     let uptime = std::time::Duration::from_secs(5025);
-    let totals = snapshot.totals;
+    let recap = panels::recap::RecapView {
+        totals: snapshot.totals,
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
 
-    let mut harness = Harness::new_ui(move |ui| {
-        let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
-        paint_content(
-            ui,
-            RenderContent {
-                kind: OverlayKind::Recap,
-                fight: None,
-                portraits,
-                combat_frame,
-                icons,
-                avatars: Some(avatars),
-                game_servers: &Default::default(),
-                combat_side: &mut combat_side,
-                combat_metric: &mut combat_metric,
-                watchlist: &[],
-                watchlist_enabled: true,
-                spells_enabled: true,
-                watchlist_selection: &mut Default::default(),
-                watchlist_toast: None,
-                catalog: &catalog,
-                catalog_stale: false,
-                remote_icons: &remote_icon_store,
-                remote_icon_textures: &mut remote_icon_textures,
-                auth_status: &auth_status,
-                auth_command_tx: &auth_sink,
-                interactive: true,
-                shortcuts: &shortcuts,
-                now,
-                session_totals: &totals,
-                session_uptime: uptime,
-                recap_cells: Default::default(),
-                options: None,
-                login: None,
-            },
-        );
-    });
+    // La fenêtre OS du bloc, pas les 800 × 600 par défaut du harnais (2026-09-17) : une
+    // infobulle ne peut pas sortir de sa fenêtre, et c'est cette contrainte-là que les captures
+    // de survol doivent montrer — ici quatre lignes (la paire Kamas/XP s'empile), plus la marge
+    // haute des infobulles et les 8 px de marge du harnais de chaque côté.
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::height(4) + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 16.0,
+        ))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Recap,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &recap,
+                    recap_cells: Default::default(),
+                    options: None,
+                    login: None,
+                },
+            );
+        });
 
     harness.run();
     harness.snapshot("recap_apres_rejeu_reel");
@@ -392,48 +404,69 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
     // touché — kamas, combats et challenges restent ceux du vrai moteur. Même exception, pour la
     // même raison, que le mode `up` du Suivi (doc de module de ce fichier) : aucun rejeu ne
     // produit cet état-là.
-    let totals = overlay_engine::SessionTotals {
-        xp_gained: snapshot.totals.xp_gained / 1_000_000,
-        ..snapshot.totals
+    // Deux reprises : l'infobulle de la durée gagne sa seconde ligne (« reprise 2 fois »), ce
+    // que la capture de survol ci-dessous montre.
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 2,
     };
+    // Le clic sur le glyphe de remise à zéro ne fait rien dans le bloc : il remonte une
+    // intention, que ce test relève ici (voir `RenderOutcome::recap_reset_requested`).
+    let reset_requested = std::rc::Rc::new(std::cell::RefCell::new(false));
 
-    let mut harness = Harness::new_ui(move |ui| {
-        let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
-        paint_content(
-            ui,
-            RenderContent {
-                kind: OverlayKind::Recap,
-                fight: None,
-                portraits,
-                combat_frame,
-                icons,
-                avatars: Some(avatars),
-                game_servers: &Default::default(),
-                combat_side: &mut combat_side,
-                combat_metric: &mut combat_metric,
-                watchlist: &[],
-                watchlist_enabled: true,
-                spells_enabled: true,
-                watchlist_selection: &mut Default::default(),
-                watchlist_toast: None,
-                catalog: &catalog,
-                catalog_stale: false,
-                remote_icons: &remote_icon_store,
-                remote_icon_textures: &mut remote_icon_textures,
-                auth_status: &auth_status,
-                auth_command_tx: &auth_sink,
-                interactive: true,
-                shortcuts: &shortcuts,
-                now,
-                session_totals: &totals,
-                session_uptime: uptime,
-                recap_cells: Default::default(),
-                options: None,
-                login: None,
-            },
-        );
-    });
+    // La fenêtre OS du bloc à trois lignes — voir le test précédent.
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::HEIGHT + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 16.0,
+        ))
+        .build_ui({
+            let reset_requested = std::rc::Rc::clone(&reset_requested);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Recap,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &recap,
+                        recap_cells: Default::default(),
+                        options: None,
+                        login: None,
+                    },
+                );
+                if outcome.recap_reset_requested {
+                    *reset_requested.borrow_mut() = true;
+                }
+            }
+        });
 
     harness.run();
     harness.snapshot("recap_session_ordinaire");
@@ -446,6 +479,108 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
     harness.hover_at(egui::pos2(64.0, 61.0));
     harness.run();
     harness.snapshot("recap_tooltip_kamas_au_dessus");
+
+    // Survol de la durée (troisième ligne, y = 110 à 132, centrée) : « Session depuis 20:12 »
+    // et « reprise 2 fois » sur deux lignes, au-dessus de la case — par-dessus les deux lignes du
+    // dessus, qui lui laissent 60 px.
+    harness.hover_at(egui::pos2(100.0, 121.0));
+    harness.run();
+    harness.snapshot("recap_tooltip_duree_reprises");
+
+    // Survol du glyphe de remise à zéro (au bout de la même ligne : x = 188 à 204) : il passe à
+    // l'or, l'infobulle dit « Remettre à zéro ».
+    harness.hover_at(egui::pos2(196.0, 121.0));
+    harness.run();
+    harness.snapshot("recap_tooltip_remise_a_zero");
+
+    // Le clic remonte l'intention — et rien d'autre : le bloc n'a pas d'état à remettre à zéro.
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: egui::pos2(196.0, 121.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    harness.run();
+    assert!(
+        *reset_requested.borrow(),
+        "le clic sur le glyphe doit remonter `recap_reset_requested`"
+    );
+}
+
+/// La confirmation de remise à zéro (`OverlayKind::RecapReset`, 2026-09-17) : la boîte du design
+/// system centrée sous un voile qui couvre toute la fenêtre — la fenêtre de jeu, en vrai. Échap
+/// répond « Non », ce que ce test relève par `RenderOutcome::recap_reset_choice`.
+#[test]
+fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let choice = std::rc::Rc::new(std::cell::RefCell::new(
+        overlay_ui::design::ConfirmChoice::Pending,
+    ));
+
+    let mut harness = Harness::new_ui({
+        let choice = std::rc::Rc::clone(&choice);
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            let outcome = paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::RecapReset,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    options: None,
+                    login: None,
+                },
+            );
+            if outcome.recap_reset_choice != overlay_ui::design::ConfirmChoice::Pending {
+                *choice.borrow_mut() = outcome.recap_reset_choice;
+            }
+        }
+    });
+
+    harness.run();
+    harness.snapshot("recap_confirmation_remise_a_zero");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        *choice.borrow(),
+        overlay_ui::design::ConfirmChoice::No,
+        "Échap doit répondre « Non »"
+    );
 }
 
 /// Le même bloc avec deux cases éteintes par les Options (2026-09-16, tard,
@@ -468,9 +603,14 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
     let now = std::time::Instant::now();
     let uptime = std::time::Duration::from_secs(5025);
     // Même XP ramenée que la session ordinaire ci-dessus, pour que la ligne Kamas / XP tienne.
-    let totals = overlay_engine::SessionTotals {
-        xp_gained: snapshot.totals.xp_gained / 1_000_000,
-        ..snapshot.totals
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 0,
     };
 
     let mut harness = Harness::new_ui(move |ui| {
@@ -502,8 +642,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &totals,
-                session_uptime: uptime,
+                recap: &recap,
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
                     fights: false,
@@ -517,6 +656,81 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
 
     harness.run();
     harness.snapshot("recap_sans_combats_ni_duree");
+}
+
+/// La durée seule éteinte (2026-09-17) : Combats / Challenges deviennent la dernière ligne, et le
+/// glyphe de remise à zéro y est — Challenges le toucherait, la ligne entière se range donc dans
+/// la largeur qui reste à sa gauche (voir `panels::recap::show`). Les kamas et l'XP, au-dessus,
+/// ne bougent pas.
+#[test]
+fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let uptime = std::time::Duration::from_secs(5025);
+    // Même XP ramenée que la session ordinaire ci-dessus, pour que la ligne Kamas / XP tienne.
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                recap: &recap,
+                recap_cells: panels::recap::RecapCells {
+                    duration: false,
+                    fights: true,
+                    challenges: true,
+                },
+                options: None,
+                login: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("recap_sans_duree");
 }
 
 #[test]
@@ -570,8 +784,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -731,8 +944,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -806,8 +1018,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -941,8 +1152,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: None,
@@ -1086,8 +1296,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: None,
@@ -1186,8 +1395,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: None,
@@ -1290,8 +1498,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         interactive: true,
                         shortcuts: &shortcuts,
                         now,
-                        session_totals: &Default::default(),
-                        session_uptime: std::time::Duration::ZERO,
+                        recap: &Default::default(),
                         recap_cells: Default::default(),
                         options: None,
                         login: None,
@@ -1409,8 +1616,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: None,
@@ -1705,8 +1911,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: None,
@@ -1806,8 +2011,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -1892,8 +2096,7 @@ fn panneau_options_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: Some(&mut options_state),
                 login: None,
@@ -2012,6 +2215,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
                 // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
                 countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
+                // Idem pour la ligne « Reprendre la session après une pause » de la section
+                // « Recap » (2026-09-17).
+                recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -2163,8 +2369,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: Some(&mut options_state),
                 login: None,
@@ -4470,8 +4675,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -5115,8 +5319,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
-                session_totals: &Default::default(),
-                session_uptime: std::time::Duration::ZERO,
+                recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
                 login: None,
@@ -5268,8 +5471,7 @@ fn capture_login_with_update(
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: Some(&mut login_state),

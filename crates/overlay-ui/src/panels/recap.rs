@@ -60,36 +60,72 @@
 //! même mécanique que l'empilement « responsive » (voir [`layout_rows`]) : une ligne porte une ou
 //! deux cases, et une case seule prend toute la largeur.
 //!
-//! ## La durée vient de l'overlay, jamais du fichier
+//! ## La durée, et les quatre autres chiffres, viennent de la SESSION
 //!
-//! **Décision explicite de l'utilisateur (2026-09-16)** : la durée affichée ici est le temps
-//! d'exécution de l'overlay — le chrono part au lancement du processus et avance tant qu'il tourne.
-//! Le web fait exactement l'inverse (`StatsStoreService.accumulateSessionDuration` : somme des
-//! écarts entre deux lignes horodatées de `wakfu.log`, coupée au-delà de cinq minutes de silence,
-//! voir le CLAUDE.md du dépôt web), et c'est ce qu'on ne veut PAS ici : un `wakfu.log` contient
-//! typiquement plusieurs sessions de jeu, et l'overlay relit tout le fichier à son démarrage — la
-//! durée dérivée du fichier annoncerait donc le temps de jeu d'avant-hier à qui vient d'ouvrir
-//! l'overlay.
+//! Depuis le 2026-09-17, les cinq chiffres ont la même vie : celle de `crate::recap_session`
+//! (« la session, c'est ce que l'overlay a vu du jeu » — chrono qui n'avance que fenêtre de jeu
+//! présente, reprise après une pause tolérée, remise à zéro à la demande). Ce bloc n'en connaît
+//! que la vue ([`RecapView`]) : les totaux de session, le chrono, l'heure de début et le nombre de
+//! reprises pour l'infobulle de la durée — « Session depuis 20:12 », et « reprise 2 fois » sur une
+//! seconde ligne dès qu'il y en a eu une.
 //!
-//! Conséquence assumée, à connaître avant de croire à un bug : **les quatre autres chiffres, eux,
-//! couvrent tout le fichier relu** (`overlay_engine::SessionTotals`, alimenté par le rattrapage
-//! initial au même titre que par les lignes lues en direct). Un overlay lancé au milieu d'une
-//! partie affiche donc l'XP de toute la partie en face d'une durée qui démarre à zéro. Les aligner
-//! demanderait de trancher ce qu'est « la session » côté moteur — un autre chantier, et une
-//! décision qui n'a pas été prise.
+//! Le premier jour (2026-09-16), la durée était le temps d'exécution du processus
+//! (`App::started_at`) et les quatre autres chiffres couvraient tout le `wakfu.log` relu au
+//! démarrage — un écart assumé faute d'avoir tranché ce qu'est « la session ». C'est tranché.
+//!
+//! ## Le glyphe de remise à zéro
+//!
+//! Un seul élément cliquable : le glyphe `Undo` au bout de la dernière ligne (celle de la durée
+//! quand elle est affichée — la seule qui a de la place, et celle que ça remet à zéro en
+//! premier), blanc comme les autres, or au survol (`tokens::ICON_TINT_HOVER`), infobulle
+//! « Remettre à zéro » au-dessus. Il n'est pas une sixième case : hors de [`layout_rows`], posé à
+//! `WIDTH − PADDING_X − ICON_SIZE` quel que soit le nombre de lignes. Si la dernière ligne porte
+//! une case qui le toucherait (la durée éteinte : c'est alors Combats / Challenges, ou Kamas / XP),
+//! cette ligne se range dans la largeur qui reste à gauche du glyphe — les autres lignes ne bougent
+//! pas. Un clic ne remet rien à zéro ici : il est REMONTÉ ([`RecapOutcome::reset_requested`]) et
+//! l'hôte ouvre une boîte de confirmation par-dessus toute la fenêtre de jeu
+//! (`OverlayKind::RecapReset`) — décision utilisateur du 2026-09-17 : « impose une confirmBox
+//! centrée au jeu avec un fond voilé sur toute la fenêtre du jeu et des overlays ».
 //!
 //! ## Ce que ce module ne fait pas
 //!
-//! Pas de bouton, pas d'état, aucune intention remontée : ce bloc ne fait qu'afficher. Il
-//! renvoie la **largeur** qu'il vient d'occuper, pour que l'hôte ajuste sa fenêtre OS à son
-//! contenu (même mécanique que `panels::login::LoginOutcome::content_height`) — une fenêtre plus
-//! large que son bloc capterait les clics sur du vide en mode interactif.
+//! Pas d'état : ce bloc affiche une vue et remonte une intention. Il renvoie aussi la **hauteur**
+//! qu'il vient d'occuper, pour que l'hôte ajuste sa fenêtre OS à son contenu (même mécanique que
+//! `panels::login::LoginOutcome::content_height`) — une fenêtre plus haute que son bloc capterait
+//! les clics sur du vide en mode interactif.
 
 use egui::Color32;
 use overlay_engine::SessionTotals;
 
 use crate::design::{self, text, tokens, DsIcon, TooltipSide};
 use crate::panels::combat::format_fr_thousands;
+
+/// Ce que le bloc affiche — construit par l'hôte depuis `crate::recap_session::RecapSession` à
+/// chaque frame (voir la doc de module).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecapView {
+    /// Les compteurs de la session (pas ceux du fichier relu).
+    pub totals: SessionTotals,
+    /// Le chrono de la session.
+    pub uptime: std::time::Duration,
+    /// Heure locale `HH:MM` du début de la session — l'infobulle de la durée.
+    pub started_at: String,
+    /// Nombre de reprises de la session — deuxième ligne de la même infobulle, si > 0.
+    pub resumed: u32,
+}
+
+/// Ce que [`show`] rend à l'hôte.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RecapOutcome {
+    /// Hauteur occupée par le bloc, fond compris — la fenêtre OS s'y retaille.
+    pub height: f32,
+    /// Le glyphe de remise à zéro vient d'être cliqué : à l'hôte d'ouvrir la confirmation.
+    pub reset_requested: bool,
+}
+
+/// Côté du glyphe de remise à zéro — plus discret que les cinq glyphes de case (16 px) : c'est
+/// une commande, pas une information.
+const RESET_ICON_SIZE: f32 = 14.0;
 
 /// Hauteur d'une ligne du bloc. 22 px : le corps de 15 px des chiffres (voir [`FONT_SIZE`]) plus
 /// le cerne d'un pixel de chaque côté, et assez d'interligne pour que deux lignes de glyphes de
@@ -231,7 +267,7 @@ struct Segment {
 /// l'overlay) reste documenté dans [`cells`] et la doc de module, pas à l'écran.
 struct Cell {
     icon: DsIcon,
-    tooltip: &'static str,
+    tooltip: String,
     segments: Vec<Segment>,
     /// Sa ligne quand tout est affiché.
     row: Row,
@@ -247,12 +283,13 @@ struct Cell {
 /// challenges et `Clock` pour la durée. Les deux derniers ont été détourés le 2026-09-16 pour ce
 /// bloc, qui empruntait jusque-là la dague colorée du switch de grandeur du panneau Combat et la
 /// grille de calendrier.
-fn cells(totals: &SessionTotals, uptime: std::time::Duration, visible: RecapCells) -> Vec<Cell> {
+fn cells(view: &RecapView, visible: RecapCells) -> Vec<Cell> {
+    let totals = &view.totals;
     let net_kamas = totals.kamas_gained - totals.kamas_lost;
     let mut cells = vec![
         Cell {
             icon: DsIcon::Kamas,
-            tooltip: "Kamas gagnés",
+            tooltip: "Kamas gagnés".to_string(),
             // **Pas de symbole « ₭ » derrière le nombre**, contrairement au web. Ubuntu, la police
             // embarquée de cette interface (`design::fonts`), ne couvre pas U+20AD : la première
             // version de cette bande affichait un « ? » à sa place, vu sur la capture du harnais.
@@ -269,7 +306,7 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration, visible: RecapCell
         },
         Cell {
             icon: DsIcon::Xp,
-            tooltip: "XP gagnée",
+            tooltip: "XP gagnée".to_string(),
             segments: vec![Segment {
                 text: format!("+{}", format_fr_thousands(totals.xp_gained)),
                 color: ACCENT_COLOR,
@@ -280,7 +317,7 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration, visible: RecapCell
     if visible.fights {
         cells.push(Cell {
             icon: DsIcon::Sword,
-            tooltip: "Combats",
+            tooltip: "Combats".to_string(),
             segments: win_loss(totals.fights_won, totals.fights_lost),
             row: Row::Scores,
         });
@@ -288,7 +325,7 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration, visible: RecapCell
     if visible.challenges {
         cells.push(Cell {
             icon: DsIcon::Trophy,
-            tooltip: "Challenges",
+            tooltip: "Challenges".to_string(),
             segments: win_loss(totals.challenges_passed, totals.challenges_failed),
             row: Row::Scores,
         });
@@ -296,9 +333,9 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration, visible: RecapCell
     if visible.duration {
         cells.push(Cell {
             icon: DsIcon::Clock,
-            tooltip: "Durée de session",
+            tooltip: duration_tooltip(view),
             segments: vec![Segment {
-                text: format_duration(uptime),
+                text: format_duration(view.uptime),
                 color: ACCENT_COLOR,
             }],
             row: Row::Duration,
@@ -325,6 +362,18 @@ fn win_loss(won: i64, lost: i64) -> Vec<Segment> {
     ]
 }
 
+/// L'infobulle de la durée : « Session depuis HH:MM », et « reprise N fois » sur une seconde
+/// ligne dès que la session a repris au moins une fois (décision utilisateur du 2026-09-17). Deux
+/// lignes tiennent au-dessus de la case : la durée est sur la dernière ligne du bloc, les deux
+/// lignes du dessus (60 px) lui laissent la place — la réserve de l'hôte
+/// (`render_content::RECAP_TOOLTIP_RESERVE`) ne sert qu'à la première ligne.
+fn duration_tooltip(view: &RecapView) -> String {
+    match view.resumed {
+        0 => format!("Session depuis {}", view.started_at),
+        n => format!("Session depuis {}\nreprise {n} fois", view.started_at),
+    }
+}
+
 /// `HH:MM:SS`, heures non bornées (un `99:00:00` reste lisible, un `03:00:00` qui repart à zéro
 /// mentirait) — même format que le web (`SessionRecapComponent.duration`, `00:00:00` au départ).
 pub fn format_duration(uptime: std::time::Duration) -> String {
@@ -333,18 +382,13 @@ pub fn format_duration(uptime: std::time::Duration) -> String {
     format!("{h:02}:{m:02}:{s:02}")
 }
 
-/// Peint le bloc et renvoie la hauteur qu'il occupe, fond compris — voir la doc de module pour
-/// ce que l'hôte en fait. La largeur, elle, est fixe : [`WIDTH`]. `visible` dit quelles cases
-/// facultatives peindre (voir [`RecapCells`]).
+/// Peint le bloc et rend la hauteur qu'il occupe, fond compris, et l'intention de remise à zéro
+/// — voir la doc de module pour ce que l'hôte en fait. La largeur, elle, est fixe : [`WIDTH`].
+/// `visible` dit quelles cases facultatives peindre (voir [`RecapCells`]).
 ///
 /// Le contenu est calé en HAUT À GAUCHE de `ui` : la fenêtre OS peut être plus grande que le bloc
 /// (elle l'est, entre deux ajustements de hauteur), le vide qui reste est transparent.
-pub fn show(
-    ui: &mut egui::Ui,
-    totals: &SessionTotals,
-    uptime: std::time::Duration,
-    visible: RecapCells,
-) -> f32 {
+pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOutcome {
     // **Le chrono avance tout seul.** Cette architecture ne rend une frame que lorsque quelque
     // chose change (`ControlFlow::Wait`, §6.1 du plan : l'overlay ne consomme rien au repos) — un
     // snapshot du moteur, un survol, un raccourci. La durée, elle, change sans que rien d'autre ne
@@ -354,7 +398,7 @@ pub fn show(
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_secs(1));
 
-    let cells = cells(totals, uptime, visible);
+    let cells = cells(view, visible);
     let font = text::label_font(ui.ctx(), FONT_SIZE);
     let ds = design::DesignSystem::get(ui.ctx());
 
@@ -409,28 +453,79 @@ pub fn show(
     let centered = |slot_left: f32, slot_width: f32, cell: usize| {
         content_left + slot_left + ((slot_width - cell_widths[cell]) / 2.0).round()
     };
-    let placements: Vec<(usize, f32, f32)> = rows_layout
+    let place_row = |cells: &[usize], width: f32, y: f32| -> Vec<(usize, f32, f32)> {
+        match *cells {
+            [left, right] => vec![
+                (left, centered(0.0, width / 2.0, left), y),
+                (right, centered(width / 2.0, width / 2.0, right), y),
+            ],
+            [alone] => vec![(alone, centered(0.0, width, alone), y)],
+            _ => unreachable!("une ligne porte une ou deux cases"),
+        }
+    };
+    let mut placements: Vec<(usize, f32, f32)> = rows_layout
         .iter()
         .enumerate()
-        .flat_map(|(row, cells)| {
-            let y = row_top(row);
-            match cells[..] {
-                [left, right] => vec![
-                    (left, centered(0.0, half_width, left), y),
-                    (right, centered(half_width, half_width, right), y),
-                ],
-                [alone] => vec![(alone, centered(0.0, content_width, alone), y)],
-                _ => unreachable!("une ligne porte une ou deux cases"),
-            }
-        })
+        .flat_map(|(row, cells)| place_row(cells, content_width, row_top(row)))
         .collect();
+
+    // Le glyphe de remise à zéro, au bout de la dernière ligne (voir la doc de module). Si une
+    // case de cette ligne le toucherait, la ligne entière se range dans la largeur qui reste à sa
+    // gauche — le cas courant (la durée seule, centrée) garde ses 30 px de marge et ne bouge pas.
+    let reset_rect = egui::Rect::from_min_size(
+        egui::pos2(band.max.x - PADDING_X - ICON_SIZE, row_top(rows - 1)),
+        egui::vec2(ICON_SIZE, ROW_HEIGHT),
+    );
+    let last_row = &rows_layout[rows - 1];
+    let touches_reset = placements
+        .iter()
+        .filter(|(cell, _, _)| last_row.contains(cell))
+        .any(|(cell, x, _)| x + cell_widths[*cell] + ICON_GAP > reset_rect.min.x);
+    if touches_reset {
+        placements.retain(|(cell, _, _)| !last_row.contains(cell));
+        placements.extend(place_row(
+            last_row,
+            content_width - ICON_SIZE - ICON_GAP,
+            row_top(rows - 1),
+        ));
+    }
+
     for (index, x, y) in placements {
         let cell_rect =
             egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cell_widths[index], ROW_HEIGHT));
         paint_cell(ui, &ds, cell_rect, &cells[index], &galleys[index]);
     }
+    let reset_requested = paint_reset_button(ui, &ds, reset_rect);
 
-    band.height()
+    RecapOutcome {
+        height: band.height(),
+        reset_requested,
+    }
+}
+
+/// Le glyphe de remise à zéro (voir la doc de module) : `Undo`, blanc au repos, or au survol,
+/// curseur « main », infobulle au-dessus. Rend `true` la frame où il est cliqué.
+///
+/// Peint à la main comme les cinq glyphes de case, et non par `design::icon_button` : les quatre
+/// contextes de ce composant posent un socle (texture du jeu ou voile), et un socle de 32 px sur
+/// une ligne de 22 serait le seul bouton « habillé » d'un bloc où tout le reste est nu.
+fn paint_reset_button(ui: &mut egui::Ui, ds: &design::DesignSystem, rect: egui::Rect) -> bool {
+    let response = ui.interact(rect, ui.id().with("recap-reset"), egui::Sense::click());
+    let tint = if response.hovered() {
+        tokens::ICON_TINT_HOVER
+    } else {
+        TEXT_COLOR
+    };
+    let icon_rect = egui::Rect::from_center_size(
+        rect.center(),
+        fit(ds.icon_native_size(DsIcon::Undo), RESET_ICON_SIZE),
+    );
+    ds.paint_icon(ui.painter(), icon_rect, DsIcon::Undo, tint);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response)
+        .side(TooltipSide::Above)
+        .text("Remettre à zéro");
+    response.clicked()
 }
 
 /// Les lignes du bloc, de haut en bas : les indices (dans [`cells`]) des cases qu'elles portent,
@@ -512,12 +607,12 @@ fn paint_cell(
 
     let response = ui.interact(
         rect,
-        ui.id().with(("recap-cell", cell.tooltip)),
+        ui.id().with(("recap-cell", cell.icon)),
         egui::Sense::hover(),
     );
     design::tooltip(&response)
         .side(TooltipSide::Above)
-        .text(cell.tooltip);
+        .text(cell.tooltip.clone());
 }
 
 /// Rectangle de `side` px de côté au plus, au rapport natif du glyphe — le pendant local de
@@ -565,21 +660,22 @@ mod tests {
     /// durée), dans l'ordre où la grille les lit ligne par ligne : les kamas d'abord, puis l'XP.
     #[test]
     fn le_bloc_porte_cinq_cases_kamas_en_tete() {
-        let totals = SessionTotals {
-            kamas_gained: 1_500,
-            kamas_lost: 500,
-            xp_gained: 42_000,
-            loot_count: 3,
-            fights_won: 7,
-            fights_lost: 2,
-            challenges_passed: 4,
-            challenges_failed: 1,
+        let view = RecapView {
+            totals: SessionTotals {
+                kamas_gained: 1_500,
+                kamas_lost: 500,
+                xp_gained: 42_000,
+                loot_count: 3,
+                fights_won: 7,
+                fights_lost: 2,
+                challenges_passed: 4,
+                challenges_failed: 1,
+            },
+            uptime: std::time::Duration::from_secs(3600),
+            started_at: "20:12".to_string(),
+            resumed: 0,
         };
-        let cells = cells(
-            &totals,
-            std::time::Duration::from_secs(3600),
-            RecapCells::default(),
-        );
+        let cells = cells(&view, RecapCells::default());
         let icons: Vec<DsIcon> = cells.iter().map(|c| c.icon).collect();
         assert_eq!(
             icons,
@@ -600,18 +696,43 @@ mod tests {
         assert_eq!(cells[3].segments[0].text, "4");
         assert_eq!(cells[3].segments[2].text, "1");
         assert_eq!(cells[4].segments[0].text, "01:00:00");
+        assert_eq!(cells[4].tooltip, "Session depuis 20:12");
+    }
+
+    /// L'infobulle de la durée gagne une seconde ligne dès la première reprise — et jamais
+    /// avant : « reprise 0 fois » ne dirait rien.
+    #[test]
+    fn l_infobulle_de_la_duree_compte_les_reprises() {
+        let mut view = RecapView {
+            started_at: "09:30".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(duration_tooltip(&view), "Session depuis 09:30");
+        view.resumed = 1;
+        assert_eq!(
+            duration_tooltip(&view),
+            "Session depuis 09:30\nreprise 1 fois"
+        );
+        view.resumed = 3;
+        assert_eq!(
+            duration_tooltip(&view),
+            "Session depuis 09:30\nreprise 3 fois"
+        );
     }
 
     /// Seul le chiffre est en couleur : or `#FFD700` pour les kamas (demande utilisateur), accent
     /// pour l'XP et la durée, vert/rouge pour les compteurs — et un solde négatif garde son signe.
     #[test]
     fn les_couleurs_suivent_la_maquette() {
-        let totals = SessionTotals {
-            kamas_gained: 100,
-            kamas_lost: 350,
+        let view = RecapView {
+            totals: SessionTotals {
+                kamas_gained: 100,
+                kamas_lost: 350,
+                ..Default::default()
+            },
             ..Default::default()
         };
-        let cells = cells(&totals, std::time::Duration::ZERO, RecapCells::default());
+        let cells = cells(&view, RecapCells::default());
         assert_eq!(
             cells[0].segments[0].color,
             Color32::from_rgb(0xFF, 0xD7, 0x00)
@@ -662,9 +783,9 @@ mod tests {
     /// la ligne pour elle seule, une ligne vide disparaît, Kamas et XP restent.
     #[test]
     fn les_cases_eteintes_resserrent_la_grille() {
-        let totals = SessionTotals::default();
+        let view = RecapView::default();
         let icons = |visible: RecapCells| {
-            cells(&totals, std::time::Duration::ZERO, visible)
+            cells(&view, visible)
                 .iter()
                 .map(|c| (c.icon, c.row))
                 .collect::<Vec<_>>()

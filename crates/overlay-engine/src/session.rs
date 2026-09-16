@@ -281,7 +281,11 @@ pub struct FightSnapshot {
     pub last_enemy_caster: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// `Serialize`/`Deserialize` (2026-09-17) : la bande Récap de l'overlay persiste les totaux de SA
+/// session (`overlay_ui::recap_session`, un JSON à côté des `fight-*.json`) pour les reprendre
+/// après un redémarrage. `#[serde(default)]` : un fichier écrit avant un champ reste chargeable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessionTotals {
     pub kamas_gained: i64,
     pub kamas_lost: i64,

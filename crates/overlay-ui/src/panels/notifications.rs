@@ -84,14 +84,14 @@ const TEXT: Color32 = Color32::WHITE;
 
 /// Gris des unités — `#b8b9ba`, le gris unique du jeu (voir
 /// `panels::options_modal::SECTION_TITLE_TEXT`).
-const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
+pub const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Hauteur d'une ligne de cette section — celle mesurée sur `interface-options-commandes.png`,
 /// partagée par les lignes qu'une section peut porter, et par la sourdine de tour de la section
 /// « Combat » depuis qu'elle porte le même bouton d'essai (`panels::options_modal`).
 pub const ROW_HEIGHT: f32 = 39.0;
 
-const BODY_FONT_SIZE: f32 = 15.0;
+pub const BODY_FONT_SIZE: f32 = 15.0;
 
 /// Largeur du champ de durée — celle de la maquette d'« Alertes », assez pour « 30 » comme pour
 /// « 0,75 ».

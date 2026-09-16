@@ -93,6 +93,7 @@ use crate::panels::personnages_tab::{
     self, PersonnagesAvailability, PersonnagesTabContext, PersonnagesTabState,
 };
 use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
+use crate::recap_session::{self, ResumeSettings};
 use crate::shortcuts::ShortcutBindings;
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
@@ -164,6 +165,14 @@ const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 /// filet, ni bordure (note du relevé) : cet écart est donc la séparation elle-même, pas une
 /// décoration qu'on pourrait resserrer.
 const SECTION_GAP: f32 = 17.0;
+
+/// Côté des boutons du pas « minutes » de la reprise du Récap — celui d'une ligne de
+/// notification moins un liseré de chaque côté, pour que le pas tienne dans sa ligne sans la
+/// toucher ; le jeu règle son pas de 24 à 32 px selon l'interface, 28 est dedans.
+const RESUME_STEPPER_SIZE: f32 = 28.0;
+
+/// Largeur du champ du même pas — quatre chiffres (« 1440 ») et leurs marges.
+const RESUME_FIELD_WIDTH: f32 = 56.0;
 
 /// Onglet affiché par la modale.
 ///
@@ -282,6 +291,11 @@ pub struct OptionsModalState {
     /// vigueur (`config::OverlayConfig::countdown_toast`) et pris en compte à « Valider », comme
     /// [`Self::mutes`] et [`Self::features`].
     pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// **La reprise de la session du Récap** — ligne « Reprendre la session après une pause de
+    /// moins de … min » de la section « Recap » (2026-09-17, voir
+    /// [`crate::recap_session::ResumeSettings`]). Réglage LOCAL, même trajet que
+    /// [`Self::countdown_toast`] : posé par l'hôte à la valeur en vigueur, emporté à « Valider ».
+    pub recap_resume: ResumeSettings,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -406,6 +420,8 @@ pub struct OptionsInitial {
     pub mutes: AlertMutes,
     /// La fermeture de la carte de décompte telle qu'elle était à l'ouverture — même rôle.
     pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// La reprise de la session du Récap telle qu'elle était à l'ouverture — même rôle.
+    pub recap_resume: ResumeSettings,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -437,6 +453,7 @@ impl OptionsModalState {
             features: self.features,
             mutes: self.mutes,
             countdown_toast: self.countdown_toast,
+            recap_resume: self.recap_resume,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
             start_with_os: self.start_with_os,
@@ -476,6 +493,7 @@ impl OptionsModalState {
             || self.features != self.initial.features
             || self.mutes != self.initial.mutes
             || self.countdown_toast != self.initial.countdown_toast
+            || self.recap_resume != self.initial.recap_resume
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -585,6 +603,10 @@ pub struct OptionsCommit {
     /// (`config::OverlayConfig::set_countdown_toast`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetCountdownToast`).
     pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// La reprise de la session du Récap ([`crate::recap_session::ResumeSettings`]) — ce que
+    /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
+    /// (`recap_session::RecapSession::set_resume_settings`).
+    pub recap_resume: ResumeSettings,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -861,8 +883,8 @@ pub fn show(
                 (
                     &mut state.features.recap_cells.duration,
                     "Afficher la durée de la session",
-                    "Le chrono de l'overlay, depuis son lancement, sur la dernière ligne de la \
-                     bande. Décoché, la bande perd cette ligne.",
+                    "Le chrono de la session, sur la dernière ligne de la bande. Décoché, la \
+                     bande perd cette ligne — le glyphe de remise à zéro reste.",
                     "options-recap-duree",
                 ),
                 (
@@ -891,6 +913,50 @@ pub fn show(
                     );
                 });
             }
+            // **La reprise après une pause** (2026-09-17, voir `crate::recap_session`) : une
+            // case et un pas numérique en minutes sur la même ligne — la forme de la ligne
+            // « Fermeture automatique » des sections de notification, avec le pas du jeu à la
+            // place du champ libre : des minutes rondes, pas une durée à virgule. Le pas suit la
+            // case, comme le champ de durée suit la sienne là-bas : décoché, il n'y a plus de
+            // tolérance à régler.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.allocate_ui_with_layout(
+                egui::vec2(inner_width, notifications::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add(
+                        design::checkbox(
+                            &mut state.recap_resume.enabled,
+                            "Reprendre la session après une pause de moins de",
+                        )
+                        .tooltip(
+                            "Fenêtre de jeu fermée puis rouverte dans ce délai : le chrono et \
+                             les compteurs continuent. Décochée, chaque retour dans le jeu \
+                             repart de zéro.",
+                        )
+                        .log_name("options-recap-reprise"),
+                    );
+                    ui.add_space(notifications::CONTROL_GAP);
+                    ui.add(
+                        design::stepper(&mut state.recap_resume.minutes)
+                            .range(
+                                recap_session::MIN_RESUME_MINUTES
+                                    ..=recap_session::MAX_RESUME_MINUTES,
+                            )
+                            .step(recap_session::RESUME_STEP_MINUTES)
+                            .size(RESUME_STEPPER_SIZE)
+                            .field_width(RESUME_FIELD_WIDTH)
+                            .enabled(state.recap_resume.enabled)
+                            .log_name("options-recap-reprise-minutes"),
+                    );
+                    ui.add_space(design::tokens::CHECKBOX_LABEL_GAP);
+                    ui.label(
+                        egui::RichText::new("min")
+                            .color(notifications::SUBDUED)
+                            .size(notifications::BODY_FONT_SIZE),
+                    );
+                },
+            );
 
             // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
             // en un seul endroit.
@@ -1750,6 +1816,7 @@ mod tests {
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
+                recap_resume: ResumeSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
                 // La case « Lancer l'overlay au démarrage de l'ordinateur » est posée décochée

@@ -174,6 +174,19 @@ pub struct OverlayConfig {
     /// les challenges », même famille que [`Self::recap_duration_enabled`].
     #[serde(default = "actif")]
     pub recap_challenges_enabled: bool,
+    /// **Reprendre la session du Récap après une pause** — case « Reprendre la session après une
+    /// pause de moins de … min » de la section « Recap » (2026-09-17, voir
+    /// `crate::recap_session::ResumeSettings`). Décochée, chaque retour dans le jeu repart de
+    /// zéro. Cochée pour une config écrite avant ce champ.
+    ///
+    /// **Ici et non au compte**, même exception et même raison que
+    /// [`Self::countdown_alert_duration_seconds`] : pas d'équivalent web.
+    #[serde(default = "actif")]
+    pub recap_resume_enabled: bool,
+    /// La tolérance de pause, en minutes — `None` = défaut
+    /// (`crate::recap_session::DEFAULT_RESUME_MINUTES`, 60). Bornée à la lecture.
+    #[serde(default)]
+    pub recap_resume_minutes: Option<i64>,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -275,6 +288,8 @@ impl Default for OverlayConfig {
             recap_duration_enabled: actif(),
             recap_fights_enabled: actif(),
             recap_challenges_enabled: actif(),
+            recap_resume_enabled: actif(),
+            recap_resume_minutes: None,
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
@@ -332,6 +347,25 @@ impl OverlayConfig {
     pub fn set_countdown_toast(&mut self, toast: crate::panels::suivi_tab::CountdownToastSettings) {
         self.countdown_alert_duration_seconds = Some(toast.duration_seconds);
         self.countdown_alert_manual_close = toast.manual_close;
+    }
+
+    /// Le réglage de reprise de la session du Récap effectif — défaut pour une config qui ne le
+    /// porte pas, exactement comme [`Self::countdown_toast`].
+    pub fn recap_resume(&self) -> crate::recap_session::ResumeSettings {
+        let mut resume = crate::recap_session::ResumeSettings {
+            enabled: self.recap_resume_enabled,
+            ..Default::default()
+        };
+        if let Some(minutes) = self.recap_resume_minutes {
+            resume.set_minutes(minutes);
+        }
+        resume
+    }
+
+    /// Reporte le réglage de reprise de la session du Récap dans la config.
+    pub fn set_recap_resume(&mut self, resume: crate::recap_session::ResumeSettings) {
+        self.recap_resume_enabled = resume.enabled;
+        self.recap_resume_minutes = Some(resume.minutes);
     }
 
     /// Les trois interrupteurs de fonctionnalité de cette config — voir

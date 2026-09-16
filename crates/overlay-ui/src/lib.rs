@@ -53,6 +53,7 @@ pub mod logging;
 pub mod panels;
 pub mod portraits;
 pub mod rarity_bridge;
+pub mod recap_session;
 pub mod remote_icons;
 pub mod render_content;
 pub mod shortcuts;

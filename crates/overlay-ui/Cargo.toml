@@ -12,6 +12,10 @@ overlay-sync = { path = "../overlay-sync" }
 overlay-platform = { path = "../overlay-platform" }
 
 arc-swap = "1"
+# Heure LOCALE du début de la session du Récap (« Session depuis 20:12 », `recap_session`) — même
+# dépendance et mêmes fonctionnalités que le moteur (`overlay_engine::log_time`), même raison : le
+# fuseau courant de la machine est délégué à l'OS, aucune base de fuseaux embarquée.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crossbeam-channel = "0.5"
 ctrlc = "3"
 directories = "5"

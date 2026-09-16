@@ -95,6 +95,7 @@ mod linux_main {
     use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
+    use overlay_ui::recap_session::{self, RecapSession};
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
     use overlay_ui::render_content;
     use overlay_ui::render_content::{
@@ -298,9 +299,8 @@ mod linux_main {
         /// `main.rs::App::countdown_toast`.
         countdown_toast: suivi_tab::CountdownToastSettings,
         game_window: GameWindowTracker,
-        /// Instant de lancement — l'origine de la durée de session de la bande Récap. Voir
-        /// `main.rs::App::started_at` : temps d'exécution du processus, jamais dérivé du fichier.
-        started_at: std::time::Instant,
+        /// La session du Récap — voir `main.rs::App::recap_session` (2026-09-17).
+        recap_session: RecapSession,
         banner_printed: bool,
         /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir
         /// `App::start_file_dialog`. Un seul à la fois (une seule modale Options peut être ouverte,
@@ -333,6 +333,8 @@ mod linux_main {
         /// Réglages de la carte de décompte à zéro en vigueur — voir
         /// `main.rs::App::countdown_toast`.
         countdown_toast: suivi_tab::CountdownToastSettings,
+        /// La session du Récap relue du disque — voir `main.rs::AppState::recap_session`.
+        recap_session: RecapSession,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
         /// Même provenance que `combat_always_visible`.
         shortcuts: ShortcutBindings,
@@ -369,6 +371,7 @@ mod linux_main {
                 alert_mutes,
                 chat_toast,
                 countdown_toast,
+                recap_session,
                 shortcuts,
                 snapshot,
                 watchlist,
@@ -424,7 +427,7 @@ mod linux_main {
                 chat_toast,
                 countdown_toast,
                 game_window,
-                started_at: std::time::Instant::now(),
+                recap_session,
                 banner_printed: false,
                 pending_dialog: None,
                 pending_recipe: None,
@@ -723,6 +726,12 @@ mod linux_main {
                     self.windows.insert(overlay.window.id(), overlay);
                 }
             }
+            // La session du Récap suit ce balayage — voir `main.rs::App::sync_windows`.
+            self.recap_session.observe(
+                !found.is_empty(),
+                &snapshot.totals,
+                std::time::SystemTime::now(),
+            );
         }
 
         /// Affiche ou masque les fenêtres dont la présence est CONDITIONNELLE — `Combat` (combat
@@ -797,6 +806,9 @@ mod linux_main {
                     rect.client_top + GAME_RECAP_TOP_MARGIN_PX
                         - render_content::RECAP_TOOLTIP_RESERVE as i32,
                 ),
+                // La confirmation de remise à zéro couvre la fenêtre de jeu entière — voir
+                // `main.rs::App::anchor_position`.
+                OverlayKind::RecapReset => PhysicalPosition::new(rect.left, rect.top),
                 // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
                 // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent
                 // ancrés sur un bord.
@@ -835,6 +847,8 @@ mod linux_main {
                     panels::recap::WIDTH as f64,
                     panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
                 ),
+                // La taille de la fenêtre de jeu, pour que le voile la couvre — voir `main.rs`.
+                OverlayKind::RecapReset => (rect.width as f64, rect.height as f64),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
                 OverlayKind::Login => (
                     panels::login::WINDOW_WIDTH as f64,
@@ -845,6 +859,7 @@ mod linux_main {
                 OverlayKind::Combat => "Combat",
                 OverlayKind::Watchlist => "Suivi",
                 OverlayKind::Recap => "Recap",
+                OverlayKind::RecapReset => "Confirmation",
                 OverlayKind::Options => "Options",
                 OverlayKind::Login => "Connexion",
             };
@@ -1251,6 +1266,8 @@ mod linux_main {
                 // La fermeture de la carte de décompte (2026-09-16) — réglage local, la ligne
                 // s'ouvre directement sur sa valeur, voir `main.rs`.
                 countdown_toast: self.countdown_toast,
+                // La reprise de la session du Récap (2026-09-17), même principe.
+                recap_resume: self.recap_session.resume_settings(),
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
@@ -1298,6 +1315,7 @@ mod linux_main {
                     features: self.features,
                     mutes: self.alert_mutes,
                     countdown_toast: self.countdown_toast,
+                    recap_resume: self.recap_session.resume_settings(),
                     shortcuts: self.hotkeys.bindings().clone(),
                     auto_update: self.auto_update,
                     start_with_os: autostart_actif,
@@ -1491,6 +1509,47 @@ mod linux_main {
                 .ok();
         }
 
+        /// Voir `main.rs::open_recap_reset_confirm` — la confirmation de remise à zéro du Récap,
+        /// par-dessus la fenêtre de jeu d'où le glyphe a été cliqué, une seule à la fois.
+        fn open_recap_reset_confirm(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            game_window: u32,
+            rect: GameRect,
+        ) {
+            if self
+                .windows
+                .values()
+                .any(|w| w.kind == OverlayKind::RecapReset)
+            {
+                return;
+            }
+            let overlay = Self::create_overlay_window(
+                event_loop,
+                OverlayKind::RecapReset,
+                game_window,
+                "Recap".to_string(),
+                rect,
+                true,
+                true,
+            );
+            overlay.window.request_redraw();
+            self.windows.insert(overlay.window.id(), overlay);
+            tracing::info!("[session] confirmation de remise à zéro ouverte.");
+        }
+
+        /// Voir `main.rs::answer_recap_reset`.
+        fn answer_recap_reset(&mut self, confirm_window_id: WindowId, confirmed: bool) {
+            self.windows.remove(&confirm_window_id);
+            if confirmed {
+                let snapshot = self.snapshot.load();
+                self.recap_session
+                    .reset(&snapshot.totals, std::time::SystemTime::now());
+            } else {
+                tracing::info!("[session] remise à zéro annulée.");
+            }
+        }
+
         /// Voir `main.rs::close_options_modal` — unique point de fermeture, rend les raccourcis
         /// globaux au système.
         fn close_options_modal(&mut self, options_window_id: WindowId, raison: &str) {
@@ -1648,6 +1707,17 @@ mod linux_main {
                             .settings_tx
                             .send(EngineCommand::SetCountdownToast(self.countdown_toast));
                     }
+                    // La reprise de la session du Récap (2026-09-17) — voir `main.rs`.
+                    let recap_resume_changed =
+                        commit.recap_resume != self.recap_session.resume_settings();
+                    if recap_resume_changed {
+                        self.recap_session.set_resume_settings(commit.recap_resume);
+                        tracing::info!(
+                            enabled = commit.recap_resume.enabled,
+                            minutes = commit.recap_resume.minutes,
+                            "[options] reprise de la session du récap mise à jour"
+                        );
+                    }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.
                     let shortcuts_changed = commit.shortcuts != *self.hotkeys.bindings();
@@ -1688,6 +1758,7 @@ mod linux_main {
                         || features_changed
                         || mutes_changed
                         || countdown_toast_changed
+                        || recap_resume_changed
                         || auto_update_changed
                     {
                         let mut saved = config::OverlayConfig {
@@ -1703,6 +1774,7 @@ mod linux_main {
                         saved.set_shortcuts(self.hotkeys.bindings());
                         saved.set_chat_toast(self.chat_toast);
                         saved.set_countdown_toast(self.countdown_toast);
+                        saved.set_recap_resume(self.recap_session.resume_settings());
                         saved.set_features(self.features);
                         saved.set_alert_mutes(self.alert_mutes);
                         config::save(&saved);
@@ -1780,6 +1852,10 @@ mod linux_main {
                 /// `render_content::RenderOutcome::open_watchlist`/`open_options`).
                 OpenOptions(u32, GameRect, options_modal::OptionsTab),
                 CloseOptions,
+                /// Glyphe de remise à zéro du Récap cliqué — voir `main.rs`.
+                OpenRecapReset(u32, GameRect),
+                /// La confirmation a répondu — voir `main.rs`.
+                AnswerRecapReset(bool),
                 /// Carte d'alerte de chat cliquée — voir `main.rs`.
                 Whisper(String),
                 BrowseOptions,
@@ -1827,6 +1903,9 @@ mod linux_main {
                             }
                             _ => post_redraw = PostRedraw::CloseOptions,
                         }
+                    } else if overlay.kind == OverlayKind::RecapReset {
+                        // Fermer la question, c'est répondre « Non ».
+                        post_redraw = PostRedraw::AnswerRecapReset(false);
                     } else {
                         logging::log_session_end("fermeture de fenêtre");
                         event_loop.exit();
@@ -1846,8 +1925,10 @@ mod linux_main {
                     // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une
                     // fenêtre ordinaire ne quitte pas l'application — sa fermeture (`CloseRequested`)
                     // le fait.
-                    if !matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login)
-                        && event.state == ElementState::Pressed
+                    if !matches!(
+                        overlay.kind,
+                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
+                    ) && event.state == ElementState::Pressed
                         && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                     {
                         event_loop.exit();
@@ -1919,11 +2000,19 @@ mod linux_main {
                     // `App::open_options_modal`) — jamais assujettie à `self.interactive` (mode
                     // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait
                     // elle-même traversable si l'utilisateur avait basculé ce mode juste avant.
-                    let interactive =
-                        matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login)
-                            || self.interactive;
+                    let interactive = matches!(
+                        overlay.kind,
+                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
+                    ) || self.interactive;
                     let this_game_rect = overlay.game_rect;
                     let this_game_window = overlay.game_window;
+                    // La vue de la session du Récap — voir `main.rs`.
+                    let recap_view = panels::recap::RecapView {
+                        totals: self.recap_session.totals(&snapshot.totals),
+                        uptime: self.recap_session.uptime(),
+                        started_at: self.recap_session.started_at_local(),
+                        resumed: self.recap_session.resumed(),
+                    };
                     // L'état de la mise à jour, copié dans la fenêtre qui l'affiche AVANT chaque rendu
                     // (jamais figé à l'ouverture, voir `OptionsModalState::update`).
                     let update_status = self.update_status.load();
@@ -1963,10 +2052,8 @@ mod linux_main {
                             interactive,
                             shortcuts: self.hotkeys.bindings(),
                             now,
-                            session_totals: &snapshot.totals,
-                            // Voir `main.rs` : `now` et non une seconde lecture d'horloge.
-                            session_uptime: now.saturating_duration_since(self.started_at),
                             recap_cells: self.features.recap_cells,
+                            recap: &recap_view,
                             options: overlay.options_state.as_mut(),
                             login: overlay.login_state.as_mut(),
                         },
@@ -2077,6 +2164,19 @@ mod linux_main {
                     if let Some(url) = &outcome.open_url {
                         let _ = open::that(url);
                     }
+                    // Remise à zéro du Récap (2026-09-17) — voir `main.rs`.
+                    if outcome.recap_reset_requested {
+                        post_redraw = PostRedraw::OpenRecapReset(this_game_window, this_game_rect);
+                    }
+                    match outcome.recap_reset_choice {
+                        overlay_ui::design::ConfirmChoice::Pending => {}
+                        overlay_ui::design::ConfirmChoice::Yes => {
+                            post_redraw = PostRedraw::AnswerRecapReset(true)
+                        }
+                        overlay_ui::design::ConfirmChoice::No => {
+                            post_redraw = PostRedraw::AnswerRecapReset(false)
+                        }
+                    }
                     match outcome.options_action {
                         OptionsModalAction::None => {}
                         OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
@@ -2122,6 +2222,10 @@ mod linux_main {
                     self.open_options_modal(event_loop, Some((window, rect)), tab)
                 }
                 PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
+                PostRedraw::OpenRecapReset(window, rect) => {
+                    self.open_recap_reset_confirm(event_loop, window, rect)
+                }
+                PostRedraw::AnswerRecapReset(confirmed) => self.answer_recap_reset(id, confirmed),
                 PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
@@ -2554,6 +2658,12 @@ mod linux_main {
             alert_mutes: saved_config.alert_mutes(),
             chat_toast: saved_config.chat_toast(),
             countdown_toast: saved_config.countdown_toast(),
+            // Voir `main.rs` : à côté des combats en cours.
+            recap_session: RecapSession::load(
+                overlay_engine::fight_store::default_store_dir().join(recap_session::FILE_NAME),
+                saved_config.recap_resume(),
+                std::time::SystemTime::now(),
+            ),
             shortcuts: saved_config.shortcuts(),
             snapshot,
             watchlist,
