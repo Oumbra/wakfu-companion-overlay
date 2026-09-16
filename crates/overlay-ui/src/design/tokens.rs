@@ -346,6 +346,70 @@ pub const TAB_LABEL_OUTLINE_FACTOR: f32 = 0.205;
 pub const TAB_FONT_SIZE: f32 = 17.0;
 
 // ---------------------------------------------------------------------------------------------
+// Switch à deux cases — mesuré le 2026-09-16 sur les deux captures du sélecteur de genre du jeu
+// (`switch-first-slot-active.png` / `switch-second-slot-active.png`, 88 × 44 une fois détourées et
+// générifiées) et sur le relevé `ui-blueprint` qui en a été tiré. Détail dans
+// `design::components::switch`.
+
+/// Hauteur native d'un switch — **44px**, celle des deux captures. Comme pour un onglet, la
+/// hauteur est celle de la texture, jamais déduite de la largeur.
+pub const SWITCH_HEIGHT: f32 = 44.0;
+
+/// Largeur native d'un switch — **88px** : liseré 2 + case active 40 + séparateur 2 + case
+/// inactive 42 + liseré 2. C'est la largeur par défaut ; `Switch::width` l'étire.
+///
+/// La capture « première case active » mesurait 87px (case inactive à 41, ombre intérieure sur
+/// 1px) contre 88 pour l'autre : écart de rendu du jeu, égalisé à 88 au traitement de l'asset.
+pub const SWITCH_WIDTH: f32 = 88.0;
+
+/// Largeur du séparateur entre les deux cases — **2px**, colonnes x 42–43 de la capture.
+pub const SWITCH_SEPARATOR_WIDTH: f32 = 2.0;
+
+/// Épaisseur du liseré haut et bas — **2px**. Le séparateur ne court qu'entre ces deux liserés
+/// (y 2..42), comme celui d'une barre d'onglets.
+pub const SWITCH_BORDER_Y: f32 = 2.0;
+
+/// Liseré du cadre — **`#221f24`**, `uispec.py palette` sur les colonnes x 0–1 (79 % à
+/// `#221f24`, le reste à un niveau près). Peint dans la gouttière, où aucune texture de case ne
+/// le porte : sans lui, le cadre serait entaillé de deux encoches au droit du séparateur.
+pub const SWITCH_BORDER: Color32 = Color32::from_rgb(0x22, 0x1F, 0x24);
+
+/// Séparateur entre les deux cases — **`#312d2d`**, 100 % de la palette des colonnes x 42–43
+/// entre les deux liserés. Un aplat, pas un dégradé : contrairement au trait entre deux onglets,
+/// la colonne est constante à deux niveaux près de y=4 à y=39 (les extrémités reçoivent le
+/// biseau de la case active, un pixel plus clair).
+pub const SWITCH_SEPARATOR: Color32 = Color32::from_rgb(0x31, 0x2D, 0x2D);
+
+/// Glyphe de la case ACTIVE — **`#f4d89f`**, couleur dominante des pixels pleins du ♂ et du ♀
+/// sur leurs captures respectives. C'est, à un niveau près, l'or de tout le design system
+/// ([`TEXT_GOLD`], [`ICON_TINT_HOVER`]).
+pub const SWITCH_ICON_ACTIVE: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
+/// Glyphe de la case INACTIVE — **`#a9a5a2`**, gris clair légèrement chaud, couleur dominante des
+/// pixels pleins du ♀ inactif (capture 1) et du ♂ inactif (capture 2). Ce n'est pas
+/// [`ICON_TINT`] (`#c5cbcc`, gris froid du premier plan) : le jeu grise le glyphe non
+/// sélectionné plus franchement.
+pub const SWITCH_ICON_INACTIVE: Color32 = Color32::from_rgb(0xA9, 0xA5, 0xA2);
+
+/// Côté du carré englobant d'un glyphe de switch — **16px**.
+///
+/// **Mesuré, avec une nuance.** Les deux glyphes du jeu sont peints à leur taille native dans
+/// leur case de 40px : ♂ 14 × 14 et ♀ 10 × 16, tous deux centrés (relevé `ui-blueprint`,
+/// centres à 22,22 et 66,22 pour des cases centrées en 22 et 65). 16 est la plus grande de ces
+/// deux encres. Le composant ne **grossit** donc pas un glyphe qui tient dans ce carré — le ♂
+/// reste à 14 — et ne réduit que ceux qui le dépassent. Un étalon commun (comme
+/// [`ICON_BUTTON_CONTENT`]) donnerait un ♂ à 16, deux pixels plus large que dans le jeu.
+pub const SWITCH_ICON_SIZE: f32 = 16.0;
+
+/// Corps du libellé d'une case **sans pictogramme** — 17px, le corps de tous les libellés du jeu
+/// ([`TAB_FONT_SIZE`]).
+///
+/// **Inventé, faute de référence** : le jeu n'a pas de switch à libellé texte dans les captures
+/// relevées, seulement le sélecteur de genre à pictogrammes. La valeur reprend le corps d'onglet,
+/// la case la plus proche par sa hauteur (44px, la même). À mesurer dès qu'une capture existera.
+pub const SWITCH_FONT_SIZE: f32 = TAB_FONT_SIZE;
+
+// ---------------------------------------------------------------------------------------------
 // Case à cocher — mesurée sur `releve-section-options.json` (nœuds `cb1` à `cb3`) et sur les deux
 // assets, qui font exactement la taille relevée. Détail dans `design::components::checkbox`.
 // ---------------------------------------------------------------------------------------------

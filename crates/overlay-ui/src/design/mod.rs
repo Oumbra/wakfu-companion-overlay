@@ -88,6 +88,7 @@ pub use components::slider::{
     SliderState,
 };
 pub use components::stepper::{stepper, Stepper};
+pub use components::switch::{switch, Switch, SwitchState};
 pub use components::table::{
     column_spans as table_column_spans, is_striped as table_is_striped, table, Table, TableAlign,
     TableBody, TableColumn, TableRow, TableWidth,

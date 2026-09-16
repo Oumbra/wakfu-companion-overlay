@@ -344,4 +344,15 @@ ds_icons! {
         /// `--from-button`, sur socle sombre uni. Pas de `DsIcon::content_size`. Même statut que
         /// [`DsIcon::BagIn`].
         Xp => "icon-xp", libre;
+
+        /// Signe ♂ (`icons/icon-male.png`, 14 × 14) — genre masculin, case gauche du switch de
+        /// genre du jeu. Détouré le 2026-09-16 SANS `--from-button` (glyphe posé sur le décor
+        /// sombre de la capture, réglages par défaut, `luma-light`). Pas de `DsIcon::content_size` :
+        /// le jeu le peint à sa taille native dans une case de 40px, c'est cette taille qui fait foi
+        /// (voir `design::switch`).
+        Male => "icon-male", libre;
+
+        /// Signe ♀ (`icons/icon-female.png`, 10 × 16) — genre féminin, case droite du même switch.
+        /// Même provenance, même réglage et même statut que [`DsIcon::Male`].
+        Female => "icon-female", libre;
 }

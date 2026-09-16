@@ -136,6 +136,39 @@ pub const TAB_SLICE_FIRST: NineSlice = tab_end_slice(8.0, 4.0);
 /// Dernier onglet de la barre — arrondi à droite.
 pub const TAB_SLICE_LAST: NineSlice = tab_end_slice(4.0, 8.0);
 
+/// Découpage d'une case de **switch** : **8px figés du côté arrondi, 4 du côté séparateur, 6 en
+/// haut et en bas**.
+///
+/// Même construction que [`tab_end_slice`], et pour la même raison : l'arrondi (rayon 6) est
+/// celui du **cadre** du switch, porté par l'alpha de chaque case d'extrémité. 8 = les 2px de
+/// liseré + les 5px d'escalier d'alpha (`0, 8, 112, 203, 251` sur la première ligne) + 1 de
+/// sécurité. 6 en vertical = liseré 2 + biseau clair 2 + 2 de sécurité — la case active porte un
+/// biseau de 2px en haut et en bas, la case inactive une ombre intérieure de 2px du côté du liseré
+/// (couverte par les 8 du côté arrondi). 4 du côté séparateur : rien à figer, un pixel de
+/// transition et du remplissage.
+///
+/// **Pas d'embout** : `component.py insets` rend un `decor_span` au niveau du bruit (pic 1,7 pour
+/// un bruit de 1,1) sur les quatre cases — le remplissage est une texture sourde, `Fill::Stretch`
+/// sur les deux axes comme pour un onglet.
+const fn switch_slot_slice(left: f32, right: f32) -> NineSlice {
+    NineSlice::new(
+        Insets {
+            left,
+            top: 6.0,
+            right,
+            bottom: 6.0,
+        },
+        Fill::Stretch,
+        Fill::Stretch,
+    )
+}
+
+/// Première case d'un switch — arrondie à gauche.
+pub const SWITCH_SLICE_FIRST: NineSlice = switch_slot_slice(8.0, 4.0);
+
+/// Seconde case d'un switch — arrondie à droite.
+pub const SWITCH_SLICE_LAST: NineSlice = switch_slot_slice(4.0, 8.0);
+
 /// Découpage d'une case à cocher : **5px figés sur les quatre côtés**.
 ///
 /// Mesuré : 2px de fond sombre puis 2px de cadre, plus un pixel de sécurité. Une case est toujours
@@ -339,6 +372,30 @@ pub enum DsTexture {
     TabInactiveLast,
     /// Onglet inactif en PREMIÈRE position — miroir horizontal de [`DsTexture::TabInactiveLast`].
     TabInactiveFirst,
+    /// Case ACTIVE d'un switch en PREMIÈRE position (`switch-slot-active-first.png`, 42 × 44) —
+    /// kaki `#635a47` texturé, biseau clair en haut et en bas, coins gauches arrondis.
+    ///
+    /// Découpée de `switch-first-slot-active.png` (88 × 44, générique : le glyphe ♂ retiré), sur
+    /// `x 0..42` — le liseré gauche et les 40px de remplissage, **sans** le séparateur. Comme pour
+    /// les onglets, l'arrondi appartient au cadre du switch et il est porté par l'alpha : d'où une
+    /// texture par extrémité et par état, quatre en tout, tirées des deux captures du jeu.
+    SwitchSlotActiveFirst,
+    /// Case ACTIVE en SECONDE position (`switch-slot-active-last.png`, 42 × 44) — découpée de
+    /// `switch-second-slot-active.png` sur `x 46..88`. Ce n'est **pas** un miroir : le jeu a
+    /// capturé les deux états.
+    SwitchSlotActiveLast,
+    /// Case INACTIVE en PREMIÈRE position (`switch-slot-inactive-first.png`, 44 × 44) — gris-brun
+    /// `#514b44` quasi uni, ombre intérieure de 2px côté liseré. Découpée de
+    /// `switch-second-slot-active.png` sur `x 0..44`.
+    ///
+    /// **2px plus large que la case active** (42), et ce sont les captures qui le disent : la
+    /// case inactive est « enfoncée », son ombre intérieure s'ajoute au remplissage, et le
+    /// séparateur se déplace de 2px selon l'état. Le composant donne la même largeur aux deux
+    /// cases ; le 9-slice absorbe l'écart d'un pixel de chaque côté.
+    SwitchSlotInactiveFirst,
+    /// Case INACTIVE en SECONDE position (`switch-slot-inactive-last.png`, 44 × 44) — découpée de
+    /// `switch-first-slot-active.png` sur `x 44..88`.
+    SwitchSlotInactiveLast,
     /// Case à cocher COCHÉE (`checkbox-true.png`, 20 × 20) — cadre doré vif, carré blanc plein.
     CheckboxChecked,
     /// Case à cocher DÉCOCHÉE (`checkbox-false.png`, 20 × 20) — cadre kaki sombre, intérieur noir.
@@ -554,6 +611,10 @@ impl DsTexture {
         DsTexture::TabActiveLast,
         DsTexture::TabInactiveFirst,
         DsTexture::TabInactiveLast,
+        DsTexture::SwitchSlotActiveFirst,
+        DsTexture::SwitchSlotActiveLast,
+        DsTexture::SwitchSlotInactiveFirst,
+        DsTexture::SwitchSlotInactiveLast,
         DsTexture::CheckboxChecked,
         DsTexture::CheckboxUnchecked,
         DsTexture::SelectFace,
@@ -683,6 +744,26 @@ impl DsTexture {
                 name: "ds-tab-inactive-last",
                 bytes: ds_asset!("tab-inactive-last.png"),
                 slice: TAB_SLICE_LAST,
+            },
+            DsTexture::SwitchSlotActiveFirst => DsTextureSpec {
+                name: "ds-switch-slot-active-first",
+                bytes: ds_asset!("switch-slot-active-first.png"),
+                slice: SWITCH_SLICE_FIRST,
+            },
+            DsTexture::SwitchSlotActiveLast => DsTextureSpec {
+                name: "ds-switch-slot-active-last",
+                bytes: ds_asset!("switch-slot-active-last.png"),
+                slice: SWITCH_SLICE_LAST,
+            },
+            DsTexture::SwitchSlotInactiveFirst => DsTextureSpec {
+                name: "ds-switch-slot-inactive-first",
+                bytes: ds_asset!("switch-slot-inactive-first.png"),
+                slice: SWITCH_SLICE_FIRST,
+            },
+            DsTexture::SwitchSlotInactiveLast => DsTextureSpec {
+                name: "ds-switch-slot-inactive-last",
+                bytes: ds_asset!("switch-slot-inactive-last.png"),
+                slice: SWITCH_SLICE_LAST,
             },
             DsTexture::CheckboxChecked => DsTextureSpec {
                 name: "ds-checkbox-checked",
