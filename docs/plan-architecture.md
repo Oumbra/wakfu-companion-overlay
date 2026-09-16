@@ -747,7 +747,7 @@ DERNIER instantané compte.
 | **Dégâts de combat** | dégâts par allié/ennemi en temps réel, détail par sort et par élément, onglets multi-combats (multi-compte) | Ouvert automatiquement à l'entrée en combat, replié à la fin (configurable) |
 | **Suivi (watchlist)** | compteurs objets/ennemis, mode incrémental ou décompte avec alerte | Persistant entre sessions — **jamais incrémenté pendant `isInitialLoad`** |
 | **Alertes de drop** | toast (carte + confettis, miroir visuel de `loot-alert.component` du dépôt web) + son, sur ramassage à son activé (défaut ou ajouté au compte) ET sur décompte de suivi à 0 | Son configurable par objet (parité web) ; toast ≤ 5 s (minuterie fixe) OU fermé plus tôt par clic (carte ou croix) — les deux cohabitent, pas un réglage exclusif comme `ProfileService.alertManualClose` côté web |
-| **Récap de session** | kamas (combat / ventes HDV / échanges), XP, combats gagnés/perdus | Compact, toujours visible |
+| **Récap de session** (2026-09-16, §9.1 octodecies) | XP, kamas nets, combats gagnés − perdus, challenges réussis − échoués, durée de la session | Bande compacte en haut à gauche, sous les boutons du jeu ; `OverlayKind::Recap`, une par fenêtre de jeu ; masquée par la case « Activer le récap de session » (section « Recap » des Paramètres) |
 | **État de synchro** | `idle`/`pending`/`syncing`/`error`, nombre en attente, dernière synchro | Discret ; l'erreur réseau ne doit jamais masquer le jeu |
 | **Modale Options** (2026-09-08) | Onglets « Suivi », « Alertes » (§9.1 ter), « Raccourcis » (§9.1 quinquies) et « Paramètres » (chemin de `wakfu.log`, §5.1 — plus l'affichage du panneau Combat hors combat) | Ouverte par le bouton "Options" du carré de contrôle Suivi ou son raccourci (`Ctrl+Shift+O` par défaut, personnalisable) ; fenêtre OS dédiée, centrée sur la fenêtre de jeu, chrome du design system (bannière turquoise, ligne d'onglets, pied de page Annuler/Valider) ; rien n'est pris en compte avant "Valider" |
 
@@ -1911,6 +1911,71 @@ par section.
 **Captures** : `options_parametres_son_coupe` (Suivi coupé → bouton grisé, ligne d'essai des
 Alertes), `options_parametres_combat_coupe` (tour cochée, son coupé), `options_alertes_liste` et
 `options_alertes_selection` (la tuile coupée, badge en bas à droite).
+
+### 9.1 octodecies Récap de session (2026-09-16)
+
+Demande utilisateur : « ajouter un overlay en haut à gauche, en dessous des boutons du jeu,
+présentant le récap de la session : XP gagné, kamas gagné, combats (gagné − perdu), challenges
+(réussi − échoué), durée de la session », avec « la section "Recap", après la section "Combat",
+dans l'onglet "Paramètres" » et « une option pour activer l'affichage de cet overlay, active par
+défaut ».
+
+**Ce que c'est** : une quatrième zone d'overlay ancrée sur le jeu (`OverlayKind::Recap`,
+`panels::recap`), à côté de Combat, Suivi et Options. Une bande d'une seule ligne, cinq cases
+séparées par un filet, chacune un glyphe du design system et un chiffre, sur le fond translucide
+déjà employé par le carré de contrôle du Suivi (`tokens::OVERLAY_BACKDROP`).
+
+C'est la « bande coup d'œil » du web (`session-recap.component.html`, `.recap-bandeau`) et rien de
+plus : le site déplie sous elle l'XP par personnage, la ventilation des kamas, le butin et les
+accordéons par donjon — de la consultation APRÈS coup, pas du temps réel par-dessus un jeu.
+
+**La durée est celle de l'overlay, jamais celle du fichier** — décision explicite de
+l'utilisateur : « c'est par rapport à la durée d'uptime de l'overlay [...] plutôt que de se baser
+sur le fichier ». Le web fait l'inverse (`StatsStoreService.accumulateSessionDuration` : somme des
+écarts entre lignes horodatées, coupée au-delà de cinq minutes de silence), et ça ne convient pas
+ici : un `wakfu.log` porte plusieurs sessions de jeu et l'overlay le relit en entier à son
+démarrage, la durée annoncerait donc du temps de jeu d'avant-hier. Le chrono part au lancement du
+processus (`App::started_at`) et avance tant qu'il tourne.
+
+**Écart assumé, à connaître avant de croire à un bug** : les quatre autres chiffres, eux, couvrent
+tout le fichier relu (`overlay_engine::SessionTotals`, alimenté par le rattrapage initial comme par
+les lignes lues en direct). Un overlay lancé au milieu d'une partie affiche l'XP de toute la partie
+en face d'une durée qui démarre à zéro. Les aligner demanderait de trancher ce qu'est « la
+session » côté moteur : un autre chantier, et une décision qui n'a pas été prise.
+
+**Ce que le moteur a gagné** : `SessionTotals::challenges_passed`/`challenges_failed`, les
+challenges de TOUTE la session — `FightSnapshot` ne comptait que ceux d'un combat, et
+`MAX_TRACKED_FIGHTS` purge les plus anciens, un total recalculé à la volée diminuerait donc en
+cours de session (même raison que `fights_won`/`fights_lost`). Comptés même quand le parser n'a pas
+résolu de `fightId`, miroir exact du web.
+
+**Les détails qui ont demandé un arbitrage :**
+
+- **Ancrage** : bord gauche, `client_top + GAME_RECAP_TOP_MARGIN_PX` (70 px = les 28 px de fausse
+  barre de titre déjà mesurés, plus 36 px de bouton du jeu — `tokens::ICON_BUTTON_SIZE` —, plus
+  6 px). Seule valeur de cette famille dérivée d'une mesure du design system plutôt que relevée sur
+  une capture : à corriger sur retour d'écran.
+- **Largeur pilotée par le contenu** : la bande mesure ce qu'elle occupe et le renvoie
+  (`RenderOutcome::recap_width`), l'hôte y ajuste la fenêtre OS — même raison que le Suivi, une
+  fenêtre plus large que sa bande capte les clics sur du vide en mode interactif.
+- **Infobulles en dessous** (`TooltipSide::Below`, `RECAP_TOOLTIP_RESERVE`) : la bande est collée en
+  haut, il n'y a rien au-dessus d'elle — la règle de §9.1 octies, à l'identique.
+- **Le chrono se redessine tout seul** : `request_repaint_after(1 s)` depuis le panneau. Cette
+  architecture ne rend une frame que lorsque quelque chose change (§6.1) ; la durée, elle, change
+  sans que rien d'autre ne bouge.
+- **Pas de symbole « ₭ »** derrière les kamas, contrairement au web : Ubuntu, la police embarquée,
+  ne couvre pas U+20AD — la première version affichait un « ? », vu sur la capture du harnais. Le
+  glyphe Kamas à gauche dit déjà de quelle monnaie il s'agit.
+- **Aucune icône inventée** : `Xp`, `Kamas`, `MetricDamage` (les combats), `Trophy` (les
+  challenges) et `Calendar` (la durée — la seule notion de temps du registre `DsIcon`, le jeu n'a
+  pas de cadran).
+- **La case vit avec les autres interrupteurs** (`FeatureToggles::recap`, §9.1 duodecies), persistée
+  en local (`config::OverlayConfig::recap_enabled`, `true` par défaut, y compris pour un
+  `config.toml` écrit avant ce champ). Décochée, la fenêtre est **masquée, jamais détruite** —
+  `App::sync_panel_visibility`, qui porte désormais Combat ET Récap, même politique.
+
+**Capture** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, durée fixée à 1 h 23 min 45 s — elle
+n'existe pas dans le fichier par construction).
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
