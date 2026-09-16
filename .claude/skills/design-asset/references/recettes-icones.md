@@ -49,6 +49,7 @@ appliquée en fin de pipeline (défaut).
 | `icon-info` | *sans* `--from-button` | 27 × 28 |
 | `icon-male` | *sans* `--from-button` | 14 × 14 |
 | `icon-female` | *sans* `--from-button` | 10 × 16 |
+| `icon-allies`, `icon-enemies`, `icon-metric-*` | **aucun traitement** — en couleurs, voir plus bas | 18 × 22 … 22 × 20 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -145,3 +146,18 @@ Les signes ♂ et ♀ du sélecteur de genre, capturés chacun à même le déco
 distinctif d'`icon-pin`. Réglages par défaut, `luma-light` en polarité automatique, aucun halo sur
 la bande sombre de la planche (`band_rejected` 72 et 78 : la frange antialiasée est correctement
 rejetée). Rien à consigner de plus : c'est le cas nominal du second lot.
+
+## `icon-allies` / `icon-enemies` / `icon-metric-*` (2026-09-16) — cinq glyphes gardés en couleurs
+
+Les icônes des deux switches du panneau Combat : silhouettes verte et orange du dépôt web,
+dague, cœur vert à flèche et cœur rouge à croix du jeu (`Vertylo/wakassets`). Elles n'ont **pas**
+été passées par `icon` ni `tint` : la couleur y porte le sens, et l'essai en monochrome l'a
+montré — `tint --mode luma` donne deux silhouettes qui ne se distinguent plus que par la position
+des bras, et deux cœurs qui deviennent des taches (`flat` est pire, le cœur n'est plus qu'une
+forme pleine). Elles sont donc entrées au registre `DsIcon` en catégorie **`couleur`**, simplement
+rognées à leur boîte d'encre (`Image.getbbox()`), et c'est le composant qui les atténue hors
+sélection (`tokens::ICON_NATIVE_DIM`) au lieu de les teinter.
+
+C'est la première exception à « l'icône sort blanche ». La règle reste : un glyphe monochrome se
+teinte au rendu. L'exception se justifie par une raison lisible sur la planche — un glyphe dont la
+couleur distingue deux valeurs — pas par la commodité de ne pas traiter.
