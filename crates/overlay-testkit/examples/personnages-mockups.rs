@@ -1,49 +1,62 @@
-//! **Maquettes de l'onglet « Personnages »** de la fenêtre Options — trois directions à comparer,
-//! plus les états et le sélecteur de classe qu'elles partagent.
+//! **Onglet « Personnages » de la fenêtre Options — direction A, « Héros », détaillée geste par
+//! geste.**
 //!
 //! ```bash
 //! cargo run -p overlay-testkit --example personnages-mockups
 //! ```
 //!
-//! ## Ce qui est porté, et d'où
+//! Le premier jet (2026-09-14) proposait trois directions à comparer — A « Héros », B « Registre »,
+//! C « Comptes empilés ». **A est retenue** ; B et C sont retirées de ce fichier plutôt que gardées
+//! en code mort. Ce qui suit ne montre plus une direction mais **un écran et tous ses états** : ce
+//! qu'on y voit au repos, et ce que chacune des sept actions y fait.
 //!
-//! Le dépôt web (`Oumbra/wakfu-companion`, page « Profil › Personnages », `profile-page.
-//! component.html` et `core/services/character-roster.service.ts`) porte tout le système :
-//! multi-comptes avec un compte « Principal » ni renommable ni supprimable, serveur de jeu par
-//! compte, formulaire d'ajout (portrait → sélecteur de classe, nom), deux vues de liste
-//! (grille de tuiles / lignes), renommage sur place, retrait avec confirmation, réordonnancement
-//! par glisser-déposer, état vide illustré. L'overlay n'en avait qu'un **miroir en lecture seule**
-//! (`overlay_engine::roster::RosterIndex`, alimenté par `GET /api/v1/settings`).
+//! ## Ce qui change depuis le premier jet
 //!
-//! ## Ce que le jeu apporte, et qui ne vient pas du web
+//! 1. **Les portraits.** `crates/overlay-ui/assets/avatars/<classe>-<f|m>.png`, versés sur `dev` le
+//!    2026-09-16 : 36 bustes **détourés** de 80 × 80 (fond transparent, coins arrondis), et non les
+//!    médaillons carrés de 48 de `class-profile/` que `portraits::PortraitAtlas` sert au panneau
+//!    Combat. Un buste détouré n'a pas de fond à lui : il se pose SUR la tuile, et c'est
+//!    exactement l'anatomie des cartes du panneau de héros du jeu.
+//! 2. **Plus de nom de classe sous le portrait** (demande explicite du 2026-09-16) : « on est dans
+//!    le jeu, on connaît déjà les classes et leurs visuels ». Le bandeau ne porte plus que le nom
+//!    du personnage — ce qui le libère et permet de le centrer.
+//! 3. **Le sélecteur de classe devient une vraie modale** (`design::window` posée par-dessus la
+//!    fenêtre Options voilée), et non plus un contenu qui remplace l'onglet.
 //!
-//! Le panneau de sélection de héros du client Wakfu (quatre captures fournies par l'utilisateur le
-//! 2026-09-14) : grille de cartes à quatre colonnes, **portrait porteur d'identité** (aucun nom de
-//! classe écrit), niveau incrusté au coin bas-droit du portrait, et surtout un **bandeau de nom
-//! pleine largeur collé sous le portrait, turquoise ou gris sombre** selon l'appartenance. C'est
-//! cette anatomie que la direction A reprend, et le turquoise que les trois réaffectent au
-//! **personnage actif** — le dernier reconnu dans `wakfu.log`
-//! (`overlay_engine::session::Engine::last_known_character`), une information que le web n'a pas.
+//! ## D'où vient chaque chose
+//!
+//! Le dépôt web (`Oumbra/wakfu-companion`, page « Profil › Personnages ») porte le système :
+//! multi-comptes avec un compte principal ni renommable ni supprimable, serveur de jeu par compte,
+//! formulaire d'ajout (portrait → sélecteur de classe, puis nom), renommage sur place, retrait avec
+//! confirmation, réordonnancement au glisser-déposer, état vide. L'overlay n'en a qu'un **miroir en
+//! lecture seule** (`overlay_engine::roster::RosterIndex`, alimenté par `GET /api/v1/settings`).
+//!
+//! Le jeu apporte la forme : grille de cartes, portrait porteur d'identité, **bandeau de nom pleine
+//! largeur collé sous le portrait**, turquoise ou gris sombre. Le turquoise est ici **réaffecté au
+//! personnage actif** — le dernier reconnu dans `wakfu.log`
+//! (`overlay_engine::session::Engine::last_known_character`), que le site ne peut pas savoir.
 //!
 //! **Le niveau n'est PAS repris** : `wakfu.log` ne le porte nulle part (vérifié sur
 //! `crates/overlay-engine/tests/wakfu.log` — les seuls « lvl 185 » du fichier sont des messages du
-//! canal Recrutement), et `RosterCharacter` n'a pas de champ pour lui. L'afficher demanderait une
-//! saisie à la main et une clé de plus côté compte, des deux côtés.
+//! canal Recrutement), et `RosterCharacter` n'a pas de champ pour lui.
 //!
-//! ## Les trois directions
+//! ## Les planches
 //!
-//! - **A — « Héros »** ([`personnages_a_heros`]) : la grille du jeu, cinq tuiles par rangée, un
-//!   compte à la fois choisi en tête. La plus proche du client, et la seule où le portrait fait
-//!   plus que décorer.
-//! - **B — « Registre »** ([`personnages_b_registre`]) : un `design::table`, une ligne par
-//!   personnage, **tous comptes confondus**, avec recherche. La seule qui tienne les quarante
-//!   personnages d'un vrai multi-compte sans naviguer.
-//! - **C — « Comptes empilés »** ([`personnages_c_comptes`]) : un `design::collapsible` par
-//!   compte, sa grille dedans. Tous les comptes visibles d'un coup, la structure avant le contenu.
+//! | Planche | Ce qu'elle montre |
+//! | --- | --- |
+//! | `a1_ecran` | l'écran au repos, douze personnages |
+//! | `a2_survol` | une tuile survolée : voile et croix de retrait |
+//! | `a3_classe` | la modale de choix de classe, par-dessus l'onglet voilé |
+//! | `a4_ajout` | classe choisie, nom saisi, « Ajouter » devenu actif |
+//! | `a5_renommage` | le bandeau devenu champ de saisie |
+//! | `a6_suppression` | la boîte de confirmation du retrait |
+//! | `a7_deplacement` | un déplacement en vol : voile, fantôme, liseré or |
+//! | `a8_vide` | compte lié, aucun personnage |
+//! | `a9_sans_compte` | aucun compte lié |
 //!
 //! Les composants sont **appelés**, jamais recopiés : `design::window`, `tabs`, `panel`, `heading`,
-//! `select`, `input`, `button`, `icon_button`, `table`, `collapsible`, `info_text`, `portrait`. Le
-//! chrome est celui de la production, à sa taille de production. Les planches sont écrites dans
+//! `select`, `input`, `button`, `icon_button`, `info_text`, `confirm_dialog`, `tooltip`. Le chrome
+//! est celui de la production, à sa taille de production. Les planches sont écrites dans
 //! `target/mockups/`, jamais commitées.
 //!
 //! ## Ce que le portage demandera, et qui n'existe pas encore
@@ -55,19 +68,21 @@
 //!    exactement comme `AccountSettings::profile_raw` le fait déjà pour `profile`.
 //! 2. **`patch_roster`** dans `overlay_sync::client`, sur le modèle de `patch_chat_filters`.
 //! 3. **Le personnage actif au snapshot** : `last_known_character` est privé à `Engine`.
-//! 4. **Un sélecteur de classe** (36 portraits, bascule ♂/♀) — aucun composant du design system ne
-//!    le couvre ; [`personnages_selecteur_classe`] en propose le gabarit.
+//! 4. **Un chargeur d'avatars dans `overlay-ui`** — [`Avatars`] ci-dessous en est le brouillon,
+//!    écrit ici parce qu'une maquette n'a pas à figer une API de la bibliothèque.
 //! 5. **Le mode sans compte lié** : mêmes trois cas qu'`alerts_tab` (`Ready`/`Loading`/`NoAccount`).
 //!
 //! **Driver logiciel requis** — même prérequis que `tests/panels.rs`, voir sa doc de module.
 
+use std::collections::HashMap;
+
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{Color32, Rect, RichText, Vec2};
 use egui_kittest::Harness;
+use overlay_engine::class_breed::CLASS_PORTRAIT_ORDER;
 use overlay_engine::Gender;
 use overlay_ui::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, InputSize};
 use overlay_ui::panels::options_modal::{self, OptionsTab};
-use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::ui_icons::UiIcons;
 
 // -------------------------------------------------------------------------------------------
@@ -99,8 +114,6 @@ const TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
 /// **Le turquoise du jeu**, à sa mesure RÉELLE : `#1A6E80`, relevé au pixel sur
 /// `interface-options-jeu.png` — et non le `banner_teal.gradient_end` `#1D8B9C` de
 /// `design-tokens.json`, que le fichier signale lui-même comme une première mesure révisée depuis.
-/// L'écart se voyait : le bandeau d'une tuile ressortait plus clair et plus saturé que la bannière
-/// de la fenêtre qui le contient.
 ///
 /// Ici il ne dit pas « sélectionné » mais **« actif » : le dernier personnage reconnu dans
 /// `wakfu.log`**, ce que le jeu ne peut pas savoir et l'overlay si.
@@ -115,9 +128,74 @@ const IDLE_BAND: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
 const TILE_FILL: Color32 = Color32::from_rgb(0x0E, 0x11, 0x15);
 const TILE_BORDER: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
 const TILE_BORDER_WIDTH: f32 = 2.0;
+/// Le même cadre, éclairci, pour la tuile SURVOLÉE. Ajout au jeton d'Alertes : le voile seul
+/// (`TILE_HOVER_SCRIM`) se lit sur une carte d'objet claire, pas sur un buste déjà sombre — la
+/// tuile survolée y devenait presque indiscernable de ses voisines. Un cadre clair ≠ le cadre OR,
+/// qui reste réservé à la tuile VISÉE par un déplacement.
+const TILE_BORDER_HOVER: Color32 = Color32::from_rgb(0x9A, 0x8C, 0x6E);
+
+/// Voile posé sur la place d'origine d'une tuile en vol — `panels::tile_reorder::DRAG_SOURCE_SCRIM`.
+const DRAG_SOURCE_SCRIM: Color32 = Color32::from_black_alpha(0xAA);
 
 const DESC: &str = "Déclarez les personnages de vos comptes : l'overlay les reconnaît dans le \
                     journal, les distingue des ennemis et rattache vos gains au bon compte.";
+
+// -------------------------------------------------------------------------------------------
+// Les avatars détourés — brouillon du chargeur qui ira dans `overlay-ui`
+// -------------------------------------------------------------------------------------------
+
+/// Côté natif des fichiers `assets/avatars/*.png`. **Peints à cette taille, jamais rééchantillonnés**
+/// — c'est la leçon de `portraits.rs`, refondu en 36 textures indépendantes pour cette seule raison.
+const AVATAR_SIZE: f32 = 80.0;
+
+/// Les 36 bustes détourés, une texture par couple classe/sexe.
+///
+/// Lus **au disque** plutôt qu'`include_bytes!` : c'est un exemple, pas la bibliothèque, et une
+/// macro de 18 lignes figerait ici une table que `overlay-ui` devra de toute façon écrire chez elle
+/// au moment du portage. Panique si un fichier manque : c'est un asset absent du dépôt, pas un cas
+/// d'exécution à tolérer.
+struct Avatars {
+    textures: HashMap<(&'static str, Gender), egui::TextureHandle>,
+}
+
+impl Avatars {
+    fn load(ctx: &egui::Context) -> Self {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../overlay-ui/assets/avatars");
+        let mut textures = HashMap::with_capacity(CLASS_PORTRAIT_ORDER.len() * 2);
+        for class in CLASS_PORTRAIT_ORDER {
+            for (gender, suffix) in [(Gender::F, 'f'), (Gender::M, 'm')] {
+                let path = dir.join(format!("{class}-{suffix}.png"));
+                let bytes = std::fs::read(&path)
+                    .unwrap_or_else(|err| panic!("avatar {} illisible : {err}", path.display()));
+                let decoded = image::load_from_memory(&bytes)
+                    .unwrap_or_else(|err| panic!("avatar {} invalide : {err}", path.display()))
+                    .to_rgba8();
+                let (width, height) = decoded.dimensions();
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    decoded.as_raw(),
+                );
+                textures.insert(
+                    (class, gender),
+                    ctx.load_texture(
+                        format!("avatar-{class}-{suffix}"),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ),
+                );
+            }
+        }
+        Self { textures }
+    }
+
+    fn texture(&self, class: &str, gender: Gender) -> Option<egui::TextureId> {
+        self.textures
+            .iter()
+            .find(|((name, sex), _)| *name == class && *sex == gender)
+            .map(|(_, handle)| handle.id())
+    }
+}
 
 // -------------------------------------------------------------------------------------------
 // Les données de démonstration — les personnages réels de l'utilisateur, tels que ses captures du
@@ -130,93 +208,56 @@ struct Perso {
     name: &'static str,
     class: &'static str,
     gender: Gender,
-    /// Nom de classe affiché — celui que le web écrit sous le portrait en vue grille.
-    class_label: &'static str,
 }
 
-const fn p(
-    name: &'static str,
-    class: &'static str,
-    gender: Gender,
-    class_label: &'static str,
-) -> Perso {
+const fn p(name: &'static str, class: &'static str, gender: Gender) -> Perso {
     Perso {
         name,
         class,
         gender,
-        class_label,
     }
 }
 
 /// Le compte principal — douze personnages, de quoi remplir deux rangées et demie.
 static COMPTE_PRINCIPAL: &[Perso] = &[
-    p("Pugio Letalis", "sram", Gender::M, "Sram"),
-    p("Sagitta Lucis", "cra", Gender::F, "Crâ"),
-    p("Ensis Orientalis", "iop", Gender::M, "Iop"),
-    p("Canis Furiosus", "ouginak", Gender::M, "Ouginak"),
-    p("Rota Metallica", "foggernaut", Gender::F, "Steamer"),
-    p("Imago Speculi", "zobal", Gender::F, "Zobal"),
-    p("Ignis Dolosus", "rogue", Gender::M, "Roublard"),
-    p("Monstrum Amoris", "osamodas", Gender::M, "Osamodas"),
-    p("Bursa Auri", "enutrof", Gender::F, "Enutrof"),
-    p("Penicillus Vitae", "eniripsa", Gender::F, "Eniripsa"),
-    p("Aegis Feminea", "feca", Gender::F, "Féca"),
-    p("Arbovenenum", "sadida", Gender::M, "Sadida"),
+    p("Pugio Letalis", "sram", Gender::M),
+    p("Sagitta Lucis", "cra", Gender::F),
+    p("Ensis Orientalis", "iop", Gender::M),
+    p("Canis Furiosus", "ouginak", Gender::M),
+    p("Rota Metallica", "foggernaut", Gender::F),
+    p("Imago Speculi", "zobal", Gender::F),
+    p("Ignis Dolosus", "rogue", Gender::M),
+    p("Monstrum Amoris", "osamodas", Gender::M),
+    p("Bursa Auri", "enutrof", Gender::M),
+    p("Penicillus Vitae", "eniripsa", Gender::F),
+    p("Aegis Feminea", "feca", Gender::F),
+    p("Arbovenenum", "sadida", Gender::M),
 ];
 
-/// Un deuxième compte, plus court.
-static COMPTE_MULE: &[Perso] = &[
-    p("Magister Thesauri", "enutrof", Gender::M, "Enutrof"),
-    p("Cura Pictor", "eniripsa", Gender::M, "Eniripsa"),
-    p("Scutum Tutelare", "feca", Gender::M, "Féca"),
-    p("Rhynchanthera", "sadida", Gender::M, "Sadida"),
-    p("Cartarum Lusor", "ecaflip", Gender::M, "Ecaflip"),
-    p("Fanaticus Personae", "sacrier", Gender::M, "Sacrieur"),
-];
-
-/// Un troisième, pour que la direction C ait trois blocs à empiler.
-static COMPTE_CRAFT: &[Perso] = &[
-    p("Contra Horologii", "xelor", Gender::F, "Xélor"),
-    p("Porta Divina", "eliotrope", Gender::F, "Éliotrope"),
-    p("Runae Desolationis", "huppermage", Gender::M, "Huppermage"),
-    p("Bambusa Vacillans", "pandawa", Gender::M, "Pandawa"),
-];
-
-/// Le personnage reconnu en dernier dans `wakfu.log` — celui qui porte le bandeau turquoise.
+/// Le personnage **actif** : le dernier que `wakfu.log` a reconnu. Porte le bandeau turquoise.
 const ACTIF: &str = "Sagitta Lucis";
 
-/// Une ligne du registre (direction B) : le personnage, et le compte auquel il appartient.
-struct Ligne {
-    perso: &'static Perso,
-    compte: &'static str,
-    serveur: &'static str,
-}
-
-fn registre() -> Vec<Ligne> {
-    let mut lignes = Vec::new();
-    for perso in COMPTE_PRINCIPAL {
-        lignes.push(Ligne {
-            perso,
-            compte: "Principal",
-            serveur: "Pandora",
-        });
-    }
-    for perso in COMPTE_MULE {
-        lignes.push(Ligne {
-            perso,
-            compte: "Mules",
-            serveur: "Pandora",
-        });
-    }
-    for perso in COMPTE_CRAFT {
-        lignes.push(Ligne {
-            perso,
-            compte: "Métiers",
-            serveur: "Rubilax",
-        });
-    }
-    lignes
-}
+/// Les 18 classes dans l'ordre du jeu, avec leur nom affiché — celui du sélecteur.
+const CLASSES: &[(&str, &str)] = &[
+    ("feca", "Féca"),
+    ("osamodas", "Osamodas"),
+    ("enutrof", "Enutrof"),
+    ("sram", "Sram"),
+    ("xelor", "Xélor"),
+    ("ecaflip", "Ecaflip"),
+    ("eniripsa", "Eniripsa"),
+    ("iop", "Iop"),
+    ("cra", "Crâ"),
+    ("sadida", "Sadida"),
+    ("sacrier", "Sacrieur"),
+    ("pandawa", "Pandawa"),
+    ("rogue", "Roublard"),
+    ("zobal", "Zobal"),
+    ("foggernaut", "Steamer"),
+    ("eliotrope", "Éliotrope"),
+    ("huppermage", "Huppermage"),
+    ("ouginak", "Ouginak"),
+];
 
 // -------------------------------------------------------------------------------------------
 // Sortie
@@ -249,13 +290,20 @@ fn write_mockup(harness: &mut Harness<'static>, name: &str) {
 // Le harnais — le chrome de production, onglet « Personnages » actif
 // -------------------------------------------------------------------------------------------
 
-fn options_harness(
-    mut build: impl FnMut(&mut egui::Ui, &UiIcons, &PortraitAtlas, &design::PanelZones, Rect) + 'static,
-) -> Harness<'static> {
+/// Ce que l'appelant reçoit à chaque frame : de quoi peindre, et où.
+struct Scene<'a> {
+    icons: &'a UiIcons,
+    avatars: &'a Avatars,
+    panel: &'a design::PanelZones,
+    /// La fenêtre entière — ce sur quoi une modale se pose.
+    window: Rect,
+}
+
+fn options_harness(mut build: impl FnMut(&mut egui::Ui, Scene<'_>) + 'static) -> Harness<'static> {
     // Chargés UNE fois et gardés vivants entre les frames : un `TextureHandle` libère sa texture
     // dès que son dernier exemplaire tombe, et la planche sortirait avec des portraits vides.
     let mut icons: Option<UiIcons> = None;
-    let mut portraits: Option<PortraitAtlas> = None;
+    let mut avatars: Option<Avatars> = None;
     let mut tab = OptionsTab::Personnages;
     Harness::builder().with_size(WINDOW).build_ui(move |ui| {
         overlay_ui::style::apply(ui.ctx());
@@ -264,7 +312,7 @@ fn options_harness(
         overlay_ui::build_info::freeze_for_snapshots();
         ui.style_mut().visuals.text_cursor.blink = false;
         let icons = icons.get_or_insert_with(|| UiIcons::load(ui.ctx()));
-        let portraits = portraits.get_or_insert_with(|| PortraitAtlas::load(ui.ctx()));
+        let avatars = avatars.get_or_insert_with(|| Avatars::load(ui.ctx()));
         egui::Frame::NONE.fill(BACKDROP).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             let window = ui.max_rect();
@@ -274,8 +322,6 @@ fn options_harness(
                 .version(true)
                 .log_name("maquette")
                 .show(ui);
-            // L'ordre des entrées est celui de la production (`options_modal::show`). « Personnages »
-            // n'y porte plus `.enabled(false)` : c'est justement l'onglet que ces planches montrent.
             chrome.tabs(
                 ui,
                 design::tabs(&mut tab)
@@ -288,7 +334,15 @@ fn options_harness(
                     .log_name("maquette-onglets"),
             );
             design::panel().show(ui, chrome.content, |ui, panel| {
-                build(ui, icons, portraits, panel, window);
+                build(
+                    ui,
+                    Scene {
+                        icons,
+                        avatars,
+                        panel,
+                        window,
+                    },
+                );
             });
         });
     })
@@ -310,8 +364,7 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// Texte d'une ligne, ellipsé s'il déborde — jamais rogné en silence. Rend la largeur réellement
-/// occupée, pour que l'appelant puisse poser quelque chose à sa suite.
+/// Texte d'une ligne, ellipsé s'il déborde — jamais rogné en silence.
 #[allow(clippy::too_many_arguments)]
 fn painted_ellipsed(
     ui: &egui::Ui,
@@ -352,25 +405,30 @@ fn painted_ellipsed(
     size.x
 }
 
-/// Le portrait de classe d'un personnage, peint dans `rect`. Repli sur le portrait générique
-/// d'`UiIcons` quand la classe est inconnue de l'atlas — jamais un trou.
-fn paint_face(
+/// Le buste détouré d'un personnage, peint à sa taille NATIVE, centré dans `rect`. Repli sur le
+/// portrait générique d'`UiIcons` quand la classe est inconnue — jamais un trou.
+fn paint_avatar(
     ui: &egui::Ui,
     rect: Rect,
-    perso: &Perso,
-    portraits: &PortraitAtlas,
+    class: &str,
+    gender: Gender,
+    avatars: &Avatars,
     icons: &UiIcons,
 ) {
-    let texture = portraits
-        .texture(perso.class, perso.gender, false)
-        .map(|handle| handle.id())
+    let texture = avatars
+        .texture(class, gender)
         .unwrap_or_else(|| icons.unknown_entity_texture().id());
-    design::paint_portrait(ui, rect, texture, design::PortraitShape::Square, false);
+    ui.painter().image(
+        texture,
+        rect,
+        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
 }
 
 /// La croix de retrait révélée au survol d'une tuile — l'idiome des tuiles d'Alertes et de Chat.
-/// `scrim` est la zone réellement voilée : elle vaut la tuile entière quand rien n'y doit rester
-/// lisible, et s'arrête au bandeau de nom quand il y en a un (voir [`hero_tile`]).
+/// `scrim` est la zone réellement voilée : elle s'arrête au bandeau de nom, qui doit rester lisible
+/// à l'instant précis où le pointeur l'atteint.
 fn hover_badge(ui: &mut egui::Ui, rect: Rect, scrim: Rect, log_name: String) {
     let ctx = ui.ctx().clone();
     let painter = ui.painter().clone();
@@ -396,8 +454,9 @@ fn hover_badge(ui: &mut egui::Ui, rect: Rect, scrim: Rect, log_name: String) {
     ds.paint_icon(&painter, icon_rect, DsIcon::Close, tint);
 }
 
-/// La ligne « compte + serveur » qui coiffe les directions A et B. Le bouton « + » ajoute un
-/// compte, ancré au bord droit comme le « Ajouter » du formulaire de Chat.
+/// La ligne « compte + serveur », au-dessus de la grille. Les deux boutons de droite portent sur le
+/// COMPTE, jamais sur un personnage : « + » en ajoute un, la corbeille retire celui qui est choisi
+/// — désactivée sur le compte principal, que le web interdit de supprimer (`isDefault`).
 fn account_row(ui: &mut egui::Ui, compte: &mut usize, serveur: &mut usize, width: f32) {
     // La ligne n'est pas dans la zone défilable : elle reprend la réserve de barre, comme le
     // formulaire d'ajout de `chat_tab`.
@@ -406,6 +465,7 @@ fn account_row(ui: &mut egui::Ui, compte: &mut usize, serveur: &mut usize, width
     let row = ui
         .allocate_space(Vec2::new(total, design::tokens::SELECT_HEIGHT))
         .1;
+    let principal = *compte == 0;
     let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
     cell.spacing_mut().item_spacing.x = 0.0;
     cell.horizontal_centered(|ui| {
@@ -445,7 +505,12 @@ fn account_row(ui: &mut egui::Ui, compte: &mut usize, serveur: &mut usize, width
         right.add(
             design::icon_button(DsIcon::Delete)
                 .context(IconContext::Panel)
-                .tooltip("Supprimer ce compte")
+                .enabled(!principal)
+                .tooltip(if principal {
+                    "Le compte principal ne se supprime pas"
+                } else {
+                    "Supprimer ce compte"
+                })
                 .log_name("personnages.compte.retirer"),
         );
         right.add_space(design::tokens::PANEL_PAD_CONTROL_X);
@@ -459,24 +524,24 @@ fn account_row(ui: &mut egui::Ui, compte: &mut usize, serveur: &mut usize, width
 }
 
 /// Le formulaire d'ajout : **portrait, nom, « Ajouter » — dans cet ordre**, celui du web
-/// (`character-add-form.component.html`). Le portrait est un bouton : il ouvre le sélecteur de
-/// classe (voir [`personnages_selecteur_classe`]) et porte ensuite la classe choisie.
+/// (`character-add-form.component.html`). Le portrait est un bouton : il ouvre la modale de choix
+/// de classe et porte ensuite le buste choisi.
 fn add_row(
     ui: &mut egui::Ui,
     nom: &mut String,
-    choisie: Option<&Perso>,
-    portraits: &PortraitAtlas,
+    choisie: Option<(&str, Gender)>,
+    avatars: &Avatars,
     icons: &UiIcons,
     width: f32,
 ) {
-    const FACE: f32 = 36.0;
+    // 48 et non la hauteur d'un champ : un buste de 80 réduit à 32 n'est plus qu'une tache. La
+    // ligne s'aligne donc sur le portrait, pas l'inverse — les champs y restent centrés.
+    const FACE: f32 = 48.0;
     const ADD_WIDTH: f32 = 100.0;
     const GAP: f32 = 12.0;
     let total =
         width + design::components::scroll_area::RESERVE_X - design::tokens::PANEL_PAD_CONTROL_X;
-    let row = ui
-        .allocate_space(Vec2::new(total, design::tokens::SELECT_HEIGHT))
-        .1;
+    let row = ui.allocate_space(Vec2::new(total, FACE)).1;
     let face = Rect::from_min_size(
         egui::pos2(row.left(), row.center().y - FACE / 2.0),
         Vec2::splat(FACE),
@@ -502,7 +567,7 @@ fn add_row(
         egui::StrokeKind::Inside,
     );
     match choisie {
-        Some(perso) => paint_face(ui, face.shrink(3.0), perso, portraits, icons),
+        Some((class, gender)) => paint_avatar(ui, face.shrink(2.0), class, gender, avatars, icons),
         None => {
             let ds = design::DesignSystem::get(ui.ctx());
             let native = ds.icon_native_size(DsIcon::Characters);
@@ -550,87 +615,139 @@ fn add_row(
 }
 
 // -------------------------------------------------------------------------------------------
-// A — « Héros » : la grille du jeu
+// La grille de héros
 // -------------------------------------------------------------------------------------------
 
-/// Tuiles par rangée. **Cinq** : à 675 pt de large utile, une tuile fait 125 pt, soit très près des
-/// 105 px des cartes du jeu — quatre les rendrait obèses, six couperait un nom sur deux.
+/// Tuiles par rangée. **Cinq** : à ~675 pt de large utile, une tuile fait 125 pt pour un buste de
+/// 80 — le rapport des cartes du jeu. Quatre les rendrait obèses, six couperait un nom sur deux.
 const A_TILES_PER_ROW: usize = 5;
-/// Hauteur d'une tuile : 8 de marge + 48 de portrait + 4 + 14 de classe + 6 + 22 de bandeau.
-const A_TILE_HEIGHT: f32 = 102.0;
-/// Côté du portrait dans la tuile — **48, la taille NATIVE** des fichiers `class-profile/*.png`.
-/// `portraits.rs` a justement été refondu en 36 textures indépendantes pour éviter le filtrage
-/// LINEAR sur le bord des médaillons ; les peindre à 56 rendait ce travail inutile.
-const A_FACE: f32 = 48.0;
-/// Hauteur du bandeau de nom, relevée sur les captures du panneau de héros (~20 px).
-const A_BAND: f32 = 22.0;
+/// Hauteur d'une tuile : 2 de bordure + 4 + 80 de buste + 24 de bandeau + 2 de bordure.
+const A_TILE_HEIGHT: f32 = 112.0;
+/// Hauteur du bandeau de nom, relevée sur les captures du panneau de héros (~20 px), remontée à 24
+/// pour que le nom respire maintenant qu'il y est seul.
+const A_BAND: f32 = 24.0;
 
-/// Une carte de héros : portrait au centre, classe en gris, **bandeau de nom pleine largeur collé
-/// en bas** — turquoise si le personnage est celui que le journal a reconnu en dernier.
+/// Ce que la planche montre — un seul état à la fois, forcé plutôt que simulé au pointeur : une
+/// position de souris en dur dans une planche se décale au premier ajustement de cote.
+#[derive(Clone, Copy, PartialEq)]
+enum Etat {
+    Repos,
+    /// Tuile survolée : voile et croix de retrait.
+    Survol(usize),
+    /// Bandeau devenu champ de saisie.
+    Renommage(usize),
+    /// Déplacement en vol — `pris` a quitté sa place, `vise` est la destination sous le pointeur.
+    Deplacement {
+        pris: usize,
+        vise: usize,
+    },
+}
+
+impl Etat {
+    fn survol(self, index: usize) -> bool {
+        matches!(self, Etat::Survol(i) if i == index)
+    }
+    fn renomme(self, index: usize) -> bool {
+        matches!(self, Etat::Renommage(i) if i == index)
+    }
+}
+
+/// Le bandeau de nom d'une tuile — turquoise si le personnage est celui que le journal a reconnu en
+/// dernier, gris sinon. **Pleine largeur intérieure, collé au bord bas**, comme les cartes du jeu.
+fn band_rect(tile: Rect) -> Rect {
+    Rect::from_min_max(
+        egui::pos2(
+            tile.left() + TILE_BORDER_WIDTH,
+            tile.bottom() - TILE_BORDER_WIDTH - A_BAND,
+        ),
+        egui::pos2(
+            tile.right() - TILE_BORDER_WIDTH,
+            tile.bottom() - TILE_BORDER_WIDTH,
+        ),
+    )
+}
+
+/// Une carte de héros : buste détouré posé sur le fond de la tuile, **bandeau de nom seul** collé
+/// en bas. Plus de nom de classe : le portrait la dit déjà, et dans le jeu on la connaît.
+#[allow(clippy::too_many_arguments)]
 fn hero_tile(
     ui: &mut egui::Ui,
     perso: &Perso,
+    index: usize,
     size: Vec2,
-    portraits: &PortraitAtlas,
+    etat: Etat,
+    brouillon: &mut String,
+    avatars: &Avatars,
     icons: &UiIcons,
-) {
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+) -> Rect {
+    let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
     let painter = ui.painter().clone();
     let actif = perso.name == ACTIF;
+    let vise = matches!(etat, Etat::Deplacement { vise, .. } if vise == index);
+    let pris = matches!(etat, Etat::Deplacement { pris, .. } if pris == index);
 
     painter.rect_filled(rect, 2.0, TILE_FILL);
-    // **Un seul porteur du turquoise : le bandeau.** Un liseré de tuile en plus doublait le signal
-    // et serait entré en concurrence avec le liseré or que `panels::tile_reorder` pose sur la tuile
-    // visée pendant un déplacement — deux accents pour deux sens différents sur la même arête.
+    // **Un seul porteur du turquoise : le bandeau.** Un liseré de tuile en plus doublerait le
+    // signal et entrerait en concurrence avec le liseré OR de la tuile visée pendant un
+    // déplacement — deux accents pour deux sens différents sur la même arête.
     painter.rect_stroke(
         rect,
         2.0,
-        egui::Stroke::new(TILE_BORDER_WIDTH, TILE_BORDER),
+        egui::Stroke::new(
+            TILE_BORDER_WIDTH,
+            if vise {
+                design::tokens::ITEM_SLOT_SELECTED_BORDER
+            } else if etat.survol(index) {
+                TILE_BORDER_HOVER
+            } else {
+                TILE_BORDER
+            },
+        ),
         egui::StrokeKind::Inside,
     );
 
-    let face = Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.top() + 8.0 + A_FACE / 2.0),
-        Vec2::splat(A_FACE),
-    );
-    paint_face(ui, face, perso, portraits, icons);
-
-    painted_ellipsed(
-        ui,
-        &painter,
-        perso.class_label,
-        egui::pos2(rect.center().x, face.bottom() + 11.0),
-        rect.width() - 12.0,
-        design::text::label_font(ui.ctx(), 11.0),
-        SUBDUED,
-        true,
-    );
-
-    // Le bandeau : pleine largeur intérieure, collé au bord bas, comme sur les cartes du jeu.
-    let band = Rect::from_min_max(
+    let face = Rect::from_min_size(
         egui::pos2(
-            rect.left() + TILE_BORDER_WIDTH,
-            rect.bottom() - TILE_BORDER_WIDTH - A_BAND,
+            rect.center().x - AVATAR_SIZE / 2.0,
+            rect.top() + TILE_BORDER_WIDTH + 4.0,
         ),
-        egui::pos2(
-            rect.right() - TILE_BORDER_WIDTH,
-            rect.bottom() - TILE_BORDER_WIDTH,
-        ),
+        Vec2::splat(AVATAR_SIZE),
     );
-    painter.rect_filled(band, 0.0, if actif { ACTIVE_BAND } else { IDLE_BAND });
-    painted_ellipsed(
-        ui,
-        &painter,
-        perso.name,
-        egui::pos2(band.left() + 7.0, band.center().y),
-        band.width() - 14.0,
-        design::text::label_strong_font(ui.ctx(), 12.0),
-        TEXT,
-        false,
-    );
+    paint_avatar(ui, face, perso.class, perso.gender, avatars, icons);
 
-    if response.contains_pointer() {
-        // Le voile s'arrête au bord haut du bandeau — le couvrir rendait le nom gris sur gris à
+    let band = band_rect(rect);
+    if etat.renomme(index) {
+        // Le renommage se fait DANS la tuile, à la place du bandeau : le nom ne bouge pas d'un
+        // pixel entre la lecture et la correction. Même geste que le web, sans sa popover.
+        let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(band));
+        cell.add(
+            design::input(brouillon)
+                .size(InputSize::Height(A_BAND))
+                .width(band.width())
+                .request_focus(true)
+                .log_name(format!("personnages.renommer.{index}")),
+        );
+    } else {
+        painter.rect_filled(band, 0.0, if actif { ACTIVE_BAND } else { IDLE_BAND });
+        painted_ellipsed(
+            ui,
+            &painter,
+            perso.name,
+            band.center(),
+            band.width() - 12.0,
+            design::text::label_strong_font(ui.ctx(), 12.5),
+            TEXT,
+            true,
+        );
+    }
+
+    if pris {
+        // La place d'origine s'efface derrière le fantôme, maintenant seul exemplaire de l'entrée —
+        // `panels::tile_reorder`, à la lettre.
+        painter.rect_filled(rect, 2.0, DRAG_SOURCE_SCRIM);
+    }
+    if etat.survol(index) {
+        // Le voile s'arrête au bord haut du bandeau : le couvrir rendrait le nom gris sur gris à
         // l'instant où le pointeur l'atteint, c'est-à-dire exactement quand on le lit.
         hover_badge(
             ui,
@@ -639,512 +756,166 @@ fn hero_tile(
             format!("personnages.retirer.{}", perso.name),
         );
     }
+    rect
 }
 
+/// L'écran : en-tête, ligne de compte, formulaire d'ajout, grille.
 #[allow(clippy::too_many_arguments)]
-fn direction_a(
+fn ecran(
     ui: &mut egui::Ui,
-    panel: &design::PanelZones,
-    portraits: &PortraitAtlas,
-    icons: &UiIcons,
+    scene: &Scene<'_>,
     compte: &mut usize,
     serveur: &mut usize,
     nom: &mut String,
+    brouillon: &mut String,
+    choisie: Option<(&str, Gender)>,
+    etat: Etat,
     liste: &[Perso],
 ) {
-    let width = panel.inner.width();
+    let width = scene.panel.inner.width();
     ui.add(design::heading("Personnages"));
     paragraph(ui, DESC);
     ui.add_space(SECTION_GAP);
 
     account_row(ui, compte, serveur, width);
     ui.add_space(SECTION_GAP * 0.75);
-    add_row(ui, nom, Some(&liste[1]), portraits, icons, width);
+    add_row(ui, nom, choisie, scene.avatars, scene.icons, width);
     ui.add_space(SECTION_GAP * 0.75);
 
-    panel.scroll_area(ui, "personnages.grille", |ui, content_width| {
-        ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
-        let tile_width =
-            (content_width - TILE_GAP * (A_TILES_PER_ROW as f32 - 1.0)) / A_TILES_PER_ROW as f32;
-        for chunk in liste.chunks(A_TILES_PER_ROW) {
-            ui.horizontal(|ui| {
-                for perso in chunk {
-                    hero_tile(
-                        ui,
-                        perso,
-                        Vec2::new(tile_width, A_TILE_HEIGHT),
-                        portraits,
-                        icons,
-                    );
-                }
-            });
-        }
-    });
-}
-
-// -------------------------------------------------------------------------------------------
-// B — « Registre » : une ligne par personnage, tous comptes confondus
-// -------------------------------------------------------------------------------------------
-
-const B_ROW_HEIGHT: f32 = 44.0;
-
-fn direction_b(
-    ui: &mut egui::Ui,
-    panel: &design::PanelZones,
-    portraits: &PortraitAtlas,
-    icons: &UiIcons,
-    recherche: &mut String,
-    lignes: &[Ligne],
-) {
-    let width = panel.inner.width();
-    ui.add(design::heading("Personnages"));
-    paragraph(ui, DESC);
-    ui.add_space(SECTION_GAP);
-
-    // Barre : recherche à gauche, « Ajouter un personnage » ancré à droite.
-    let total =
-        width + design::components::scroll_area::RESERVE_X - design::tokens::PANEL_PAD_CONTROL_X;
-    let row = ui
-        .allocate_space(Vec2::new(total, design::tokens::SELECT_HEIGHT))
-        .1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    cell.spacing_mut().item_spacing.x = 0.0;
-    cell.horizontal_centered(|ui| {
-        ui.add(
-            design::input(recherche)
-                .size(InputSize::Search)
-                .leading_icon(DsIcon::Search)
-                .clearable(true)
-                .placeholder("Filtrer par nom, classe ou compte…")
-                .width(total - 250.0)
-                .log_name("personnages.recherche"),
-        );
-        let mut right = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(row)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        right.add(
-            design::button("Ajouter")
-                .variant(ButtonVariant::Primary)
-                .size(ButtonSize::Compact)
-                .width(110.0)
-                .log_name("personnages.ajouter"),
-        );
-        right.add_space(8.0);
-        right.add(
-            design::icon_button(DsIcon::Order)
-                .context(IconContext::Panel)
-                .tooltip("Réordonner")
-                .log_name("personnages.ordre"),
-        );
-    });
-    ui.add_space(SECTION_GAP * 0.75);
-
-    // Hauteur calée sur un nombre ENTIER de lignes : un tableau qui s'arrête au milieu d'une
-    // ligne se lit comme un défaut de mise en page, pas comme une invitation à faire défiler.
-    // Mesuré sur le BAS DU PANNEAU (`panel.inner`), pas sur `ui.available_height()` : le `Ui` du
-    // panneau déborde son propre écrêtage, et s'y fier laissait une dixième ligne coupée en deux
-    // sous le bord — exactement le défaut que ce calage doit éviter.
-    let dispo = panel.inner.bottom() - ui.cursor().top() - design::Table::header_height();
-    // `max_height` borne le CORPS seul, en-tête non compris (voir `Table::show`) : y ajouter la
-    // hauteur d'en-tête laissait dépasser une ligne de plus sous le bord du panneau.
-    let visible = (dispo / B_ROW_HEIGHT).floor().max(1.0) * B_ROW_HEIGHT;
-    design::table()
-        .column(design::TableColumn::fixed("", 44.0))
-        .column(design::TableColumn::flex("Personnage", 2.0))
-        .column(design::TableColumn::fixed("Classe", 120.0))
-        .column(design::TableColumn::flex("Compte", 1.2))
-        .column(design::TableColumn::fixed("Serveur", 100.0))
-        .column(design::TableColumn::fixed("", 40.0))
-        .body(design::TableBody::Rows(lignes.len()))
-        .row_height(B_ROW_HEIGHT)
-        .width(width)
-        .max_height(visible)
-        .empty_text("Aucun personnage déclaré.")
-        .log_name("personnages.registre")
-        .show(ui, |row| {
-            let Some(ligne) = lignes.get(row.index()) else {
-                return;
-            };
-            let actif = ligne.perso.name == ACTIF;
-            if actif {
-                // Le turquoise, réduit à un liseré : une ligne entièrement teintée hurlerait.
-                let r = row.rect();
-                row.response()
-                    .ctx
-                    .layer_painter(row.response().layer_id)
-                    .rect_filled(
-                        Rect::from_min_max(r.min, egui::pos2(r.left() + 3.0, r.bottom())),
-                        0.0,
-                        ACTIVE_BAND,
-                    );
-            }
-            row.cell(|ui| {
-                let face = Rect::from_center_size(
-                    ui.max_rect().center(),
-                    Vec2::splat(overlay_ui::portraits::PORTRAIT_SIZE * 0.8),
-                );
-                paint_face(ui, face, ligne.perso, portraits, icons);
-            });
-            row.cell(|ui| {
-                ui.add(
-                    design::label(ligne.perso.name)
-                        .width(ui.available_width())
-                        .align(egui::Align::LEFT)
-                        .size(BODY_FONT_SIZE)
-                        .color(if actif {
-                            design::tokens::TEXT_GOLD
-                        } else {
-                            TEXT
-                        })
-                        .log_name("personnages.registre.nom"),
-                );
-            });
-            row.cell(|ui| {
-                ui.add(
-                    design::label(ligne.perso.class_label)
-                        .width(ui.available_width())
-                        .align(egui::Align::LEFT)
-                        .size(13.0)
-                        .color(SUBDUED)
-                        .log_name("personnages.registre.classe"),
-                );
-            });
-            row.cell(|ui| {
-                ui.add(
-                    design::label(ligne.compte)
-                        .width(ui.available_width())
-                        .align(egui::Align::LEFT)
-                        .size(13.0)
-                        .color(SUBDUED)
-                        .log_name("personnages.registre.compte"),
-                );
-            });
-            row.cell(|ui| {
-                ui.add(
-                    design::label(ligne.serveur)
-                        .width(ui.available_width())
-                        .align(egui::Align::LEFT)
-                        .size(13.0)
-                        .color(SUBDUED)
-                        .log_name("personnages.registre.serveur"),
-                );
-            });
-            row.cell(|ui| {
-                ui.add(
-                    design::icon_button(DsIcon::Close)
-                        .context(IconContext::Panel)
-                        .size(26.0)
-                        .tooltip("Retirer")
-                        .log_name("personnages.registre.retirer"),
-                );
-            });
-        });
-}
-
-// -------------------------------------------------------------------------------------------
-// C — « Comptes empilés » : un bloc repliable par compte
-// -------------------------------------------------------------------------------------------
-
-const C_TILES_PER_ROW: usize = 3;
-/// 64 — `tokens::ITEM_SLOT_SIZE`, le pas des grilles d'Alertes et du Suivi : la grille des comptes
-/// se cale sur elles au lieu d'inventer sa propre hauteur.
-const C_TILE_HEIGHT: f32 = 64.0;
-/// 48, taille native du portrait — voir [`A_FACE`].
-const C_FACE: f32 = 48.0;
-
-/// Une tuile compacte : portrait à gauche, nom et classe à droite. Plus dense que la carte de la
-/// direction A, parce qu'elle vit DANS un bloc qui a déjà son propre en-tête.
-fn compact_tile(
-    ui: &mut egui::Ui,
-    perso: &Perso,
-    size: Vec2,
-    portraits: &PortraitAtlas,
-    icons: &UiIcons,
-) {
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let painter = ui.painter().clone();
-    let actif = perso.name == ACTIF;
-
-    painter.rect_filled(rect, 2.0, TILE_FILL);
-    painter.rect_stroke(
-        rect,
-        2.0,
-        egui::Stroke::new(
-            TILE_BORDER_WIDTH,
-            if actif { ACTIVE_BAND } else { TILE_BORDER },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    // Un seul porteur du turquoise ici aussi : la bordure. L'arête de 3 pt qu'elle portait en plus
-    // disparaissait dessous, à un pixel près.
-
-    let face = Rect::from_center_size(
-        egui::pos2(rect.left() + 10.0 + C_FACE / 2.0, rect.center().y),
-        Vec2::splat(C_FACE),
-    );
-    paint_face(ui, face, perso, portraits, icons);
-
-    let text_left = face.right() + 9.0;
-    let text_width = rect.right() - text_left - 10.0;
-    painted_ellipsed(
-        ui,
-        &painter,
-        perso.name,
-        egui::pos2(text_left, rect.center().y - 9.0),
-        text_width,
-        design::text::label_strong_font(ui.ctx(), 13.0),
-        TEXT,
-        false,
-    );
-    painted_ellipsed(
-        ui,
-        &painter,
-        perso.class_label,
-        egui::pos2(text_left, rect.center().y + 9.0),
-        text_width,
-        design::text::label_font(ui.ctx(), 11.0),
-        SUBDUED,
-        false,
-    );
-
-    if response.contains_pointer() {
-        hover_badge(
-            ui,
-            rect,
-            rect,
-            format!("personnages.c.retirer.{}", perso.name),
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compte_bloc(
-    ui: &mut egui::Ui,
-    titre: &str,
-    serveur: &str,
-    liste: &[Perso],
-    ouvert: &mut bool,
-    nom: &mut String,
-    // Le compte principal ne se supprime pas — voir la ligne de réglage ci-dessous.
-    principal: bool,
-    portraits: &PortraitAtlas,
-    icons: &UiIcons,
-) {
-    let titre_complet = format!("{titre}  ·  {serveur}  ·  {} personnages", liste.len());
-    design::collapsible(titre_complet, ouvert)
-        .icon(DsIcon::Characters)
-        .log_name(format!("personnages.compte.{titre}"))
-        .show(ui, |ui| {
-            let width = ui.available_width();
-            // **La ligne de réglage du compte, DANS son bloc.** Sans elle, la direction C ne sait
-            // ni renommer un compte, ni lui poser un serveur, ni le supprimer — et le bloc
-            // repliable n'est plus qu'un classeur. Aplat de ligne de réglage du jeu
-            // (`alerts_tab::SETTING_ROW_FILL`, rayon 4, 40 pt), comme « Fermeture automatique ».
-            let ligne = ui.allocate_space(Vec2::new(width, 40.0)).1;
-            ui.painter().rect_filled(ligne, 4.0, IDLE_BAND);
-            let mut cell =
-                ui.new_child(egui::UiBuilder::new().max_rect(ligne.shrink2(Vec2::new(12.0, 0.0))));
-            cell.spacing_mut().item_spacing.x = 0.0;
-            cell.horizontal_centered(|ui| {
-                ui.label(
-                    RichText::new("Nom du compte")
-                        .color(SUBDUED)
-                        .font(design::text::label_font(ui.ctx(), 13.0)),
-                );
-                ui.add_space(10.0);
-                let mut libelle = titre.to_owned();
-                ui.add(
-                    design::input(&mut libelle)
-                        .size(InputSize::Search)
-                        .width(180.0)
-                        .log_name("personnages.compte.nom"),
-                );
-                ui.add_space(20.0);
-                ui.label(
-                    RichText::new("Serveur")
-                        .color(SUBDUED)
-                        .font(design::text::label_font(ui.ctx(), 13.0)),
-                );
-                ui.add_space(10.0);
-                let mut choix = 0usize;
-                design::select(&mut choix)
-                    .option(0usize, serveur)
-                    .option(1usize, "Aucun")
-                    .width(150.0)
-                    .log_name("personnages.compte.serveur")
-                    .show(ui);
-                let mut right = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(ligne.shrink2(Vec2::new(8.0, 0.0)))
-                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
-                );
-                // **Rien du tout sur le compte principal**, pas un bouton désactivé : c'est le
-                // traitement que les dix objets par défaut d'Alertes ont déjà reçu.
-                if !principal {
-                    right.add(
-                        design::icon_button(DsIcon::Delete)
-                            .context(IconContext::Panel)
-                            .size(28.0)
-                            .tooltip("Supprimer ce compte")
-                            .log_name("personnages.compte.retirer"),
-                    );
-                }
-            });
-            ui.add_space(TILE_GAP);
-            add_row(ui, nom, Some(&liste[0]), portraits, icons, width - 26.0);
-            ui.add_space(TILE_GAP);
+    let mut fantome: Option<(Rect, usize)> = None;
+    scene
+        .panel
+        .scroll_area(ui, "personnages.grille", |ui, content_width| {
             ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
-            let tile_width =
-                (width - TILE_GAP * (C_TILES_PER_ROW as f32 - 1.0)) / C_TILES_PER_ROW as f32;
-            for chunk in liste.chunks(C_TILES_PER_ROW) {
+            let tile_width = (content_width - TILE_GAP * (A_TILES_PER_ROW as f32 - 1.0))
+                / A_TILES_PER_ROW as f32;
+            for (rang, chunk) in liste.chunks(A_TILES_PER_ROW).enumerate() {
                 ui.horizontal(|ui| {
-                    for perso in chunk {
-                        compact_tile(
+                    for (colonne, perso) in chunk.iter().enumerate() {
+                        let index = rang * A_TILES_PER_ROW + colonne;
+                        let rect = hero_tile(
                             ui,
                             perso,
-                            Vec2::new(tile_width, C_TILE_HEIGHT),
-                            portraits,
-                            icons,
+                            index,
+                            Vec2::new(tile_width, A_TILE_HEIGHT),
+                            etat,
+                            brouillon,
+                            scene.avatars,
+                            scene.icons,
                         );
+                        if let Etat::Deplacement { pris, vise } = etat {
+                            if vise == index {
+                                fantome = Some((rect, pris));
+                            }
+                        }
                     }
                 });
             }
         });
+
+    // Le fantôme, peint EN DERNIER et au-dessus de tout : c'est ce qu'on tient, il ne peut pas
+    // passer sous une tuile voisine. Posé légèrement décalé de la tuile visée, là où serait le
+    // pointeur qui l'a pris par son coin haut-gauche.
+    if let Some((cible, pris)) = fantome {
+        let ghost = Rect::from_min_size(
+            cible.min + Vec2::new(-18.0, -14.0),
+            Vec2::new(cible.width(), A_TILE_HEIGHT),
+        );
+        let painter = ui.painter().clone();
+        painter.rect_filled(ghost, 2.0, TILE_FILL.gamma_multiply(0.95));
+        painter.rect_stroke(
+            ghost,
+            2.0,
+            egui::Stroke::new(TILE_BORDER_WIDTH, TILE_BORDER),
+            egui::StrokeKind::Inside,
+        );
+        let perso = &liste[pris];
+        paint_avatar(
+            ui,
+            Rect::from_min_size(
+                egui::pos2(
+                    ghost.center().x - AVATAR_SIZE / 2.0,
+                    ghost.top() + TILE_BORDER_WIDTH + 4.0,
+                ),
+                Vec2::splat(AVATAR_SIZE),
+            ),
+            perso.class,
+            perso.gender,
+            scene.avatars,
+            scene.icons,
+        );
+        let band = band_rect(ghost);
+        painter.rect_filled(band, 0.0, IDLE_BAND);
+        painted_ellipsed(
+            ui,
+            &painter,
+            perso.name,
+            band.center(),
+            band.width() - 12.0,
+            design::text::label_strong_font(ui.ctx(), 12.5),
+            TEXT,
+            true,
+        );
+    }
 }
 
 // -------------------------------------------------------------------------------------------
-// Les planches
+// La modale de choix de classe
 // -------------------------------------------------------------------------------------------
 
-/// **A — « Héros ».** La grille du panneau de héros du jeu, portée au design system : cinq tuiles
-/// par rangée, portrait au centre, bandeau de nom collé en bas. « Sagitta Lucis », le dernier
-/// personnage reconnu dans le journal, porte le bandeau turquoise. La troisième tuile est survolée.
-fn personnages_a_heros() {
-    let mut compte = 0usize;
-    let mut serveur = 0usize;
-    let mut nom = String::new();
-    let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        direction_a(
-            ui,
-            panel,
-            portraits,
-            icons,
-            &mut compte,
-            &mut serveur,
-            &mut nom,
-            COMPTE_PRINCIPAL,
-        );
-    });
-    harness.run();
-    write_mockup(&mut harness, "personnages_a_heros");
-}
+/// Largeur et hauteur de la modale — assez pour six colonnes de bustes NATIFS et leurs libellés,
+/// sans barre de défilement : les dix-huit classes tiennent d'un coup, et c'est tout l'intérêt.
+const CLASSE_MODALE: Vec2 = Vec2::new(620.0, 636.0);
+/// Six colonnes × trois rangées = les dix-huit classes, dans l'ordre du jeu.
+const CLASSE_COLS: usize = 6;
 
-/// La même, une tuile survolée : voile et croix de retrait.
-fn personnages_a_heros_survol() {
-    let mut compte = 0usize;
-    let mut serveur = 0usize;
-    let mut nom = String::new();
-    let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        direction_a(
-            ui,
-            panel,
-            portraits,
-            icons,
-            &mut compte,
-            &mut serveur,
-            &mut nom,
-            COMPTE_PRINCIPAL,
-        );
-    });
-    harness.run();
-    // Centre de la troisième tuile de la première rangée : bord de contenu à x = 39.
-    harness.hover_at(egui::pos2(39.0 + 125.4 * 2.5 + TILE_GAP * 2.0, 400.0));
-    harness.run();
-    write_mockup(&mut harness, "personnages_a_heros_survol");
-}
+/// Le sélecteur de classe, **modale posée sur la fenêtre Options voilée**. Aucun composant du
+/// design system ne le couvre ; il est ici assemblé de `design::window` + `design::panel`, comme le
+/// ferait le panneau au moment du portage.
+fn modale_classe(
+    ui: &mut egui::Ui,
+    window: Rect,
+    genre: &mut usize,
+    choisie: usize,
+    survolee: Option<usize>,
+    avatars: &Avatars,
+    icons: &UiIcons,
+) {
+    // **Tout est peint dans une couche AU-DESSUS**, l'idiome de `design::confirm_dialog` : le `Ui`
+    // d'où l'on vient est celui du panneau, dont le clip rognerait et le voile et la modale — la
+    // bannière y passait à la trappe et la troisième rangée de classes était coupée.
+    let mut couche = ui.new_child(egui::UiBuilder::new().max_rect(window).layer_id(
+        egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("personnages.classe.couche"),
+        ),
+    ));
+    couche.set_clip_rect(Rect::EVERYTHING);
+    let ui = &mut couche;
 
-/// **B — « Registre ».** Un `design::table`, les vingt-deux personnages des trois comptes d'un
-/// coup, filtrables. Le liseré turquoise et le nom en or marquent le personnage actif.
-fn personnages_b_registre() {
-    let lignes = registre();
-    let mut recherche = String::new();
-    let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        direction_b(ui, panel, portraits, icons, &mut recherche, &lignes);
-    });
-    harness.run();
-    write_mockup(&mut harness, "personnages_b_registre");
-}
+    // Le voile : le reste de la fenêtre est inerte, et le dit. Même ton que `design::confirm_dialog`.
+    ui.painter().rect_filled(
+        window,
+        0.0,
+        Color32::from_black_alpha(design::tokens::CONFIRM_SCRIM_ALPHA),
+    );
 
-/// **C — « Comptes empilés ».** Un bloc repliable par compte, sa grille compacte dedans. Le premier
-/// est ouvert, les deux autres repliés — la structure se lit avant le contenu.
-fn personnages_c_comptes() {
-    let mut ouverts = [true, false, false];
-    let mut noms = [String::new(), String::new(), String::new()];
-    let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        ui.add(design::heading("Personnages"));
-        paragraph(ui, DESC);
-        ui.add_space(SECTION_GAP);
+    let rect = Rect::from_center_size(window.center(), CLASSE_MODALE);
+    let mut modale = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    modale.set_clip_rect(Rect::EVERYTHING);
+    let chrome = design::window("Choisir une classe")
+        .footer("Annuler", "Valider")
+        .close_button(true)
+        .log_name("personnages.classe.modale")
+        .show(&mut modale);
 
-        panel.scroll_area(ui, "personnages.comptes", |ui, _content_width| {
-            ui.spacing_mut().item_spacing.y = TILE_GAP;
-            compte_bloc(
-                ui,
-                "Principal",
-                "Pandora",
-                COMPTE_PRINCIPAL,
-                &mut ouverts[0],
-                &mut noms[0],
-                true,
-                portraits,
-                icons,
-            );
-            compte_bloc(
-                ui,
-                "Mules",
-                "Pandora",
-                COMPTE_MULE,
-                &mut ouverts[1],
-                &mut noms[1],
-                false,
-                portraits,
-                icons,
-            );
-            compte_bloc(
-                ui,
-                "Métiers",
-                "Rubilax",
-                COMPTE_CRAFT,
-                &mut ouverts[2],
-                &mut noms[2],
-                false,
-                portraits,
-                icons,
-            );
-        });
-    });
-    harness.run();
-    write_mockup(&mut harness, "personnages_c_comptes");
-}
-
-/// **Le sélecteur de classe**, commun aux trois directions et absent du design system : 18 classes
-/// × 2 sexes, une bascule ♂/♀ en tête. Porté du web (`class-picker.component.html`), rendu ici au
-/// gabarit du panneau — six colonnes de portraits à 64 pt, le nom de classe dessous.
-fn personnages_selecteur_classe() {
-    let mut genre = 0usize;
-    let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        let width = panel.inner.width();
-        ui.add(design::heading("Choisir la classe"));
-        paragraph(
-            ui,
-            "Le portrait porte l'identité du personnage dans tout l'overlay : liste de combat, \
-             cadre à six médaillons, cartes d'alerte.",
-        );
-        ui.add_space(SECTION_GAP);
-
+    design::panel().show(&mut modale, chrome.content, |ui, panel| {
+        let gender = if *genre == 0 { Gender::F } else { Gender::M };
         let row = ui
-            .allocate_space(Vec2::new(width, design::tokens::SELECT_HEIGHT))
+            .allocate_space(Vec2::new(
+                panel.inner.width(),
+                design::tokens::SELECT_HEIGHT,
+            ))
             .1;
         let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
         cell.spacing_mut().item_spacing.x = 0.0;
@@ -1155,99 +926,203 @@ fn personnages_selecteur_classe() {
                     .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
             );
             ui.add_space(10.0);
-            design::select(&mut genre)
+            design::select(genre)
                 .option(0usize, "Féminin")
                 .option(1usize, "Masculin")
                 .width(170.0)
-                .log_name("personnages.sexe")
+                .log_name("personnages.classe.sexe")
                 .show(ui);
         });
         ui.add_space(SECTION_GAP);
 
-        const COLS: usize = 6;
-        const FACE: f32 = 64.0;
-        let gender = if genre == 0 { Gender::F } else { Gender::M };
-        let classes: &[(&str, &str)] = &[
-            ("feca", "Féca"),
-            ("osamodas", "Osamodas"),
-            ("enutrof", "Enutrof"),
-            ("sram", "Sram"),
-            ("xelor", "Xélor"),
-            ("ecaflip", "Ecaflip"),
-            ("eniripsa", "Eniripsa"),
-            ("iop", "Iop"),
-            ("cra", "Crâ"),
-            ("sadida", "Sadida"),
-            ("sacrier", "Sacrieur"),
-            ("pandawa", "Pandawa"),
-            ("rogue", "Roublard"),
-            ("zobal", "Zobal"),
-            ("foggernaut", "Steamer"),
-            ("eliotrope", "Éliotrope"),
-            ("huppermage", "Huppermage"),
-            ("ouginak", "Ouginak"),
-        ];
-        panel.scroll_area(ui, "personnages.classes", |ui, content_width| {
-            ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
-            let cell_width = (content_width - TILE_GAP * (COLS as f32 - 1.0)) / COLS as f32;
-            for chunk in classes.chunks(COLS) {
-                ui.horizontal(|ui| {
-                    for (class, label) in chunk {
-                        let (rect, response) = ui.allocate_exact_size(
-                            Vec2::new(cell_width, FACE + 22.0),
-                            egui::Sense::hover(),
-                        );
-                        let painter = ui.painter().clone();
-                        if response.contains_pointer() {
-                            painter.rect_filled(rect, 2.0, TILE_FILL);
-                            painter.rect_stroke(
-                                rect,
-                                2.0,
-                                egui::Stroke::new(TILE_BORDER_WIDTH, design::tokens::TEXT_GOLD),
-                                egui::StrokeKind::Inside,
-                            );
-                        }
-                        let face = Rect::from_center_size(
-                            egui::pos2(rect.center().x, rect.top() + 4.0 + FACE / 2.0),
-                            Vec2::splat(FACE),
-                        );
-                        let texture = portraits
-                            .texture(class, gender, false)
-                            .map(|h| h.id())
-                            .unwrap_or_else(|| icons.unknown_entity_texture().id());
-                        design::paint_portrait(
-                            ui,
-                            face,
-                            texture,
-                            design::PortraitShape::Square,
-                            false,
-                        );
-                        painted_ellipsed(
-                            ui,
-                            &painter,
-                            label,
-                            egui::pos2(rect.center().x, face.bottom() + 11.0),
-                            cell_width - 6.0,
-                            design::text::label_font(ui.ctx(), 12.0),
-                            SUBDUED,
-                            true,
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 10.0);
+        let cell_width =
+            (panel.inner.width() - 8.0 * (CLASSE_COLS as f32 - 1.0)) / CLASSE_COLS as f32;
+        for (rang, chunk) in CLASSES.chunks(CLASSE_COLS).enumerate() {
+            ui.horizontal(|ui| {
+                for (colonne, (class, label)) in chunk.iter().enumerate() {
+                    let index = rang * CLASSE_COLS + colonne;
+                    let (rect, _) = ui.allocate_exact_size(
+                        Vec2::new(cell_width, AVATAR_SIZE + 20.0),
+                        egui::Sense::click(),
+                    );
+                    let painter = ui.painter().clone();
+                    let retenue = index == choisie;
+                    let survol = survolee == Some(index);
+                    if retenue || survol {
+                        painter.rect_filled(rect, 2.0, TILE_FILL);
+                        painter.rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(
+                                TILE_BORDER_WIDTH,
+                                if retenue {
+                                    design::tokens::ITEM_SLOT_SELECTED_BORDER
+                                } else {
+                                    TILE_BORDER
+                                },
+                            ),
+                            egui::StrokeKind::Inside,
                         );
                     }
-                });
-            }
-        });
+                    paint_avatar(
+                        ui,
+                        Rect::from_min_size(
+                            egui::pos2(rect.center().x - AVATAR_SIZE / 2.0, rect.top() + 2.0),
+                            Vec2::splat(AVATAR_SIZE),
+                        ),
+                        class,
+                        gender,
+                        avatars,
+                        icons,
+                    );
+                    painted_ellipsed(
+                        ui,
+                        &painter,
+                        label,
+                        egui::pos2(rect.center().x, rect.bottom() - 9.0),
+                        cell_width - 4.0,
+                        design::text::label_font(ui.ctx(), 11.5),
+                        if retenue {
+                            design::tokens::TEXT_GOLD
+                        } else {
+                            SUBDUED
+                        },
+                        true,
+                    );
+                }
+            });
+        }
+    });
+}
+
+// -------------------------------------------------------------------------------------------
+// Les planches
+// -------------------------------------------------------------------------------------------
+
+/// Peint l'écran dans l'état demandé, sans rien d'autre par-dessus.
+fn planche_ecran(
+    nom_du_fichier: &str,
+    etat: Etat,
+    choisie: Option<(&'static str, Gender)>,
+    saisi: &str,
+) {
+    let mut compte = 0usize;
+    let mut serveur = 0usize;
+    let mut nom = saisi.to_owned();
+    let mut brouillon = String::from("Sagitta Lucis");
+    let mut harness = options_harness(move |ui, scene| {
+        ecran(
+            ui,
+            &scene,
+            &mut compte,
+            &mut serveur,
+            &mut nom,
+            &mut brouillon,
+            choisie,
+            etat,
+            COMPTE_PRINCIPAL,
+        );
     });
     harness.run();
-    harness.hover_at(egui::pos2(39.0 + 55.0, 330.0));
+    write_mockup(&mut harness, nom_du_fichier);
+}
+
+/// **La modale de choix de classe**, par-dessus l'écran voilé. Le Crâ est retenu (liseré et libellé
+/// or), le Sram survolé.
+fn planche_classe() {
+    let mut compte = 0usize;
+    let mut serveur = 0usize;
+    let mut nom = String::new();
+    let mut brouillon = String::new();
+    let mut genre = 0usize;
+    let mut harness = options_harness(move |ui, scene| {
+        ecran(
+            ui,
+            &scene,
+            &mut compte,
+            &mut serveur,
+            &mut nom,
+            &mut brouillon,
+            None,
+            Etat::Repos,
+            COMPTE_PRINCIPAL,
+        );
+        modale_classe(
+            ui,
+            scene.window,
+            &mut genre,
+            8,
+            Some(3),
+            scene.avatars,
+            scene.icons,
+        );
+    });
     harness.run();
-    write_mockup(&mut harness, "personnages_selecteur_classe");
+    write_mockup(&mut harness, "personnages_a3_classe");
+}
+
+/// **La confirmation de retrait.** Le composant du jeu, pas une popover collée au bouton : boîte
+/// centrée sur la fenêtre entière, bouton affirmatif OR — voir `design::confirm_dialog`.
+fn planche_suppression() {
+    let mut compte = 0usize;
+    let mut serveur = 0usize;
+    let mut nom = String::new();
+    let mut brouillon = String::new();
+    let mut harness = options_harness(move |ui, scene| {
+        ecran(
+            ui,
+            &scene,
+            &mut compte,
+            &mut serveur,
+            &mut nom,
+            &mut brouillon,
+            None,
+            Etat::Repos,
+            COMPTE_PRINCIPAL,
+        );
+        let _ = design::confirm_dialog("Retirer « Ignis Dolosus » de ce compte ?")
+            .over(scene.window)
+            .log_name("personnages.retrait")
+            .show(ui);
+    });
+    harness.run();
+    write_mockup(&mut harness, "personnages_a6_suppression");
+}
+
+/// **Compte lié, aucun personnage.** L'état d'accueil : le formulaire, et la phrase qui dit quoi en
+/// faire.
+fn planche_vide() {
+    let mut compte = 0usize;
+    let mut serveur = 0usize;
+    let mut nom = String::new();
+    let mut harness = options_harness(move |ui, scene| {
+        let width = scene.panel.inner.width();
+        ui.add(design::heading("Personnages"));
+        paragraph(ui, DESC);
+        ui.add_space(SECTION_GAP);
+        account_row(ui, &mut compte, &mut serveur, width);
+        ui.add_space(SECTION_GAP * 0.75);
+        add_row(ui, &mut nom, None, scene.avatars, scene.icons, width);
+        ui.add_space(SECTION_GAP * 0.75);
+        ui.add(
+            design::info_text(
+                "Aucun personnage sur ce compte. Choisissez une classe, saisissez le nom exact \
+                 tel qu'il apparaît en jeu, puis cliquez sur Ajouter.",
+            )
+            .width(width)
+            .log_name("personnages.vide"),
+        );
+    });
+    harness.run();
+    write_mockup(&mut harness, "personnages_a8_vide");
 }
 
 /// **Sans compte lié.** Le roster vit sur le compte Wakfu Companion : sans lui, l'overlay n'a ni
 /// source ni destination. Même traitement que `panels::alerts_tab`, cas `NoAccount`.
-fn personnages_sans_compte() {
-    let mut harness = options_harness(move |ui, _icons, _portraits, panel, _window| {
-        let width = panel.inner.width();
+fn planche_sans_compte() {
+    let mut harness = options_harness(move |ui, scene| {
+        let width = scene.panel.inner.width();
         ui.add(design::heading("Personnages"));
         paragraph(ui, DESC);
         ui.add_space(SECTION_GAP);
@@ -1262,52 +1137,38 @@ fn personnages_sans_compte() {
         );
     });
     harness.run();
-    write_mockup(&mut harness, "personnages_sans_compte");
-}
-
-/// **Compte lié, aucun personnage.** L'état d'accueil : le formulaire, et la phrase qui dit quoi en
-/// faire.
-fn personnages_vide() {
-    let mut compte = 0usize;
-    let mut serveur = 0usize;
-    let mut nom = String::new();
-    let mut harness = options_harness(move |ui, icons, portraits, panel, _window| {
-        let width = panel.inner.width();
-        ui.add(design::heading("Personnages"));
-        paragraph(ui, DESC);
-        ui.add_space(SECTION_GAP);
-        account_row(ui, &mut compte, &mut serveur, width);
-        ui.add_space(SECTION_GAP * 0.75);
-        add_row(ui, &mut nom, None, portraits, icons, width);
-        ui.add_space(SECTION_GAP * 0.75);
-        ui.add(
-            design::info_text(
-                "Aucun personnage sur ce compte. Choisissez une classe, saisissez le nom exact \
-                 tel qu'il apparaît en jeu, puis cliquez sur Ajouter.",
-            )
-            .width(width)
-            .log_name("personnages.vide"),
-        );
-    });
-    harness.run();
-    write_mockup(&mut harness, "personnages_vide");
+    write_mockup(&mut harness, "personnages_a9_sans_compte");
 }
 
 fn main() {
-    personnages_a_heros();
-    println!("  personnages_a_heros");
-    personnages_a_heros_survol();
-    println!("  personnages_a_heros_survol");
-    personnages_b_registre();
-    println!("  personnages_b_registre");
-    personnages_c_comptes();
-    println!("  personnages_c_comptes");
-    personnages_selecteur_classe();
-    println!("  personnages_selecteur_classe");
-    personnages_sans_compte();
-    println!("  personnages_sans_compte");
-    personnages_vide();
-    println!("  personnages_vide");
+    planche_ecran("personnages_a1_ecran", Etat::Repos, None, "");
+    println!("  a1 — l'écran au repos");
+    planche_ecran("personnages_a2_survol", Etat::Survol(6), None, "");
+    println!("  a2 — tuile survolée");
+    planche_classe();
+    println!("  a3 — modale de choix de classe");
+    planche_ecran(
+        "personnages_a4_ajout",
+        Etat::Repos,
+        Some(("cra", Gender::F)),
+        "Telum Novum",
+    );
+    println!("  a4 — classe choisie, nom saisi");
+    planche_ecran("personnages_a5_renommage", Etat::Renommage(1), None, "");
+    println!("  a5 — renommage sur place");
+    planche_suppression();
+    println!("  a6 — confirmation du retrait");
+    planche_ecran(
+        "personnages_a7_deplacement",
+        Etat::Deplacement { pris: 10, vise: 7 },
+        None,
+        "",
+    );
+    println!("  a7 — déplacement en vol");
+    planche_vide();
+    println!("  a8 — aucun personnage");
+    planche_sans_compte();
+    println!("  a9 — aucun compte lié");
     let dir = mockup_dir();
     let ecrites = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
     let affiche = dir.canonicalize().unwrap_or_else(|_| dir.clone());
