@@ -161,11 +161,12 @@ const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE a
 /// Largeur de la fenêtre Récap **à sa création**, avant que la première frame n'ait mesuré sa
 /// bande (`panels::recap::show` renvoie la largeur réelle, voir `RenderOutcome::recap_width`).
 ///
-/// 360 px : à peu près ce que les cinq cases occupent avec des chiffres de session ordinaires.
+/// 220 px : à peu près ce que les deux colonnes occupent avec des chiffres de session ordinaires
+/// (grille de deux cases par ligne depuis le 2026-09-16 au soir, voir `panels::recap`).
 /// La valeur n'a pas à être juste — elle est corrigée dès la première frame, comme le Suivi qui
 /// naît « au plus étroit » et s'élargit au premier redessin. Elle évite seulement qu'une fenêtre
 /// manifestement trop large ou trop étroite clignote le temps d'une frame.
-const RECAP_INITIAL_WIDTH: f64 = 360.0;
+const RECAP_INITIAL_WIDTH: f64 = 220.0;
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.
@@ -254,20 +255,28 @@ const GAME_EDGE_MARGIN_PX: i32 = 0;
 /// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
 /// boutons Menu/Boutique du jeu).
 const GAME_TOP_MARGIN_PX: i32 = 28;
-/// Même principe que [`GAME_TOP_MARGIN_PX`], mais **sous** la rangée de boutons du jeu : c'est
-/// l'ancrage de la bande Récap (`OverlayKind::Recap`, 2026-09-16), demandée « en haut à gauche, en
-/// dessous des boutons du jeu ».
+/// Même principe que [`GAME_TOP_MARGIN_PX`], mais **sous** la rangée de boutons du jeu ET sous
+/// leurs infobulles : c'est l'ancrage du bloc Récap (`OverlayKind::Recap`, 2026-09-16), demandé
+/// « en haut à gauche, en dessous des boutons du jeu ».
 ///
-/// 70 px = les 28 px de fausse barre de titre (voir `GAME_TOP_MARGIN_PX`, mesurés), plus 36 px de
-/// bouton — `design::tokens::ICON_BUTTON_SIZE`, la taille NATIVE des cinq socles de bouton icône
-/// du jeu, donc celle de la rangée Menu/Boutique qu'on veut dégager —, plus 6 px de respiration,
-/// l'écart que le Suivi laisse déjà entre son carré de contrôle et sa bande.
+/// **Relevé sur capture d'écran le 2026-09-16 au soir** (retour utilisateur : le bloc, alors à
+/// 70 px, recouvrait l'infobulle « Ouvrir/Fermer le Shop » du bouton Boutique). En pixels du
+/// client, depuis le haut de la fausse barre de titre : 24 px de barre de titre, 6 px de vide,
+/// 40 px de boutons (bas à 70), puis l'infobulle du jeu — centrée sur son bouton, **6 px sous
+/// lui, 34 px de haut** pour une ligne de texte, bas à 110. Le bloc se pose 10 px plus bas, une
+/// garde pour qu'une infobulle du jeu ne le touche pas. La valeur précédente (70) était dérivée
+/// du design system (28 + 36 + 6) sans capture ; celle-ci en a une.
 ///
-/// Dérivée d'une mesure du design system plutôt que relevée sur une capture : le client Wakfu
-/// pose ses boutons de premier plan à cette échelle partout. À corriger sur retour d'écran si la
-/// bande chevauche ou flotte — c'est la seule des trois valeurs de cette famille à ne pas avoir
-/// été vérifiée sur une capture réelle.
-const GAME_RECAP_TOP_MARGIN_PX: i32 = 70;
+/// À corriger sur retour d'écran si une infobulle du jeu sur deux lignes passait dessous.
+const GAME_RECAP_TOP_MARGIN_PX: i32 = 120;
+/// Marge, en pixels physiques, entre le bord gauche de la fenêtre de jeu et le bord gauche du
+/// bloc Récap — **le même écart que les boutons du jeu** (demande utilisateur 2026-09-16 au soir),
+/// là où `GAME_EDGE_MARGIN_PX` (0) colle l'overlay Combat au bord.
+///
+/// Relevé sur la même capture que [`GAME_RECAP_TOP_MARGIN_PX`] : la zone cliente du jeu commence
+/// 4 px avant le socle du bouton Menu (le cadre du client fait 4 px, et le bouton est posé contre
+/// lui). Le bloc à 0 débordait donc de 4 px à gauche de la colonne des boutons.
+const GAME_RECAP_EDGE_MARGIN_PX: i32 = 4;
 
 // `OverlayKind`/`UserEvent`/`AuthStatus`/`AuthCommand`/`CLICK_THROUGH_OPACITY` ont migré vers
 // `overlay_ui::render_content` (2026-09-03, §17.1 du plan) — voir leur doc là-bas, importés en
@@ -1326,13 +1335,13 @@ impl App {
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
             ),
-            // Récap : collé au bord GAUCHE comme Combat, mais sous la rangée de boutons du jeu —
-            // « en haut à gauche, en dessous des boutons du jeu » (2026-09-16). Voir
-            // `GAME_RECAP_TOP_MARGIN_PX` pour d'où viennent ces pixels, et `client_top` (pas
-            // `top`) pour la même raison que le Suivi : le client dessine sa fausse barre de titre
-            // dans sa propre zone cliente.
+            // Récap : à gauche, aligné sur la colonne des boutons du jeu, et sous ces boutons ET
+            // leurs infobulles — « en haut à gauche, en dessous des boutons du jeu » (2026-09-16).
+            // Voir `GAME_RECAP_EDGE_MARGIN_PX`/`GAME_RECAP_TOP_MARGIN_PX` pour d'où viennent ces
+            // pixels, et `client_top` (pas `top`) pour la même raison que le Suivi : le client
+            // dessine sa fausse barre de titre dans sa propre zone cliente.
             OverlayKind::Recap => PhysicalPosition::new(
-                rect.left + GAME_EDGE_MARGIN_PX,
+                rect.left + GAME_RECAP_EDGE_MARGIN_PX,
                 rect.client_top + GAME_RECAP_TOP_MARGIN_PX,
             ),
             // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de

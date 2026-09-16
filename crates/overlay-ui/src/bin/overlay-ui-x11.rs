@@ -129,11 +129,14 @@ mod linux_main {
     const WATCHLIST_MAX_CEILING: f64 = 1000.0;
     const GAME_EDGE_MARGIN_PX: i32 = 12;
     const GAME_TOP_MARGIN_PX: i32 = 28;
-    // Voir `main.rs::GAME_RECAP_TOP_MARGIN_PX` — l'ancrage de la bande Récap, sous la rangée de
-    // boutons du jeu.
-    const GAME_RECAP_TOP_MARGIN_PX: i32 = 70;
+    // Voir `main.rs::GAME_RECAP_TOP_MARGIN_PX` — l'ancrage du bloc Récap, sous la rangée de
+    // boutons du jeu et sous leurs infobulles (relevé sur capture Windows ; le client dessine
+    // sa barre de titre et ses boutons lui-même, la mesure vaut donc ici aussi).
+    const GAME_RECAP_TOP_MARGIN_PX: i32 = 120;
+    // Voir `main.rs::GAME_RECAP_EDGE_MARGIN_PX` — l'écart des boutons du jeu à leur bord.
+    const GAME_RECAP_EDGE_MARGIN_PX: i32 = 4;
     // Voir `main.rs::RECAP_INITIAL_WIDTH` — corrigée dès la première frame par la largeur mesurée.
-    const RECAP_INITIAL_WIDTH: f64 = 360.0;
+    const RECAP_INITIAL_WIDTH: f64 = 220.0;
 
     /// Même calcul que `main.rs::watchlist_target_width` (voir sa doc pour le détail) — dupliqué
     /// plutôt que partagé : petite fonction pure, coût de duplication largement inférieur au coût
@@ -787,10 +790,10 @@ mod linux_main {
                     rect.left + (rect.width - overlay_width) / 2,
                     rect.client_top + GAME_TOP_MARGIN_PX,
                 ),
-                // Récap : bord gauche, sous la rangée de boutons du jeu — voir
-                // `GAME_RECAP_TOP_MARGIN_PX` et `main.rs::App::anchor_position`.
+                // Récap : aligné sur les boutons du jeu, sous eux et leurs infobulles — voir
+                // `GAME_RECAP_*_MARGIN_PX` et `main.rs::App::anchor_position`.
                 OverlayKind::Recap => PhysicalPosition::new(
-                    rect.left + GAME_EDGE_MARGIN_PX,
+                    rect.left + GAME_RECAP_EDGE_MARGIN_PX,
                     rect.client_top + GAME_RECAP_TOP_MARGIN_PX,
                 ),
                 // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
