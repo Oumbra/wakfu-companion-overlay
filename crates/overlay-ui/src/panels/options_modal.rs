@@ -1618,6 +1618,10 @@ mod tests {
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
+                // La case « Lancer l'overlay au démarrage de l'ordinateur » est posée décochée
+                // par `fenetre_ouverte` : « Valider » l'emporte telle quelle, sans rien lire du
+                // système — c'est l'hôte qui s'en charge (voir `crate::autostart`).
+                start_with_os: false,
             }
         );
     }
