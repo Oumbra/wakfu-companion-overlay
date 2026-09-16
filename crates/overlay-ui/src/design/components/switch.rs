@@ -637,23 +637,23 @@ mod tests {
     #[test]
     fn le_fond_suit_la_selection_et_le_survol() {
         assert_eq!(
-            slot_texture(Position::First, SwitchState::Active, true),
+            SwitchVariant::Frame.slot_texture(Position::First, SwitchState::Active, true),
             DsTexture::SwitchSlotActiveFirst
         );
         assert_eq!(
-            slot_texture(Position::Last, SwitchState::Active, true),
+            SwitchVariant::Frame.slot_texture(Position::Last, SwitchState::Active, true),
             DsTexture::SwitchSlotActiveLast
         );
         assert_eq!(
-            slot_texture(Position::First, SwitchState::Hovered, false),
+            SwitchVariant::Frame.slot_texture(Position::First, SwitchState::Hovered, false),
             DsTexture::SwitchSlotActiveFirst
         );
         assert_eq!(
-            slot_texture(Position::Middle, SwitchState::Hovered, false),
+            SwitchVariant::Frame.slot_texture(Position::Middle, SwitchState::Hovered, false),
             DsTexture::SwitchSlotActive
         );
         assert_eq!(
-            slot_texture(Position::Last, SwitchState::Idle, false),
+            SwitchVariant::Frame.slot_texture(Position::Last, SwitchState::Idle, false),
             DsTexture::SwitchSlotInactiveLast
         );
     }
@@ -687,11 +687,11 @@ mod tests {
     #[test]
     fn la_case_du_milieu_n_a_pas_de_coin() {
         assert_eq!(
-            slot_texture(Position::Middle, SwitchState::Active, true),
+            SwitchVariant::Frame.slot_texture(Position::Middle, SwitchState::Active, true),
             DsTexture::SwitchSlotActive
         );
         assert_eq!(
-            slot_texture(Position::Middle, SwitchState::Idle, false),
+            SwitchVariant::Frame.slot_texture(Position::Middle, SwitchState::Idle, false),
             DsTexture::SwitchSlotInactive
         );
         assert_eq!(Position::of(0, 3), Position::First);
@@ -705,11 +705,11 @@ mod tests {
     #[test]
     fn desactive_garde_le_fond_de_la_case_selectionnee() {
         assert_eq!(
-            slot_texture(Position::First, SwitchState::Disabled, true),
+            SwitchVariant::Frame.slot_texture(Position::First, SwitchState::Disabled, true),
             DsTexture::SwitchSlotActiveFirst
         );
         assert_eq!(
-            slot_texture(Position::Last, SwitchState::Disabled, false),
+            SwitchVariant::Frame.slot_texture(Position::Last, SwitchState::Disabled, false),
             DsTexture::SwitchSlotInactiveLast
         );
     }
