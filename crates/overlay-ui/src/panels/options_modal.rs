@@ -800,36 +800,41 @@ pub fn show(
         // chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un jeu.
         //
         // **L'ordre des sections** (remanié le 2026-09-16) va de ce qu'on règle souvent à ce qu'on
-        // règle une fois : le démarrage et l'affichage d'abord, les notifications ensuite, et les
-        // trois sections de maintenance à la fin — « Fichier » (le chemin de `wakfu.log`, que la
-        // découverte automatique trouve seule dans l'immense majorité des cas), « Mise à jour »,
-        // « Compte ».
+        // règle une fois : l'affichage d'abord — « Recap » puis « Combat » —, les notifications
+        // ensuite, et les quatre sections de maintenance à la fin — « Fichier » (le chemin de
+        // `wakfu.log`, que la découverte automatique trouve seule dans l'immense majorité des
+        // cas), « Démarrage », « Mise à jour », « Compte ».
         panel.scroll_area(ui, "options-parametres", |ui, width| {
             // La largeur utile vient de la zone défilable : la réserve de barre y est déjà
             // déduite (voir `design::PanelZones::scroll_area`).
             let inner_width = width;
-            // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
-            // avant même qu'on le lance.
+            // **Section « Recap »** (2026-09-16) — l'interrupteur de la bande XP / Kamas /
+            // Combats / Challenges / Durée posée en haut à gauche de la fenêtre de jeu
+            // (`panels::recap`).
             //
-            // Elle ouvre l'onglet, à la place que « Fichier » occupait : c'est le premier moment
-            // de la vie de l'overlay, et la seule section dont le réglage agit hors de lui.
+            // Créée « après la section Combat » puis **remontée en tête de l'onglet** le même jour
+            // (demande utilisateur : « déplace la section Recap en premier ») : c'est la bande
+            // qu'on a sous les yeux toute la session, avant même le premier combat.
             //
-            // **Ce réglage n'est pas dans `config.toml`** : son état réel appartient au système
-            // (clé `Run` sous Windows, fichier `.desktop` sous Linux) et se désactive aussi depuis
-            // le Gestionnaire des tâches ou les réglages du bureau. Il est donc lu à l'ouverture
-            // et reposé à « Valider » — voir `crate::autostart`, dont la doc de module porte le
-            // raisonnement complet.
-            ui.add(design::heading("Démarrage"));
+            // Une section à une seule case pour l'instant, et c'est voulu : la demande ne porte
+            // que sur l'affichage. Elle a sa place propre plutôt qu'une ligne de plus sous
+            // « Combat » parce que c'est une autre fonctionnalité — le récap compte la session
+            // entière, pas le combat en cours — et parce que les réglages qui viendront (quels
+            // chiffres montrer, par exemple) s'y rangeront sans déménagement.
+            //
+            // Pas de `feature_switch::show` ici : cette fonction grise TOUT ce qui est peint
+            // ensuite dans le `Ui`, ce qui emporterait tout l'onglet — c'est un outil d'onglet
+            // entier, pas de section. Même raison que pour les deux cases de la section « Combat »
+            // en dessous.
+            ui.add(design::heading("Recap"));
             ui.add(
-                design::checkbox(
-                    &mut state.start_with_os,
-                    "Lancer l'overlay au démarrage de l'ordinateur",
-                )
-                .tooltip(
-                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
-                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
-                )
-                .log_name("options-demarrage-auto"),
+                design::checkbox(&mut state.features.recap, "Activer le récap de session")
+                    .tooltip(
+                        "La bande XP, kamas, combats, challenges et durée, en haut à gauche de la \
+                         fenêtre de jeu. Décochée, elle ne s'affiche plus ; les chiffres continuent \
+                         d'être comptés.",
+                    )
+                    .log_name("options-recap-actif"),
             );
 
             // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
@@ -963,32 +968,6 @@ pub fn show(
                     action = OptionsModalAction::TestTurnSound;
                 }
             },
-            );
-
-            // **Section « Recap »** (2026-09-16, demande utilisateur : « créer la section Recap,
-            // après la section Combat ») — l'interrupteur de la bande XP / Kamas / Combats /
-            // Challenges / Durée posée en haut à gauche de la fenêtre de jeu (`panels::recap`).
-            //
-            // Une section à une seule case pour l'instant, et c'est voulu : la demande ne porte
-            // que sur l'affichage. Elle a sa place propre plutôt qu'une ligne de plus sous
-            // « Combat » parce que c'est une autre fonctionnalité — le récap compte la session
-            // entière, pas le combat en cours — et parce que les réglages qui viendront (quels
-            // chiffres montrer, par exemple) s'y rangeront sans déménagement.
-            //
-            // Pas de `feature_switch::show` ici : cette fonction grise TOUT ce qui est peint
-            // ensuite dans le `Ui`, ce qui emporterait les quatre sections suivantes — c'est un
-            // outil d'onglet entier, pas de section. Même raison que pour les deux cases de la
-            // section « Combat » au-dessus.
-            ui.add_space(SECTION_GAP);
-            ui.add(design::heading("Recap"));
-            ui.add(
-                design::checkbox(&mut state.features.recap, "Activer le récap de session")
-                    .tooltip(
-                        "La bande XP, kamas, combats, challenges et durée, en haut à gauche de la \
-                         fenêtre de jeu. Décochée, elle ne s'affiche plus ; les chiffres continuent \
-                         d'être comptés.",
-                    )
-                    .log_name("options-recap-actif"),
             );
 
             // **Les trois sections de notifications** (2026-09-15) — le Suivi, les Alertes et le
@@ -1162,6 +1141,35 @@ pub fn show(
                         .log_name("options-erreur"),
                 );
             }
+
+            // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
+            // avant même qu'on le lance.
+            //
+            // Elle a ouvert l'onglet quelques heures, à la place que « Fichier » occupait, puis a
+            // été **descendue ici, juste après « Fichier »** (demande utilisateur du 2026-09-16 :
+            // « déplace la section Démarrage après la section Fichier ») : comme le chemin de
+            // `wakfu.log`, ce réglage se pose une fois et ne se retouche plus — c'est de la
+            // maintenance, pas un réglage de session. Elle reste la seule section dont le réglage
+            // agit hors de l'overlay.
+            //
+            // **Ce réglage n'est pas dans `config.toml`** : son état réel appartient au système
+            // (clé `Run` sous Windows, fichier `.desktop` sous Linux) et se désactive aussi depuis
+            // le Gestionnaire des tâches ou les réglages du bureau. Il est donc lu à l'ouverture
+            // et reposé à « Valider » — voir `crate::autostart`, dont la doc de module porte le
+            // raisonnement complet.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Démarrage"));
+            ui.add(
+                design::checkbox(
+                    &mut state.start_with_os,
+                    "Lancer l'overlay au démarrage de l'ordinateur",
+                )
+                .tooltip(
+                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
+                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
+                )
+                .log_name("options-demarrage-auto"),
+            );
 
             // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
             // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la
