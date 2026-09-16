@@ -45,6 +45,7 @@ pub mod cursor;
 pub mod design;
 pub mod engine_thread;
 pub mod frame;
+pub mod game_servers;
 pub mod game_window;
 pub mod logging;
 pub mod panels;

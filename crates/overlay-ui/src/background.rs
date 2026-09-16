@@ -1,6 +1,6 @@
 //! **Threads de fond partagés par les deux binaires** (2026-09-14) : compte (`spawn_auth_thread`),
 //! file de synchro (`spawn_sync_thread`), catalogue (`spawn_catalog_thread`) et référentiel de
-//! donjons (`spawn_dungeon_thread`). Ils vivaient dans `main.rs` (Windows) depuis les lots L3-L5 ;
+//! donjons (`spawn_dungeon_thread`), serveurs de jeu (`spawn_game_servers_thread`). Ils vivaient dans `main.rs` (Windows) depuis les lots L3-L5 ;
 //! rien n'y dépend de l'OS — `std::thread`, `mpsc`, `ArcSwap`, `overlay_sync` et un
 //! `EventLoopProxy` — et le binaire Linux (`bin/overlay-ui-x11.rs`) en a besoin depuis que la
 //! fenêtre de connexion lui est portée (§9.1 undecies du plan) : sortis ici tels quels, doc
@@ -16,6 +16,8 @@ use std::thread;
 
 use arc_swap::ArcSwap;
 use overlay_engine::{CatalogIndex, DungeonIndex, WatchlistEntry};
+
+use crate::game_servers::GameServers;
 use winit::event_loop::EventLoopProxy;
 
 use crate::engine_thread::{EngineCommand, SyncCommand};
@@ -169,6 +171,43 @@ fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<U
             "téléchargement du référentiel de donjons impossible, repli sur le cache local (dungeonId non résolu si aucun cache)"
         ),
     }
+}
+
+/// Thread Serveurs de jeu (2026-09-16, onglet « Personnages ») : même mécanique que le thread
+/// Donjons ci-dessus — cache disque publié immédiatement, réseau qui le remplace dès qu'il arrive.
+///
+/// **Aucun jalon de démarrage** (contrairement au catalogue et aux donjons, voir
+/// [`StartupProgress`]) : cette liste ne sert qu'au sélecteur de serveur de la fenêtre Options,
+/// jamais à l'ingestion ni à l'affichage d'un combat. Faire attendre l'écran de chargement pour
+/// elle retarderait le lancement pour un écran que l'utilisateur n'ouvrira peut-être pas.
+pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
+    thread::Builder::new()
+        .name("overlay-game-servers".into())
+        .spawn(move || {
+            use overlay_sync::reference_data_cache::{self, ReferenceData};
+            if let Some(rows) = reference_data_cache::load(ReferenceData::GameServers) {
+                servers.store(Arc::new(GameServers::from_json(&rows)));
+            }
+            match overlay_sync::client::fetch_game_servers() {
+                Ok(rows) => {
+                    servers.store(Arc::new(GameServers::from_json(&rows)));
+                    if let Err(err) = reference_data_cache::save(ReferenceData::GameServers, &rows)
+                    {
+                        tracing::warn!(
+                            %err,
+                            "échec de mise en cache des serveurs de jeu (retéléchargés au prochain lancement)"
+                        );
+                    }
+                }
+                // Best-effort, comme les donjons : sans liste, le sélecteur de serveur montre ce
+                // que le compte porte déjà et rien d'autre — jamais un blocage.
+                Err(err) => tracing::warn!(
+                    %err,
+                    "téléchargement des serveurs de jeu impossible, repli sur le cache local"
+                ),
+            }
+        })
+        .expect("échec de création du thread Serveurs de jeu");
 }
 
 /// Thread Sync (lot L5, §7.3 du plan) : possède la file SQLite persistante (`overlay_sync::
