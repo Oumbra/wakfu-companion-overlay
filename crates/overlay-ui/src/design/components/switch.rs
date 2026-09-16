@@ -72,11 +72,19 @@
 //! ([`tokens::SWITCH_SLOT_WIDTH`]) et laisse le 9-slice absorber l'écart — un pixel de chaque
 //! côté, invisible.
 //!
+//! ## Le survol — la case survolée devient une case active
+//!
+//! Capture du 2026-09-16 (`switch-first-slot-active-and-second-slot-hover.png`, ♂ actif, souris
+//! sur ♀) : la case inactive survolée prend **tout** l'aspect de la case active — fond kaki
+//! `#635a47`, biseau clair de 2px en haut et en bas, glyphe doré, plus d'ombre intérieure côté
+//! liseré. Écart moyen entre la case survolée et la case active de la référence : 1,0/255 (11,5
+//! contre la case inactive). Le switch montre alors deux cases actives, indiscernables : c'est le
+//! jeu, on ne l'améliore pas. Aucune texture de plus, `Hovered` peint les textures actives. (La
+//! première version dorait le glyphe seul sans toucher au fond — inventé faute de capture, et
+//! faux.)
+//!
 //! ## Ce que le jeu n'a pas montré
 //!
-//! - **Le survol.** Aucune capture. La case inactive survolée prend la teinte de glyphe de la case
-//!   active (doré), sans changer de fond — le signal le plus discret qui reste lisible, et celui
-//!   du bouton icône de premier plan (gris → or). À remplacer par une mesure.
 //! - **L'état désactivé.** Aucune capture. Fonds atténués comme un bouton désactivé, glyphes
 //!   [`tokens::TEXT_DISABLED`] ; la case sélectionnée reste reconnaissable à son fond.
 //! - **Le milieu.** Voir plus haut : dérivé des extrémités.
@@ -273,12 +281,12 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
     }
 }
 
-/// Fond d'une case selon sa position et son état. Le survolé garde le fond de l'inactif : seul
-/// le glyphe change (voir la doc de module, « ce que le jeu n'a pas montré »).
+/// Fond d'une case selon sa position et son état. Le survolé prend le fond de l'actif — c'est ce
+/// que le jeu fait (voir la doc de module, « le survol »).
 fn slot_texture(position: Position, state: SwitchState, selected: bool) -> DsTexture {
     let active = match state {
-        SwitchState::Active => true,
-        SwitchState::Idle | SwitchState::Hovered => false,
+        SwitchState::Active | SwitchState::Hovered => true,
+        SwitchState::Idle => false,
         // Désactivé, la case sélectionnée garde son fond : c'est ce qui la laisse reconnaissable.
         SwitchState::Disabled => selected,
     };
@@ -460,10 +468,10 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
 mod tests {
     use super::*;
 
-    /// La case sélectionnée garde son fond actif dans tous les états qui le permettent, et le
-    /// survol ne change PAS le fond : le jeu n'a pas montré de survol, le glyphe seul le signale.
+    /// La case sélectionnée garde son fond actif dans tous les états qui le permettent, et la
+    /// case survolée prend le fond actif elle aussi — mesuré sur la capture du 2026-09-16.
     #[test]
-    fn le_fond_suit_la_selection_pas_le_survol() {
+    fn le_fond_suit_la_selection_et_le_survol() {
         assert_eq!(
             slot_texture(Position::First, SwitchState::Active, true),
             DsTexture::SwitchSlotActiveFirst
@@ -474,7 +482,11 @@ mod tests {
         );
         assert_eq!(
             slot_texture(Position::First, SwitchState::Hovered, false),
-            DsTexture::SwitchSlotInactiveFirst
+            DsTexture::SwitchSlotActiveFirst
+        );
+        assert_eq!(
+            slot_texture(Position::Middle, SwitchState::Hovered, false),
+            DsTexture::SwitchSlotActive
         );
         assert_eq!(
             slot_texture(Position::Last, SwitchState::Idle, false),

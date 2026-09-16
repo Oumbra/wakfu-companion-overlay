@@ -1745,8 +1745,8 @@ fn galerie_du_switch() {
                     });
                     heading(
                         ui,
-                        "Ce que le jeu n'a pas montré — survol et désactivé",
-                        "Survolée, la case inactive prend le glyphe doré sans changer de fond (inventé). Désactivé : fonds atténués, glyphes gris, la case sélectionnée reste reconnaissable.",
+                        "Survol (mesuré) et désactivé (inventé)",
+                        "Survolée, la case inactive prend tout l'aspect de la case active — fond kaki, biseaux, glyphe doré (capture du jeu, 2026-09-16). Désactivé : fonds atténués, glyphes gris, la case sélectionnée reste reconnaissable.",
                     );
                     ui.horizontal(|ui| {
                         let mut survol = Genre::Masculin;
