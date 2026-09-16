@@ -371,11 +371,12 @@ pub struct RenderOutcome {
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion — l'hôte
     /// relance la vérification avec installation (voir `panels::login::LoginOutcome`).
     pub retry_update: bool,
-    /// Largeur que la bande Récap vient d'occuper (`kind == Recap`), pour que l'hôte ajuste sa
+    /// Hauteur que le bloc Récap vient d'occuper (`kind == Recap`), pour que l'hôte ajuste sa
     /// fenêtre OS au contenu — même mécanique que [`Self::login_height`], et pour la même raison
-    /// qu'elle : une fenêtre plus large que sa bande capterait les clics sur du vide en mode
-    /// interactif. Voir `panels::recap::show`.
-    pub recap_width: Option<f32>,
+    /// qu'elle : une fenêtre plus haute que son bloc capterait les clics sur du vide en mode
+    /// interactif. La largeur, elle, est fixe (`panels::recap::WIDTH`) ; c'est la hauteur qui
+    /// bouge, quand une ligne trop large s'empile. Voir `panels::recap::show`.
+    pub recap_height: Option<f32>,
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
@@ -679,10 +680,10 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     }
                 }
                 // Récap de session (2026-09-16) — voir `panels::recap`. Aucune intention
-                // remontée : cette bande n'a ni bouton ni état, seulement la largeur qu'elle
-                // vient d'occuper, dont l'hôte se sert pour redimensionner la fenêtre OS.
+                // remontée : ce bloc n'a ni bouton ni état, seulement la hauteur qu'il vient
+                // d'occuper, dont l'hôte se sert pour redimensionner la fenêtre OS.
                 OverlayKind::Recap => {
-                    outcome.recap_width =
+                    outcome.recap_height =
                         Some(panels::recap::show(ui, session_totals, session_uptime));
                 }
                 OverlayKind::Options => {

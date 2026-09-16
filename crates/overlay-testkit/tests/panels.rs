@@ -362,6 +362,79 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
     harness.snapshot("recap_apres_rejeu_reel");
 }
 
+/// Le même bloc avec les chiffres d'une session ORDINAIRE, où tout tient sur trois lignes — le cas
+/// courant, que le rejeu ci-dessus ne montre pas : son `wakfu.log` cumule vingt milliards d'XP,
+/// ce qui empile déjà la ligne Kamas/XP (`panels::recap::layout_rows`, 2026-09-16). Les deux
+/// captures ensemble couvrent donc les deux états de la règle « responsive » : empilé (rejeu
+/// brut) et côte à côte (ici).
+#[test]
+fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    // 1 h 23 min 45 s — une durée qui exerce les trois champs de `HH:MM:SS` d'un coup, plutôt
+    // qu'un compte rond où une erreur de minutes ou de secondes passerait inaperçue.
+    let uptime = std::time::Duration::from_secs(5025);
+    // Les totaux du rejeu, l'XP RAMENÉE à ce qu'une session d'une heure rapporte (quelques
+    // dizaines de milliers) : c'est la seule case du rejeu qui déborde, et c'est le seul champ
+    // touché — kamas, combats et challenges restent ceux du vrai moteur. Même exception, pour la
+    // même raison, que le mode `up` du Suivi (doc de module de ce fichier) : aucun rejeu ne
+    // produit cet état-là.
+    let totals = overlay_engine::SessionTotals {
+        xp_gained: snapshot.totals.xp_gained / 1_000_000,
+        ..snapshot.totals
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                session_totals: &totals,
+                session_uptime: uptime,
+                options: None,
+                login: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("recap_session_ordinaire");
+}
+
 #[test]
 fn panneau_suivi_vide_ne_panique_pas() {
     // Rejeu réel quand même (voir la doc de module) : un rejeu sans compte lié ne produit

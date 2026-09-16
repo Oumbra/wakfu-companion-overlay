@@ -132,11 +132,9 @@ mod linux_main {
     // Voir `main.rs::GAME_RECAP_TOP_MARGIN_PX` — l'ancrage du bloc Récap, sous la rangée de
     // boutons du jeu et sous leurs infobulles (relevé sur capture Windows ; le client dessine
     // sa barre de titre et ses boutons lui-même, la mesure vaut donc ici aussi).
-    const GAME_RECAP_TOP_MARGIN_PX: i32 = 120;
+    const GAME_RECAP_TOP_MARGIN_PX: i32 = 112;
     // Voir `main.rs::GAME_RECAP_EDGE_MARGIN_PX` — l'écart des boutons du jeu à leur bord.
     const GAME_RECAP_EDGE_MARGIN_PX: i32 = 4;
-    // Voir `main.rs::RECAP_INITIAL_WIDTH` — corrigée dès la première frame par la largeur mesurée.
-    const RECAP_INITIAL_WIDTH: f64 = 220.0;
 
     /// Même calcul que `main.rs::watchlist_target_width` (voir sa doc pour le détail) — dupliqué
     /// plutôt que partagé : petite fonction pure, coût de duplication largement inférieur au coût
@@ -222,9 +220,9 @@ mod linux_main {
         last_position: Option<PhysicalPosition<i32>>,
         last_watchlist_width: Option<f64>,
         last_watchlist_height: Option<f64>,
-        /// Voir `main.rs::OverlayWindow::last_recap_width` — la largeur que la bande Récap a
+        /// Voir `main.rs::OverlayWindow::last_recap_height` — la hauteur que le bloc Récap a
         /// mesurée à sa dernière frame.
-        last_recap_width: Option<f32>,
+        last_recap_height: Option<f32>,
         /// La fenêtre est-elle actuellement affichée ? — toujours `true` sauf pour une fenêtre
         /// `Combat` hors combat quand l'option est décochée (le défaut), voir
         /// `App::sync_panel_visibility`. Même rôle que dans `main.rs` : éviter un `set_visible`
@@ -625,7 +623,7 @@ mod linux_main {
                 last_position: None,
                 last_watchlist_width: None,
                 last_watchlist_height: None,
-                last_recap_width: None,
+                last_recap_height: None,
                 visible: true,
                 // Jamais promue : `sync_topmost` l'ignore, elle reste en z-order normal.
                 topmost_state: TopmostState::Normal,
@@ -828,10 +826,10 @@ mod linux_main {
                     options_modal::WINDOW_SIZE.0 as f64,
                     options_modal::WINDOW_SIZE.1 as f64,
                 ),
-                // Récap : largeur pilotée par le contenu dès la première frame — voir
-                // `RECAP_INITIAL_WIDTH` et `main.rs`, même mécanique.
+                // Récap : largeur fixe, hauteur pilotée par le contenu dès la première frame —
+                // voir `main.rs`, même mécanique.
                 OverlayKind::Recap => (
-                    RECAP_INITIAL_WIDTH,
+                    panels::recap::WIDTH as f64,
                     panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
                 ),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
@@ -908,7 +906,7 @@ mod linux_main {
                 last_position: Some(position),
                 last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
                 last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
-                last_recap_width: (kind == OverlayKind::Recap).then_some(size.0 as f32),
+                last_recap_height: (kind == OverlayKind::Recap).then_some(panels::recap::HEIGHT),
                 visible,
                 // `WindowLevel::AlwaysOnTop` déjà appliqué ci-dessus à la création — voir la doc
                 // de `topmost::decide` pour la suite de la politique.
@@ -1966,18 +1964,20 @@ mod linux_main {
                             login: overlay.login_state.as_mut(),
                         },
                     );
-                    // Bande Récap : retaillée à la largeur qu'elle vient de mesurer — voir
+                    // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — voir
                     // `main.rs`, même mécanique. Sous X11, `request_inner_size` est asynchrone :
                     // le `Resized` qui suit reconfigure la surface lui-même.
                     if overlay.kind == OverlayKind::Recap {
-                        if let Some(width) = outcome.recap_width {
-                            if overlay.last_recap_width != Some(width) {
-                                let height = panels::recap::HEIGHT as f64
-                                    + render_content::RECAP_TOOLTIP_RESERVE as f64;
+                        if let Some(height) = outcome.recap_height {
+                            if overlay.last_recap_height != Some(height) {
                                 let _ = overlay.window.request_inner_size(
-                                    winit::dpi::LogicalSize::new(width as f64, height),
+                                    winit::dpi::LogicalSize::new(
+                                        panels::recap::WIDTH as f64,
+                                        height as f64
+                                            + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                                    ),
                                 );
-                                overlay.last_recap_width = Some(width);
+                                overlay.last_recap_height = Some(height);
                                 overlay.window.request_redraw();
                             }
                         }

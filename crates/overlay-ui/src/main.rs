@@ -158,15 +158,6 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 /// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
 const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE as f64;
 
-/// Largeur de la fenêtre Récap **à sa création**, avant que la première frame n'ait mesuré sa
-/// bande (`panels::recap::show` renvoie la largeur réelle, voir `RenderOutcome::recap_width`).
-///
-/// 220 px : à peu près ce que les deux colonnes occupent avec des chiffres de session ordinaires
-/// (grille de deux cases par ligne depuis le 2026-09-16 au soir, voir `panels::recap`).
-/// La valeur n'a pas à être juste — elle est corrigée dès la première frame, comme le Suivi qui
-/// naît « au plus étroit » et s'élargit au premier redessin. Elle évite seulement qu'une fenêtre
-/// manifestement trop large ou trop étroite clignote le temps d'une frame.
-const RECAP_INITIAL_WIDTH: f64 = 220.0;
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.
@@ -259,23 +250,26 @@ const GAME_TOP_MARGIN_PX: i32 = 28;
 /// leurs infobulles : c'est l'ancrage du bloc Récap (`OverlayKind::Recap`, 2026-09-16), demandé
 /// « en haut à gauche, en dessous des boutons du jeu ».
 ///
-/// **Relevé sur capture d'écran le 2026-09-16 au soir** (retour utilisateur : le bloc, alors à
-/// 70 px, recouvrait l'infobulle « Ouvrir/Fermer le Shop » du bouton Boutique). En pixels du
-/// client, depuis le haut de la fausse barre de titre : 24 px de barre de titre, 6 px de vide,
-/// 40 px de boutons (bas à 70), puis l'infobulle du jeu — centrée sur son bouton, **6 px sous
-/// lui, 34 px de haut** pour une ligne de texte, bas à 110. Le bloc se pose 10 px plus bas, une
-/// garde pour qu'une infobulle du jeu ne le touche pas. La valeur précédente (70) était dérivée
-/// du design system (28 + 36 + 6) sans capture ; celle-ci en a une.
+/// **Relevé sur capture d'écran annotée (2026-09-16, tard)** — l'utilisateur a tracé où le bloc
+/// doit commencer : juste sous l'infobulle « Ouvrir/Fermer le Shop », avec **le même écart que
+/// l'infobulle prend elle-même sous son bouton**. En pixels du client, depuis le haut de la
+/// fausse barre de titre : 24 px de barre de titre, 8 px de vide, les boutons jusqu'à y = 71,
+/// **2 px de vide, l'infobulle de y = 74 à 109** (36 px, une ligne de texte, centrée sur son
+/// bouton — pas sur le curseur), 2 px de vide, et le bloc à y = 112. Les valeurs précédentes
+/// (70 : dérivée du design system sans capture ; 120 : première capture, garde de 10 px) sont
+/// remplacées par ce relevé au pixel.
 ///
 /// À corriger sur retour d'écran si une infobulle du jeu sur deux lignes passait dessous.
-const GAME_RECAP_TOP_MARGIN_PX: i32 = 120;
+const GAME_RECAP_TOP_MARGIN_PX: i32 = 112;
 /// Marge, en pixels physiques, entre le bord gauche de la fenêtre de jeu et le bord gauche du
 /// bloc Récap — **le même écart que les boutons du jeu** (demande utilisateur 2026-09-16 au soir),
 /// là où `GAME_EDGE_MARGIN_PX` (0) colle l'overlay Combat au bord.
 ///
 /// Relevé sur la même capture que [`GAME_RECAP_TOP_MARGIN_PX`] : la zone cliente du jeu commence
 /// 4 px avant le socle du bouton Menu (le cadre du client fait 4 px, et le bouton est posé contre
-/// lui). Le bloc à 0 débordait donc de 4 px à gauche de la colonne des boutons.
+/// lui). Le bloc à 0 débordait donc de 4 px à gauche de la colonne des boutons. Sa largeur
+/// (`panels::recap::WIDTH`, 206 px) le fait finir au bord droit du bouton Boutique, comme tracé
+/// par l'utilisateur.
 const GAME_RECAP_EDGE_MARGIN_PX: i32 = 4;
 
 // `OverlayKind`/`UserEvent`/`AuthStatus`/`AuthCommand`/`CLICK_THROUGH_OPACITY` ont migré vers
@@ -365,12 +359,12 @@ struct OverlayWindow {
     /// Même principe que `last_watchlist_width`, pour la HAUTEUR (voir `watchlist_target_height`)
     /// — change uniquement à l'apparition/disparition d'un toast, jamais avec le nombre d'entrées.
     last_watchlist_height: Option<f64>,
-    /// Dernière largeur demandée pour une fenêtre `Recap` — la bande mesure ce qu'elle occupe et
-    /// le renvoie (`RenderOutcome::recap_width`), l'hôte y ajuste la fenêtre OS. Même rôle et même
-    /// garde-fou que `last_watchlist_width` (ne pas rappeler `request_inner_size` pour rien), et
-    /// même raison de fond : une fenêtre plus large que sa bande capte les clics sur du vide.
-    /// `None` pour toute autre zone.
-    last_recap_width: Option<f32>,
+    /// Dernière hauteur demandée pour une fenêtre `Recap` — le bloc mesure ce qu'il occupe et
+    /// le renvoie (`RenderOutcome::recap_height`), l'hôte y ajuste la fenêtre OS. Même rôle et
+    /// même garde-fou que `last_watchlist_height` (ne pas rappeler `request_inner_size` pour
+    /// rien), et même raison de fond : une fenêtre plus haute que son bloc capte les clics sur du
+    /// vide. `None` pour toute autre zone.
+    last_recap_height: Option<f32>,
     /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
     /// rien (voir `App::sync_topmost`).
     is_topmost: bool,
@@ -901,7 +895,7 @@ impl App {
             last_position: None,
             last_watchlist_width: None,
             last_watchlist_height: None,
-            last_recap_width: None,
+            last_recap_height: None,
             visible: true,
             is_topmost: false,
             last_topmost_reassert: None,
@@ -1384,11 +1378,12 @@ impl App {
                 options_modal::WINDOW_SIZE.0 as f64,
                 options_modal::WINDOW_SIZE.1 as f64,
             ),
-            // Récap : la LARGEUR suit le contenu (voir `RECAP_INITIAL_WIDTH` et le
-            // redimensionnement dans `RedrawRequested`, même mécanique que le Suivi) ; la hauteur
-            // est celle de la bande plus la réserve de ses infobulles, qui s'ouvrent en dessous.
+            // Récap : largeur FIXE, celle de la rangée de boutons du jeu (`panels::recap::WIDTH`) ;
+            // la hauteur naît à trois lignes et suit le contenu (voir le redimensionnement dans
+            // `RedrawRequested`, même mécanique que le Suivi), plus la réserve des infobulles,
+            // qui s'ouvrent en dessous.
             OverlayKind::Recap => (
-                RECAP_INITIAL_WIDTH,
+                panels::recap::WIDTH as f64,
                 panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
             ),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
@@ -1496,7 +1491,7 @@ impl App {
             last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
             // Déjà la largeur demandée ci-dessus pour une fenêtre `Recap` — même principe que le
             // Suivi juste au-dessus : la première frame ne redemande rien si elle tombe dessus.
-            last_recap_width: (kind == OverlayKind::Recap).then_some(size.0 as f32),
+            last_recap_height: (kind == OverlayKind::Recap).then_some(panels::recap::HEIGHT),
             visible,
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
             last_topmost_reassert: None,
@@ -3055,24 +3050,23 @@ impl App {
                 login: overlay.login_state.as_mut(),
             },
         );
-        // Bande Récap : retaillée à la largeur qu'elle vient de mesurer — même mécanique et même
-        // raison que le Suivi juste au-dessus (une fenêtre plus large que son contenu bloque les
+        // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — même mécanique et même
+        // raison que le Suivi juste au-dessus (une fenêtre plus grande que son contenu bloque les
         // clics sur du vide), à ceci près que la mesure vient du panneau lui-même plutôt que d'un
-        // calcul de l'hôte : c'est la largeur des CHIFFRES qui commande, et seul le rendu la
-        // connaît. `request_inner_size` est synchrone sous Windows, d'où `reconfigure_surface`
-        // ici même (voir sa doc).
+        // calcul de l'hôte : c'est la largeur des CHIFFRES qui décide si une ligne s'empile, et
+        // seul le rendu la connaît. `request_inner_size` est synchrone sous Windows, d'où
+        // `reconfigure_surface` ici même (voir sa doc).
         if overlay.kind == OverlayKind::Recap {
-            if let Some(width) = outcome.recap_width {
-                if overlay.last_recap_width != Some(width) {
-                    let height =
-                        panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64;
-                    if let Some(actual) = overlay
-                        .window
-                        .request_inner_size(winit::dpi::LogicalSize::new(width as f64, height))
-                    {
+            if let Some(height) = outcome.recap_height {
+                if overlay.last_recap_height != Some(height) {
+                    let size = winit::dpi::LogicalSize::new(
+                        panels::recap::WIDTH as f64,
+                        height as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                    );
+                    if let Some(actual) = overlay.window.request_inner_size(size) {
                         Self::reconfigure_surface(&mut overlay.gpu, actual);
                     }
-                    overlay.last_recap_width = Some(width);
+                    overlay.last_recap_height = Some(height);
                     overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
             }
