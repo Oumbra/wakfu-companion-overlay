@@ -468,6 +468,19 @@ pub enum OptionsModalAction {
     /// Les réglages de l'onglet « Paramètres » tels qu'ils sont à l'instant du clic — voir
     /// [`OptionsCommit`].
     Validate(OptionsCommit),
+    /// Jouer le son de ramassage, depuis la ligne « Tester le son des notifications » de la
+    /// section « Alertes » — l'appelant seul a le périphérique audio
+    /// (`alert_sound::play_loot_alert`).
+    TestAlertSound,
+    /// Le bouton d'essai de la section « Chat » : jouer le son de recherche
+    /// (`alert_sound::play_chat_alert`).
+    TestChatSound,
+    /// Le bouton d'essai de la section « Suivi » : jouer le son du décompte arrivé à 0
+    /// (`alert_sound::play_countdown_alert`).
+    TestCountdownSound,
+    /// Le bouton d'essai de la section « Combat » : jouer le son de la notification de tour
+    /// (`alert_sound::play_turn_alert`).
+    TestTurnSound,
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -898,8 +911,17 @@ pub fn show(
             // commence le LIBELLÉ de la case du dessus (case + écart, voir `design::checkbox`) : la
             // première version reprenait le retrait titre → contrôle (7 px), jugé trop faible au
             // rendu — « aligner la partie gauche avec le début du m d'en haut ».
+            //
+            // **Le bouton d'essai à sa droite** (2026-09-16), comme sur la sourdine des trois
+            // sections qui suivent (voir `panels::notifications`) : grisé quand le son ne
+            // viendrait pas — notification décochée ou son coupé. La ligne prend la hauteur des
+            // leurs et se centre dedans : dans un simple `horizontal`, la case restait calée en
+            // haut d'un bouton plus grand qu'elle.
             ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-            ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(inner_width, notifications::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
                 ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
                 ui.add(
                     design::checkbox(
@@ -910,7 +932,16 @@ pub fn show(
                     .tooltip("La notification s'affiche sans jouer de son.")
                     .log_name("options-notification-de-tour-sans-son"),
                 );
-            });
+                ui.add_space(notifications::CONTROL_GAP);
+                if notifications::test_sound_button(
+                    ui,
+                    "combat",
+                    state.turn_notification && !state.turn_notification_muted,
+                ) {
+                    action = OptionsModalAction::TestTurnSound;
+                }
+            },
+            );
 
             // **Les trois sections de notifications** (2026-09-15) — le Suivi, les Alertes et le
             // Chat, dans l'ordre du menu d'onglets, juste après « Combat » qui porte déjà les
@@ -938,7 +969,7 @@ pub fn show(
             // n'y a ni son à essayer ni carte à fermer quand rien ne se déclenche.
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Suivi"));
-            notifications::section(
+            if notifications::section(
                 ui,
                 inner_width,
                 notifications::Section {
@@ -955,17 +986,20 @@ pub fn show(
                         input: &mut state.suivi.duration_input,
                     }),
                 },
-            );
+            ) {
+                action = OptionsModalAction::TestCountdownSound;
+            }
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Alertes"));
             // Le brouillon d'alertes descend du compte : tant qu'il n'est pas là, la ligne de
             // fermeture se peint grisée sur un profil de repli plutôt que d'apparaître en cours
-            // de route (voir `notifications::AutoClose::available`).
+            // de route (voir `notifications::AutoClose::available`). Le son, lui, s'essaie sans
+            // compte — il ne dépend que du périphérique audio.
             let mut alertes_repli = overlay_engine::AlertProfile::default();
             let alertes_prêtes = state.alerts_draft.is_some();
             let profil = state.alerts_draft.as_mut().unwrap_or(&mut alertes_repli);
-            notifications::section(
+            if notifications::section(
                 ui,
                 inner_width,
                 notifications::Section {
@@ -979,14 +1013,16 @@ pub fn show(
                         input: &mut state.alerts.duration_input,
                     }),
                 },
-            );
+            ) {
+                action = OptionsModalAction::TestAlertSound;
+            }
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Chat"));
             let mut chat_repli = ChatDraft::default();
             let chat_prêt = state.chat_draft.is_some();
             let chat = state.chat_draft.as_mut().unwrap_or(&mut chat_repli);
-            notifications::section(
+            if notifications::section(
                 ui,
                 inner_width,
                 notifications::Section {
@@ -1000,7 +1036,9 @@ pub fn show(
                         input: &mut state.chat.duration_input,
                     }),
                 },
-            );
+            ) {
+                action = OptionsModalAction::TestChatSound;
+            }
 
             // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
             // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la

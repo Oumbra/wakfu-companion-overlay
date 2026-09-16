@@ -1904,6 +1904,20 @@ mod linux_main {
                         OptionsModalAction::Validate(commit) => {
                             post_redraw = PostRedraw::ValidateOptions(commit)
                         }
+                        // Les sons d'essai se jouent par le même chemin qu'en jeu — c'est tout
+                        // l'intérêt du bouton : entendre ce qu'on entendra.
+                        OptionsModalAction::TestAlertSound => {
+                            overlay_ui::alert_sound::play_loot_alert()
+                        }
+                        OptionsModalAction::TestChatSound => {
+                            overlay_ui::alert_sound::play_chat_alert()
+                        }
+                        OptionsModalAction::TestCountdownSound => {
+                            overlay_ui::alert_sound::play_countdown_alert()
+                        }
+                        OptionsModalAction::TestTurnSound => {
+                            overlay_ui::alert_sound::play_turn_alert()
+                        }
                         OptionsModalAction::Disconnect => {
                             post_redraw = PostRedraw::DisconnectAccount
                         }

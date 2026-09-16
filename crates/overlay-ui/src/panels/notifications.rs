@@ -1,15 +1,25 @@
-//! **Les notifications d'une fonctionnalité** — couper le son, et régler la fermeture automatique
-//! de la carte, pour le Suivi, les Alertes et le Chat.
+//! **Les notifications d'une fonctionnalité** — essayer le son, le couper, et régler la fermeture
+//! automatique de la carte, pour le Suivi, les Alertes et le Chat.
 //!
 //! Ces blocs vivent depuis le 2026-09-15 dans l'onglet « Paramètres », en **sections dédiées
 //! posées après « Combat »** (demande utilisateur) — plus dans chacun des trois onglets qu'ils
 //! concernent. Ce module les peint tous les trois ; il ne joue aucun son et n'écrit rien : il
-//! modifie des brouillons, comme tout le reste de cette fenêtre (§17.3 bis du plan).
+//! renvoie le clic d'essai et modifie des brouillons, comme tout le reste de cette fenêtre
+//! (§17.3 bis du plan).
 //!
-//! **Plus de bouton d'essai** (2026-09-16) : la ligne « Tester le son des notifications » que
-//! chaque section ouvrait a été retirée à la demande de l'utilisateur, et avec elle les actions
-//! `TestAlertSound`/`TestChatSound`/`TestCountdownSound` que la fenêtre renvoyait à l'hôte. Les
-//! sons eux-mêmes ne bougent pas (`alert_sound`), ils ne se déclenchent plus qu'en jeu.
+//! ## Le bouton d'essai vit SUR la ligne de sourdine
+//!
+//! Chaque section ouvrait, jusqu'au 2026-09-16, sur une ligne « Tester le son des notifications »
+//! et son bouton ; retirée le matin à la demande de l'utilisateur, elle revient le même jour sous
+//! une autre forme (demande : « ajouter le bouton de test du son des notifications sur la ligne
+//! de coupure du son des notifications ») : le haut-parleur se pose **à droite de la case « Couper
+//! le son des notifications »**, sur la même ligne — c'est le même son qu'on coupe et qu'on
+//! essaie, il n'a pas à occuper deux lignes. La section « Combat » fait de même avec sa sourdine
+//! de tour ([`test_sound_button`], appelé depuis `panels::options_modal`).
+//!
+//! **Les Alertes gardent une ligne à elles**, [`TEST_LABEL`] : elles n'ont pas de sourdine
+//! globale (le son d'un ramassage se coupe objet par objet, à la tuile — voir [`AlertMutes`]), le
+//! bouton n'a donc aucune ligne où se poser.
 //!
 //! ## Pourquoi tout regrouper dans « Paramètres »
 //!
@@ -27,7 +37,13 @@
 //! Cochée, la sourdine fait taire l'alerte mais **la carte s'affiche toujours** par-dessus le jeu
 //! — c'est ce qui la distingue de la case « Activer … » qui ouvre l'onglet correspondant
 //! ([`crate::panels::feature_switch`]) et qui, elle, coupe les deux canaux. Une fonctionnalité
-//! éteinte grise sa section ici : ni son à essayer, ni carte à fermer.
+//! éteinte grise sa section ici : ni son à essayer, ni son à couper, ni carte à fermer.
+//!
+//! **Le bouton d'essai est grisé quand le son est coupé** : proposer d'écouter ce qu'on vient de
+//! faire taire serait une promesse que le jeu ne tiendra pas. C'est la même règle que le champ de
+//! durée grisé sous une « Fermeture automatique des notifications » décochée, et que la case de
+//! son grisée sous une notification de tour décochée (`panels::options_modal`) : un réglage qui
+//! n'a plus d'effet se voit avant le clic.
 //!
 //! ## Pas de fond de ligne sous la fermeture automatique
 //!
@@ -40,7 +56,7 @@
 use egui::{Color32, RichText, Vec2};
 use overlay_engine::AlertProfile;
 
-use crate::design::{self, InputSize};
+use crate::design::{self, DsIcon, IconContext, InputSize};
 
 /// **Les sourdines, ensemble** — Suivi et Chat.
 ///
@@ -63,13 +79,17 @@ pub struct AlertMutes {
     pub chat: bool,
 }
 
+/// Texte courant — blanc, comme tout texte de corps du jeu.
+const TEXT: Color32 = Color32::WHITE;
+
 /// Gris des unités — `#b8b9ba`, le gris unique du jeu (voir
 /// `panels::options_modal::SECTION_TITLE_TEXT`).
 const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
 
 /// Hauteur d'une ligne de cette section — celle mesurée sur `interface-options-commandes.png`,
-/// partagée par les trois (ou quatre) lignes qu'une section peut porter.
-const ROW_HEIGHT: f32 = 39.0;
+/// partagée par les lignes qu'une section peut porter, et par la sourdine de tour de la section
+/// « Combat » depuis qu'elle porte le même bouton d'essai (`panels::options_modal`).
+pub const ROW_HEIGHT: f32 = 39.0;
 
 const BODY_FONT_SIZE: f32 = 15.0;
 
@@ -79,12 +99,16 @@ const DURATION_FIELD_WIDTH: f32 = 52.0;
 
 /// Écart entre un libellé et le contrôle posé à sa droite — la valeur du relevé de section
 /// (`panels::options_modal::FIELD_TO_BROWSE_GAP` en pose la sœur à 10).
-const CONTROL_GAP: f32 = 12.0;
+pub const CONTROL_GAP: f32 = 12.0;
 
 /// Le libellé de la sourdine — le même que celui de la section « Combat », écrit une seule fois
 /// ici et repris là-bas. **« des notifications », pas « de l'alerte »** (2026-09-15) : les quatre
 /// sections de « Paramètres » parlent des mêmes objets, elles les nomment pareil.
 pub const MUTE_LABEL: &str = "Couper le son des notifications";
+
+/// Le libellé de la ligne d'essai des Alertes — la seule section où le bouton a sa ligne à lui,
+/// voir la doc de module. « des notifications » pour la même raison que [`MUTE_LABEL`].
+pub const TEST_LABEL: &str = "Tester le son des notifications";
 
 /// Le libellé de la fermeture automatique — « des notifications » pour la même raison que
 /// [`MUTE_LABEL`] : « Fermeture automatique » seul ne disait pas de quoi.
@@ -169,6 +193,7 @@ pub struct Section<'a> {
     /// sinon — il n'y a ni son à couper ni carte à fermer quand rien ne se déclenche.
     pub enabled: bool,
     /// La sourdine, pour les fonctionnalités qui en ont une (Suivi et Chat — voir [`AlertMutes`]).
+    /// Le bouton d'essai se pose sur sa ligne ; sans sourdine, il a la sienne ([`TEST_LABEL`]).
     pub muted: Option<&'a mut bool>,
     /// La fermeture automatique de la carte, pour les fonctionnalités qui en affichent une —
     /// le Suivi, les Alertes et le Chat (toutes, depuis le 2026-09-16 ; voir
@@ -179,8 +204,10 @@ pub struct Section<'a> {
 /// Peint le contenu d'une section de notifications — **sans son titre**, que l'appelant pose
 /// (`design::heading`) comme il pose celui de « Combat ».
 ///
-/// Ne renvoie rien : tout ce que la section règle est un brouillon, que « Valider » emporte.
-pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) {
+/// Renvoie `true` la frame où le bouton d'essai est cliqué ; c'est l'hôte qui a le périphérique
+/// audio et qui fait entendre le son de la fonctionnalité concernée. Tout le reste est un
+/// brouillon, que « Valider » emporte.
+pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) -> bool {
     let Section {
         log_prefix,
         enabled,
@@ -194,17 +221,22 @@ pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) {
         if !enabled {
             ui.disable();
         }
-        if let Some(muted) = muted {
-            mute_row(ui, width, log_prefix, muted);
-        }
+        let clicked = match muted {
+            Some(muted) => mute_row(ui, width, log_prefix, muted),
+            None => test_row(ui, width, log_prefix),
+        };
         if let Some(auto_close) = auto_close {
             close_row(ui, width, log_prefix, auto_close);
         }
-    });
+        clicked
+    })
+    .inner
 }
 
-/// « Couper le son des notifications ».
-fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) {
+/// « Couper le son des notifications », et le bouton d'essai à sa droite — voir la doc de module.
+///
+/// Renvoie `true` la frame où le bouton est cliqué.
+fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) -> bool {
     let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
     let mut cell = ui.new_child(
         egui::UiBuilder::new()
@@ -220,7 +252,50 @@ fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) {
                 )
                 .log_name(format!("{log_prefix}.sans-son")),
         );
-    });
+        ui.add_space(CONTROL_GAP);
+        test_sound_button(ui, log_prefix, !*muted)
+    })
+    .inner
+}
+
+/// « Tester le son des notifications » et son bouton — la ligne des Alertes, seule section sans
+/// sourdine où le poser (voir la doc de module).
+fn test_row(ui: &mut egui::Ui, width: f32, log_prefix: &str) -> bool {
+    let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .id_salt((log_prefix, "essai")),
+    );
+    cell.horizontal_centered(|ui| {
+        ui.label(RichText::new(TEST_LABEL).color(TEXT).size(BODY_FONT_SIZE));
+        ui.add_space(CONTROL_GAP);
+        test_sound_button(ui, log_prefix, true)
+    })
+    .inner
+}
+
+/// Le bouton d'essai — un haut-parleur, posé à droite de la case de sourdine (ou du libellé
+/// [`TEST_LABEL`]). Public pour la section « Combat », qui peint sa sourdine de tour elle-même
+/// (`panels::options_modal`) et y pose le même bouton.
+///
+/// `audible` faux grise le bouton et le dit dans l'infobulle — voir la doc de module : on ne
+/// propose pas d'écouter un son qu'on vient de couper.
+///
+/// Renvoie `true` la frame du clic.
+pub fn test_sound_button(ui: &mut egui::Ui, log_prefix: &str, audible: bool) -> bool {
+    ui.add(
+        design::icon_button(DsIcon::Volume)
+            .context(IconContext::Panel)
+            .enabled(audible)
+            .tooltip(if audible {
+                "Écouter le son des notifications"
+            } else {
+                "Le son des notifications est coupé."
+            })
+            .log_name(format!("{log_prefix}.tester")),
+    )
+    .clicked()
 }
 
 /// « Fermeture automatique des notifications » et sa durée — **sans fond de ligne**, voir la doc
