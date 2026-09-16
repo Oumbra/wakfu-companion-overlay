@@ -46,9 +46,10 @@
 //!   que le nom, plus ce que le clic fera ;
 //! - **la croix permanente**, qui n'apparaît plus qu'au survol, avec un voile, et seulement sur un
 //!   objet retirable ;
-//! - **le pictogramme du son ACTIF** : le coin haut-gauche ne montre plus que le haut-parleur
-//!   barré. Une tuile sans marque est une tuile qui sonnera — c'est lui qui porte seul l'état
-//!   depuis que la bordure est partie.
+//! - **le pictogramme du son ACTIF** : la tuile ne montre plus que le haut-parleur barré — en
+//!   bas à droite depuis le 2026-09-16, le haut gauche étant le coin de la case du mode sélection.
+//!   Une tuile sans marque est une tuile qui sonnera — c'est lui qui porte seul l'état depuis que
+//!   la bordure est partie.
 //!
 //! Rien n'est ajouté au passage : pas de chiffre, pas de cible, pas de compteur. L'emplacement du
 //! Suivi sait en afficher un ([`design::SlotCount`]), une alerte n'en a aucun.
@@ -130,7 +131,7 @@ const MUTE_BADGE: f32 = 20.0;
 /// demande était « à deux pixels des bordures noires », c'est-à-dire à l'intérieur, pas à
 /// l'extérieur : « elle doit vraiment être présente à l'intérieur du bord, pour qu'il y ait un
 /// tout petit espacement entre la bordure intérieure ». Le Suivi garde 5 px de son côté : il n'y
-/// a que la croix, et rien n'y est peint dans le coin opposé.
+/// a que la croix, et rien n'y est peint dans un autre coin.
 const TILE_BADGE_INSET: f32 = 8.0;
 
 /// Voile d'une tuile SURVOLÉE, sous sa croix — même teinte qu'au Suivi
@@ -646,7 +647,7 @@ enum TileClick {
 /// | Élément | Ce qu'il dit |
 /// | --- | --- |
 /// | Cadre | ce qu'est l'objet : la bordure de sa **rareté** |
-/// | Coin haut-gauche | le son est **coupé** — et rien du tout quand il est actif |
+/// | Coin bas-droit | le son est **coupé** — et rien du tout quand il est actif |
 /// | Coin haut-droit | retrait — **seulement sur une tuile retirable ET survolée**, rouge sous le pointeur |
 /// | Voile | le survol, et un fond assez sombre pour la croix — **retirables uniquement** |
 /// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
@@ -715,6 +716,11 @@ fn alert_item(
     // Pictogramme du son — **peint APRÈS le voile**, sinon celui-ci l'assombrirait avec l'icône.
     // Affiché seulement quand le son est COUPÉ : une tuile sans marque est une tuile qui sonnera
     // (décision du 2026-09-13, en remplacement de la bordure d'état cyan/gris).
+    //
+    // **En bas à droite** (demande du 2026-09-16), et non plus en haut à gauche : ce coin-là est
+    // celui de la case à cocher du mode sélection (`item_slot`), qui recouvrait le haut-parleur
+    // d'une tuile coupée dès qu'on entrait dans le mode. La croix garde le haut droit ; le bas
+    // droit, lui, n'est pris par rien.
     if !item.enabled {
         paint_mute_badge(
             ui.painter(),
@@ -722,7 +728,7 @@ fn alert_item(
             badge_rect(
                 ds.icon_native_size(DsIcon::VolumeMute),
                 rect,
-                Corner::Left,
+                Corner::BottomRight,
                 MUTE_BADGE,
             ),
         );
@@ -733,7 +739,7 @@ fn alert_item(
         // **Sa propre zone cliquable, avec sa propre main et sa propre infobulle.** Elle mange
         // aussi le clic, pour qu'un retrait n'emporte pas au passage la bascule du son.
         let zone_rect = Rect::from_center_size(
-            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::Right, TILE_BADGE).center(),
+            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::TopRight, TILE_BADGE).center(),
             Vec2::splat(TILE_BADGE + 4.0),
         );
         let croix = ui
@@ -744,7 +750,7 @@ fn alert_item(
             badge_rect(
                 ds.icon_native_size(DsIcon::Close),
                 rect,
-                Corner::Right,
+                Corner::TopRight,
                 TILE_BADGE,
             ),
             DsIcon::Close,
@@ -789,11 +795,12 @@ fn alert_item(
     clic
 }
 
-/// Le coin d'une tuile où se pose un badge.
+/// Le coin d'une tuile où se pose un badge — la croix en haut à droite, le haut-parleur en bas à
+/// droite (voir `alert_tile`). Le haut gauche est celui de la case du mode sélection.
 #[derive(Clone, Copy)]
 enum Corner {
-    Left,
-    Right,
+    TopRight,
+    BottomRight,
 }
 
 /// Où peindre un badge de [`TILE_BADGE`] px dans son coin, à [`TILE_BADGE_INSET`] des deux bords.
@@ -801,12 +808,13 @@ enum Corner {
 /// `native` est la taille native du glyphe : `glyph_fit` l'inscrit dans le carré du badge sans le
 /// déformer, exactement comme les boutons icône du design system.
 fn badge_rect(native: Vec2, tile: Rect, corner: Corner, side: f32) -> Rect {
-    let x = match corner {
-        Corner::Left => tile.left() + TILE_BADGE_INSET + side / 2.0,
-        Corner::Right => tile.right() - TILE_BADGE_INSET - side / 2.0,
+    let x = tile.right() - TILE_BADGE_INSET - side / 2.0;
+    let y = match corner {
+        Corner::TopRight => tile.top() + TILE_BADGE_INSET + side / 2.0,
+        Corner::BottomRight => tile.bottom() - TILE_BADGE_INSET - side / 2.0,
     };
     Rect::from_center_size(
-        egui::pos2(x, tile.top() + TILE_BADGE_INSET + side / 2.0),
+        egui::pos2(x, y),
         design::components::icon_button::glyph_fit(native, side),
     )
 }
