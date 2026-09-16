@@ -1,4 +1,4 @@
-//! Icônes réelles d'objets/monstres (`wakassets`, voir `overlay_engine::IconRef::image_url`) —
+//! Icônes réelles d'objets/monstres (`wakassets`, voir `overlay_engine::IconRef::image_urls`) —
 //! remplace l'icône générique du panneau Suivi (`panels::watchlist`) dès qu'une entrée est résolue
 //! par le catalogue (`CatalogIndex`, voir `catalog.rs`). Retour utilisateur 2026-09-02 : « comme
 //! les images de ressources/monstres n'est pas présent c'est très compliqué pour l'utilisateur »
@@ -228,23 +228,38 @@ impl Drop for RemoteIconStore {
     }
 }
 
+/// Télécharge les octets d'une icône en essayant ses sources **dans l'ordre**
+/// (`IconRef::image_urls`) : la première qui répond gagne, les échecs intermédiaires ne sont que
+/// tracés en `debug` (un monstre absent de `monsters/` mais présent dans `monsterIllustrations/`
+/// est un cas normal, pas une anomalie), seul l'échec de TOUTES les sources vaut un `warn`. Mise en
+/// cache sous la clé de l'icône (`kind`, `gfx_id`), quelle que soit la source gagnante : le cache
+/// disque ne connaît que l'icône, pas l'URL qui l'a servie, et un `gfx_id` ne vit jamais dans les
+/// deux dossiers à la fois.
+fn fetch_bytes_from_any_source(icon: &IconRef) -> Option<Vec<u8>> {
+    let urls = icon.image_urls();
+    for url in &urls {
+        match overlay_sync::client::fetch_bytes(url) {
+            Ok(bytes) => return Some(bytes),
+            Err(err) => tracing::debug!(%url, %err, "source d'icône distante sans réponse"),
+        }
+    }
+    tracing::warn!(
+        sources = ?urls,
+        "icône distante injoignable sur toutes ses sources, repli sur l'icône générique"
+    );
+    None
+}
+
 fn fetch_and_decode(icon: &IconRef) -> Option<DecodedIcon> {
-    let url = icon.image_url();
     let bytes = overlay_sync::icon_cache::load(icon.kind, &icon.gfx_id).or_else(|| {
-        let fetched = match overlay_sync::client::fetch_bytes(&url) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                tracing::warn!(%url, %err, "icône distante injoignable, repli sur l'icône générique");
-                return None;
-            }
-        };
+        let fetched = fetch_bytes_from_any_source(icon)?;
         overlay_sync::icon_cache::save(icon.kind, &icon.gfx_id, &fetched);
         Some(fetched)
     })?;
 
     let decoded = decode_icon(&bytes);
     if decoded.is_none() {
-        tracing::warn!(%url, "icône distante récupérée mais illisible");
+        tracing::warn!(url = %icon.image_url(), "icône distante récupérée mais illisible");
     }
     decoded
 }

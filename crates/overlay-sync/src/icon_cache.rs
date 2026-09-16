@@ -1,5 +1,5 @@
 //! Cache disque des icônes réelles d'objets/monstres/raretés/catégories (`wakassets`, voir
-//! `overlay_engine::IconRef::image_url`) — évite de retélécharger la même image à chaque
+//! `overlay_engine::IconRef::image_urls`) — évite de retélécharger la même image à chaque
 //! lancement. Un fichier PNG par icône plutôt qu'une base : le contenu ne change jamais pour un
 //! `gfx_id` donné (image statique d'un CDN tiers), donc pas de notion d'expiration/`ETag` à gérer
 //! ici (contrairement à `catalog_cache.rs`, dont le contenu évolue avec le référentiel du jeu).
@@ -20,6 +20,9 @@ fn cache_dir() -> Option<PathBuf> {
 fn file_path(kind: IconKind, gfx_id: &str) -> Option<PathBuf> {
     let folder = match kind {
         IconKind::Item => "items",
+        // Un monstre servi par le second dossier du CDN (`monsterIllustrations/`, voir
+        // `IconRef::image_urls`) se range quand même ici : le cache est indexé par icône, pas par
+        // URL gagnante, et un `gfx_id` n'existe jamais dans les deux dossiers à la fois.
         IconKind::Monster => "monsters",
         // Huit fichiers en tout, et jamais renouvelés : les gemmes se mettent en cache comme le
         // reste plutôt que d'être retéléchargées à chaque lancement. Même nom de dossier que le
