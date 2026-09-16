@@ -3063,7 +3063,9 @@ sa case de 42).
   gouttière (retour utilisateur : garder les marges latérales du design), icônes en couleurs.
   Taille arrêtée en trois temps le même jour : 26 px par `height` (« compressé »), 44 natif
   (« imposant »), puis **`scale(36/44)`** — cases de 35 × 36, switches de 72 et 109 px, bandeaux
-  de 48 px, bandeau de camp à 84 px.
+  de 48 px, bandeau de camp à 84 px, bandeau leader à 202 px (débord permanent de 6 px de chaque
+  côté de la colonne, pour loger un total à sept chiffres au corps 16 à côté du switch de
+  grandeur — voir `combat::show_leader_row`).
   Les cinq glyphes sont entrés au registre `DsIcon` (`Allies`, `Enemies`, `MetricDamage`,
   `MetricArmor`, `MetricHeal`, catégorie `couleur`), et les fichiers d'`assets/ui/` qu'`UiIcons`
   chargeait ont été supprimés.
