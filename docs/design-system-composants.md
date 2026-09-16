@@ -2915,7 +2915,7 @@ le relevé). La carte d'alerte du Suivi (`panels::watchlist::chat_toast_card`) r
 `crates/overlay-ui/src/design/components/switch.rs`
 
 ```rust
-use overlay_ui::design::{self, DsIcon};
+use overlay_ui::design::{self, DsIcon, SwitchVariant};
 
 design::switch(&mut personnage.genre)
     .slot(Genre::Masculin, "Masculin").icon(DsIcon::Male)
@@ -2924,13 +2924,12 @@ design::switch(&mut personnage.genre)
     .show(ui);
 
 // Trois positions, une seule active — le sélecteur de grandeur du panneau Combat, tel qu'il
-// est appelé : glyphes en couleurs, 26 px de haut, cases de 35 px.
+// est appelé : glyphes en couleurs, sur le socle de premier plan, 112 × 36.
 design::switch(&mut metric)
     .slot(CombatMetric::Damage, "Dégâts infligés (F3)").icon(DsIcon::MetricDamage)
     .slot(CombatMetric::Armor, "Armure donnée (F3)").icon(DsIcon::MetricArmor)
     .slot(CombatMetric::Heal, "Soins prodigués (F3)").icon(DsIcon::MetricHeal)
-    .width(109.0)
-    .height(26.0)
+    .variant(SwitchVariant::FirstPlan)
     .log_name("combat.grandeur")
     .show(ui);
 ```
@@ -2940,9 +2939,9 @@ design::switch(&mut metric)
 | `slot(valeur, libellé)` | une case, dans l'ordre d'affichage — **deux au moins** | — |
 | `variant` | `Frame` (le cadre du jeu) ou `FirstPlan` (le socle de bouton icône de premier plan) | `Frame` |
 | `icon` | pictogramme de **la dernière case déclarée** ; remplace le libellé au rendu, qui devient l'infobulle | libellé peint |
-| `width` | largeur totale, partagée à égalité entre les cases | largeur native de la variante × n + 2 × (n − 1) — 88 en `Frame`, 74 en `FirstPlan`, pour deux |
-| `height` | hauteur imposée ; le 9-slice n'étire que le corps des cases (marges figées 6 + 6) | `SWITCH_HEIGHT` = 44 en `Frame`, `SWITCH_FIRST_PLAN_SIZE` = 36 en `FirstPlan` |
-| `scale` | **réduction homothétique** de tout le switch — cases, séparateur, liseré, biseaux, glyphes — chaque case en un quad filtré, sans 9-slice ; dimensions arrondies au pixel | `1.0` |
+| `width` | largeur totale, partagée à égalité entre les cases ; le 9-slice à l'échelle étire le corps, coins gardés | `SWITCH_SLOT_SIZE` × n ± 2 × (n − 1) — **74 / 112 en `Frame`** (gouttière), **70 / 104 en `FirstPlan`** (chevauchement) |
+| `height` | hauteur imposée ; le 9-slice à l'échelle étire le corps des cases | `SWITCH_SLOT_SIZE` = 36, dans les deux variantes |
+| `scale` | **réduction homothétique** de tout le switch — cases, séparateur, liseré, biseaux, glyphes — multipliée au rapport de la variante (36/44 pour le cadre) ; dimensions arrondies au pixel | `1.0` (la case de 36) |
 | `enabled` | le switch **entier** | `true` |
 | `preview_state` | `Idle` / `Hovered` / `Active` / `Disabled`, sur la dernière case — **galerie et captures uniquement** | état réel |
 | `log_name` | nom d'instance pour le journal | `"switch"` |
@@ -2970,7 +2969,7 @@ liseré extérieur, une case sans liseré n'en porte pas.
 
 | Grandeur | Valeur | Jeton |
 | --- | --- | --- |
-| Cadre | 88 × 44, liseré 2 px `#221f24`, rayon 6 | `SWITCH_SLOT_WIDTH` = 43, `SWITCH_HEIGHT`, `SWITCH_BORDER` |
+| Cadre | 88 × 44, liseré 2 px `#221f24`, rayon 6 — **mesures de la capture**, servies à 36/44 (voir plus bas) | `SWITCH_SLOT_WIDTH` = 43, `SWITCH_HEIGHT` = 44, `SWITCH_BORDER` |
 | Case active | 40 × 40, kaki `#635a47`, biseau clair 2 px en haut et en bas | texture |
 | Case inactive | **42** × 40, gris-brun `#514b44`, ombre intérieure 2 px côté liseré | texture |
 | Séparateur | 2 px, aplat `#312d2d`, entre les deux liserés (y 2..42) | `SWITCH_SEPARATOR_WIDTH`, `SWITCH_SEPARATOR`, `SWITCH_BORDER_Y` |
@@ -3022,17 +3021,9 @@ le glyphe seul sans toucher au fond — inventé faute de capture, et faux.
   (`SWITCH_FONT_SIZE` = `TAB_FONT_SIZE`, 17 px) : le jeu n'a pas de switch texte dans les
   interfaces relevées.
 - **Les cases du milieu.** Dérivées des bouts, voir plus haut.
-- **Une autre taille que 88 × 44.** Deux voies. `scale` réduit **tout** dans le même rapport,
-  comme le jeu quand on baisse l'échelle de son interface : à 36/44 (le panneau Combat,
-  `SWITCH_SCALE`), une case fait 35 × 36, le séparateur 2, les glyphes 82 % de leur taille ;
-  la texture entière de chaque case est peinte en un quad filtré par le GPU (écart moyen
-  1,5/255 avec une réduction Lanczos hors ligne, mesuré sur la capture du panneau). `height`
-  n'impose que la hauteur : le 9-slice garde ses 6 px hauts et bas et n'étire que le corps —
-  à 26 px il reste 14 px de dégradé au lieu de 32, et c'est ce rendu qui a fait dire « on a
-  l'impression d'avoir compressé le switch » (2026-09-16) ; à réserver aux écarts de quelques
-  pixels. Le panneau Combat a essayé les trois le même jour — 26 par `height`, 44 natif (« le
-  rendu dans le jeu est relativement imposant »), puis 36 par `scale` (« vraiment scaler à
-  double dimension pour ne pas perdre le rendu visuel »).
+- **Une autre taille que 88 × 44.** Le composant ne se peint jamais à la taille de sa capture —
+  voir « 36 × 36 dans les deux variantes » ci-dessous. `scale` multiplie ce rapport, `width` et
+  `height` imposent une dimension ; dans tous les cas, c'est le 9-slice à l'échelle qui peint.
 - **Des glyphes en couleurs.** Un `DsIcon` de catégorie `couleur` (`native_color()`) est peint
   tel quel sur la case active ou survolée, et multiplié par `ICON_NATIVE_DIM` (150/255) ailleurs
   — le rapport de luminance gris/or du jeu, arrondi vers le bas pour se lire sur un glyphe déjà
@@ -3040,6 +3031,33 @@ le glyphe seul sans toucher au fond — inventé faute de capture, et faux.
   sens (vert = alliés, orange = ennemis, deux cœurs) : passés au blanc par transfert de
   luminance, les silhouettes ne se distinguaient plus que par les bras et les cœurs devenaient
   des taches (planche d'essai du 2026-09-16).
+
+### 36 × 36 dans les deux variantes (2026-09-16, le soir)
+
+**Demande utilisateur** : « passer les boutons du composant switch en 36 par 36 de manière
+générique ». Une case est un carré de `SWITCH_SLOT_SIZE` (36, `ICON_BUTTON_SIZE`) **quelle que soit
+sa matière**, et c'est le composant qui le fait — aucun appelant n'a d'échelle à régler, le
+sélecteur de genre de l'onglet Personnages y passe sans être touché. Un switch à deux cases fait
+74 px en `Frame` (gouttière de 2) et 70 en `FirstPlan` (chevauchement de 2) ; 112 et 104 à trois.
+
+La variante premier plan y était déjà (son socle EST un bouton icône de 36). La variante cadre se
+peignait aux 43 × 44 de sa capture, et les deux contrôles ne tombaient pas sur la même grille.
+Elle y est ramenée par un **9-slice à l'échelle** — `nine_slice::shape_scaled`,
+`DesignSystem::paint_scaled`, nouveau ce jour et le switch en est le premier appelant : les marges
+figées de la texture (coins, liseré, biseaux) sont peintes à `36 / 44` de leur taille, comme le jeu
+les réduit quand on baisse l'échelle de son interface, et le corps s'étire sur ce qui reste.
+Séparateur et liseré de gouttière suivent le même rapport (2 px restent 2 une fois arrondis).
+**Les glyphes, eux, ne bougent pas** : plafond commun de 16 aux deux variantes — la taille de
+glyphe commune arrêtée par le lot premier plan (ci-dessous) — et ♂ 14, ♀ 16 restent ce qu'ils
+sont, sur la même grille de 36 que ceux du panneau Combat.
+
+Les deux voies essayées la veille sur le panneau Combat sont écartées par construction : le 9-slice
+ordinaire (`height` seul) gardait ses 6 px hauts et bas à 1:1 et ne comprimait que le dégradé
+(« on a l'impression d'avoir compressé le switch »), et la texture entière en un quad réduisait
+tout mais ne savait plus s'étirer en largeur sans déformer ses coins. Le 9-slice à l'échelle vaut
+le quad à la largeur native et le 9-slice une fois étiré. `SWITCH_HEIGHT` et `SWITCH_SLOT_WIDTH`
+restent au fichier de jetons comme **mesures de la capture** : le rapport de réduction en
+découle.
 
 ### `SwitchVariant::FirstPlan` — le socle de bouton icône du jeu (2026-09-16, plus tard le même jour)
 
@@ -3058,7 +3076,7 @@ premier plan est la matière que le jeu emploie à cet endroit.
 | --- | --- | --- |
 | Fond d'une case | six textures de cadre, selon sa position | **un socle carré**, le même pour toutes |
 | Gouttière | liseré `SWITCH_BORDER` + séparateur `SWITCH_SEPARATOR` peints dedans | **chevauchement de 2 px**, plus un trait de 1 px `SWITCH_FIRST_PLAN_SEAM` |
-| Case native | 43 × 44 | **36 × 36** (`SWITCH_FIRST_PLAN_SIZE` = `ICON_BUTTON_SIZE`) |
+| Case native | 36 × 36 (`SWITCH_SLOT_SIZE`), cadre du jeu à l'échelle 36/44 | **36 × 36** (`SWITCH_FIRST_PLAN_SIZE` = `ICON_BUTTON_SIZE`), socle tel quel |
 | Case choisie | fond kaki | **liseré `#126068` de 2 px + halo d'1 px**, sur la bordure |
 | Survol | fond actif, glyphe doré | fond actif **et glyphe allumé** |
 | Glyphe actif / survolé / repos | doré / doré / gris chaud | blanc / **blanc** / gris froid `ICON_TINT` |
@@ -3125,11 +3143,12 @@ en dérivent sans être touchés.
 ### Vérification
 
 Planche dédiée `design_gallery_switch.png` (la galerie principale est au plafond des 8192 px) :
-les deux états du jeu à 88 px, le survol (comparé à sa capture, ci-dessus) et le désactivé, un switch de 160 px à pictogrammes de
-22 px, le repli à libellés, et deux switches à trois cases (libellés à 260 px ; pictogrammes à la
-largeur native de 133 px, milieu actif, dernière survolée), et les deux switches du panneau Combat
-à l'échelle 36/44 (glyphes en couleurs, dernière case survolée, puis désactivé), suivis du même
-switch de camp à 72 × 36 par `height` pour comparer les deux voies. Deux rangées de plus pour
+les deux états du jeu à la case de 36 (74 × 36), le survol (comparé à sa capture, ci-dessus) et le
+désactivé, un switch de 160 px à pictogrammes de 22 px, le repli à libellés, deux switches à trois
+cases (libellés à 260 px ; pictogrammes à la largeur native de 112 px, milieu actif, dernière
+survolée), puis une rangée **aux 88 × 44 de la capture** (`scale(44/36)`, `width(88)` — la rangée
+à comparer aux deux captures du jeu) suivie des glyphes en couleurs sur le cadre à 36 (dernière
+case survolée, puis désactivé). Deux rangées de plus pour
 `SwitchVariant::FirstPlan` : les deux switches du panneau Combat tels qu'ils sont appelés (74 et
 112 px, une case survolée, un switch désactivé), et les **quatre états côte à côte** sur un switch
 portant un glyphe monochrome et un glyphe en couleurs — la seule disposition qui permette de juger
