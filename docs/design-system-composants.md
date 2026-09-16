@@ -2981,10 +2981,16 @@ d'alpha 5 + 1), 4 côté séparateur, 6 en haut et en bas (liseré 2 + biseau 2 
 au niveau du bruit, `Stretch` sur les deux axes. Les deux barres génériques 88 × 44 restent dans
 `assets/design-system/` comme référence de comparaison.
 
+**Le survol — mesuré** (capture `switch-first-slot-active-and-second-slot-hover.png` du
+2026-09-16, ♂ actif et souris sur ♀, générifiée à 88 × 44 comme les deux autres) : la case
+inactive survolée prend **tout** l'aspect de la case active — fond `#635a47`, biseau clair de 2 px
+en haut et en bas, glyphe doré, plus d'ombre intérieure côté liseré. Écart moyen entre la case
+survolée et la case active de la référence : 1,0/255 (11,5 contre la case inactive). `Hovered`
+peint donc les textures actives, aucune texture de plus. La première version du composant dorait
+le glyphe seul sans toucher au fond — inventé faute de capture, et faux.
+
 **Inventé, faute de référence** — à remplacer par une mesure dès qu'une capture existera :
 
-- **Le survol.** La case inactive survolée prend le glyphe doré sans changer de fond — le signal
-  du bouton icône de premier plan (gris → or).
 - **L'état désactivé.** Fonds atténués comme un bouton désactivé (alpha 190/255), glyphes
   `TEXT_DISABLED`, gouttières atténuées de même ; la case sélectionnée garde son fond actif pour
   rester reconnaissable.
@@ -3007,7 +3013,7 @@ au niveau du bruit, `Stretch` sur les deux axes. Les deux barres génériques 88
 ### Vérification
 
 Planche dédiée `design_gallery_switch.png` (la galerie principale est au plafond des 8192 px) :
-les deux états du jeu à 88 px, le survol et le désactivé, un switch de 160 px à pictogrammes de
+les deux états du jeu à 88 px, le survol (comparé à sa capture, ci-dessus) et le désactivé, un switch de 160 px à pictogrammes de
 22 px, le repli à libellés, et deux switches à trois cases (libellés à 260 px ; pictogrammes à la
 largeur native de 133 px, milieu actif, dernière survolée), et les deux switches du panneau Combat
 à 26 px (glyphes en couleurs, dernière case survolée, puis désactivé). Comparaison au jeu à la même
