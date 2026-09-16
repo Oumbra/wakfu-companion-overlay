@@ -888,7 +888,11 @@ fn tile_button(
     id: egui::Id,
 ) -> egui::Response {
     let disc = Rect::from_center_size(center, Vec2::splat(BADGE_DISC));
-    let response = ui.interact(disc, id, egui::Sense::click());
+    // Main sous le pointeur, comme la croix des tuiles d'Alertes et de Chat : la tuile en dessous
+    // n'en affiche pas, c'est donc ici que le geste se signale.
+    let response = ui
+        .interact(disc, id, egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
     let survol = response.contains_pointer();
     if socle {
         let painter = ui.painter();
