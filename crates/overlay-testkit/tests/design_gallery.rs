@@ -1706,7 +1706,8 @@ fn galerie_du_switch() {
         Feminin,
     }
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 680.0))
+        // 680 → 700 le 2026-09-16 : les switches du panneau Combat passent de 26 à 36 px de haut.
+        .with_size(Vec2::new(760.0, 700.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1834,8 +1835,9 @@ fn galerie_du_switch() {
                     });
                     heading(
                         ui,
-                        "Hauteur imposée et glyphes en couleurs — les deux switches du panneau Combat",
-                        "26 px de haut (le 9-slice n'étire que le corps), cases de 35 px, glyphes de catégorie « couleur » peints tels quels sur la case active et atténués ailleurs (ICON_NATIVE_DIM).",
+                        "Échelle 36/44 et glyphes en couleurs — les deux switches du panneau Combat",
+                        "Switch::scale : cases de 35 × 36, séparateur, liseré, biseaux et glyphes réduits ensemble.
+Glyphes « couleur » tels quels sur la case active, atténués ailleurs (ICON_NATIVE_DIM). À droite, 72 × 36 par 9-slice (height), pour comparer.",
                     );
                     ui.horizontal(|ui| {
                         let mut camp = 0_u8;
@@ -1844,8 +1846,7 @@ fn galerie_du_switch() {
                             .icon(DsIcon::Allies)
                             .slot(1, "Ennemis")
                             .icon(DsIcon::Enemies)
-                            .width(70.0)
-                            .height(26.0)
+                            .scale(36.0 / 44.0)
                             .log_name("galerie.switch.camp")
                             .show(ui);
                         let mut grandeur = 0_u8;
@@ -1857,8 +1858,7 @@ fn galerie_du_switch() {
                             .slot(2, "Soins prodigués")
                             .icon(DsIcon::MetricHeal)
                             .preview_state(SwitchState::Hovered)
-                            .width(109.0)
-                            .height(26.0)
+                            .scale(36.0 / 44.0)
                             .log_name("galerie.switch.grandeur")
                             .show(ui);
                         let mut inactif = 0_u8;
@@ -1869,13 +1869,22 @@ fn galerie_du_switch() {
                             .icon(DsIcon::MetricArmor)
                             .slot(2, "Soins prodigués")
                             .icon(DsIcon::MetricHeal)
-                            .width(109.0)
-                            .height(26.0)
+                            .scale(36.0 / 44.0)
                             .enabled(false)
                             .log_name("galerie.switch.grandeur-desactive")
                             .show(ui);
+                        let mut etire = 0_u8;
+                        design::switch(&mut etire)
+                            .slot(0, "Alliés")
+                            .icon(DsIcon::Allies)
+                            .slot(1, "Ennemis")
+                            .icon(DsIcon::Enemies)
+                            .width(72.0)
+                            .height(36.0)
+                            .log_name("galerie.switch.camp-9slice")
+                            .show(ui);
                         ui.label(
-                            RichText::new("70 × 26 · 109 × 26, dernière survolée · désactivé")
+                            RichText::new("72 × 36 · 109 × 36, survolée · désactivé · 9-slice")
                                 .color(CAPTION)
                                 .size(12.0),
                         );

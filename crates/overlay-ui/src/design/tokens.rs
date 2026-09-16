@@ -352,9 +352,10 @@ pub const TAB_FONT_SIZE: f32 = 17.0;
 // `design::components::switch`.
 
 /// Hauteur native d'un switch — **44px**, celle des deux captures. Comme pour un onglet, la
-/// hauteur est celle de la texture, jamais déduite de la largeur. `Switch::height` peut
-/// l'abaisser : les 6px hauts et bas du 9-slice (coins, liseré, biseau) restent figés, seul le
-/// corps s'étire — le panneau Combat le tient à 26px (`panels::combat::SWITCH_HEIGHT`).
+/// hauteur est celle de la texture, jamais déduite de la largeur. Deux façons d'en changer :
+/// `Switch::scale` réduit tout dans le même rapport (le panneau Combat est à 36/44,
+/// `panels::combat::SWITCH_SCALE`) ; `Switch::height` n'étire que le corps des cases, les 6px
+/// hauts et bas du 9-slice (coins, liseré, biseau) restant figés.
 pub const SWITCH_HEIGHT: f32 = 44.0;
 
 /// Largeur d'une case, par défaut — **43px**, la moitié des 88px du switch du jeu une fois le
