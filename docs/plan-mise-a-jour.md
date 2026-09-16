@@ -313,6 +313,14 @@ lto = "fat"           # code mort inter-crates
 codegen-units = 1
 ```
 
+**Effet de bord constaté le lendemain (2026-09-16)** : `preview.{ps1,sh}` compilait en `--release`
+par défaut, et ce profil a fait passer la recompilation de `overlay-ui` après la moindre édition
+de quelques secondes à 5–10 min (`codegen-units = 1` monothread, LTO fat sur toute la chaîne).
+D'où le profil **`preview`** du `Cargo.toml` racine (`inherits = "release"`, `lto = false`,
+`codegen-units = 16`, `incremental = true`, `strip = false`), désormais le défaut des deux
+scripts de prévisualisation — `-Release`/`--release` redonne le vrai profil pour une vérification
+finale. Le binaire de Release lui-même n'est pas concerné : `release.yml` garde `--release`.
+
 ---
 
 ## 7. Côté overlay — architecture
