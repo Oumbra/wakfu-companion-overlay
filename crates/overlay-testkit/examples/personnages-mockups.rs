@@ -487,38 +487,42 @@ fn paint_glyph(ui: &egui::Ui, center: Pos2, icon: DsIcon, side: f32, tint: Color
     );
 }
 
-/// **Un bouton de tuile** : un socle rond, un liseré plus clair, un glyphe au centre, une
-/// infobulle.
+/// **Un bouton de tuile** : un glyphe, une zone cliquable, une infobulle — et, quand `socle` le
+/// demande, le disque qui dit « ceci est un bouton ».
 ///
-/// Le glyphe nu du premier jet ne disait pas qu'il était cliquable — sur une tuile déjà cliquable
-/// de partout, rien ne distinguait « la zone où l'on clique pour retirer » du reste. Le socle est
-/// **le même pour les deux**, et c'est voulu : ce qui les sépare, c'est leur PLACE (voir
-/// [`hero_tile`]), pas leur forme.
+/// **Le socle n'est PAS pour les deux** (correction du 2026-09-16) : il porte le bouton de
+/// modification, posé au centre du buste, où rien d'autre ne signalerait qu'on peut cliquer. La
+/// croix de retrait, elle, garde le glyphe nu des tuiles d'Alertes et de Chat — c'est l'idiome de
+/// l'application, et l'entourer d'un disque l'aurait mise en avant alors qu'elle est le geste qu'on
+/// ne veut PAS faire par mégarde.
 fn tile_button(
     ui: &mut egui::Ui,
     tuile: Rect,
     center: Pos2,
     icon: DsIcon,
     tooltip: &str,
+    socle: bool,
     id: egui::Id,
 ) -> egui::Response {
     let disc = Rect::from_center_size(center, Vec2::splat(BADGE_DISC));
     let response = ui.interact(disc, id, egui::Sense::click());
     let survol = response.contains_pointer();
-    let painter = ui.painter();
-    painter.circle_filled(center, BADGE_DISC / 2.0, BADGE_DISC_FILL);
-    painter.circle_stroke(
-        center,
-        BADGE_DISC / 2.0,
-        egui::Stroke::new(
-            1.0,
-            if survol {
-                design::tokens::TEXT_GOLD
-            } else {
-                TILE_BORDER_HOVER
-            },
-        ),
-    );
+    if socle {
+        let painter = ui.painter();
+        painter.circle_filled(center, BADGE_DISC / 2.0, BADGE_DISC_FILL);
+        painter.circle_stroke(
+            center,
+            BADGE_DISC / 2.0,
+            egui::Stroke::new(
+                1.0,
+                if survol {
+                    design::tokens::TEXT_GOLD
+                } else {
+                    TILE_BORDER_HOVER
+                },
+            ),
+        );
+    }
     paint_glyph(
         ui,
         center,
@@ -622,8 +626,9 @@ const BADGE: f32 = 14.0;
 /// Diamètre du socle rond qui le porte — **les deux badges ont le même** (2026-09-16) : c'est ce
 /// socle qui dit « ceci est un bouton », et deux formats différents diraient deux choses.
 const BADGE_DISC: f32 = 26.0;
-/// Distance du socle au coin haut-droit de la tuile.
-const BADGE_INSET: f32 = 6.0;
+/// Distance de la croix nue au coin haut-droit — `alerts_tab::TILE_BADGE_INSET`, l'idiome des
+/// tuiles d'Alertes et de Chat, que ce bouton-là reprend tel quel.
+const CROSS_INSET: f32 = 8.0;
 /// Fond du socle — assez opaque pour détacher le glyphe du buste, assez sombre pour rester du jeu.
 const BADGE_DISC_FILL: Color32 = Color32::from_black_alpha(0xB4);
 
@@ -828,17 +833,19 @@ fn hero_tile(
             egui::pos2(rect.center().x, band.top() - AVATAR_SIZE / 2.0 - 4.0),
             DsIcon::Option,
             "Modifier",
+            true,
             egui::Id::new(("personnages.modifier", index)),
         );
         tile_button(
             ui,
             rect,
             egui::pos2(
-                rect.right() - BADGE_INSET - BADGE_DISC / 2.0,
-                rect.top() + BADGE_INSET + BADGE_DISC / 2.0,
+                rect.right() - CROSS_INSET - BADGE / 2.0,
+                rect.top() + CROSS_INSET + BADGE / 2.0,
             ),
             DsIcon::Close,
             "Supprimer",
+            false,
             egui::Id::new(("personnages.retirer", index)),
         );
         let _ = modifier;
@@ -1130,6 +1137,12 @@ fn modale_personnage(
             .placeholder("Nom du personnage, exactement comme en jeu…")
             .entries(&entrees)
             .width(COLONNE)
+            // **Ni loupe, ni champ vidé** (2026-09-16) : ce n'est pas une recherche, c'est le nom
+            // du personnage. Il s'écrit librement — le composant ne valide rien, un nom qu'aucune
+            // suggestion ne porte sort du champ tel quel — et choisir une suggestion le REMPLIT au
+            // lieu de l'effacer. Les deux réglages ont été ajoutés au composant pour ce cas.
+            .search_icon(false)
+            .fill_on_select(true)
             .log_name("personnages.modale.nom");
         if suggestions {
             champ = champ.preview_open(true).preview_active(0);

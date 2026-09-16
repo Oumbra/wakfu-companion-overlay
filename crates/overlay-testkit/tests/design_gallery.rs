@@ -2067,6 +2067,96 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         .log_name("galerie.autocomplete-filtre-vide")
         .show(ui);
     ui.add_space(4.0 + 38.0 + 34.0);
+
+    // La **saisie assistée** (`search_icon` / `fill_on_select`) a sa propre planche : celle-ci est
+    // pleine — voir `galerie_de_la_saisie_assistee`.
+}
+
+/// **La saisie assistée** — le second réglage de `design::autocomplete`, ajouté le 2026-09-16.
+///
+/// Sa propre planche parce que `galerie_du_design_system` est pleine : son contenu dépasse déjà le
+/// plafond de 8192 px que wgpu impose à une texture, et sa section « Autocomplétion » y est
+/// tronquée en bas. Ajouter ici, c'était ajouter dans ce qui ne se voit plus.
+///
+/// Trois cas, et le premier est le témoin : **le même champ avec et sans sa loupe**, puis le
+/// panneau ouvert d'une saisie assistée. `fill_on_select` ne s'y voit pas — c'est un comportement
+/// (la valeur choisie reste dans le champ au lieu de le vider), pas une apparence.
+#[test]
+fn galerie_de_la_saisie_assistee() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(760.0, 540.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    section_saisie_assistee(ui);
+                });
+        });
+    harness.run();
+    harness.snapshot("design_gallery_autocomplete_saisie");
+}
+
+fn section_saisie_assistee(ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+    let largeur = 700.0;
+    let entrees: Vec<design::AutocompleteEntry> = [
+        "Anonyme-Zobal1",
+        "Anonyme-Sadida1",
+        "Anonyme-Huppermage1",
+        "Anonyme-Ecaflip1",
+        "Anonyme-Ouginak1",
+    ]
+    .iter()
+    .map(|nom| design::AutocompleteEntry::new(*nom, 0))
+    .collect();
+
+    heading(
+        ui,
+        "Champ de recherche — le réglage par défaut",
+        "`search_icon` vaut `true` : la loupe du jeu, et la sélection vide le champ (règle 5). C'est ce que veut un champ d'AJOUT, qui a fini son travail dès que l'entrée est passée à la liste.",
+    );
+    let mut recherche = String::new();
+    design::autocomplete(&mut recherche)
+        .placeholder("Ajouter un objet à surveiller…")
+        .width(largeur)
+        .entries(&entrees)
+        .log_name("galerie.autocomplete-avec-loupe")
+        .show(ui);
+
+    heading(
+        ui,
+        "Saisie assistée — sans loupe",
+        "`search_icon(false)` quand le champ n'est pas une recherche : le nom d'un personnage s'écrit, il ne se cherche pas, et deux champs à loupe sur un même écran ne se distinguent plus que par leur invite. Son compagnon `fill_on_select(true)` laisse la valeur choisie DANS le champ. Le texte libre reste accepté dans les deux réglages : le composant ne valide rien, et un nom qu'aucune suggestion ne porte sort du champ tel quel.",
+    );
+    let mut nom = String::new();
+    design::autocomplete(&mut nom)
+        .placeholder("Nom du personnage, exactement comme en jeu…")
+        .width(largeur)
+        .entries(&entrees)
+        .search_icon(false)
+        .fill_on_select(true)
+        .log_name("galerie.autocomplete-saisie")
+        .show(ui);
+
+    heading(
+        ui,
+        "Le même, déplié",
+        "Le panneau est inchangé : seul le décor du champ l'est.",
+    );
+    let mut saisi = String::from("erz");
+    design::autocomplete(&mut saisi)
+        .placeholder("Nom du personnage, exactement comme en jeu…")
+        .width(largeur)
+        .entries(&entrees)
+        .search_icon(false)
+        .fill_on_select(true)
+        .preview_open(true)
+        .preview_active(0)
+        .log_name("galerie.autocomplete-saisie-depliee")
+        .show(ui);
 }
 
 /// Le tableau — ses trois corps (peuplé, vide, en chargement), son défilement et son cas dégénéré.
