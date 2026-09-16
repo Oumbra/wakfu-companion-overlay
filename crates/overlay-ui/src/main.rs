@@ -2822,6 +2822,10 @@ impl App {
                         turn_notification: self.turn_notification,
                         turn_notification_muted: self.turn_notification_muted,
                         auto_update: self.auto_update,
+                        // Jalon posé au démarrage (`autostart::enable_by_default_once`, avant la
+                        // première fenêtre) : toujours vrai ici, et le laisser retomber sur
+                        // `Default` réinscrirait l'overlay au prochain lancement.
+                        autostart_initialized: true,
                         ..Default::default()
                     };
                     saved.set_shortcuts(self.hotkeys.bindings());
@@ -3683,7 +3687,9 @@ fn main() {
     let (class_spells, monster_spells) = overlay_engine::preload_spell_indexes();
     tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
-    let saved_config = config::load();
+    let mut saved_config = config::load();
+    // Actif par défaut, une seule fois par installation — voir `autostart`, doc de module.
+    overlay_ui::autostart::enable_by_default_once(&mut saved_config);
 
     // `--updated-from X` (relance après une mise à jour, voir `overlay_sync::update::apply`)
 

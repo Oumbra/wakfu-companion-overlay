@@ -194,6 +194,22 @@ pub struct OverlayConfig {
     /// active, une config écrite avant ce champ comprise.
     #[serde(default = "actif")]
     pub auto_update: bool,
+    /// **Le lancement au démarrage de l'ordinateur a-t-il reçu son défaut ?** — le seul champ de
+    /// cette structure qui ne porte pas un réglage mais un JALON (2026-09-16).
+    ///
+    /// Le réglage lui-même vit dans le système, pas ici (voir `crate::autostart`, doc de module) ;
+    /// mais « actif par défaut » (demande utilisateur du 2026-09-16) suppose de savoir si
+    /// l'overlay a déjà eu l'occasion de s'inscrire une fois. Sans ce jalon, chaque lancement
+    /// réinscrirait l'overlay que l'utilisateur vient de décocher — le système ne distingue pas
+    /// « jamais inscrit » de « retiré exprès ». `false` = jamais fait ; `true` dès que
+    /// `autostart::enable_by_default_once` est passé, et pour toujours.
+    ///
+    /// `#[serde(default)]` : une config écrite avant ce champ vaut « jamais fait » — c'est ce qui
+    /// inscrit aussi les installations existantes, une fois, à leur premier lancement de cette
+    /// version. **Les hôtes doivent le réécrire à `true`** à chaque sauvegarde (ils rebâtissent la
+    /// config depuis leurs champs, `..Default::default()` le remettrait à `false`).
+    #[serde(default)]
+    pub autostart_initialized: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -246,6 +262,7 @@ impl Default for OverlayConfig {
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
+            autostart_initialized: false,
             shortcuts: BTreeMap::new(),
         }
     }
@@ -390,8 +407,10 @@ pub fn load() -> OverlayConfig {
 }
 
 /// Sauvegarde `config` sur disque — best-effort (voir doc de module), crée le répertoire parent
-/// si besoin. Appelée UNIQUEMENT à la validation de la modale Options (jamais à chaque frame) :
-/// voir `panels::options_modal::OptionsModalAction::Validate`.
+/// si besoin. Appelée à la validation de la modale Options (jamais à chaque frame, voir
+/// `panels::options_modal::OptionsModalAction::Validate`) et, une seule fois par installation,
+/// au démarrage pour poser le jalon [`OverlayConfig::autostart_initialized`]
+/// (`crate::autostart::enable_by_default_once`).
 pub fn save(config: &OverlayConfig) {
     let Some(path) = config_file() else {
         tracing::warn!(
@@ -510,6 +529,25 @@ mod tests {
         assert!(ancienne.chat_enabled);
         assert!(ancienne.combat_enabled);
         assert!(ancienne.spells_enabled);
+    }
+
+    /// Le jalon du démarrage automatique part à « jamais fait » — config neuve comme config
+    /// écrite avant ce champ — et survit à l'aller-retour une fois levé : c'est ce qui empêche un
+    /// second lancement de réinscrire ce que l'utilisateur a décoché (voir `crate::autostart`).
+    #[test]
+    fn le_jalon_du_demarrage_automatique_part_a_faux_et_se_conserve() {
+        assert!(!OverlayConfig::default().autostart_initialized);
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert!(!ancienne.autostart_initialized);
+
+        let config = OverlayConfig {
+            autostart_initialized: true,
+            ..Default::default()
+        };
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(relu.autostart_initialized);
     }
 
     /// Une fonctionnalité coupée le reste après un aller-retour sur disque : c'est tout l'intérêt

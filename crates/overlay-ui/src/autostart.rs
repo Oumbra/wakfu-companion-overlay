@@ -15,6 +15,16 @@
 //! « Valider » ([`apply`]), comme elle le fait déjà du reste : brouillon en attendant, rien
 //! d'écrit si la case n'a pas bougé.
 //!
+//! ## Actif par défaut — une fois, au premier lancement
+//!
+//! Demande utilisateur du 2026-09-16 : « option de démarrage active par défaut ». Le système ne
+//! sachant pas distinguer « jamais inscrit » de « retiré exprès », le défaut ne peut pas se
+//! rejouer à chaque lancement : il s'applique **une seule fois**, au premier lancement qui trouve
+//! le jalon `config::OverlayConfig::autostart_initialized` à `false`
+//! ([`enable_by_default_once`]), après quoi seule la case de la fenêtre Options — ou le système
+//! lui-même — change l'inscription. C'est la seule entorse à « rien dans `config.toml` », et elle
+//! ne duplique pas l'état : elle dit seulement que le défaut a été posé.
+//!
 //! ## Ce qui est écrit, et où
 //!
 //! | Plateforme | Emplacement | Contenu |
@@ -50,6 +60,24 @@ const DISPLAY_NAME: &str = "Wakfu Companion Overlay";
 /// réglage mémorisé — voir la doc de module.
 pub fn is_enabled() -> bool {
     imp::is_enabled()
+}
+
+/// **Pose le défaut « actif », une fois par installation** — voir la doc de module. Appelée par
+/// les hôtes au démarrage, juste après `config::load` et avant toute fenêtre : si le jalon
+/// `autostart_initialized` est levé, ne fait rien ; sinon inscrit l'overlay ([`apply`]), lève le
+/// jalon et le sauvegarde. Un échec d'inscription (droits, stratégie de groupe) lève le jalon
+/// quand même : le défaut a été proposé, la case de la fenêtre Options reste là pour réessayer —
+/// le rejouer à chaque lancement ne ferait que remplir le journal du même refus.
+pub fn enable_by_default_once(config: &mut crate::config::OverlayConfig) {
+    if config.autostart_initialized {
+        return;
+    }
+    tracing::info!(
+        "[démarrage] premier lancement : inscription au démarrage de l'ordinateur par défaut."
+    );
+    apply(true);
+    config.autostart_initialized = true;
+    crate::config::save(config);
 }
 
 /// Inscrit ou retire l'overlay du démarrage de la session. Best-effort : n'écrit que si l'état
