@@ -59,7 +59,11 @@ pub const WINDOW_WIDTH: f32 = 400.0;
 pub const INITIAL_HEIGHT: f32 = 385.0;
 
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
-const CARD_FILL: Color32 = Color32::from_rgba_premultiplied(6, 8, 11, 199); // rgba(8,10,14,.78)
+/// Fond de la carte — `rgba(8,10,14,.90)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
+/// 2026-09-16 : « rendre moins translucide d'au moins 40 % » (demande utilisateur) — de 22 % à
+/// 10 % de transparence, soit 55 % de translucidité en moins. Posée sur le bureau, et non sur une
+/// page déjà sombre comme au web, la carte laissait voir ce qu'il y avait dessous.
+const CARD_FILL: Color32 = Color32::from_rgba_premultiplied(7, 9, 13, 230); // rgba(8,10,14,.90)
 const CARD_BORDER: Color32 = Color32::from_rgb(0x2a, 0x30, 0x38);
 const CARD_BORDER_PAIRING: Color32 = Color32::from_rgba_premultiplied(0, 46, 56, 56); // cyan .22
 const CARD_BORDER_ERROR: Color32 = Color32::from_rgba_premultiplied(81, 29, 26, 89); // rouge .35
