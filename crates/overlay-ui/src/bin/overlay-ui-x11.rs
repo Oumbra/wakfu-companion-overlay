@@ -1183,6 +1183,10 @@ mod linux_main {
             };
             // Les noms déjà vus dans `wakfu.log` cette session, que le champ de nom propose.
             let journal = personnages_tab::journal_from_session(&self.snapshot.load());
+            // Lu une seule fois par ouverture, jamais à chaque frame : c'est un accès au registre
+            // (Windows) ou au disque (Linux), et la case est un brouillon comme les autres — elle ne
+            // doit surtout pas se remettre d'aplomb toute seule pendant qu'on la regarde.
+            let autostart_actif = overlay_ui::autostart::is_enabled();
 
             overlay.options_state = Some(OptionsModalState {
                 path_input: self.log_path.display().to_string(),
@@ -1217,6 +1221,11 @@ mod linux_main {
                 // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
                 update: (**self.update_status.load()).clone(),
                 auto_update: self.auto_update,
+                // **Le démarrage avec l'ordinateur se lit dans le SYSTÈME**, pas dans un champ
+                // de l'hôte : c'est le seul réglage de cette fenêtre qu'un autre programme peut
+                // avoir changé entre deux ouvertures (réglages du bureau, fichier supprimé à la
+                // main). Voir `autostart`, doc de module.
+                start_with_os: autostart_actif,
                 pending_install: None,
                 alerts: alerts_tab::AlertsTabState {
                     duration_input: alerts_draft
@@ -1243,6 +1252,7 @@ mod linux_main {
                     countdown_toast: self.countdown_toast,
                     shortcuts: self.hotkeys.bindings().clone(),
                     auto_update: self.auto_update,
+                    start_with_os: autostart_actif,
                 },
                 pending_close: false,
                 alerts_draft,
@@ -1593,6 +1603,12 @@ mod linux_main {
                         tracing::info!("[options] raccourcis personnalisés mis à jour.");
                         self.hotkeys.apply(commit.shortcuts);
                     }
+                    // **Le démarrage avec l'ordinateur (2026-09-16)** — le seul réglage de cette fenêtre
+                    // qui ne passe NI par la config NI par le thread Engine : il s'inscrit dans le système
+                    // (voir `autostart`, doc de module). `apply` compare à l'état réel avant d'écrire, et
+                    // n'échoue jamais bruyamment — un refus du système laisse simplement la case revenir
+                    // sur son état réel à la prochaine ouverture.
+                    overlay_ui::autostart::apply(commit.start_with_os);
                     // **La mise à jour automatique (2026-09-15)** — persistée, effective au prochain lancement :
                     // c'est là que la première commande au thread de mise à jour se décide.
                     let auto_update_changed = commit.auto_update != self.auto_update;

@@ -1,10 +1,16 @@
 //! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
 //! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
 //! (voir `main.rs`/`bin/overlay-ui-x11.rs`). L'onglet "Paramètres" expose les réglages LOCAUX de
-//! l'overlay : le chemin de `wakfu.log` à suivre, et la section « Combat » — le détail des
-//! combats et le suivi des sorts (2026-09-15), l'affichage du panneau de combat en dehors des
-//! combats (2026-09-13) et la notification de tour (2026-09-14). Tous sont persistés par
-//! `config::OverlayConfig`, jamais sur le compte — contrairement aux onglets "Suivi" et "Alertes".
+//! l'overlay : le lancement avec l'ordinateur (2026-09-16), le chemin de `wakfu.log` à suivre, et
+//! la section « Combat » — le détail des combats et le suivi des sorts (2026-09-15), l'affichage
+//! du panneau de combat en dehors des combats (2026-09-13) et la notification de tour
+//! (2026-09-14). Tous sont persistés par `config::OverlayConfig`, jamais sur le compte —
+//! contrairement aux onglets "Suivi" et "Alertes".
+//!
+//! **Une exception à cette persistance** : « Lancer l'overlay au démarrage de l'ordinateur » ne
+//! vit pas dans `config.toml` mais dans le système lui-même (clé `Run` sous Windows, fichier
+//! `.desktop` sous Linux), parce qu'il s'y désactive aussi sans passer par cette fenêtre — voir
+//! `crate::autostart`.
 //!
 //! **Interrupteurs de fonctionnalité (2026-09-15, §9.1 duodecies)** : les onglets "Suivi",
 //! "Alertes" et "Chat" s'ouvrent chacun sur une case « Activer … » (`panels::feature_switch`) qui
@@ -349,6 +355,12 @@ pub struct OptionsModalState {
     /// jour », même mécanique de brouillon que les autres cases : initialisée par l'hôte au
     /// réglage en vigueur (`config::OverlayConfig::auto_update`), prise en compte à « Valider ».
     pub auto_update: bool,
+    /// **Lancer l'overlay au démarrage de l'ordinateur ?** — case unique de la section
+    /// « Démarrage » (2026-09-16). Brouillon comme ses voisines, à une différence près : l'état
+    /// dont elle part et celui qu'elle repose ne sont PAS dans `config.toml` mais dans le système
+    /// (clé `Run` sous Windows, fichier `.desktop` sous Linux) — voir `crate::autostart`, qui dit
+    /// pourquoi.
+    pub start_with_os: bool,
     /// La confirmation d'installation est ouverte, pour cette version — « Mettre à jour vers X »
     /// ferme l'overlay de jeu le temps de l'installation, ce qui mérite un « oui » explicite.
     /// Troisième boîte exclusive avec les deux autres (voir `show`).
@@ -395,6 +407,9 @@ pub struct OptionsInitial {
     pub shortcuts: ShortcutBindings,
     /// La mise à jour automatique telle qu'elle était à l'ouverture — même rôle.
     pub auto_update: bool,
+    /// Le démarrage avec l'ordinateur tel qu'il était à l'ouverture — même rôle. Lu dans le
+    /// système par l'hôte (`crate::autostart::is_enabled`), pas dans la config.
+    pub start_with_os: bool,
 }
 
 impl OptionsModalState {
@@ -420,6 +435,7 @@ impl OptionsModalState {
             countdown_toast: self.countdown_toast,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
+            start_with_os: self.start_with_os,
         }
     }
 
@@ -462,6 +478,7 @@ impl OptionsModalState {
             || self.personnages_draft != self.initial.personnages
             || self.shortcuts != self.initial.shortcuts
             || self.auto_update != self.initial.auto_update
+            || self.start_with_os != self.initial.start_with_os
     }
 }
 
@@ -567,6 +584,10 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::auto_update`) ; il ne s'applique qu'au prochain
     /// lancement.
     pub auto_update: bool,
+    /// État de la case « Lancer l'overlay au démarrage de l'ordinateur » — ce que l'hôte pose
+    /// dans le SYSTÈME (`crate::autostart::apply`), et nulle part ailleurs : ce réglage n'a pas
+    /// de ligne dans `config.toml`, voir la doc de module de `crate::autostart`.
+    pub start_with_os: bool,
 }
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
@@ -773,13 +794,13 @@ pub fn show(
             return;
         }
         // **Tout l'onglet défile** depuis le 2026-09-15 : il portait quatre sections, il en porte
-        // sept — « Combat », une section de notifications par fonctionnalité
+        // huit — « Démarrage », « Combat », une section de notifications par fonctionnalité
         // (`panels::notifications`), « Fichier », « Mise à jour » et « Compte ». La dernière
         // tombait hors de la fenêtre sans que rien ne le dise, et agrandir la fenêtre pour suivre
         // chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un jeu.
         //
         // **L'ordre des sections** (remanié le 2026-09-16) va de ce qu'on règle souvent à ce qu'on
-        // règle une fois : l'affichage d'abord, les notifications ensuite, et les
+        // règle une fois : le démarrage et l'affichage d'abord, les notifications ensuite, et les
         // trois sections de maintenance à la fin — « Fichier » (le chemin de `wakfu.log`, que la
         // découverte automatique trouve seule dans l'immense majorité des cas), « Mise à jour »,
         // « Compte ».
@@ -787,6 +808,30 @@ pub fn show(
             // La largeur utile vient de la zone défilable : la réserve de barre y est déjà
             // déduite (voir `design::PanelZones::scroll_area`).
             let inner_width = width;
+            // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
+            // avant même qu'on le lance.
+            //
+            // Elle ouvre l'onglet, à la place que « Fichier » occupait : c'est le premier moment
+            // de la vie de l'overlay, et la seule section dont le réglage agit hors de lui.
+            //
+            // **Ce réglage n'est pas dans `config.toml`** : son état réel appartient au système
+            // (clé `Run` sous Windows, fichier `.desktop` sous Linux) et se désactive aussi depuis
+            // le Gestionnaire des tâches ou les réglages du bureau. Il est donc lu à l'ouverture
+            // et reposé à « Valider » — voir `crate::autostart`, dont la doc de module porte le
+            // raisonnement complet.
+            ui.add(design::heading("Démarrage"));
+            ui.add(
+                design::checkbox(
+                    &mut state.start_with_os,
+                    "Lancer l'overlay au démarrage de l'ordinateur",
+                )
+                .tooltip(
+                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
+                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
+                )
+                .log_name("options-demarrage-auto"),
+            );
+
             // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
             // en un seul endroit.
             //

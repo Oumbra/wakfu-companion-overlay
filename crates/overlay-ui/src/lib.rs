@@ -37,6 +37,7 @@
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
 
 pub mod alert_sound;
+pub mod autostart;
 pub mod avatars;
 pub mod background;
 pub mod build_info;

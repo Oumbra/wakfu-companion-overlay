@@ -1754,6 +1754,10 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
+                // Et pour la case « Lancer l'overlay au démarrage de l'ordinateur » : posée à
+                // `false` à l'ouverture de cet état de test, emportée telle quelle. Rien n'est
+                // écrit dans le système ici — c'est l'hôte qui le fait, sur cette valeur.
+                start_with_os: false,
             }
         )],
         "Entrée doit valider les réglages courants, comme le bouton « Valider » du pied de page"
