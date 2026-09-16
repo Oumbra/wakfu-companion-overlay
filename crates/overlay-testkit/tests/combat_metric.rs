@@ -98,7 +98,10 @@ impl Textures {
 }
 
 fn harness_for(side: CombatSide, metric: CombatMetric) -> Harness<'static> {
-    let fight = fight();
+    harness_with(fight(), side, metric)
+}
+
+fn harness_with(fight: FightSnapshot, side: CombatSide, metric: CombatMetric) -> Harness<'static> {
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let mut textures = Textures {
@@ -162,6 +165,19 @@ fn armure_du_camp_allie() {
     let mut harness = harness_for(CombatSide::Allies, CombatMetric::Armor);
     harness.run();
     harness.snapshot("combat_metrique_armure");
+}
+
+/// Total à SEPT chiffres : le Iop porté à un peu plus d'un million, comme la capture utilisateur
+/// du 16 sept. 2026 (« 1 047 404 » mordait de 10 px sur la case Soins). Le total passe au corps
+/// compact (16) et tient dans le bandeau, qui déborde de 6 px de chaque côté de la colonne quel
+/// que soit le total — voir `combat::show_leader_row`.
+#[test]
+fn total_a_sept_chiffres_au_corps_compact() {
+    let mut fight = fight();
+    fight.fighters[0].total_damage = 1_035_654; // total du camp : 1 047 404
+    let mut harness = harness_with(fight, CombatSide::Allies, CombatMetric::Damage);
+    harness.run();
+    harness.snapshot("combat_metrique_total_sept_chiffres");
 }
 
 #[test]
