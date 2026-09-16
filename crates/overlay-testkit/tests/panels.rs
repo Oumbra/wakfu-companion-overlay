@@ -1722,8 +1722,7 @@ fn modale_options_echap_annule_et_entree_valide() {
         }
     });
 
-    // Frames de repos : aucune touche, aucune action. Vérifie au passage que le focus initial pris
-    // par le champ ne déclenche à lui seul rien du tout.
+    // Frames de repos : aucune touche, aucune action.
     harness.run();
     assert_eq!(actions.borrow_mut().drain(..).collect::<Vec<_>>(), vec![]);
 
@@ -4381,7 +4380,9 @@ fn defile_les_parametres(harness: &mut Harness<'_>, points: f32) {
 #[test]
 fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
     /// Centre de la case « Activer le suivi des sorts », deuxième ligne de la section « Combat ».
-    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 307.0);
+    /// **Remontée de 16 px le 2026-09-16** : la section « Fichier » a quitté la tête de l'onglet
+    /// au profit de « Démarrage », plus courte d'autant (voir `options_modal::show`).
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 291.0);
 
     let clic = |detail_actif: bool| -> bool {
         let mut etat = parametres_avec_notifications();

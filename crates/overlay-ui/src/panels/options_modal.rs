@@ -589,11 +589,6 @@ pub struct OptionsModalContext<'a> {
     pub game_servers: &'a crate::game_servers::GameServers,
 }
 
-/// Clé mémoire « le focus initial a déjà été donné » — voir [`show`].
-fn focus_given_id() -> egui::Id {
-    egui::Id::new("options-modal-focus-initial")
-}
-
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
 /// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
 pub fn show(
@@ -617,17 +612,6 @@ pub fn show(
     // pour l'une comme pour l'autre — c'est le double appui d'Échap qu'elle empêche.
     let dialogue_a_l_entree =
         state.pending_close || state.pending_disconnect || state.pending_install.is_some();
-
-    // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
-    // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
-    // a sa propre fenêtre OS, créée à l'ouverture et détruite à la fermeture (voir
-    // `main.rs::open_options_modal` / `PostRedraw::CloseOptions`). Rouvrir la modale redonne donc
-    // bien le focus, refermer et rouvrir n'en garde aucune trace.
-    let first_frame = !ui.data_mut(|d| {
-        let seen = d.get_temp::<bool>(focus_given_id()).unwrap_or(false);
-        d.insert_temp(focus_given_id(), true);
-        seen
-    });
 
     // Tout le décor de la fenêtre — `design::window` depuis le 2026-09-10 (lot 1 de
     // `docs/plan-composants-ui.md`). Il vivait ici, dans une fonction `chrome()` de ce panneau,
@@ -789,79 +773,20 @@ pub fn show(
             return;
         }
         // **Tout l'onglet défile** depuis le 2026-09-15 : il portait quatre sections, il en porte
-        // sept — « Fichier », « Combat », une section de notifications par fonctionnalité
-        // (`panels::notifications`), « Mise à jour » et « Compte ». La dernière tombait hors de la
-        // fenêtre sans que rien ne le dise, et agrandir la fenêtre pour suivre chaque réglage
-        // ajouté n'est pas une option : c'est une fenêtre posée par-dessus un jeu.
+        // sept — « Combat », une section de notifications par fonctionnalité
+        // (`panels::notifications`), « Fichier », « Mise à jour » et « Compte ». La dernière
+        // tombait hors de la fenêtre sans que rien ne le dise, et agrandir la fenêtre pour suivre
+        // chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un jeu.
+        //
+        // **L'ordre des sections** (remanié le 2026-09-16) va de ce qu'on règle souvent à ce qu'on
+        // règle une fois : l'affichage d'abord, les notifications ensuite, et les
+        // trois sections de maintenance à la fin — « Fichier » (le chemin de `wakfu.log`, que la
+        // découverte automatique trouve seule dans l'immense majorité des cas), « Mise à jour »,
+        // « Compte ».
         panel.scroll_area(ui, "options-parametres", |ui, width| {
             // La largeur utile vient de la zone défilable : la réserve de barre y est déjà
             // déduite (voir `design::PanelZones::scroll_area`).
             let inner_width = width;
-            ui.add(design::heading("Fichier"));
-
-            // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
-            // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
-            // le reste. C'est le bouton qui commande, pas l'inverse — une largeur figée pour lui
-            // désaccorderait le couple dès que le libellé ou la fenêtre changent.
-            let browse = design::button("Parcourir")
-                .variant(ButtonVariant::Secondary)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .log_name("options-parcourir");
-            let browse_width = browse.desired_size(ui).x;
-            let row_rect = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            // Plancher à zéro : si la ligne devenait plus étroite que le bouton, un rectangle de
-            // largeur négative serait inversé par egui et peint n'importe où. Zéro le rend invisible,
-            // ce qui se voit sur une capture — c'est la règle du contrat de composant.
-            let field_width = (row_rect.width() - browse_width - FIELD_TO_BROWSE_GAP).max(0.0);
-            // Le champ garde sa hauteur native (25px) et se centre sur la ligne, que le bouton fixe à
-            // 36 : le jeu compose réellement des lignes où le champ est plus bas que ce qui
-            // l'accompagne (voir `design::components::input`), et la règle du design system est que la
-            // hauteur d'un composant est celle de sa référence — pas celle de son voisin.
-            let field_rect = egui::Rect::from_center_size(
-                egui::pos2(row_rect.left() + field_width / 2.0, row_rect.center().y),
-                egui::vec2(field_width, FIELD_HEIGHT),
-            );
-            let browse_rect = egui::Rect::from_min_size(
-                egui::pos2(row_rect.right() - browse_width, row_rect.top()),
-                egui::vec2(browse_width, ROW_HEIGHT),
-            );
-            // Focus initial dans le champ à l'ouverture : la modale est la SEULE fenêtre overlay
-            // focalisable (§9.1 du plan, `WS_EX_NOACTIVATE` délibérément omis pour elle), et son unique
-            // réglage est ce champ — devoir cliquer dedans avant de pouvoir taper n'a aucune raison
-            // d'être. Une seule frame, sinon le champ reprendrait le focus indéfiniment.
-            ui.put(
-                field_rect,
-                design::input(&mut state.path_input)
-                    .placeholder("Chemin vers wakfu.log")
-                    .width(field_width)
-                    // Un chemin se retape rarement à partir de l'ancien : la croix vide d'un geste.
-                    .clearable(true)
-                    // Le champ porte l'alerte en même temps que le message ci-dessous : celui-ci est
-                    // sous le bouton « Parcourir » et hors du regard de qui vient de taper.
-                    .error(state.error.is_some())
-                    .request_focus(first_frame)
-                    .log_name("options-chemin"),
-            );
-
-            if ui.put(browse_rect, browse).clicked() {
-                action = OptionsModalAction::Browse;
-            }
-
-            // Message d'erreur — `design::info_text` au ton alerte depuis le 2026-09-10. C'était le
-            // dernier texte de la modale à échapper au design system : un `ui.label` à la police
-            // proportionnelle d'egui, au corps 13 arbitraire, sans pastille ni interligne relevé. Son
-            // rouge (`#e06055`) n'appartenait à aucune capture ; celui du composant est le rouge mesuré
-            // du bouton « Annuler ».
-            if let Some(err) = &state.error {
-                ui.add_space(INFO_GAP);
-                ui.add(
-                    design::info_text(err)
-                        .tone(design::InfoTone::Alert)
-                        .width(inner_width)
-                        .log_name("options-erreur"),
-                );
-            }
-
             // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
             // en un seul endroit.
             //
@@ -1090,6 +1015,81 @@ pub fn show(
                 },
             ) {
                 action = OptionsModalAction::TestChatSound;
+            }
+
+            // **Section « Fichier »** — le chemin de `wakfu.log` que l'overlay suit.
+            //
+            // **Descendue ici le 2026-09-16** (demande utilisateur : « déplacer la section
+            // Fichier avant la section Mise à jour »), elle ouvrait l'onglet depuis la refonte du
+            // 2026-09-09. Elle y était par ancienneté — c'était le premier réglage de l'overlay —
+            // pas par usage : ce chemin se règle une fois, souvent jamais (la découverte
+            // automatique le trouve seule, voir `overlay_ingest::discovery`), là où les sections
+            // qui la précèdent maintenant se règlent au fil des sessions. Elle rejoint donc les
+            // deux autres sections de maintenance, « Mise à jour » et « Compte ».
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Fichier"));
+
+            // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
+            // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
+            // le reste. C'est le bouton qui commande, pas l'inverse — une largeur figée pour lui
+            // désaccorderait le couple dès que le libellé ou la fenêtre changent.
+            let browse = design::button("Parcourir")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .log_name("options-parcourir");
+            let browse_width = browse.desired_size(ui).x;
+            let row_rect = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            // Plancher à zéro : si la ligne devenait plus étroite que le bouton, un rectangle de
+            // largeur négative serait inversé par egui et peint n'importe où. Zéro le rend invisible,
+            // ce qui se voit sur une capture — c'est la règle du contrat de composant.
+            let field_width = (row_rect.width() - browse_width - FIELD_TO_BROWSE_GAP).max(0.0);
+            // Le champ garde sa hauteur native (25px) et se centre sur la ligne, que le bouton fixe à
+            // 36 : le jeu compose réellement des lignes où le champ est plus bas que ce qui
+            // l'accompagne (voir `design::components::input`), et la règle du design system est que la
+            // hauteur d'un composant est celle de sa référence — pas celle de son voisin.
+            let field_rect = egui::Rect::from_center_size(
+                egui::pos2(row_rect.left() + field_width / 2.0, row_rect.center().y),
+                egui::vec2(field_width, FIELD_HEIGHT),
+            );
+            let browse_rect = egui::Rect::from_min_size(
+                egui::pos2(row_rect.right() - browse_width, row_rect.top()),
+                egui::vec2(browse_width, ROW_HEIGHT),
+            );
+            // **Plus de focus initial dans ce champ** depuis que la section a quitté la tête de
+            // l'onglet (2026-09-16) : il était justifié quand le chemin de `wakfu.log` était le
+            // premier réglage visible à l'ouverture (« son unique réglage est ce champ »), il ne
+            // l'est plus pour un champ que la fenêtre n'ouvre même pas sous les yeux — le curseur
+            // aurait clignoté plusieurs sections plus bas, hors du champ visible.
+            ui.put(
+                field_rect,
+                design::input(&mut state.path_input)
+                    .placeholder("Chemin vers wakfu.log")
+                    .width(field_width)
+                    // Un chemin se retape rarement à partir de l'ancien : la croix vide d'un geste.
+                    .clearable(true)
+                    // Le champ porte l'alerte en même temps que le message ci-dessous : celui-ci est
+                    // sous le bouton « Parcourir » et hors du regard de qui vient de taper.
+                    .error(state.error.is_some())
+                    .log_name("options-chemin"),
+            );
+
+            if ui.put(browse_rect, browse).clicked() {
+                action = OptionsModalAction::Browse;
+            }
+
+            // Message d'erreur — `design::info_text` au ton alerte depuis le 2026-09-10. C'était le
+            // dernier texte de la modale à échapper au design system : un `ui.label` à la police
+            // proportionnelle d'egui, au corps 13 arbitraire, sans pastille ni interligne relevé. Son
+            // rouge (`#e06055`) n'appartenait à aucune capture ; celui du composant est le rouge mesuré
+            // du bouton « Annuler ».
+            if let Some(err) = &state.error {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(err)
+                        .tone(design::InfoTone::Alert)
+                        .width(inner_width)
+                        .log_name("options-erreur"),
+                );
             }
 
             // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
