@@ -65,7 +65,7 @@ pub struct OverlayConfig {
     ///
     /// **Ici et non au compte**, même exception et même raison que
     /// [`Self::chat_alert_duration_seconds`] : ce réglage n'a pas d'équivalent web, et le serveur
-    /// n'accepte que des clés connues. `None` = défaut (3,5 s).
+    /// n'accepte que des clés connues. `None` = défaut (5 s).
     ///
     /// Avant cette clé, la carte du décompte empruntait la durée du **profil d'alertes de
     /// ramassage** (`AlertProfile`, descendue du compte) : régler l'une réglait l'autre.

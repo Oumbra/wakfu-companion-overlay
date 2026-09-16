@@ -43,8 +43,14 @@ pub const DEFAULT_SOUND_ITEM_NAMES: [&str; 10] = [
     "Plan \"Epée d'Amakna\"",
 ];
 
-/// Durée d'affichage du toast d'alerte, en secondes — `DEFAULT_ALERT_DURATION_SECONDS` du web.
-pub const DEFAULT_ALERT_DURATION_SECONDS: f32 = 3.5;
+/// Durée d'affichage du toast d'alerte, en secondes.
+///
+/// **5 s, et non les 3,5 s de `DEFAULT_ALERT_DURATION_SECONDS` du web** (demande utilisateur du
+/// 2026-09-16) : c'est le défaut de TOUTES les lignes « Fermeture automatique » de l'overlay —
+/// alertes de ramassage (ce profil), carte de chat et carte de décompte (config locale, voir
+/// `overlay_ui::config`). Le web garde son 3,5 ; un compte qui a déjà réglé sa durée n'est pas
+/// concerné, seul un profil sans `alertDurationSeconds` reçoit cette valeur.
+pub const DEFAULT_ALERT_DURATION_SECONDS: f32 = 5.0;
 
 /// Plancher de la durée réglable — `MIN_ALERT_DURATION_SECONDS` du web.
 pub const MIN_ALERT_DURATION_SECONDS: f32 = 0.5;
