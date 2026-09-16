@@ -129,6 +129,11 @@ mod linux_main {
     const WATCHLIST_MAX_CEILING: f64 = 1000.0;
     const GAME_EDGE_MARGIN_PX: i32 = 12;
     const GAME_TOP_MARGIN_PX: i32 = 28;
+    // Voir `main.rs::GAME_RECAP_TOP_MARGIN_PX` — l'ancrage de la bande Récap, sous la rangée de
+    // boutons du jeu.
+    const GAME_RECAP_TOP_MARGIN_PX: i32 = 70;
+    // Voir `main.rs::RECAP_INITIAL_WIDTH` — corrigée dès la première frame par la largeur mesurée.
+    const RECAP_INITIAL_WIDTH: f64 = 360.0;
 
     /// Même calcul que `main.rs::watchlist_target_width` (voir sa doc pour le détail) — dupliqué
     /// plutôt que partagé : petite fonction pure, coût de duplication largement inférieur au coût
@@ -214,9 +219,12 @@ mod linux_main {
         last_position: Option<PhysicalPosition<i32>>,
         last_watchlist_width: Option<f64>,
         last_watchlist_height: Option<f64>,
+        /// Voir `main.rs::OverlayWindow::last_recap_width` — la largeur que la bande Récap a
+        /// mesurée à sa dernière frame.
+        last_recap_width: Option<f32>,
         /// La fenêtre est-elle actuellement affichée ? — toujours `true` sauf pour une fenêtre
         /// `Combat` hors combat quand l'option est décochée (le défaut), voir
-        /// `App::sync_combat_visibility`. Même rôle que dans `main.rs` : éviter un `set_visible`
+        /// `App::sync_panel_visibility`. Même rôle que dans `main.rs` : éviter un `set_visible`
         /// par tick alors que rien n'a changé.
         visible: bool,
         /// État topmost/délai de grâce — voir `overlay_platform::linux::topmost` (7 tests
@@ -289,6 +297,9 @@ mod linux_main {
         /// `main.rs::App::countdown_toast`.
         countdown_toast: suivi_tab::CountdownToastSettings,
         game_window: GameWindowTracker,
+        /// Instant de lancement — l'origine de la durée de session de la bande Récap. Voir
+        /// `main.rs::App::started_at` : temps d'exécution du processus, jamais dérivé du fichier.
+        started_at: std::time::Instant,
         banner_printed: bool,
         /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir
         /// `App::start_file_dialog`. Un seul à la fois (une seule modale Options peut être ouverte,
@@ -412,6 +423,7 @@ mod linux_main {
                 chat_toast,
                 countdown_toast,
                 game_window,
+                started_at: std::time::Instant::now(),
                 banner_printed: false,
                 pending_dialog: None,
                 pending_recipe: None,
@@ -610,6 +622,7 @@ mod linux_main {
                 last_position: None,
                 last_watchlist_width: None,
                 last_watchlist_height: None,
+                last_recap_width: None,
                 visible: true,
                 // Jamais promue : `sync_topmost` l'ignore, elle reste en z-order normal.
                 topmost_state: TopmostState::Normal,
@@ -645,7 +658,7 @@ mod linux_main {
             }
             let found = self.game_window.scan();
             // Une fenêtre `Combat` créée hors combat naît masquée quand l'option est décochée —
-            // voir `sync_combat_visibility`. Lu ici une fois pour toute la passe.
+            // voir `sync_panel_visibility`. Lu ici une fois pour toute la passe.
             let snapshot = self.snapshot.load();
 
             self.windows.retain(|_, overlay| {
@@ -669,7 +682,11 @@ mod linux_main {
             });
 
             for (character_name, info) in &found {
-                for kind in [OverlayKind::Combat, OverlayKind::Watchlist] {
+                for kind in [
+                    OverlayKind::Combat,
+                    OverlayKind::Watchlist,
+                    OverlayKind::Recap,
+                ] {
                     if let Some(existing) = self
                         .windows
                         .values_mut()
@@ -678,13 +695,17 @@ mod linux_main {
                         Self::reposition(existing, info.rect);
                         continue;
                     }
-                    let visible = kind != OverlayKind::Combat
-                        || panels::combat::should_show(
+                    let visible = match kind {
+                        OverlayKind::Combat => panels::combat::should_show(
                             &snapshot,
                             character_name,
                             self.combat_always_visible,
                             self.features.combat,
-                        );
+                        ),
+                        // La bande Récap ne dépend que de sa case — voir `main.rs`, même règle.
+                        OverlayKind::Recap => self.features.recap,
+                        _ => true,
+                    };
                     let overlay = Self::create_overlay_window(
                         event_loop,
                         kind,
@@ -703,28 +724,31 @@ mod linux_main {
             }
         }
 
-        /// Affiche ou masque chaque fenêtre `Combat` selon qu'un combat est en cours pour SON
-        /// personnage — même politique que `main.rs::App::sync_combat_visibility` (masquer plutôt
-        /// que détruire, défaut décoché), la règle elle-même étant `panels::combat::should_show`.
+        /// Affiche ou masque les fenêtres dont la présence est CONDITIONNELLE — `Combat` (combat
+        /// en cours pour SON personnage) et `Recap` (sa case à cocher, 2026-09-16) — même
+        /// politique que `main.rs::App::sync_panel_visibility` (masquer plutôt que détruire), les
+        /// règles elles-mêmes étant `panels::combat::should_show` et `features.recap`.
         ///
         /// Pas de recréation de surface ici, contrairement à Windows : ce chemin corrige un défaut
         /// propre à DirectComposition (voir `main.rs::sync_topmost`), sans équivalent sous X11.
-        fn sync_combat_visibility(&mut self) {
+        fn sync_panel_visibility(&mut self) {
             let snapshot = self.snapshot.load();
             let always = self.combat_always_visible;
-            // Voir `main.rs::App::sync_combat_visibility` : même rôle, le détail des combats
+            // Voir `main.rs::App::sync_panel_visibility` : même rôle, le détail des combats
             // coupé masque toutes les fenêtres Combat.
             let enabled = self.features.combat;
+            let recap_enabled = self.features.recap;
             for overlay in self.windows.values_mut() {
-                if overlay.kind != OverlayKind::Combat {
-                    continue;
-                }
-                let wanted = panels::combat::should_show(
-                    &snapshot,
-                    &overlay.character_name,
-                    always,
-                    enabled,
-                );
+                let wanted = match overlay.kind {
+                    OverlayKind::Combat => panels::combat::should_show(
+                        &snapshot,
+                        &overlay.character_name,
+                        always,
+                        enabled,
+                    ),
+                    OverlayKind::Recap => recap_enabled,
+                    _ => continue,
+                };
                 if wanted == overlay.visible {
                     continue;
                 }
@@ -734,7 +758,12 @@ mod linux_main {
                     overlay.window.request_redraw();
                 }
                 tracing::info!(
-                    "[combat] {} — panneau {}",
+                    "[{}] {} — panneau {}",
+                    if overlay.kind == OverlayKind::Recap {
+                        "recap"
+                    } else {
+                        "combat"
+                    },
                     overlay.character_name,
                     if wanted { "affiché" } else { "masqué" }
                 );
@@ -757,6 +786,12 @@ mod linux_main {
                 OverlayKind::Watchlist => PhysicalPosition::new(
                     rect.left + (rect.width - overlay_width) / 2,
                     rect.client_top + GAME_TOP_MARGIN_PX,
+                ),
+                // Récap : bord gauche, sous la rangée de boutons du jeu — voir
+                // `GAME_RECAP_TOP_MARGIN_PX` et `main.rs::App::anchor_position`.
+                OverlayKind::Recap => PhysicalPosition::new(
+                    rect.left + GAME_EDGE_MARGIN_PX,
+                    rect.client_top + GAME_RECAP_TOP_MARGIN_PX,
                 ),
                 // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
                 // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent
@@ -790,6 +825,12 @@ mod linux_main {
                     options_modal::WINDOW_SIZE.0 as f64,
                     options_modal::WINDOW_SIZE.1 as f64,
                 ),
+                // Récap : largeur pilotée par le contenu dès la première frame — voir
+                // `RECAP_INITIAL_WIDTH` et `main.rs`, même mécanique.
+                OverlayKind::Recap => (
+                    RECAP_INITIAL_WIDTH,
+                    panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                ),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
                 OverlayKind::Login => (
                     panels::login::WINDOW_WIDTH as f64,
@@ -799,6 +840,7 @@ mod linux_main {
             let title_suffix = match kind {
                 OverlayKind::Combat => "Combat",
                 OverlayKind::Watchlist => "Suivi",
+                OverlayKind::Recap => "Recap",
                 OverlayKind::Options => "Options",
                 OverlayKind::Login => "Connexion",
             };
@@ -812,7 +854,7 @@ mod linux_main {
                 .with_window_level(WindowLevel::AlwaysOnTop)
                 .with_resizable(false)
                 // Une fenêtre `Combat` peut naître MASQUÉE (aucun combat en cours, option
-                // décochée — voir `sync_combat_visibility`) : demandé dès les attributs plutôt que
+                // décochée — voir `sync_panel_visibility`) : demandé dès les attributs plutôt que
                 // par un `set_visible(false)` juste après, qui la ferait clignoter à l'écran.
                 .with_visible(visible)
                 // `_NET_WM_WINDOW_TYPE_UTILITY` (§6.4 du plan) — absent du taskbar/alt-tab, comme
@@ -863,6 +905,7 @@ mod linux_main {
                 last_position: Some(position),
                 last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
                 last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
+                last_recap_width: (kind == OverlayKind::Recap).then_some(size.0 as f32),
                 visible,
                 // `WindowLevel::AlwaysOnTop` déjà appliqué ci-dessus à la création — voir la doc
                 // de `topmost::decide` pour la suite de la politique.
@@ -1115,7 +1158,7 @@ mod linux_main {
                 rect,
                 true,
                 // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul
-                // `Combat` peut naître masqué (voir `sync_combat_visibility`).
+                // `Combat` peut naître masqué (voir `sync_panel_visibility`).
                 true,
             );
             // **Brouillons pris sur le compte** — même logique que `main.rs::open_options_modal`
@@ -1562,6 +1605,7 @@ mod linux_main {
                             recherche = self.features.chat,
                             combat = self.features.combat,
                             sorts = self.features.spells,
+                            recap = self.features.recap,
                             "[options] fonctionnalités actives mises à jour"
                         );
                         let _ = self
@@ -1659,7 +1703,7 @@ mod linux_main {
                     self.close_options_modal(options_window_id, "Valider");
                     // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
                     // d'`about_to_wait` — même raison que `main.rs`.
-                    self.sync_combat_visibility();
+                    self.sync_panel_visibility();
                 }
                 Err(err) => {
                     tracing::info!("[options] chemin refusé : {}", err.message());
@@ -1806,8 +1850,8 @@ mod linux_main {
                         .surface
                         .configure(&overlay.gpu.device, &overlay.gpu.config);
                 }
-                // Fenêtre `Combat` masquée hors combat (voir `sync_combat_visibility`) : rien à
-                // peindre ni à présenter. C'est `sync_combat_visibility` qui redemande un
+                // Fenêtre `Combat` masquée hors combat (voir `sync_panel_visibility`) : rien à
+                // peindre ni à présenter. C'est `sync_panel_visibility` qui redemande un
                 // redessin en la faisant réapparaître.
                 WindowEvent::RedrawRequested if !overlay.visible => {}
                 WindowEvent::RedrawRequested => {
@@ -1907,10 +1951,29 @@ mod linux_main {
                             interactive,
                             shortcuts: self.hotkeys.bindings(),
                             now,
+                            session_totals: &snapshot.totals,
+                            // Voir `main.rs` : `now` et non une seconde lecture d'horloge.
+                            session_uptime: now.saturating_duration_since(self.started_at),
                             options: overlay.options_state.as_mut(),
                             login: overlay.login_state.as_mut(),
                         },
                     );
+                    // Bande Récap : retaillée à la largeur qu'elle vient de mesurer — voir
+                    // `main.rs`, même mécanique. Sous X11, `request_inner_size` est asynchrone :
+                    // le `Resized` qui suit reconfigure la surface lui-même.
+                    if overlay.kind == OverlayKind::Recap {
+                        if let Some(width) = outcome.recap_width {
+                            if overlay.last_recap_width != Some(width) {
+                                let height = panels::recap::HEIGHT as f64
+                                    + render_content::RECAP_TOOLTIP_RESERVE as f64;
+                                let _ = overlay.window.request_inner_size(
+                                    winit::dpi::LogicalSize::new(width as f64, height),
+                                );
+                                overlay.last_recap_width = Some(width);
+                                overlay.window.request_redraw();
+                            }
+                        }
+                    }
                     // Fenêtre de connexion : retaillée à la hauteur de la carte et recentrée —
                     // voir `main.rs`. Sous X11, `request_inner_size` est asynchrone (le
                     // `Resized` qui suit reconfigure la surface, voir plus haut) : le décalage de
@@ -2197,7 +2260,7 @@ mod linux_main {
             // Apparition/disparition automatique du panneau Combat — entre les deux, même ordre
             // que `main.rs` : `sync_windows` vient peut-être de créer la fenêtre, `sync_topmost`
             // doit voir son état final.
-            self.sync_combat_visibility();
+            self.sync_panel_visibility();
             self.sync_topmost();
 
             let now = std::time::Instant::now();

@@ -965,6 +965,32 @@ pub fn show(
             },
             );
 
+            // **Section « Recap »** (2026-09-16, demande utilisateur : « créer la section Recap,
+            // après la section Combat ») — l'interrupteur de la bande XP / Kamas / Combats /
+            // Challenges / Durée posée en haut à gauche de la fenêtre de jeu (`panels::recap`).
+            //
+            // Une section à une seule case pour l'instant, et c'est voulu : la demande ne porte
+            // que sur l'affichage. Elle a sa place propre plutôt qu'une ligne de plus sous
+            // « Combat » parce que c'est une autre fonctionnalité — le récap compte la session
+            // entière, pas le combat en cours — et parce que les réglages qui viendront (quels
+            // chiffres montrer, par exemple) s'y rangeront sans déménagement.
+            //
+            // Pas de `feature_switch::show` ici : cette fonction grise TOUT ce qui est peint
+            // ensuite dans le `Ui`, ce qui emporterait les quatre sections suivantes — c'est un
+            // outil d'onglet entier, pas de section. Même raison que pour les deux cases de la
+            // section « Combat » au-dessus.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Recap"));
+            ui.add(
+                design::checkbox(&mut state.features.recap, "Activer le récap de session")
+                    .tooltip(
+                        "La bande XP, kamas, combats, challenges et durée, en haut à gauche de la \
+                         fenêtre de jeu. Décochée, elle ne s'affiche plus ; les chiffres continuent \
+                         d'être comptés.",
+                    )
+                    .log_name("options-recap-actif"),
+            );
+
             // **Les trois sections de notifications** (2026-09-15) — le Suivi, les Alertes et le
             // Chat, dans l'ordre du menu d'onglets, juste après « Combat » qui porte déjà les
             // siennes depuis le 2026-09-14.

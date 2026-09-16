@@ -75,6 +75,17 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// d'interface du jeu) plus les 6 px de marge interne — 34 px au lieu de 62.
 pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
 
+/// Espace réservé **sous** la bande Récap (`OverlayKind::Recap`, 2026-09-16) pour ses cinq
+/// infobulles — exactement le même besoin, la même valeur et la même raison que
+/// [`WATCHLIST_TOOLTIP_RESERVE`] : la bande est collée au bord haut de la fenêtre de jeu, ses
+/// infobulles s'ouvrent donc en dessous (`TooltipSide::Below`, voir `panels::recap::paint_cell`)
+/// et il faut que la fenêtre OS descende assez bas pour les contenir.
+///
+/// Un seul jeton partagé aurait été tentant ; deux constantes distinctes disent que ce sont deux
+/// panneaux dont les infobulles peuvent diverger (plusieurs lignes ici un jour, une seule là-bas),
+/// comme `COMBAT_TOP_MARGIN` reste séparée bien qu'elle mesure la même chose retournée.
+pub const RECAP_TOOLTIP_RESERVE: f32 = 28.0;
+
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
 /// pas de boucle 60 Hz forcée, l'overlay ne consomme rien tant que rien ne change). Publique : à
@@ -110,6 +121,14 @@ pub enum OverlayKind {
     /// "Options" du carré de contrôle, ou raccourci `Ctrl+Shift+O`), voir
     /// `main.rs::App::open_options_modal`/`bin/overlay-ui-x11.rs` (même méthode dupliquée).
     Options,
+    /// **Récap de session** (2026-09-16, demande utilisateur) — la bande XP / Kamas / Combats /
+    /// Challenges / Durée posée en haut à gauche de la fenêtre de jeu, sous les boutons
+    /// d'interface du client. Voir `panels::recap`.
+    ///
+    /// Créée par `sync_windows` comme `Combat`/`Watchlist` (une par fenêtre de jeu trouvée), et
+    /// masquée — jamais détruite — quand la case « Activer le récap de session » est décochée,
+    /// même mécanique que le panneau Combat (`main.rs::App::sync_panel_visibility`).
+    Recap,
     /// Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) — voir `panels::login`. **La
     /// première interface de l'overlay**, et la seule tant que `AuthStatus` n'est pas `Connected` :
     /// une fenêtre logicielle classique (barre des tâches, focus, centrée sur l'écran), jamais un
@@ -282,6 +301,20 @@ pub struct RenderContent<'a> {
     /// tout appelant (`overlay-testkit`) qui n'exerce pas encore ce panneau. `&mut` : la frappe
     /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
     /// `panels::options_modal::OptionsModalState`.
+    /// Totaux de la session tels que le moteur les tient (`overlay_engine::SessionTotals`) — ce
+    /// que peint la bande Récap (`kind == OverlayKind::Recap`), ignoré par les autres zones.
+    ///
+    /// Une RÉFÉRENCE sur le snapshot chargé par l'hôte plutôt qu'une copie : `SessionTotals` est
+    /// `Copy`, mais le passer par valeur inviterait à le construire à la main au site d'appel —
+    /// ce que le harnais de captures s'interdit justement (voir la doc de `tests/panels.rs`).
+    pub session_totals: &'a overlay_engine::SessionTotals,
+    /// Depuis combien de temps l'overlay tourne — la « durée de la session » de la bande Récap.
+    ///
+    /// **Jamais dérivée de `wakfu.log`**, contrairement au web : décision explicite de
+    /// l'utilisateur, voir la doc de module de `panels::recap`. L'hôte la calcule à partir de
+    /// l'instant de lancement du processus (`main.rs::App::started_at`), ce qui la rend aussi
+    /// figeable par un harnais de test, comme `now`.
+    pub session_uptime: std::time::Duration,
     pub options: Option<&'a mut OptionsModalState>,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
@@ -338,6 +371,11 @@ pub struct RenderOutcome {
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion — l'hôte
     /// relance la vérification avec installation (voir `panels::login::LoginOutcome`).
     pub retry_update: bool,
+    /// Largeur que la bande Récap vient d'occuper (`kind == Recap`), pour que l'hôte ajuste sa
+    /// fenêtre OS au contenu — même mécanique que [`Self::login_height`], et pour la même raison
+    /// qu'elle : une fenêtre plus large que sa bande capterait les clics sur du vide en mode
+    /// interactif. Voir `panels::recap::show`.
+    pub recap_width: Option<f32>,
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
@@ -420,6 +458,8 @@ pub fn build_ui(
                 interactive: content.interactive,
                 shortcuts: content.shortcuts,
                 now: content.now,
+                session_totals: content.session_totals,
+                session_uptime: content.session_uptime,
                 options: content.options.as_deref_mut(),
                 login: content.login.as_deref_mut(),
             },
@@ -461,6 +501,8 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         interactive,
         shortcuts,
         now,
+        session_totals,
+        session_uptime,
         options,
         login,
     } = content;
@@ -504,6 +546,13 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,
+        // Récap : collé au coin haut-gauche de sa fenêtre, sans la moindre marge — la bande peint
+        // son propre fond et se place elle-même (voir `panels::recap::show`), et la place pour ses
+        // infobulles est prise SOUS elle, dans la hauteur de fenêtre
+        // ([`RECAP_TOOLTIP_RESERVE`]), jamais en la décalant vers le bas. Même arbitrage que le
+        // Suivi, et pour le même retour utilisateur : une bande qui flotte loin du bord du jeu
+        // dérange.
+        OverlayKind::Recap => egui::Margin::ZERO,
         // La fenêtre de connexion peint sa carte jusqu'aux bords de sa fenêtre OS (fond
         // translucide, anneau animé sur le pourtour) — voir `panels::login`.
         OverlayKind::Login => egui::Margin::ZERO,
@@ -628,6 +677,13 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         outcome.retry_update = login_outcome.retry_update;
                         outcome.login_height = Some(login_outcome.content_height);
                     }
+                }
+                // Récap de session (2026-09-16) — voir `panels::recap`. Aucune intention
+                // remontée : cette bande n'a ni bouton ni état, seulement la largeur qu'elle
+                // vient d'occuper, dont l'hôte se sert pour redimensionner la fenêtre OS.
+                OverlayKind::Recap => {
+                    outcome.recap_width =
+                        Some(panels::recap::show(ui, session_totals, session_uptime));
                 }
                 OverlayKind::Options => {
                     if let Some(state) = options {

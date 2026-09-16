@@ -289,6 +289,20 @@ pub struct SessionTotals {
     pub loot_count: i64,
     pub fights_won: i64,
     pub fights_lost: i64,
+    /// Challenges réussis **de toute la session**, tous combats confondus (2026-09-16) — le
+    /// pendant de `FightSnapshot::challenges_passed`, qui ne compte que ceux d'UN combat.
+    ///
+    /// Deux compteurs et non un total dérivé de `fights` : `MAX_TRACKED_FIGHTS` purge les combats
+    /// terminés les plus anciens, un total recalculé à la volée diminuerait donc en cours de
+    /// session. Même raison que `fights_won`/`fights_lost`, accumulés ici pour la même raison.
+    ///
+    /// **Compté même sans `fightId` résolu** (le parser n'en rattache pas toujours un), miroir
+    /// exact du web : `StatsStoreService.challengesPassed`/`challengesFailed` s'incrémentent sur
+    /// TOUTE ligne de challenge, indépendamment de `Fight.challengesPassed`/`Failed`, qui eux
+    /// exigent un combat.
+    pub challenges_passed: i64,
+    /// Challenges échoués de toute la session — voir [`Self::challenges_passed`].
+    pub challenges_failed: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1260,11 +1274,17 @@ impl SessionState {
                 }
             }
             LogEntry::ChallengeResult {
-                success,
-                fight_id: Some(fight_id),
-                ..
+                success, fight_id, ..
             } => {
-                if let Some(fight) = self.fights.get_mut(fight_id) {
+                // Le total de SESSION d'abord, et sans condition sur `fight_id` : voir
+                // `SessionTotals::challenges_passed`. Un challenge dont le combat n'a pas été
+                // résolu par le parser reste un challenge tenté.
+                if *success {
+                    self.totals.challenges_passed += 1;
+                } else {
+                    self.totals.challenges_failed += 1;
+                }
+                if let Some(fight) = (*fight_id).and_then(|id| self.fights.get_mut(&id)) {
                     if *success {
                         fight.challenges_passed += 1;
                     } else {

@@ -1216,7 +1216,7 @@ fn damage_bar(ui: &mut egui::Ui, rect: egui::Rect, damage: i64, total_damage: i6
 /// de retour à la ligne malvenu ici : ce texte est TOUJOURS peint directement via `Painter::text`
 /// (voir `design::text::paint_outlined_text`), jamais mis en page par un widget qui pourrait
 /// le scinder.
-fn format_fr_thousands(n: i64) -> String {
+pub(crate) fn format_fr_thousands(n: i64) -> String {
     let sign = if n < 0 { "-" } else { "" };
     let digits = n.unsigned_abs().to_string();
     let grouped: String = digits

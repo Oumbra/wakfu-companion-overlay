@@ -65,6 +65,15 @@ pub struct FeatureToggles {
     /// pas de colonne où peindre les sorts. Décoché, le panneau garde ses portraits et ses barres
     /// et perd le bloc (et avec lui les marques sur les médaillons).
     pub spells: bool,
+    /// **La bande Récap de session** — case « Activer le récap de session », en tête de la section
+    /// « Recap » de l'onglet « Paramètres » (2026-09-16).
+    ///
+    /// Décochée, aucune fenêtre Récap n'est montrée (elle est masquée, pas détruite — voir
+    /// `main.rs::App::sync_panel_visibility`, même politique que le panneau Combat). Le moteur
+    /// continue de compter : recocher la case retrouve les mêmes chiffres, sans relire le log.
+    /// La durée affichée, elle, reste celle de l'overlay depuis son lancement — couper la bande ne
+    /// met pas le chrono en pause (voir `panels::recap`).
+    pub recap: bool,
 }
 
 impl FeatureToggles {
@@ -88,6 +97,7 @@ impl Default for FeatureToggles {
             chat: true,
             combat: true,
             spells: true,
+            recap: true,
         }
     }
 }

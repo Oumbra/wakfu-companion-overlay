@@ -139,6 +139,8 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },

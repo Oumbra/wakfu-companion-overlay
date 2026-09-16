@@ -152,6 +152,15 @@ pub struct OverlayConfig {
     /// Même politique que [`Self::combat_enabled`] pour le reste.
     #[serde(default = "actif")]
     pub spells_enabled: bool,
+    /// La bande **Récap de session** est-elle active ? — case « Activer le récap de session », en
+    /// tête de la section « Recap » de l'onglet « Paramètres » (2026-09-16).
+    ///
+    /// Décochée, la bande XP / Kamas / Combats / Challenges / Durée posée en haut à gauche de la
+    /// fenêtre de jeu n'est plus montrée (voir `panels::recap`). Même politique que ses voisines
+    /// pour le reste : le moteur continue de compter, rien n'est effacé, et
+    /// `#[serde(default = "actif")]` garde la bande allumée pour une config écrite avant ce champ.
+    #[serde(default = "actif")]
+    pub recap_enabled: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -233,6 +242,7 @@ impl Default for OverlayConfig {
             chat_enabled: actif(),
             combat_enabled: actif(),
             spells_enabled: actif(),
+            recap_enabled: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
@@ -303,6 +313,7 @@ impl OverlayConfig {
             chat: self.chat_enabled,
             combat: self.combat_enabled,
             spells: self.spells_enabled,
+            recap: self.recap_enabled,
         }
     }
 
@@ -314,6 +325,7 @@ impl OverlayConfig {
         self.chat_enabled = features.chat;
         self.combat_enabled = features.combat;
         self.spells_enabled = features.spells;
+        self.recap_enabled = features.recap;
     }
 
     /// Les deux sourdines de cette config — voir [`crate::panels::notifications::AlertMutes`], qui les

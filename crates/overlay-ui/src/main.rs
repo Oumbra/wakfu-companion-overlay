@@ -157,6 +157,15 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 /// toast, 6 px de marge basse, plus 2 px d'arrondi — et rien de plus : la fenêtre reste
 /// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
 const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE as f64;
+
+/// Largeur de la fenêtre Récap **à sa création**, avant que la première frame n'ait mesuré sa
+/// bande (`panels::recap::show` renvoie la largeur réelle, voir `RenderOutcome::recap_width`).
+///
+/// 360 px : à peu près ce que les cinq cases occupent avec des chiffres de session ordinaires.
+/// La valeur n'a pas à être juste — elle est corrigée dès la première frame, comme le Suivi qui
+/// naît « au plus étroit » et s'élargit au premier redessin. Elle évite seulement qu'une fenêtre
+/// manifestement trop large ou trop étroite clignote le temps d'une frame.
+const RECAP_INITIAL_WIDTH: f64 = 360.0;
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.
@@ -245,6 +254,20 @@ const GAME_EDGE_MARGIN_PX: i32 = 0;
 /// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
 /// boutons Menu/Boutique du jeu).
 const GAME_TOP_MARGIN_PX: i32 = 28;
+/// Même principe que [`GAME_TOP_MARGIN_PX`], mais **sous** la rangée de boutons du jeu : c'est
+/// l'ancrage de la bande Récap (`OverlayKind::Recap`, 2026-09-16), demandée « en haut à gauche, en
+/// dessous des boutons du jeu ».
+///
+/// 70 px = les 28 px de fausse barre de titre (voir `GAME_TOP_MARGIN_PX`, mesurés), plus 36 px de
+/// bouton — `design::tokens::ICON_BUTTON_SIZE`, la taille NATIVE des cinq socles de bouton icône
+/// du jeu, donc celle de la rangée Menu/Boutique qu'on veut dégager —, plus 6 px de respiration,
+/// l'écart que le Suivi laisse déjà entre son carré de contrôle et sa bande.
+///
+/// Dérivée d'une mesure du design system plutôt que relevée sur une capture : le client Wakfu
+/// pose ses boutons de premier plan à cette échelle partout. À corriger sur retour d'écran si la
+/// bande chevauche ou flotte — c'est la seule des trois valeurs de cette famille à ne pas avoir
+/// été vérifiée sur une capture réelle.
+const GAME_RECAP_TOP_MARGIN_PX: i32 = 70;
 
 // `OverlayKind`/`UserEvent`/`AuthStatus`/`AuthCommand`/`CLICK_THROUGH_OPACITY` ont migré vers
 // `overlay_ui::render_content` (2026-09-03, §17.1 du plan) — voir leur doc là-bas, importés en
@@ -333,6 +356,12 @@ struct OverlayWindow {
     /// Même principe que `last_watchlist_width`, pour la HAUTEUR (voir `watchlist_target_height`)
     /// — change uniquement à l'apparition/disparition d'un toast, jamais avec le nombre d'entrées.
     last_watchlist_height: Option<f64>,
+    /// Dernière largeur demandée pour une fenêtre `Recap` — la bande mesure ce qu'elle occupe et
+    /// le renvoie (`RenderOutcome::recap_width`), l'hôte y ajuste la fenêtre OS. Même rôle et même
+    /// garde-fou que `last_watchlist_width` (ne pas rappeler `request_inner_size` pour rien), et
+    /// même raison de fond : une fenêtre plus large que sa bande capte les clics sur du vide.
+    /// `None` pour toute autre zone.
+    last_recap_width: Option<f32>,
     /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
     /// rien (voir `App::sync_topmost`).
     is_topmost: bool,
@@ -358,7 +387,7 @@ struct OverlayWindow {
     ///
     /// Toujours `true` sauf pour une fenêtre `Combat` quand l'option « Afficher le panneau de
     /// combat en dehors des combats » est décochée (le défaut) et qu'aucun combat n'est en cours —
-    /// voir `App::sync_combat_visibility`. Mémorisé ici pour ne pas rappeler `Window::set_visible`
+    /// voir `App::sync_panel_visibility`. Mémorisé ici pour ne pas rappeler `Window::set_visible`
     /// à chaque tick (50 ms) alors que rien n'a changé, comme `is_topmost` pour le z-order.
     visible: bool,
     /// Prochain redessin déjà planifié par une frame précédente qui a demandé un délai (retour
@@ -464,7 +493,7 @@ struct App {
     log_path: PathBuf,
     /// Le panneau Combat reste-t-il affiché en dehors des combats ? — réglage LOCAL persisté
     /// (`config::OverlayConfig::combat_always_visible`), lu au démarrage et remplacé à la
-    /// validation de la fenêtre Options. `false` par défaut : voir `sync_combat_visibility`.
+    /// validation de la fenêtre Options. `false` par défaut : voir `sync_panel_visibility`.
     combat_always_visible: bool,
     /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
     /// persisté (`config::OverlayConfig::turn_notification`), même politique que
@@ -498,6 +527,11 @@ struct App {
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
     game_window: GameWindowTracker,
+    /// Instant de lancement de l'overlay — l'origine de la **durée de session** affichée par la
+    /// bande Récap (2026-09-16). Posé une fois à la construction de l'`App` et jamais remis à
+    /// zéro : c'est le temps d'exécution du processus, jamais une durée dérivée de `wakfu.log`
+    /// (décision explicite de l'utilisateur, voir la doc de module de `panels::recap`).
+    started_at: std::time::Instant,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
     /// bannière.
@@ -691,6 +725,7 @@ impl App {
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
+            started_at: std::time::Instant::now(),
             banner_printed: false,
             last_foreground_heartbeat: None,
             pending_dialog: None,
@@ -857,6 +892,7 @@ impl App {
             last_position: None,
             last_watchlist_width: None,
             last_watchlist_height: None,
+            last_recap_width: None,
             visible: true,
             is_topmost: false,
             last_topmost_reassert: None,
@@ -995,7 +1031,7 @@ impl App {
         }
         let found = self.game_window.scan();
         // Une fenêtre `Combat` créée alors qu'aucun combat n'est en cours naît MASQUÉE quand
-        // l'option est décochée — voir `sync_combat_visibility`, qui la fera apparaître au premier
+        // l'option est décochée — voir `sync_panel_visibility`, qui la fera apparaître au premier
         // combat. Lu ici une fois pour toute la passe.
         let snapshot = self.snapshot.load();
 
@@ -1024,7 +1060,11 @@ impl App {
         });
 
         for (character_name, info) in &found {
-            for kind in [OverlayKind::Combat, OverlayKind::Watchlist] {
+            for kind in [
+                OverlayKind::Combat,
+                OverlayKind::Watchlist,
+                OverlayKind::Recap,
+            ] {
                 if let Some(existing) = self
                     .windows
                     .values_mut()
@@ -1036,13 +1076,18 @@ impl App {
                     }
                     continue;
                 }
-                let visible = kind != OverlayKind::Combat
-                    || panels::combat::should_show(
+                let visible = match kind {
+                    OverlayKind::Combat => panels::combat::should_show(
                         &snapshot,
                         character_name,
                         self.combat_always_visible,
                         self.features.combat,
-                    );
+                    ),
+                    // La bande Récap n'a pas de condition de combat : seule sa case la commande
+                    // (voir `sync_panel_visibility`, qui la suit ensuite à chaque tick).
+                    OverlayKind::Recap => self.features.recap,
+                    _ => true,
+                };
                 let mut overlay = Self::create_overlay_window(
                     event_loop,
                     kind,
@@ -1196,22 +1241,40 @@ impl App {
         }
     }
 
+    /// Affiche ou masque les fenêtres dont la présence à l'écran est CONDITIONNELLE — `Combat`
+    /// (selon qu'un combat est en cours pour SON personnage, demande du 2026-09-13) et `Recap`
+    /// (selon sa case à cocher, 2026-09-16). `Watchlist` n'en est jamais : son bandeau porte le
+    /// carré de contrôle, seul accès à la fenêtre Options depuis le jeu.
+    ///
+    /// **Masquer plutôt que détruire la fenêtre** : une fenêtre OS, sa surface wgpu et ses atlas
+    /// de textures se recréent en dizaines de millisecondes — les refaire à chaque combat mettrait
+    /// ce coût pile au moment où le joueur a besoin de voir ses dégâts. `set_visible` ne coûte
+    /// rien et garde la fenêtre prête.
+    ///
     /// Appelée à chaque tick d'`about_to_wait`, juste après `sync_windows` (une fenêtre tout juste
     /// créée est donc déjà au bon état) et avant `sync_topmost` (une fenêtre qui vient de
-    /// réapparaître doit être promue dans la même passe).
-    fn sync_combat_visibility(&mut self) {
+    /// réapparaître doit être promue dans la même passe) — et sans attendre ce tick à la
+    /// validation de la fenêtre Options, pour que le geste et son effet soient dans la même passe.
+    fn sync_panel_visibility(&mut self) {
         let snapshot = self.snapshot.load();
         let always = self.combat_always_visible;
         // Le détail des combats coupé masque toutes les fenêtres Combat au prochain tick — c'est
         // la validation de la fenêtre Options qui déclenche la passe (voir `apply_options`, qui
         // appelle cette méthode sans attendre `about_to_wait`).
         let enabled = self.features.combat;
+        let recap_enabled = self.features.recap;
         for overlay in self.windows.values_mut() {
-            if overlay.kind != OverlayKind::Combat {
-                continue;
-            }
-            let wanted =
-                panels::combat::should_show(&snapshot, &overlay.character_name, always, enabled);
+            // **Deux zones, une seule passe** (2026-09-16, arrivée de la bande Récap) : elles ont
+            // la même politique — masquer plutôt que détruire, voir la doc de cette méthode — et
+            // les mêmes précautions de réapparition juste en dessous. Seule la RÈGLE diffère :
+            // Combat dépend du combat en cours, Récap de sa seule case à cocher.
+            let wanted = match overlay.kind {
+                OverlayKind::Combat => {
+                    panels::combat::should_show(&snapshot, &overlay.character_name, always, enabled)
+                }
+                OverlayKind::Recap => recap_enabled,
+                _ => continue,
+            };
             if wanted == overlay.visible {
                 continue;
             }
@@ -1232,7 +1295,12 @@ impl App {
                 overlay.last_topmost_reassert = None;
             }
             tracing::info!(
-                "[combat] {} — panneau {}",
+                "[{}] {} — panneau {}",
+                if overlay.kind == OverlayKind::Recap {
+                    "recap"
+                } else {
+                    "combat"
+                },
                 overlay.character_name,
                 if wanted { "affiché" } else { "masqué" }
             );
@@ -1257,6 +1325,15 @@ impl App {
             OverlayKind::Watchlist => PhysicalPosition::new(
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
+            ),
+            // Récap : collé au bord GAUCHE comme Combat, mais sous la rangée de boutons du jeu —
+            // « en haut à gauche, en dessous des boutons du jeu » (2026-09-16). Voir
+            // `GAME_RECAP_TOP_MARGIN_PX` pour d'où viennent ces pixels, et `client_top` (pas
+            // `top`) pour la même raison que le Suivi : le client dessine sa fausse barre de titre
+            // dans sa propre zone cliente.
+            OverlayKind::Recap => PhysicalPosition::new(
+                rect.left + GAME_EDGE_MARGIN_PX,
+                rect.client_top + GAME_RECAP_TOP_MARGIN_PX,
             ),
             // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
             // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent ancrés
@@ -1298,12 +1375,20 @@ impl App {
                 options_modal::WINDOW_SIZE.0 as f64,
                 options_modal::WINDOW_SIZE.1 as f64,
             ),
+            // Récap : la LARGEUR suit le contenu (voir `RECAP_INITIAL_WIDTH` et le
+            // redimensionnement dans `RedrawRequested`, même mécanique que le Suivi) ; la hauteur
+            // est celle de la bande plus la réserve de ses infobulles, qui s'ouvrent en dessous.
+            OverlayKind::Recap => (
+                RECAP_INITIAL_WIDTH,
+                panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
+            ),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
             OverlayKind::Watchlist => "Suivi",
+            OverlayKind::Recap => "Recap",
             OverlayKind::Options => "Options",
             OverlayKind::Login => "Connexion",
         };
@@ -1317,7 +1402,7 @@ impl App {
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_resizable(false)
             // Une fenêtre `Combat` peut naître MASQUÉE (aucun combat en cours, option décochée —
-            // voir `sync_combat_visibility`) : demandé dès les attributs plutôt que par un
+            // voir `sync_panel_visibility`) : demandé dès les attributs plutôt que par un
             // `set_visible(false)` juste après la création, qui la laisserait clignoter à l'écran
             // le temps d'une frame. Toujours `true` pour Suivi et Options.
             .with_visible(visible);
@@ -1400,6 +1485,9 @@ impl App {
             // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
             last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
             last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
+            // Déjà la largeur demandée ci-dessus pour une fenêtre `Recap` — même principe que le
+            // Suivi juste au-dessus : la première frame ne redemande rien si elle tombe dessus.
+            last_recap_width: (kind == OverlayKind::Recap).then_some(size.0 as f32),
             visible,
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
             last_topmost_reassert: None,
@@ -2114,7 +2202,7 @@ impl App {
             rect,
             true,
             // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul `Combat`
-            // peut naître masqué (voir `sync_combat_visibility`).
+            // peut naître masqué (voir `sync_panel_visibility`).
             true,
         );
         // **Le brouillon d'alertes est une COPIE du profil du compte**, prise à l'ouverture : les
@@ -2631,7 +2719,7 @@ impl App {
                 // bougent : c'est lui qui joue (ou ne joue plus) les alertes. Le bandeau, lui, lit
                 // `self.features` directement au rendu (voir `render_window`), et les deux cases
                 // de la section « Combat » ne concernent pas le moteur du tout : le détail des
-                // combats passe par `sync_combat_visibility` (appelée en fin de cette méthode) et
+                // combats passe par `sync_panel_visibility` (appelée en fin de cette méthode) et
                 // le suivi des sorts par le rendu du panneau.
                 let features_changed = commit.features != self.features;
                 if features_changed {
@@ -2642,6 +2730,7 @@ impl App {
                         recherche = self.features.chat,
                         combat = self.features.combat,
                         sorts = self.features.spells,
+                        recap = self.features.recap,
                         "[options] fonctionnalités actives mises à jour"
                     );
                     let _ = self
@@ -2753,7 +2842,7 @@ impl App {
                 // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
                 // d'`about_to_wait` — 50 ms, imperceptible, mais le geste et son effet doivent
                 // être dans la même passe : c'est ce qui rend la fenêtre Options vérifiable.
-                self.sync_combat_visibility();
+                self.sync_panel_visibility();
             }
             Err(err) => {
                 tracing::info!("[options] chemin refusé : {}", err.message());
@@ -2823,9 +2912,9 @@ impl App {
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
-        // Fenêtre `Combat` masquée hors combat (voir `sync_combat_visibility`) : rien à peindre,
+        // Fenêtre `Combat` masquée hors combat (voir `sync_panel_visibility`) : rien à peindre,
         // et surtout rien à présenter — un `Present()` sur une surface invisible ne sert à rien.
-        // C'est `sync_combat_visibility` qui replanifie un redessin en la faisant réapparaître.
+        // C'est `sync_panel_visibility` qui replanifie un redessin en la faisant réapparaître.
         if !overlay.visible {
             return;
         }
@@ -2940,10 +3029,37 @@ impl App {
                 interactive,
                 shortcuts: self.hotkeys.bindings(),
                 now,
+                session_totals: &snapshot.totals,
+                // `now` et non un `Instant::now()` de plus : une frame lit l'horloge une seule
+                // fois (voir la doc de `RenderContent::now`), et la durée affichée doit être celle
+                // de l'instant qu'on est en train de peindre.
+                session_uptime: now.saturating_duration_since(self.started_at),
                 options: overlay.options_state.as_mut(),
                 login: overlay.login_state.as_mut(),
             },
         );
+        // Bande Récap : retaillée à la largeur qu'elle vient de mesurer — même mécanique et même
+        // raison que le Suivi juste au-dessus (une fenêtre plus large que son contenu bloque les
+        // clics sur du vide), à ceci près que la mesure vient du panneau lui-même plutôt que d'un
+        // calcul de l'hôte : c'est la largeur des CHIFFRES qui commande, et seul le rendu la
+        // connaît. `request_inner_size` est synchrone sous Windows, d'où `reconfigure_surface`
+        // ici même (voir sa doc).
+        if overlay.kind == OverlayKind::Recap {
+            if let Some(width) = outcome.recap_width {
+                if overlay.last_recap_width != Some(width) {
+                    let height =
+                        panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64;
+                    if let Some(actual) = overlay
+                        .window
+                        .request_inner_size(winit::dpi::LogicalSize::new(width as f64, height))
+                    {
+                        Self::reconfigure_surface(&mut overlay.gpu, actual);
+                    }
+                    overlay.last_recap_width = Some(width);
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
+                }
+            }
+        }
         // Fenêtre de connexion : retaillée à la hauteur que la carte vient d'occuper (chaque
         // état a la sienne), en gardant son centre — `request_inner_size` est synchrone sous
         // Windows, d'où `reconfigure_surface` ici même (voir sa doc). Et déplacée à la souris
@@ -3379,7 +3495,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.sync_windows(event_loop);
         // Apparition/disparition automatique du panneau Combat — entre les deux : `sync_windows`
         // vient peut-être de créer la fenêtre, `sync_topmost` doit voir son état final.
-        self.sync_combat_visibility();
+        self.sync_panel_visibility();
         self.sync_topmost();
         // Surveillance de tour (§9.1 decies) — après `sync_windows`, qui vient de mettre à jour
         // la liste des fenêtres de jeu qu'elle lit.

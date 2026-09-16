@@ -195,6 +195,8 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -265,6 +267,8 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -288,6 +292,74 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
     harness.hover_at(egui::pos2(68.0, 76.0));
     harness.run();
     harness.snapshot("combat_tooltip_ennemis_au_dessus");
+}
+
+/// La bande Récap de session (2026-09-16, `panels::recap`) — cinq chiffres posés en haut à gauche
+/// de la fenêtre de jeu.
+///
+/// **Les totaux viennent du rejeu réel**, comme tout le reste de ce fichier (voir sa doc de
+/// module) : XP, kamas, combats gagnés/perdus et challenges sont ceux que le vrai `wakfu.log`
+/// produit à travers le vrai moteur. Seule la DURÉE est fixée ici — et elle doit l'être : c'est le
+/// temps d'exécution de l'overlay, qui n'existe pas dans le fichier par construction (voir la doc
+/// de module de `panels::recap`), et qui rendrait cette capture différente à chaque exécution.
+#[test]
+fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    // 1 h 23 min 45 s — une durée qui exerce les trois champs de `HH:MM:SS` d'un coup, plutôt
+    // qu'un compte rond où une erreur de minutes ou de secondes passerait inaperçue.
+    let uptime = std::time::Duration::from_secs(5025);
+    let totals = snapshot.totals;
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                session_totals: &totals,
+                session_uptime: uptime,
+                options: None,
+                login: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("recap_apres_rejeu_reel");
 }
 
 #[test]
@@ -341,6 +413,8 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -499,6 +573,8 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -571,6 +647,8 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -703,6 +781,8 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    session_totals: &Default::default(),
+                    session_uptime: std::time::Duration::ZERO,
                     options: None,
                     login: None,
                 },
@@ -845,6 +925,8 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    session_totals: &Default::default(),
+                    session_uptime: std::time::Duration::ZERO,
                     options: None,
                     login: None,
                 },
@@ -942,6 +1024,8 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    session_totals: &Default::default(),
+                    session_uptime: std::time::Duration::ZERO,
                     options: None,
                     login: None,
                 },
@@ -1043,6 +1127,8 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         interactive: true,
                         shortcuts: &shortcuts,
                         now,
+                        session_totals: &Default::default(),
+                        session_uptime: std::time::Duration::ZERO,
                         options: None,
                         login: None,
                     },
@@ -1159,6 +1245,8 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    session_totals: &Default::default(),
+                    session_uptime: std::time::Duration::ZERO,
                     options: None,
                     login: None,
                 },
@@ -1452,6 +1540,8 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    session_totals: &Default::default(),
+                    session_uptime: std::time::Duration::ZERO,
                     options: None,
                     login: None,
                 },
@@ -1550,6 +1640,8 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -1633,6 +1725,8 @@ fn panneau_options_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: Some(&mut options_state),
                 login: None,
             },
@@ -1901,6 +1995,8 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: Some(&mut options_state),
                 login: None,
             },
@@ -4045,6 +4141,8 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -4668,6 +4766,8 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                session_totals: &Default::default(),
+                session_uptime: std::time::Duration::ZERO,
                 options: None,
                 login: None,
             },
@@ -4818,6 +4918,8 @@ fn capture_login_with_update(
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    session_totals: &Default::default(),
+                    session_uptime: std::time::Duration::ZERO,
                     options: None,
                     login: Some(&mut login_state),
                 },
