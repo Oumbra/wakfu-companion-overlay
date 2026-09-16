@@ -1767,6 +1767,50 @@ geste et son effet soient dans la même passe), le suivi des sorts une affaire d
 `options_parametres_la_case_des_sorts_suit_le_detail_des_combats` pour la moitié « la case grisée
 ne répond plus », qu'aucune image ne montre.
 
+### 9.1 quindecies La suppression multiple gagne « Alertes » et « Chat » (2026-09-16)
+
+Demande utilisateur : « ajouter le système de la suppression multiple, comme dans l'onglet "Suivi",
+dans les onglets "Alertes" et "Chat" ».
+
+Le geste existait depuis le 2026-09-13, mais **au Suivi seulement** : un bouton corbeille qui ouvre
+un mode, une case à cocher sur chaque tuile, un bouton rouge dont le libellé dit ce qu'il retire.
+Les deux autres onglets composent pourtant la même sorte de liste, et n'offraient qu'un retrait
+tuile par tuile — vider une liste de quinze recherches demandait quinze survols.
+
+**Ce qui existe maintenant :**
+
+- **Un module partagé**, `panels::bulk_select`, où la mécanique vit une seule fois : l'en-tête
+  (titre à gauche, corbeille et bouton groupé ancrés à droite), la bascule du mode, l'oubli des
+  coches en quittant, et le libellé `bulk_label` que le bandeau in-game partageait déjà avec le
+  Suivi. Il ne touche à aucune liste : il rend une intention (`BulkRequest::{All, Keys}`) et
+  l'appelant, seul à savoir ce qu'est une entrée, l'applique à la sienne. L'onglet Suivi y a migré
+  du même coup — trois copies du même en-tête auraient divergé au premier ajustement.
+- **Les quatre règles du Suivi tenues partout** : la sélection est un MODE et non une case
+  permanente ; sélection vide = « Supprimer tout » (la règle du web : aucune coche se lit « aucune
+  exclusion ») ; aucune commande quand il n'y a rien à retirer ; quitter le mode oublie les coches.
+  Et le ton reste **destructif** (`SelectionTone::Danger`) : cocher ici ne mène qu'au retrait, l'or
+  promettrait un choix qui n'existe pas.
+- **Ce que chaque onglet ajoute, et lui seul :**
+
+| Onglet | Ce qui lui est propre |
+| --- | --- |
+| Suivi | inchangé — le glisser-déposer de réordonnancement reste coupé dans le mode |
+| Alertes | **les dix objets par défaut ne se cochent pas** : ils ne se retirent pas (`SoundItemEntry::is_default`, refus structurel du web), donc ni case, ni clic — leur infobulle le dit plutôt que de laisser le clic ne rien faire. Le bouton disparaît quand la liste n'a plus qu'eux, et « Supprimer tout » les conserve. La phrase sous le titre change avec le mode : le clic ne bascule plus le son, il coche |
+| Chat | toutes les recherches se retirent ; la case se pose au coin **haut-droit** de la tuile — le haut-gauche porte la légende du canal — c'est-à-dire au coin de la croix qu'elle remplace |
+
+- **Un composant enrichi** : `design::legend_tile` sait porter une sélection
+  (`LegendTile::selection`/`selection_tone`), comme `design::item_slot` depuis le 2026-09-13. Case
+  ET liseré appartiennent au composant, jamais au panneau — la case n'est pas un widget et ne prend
+  aucun geste, c'est le clic de la tuile qui coche. Le liseré n'est pas un trait ajouté par-dessus :
+  c'est **la bordure du cadre repeinte** au ton de la sélection, sans quoi un rectangle plein
+  traverserait la légende, qui interrompt justement la bordure haute.
+
+**Captures** : `options_alertes_selection` (les trois objets du joueur cochables, dont deux cochés,
+et les dix objets par défaut sans case), `options_chat_selection` (case au coin haut-droit, croix
+disparue, bordures rouges), et la rangée « Sélection multiple » de
+`design_gallery_legend_tile`. `options_suivi_selection` reste inchangée : la migration vers le
+module partagé ne devait rien déplacer, et c'est cette image qui le prouve.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
