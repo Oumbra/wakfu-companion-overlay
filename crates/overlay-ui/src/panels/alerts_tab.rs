@@ -20,7 +20,9 @@
 //!    SON ; l'emplacement de rareté dit ce qu'est l'OBJET. Cliquer bascule le son et ne touche que
 //!    le premier.
 //! 2. **Les dix objets par défaut n'ont pas de croix de retrait** (`SoundItemEntry::is_default`),
-//!    parce que le web refuse structurellement de les supprimer. Leur son, lui, se coupe.
+//!    parce que le web refuse structurellement de les supprimer. Leur son, lui, se coupe. Depuis le
+//!    2026-09-16 ils n'ont pas non plus de **case à cocher** : la sélection multiple ne mène qu'au
+//!    retrait, cocher ce qui ne se retire pas promettrait une action qui n'existe pas.
 //! 3. **Le son et le toast sont deux canaux**, réglés séparément — règle tenue ailleurs depuis le
 //!    2026-09-15 : les deux blocs sont partis dans la section « Alertes » de l'onglet
 //!    « Paramètres » ([`crate::panels::notifications`]), où ils rejoignent ceux du Suivi, du Chat
@@ -51,6 +53,15 @@
 //! Rien n'est ajouté au passage : pas de chiffre, pas de cible, pas de compteur. L'emplacement du
 //! Suivi sait en afficher un ([`design::SlotCount`]), une alerte n'en a aucun.
 //!
+//! ## La suppression multiple, 2026-09-16
+//!
+//! Demande utilisateur : « ajouter le système de la suppression multiple, comme dans l'onglet
+//! Suivi ». La mécanique — bouton corbeille qui ouvre le mode, bouton rouge dont le libellé dit ce
+//! qu'il retire, coches oubliées en quittant — est **partagée**, elle vit dans
+//! [`crate::panels::bulk_select`] ; cet onglet n'ajoute que ce qui lui est propre : les objets par
+//! défaut, qui ne se cochent pas (règle 2 ci-dessus), et donc un bouton qui disparaît quand la
+//! liste n'a plus qu'eux.
+//!
 //! ## Transactionnel, comme le reste de la fenêtre
 //!
 //! Rien n'est écrit tant que « Valider » n'a pas été cliqué (§5.1 du plan) : cet onglet travaille
@@ -62,7 +73,7 @@ use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
 use crate::design::{self, DsIcon, SlotFrame};
-use crate::panels::feature_switch;
+use crate::panels::{bulk_select, feature_switch};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -156,6 +167,12 @@ const DESC: &str = "Au ramassage d'un des objets ci-dessous, un son est joué et
 /// La phrase sous le titre « Objets surveillés » — le geste, à côté des tuiles qu'il concerne.
 const LIST_DESC: &str = "Cliquez une tuile pour couper ou rétablir son alerte.";
 
+/// La même phrase **en mode sélection multiple**, où le clic ne veut plus dire la même chose : il
+/// coche. La laisser telle quelle décrirait un geste que le mode a justement remplacé — un même
+/// appui ne peut pas vouloir dire deux choses (règle reprise du Suivi).
+const LIST_DESC_SELECTION: &str = "Cliquez une tuile pour la cocher. Les objets par défaut ne \
+                                   peuvent pas être retirés.";
+
 /// Le libellé de la légende, à droite du pictogramme.
 const LEGEND_LABEL: &str = "silencieux";
 /// Écart entre le pictogramme de la légende et son libellé.
@@ -188,6 +205,25 @@ pub struct AlertsTabState {
     /// l'onglet « Paramètres »** depuis le 2026-09-15 ; elle reste ici, avec le brouillon dont
     /// elle règle la carte.
     pub duration_input: String,
+    /// Mode « sélection multiple » ouvert — voir [`crate::panels::bulk_select`], partagé avec les
+    /// onglets « Suivi » et « Chat » (2026-09-16).
+    pub select_mode: bool,
+    /// Clés des tuiles cochées — voir [`entry_key`]. **Jamais un objet par défaut** : ceux-là ne se
+    /// retirent pas, ils n'ont donc pas de case à cocher.
+    pub selected: Vec<String>,
+}
+
+/// Identifie un objet de la liste, homonymes d'id différents compris — la clé de coche du mode
+/// sélection, jumelle de `panels::suivi_tab::entry_key`.
+///
+/// Le couple (nom, `catalog_id`) est ce qu'`AlertProfile::remove` prend lui-même : cocher et
+/// retirer désignent ainsi un objet de la même façon.
+pub(crate) fn entry_key(name: &str, catalog_id: Option<i64>) -> String {
+    format!(
+        "{}::{}",
+        name,
+        catalog_id.map(|id| id.to_string()).unwrap_or_default()
+    )
 }
 
 /// Ce que l'onglet a besoin de recevoir pour peindre de vraies données.
@@ -270,8 +306,45 @@ pub fn show(
     ui.add_space(SECTION_GAP);
 
     // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
-    ui.add(design::heading("Objets surveillés"));
-    paragraph(ui, LIST_DESC);
+    //
+    // **Les commandes de suppression multiple sont dans cette ligne** depuis le 2026-09-16 (demande
+    // utilisateur : « comme dans l'onglet Suivi ») — mécanique partagée, voir
+    // `panels::bulk_select`. `removable` n'est PAS la longueur de la liste : les dix objets par
+    // défaut ne se retirent pas (règle 2), une liste qui n'aurait qu'eux n'a donc rien à supprimer
+    // et ne montre aucun bouton.
+    let retirables = ctx
+        .profile
+        .sound_items
+        .iter()
+        .filter(|entry| !entry.is_default)
+        .count();
+    let demande = bulk_select::show(
+        ui,
+        width,
+        bulk_select::BulkHeader {
+            title: "Objets surveillés",
+            removable: retirables,
+            bulk_tooltip: "Retire les tuiles cochées de la liste — annulable tant que la fenêtre \
+                           n'est pas validée. Les objets par défaut sont conservés.",
+            log_prefix: "alertes",
+            enabled: ctx.availability == AlertsAvailability::Ready,
+        },
+        bulk_select::BulkSelection {
+            mode: &mut state.select_mode,
+            keys: &mut state.selected,
+        },
+    );
+    apply_bulk(ctx.profile, demande);
+    ui.add_space(bulk_select::HEADER_TO_PARAGRAPH);
+
+    paragraph(
+        ui,
+        if state.select_mode {
+            LIST_DESC_SELECTION
+        } else {
+            LIST_DESC
+        },
+    );
     ui.add_space(SECTION_GAP);
 
     match ctx.availability {
@@ -294,7 +367,7 @@ pub fn show(
         AlertsAvailability::Ready => {}
     }
 
-    tile_grid(ui, panel, ctx);
+    tile_grid(ui, panel, state, ctx);
     legend_row(ui, legend);
 }
 
@@ -454,8 +527,40 @@ fn add_field(
     }
 }
 
+/// Applique ce que l'en-tête de suppression multiple a rendu.
+///
+/// **Les objets par défaut survivent aux deux cas.** `AlertProfile::remove` refuse déjà de les
+/// retirer (`retain(|e| e.is_default || …)`) et le mode sélection ne leur donne pas de case à
+/// cocher : la garde est double, parce que le web le refuse structurellement (règle 2).
+fn apply_bulk(profile: &mut AlertProfile, demande: bulk_select::BulkRequest) {
+    match demande {
+        bulk_select::BulkRequest::None => {}
+        bulk_select::BulkRequest::All => {
+            let retires = profile.sound_items.iter().filter(|e| !e.is_default).count();
+            profile.sound_items.retain(|entry| entry.is_default);
+            tracing::info!(retires, "[options] objets d'alerte retirés en bloc");
+        }
+        bulk_select::BulkRequest::Keys(cles) => {
+            let cochees: std::collections::HashSet<&String> = cles.iter().collect();
+            let avant = profile.sound_items.len();
+            profile.sound_items.retain(|entry| {
+                entry.is_default || !cochees.contains(&entry_key(&entry.name, entry.catalog_id))
+            });
+            tracing::info!(
+                retires = avant - profile.sound_items.len(),
+                "[options] objets d'alerte retirés en bloc"
+            );
+        }
+    }
+}
+
 /// La grille de tuiles, dans la zone défilable du panneau.
-fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabContext<'_>) {
+fn tile_grid(
+    ui: &mut egui::Ui,
+    panel: &design::PanelZones,
+    state: &mut AlertsTabState,
+    ctx: &mut AlertsTabContext<'_>,
+) {
     // Le rendu lit le profil et les gestes le modifient : les collecter d'abord évite d'emprunter
     // `ctx.profile` en lecture et en écriture dans la même boucle.
     let items: Vec<TileData> = ctx
@@ -474,6 +579,9 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
 
     let mut toggled: Option<(String, Option<i64>)> = None;
     let mut removal: Option<(String, Option<i64>)> = None;
+    let mut coche: Option<String> = None;
+    let select_mode = state.select_mode;
+    let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
 
     panel.scroll_area(ui, "alertes.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -481,9 +589,11 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
         for chunk in items.chunks(per_row) {
             ui.horizontal(|ui| {
                 for item in chunk {
-                    match alert_item(ui, ctx, item) {
+                    let cle = entry_key(&item.name, item.catalog_id);
+                    match alert_item(ui, ctx, item, select_mode, cochees.contains(&cle)) {
                         TileClick::Toggle => toggled = Some((item.name.clone(), item.catalog_id)),
                         TileClick::Remove => removal = Some((item.name.clone(), item.catalog_id)),
+                        TileClick::Check => coche = Some(cle),
                         TileClick::None => {}
                     }
                 }
@@ -491,6 +601,9 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
         }
     });
 
+    if let Some(cle) = coche {
+        bulk_select::toggle(&mut state.selected, &cle);
+    }
     if let Some((name, catalog_id)) = toggled {
         ctx.profile.toggle(&name, catalog_id);
     }
@@ -499,6 +612,10 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
     // réversible deux fois, une boîte de confirmation par-dessus n'ajoutait qu'un clic.
     if let Some((name, catalog_id)) = removal {
         ctx.profile.remove(&name, catalog_id);
+        // Une clé cochée qui ne désigne plus rien ferait mentir le compteur du bouton groupé
+        // (« Supprimer (3) » pour deux tuiles). Le Suivi tient la même règle.
+        let cle = entry_key(&name, catalog_id);
+        state.selected.retain(|k| *k != cle);
     }
 }
 
@@ -516,8 +633,12 @@ struct TileData {
 /// Ce qu'un clic sur une tuile signifie.
 enum TileClick {
     None,
+    /// Couper ou rétablir le son — le geste ORDINAIRE de la tuile.
     Toggle,
+    /// Retirer l'objet, à la croix du survol.
     Remove,
+    /// Cocher ou décocher — le geste de la tuile **en mode sélection**, où il remplace [`Self::Toggle`].
+    Check,
 }
 
 /// **La tuile d'un objet en alerte — un emplacement d'objet, et rien d'autre.**
@@ -528,10 +649,23 @@ enum TileClick {
 /// | Coin haut-gauche | le son est **coupé** — et rien du tout quand il est actif |
 /// | Coin haut-droit | retrait — **seulement sur une tuile retirable ET survolée**, rouge sous le pointeur |
 /// | Voile | le survol, et un fond assez sombre pour la croix — **retirables uniquement** |
+/// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
+/// | Liseré rouge | la tuile est cochée — le ton destructif, la sélection ne mène qu'au retrait |
 ///
 /// Ni nom, ni chiffre : le nom se lit en infobulle, et une alerte n'a ni compteur ni cible
 /// (contrairement au Suivi, dont l'emplacement sait afficher une cible de décompte).
-fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData) -> TileClick {
+///
+/// **En mode sélection, une tuile par défaut est inerte** : elle ne se coche pas (elle ne se retire
+/// pas, règle 2) et son son ne bascule pas non plus — un même appui ne peut pas vouloir dire deux
+/// choses selon la tuile visée. Son infobulle le dit, plutôt que de laisser le clic ne rien faire
+/// sans explication.
+fn alert_item(
+    ui: &mut egui::Ui,
+    ctx: &mut AlertsTabContext<'_>,
+    item: &TileData,
+    select_mode: bool,
+    cochee: bool,
+) -> TileClick {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), egui::Sense::click());
 
     let icon_id = item
@@ -549,6 +683,13 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             .size(TILE)
             .frame(SlotFrame::Rarity(to_slot_rarity(item.rarity)))
             .icon(icon_id)
+            // **La sélection entière appartient au composant** — liseré ET case à cocher, posés
+            // sur le bon anneau et sans voler le clic de la tuile (voir `design::item_slot`). Un
+            // objet par défaut n'en reçoit aucun : il ne se retire pas, donc il ne se coche pas.
+            .selection((select_mode && !item.is_default).then_some(cochee))
+            // **Le ton destructif**, comme au Suivi et au bandeau : cocher ici ne mène qu'au
+            // bouton « Supprimer », jamais à une autre action.
+            .selection_tone(design::SelectionTone::Danger)
             .log_name(item.name.clone()),
     );
 
@@ -562,7 +703,10 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     // **Et seulement sur un objet retirable** : les dix objets par défaut n'ont pas de croix, donc
     // rien à révéler — « le voile ne concerne que les objets pouvant être supprimés » (retour du
     // 2026-09-13). Un voile sans croix annoncerait une action qui n'existe pas.
-    let survol_retirable = !item.is_default && response.contains_pointer();
+    // **Rien de tout cela en mode sélection** : la case du composant remplace la croix, et deux
+    // marqueurs dans deux coins d'une tuile de 64 px reviendraient à demander de viser (règle
+    // reprise de `panels::suivi_tab::tracked_tile`).
+    let survol_retirable = !select_mode && !item.is_default && response.contains_pointer();
     if survol_retirable {
         ui.painter()
             .rect_filled(hover_scrim_rect(rect), 0.0, TILE_HOVER_SCRIM);
@@ -617,6 +761,16 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         }
     }
 
+    if select_mode && item.is_default {
+        // Inerte, et qui le dit : ni main au survol, ni clic. Le nom reste, c'est la seule chose
+        // qui identifie la tuile.
+        design::tooltip(&response).text(format!(
+            "{} — objet par défaut, il ne peut pas être retiré",
+            item.name
+        ));
+        return TileClick::None;
+    }
+
     // **Le nom, et rien que le nom** (demande du 2026-09-13). L'infobulle disait aussi ce que le
     // clic ferait (« Cliquer pour couper ») ; le pictogramme porte déjà l'état, et le nom n'est
     // plus écrit nulle part ailleurs depuis qu'il a quitté la tuile. Du même coup disparaît
@@ -624,7 +778,13 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     design::tooltip(&response).text(&item.name);
     if response.clicked() {
-        clic = TileClick::Toggle;
+        // En mode sélection, le geste de la tuile est de COCHER : le son ne bascule plus, sans quoi
+        // le même appui voudrait dire deux choses.
+        clic = if select_mode {
+            TileClick::Check
+        } else {
+            TileClick::Toggle
+        };
     }
     clic
 }

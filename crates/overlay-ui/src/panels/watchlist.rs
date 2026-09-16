@@ -1061,7 +1061,7 @@ pub fn show(
             let visible = tuiles.intersect(strip_rect);
             if bulk_button_row(ui, selection, entries.len(), visible) {
                 let restantes: Vec<WatchlistEntry> = if selection.picked.is_empty() {
-                    // Aucune coche : « Supprimer tout » — la règle du web, voir `bulk_label`.
+                    // Aucune coche : « Supprimer tout » — la règle du web, voir `bulk_select::bulk_label`.
                     Vec::new()
                 } else {
                     entries
@@ -1151,7 +1151,7 @@ fn bulk_button_row(
     );
     ui.put(
         rect,
-        design::button(crate::panels::suivi_tab::bulk_label(
+        design::button(crate::panels::bulk_select::bulk_label(
             selection.picked.len(),
             total,
         ))

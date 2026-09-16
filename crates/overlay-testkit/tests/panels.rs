@@ -1881,12 +1881,46 @@ fn modale_options_sur_damier_ne_panique_pas() {
 /// de snapshot soient abandonnés séparément dans le même test (« Multiple SnapshotResults were
 /// dropped without being handled »), ce qui casserait la mise à jour groupée des images.
 fn capture_onglet_alertes(nom: &str) {
+    capture_onglet_alertes_selection(nom, false)
+}
+
+/// [`capture_onglet_alertes`], avec en plus le **mode sélection multiple** ouvert.
+///
+/// Trois objets ajoutés par le joueur, dont deux cochés : assez pour que le bouton porte
+/// « Supprimer (2) » plutôt que « Supprimer tout », et pour montrer côte à côte une tuile cochée,
+/// une tuile cochable décochée, et les dix objets par défaut — qui n'ont **aucune case**.
+fn capture_onglet_alertes_selection(nom: &str, select_mode: bool) {
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     let mut profile = overlay_engine::AlertProfile::default();
     profile.add("Combinaison Lardante", Some(4242));
     // Un objet au son coupé dans la capture : c'est l'autre moitié de ce que la tuile dit.
     profile.toggle("Influence III", None);
+    if select_mode {
+        profile.add("Bois de Frêne", Some(1001));
+        profile.add("Pierre de Lune", Some(1002));
+    }
+
+    let cochees: Vec<String> = if select_mode {
+        profile
+            .sound_items
+            .iter()
+            .filter(|entry| !entry.is_default)
+            .take(2)
+            .map(|entry| {
+                format!(
+                    "{}::{}",
+                    entry.name,
+                    entry
+                        .catalog_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default()
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut options_state = OptionsModalState {
         suivi: Default::default(),
@@ -1897,6 +1931,8 @@ fn capture_onglet_alertes(nom: &str) {
         tab: OptionsTab::Alertes,
         alerts: AlertsTabState {
             duration_input: "3,5".to_string(),
+            select_mode,
+            selected: cochees,
             ..Default::default()
         },
         alerts_draft: Some(profile),
@@ -1941,6 +1977,17 @@ fn capture_onglet_alertes(nom: &str) {
 #[test]
 fn options_onglet_alertes_liste() {
     capture_onglet_alertes("options_alertes_liste");
+}
+
+/// **Sélection multiple** (2026-09-16) — la même mécanique qu'au Suivi, portée aux alertes.
+///
+/// Ce que cette planche verrouille, et qui est propre à cet onglet : **les dix objets par défaut
+/// n'ont pas de case à cocher**. Ils ne se retirent pas (règle 2 de la doc de module), cocher ce
+/// qui ne se retire pas promettrait une action qui n'existe pas — seuls les trois objets ajoutés
+/// par le joueur en portent une, dont deux cochées, d'où le « Supprimer (2) » du bouton.
+#[test]
+fn options_onglet_alertes_selection_multiple() {
+    capture_onglet_alertes_selection("options_alertes_selection", true);
 }
 
 /// **L'onglet « Raccourcis »** (2026-09-13) — celui qui personnalise les raccourcis clavier
@@ -3997,12 +4044,38 @@ fn capture_onglet_chat(
     availability: overlay_ui::panels::chat_tab::ChatAvailability,
     survol: Option<egui::Pos2>,
 ) {
+    capture_onglet_chat_selection(nom, draft, availability, survol, false)
+}
+
+/// [`capture_onglet_chat`], avec en plus le **mode sélection multiple** ouvert.
+///
+/// Les trois premières tuiles y sont cochées, comme au Suivi : c'est ce qui fait basculer le
+/// libellé du bouton de « Supprimer tout » à « Supprimer (3) ».
+fn capture_onglet_chat_selection(
+    nom: &str,
+    draft: Option<overlay_ui::panels::chat_tab::ChatDraft>,
+    availability: overlay_ui::panels::chat_tab::ChatAvailability,
+    survol: Option<egui::Pos2>,
+    select_mode: bool,
+) {
     use overlay_ui::panels::chat_tab::ChatTabState;
+
+    let cochees: Vec<String> = match (select_mode, draft.as_ref()) {
+        (true, Some(draft)) => draft
+            .filters
+            .iter()
+            .take(3)
+            .map(|f| format!("{}::{}", f.scope.label(), f.text))
+            .collect(),
+        _ => Vec::new(),
+    };
 
     let mut options_state = OptionsModalState {
         tab: OptionsTab::Chat,
         chat: ChatTabState {
             duration_input: "3,5".to_string(),
+            select_mode,
+            selected: cochees,
             ..Default::default()
         },
         chat_draft: draft,
@@ -4387,6 +4460,23 @@ fn options_onglet_chat_survol_d_une_tuile() {
             47.0 + 155.0 + 12.0 + 77.0,
             320.0 + INTERRUPTEUR_Y,
         )),
+    );
+}
+
+/// **Sélection multiple** (2026-09-16) — la même mécanique qu'au Suivi, portée aux recherches :
+/// case à cocher au coin haut-DROIT de chaque tuile (le haut-gauche porte la légende), bordure
+/// rouge sur les cochées, et le bouton de suppression groupée en rouge dans la ligne du titre.
+///
+/// Ce que cette planche verrouille : la case ne mange pas la légende, et la croix de retrait ne
+/// s'affiche plus — elle est ce que la case remplace.
+#[test]
+fn options_onglet_chat_selection_multiple() {
+    capture_onglet_chat_selection(
+        "options_chat_selection",
+        Some(recherches_de_chat()),
+        Default::default(),
+        None,
+        true,
     );
 }
 

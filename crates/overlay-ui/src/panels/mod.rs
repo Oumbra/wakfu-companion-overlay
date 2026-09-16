@@ -5,6 +5,7 @@
 //! exact).
 
 pub mod alerts_tab;
+pub mod bulk_select;
 pub mod chamfer;
 pub mod chat_tab;
 pub mod combat;

@@ -26,7 +26,9 @@
 //!    sur la tuile survolée et vire au rouge sous le pointeur. Aucune boîte : la fenêtre est
 //!    transactionnelle, « Annuler » rattrape tout et « Valider » est une seconde garde.
 //! 4. **La sélection multiple est un MODE**, pas une case permanente. Sélection vide = « Supprimer
-//!    tout » (aucune exclusion cochée), la règle du web — voir [`bulk_label`].
+//!    tout » (aucune exclusion cochée), la règle du web — voir
+//!    [`bulk_select::bulk_label`]. La mécanique du mode est partagée avec les onglets « Alertes »
+//!    et « Chat » depuis le 2026-09-16 : elle vit dans [`crate::panels::bulk_select`].
 //! 5. **Rien n'est écrit avant « Valider »** : l'onglet travaille sur un brouillon que l'appelant
 //!    lui prête, comme l'onglet Alertes.
 //!
@@ -61,8 +63,8 @@ use overlay_engine::{
     DEFAULT_ALERT_DURATION_SECONDS, MAX_ALERT_DURATION_SECONDS, MIN_ALERT_DURATION_SECONDS,
 };
 
-use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
-use crate::panels::{feature_switch, notifications, tile_reorder};
+use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, SlotFrame};
+use crate::panels::{bulk_select, feature_switch, notifications, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -90,21 +92,6 @@ const FORM_ROW_GAP: f32 = 6.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, la valeur arrêtée pour l'onglet Alertes.
 const SECTION_GAP: f32 = 18.0;
-
-/// Hauteur de la ligne d'en-tête de la liste — **le côté du bouton icône, pas une valeur ronde**.
-///
-/// Elle valait 34 px alors que le bouton de suppression multiple en mesure 36 : centré dans une
-/// ligne plus courte que lui, il débordait d'un pixel en haut ET en bas, et ce débordement du bas
-/// mangeait la gouttière qui le séparait de la première tuile. Le bouton semblait alors posé sur
-/// la grille (relevé par l'utilisateur le 2026-09-14). La ligne fait désormais la taille de son
-/// plus haut occupant : plus rien n'en sort, et [`LIST_HEADER_GAP`] reste entier.
-const LIST_HEADER_HEIGHT: f32 = design::tokens::ICON_BUTTON_SIZE;
-/// Gouttière entre l'en-tête de la liste et la première rangée de tuiles.
-///
-/// Le titre, plus court que le bouton, garde l'air que lui donne sa ligne ; le bouton, lui, n'a que
-/// cette gouttière. 6 px : l'écart mesuré sous le titre sans qu'elle repousse la grille au point de
-/// détacher l'en-tête de ce qu'il commande.
-const LIST_HEADER_GAP: f32 = 6.0;
 
 /// Côté d'une tuile — **l'emplacement d'objet du jeu**, celui du bandeau de suivi.
 const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
@@ -409,7 +396,7 @@ pub fn show(
     ui.add_space(SECTION_GAP);
 
     list_header(ui, state, ctx, width);
-    ui.add_space(LIST_HEADER_GAP);
+    ui.add_space(bulk_select::HEADER_GAP);
 
     if ctx.availability == SuiviAvailability::Loading {
         loading_row(ui, panel.inner);
@@ -747,81 +734,44 @@ fn push_entry(
 }
 
 /// L'en-tête de la liste : son titre à gauche, ses commandes à droite.
+///
+/// **La mécanique vit dans [`bulk_select`]**, partagée avec les onglets « Alertes » et « Chat »
+/// depuis le 2026-09-16 : les trois écrans composent une liste avec le même geste, ils ne peuvent
+/// pas le faire chacun à leur façon.
 fn list_header(
     ui: &mut egui::Ui,
     state: &mut SuiviTabState,
     ctx: &mut SuiviTabContext<'_>,
     width: f32,
 ) {
-    let row = ui.allocate_space(Vec2::new(width, LIST_HEADER_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    let mut bascule = false;
-    let mut supprimer = false;
-    let total = ctx.entries.len();
-    let selection = state.selected.len();
-    let select_mode = state.select_mode;
-    let availability = ctx.availability;
-    cell.horizontal_centered(|ui| {
-        ui.add(design::heading("Éléments suivis"));
-        // **Rien à commander quand il n'y a rien à lister** : pendant que la liste descend, et
-        // tant qu'elle est vide, le bouton disparaît au lieu de rester grisé — le geste n'a pas
-        // d'objet. Une liste vide au repos est l'état de départ de tout nouveau compte : y offrir
-        // une « suppression multiple » de rien du tout se lisait comme un bug (retour du
-        // 2026-09-16).
-        if availability != SuiviAvailability::Ready || total == 0 {
-            return;
-        }
-        let mut droite = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(row)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        let mut bouton = design::icon_button(DsIcon::Delete)
-            .context(IconContext::Panel)
-            .tooltip(if select_mode {
-                "Quitter la sélection"
-            } else {
-                "Suppression multiple"
-            })
-            .log_name("suivi.selection");
-        if select_mode {
-            // Le mode ouvert se lit sur le bouton lui-même, comme un onglet actif.
-            bouton = bouton.preview_state(design::IconButtonState::Hovered);
-        }
-        if droite.add(bouton).clicked() {
-            bascule = true;
-        }
-        if select_mode {
-            droite.add_space(8.0);
-            if droite
-                .add(
-                    // **Rouge**, comme le « Annuler » du pied de page — décision explicite de
-                    // l'utilisateur le 2026-09-13, qui prévaut sur la règle « le rouge est réservé
-                    // au pied de fenêtre » que l'onglet Alertes avait posée.
-                    design::button(bulk_label(selection, total))
-                        .variant(ButtonVariant::Danger)
-                        .size(ButtonSize::Height(28.0))
-                        .min_width(150.0)
-                        .tooltip(
-                            "Retire les tuiles cochées du suivi — annulable tant que la fenêtre \
-                             n'est pas validée",
-                        )
-                        .log_name("suivi.supprimer-groupe"),
-                )
-                .clicked()
-            {
-                supprimer = true;
-            }
-        }
-    });
+    let demande = bulk_select::show(
+        ui,
+        width,
+        bulk_select::BulkHeader {
+            title: "Éléments suivis",
+            removable: ctx.entries.len(),
+            bulk_tooltip: "Retire les tuiles cochées du suivi — annulable tant que la fenêtre \
+                           n'est pas validée",
+            log_prefix: "suivi",
+            // Pendant que la liste descend, il n'y a rien à commander : ce qu'on retirerait
+            // serait écrasé par la liste qui arrive.
+            enabled: ctx.availability == SuiviAvailability::Ready,
+        },
+        bulk_select::BulkSelection {
+            mode: &mut state.select_mode,
+            keys: &mut state.selected,
+        },
+    );
 
-    if supprimer {
-        // Sélection vide : on retire TOUT (aucune exclusion cochée) — voir [`bulk_label`].
-        if state.selected.is_empty() {
+    match demande {
+        bulk_select::BulkRequest::None => {}
+        // Sélection vide : on retire TOUT (aucune exclusion cochée) — voir `bulk_select::bulk_label`.
+        bulk_select::BulkRequest::All => {
             oublier(state, ctx.entries.clone());
             ctx.entries.clear();
-        } else {
-            let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
+        }
+        bulk_select::BulkRequest::Keys(cles) => {
+            let cochees: std::collections::HashSet<&String> = cles.iter().collect();
             let (retirees, restantes): (Vec<_>, Vec<_>) = ctx
                 .entries
                 .drain(..)
@@ -829,27 +779,6 @@ fn list_header(
             *ctx.entries = restantes;
             oublier(state, retirees);
         }
-        state.select_mode = false;
-        state.selected.clear();
-    } else if bascule {
-        state.select_mode = !state.select_mode;
-        state.selected.clear();
-    }
-}
-
-/// Le libellé du bouton de suppression groupée — **la règle du web**, reprise telle quelle.
-///
-/// Aucune tuile cochée se lit « aucune exclusion » et non « rien à faire » : le bouton porte alors
-/// « Supprimer tout » et agit sur la liste entière. Tout cocher à la main donne le même libellé, par
-/// cohérence — même résultat, deux chemins pour y arriver.
-///
-/// **Partagée avec le bandeau**, comme [`entry_key`] : le bouton y est le même, jusqu'à sa
-/// variante et sa hauteur.
-pub(crate) fn bulk_label(selected: usize, total: usize) -> String {
-    if selected == 0 || selected == total {
-        "Supprimer tout".to_string()
-    } else {
-        format!("Supprimer ({selected})")
     }
 }
 
@@ -938,11 +867,7 @@ fn tile_grid(
         state.selected.retain(|k| *k != cle);
     }
     if let Some(cle) = bascule {
-        if let Some(pos) = state.selected.iter().position(|k| *k == cle) {
-            state.selected.remove(pos);
-        } else {
-            state.selected.push(cle);
-        }
+        bulk_select::toggle(&mut state.selected, &cle);
     }
 }
 
@@ -1190,14 +1115,6 @@ fn texture(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn le_libelle_groupe_dit_tout_quand_rien_n_est_coche() {
-        // Une sélection vide se lit « aucune exclusion », pas « rien à faire » — règle du web.
-        assert_eq!(bulk_label(0, 12), "Supprimer tout");
-        assert_eq!(bulk_label(12, 12), "Supprimer tout");
-        assert_eq!(bulk_label(3, 12), "Supprimer (3)");
-    }
 
     #[test]
     fn la_cle_distingue_deux_homonymes_d_id_different() {

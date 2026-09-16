@@ -2008,6 +2008,13 @@ pub const LEGEND_TILE_PAD_X: f32 = 10.0;
 /// Voile d'une tuile survolée — le même noir à 40 % que les tuiles d'Alertes et du Suivi
 /// (`panels::alerts_tab::TILE_HOVER_SCRIM`).
 pub const LEGEND_TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
+/// Retrait de la case à cocher du mode sélection depuis le coin **haut-droit du cadre** — le coin
+/// de la croix de retrait, qu'elle remplace (2026-09-16).
+///
+/// 6 px, et non les 7 d'[`ITEM_SLOT_SELECTION_INSET`] : l'emplacement d'objet doit loger sa case à
+/// l'intérieur d'un liseré de rareté qui occupe les pixels 2 à 4 du bord, une tuile à légende n'a
+/// qu'un trait d'un pixel. La case y tombe à la même distance visible du cadre.
+pub const LEGEND_TILE_SELECTION_INSET: f32 = 6.0;
 
 // -------------------------------------------------------------------------------------------
 // Couleurs des canaux de chat
