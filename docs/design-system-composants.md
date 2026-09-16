@@ -3057,29 +3057,70 @@ premier plan est la matière que le jeu emploie à cet endroit.
 | | `Frame` | `FirstPlan` |
 | --- | --- | --- |
 | Fond d'une case | six textures de cadre, selon sa position | **un socle carré**, le même pour toutes |
-| Gouttière | liseré `SWITCH_BORDER` + séparateur `SWITCH_SEPARATOR` peints dedans | **rien** — chaque socle porte ses quatre coins |
+| Gouttière | liseré `SWITCH_BORDER` + séparateur `SWITCH_SEPARATOR` peints dedans | **chevauchement de 2 px**, plus un trait de 1 px `SWITCH_FIRST_PLAN_SEAM` |
 | Case native | 43 × 44 | **36 × 36** (`SWITCH_FIRST_PLAN_SIZE` = `ICON_BUTTON_SIZE`) |
-| Glyphe | sa taille native sous 16 px (`SWITCH_ICON_SIZE`) | la grille du bouton icône (`ICON_BUTTON_CONTENT`, 18 sur 36) |
-| Glyphe actif / survolé / repos | doré / doré / gris chaud | **blanc** / or `ICON_TINT_HOVER` / gris froid `ICON_TINT` |
+| Case choisie | fond kaki | **liseré `#126068` de 2 px + halo d'1 px**, sur la bordure |
+| Survol | fond actif, glyphe doré | fond actif **et glyphe allumé** |
+| Glyphe actif / survolé / repos | doré / doré / gris chaud | blanc / **blanc** / gris froid `ICON_TINT` |
 
 **Aucune texture nouvelle** : `button-icon-first-plan.png` et son `-hover` sont au manifeste depuis
-`design::icon_button` (36 × 36, `ICON_BUTTON_SLICE`, marges figées de 6). Aucun jeton mesuré non
-plus — la variante emprunte ceux du bouton icône, c'est tout l'intérêt de partager une texture.
-Deux alias les nomment pour ce composant : `SWITCH_FIRST_PLAN_SIZE` et
-`SWITCH_FIRST_PLAN_ICON_ACTIVE`.
+`design::icon_button` (36 × 36, `ICON_BUTTON_SLICE`, marges figées de 6).
 
-**Le piège est le même que dans `Frame`, et que dans `design::tabs`** : le jeu n'a qu'une texture
-survolée, et c'est elle qui sert de case active. L'actif et le survolé partagent donc leur socle,
-et **seule la teinte du glyphe les distingue**. Sur un glyphe monochrome : blanc (actif), or
-(survolé), gris froid (repos). Sur un glyphe **en couleurs** — les cinq du panneau Combat — une
-teinte egui multiplie, donc le blanc est sa couleur vraie et l'or le dorerait : sa case active le
-peint tel quel, **toutes les autres l'atténuent** (`ICON_NATIVE_DIM`), survol compris. Là, c'est le
-socle éclairci qui porte seul le survol, et la couleur pleine reste le signal de la case choisie.
+#### La règle d'étanchéité — exigence utilisateur, vérifiée
 
-**Ce que le panneau Combat y gagne** : plus d'échelle à régler. `SWITCH_SCALE` (36/44, la réduction
-homothétique du cadre) a disparu — la variante est déjà à 36, sa taille native. Les switches passent
-de 72 et 109 px à **74 et 112** (deux pixels de plus par gouttière conservée), la hauteur ne bouge
-pas d'un pixel, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET` en dérivent sans être touchés.
+**Rien de ce lot ne doit toucher la variante `Frame`.** Énoncé tel quel par l'utilisateur
+(2026-09-16) : « le switch de sexe dans la modale de création de personnage ne doit pas du tout
+changer ». Le chevauchement, le trait de jointure, le liseré, son halo et le survol qui allume le
+glyphe appartiennent **strictement** à `FirstPlan`, et chaque différence passe par un `match` sur
+la variante — jamais par une valeur partagée qu'on « ajusterait ».
+
+Trois garde-fous, et ils sont de nature différente :
+
+1. **Deux tests unitaires** (`la_variante_cadre_ignore_tout_ce_qui_appartient_au_premier_plan`,
+   `la_teinte_du_glyphe_du_cadre_reste_celle_mesuree_sur_le_jeu`) : la gouttière du cadre reste
+   positive quand celle du premier plan devient négative, les tailles natives diffèrent, et les
+   teintes de glyphe du cadre restent celles mesurées sur les captures du jeu, état par état.
+2. **Les captures** : sur les 108 du harnais, **19 ont bougé, toutes `combat_*` ou la planche du
+   switch**. `options_personnages_modale.png`, celle qui porte le sélecteur ♂/♀, n'a pas bougé
+   d'un pixel — c'est la preuve visuelle que la variante `Frame` est intacte.
+3. **La taille du glyphe est volontairement commune** (plafond `SWITCH_ICON_SIZE`, 16) : c'est ce
+   qu'elle a toujours été pour `Frame`. `FirstPlan` avait d'abord suivi la grille du bouton icône
+   (18 sur 36), qui grossissait de 68 % les cinq glyphes du panneau Combat — ils sont de catégorie
+   `couleur` et n'ont donc pas d'étalon d'encre. Le retour au plafond commun ne change rien à
+   `Frame`.
+
+#### Le liseré de la case choisie, et son halo
+
+Quatre allers-retours sur rendu (artefact « Réglages du switch premier plan ») ont fixé, dans cet
+ordre : la position, la couleur, l'épaisseur, l'opacité.
+
+| Réglage | Valeur | D'où elle vient |
+| --- | --- | --- |
+| Couleur | `#126068` | **une couleur de la texture** — la teinte la plus vive de `button-icon-first-plan-hover.png` |
+| Épaisseur | 2 px | celle de la bordure de la texture (colonnes x 0–1 à `#141519`, corps en 2) |
+| Arrondi | 2 | celui de ses coins (alpha 24/255 en (0,0), 32 et 42 sur ses voisins, 236 en (0,2)) |
+| Opacité | 85 % | choisie sur rendu comparatif 100 / 85 / 70 % |
+| Halo | 1 px, 35 % | même couleur, juste à l'intérieur ; au-delà de 50 % il se lit comme un liseré de 3 px |
+| Position | retrait nul | **sur** la bordure, pas dedans |
+| Ordre | après toutes les cases | pour recouvrir les bordures des voisines qui la chevauchent |
+
+**Pourquoi une couleur de la texture, et pas un accent.** L'or du design system a été essayé et
+rejeté (« pas bon pour la couleur de la texture »), un gris aussi. Le socle sélectionné est un
+**dégradé** — `#428087` en haut, `#18383e` en bas : une teinte prise dans sa moitié basse
+(`#164047`, essayée) se détache en bas de la case et se dissout dans le haut. `#126068` tient sur
+toute la hauteur.
+
+**Pourquoi il est devenu nécessaire.** Le survol allume désormais le glyphe en même temps que le
+socle (retour utilisateur : n'éclaircir que le fond laissait une icône éteinte dessus, « un effet
+de décalage perturbant »). Conséquence directe : une case survolée et la case choisie sont
+devenues identiques. Le liseré est ce qui les sépare.
+
+#### Ce que le panneau Combat y gagne
+
+Plus d'échelle à régler : `SWITCH_SCALE` (36/44, la réduction homothétique du cadre) a disparu — la
+variante est native à 36. Les switches passent de 72 et 109 px à **74 et 112** (chevauchement
+compris), la hauteur ne bouge pas d'un pixel, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET`
+en dérivent sans être touchés.
 
 ### Vérification
 
@@ -3092,7 +3133,11 @@ switch de camp à 72 × 36 par `height` pour comparer les deux voies. Deux rang�
 `SwitchVariant::FirstPlan` : les deux switches du panneau Combat tels qu'ils sont appelés (74 et
 112 px, une case survolée, un switch désactivé), et les **quatre états côte à côte** sur un switch
 portant un glyphe monochrome et un glyphe en couleurs — la seule disposition qui permette de juger
-le couple actif / survolé, puisqu'ils partagent leur socle. Comparaison au jeu à la même
+le couple actif / survolé, puisqu'ils partagent leur socle.
+
+Et pour la variante, une preuve en creux : `options_personnages_modale.png` (le sélecteur ♂/♀)
+**ne doit jamais bouger** quand on touche au premier plan. Elle n'a pas bougé au lot du
+2026-09-16. Comparaison au jeu à la même
 taille : écart moyen 4,4 et 3,4/255 sur les deux états — le cerne sombre des glyphes du jeu,
 absorbé par la teinte comme sur toutes les icônes, fait l'essentiel des pixels en écart. Boîtes
 d'encre : ♂ au pixel près, ♀ décalé de 1 px (le jeu le pose lui-même 1 px à droite du centre de
@@ -3117,4 +3162,6 @@ sa case de 42).
   **Puis, le même jour** : `variant(SwitchVariant::FirstPlan)` sur les deux (demande utilisateur,
   voir la section de la variante ci-dessus). `SWITCH_SCALE` disparaît — la variante est native à
   36 px —, les switches passent à 74 et 112 px, tout le reste de la mise en page est dérivé et ne
-  bouge pas.
+  bouge pas. Quatre allers-retours sur rendu ont ensuite réglé le détail : taille du glyphe ramenée
+  au plafond commun (elle avait grossi de 68 %), socles collés, survol qui allume le glyphe, et le
+  liseré `#126068` de la case choisie avec son halo.
