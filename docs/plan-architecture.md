@@ -1918,7 +1918,10 @@ Demande utilisateur : « ajouter un overlay en haut à gauche, en dessous des bo
 présentant le récap de la session : XP gagné, kamas gagné, combats (gagné − perdu), challenges
 (réussi − échoué), durée de la session », avec « la section "Recap", après la section "Combat",
 dans l'onglet "Paramètres" » et « une option pour activer l'affichage de cet overlay, active par
-défaut ».
+défaut ». Le même jour, la section « Recap » est **remontée en tête de l'onglet** (« déplace la
+section Recap en premier ») et « Démarrage » descend après « Fichier », parmi les réglages qu'on
+pose une fois — l'ordre courant est celui commenté en tête de `OptionsTab::Parametres` dans
+`panels/options_modal.rs`.
 
 **Ce que c'est** : une quatrième zone d'overlay ancrée sur le jeu (`OverlayKind::Recap`,
 `panels::recap`), à côté de Combat, Suivi et Options. Une bande d'une seule ligne, cinq cases
