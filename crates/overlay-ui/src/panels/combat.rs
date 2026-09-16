@@ -412,18 +412,23 @@
 //! cases de fond kaki biseauté (active) ou gris-brun (inactive). Décisions prises sur rendu du
 //! harnais (avant / après en artefact, quatre variantes) :
 //!
-//! - **Hauteur 26px conservée** (`SWITCH_HEIGHT`, hauteur imposée via `Switch::height`) plutôt
-//!   que les 44 du jeu : « à 44 on a l'impression d'avoir compressé le switch » — et les deux
-//!   bandeaux gardent ainsi leurs 38px, cadre, barres et sorts ne bougent pas d'un pixel.
-//! - **Cases de 35px** (`SWITCH_SLOT_WIDTH`) au lieu des 43 du jeu : deux cases = 70px, la
-//!   largeur exacte du cadre ; trois = 109px, ce qui laisse 69px au total du bandeau leader,
-//!   assez pour six chiffres. Le 9-slice absorbe l'écart, biseaux et liseré restent ceux du jeu.
+//! - **À l'échelle 36/44** (`SWITCH_SCALE`, via `Switch::scale`) : le switch du jeu réduit
+//!   homothétiquement — cases de 35 × 36, séparateur de 2, liseré, biseaux et glyphes réduits
+//!   dans le même rapport. Deux cases = 72px, trois = 109px. Trois tailles ont été rendues le
+//!   même jour avant celle-ci : 26px de haut par étirement du 9-slice (« on a l'impression
+//!   d'avoir compressé le switch »), le standard de 44 (« le rendu dans le jeu est relativement
+//!   imposant »), puis cette réduction — « vraiment scaler à double dimension pour ne pas perdre
+//!   le rendu visuel ». Les deux bandeaux font 48px, la colonne des barres descend d'autant
+//!   (`BARS_COLUMN_TOP_OFFSET`).
 //! - **Bandeaux opacifiés conservés** (`LEADER_PANEL_FILL`), avec leurs marges de 6px. Le
-//!   bandeau de camp, qui faisait la largeur du cadre, s'élargit à 82px pour loger le switch de
-//!   70 avec ses marges : **calé à gauche sur le cadre**, il déborde de 12px vers la gouttière
-//!   des colonnes (retour utilisateur : les marges latérales du bandeau doivent rester celles
-//!   du design, pas se résorber sur la gauche) — sans rencontrer le bandeau leader, qui commence
+//!   bandeau de camp, qui faisait la largeur du cadre, s'élargit à 84px pour loger le switch de
+//!   72 avec ses marges : **calé à gauche sur le cadre**, il déborde de 14px vers la gouttière
+//!   des colonnes (retour utilisateur : les marges latérales du bandeau doivent rester celles du
+//!   design, pas se résorber sur la gauche) — sans rencontrer le bandeau leader, qui commence
 //!   plus bas (`BARS_COLUMN_TOP_OFFSET`).
+//! - **Le total du bandeau leader** dispose de 69px (190 − 12 de marges − 109 de switch) :
+//!   assez pour six chiffres au corps de 18, pas pour sept (79px). Recadrage à venir, décision
+//!   utilisateur sur rendu.
 //! - **Icônes en couleurs** : les cinq glyphes (`DsIcon::Allies`/`Enemies`/`Metric*`, catégorie
 //!   `couleur`) restent ceux du jeu et du site, peints tels quels sur la case active et
 //!   atténués ailleurs. Passés au monochrome du design system, alliés et ennemis ne se
@@ -548,20 +553,11 @@ impl CombatMetric {
     }
 }
 
-/// Hauteur des deux switches — **26px**, celle des switches peints à la main qu'ils remplacent
-/// (refonte 2026-09-16, voir doc de module) et non les 44 du jeu (`tokens::SWITCH_HEIGHT`) :
-/// imposée via `Switch::height`, le 9-slice n'étire que le corps des cases.
-const SWITCH_HEIGHT: f32 = 26.0;
-/// Largeur d'une case — **35px** et non les 43 du jeu (`tokens::SWITCH_SLOT_WIDTH`) : deux cases
-/// et leur séparateur font 70px, la largeur du cadre (`FRAME_WIDTH`) ; trois font 109px et
-/// laissent 69px au total du bandeau leader. Voir doc de module.
-const SWITCH_SLOT_WIDTH: f32 = 35.0;
-
-/// Largeur d'un switch à `slots` cases : cases de `SWITCH_SLOT_WIDTH` et séparateurs du jeu.
-fn switch_width(slots: usize) -> f32 {
-    SWITCH_SLOT_WIDTH * slots as f32
-        + design::tokens::SWITCH_SEPARATOR_WIDTH * slots.saturating_sub(1) as f32
-}
+/// Échelle des deux switches — **36px de haut** pour les 44 du jeu, réduction homothétique
+/// (`Switch::scale`, voir doc de module) : cases de 35 × 36, décision utilisateur du 2026-09-16.
+const SWITCH_SCALE: f32 = 36.0 / design::tokens::SWITCH_HEIGHT;
+/// Hauteur des deux switches à cette échelle — 36px, celle qu'annonce `Switch::desired_size`.
+const SWITCH_HEIGHT: f32 = 36.0;
 /// Écart vertical entre deux portraits de la liste "plate", et entre deux groupes nom+barre de la
 /// colonne de droite (même rythme pour les deux colonnes, demande utilisateur explicite). Resserré
 /// une 4e fois (6 px → 4 px → 2 px → 1 px, retour utilisateur répété : « il y a un écart non
@@ -881,10 +877,10 @@ pub fn show(
 /// ce qu'il commande, les portraits.
 ///
 /// **Calé à gauche sur le cadre, plus large que lui** depuis le passage à `design::switch`
-/// (2026-09-16) : le switch fait `FRAME_WIDTH` à lui seul, ses marges de 6px portent le bandeau à
-/// 82px, et c'est vers la gouttière des colonnes qu'il déborde — le bord gauche du panneau reste
-/// celui du cadre. La colonne, elle, n'alloue que `FRAME_WIDTH` : le débord est peint hors
-/// allocation, sans décaler la colonne des barres, dont le bandeau commence plus bas
+/// (2026-09-16) : le switch fait 72px, ses marges de 6px portent le bandeau à 84px, et c'est
+/// vers la gouttière des colonnes qu'il déborde — le bord gauche du panneau reste celui du
+/// cadre. La colonne, elle, n'alloue que `FRAME_WIDTH` : le débord est peint hors allocation,
+/// sans décaler la colonne des barres, dont le bandeau commence plus bas
 /// (`BARS_COLUMN_TOP_OFFSET`).
 ///
 /// Appelée par `show` dans TOUS les cas, y compris sans combat ou camp vide (donc cadre non peint)
@@ -895,31 +891,30 @@ fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutB
     let row_height = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(FRAME_WIDTH, row_height), egui::Sense::hover());
-    let switch_width = switch_width(2);
+    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`),
+    // dans l'infobulle de chaque case — le libellé de la case EST son infobulle.
+    let hotkey = shortcuts.label(ShortcutAction::CombatSide);
+    let switch = design::switch(side)
+        .slot(CombatSide::Allies, format!("Alliés ({hotkey})"))
+        .icon(design::DsIcon::Allies)
+        .slot(CombatSide::Enemies, format!("Ennemis ({hotkey})"))
+        .icon(design::DsIcon::Enemies)
+        .scale(SWITCH_SCALE)
+        .log_name("combat.camp");
+    let switch_size = switch.desired_size();
     let backdrop = egui::Rect::from_min_size(
         row_rect.min,
-        egui::vec2(switch_width + LEADER_PANEL_PADDING * 2.0, row_height),
+        egui::vec2(switch_size.x + LEADER_PANEL_PADDING * 2.0, row_height),
     );
     ui.painter()
         .rect_filled(backdrop, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
 
     let switch_rect = egui::Rect::from_min_size(
         backdrop.min + egui::vec2(LEADER_PANEL_PADDING, LEADER_PANEL_PADDING),
-        egui::vec2(switch_width, SWITCH_HEIGHT),
+        switch_size,
     );
-    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`),
-    // dans l'infobulle de chaque case — le libellé de la case EST son infobulle.
-    let hotkey = shortcuts.label(ShortcutAction::CombatSide);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
-    design::switch(side)
-        .slot(CombatSide::Allies, format!("Alliés ({hotkey})"))
-        .icon(design::DsIcon::Allies)
-        .slot(CombatSide::Enemies, format!("Ennemis ({hotkey})"))
-        .icon(design::DsIcon::Enemies)
-        .width(switch_width)
-        .height(SWITCH_HEIGHT)
-        .log_name("combat.camp")
-        .show(&mut child);
+    switch.show(&mut child);
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
@@ -952,29 +947,26 @@ fn show_leader_row(
     // TOUT le reste du panneau (ce total, les barres, les pourcentages sur les portraits) — la
     // poser juste à côté du chiffre qu'elle qualifie se lit d'un seul coup d'œil.
     let center_y = row_rect.min.y + LEADER_PANEL_PADDING + inner_height / 2.0;
-    let switch_width = switch_width(CombatMetric::ALL.len());
-    let switch_rect = egui::Rect::from_min_size(
-        egui::pos2(
-            row_rect.min.x + LEADER_PANEL_PADDING,
-            center_y - SWITCH_HEIGHT / 2.0,
-        ),
-        egui::vec2(switch_width, SWITCH_HEIGHT),
-    );
     // Même convention d'infobulle que le switch de camp : le nom de la grandeur (ce qu'elle
     // compte VRAIMENT, voir `CombatMetric::tooltip`) et sa combinaison.
     let hotkey = shortcuts.label(ShortcutAction::CombatMetric);
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
     let mut switch = design::switch(metric);
     for option in CombatMetric::ALL {
         switch = switch
             .slot(option, format!("{} ({hotkey})", option.tooltip()))
             .icon(option.icon());
     }
-    switch
-        .width(switch_width)
-        .height(SWITCH_HEIGHT)
-        .log_name("combat.grandeur")
-        .show(&mut child);
+    let switch = switch.scale(SWITCH_SCALE).log_name("combat.grandeur");
+    let switch_size = switch.desired_size();
+    let switch_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            row_rect.min.x + LEADER_PANEL_PADDING,
+            center_y - switch_size.y / 2.0,
+        ),
+        switch_size,
+    );
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+    switch.show(&mut child);
 
     text::paint_outlined_text(
         ui,

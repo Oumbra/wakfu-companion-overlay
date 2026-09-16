@@ -159,6 +159,12 @@ trois fronts — le cerne du glyphe entre dans le masque plein sous un seuil dur
 (`--residual`), et les pixels quasi transparents sont effacés (`--alpha-floor`). Toujours
 juger sur la bande « fond sombre » de la planche, jamais sur le damier seul.
 
+**Glyphe d'un seul ton sur décor uni, dont la frange disparaît** (un trait fin, la rangée
+haute de points) : le transfert de luminance joue contre l'antialiasing. Passer par
+`scripts/demix_flat.py CAPTURE OUT x0,y0,x1,y1` (démélange direct fond → glyphe, boîte lue
+dans `glyph_bbox`) et vérifier que `residual_max` reste à quelques unités — sinon revenir à
+`icon`. Cas `icon-edit` dans les recettes.
+
 Réglages étalonnés icône par icône dans
 [`references/recettes-icones.md`](references/recettes-icones.md), et composant par
 composant dans [`references/recettes-composants.md`](references/recettes-composants.md) :

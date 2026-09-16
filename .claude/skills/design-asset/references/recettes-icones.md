@@ -161,3 +161,34 @@ sélection (`tokens::ICON_NATIVE_DIM`) au lieu de les teinter.
 C'est la première exception à « l'icône sort blanche ». La règle reste : un glyphe monochrome se
 teinte au rendu. L'exception se justifie par une raison lisible sur la planche — un glyphe dont la
 couleur distingue deux valeurs — pas par la commodité de ne pas traiter.
+
+## `icon-edit` (2026-09-16) — glyphe d'un seul ton sur décor uni : démélange direct
+
+Le crayon aux trois points (édition/renommage), capturé à même le décor sombre en 26 × 24 px,
+glyphe de 14 × 14 natifs, or (244,216,159) sur fond (26,28,33). Pas de bouton porteur : même
+diagnostic qu'`icon-pin` (`analyze` rend un « composant » de la taille du glyphe, `border: null`).
+
+**`icon` écarté, dans tous ses réglages.** Par défaut comme avec `--floor 35/45/50`, `--grow`,
+`--rim-gain` ou `--residual`, la rangée haute des trois points et la pointe du crayon disparaissent.
+Ces pixels de frange (luminance ≈ 70, α réel ≈ 0,23) entrent dans le masque plein **avec leur
+couleur d'origine**, puis la teinte `luma-light` les normalise sur le 2ᵉ percentile de luminance
+du glyphe : ils tombent à α ≈ 0. Un seuil haut (`--floor 130`) les renvoie dans la bande de
+démélange, mais il faut alors `--tint-mode flat`, qui gonfle à 255 les bords intérieurs (160–183)
+restés dans le masque plein. Le transfert de luminance est pensé pour un modelé porté par la
+couleur ; sur un glyphe d'un seul ton, la seule nuance est l'antialiasing, et il joue contre elle.
+
+**Retenu : `scripts/demix_flat.py`**, démélange direct fond → glyphe sur toute la boîte :
+
+```bash
+python .claude/skills/design-asset/scripts/demix_flat.py CAPTURE OUT x0,y0,x1,y1 [alpha_floor=0.08]
+```
+
+Fond = médiane du décor hors boîte, glyphe = médiane des pixels francs (≥ 90ᵉ percentile), alpha =
+position de chaque pixel sur le segment ; l'ombre portée projette en négatif et tombe à 0. La boîte
+se lit dans le `glyph_bbox` d'`icon`. Le JSON rend le **résidu** de projection : ici 2,9 au maximum
+sur 87 pixels, preuve que tout tombe sur le segment — c'est la mesure qui autorise cette voie. Un
+résidu qui monte (texture de bouton, second ton dans le glyphe) renvoie vers `icon`.
+
+Ne pas en faire la voie par défaut des glyphes sans socle : ♂/♀ et le second lot sortent
+correctement par `icon`. Comparer sur la planche ; le symptôme qui déclenche `demix_flat` est un
+trait fin ou une rangée de pixels **manquants** par rapport à la source, pas un halo.

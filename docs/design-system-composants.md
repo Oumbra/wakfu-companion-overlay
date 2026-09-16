@@ -2941,6 +2941,7 @@ design::switch(&mut metric)
 | `icon` | pictogramme de **la dernière case déclarée** ; remplace le libellé au rendu, qui devient l'infobulle | libellé peint |
 | `width` | largeur totale, partagée à égalité entre les cases | `SWITCH_SLOT_WIDTH` × n + 2 × (n − 1) — 88 pour deux |
 | `height` | hauteur imposée ; le 9-slice n'étire que le corps des cases (marges figées 6 + 6) | `SWITCH_HEIGHT` = 44 |
+| `scale` | **réduction homothétique** de tout le switch — cases, séparateur, liseré, biseaux, glyphes — chaque case en un quad filtré, sans 9-slice ; dimensions arrondies au pixel | `1.0` |
 | `enabled` | le switch **entier** | `true` |
 | `preview_state` | `Idle` / `Hovered` / `Active` / `Disabled`, sur la dernière case — **galerie et captures uniquement** | état réel |
 | `log_name` | nom d'instance pour le journal | `"switch"` |
@@ -3003,10 +3004,16 @@ d'alpha 5 + 1), 4 côté séparateur, 6 en haut et en bas (liseré 2 + biseau 2 
 au niveau du bruit, `Stretch` sur les deux axes. Les deux barres génériques 88 × 44 restent dans
 `assets/design-system/` comme référence de comparaison.
 
+**Le survol — mesuré** (capture `switch-first-slot-active-and-second-slot-hover.png` du
+2026-09-16, ♂ actif et souris sur ♀, générifiée à 88 × 44 comme les deux autres) : la case
+inactive survolée prend **tout** l'aspect de la case active — fond `#635a47`, biseau clair de 2 px
+en haut et en bas, glyphe doré, plus d'ombre intérieure côté liseré. Écart moyen entre la case
+survolée et la case active de la référence : 1,0/255 (11,5 contre la case inactive). `Hovered`
+peint donc les textures actives, aucune texture de plus. La première version du composant dorait
+le glyphe seul sans toucher au fond — inventé faute de capture, et faux.
+
 **Inventé, faute de référence** — à remplacer par une mesure dès qu'une capture existera :
 
-- **Le survol.** La case inactive survolée prend le glyphe doré sans changer de fond — le signal
-  du bouton icône de premier plan (gris → or).
 - **L'état désactivé.** Fonds atténués comme un bouton désactivé (alpha 190/255), glyphes
   `TEXT_DISABLED`, gouttières atténuées de même ; la case sélectionnée garde son fond actif pour
   rester reconnaissable.
@@ -3014,10 +3021,17 @@ au niveau du bruit, `Stretch` sur les deux axes. Les deux barres génériques 88
   (`SWITCH_FONT_SIZE` = `TAB_FONT_SIZE`, 17 px) : le jeu n'a pas de switch texte dans les
   interfaces relevées.
 - **Les cases du milieu.** Dérivées des bouts, voir plus haut.
-- **Une hauteur autre que 44** (`height`). Le panneau Combat tient ses switches à 26 px, la
-  hauteur de ceux qu'ils remplacent (décision utilisateur du 2026-09-16 sur rendu : « à 44 on a
-  l'impression d'avoir compressé le switch »). Il reste 14 px de dégradé au lieu de 32, plus
-  raide, mais coins, liseré et biseaux ne bougent pas.
+- **Une autre taille que 88 × 44.** Deux voies. `scale` réduit **tout** dans le même rapport,
+  comme le jeu quand on baisse l'échelle de son interface : à 36/44 (le panneau Combat,
+  `SWITCH_SCALE`), une case fait 35 × 36, le séparateur 2, les glyphes 82 % de leur taille ;
+  la texture entière de chaque case est peinte en un quad filtré par le GPU (écart moyen
+  1,5/255 avec une réduction Lanczos hors ligne, mesuré sur la capture du panneau). `height`
+  n'impose que la hauteur : le 9-slice garde ses 6 px hauts et bas et n'étire que le corps —
+  à 26 px il reste 14 px de dégradé au lieu de 32, et c'est ce rendu qui a fait dire « on a
+  l'impression d'avoir compressé le switch » (2026-09-16) ; à réserver aux écarts de quelques
+  pixels. Le panneau Combat a essayé les trois le même jour — 26 par `height`, 44 natif (« le
+  rendu dans le jeu est relativement imposant »), puis 36 par `scale` (« vraiment scaler à
+  double dimension pour ne pas perdre le rendu visuel »).
 - **Des glyphes en couleurs.** Un `DsIcon` de catégorie `couleur` (`native_color()`) est peint
   tel quel sur la case active ou survolée, et multiplié par `ICON_NATIVE_DIM` (150/255) ailleurs
   — le rapport de luminance gris/or du jeu, arrondi vers le bas pour se lire sur un glyphe déjà
@@ -3029,10 +3043,11 @@ au niveau du bruit, `Stretch` sur les deux axes. Les deux barres génériques 88
 ### Vérification
 
 Planche dédiée `design_gallery_switch.png` (la galerie principale est au plafond des 8192 px) :
-les deux états du jeu à 88 px, le survol et le désactivé, un switch de 160 px à pictogrammes de
+les deux états du jeu à 88 px, le survol (comparé à sa capture, ci-dessus) et le désactivé, un switch de 160 px à pictogrammes de
 22 px, le repli à libellés, et deux switches à trois cases (libellés à 260 px ; pictogrammes à la
 largeur native de 133 px, milieu actif, dernière survolée), et les deux switches du panneau Combat
-à 26 px (glyphes en couleurs, dernière case survolée, puis désactivé). Comparaison au jeu à la même
+à l'échelle 36/44 (glyphes en couleurs, dernière case survolée, puis désactivé), suivis du même
+switch de camp à 72 × 36 par `height` pour comparer les deux voies. Comparaison au jeu à la même
 taille : écart moyen 4,4 et 3,4/255 sur les deux états — le cerne sombre des glyphes du jeu,
 absorbé par la teinte comme sur toutes les icônes, fait l'essentiel des pixels en écart. Boîtes
 d'encre : ♂ au pixel près, ♀ décalé de 1 px (le jeu le pose lui-même 1 px à droite du centre de
@@ -3044,9 +3059,11 @@ sa case de 42).
   (`show_side_row`) et grandeur Dégâts/Armure/Soins (`show_leader_row`), à la place de
   `paint_side_switch`/`paint_metric_switch` (piste `TINT_MEDIUM`, option `ACCENT`, peintes à la
   main). Choix faits sur rendu du harnais, avant / après en artefact, quatre variantes présentées :
-  hauteur 26 px conservée, cases de 35 px (deux = 70, la largeur du cadre ; trois = 109), bandeaux
-  opacifiés conservés — celui du camp élargi à 82 px, calé à gauche sur le cadre et débordant vers
-  la gouttière (retour utilisateur : garder les marges latérales du design), icônes en couleurs.
+  bandeaux opacifiés conservés — celui du camp calé à gauche sur le cadre et débordant vers la
+  gouttière (retour utilisateur : garder les marges latérales du design), icônes en couleurs.
+  Taille arrêtée en trois temps le même jour : 26 px par `height` (« compressé »), 44 natif
+  (« imposant »), puis **`scale(36/44)`** — cases de 35 × 36, switches de 72 et 109 px, bandeaux
+  de 48 px, bandeau de camp à 84 px.
   Les cinq glyphes sont entrés au registre `DsIcon` (`Allies`, `Enemies`, `MetricDamage`,
   `MetricArmor`, `MetricHeal`, catégorie `couleur`), et les fichiers d'`assets/ui/` qu'`UiIcons`
   chargeait ont été supprimés.

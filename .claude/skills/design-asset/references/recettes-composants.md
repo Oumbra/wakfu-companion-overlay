@@ -22,6 +22,7 @@ Les captures d'origine sont dans l'historique git — commit
 | `tabs-with-first-tab-active-and-hover-2nd-tab` | `strip` | idem |
 | `switch-first-slot-active` | `cutout --tol 8` puis `strip` | `--roi-inset 6 --grow 2 --parts 0,0,42,44 44,0,87,44` |
 | `switch-second-slot-active` | `cutout --tol 8` puis `strip` | `--roi-inset 6 --grow 2 --parts 0,0,44,44 46,0,88,44` |
+| `switch-first-slot-active-and-second-slot-hover` | `cutout --tol 8` puis `strip` | `--roi-inset 6 --grow 2 --parts 0,0,42,44 44,0,88,44` |
 
 ## Ce que ce lot a appris
 
@@ -107,3 +108,9 @@ n'aurait pas de médiane commune.
 par duplication d'une colonne de remplissage de la case inactive — texture uniforme, invisible —
 pour que les quatre cases découpées ensuite (`switch-slot-*.png`, voir le catalogue des
 composants) aient des largeurs cohérentes d'un état à l'autre.
+
+**Troisième capture, le survol** (`switch-first-slot-active-and-second-slot-hover`, ♂ actif et
+souris sur ♀) : 87 px comme la première, même recette, même égalisation à 88 (colonne 60
+dupliquée). Elle n'est découpée en rien : la case survolée mesure identique à la case active
+(écart moyen 1,0/255, biseaux compris, sans ombre intérieure), le composant réutilise donc les
+textures actives pour l'état survolé. Le fichier reste comme référence de comparaison.

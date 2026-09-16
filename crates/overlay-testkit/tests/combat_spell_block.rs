@@ -224,10 +224,10 @@ fn last_ally_caster_name(fight: &FightSnapshot) -> &str {
 /// de la largeur du cadre ni du `COLUMN_GAP` qui menaient jusqu'au bandeau leader, et les deux
 /// tests retombent donc sur la même abscisse. Depuis le 16 sept. (`design::switch`), son bandeau
 /// est calé à gauche sur le cadre. Abscisse : 8 de marge du harnais, 6 (`LEADER_PANEL_PADDING`)
-/// et 17,5 (moitié d'une case de `SWITCH_SLOT_WIDTH`, 35), soit 31 pour « Alliés », une case et
-/// un séparateur (37) de plus (68) pour « Ennemis ». Ordonnée : 8, 50 et 13, soit 71.
-const SWITCH_ALLIES: egui::Pos2 = egui::pos2(31.0, 71.0);
-const SWITCH_ENEMIES: egui::Pos2 = egui::pos2(68.0, 71.0);
+/// et 17,5 (moitié d'une case à l'échelle 36/44, 35), soit 31 pour « Alliés », une case et un
+/// séparateur (37) de plus (68) pour « Ennemis ». Ordonnée : 8, 50 et 18, soit 76.
+const SWITCH_ALLIES: egui::Pos2 = egui::pos2(31.0, 76.0);
+const SWITCH_ENEMIES: egui::Pos2 = egui::pos2(68.0, 76.0);
 
 fn click_at(harness: &mut Harness<'_>, pos: egui::Pos2) {
     harness.remove_cursor();
