@@ -397,6 +397,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: None,
                 },

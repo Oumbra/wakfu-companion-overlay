@@ -74,6 +74,12 @@ pub struct FeatureToggles {
     /// La durée affichée, elle, reste celle de l'overlay depuis son lancement — couper la bande ne
     /// met pas le chrono en pause (voir `panels::recap`).
     pub recap: bool,
+    /// **Les cases facultatives de la bande Récap** — « Afficher la durée de la session »,
+    /// « Afficher les combats », « Afficher les challenges », sous l'interrupteur ci-dessus et
+    /// **dépendantes de [`Self::recap`]** comme le suivi des sorts l'est du détail des combats
+    /// (2026-09-16, tard). Décochée, une case disparaît de la bande, qui se resserre (voir
+    /// `panels::recap::RecapCells`) ; kamas et XP restent toujours affichés.
+    pub recap_cells: crate::panels::recap::RecapCells,
 }
 
 impl FeatureToggles {
@@ -98,6 +104,7 @@ impl Default for FeatureToggles {
             combat: true,
             spells: true,
             recap: true,
+            recap_cells: crate::panels::recap::RecapCells::default(),
         }
     }
 }

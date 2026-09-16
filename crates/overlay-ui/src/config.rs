@@ -161,6 +161,19 @@ pub struct OverlayConfig {
     /// `#[serde(default = "actif")]` garde la bande allumée pour une config écrite avant ce champ.
     #[serde(default = "actif")]
     pub recap_enabled: bool,
+    /// La bande Récap affiche-t-elle la **durée de la session** ? — case « Afficher la durée de
+    /// la session », sous l'interrupteur de la bande dont elle dépend (2026-09-16, tard). Voir
+    /// `panels::recap::RecapCells` ; même politique que ses voisines, `actif` par défaut.
+    #[serde(default = "actif")]
+    pub recap_duration_enabled: bool,
+    /// La bande Récap affiche-t-elle les **combats** (gagnés − perdus) ? — case « Afficher les
+    /// combats », même famille que [`Self::recap_duration_enabled`].
+    #[serde(default = "actif")]
+    pub recap_fights_enabled: bool,
+    /// La bande Récap affiche-t-elle les **challenges** (réussis − échoués) ? — case « Afficher
+    /// les challenges », même famille que [`Self::recap_duration_enabled`].
+    #[serde(default = "actif")]
+    pub recap_challenges_enabled: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -259,6 +272,9 @@ impl Default for OverlayConfig {
             combat_enabled: actif(),
             spells_enabled: actif(),
             recap_enabled: actif(),
+            recap_duration_enabled: actif(),
+            recap_fights_enabled: actif(),
+            recap_challenges_enabled: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
@@ -331,6 +347,11 @@ impl OverlayConfig {
             combat: self.combat_enabled,
             spells: self.spells_enabled,
             recap: self.recap_enabled,
+            recap_cells: crate::panels::recap::RecapCells {
+                duration: self.recap_duration_enabled,
+                fights: self.recap_fights_enabled,
+                challenges: self.recap_challenges_enabled,
+            },
         }
     }
 
@@ -343,6 +364,9 @@ impl OverlayConfig {
         self.combat_enabled = features.combat;
         self.spells_enabled = features.spells;
         self.recap_enabled = features.recap;
+        self.recap_duration_enabled = features.recap_cells.duration;
+        self.recap_fights_enabled = features.recap_cells.fights;
+        self.recap_challenges_enabled = features.recap_cells.challenges;
     }
 
     /// Les deux sourdines de cette config — voir [`crate::panels::notifications::AlertMutes`], qui les
@@ -570,6 +594,41 @@ mod tests {
         assert!(relu.combat_enabled);
         assert!(!relu.spells_enabled);
         assert!(!relu.features().spells_visible());
+    }
+
+    /// Les trois cases de la bande Récap sont trois clés distinctes, persistées et relues telles
+    /// quelles ; une config d'avant leur existence les retrouve toutes cochées.
+    #[test]
+    fn aller_retour_des_cases_du_recap() {
+        let mut config = OverlayConfig::default();
+        config.set_features(crate::panels::feature_switch::FeatureToggles {
+            recap_cells: crate::panels::recap::RecapCells {
+                duration: false,
+                fights: true,
+                challenges: false,
+            },
+            ..Default::default()
+        });
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(relu.recap_enabled);
+        assert!(!relu.recap_duration_enabled);
+        assert!(relu.recap_fights_enabled);
+        assert!(!relu.recap_challenges_enabled);
+        assert_eq!(
+            relu.features().recap_cells,
+            crate::panels::recap::RecapCells {
+                duration: false,
+                fights: true,
+                challenges: false,
+            }
+        );
+        let ancienne: OverlayConfig = toml::from_str("recap_enabled = false\n").expect("relecture");
+        assert!(!ancienne.recap_enabled);
+        assert_eq!(
+            ancienne.features().recap_cells,
+            crate::panels::recap::RecapCells::default()
+        );
     }
 
     /// **Le suivi des sorts coupé se retrouve tel quel**, même si le détail des combats l'éteint

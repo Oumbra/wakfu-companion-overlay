@@ -123,6 +123,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: Some(&mut options_state),
                 login: None,
             },

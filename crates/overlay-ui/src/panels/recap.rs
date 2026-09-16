@@ -35,8 +35,30 @@
 //! bloc gagne une ligne — plutôt que deux chiffres qui se chevauchent. Voir [`show`].
 //!
 //! **Une section « Recap » commande son affichage** (onglet « Paramètres » de la fenêtre Options,
-//! juste après « Combat ») — voir `panels::feature_switch::FeatureToggles::recap`, active par
+//! en tête de l'onglet) — voir `panels::feature_switch::FeatureToggles::recap`, active par
 //! défaut comme ses voisines.
+//!
+//! ## Trois cases qu'on peut éteindre — [`RecapCells`] (2026-09-16, tard)
+//!
+//! Demande utilisateur : « options pour afficher la durée de la session, pour afficher les
+//! combats (victoire / défaite), pour afficher les challenges (réussi / échoué) ». Trois cases à
+//! cocher sous « Activer le récap de session », en retrait comme le suivi des sorts sous le détail
+//! des combats, toutes cochées par défaut. Kamas et XP ne se règlent pas : ce sont les deux chiffres
+//! pour lesquels la bande existe.
+//!
+//! La grille se **recompose** sur ce qui reste, elle ne laisse pas de trou :
+//!
+//! ```text
+//! KAMAS   EXPERIENCE        KAMAS   EXPERIENCE        KAMAS   EXPERIENCE
+//! COMBATS CHALLENGES            CHALLENGES               DUREE
+//!       DUREE                     DUREE
+//! ```
+//!
+//! Une paire dont une case est éteinte laisse l'autre **seule sur sa ligne, centrée sur toute la
+//! largeur** — comme la durée l'est déjà ; une ligne dont les deux cases sont éteintes disparaît,
+//! et le bloc perd sa hauteur (une ligne au minimum, Kamas / XP ne s'éteignant pas). C'est la
+//! même mécanique que l'empilement « responsive » (voir [`layout_rows`]) : une ligne porte une ou
+//! deux cases, et une case seule prend toute la largeur.
 //!
 //! ## La durée vient de l'overlay, jamais du fichier
 //!
@@ -81,18 +103,61 @@ const ROW_GAP: f32 = 8.0;
 /// Rembourrage vertical du fond translucide, au-dessus de la première ligne et sous la dernière.
 const PADDING_Y: f32 = 6.0;
 
-/// Nombre de lignes du bloc quand tout tient — deux lignes de deux cases, plus la durée seule sur
-/// la troisième (voir la doc de module). Une ligne de plus par paire de cases empilée.
+/// Nombre de lignes du bloc quand tout tient et que tout est affiché — deux lignes de deux cases,
+/// plus la durée seule sur la troisième (voir la doc de module). Une ligne de plus par paire de
+/// cases empilée, une de moins par ligne dont toutes les cases sont éteintes ([`RecapCells`]).
 const MIN_ROWS: usize = 3;
 
-/// Hauteur du bloc à `rows` lignes, fond compris.
+/// Hauteur du bloc à `rows` lignes, fond compris. Jamais moins d'une ligne : Kamas et XP ne
+/// s'éteignent pas.
 pub const fn height(rows: usize) -> f32 {
-    2.0 * PADDING_Y + rows as f32 * ROW_HEIGHT + (rows - 1) as f32 * ROW_GAP
+    2.0 * PADDING_Y + rows as f32 * ROW_HEIGHT + rows.saturating_sub(1) as f32 * ROW_GAP
 }
 
 /// Hauteur du bloc quand tout tient sur trois lignes — la fenêtre OS naît dessus
 /// (`main.rs::create_overlay_window`) et se retaille à ce que [`show`] renvoie ensuite.
 pub const HEIGHT: f32 = height(MIN_ROWS);
+
+/// **Les cases de la bande qu'on peut éteindre** — les trois cases « Afficher … » de la section
+/// « Recap » de la fenêtre Options (voir la doc de module). Kamas et XP n'y sont pas : elles sont
+/// toujours affichées.
+///
+/// Un type à part plutôt que trois `bool` dans `FeatureToggles`, pour la même raison que celui-ci
+/// existe : ils voyagent ensemble (config → Options → hôte → rendu), et leur défaut est `true` —
+/// un `#[derive(Default)]` les éteindrait tous.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecapCells {
+    /// La ligne « Durée de session » (chrono de l'overlay).
+    pub duration: bool,
+    /// La case « Combats » (gagnés − perdus).
+    pub fights: bool,
+    /// La case « Challenges » (réussis − échoués).
+    pub challenges: bool,
+}
+
+impl Default for RecapCells {
+    /// **Tout est affiché** — l'état d'une installation neuve, et celui d'un `config.toml` écrit
+    /// avant l'existence de ces réglages.
+    fn default() -> Self {
+        Self {
+            duration: true,
+            fights: true,
+            challenges: true,
+        }
+    }
+}
+
+/// La ligne de la grille à laquelle une case appartient quand tout est affiché — voir
+/// [`layout_rows`], qui groupe les cases par ligne avant de décider ce qui tient côte à côte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    /// Kamas et XP — toujours là.
+    Money,
+    /// Combats et challenges.
+    Scores,
+    /// La durée, seule.
+    Duration,
+}
 
 /// Largeur du bloc, fond compris — **fixe**, la fenêtre OS est dimensionnée dessus.
 ///
@@ -168,20 +233,23 @@ struct Cell {
     icon: DsIcon,
     tooltip: &'static str,
     segments: Vec<Segment>,
+    /// Sa ligne quand tout est affiché.
+    row: Row,
 }
 
-/// Les cinq cases, dans l'ordre de lecture de la grille (voir [`show`]) : Kamas, XP, Combats,
-/// Challenges, Durée. C'est l'ordre de la bande du web (`.recap-bandeau`) à une inversion près,
-/// demandée sur capture le 2026-09-16 : les kamas AVANT l'XP.
+/// Les cases **affichées**, dans l'ordre de lecture de la grille (voir [`show`]) : Kamas, XP,
+/// Combats, Challenges, Durée — les trois dernières seulement si `visible` les garde. C'est
+/// l'ordre de la bande du web (`.recap-bandeau`) à une inversion près, demandée sur capture le
+/// 2026-09-16 : les kamas AVANT l'XP.
 ///
 /// **Aucune icône inventée** — les cinq viennent du registre `design::DsIcon`, donc du jeu :
 /// `Xp` et `Kamas` sont les glyphes évidents, `Sword` tient pour les combats, `Trophy` pour les
 /// challenges et `Clock` pour la durée. Les deux derniers ont été détourés le 2026-09-16 pour ce
 /// bloc, qui empruntait jusque-là la dague colorée du switch de grandeur du panneau Combat et la
 /// grille de calendrier.
-fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
+fn cells(totals: &SessionTotals, uptime: std::time::Duration, visible: RecapCells) -> Vec<Cell> {
     let net_kamas = totals.kamas_gained - totals.kamas_lost;
-    vec![
+    let mut cells = vec![
         Cell {
             icon: DsIcon::Kamas,
             tooltip: "Kamas gagnés",
@@ -197,6 +265,7 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
                 text: format_fr_thousands(net_kamas),
                 color: KAMAS_COLOR,
             }],
+            row: Row::Money,
         },
         Cell {
             icon: DsIcon::Xp,
@@ -205,26 +274,37 @@ fn cells(totals: &SessionTotals, uptime: std::time::Duration) -> Vec<Cell> {
                 text: format!("+{}", format_fr_thousands(totals.xp_gained)),
                 color: ACCENT_COLOR,
             }],
+            row: Row::Money,
         },
-        Cell {
+    ];
+    if visible.fights {
+        cells.push(Cell {
             icon: DsIcon::Sword,
             tooltip: "Combats",
             segments: win_loss(totals.fights_won, totals.fights_lost),
-        },
-        Cell {
+            row: Row::Scores,
+        });
+    }
+    if visible.challenges {
+        cells.push(Cell {
             icon: DsIcon::Trophy,
             tooltip: "Challenges",
             segments: win_loss(totals.challenges_passed, totals.challenges_failed),
-        },
-        Cell {
+            row: Row::Scores,
+        });
+    }
+    if visible.duration {
+        cells.push(Cell {
             icon: DsIcon::Clock,
             tooltip: "Durée de session",
             segments: vec![Segment {
                 text: format_duration(uptime),
                 color: ACCENT_COLOR,
             }],
-        },
-    ]
+            row: Row::Duration,
+        });
+    }
+    cells
 }
 
 /// Les trois morceaux d'une cellule « gagné − perdu ».
@@ -254,11 +334,17 @@ pub fn format_duration(uptime: std::time::Duration) -> String {
 }
 
 /// Peint le bloc et renvoie la hauteur qu'il occupe, fond compris — voir la doc de module pour
-/// ce que l'hôte en fait. La largeur, elle, est fixe : [`WIDTH`].
+/// ce que l'hôte en fait. La largeur, elle, est fixe : [`WIDTH`]. `visible` dit quelles cases
+/// facultatives peindre (voir [`RecapCells`]).
 ///
 /// Le contenu est calé en HAUT À GAUCHE de `ui` : la fenêtre OS peut être plus grande que le bloc
 /// (elle l'est, entre deux ajustements de hauteur), le vide qui reste est transparent.
-pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Duration) -> f32 {
+pub fn show(
+    ui: &mut egui::Ui,
+    totals: &SessionTotals,
+    uptime: std::time::Duration,
+    visible: RecapCells,
+) -> f32 {
     // **Le chrono avance tout seul.** Cette architecture ne rend une frame que lorsque quelque
     // chose change (`ControlFlow::Wait`, §6.1 du plan : l'overlay ne consomme rien au repos) — un
     // snapshot du moteur, un survol, un raccourci. La durée, elle, change sans que rien d'autre ne
@@ -268,7 +354,7 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_secs(1));
 
-    let cells = cells(totals, uptime);
+    let cells = cells(totals, uptime, visible);
     let font = text::label_font(ui.ctx(), FONT_SIZE);
     let ds = design::DesignSystem::get(ui.ctx());
 
@@ -304,8 +390,12 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
 
     let content_width = WIDTH - 2.0 * PADDING_X;
     let half_width = content_width / 2.0;
-    let rows_layout = layout_rows(&cell_widths, half_width);
-    let rows = rows_layout.len() + 1;
+    let rows_layout = layout_rows(
+        &cells.iter().map(|cell| cell.row).collect::<Vec<_>>(),
+        &cell_widths,
+        half_width,
+    );
+    let rows = rows_layout.len();
 
     let origin = ui.max_rect().min;
     let band = egui::Rect::from_min_size(origin, egui::vec2(WIDTH, height(rows)));
@@ -319,7 +409,7 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
     let centered = |slot_left: f32, slot_width: f32, cell: usize| {
         content_left + slot_left + ((slot_width - cell_widths[cell]) / 2.0).round()
     };
-    let mut placements: Vec<(usize, f32, f32)> = rows_layout
+    let placements: Vec<(usize, f32, f32)> = rows_layout
         .iter()
         .enumerate()
         .flat_map(|(row, cells)| {
@@ -334,7 +424,6 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
             }
         })
         .collect();
-    placements.push((4, centered(0.0, content_width, 4), row_top(rows - 1)));
     for (index, x, y) in placements {
         let cell_rect =
             egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cell_widths[index], ROW_HEIGHT));
@@ -344,27 +433,37 @@ pub fn show(ui: &mut egui::Ui, totals: &SessionTotals, uptime: std::time::Durati
     band.height()
 }
 
-/// Les lignes des quatre premières cases, de haut en bas : les indices (dans [`cells`]) des cases
-/// qu'elles portent, deux quand la paire tient côte à côte, une quand elle s'empile. La durée n'y
-/// figure pas, elle a toujours sa ligne à elle.
+/// Les lignes du bloc, de haut en bas : les indices (dans [`cells`]) des cases qu'elles portent,
+/// deux quand une paire tient côte à côte, une quand elle s'empile — ou quand la ligne n'a qu'une
+/// case, la durée toujours, Combats ou Challenges quand l'autre est éteinte ([`RecapCells`]).
 ///
-/// Décide, paire par paire (Kamas/XP, Combats/Challenges), si les deux cases tiennent chacune
-/// dans sa moitié de ligne (`half_width`) ou si elles s'empilent — la règle « responsive »
-/// demandée le 2026-09-16 : un chiffre trop long pour sa moitié fait passer la paire l'un
-/// au-dessus de l'autre plutôt que de chevaucher son voisin. Les deux paires se décident
-/// indépendamment : chaque case a sa moitié à elle, l'une n'empiète jamais sur l'autre.
-fn layout_rows(cell_widths: &[f32], half_width: f32) -> Vec<Vec<usize>> {
-    const PAIRS: [(usize, usize); 2] = [(0, 1), (2, 3)];
-    PAIRS
-        .iter()
-        .flat_map(|&(left, right)| {
-            if cell_widths[left] > half_width || cell_widths[right] > half_width {
-                vec![vec![left], vec![right]]
-            } else {
-                vec![vec![left, right]]
+/// `rows[i]` est la ligne « nominale » de la case `i`, dans l'ordre de [`cells`] (les cases d'une
+/// même ligne se suivent). Décide, ligne par ligne, si deux cases tiennent chacune dans sa moitié
+/// (`half_width`) ou si elles s'empilent — la règle « responsive » demandée le 2026-09-16 : un
+/// chiffre trop long pour sa moitié fait passer la paire l'un au-dessus de l'autre plutôt que de
+/// chevaucher son voisin. Les lignes se décident indépendamment : chaque case a sa moitié à elle,
+/// l'une n'empiète jamais sur l'autre. Une ligne sans case n'existe pas — le bloc se resserre.
+fn layout_rows(rows: &[Row], cell_widths: &[f32], half_width: f32) -> Vec<Vec<usize>> {
+    let mut layout: Vec<Vec<usize>> = Vec::new();
+    let mut index = 0;
+    while index < rows.len() {
+        let row = rows[index];
+        let end = index + rows[index..].iter().take_while(|r| **r == row).count();
+        let members: Vec<usize> = (index..end).collect();
+        match members[..] {
+            [left, right] => {
+                if cell_widths[left] > half_width || cell_widths[right] > half_width {
+                    layout.push(vec![left]);
+                    layout.push(vec![right]);
+                } else {
+                    layout.push(vec![left, right]);
+                }
             }
-        })
-        .collect()
+            _ => layout.extend(members.iter().map(|&cell| vec![cell])),
+        }
+        index = end;
+    }
+    layout
 }
 
 /// Glyphe puis chiffres d'une cellule, centrés verticalement dans `rect`, et l'infobulle qui dit
@@ -476,7 +575,11 @@ mod tests {
             challenges_passed: 4,
             challenges_failed: 1,
         };
-        let cells = cells(&totals, std::time::Duration::from_secs(3600));
+        let cells = cells(
+            &totals,
+            std::time::Duration::from_secs(3600),
+            RecapCells::default(),
+        );
         let icons: Vec<DsIcon> = cells.iter().map(|c| c.icon).collect();
         assert_eq!(
             icons,
@@ -508,7 +611,7 @@ mod tests {
             kamas_lost: 350,
             ..Default::default()
         };
-        let cells = cells(&totals, std::time::Duration::ZERO);
+        let cells = cells(&totals, std::time::Duration::ZERO, RecapCells::default());
         assert_eq!(
             cells[0].segments[0].color,
             Color32::from_rgb(0xFF, 0xD7, 0x00)
@@ -520,27 +623,93 @@ mod tests {
         assert_eq!(cells[4].segments[0].color, ACCENT_COLOR);
     }
 
-    /// Tout tient : deux lignes de deux cases, chacune dans sa moitié de 93 px.
+    /// Les cinq lignes nominales quand tout est affiché.
+    const ALL: [Row; 5] = [
+        Row::Money,
+        Row::Money,
+        Row::Scores,
+        Row::Scores,
+        Row::Duration,
+    ];
+
+    /// Tout tient : deux lignes de deux cases, chacune dans sa moitié de 93 px, et la durée seule
+    /// sur la troisième.
     #[test]
     fn deux_paires_qui_tiennent_restent_sur_deux_lignes() {
-        let rows = layout_rows(&[40.0, 93.0, 50.0, 45.0, 70.0], 93.0);
-        assert_eq!(rows, vec![vec![0, 1], vec![2, 3]]);
+        let rows = layout_rows(&ALL, &[40.0, 93.0, 50.0, 45.0, 70.0], 93.0);
+        assert_eq!(rows, vec![vec![0, 1], vec![2, 3], vec![4]]);
+        assert_eq!(height(rows.len()), HEIGHT);
     }
 
     /// Une case qui déborde de sa moitié empile SA paire (la case de gauche au-dessus), l'autre
     /// paire reste côte à côte — et le bloc gagne une ligne.
     #[test]
     fn une_case_trop_large_empile_sa_paire_seule() {
-        let rows = layout_rows(&[40.0, 94.0, 50.0, 45.0, 70.0], 93.0);
-        assert_eq!(rows, vec![vec![0], vec![1], vec![2, 3]]);
-        assert_eq!(height(rows.len() + 1), height(4));
+        let rows = layout_rows(&ALL, &[40.0, 94.0, 50.0, 45.0, 70.0], 93.0);
+        assert_eq!(rows, vec![vec![0], vec![1], vec![2, 3], vec![4]]);
+        assert_eq!(height(rows.len()), height(4));
     }
 
     /// Les deux paires empilées : cinq lignes, une par case.
     #[test]
     fn les_deux_paires_empilees_font_cinq_lignes() {
-        let rows = layout_rows(&[120.0, 110.0, 100.0, 45.0, 70.0], 93.0);
-        assert_eq!(rows, vec![vec![0], vec![1], vec![2], vec![3]]);
+        let rows = layout_rows(&ALL, &[120.0, 110.0, 100.0, 45.0, 70.0], 93.0);
+        assert_eq!(rows, vec![vec![0], vec![1], vec![2], vec![3], vec![4]]);
         assert_eq!(height(5), 2.0 * 6.0 + 5.0 * 22.0 + 4.0 * 8.0);
+    }
+
+    /// Les trois cases facultatives s'éteignent une à une : la case restante d'une paire prend
+    /// la ligne pour elle seule, une ligne vide disparaît, Kamas et XP restent.
+    #[test]
+    fn les_cases_eteintes_resserrent_la_grille() {
+        let totals = SessionTotals::default();
+        let icons = |visible: RecapCells| {
+            cells(&totals, std::time::Duration::ZERO, visible)
+                .iter()
+                .map(|c| (c.icon, c.row))
+                .collect::<Vec<_>>()
+        };
+        // Sans combats : Challenges seule sur sa ligne.
+        let sans_combats = icons(RecapCells {
+            fights: false,
+            ..RecapCells::default()
+        });
+        assert_eq!(
+            sans_combats,
+            vec![
+                (DsIcon::Kamas, Row::Money),
+                (DsIcon::Xp, Row::Money),
+                (DsIcon::Trophy, Row::Scores),
+                (DsIcon::Clock, Row::Duration),
+            ]
+        );
+        let rows: Vec<Row> = sans_combats.iter().map(|(_, row)| *row).collect();
+        assert_eq!(
+            layout_rows(&rows, &[40.0, 50.0, 45.0, 70.0], 93.0),
+            vec![vec![0, 1], vec![2], vec![3]]
+        );
+        // Sans durée ni combats ni challenges : la seule ligne Kamas / XP.
+        let rien = icons(RecapCells {
+            duration: false,
+            fights: false,
+            challenges: false,
+        });
+        assert_eq!(rien.len(), 2);
+        let rows: Vec<Row> = rien.iter().map(|(_, row)| *row).collect();
+        assert_eq!(layout_rows(&rows, &[40.0, 50.0], 93.0), vec![vec![0, 1]]);
+        assert_eq!(height(1), 2.0 * 6.0 + 22.0);
+    }
+
+    /// Le défaut affiche tout : c'est l'état d'une config écrite avant ces réglages.
+    #[test]
+    fn par_defaut_tout_est_affiche() {
+        assert_eq!(
+            RecapCells::default(),
+            RecapCells {
+                duration: true,
+                fights: true,
+                challenges: true,
+            }
+        );
     }
 }

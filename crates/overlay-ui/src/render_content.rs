@@ -328,6 +328,11 @@ pub struct RenderContent<'a> {
     /// l'instant de lancement du processus (`main.rs::App::started_at`), ce qui la rend aussi
     /// figeable par un harnais de test, comme `now`.
     pub session_uptime: std::time::Duration,
+    /// Les cases facultatives de la bande Récap — durée, combats, challenges (cases « Afficher
+    /// … » de la section « Recap » des Options, 2026-09-16). Voir `panels::recap::RecapCells`.
+    /// L'interrupteur de la bande lui-même ne se voit pas ici : la fenêtre Récap n'est alors pas
+    /// montrée du tout (même règle que le détail des combats).
+    pub recap_cells: panels::recap::RecapCells,
     pub options: Option<&'a mut OptionsModalState>,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
@@ -474,6 +479,7 @@ pub fn build_ui(
                 now: content.now,
                 session_totals: content.session_totals,
                 session_uptime: content.session_uptime,
+                recap_cells: content.recap_cells,
                 options: content.options.as_deref_mut(),
                 login: content.login.as_deref_mut(),
             },
@@ -517,6 +523,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         now,
         session_totals,
         session_uptime,
+        recap_cells,
         options,
         login,
     } = content;
@@ -700,8 +707,12 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // remontée : ce bloc n'a ni bouton ni état, seulement la hauteur qu'il vient
                 // d'occuper, dont l'hôte se sert pour redimensionner la fenêtre OS.
                 OverlayKind::Recap => {
-                    outcome.recap_height =
-                        Some(panels::recap::show(ui, session_totals, session_uptime));
+                    outcome.recap_height = Some(panels::recap::show(
+                        ui,
+                        session_totals,
+                        session_uptime,
+                        recap_cells,
+                    ));
                 }
                 OverlayKind::Options => {
                     if let Some(state) = options {

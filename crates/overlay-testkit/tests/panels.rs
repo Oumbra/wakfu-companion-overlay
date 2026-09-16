@@ -197,6 +197,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -269,6 +270,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -352,6 +354,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                 now,
                 session_totals: &totals,
                 session_uptime: uptime,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -425,6 +428,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                 now,
                 session_totals: &totals,
                 session_uptime: uptime,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -442,6 +446,77 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
     harness.hover_at(egui::pos2(64.0, 61.0));
     harness.run();
     harness.snapshot("recap_tooltip_kamas_au_dessus");
+}
+
+/// Le même bloc avec deux cases éteintes par les Options (2026-09-16, tard,
+/// `panels::recap::RecapCells`) : sans combats ni durée, les challenges prennent la deuxième
+/// ligne pour eux seuls, centrés sur toute la largeur, et le bloc perd sa troisième ligne — la
+/// grille se resserre, elle ne laisse pas de trou.
+#[test]
+fn bloc_recap_sans_combats_ni_duree_se_resserre() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let uptime = std::time::Duration::from_secs(5025);
+    // Même XP ramenée que la session ordinaire ci-dessus, pour que la ligne Kamas / XP tienne.
+    let totals = overlay_engine::SessionTotals {
+        xp_gained: snapshot.totals.xp_gained / 1_000_000,
+        ..snapshot.totals
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                session_totals: &totals,
+                session_uptime: uptime,
+                recap_cells: panels::recap::RecapCells {
+                    duration: false,
+                    fights: false,
+                    challenges: true,
+                },
+                options: None,
+                login: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("recap_sans_combats_ni_duree");
 }
 
 #[test]
@@ -497,6 +572,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -657,6 +733,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -731,6 +808,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -865,6 +943,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: None,
                 },
@@ -1009,6 +1088,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: None,
                 },
@@ -1108,6 +1188,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: None,
                 },
@@ -1211,6 +1292,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         now,
                         session_totals: &Default::default(),
                         session_uptime: std::time::Duration::ZERO,
+                        recap_cells: Default::default(),
                         options: None,
                         login: None,
                     },
@@ -1329,6 +1411,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: None,
                 },
@@ -1624,6 +1707,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: None,
                 },
@@ -1724,6 +1808,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -1809,6 +1894,7 @@ fn panneau_options_ne_panique_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: Some(&mut options_state),
                 login: None,
             },
@@ -2079,6 +2165,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: Some(&mut options_state),
                 login: None,
             },
@@ -4385,6 +4472,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -4729,8 +4817,10 @@ fn defile_les_parametres(harness: &mut Harness<'_>, points: f32) {
 fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
     /// Centre de la case « Activer le suivi des sorts », deuxième ligne de la section « Combat ».
     /// **Remontée de 16 px le 2026-09-16** : la section « Fichier » a quitté la tête de l'onglet
-    /// au profit de « Démarrage », plus courte d'autant (voir `options_modal::show`).
-    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 291.0);
+    /// au profit de « Démarrage », plus courte d'autant (voir `options_modal::show`). **Puis
+    /// descendue de 93 px le soir même** : les trois cases « Afficher … » de la section « Recap »
+    /// (31 px par ligne) se sont glissées au-dessus — carré mesuré en y 374..393 sur la capture.
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 384.0);
 
     let clic = |detail_actif: bool| -> bool {
         let mut etat = parametres_avec_notifications();
@@ -4797,6 +4887,19 @@ fn options_parametres_combat_coupe() {
     let mut etat = parametres_avec_notifications();
     etat.features.combat = false;
     capture_parametres("options_parametres_combat_coupe", etat);
+}
+
+/// **Le récap coupé grise ses trois cases** — « Afficher la durée de la session », « Afficher
+/// les combats », « Afficher les challenges » (2026-09-16, tard, section « Recap » en tête de
+/// l'onglet « Paramètres »), estompées MAIS toujours cochées : même règle que le suivi des sorts
+/// sous le détail des combats, le réglage se retrouve tel quel en rallumant la bande. Ici, la
+/// case des combats est en plus décochée, pour montrer qu'une case grisée garde sa valeur.
+#[test]
+fn options_parametres_recap_coupe() {
+    let mut etat = parametres_avec_notifications();
+    etat.features.recap = false;
+    etat.features.recap_cells.fights = false;
+    capture_parametres("options_parametres_recap_coupe", etat);
 }
 
 #[test]
@@ -5014,6 +5117,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 now,
                 session_totals: &Default::default(),
                 session_uptime: std::time::Duration::ZERO,
+                recap_cells: Default::default(),
                 options: None,
                 login: None,
             },
@@ -5166,6 +5270,7 @@ fn capture_login_with_update(
                     now,
                     session_totals: &Default::default(),
                     session_uptime: std::time::Duration::ZERO,
+                    recap_cells: Default::default(),
                     options: None,
                     login: Some(&mut login_state),
                 },

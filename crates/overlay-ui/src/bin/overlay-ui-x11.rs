@@ -1611,6 +1611,9 @@ mod linux_main {
                             combat = self.features.combat,
                             sorts = self.features.spells,
                             recap = self.features.recap,
+                            recap_duree = self.features.recap_cells.duration,
+                            recap_combats = self.features.recap_cells.fights,
+                            recap_challenges = self.features.recap_cells.challenges,
                             "[options] fonctionnalités actives mises à jour"
                         );
                         let _ = self
@@ -1963,6 +1966,7 @@ mod linux_main {
                             session_totals: &snapshot.totals,
                             // Voir `main.rs` : `now` et non une seconde lecture d'horloge.
                             session_uptime: now.saturating_duration_since(self.started_at),
+                            recap_cells: self.features.recap_cells,
                             options: overlay.options_state.as_mut(),
                             login: overlay.login_state.as_mut(),
                         },

@@ -829,11 +829,14 @@ pub fn show(
             // (demande utilisateur : « déplace la section Recap en premier ») : c'est la bande
             // qu'on a sous les yeux toute la session, avant même le premier combat.
             //
-            // Une section à une seule case pour l'instant, et c'est voulu : la demande ne porte
-            // que sur l'affichage. Elle a sa place propre plutôt qu'une ligne de plus sous
-            // « Combat » parce que c'est une autre fonctionnalité — le récap compte la session
-            // entière, pas le combat en cours — et parce que les réglages qui viendront (quels
-            // chiffres montrer, par exemple) s'y rangeront sans déménagement.
+            // Une section à part plutôt qu'une ligne de plus sous « Combat » parce que c'est une
+            // autre fonctionnalité — le récap compte la session entière, pas le combat en cours.
+            // Créée avec sa seule case d'activation, elle a reçu le soir même les réglages
+            // annoncés (« quels chiffres montrer ») : trois cases « Afficher … » en retrait sous
+            // l'interrupteur (demande utilisateur : « options pour afficher la durée de la
+            // session, pour afficher les combats (victoire / défaite), pour afficher les
+            // challenges (réussi / échoué) »). Kamas et XP n'ont pas de case : ce sont les deux
+            // chiffres pour lesquels la bande existe (voir `panels::recap::RecapCells`).
             //
             // Pas de `feature_switch::show` ici : cette fonction grise TOUT ce qui est peint
             // ensuite dans le `Ui`, ce qui emporterait tout l'onglet — c'est un outil d'onglet
@@ -849,6 +852,45 @@ pub fn show(
                     )
                     .log_name("options-recap-actif"),
             );
+            // Les trois cases facultatives de la bande, sous leur interrupteur et en retrait —
+            // même géométrie que le suivi des sorts sous le détail des combats : la case commence
+            // là où commence le LIBELLÉ de celle du dessus. Grisées sans changer de valeur quand
+            // la bande est coupée : on les retrouve telles quelles en la rallumant.
+            let recap_on = state.features.recap;
+            for (value, label, tooltip, log_name) in [
+                (
+                    &mut state.features.recap_cells.duration,
+                    "Afficher la durée de la session",
+                    "Le chrono de l'overlay, depuis son lancement, sur la dernière ligne de la \
+                     bande. Décoché, la bande perd cette ligne.",
+                    "options-recap-duree",
+                ),
+                (
+                    &mut state.features.recap_cells.fights,
+                    "Afficher les combats (victoires / défaites)",
+                    "Le nombre de combats gagnés et perdus depuis le début de la session. \
+                     Décoché, la case disparaît de la bande, qui se resserre.",
+                    "options-recap-combats",
+                ),
+                (
+                    &mut state.features.recap_cells.challenges,
+                    "Afficher les challenges (réussis / échoués)",
+                    "Le nombre de challenges réussis et échoués depuis le début de la session. \
+                     Décoché, la case disparaît de la bande, qui se resserre.",
+                    "options-recap-challenges",
+                ),
+            ] {
+                ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+                ui.horizontal(|ui| {
+                    ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+                    ui.add(
+                        design::checkbox(value, label)
+                            .enabled(recap_on)
+                            .tooltip(tooltip)
+                            .log_name(log_name),
+                    );
+                });
+            }
 
             // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
             // en un seul endroit.
