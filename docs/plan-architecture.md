@@ -1503,7 +1503,8 @@ session), portée telle quelle dans `panels::login`.
   session déjà ouverte (« Mettre à jour » des Options), sinon une mise à jour qui échoue d'emblée
   — dossier d'installation non inscriptible, manifeste injoignable — rendrait la main aussi vite
   qu'elle l'a prise.
-- **`OverlayKind::Login` / `panels::login`** — une carte de 400 px sur fond noir translucide :
+- **`OverlayKind::Login` / `panels::login`** — une carte de 400 px sur fond noir quasi opaque
+  (`rgba(8,10,14,.90)` ; le `.78` du web laissait voir le bureau, demande du 2026-09-16) :
   logo du site (`assets/ui/logo-purple.png`, copie de `public/logo-purple.png` du dépôt web),
   titre « WAKFU COMPANION » en accent cyan `#00d2ff` suivi d'« OVERLAY » en italique gris, badge
   *beta* en haut à droite, séparateur gravé, corps aligné à gauche, version en pied en bas à
@@ -1849,6 +1850,15 @@ que depuis la section d'à côté, pour les deux alertes à la fois.
   l'alerte naît. `chat_toast_deadline` devient `local_toast_deadline`, générique sur `ToastClose` :
   les deux réglages locaux calculent leur échéance par la même fonction, `toast_deadline` restant
   celle du profil de compte.
+
+**Défaut commun : fermeture automatique cochée, 5 s** (demande du même jour : « toutes les options
+de gestion de fermeture doivent être actives par défaut et les valeurs numériques à 5 par
+défaut »). La case l'était déjà — `manual_close: false` dans les trois `Default` — mais la durée
+reprenait le `DEFAULT_ALERT_DURATION_SECONDS` du web, 3,5 s. La constante passe à **5,0** dans
+`overlay-engine::profile` et les trois lignes en héritent (profil de compte sans
+`alertDurationSeconds`, `ChatToastSettings::default`, `CountdownToastSettings::default`). Le web
+garde ses 3,5 s ; un compte ou une config qui porte déjà une durée n'est pas touché. Les captures
+de « Paramètres », qui posent leur durée explicitement, ne bougent pas.
 
 **Un bug de rendu trouvé en chemin, et corrigé** (`design::components::input`) : la zone d'édition
 d'un champ prenait l'identifiant AUTOMATIQUE de son `Ui` parent. Un widget que le défilement sort
