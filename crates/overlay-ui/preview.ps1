@@ -6,8 +6,10 @@
     Commande unique, même esprit que spikes/s1-window-windows/preview.ps1 :
       1. Prépare vendor/wgpu-hal-30.0.1 (patch DirectComposition, voir patches/setup-vendor.sh à
          la racine du dépôt) s'il est absent.
-      2. `cargo run -p overlay-ui` (release par défaut) : compile puis lance directement la
-         fenêtre overlay, câblée sur overlay-ingest + overlay-engine.
+      2. `cargo run -p overlay-ui --profile preview` : compile puis lance directement la
+         fenêtre overlay, câblée sur overlay-ingest + overlay-engine. Le profil `preview`
+         (Cargo.toml racine) optimise comme `release` mais sans LTO fat ni `codegen-units = 1`,
+         qui ne servent qu'au binaire livré et coûtaient 5 à 10 min par relance.
 
     La fenêtre est transparente, toujours au-dessus, sans bordure. Ctrl+Shift+W bascule interactif /
     clic-traversant (hotkey global). Ctrl+Shift+R force un rafraîchissement (overlay bloqué, mal
@@ -21,18 +23,23 @@
     log du jeu). Sans ce paramètre : découverte automatique (overlay_ingest::discovery).
 
 .PARAMETER Debug
-    Build debug au lieu de release : compilation plus rapide, utile pour itérer sur le code.
+    Build debug au lieu du profil preview : sans optimisation, utile pour un débogueur.
+
+.PARAMETER Release
+    Le VRAI profil release (LTO fat, strip) : le binaire exactement tel que le livrerait
+    `.github/workflows/release.yml`. Long à compiler — réservé à une vérification finale.
 
 .EXAMPLE
     .\preview.ps1
-    Build release + lance l'overlay sur le wakfu.log découvert automatiquement.
+    Build preview + lance l'overlay sur le wakfu.log découvert automatiquement.
 
 .EXAMPLE
     .\preview.ps1 -LogPath C:\chemin\vers\un\autre\wakfu.log -Debug
 #>
 param(
     [string]$LogPath,
-    [switch]$Debug
+    [switch]$Debug,
+    [switch]$Release
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +78,8 @@ Write-Host "API : $env:WAKFU_COMPANION_API_URL" -ForegroundColor DarkGray
 Write-Host ""
 
 $cargoArgs = @("run", "-p", "overlay-ui", "--bin", $binName)
-if (-not $Debug) { $cargoArgs += "--release" }
+if ($Release) { $cargoArgs += "--release" }
+elseif (-not $Debug) { $cargoArgs += @("--profile", "preview") }
 if ($LogPath) { $cargoArgs += @("--", $LogPath) }
 
 & cargo @cargoArgs

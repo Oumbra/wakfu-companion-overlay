@@ -33,6 +33,27 @@ strip = true
 lto = "fat"
 codegen-units = 1
 
+# Profil de PRÉVISUALISATION locale (`crates/overlay-ui/preview.{ps1,sh}`, par défaut) : les mêmes
+# optimisations de code que `release` (l'overlay doit être fluide pour être jugé), SANS ce qui ne
+# sert qu'au binaire livré et coûte plusieurs minutes à chaque édition — constaté le 2026-09-16,
+# le lendemain de l'arrivée du profil ci-dessus : la dernière unité (`overlay-ui`) passait de
+# quelques secondes à 5–10 min, `codegen-units = 1` la rendant monothread et `lto = "fat"`
+# ré-optimisant toute la chaîne (wgpu, egui, windows…) à chaque `cargo run`.
+#
+# - `lto = false` : LTO « thin local » de Cargo, celui de `release` avant le 2026-09-15.
+# - `codegen-units = 16` : valeur par défaut de `release`, la compilation redevient parallèle.
+# - `incremental = true` : seules les fonctions touchées sont recompilées d'une édition à l'autre.
+# - `strip = false` : garde les backtraces nominatives, utiles justement quand on itère.
+#
+# Le résultat vit dans `target/preview/`, jamais dans `target/release/` : un binaire de Release
+# (`.github/workflows/release.yml`) reste produit par `--release`, avec LTO fat et strip.
+[profile.preview]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
+
 # `overlay-ui` a besoin de DirectComposition sous Windows (fenêtre transparente, voir S1 —
 # spikes/s1-window-windows/README.md pour le détail complet des deux bugs corrigés). `vendor/`
 # n'est PAS commité (voir .gitignore) : lancer `bash patches/setup-vendor.sh` après un clone,

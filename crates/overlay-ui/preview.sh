@@ -5,8 +5,10 @@
 #   1. Prépare vendor/wgpu-hal-30.0.1 (patch DirectComposition, voir patches/setup-vendor.sh) s'il
 #      est absent : `[patch.crates-io]` du Cargo.toml racine s'applique aussi sous Linux, sans ce
 #      dossier AUCUNE commande cargo touchant overlay-ui ne démarre.
-#   2. `cargo run -p overlay-ui --bin overlay-ui-x11` (release par défaut) : compile puis lance
-#      directement les fenêtres overlay, câblées sur overlay-ingest + overlay-engine.
+#   2. `cargo run -p overlay-ui --bin overlay-ui-x11 --profile preview` : compile puis lance
+#      directement les fenêtres overlay, câblées sur overlay-ingest + overlay-engine. Le profil
+#      `preview` (Cargo.toml racine) optimise comme `release` mais sans LTO fat ni
+#      `codegen-units = 1`, qui ne servent qu'au binaire livré et coûtaient 5 à 10 min par relance.
 #
 # Sur SteamOS (Steam Deck), le système n'a ni cargo ni compilateur et son rootfs est en lecture
 # seule : le script se relance alors TOUT SEUL dans le conteneur préparé par
@@ -23,17 +25,19 @@
 # Usage :
 #   bash crates/overlay-ui/preview.sh                  # découverte automatique du wakfu.log
 #   bash crates/overlay-ui/preview.sh <chemin>         # rejouer un wakfu.log précis
-#   bash crates/overlay-ui/preview.sh --debug          # build debug, plus rapide à itérer
+#   bash crates/overlay-ui/preview.sh --debug          # build debug, sans optimisation
+#   bash crates/overlay-ui/preview.sh --release        # vrai profil release (LTO fat), long
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONTAINER="${CONTAINER:-wakfu-overlay-dev}"
 
-BUILD_RELEASE=1
+PROFILE=preview
 LOG_PATH=""
 for arg in "$@"; do
   case "$arg" in
-    --debug) BUILD_RELEASE=0 ;;
+    --debug) PROFILE=dev ;;
+    --release) PROFILE=release ;;
     --help|-h) sed -n '2,30p' "$0"; exit 0 ;;
     -*) echo "option inconnue : $arg (voir --help)" >&2; exit 2 ;;
     *)  LOG_PATH="$arg" ;;
@@ -74,8 +78,7 @@ printf '\033[36mLes fenêtres overlay ne s’affichent qu’au-dessus d’une fe
 export WAKFU_COMPANION_API_URL="${WAKFU_COMPANION_API_URL:-https://claude-dev.wakfu-companion.com}"
 printf '\033[90mAPI : %s\033[0m\n\n' "$WAKFU_COMPANION_API_URL"
 
-CARGO_ARGS=(run -p overlay-ui --bin overlay-ui-x11)
-[ "$BUILD_RELEASE" -eq 1 ] && CARGO_ARGS+=(--release)
+CARGO_ARGS=(run -p overlay-ui --bin overlay-ui-x11 --profile "$PROFILE")
 [ -n "$LOG_PATH" ] && CARGO_ARGS+=(-- "$LOG_PATH")
 
 exec cargo "${CARGO_ARGS[@]}"
