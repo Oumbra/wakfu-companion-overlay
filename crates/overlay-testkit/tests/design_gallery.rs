@@ -26,7 +26,8 @@ use overlay_engine::ChatChannel;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, DsTexture,
     IconButtonState, IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep,
-    SelectState, SliderState, SwitchState, TabState, TableAlign, TableBody, TableColumn,
+    SelectState, SliderState, SwitchState, SwitchVariant, TabState, TableAlign, TableBody,
+    TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -1711,7 +1712,8 @@ fn galerie_du_switch() {
     }
     let mut harness = Harness::builder()
         // 680 → 700 le 2026-09-16 : les switches du panneau Combat passent de 26 à 36 px de haut.
-        .with_size(Vec2::new(760.0, 700.0))
+        // 700 → 1000 le 2026-09-16 : les deux rangées de la variante premier plan.
+        .with_size(Vec2::new(760.0, 1000.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1892,6 +1894,78 @@ Glyphes « couleur » tels quels sur la case active, atténués ailleurs (ICON_N
                                 .color(CAPTION)
                                 .size(12.0),
                         );
+                    });
+                    heading(
+                        ui,
+                        "Variante premier plan — le socle de bouton icône du jeu",
+                        "SwitchVariant::FirstPlan : une case = un socle button-icon-first-plan.png (36 × 36),\npas de cadre, pas de séparateur. Ce que les deux switches du panneau Combat portent depuis le 2026-09-16.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut camp = 0_u8;
+                        design::switch(&mut camp)
+                            .slot(0, "Alliés")
+                            .icon(DsIcon::Allies)
+                            .slot(1, "Ennemis")
+                            .icon(DsIcon::Enemies)
+                            .variant(SwitchVariant::FirstPlan)
+                            .log_name("galerie.switch.camp-premier-plan")
+                            .show(ui);
+                        let mut grandeur = 0_u8;
+                        design::switch(&mut grandeur)
+                            .slot(0, "Dégâts infligés")
+                            .icon(DsIcon::MetricDamage)
+                            .slot(1, "Armure donnée")
+                            .icon(DsIcon::MetricArmor)
+                            .slot(2, "Soins prodigués")
+                            .icon(DsIcon::MetricHeal)
+                            .preview_state(SwitchState::Hovered)
+                            .variant(SwitchVariant::FirstPlan)
+                            .log_name("galerie.switch.grandeur-premier-plan")
+                            .show(ui);
+                        let mut inactif = 0_u8;
+                        design::switch(&mut inactif)
+                            .slot(0, "Dégâts infligés")
+                            .icon(DsIcon::MetricDamage)
+                            .slot(1, "Armure donnée")
+                            .icon(DsIcon::MetricArmor)
+                            .variant(SwitchVariant::FirstPlan)
+                            .enabled(false)
+                            .log_name("galerie.switch.premier-plan-desactive")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("74 × 36 · 112 × 36, dernière survolée · désactivé")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Le piège de la variante : l'actif et le survolé partagent leur socle",
+                        "Seule la teinte du glyphe les distingue. Monochrome : blanc (actif), or (survolé), gris froid (repos).\nEn couleurs : sa couleur vraie sur la case active, atténué partout ailleurs — le socle éclairci porte seul le survol.",
+                    );
+                    ui.horizontal(|ui| {
+                        for (state, legende) in [
+                            (SwitchState::Idle, "repos"),
+                            (SwitchState::Hovered, "survolé"),
+                            (SwitchState::Active, "actif"),
+                            (SwitchState::Disabled, "désactivé"),
+                        ] {
+                            let mut etat = 1_u8;
+                            design::switch(&mut etat)
+                                // Deux cases au moins (un switch à une case n'en est pas un) : la
+                                // seconde est le témoin au repos, seule la PREMIÈRE porte l'état
+                                // forcé — d'où le `preview_state` posé avant elle.
+                                .slot(0, "Monochrome")
+                                .icon(DsIcon::Trophy)
+                                .preview_state(state)
+                                .slot(1, "En couleurs")
+                                .icon(DsIcon::MetricHeal)
+                                .preview_state(state)
+                                .variant(SwitchVariant::FirstPlan)
+                                .log_name(format!("galerie.switch.premier-plan-{legende}"))
+                                .show(ui);
+                            ui.label(RichText::new(legende).color(CAPTION).size(12.0));
+                        }
                     });
                 });
         });

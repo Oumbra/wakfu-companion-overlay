@@ -105,6 +105,38 @@
 //!   `DsIcon::native_color` est peint tel quel sur la case active et atténué
 //!   ([`tokens::ICON_NATIVE_DIM`]) ailleurs — voir la catégorie `couleur` de `design::icons`.
 
+//! ## Deux matières pour un même contrôle — [`SwitchVariant`]
+//!
+//! Le cadre décrit ci-dessus est la variante [`SwitchVariant::Frame`], celle du sélecteur de genre
+//! du jeu, et elle reste le défaut. [`SwitchVariant::FirstPlan`] peint les mêmes cases sur le
+//! **socle de bouton icône de premier plan** (`button-icon-first-plan.png` et son `-hover`, les
+//! textures d'`IconContext::FirstPlan`) — demande utilisateur du 2026-09-16 pour les deux switches
+//! du panneau Combat.
+//!
+//! Ce n'est pas un habillage de plus sur un coup de tête : ces deux switches sont les seuls de
+//! l'overlay à flotter **par-dessus le jeu**, à côté des boutons icône du carré de contrôle du
+//! Suivi, et non dans une fenêtre du design system. Le cadre kaki du sélecteur de genre y est un
+//! meuble d'interface posé sur la scène ; le socle de premier plan est précisément la matière que
+//! le jeu emploie là.
+//!
+//! Ce que la variante change, et rien d'autre :
+//!
+//! | | `Frame` | `FirstPlan` |
+//! | --- | --- | --- |
+//! | Fond d'une case | six textures de cadre, selon sa position | **un socle carré**, le même pour toutes |
+//! | Gouttière | liseré + séparateur peints dedans | **rien** — chaque socle porte ses quatre coins |
+//! | Case native | 43 × 44 | **36 × 36** ([`tokens::SWITCH_FIRST_PLAN_SIZE`]) |
+//! | Glyphe | sa taille native sous 16px | la grille du bouton icône (18 sur 36) |
+//! | Glyphe actif / inactif | doré / gris chaud | **blanc** / gris froid du premier plan |
+//!
+//! **Le piège de cette variante** : le jeu n'a qu'une texture survolée, et c'est elle qui sert de
+//! case active — comme dans `Frame`, comme dans `design::tabs`. L'actif et le survolé partagent
+//! donc leur socle, et **seule la teinte du glyphe les distingue** : blanc sur la case choisie
+//! (c'est-à-dire, sur un glyphe en couleurs, sa couleur vraie), or au survol, gris au repos. Un
+//! portage qui ne jouerait que sur le socle rendrait les deux indiscernables dès que la souris
+//! passe sur une case non choisie.
+//!
+
 use egui::emath::GuiRounding as _;
 use egui::{Align2, Color32, Response, Sense, Ui, Vec2, Widget};
 
@@ -141,6 +173,101 @@ impl SwitchState {
         match self {
             SwitchState::Active | SwitchState::Hovered => Color32::WHITE,
             SwitchState::Idle | SwitchState::Disabled => tokens::ICON_NATIVE_DIM,
+        }
+    }
+}
+
+/// La matière sur laquelle les cases sont peintes — voir « deux matières pour un même contrôle »
+/// dans la doc de module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SwitchVariant {
+    /// Le cadre du sélecteur de genre du jeu : six textures, un liseré, un séparateur.
+    #[default]
+    Frame,
+    /// Le socle de bouton icône de premier plan (`button-icon-first-plan.png` / `-hover`), un par
+    /// case — la matière de ce que le jeu pose PAR-DESSUS la scène.
+    FirstPlan,
+}
+
+impl SwitchVariant {
+    /// Côté natif d'une case : les 43 × 44 du cadre du jeu, ou le socle carré de 36.
+    fn native_slot_size(self) -> Vec2 {
+        match self {
+            SwitchVariant::Frame => Vec2::new(tokens::SWITCH_SLOT_WIDTH, tokens::SWITCH_HEIGHT),
+            SwitchVariant::FirstPlan => Vec2::splat(tokens::SWITCH_FIRST_PLAN_SIZE),
+        }
+    }
+
+    /// Fond d'une case. Le survolé prend le fond de l'actif dans les DEUX variantes — c'est ce que
+    /// le jeu fait, et c'est pourquoi la teinte du glyphe porte seule la distinction.
+    fn slot_texture(self, position: Position, state: SwitchState, selected: bool) -> DsTexture {
+        let active = match state {
+            SwitchState::Active | SwitchState::Hovered => true,
+            SwitchState::Idle => false,
+            // Désactivé, la case sélectionnée garde son fond : c'est ce qui la laisse
+            // reconnaissable.
+            SwitchState::Disabled => selected,
+        };
+        match self {
+            // Un socle de premier plan porte ses quatre coins : sa position dans la rangée ne
+            // change rien, contrairement aux cases d'un cadre continu.
+            SwitchVariant::FirstPlan if active => DsTexture::ButtonIconFirstPlanHover,
+            SwitchVariant::FirstPlan => DsTexture::ButtonIconFirstPlan,
+            SwitchVariant::Frame => match (position, active) {
+                (Position::First, true) => DsTexture::SwitchSlotActiveFirst,
+                (Position::First, false) => DsTexture::SwitchSlotInactiveFirst,
+                (Position::Middle, true) => DsTexture::SwitchSlotActive,
+                (Position::Middle, false) => DsTexture::SwitchSlotInactive,
+                (Position::Last, true) => DsTexture::SwitchSlotActiveLast,
+                (Position::Last, false) => DsTexture::SwitchSlotInactiveLast,
+            },
+        }
+    }
+
+    /// Teinte du glyphe (ou du libellé de repli) pour cet état.
+    ///
+    /// `Frame` rend les teintes mesurées sur le sélecteur du jeu. `FirstPlan` reprend le couple du
+    /// contexte premier plan ([`tokens::ICON_TINT`] → [`tokens::ICON_TINT_HOVER`], mesuré sur
+    /// `menu-button-icon-first-plan.png`) et **blanchit la case choisie** : sans cela elle serait
+    /// indiscernable de la case survolée, qui partage son socle.
+    fn glyph_color(self, state: SwitchState, native_color: bool) -> Color32 {
+        match (self, native_color) {
+            (SwitchVariant::Frame, false) => state.glyph_color(),
+            (SwitchVariant::Frame, true) => state.native_glyph_color(),
+            // Un glyphe EN COULEURS ne se teinte pas, il s'atténue : une teinte egui multiplie, le
+            // blanc est donc sa couleur vraie et l'or le dorerait. Sa case survolée retombe sur
+            // l'atténuation du repos — le socle éclairci porte à lui seul le survol, et la couleur
+            // pleine reste le signal de la case choisie.
+            (SwitchVariant::FirstPlan, true) => match state {
+                SwitchState::Active => Color32::WHITE,
+                SwitchState::Idle | SwitchState::Hovered | SwitchState::Disabled => {
+                    tokens::ICON_NATIVE_DIM
+                }
+            },
+            (SwitchVariant::FirstPlan, false) => match state {
+                SwitchState::Active => tokens::SWITCH_FIRST_PLAN_ICON_ACTIVE,
+                SwitchState::Hovered => tokens::ICON_TINT_HOVER,
+                SwitchState::Idle => tokens::ICON_TINT,
+                SwitchState::Disabled => tokens::ICON_TINT_DISABLED,
+            },
+        }
+    }
+
+    /// Taille de peinture d'un glyphe dans une case de côté `side`.
+    ///
+    /// `Frame` peint le glyphe à sa taille de fichier tant qu'il tient dans le carré de 16 du jeu
+    /// (voir [`glyph_size`]). `FirstPlan` suit la grille de son socle — l'étalon d'encre du
+    /// manifeste ramené à 18 sur 36, la même règle que `design::icon_button`, sans quoi deux
+    /// contrôles peints sur le MÊME socle porteraient des glyphes de tailles différentes.
+    fn glyph_size(self, design: &DesignSystem, icon: DsIcon, side: f32) -> Vec2 {
+        match self {
+            SwitchVariant::Frame => glyph_size(design.icon_native_size(icon)),
+            SwitchVariant::FirstPlan => super::icon_button::icon_draw_size(
+                design.icon_native_size(icon),
+                icon.content_size(),
+                side,
+                tokens::SWITCH_FIRST_PLAN_SIZE,
+            ),
         }
     }
 }
@@ -187,6 +314,8 @@ pub fn switch<T: PartialEq + Copy>(selected: &mut T) -> Switch<'_, T> {
 pub struct Switch<'a, T> {
     selected: &'a mut T,
     slots: Vec<Slot<T>>,
+    /// La matière des cases — voir [`SwitchVariant`].
+    variant: SwitchVariant,
     /// Largeur totale imposée — sinon [`Switch::natural_width`].
     width: Option<f32>,
     /// Hauteur imposée — sinon [`tokens::SWITCH_HEIGHT`].
@@ -202,6 +331,7 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
         Self {
             selected,
             slots: Vec::new(),
+            variant: SwitchVariant::default(),
             width: None,
             height: None,
             scale: 1.0,
@@ -231,8 +361,16 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
         self
     }
 
+    /// Matière des cases — cadre du jeu par défaut, socle de premier plan pour un switch qui
+    /// flotte PAR-DESSUS la scène (les deux du panneau Combat). Voir [`SwitchVariant`].
+    pub fn variant(mut self, variant: SwitchVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
     /// Largeur totale imposée. Les cases se la partagent à égalité, séparateurs déduits. Sans
-    /// elle, chaque case fait [`tokens::SWITCH_SLOT_WIDTH`] — les 88px du jeu pour deux cases.
+    /// elle, chaque case fait sa largeur native — [`tokens::SWITCH_SLOT_WIDTH`] en `Frame` (les
+    /// 88px du jeu pour deux cases), le côté du socle en `FirstPlan`.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
         self
@@ -293,11 +431,11 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             .max(1.0)
     }
 
-    /// Largeur sans contrainte : `n` cases de [`tokens::SWITCH_SLOT_WIDTH`] et `n − 1`
+    /// Largeur sans contrainte : `n` cases à la largeur native de la variante et `n − 1`
     /// séparateurs, à l'échelle.
     fn natural_width(&self) -> f32 {
         let n = self.slots.len() as f32;
-        n * (tokens::SWITCH_SLOT_WIDTH * self.scale).round()
+        n * (self.variant.native_slot_size().x * self.scale).round()
             + (n - 1.0).max(0.0) * self.separator_width()
     }
 
@@ -306,27 +444,8 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
         Vec2::new(
             self.width.unwrap_or_else(|| self.natural_width()),
             self.height
-                .unwrap_or_else(|| (tokens::SWITCH_HEIGHT * self.scale).round()),
+                .unwrap_or_else(|| (self.variant.native_slot_size().y * self.scale).round()),
         )
-    }
-}
-
-/// Fond d'une case selon sa position et son état. Le survolé prend le fond de l'actif — c'est ce
-/// que le jeu fait (voir la doc de module, « le survol »).
-fn slot_texture(position: Position, state: SwitchState, selected: bool) -> DsTexture {
-    let active = match state {
-        SwitchState::Active | SwitchState::Hovered => true,
-        SwitchState::Idle => false,
-        // Désactivé, la case sélectionnée garde son fond : c'est ce qui la laisse reconnaissable.
-        SwitchState::Disabled => selected,
-    };
-    match (position, active) {
-        (Position::First, true) => DsTexture::SwitchSlotActiveFirst,
-        (Position::First, false) => DsTexture::SwitchSlotInactiveFirst,
-        (Position::Middle, true) => DsTexture::SwitchSlotActive,
-        (Position::Middle, false) => DsTexture::SwitchSlotInactive,
-        (Position::Last, true) => DsTexture::SwitchSlotActiveLast,
-        (Position::Last, false) => DsTexture::SwitchSlotInactiveLast,
     }
 }
 
@@ -412,7 +531,9 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
             });
 
             if ui.is_rect_visible(slot_rect) {
-                let texture = slot_texture(Position::of(index, count), state, selected);
+                let texture =
+                    self.variant
+                        .slot_texture(Position::of(index, count), state, selected);
                 if self.scale == 1.0 {
                     design.paint(ui.painter(), slot_rect, texture, tint);
                 } else {
@@ -433,12 +554,12 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     .painter()
                     .with_clip_rect(slot_rect.intersect(ui.clip_rect()));
                 if let Some(icon) = slot.icon {
-                    let color = if icon.native_color() {
-                        state.native_glyph_color()
-                    } else {
-                        state.glyph_color()
-                    };
-                    let drawn = glyph_size(design.icon_native_size(icon)) * self.scale;
+                    let color = self.variant.glyph_color(state, icon.native_color());
+                    let drawn = self.variant.glyph_size(
+                        &design,
+                        icon,
+                        slot_rect.width().min(slot_rect.height()),
+                    ) * self.scale;
                     // Calé sur la grille de pixels : une case de 43px met son centre à une
                     // demi-position, et un glyphe de 14px peint à x + 0,5 s'étale sur deux
                     // colonnes — flou visible à ×8 sur la comparaison au jeu.
@@ -446,7 +567,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                         (slot_rect.center() - drawn * 0.5).round_to_pixels(ui.pixels_per_point());
                     design.paint_icon(&painter, egui::Rect::from_min_size(min, drawn), icon, color);
                 } else {
-                    let color = state.glyph_color();
+                    let color = self.variant.glyph_color(state, false);
                     let font = text::label_font(ui.ctx(), tokens::SWITCH_FONT_SIZE);
                     let galley = painter.layout_no_wrap(slot.label.clone(), font, color);
                     let pos = Align2::CENTER_CENTER
@@ -455,10 +576,12 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     painter.galley(pos, galley, color);
                 }
 
-                // La gouttière qui suit — jamais après la dernière case. Aucune texture ne la
-                // porte : le liseré du cadre la traverse de part en part, et le séparateur
+                // La gouttière qui suit — jamais après la dernière case, et **rien du tout en
+                // `FirstPlan`** : là, chaque socle porte ses quatre coins et son liseré, il n'y a
+                // pas de cadre continu à prolonger entre deux cases. En `Frame`, aucune texture ne
+                // la porte : le liseré du cadre la traverse de part en part, et le séparateur
                 // n'occupe que le corps entre les deux liserés.
-                if index + 1 < count {
+                if index + 1 < count && self.variant == SwitchVariant::Frame {
                     let gutter = egui::Rect::from_min_size(
                         egui::pos2(slot_rect.right(), rect.top()),
                         Vec2::new(separator_width, rect.height()),

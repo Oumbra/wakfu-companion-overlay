@@ -418,6 +418,23 @@ pub const ICON_NATIVE_DIM: Color32 = Color32::from_rgb(150, 150, 150);
 /// [`ICON_BUTTON_CONTENT`]) donnerait un ♂ à 16, deux pixels plus large que dans le jeu.
 pub const SWITCH_ICON_SIZE: f32 = 16.0;
 
+/// Côté natif d'une case de la variante [`SwitchVariant::FirstPlan`](crate::design::SwitchVariant)
+/// — **[`ICON_BUTTON_SIZE`], 36px**, parce qu'une case y EST un socle de bouton icône
+/// (`button-icon-first-plan.png`, 36 × 36). Lui donner une référence propre ferait diverger deux
+/// contrôles qui partagent leur texture, et l'écart se verrait dès qu'ils cohabitent dans une même
+/// barre de premier plan.
+pub const SWITCH_FIRST_PLAN_SIZE: f32 = ICON_BUTTON_SIZE;
+
+/// Glyphe de la case CHOISIE en variante premier plan — **blanc pur**, donc la couleur vraie du
+/// fichier.
+///
+/// C'est la distinction qui sépare la case choisie de la case survolée, qui partagent leur socle
+/// (`button-icon-first-plan-hover.png`) : même règle que la barre d'onglets, où l'actif et le
+/// survolé partagent leur fond et ne se distinguent que par la couleur de leur libellé (voir
+/// [`TAB_LABEL_ACTIVE`]). Le couple gris clair → or du contexte premier plan ([`ICON_TINT`] /
+/// [`ICON_TINT_HOVER`]) tient les deux autres états, il ne pouvait pas arbitrer celui-ci.
+pub const SWITCH_FIRST_PLAN_ICON_ACTIVE: Color32 = TAB_LABEL_ACTIVE;
+
 /// Corps du libellé d'une case **sans pictogramme** — 17px, le corps de tous les libellés du jeu
 /// ([`TAB_FONT_SIZE`]).
 ///
