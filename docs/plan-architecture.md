@@ -1980,6 +1980,39 @@ résolu de `fightId`, miroir exact du web.
 **Capture** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, durée fixée à 1 h 23 min 45 s — elle
 n'existe pas dans le fichier par construction).
 
+### 9.1 novodecies Démarrage actif par défaut, bouton « Fermer l'overlay » (2026-09-16)
+
+Deux demandes utilisateur du même jour, toutes deux dans l'onglet « Paramètres ».
+
+**« Option de démarrage active par défaut. »** La case « Lancer l'overlay au démarrage de
+l'ordinateur » (section « Démarrage », `overlay_ui::autostart`) lit et écrit l'état RÉEL du système
+(clé `Run` sous Windows, `.desktop` sous Linux), jamais une copie en config — et le système ne
+distingue pas « jamais inscrit » de « retiré exprès ». Un défaut ne peut donc pas se rejouer à
+chaque lancement, sous peine de réinscrire ce que l'utilisateur vient de décocher. Il s'applique
+**une seule fois par installation** : `autostart::enable_by_default_once`, appelée par les deux
+hôtes juste après `config::load`, inscrit l'overlay puis lève le jalon
+`config::OverlayConfig::autostart_initialized` (sauvegardé dans la foulée — la seule écriture de
+`config.toml` hors « Valider »). Une config écrite avant ce champ vaut « jamais fait » : les
+installations existantes sont inscrites, une fois, à leur premier lancement de cette version. Les
+hôtes réécrivent le jalon à `true` à chaque sauvegarde (ils rebâtissent la config depuis leurs
+champs). Un échec d'inscription lève le jalon quand même : la case reste là pour réessayer.
+
+**« Un bouton pour fermer l'overlay à la toute fin de l'onglet, secondaire, centré, avec une
+confirmation. »** Sous la section « Compte », sans section propre (ce n'est pas un réglage, c'est
+la sortie) : `design::button` en `Secondary` — et non `Danger` comme « Se déconnecter » juste
+au-dessus, parce que fermer ne détruit rien (compte appairé, réglages validés conservés) —, centré
+comme lui parce que ce sont les deux seules actions de la fenêtre qui échappent à « Annuler ». La
+confirmation (`OptionsModalState::pending_quit`, « Fermer l'overlay ? ») est la quatrième boîte
+exclusive de la fenêtre ; « Oui » remonte `OptionsModalAction::Quit`, et l'hôte sort par le chemin
+du raccourci « Quitter » et de la zone de notification (`logging::log_session_end` puis
+`event_loop.exit()`, §11 — la borne de fin de session dit « Fermer l'overlay (fenêtre Options) »).
+
+**Captures** : `options_parametres_fermer_overlay` (bas de l'onglet) ; `options_parametres_compte`
+et `options_parametres_mise_a_jour` bougent avec la hauteur de l'onglet. L'aide de défilement des
+tests (`defile_les_parametres`) retire désormais le pointeur AVANT les frames de repos : un bouton
+centré passant sous lui ouvrait son infobulle, dont l'animation empêchait `Harness::run` de se
+poser.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
