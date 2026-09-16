@@ -2336,6 +2336,7 @@ impl App {
             // `autostart`, doc de module.
             start_with_os: autostart_actif,
             pending_install: None,
+            pending_quit: false,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -2889,6 +2890,9 @@ enum PostRedraw {
     CheckUpdate,
     /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
     InstallUpdate,
+    /// « Fermer l'overlay », **après confirmation** (pied de l'onglet « Paramètres »,
+    /// 2026-09-16) : arrête le programme par le chemin du raccourci « Quitter ».
+    Quit,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
     RetryUpdate,
@@ -3178,6 +3182,7 @@ impl App {
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
             OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
+            OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -3214,6 +3219,13 @@ impl App {
                 let _ = self.update_command_tx.send(UpdateCommand::Check {
                     install_if_available: true,
                 });
+            }
+            // Même sortie que le raccourci « Quitter » et l'entrée de la zone de notification :
+            // la borne de fin de session d'abord (§11 du plan), puis la boucle s'arrête — les
+            // fenêtres, modale comprise, tombent avec elle.
+            PostRedraw::Quit => {
+                logging::log_session_end("Fermer l'overlay (fenêtre Options)");
+                event_loop.exit();
             }
         }
     }

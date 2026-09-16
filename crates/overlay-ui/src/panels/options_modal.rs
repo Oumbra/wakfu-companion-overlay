@@ -365,6 +365,10 @@ pub struct OptionsModalState {
     /// ferme l'overlay de jeu le temps de l'installation, ce qui mérite un « oui » explicite.
     /// Troisième boîte exclusive avec les deux autres (voir `show`).
     pub pending_install: Option<String>,
+    /// La confirmation de fermeture de l'OVERLAY est ouverte — bouton « Fermer l'overlay », tout
+    /// en bas de l'onglet « Paramètres » (2026-09-16). Quatrième boîte exclusive avec les trois
+    /// autres (voir `show`) : elle ne ferme pas cette fenêtre, elle arrête le programme.
+    pub pending_quit: bool,
     /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
     ///
     /// Posée par le clic sur « Annuler », par la croix de la bannière (2026-09-13), par Échap, **ou
@@ -534,6 +538,12 @@ pub enum OptionsModalAction {
     /// sans retour : ce que cette fenêtre avait en brouillon est abandonné, comme à la
     /// déconnexion.
     InstallUpdate,
+    /// « Fermer l'overlay », **confirmé** (bouton en pied de l'onglet « Paramètres », 2026-09-16) :
+    /// l'hôte arrête le programme — le même chemin que le raccourci « Quitter » et que l'entrée
+    /// de la zone de notification (`logging::log_session_end` puis `event_loop.exit()`). Immédiat
+    /// et sans retour, comme `Disconnect` : ce que cette fenêtre avait en brouillon est perdu, et
+    /// c'est ce que la confirmation rattrape.
+    Quit,
 }
 
 /// Ce que « Valider » emporte de l'onglet « Paramètres ».
@@ -627,12 +637,15 @@ pub fn show(
     // même Échap et rouvrait la garde. La boîte semblait ne jamais se fermer. Attrapé par
     // `options_garde_de_fermeture_au_clavier`.
     //
-    // **Deux dialogues possibles, jamais en même temps** : la garde de fermeture et, depuis le
-    // 2026-09-13, la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »).
-    // Elles s'excluent par construction (voir leur `else if` plus bas) ; la capture ci-dessus vaut
-    // pour l'une comme pour l'autre — c'est le double appui d'Échap qu'elle empêche.
-    let dialogue_a_l_entree =
-        state.pending_close || state.pending_disconnect || state.pending_install.is_some();
+    // **Plusieurs dialogues possibles, jamais en même temps** : la garde de fermeture, depuis le
+    // 2026-09-13 la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »),
+    // puis celles d'installation d'une mise à jour et de fermeture de l'overlay. Ils s'excluent
+    // par construction (voir leur `else if` plus bas) ; la capture ci-dessus vaut pour tous —
+    // c'est le double appui d'Échap qu'elle empêche.
+    let dialogue_a_l_entree = state.pending_close
+        || state.pending_disconnect
+        || state.pending_install.is_some()
+        || state.pending_quit;
 
     // Tout le décor de la fenêtre — `design::window` depuis le 2026-09-10 (lot 1 de
     // `docs/plan-composants-ui.md`). Il vivait ici, dans une fonction `chrome()` de ce panneau,
@@ -1284,6 +1297,35 @@ pub fn show(
             {
                 state.pending_disconnect = true;
             }
+
+            // **« Fermer l'overlay »** (2026-09-16), tout en bas de l'onglet, sans section : ce
+            // n'est pas un réglage, c'est la sortie. Jusque-là, quitter demandait le raccourci
+            // « Quitter » ou l'icône de la zone de notification — deux chemins qu'un joueur qui
+            // a la fenêtre Options sous les yeux ne voit pas.
+            //
+            // **Secondaire et centré** (demande utilisateur) : centré comme « Se déconnecter »
+            // juste au-dessus, parce que ce sont les deux seules actions de cette fenêtre qui
+            // échappent à « Annuler » ; secondaire et non `Danger`, parce que fermer l'overlay
+            // ne détruit rien — le compte reste appairé, les réglages validés restent écrits,
+            // relancer retrouve tout. La confirmation, elle, reste : un clic sur ce bouton en
+            // plein combat coupe le détail des dégâts sans retour, et le brouillon de la
+            // fenêtre part avec.
+            ui.add_space(SECTION_GAP);
+            let quit = design::button("Fermer l'overlay")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .tooltip(
+                    "Arrêter l'overlay. Le compte reste appairé et les réglages validés sont                      conservés pour la prochaine fois.",
+                )
+                .log_name("options-fermer-overlay");
+            let quit_size = quit.desired_size(ui);
+            let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            if ui
+                .put(egui::Rect::from_center_size(row.center(), quit_size), quit)
+                .clicked()
+            {
+                state.pending_quit = true;
+            }
         });
     });
 
@@ -1345,6 +1387,22 @@ pub fn show(
                 action = OptionsModalAction::Disconnect;
             }
             design::ConfirmChoice::No => state.pending_disconnect = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    } else if state.pending_quit {
+        // **La confirmation de fermeture de l'overlay** (2026-09-16) — même exclusion, même voile
+        // sur la fenêtre entière que ses voisines : « Oui » arrête le programme, il n'y a rien à
+        // rattraper derrière.
+        let choix = design::confirm_dialog("Fermer l'overlay ?")
+            .over(window)
+            .log_name("options.fermeture-overlay")
+            .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_quit = false;
+                action = OptionsModalAction::Quit;
+            }
+            design::ConfirmChoice::No => state.pending_quit = false,
             design::ConfirmChoice::Pending => {}
         }
     }

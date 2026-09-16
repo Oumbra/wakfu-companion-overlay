@@ -1270,6 +1270,7 @@ mod linux_main {
                 // main). Voir `autostart`, doc de module.
                 start_with_os: autostart_actif,
                 pending_install: None,
+                pending_quit: false,
                 alerts: alerts_tab::AlertsTabState {
                     duration_input: alerts_draft
                         .as_ref()
@@ -1787,6 +1788,8 @@ mod linux_main {
                 InstallUpdate,
                 /// « Réessayer » de l'écran « Mise à jour requise ».
                 RetryUpdate,
+                /// « Fermer l'overlay », après confirmation — voir `main.rs`.
+                Quit,
             }
             let mut post_redraw = PostRedraw::None;
 
@@ -2095,6 +2098,7 @@ mod linux_main {
                         OptionsModalAction::InstallUpdate => {
                             post_redraw = PostRedraw::InstallUpdate
                         }
+                        OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
                     }
                     overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
                         .then(|| std::time::Instant::now() + repaint_delay);
@@ -2130,6 +2134,11 @@ mod linux_main {
                     let _ = self.update_command_tx.send(UpdateCommand::Check {
                         install_if_available: true,
                     });
+                }
+                // Même sortie que le raccourci « Quitter » — voir `main.rs`.
+                PostRedraw::Quit => {
+                    logging::log_session_end("Fermer l'overlay (fenêtre Options)");
+                    event_loop.exit();
                 }
             }
         }

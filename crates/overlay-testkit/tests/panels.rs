@@ -2369,6 +2369,166 @@ fn options_deconnexion_confirmation() {
     harness.snapshot("options_deconnexion_confirmation");
 }
 
+/// **« Fermer l'overlay » passe par une confirmation ; Échap y répond « Non », « Oui » arrête le
+/// programme** (2026-09-16, bouton en pied de l'onglet « Paramètres »).
+///
+/// Même contrat que la déconnexion : le bouton ne ferme jamais du premier clic (l'action arrête
+/// l'overlay, brouillon compris, « Annuler » ne la rattraperait pas), et l'Échap qui ferme la
+/// boîte ne doit pas être relu par le filet clavier de la fenêtre. La seconde moitié clique « Oui »
+/// à ses coordonnées calculées depuis les tokens de `design::confirm_dialog` — pas mesurées sur une
+/// capture — et attend `OptionsModalAction::Quit`, la seule intention que le panneau remonte à
+/// l'hôte (qui, lui, appelle `event_loop.exit()`).
+#[test]
+fn options_fermeture_overlay_confirmee_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = |pending_quit: bool| OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        pending_quit,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_quit);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte, la fenêtre reste.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(true),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    assert_eq!(actions.borrow_mut().drain(..).collect::<Vec<_>>(), vec![]);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : ni arrêt de l'overlay, ni fermeture de la fenêtre derrière"
+    );
+
+    // 2. « Oui » remonte `Quit` — et rien d'autre.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(true),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    // Géométrie de `design::confirm_dialog` : l'ensemble crête + corps + pied est centré sur la
+    // fenêtre, « Non » puis « Oui » posés à `CONFIRM_BUTTONS_TOP` du haut du corps.
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Quit],
+        "« Oui » remonte l'arrêt de l'overlay à l'hôte, et rien d'autre"
+    );
+}
+
+/// **Le pied de l'onglet « Paramètres »** (2026-09-16) : sous la section « Compte », le bouton
+/// « Fermer l'overlay » — secondaire, centré, sans section (ce n'est pas un réglage, c'est la
+/// sortie). Capturé après un défilement jusqu'en bas, la seule position où il se voit.
+#[test]
+fn options_parametres_fermer_overlay() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    // Bien au-delà de la hauteur de l'onglet : la zone défilable s'arrête d'elle-même au bas.
+    defile_les_parametres(&mut harness, 2000.0);
+    harness.snapshot("options_parametres_fermer_overlay");
+}
+
 #[test]
 fn options_onglet_raccourcis() {
     // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
@@ -4460,13 +4620,17 @@ fn defile_les_parametres(harness: &mut Harness<'_>, points: f32) {
         phase: egui::TouchPhase::Move,
         modifiers: egui::Modifiers::NONE,
     });
+    // Une seule frame avec la molette, puis le pointeur repart AVANT les frames de repos : le
+    // contenu défile sous lui, et un bouton centré qui passerait dessous (« Se déconnecter »,
+    // « Fermer l'overlay », x = 380 comme lui) ouvrirait son infobulle — dont l'animation ne
+    // laisse jamais `Harness::run` se poser (« exceeded max_steps », vécu le 2026-09-16). Sans
+    // pointeur, le curseur du jeu (`overlay_ui::cursor`) ne reste pas non plus peint au milieu de
+    // la capture.
+    harness.step();
+    harness.event(egui::Event::PointerGone);
     for _ in 0..12 {
         harness.run();
     }
-    // Le pointeur repart : sans cela, le curseur du jeu (`overlay_ui::cursor`) resterait peint au
-    // milieu de la capture, là où la molette a été actionnée.
-    harness.event(egui::Event::PointerGone);
-    harness.run();
 }
 
 /// **La case grisée ne répond plus au clic** — l'autre moitié de la dépendance « suivi des sorts →
