@@ -172,36 +172,75 @@ pub fn paint(
 /// emplacement réservé plus tôt (`Painter::add` puis `Painter::set`), c'est-à-dire tout conteneur
 /// dont le cadre enveloppe un contenu de hauteur inconnue. Voir `design::collapsible`.
 pub fn shape(rect: Rect, texture: &TextureHandle, slice: &NineSlice, tint: Color32) -> Shape {
+    shape_scaled(rect, texture, slice, tint, 1.0)
+}
+
+/// Peint `texture` dans `rect` selon `slice`, **les marges figées réduites (ou agrandies) par
+/// `scale`** — voir [`shape_scaled`].
+pub fn paint_scaled(
+    painter: &Painter,
+    rect: Rect,
+    texture: &TextureHandle,
+    slice: &NineSlice,
+    tint: Color32,
+    scale: f32,
+) {
+    painter.add(shape_scaled(rect, texture, slice, tint, scale));
+}
+
+/// [`shape`], mais les marges figées sont peintes à `scale` fois leur taille source au lieu du
+/// 1:1 : à `0.818`, un coin de 8 px de la texture occupe 6,5 px à l'écran, et la bande médiane
+/// s'étire sur ce qui reste.
+///
+/// C'est ce qui permet de servir un composant **plus petit que sa capture** sans choisir entre
+/// deux défauts : le 9-slice ordinaire garde ses coins à 1:1 et ne comprime que le corps (à 36 px
+/// de haut sur une texture de 44, il reste 24 px de dégradé au lieu de 32 — « on a l'impression
+/// d'avoir compressé le switch »), et un quad unique réduit tout mais ne sait plus s'étirer en
+/// largeur sans déformer ses coins. Ici, les coins, le liseré et les biseaux se réduisent comme
+/// le jeu les réduit quand on baisse l'échelle de son interface, et la largeur reste libre. À
+/// `scale = 1`, c'est exactement [`shape`]. Voir `design::switch`, son premier appelant.
+///
+/// Les marges restent bornées comme dans [`shape`] — par la texture côté source, par le rectangle
+/// côté destination (rognées par l'intérieur, jamais compressées au-delà de `scale`).
+pub fn shape_scaled(
+    rect: Rect,
+    texture: &TextureHandle,
+    slice: &NineSlice,
+    tint: Color32,
+    scale: f32,
+) -> Shape {
     let tex: Vec2 = texture.size_vec2();
-    if tex.x < 1.0 || tex.y < 1.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
+    if tex.x < 1.0 || tex.y < 1.0 || rect.width() <= 0.0 || rect.height() <= 0.0 || scale <= 0.0 {
         return Shape::Noop;
     }
 
-    // Marges effectives, utilisées à la fois côté source et côté destination : c'est ce qui garantit
-    // le 1:1. Bornées deux fois — par la texture (une marge de 6px sur une texture de 10px de haut
-    // ne laisserait aucune bande médiane) puis par le rectangle cible (voir la doc).
-    let effective = |lo: f32, hi: f32, tex_len: f32, dst_len: f32| -> (f32, f32) {
-        let mut total = lo + hi;
+    // Marges effectives — `(source, destination)` par extrémité. À `scale = 1` les deux sont
+    // égales, c'est ce qui garantit le 1:1. Bornées deux fois — par la texture (une marge de 6px
+    // sur une texture de 10px de haut ne laisserait aucune bande médiane) puis par le rectangle
+    // cible (voir la doc de `paint`).
+    let effective = |lo: f32, hi: f32, tex_len: f32, dst_len: f32| -> ((f32, f32), (f32, f32)) {
+        let total = lo + hi;
         if total <= 0.0 {
-            return (0.0, 0.0);
+            return ((0.0, 0.0), (0.0, 0.0));
         }
         let mut k: f32 = 1.0;
         let max_src = (tex_len - 1.0).max(0.0);
         if total > max_src {
             k = k.min(max_src / total);
         }
-        if total * k > dst_len {
-            k = k.min(dst_len / total);
+        if total * k * scale > dst_len {
+            k = k.min(dst_len / (total * scale));
         }
-        total *= k;
-        debug_assert!(total <= dst_len + 0.01);
-        (lo * k, hi * k)
+        debug_assert!(total * k * scale <= dst_len + 0.01);
+        ((lo * k, hi * k), (lo * k * scale, hi * k * scale))
     };
-    let (l, r) = effective(slice.insets.left, slice.insets.right, tex.x, rect.width());
-    let (t, b) = effective(slice.insets.top, slice.insets.bottom, tex.y, rect.height());
+    let ((l_src, r_src), (l, r)) =
+        effective(slice.insets.left, slice.insets.right, tex.x, rect.width());
+    let ((t_src, b_src), (t, b)) =
+        effective(slice.insets.top, slice.insets.bottom, tex.y, rect.height());
 
-    let cols = split_axis(rect.width(), tex.x, l, r, l, r, slice.fill_x);
-    let rows = split_axis(rect.height(), tex.y, t, b, t, b, slice.fill_y);
+    let cols = split_axis(rect.width(), tex.x, l, r, l_src, r_src, slice.fill_x);
+    let rows = split_axis(rect.height(), tex.y, t, b, t_src, b_src, slice.fill_y);
 
     let mut mesh = Mesh::with_texture(texture.id());
     for (ry, (y0, y1)) in rows.dst.iter().enumerate() {

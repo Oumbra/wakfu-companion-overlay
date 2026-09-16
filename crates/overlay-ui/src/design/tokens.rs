@@ -351,16 +351,21 @@ pub const TAB_FONT_SIZE: f32 = 17.0;
 // générifiées) et sur le relevé `ui-blueprint` qui en a été tiré. Détail dans
 // `design::components::switch`.
 
-/// Hauteur native d'un switch — **44px**, celle des deux captures. Comme pour un onglet, la
-/// hauteur est celle de la texture, jamais déduite de la largeur. Deux façons d'en changer :
-/// `Switch::scale` réduit tout dans le même rapport (le panneau Combat est à 36/44,
-/// `panels::combat::SWITCH_SCALE`) ; `Switch::height` n'étire que le corps des cases, les 6px
-/// hauts et bas du 9-slice (coins, liseré, biseau) restant figés.
+/// Hauteur de la **capture** du switch — **44px**, celle des deux textures du jeu. Comme pour un
+/// onglet, la hauteur est celle de la texture, jamais déduite de la largeur.
+///
+/// Ce n'est plus la hauteur à laquelle le composant se peint : depuis le 2026-09-16 (demande
+/// utilisateur, « passer les boutons du composant switch en 36 par 36 de manière générique »),
+/// toute case est servie à [`SWITCH_SLOT_SIZE`], et ce jeton ne sert qu'à en déduire le rapport
+/// de réduction (`36 / 44`) appliqué aux marges du 9-slice, au séparateur, au liseré et aux
+/// glyphes — voir `design::components::switch`. `Switch::scale` multiplie ce rapport ;
+/// `Switch::height` impose la hauteur seule.
 pub const SWITCH_HEIGHT: f32 = 44.0;
 
-/// Largeur d'une case, par défaut — **43px**, la moitié des 88px du switch du jeu une fois le
-/// séparateur déduit : liseré 2 + case active 40 + séparateur 2 + case inactive 42 + liseré 2.
-/// Un switch à `n` cases fait donc `43 × n + 2 × (n − 1)` par défaut ; `Switch::width` l'étire.
+/// Largeur d'une case dans la **capture** — **43px**, la moitié des 88px du switch du jeu une
+/// fois le séparateur déduit : liseré 2 + case active 40 + séparateur 2 + case inactive 42 +
+/// liseré 2. Même statut que [`SWITCH_HEIGHT`] : une mesure du jeu, pas la largeur servie — celle-ci
+/// est [`SWITCH_SLOT_SIZE`], et `Switch::width` l'étire.
 ///
 /// 43 et non 40 ou 42 : la case active du jeu fait 40 de remplissage, l'inactive 42, et chacune
 /// porte un liseré de 2 à son extrémité. Donner la même largeur aux deux laisse le 9-slice
@@ -368,6 +373,21 @@ pub const SWITCH_HEIGHT: f32 = 44.0;
 /// inactive à 41) contre 88 pour l'autre : écart de rendu du jeu, égalisé à 88 au traitement de
 /// l'asset.
 pub const SWITCH_SLOT_WIDTH: f32 = 43.0;
+
+/// Côté d'une case de switch, **dans les deux variantes** — **36px**, [`ICON_BUTTON_SIZE`].
+///
+/// **Décision utilisateur du 2026-09-16** : « passer les boutons du composant switch en 36 par 36
+/// de manière générique ». Jusque-là, seule la variante premier plan était à 36 (son socle EST un
+/// bouton icône) ; la variante cadre se peignait aux 43 × 44 de sa capture, et les deux
+/// contrôles ne tombaient pas sur la même grille dès qu'ils cohabitaient. Une case est désormais
+/// un carré de 36, quelle que soit sa matière : le cadre du jeu y est ramené par un 9-slice à
+/// l'échelle `36 / 44` (`DesignSystem::paint_scaled`) — coins, liseré et biseaux réduits ensemble,
+/// comme le jeu réduit son interface —, et non par un corps comprimé entre des marges figées.
+///
+/// Un switch à `n` cases fait donc `36 × n` plus ses gouttières : `+ 2 × (n − 1)` en cadre (74
+/// pour deux, 112 pour trois), `− 2 × (n − 1)` en premier plan, dont les socles se chevauchent
+/// ([`SWITCH_FIRST_PLAN_OVERLAP`] : 70 et 104).
+pub const SWITCH_SLOT_SIZE: f32 = ICON_BUTTON_SIZE;
 
 /// Largeur du séparateur entre les deux cases — **2px**, colonnes x 42–43 de la capture.
 pub const SWITCH_SEPARATOR_WIDTH: f32 = 2.0;
@@ -422,8 +442,9 @@ pub const SWITCH_ICON_SIZE: f32 = 16.0;
 /// — **[`ICON_BUTTON_SIZE`], 36px**, parce qu'une case y EST un socle de bouton icône
 /// (`button-icon-first-plan.png`, 36 × 36). Lui donner une référence propre ferait diverger deux
 /// contrôles qui partagent leur texture, et l'écart se verrait dès qu'ils cohabitent dans une même
-/// barre de premier plan.
-pub const SWITCH_FIRST_PLAN_SIZE: f32 = ICON_BUTTON_SIZE;
+/// barre de premier plan. Depuis le 2026-09-16, c'est aussi le côté d'une case de la variante
+/// cadre ([`SWITCH_SLOT_SIZE`]) : les deux variantes partagent leur grille.
+pub const SWITCH_FIRST_PLAN_SIZE: f32 = SWITCH_SLOT_SIZE;
 
 /// Liseré de la case CHOISIE en variante premier plan — **`#126068`, la teinte la plus vive de
 /// `button-icon-first-plan-hover.png`** (relevé de sa palette, 2026-09-16 : 10 px de la texture).

@@ -1698,11 +1698,13 @@ fn galerie_de_la_tuile_a_legende() {
 
 /// Le switch à cases — sa propre planche, la principale ayant atteint le plafond de 8192 px.
 ///
-/// Les deux états du jeu aux 88 px de la capture (c'est LA rangée à comparer à
-/// `switch-first-slot-active.png` / `switch-second-slot-active.png`), puis ce que le jeu n'a pas
-/// montré — survol, désactivé —, un switch étiré portant des pictogrammes plus grands que le carré
-/// de 16, le repli sans pictogramme, et les switches à trois cases — le cas du sélecteur de
-/// grandeur du panneau Combat, que le jeu n'a pas capturé (cases du milieu dérivées des bouts).
+/// Les deux états du jeu à la case de 36 (74 × 36, la taille servie à tous les appelants depuis
+/// le 2026-09-16), puis ce que le jeu n'a pas montré — survol, désactivé —, un switch étiré
+/// portant des pictogrammes plus grands que le carré de 16, le repli sans pictogramme, les
+/// switches à trois cases — le cas du sélecteur de grandeur du panneau Combat, que le jeu n'a pas
+/// capturé (cases du milieu dérivées des bouts) —, et une rangée aux 88 × 44 de la capture
+/// (`scale(44 / 36)`, largeur 88 imposée) : c'est LA rangée à comparer à
+/// `switch-first-slot-active.png` / `switch-second-slot-active.png`.
 #[test]
 fn galerie_du_switch() {
     #[derive(Clone, Copy, PartialEq)]
@@ -1724,8 +1726,8 @@ fn galerie_du_switch() {
                     ui.spacing_mut().item_spacing = Vec2::new(12.0, 8.0);
                     heading(
                         ui,
-                        "Switch à deux cases — les deux états du jeu, 88 × 44",
-                        "Le sélecteur de genre : case active kaki au glyphe doré, case inactive gris-brun au glyphe gris. Le pictogramme remplace le libellé, qui devient l'infobulle.",
+                        "Switch à deux cases — les deux états du jeu, case de 36 (74 × 36)",
+                        "Le sélecteur de genre : case active kaki au glyphe doré, case inactive gris-brun au glyphe gris. Le pictogramme remplace le libellé, qui devient l'infobulle. Cadre du jeu ramené de 44 à 36 par un 9-slice à l'échelle.",
                     );
                     ui.horizontal(|ui| {
                         let mut masculin = Genre::Masculin;
@@ -1783,7 +1785,7 @@ fn galerie_du_switch() {
                     heading(
                         ui,
                         "Étiré, autres pictogrammes, et le repli sans pictogramme",
-                        "Toute largeur est valide (9-slice par case). Un glyphe plus grand que 16 px y est ramené ; les deux du jeu restent à leur taille native. Sans pictogramme, le libellé est peint dans la case — non vérifié contre une capture.",
+                        "Toute largeur est valide (9-slice à l'échelle par case, coins gardés). Un glyphe plus grand que 16 px y est ramené ; les deux du jeu restent à leur taille native (plafond commun aux deux variantes). Sans pictogramme, le libellé est peint dans la case — non vérifié contre une capture.",
                     );
                     ui.horizontal(|ui| {
                         let mut vue = 0_u8;
@@ -1834,25 +1836,43 @@ fn galerie_du_switch() {
                             .log_name("galerie.switch.trois-milieu")
                             .show(ui);
                         ui.label(
-                            RichText::new("260 px, première active · 133 px (natif), milieu actif, dernière survolée")
+                            RichText::new("260 px, première active · 112 px (natif), milieu actif, dernière survolée")
                                 .color(CAPTION)
                                 .size(12.0),
                         );
                     });
                     heading(
                         ui,
-                        "Échelle 36/44 et glyphes en couleurs — les deux switches du panneau Combat",
-                        "Switch::scale : cases de 35 × 36, séparateur, liseré, biseaux et glyphes réduits ensemble.
-Glyphes « couleur » tels quels sur la case active, atténués ailleurs (ICON_NATIVE_DIM). À droite, 72 × 36 par 9-slice (height), pour comparer.",
+                        "Aux 88 × 44 de la capture, et glyphes en couleurs sur le cadre",
+                        "scale(44/36) + width(88) : le cadre du jeu à sa taille de capture, coins et liseré à 1:1 — la rangée à comparer aux deux captures. Puis les glyphes « couleur » sur le cadre à 36 : tels quels sur la case active, atténués ailleurs (ICON_NATIVE_DIM).",
                     );
                     ui.horizontal(|ui| {
+                        let mut masculin = Genre::Masculin;
+                        design::switch(&mut masculin)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .scale(44.0 / 36.0)
+                            .width(88.0)
+                            .log_name("galerie.switch.capture-masculin")
+                            .show(ui);
+                        let mut feminin = Genre::Feminin;
+                        design::switch(&mut feminin)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .scale(44.0 / 36.0)
+                            .width(88.0)
+                            .log_name("galerie.switch.capture-feminin")
+                            .show(ui);
                         let mut camp = 0_u8;
                         design::switch(&mut camp)
                             .slot(0, "Alliés")
                             .icon(DsIcon::Allies)
                             .slot(1, "Ennemis")
                             .icon(DsIcon::Enemies)
-                            .scale(36.0 / 44.0)
                             .log_name("galerie.switch.camp")
                             .show(ui);
                         let mut grandeur = 0_u8;
@@ -1864,7 +1884,6 @@ Glyphes « couleur » tels quels sur la case active, atténués ailleurs (ICON_N
                             .slot(2, "Soins prodigués")
                             .icon(DsIcon::MetricHeal)
                             .preview_state(SwitchState::Hovered)
-                            .scale(36.0 / 44.0)
                             .log_name("galerie.switch.grandeur")
                             .show(ui);
                         let mut inactif = 0_u8;
@@ -1875,22 +1894,11 @@ Glyphes « couleur » tels quels sur la case active, atténués ailleurs (ICON_N
                             .icon(DsIcon::MetricArmor)
                             .slot(2, "Soins prodigués")
                             .icon(DsIcon::MetricHeal)
-                            .scale(36.0 / 44.0)
                             .enabled(false)
                             .log_name("galerie.switch.grandeur-desactive")
                             .show(ui);
-                        let mut etire = 0_u8;
-                        design::switch(&mut etire)
-                            .slot(0, "Alliés")
-                            .icon(DsIcon::Allies)
-                            .slot(1, "Ennemis")
-                            .icon(DsIcon::Enemies)
-                            .width(72.0)
-                            .height(36.0)
-                            .log_name("galerie.switch.camp-9slice")
-                            .show(ui);
                         ui.label(
-                            RichText::new("72 × 36 · 109 × 36, survolée · désactivé · 9-slice")
+                            RichText::new("88 × 44 : première active · seconde active · 74 × 36 · 112 × 36, survolée · désactivé")
                                 .color(CAPTION)
                                 .size(12.0),
                         );
@@ -1933,7 +1941,7 @@ Glyphes « couleur » tels quels sur la case active, atténués ailleurs (ICON_N
                             .log_name("galerie.switch.premier-plan-desactive")
                             .show(ui);
                         ui.label(
-                            RichText::new("74 × 36 · 112 × 36, dernière survolée · désactivé")
+                            RichText::new("70 × 36 · 104 × 36, dernière survolée · désactivé")
                                 .color(CAPTION)
                                 .size(12.0),
                         );

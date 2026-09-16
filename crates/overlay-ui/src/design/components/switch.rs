@@ -69,8 +69,8 @@
 //!
 //! **La case inactive est 2px plus large que l'active**, et le séparateur se déplace donc de 2px
 //! selon l'état (x 42–44 ou 44–46). Le composant donne la même largeur à toutes les cases
-//! ([`tokens::SWITCH_SLOT_WIDTH`]) et laisse le 9-slice absorber l'écart — un pixel de chaque
-//! côté, invisible.
+//! (43 dans la capture, [`tokens::SWITCH_SLOT_WIDTH`] ; 36 à l'écran, voir plus bas) et laisse
+//! le 9-slice absorber l'écart — un pixel de chaque côté, invisible.
 //!
 //! ## Le survol — la case survolée devient une case active
 //!
@@ -88,22 +88,44 @@
 //! - **L'état désactivé.** Aucune capture. Fonds atténués comme un bouton désactivé, glyphes
 //!   [`tokens::TEXT_DISABLED`] ; la case sélectionnée reste reconnaissable à son fond.
 //! - **Le milieu.** Voir plus haut : dérivé des extrémités.
-//! - **Une hauteur autre que 44.** Deux voies, qui ne font pas la même chose :
-//!   - `Switch::scale` **réduit tout** dans le même rapport — cases, séparateur, liseré, biseaux,
-//!     glyphes — comme le jeu quand on baisse l'échelle de son interface. La texture entière de
-//!     chaque case est peinte en un seul quad (plus de 9-slice : à l'échelle, il n'y a rien à
-//!     figer), filtrée en bilinéaire par le GPU. C'est la voie du panneau Combat (36px, décision
-//!     utilisateur du 2026-09-16 : « le rendu dans le jeu est imposant », mais « vraiment scaler
-//!     à double dimension pour ne pas perdre le rendu visuel »). Les dimensions sont arrondies au
-//!     pixel : à 36/44, une case fait 35 × 36, le séparateur 2.
-//!   - `Switch::height` **impose la hauteur seule** : les 6px hauts et bas du 9-slice sont
-//!     recopiés tels quels, seul le corps s'étire. À 26px il reste 14px de dégradé au lieu de 32,
-//!     plus raide mais sans déformation des coins ni du liseré — c'est le rendu qui a fait dire
-//!     « on a l'impression d'avoir compressé le switch » : à réserver aux écarts de quelques
-//!     pixels.
+//! - **Une taille autre que 88 × 44.** Le composant ne se peint jamais aux dimensions de sa
+//!   capture : voir « 36 × 36 dans les deux variantes » ci-dessous. `Switch::scale` multiplie
+//!   ce rapport de réduction (cases, séparateur, liseré, biseaux et glyphes ensemble, comme le
+//!   jeu quand on change l'échelle de son interface) ; `Switch::width` et `Switch::height`
+//!   imposent une dimension, le 9-slice à l'échelle étirant le corps des cases sur ce qui reste.
 //! - **Des glyphes en couleurs.** Le jeu teinte ses glyphes (doré / gris) ; un glyphe
 //!   `DsIcon::native_color` est peint tel quel sur la case active et atténué
 //!   ([`tokens::ICON_NATIVE_DIM`]) ailleurs — voir la catégorie `couleur` de `design::icons`.
+//!
+//! ## 36 × 36 dans les deux variantes (2026-09-16)
+//!
+//! **Décision utilisateur** : « passer les boutons du composant switch en 36 par 36 de manière
+//! générique ». Une case est un carré de [`tokens::SWITCH_SLOT_SIZE`] (36, le côté d'un bouton
+//! icône), quelle que soit sa matière — le composant le fait pour tous ses appelants, aucun n'a
+//! d'échelle à régler. Un switch à deux cases fait 74 px en `Frame` (gouttière de 2), 70 en
+//! `FirstPlan` (chevauchement de 2) ; 112 et 104 à trois cases.
+//!
+//! La variante premier plan y était déjà (son socle EST un bouton icône de 36). La variante cadre,
+//! elle, se peignait aux 43 × 44 de sa capture — « le rendu dans le jeu est relativement
+//! imposant » —, et les deux contrôles ne tombaient pas sur la même grille. Elle y est ramenée par
+//! un **9-slice à l'échelle** (`DesignSystem::paint_scaled`, rapport `36 / 44` =
+//! [`tokens::SWITCH_SLOT_SIZE`] / [`tokens::SWITCH_HEIGHT`]) : les marges figées de la texture —
+//! coins, liseré, biseaux — sont peintes à 82 % de leur taille, comme le jeu les réduit quand on
+//! baisse l'échelle de son interface, et le corps s'étire sur ce qui reste. Séparateur et liseré
+//! de gouttière suivent le même rapport (2 px restent 2 une fois arrondis au pixel). **Les
+//! glyphes, eux, ne bougent pas** : plafond commun de 16 aux deux variantes ([`glyph_size`]), le
+//! ♂ reste à 14 et le ♀ à 16 — c'est la taille de glyphe commune que le lot premier plan a
+//! arrêtée (voir « la règle d'étanchéité »), et un sélecteur de genre aux glyphes plus petits que
+//! ceux du panneau Combat, sur la même grille de 36, se serait vu.
+//!
+//! Les deux autres voies ont été essayées avant, sur le panneau Combat, et écartées : le 9-slice
+//! ordinaire (`Switch::height` seul) garde ses 6 px hauts et bas à 1:1 et ne comprime que le
+//! dégradé — « on a l'impression d'avoir compressé le switch » —, et la texture entière en un
+//! quad réduit tout mais ne sait plus s'étirer en largeur sans déformer ses coins. Le 9-slice à
+//! l'échelle fait les deux : à la largeur native, il vaut le quad ; étiré, il vaut le 9-slice.
+//!
+//! La texture du jeu reste à 88 × 44 dans `assets/design-system/`, et la galerie en montre une
+//! rangée à cette taille (`scale(44 / 36)`, largeur 88 imposée) pour la comparaison à la capture.
 //!
 //! ## Deux matières pour un même contrôle — [`SwitchVariant`]
 //!
@@ -125,8 +147,8 @@
 //! | --- | --- | --- |
 //! | Fond d'une case | six textures de cadre, selon sa position | **un socle carré**, le même pour toutes |
 //! | Gouttière | liseré + séparateur peints dedans | **rien** — chaque socle porte ses quatre coins |
-//! | Case native | 43 × 44 | **36 × 36** ([`tokens::SWITCH_FIRST_PLAN_SIZE`]) |
-//! | Glyphe | sa taille native sous 16px | la grille du bouton icône (18 sur 36) |
+//! | Case native | 36 × 36 ([`tokens::SWITCH_SLOT_SIZE`]), cadre du jeu à l'échelle 36/44 | **36 × 36** ([`tokens::SWITCH_FIRST_PLAN_SIZE`]), socle tel quel |
+//! | Glyphe | sa taille native sous 16px, à l'échelle 36/44 | la grille du bouton icône (18 sur 36) |
 //! | Glyphe actif / inactif | doré / gris chaud | **blanc** / gris froid du premier plan |
 //!
 //! ## La règle d'étanchéité — ce lot ne concerne QUE `FirstPlan`
@@ -136,6 +158,12 @@
 //! survol qui allume le glyphe avec le socle appartiennent **strictement** à
 //! [`SwitchVariant::FirstPlan`]. Le switch standard — celui du sélecteur de genre de la fenêtre
 //! Personnages — doit rendre **exactement** ce qu'il rendait avant ce lot, au pixel près.
+//!
+//! **Une exception, venue APRÈS ce lot et décidée pour elle-même** : la case de 36 (« passer les
+//! boutons du composant switch en 36 par 36 de manière générique », voir plus haut). Elle change
+//! la grille du composant entier, cadre compris — ce n'est pas le premier plan qui déteint, et
+//! les captures de la fenêtre Personnages ont bougé pour cette seule raison. Tout le reste de la
+//! liste ci-dessous reste étanche.
 //!
 //! Concrètement, tout ce qui diffère passe par un `match self` sur la variante, jamais par une
 //! valeur partagée qu'on « ajusterait » :
@@ -220,11 +248,23 @@ pub enum SwitchVariant {
 }
 
 impl SwitchVariant {
-    /// Côté natif d'une case : les 43 × 44 du cadre du jeu, ou le socle carré de 36.
+    /// Côté natif d'une case — **36 dans les deux variantes** (voir « 36 × 36 dans les deux
+    /// variantes » dans la doc de module).
     fn native_slot_size(self) -> Vec2 {
         match self {
-            SwitchVariant::Frame => Vec2::new(tokens::SWITCH_SLOT_WIDTH, tokens::SWITCH_HEIGHT),
+            SwitchVariant::Frame => Vec2::splat(tokens::SWITCH_SLOT_SIZE),
             SwitchVariant::FirstPlan => Vec2::splat(tokens::SWITCH_FIRST_PLAN_SIZE),
+        }
+    }
+
+    /// Rapport entre la case servie et la texture qui la peint : `36 / 44` pour le cadre du jeu,
+    /// capturé à 44 de haut ; 1 pour le socle de premier plan, qui fait déjà 36. C'est l'échelle
+    /// des marges du 9-slice, du séparateur, du liseré et des glyphes — tout ce qui doit se
+    /// réduire avec la case pour qu'elle reste le switch du jeu en plus petit.
+    fn texture_scale(self) -> f32 {
+        match self {
+            SwitchVariant::Frame => tokens::SWITCH_SLOT_SIZE / tokens::SWITCH_HEIGHT,
+            SwitchVariant::FirstPlan => 1.0,
         }
     }
 
@@ -395,26 +435,27 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
     }
 
     /// Largeur totale imposée. Les cases se la partagent à égalité, séparateurs déduits. Sans
-    /// elle, chaque case fait sa largeur native — [`tokens::SWITCH_SLOT_WIDTH`] en `Frame` (les
-    /// 88px du jeu pour deux cases), le côté du socle en `FirstPlan`.
+    /// elle, chaque case fait [`tokens::SWITCH_SLOT_SIZE`] de large — 74px pour deux cases, dans
+    /// les deux variantes. Le 9-slice à l'échelle étire le corps des cases, coins et liseré
+    /// gardés.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
         self
     }
 
-    /// Hauteur imposée — sinon [`tokens::SWITCH_HEIGHT`], celle de la texture. Voir « une hauteur
-    /// autre que 44 » dans la doc de module : pas en dessous des 12px de marges figées du 9-slice
-    /// plus un glyphe.
+    /// Hauteur imposée — sinon [`tokens::SWITCH_SLOT_SIZE`]. Le 9-slice à l'échelle étire le
+    /// corps des cases ; pas en dessous des marges réduites du 9-slice (10px) plus un glyphe.
     pub fn height(mut self, height: f32) -> Self {
         self.height = Some(height);
         self
     }
 
     /// Réduit (ou agrandit) **tout le switch dans le même rapport** — cases, séparateur, liseré,
-    /// biseaux et glyphes — comme le jeu quand on change l'échelle de son interface. Chaque case
-    /// est alors peinte en un seul quad filtré, sans 9-slice. Les dimensions sont arrondies au
-    /// pixel (case de 43 → 35 à `36/44`). `width` et `height`, s'ils sont donnés, priment sur la
-    /// taille ainsi calculée. Voir « une hauteur autre que 44 » dans la doc de module.
+    /// biseaux et glyphes — comme le jeu quand on change l'échelle de son interface. 1 = la case
+    /// de 36 ; le rapport se multiplie à celui de la texture (voir « 36 × 36 dans les deux
+    /// variantes » dans la doc de module : `44 / 36` rend au cadre les dimensions de sa capture).
+    /// Les dimensions sont arrondies au pixel. `width` et `height`, s'ils sont donnés, priment
+    /// sur la taille ainsi calculée.
     pub fn scale(mut self, scale: f32) -> Self {
         self.scale = scale;
         self
@@ -449,6 +490,14 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
         ui.add(self)
     }
 
+    /// L'échelle à laquelle la texture d'une case est peinte : celle de l'appelant
+    /// ([`Switch::scale`]) fois celle de la variante ([`SwitchVariant::texture_scale`]). C'est
+    /// le rapport des marges du 9-slice, du séparateur, du liseré et des glyphes — pas celui de
+    /// la case, qui vaut `36 × scale` dans les deux variantes.
+    fn effective_scale(&self) -> f32 {
+        self.scale * self.variant.texture_scale()
+    }
+
     /// Largeur du séparateur à l'échelle — au pixel, jamais sous 1 : une gouttière de 1,6px
     /// serait peinte floue sur deux colonnes.
     fn separator_width(&self) -> f32 {
@@ -456,14 +505,15 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             // Un chevauchement est une gouttière négative : toute la géométrie (largeur totale,
             // largeur de case, position de chaque case) en découle sans autre changement.
             SwitchVariant::FirstPlan => -tokens::SWITCH_FIRST_PLAN_OVERLAP,
-            SwitchVariant::Frame => (tokens::SWITCH_SEPARATOR_WIDTH * self.scale)
+            // Le séparateur du jeu, réduit avec le cadre (36/44) puis à l'échelle de l'appelant.
+            SwitchVariant::Frame => (tokens::SWITCH_SEPARATOR_WIDTH * self.effective_scale())
                 .round()
                 .max(1.0),
         }
     }
 
-    /// Largeur sans contrainte : `n` cases à la largeur native de la variante et `n − 1`
-    /// séparateurs, à l'échelle.
+    /// Largeur sans contrainte : `n` cases au côté natif (36, à l'échelle de l'appelant) et
+    /// `n − 1` séparateurs.
     fn natural_width(&self) -> f32 {
         let n = self.slots.len() as f32;
         n * (self.variant.native_slot_size().x * self.scale).round()
@@ -527,6 +577,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
         let pointer_down = ui.input(|i| i.pointer.any_down());
         let count = self.slots.len();
         let separator_width = self.separator_width();
+        let effective_scale = self.effective_scale();
         let slot_width = (rect.width() - separator_width * (count - 1) as f32) / count as f32;
         let sense = if self.enabled {
             Sense::click()
@@ -568,19 +619,11 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                 let texture =
                     self.variant
                         .slot_texture(Position::of(index, count), state, selected);
-                if self.scale == 1.0 {
-                    design.paint(ui.painter(), slot_rect, texture, tint);
-                } else {
-                    // À l'échelle, la texture entière en un quad : coins, liseré et biseaux se
-                    // réduisent avec le reste, c'est le but (doc de module).
-                    design.paint_region(
-                        ui.painter(),
-                        slot_rect,
-                        texture,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        tint,
-                    );
-                }
+                // 9-slice à l'échelle : coins, liseré et biseaux réduits avec le reste — c'est ce
+                // qui ramène le cadre du jeu de 44 à 36 sans le comprimer (doc de module) —, et
+                // le corps étiré sur ce qui reste, ce qui laisse `width` et `height` libres. À
+                // l'échelle 1 (le socle de premier plan), c'est le 9-slice ordinaire.
+                design.paint_scaled(ui.painter(), slot_rect, texture, tint, effective_scale);
 
                 // Le glyphe (ou le libellé de repli) est écrêté à SA case : un pictogramme trop
                 // large ne doit pas déborder sur la voisine.
@@ -589,6 +632,8 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     .with_clip_rect(slot_rect.intersect(ui.clip_rect()));
                 if let Some(icon) = slot.icon {
                     let color = self.variant.glyph_color(state, icon.native_color());
+                    // `self.scale` et non `effective_scale` : le glyphe ne suit pas la réduction
+                    // du cadre à 36 (plafond commun aux deux variantes, doc de module).
                     let drawn = self.variant.glyph_size(&design, icon) * self.scale;
                     // Calé sur la grille de pixels : une case de 43px met son centre à une
                     // demi-position, et un glyphe de 14px peint à x + 0,5 s'étale sur deux
@@ -635,7 +680,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     ui.painter().rect_filled(
                         gutter.shrink2(Vec2::new(
                             0.0,
-                            (tokens::SWITCH_BORDER_Y * self.scale).round(),
+                            (tokens::SWITCH_BORDER_Y * effective_scale).round(),
                         )),
                         0,
                         tokens::SWITCH_SEPARATOR.gamma_multiply(dim),
@@ -746,15 +791,21 @@ mod tests {
             premier_plan.separator_width()
         );
 
-        // Et la taille native d'une case n'est pas la même : 43 × 44 contre un socle carré de 36.
+        // La taille native d'une case, elle, est commune depuis la demande « 36 par 36 de manière
+        // générique » (2026-09-16, après ce lot) : ce n'est pas le premier plan qui déteint sur
+        // le cadre, c'est le composant entier qui change de grille — voir
+        // `les_deux_variantes_servent_la_meme_case_de_36`. Ce qui reste propre au cadre est SA
+        // texture, peinte à l'échelle de sa capture.
         assert_eq!(
             SwitchVariant::Frame.native_slot_size(),
-            Vec2::new(tokens::SWITCH_SLOT_WIDTH, tokens::SWITCH_HEIGHT)
+            Vec2::splat(tokens::SWITCH_SLOT_SIZE)
         );
         assert_eq!(
             SwitchVariant::FirstPlan.native_slot_size(),
             Vec2::splat(tokens::SWITCH_FIRST_PLAN_SIZE)
         );
+        assert!(SwitchVariant::Frame.texture_scale() < 1.0);
+        assert_eq!(SwitchVariant::FirstPlan.texture_scale(), 1.0);
     }
 
     /// Le corollaire du précédent, sur la seule chose que le lot « premier plan » a changé dans le
@@ -813,20 +864,26 @@ mod tests {
         );
     }
 
-    /// À l'échelle 36/44, tout est arrondi au pixel : case de 35, séparateur de 2, hauteur 36 —
-    /// deux cases font 72, trois 109.
+    /// L'échelle multiplie le côté de 36 et tout est arrondi au pixel : à `44 / 36`, le cadre
+    /// retrouve les 44 de sa capture (deux cases : 90, avec `width(88)` les 88 du jeu) ; à 0,5,
+    /// une case fait 18 et le séparateur 1 — jamais 0.
     #[test]
     fn l_echelle_reduit_tout_au_pixel_pres() {
         let mut v = 0u8;
-        let deux = switch(&mut v).slot(0, "a").slot(1, "b").scale(36.0 / 44.0);
-        assert_eq!(deux.desired_size(), Vec2::new(72.0, 36.0));
+        let capture = switch(&mut v).slot(0, "a").slot(1, "b").scale(44.0 / 36.0);
+        assert_eq!(capture.desired_size(), Vec2::new(90.0, 44.0));
+        assert!((capture.effective_scale() - 1.0).abs() < 1e-5);
         let mut v = 0u8;
-        let trois = switch(&mut v)
+        let jeu = switch(&mut v)
             .slot(0, "a")
             .slot(1, "b")
-            .slot(2, "c")
-            .scale(36.0 / 44.0);
-        assert_eq!(trois.desired_size(), Vec2::new(109.0, 36.0));
+            .scale(44.0 / 36.0)
+            .width(88.0);
+        assert_eq!(jeu.desired_size(), Vec2::new(88.0, 44.0));
+        let mut v = 0u8;
+        let moitie = switch(&mut v).slot(0, "a").slot(1, "b").scale(0.5);
+        assert_eq!(moitie.desired_size(), Vec2::new(37.0, 18.0));
+        assert_eq!(moitie.separator_width(), 1.0);
         // Une largeur imposée prime sur l'échelle.
         let mut v = 0u8;
         let impose = switch(&mut v)
@@ -834,7 +891,33 @@ mod tests {
             .slot(1, "b")
             .scale(0.5)
             .width(100.0);
-        assert_eq!(impose.desired_size(), Vec2::new(100.0, 22.0));
+        assert_eq!(impose.desired_size(), Vec2::new(100.0, 18.0));
+    }
+
+    /// Le cadre du jeu est peint à `36 / 44` de sa capture, le socle de premier plan tel quel :
+    /// les deux variantes servent la même case de 36, et c'est la texture qui s'adapte.
+    #[test]
+    fn les_deux_variantes_servent_la_meme_case_de_36() {
+        assert_eq!(SwitchVariant::Frame.native_slot_size(), Vec2::splat(36.0));
+        assert_eq!(
+            SwitchVariant::FirstPlan.native_slot_size(),
+            Vec2::splat(36.0)
+        );
+        assert!((SwitchVariant::Frame.texture_scale() - 36.0 / 44.0).abs() < 1e-5);
+        assert_eq!(SwitchVariant::FirstPlan.texture_scale(), 1.0);
+        let mut v = 0u8;
+        let cadre = switch(&mut v).slot(0, "a").slot(1, "b");
+        let mut v = 0u8;
+        let premier_plan = switch(&mut v)
+            .slot(0, "a")
+            .slot(1, "b")
+            .variant(SwitchVariant::FirstPlan);
+        // Même hauteur ; la largeur ne diffère que par la gouttière — 2 px de séparateur pour
+        // le cadre, 2 px de chevauchement pour le premier plan (74 contre 70).
+        assert_eq!(cadre.desired_size(), Vec2::new(74.0, 36.0));
+        assert_eq!(premier_plan.desired_size(), Vec2::new(70.0, 36.0));
+        // Le séparateur du cadre, 2px dans la capture, reste à 2 une fois réduit (1,64 arrondi).
+        assert_eq!(cadre.separator_width(), 2.0);
     }
 
     /// Une case du milieu prend les textures sans coin — les seules qui conviennent entre deux
@@ -903,25 +986,25 @@ mod tests {
         assert_eq!(switch.slots[1].forced_state, Some(SwitchState::Hovered));
     }
 
-    /// La largeur par défaut est la mesure du jeu — 88 × 44 pour deux cases — et suit le nombre
-    /// de cases : 43 par case, 2 par séparateur.
+    /// La taille par défaut est la case de 36 — 74 × 36 pour deux cases — et suit le nombre de
+    /// cases : 36 par case, 2 par séparateur.
     #[test]
-    fn la_taille_par_defaut_est_celle_du_jeu_et_suit_le_nombre_de_cases() {
+    fn la_taille_par_defaut_est_la_case_de_36_et_suit_le_nombre_de_cases() {
         let mut selected = 0_u8;
         let deux = Switch::new(&mut selected).slot(0, "A").slot(1, "B");
-        assert_eq!(deux.desired_size(), Vec2::new(88.0, 44.0));
+        assert_eq!(deux.desired_size(), Vec2::new(74.0, 36.0));
         let mut selected = 0_u8;
         let trois = Switch::new(&mut selected)
             .slot(0, "A")
             .slot(1, "B")
             .slot(2, "C");
-        assert_eq!(trois.desired_size(), Vec2::new(133.0, 44.0));
+        assert_eq!(trois.desired_size(), Vec2::new(112.0, 36.0));
         let mut selected = 0_u8;
         let impose = Switch::new(&mut selected)
             .slot(0, "A")
             .slot(1, "B")
             .width(200.0);
-        assert_eq!(impose.desired_size(), Vec2::new(200.0, 44.0));
+        assert_eq!(impose.desired_size(), Vec2::new(200.0, 36.0));
         let mut selected = 0_u8;
         let abaisse = Switch::new(&mut selected)
             .slot(0, "A")

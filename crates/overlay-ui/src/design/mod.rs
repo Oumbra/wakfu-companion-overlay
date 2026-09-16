@@ -306,6 +306,28 @@ impl DesignSystem {
             tint,
         );
     }
+
+    /// Peint `texture` en 9-slice dans `rect`, **les marges figées réduites par `scale`** — voir
+    /// `nine_slice::shape_scaled`. C'est la voie d'un composant servi plus petit que sa capture
+    /// (le switch à cases, 36 px pour une texture de 44) : coins, liseré et biseaux se réduisent
+    /// ensemble, le corps s'étire sur ce qui reste, et la largeur reste libre.
+    pub fn paint_scaled(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        texture: DsTexture,
+        tint: egui::Color32,
+        scale: f32,
+    ) {
+        nine_slice::paint_scaled(
+            painter,
+            rect,
+            self.texture(texture),
+            &texture.spec().slice,
+            tint,
+            scale,
+        );
+    }
 }
 
 /// Décode un PNG embarqué et le téléverse sur le GPU sous le nom de cache `name`.

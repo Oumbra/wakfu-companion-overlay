@@ -1223,7 +1223,7 @@ fn modale_personnage(
         // 2. Sexe à gauche, recherche de classe à droite — une seule ligne, les deux filtres de la
         //    grille qui suit.
         let row = ui
-            .allocate_space(Vec2::new(COLONNE, design::tokens::SWITCH_HEIGHT))
+            .allocate_space(Vec2::new(COLONNE, design::tokens::SWITCH_SLOT_SIZE))
             .1;
         let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
         cell.spacing_mut().item_spacing.x = 0.0;
