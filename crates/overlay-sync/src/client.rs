@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use overlay_engine::{
     chat_filters_from_account_data, chat_filters_patch_entry, profile_patch_entry,
-    watchlist_from_settings_json, watchlist_patch_entry, AlertProfile, ChatFilter, RosterIndex,
-    WatchlistEntry,
+    roster_patch_entry, watchlist_from_settings_json, watchlist_patch_entry, AlertProfile,
+    ChatFilter, Roster, RosterIndex, WatchlistEntry,
 };
 use serde_json::Value;
 
@@ -135,6 +135,18 @@ pub fn patch_chat_filters(token: &str, filters: &[ChatFilter]) -> Result<Value, 
     patch_json_authenticated(token, "/api/v1/settings", &body)
 }
 
+/// `PATCH /api/v1/settings` pour écrire la clé `roster` — les comptes et leurs personnages tels
+/// que l'onglet « Personnages » de la fenêtre Options les a édités (2026-09-16).
+///
+/// **Le roster doit être celui qui a été LU**, modifié, pas un reconstruit : la clé porte l'identité
+/// des comptes (`id`, `label`, `isDefault`) et des champs que l'overlay n'affiche nulle part — voir
+/// `overlay_engine::roster`, doc de module, qui explique ce qu'une réécriture appauvrissante
+/// coûterait au compte. Même arbitrage serveur « dernier écrivain gagne » que `patch_profile`.
+pub fn patch_roster(token: &str, roster: &Roster) -> Result<Value, SyncError> {
+    let body = serde_json::json!({ "entries": [roster_patch_entry(roster)] });
+    patch_json_authenticated(token, "/api/v1/settings", &body)
+}
+
 /// `GET /api/v1/items/{id}` — le détail d'un objet, dont **sa recette** (`functions/api/v1/
 /// items/[id].ts` côté dépôt web).
 ///
@@ -201,6 +213,13 @@ fn parse_json_body(
 /// deux clés du même objet `data` (voir `functions/api/v1/settings.ts`, dépôt `wakfu-companion`).
 pub struct AccountSettings {
     pub roster: RosterIndex,
+    /// **Le même roster, sous sa forme éditable** — ce que l'onglet « Personnages » prend en
+    /// brouillon à l'ouverture de la fenêtre Options, et ce que `patch_roster` réécrit.
+    ///
+    /// Les deux viennent du même JSON et ne peuvent pas diverger ; ils ne s'en déduisent pas l'un
+    /// l'autre pour autant (voir `overlay_engine::roster`, doc de module) : l'index jette
+    /// l'identité des comptes, que l'écriture ne peut pas se permettre de perdre.
+    pub roster_draft: Roster,
     /// Liste des entrées suivies — définitions SEULEMENT (nom/genre/mode/cible), lues en lecture
     /// seule depuis le compte comme le roster. Les compteurs (`count`) eux-mêmes restent locaux à
     /// l'overlay pour cette première version (voir `overlay_engine::watchlist`, décision
@@ -281,6 +300,7 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
     let data = body.get("data").cloned().unwrap_or(Value::Null);
     Ok(AccountSettings {
         roster: RosterIndex::from_settings_json(&data),
+        roster_draft: Roster::from_settings_json(&data),
         watchlist: watchlist_from_settings_json(&data),
         alerts: AlertProfile::from_settings_json(&data),
         profile_raw: data.get("profile").cloned(),
@@ -342,4 +362,20 @@ pub fn fetch_monster_families() -> Result<Value, SyncError> {
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body("/api/v1/monster-families", response)
+}
+
+/// `GET /api/v1/game-servers` — les serveurs de jeu (`game_servers`, voir
+/// `functions/api/v1/game-servers.ts` côté `wakfu-companion`), **jamais une liste en dur** : c'est
+/// la règle du dépôt web, et le code écrit dans `roster[].gameServer` doit être un `code` de cette
+/// table pour que le site le reconnaisse.
+///
+/// Sans authentification, comme le catalogue et les donjons — table minuscule et quasi statique,
+/// mise en cache disque au même titre (`reference_data_cache::ReferenceData::GameServers`).
+pub fn fetch_game_servers() -> Result<Value, SyncError> {
+    let url = format!("{}/api/v1/game-servers", base_url());
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body("/api/v1/game-servers", response)
 }

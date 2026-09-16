@@ -24,6 +24,10 @@ const APP_NAME: &str = "wakfu-companion-overlay-test";
 pub enum ReferenceData {
     Dungeons,
     MonsterFamilies,
+    /// Les serveurs de jeu (`GET /api/v1/game-servers`) — table minuscule et quasi statique, dont
+    /// l'onglet « Personnages » a besoin pour proposer un serveur au compte. Sans ce cache, un
+    /// lancement hors ligne afficherait un sélecteur vide alors que le compte porte un serveur.
+    GameServers,
 }
 
 impl ReferenceData {
@@ -31,6 +35,7 @@ impl ReferenceData {
         match self {
             ReferenceData::Dungeons => "dungeons-cache.json",
             ReferenceData::MonsterFamilies => "monster-families-cache.json",
+            ReferenceData::GameServers => "game-servers-cache.json",
         }
     }
 }
@@ -79,7 +84,11 @@ mod tests {
         let handle = std::thread::Builder::new()
             .name("reference-data-cache-test".into())
             .spawn(|| {
-                for which in [ReferenceData::Dungeons, ReferenceData::MonsterFamilies] {
+                for which in [
+                    ReferenceData::Dungeons,
+                    ReferenceData::MonsterFamilies,
+                    ReferenceData::GameServers,
+                ] {
                     let rows = serde_json::json!([{ "id": 1, "fr": "Test" }]);
                     save(which, &rows).expect("save ne doit pas échouer");
                     assert_eq!(load(which), Some(rows));
