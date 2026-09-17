@@ -632,6 +632,45 @@ mod tests {
     }
 
     #[test]
+    fn le_tour_est_notifie_sous_le_voile_des_bonus_de_tour() {
+        // Le tour d'Oumbra commence derrière la sélection des bonus de tour : écran voilé, panneau
+        // plus doré. Le gabarit appris au repos doit le reconnaître, sinon un joueur qui n'a pas
+        // la fenêtre sous les yeux n'est jamais prévenu (bug du 2026-09-17).
+        let mut w = Watcher::default();
+        let t0 = Instant::now();
+        learn_oumbra(&mut w, t0);
+        let voile = vision::veiled(&fixture("repos-oumbra"));
+        let autre = fixture("repos-pugio-t18");
+        let f = facts(true, 2);
+        for i in 0..2 {
+            tick(
+                &mut w,
+                "Oumbra",
+                "Oumbra",
+                Some(&autre),
+                &f,
+                false,
+                t0 + Duration::from_secs(10 + i),
+            );
+        }
+        let ev = tick(
+            &mut w,
+            "Oumbra",
+            "Oumbra",
+            Some(&voile),
+            &f,
+            false,
+            t0 + Duration::from_secs(40),
+        );
+        assert_eq!(
+            ev,
+            vec![Event::Notify {
+                character: "Oumbra".to_string()
+            }]
+        );
+    }
+
+    #[test]
     fn la_fin_du_combat_remet_l_etat_a_zero_mais_garde_le_gabarit() {
         let mut w = Watcher::default();
         let t0 = Instant::now();
