@@ -2875,7 +2875,7 @@ impl App {
             tracing::info!(
                 name = %completed.name,
                 remove = self.completion.remove,
-                animate = self.completion.animate,
+                animate = self.completion.animates(),
                 "[suivi] entrée complétée"
             );
             self.watchlist_completions.push(
@@ -3543,7 +3543,7 @@ impl App {
                     self.completion = commit.completion;
                     tracing::info!(
                         remove = self.completion.remove,
-                        animate = self.completion.animate,
+                        animate = self.completion.animates(),
                         "[options] complétion d'un suivi mise à jour"
                     );
                 }

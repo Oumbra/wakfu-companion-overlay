@@ -215,14 +215,17 @@ impl CountdownToastSettings {
 /// rattrapable après coup mais de le rendre **réglable avant** : ces deux cases, actives par
 /// défaut.
 ///
-/// **Les deux sont indépendantes**, et les quatre combinaisons ont un sens :
+/// **L'animation DÉPEND du retrait** (décision utilisateur du 2026-09-18, qui revient sur les
+/// « quatre combinaisons » de la veille) : la célébration est l'adieu de la tuile, une tuile qui
+/// reste n'a rien à célébrer. La case « Activer l'animation » est donc grisée sous « Supprimer les
+/// éléments suivis » décochée — sans changer de valeur, comme la sourdine sous la notification de
+/// tour — et [`Self::animates`] est ce que l'hôte lit, jamais `animate` seul :
 ///
 /// | Retrait | Animation | Ce qui se passe |
 /// | --- | --- | --- |
 /// | ✔ | ✔ | la tuile célèbre, puis disparaît (le défaut) |
 /// | ✔ | ✘ | la tuile disparaît tout de suite, sans cérémonie |
-/// | ✘ | ✔ | la tuile célèbre et reste, compteur à sa cible |
-/// | ✘ | ✘ | rien ne bouge — seul le toast signale l'événement |
+/// | ✘ | (grisée) | rien ne bouge — seul le toast signale l'événement |
 ///
 /// **Persistés localement** (`config::OverlayConfig`), pour la même raison que
 /// [`CountdownToastSettings`] : pas d'équivalent web, et le serveur n'accepte que des clés
@@ -246,6 +249,12 @@ impl Default for CompletionSettings {
 }
 
 impl CompletionSettings {
+    /// La célébration se joue-t-elle : `animate` **et** `remove` — la case d'animation grisée
+    /// (retrait décoché) garde sa valeur mais ne vaut plus, voir la doc du type.
+    pub fn animates(self) -> bool {
+        self.remove && self.animate
+    }
+
     /// Le délai à attendre avant de retirer l'entrée, en secondes — la durée de la célébration
     /// quand elle est jouée, **zéro sinon**.
     ///
@@ -253,7 +262,7 @@ impl CompletionSettings {
     /// animation il n'y a rien à attendre, et une attente de 3,5 s devant une tuile immobile
     /// passerait pour un bug.
     pub fn removal_delay_seconds(self) -> f32 {
-        if self.animate {
+        if self.animates() {
             design::tokens::ITEM_SLOT_COMPLETION_DURATION
         } else {
             0.0
@@ -1320,5 +1329,33 @@ mod recette_tests {
         };
         track_recipe_lines(&mut entries, &[], &mut state);
         assert!(state.recipe.is_none());
+    }
+
+    #[test]
+    fn l_animation_ne_vaut_qu_avec_le_retrait() {
+        // Décision du 2026-09-18 : la case « Activer l'animation de complétion » est grisée
+        // sous « Supprimer les éléments suivis » décochée, et sa valeur — conservée — ne vaut
+        // plus. L'hôte ne doit donc ni attendre ni faire célébrer une tuile qui reste.
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        let defaut = CompletionSettings::default();
+        assert!(defaut.animates());
+        assert_eq!(defaut.removal_delay_seconds(), duree);
+
+        let sans_retrait = CompletionSettings {
+            remove: false,
+            animate: true,
+        };
+        assert!(
+            !sans_retrait.animates(),
+            "case grisée : sa valeur ne compte pas"
+        );
+        assert_eq!(sans_retrait.removal_delay_seconds(), 0.0);
+
+        let sans_animation = CompletionSettings {
+            remove: true,
+            animate: false,
+        };
+        assert!(!sans_animation.animates());
+        assert_eq!(sans_animation.removal_delay_seconds(), 0.0);
     }
 }

@@ -3191,10 +3191,26 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
 /// de complétion » n'auraient donc été vérifiées nulle part.
 #[test]
 fn options_parametres_section_suivi() {
+    capture_section_suivi(
+        "options_parametres_section_suivi",
+        parametres_avec_notifications(),
+    );
+}
+
+/// **Retrait décoché : l'animation se grise** (2026-09-18, demande utilisateur — « l'option
+/// "Activer l'animation de complétion" est dépendante de l'option "Supprimer les éléments
+/// suivis" »). La case garde sa coche (elle vaudra de nouveau si le retrait est recoché) mais
+/// s'éteint, en retrait sous sa maîtresse comme le suivi des sorts sous le détail des combats.
+#[test]
+fn options_parametres_section_suivi_sans_retrait() {
+    let mut etat = parametres_avec_notifications();
+    etat.completion.remove = false;
+    capture_section_suivi("options_parametres_section_suivi_sans_retrait", etat);
+}
+
+fn capture_section_suivi(name: &str, options_state: panels::options_modal::OptionsModalState) {
     // Voir `options_parametres_section_compte` : ce test peint sans passer par
     // `Textures::get_or_load`, c'est `parametres_avec_notifications` qui pose le gel de version.
-    let options_state = parametres_avec_notifications();
-
     let mut harness = Harness::builder()
         .with_size(egui::vec2(
             panels::options_modal::WINDOW_SIZE.0,
@@ -3225,9 +3241,11 @@ fn options_parametres_section_suivi() {
         });
     harness.run();
     // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
-    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet.
-    defile_les_parametres(&mut harness, 430.0);
-    harness.snapshot("options_parametres_section_suivi");
+    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
+    // de 148 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
+    // « Replacer au défaut », « Suivi » est remontée d'autant.
+    defile_les_parametres(&mut harness, 282.0);
+    harness.snapshot(name);
 }
 
 /// **La section « Compte » de l'onglet « Paramètres »** (2026-09-13) — la déconnexion, qui était

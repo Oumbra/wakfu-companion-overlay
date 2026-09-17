@@ -2544,9 +2544,10 @@ mod tests {
 
     #[test]
     fn sans_retrait_la_tuile_celebre_et_reste() {
-        // Case « Supprimer les éléments suivis lorsqu'ils sont complétés » décochée : la
-        // célébration se joue, mais aucune clé ne part — et la liste ne grossit pas indéfiniment,
-        // la célébration finie est oubliée.
+        // Une célébration sans retrait : la célébration se joue, mais aucune clé ne part — et la
+        // liste ne grossit pas indéfiniment, la célébration finie est oubliée. Depuis le
+        // 2026-09-18, les réglages ne produisent plus ce cas (`CompletionSettings::animates`
+        // exige le retrait) ; la primitive, elle, reste indépendante des cases et le garantit.
         let t0 = t0();
         let mut completions = WatchlistCompletions::default();
         let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;

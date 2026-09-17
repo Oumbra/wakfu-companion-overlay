@@ -1270,39 +1270,50 @@ pub fn show(
             //
             // Ces deux cases sont la réponse à « et si le retrait était une erreur ? » : le geste
             // n'est pas rattrapable après coup, il est réglable AVANT. Les deux sont actives par
-            // défaut, et **indépendantes** — les quatre combinaisons ont un sens (voir
-            // `suivi_tab::CompletionSettings`), l'animation n'est donc pas grisée quand le retrait
-            // est décoché : une tuile peut célébrer et rester.
+            // défaut.
             //
             // Elles ne passent pas par `notifications::section` : ce n'est ni un son ni une carte,
             // c'est ce qu'il advient de l'ENTRÉE. Grisées avec le reste de la section quand le
             // Suivi est éteint, comme tout ce qui le concerne ici.
-            for (value, label, tooltip, log_name) in [
-                (
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(
                     &mut state.completion.remove,
                     "Supprimer les éléments suivis lorsqu'ils sont complétés",
+                )
+                .enabled(state.features.suivi)
+                .tooltip(
                     "Un décompte arrivé à 0 ou un objectif atteint a fini son travail : son \
                      élément disparaît du bandeau ET du compte. Décochée, il reste, compteur à sa \
                      cible.",
-                    "options-suivi-retrait",
-                ),
-                (
-                    &mut state.completion.animate,
-                    "Activer l'animation de complétion",
-                    "La tuile se soulève, sa bordure devient arc-en-ciel et tournoie, se fige sur \
-                     la couleur de rareté de l'objet, puis éclate en confettis — trois secondes et \
-                     demie. Décochée, l'élément s'en va sans cérémonie.",
-                    "options-suivi-animation",
-                ),
-            ] {
-                ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+                )
+                .log_name("options-suivi-retrait"),
+            );
+            // **L'animation, sous le retrait et en retrait** (2026-09-18, demande utilisateur :
+            // « l'option "Activer l'animation de complétion" est dépendante de l'option
+            // "Supprimer les éléments suivis" ») — la veille, les deux cases étaient
+            // indépendantes et une tuile pouvait célébrer et rester. Plus maintenant : la
+            // célébration est l'adieu de la tuile, voir `suivi_tab::CompletionSettings`. Même
+            // géométrie et même règle que le suivi des sorts sous le détail des combats : la case
+            // commence là où commence le LIBELLÉ de celle du dessus, grisée sans changer de valeur
+            // quand le retrait est décoché — on la retrouve telle quelle en le recochant.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.horizontal(|ui| {
+                ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
                 ui.add(
-                    design::checkbox(value, label)
-                        .enabled(state.features.suivi)
-                        .tooltip(tooltip)
-                        .log_name(log_name),
+                    design::checkbox(
+                        &mut state.completion.animate,
+                        "Activer l'animation de complétion",
+                    )
+                    .enabled(state.features.suivi && state.completion.remove)
+                    .tooltip(
+                        "La tuile se soulève, sa bordure devient arc-en-ciel et tournoie, se fige \
+                         sur la couleur de rareté de l'objet, puis éclate en confettis — trois \
+                         secondes et demie. Décochée, l'élément s'en va sans cérémonie.",
+                    )
+                    .log_name("options-suivi-animation"),
                 );
-            }
+            });
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Alertes"));
