@@ -460,8 +460,10 @@ affichant le combat de SON personnage (`overlay_engine::SessionSnapshot::fight_f
 résolu depuis le nom extrait du titre de fenêtre — voir §2 du plan overlay-engine et
 `crates/overlay-ui/src/main.rs::App::sync_windows`). Chaque fenêtre overlay se cale au bord gauche
 de SA fenêtre de jeu — au bord DROIT depuis le 2026-09-17 si la case correspondante est cochée, et
-son contenu est alors retourné en miroir, voir §9.1 vicies —, verticalement centrée dessus, et suit
-tout déplacement/redimensionnement (`crates/overlay-ui/src/game_window.rs`) :
+son contenu est alors retourné en miroir, voir §9.1 vicies —, verticalement centrée dessus **tant
+que l'utilisateur ne l'a pas fait glisser** (§9.1 unvicies : la hauteur choisie est persistée et
+bornée au cadre, le côté reste une case des Options), et suit tout déplacement/redimensionnement
+(`crates/overlay-ui/src/game_window.rs`) :
 
 - **Identification par titre, pas par process.** Le titre de la fenêtre de jeu est
   `"<Nom du personnage> - WAKFU"` — variable, mais le suffixe `" - WAKFU"` est constant, ET c'est
@@ -2099,10 +2101,11 @@ ouvert dont « les deux ne peuvent pas vivre en même temps ».
   (`RecapChrome::moved`) : il n'y a rien à défaire avant, et un bouton grisé en permanence
   coûterait sa place pour ne rien dire. Un clic ouvre une confirmation — décision utilisateur :
   « on remet le récap à son emplacement initial seulement si l'utilisateur appuie sur oui » — par
-  la fenêtre qui existait déjà, `OverlayKind::RecapReset`, désormais paramétrée par sa cible
-  (`RecapTarget::Session` pour les compteurs, `Position` pour la bande). Deux variantes auraient
-  dédoublé dans les deux hôtes tout le cycle « ouvrir / centrer / voiler / fermer » pour ne changer
-  qu'une phrase.
+  la fenêtre qui existait déjà, `OverlayKind::ResetConfirm`, paramétrée par sa cible
+  (`ResetTarget::RecapSession` pour les compteurs, `RecapPosition` pour la bande, et depuis le
+  soir du même jour `CombatPosition` pour la hauteur du panneau Combat — voir §9.1 unvicies). Une
+  variante d'`OverlayKind` par cible aurait dédoublé, dans les deux hôtes, tout le cycle
+  « ouvrir / centrer / voiler / fermer » pour ne changer qu'une phrase.
 - **La rangée se pose au-dessus du bloc, en haut à gauche, et bascule en dessous** quand la bande
   est posée si haut dans la fenêtre de jeu que la rangée en sortirait
   (`recap_placement::actions_below`, calculé par l'hôte : le panneau ne connaît pas sa position à
@@ -2265,6 +2268,96 @@ directement la position de mise en page.
 Le curseur qu'`egui_kittest` dessine reste, lui, à la position de mise en page : il vient de
 `PlatformOutput::cursor_image`, pas des formes — en production c'est le curseur du système, à la
 position réelle du pointeur.
+
+### 9.1 unvicies Panneau Combat déplaçable en hauteur (2026-09-17, soir)
+
+Demande utilisateur, dans la foulée du cadenas de la bande Récap : « que l'utilisateur puisse
+slider l'overlay combat de manière verticale, peu importe le côté, pour qu'il choisisse à quelle
+hauteur l'overlay se dessine. Il est bloqué sur le côté, il peut simplement le déplacer de haut en
+bas, et la position sera enregistrée. Même s'il change de côté, la hauteur est conservée. [...] le
+même système que l'overlay récap, avec deux boutons, un cadenas ouvert / cadenas fermé. »
+
+**Une seule valeur persistée : la hauteur.** L'abscisse n'est jamais un réglage — elle vaut le bord
+gauche ou le bord droit du client selon la case des Options (§9.1 vicies) — et la hauteur ne dépend
+pas du côté : `config::OverlayConfig::combat_position_y` est une clé UNIQUE, lue des deux côtés, si
+bien que basculer de gauche à droite garde la hauteur choisie sans rien recalculer. `None` = jamais
+déplacé, donc le centrage vertical d'origine (S1/L2), qui suit les redimensionnements du client —
+et non une valeur figée qui clouerait le panneau à un centre qui n'en est plus un.
+
+**`overlay_ui::combat_placement`**, jumeau de `recap_placement` et partagé par les deux hôtes :
+centrage d'origine (`default_offset`, fonction et non constante — il dépend de la fenêtre de jeu),
+bornage, aimantation (`SNAP_RADIUS_PX`, 12 px), et la traduction geste → hauteur
+(`drag_offset`, sur le curseur d'ÉCRAN, jamais celui d'egui : c'est la boucle qui a fait vibrer la
+bande Récap, diagnostic complet en §9.1 octodecies). Le calcul est de l'arithmétique sur des
+entiers, et ici il se teste sans serveur graphique.
+
+- **Le décalage décrit le CONTENU**, pas sa fenêtre — celle-ci commence `COMBAT_TOP_MARGIN` plus
+  haut (la réserve d'infobulle du switch Alliés/Ennemis). Un fichier de config qu'on ouvre à la
+  main dit ainsi où l'on voit le panneau.
+- **Ce qui est borné, en revanche, c'est la FENÊTRE entière** — l'inverse de la bande Récap. Le
+  panneau peint sa rangée d'actions DANS cette réserve : une fenêtre qui sortirait par le haut
+  emporterait le cadenas, donc le seul geste qui ramène le panneau. Le prix est que le contenu ne
+  monte pas plus haut que 44 px sous le bord du cadre — exactement la marge qu'il prend déjà.
+- **Aucune bascule de côté pour la rangée, aucune réserve ajoutée** : la place existait déjà, la
+  fenêtre OS ne change donc pas de taille (la bande Récap, elle, a dû garder `RECAP_ACTIONS_RESERVE`
+  des deux côtés en permanence).
+- **La marge au bord vertical, elle, est enfin la même sur les deux OS** : `GAME_EDGE_MARGIN_PX`
+  valait 0 sous Windows depuis le 2026-09-04 (« comme si l'overlay faisait partie du jeu ») et
+  encore 12 px dans le binaire X11, que cette refonte-là n'avait pas suivi. Rien ne comparait les
+  deux hôtes ; le calcul partagé les met d'accord.
+
+**La poignée est la lisière du bord extérieur** (`panels::combat::HANDLE_WIDTH`, 8 px, toute la
+hauteur du panneau) — « il faudra qu'il déplace l'overlay en slidant sur la bordure latérale ».
+Trois conséquences qui ne s'improvisent pas :
+
+- **Déclarée en tête du panneau, peinte à la fin.** L'ordre de déclaration décide qui reçoit le
+  pointeur (le dernier gagne) : la lisière est donc la plus basse de la pile et le cadre des
+  portraits, dont l'ornement la chevauche, garde ses clics. L'ordre de PEINTURE décide qui recouvre
+  qui : peinte en tête, elle passait sous ce même cadre — invisible précisément là où la main va.
+- **Elle ne s'encre qu'au survol.** Un rail permanent sur le bord d'un panneau volontairement
+  transparent serait un meuble, et le fond translucide de l'overlay disparaît de toute façon sur un
+  décor sombre (vu sur capture). Ce qui annonce la fonctionnalité, c'est le cadenas — toujours là,
+  à deux pixels de la lisière, avec son infobulle —, le curseur `Grab` dès qu'on approche, et la
+  ligne d'aide des Options. C'est ce que fait déjà la bande Récap, dont tout le fond se saisit sans
+  rien peindre.
+- **Bord EXTÉRIEUR quel que soit le côté** : la lisière est déclarée à gauche dans le repère de
+  mise en page, et le miroir la porte à droite avec le reste du décor. Elle tombe donc contre le
+  bord de l'écran de jeu, là où la souris se pose sans viser — on la pousse contre le bord.
+
+**Le cadenas, et le retour à la hauteur d'origine** — le même système que la bande Récap, aux deux
+différences près que la demande impose :
+
+- **Déverrouillé par défaut** (`config::OverlayConfig::combat_locked`, défaut `false`), là où la
+  bande Récap naît verrouillée : ici la poignée est une lisière dédiée de 8 px, pas tout le fond du
+  panneau, donc un clic malencontreux ne déplace rien et il n'y a rien à protéger par défaut.
+  « Par défaut il sera unlock, et l'utilisateur pourra cliquer pour verrouiller la position. »
+- **Le glyphe de replacement ne concerne que la HAUTEUR** : « pas en termes de droite-gauche, juste
+  en termes de hauteur ». Il n'apparaît qu'une fois le panneau déplacé (`CombatChrome::moved`), et
+  un clic ouvre la confirmation (`ResetTarget::CombatPosition`) : « Replacer le panneau de combat à
+  sa hauteur d'origine ? ». Le côté, lui, reste une case des Options.
+- **La pastille des deux glyphes vit dans la réserve d'infobulle**, au coin haut extérieur, et elle
+  est déclarée `mirror::upright_in` : sa PLACE part à droite avec le panneau, son contenu reste à
+  l'endroit — un `Undo` réfléchi dirait « rétablir », soit l'inverse de ce qu'il fait.
+- **Le geste est mutualisé** : `panels::drag::PanelDrag` (ex-`RecapDrag`, qui en est désormais un
+  alias) et `panels::drag::from_response` servent les deux overlays. Une divergence entre les deux
+  se serait payée en vibration d'un seul côté, le plus difficile des bugs à voir.
+- **Sortie de secours** : ligne d'aide et bouton « Replacer au défaut » dans la section « Combat »
+  des Paramètres, comme pour la bande — en clic-traversant l'OS fait passer les clics à travers et
+  la poignée ne les voit jamais, c'est donc le seul endroit où la fonctionnalité existe par écrit.
+
+**Au passage, un bug d'écriture de config corrigé côté Linux** : `validate_and_commit_options` du
+binaire X11 reconstruisait sa propre `OverlayConfig` au lieu d'appeler `persist_config`, et cette
+copie avait déjà divergé — la position ET le verrou de la bande Récap y manquaient, si bien que
+valider la fenêtre Options effaçait du disque une bande qu'on venait de déplacer. C'est exactement
+le risque que la doc de `persist_config` annonçait ; la hauteur du panneau Combat en aurait été la
+troisième victime.
+
+**Captures** (`tests/combat_deplacement.rs`) : `combat_actions_verrouille` (cadenas fermé seul),
+`combat_actions_deverrouille_deplace` (cadenas ouvert + replacement), `combat_poignee_survolee` (la
+lisière encrée par-dessus le panneau, ses trois traits au milieu), `combat_actions_a_droite` (la
+pastille au bord droit, glyphes à l'endroit). Le reste du fichier tient ce qu'aucune capture ne
+montre : verrouillé, aucun geste remonté ; déverrouillé, la suite `Started`/`Moved`/`Released` ;
+et un glissement parti du cadenas qui ne déplace pas le panneau (`Sense::click_and_drag`).
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
