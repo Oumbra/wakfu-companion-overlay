@@ -285,6 +285,67 @@ de parité fonctionnelle voulu, seulement une conséquence du fait que l'overlay
 onglet de navigateur, reste ouvert en continu pendant des heures de jeu et traverse donc bien plus
 souvent une vraie rotation `wakfu.log` mid-session.
 
+### 5.3 bis Reprise après blocage de l'ingestion (2026-09-17)
+
+**Le symptôme, rapporté par l'utilisateur** : le panneau Combat se fige en plein combat — plus un
+dégât, plus une armure donnée, plus un soin qui monte — alors que ses boutons répondent encore.
+
+**Ce que ce symptôme désigne.** Un panneau qui répond mais n'avance plus n'est PAS un rendu bloqué :
+le thread de rendu lit le dernier `SessionSnapshot` publié par `ArcSwap` (§3), il redessine donc
+fidèlement un état qui, lui, ne bouge plus. C'est la publication qui s'est arrêtée, et il n'y a que
+deux endroits où elle peut s'arrêter :
+
+1. **le tailer ne livre plus** — plus aucun lot n'arrive sur le canal alors que le jeu écrit
+   (handle perdu, rotation mal vue, inode réutilisé malgré le garde-fou de préfixe du §5.2) ;
+2. **le parser rejette tout** — les lots arrivent mais `Engine::ingest_batch` échoue à chaque fois
+   (contexte QuickJS en échec durable) ; la boucle d'ingestion abandonne alors les lignes SANS
+   publier, et le tailer a déjà avancé son offset : elles sont perdues.
+
+**La réparation, unique pour les deux cas** : relire `wakfu.log` depuis sa première ligne et
+reconstruire la session à partir de ce qu'il contient — `EngineCommand::ResyncLog`
+(`overlay-ui/src/engine_thread.rs`). Mécaniquement, c'est `ChangeLogPath` sur le même fichier :
+`Engine::forget_session()` puis un watcher respawné, ce qui donne un tailer neuf ET, par le
+rattrapage `is_initial_load` qui suit, un parser réinitialisé (§5.3). Aucune alerte ne re-sonne : le
+rattrapage entier est marqué `is_initial_load`, et tout ce qui sonne ou compte durablement est déjà
+filtré par ce drapeau (`Engine::apply_entry`). Les événements d'historique, eux, repartent — comme à
+toute reconnexion, et pour la même raison (idempotence serveur par `clientKey`, §7.1).
+
+**Ce que la relecture coûte, et qui est assumé** : les combats TERMINÉS de la session en cours sont
+oubliés s'ils ne sont plus dans le fichier (rotation survenue depuis), et un combat commencé avant
+une rotation perd son début. C'est le prix d'un dépannage, pas le fonctionnement normal — une
+rotation ordinaire continue de préserver `state` (§5.3), et rien de tout cela ne se déclenche sans
+panne constatée.
+
+**Le déclenchement automatique — `IngestWatchdog`.** Le signal retenu n'est délibérément PAS « les
+chiffres du combat n'ont pas bougé » : un combat au tour par tour passe des dizaines de secondes
+sans un seul dégât, et un chien de garde qui prendrait ce calme pour une panne relancerait une
+relecture complète en plein combat pour rien. Le signal est l'écart entre ce que le JEU a écrit et
+ce que l'overlay a digéré :
+
+> `wakfu.log` a changé de taille, et aucun lot n'a été appliqué avec succès depuis huit secondes.
+
+Les deux conditions sont nécessaires. Le délai (8 s) laisse passer sans faux positif le débounce du
+watcher, son repli périodique, une ligne encore incomplète en fin de fichier et l'ingestion d'un gros
+lot. L'écart de taille — une INÉGALITÉ, pas une croissance, une rotation faisant retomber la taille —
+garantit qu'on ne relit jamais un fichier que personne n'alimente : client fermé, joueur à l'arrêt,
+il n'y a alors rien à rattraper. Un lot REJETÉ ne compte jamais comme un progrès, c'est ce qui rend
+le cas 2 visible. Une période de grâce de 30 s suit chaque relecture : une panne qui résiste doit
+réessayer, pas repasser le fichier entier dans QuickJS toutes les huit secondes.
+
+**Le déclenchement manuel** : le bouton « Rafraîchir le panneau de combat » en fin de section
+« Combat » de la fenêtre Options (les deux plateformes), et `ShortcutAction::Refresh` sous Windows —
+le « bouton nucléaire » du 2026-09-02 (`App::force_refresh`), qui redessinait et réaffirmait le
+premier plan sans jamais toucher au flux de log, c'est-à-dire sans rien pouvoir contre cette
+panne-là.
+
+**La bascule est atomique.** Pendant la relecture, la publication du snapshot est SUSPENDUE : le
+panneau garde ce qu'il affichait jusqu'à ce que l'état reconstruit soit complet, puis bascule d'un
+bloc. Sans cela, une relecture de plusieurs dizaines de lots (2000 lignes chacun, `MAX_BATCH_LINES`)
+ferait défiler à l'écran tout l'historique du fichier, combat par combat, avant de retomber sur le
+combat en cours — l'inverse de ce que le geste promet. La fin de la relecture est le premier silence
+du watcher (il pousse les lots d'un trait, §5.2), avec une échéance de 20 s en garde-fou : un
+panneau muet est le symptôme qu'on répare, pas celui qu'on installe.
+
 ### 5.4 Date et heure
 
 Le log ne porte que `HH:MM:SS,mmm`. L'Engine reconstitue la date du jour de lecture (comportement
