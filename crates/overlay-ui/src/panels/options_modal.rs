@@ -95,7 +95,7 @@ use crate::panels::personnages_tab::{
 };
 use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
 use crate::recap_session::{self, ResumeSettings};
-use crate::shortcuts::{ShortcutAction, ShortcutBindings};
+use crate::shortcuts::ShortcutBindings;
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
 /// `OverlayKind::Options`).
@@ -307,16 +307,6 @@ pub struct OptionsModalState {
     /// [`crate::recap_session::ResumeSettings`]). Réglage LOCAL, même trajet que
     /// [`Self::countdown_toast`] : posé par l'hôte à la valeur en vigueur, emporté à « Valider ».
     pub recap_resume: ResumeSettings,
-    /// **Où la bande Récap est posée** — le brouillon du bouton « Replacer au défaut » de la
-    /// section « Recap » (2026-09-17). `None` = à son emplacement d'origine, sous les boutons du
-    /// jeu (voir `crate::recap_placement`).
-    ///
-    /// La fenêtre Options ne sait pas DÉPLACER la bande — ça se fait à la souris, sur le jeu, et
-    /// c'est le seul geste qui la déplace. Elle sait seulement la renvoyer d'où elle vient, ce
-    /// qui est la sortie de secours d'une bande posée quelque part d'inatteignable ou d'oublié.
-    /// Même trajet que [`Self::recap_resume`] : posé par l'hôte à la valeur en vigueur, emporté
-    /// à « Valider ».
-    pub recap_position: Option<(i32, i32)>,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -452,8 +442,6 @@ pub struct OptionsInitial {
     pub completion: suivi_tab::CompletionSettings,
     /// La reprise de la session du Récap telle qu'elle était à l'ouverture — même rôle.
     pub recap_resume: ResumeSettings,
-    /// La position de la bande Récap telle qu'elle était à l'ouverture — même rôle.
-    pub recap_position: Option<(i32, i32)>,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -488,7 +476,6 @@ impl OptionsModalState {
             countdown_toast: self.countdown_toast,
             completion: self.completion,
             recap_resume: self.recap_resume,
-            recap_position: self.recap_position,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
             start_with_os: self.start_with_os,
@@ -531,7 +518,6 @@ impl OptionsModalState {
             || self.countdown_toast != self.initial.countdown_toast
             || self.completion != self.initial.completion
             || self.recap_resume != self.initial.recap_resume
-            || self.recap_position != self.initial.recap_position
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -673,10 +659,6 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
     /// (`recap_session::RecapSession::set_resume_settings`).
     pub recap_resume: ResumeSettings,
-    /// Où la bande Récap doit être posée — `None` pour la renvoyer à son emplacement d'origine,
-    /// ce que fait le bouton « Replacer au défaut » (2026-09-17). Inchangée le reste du temps :
-    /// la bande se déplace à la souris, pas depuis cette fenêtre.
-    pub recap_position: Option<(i32, i32)>,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -1028,57 +1010,10 @@ pub fn show(
                     );
                 },
             );
-
-            // **La bande se déplace à la souris** (2026-09-17, demande utilisateur) — une ligne
-            // d'aide et un bouton de retour, rien de plus : le geste se fait sur le jeu, pas ici.
-            //
-            // La ligne d'aide n'est pas décorative. Un fond translucide qu'on peut attraper ne
-            // s'annonce nulle part — aucun libellé, aucune poignée — et le mode clic-traversant
-            // le rend inerte une fois sur deux (l'OS fait passer les clics à travers, la fenêtre
-            // ne les voit jamais). C'est donc le seul endroit où la fonctionnalité EXISTE par
-            // écrit, d'où le rappel du raccourci de bascule tel qu'il est réglé, jamais en dur.
-            //
-            // **Et depuis le 2026-09-17 au soir, elle dit le cadenas** : la bande naît
-            // VERROUILLÉE (`config::OverlayConfig::recap_locked`), donc quelqu'un qui lirait
-            // seulement « la saisir et la faire glisser » essaierait en vain.
-            //
-            // Le bouton, lui, est la sortie de secours : une bande posée dans un coin oublié, ou
-            // sur un écran qu'on n'a plus, se rattrape d'un clic. Grisé tant qu'elle n'a pas
-            // bougé — il n'y aurait rien à replacer.
-            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-            ui.add(
-                design::info_text(format!(
-                    "La bande se déplace à la souris, cadenas ouvert : cliquer le cadenas à son \
-                     coin, puis la saisir sur le jeu et la faire glisser ({} pour passer en mode \
-                     interactif). Verrouillée, elle ne bouge plus. Verrou et position sont \
-                     retenus d'un lancement à l'autre.",
-                    state.shortcuts.label(ShortcutAction::Toggle)
-                ))
-                .width(inner_width)
-                .log_name("options-recap-deplacement-info"),
-            );
-            ui.add_space(INFO_GAP);
-            let replace_recap = design::button("Replacer au défaut")
-                .variant(ButtonVariant::Secondary)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .enabled(state.recap_position.is_some())
-                .tooltip(if state.recap_position.is_some() {
-                    "Renvoyer la bande sous les boutons du jeu, à son emplacement d'origine"
-                } else {
-                    "La bande est déjà à son emplacement d'origine"
-                })
-                .log_name("options-recap-replacer");
-            let replace_size = replace_recap.desired_size(ui);
-            let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            if ui
-                .put(
-                    egui::Rect::from_min_size(row.min, replace_size),
-                    replace_recap,
-                )
-                .clicked()
-            {
-                state.recap_position = None;
-            }
+            // **Rien sur le déplacement de la bande ici** (2026-09-18, demande utilisateur) : la
+            // ligne d'aide et le bouton « Replacer au défaut » qui suivaient ont été retirés. La
+            // bande porte elle-même son cadenas et son bouton de retour (`panels::recap`, rangée
+            // d'actions) — le geste et sa sortie de secours vivent au même endroit, sur le jeu.
 
             // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
             // en un seul endroit.
@@ -2104,9 +2039,6 @@ mod tests {
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 completion: suivi_tab::CompletionSettings::default(),
                 recap_resume: ResumeSettings::default(),
-                // La bande Récap n'a pas bougé dans cette fenêtre de test, et « Replacer au
-                // défaut » n'a pas été cliqué : `None`, c'est-à-dire son ancrage d'origine.
-                recap_position: None,
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
                 // La case « Lancer l'overlay au démarrage de l'ordinateur » est posée décochée

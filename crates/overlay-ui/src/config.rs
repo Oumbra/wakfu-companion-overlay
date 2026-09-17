@@ -273,8 +273,8 @@ pub struct OverlayConfig {
     /// physiques depuis le bord gauche de la fenêtre de jeu. `None` = jamais déplacée, donc
     /// l'ancrage d'origine sous les boutons du client (`main.rs::GAME_RECAP_EDGE_MARGIN_PX` /
     /// `GAME_RECAP_TOP_MARGIN_PX`) — ce qui n'est pas la même chose que « posée exactement au
-    /// défaut » : c'est ce que l'aimantation du glisser-déposer rétablit, et le bouton
-    /// « Replacer au défaut » de la section « Recap » avec elle.
+    /// défaut » : c'est ce que l'aimantation du glisser-déposer rétablit, et le bouton de retour
+    /// de la bande elle-même (`panels::recap`) avec elle.
     ///
     /// **Relative à la fenêtre de jeu, jamais à l'écran** : le client se déplace, change de
     /// taille, passe d'un écran à l'autre ; seul un décalage depuis son coin garde la bande là
@@ -533,7 +533,7 @@ impl OverlayConfig {
     }
 
     /// Reporte la position de la bande Récap dans la config — `None` efface les deux clés et
-    /// rend son ancrage d'origine à la bande (bouton « Replacer au défaut », et aimantation du
+    /// rend son ancrage d'origine à la bande (bouton de retour de la bande, et aimantation du
     /// glisser-déposer). Appelée au relâchement du bouton de la souris, jamais à chaque frame.
     pub fn set_recap_position(&mut self, position: Option<(i32, i32)>) {
         (self.recap_position_x, self.recap_position_y) = match position {

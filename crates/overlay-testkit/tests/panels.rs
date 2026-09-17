@@ -2664,10 +2664,6 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
-                // La bande Récap n'a pas été déplacée dans cet état (elle se déplace à la souris,
-                // sur le jeu — pas depuis cette fenêtre) et personne n'a cliqué « Replacer au
-                // défaut » : « Valider » emporte `None`, c'est-à-dire son ancrage d'origine.
-                recap_position: None,
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -5912,7 +5908,9 @@ fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
     /// « Replacer au défaut » (36 px), gouttières comprises — carré mesuré en y 526..545.
     /// **Puis de 46 px le 2026-09-17 (3)** : le cadenas de la bande (verrouillée par défaut) a
     /// allongé cette même ligne d'aide de deux lignes de 23 px.
-    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 582.0);
+    /// **Puis remontée de 148 px le 2026-09-18** : ligne d'aide et bouton retirés de la section
+    /// « Recap » (la bande porte les siens) — la case retrouve son y du 2026-09-17 (1), 424..443.
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 434.0);
 
     let clic = |detail_actif: bool| -> bool {
         let mut etat = parametres_avec_notifications();
@@ -5992,20 +5990,6 @@ fn options_parametres_recap_coupe() {
     etat.features.recap = false;
     etat.features.recap_cells.fights = false;
     capture_parametres("options_parametres_recap_coupe", etat);
-}
-
-/// **La bande Récap déplacée : le bouton « Replacer au défaut » s'allume** (2026-09-17). C'est le
-/// seul état où il est cliquable — ailleurs, la bande est à son ancrage d'origine et il n'y a rien
-/// à replacer, d'où son aspect grisé sur les autres planches de cet onglet.
-///
-/// Ce que la capture doit montrer : la ligne d'aide qui nomme le geste et le raccourci de bascule
-/// (le seul endroit où la fonctionnalité existe par écrit — un fond translucide qu'on peut
-/// attraper ne s'annonce nulle part), et le bouton vif juste dessous.
-#[test]
-fn options_parametres_recap_deplace() {
-    let mut etat = parametres_avec_notifications();
-    etat.recap_position = Some((460, 234));
-    capture_parametres("options_parametres_recap_deplace", etat);
 }
 
 #[test]

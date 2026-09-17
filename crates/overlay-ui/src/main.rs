@@ -2769,7 +2769,6 @@ impl App {
             completion: self.completion,
             // Idem pour la reprise de la session du Récap (2026-09-17).
             recap_resume: self.recap_session.resume_settings(),
-            recap_position: self.recap_position,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -2826,7 +2825,6 @@ impl App {
                 countdown_toast: self.countdown_toast,
                 completion: self.completion,
                 recap_resume: self.recap_session.resume_settings(),
-                recap_position: self.recap_position,
                 shortcuts: self.hotkeys.bindings().clone(),
                 auto_update: self.auto_update,
                 start_with_os: autostart_actif,
@@ -3260,9 +3258,10 @@ impl App {
     /// ferment la fenêtre. Le bloc Récap se redessine à son prochain tick — il se redessine
     /// toutes les secondes de toute façon.
     ///
-    /// **Le replacement passe par le même chemin que le bouton « Replacer au défaut » de la
-    /// fenêtre Options** : `recap_position` à `None`, la config réécrite, et les fenêtres
+    /// **Le replacement** : `recap_position` à `None`, la config réécrite, et les fenêtres
     /// replacées — « jamais déplacée » veut dire « suit l'ancrage », voir `recap_placement::snap`.
+    /// C'est le seul chemin depuis le 2026-09-18 : la fenêtre Options n'a plus de bouton
+    /// « Replacer au défaut », la bande porte le sien (`panels::recap`).
     fn answer_reset_confirm(
         &mut self,
         confirm_window_id: WindowId,
@@ -3560,17 +3559,6 @@ impl App {
                         "[options] reprise de la session du récap mise à jour"
                     );
                 }
-                // **La position de la bande Récap (2026-09-17)** — cette fenêtre ne sait pas
-                // la DÉPLACER (ça se fait à la souris, sur le jeu) : elle sait la renvoyer d'où
-                // elle vient, et c'est le bouton « Replacer au défaut ». Les bandes se recollent
-                // dans la même passe, pour que le geste et son effet ne soient pas séparés d'un
-                // tick.
-                let recap_position_changed = commit.recap_position != self.recap_position;
-                if recap_position_changed {
-                    self.recap_position = commit.recap_position;
-                    tracing::info!("[options] bande Récap replacée à son emplacement d'origine.");
-                    self.reposition_recap();
-                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -3619,7 +3607,6 @@ impl App {
                     || mutes_changed
                     || countdown_toast_changed
                     || recap_resume_changed
-                    || recap_position_changed
                     || auto_update_changed
                 {
                     self.persist_config();

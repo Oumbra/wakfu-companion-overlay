@@ -1544,7 +1544,6 @@ mod linux_main {
                 completion: self.completion,
                 // La reprise de la session du Récap (2026-09-17), même principe.
                 recap_resume: self.recap_session.resume_settings(),
-                recap_position: self.recap_position,
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
@@ -1596,7 +1595,6 @@ mod linux_main {
                     countdown_toast: self.countdown_toast,
                     completion: self.completion,
                     recap_resume: self.recap_session.resume_settings(),
-                    recap_position: self.recap_position,
                     shortcuts: self.hotkeys.bindings().clone(),
                     auto_update: self.auto_update,
                     start_with_os: autostart_actif,
@@ -2035,8 +2033,8 @@ mod linux_main {
         /// prochain redessin (voir `OptionsModalState::error`) — rien n'est pris en compte tant que
         /// la validation n'a pas réussi.
         /// Recolle chaque bande Récap sur sa fenêtre de jeu — voir
-        /// `main.rs::App::reposition_recap`, même rôle : le bouton « Replacer au défaut » doit se
-        /// voir dans la même passe que le clic.
+        /// `main.rs::App::reposition_recap`, même rôle : le replacement de la bande doit se
+        /// voir dans la même passe que le geste qui l'a demandé.
         fn reposition_recap(&mut self) {
             self.reposition_kind(OverlayKind::Recap);
         }
@@ -2242,17 +2240,6 @@ mod linux_main {
                             minutes = commit.recap_resume.minutes,
                             "[options] reprise de la session du récap mise à jour"
                         );
-                    }
-                    // **La position de la bande Récap (2026-09-17)** — le bouton « Replacer au
-                    // défaut », seul geste de cette fenêtre sur la bande : la déplacer se fait à
-                    // la souris, sur le jeu. Voir `main.rs`.
-                    let recap_position_changed = commit.recap_position != self.recap_position;
-                    if recap_position_changed {
-                        self.recap_position = commit.recap_position;
-                        tracing::info!(
-                            "[options] bande Récap replacée à son emplacement d'origine."
-                        );
-                        self.reposition_recap();
                     }
                     // Raccourcis (2026-09-13) — voir `main.rs` : `apply` pendant la suspension ne
                     // touche pas encore l'OS, c'est `close_options_modal` qui enregistre.

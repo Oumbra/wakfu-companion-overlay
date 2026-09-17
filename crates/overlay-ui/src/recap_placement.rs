@@ -167,7 +167,7 @@ pub fn actions_below(offset: Option<(i32, i32)>, client: ClientArea, band: Band)
 
 /// L'aimantation de la pose : `None` quand la bande retombe à moins de [`SNAP_RADIUS_PX`] de son
 /// ancrage d'origine, c'est-à-dire « pas de position personnalisée » — ce que la config écrit en
-/// effaçant ses deux clés, et ce que le bouton « Replacer au défaut » fait d'un coup.
+/// effaçant ses deux clés, et ce que le bouton de retour de la bande fait d'un coup.
 ///
 /// `None` plutôt qu'un `Some(DEFAULT_OFFSET)` figé : une position écrite à 4 / 112 survivrait à
 /// un changement de l'ancrage d'origine (une infobulle du jeu qui grandit, un relevé refait sur
