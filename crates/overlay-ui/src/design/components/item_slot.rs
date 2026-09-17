@@ -115,6 +115,27 @@ pub enum SlotCount {
     Target(i64),
 }
 
+/// Glyphe de **mode** incrusté dans le coin bas-gauche — le pendant du compteur, à l'autre coin.
+///
+/// Décompte et objectif affichent la même fraction (« 2/5 » se lit « il en reste 2 » ou « j'en ai
+/// 2 ») : sans marque, deux tuiles de modes différents sont identiques au pixel près. Le glyphe
+/// reprend les formes du switch d'ajout du site (`target` et `goal-flag`), que l'utilisateur a
+/// vues en créant le suivi. **Décision du 2026-09-17** : glyphe seul, dans la couleur du texte
+/// qu'il accompagne (l'or du nombre courant dans le bandeau, le gris de la cible dans l'onglet
+/// Suivi) — ni couleur propre au mode, ni liseré, celui-ci codant déjà la rareté et la sélection.
+/// L'incrémental n'en porte pas : sans cible, il n'y a rien à lever.
+///
+/// Peint au **vecteur** (traits et polygone cernés de noir comme les chiffres) plutôt qu'en
+/// texture : à 8 px, une icône du design system serait floue, et le cerne doit être celui du
+/// texte voisin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotGlyph {
+    /// Décompte — une cible : anneau et point.
+    Countdown,
+    /// Objectif — un drapeau : hampe et fanion.
+    Goal,
+}
+
 /// Ordre dans lequel les couches d'un emplacement se peignent.
 ///
 /// Fonction libre et testée pour une seule raison : **l'inverser a déjà produit un bug**, et ce bug
@@ -207,6 +228,7 @@ pub fn item_slot() -> ItemSlot {
         frame: SlotFrame::Plain,
         icon: None,
         count: None,
+        glyph: None,
         size: tokens::ITEM_SLOT_SIZE,
         selection: None,
         selection_tone: SelectionTone::Neutral,
@@ -219,6 +241,7 @@ pub struct ItemSlot {
     frame: SlotFrame,
     icon: Option<SizedTexture>,
     count: Option<SlotCount>,
+    glyph: Option<SlotGlyph>,
     size: f32,
     selection: Option<bool>,
     selection_tone: SelectionTone,
@@ -243,6 +266,12 @@ impl ItemSlot {
     /// Compteur incrusté. Sans appel, aucun compteur.
     pub fn count(mut self, count: SlotCount) -> Self {
         self.count = Some(count);
+        self
+    }
+
+    /// Glyphe de mode au coin bas-gauche — voir [`SlotGlyph`]. Sans appel, aucun glyphe.
+    pub fn glyph(mut self, glyph: Option<SlotGlyph>) -> Self {
+        self.glyph = glyph;
         self
     }
 
@@ -388,6 +417,9 @@ impl Widget for ItemSlot {
         if let Some(count) = self.count {
             paint_count(ui, rect, count);
         }
+        if let Some(glyph) = self.glyph {
+            paint_glyph(ui, rect, glyph, glyph_color(self.count));
+        }
 
         // La sélection vient APRÈS tout le reste. Le liseré se pose sur le MÊME anneau que le
         // cadre : il remplace visuellement la bordure de l'emplacement, il ne s'ajoute pas à côté.
@@ -474,9 +506,106 @@ fn paint_count(ui: &Ui, rect: egui::Rect, count: SlotCount) {
     }
 }
 
+/// Couleur du glyphe de mode : **celle du texte qu'il accompagne**, jamais une couleur à lui.
+///
+/// Dans le bandeau, la fraction met le nombre courant en or et c'est lui que l'œil lit : le glyphe
+/// est en or. Dans l'onglet Suivi, seule la cible s'affiche, en gris : le glyphe est gris. Sans
+/// compteur (cas théorique), le blanc du compteur simple.
+pub fn glyph_color(count: Option<SlotCount>) -> egui::Color32 {
+    match count {
+        Some(SlotCount::Fraction { .. }) => tokens::ITEM_SLOT_COUNT_CURRENT,
+        Some(SlotCount::Target(_)) => tokens::ITEM_SLOT_TARGET_TEXT,
+        Some(SlotCount::Simple(_)) | None => tokens::ITEM_SLOT_COUNT_TEXT,
+    }
+}
+
+/// Carré du glyphe de mode dans un emplacement : coin bas-gauche, **posé sur la ligne de base de
+/// la fraction** (même hauteur que les chiffres de `/cible`, retour du 2026-09-17), en retrait du
+/// liseré.
+pub fn glyph_rect(rect: egui::Rect) -> egui::Rect {
+    let left = rect.left() + tokens::ITEM_SLOT_GLYPH_INSET_LEFT;
+    let bottom = rect.bottom()
+        - tokens::ITEM_SLOT_COUNT_INSET_BOTTOM
+        - tokens::ITEM_SLOT_GLYPH_BASELINE_LIFT;
+    egui::Rect::from_min_max(
+        egui::pos2(left, bottom - tokens::ITEM_SLOT_GLYPH_SIZE),
+        egui::pos2(left + tokens::ITEM_SLOT_GLYPH_SIZE, bottom),
+    )
+}
+
+/// Peint le glyphe de mode — voir [`SlotGlyph`] et [`glyph_rect`].
+///
+/// Cerné de noir par le même procédé que [`text::paint_outlined_text`] : une copie noire par
+/// décalage de [`text::OUTLINE_FULL`], puis la forme pleine. Le fond d'une tuile est arbitraire
+/// (icône claire ou sombre), une ombre d'un seul côté ne suffirait pas.
+fn paint_glyph(ui: &Ui, rect: egui::Rect, glyph: SlotGlyph, color: egui::Color32) {
+    let boite = glyph_rect(rect);
+    let painter = ui.painter();
+    let peindre = |offset: Vec2, couleur: egui::Color32| {
+        let b = boite.translate(offset);
+        match glyph {
+            SlotGlyph::Goal => {
+                // Hampe sur toute la hauteur, fanion triangulaire accroché en haut.
+                painter.line_segment(
+                    [b.left_top(), b.left_bottom()],
+                    egui::Stroke::new(1.0, couleur),
+                );
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(b.left() + 1.0, b.top()),
+                        egui::pos2(b.right(), b.top() + b.height() * 0.3),
+                        egui::pos2(b.left() + 1.0, b.top() + b.height() * 0.6),
+                    ],
+                    couleur,
+                    egui::Stroke::NONE,
+                ));
+            }
+            SlotGlyph::Countdown => {
+                // Anneau et point, la cible du switch web réduite à sa plus simple forme.
+                let rayon = b.width() / 2.0;
+                painter.circle_stroke(b.center(), rayon - 0.5, egui::Stroke::new(1.0, couleur));
+                painter.circle_filled(b.center(), rayon * 0.3, couleur);
+            }
+        }
+    };
+    for offset in text::OUTLINE_FULL {
+        peindre(*offset, egui::Color32::BLACK);
+    }
+    peindre(Vec2::ZERO, color);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_glyphe_prend_la_couleur_du_texte_qu_il_accompagne() {
+        assert_eq!(
+            glyph_color(Some(SlotCount::Fraction {
+                current: 2,
+                target: 5
+            })),
+            tokens::ITEM_SLOT_COUNT_CURRENT
+        );
+        assert_eq!(
+            glyph_color(Some(SlotCount::Target(5))),
+            tokens::ITEM_SLOT_TARGET_TEXT
+        );
+        assert_eq!(glyph_color(None), tokens::ITEM_SLOT_COUNT_TEXT);
+    }
+
+    #[test]
+    fn le_glyphe_se_pose_sur_la_ligne_de_base_de_la_fraction_en_retrait_du_lisere() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(64.0));
+        let g = glyph_rect(rect);
+        // Bas du glyphe = bas du texte de la cible (bottom - 4) remonté de la descente (2).
+        assert_eq!(g.bottom(), 64.0 - 4.0 - 2.0);
+        assert_eq!(g.height(), tokens::ITEM_SLOT_GLYPH_SIZE);
+        // Retrait gauche = retrait droit du compteur : les deux coins se répondent, et le glyphe
+        // reste hors de l'anneau du liseré (2 px de retrait + 2 px de trait).
+        assert_eq!(g.left(), tokens::ITEM_SLOT_COUNT_INSET_RIGHT);
+        assert!(g.left() >= tokens::ITEM_SLOT_PLAIN_STROKE * 2.0);
+    }
 
     #[test]
     fn une_bordure_de_rarete_se_peint_sous_l_icone() {

@@ -2091,6 +2091,7 @@ fn entry_tile(
     if let Some(count) = slot_count(entry) {
         slot = slot.count(count);
     }
+    slot = slot.glyph(slot_glyph(entry.mode));
     if let Some(cochee) = selection {
         slot = slot.selection(Some(cochee));
     }
@@ -2141,9 +2142,32 @@ fn entry_tile(
     if !reorder.in_flight() {
         design::tooltip(&response)
             .side(design::TooltipSide::Below)
-            .text(&entry.name);
+            .text(tile_tooltip(entry));
     }
     Tile { response, reorder }
+}
+
+/// Texte de l'infobulle d'une tuile : le nom, puis **le mode après un point médian** pour un
+/// suivi à cible — « Bottes Lantha · Objectif ». Forme choisie par l'utilisateur le 2026-09-17,
+/// avec le glyphe (voir [`slot_glyph`]) : la fraction seule ne dit pas dans quel sens elle se lit.
+/// L'incrémental garde le nom nu, il n'y a rien à lever.
+pub(crate) fn tile_tooltip(entry: &WatchlistEntry) -> String {
+    match entry.mode {
+        WatchlistMode::Down => format!("{} · Décompte", entry.name),
+        WatchlistMode::Goal => format!("{} · Objectif", entry.name),
+        WatchlistMode::Up => entry.name.clone(),
+    }
+}
+
+/// Le glyphe de mode d'une tuile — voir `design::SlotGlyph` : cible en décompte, drapeau en
+/// objectif, rien en incrémental. Partagé avec l'onglet « Suivi » de la fenêtre Options, qui
+/// marque les mêmes entrées de la même façon.
+pub(crate) fn slot_glyph(mode: WatchlistMode) -> Option<design::SlotGlyph> {
+    match mode {
+        WatchlistMode::Down => Some(design::SlotGlyph::Countdown),
+        WatchlistMode::Goal => Some(design::SlotGlyph::Goal),
+        WatchlistMode::Up => None,
+    }
 }
 
 /// Traduit une entrée de suivi en compteur du design system.
@@ -2162,4 +2186,46 @@ fn slot_count(entry: &WatchlistEntry) -> Option<design::SlotCount> {
         },
         WatchlistMode::Up => design::SlotCount::Simple(entry.count),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entree(mode: WatchlistMode) -> WatchlistEntry {
+        WatchlistEntry {
+            name: "Bottes Lantha".to_string(),
+            kind: WatchlistKind::Item,
+            catalog_id: None,
+            mode,
+            count: 2,
+            countdown_target: 5,
+        }
+    }
+
+    #[test]
+    fn l_infobulle_dit_le_mode_apres_le_nom_pour_un_suivi_a_cible() {
+        assert_eq!(
+            tile_tooltip(&entree(WatchlistMode::Goal)),
+            "Bottes Lantha · Objectif"
+        );
+        assert_eq!(
+            tile_tooltip(&entree(WatchlistMode::Down)),
+            "Bottes Lantha · Décompte"
+        );
+        assert_eq!(tile_tooltip(&entree(WatchlistMode::Up)), "Bottes Lantha");
+    }
+
+    #[test]
+    fn le_glyphe_suit_le_mode_et_manque_a_l_incremental() {
+        assert_eq!(
+            slot_glyph(WatchlistMode::Down),
+            Some(design::SlotGlyph::Countdown)
+        );
+        assert_eq!(
+            slot_glyph(WatchlistMode::Goal),
+            Some(design::SlotGlyph::Goal)
+        );
+        assert_eq!(slot_glyph(WatchlistMode::Up), None);
+    }
 }

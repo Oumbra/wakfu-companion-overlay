@@ -816,6 +816,7 @@ fn tile_grid(
             name: entry.name.clone(),
             kind: entry.kind,
             target: entry.mode.has_target().then_some(entry.countdown_target),
+            mode: entry.mode,
             icon: match entry.kind {
                 WatchlistKind::Item => ctx.catalog.find_item_icon(&entry.name, entry.catalog_id),
                 WatchlistKind::Enemy => {
@@ -896,6 +897,8 @@ struct TileData {
     /// La cible, pour un décompte ou un objectif — `None` en incrémental, et la tuile ne porte
     /// alors aucun chiffre.
     target: Option<i64>,
+    /// Le mode, pour le glyphe du coin bas-gauche (voir `panels::watchlist::slot_glyph`).
+    mode: WatchlistMode,
     icon: Option<IconRef>,
     rarity: overlay_engine::WakfuRarity,
 }
@@ -972,6 +975,9 @@ fn tracked_tile(
     if let Some(target) = tuile.target {
         slot = slot.count(design::SlotCount::Target(target));
     }
+    // Le même glyphe que le bandeau, dans le gris de la cible ici (voir `design::SlotGlyph`).
+    // L'infobulle, elle, reste le nom seul : décision du 2026-09-17, qui confirme celle du 13.
+    slot = slot.glyph(crate::panels::watchlist::slot_glyph(tuile.mode));
     cellule.put(rect, slot);
 
     let ds = design::DesignSystem::get(ui.ctx());

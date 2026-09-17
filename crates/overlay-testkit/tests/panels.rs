@@ -2040,6 +2040,102 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
     harness.snapshot("watchlist_decompte_grandes_valeurs");
 }
 
+/// Les trois modes côte à côte (2026-09-17) : un objectif « 2/5 », un décompte « 3/5 » et un
+/// incrémental « 7 ». Sans marque, les deux premières tuiles seraient identiques : c'est le
+/// **glyphe de mode** (`design::SlotGlyph`, coin bas-gauche, sur la ligne de base de la fraction,
+/// dans l'or du nombre courant) qui les distingue — drapeau pour l'objectif, cible pour le
+/// décompte, rien pour l'incrémental. La seconde capture survole la tuile objectif : l'infobulle
+/// dit le mode après le nom, « Laine de Bouftou · Objectif » (voir `panels::watchlist::
+/// tile_tooltip`). Seule planche de la suite à exercer le drapeau : les autres suivis à cible du
+/// harnais sont tous des décomptes.
+#[test]
+fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let entries = vec![
+        WatchlistEntry {
+            name: "Laine de Bouftou".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Goal,
+            count: 2,
+            countdown_target: 5,
+            catalog_id: None,
+        },
+        WatchlistEntry {
+            name: "Bois de Frêne".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Down,
+            count: 3,
+            countdown_target: 5,
+            catalog_id: None,
+        },
+        WatchlistEntry {
+            name: "Fleur de Kalé".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Up,
+            count: 7,
+            countdown_target: 0,
+            catalog_id: None,
+        },
+    ];
+    let window_width = bandeau_largeur(entries.len());
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &entries,
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    options: None,
+                    login: None,
+                    veiled: false,
+                },
+            );
+        });
+
+    harness.run();
+    harness.snapshot("watchlist_glyphes_de_mode");
+
+    harness.hover_at(BANDEAU_TUILE_0);
+    harness.run();
+    harness.snapshot("watchlist_tooltip_tuile_objectif");
+}
+
 /// Modale Options (2026-09-08, §9 du plan) — chrome pur (`panels::options_modal`), pas de rejeu de
 /// log nécessaire (aucun de ses champs ne dépend d'un `SessionSnapshot`). Couvre les DEUX états
 /// visuels : champ rempli sans erreur, ET message d'erreur affiché (guard de nom de fichier, voir

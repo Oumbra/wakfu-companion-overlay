@@ -1687,6 +1687,20 @@ pub const ITEM_SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00)
 /// qu'elle portait avant.
 pub const ITEM_SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
 
+/// Côté du **glyphe de mode** (cible du décompte, drapeau de l'objectif — voir
+/// `item_slot::SlotGlyph`) — 8 px, un peu moins que les 9 px de la maquette validée : « un tout
+/// petit peu réduit pour qu'il ne déborde pas sur la bordure » (2026-09-17).
+pub const ITEM_SLOT_GLYPH_SIZE: f32 = 8.0;
+
+/// Marge du glyphe au bord gauche — la même que celle du compteur au bord droit, les deux
+/// occupent les deux coins bas de la tuile en miroir.
+pub const ITEM_SLOT_GLYPH_INSET_LEFT: f32 = ITEM_SLOT_COUNT_INSET_RIGHT;
+
+/// De combien le bas du glyphe remonte au-dessus du bas du texte de la cible — 2 px, la descente
+/// de la police à 10 px : le glyphe se pose ainsi **sur la ligne de base des chiffres** de la
+/// fraction, « au même niveau », et non sur le bas de leur boîte.
+pub const ITEM_SLOT_GLYPH_BASELINE_LIFT: f32 = 2.0;
+
 // ---------------------------------------------------------------------------------------------
 // Jauge — `design::meter`
 //
