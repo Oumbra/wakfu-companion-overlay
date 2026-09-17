@@ -585,6 +585,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
     } = content;
 
     let mut outcome = RenderOutcome::default();
+    // **Panneau Combat posé à droite** (2026-09-17) : le miroir est ARMÉ avant la première forme
+    // du panneau et APPLIQUÉ après la dernière (voir la fin de cette fonction et `crate::mirror`,
+    // qui porte la décision et son pourquoi). Entre les deux, les panneaux peignent comme
+    // d'habitude et déclarent seulement leurs blocs de lecture (`mirror::upright`) — une
+    // déclaration qui ne coûte rien tant que le miroir n'est pas armé, donc rien du tout quand le
+    // panneau est à gauche.
+    let mirrored = kind == OverlayKind::Combat && combat_on_right;
+    if mirrored {
+        let ctx = ui.ctx();
+        crate::mirror::arm(ctx, crate::mirror::axis_of(ctx));
+    }
     // Marge interne nulle pour Combat sur trois côtés (refonte 2026-09-04, retour utilisateur :
     // collé au bord de la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui
     // ferait partie du jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même
@@ -818,18 +829,11 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
     // Curseur du jeu à la place du curseur système (voir `crate::cursor`) — APRÈS tout le contenu,
     // une fois que chaque widget survolé a dit ce qu'il voulait (`PlatformOutput::cursor_icon`).
     crate::cursor::apply(ui.ctx(), now);
-    // **Panneau Combat posé à droite** (2026-09-17) : le contenu vient d'être peint comme
-    // d'habitude, dans le repère « à gauche » ; il ne reste qu'à réfléchir les formes produites
-    // autour du centre de la fenêtre — voir `crate::mirror`, qui porte la décision et son
-    // pourquoi. Tout DERNIER geste de la frame, infobulles comprises : une forme peinte après
-    // resterait à l'endroit.
-    //
-    // L'ENTRÉE fait le chemin inverse, en amont (`build_ui`) : le clic réel, à droite, est traduit
-    // en coordonnées de mise en page avant qu'egui ne le voie. C'est ce qui permet à tous les
-    // panneaux d'ignorer complètement ce réglage.
-    if kind == OverlayKind::Combat && combat_on_right {
-        let ctx = ui.ctx();
-        crate::mirror::mirror_painted(ctx, crate::mirror::axis_of(ctx));
+    // Le miroir s'applique en tout DERNIER, infobulles comprises : une forme peinte après
+    // resterait de l'autre côté. L'ENTRÉE fait le chemin inverse, en amont (`build_ui`) : le clic
+    // réel, à droite, est traduit en coordonnées de mise en page avant qu'egui ne le voie.
+    if mirrored {
+        crate::mirror::apply(ui.ctx());
     }
     outcome
 }
