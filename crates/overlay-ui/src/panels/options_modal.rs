@@ -312,14 +312,6 @@ pub struct OptionsModalState {
     /// Même trajet que [`Self::recap_resume`] : posé par l'hôte à la valeur en vigueur, emporté
     /// à « Valider ».
     pub recap_position: Option<(i32, i32)>,
-    /// **À quelle hauteur le panneau Combat est posé** — le brouillon du bouton « Replacer au
-    /// défaut » de la section « Combat » (2026-09-17). `None` = à son centrage vertical d'origine
-    /// (voir `crate::combat_placement`).
-    ///
-    /// Même statut que [`Self::recap_position`], et pour les mêmes raisons : cette fenêtre ne sait
-    /// pas déplacer le panneau — ça se fait à la souris, par sa poignée latérale — elle sait
-    /// seulement le renvoyer d'où il vient.
-    pub combat_position_y: Option<i32>,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -455,8 +447,6 @@ pub struct OptionsInitial {
     pub recap_resume: ResumeSettings,
     /// La position de la bande Récap telle qu'elle était à l'ouverture — même rôle.
     pub recap_position: Option<(i32, i32)>,
-    /// La hauteur du panneau Combat telle qu'elle était à l'ouverture — même rôle.
-    pub combat_position_y: Option<i32>,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
@@ -491,7 +481,6 @@ impl OptionsModalState {
             countdown_toast: self.countdown_toast,
             recap_resume: self.recap_resume,
             recap_position: self.recap_position,
-            combat_position_y: self.combat_position_y,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
             start_with_os: self.start_with_os,
@@ -534,7 +523,6 @@ impl OptionsModalState {
             || self.countdown_toast != self.initial.countdown_toast
             || self.recap_resume != self.initial.recap_resume
             || self.recap_position != self.initial.recap_position
-            || self.combat_position_y != self.initial.combat_position_y
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
@@ -677,11 +665,6 @@ pub struct OptionsCommit {
     /// ce que fait le bouton « Replacer au défaut » (2026-09-17). Inchangée le reste du temps :
     /// la bande se déplace à la souris, pas depuis cette fenêtre.
     pub recap_position: Option<(i32, i32)>,
-    /// À quelle hauteur le panneau Combat doit être posé — `None` pour le renvoyer à son centrage
-    /// vertical d'origine, ce que fait le bouton « Replacer au défaut » de la section « Combat »
-    /// (2026-09-17). Inchangée le reste du temps : le panneau se déplace à la souris, par sa
-    /// poignée latérale, pas depuis cette fenêtre.
-    pub combat_position_y: Option<i32>,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -1190,53 +1173,6 @@ pub fn show(
                 )
                 .log_name("options-combat-a-droite"),
             );
-            // **Le panneau se déplace en hauteur à la souris** (2026-09-17, demande utilisateur) —
-            // une ligne d'aide et un bouton de retour, exactement comme la bande Récap plus haut
-            // dans cette fenêtre, et pour les mêmes raisons.
-            //
-            // La ligne d'aide n'est pas décorative : une poignée de huit pixels sur le bord d'un
-            // panneau transparent ne s'annonce nulle part, et le mode clic-traversant la rend
-            // inerte une fois sur deux (l'OS fait passer les clics à travers, la fenêtre ne les
-            // voit jamais). C'est donc le seul endroit où la fonctionnalité EXISTE par écrit, d'où
-            // le rappel du raccourci de bascule tel qu'il est réglé, jamais en dur.
-            //
-            // Le bouton, lui, est la sortie de secours : un panneau poussé contre un bord, ou posé
-            // sur un écran qu'on n'a plus, se rattrape d'un clic. Grisé tant qu'il n'a pas bougé —
-            // il n'y aurait rien à replacer.
-            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-            ui.add(
-                design::info_text(format!(
-                    "Le panneau se déplace de haut en bas à la souris, cadenas ouvert (au coin \
-                     haut du panneau) : le saisir par la lisière de son bord extérieur et le \
-                     faire glisser ({} pour passer en mode interactif). La hauteur est retenue \
-                     d'un lancement à l'autre, et reste la même des deux côtés.",
-                    state.shortcuts.label(ShortcutAction::Toggle)
-                ))
-                .width(inner_width)
-                .log_name("options-combat-deplacement-info"),
-            );
-            ui.add_space(INFO_GAP);
-            let replace_combat = design::button("Replacer au défaut")
-                .variant(ButtonVariant::Secondary)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .enabled(state.combat_position_y.is_some())
-                .tooltip(if state.combat_position_y.is_some() {
-                    "Recentrer le panneau de combat verticalement sur la fenêtre de jeu"
-                } else {
-                    "Le panneau de combat est déjà à sa hauteur d'origine"
-                })
-                .log_name("options-combat-replacer");
-            let replace_combat_size = replace_combat.desired_size(ui);
-            let combat_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            if ui
-                .put(
-                    egui::Rect::from_min_size(combat_row.min, replace_combat_size),
-                    replace_combat,
-                )
-                .clicked()
-            {
-                state.combat_position_y = None;
-            }
             // **L'interligne des lignes d'option** (2026-09-14) — voir `tokens::CHECKBOX_ROW_GAP` : le
             // jeu laisse 11px entre deux cases, pas zéro. Posé ici et pas dans `design::checkbox`
             // parce que le relevé le range du côté de la mise en page, et parce qu'un écart porté par
@@ -2120,9 +2056,6 @@ mod tests {
                 // La bande Récap n'a pas bougé dans cette fenêtre de test, et « Replacer au
                 // défaut » n'a pas été cliqué : `None`, c'est-à-dire son ancrage d'origine.
                 recap_position: None,
-                // Idem pour la hauteur du panneau Combat : il se déplace par sa poignée
-                // latérale, sur le jeu, pas depuis cette fenêtre.
-                combat_position_y: None,
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
                 // La case « Lancer l'overlay au démarrage de l'ordinateur » est posée décochée

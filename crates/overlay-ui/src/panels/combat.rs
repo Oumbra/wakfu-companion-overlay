@@ -1102,8 +1102,7 @@ struct ActionsOutcome {
 
 /// **La rangée d'actions du panneau Combat** (2026-09-17, demande utilisateur : « le même système
 /// que l'overlay récap ») : le cadenas, et le glyphe de replacement quand il a lieu d'être —
-/// posés sur une pastille à eux, en haut du bord extérieur, DANS la réserve d'infobulle de la
-/// fenêtre (`render_content::COMBAT_TOP_MARGIN`).
+/// posés sur une pastille à eux, au coin BAS du bord extérieur du panneau.
 ///
 /// ## Un seul cadenas, deux visages
 ///
@@ -1117,12 +1116,18 @@ struct ActionsOutcome {
 /// [`CombatChrome::moved`], et rien d'autre : tant que le panneau est à son centrage d'origine, il
 /// n'y a rien à défaire. La pastille se resserre sur le seul cadenas dans ce cas.
 ///
-/// ## Dans la réserve, et pas dans le panneau
+/// ## En bas, et non en haut (2026-09-17, demande utilisateur)
 ///
-/// Cette réserve existait déjà, pour que l'infobulle du switch Alliés/Ennemis s'ouvre au-dessus de
-/// lui (voir `render_content::COMBAT_TOP_MARGIN`) : la pastille y tient sans rien décaler, et sans
-/// que la fenêtre OS change de taille. Les infobulles de ses deux glyphes s'ouvrent donc EN
-/// DESSOUS — au-dessus, elles sortiraient de la fenêtre.
+/// La première version posait la pastille en HAUT, dans la réserve d'infobulle du switch
+/// Alliés/Ennemis (`render_content::COMBAT_TOP_MARGIN`) : elle y tenait sans rien décaler, mais
+/// elle s'y trouvait juste au-dessus du switch, dans la zone que l'infobulle de celui-ci occupe
+/// quand on le survole. « Place les deux icônes en bas plutôt qu'en haut par défaut » : c'est
+/// désormais le coin bas de la fenêtre, où le panneau laisse de la place (son contenu s'arrête bien
+/// avant, les barres n'atteignent le bas que dans les combats les plus peuplés).
+///
+/// La pastille est donc DANS l'espace alloué au contenu, ce qui ne demande ni réserve ajoutée ni
+/// clip élargi. Les infobulles de ses deux glyphes s'ouvrent AU-DESSUS — en dessous, elles
+/// sortiraient de la fenêtre.
 ///
 /// Le bloc est déclaré `mirror::upright_in` sur sa pastille : sa PLACE part à droite avec le
 /// panneau, son contenu reste à l'endroit — un glyphe `Undo` réfléchi dirait « rétablir », soit
@@ -1137,22 +1142,14 @@ fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome 
         ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING,
     );
     let panel = ui.max_rect();
-    // La pastille est peinte HORS de l'espace alloué au contenu, dans la marge que la fenêtre
-    // garde au-dessus de lui : d'où le clip élargi à la fenêtre entière, sans quoi egui la
-    // rognerait au bord du panneau.
-    let pill = egui::Rect::from_min_size(
-        egui::pos2(
-            panel.min.x,
-            panel.min.y - crate::render_content::COMBAT_TOP_MARGIN,
-        ),
-        size,
-    );
+    // Collée au coin bas extérieur de la fenêtre : dans l'espace alloué au contenu, donc rien à
+    // déclipper — et rien à décaler non plus, le panneau ne peint pas jusque-là.
+    let pill = egui::Rect::from_min_size(egui::pos2(panel.min.x, panel.max.y - size.y), size);
     let mut outcome = ActionsOutcome::default();
     crate::mirror::upright_in(ui, pill, |ui| {
-        let painter = ui
-            .painter()
-            .clone()
-            .with_clip_rect(ui.ctx().viewport_rect());
+        // Un painter cloné, et non `ui.painter()` : les glyphes se peignent pendant que `ui` est
+        // emprunté par leur zone d'interaction (voir [`paint_action`]).
+        let painter = ui.painter().clone();
         painter.rect_filled(pill, HANDLE_ROUNDING, design::tokens::OVERLAY_BACKDROP);
         let slot = |index: usize| {
             egui::Rect::from_min_size(
@@ -1190,7 +1187,7 @@ fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome 
 }
 
 /// Un glyphe-commande de la rangée d'actions : blanc au repos, or au survol, curseur « main »,
-/// infobulle en dessous. Rend `true` la frame où il est cliqué.
+/// infobulle au-dessus. Rend `true` la frame où il est cliqué.
 ///
 /// **`click_and_drag`**, comme les glyphes de la bande Récap et pour la même raison : un bouton qui
 /// ne sentirait que le clic laisserait le glissement à ce qui est dessous, et un appui sur le
@@ -1216,8 +1213,10 @@ fn paint_action(
     let icon_rect = design::contain_rect(rect, ds.icon_native_size(icon));
     ds.paint_icon(painter, icon_rect, icon, tint);
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    // `Above`, le défaut du design system : la pastille est collée au bord bas de la fenêtre, une
+    // bulle ouverte en dessous en sortirait.
     design::tooltip(&response)
-        .side(design::TooltipSide::Below)
+        .side(design::TooltipSide::Above)
         .text(tooltip);
     response.clicked()
 }

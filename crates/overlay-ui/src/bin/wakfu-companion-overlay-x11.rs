@@ -1508,7 +1508,6 @@ mod linux_main {
                 tab: initial_tab,
                 combat_always_visible: self.combat_always_visible,
                 combat_on_right: self.combat_on_right,
-                combat_position_y: self.combat_position_y,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 // Les cases « Activer … » s'ouvrent sur l'état réel — voir `main.rs`. Les deux
@@ -1565,7 +1564,6 @@ mod linux_main {
                     personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
                     combat_on_right: self.combat_on_right,
-                    combat_position_y: self.combat_position_y,
                     turn_notification: self.turn_notification,
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
@@ -2123,15 +2121,6 @@ mod linux_main {
                     // **La position de la bande Récap (2026-09-17)** — le bouton « Replacer au
                     // défaut », seul geste de cette fenêtre sur la bande : la déplacer se fait à
                     // la souris, sur le jeu. Voir `main.rs`.
-                    let combat_position_changed =
-                        commit.combat_position_y != self.combat_position_y;
-                    if combat_position_changed {
-                        self.combat_position_y = commit.combat_position_y;
-                        tracing::info!(
-                            "[options] panneau de combat replacé à sa hauteur d'origine."
-                        );
-                        self.reposition_combat();
-                    }
                     let recap_position_changed = commit.recap_position != self.recap_position;
                     if recap_position_changed {
                         self.recap_position = commit.recap_position;

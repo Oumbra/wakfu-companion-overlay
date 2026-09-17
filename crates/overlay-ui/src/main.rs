@@ -2730,7 +2730,6 @@ impl App {
             // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
             combat_always_visible: self.combat_always_visible,
             combat_on_right: self.combat_on_right,
-            combat_position_y: self.combat_position_y,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             // Idem pour les trois interrupteurs : les cases s'ouvrent sur l'état réel.
@@ -2799,7 +2798,6 @@ impl App {
                 countdown_toast: self.countdown_toast,
                 recap_resume: self.recap_session.resume_settings(),
                 recap_position: self.recap_position,
-                combat_position_y: self.combat_position_y,
                 shortcuts: self.hotkeys.bindings().clone(),
                 auto_update: self.auto_update,
                 start_with_os: autostart_actif,
@@ -3445,14 +3443,6 @@ impl App {
                     tracing::info!("[options] bande Récap replacée à son emplacement d'origine.");
                     self.reposition_recap();
                 }
-                // **La hauteur du panneau Combat (2026-09-17)** — même chose, et même unique
-                // geste : cette fenêtre ne sait que le renvoyer à son centrage d'origine.
-                let combat_position_changed = commit.combat_position_y != self.combat_position_y;
-                if combat_position_changed {
-                    self.combat_position_y = commit.combat_position_y;
-                    tracing::info!("[options] panneau de combat replacé à sa hauteur d'origine.");
-                    self.reposition_combat();
-                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -3502,7 +3492,6 @@ impl App {
                     || countdown_toast_changed
                     || recap_resume_changed
                     || recap_position_changed
-                    || combat_position_changed
                     || auto_update_changed
                 {
                     self.persist_config();
