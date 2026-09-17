@@ -236,6 +236,21 @@ pub struct OverlayConfig {
     /// position que si les deux sont là).
     #[serde(default)]
     pub recap_position_y: Option<i32>,
+    /// **La bande Récap est-elle verrouillée ?** (2026-09-17) — le cadenas de sa rangée
+    /// d'actions (`panels::recap::RecapChrome::locked`). Verrouillée, elle ne se saisit plus à la
+    /// souris et le curseur redevient celui du système au-dessus d'elle.
+    ///
+    /// **Le défaut est `true`, verrouillée** : tout le fond de la bande est une poignée (elle n'a
+    /// pas la place d'en porter une dédiée, voir `panels::recap`), donc non verrouillée, le
+    /// moindre clic dessus en mode interactif la déplace. On la déverrouille pour la ranger, on
+    /// la reverrouille ensuite — c'est le geste que les deux glyphes racontent. Une config écrite
+    /// avant cette clé se verrouille donc au premier lancement, y compris pour une bande déjà
+    /// déplacée : sa position, elle, ne bouge pas.
+    ///
+    /// **Locale et non au compte**, comme la position qu'elle protège : le serveur n'accepte que
+    /// des clés connues (même raison que `chat_alert_duration_seconds`).
+    #[serde(default = "actif")]
+    pub recap_locked: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -342,6 +357,7 @@ impl Default for OverlayConfig {
             recap_resume_minutes: None,
             recap_position_x: None,
             recap_position_y: None,
+            recap_locked: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
