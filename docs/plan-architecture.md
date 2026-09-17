@@ -2179,8 +2179,12 @@ refaire à chaque futur ajustement, sous peine de voir la version miroir diverge
 
 - **à la sortie**, `apply` réfléchit le décor et déplace les blocs (dernier geste de
   `render_content::paint_content`, infobulles comprises) ;
-- **à l'entrée**, `mirror_input` réfléchit les événements de pointeur avant qu'egui ne les voie
-  (`render_content::build_ui`).
+- **à l'entrée**, `mirror_input` traduit les événements de pointeur vers le repère de mise en page
+  avant qu'egui ne les voie (`render_content::build_ui`) — **l'inverse exact de la sortie, donc par
+  morceaux comme elle** : `apply` laisse derrière lui la carte des blocs déplacés (leur boîte telle
+  qu'elle est affichée, et de combien elle a bougé), un point posé sur un bloc remonte le
+  déplacement de CE bloc, un point posé sur le décor est réfléchi. Corollaire : une infobulle née
+  d'un survol suit le bloc survolé au lieu d'aller à la place de son reflet.
 
 egui continue de raisonner dans le repère « à gauche » de bout en bout — mise en page, survol,
 clic, placement des infobulles — et les panneaux n'ont à déclarer qu'une chose : où sont leurs
@@ -2191,7 +2195,7 @@ quand le panneau est à gauche.
 globalement inchangée, donc ce qui y tenait y tient encore, et un contenu collé au bord gauche se
 retrouve collé au bord droit — ce que l'ancrage complète.
 
-**Deux pièges rencontrés, tous deux verrouillés par un test.**
+**Trois pièges rencontrés, tous verrouillés par un test.**
 
 1. La couche de fond figure déjà dans `Memory::layer_ids` selon l'appelant, et la traiter deux fois
    ramène exactement le contenu à sa place de départ — un bug muet, puisque le rendu est alors
@@ -2202,6 +2206,14 @@ retrouve collé au bord droit — ce que l'ancrage complète.
    mécanique. Un clip venu de plus haut (la fenêtre, la bande d'un cadre défilant), lui, reste
    réfléchi. L'ombre portée, enfin, ne compte pas dans la boîte d'un bloc : elle est décalée sous
    ce qu'elle ombre, et tirait l'infobulle de quelques pixels.
+3. **L'entrée doit suivre la sortie morceau par morceau.** Une réflexion globale du pointeur a
+   tenu tant que la sortie réfléchissait tout, et elle est devenue fausse le jour où les blocs ont
+   cessé d'être réfléchis pour être déplacés : sur un switch de trois cases, survoler la case de
+   gauche visait celle de droite, sans infobulle là où on la montrait et avec un clic qui activait
+   le voisin (essai en jeu, 2026-09-17). La carte des blocs lue par l'entrée est celle de la frame
+   PRÉCÉDENTE — la seule qui existe à cet instant, la frame en cours n'ayant rien peint encore ;
+   la première frame après l'armement du miroir, comme celle qui suit un redimensionnement,
+   retombe donc sur la réflexion seule.
 
 **Réglage** : case « Afficher le panneau de combat à droite de la fenêtre de jeu », section
 « Combat » de l'onglet « Paramètres », sous l'affichage permanent et grisée avec lui quand le
@@ -2214,7 +2226,10 @@ où une réflexion devrait l'inverser autour d'un pivot lui-même réfléchi. Ri
 tourne aujourd'hui — à traiter le jour où quelque chose tournera.
 
 **Captures** (`tests/combat_miroir.rs`) : `combat_miroir_gauche` et `combat_miroir_droite` (même
-fixture des deux côtés, c'est leur comparaison qui a du sens) et `combat_miroir_droite_infobulle`.
+fixture des deux côtés, c'est leur comparaison qui a du sens), `combat_miroir_droite_infobulle` et
+`combat_miroir_droite_infobulle_pointeur` — cette dernière prend le chemin complet de la
+production, pointeur en coordonnées écran traduit par `mirror_input`, là où les autres survolent
+directement la position de mise en page.
 Le curseur qu'`egui_kittest` dessine reste, lui, à la position de mise en page : il vient de
 `PlatformOutput::cursor_image`, pas des formes — en production c'est le curseur du système, à la
 position réelle du pointeur.
