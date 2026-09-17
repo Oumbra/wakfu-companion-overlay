@@ -398,6 +398,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );

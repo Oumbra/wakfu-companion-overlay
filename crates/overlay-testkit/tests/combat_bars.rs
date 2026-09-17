@@ -142,6 +142,7 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );

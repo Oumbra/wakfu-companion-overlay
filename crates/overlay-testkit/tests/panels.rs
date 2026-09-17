@@ -198,6 +198,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -270,6 +271,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -368,6 +370,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     recap: &recap,
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -459,6 +462,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         recap: &recap,
                         recap_cells: Default::default(),
                         options: None,
+                        veiled: false,
                         login: None,
                     },
                 );
@@ -562,6 +566,7 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -649,6 +654,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                     challenges: true,
                 },
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -724,6 +730,7 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                     challenges: true,
                 },
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -787,6 +794,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -947,6 +955,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -1021,6 +1030,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -1155,6 +1165,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -1299,6 +1310,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -1398,6 +1410,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -1501,6 +1514,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         recap: &Default::default(),
                         recap_cells: Default::default(),
                         options: None,
+                        veiled: false,
                         login: None,
                     },
                 );
@@ -1619,6 +1633,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -1914,6 +1929,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
                 },
             );
@@ -2014,6 +2030,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -2099,6 +2116,7 @@ fn panneau_options_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: Some(&mut options_state),
+                veiled: false,
                 login: None,
             },
         );
@@ -2372,6 +2390,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: Some(&mut options_state),
+                veiled: false,
                 login: None,
             },
         );
@@ -2379,6 +2398,148 @@ fn modale_options_sur_damier_ne_panique_pas() {
 
     harness.run();
     harness.snapshot("options_modale_sur_damier");
+}
+
+/// **La fenêtre Options voile le jeu** (2026-09-17, `RenderContent::veiled`) : rattachée à un
+/// client, sa fenêtre OS est celle du jeu — plus grande que la modale — et le rendu voile tout
+/// (`design::scrim`) puis centre la modale dedans, à sa taille habituelle. Ce test rend cette
+/// fenêtre à une taille de jeu plausible, sur un damier qui tient lieu de scène : on doit y voir
+/// le damier assombri partout, et la modale intacte au milieu.
+///
+/// Deux vérifications au-delà de la capture : Échap traverse le voile jusqu'à la modale (elle
+/// remonte `Cancel`, exactement comme sans voile), et un clic à côté d'elle est avalé — il ne
+/// produit aucune action, et surtout pas une fermeture : un vrai dialogue modal ne se ferme pas sur
+/// un clic à côté.
+#[test]
+fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
+    const CASE: f32 = 40.0;
+    const SOMBRE: egui::Color32 = egui::Color32::from_rgb(0x24, 0x2E, 0x22);
+    const CLAIR: egui::Color32 = egui::Color32::from_rgb(0xC2, 0xAE, 0x84);
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
+        path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+        error: None,
+        tab: OptionsTab::Parametres,
+        // Référence = ce qui est affiché, pour qu'Échap annule du premier coup au lieu d'ouvrir
+        // la garde de fermeture — voir `modale_options_echap_annule_et_entree_valide`.
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+
+    let mut harness = Harness::builder()
+        // Une fenêtre de jeu modeste, mais nettement plus grande que la modale (760 × 810) : le
+        // voile doit se voir sur ses quatre côtés.
+        .with_size(egui::Vec2::new(1100.0, 950.0))
+        .build_ui({
+            let actions = std::rc::Rc::clone(&actions);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                ui.style_mut().visuals.text_cursor.blink = false;
+                let rect = ui.max_rect();
+                let painter = ui.painter().clone();
+                let mut y = rect.top();
+                let mut ligne = 0;
+                while y < rect.bottom() {
+                    let mut x = rect.left();
+                    let mut colonne = 0;
+                    while x < rect.right() {
+                        let case =
+                            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(CASE, CASE))
+                                .intersect(rect);
+                        painter.rect_filled(
+                            case,
+                            0,
+                            if (ligne + colonne) % 2 == 0 {
+                                CLAIR
+                            } else {
+                                SOMBRE
+                            },
+                        );
+                        x += CASE;
+                        colonne += 1;
+                    }
+                    y += CASE;
+                    ligne += 1;
+                }
+
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Options,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &Default::default(),
+                        recap_cells: Default::default(),
+                        options: Some(&mut options_state),
+                        veiled: true,
+                        login: None,
+                    },
+                );
+                if !matches!(outcome.options_action, OptionsModalAction::None) {
+                    actions.borrow_mut().push(outcome.options_action);
+                }
+            }
+        });
+
+    harness.run();
+    harness.snapshot("options_modale_voilee");
+
+    // Un clic dans le voile, loin de la modale : avalé, aucune action.
+    harness.remove_cursor();
+    harness.drag_at(egui::pos2(40.0, 40.0));
+    harness.drop_at(egui::pos2(40.0, 40.0));
+    harness.run();
+    assert!(
+        actions.borrow().is_empty(),
+        "un clic à côté de la modale doit être avalé par le voile, pas fermer la fenêtre"
+    );
+
+    // Échap atteint bien la modale à travers le voile.
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Cancel],
+        "Échap doit annuler la modale, voilée ou non"
+    );
 }
 
 /// Rend l'onglet « Alertes » de la fenêtre Options dans un état donné, et le capture.
@@ -4717,6 +4878,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -5364,6 +5526,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -5516,6 +5679,7 @@ fn capture_login_with_update(
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
+                    veiled: false,
                     login: Some(&mut login_state),
                 },
             );

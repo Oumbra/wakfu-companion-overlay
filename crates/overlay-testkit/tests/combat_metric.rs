@@ -150,6 +150,7 @@ fn harness_with(fight: FightSnapshot, side: CombatSide, metric: CombatMetric) ->
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );
@@ -257,6 +258,7 @@ fn grandeur_sans_valeur_affiche_son_message() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
             },
         );

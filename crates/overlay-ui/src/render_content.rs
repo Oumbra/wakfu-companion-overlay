@@ -133,6 +133,12 @@ pub enum OverlayKind {
     /// jeu trouvée) : cette fenêtre OS est ouverte/fermée à la demande (clic sur le bouton
     /// "Options" du carré de contrôle, ou raccourci `Ctrl+Shift+O`), voir
     /// `main.rs::App::open_options_modal`/`bin/overlay-ui-x11.rs` (même méthode dupliquée).
+    ///
+    /// **Rattachée à une fenêtre de jeu, elle la couvre entière** (2026-09-17, décision
+    /// utilisateur) : un voile sur le jeu et ses overlays, la modale centrée dedans à sa taille
+    /// habituelle — même forme que `RecapReset`, par le même composant (`design::scrim`). Ouverte
+    /// SANS client à l'écran, elle reste une fenêtre à la taille de la modale, sans voile. C'est
+    /// [`RenderContent::veiled`] qui distingue les deux au rendu.
     Options,
     /// **Récap de session** (2026-09-16, demande utilisateur) — la bande XP / Kamas / Combats /
     /// Challenges / Durée posée en haut à gauche de la fenêtre de jeu, sous les boutons
@@ -336,6 +342,17 @@ pub struct RenderContent<'a> {
     /// harnais de test, comme `now`.
     pub recap: &'a panels::recap::RecapView,
     pub options: Option<&'a mut OptionsModalState>,
+    /// **La fenêtre Options couvre la fenêtre de jeu entière** (2026-09-17, décision utilisateur :
+    /// « un voile qui recouvre toute la fenêtre du jeu et les overlays lorsque l'utilisateur ouvre
+    /// la modale d'options alors que la fenêtre de jeu est ouverte ») : `paint_content` voile
+    /// alors toute la fenêtre (`design::scrim`) et centre la modale dedans, à sa taille
+    /// habituelle (`panels::options_modal::WINDOW_SIZE`). `false` quand elle est ouverte SANS
+    /// client Wakfu à l'écran (`main.rs::OverlayWindow::is_detached`) : la fenêtre OS est alors
+    /// à la taille de la modale, et il n'y a rien à voiler — « si l'utilisateur ouvre la modale
+    /// d'options sans le jeu, aucun voile ne doit être appliqué ». Sans objet pour les autres
+    /// zones ; la confirmation de remise à zéro (`RecapReset`) voile toujours, c'est sa raison
+    /// d'être.
+    pub veiled: bool,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
     /// (l'horloge de l'anneau animé et le survol vivent d'une frame à l'autre).
@@ -488,6 +505,7 @@ pub fn build_ui(
                 recap_cells: content.recap_cells,
                 recap: content.recap,
                 options: content.options.as_deref_mut(),
+                veiled: content.veiled,
                 login: content.login.as_deref_mut(),
             },
         );
@@ -531,6 +549,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         recap_cells,
         recap,
         options,
+        veiled,
         login,
     } = content;
 
@@ -733,18 +752,32 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         // Les mêmes dépendances que le bandeau Suivi : depuis le 2026-09-12,
                         // l'onglet « Alertes » liste de vrais objets, avec leur rareté lue au
                         // catalogue et leur icône descendue du même CDN.
-                        outcome.options_action = panels::options_modal::show(
-                            ui,
-                            state,
-                            &mut panels::options_modal::OptionsModalContext {
-                                catalog,
-                                remote_icons,
-                                remote_icon_textures,
-                                icons,
-                                avatars,
-                                game_servers,
-                            },
-                        );
+                        let mut context = panels::options_modal::OptionsModalContext {
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                            icons,
+                            avatars,
+                            game_servers,
+                        };
+                        outcome.options_action = if veiled {
+                            // La fenêtre est celle du jeu (voir `RenderContent::veiled`) : voile
+                            // bord à bord, modale centrée dedans à sa taille de toujours.
+                            // `ScrimLayer::Current` : le voile est le FOND de cette fenêtre,
+                            // rien n'est peint dessous — et les sélecteurs de la modale, en
+                            // `Foreground`, restent au-dessus d'elle.
+                            let (w, h) = panels::options_modal::WINDOW_SIZE;
+                            crate::design::scrim(ui.max_rect())
+                                .layer(crate::design::ScrimLayer::Current)
+                                .centered(egui::vec2(w, h))
+                                .log_name("options.voile")
+                                .show(ui, |ui| {
+                                    panels::options_modal::show(ui, state, &mut context)
+                                })
+                                .inner
+                        } else {
+                            panels::options_modal::show(ui, state, &mut context)
+                        };
                     }
                 }
             }

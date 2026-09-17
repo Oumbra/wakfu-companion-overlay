@@ -822,13 +822,10 @@ mod linux_main {
                 // La confirmation de remise à zéro couvre la fenêtre de jeu entière — voir
                 // `main.rs::App::anchor_position`.
                 OverlayKind::RecapReset => PhysicalPosition::new(rect.left, rect.top),
-                // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
-                // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent
-                // ancrés sur un bord.
-                OverlayKind::Options => PhysicalPosition::new(
-                    rect.left + (rect.width - overlay_width) / 2,
-                    rect.top + (rect.height - overlay_height) / 2,
-                ),
+                // Rattachée à une fenêtre de jeu, la fenêtre Options la couvre entière et voile
+                // tout sauf la modale, centrée par le rendu (2026-09-17) — voir
+                // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
+                OverlayKind::Options => PhysicalPosition::new(rect.left, rect.top),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
                 OverlayKind::Login => PhysicalPosition::new(0, 0),
             }
@@ -850,6 +847,10 @@ mod linux_main {
                     watchlist_target_width(0, true, false, rect.width),
                     watchlist_target_height(false, false),
                 ),
+                // Rattachée à une fenêtre de jeu : SA taille, pour que le voile la couvre en
+                // entier (2026-09-17, voir `RenderContent::veiled` et `main.rs`). Détachée :
+                // celle de la modale seule, sans voile.
+                OverlayKind::Options if game_window != 0 => (rect.width as f64, rect.height as f64),
                 OverlayKind::Options => (
                     options_modal::WINDOW_SIZE.0 as f64,
                     options_modal::WINDOW_SIZE.1 as f64,
@@ -868,6 +869,15 @@ mod linux_main {
                     panels::login::INITIAL_HEIGHT as f64,
                 ),
             };
+            // Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES, comme le rectangle
+            // dont elle vient et la position qu'on lui pose — voir `main.rs`, même raison.
+            let covers_game = matches!(kind, OverlayKind::RecapReset)
+                || (kind == OverlayKind::Options && game_window != 0);
+            let inner_size: winit::dpi::Size = if covers_game {
+                winit::dpi::PhysicalSize::new(size.0, size.1).into()
+            } else {
+                winit::dpi::LogicalSize::new(size.0, size.1).into()
+            };
             let title_suffix = match kind {
                 OverlayKind::Combat => "Combat",
                 OverlayKind::Watchlist => "Suivi",
@@ -880,7 +890,7 @@ mod linux_main {
                 .with_title(format!(
                     "wakfu-companion-overlay — {character_name} — {title_suffix}"
                 ))
-                .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
+                .with_inner_size(inner_size)
                 .with_transparent(true)
                 .with_decorations(false)
                 .with_window_level(WindowLevel::AlwaysOnTop)
@@ -2054,6 +2064,10 @@ mod linux_main {
                     if let Some(state) = overlay.options_state.as_mut() {
                         state.update = (**update_status).clone();
                     }
+                    // Voir `RenderContent::veiled` : la fenêtre Options rattachée à un client
+                    // couvre sa fenêtre de jeu et la voile ; détachée, elle est à la taille de
+                    // la modale.
+                    let veiled = overlay.kind == OverlayKind::Options && !overlay.is_detached();
                     let (repaint_delay, outcome) = render(
                         &mut overlay.gpu,
                         &overlay.window,
@@ -2085,6 +2099,7 @@ mod linux_main {
                             recap_cells: self.features.recap_cells,
                             recap: &recap_view,
                             options: overlay.options_state.as_mut(),
+                            veiled,
                             login: overlay.login_state.as_mut(),
                         },
                     );

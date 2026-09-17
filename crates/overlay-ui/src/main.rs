@@ -1390,13 +1390,16 @@ impl App {
             // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
             // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
             OverlayKind::RecapReset => PhysicalPosition::new(rect.left, rect.top),
-            // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
-            // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent ancrés
-            // sur un bord.
-            OverlayKind::Options => PhysicalPosition::new(
-                rect.left + (rect.width - overlay_width) / 2,
-                rect.top + (rect.height - overlay_height) / 2,
-            ),
+            // **Rattachée à une fenêtre de jeu, la fenêtre Options EST la fenêtre de jeu**
+            // (2026-09-17) : elle la couvre entière, barre de titre comprise, comme la
+            // confirmation ci-dessus — son voile part du coin, et c'est le rendu qui centre la
+            // modale dedans (`RenderContent::veiled`). Jusque-là elle était centrée sur les deux
+            // axes à sa propre taille (2026-09-08, « au centre de l'écran de l'utilisateur au
+            // niveau du jeu ») ; ce centrage vaut toujours, il a seulement changé d'étage.
+            //
+            // Détachée (`is_detached`), elle garde sa taille et ce bras n'est pas lu :
+            // `center_on_primary_monitor` la place, et `reposition` ne la voit jamais.
+            OverlayKind::Options => PhysicalPosition::new(rect.left, rect.top),
             // Jamais ancrée sur le jeu — centrée sur l'écran par `center_on_primary_monitor`,
             // et jamais repositionnée ensuite (`reposition` ne la voit pas, `sync_windows`
             // l'ignore). Ce bras n'est là que pour l'exhaustivité.
@@ -1426,6 +1429,12 @@ impl App {
                 watchlist_target_width(0, true, false, rect.width),
                 watchlist_target_height(false, false),
             ),
+            // Rattachée à une fenêtre de jeu : SA taille, pour que le voile la couvre en entier,
+            // overlays compris (2026-09-17, voir `RenderContent::veiled`). Détachée (`game_hwnd`
+            // nul, aucun client à l'écran) : celle de la modale seule, sans voile.
+            OverlayKind::Options if game_hwnd != HWND::default() => {
+                (rect.width as f64, rect.height as f64)
+            }
             OverlayKind::Options => (
                 options_modal::WINDOW_SIZE.0 as f64,
                 options_modal::WINDOW_SIZE.1 as f64,
@@ -1444,6 +1453,18 @@ impl App {
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
         };
+        // **Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES** : `GameRect` vient de
+        // `GetWindowRect`, et la position posée plus bas (`set_outer_position`) est physique
+        // aussi. Une taille logique serait multipliée par l'échelle d'affichage (125 % : un voile
+        // d'un quart plus grand que le jeu, débordant en bas et à droite). Les autres zones ont
+        // des tailles de MAQUETTE, en points logiques, et restent logiques.
+        let covers_game = matches!(kind, OverlayKind::RecapReset)
+            || (kind == OverlayKind::Options && game_hwnd != HWND::default());
+        let inner_size: winit::dpi::Size = if covers_game {
+            PhysicalSize::new(size.0, size.1).into()
+        } else {
+            winit::dpi::LogicalSize::new(size.0, size.1).into()
+        };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
             OverlayKind::Watchlist => "Suivi",
@@ -1456,7 +1477,7 @@ impl App {
             .with_title(format!(
                 "wakfu-companion-overlay — {character_name} — {title_suffix}"
             ))
-            .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
+            .with_inner_size(inner_size)
             .with_transparent(true)
             .with_decorations(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
@@ -2189,16 +2210,25 @@ impl App {
             overlay.pending_demote_since = None;
         }
 
-        // **La confirmation de remise à zéro du Récap reste devant tout** (2026-09-17) : chaque
+        // **Les fenêtres qui voilent le jeu restent devant tout** (2026-09-17) : chaque
         // `SetWindowPos(HWND_TOPMOST)` ci-dessus place SA fenêtre en tête de la bande topmost —
         // donc devant le voile, si un Combat ou un Suivi de la même fenêtre de jeu vient d'être
-        // réaffirmé après elle (l'ordre d'itération d'une `HashMap` n'est pas le nôtre). Réaffirmée
-        // EN DERNIER, à chaque passe, tant qu'elle est topmost : elle reprend le dessus.
-        for overlay in self
+        // réaffirmé après elle (l'ordre d'itération d'une `HashMap` n'est pas le nôtre).
+        // Réaffirmées EN DERNIER, à chaque passe, tant qu'elles sont topmost : elles reprennent le
+        // dessus. La fenêtre Options rattachée à un client voile depuis le même jour (voir
+        // `RenderContent::veiled`) ; la confirmation de remise à zéro passe après elle, au cas où
+        // les deux coexisteraient — la question doit rester lisible par-dessus le réglage.
+        let mut veils: Vec<&OverlayWindow> = self
             .windows
             .values()
-            .filter(|w| w.kind == OverlayKind::RecapReset && w.is_topmost)
-        {
+            .filter(|w| {
+                w.is_topmost
+                    && (w.kind == OverlayKind::RecapReset
+                        || (w.kind == OverlayKind::Options && !w.is_detached()))
+            })
+            .collect();
+        veils.sort_by_key(|w| w.kind == OverlayKind::RecapReset);
+        for overlay in veils {
             unsafe {
                 let _ = SetWindowPos(
                     Self::hwnd_of(&overlay.window),
@@ -2229,6 +2259,14 @@ impl App {
     /// voir `sync_topmost`. **Aucune fenêtre de jeu du tout** (2026-09-17) : la modale s'ouvre
     /// quand même, détachée — centrée sur l'écran principal, jamais refermée par `sync_windows`
     /// (voir `OverlayWindow::is_detached`).
+    ///
+    /// **Rattachée, la fenêtre OS est celle du jeu, pas celle de la modale** (2026-09-17, décision
+    /// utilisateur : « un voile qui recouvre toute la fenêtre du jeu et les overlays lorsque
+    /// l'utilisateur ouvre la modale d'options alors que la fenêtre de jeu est ouverte ») : elle
+    /// couvre le client entier, voile tout — Combat, Suivi, Récap compris, puisqu'elle naît après
+    /// eux et que `sync_topmost` la garde devant — et centre la modale dedans
+    /// (`RenderContent::veiled`, `design::scrim`). Détachée, « aucun voile ne doit être
+    /// appliqué » : elle garde la taille de la modale.
     ///
     /// `initial_tab` est l'onglet sur lequel la fenêtre s'ouvre — **`Paramètres` pour le bouton
     /// « Options » du bandeau de suivi** (demande utilisateur 2026-09-13 : ce bouton donne accès
@@ -3186,6 +3224,9 @@ impl App {
         ) || self.interactive;
         let this_game_rect = overlay.game_rect;
         let this_game_hwnd = overlay.game_hwnd;
+        // Voir `RenderContent::veiled` : la fenêtre Options rattachée à un client couvre sa
+        // fenêtre de jeu et la voile ; détachée, elle est à la taille de la modale.
+        let veiled = overlay.kind == OverlayKind::Options && !overlay.is_detached();
         // L'état de la mise à jour, copié dans la fenêtre qui l'affiche AVANT chaque rendu
         // (jamais figé à l'ouverture, voir `OptionsModalState::update`).
         let update_status = self.update_status.load();
@@ -3236,6 +3277,7 @@ impl App {
                 recap_cells: self.features.recap_cells,
                 recap: &recap_view,
                 options: overlay.options_state.as_mut(),
+                veiled,
                 login: overlay.login_state.as_mut(),
             },
         );
