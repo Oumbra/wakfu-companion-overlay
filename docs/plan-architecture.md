@@ -2131,7 +2131,7 @@ tests (`defile_les_parametres`) retire désormais le pointeur AVANT les frames d
 centré passant sous lui ouvrait son infobulle, dont l'animation empêchait `Harness::run` de se
 poser.
 
-### 9.1 vicies Panneau Combat à droite : un miroir de rendu (2026-09-17)
+### 9.1 vicies Panneau Combat à droite : le miroir porte sur la DISPOSITION (2026-09-17)
 
 **Demande utilisateur** : « permettre à l'utilisateur d'afficher l'overlay combat à droite plutôt
 qu'à gauche ; l'ensemble de l'overlay doit donc être affiché en miroir vertical, hormis les
@@ -2139,51 +2139,75 @@ portraits, les images de monstre, les icônes (allié, ennemi, dégât, armure, 
 sort ».
 
 Deux choses vont ensemble et ne se séparent jamais : la fenêtre Combat s'ancre au bord DROIT du
-client (`App::anchor_position`, le même `GAME_EDGE_MARGIN_PX` de zéro qu'à gauche), et tout son
-contenu est réfléchi autour d'un axe vertical. Sans le miroir, le panneau tournerait le dos au jeu
-— cadre des portraits contre le bord de l'écran, colonne des barres vers l'intérieur, tout le
-contraire de la lecture qu'on en a à gauche.
+client (`App::anchor_position`, le même `GAME_EDGE_MARGIN_PX` de zéro qu'à gauche), et son contenu
+bascule. Sans le second, le panneau tournerait le dos au jeu — cadre des portraits contre le bord
+de l'écran, colonne des barres vers l'intérieur.
+
+**Ce que « en miroir » veut dire, corrigé après essai en jeu.** La première version réfléchissait
+TOUT, forme par forme, en épargnant seulement les images (translatées au lieu d'être réfléchies).
+Testée le jour même, elle a été rejetée sur trois points, qui disent ensemble la vraie règle :
+
+- le **gabarit du cadre** n'était pas retourné, puisqu'il est une image : son ornement pointait du
+  mauvais côté — « le rendu est complètement affreux » ;
+- **l'ordre des cases des switches s'inversait** : ce doit rester Alliés puis Ennemis, Dégâts puis
+  Armure puis Soins, quel que soit le côté ;
+- **le sens de lecture s'inversait** : le total passait avant son switch, le chiffre de dégâts
+  avant le nom qu'il qualifie, les sorts du dernier au premier. « La zone d'affichage des dégâts,
+  des sorts, etc. ne doit pas changer. Elle doit juste être placée à l'endroit où tu l'as placée.
+  En revanche, il faut garder le sens de lecture. »
+
+La règle n'est donc pas « tout réfléchir » mais **réfléchir la PLACE des blocs, jamais leur
+contenu** :
+
+- ce qui est peint librement — gabarit du cadre, ascenseurs, fondus — est **réfléchi** : c'est du
+  décor, il doit regarder vers le jeu ;
+- ce qui forme un bloc qu'on LIT — un bandeau et son switch, un groupe nom + dégâts + barre, la
+  ligne de sorts, un portrait et son pourcentage — est déclaré par `mirror::upright` /
+  `mirror::upright_in` : sa boîte va à la place du reflet, son contenu ne bouge pas d'un pixel. Il
+  se lit toujours de gauche à droite, dans le même ordre, images à l'endroit.
+
+Une infobulle, un popup, tout ce qui vit dans sa propre couche egui est un bloc de ce genre sans
+avoir à le déclarer : sa couche entière est déplacée telle quelle, et bornée à la fenêtre (egui
+l'avait contrainte à gauche avant le miroir ; son reflet la collerait au bord droit).
 
 **Décision structurante : c'est un miroir de RENDU, pas une mise en page paramétrée.** Le panneau
 Combat est une centaine de rectangles calculés à la main (`panels::combat`, `combat_frame`,
-`combat_bars`, `combat_spell_block`, les composants de `design`), chacun posé depuis un `rect.min.x`
-ou un `Align2::LEFT_*`. Faire descendre un booléen « à droite » jusque dans chacun d'eux aurait
-voulu dire retourner chacun de ces calculs — puis le refaire à chaque futur ajustement du panneau,
-sous peine de voir la version miroir diverger en silence. `overlay_ui::mirror` prend le problème en
-UN endroit :
+`combat_bars`, `combat_spell_block`, les composants de `design`). Faire descendre un booléen « à
+droite » jusque dans chacun d'eux aurait voulu dire retourner chacun de ces calculs, puis le
+refaire à chaque futur ajustement, sous peine de voir la version miroir diverger en silence.
+`overlay_ui::mirror` prend le problème en un endroit :
 
-- **à la sortie**, `mirror_painted` réfléchit les formes déjà peintes de la frame (dernier geste de
+- **à la sortie**, `apply` réfléchit le décor et déplace les blocs (dernier geste de
   `render_content::paint_content`, infobulles comprises) ;
 - **à l'entrée**, `mirror_input` réfléchit les événements de pointeur avant qu'egui ne les voie
   (`render_content::build_ui`).
 
-egui continue donc de raisonner dans le repère « à gauche » de bout en bout — mise en page, survol,
-clic, placement des infobulles — et aucun panneau ne sait qu'il est affiché en miroir. Un futur
-changement du panneau est en miroir sans rien demander à personne.
-
-**Ce qui ne se retourne pas.** Un `Shape::Rect` texturé est réfléchi tel quel (un rect réfléchi
-reste un rect normalisé, sa texture s'y peint dans le même sens) ; un `Shape::Mesh` porteur d'une
-vraie texture est **translaté** jusqu'à la place de son reflet, ce qui conserve rigoureusement sa
-géométrie interne — coordonnées de texture et bordures 9-slice comprises. Un maillage SANS texture
-(`TextureId::default()`, un dégradé) est bien réfléchi sommet par sommet : ce n'est pas une image.
-Le texte n'est pas encore un maillage à ce stade (`Shape::Text` porte son galley) : seule sa boîte
-change de côté, jamais l'ordre de ses glyphes.
+egui continue de raisonner dans le repère « à gauche » de bout en bout — mise en page, survol,
+clic, placement des infobulles — et les panneaux n'ont à déclarer qu'une chose : où sont leurs
+blocs. Une déclaration qui ne coûte rien tant que le miroir n'est pas armé, donc rien du tout
+quand le panneau est à gauche.
 
 **L'axe est le centre de la fenêtre** (`Context::viewport_rect`) : la réflexion laisse la fenêtre
-globalement inchangée, donc ce qui y tenait y tient encore (une infobulle contrainte à droite se
-retrouve contrainte à gauche), et un contenu collé au bord gauche se retrouve collé au bord droit —
-ce que l'ancrage complète.
+globalement inchangée, donc ce qui y tenait y tient encore, et un contenu collé au bord gauche se
+retrouve collé au bord droit — ce que l'ancrage complète.
 
-**Piège rencontré, verrouillé par un test** : la couche de fond figure déjà dans
-`Memory::layer_ids` selon l'appelant, et la réfléchir deux fois ramène exactement le contenu à sa
-place de départ — un bug muet, puisque le rendu est alors celui d'avant. La liste des couches est
-dédoublonnée, et `mirror::tests::un_contenu_colle_a_gauche_ressort_colle_a_droite` le tient.
+**Deux pièges rencontrés, tous deux verrouillés par un test.**
+
+1. La couche de fond figure déjà dans `Memory::layer_ids` selon l'appelant, et la traiter deux fois
+   ramène exactement le contenu à sa place de départ — un bug muet, puisque le rendu est alors
+   celui d'avant.
+2. Le rectangle de découpe d'une forme **dans** un bloc doit suivre le bloc, pas être réfléchi :
+   la case d'un switch écrête son pictogramme, et une case réfléchie pendant que son icône est
+   déplacée **efface l'icône**. C'est ce qui a vidé les deux switches au premier essai de cette
+   mécanique. Un clip venu de plus haut (la fenêtre, la bande d'un cadre défilant), lui, reste
+   réfléchi. L'ombre portée, enfin, ne compte pas dans la boîte d'un bloc : elle est décalée sous
+   ce qu'elle ombre, et tirait l'infobulle de quelques pixels.
 
 **Réglage** : case « Afficher le panneau de combat à droite de la fenêtre de jeu », section
-« Combat » de l'onglet « Paramètres », sous l'affichage permanent et grisée avec lui quand le détail
-des combats est coupé. Config LOCALE (`config::OverlayConfig::combat_on_right`, `false` par défaut)
-comme ses voisines : ce qu'on accepte de voir par-dessus son jeu dépend de l'écran qu'on a devant
-soi, pas du joueur.
+« Combat » de l'onglet « Paramètres », sous l'affichage permanent et grisée avec lui quand le
+détail des combats est coupé. Config LOCALE (`config::OverlayConfig::combat_on_right`, `false` par
+défaut) comme ses voisines : ce qu'on accepte de voir par-dessus son jeu dépend de l'écran qu'on a
+devant soi, pas du joueur.
 
 **Limite connue** : une forme TOURNÉE (`RectShape::angle`, `TextShape::angle`) garde son angle, là
 où une réflexion devrait l'inverser autour d'un pivot lui-même réfléchi. Rien dans l'overlay ne

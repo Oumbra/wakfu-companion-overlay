@@ -4,15 +4,16 @@
 //!
 //! **Ce que ces planches doivent montrer**, et qu'aucun test unitaire ne peut dire à notre place :
 //!
-//! - toute l'interface est réfléchie autour du centre de la fenêtre — le cadre des portraits passe
-//!   à droite, la colonne des barres à gauche, les deux bandeaux, les switches, la ligne de sorts
-//!   suivent ;
-//! - **les images, elles, restent à l'endroit** : portraits de classe, icônes de monstre, icônes
-//!   allié/ennemi/dégât/armure/soin des switches, et images de sort. C'est la demande utilisateur
-//!   mot pour mot, et c'est ce qu'un miroir naïf casserait en premier ;
-//! - **le texte reste lisible** : les noms, les chiffres de dégâts et le total ne sont pas
-//!   retournés, seule leur boîte change de côté (alignements inversés de ce fait — le nom part du
-//!   bord droit de sa barre, le chiffre du bord gauche) ;
+//! - la DISPOSITION bascule — le cadre des portraits passe à droite, la colonne des barres à
+//!   gauche, les deux bandeaux et la ligne de sorts avec elle ;
+//! - **le gabarit du cadre est RETOURNÉ** : c'est du décor, son ornement doit regarder vers le
+//!   jeu. C'est ce qui manquait au premier essai (« le rendu est complètement affreux ») ;
+//! - **rien ne s'inverse à l'intérieur d'un bloc** : les cases du switch de camp restent Alliés
+//!   puis Ennemis, celles du switch de grandeur Dégâts puis Armure puis Soins, le switch reste
+//!   avant le total qu'il qualifie, le nom avant son chiffre de dégâts, et les sorts du premier
+//!   au dernier ;
+//! - **les images restent à l'endroit** : portraits de classe, icônes de monstre, icônes des
+//!   switches, images de sort ;
 //! - **l'infobulle suit** : survoler un portrait ouvre sa bulle au-dessus de lui, à sa nouvelle
 //!   place.
 //!

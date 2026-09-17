@@ -281,6 +281,12 @@ impl CombatFrame {
 
         // Le template est peint D'ABORD (voir doc de fonction) : simple fond, plus de trou à
         // masquer côté image.
+        //
+        // **Panneau posé à droite** : ce gabarit est du DÉCOR, donc il est bien RETOURNÉ par le
+        // miroir (`crate::mirror`) — son ornement doit regarder vers le jeu. C'est justement ce
+        // qui manquait à la première version, où il n'était que déplacé : « le rendu est
+        // complètement affreux ». Les portraits, eux, sont des blocs (voir plus bas) : ils
+        // changent de place sans se retourner.
         egui::Image::new(texture).paint_at(ui, frame_rect);
 
         for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
@@ -314,13 +320,17 @@ impl CombatFrame {
                     fighter.is_ko,
                 ),
             };
-            crate::design::paint_portrait(
-                ui,
-                portrait_rect,
-                texture,
-                crate::design::PortraitShape::Round,
-                dimmed,
-            );
+            // Ancré sur `portrait_rect` : le pourcentage peint plus bas, dans la seconde boucle,
+            // prend la MÊME ancre et suit donc exactement le même déplacement.
+            crate::mirror::upright_in(ui, portrait_rect, |ui| {
+                crate::design::paint_portrait(
+                    ui,
+                    portrait_rect,
+                    texture,
+                    crate::design::PortraitShape::Round,
+                    dimmed,
+                );
+            });
         }
 
         // Infobulle (nom, demande utilisateur : les portraits ne sont plus alignés avec "leur"
@@ -371,11 +381,15 @@ impl CombatFrame {
             crate::design::tooltip(&response).text(fighter.name.as_str());
             let measured = metric.value_of(fighter);
             if measured > 0 {
-                crate::design::paint_portrait_percent(
-                    ui,
-                    portrait_rect,
-                    crate::design::portrait_percent(measured, total_damage),
-                );
+                // Même ancre que le portrait : les deux se déplacent ensemble, le pourcentage
+                // reste dans son coin (voir `crate::mirror`).
+                crate::mirror::upright_in(ui, portrait_rect, |ui| {
+                    crate::design::paint_portrait_percent(
+                        ui,
+                        portrait_rect,
+                        crate::design::portrait_percent(measured, total_damage),
+                    );
+                });
             }
         }
         clicked

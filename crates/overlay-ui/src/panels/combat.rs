@@ -890,13 +890,16 @@ pub fn show(
                 // montrer pour la grandeur choisie, lui, le dit explicitement — sans ce message,
                 // basculer sur Armure dans un combat sans blindeur laissait la colonne vide sans
                 // qu'on sache si c'était zéro ou un bug.
-                ui.weak(match (fight, fighters.is_empty()) {
-                    (None, _) => "Aucun combat pour l'instant.",
-                    (Some(_), true) => match side {
-                        CombatSide::Allies => "Aucun allié pour l'instant.",
-                        CombatSide::Enemies => "Aucun ennemi pour l'instant.",
-                    },
-                    (Some(_), false) => measured.empty_message(),
+                // Un bloc, comme tout ce qui se lit : la phrase change de côté, pas de sens.
+                crate::mirror::upright(ui, |ui| {
+                    ui.weak(match (fight, fighters.is_empty()) {
+                        (None, _) => "Aucun combat pour l'instant.",
+                        (Some(_), true) => match side {
+                            CombatSide::Allies => "Aucun allié pour l'instant.",
+                            CombatSide::Enemies => "Aucun ennemi pour l'instant.",
+                        },
+                        (Some(_), false) => measured.empty_message(),
+                    });
                 });
             } else {
                 // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
@@ -952,15 +955,21 @@ fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutB
         row_rect.min,
         egui::vec2(switch_size.x + LEADER_PANEL_PADDING * 2.0, row_height),
     );
-    ui.painter()
-        .rect_filled(backdrop, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
-
     let switch_rect = egui::Rect::from_min_size(
         backdrop.min + egui::vec2(LEADER_PANEL_PADDING, LEADER_PANEL_PADDING),
         switch_size,
     );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
-    switch.show(&mut child);
+    // Panneau posé à droite : ce bandeau change de côté SANS que ses deux cases s'inversent —
+    // Alliés reste à gauche d'Ennemis (voir `crate::mirror`, et le retour utilisateur qui a fait
+    // naître cette règle). L'ancre est le bandeau PEINT, pas le rectangle alloué : il est plus
+    // large que le cadre et déborde vers la gouttière, et c'est ce débord qui doit se retrouver
+    // de l'autre côté.
+    crate::mirror::upright_in(ui, backdrop, |ui| {
+        ui.painter()
+            .rect_filled(backdrop, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+        switch.show(&mut child);
+    });
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
@@ -999,9 +1008,6 @@ fn show_leader_row(
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
     let row_rect = row_rect.expand2(egui::vec2(LEADER_PANEL_OVERHANG, 0.0));
 
-    ui.painter()
-        .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
-
     // Grandeur à gauche, total à droite, sur la même ligne : la grandeur décide de ce que raconte
     // TOUT le reste du panneau (ce total, les barres, les pourcentages sur les portraits) — la
     // poser juste à côté du chiffre qu'elle qualifie se lit d'un seul coup d'œil.
@@ -1026,18 +1032,25 @@ fn show_leader_row(
         ),
         switch_size,
     );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
-    switch.show(&mut child);
-
-    text::paint_outlined_text(
-        ui,
-        egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, center_y),
-        egui::Align2::RIGHT_CENTER,
-        &total_text,
-        total_font,
-        TEXT_COLOR,
-        text::OUTLINE_FULL,
-    );
+    // Panneau posé à droite : le bandeau change de côté, sa LIGNE ne change pas — le switch de
+    // grandeur reste à gauche du total qu'il qualifie, et ses trois cases dans l'ordre Dégâts,
+    // Armure, Soins (voir `crate::mirror`). Un bloc pour le bandeau entier, ancré sur lui : fond,
+    // switch et total se déplacent ensemble.
+    crate::mirror::upright_in(ui, row_rect, |ui| {
+        ui.painter()
+            .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+        switch.show(&mut child);
+        text::paint_outlined_text(
+            ui,
+            egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, center_y),
+            egui::Align2::RIGHT_CENTER,
+            &total_text,
+            total_font,
+            TEXT_COLOR,
+            text::OUTLINE_FULL,
+        );
+    });
 }
 
 /// Texture résolue pour un combattant — voir `resolve_fighter_texture`. Distingue les deux
@@ -1127,15 +1140,19 @@ fn paint_flat_portrait(
         Some(FighterPortrait::RemoteMonster(texture)) => (sized(texture), fighter.is_ko),
         None => (sized(icons.unknown_entity_texture()), fighter.is_ko),
     };
-    let response = ui.add(
-        design::portrait(texture)
-            .size(crate::portraits::PORTRAIT_SIZE)
-            .dimmed(dimmed)
-            .percent({
-                let value = metric.value_of(fighter);
-                (value > 0).then(|| design::portrait_percent(value, total_damage))
-            }),
-    );
+    // Panneau posé à droite : un portrait et son pourcentage changent de place, jamais de sens —
+    // une image retournée n'est pas ce qui a été demandé (voir `crate::mirror`).
+    let response = crate::mirror::upright(ui, |ui| {
+        ui.add(
+            design::portrait(texture)
+                .size(crate::portraits::PORTRAIT_SIZE)
+                .dimmed(dimmed)
+                .percent({
+                    let value = metric.value_of(fighter);
+                    (value > 0).then(|| design::portrait_percent(value, total_damage))
+                }),
+        )
+    });
     design::tooltip(&response).text(fighter.name.as_str());
 }
 
@@ -1172,6 +1189,23 @@ pub(super) fn damage_group_height(ui: &egui::Ui) -> f32 {
 /// entre la barre et la ligne du dessus », déjà réduit une 1re fois via `GROUP_NAME_BAR_GAP` —
 /// le reste venait de cette marge, retirée).
 pub(super) fn paint_damage_bar_group(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    name: &str,
+    damage: i64,
+    total_damage: i64,
+    opacity: &dyn Fn(egui::Rect) -> f32,
+) {
+    // Panneau posé à droite : le groupe change de côté, sa LIGNE ne change pas — le nom reste à
+    // gauche, le chiffre qui le qualifie à droite, et la barre se remplit toujours depuis la
+    // gauche (voir `crate::mirror`). Ancré sur `rect`, l'emplacement du groupe, pour que tous
+    // s'alignent entre eux quelle que soit la longueur du nom.
+    crate::mirror::upright_in(ui, rect, |ui| {
+        paint_damage_bar_group_inner(ui, rect, name, damage, total_damage, opacity);
+    });
+}
+
+fn paint_damage_bar_group_inner(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     name: &str,
