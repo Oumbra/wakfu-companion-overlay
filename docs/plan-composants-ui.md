@@ -105,7 +105,7 @@ plan d'architecture). C'est aussi la dernière raison d'exister de tout un appar
 panels/options_modal.rs   struct OptionsModalAssets { banner }   ← une seule texture
                           fn load_embedded_texture(…)            ← 6ᵉ copie de décoder→charger
 render_content.rs         RenderContent { …, options_assets }    ← 18ᵉ champ
-main.rs, bin/overlay-ui-x11.rs, tests                            ← câblage de ce champ
+main.rs, bin/wakfu-companion-overlay-x11.rs, tests               ← câblage de ce champ
 ```
 
 ### Ce qu'il faut construire

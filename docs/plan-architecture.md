@@ -1078,10 +1078,10 @@ les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
   ignorée, combinaison illisible remplacée par le défaut, table absente = tous les défauts).
 - **Libellés propagés jusqu'aux infobulles** (`RenderContent::shortcuts`) : les boutons du carré de
   contrôle et le switch Alliés/Ennemis affichent la combinaison RÉELLE, plus une chaîne recopiée.
-- **Portée Linux** : `bin/overlay-ui-x11.rs` n'enregistre que `ShortcutAction::LINUX_SUPPORTED`
-  (bascule, quitter, Options, sélection multiple, **plus les deux actions multicompte** depuis le
-  2026-09-13 — §9.1 sexies) faute de câblage pour les autres — celles-ci restent éditables et
-  persistées, un même `config.toml` servant aux deux OS.
+- **Portée Linux** : `bin/wakfu-companion-overlay-x11.rs` n'enregistre que
+  `ShortcutAction::LINUX_SUPPORTED` (bascule, quitter, Options, sélection multiple, **plus les deux
+  actions multicompte** depuis le 2026-09-13 — §9.1 sexies) faute de câblage pour les autres —
+  celles-ci restent éditables et persistées, un même `config.toml` servant aux deux OS.
 
 **Section « Compte » de l'onglet « Paramètres »** (même jour) : titre, bloc d'information disant que
 l'overlay ne fonctionne qu'avec un compte connecté et que se déconnecter ramène à l'écran de
@@ -1577,7 +1577,7 @@ session), portée telle quelle dans `panels::login`.
   qu'un test n'en ait qu'un) : les quatre états, animation figée (`LoginState::animate = false`),
   chacune prise à la hauteur exacte que `main.rs` donne à la fenêtre OS, vérifiée par assertion.
 
-**Linux (`bin/overlay-ui-x11.rs`, porté le même jour) :** mêmes threads de fond
+**Linux (`bin/wakfu-companion-overlay-x11.rs`, porté le même jour) :** mêmes threads de fond
 (`overlay_ui::background`), même fenêtre de connexion (fenêtre X11 ordinaire, pas `Utility` —
 barre des tâches, focus, centrée sur l'écran principal, icône = logo), même cycle de vie, fenêtre
 Options désormais pleinement câblée (compte, alertes, chat, suivi, recettes) et icônes réseau
@@ -1910,12 +1910,12 @@ par section.
 - **Les Alertes gardent une ligne à elles**, « Tester le son des notifications »
   (`notifications::TEST_LABEL`) : elles n'ont pas de sourdine globale (§9.1 terdecies), le bouton
   n'a aucune ligne où se poser. Il y est toujours vif.
-- **`notifications::section` renvoie de nouveau le clic**, et `notifications::test_sound_button`
-  est public pour la section « Combat », qui peint sa sourdine de tour elle-même
+- **`notifications::section` renvoie de nouveau le clic**, et `notifications::test_sound_button` est
+  public pour la section « Combat », qui peint sa sourdine de tour elle-même
   (`panels::options_modal`). Sa ligne prend la hauteur des lignes de section
-  (`notifications::ROW_HEIGHT`, 39 px) : dans un simple `horizontal`, la case restait calée en
-  haut d'un bouton plus grand qu'elle. Les hôtes (`main.rs`, `overlay-ui-x11.rs`) rejouent les
-  quatre actions `TestAlertSound` / `TestChatSound` / `TestCountdownSound` / `TestTurnSound` par
+  (`notifications::ROW_HEIGHT`, 39 px) : dans un simple `horizontal`, la case restait calée en haut
+  d'un bouton plus grand qu'elle. Les hôtes (`main.rs`, `wakfu-companion-overlay-x11.rs`) rejouent
+  les quatre actions `TestAlertSound` / `TestChatSound` / `TestCountdownSound` / `TestTurnSound` par
   `alert_sound`, le chemin exact du jeu.
 - **Le pictogramme « son coupé » d'une tuile d'alerte est en bas à droite** (`alerts_tab`,
   `Corner::BottomRight`), et non plus en haut à gauche : ce coin est celui de la case du mode
@@ -2242,16 +2242,17 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
     à nouveau le 2026-09-17, et réglé par le passage de l'overlay au sous-système *windows* plutôt
     que par la livraison d'un second fichier à tenir à jour. **Aucun des deux gestionnaires ne doit
     repasser en sous-système console.**
-  - Linux n'est pas concerné : `overlay-ui-x11` lancé par une entrée `.desktop` n'a jamais eu de
-    terminal, et lancé depuis un terminal il en hérite naturellement.
-- **Nom et icône de l'exécutable Windows** (2026-09-17, demande utilisateur). Le binaire livré
-  s'appelle `wakfu-companion-overlay.exe` — un bloc `[[bin]]` dans `crates/overlay-ui/Cargo.toml`,
-  le nom du PAQUET (`overlay-ui`) étant un nom de module interne qui ne dit ni le produit ni le
-  jeu et se perd dans une liste de processus. Les assets de Release portaient déjà le bon nom
-  (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`), c'est le fichier qui ne le portait
-  pas. Les deux autres binaires du crate gardent le leur : `overlay-ui-x11` (Linux, §17.2) et
-  `overlay-focus` (gestionnaire du protocole `wakfu-companion:`, cherché PAR NOM par
-  `turn_watch::notify`).
+  - Linux n'est pas concerné : `wakfu-companion-overlay-x11` lancé par une entrée `.desktop` n'a
+    jamais eu de terminal, et lancé depuis un terminal il en hérite naturellement.
+- **Nom et icône des exécutables livrés** (2026-09-17, demande utilisateur). Les binaires
+  s'appellent `wakfu-companion-overlay.exe` (Windows, bloc `[[bin]]` de
+  `crates/overlay-ui/Cargo.toml`) et `wakfu-companion-overlay-x11` (Linux/X11, §17.2, nommé d'après
+  son fichier `src/bin/`) — le nom du PAQUET (`overlay-ui`) est un nom de module interne qui ne dit
+  ni le produit ni le jeu et se perd dans une liste de processus. Les assets de Release portaient
+  déjà le bon nom (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`), ce sont les fichiers
+  qui ne le portaient pas. Seul `overlay-focus` garde un nom d'outil (gestionnaire du protocole
+  `wakfu-companion:`) : `turn_watch::notify` le cherche PAR NOM à côté de l'overlay, le renommer
+  casserait le clic sur un toast de tour.
   - **Icône** : posée par `crates/overlay-ui/build.rs` via `winresource`, à partir du logo du
     projet — le même fichier (`assets/ui/logo-purple.png`) que la zone de notification, la fenêtre
     de connexion et l'icône de fenêtre. L'`.ico` n'est pas commité, il est dérivé du PNG à chaque
@@ -2266,8 +2267,8 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
     binaire livré est toujours compilé sous Windows (`release.yml`).
   - **Mise à jour en place** : `overlay_sync::update` remplace le fichier courant
     (`std::env::current_exe`), sans le renommer. Une installation antérieure garde donc son
-    `overlay-ui.exe` jusqu'à ce que l'utilisateur retélécharge — aucune Release n'ayant encore été
-    distribuée, le cas est théorique.
+    `overlay-ui.exe`/`overlay-ui-x11` jusqu'à ce que l'utilisateur retélécharge — aucune Release
+    n'ayant encore été distribuée, le cas est théorique.
 - **Windows** : binaire + installeur NSIS/MSI. Signature Authenticode fortement recommandée (sans
   elle, SmartScreen effraie chaque nouvel utilisateur) — coût à budgéter, mais l'app reste
   installable sans.
@@ -2331,7 +2332,7 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 | --- | --- | --- |
 | **S1 — Spike rendu Windows** ✅ fait | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Voir `spikes/s1-window-windows/README.md` : panneau egui semi-transparent confirmé par capture d'écran par-dessus une autre fenêtre, hotkey global de bascule confirmé sans focus, RSS ~87 Mo — **verdict : chemin DirectComposition via `wgpu-hal` (`DxgiFromVisual`) validé**, plus simple que prévu (§6.2 mis à jour) |
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
-| **S3 — Spike X11** ✅ fait | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Spike validé (2026-09-03), critère de sortie atteint le 2026-09-04** (sauf point 5, question ouverte par nature — voir §17.2 « État »). Voir `spikes/s3-window-linux/README.md` pour le détail complet du spike : les trois prérequis de faisabilité vérifiés dans l'ordre — rendu logiciel Vulkan/lavapipe sous Xvfb confirmé avec du vrai code `wgpu`, WM EWMH (`openbox`) nécessaire et suffisant, scénario sans compositeur (repli opaque) validé comme cas par défaut et scénario avec compositeur en secondaire. Six bugs réels trouvés et corrigés dans le spike (dépendance système manquante, panique `TexturesDelta` en debug, double événement `global-hotkey` sous X11, piège de titre `xterm` dynamique, piège regex `xdotool search`, `[workspace]` manquant préexistant sur S1/S2 aussi). **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6) — rempli aux points 1/2/3/4 le 2026-09-04, voir §17.2 « État »** : le CODE **migré** vers `crates/overlay-platform/src/linux/` (7 tests unitaires topmost verts) ; le multi-fenêtres réel **câblé** — nouveau binaire `crates/overlay-ui/src/bin/overlay-ui-x11.rs` (mode invité), validé sous Xvfb avec preuve visuelle (2 fenêtres Combat/Suivi réelles) ; le HARNAIS **extrait** vers `xtask visual-check` (Rust, garde RAII, assertions par le protocole X11) — toutes les assertions passent sur le VRAI binaire (ancrage, click-through 1→0→1, topmost/délai de grâce/réaffirmation), un second bug réel trouvé au passage (`xdotool search --name` incapable de matcher un tiret cadratin UTF-8 dans son pattern, contourné) |
+| **S3 — Spike X11** ✅ fait | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Spike validé (2026-09-03), critère de sortie atteint le 2026-09-04** (sauf point 5, question ouverte par nature — voir §17.2 « État »). Voir `spikes/s3-window-linux/README.md` pour le détail complet du spike : les trois prérequis de faisabilité vérifiés dans l'ordre — rendu logiciel Vulkan/lavapipe sous Xvfb confirmé avec du vrai code `wgpu`, WM EWMH (`openbox`) nécessaire et suffisant, scénario sans compositeur (repli opaque) validé comme cas par défaut et scénario avec compositeur en secondaire. Six bugs réels trouvés et corrigés dans le spike (dépendance système manquante, panique `TexturesDelta` en debug, double événement `global-hotkey` sous X11, piège de titre `xterm` dynamique, piège regex `xdotool search`, `[workspace]` manquant préexistant sur S1/S2 aussi). **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6) — rempli aux points 1/2/3/4 le 2026-09-04, voir §17.2 « État »** : le CODE **migré** vers `crates/overlay-platform/src/linux/` (7 tests unitaires topmost verts) ; le multi-fenêtres réel **câblé** — nouveau binaire `crates/overlay-ui/src/bin/wakfu-companion-overlay-x11.rs` (mode invité), validé sous Xvfb avec preuve visuelle (2 fenêtres Combat/Suivi réelles) ; le HARNAIS **extrait** vers `xtask visual-check` (Rust, garde RAII, assertions par le protocole X11) — toutes les assertions passent sur le VRAI binaire (ancrage, click-through 1→0→1, topmost/délai de grâce/réaffirmation), un second bug réel trouvé au passage (`xdotool search --name` incapable de matcher un tiret cadratin UTF-8 dans son pattern, contourné) |
 | **L7 — Outillage de test visuel (Niveau 1)** | Rendu offscreen déterministe des panneaux `overlay-ui` (crate `overlay-testkit`), voir §17.1 | Un changement de panneau (combat/watchlist) produit un diff visuel détecté automatiquement, sans Xvfb ni GPU physique, exécutable dans une session Claude cloud headless — critère détaillé en §17.6 |
 | **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel). Réserve trouvée puis corrigée le 2026-09-04 (§5.2) : la détection de rotation combine désormais l'identité de fichier ET un second signal (préfixe de contenu), qui ne dépend pas de l'hypothèse fausse « inode jamais réutilisé ». |
 | **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Fait (2026-09-07, retour utilisateur : un Suivi jamais visible sur le site)** : les COMPTEURS du Suivi sont désormais répliqués vers le compte (`PATCH /api/v1/settings`, débounce + backoff, voir §14 point 3 pour le détail complet) — jusqu'ici locaux à l'overlay uniquement. **Reste** : indicateur visuel d'état de synchro dans l'UI (idle/pending/syncing/error, §9 — le mécanisme réseau existe désormais pour l'historique ET le Suivi, seul l'affichage manque). **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés |
@@ -2358,13 +2359,14 @@ sur une vraie machine Linux le moment venu, comme documenté au §17.2 (limite a
 **Mise à jour (2026-09-13)** : cette vérification « vraie machine Linux » est désormais possible —
 le mainteneur dispose d'un **Steam Deck (SteamOS, KDE Wayland + XWayland)** avec le client Wakfu
 natif (Zaap). Deux conséquences outillées dans le dépôt plutôt que laissées à la manœuvre manuelle :
-`crates/overlay-ui/preview.sh` (équivalent bash de `preview.ps1`, lance `overlay-ui-x11`) et
-`scripts/setup-steamdeck.sh` (conteneur `distrobox` Arch partageant HOME/écran/GPU/audio, seul moyen
-durable de compiler sous SteamOS dont le rootfs est en lecture seule et réécrit à chaque mise à
-jour ; `preview.sh` y entre tout seul). Premier constat de cette vérification sur matériel réel : la
-découverte de `wakfu.log` sous Linux (§5.1) pointait vers `~/.config/zaap/gamesLogs/wakfu/wakfu.log`
-alors que le client natif écrit dans le sous-dossier `logs/`, comme sous Windows — corrigé dans
-`overlay-ingest::discovery` (le chemin sans `logs/` reste candidat, en repli).
+`crates/overlay-ui/preview.sh` (équivalent bash de `preview.ps1`, lance
+`wakfu-companion-overlay-x11`) et `scripts/setup-steamdeck.sh` (conteneur `distrobox` Arch
+partageant HOME/écran/GPU/audio, seul moyen durable de compiler sous SteamOS dont le rootfs est en
+lecture seule et réécrit à chaque mise à jour ; `preview.sh` y entre tout seul). Premier constat de
+cette vérification sur matériel réel : la découverte de `wakfu.log` sous Linux (§5.1) pointait vers
+`~/.config/zaap/gamesLogs/wakfu/wakfu.log` alors que le client natif écrit dans le sous-dossier
+`logs/`, comme sous Windows — corrigé dans `overlay-ingest::discovery` (le chemin sans `logs/` reste
+candidat, en repli).
 
 ---
 
@@ -2867,18 +2869,19 @@ Xvfb avec preuve visuelle. Points 3 (`xtask visual-check`) et 5 (`override_redir
   unitaires de `topmost::decide` tournent nativement (`cargo test -p overlay-platform`, aucun Xvfb
   requis, voir sa doc).
 - **Point 2 (multi-fenêtres réel côté `overlay-ui`) : fait, y compris le rendu — nouveau binaire
-  `crates/overlay-ui/src/bin/overlay-ui-x11.rs`.** Plutôt que de dupliquer les 2 000+ lignes de
-  `main.rs` (fortement couplées à des appels Win32 bruts — `SetWindowPos`, `WS_EX_NOACTIVATE`/
-  `WS_EX_TOOLWINDOW`, `GetForegroundWindow`, non partageables), tout ce qui NE dépendait d'AUCUNE
-  API Windows en a d'abord été extrait vers la LIB (`overlay-ui/src/{frame,engine_thread,
-  alert_sound,logging}.rs`, voir la doc de `lib.rs`) : `frame::render` (boucle de peinture par
-  frame, générique wgpu/egui), `engine_thread::spawn_engine_thread` (thread d'ingestion, aucun
-  appel Windows), `alert_sound` (rodio pur), `logging`. `main.rs` consomme désormais ces mêmes
-  items depuis la lib au lieu de les définir localement — vérifié sans régression (`cargo check`/
-  `clippy -D warnings`/`fmt --check` propres sur la cible Windows croisée, `cargo test -p
-  overlay-testkit` toujours vert). Seul `init_gpu` (choix de backend GPU, DX12/DirectComposition
-  vs Vulkan/GL) reste dupliqué entre les deux binaires — pas du code partageable, le choix diffère
-  fondamentalement d'un OS à l'autre (§6.2).
+  `crates/overlay-ui/src/bin/wakfu-companion-overlay-x11.rs`.** Plutôt que de dupliquer les 2 000+
+  lignes de `main.rs` (fortement couplées à des appels Win32 bruts — `SetWindowPos`,
+  `WS_EX_NOACTIVATE`/ `WS_EX_TOOLWINDOW`, `GetForegroundWindow`, non partageables), tout ce qui NE
+  dépendait d'AUCUNE API Windows en a d'abord été extrait vers la LIB
+  (`overlay-ui/src/{frame,engine_thread, alert_sound,logging}.rs`, voir la doc de `lib.rs`) :
+  `frame::render` (boucle de peinture par frame, générique wgpu/egui),
+  `engine_thread::spawn_engine_thread` (thread d'ingestion, aucun appel Windows), `alert_sound`
+  (rodio pur), `logging`. `main.rs` consomme désormais ces mêmes items depuis la lib au lieu de les
+  définir localement — vérifié sans régression (`cargo check`/ `clippy -D warnings`/`fmt --check`
+  propres sur la cible Windows croisée, `cargo test -p overlay-testkit` toujours vert). Seul
+  `init_gpu` (choix de backend GPU, DX12/DirectComposition vs Vulkan/GL) reste dupliqué entre les
+  deux binaires — pas du code partageable, le choix diffère fondamentalement d'un OS à l'autre
+  (§6.2).
 
   Le nouveau binaire Linux (mode **invité uniquement** — pas de compte lié/synchro serveur L4-L5,
   voir sa doc de module pour le détail exact de ce qui est omis) réutilise ces modules partagés
@@ -2906,20 +2909,20 @@ Xvfb avec preuve visuelle. Points 3 (`xtask visual-check`) et 5 (`override_redir
   un bug d'ancrage — les deux zones ne se recouvriraient pas sur une vraie fenêtre de jeu.
 - **Point 3 (extraire `harness.sh`/`probe.rs` vers `xtask visual-check`) : fait.** Nouvelle
   sous-commande `cargo run --manifest-path xtask/Cargo.toml -- visual-check` — orchestre
-  Xvfb+openbox+xterm factice+**le vrai `overlay-ui-x11`** (compilé au vol) en Rust (garde RAII
-  `ProcessGuard` plutôt qu'un `trap` bash), assertions par le protocole X11 lui-même (`x11rb` :
-  Shape pour le click-through, `_NET_CLIENT_LIST_STACKING` pour le topmost/délai de grâce),
-  jamais une déduction visuelle. Toutes les assertions passent (ancrage, click-through 1→0→1 sur
-  deux bascules exactement, topmost focus-aware, démotion après délai de grâce, réaffirmation
-  immédiate) — capture finale envoyée à l'utilisateur en session. **Bug réel trouvé en
-  l'écrivant** : `xdotool search --name` échoue systématiquement dès que le pattern contient le
-  tiret cadratin `—` (U+2014) présent dans les titres de fenêtre réels — pas une histoire de
-  locale du process appelant (testé explicitement en `C.UTF-8`, même échec), plutôt une limite de
-  la regex POSIX étendue sous-jacente de `libxdo` face à l'UTF-8 multi-octets ; contourné en ne
-  passant jamais ce caractère à `xdotool` (motif ASCII sûr côté `search`, comparaison exacte
-  faite ensuite en Rust sur le titre déjà récupéré par `getwindowname`) — voir la doc de
-  `find_window_by_title`. Jamais appelée par `.github/workflows/ci.yml` (gouvernance §17.2 :
-  « jamais un gate CI par défaut » pour ce harnais précis), strictement à la demande.
+  Xvfb+openbox+xterm factice+**le vrai `wakfu-companion-overlay-x11`** (compilé au vol) en Rust
+  (garde RAII `ProcessGuard` plutôt qu'un `trap` bash), assertions par le protocole X11 lui-même
+  (`x11rb` : Shape pour le click-through, `_NET_CLIENT_LIST_STACKING` pour le topmost/délai de
+  grâce), jamais une déduction visuelle. Toutes les assertions passent (ancrage, click-through 1→0→1
+  sur deux bascules exactement, topmost focus-aware, démotion après délai de grâce, réaffirmation
+  immédiate) — capture finale envoyée à l'utilisateur en session. **Bug réel trouvé en l'écrivant**
+  : `xdotool search --name` échoue systématiquement dès que le pattern contient le tiret cadratin
+  `—` (U+2014) présent dans les titres de fenêtre réels — pas une histoire de locale du process
+  appelant (testé explicitement en `C.UTF-8`, même échec), plutôt une limite de la regex POSIX
+  étendue sous-jacente de `libxdo` face à l'UTF-8 multi-octets ; contourné en ne passant jamais ce
+  caractère à `xdotool` (motif ASCII sûr côté `search`, comparaison exacte faite ensuite en Rust sur
+  le titre déjà récupéré par `getwindowname`) — voir la doc de `find_window_by_title`. Jamais
+  appelée par `.github/workflows/ci.yml` (gouvernance §17.2 : « jamais un gate CI par défaut » pour
+  ce harnais précis), strictement à la demande.
 - **Point 4 (bug `global-hotkey` double-événement) : résolu des DEUX côtés.** Déjà corrigé côté
   Windows depuis le 2026-09-02 ; le nouveau binaire Linux filtre sur `HotKeyState::Pressed` dès
   son écriture (jamais réintroduit), vérifié sous Xvfb ci-dessus (3 appuis, 3 bascules, jamais 6).
@@ -2962,7 +2965,7 @@ dev, plusieurs fois dans la journée avant que l'utilisateur ne le signale.
 Faire remonter l'intention rend les panneaux inertes **par construction** : aucun test n'a à se
 souvenir de neutraliser quoi que ce soit, et un nouveau panneau ne peut pas réintroduire le problème
 sans que cela se voie dans sa signature. Le seul point du binaire qui appelle `open::that` est
-l'hôte (`main.rs`, `bin/overlay-ui-x11.rs`) — c'est vérifiable d'un `grep`.
+l'hôte (`main.rs`, `bin/wakfu-companion-overlay-x11.rs`) — c'est vérifiable d'un `grep`.
 
 ### 17.4 Restitution humaine
 

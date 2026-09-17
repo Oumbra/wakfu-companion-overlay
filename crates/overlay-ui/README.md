@@ -7,7 +7,7 @@ sur un vrai `wakfu.log` — voir [`docs/plan-architecture.md`](../../docs/plan-a
 
 ## Prévisualisation à tout moment
 
-**Windows** (binaire `overlay-ui`) :
+**Windows** (binaire `wakfu-companion-overlay`) :
 
 ```
 cd crates\overlay-ui
@@ -16,8 +16,8 @@ cd crates\overlay-ui
 .\preview.ps1 -Debug                   # build debug, plus rapide à itérer
 ```
 
-**Linux / X11** (binaire `overlay-ui-x11`, voir « Portage Linux » plus bas) — même contrat, en
-bash, sans PowerShell :
+**Linux / X11** (binaire `wakfu-companion-overlay-x11`, voir « Portage Linux » plus bas) — même
+contrat, en bash, sans PowerShell :
 
 ```bash
 bash crates/overlay-ui/preview.sh              # découverte automatique du wakfu.log
@@ -69,11 +69,12 @@ de chacun, la lecture/écriture de la config, l'enregistrement auprès de l'OS),
 décisions : modificateur obligatoire, doublons refusés, raccourcis suspendus tant que la fenêtre
 est ouverte, échec d'enregistrement non fatal.
 
-Persisté dans la table `[shortcuts]` du même `config.toml` que le chemin de `wakfu.log` ; un
-fichier écrit par une version antérieure reste lisible tel quel. Le binaire Linux
-(`src/bin/overlay-ui-x11.rs`) n'enregistre que les actions de `ShortcutAction::LINUX_SUPPORTED`
-(bascule, Options, sélection multiple du bandeau, invitation et suivi de l'autre personnage) faute
-de câblage pour les autres — toutes restent éditables et persistées.
+Persisté dans la table `[shortcuts]` du même `config.toml` que le chemin de `wakfu.log` ; un fichier
+écrit par une version antérieure reste lisible tel quel. Le binaire Linux
+(`src/bin/wakfu-companion-overlay-x11.rs`) n'enregistre que les actions de
+`ShortcutAction::LINUX_SUPPORTED` (bascule, Options, sélection multiple du bandeau, invitation et
+suivi de l'autre personnage) faute de câblage pour les autres — toutes restent éditables et
+persistées.
 
 ## Deux fenêtres overlay indépendantes par personnage
 

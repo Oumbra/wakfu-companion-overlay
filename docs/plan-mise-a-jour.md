@@ -48,7 +48,7 @@ automatique.
 | `design::meter(ratio)` existe (jauge 0→1 du panneau Combat), `design::button`, `design::confirm_dialog`, `design::info_text`, `design::checkbox` aussi | `design/components/` | Aucun composant à créer pour la barre de progression ni pour la section Options. |
 | Fenêtre Options : onglet « Paramètres » = sections Fichier / Combat / Compte, motif « heading + info_text + bouton + confirm + `OptionsModalAction` traité par l'hôte » | `options_modal.rs:653-841` | La section « Mise à jour » suit exactement ce motif. |
 | Threads de fond nommés + `ArcSwap` + `EventLoopProxy<UserEvent>` + `backoff_delay` ; `UserEvent::{NewSnapshot, AuthStatusChanged, StartupProgress}` | `background.rs`, `render_content.rs:83-89` | Un `UserEvent::UpdateProgress` et un `spawn_update_thread` s'y ajoutent sans rien changer au modèle. |
-| Deux hôtes dupliquent la boucle d'événements : `main.rs` (Windows) et `bin/overlay-ui-x11.rs` (Linux) | — | Tout ce qui est partageable va dans la lib (`overlay_ui::background`, `startup`, `panels`), les deux hôtes ne font que brancher. |
+| Deux hôtes dupliquent la boucle d'événements : `main.rs` (Windows) et `bin/wakfu-companion-overlay-x11.rs` (Linux) | — | Tout ce qui est partageable va dans la lib (`overlay_ui::background`, `startup`, `panels`), les deux hôtes ne font que brancher. |
 | Le binaire sait déjà **se relancer avec un argument spécial** et sortir aussitôt (URI de focus) ; `logging::log_session_end` est appelé à chaque sortie | `main.rs:3159-3166` | Précédent pour un argument `--updated-from <version>` et pour une sortie propre avant relance. |
 | `build.rs` accepte `WAKFU_OVERLAY_COMMIT` en surcharge, prévu pour « une chaîne de release qui construit sans `.git/` » | `overlay-ui/build.rs:28-33` | Déjà prêt pour le CI de release. |
 | Déjà dans l'arbre de dépendances : `sha2` 0.10 et `flate2` 1.1 (directes), `semver` 1.0 (transitive), `rustls`/`ring` (via `ureq`) | `Cargo.lock` | Intégrité SHA-256 et gzip gratuits. Absents : `minisign`/ed25519 (pourtant nommés au §10 du plan), `zstd`, `bsdiff`. |
@@ -208,7 +208,7 @@ instant ; les sauts (`0.19.0` → `0.27.2`) sont normaux et sans conséquence.
    (idempotent : un push sur `main` sans bump ne republie rien).
 2. **`build-windows`** / **`build-linux`** (parallèles) — `vendor-wgpu-hal`, cache, puis
    `cargo build --release -p overlay-ui --bin wakfu-companion-overlay` (Windows) et
-   `--bin overlay-ui-x11`
+   `--bin wakfu-companion-overlay-x11`
    (Linux), avec `WAKFU_OVERLAY_COMMIT=${{ github.sha }}`. Artefacts éphémères.
 3. **`publish`** — `cargo xtask dist` (nouvelle sous-commande de l'outillage existant) : télécharge
    les assets des 3 Releases précédentes (`gh release download`, jeton du job), décompresse,
@@ -340,7 +340,8 @@ overlay-ui
    ├─ startup::StartupProgress          + étape `update` (Checking → …), liste d'étapes typée
    ├─ panels::login                     liste des étapes + design::meter
    ├─ panels::options_modal             section « Mise à jour » (onglet Paramètres)
-   └─ main.rs / bin/overlay-ui-x11.rs   UserEvent::UpdateProgress, OptionsModalAction::InstallUpdate,
+   └─ main.rs / bin/wakfu-companion-overlay-x11.rs
+                                        UserEvent::UpdateProgress, OptionsModalAction::InstallUpdate,
                                         sortie propre + relance avec --updated-from
 ```
 
@@ -589,7 +590,7 @@ version ». L'écran de chargement est à retravailler dans une itération dédi
 
 | Phase | Contenu | Livrable vérifiable | Dépôt |
 | --- | --- | --- | --- |
-| **0 — Préalables** ✅ (2026-09-15, sauf la paire de clés, à la charge du mainteneur) | `[profile.release]` ; `DEFAULT_BASE_URL` → prod (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décisions 1 et 7) | **Mesuré** sur `overlay-ui-x11` (Linux x86_64, session cloud) : sans profil **49,4 Mo brut / 18,0 Mo gzip**, avec `strip`+LTO+`codegen-units=1` **28,9 Mo brut / 14,0 Mo gzip** (−41 % brut, −22 % gzip ; compilation release 4 min 40 → 6 min 38). L'exe Windows sera du même ordre. | overlay |
+| **0 — Préalables** ✅ (2026-09-15, sauf la paire de clés, à la charge du mainteneur) | `[profile.release]` ; `DEFAULT_BASE_URL` → prod (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décisions 1 et 7) | **Mesuré** sur `wakfu-companion-overlay-x11` (Linux x86_64, session cloud) : sans profil **49,4 Mo brut / 18,0 Mo gzip**, avec `strip`+LTO+`codegen-units=1` **28,9 Mo brut / 14,0 Mo gzip** (−41 % brut, −22 % gzip ; compilation release 4 min 40 → 6 min 38). L'exe Windows sera du même ordre. | overlay |
 | **1 — Publication** ✅ outillage (2026-09-15) — première Release à la prochaine fusion sur `main` | `release.yml` ; `xtask dist` (gzip, SHA-256, `latest.json`, signature + revérification par `wakfu-overlay.pub`, mesure du delta) ; première Release `v0.x` | un exe Windows et un binaire Linux téléchargeables depuis `releases/latest`, manifeste signé vérifiable avec `minisign -V` | overlay |
 | **2 — Client** ✅ code (2026-09-15) — validation bout en bout en attente de la première Release | `overlay_sync::update` (`manifest`/`download`/`apply`, 13 tests dont un serveur HTTP local) ; `background::spawn_update_thread` ; `StartupProgress` (étape « vérification », drapeau « mise à jour en cours » qui suspend le garde-fou) ; écran de chargement : ligne d'état + jauge sous le rouage, écran « Mise à jour requise » ; section Options « Mise à jour » (ligne d'info, case `auto_update`, bouton unique) ; `--updated-from` ; captures (4 nouvelles, 2 régénérées) | **Fait ici** : `cargo check` des deux binaires (X11 natif, Windows via `x86_64-pc-windows-gnu`), 220 tests `overlay-ui`, 33 `overlay-sync`, gate de captures vert (67). **Reste à faire sur une vraie machine** : installer une version N-1 et vérifier qu'elle se met à jour et se relance en N — impossible sans Release publiée, et `self-replace` sous Windows n'a pas été exercé depuis ce conteneur Linux. | overlay |
 | **3 — Différentiel** | `xtask dist` génère 3 deltas ; `apply.rs` applique `qbsdiff` quand `fromSha256` correspond | même test qu'en 2 avec le journal montrant « delta 3,1 Mo appliqué » ; repli asset complet vérifié sur un exe modifié | overlay |
