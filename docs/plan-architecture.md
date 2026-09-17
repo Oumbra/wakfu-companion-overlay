@@ -285,6 +285,67 @@ de parité fonctionnelle voulu, seulement une conséquence du fait que l'overlay
 onglet de navigateur, reste ouvert en continu pendant des heures de jeu et traverse donc bien plus
 souvent une vraie rotation `wakfu.log` mid-session.
 
+### 5.3 bis Reprise après blocage de l'ingestion (2026-09-17)
+
+**Le symptôme, rapporté par l'utilisateur** : le panneau Combat se fige en plein combat — plus un
+dégât, plus une armure donnée, plus un soin qui monte — alors que ses boutons répondent encore.
+
+**Ce que ce symptôme désigne.** Un panneau qui répond mais n'avance plus n'est PAS un rendu bloqué :
+le thread de rendu lit le dernier `SessionSnapshot` publié par `ArcSwap` (§3), il redessine donc
+fidèlement un état qui, lui, ne bouge plus. C'est la publication qui s'est arrêtée, et il n'y a que
+deux endroits où elle peut s'arrêter :
+
+1. **le tailer ne livre plus** — plus aucun lot n'arrive sur le canal alors que le jeu écrit
+   (handle perdu, rotation mal vue, inode réutilisé malgré le garde-fou de préfixe du §5.2) ;
+2. **le parser rejette tout** — les lots arrivent mais `Engine::ingest_batch` échoue à chaque fois
+   (contexte QuickJS en échec durable) ; la boucle d'ingestion abandonne alors les lignes SANS
+   publier, et le tailer a déjà avancé son offset : elles sont perdues.
+
+**La réparation, unique pour les deux cas** : relire `wakfu.log` depuis sa première ligne et
+reconstruire la session à partir de ce qu'il contient — `EngineCommand::ResyncLog`
+(`overlay-ui/src/engine_thread.rs`). Mécaniquement, c'est `ChangeLogPath` sur le même fichier :
+`Engine::forget_session()` puis un watcher respawné, ce qui donne un tailer neuf ET, par le
+rattrapage `is_initial_load` qui suit, un parser réinitialisé (§5.3). Aucune alerte ne re-sonne : le
+rattrapage entier est marqué `is_initial_load`, et tout ce qui sonne ou compte durablement est déjà
+filtré par ce drapeau (`Engine::apply_entry`). Les événements d'historique, eux, repartent — comme à
+toute reconnexion, et pour la même raison (idempotence serveur par `clientKey`, §7.1).
+
+**Ce que la relecture coûte, et qui est assumé** : les combats TERMINÉS de la session en cours sont
+oubliés s'ils ne sont plus dans le fichier (rotation survenue depuis), et un combat commencé avant
+une rotation perd son début. C'est le prix d'un dépannage, pas le fonctionnement normal — une
+rotation ordinaire continue de préserver `state` (§5.3), et rien de tout cela ne se déclenche sans
+panne constatée.
+
+**Le déclenchement automatique — `IngestWatchdog`.** Le signal retenu n'est délibérément PAS « les
+chiffres du combat n'ont pas bougé » : un combat au tour par tour passe des dizaines de secondes
+sans un seul dégât, et un chien de garde qui prendrait ce calme pour une panne relancerait une
+relecture complète en plein combat pour rien. Le signal est l'écart entre ce que le JEU a écrit et
+ce que l'overlay a digéré :
+
+> `wakfu.log` a changé de taille, et aucun lot n'a été appliqué avec succès depuis huit secondes.
+
+Les deux conditions sont nécessaires. Le délai (8 s) laisse passer sans faux positif le débounce du
+watcher, son repli périodique, une ligne encore incomplète en fin de fichier et l'ingestion d'un gros
+lot. L'écart de taille — une INÉGALITÉ, pas une croissance, une rotation faisant retomber la taille —
+garantit qu'on ne relit jamais un fichier que personne n'alimente : client fermé, joueur à l'arrêt,
+il n'y a alors rien à rattraper. Un lot REJETÉ ne compte jamais comme un progrès, c'est ce qui rend
+le cas 2 visible. Une période de grâce de 30 s suit chaque relecture : une panne qui résiste doit
+réessayer, pas repasser le fichier entier dans QuickJS toutes les huit secondes.
+
+**Le déclenchement manuel** : le bouton « Rafraîchir le panneau de combat » en fin de section
+« Combat » de la fenêtre Options (les deux plateformes), et `ShortcutAction::Refresh` sous Windows —
+le « bouton nucléaire » du 2026-09-02 (`App::force_refresh`), qui redessinait et réaffirmait le
+premier plan sans jamais toucher au flux de log, c'est-à-dire sans rien pouvoir contre cette
+panne-là.
+
+**La bascule est atomique.** Pendant la relecture, la publication du snapshot est SUSPENDUE : le
+panneau garde ce qu'il affichait jusqu'à ce que l'état reconstruit soit complet, puis bascule d'un
+bloc. Sans cela, une relecture de plusieurs dizaines de lots (2000 lignes chacun, `MAX_BATCH_LINES`)
+ferait défiler à l'écran tout l'historique du fichier, combat par combat, avant de retomber sur le
+combat en cours — l'inverse de ce que le geste promet. La fin de la relecture est le premier silence
+du watcher (il pousse les lots d'un trait, §5.2), avec une échéance de 20 s en garde-fou : un
+panneau muet est le symptôme qu'on répare, pas celui qu'on installe.
+
 ### 5.4 Date et heure
 
 Le log ne porte que `HH:MM:SS,mmm`. L'Engine reconstitue la date du jour de lecture (comportement
@@ -461,7 +522,7 @@ résolu depuis le nom extrait du titre de fenêtre — voir §2 du plan overlay-
 `crates/overlay-ui/src/main.rs::App::sync_windows`). Chaque fenêtre overlay se cale au bord gauche
 de SA fenêtre de jeu — au bord DROIT depuis le 2026-09-17 si la case correspondante est cochée, et
 son contenu est alors retourné en miroir, voir §9.1 vicies —, verticalement centrée dessus **tant
-que l'utilisateur ne l'a pas fait glisser** (§9.1 unvicies : la hauteur choisie est persistée et
+que l'utilisateur ne l'a pas fait glisser** (§9.1 duovicies : la hauteur choisie est persistée et
 bornée au cadre, le côté reste une case des Options), et suit tout déplacement/redimensionnement
 (`crates/overlay-ui/src/game_window.rs`) :
 
@@ -2103,7 +2164,7 @@ ouvert dont « les deux ne peuvent pas vivre en même temps ».
   « on remet le récap à son emplacement initial seulement si l'utilisateur appuie sur oui » — par
   la fenêtre qui existait déjà, `OverlayKind::ResetConfirm`, paramétrée par sa cible
   (`ResetTarget::RecapSession` pour les compteurs, `RecapPosition` pour la bande, et depuis le
-  soir du même jour `CombatPosition` pour la hauteur du panneau Combat — voir §9.1 unvicies). Une
+  soir du même jour `CombatPosition` pour la hauteur du panneau Combat — voir §9.1 duovicies). Une
   variante d'`OverlayKind` par cible aurait dédoublé, dans les deux hôtes, tout le cycle
   « ouvrir / centrer / voiler / fermer » pour ne changer qu'une phrase.
 - **La rangée se pose au-dessus du bloc, en haut à gauche, et bascule en dessous** quand la bande
@@ -2160,7 +2221,9 @@ reproche fait à `Ctrl+Alt+D` (déconnexion) le 2026-09-13. Même traitement : v
 sorties propres sont désormais ce bouton, l'entrée « Quitter » de la zone de notification, et
 Ctrl+C dans le terminal.
 
-**Captures** : `options_parametres_fermer_overlay` (bas de l'onglet) ; `options_parametres_compte`
+**Captures** : `options_parametres_sorties` (bas de l'onglet — la capture s'appelait
+`options_parametres_fermer_overlay` jusqu'au 2026-09-17, où « Redémarrer » est venu à côté, voir
+§9.1 unvicies) ; `options_parametres_compte`
 et `options_parametres_mise_a_jour` bougent avec la hauteur de l'onglet. L'aide de défilement des
 tests (`defile_les_parametres`) retire désormais le pointeur AVANT les frames de repos : un bouton
 centré passant sous lui ouvrait son infobulle, dont l'animation empêchait `Harness::run` de se
@@ -2269,7 +2332,49 @@ Le curseur qu'`egui_kittest` dessine reste, lui, à la position de mise en page 
 `PlatformOutput::cursor_image`, pas des formes — en production c'est le curseur du système, à la
 position réelle du pointeur.
 
-### 9.1 unvicies Panneau Combat déplaçable en hauteur (2026-09-17, soir)
+### 9.1 unvicies Bouton « Redémarrer », à gauche de « Fermer l'overlay » (2026-09-17)
+
+**Demande utilisateur** : « ajouter un bouton *Redémarrer* à gauche du bouton *Fermer l'overlay*
+permettant de relancer l'overlay complètement ».
+
+Redémarrer était jusqu'ici deux gestes : fermer (bouton du pied de l'onglet « Paramètres », §9.1
+novodecies), puis retrouver l'exe ou son raccourci. C'est le geste qu'on fait après avoir changé de
+fichier de journal, quand l'affichage ne suit plus une fenêtre de jeu recréée, ou pour repartir d'un
+moteur propre — assez souvent pour mériter son bouton, jamais assez pour mériter un raccourci
+global (le reproche fait à `Ctrl+Shift+Q`, retiré la veille : une combinaison qui arrête le
+programme d'un geste est un piège en plein combat).
+
+**La paire est centrée, pas chaque bouton.** Les deux largeurs naturelles et la gouttière du pied de
+page (`tokens::WINDOW_FOOTER_GUTTER`, la seule gouttière bouton-à-bouton relevée dans le jeu)
+forment un bloc centré d'un seul tenant sur la colonne. Centrer chacun dans une moitié les
+éloignerait au gré de la largeur de la fenêtre, et « Redémarrer » ne se lirait plus comme la
+variante de son voisin. Il est à GAUCHE (demande), ce qui met aussi l'action la moins définitive en
+premier. Même variante `Secondary` et même hauteur `ROW_HEIGHT` que « Fermer l'overlay » : ni l'un
+ni l'autre ne détruit quoi que ce soit.
+
+**Même contrat de confirmation** : `OptionsModalState::pending_restart` (« Redémarrer l'overlay ? »)
+est la cinquième boîte exclusive de la fenêtre, et Échap y répond « Non » sans être relu par le
+filet clavier. « Oui » remonte `OptionsModalAction::Restart` — un panneau ne produit pas d'effet de
+bord (§17.3 bis), l'hôte seul relance un process.
+
+**La relance, côté hôte** : `overlay_ui::restart::relaunch` lance `std::env::current_exe` avec les
+arguments de CE lancement, moins `--updated-from <version>` (ce drapeau dit « je viens d'une mise à
+jour » et déclenche le nettoyage du dossier de mise à jour, voir §12 — il serait faux ici) ; le
+chemin de `wakfu.log` passé en argument, lui, est conservé, sans quoi le process neuf retomberait
+sur la découverte automatique. Les deux hôtes (`main.rs` et `bin/wakfu-companion-overlay-x11.rs`)
+sortent ensuite comme pour « Fermer l'overlay » : `logging::log_session_end("Redémarrer l'overlay
+(fenêtre Options)")` puis `event_loop.exit()`. Le process neuf est lancé AVANT cette sortie, comme
+à l'installation d'une mise à jour (`update::apply::install_and_relaunch`) : les deux se croisent le
+temps que les fenêtres tombent, ce que rien ne gêne — l'overlay ne prend aucun verrou exclusif au
+démarrage. **Une relance impossible ne ferme rien** : l'erreur part au journal et l'overlay en place
+reste ouvert, plutôt que de laisser l'utilisateur sans overlay du tout.
+
+**Captures** : `options_parametres_sorties` (la paire, bas de l'onglet) ;
+`options_parametres_mise_a_jour` bouge avec elle, la ligne des sorties entrant dans son cadre.
+Comportement couvert sans peindre par `options_redemarrage_confirme_et_echap_repond_non`
+(`tests/panels.rs`) et par les tests d'arguments de `restart`.
+
+### 9.1 duovicies Panneau Combat déplaçable en hauteur (2026-09-17, soir)
 
 Demande utilisateur, dans la foulée du cadenas de la bande Récap : « que l'utilisateur puisse
 slider l'overlay combat de manière verticale, peu importe le côté, pour qu'il choisisse à quelle

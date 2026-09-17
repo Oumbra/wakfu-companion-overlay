@@ -2004,6 +2004,15 @@ impl App {
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
         self.sync_topmost();
+        // **(e) Le flux de log lui-même** (2026-09-17) — un panneau Combat qui répond mais n'avance
+        // plus (« les boutons marchent, les dégâts ne montent plus ») ne se répare ni par un
+        // redessin ni par une réaffirmation topmost : ce qu'il affiche est fidèle au dernier
+        // `SessionSnapshot` publié, c'est la publication qui s'est arrêtée. Ce raccourci étant
+        // voulu comme la réponse universelle à « quelque chose s'est mal affiché » (voir plus
+        // haut), il relit désormais `wakfu.log` en entier et reconstruit la session — voir
+        // `EngineCommand::ResyncLog`. Le chien de garde du thread Engine (`IngestWatchdog`) fait
+        // de même tout seul au bout de huit secondes ; ce chemin-ci n'attend pas.
+        let _ = self.settings_tx.send(EngineCommand::ResyncLog);
         let settings_tx = self.settings_tx.clone();
         // Capturé AVANT le `move` : le thread n'a pas accès à `self` (et la combinaison peut de
         // toute façon changer entre-temps, la fenêtre Options étant ouvrable pendant l'appel).
@@ -2761,6 +2770,7 @@ impl App {
             start_with_os: autostart_actif,
             pending_install: None,
             pending_quit: false,
+            pending_restart: false,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -3558,12 +3568,19 @@ enum PostRedraw {
     /// « Recherche de mise à jour » (section « Mise à jour » de l'onglet « Paramètres ») :
     /// une vérification sans installation, demandée au thread de mise à jour.
     CheckUpdate,
+    /// « Rafraîchir le panneau de combat » (section « Combat ») : relecture complète de
+    /// `wakfu.log` demandée au thread Engine — voir `EngineCommand::ResyncLog`.
+    ResyncCombat,
     /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
     InstallUpdate,
     /// « Fermer l'overlay », **après confirmation** (pied de l'onglet « Paramètres »,
     /// 2026-09-16) : arrête le programme par le chemin de l'entrée « Quitter » de la zone de
     /// notification — le raccourci global « Quitter l'overlay » a été retiré le 2026-09-17.
     Quit,
+    /// « Redémarrer », **après confirmation** (pied de l'onglet « Paramètres », à gauche de
+    /// « Fermer l'overlay », 2026-09-17) : un process neuf est lancé (`restart::relaunch`) puis
+    /// celui-ci sort, par le même chemin que [`Self::Quit`].
+    Restart,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
     RetryUpdate,
@@ -4094,8 +4111,10 @@ impl App {
             }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
             OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+            OptionsModalAction::ResyncCombat => post_redraw = PostRedraw::ResyncCombat,
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
             OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
+            OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -4141,6 +4160,10 @@ impl App {
                     install_if_available: false,
                 });
             }
+            PostRedraw::ResyncCombat => {
+                tracing::info!(">>> Rafraîchissement du panneau de combat (fenêtre Options).");
+                let _ = self.settings_tx.send(EngineCommand::ResyncLog);
+            }
             PostRedraw::InstallUpdate => self.request_update_install(id),
             PostRedraw::RetryUpdate => {
                 let _ = self.update_command_tx.send(UpdateCommand::Check {
@@ -4154,6 +4177,19 @@ impl App {
                 logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                 event_loop.exit();
             }
+            // Même sortie que « Fermer l'overlay », un process neuf en plus — lancé AVANT de
+            // sortir (voir `restart::relaunch`). Une relance impossible ne ferme rien : l'overlay
+            // en place reste ouvert, avec la cause au journal, plutôt que de laisser l'utilisateur
+            // sans overlay du tout.
+            PostRedraw::Restart => match overlay_ui::restart::relaunch() {
+                Ok(()) => {
+                    logging::log_session_end("Redémarrer l'overlay (fenêtre Options)");
+                    event_loop.exit();
+                }
+                Err(err) => {
+                    tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
+                }
+            },
         }
     }
 }
