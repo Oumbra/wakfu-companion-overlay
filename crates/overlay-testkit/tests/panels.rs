@@ -2531,6 +2531,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
                 // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
                 countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
+                // Idem pour les deux cases de complétion de la même section (2026-09-17) :
+                // jamais touchées, donc emportées actives — le défaut demandé.
+                completion: overlay_ui::panels::suivi_tab::CompletionSettings::default(),
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
@@ -3048,6 +3051,54 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
         vec![],
         "Échap répond « Non » : ni déconnexion, ni fermeture de la fenêtre derrière"
     );
+}
+
+/// **La section « Suivi » de l'onglet « Paramètres »** — le son, la fermeture de la carte, et les
+/// deux cases qui décident de ce que devient un suivi complété (2026-09-17).
+///
+/// Sa propre capture, parce qu'aucune autre ne la montre : `capture_parametres` s'arrête au haut
+/// de l'onglet, et les sections qui défilent (« Compte », « Mise à jour ») sont bien plus bas. Les
+/// deux cases « Supprimer les éléments suivis lorsqu'ils sont complétés » et « Activer l'animation
+/// de complétion » n'auraient donc été vérifiées nulle part.
+#[test]
+fn options_parametres_section_suivi() {
+    // Voir `options_parametres_section_compte` : ce test peint sans passer par
+    // `Textures::get_or_load`, c'est `parametres_avec_notifications` qui pose le gel de version.
+    let options_state = parametres_avec_notifications();
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui({
+            let mut options_state = options_state;
+            move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                ui.style_mut().visuals.text_cursor.blink = false;
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+            }
+        });
+    harness.run();
+    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
+    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet.
+    defile_les_parametres(&mut harness, 430.0);
+    harness.snapshot("options_parametres_section_suivi");
 }
 
 /// **La section « Compte » de l'onglet « Paramètres »** (2026-09-13) — la déconnexion, qui était
