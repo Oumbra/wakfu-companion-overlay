@@ -1,10 +1,10 @@
 //! **Threads de fond partagés par les deux binaires** (2026-09-14) : compte (`spawn_auth_thread`),
 //! file de synchro (`spawn_sync_thread`), catalogue (`spawn_catalog_thread`) et référentiel de
-//! donjons (`spawn_dungeon_thread`), serveurs de jeu (`spawn_game_servers_thread`). Ils vivaient dans `main.rs` (Windows) depuis les lots L3-L5 ;
-//! rien n'y dépend de l'OS — `std::thread`, `mpsc`, `ArcSwap`, `overlay_sync` et un
-//! `EventLoopProxy` — et le binaire Linux (`bin/overlay-ui-x11.rs`) en a besoin depuis que la
-//! fenêtre de connexion lui est portée (§9.1 undecies du plan) : sortis ici tels quels, doc
-//! comprise, plutôt que dupliqués.
+//! donjons (`spawn_dungeon_thread`), serveurs de jeu (`spawn_game_servers_thread`). Ils vivaient
+//! dans `main.rs` (Windows) depuis les lots L3-L5 ; rien n'y dépend de l'OS — `std::thread`,
+//! `mpsc`, `ArcSwap`, `overlay_sync` et un `EventLoopProxy` — et le binaire Linux
+//! (`bin/wakfu-companion-overlay-x11.rs`) en a besoin depuis que la fenêtre de connexion lui est
+//! portée (§9.1 undecies du plan) : sortis ici tels quels, doc comprise, plutôt que dupliqués.
 //!
 //! Chacun signale au [`crate::startup::StartupProgress`] partagé la fin de son chargement initial,
 //! ce qui fait tomber l'écran de chargement de la fenêtre de connexion (voir `panels::login`).

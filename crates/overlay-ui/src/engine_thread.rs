@@ -1,8 +1,8 @@
 //! Thread Engine (§3 du plan) — voir la doc de `lib.rs` pour pourquoi ce module est partagé entre
-//! les deux binaires (`main.rs` Windows, `bin/overlay-ui-x11.rs` Linux) : rien ici ne dépend de
-//! l'OS, seuls les threads compte lié (Auth/Sync/Catalogue, lot L4-L5) restent Windows-only pour
-//! l'instant — le binaire Linux tourne pour l'instant uniquement en mode invité (`catalog`/
-//! `dungeons` vides, `sync_tx` vers un canal dont rien ne lit jamais le receveur).
+//! les deux binaires (`main.rs` Windows, `bin/wakfu-companion-overlay-x11.rs` Linux) : rien ici ne
+//! dépend de l'OS, seuls les threads compte lié (Auth/Sync/Catalogue, lot L4-L5) restent
+//! Windows-only pour l'instant — le binaire Linux tourne pour l'instant uniquement en mode invité
+//! (`catalog`/ `dungeons` vides, `sync_tx` vers un canal dont rien ne lit jamais le receveur).
 //!
 //! Lit `wakfu.log` en continu, alimente `overlay-engine`, publie chaque nouveau `SessionSnapshot`
 //! par `ArcSwap` et réveille le thread principal. Ne rappelle jamais l'UI directement — l'UI ne

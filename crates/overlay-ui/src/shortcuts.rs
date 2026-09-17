@@ -14,12 +14,13 @@
 //! l'onglet « Paramètres » (confirmé, 2026-09-16), doublé par l'entrée « Quitter » de la zone de
 //! notification — et Ctrl+C dans le terminal reste.
 //!
-//! Jusqu'ici chaque combinaison était une constante en dur dans `main.rs`/`bin/overlay-ui-x11.rs`
-//! (`HOTKEY_LABEL`, `DETAILS_HOTKEY_LABEL`…), doublée d'un libellé recopié à la main dans les
-//! tooltips des boutons (`panels::watchlist::control_button_row`,
-//! `panels::combat::paint_side_switch`). Ce module devient la **source unique** : la liste des
-//! actions ([`ShortcutAction`]), leur combinaison par défaut, la combinaison effective après
-//! personnalisation ([`ShortcutBindings`]) et le libellé affiché partout (`Ctrl+Shift+W`).
+//! Jusqu'ici chaque combinaison était une constante en dur dans
+//! `main.rs`/`bin/wakfu-companion-overlay-x11.rs` (`HOTKEY_LABEL`, `DETAILS_HOTKEY_LABEL`…),
+//! doublée d'un libellé recopié à la main dans les tooltips des boutons
+//! (`panels::watchlist::control_button_row`, `panels::combat::paint_side_switch`). Ce module
+//! devient la **source unique** : la liste des actions ([`ShortcutAction`]), leur combinaison par
+//! défaut, la combinaison effective après personnalisation ([`ShortcutBindings`]) et le libellé
+//! affiché partout (`Ctrl+Shift+W`).
 //!
 //! **Portée réelle des raccourcis** : `global_hotkey` (XGrabKey sous X11, `RegisterHotKey` sous
 //! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (les fenêtres portent
@@ -39,7 +40,7 @@
 //! mais la frappe est perdue pour l'application qui avait le focus.
 //!
 //! **Toutes les actions ne sont pas câblées sur les deux OS** : le binaire Linux
-//! (`bin/overlay-ui-x11.rs`) n'enregistre que les actions de
+//! (`bin/wakfu-companion-overlay-x11.rs`) n'enregistre que les actions de
 //! [`ShortcutAction::LINUX_SUPPORTED`] (voir sa doc de module : pas de thread Auth/Catalogue ni de
 //! compte lié). Les autres restent personnalisables et persistées, simplement inertes là-bas.
 
@@ -154,10 +155,10 @@ impl ShortcutAction {
         Self::FollowPartner,
     ];
 
-    /// Actions réellement enregistrées par le binaire Linux (`bin/overlay-ui-x11.rs`) — voir doc
-    /// de module. Les autres restent personnalisables et persistées là-bas (un même `config.toml`
-    /// peut servir aux deux OS), simplement sans effet : ce binaire n'a ni thread Auth/Catalogue à
-    /// rafraîchir, ni compte à déconnecter, ni fenêtre Combat à basculer.
+    /// Actions réellement enregistrées par le binaire Linux (`bin/wakfu-companion-overlay-x11.rs`)
+    /// — voir doc de module. Les autres restent personnalisables et persistées là-bas (un même
+    /// `config.toml` peut servir aux deux OS), simplement sans effet : ce binaire n'a ni thread
+    /// Auth/Catalogue à rafraîchir, ni compte à déconnecter, ni fenêtre Combat à basculer.
     ///
     /// **À tenir à jour avec ce que ce binaire câble réellement** : une action ajoutée là-bas sans
     /// être ajoutée ici ne serait jamais enregistrée auprès de l'OS.
@@ -453,12 +454,12 @@ impl ShortcutBindings {
 /// (qui doit rester en vie tant qu'on veut recevoir des événements — voir le spike S1), la table
 /// `id de HotKey -> action` consultée à la réception, et les combinaisons actuellement actives.
 ///
-/// Existe pour que `main.rs` (Windows, toutes les actions) et `bin/overlay-ui-x11.rs` (Linux, les
-/// trois de [`ShortcutAction::LINUX_SUPPORTED`]) partagent la MÊME logique d'(dés)enregistrement —
-/// devenue non triviale avec la personnalisation : il faut désenregistrer l'ancien jeu avant
-/// d'enregistrer le nouveau ([`Self::apply`]), et tout désenregistrer tant que la modale Options
-/// est ouverte ([`Self::suspend`]) sans quoi l'OS avalerait la frappe que l'utilisateur essaie
-/// justement d'assigner.
+/// Existe pour que `main.rs` (Windows, toutes les actions) et `bin/wakfu-companion-overlay-x11.rs`
+/// (Linux, les trois de [`ShortcutAction::LINUX_SUPPORTED`]) partagent la MÊME logique
+/// d'(dés)enregistrement — devenue non triviale avec la personnalisation : il faut désenregistrer
+/// l'ancien jeu avant d'enregistrer le nouveau ([`Self::apply`]), et tout désenregistrer tant que
+/// la modale Options est ouverte ([`Self::suspend`]) sans quoi l'OS avalerait la frappe que
+/// l'utilisateur essaie justement d'assigner.
 ///
 /// **Aucun `expect` sur l'enregistrement** (contrairement au code d'origine, qui paniquait) : une
 /// combinaison peut être refusée par l'OS parce qu'une AUTRE application l'a déjà prise — cas

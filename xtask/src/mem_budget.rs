@@ -13,7 +13,7 @@
 //! reflète cette portée réduite, pas la cible globale du produit — mesuré à 17,1 Mo lors de
 //! l'écriture de ce fichier (marge ~6× pour absorber la variance du runner CI et la croissance
 //! future, ex. chargement du catalogue). Voir aussi `docs/plan-architecture.md` §17.3 sur
-//! l'absence, à ce jour, d'un scénario qui piloterait le vrai binaire `overlay-ui`.
+//! l'absence, à ce jour, d'un scénario qui piloterait le vrai binaire `wakfu-companion-overlay`.
 //!
 //! **Simulation d'une session longue, pas 8 sessions indépendantes** : le fichier réel est
 //! RÉ-APPENDÉ (jamais retronqué) à un fichier temporaire suivi par un SEUL `Tailer` qui ne repart

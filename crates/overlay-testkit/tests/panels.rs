@@ -117,10 +117,10 @@ impl Textures {
         ctx: &egui::Context,
     ) -> (&PortraitAtlas, &CombatFrame, &UiIcons, &AvatarAtlas) {
         // `overlay_ui::style::apply` — MÊME style que les deux binaires (`main.rs`, `bin/
-        // overlay-ui-x11.rs`, voir sa doc), sans quoi ces snapshots resteraient sur le thème PAR
-        // DÉFAUT d'egui pour les tooltips (`egui_kittest::Harness::new_ui` crée son propre
-        // `egui::Context`, qui ne passe jamais par le point de configuration des deux binaires) et
-        // ne vaudraient plus rien pour vérifier visuellement le design system tooltip.
+        // wakfu-companion-overlay-x11.rs`, voir sa doc), sans quoi ces snapshots resteraient sur le
+        // thème PAR DÉFAUT d'egui pour les tooltips (`egui_kittest::Harness::new_ui` crée son
+        // propre `egui::Context`, qui ne passe jamais par le point de configuration des deux
+        // binaires) et ne vaudraient plus rien pour vérifier visuellement le design system tooltip.
         overlay_ui::style::apply(ctx);
         // Numéro de version FIGÉ dans toutes les captures de ce binaire de test (`v0.0.0`) : la
         // version réelle est incrémentée automatiquement à chaque commit `feat:`/`fix:`/… (voir
@@ -2132,10 +2132,11 @@ fn panneau_options_ne_panique_pas() {
 /// l'action remontée à l'hôte (`OptionsModalAction`), et le rendu ne change pas d'un pixel selon la
 /// touche pressée.
 ///
-/// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le filet
-/// global des deux hôtes (`main.rs` / `bin/overlay-ui-x11.rs`, `event_loop.exit()`) et **fermait
-/// l'overlay entier** au lieu d'annuler la saisie — la modale étant la seule fenêtre overlay
-/// focalisable (§9.1 du plan), elle était aussi la seule à pouvoir déclencher ce filet.
+/// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le
+/// filet global des deux hôtes (`main.rs` / `bin/wakfu-companion-overlay-x11.rs`,
+/// `event_loop.exit()`) et **fermait l'overlay entier** au lieu d'annuler la saisie — la modale
+/// étant la seule fenêtre overlay focalisable (§9.1 du plan), elle était aussi la seule à pouvoir
+/// déclencher ce filet.
 ///
 /// Le champ de chemin a le focus dès la première frame (`design::input::request_focus`), donc ces
 /// deux touches sont pressées **alors qu'un `TextEdit` est actif** : c'est exactement le cas où

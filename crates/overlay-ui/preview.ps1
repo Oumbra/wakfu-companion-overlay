@@ -60,13 +60,14 @@ if (-not (Test-Path $vendorDir)) {
     }
 }
 
-# Deux binaires coexistent dans le crate (wakfu-companion-overlay pour Windows, overlay-ui-x11 pour
-# Linux/X11) — cargo ne peut pas choisir seul, on détermine ici lequel lancer selon l'OS courant
-# pour que l'utilisateur n'ait jamais à s'en soucier. $IsWindows n'existe pas sous Windows
-# PowerShell 5.1 (toujours Windows dans ce cas) mais existe sous pwsh (Core, cross-plateforme).
+# Deux binaires coexistent dans le crate (wakfu-companion-overlay pour Windows,
+# wakfu-companion-overlay-x11 pour Linux/X11) — cargo ne peut pas choisir seul, on détermine ici
+# lequel lancer selon l'OS courant pour que l'utilisateur n'ait jamais à s'en soucier. $IsWindows
+# n'existe pas sous Windows PowerShell 5.1 (toujours Windows dans ce cas) mais existe sous pwsh
+# (Core, cross-plateforme).
 $isWindowsHost = $true
 if (Test-Path variable:IsWindows) { $isWindowsHost = $IsWindows }
-$binName = if ($isWindowsHost) { "wakfu-companion-overlay" } else { "overlay-ui-x11" }
+$binName = if ($isWindowsHost) { "wakfu-companion-overlay" } else { "wakfu-companion-overlay-x11" }
 
 Write-Host ""
 Write-Host "=== overlay-ui — prévisualisation ($binName) ===" -ForegroundColor Cyan

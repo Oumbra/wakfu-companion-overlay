@@ -287,7 +287,7 @@ mod imp {
         #[test]
         fn le_fichier_d_entree_apparait_et_disparait_avec_le_reglage() {
             let dir = tmp_dir("cycle");
-            let exe = Path::new("/opt/wakfu companion/overlay-ui-x11");
+            let exe = Path::new("/opt/wakfu companion/wakfu-companion-overlay-x11");
             assert!(!enabled_in(&dir), "rien n'est inscrit au départ");
 
             set_enabled_in(&dir, exe, true).expect("inscription");
@@ -306,9 +306,11 @@ mod imp {
         /// `Exec` serait compris comme une commande suivie d'un argument.
         #[test]
         fn l_entree_pointe_l_executable_entre_guillemets() {
-            let contenu = entry_contents(Path::new("/opt/wakfu companion/overlay-ui-x11"));
+            let contenu = entry_contents(Path::new(
+                "/opt/wakfu companion/wakfu-companion-overlay-x11",
+            ));
             assert!(
-                contenu.contains("Exec=\"/opt/wakfu companion/overlay-ui-x11\"\n"),
+                contenu.contains("Exec=\"/opt/wakfu companion/wakfu-companion-overlay-x11\"\n"),
                 "Exec mal formé :\n{contenu}"
             );
             assert!(contenu.starts_with("[Desktop Entry]\n"));

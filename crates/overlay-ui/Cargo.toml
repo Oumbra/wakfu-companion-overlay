@@ -5,15 +5,18 @@ edition.workspace = true
 publish.workspace = true
 description = "Fenetre overlay transparente (Windows, DirectComposition — voir S1) rendant les deux premiers panneaux de L2 (degats du combat en cours, recap de session) a partir d'overlay-engine/overlay-ingest."
 
-# **Nom de l'exécutable livré** (Windows) — `wakfu-companion-overlay.exe`, et non le nom du paquet.
+# **Nom des exécutables livrés** — `wakfu-companion-overlay.exe` sous Windows, et non le nom du
+# paquet.
 # Sans ce bloc, Cargo nomme le binaire d'après `[package] name` : l'utilisateur téléchargeait un
 # `overlay-ui.exe`, un nom de module interne qui ne dit ni le produit ni le jeu, et qui se perd dans
 # une liste de processus. Le nom des ASSETS de Release, lui, portait déjà le bon
 # (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`, voir `.github/workflows/release.yml`).
 #
-# `src/bin/*.rs` reste découvert automatiquement à côté : `overlay-ui-x11` (Linux/X11, §17.2 du
-# plan) et `overlay-focus` (gestionnaire du protocole `wakfu-companion:`, voir son en-tête) gardent
-# leur nom — le second est cherché PAR NOM par l'overlay (`turn_watch::notify`).
+# `src/bin/*.rs` reste découvert automatiquement à côté, et suit la même règle :
+# `wakfu-companion-overlay-x11` est le binaire Linux/X11 (§17.2 du plan), nommé d'après son fichier.
+# Seul `overlay-focus` garde un nom d'outil (gestionnaire du protocole `wakfu-companion:`, voir son
+# en-tête) : il est cherché PAR NOM par l'overlay (`turn_watch::notify`), le renommer casserait le
+# clic sur un toast de tour.
 [[bin]]
 name = "wakfu-companion-overlay"
 path = "src/main.rs"

@@ -10,8 +10,8 @@
 //! passe par le compte (`overlay_sync::client::fetch_settings`), jamais par ce fichier.
 //!
 //! **Priorité de résolution du chemin au démarrage** (voir `resolve_log_path`, partagé par
-//! `main.rs` et `bin/overlay-ui-x11.rs`) : argument CLI explicite > chemin sauvegardé ici (choisi
-//! via la modale Options, `panels::options_modal`) > découverte automatique
+//! `main.rs` et `bin/wakfu-companion-overlay-x11.rs`) : argument CLI explicite > chemin sauvegardé
+//! ici (choisi via la modale Options, `panels::options_modal`) > découverte automatique
 //! (`overlay_ingest::discovery::discover`).
 //!
 //! Emplacement du fichier : `directories::ProjectDirs` (déjà une dépendance de ce crate, utilisée
@@ -501,8 +501,8 @@ pub fn save(config: &OverlayConfig) {
 }
 
 /// Résout le chemin de `wakfu.log` à utiliser au démarrage — voir doc de module pour l'ordre de
-/// priorité. Partagée par `main.rs` (Windows) et `bin/overlay-ui-x11.rs` (Linux), qui appellent
-/// chacun `env::args().nth(1)` pour l'argument CLI (rien d'OS-spécifique là-dedans, mais
+/// priorité. Partagée par `main.rs` (Windows) et `bin/wakfu-companion-overlay-x11.rs` (Linux), qui
+/// appellent chacun `env::args().nth(1)` pour l'argument CLI (rien d'OS-spécifique là-dedans, mais
 /// `std::env::args` reste appelé au point d'entrée de chaque binaire plutôt qu'ici, pour ne pas
 /// faire dépendre ce module de la façon dont chaque binaire construit ses arguments).
 ///

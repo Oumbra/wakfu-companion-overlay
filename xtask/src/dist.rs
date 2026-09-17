@@ -25,7 +25,7 @@
 //! cargo run --manifest-path xtask/Cargo.toml --release -- dist \
 //!     --version 0.21.0 --commit a1b2c3d \
 //!     --asset windows-x86_64=target/release/wakfu-companion-overlay.exe \
-//!     --asset linux-x86_64=target/release/overlay-ui-x11 \
+//!     --asset linux-x86_64=target/release/wakfu-companion-overlay-x11 \
 //!     --out dist [--previous previous/] [--min-version 0.17.0] [--notes-url URL] \
 //!     [--public-key wakfu-overlay.pub] [--unsigned]
 //! ```
@@ -535,7 +535,7 @@ mod tests {
             gzip(&old).unwrap(),
         )
         .unwrap();
-        let bin = tmp.join("overlay-ui-x11");
+        let bin = tmp.join("wakfu-companion-overlay-x11");
         fs::write(&bin, &new).unwrap();
 
         let args = Args::parse(

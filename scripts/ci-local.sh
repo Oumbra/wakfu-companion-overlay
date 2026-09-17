@@ -53,8 +53,8 @@ case "${1:-}" in
 esac
 
 # Windows (Git Bash / MSYS) ne compile pas les mêmes cibles que Linux : `overlay-ui::main` importe
-# `windows::` sans `cfg` (Windows uniquement), et `overlay-ui-x11` vise X11 (Linux uniquement).
-# Même découpage que le CI, qui a un job par plateforme pour cette raison.
+# `windows::` sans `cfg` (Windows uniquement), et `wakfu-companion-overlay-x11` vise X11 (Linux
+# uniquement). Même découpage que le CI, qui a un job par plateforme pour cette raison.
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) PLATFORM=windows ;;
   *)                    PLATFORM=linux ;;
@@ -85,7 +85,7 @@ step "fmt — xtask"                    cargo fmt --manifest-path xtask/Cargo.to
 
 step "clippy — crates métier"         cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
 if [ "$PLATFORM" = linux ]; then
-  step "clippy — overlay-ui (lib + x11)" cargo clippy -p overlay-ui --lib --bin overlay-ui-x11 -- -D warnings
+  step "clippy — overlay-ui (lib + x11)" cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay-x11 -- -D warnings
   step "clippy — overlay-testkit"        cargo clippy -p overlay-testkit --all-targets -- -D warnings
 fi
 step "clippy — xtask"                 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
@@ -186,8 +186,8 @@ etape_captures_conteneur() {
 if [ "$LINT_ONLY" -eq 0 ]; then
   step "test — crates métier"         cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
   if [ "$PLATFORM" = linux ]; then
-    step "test — overlay-ui (lib)"    cargo test --no-fail-fast -p overlay-ui --lib
-    step "build — overlay-ui-x11"     cargo build -p overlay-ui --bin overlay-ui-x11
+    step "test — overlay-ui (lib)"     cargo test --no-fail-fast -p overlay-ui --lib
+    step "build — binaire Linux/X11"   cargo build -p overlay-ui --bin wakfu-companion-overlay-x11
     # GATE du CI depuis le 2026-09-13 (§17.1 du plan). Bloquant ici seulement si le rendu de cette
     # machine est prouvé être celui du CI — voir le bloc « Captures » plus haut.
     if [ "$CAPTURES_CONTENEUR" -eq 1 ]; then

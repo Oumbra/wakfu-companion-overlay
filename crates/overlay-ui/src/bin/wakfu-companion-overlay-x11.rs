@@ -1,11 +1,11 @@
-//! `overlay-ui-x11` — binaire Linux/X11 (docs/plan-architecture.md §17.2, Niveau 2 : critère de
-//! sortie de S3, point « multi-fenêtres réel côté `overlay-ui` »). Réutilise de la LIB tout ce qui
-//! ne dépend pas de l'OS (voir la doc de `lib.rs`) : `frame::render`, `engine_thread::
+//! `wakfu-companion-overlay-x11` — binaire Linux/X11 (docs/plan-architecture.md §17.2, Niveau 2 :
+//! critère de sortie de S3, point « multi-fenêtres réel côté `overlay-ui` »). Réutilise de la LIB
+//! tout ce qui ne dépend pas de l'OS (voir la doc de `lib.rs`) : `frame::render`, `engine_thread::
 //! spawn_engine_thread`, `game_window` n'est PAS réutilisé ici — voir plus bas pourquoi ce binaire
 //! parle directement à `overlay_platform::linux::x11` — `panels`, `render_content`, `logging`.
-//! Fenêtrage réel via winit natif X11 (`WindowLevel`, `set_cursor_hittest`,
-//! `with_x11_window_type`) — mêmes primitives déjà validées par `spikes/s3-window-linux/`, voir
-//! son README pour la preuve programmatique sous Xvfb (Shape, stacking, focus).
+//! Fenêtrage réel via winit natif X11 (`WindowLevel`, `set_cursor_hittest`, `with_x11_window_type`)
+//! — mêmes primitives déjà validées par `spikes/s3-window-linux/`, voir son README pour la preuve
+//! programmatique sous Xvfb (Shape, stacking, focus).
 //!
 //! **Compte, synchro et catalogue depuis le 2026-09-14** : les threads de fond sont partagés avec
 //! Windows (`overlay_ui::background` — Auth, Sync, Catalogue, Donjons) et la fenêtre de connexion
@@ -43,8 +43,8 @@ fn main() {
 #[cfg(target_os = "windows")]
 fn main() {
     eprintln!(
-        "overlay-ui-x11 est réservé à Linux/X11 (voir docs/plan-architecture.md §17.2) — \
-         utilisez le binaire overlay-ui sous Windows."
+        "wakfu-companion-overlay-x11 est réservé à Linux/X11 (voir docs/plan-architecture.md \
+         §17.2) — utilisez le binaire wakfu-companion-overlay sous Windows."
     );
     std::process::exit(1);
 }
@@ -2474,7 +2474,7 @@ mod linux_main {
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("overlay-ui-x11-device"),
+                label: Some("wakfu-companion-overlay-x11-device"),
                 required_features: wgpu::Features::empty(),
                 // Plancher `webgl2` (l'overlay ne demande rien de plus), mais avec les limites
                 // de RÉSOLUTION de l'adaptateur : la swapchain de la confirmation de remise à
@@ -2566,7 +2566,8 @@ mod linux_main {
                     tracing::error!("  - {}", candidate.display());
                 }
                 tracing::error!(
-                    "Précisez le chemin explicitement : cargo run -p overlay-ui --bin overlay-ui-x11 -- <chemin>"
+                    "Précisez le chemin explicitement : cargo run -p overlay-ui \
+                     --bin wakfu-companion-overlay-x11 -- <chemin>"
                 );
                 logging::log_session_end("échec de démarrage (wakfu.log introuvable)");
                 std::process::exit(1);

@@ -45,9 +45,9 @@ fi
 # `--` : tout ce qui suit est exécuté DANS le conteneur.
 #
 # Paquets : `base-devel` (gcc, ld, make) pour le linker de Rust ; les en-têtes X11 exigées par
-# winit/x11rb (`overlay-ui-x11`) ; `alsa-lib` pour `rodio` (sons d'alerte) ; `vulkan-icd-loader` +
-# `mesa` + `vulkan-radeon` pour wgpu sur l'APU AMD du Deck ; `curl`/`patch`/`tar` pour
-# `patches/setup-vendor.sh` ; `git` pour les dépendances de `cargo`.
+# winit/x11rb (`wakfu-companion-overlay-x11`) ; `alsa-lib` pour `rodio` (sons d'alerte) ;
+# `vulkan-icd-loader` + `mesa` + `vulkan-radeon` pour wgpu sur l'APU AMD du Deck ;
+# `curl`/`patch`/`tar` pour `patches/setup-vendor.sh` ; `git` pour les dépendances de `cargo`.
 printf '\n\033[1m▶ Dépendances système dans le conteneur\033[0m\n'
 distrobox enter --name "$CONTAINER" -- bash -lc '
   set -euo pipefail

@@ -132,14 +132,14 @@ jobs:
         with:
           workspaces: . -> target
           key: release
-      - name: cargo build --release (overlay-ui-x11)
+      - name: cargo build --release (wakfu-companion-overlay-x11)
         env:
           WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
-        run: cargo build --release -p overlay-ui --bin overlay-ui-x11
+        run: cargo build --release -p overlay-ui --bin wakfu-companion-overlay-x11
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
-          path: target/release/overlay-ui-x11
+          path: target/release/wakfu-companion-overlay-x11
           if-no-files-found: error
           retention-days: 3
 
@@ -173,12 +173,12 @@ jobs:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
-          chmod +x binaries/linux-x86_64/overlay-ui-x11
+          chmod +x binaries/linux-x86_64/wakfu-companion-overlay-x11
           cargo run --manifest-path xtask/Cargo.toml --release -- dist \
             --version "${{ needs.version.outputs.version }}" \
             --commit "${{ needs.version.outputs.commit }}" \
             --asset "windows-x86_64=binaries/windows-x86_64/wakfu-companion-overlay.exe" \
-            --asset "linux-x86_64=binaries/linux-x86_64/overlay-ui-x11" \
+            --asset "linux-x86_64=binaries/linux-x86_64/wakfu-companion-overlay-x11" \
             --previous previous \
             --public-key wakfu-overlay.pub \
             --notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/${{ needs.version.outputs.tag }}" \

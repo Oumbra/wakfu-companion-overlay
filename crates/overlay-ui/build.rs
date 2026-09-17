@@ -61,7 +61,7 @@ fn main() {
 /// pour la machine qui compile), ce qui est exactement la condition des `build-dependencies` de
 /// `Cargo.toml` : sans cet accord, `winresource`/`image` seraient absentes du graphe et ce fichier
 /// ne compilerait pas sous Linux. La CIBLE, elle, est revérifiée ci-dessous — compiler
-/// `overlay-ui-x11` depuis Windows ne doit pas embarquer de ressource Windows.
+/// `wakfu-companion-overlay-x11` depuis Windows ne doit pas embarquer de ressource Windows.
 #[cfg(not(windows))]
 fn embed_windows_resources() {
     // Cross-compilation vers Windows depuis Linux : `cargo check --target x86_64-pc-windows-gnu`

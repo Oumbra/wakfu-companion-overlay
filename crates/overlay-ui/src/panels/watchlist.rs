@@ -921,10 +921,10 @@ pub struct WatchlistAssets<'a> {
 /// **2026-09-08 (modale Options)** : `show` renvoie désormais [`WatchlistOutcome`] plutôt qu'un
 /// simple `bool` — le clic sur "Options" (`control_button_row`) doit remonter jusqu'à
 /// `render_content::paint_content`, qui seul peut déclencher l'ouverture d'une fenêtre OS dédiée
-/// (`main.rs`/`bin/overlay-ui-x11.rs`, nouveau cas `OverlayKind::Options`) ; `close_toast` garde
-/// exactement son rôle d'avant (fermeture du toast, voir plus bas). Le clic sur "+" remonte de la
-/// même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même mécanisme, pour
-/// ouvrir la même fenêtre sur un autre onglet.
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, nouveau cas `OverlayKind::Options`) ;
+/// `close_toast` garde exactement son rôle d'avant (fermeture du toast, voir plus bas). Le clic sur
+/// "+" remonte de la même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même
+/// mécanisme, pour ouvrir la même fenêtre sur un autre onglet.
 ///
 /// `tracking_enabled` : état de la case « Activer le suivi » (`panels::feature_switch`). Décochée,
 /// `entries` est vide (l'hôte n'en transmet aucune, voir `main.rs`) ET les boutons « + »/« − »

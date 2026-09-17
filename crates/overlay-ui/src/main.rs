@@ -130,7 +130,7 @@ use winit::platform::windows::WindowAttributesExtWindows;
 // DÉFAUT, inchangée par rapport aux anciennes constantes `HOTKEY_LABEL`/`DETAILS_HOTKEY_LABEL`/…,
 // dont la doc a suivi là-bas), `ShortcutBindings` (les combinaisons effectives, lues de
 // `config.toml`) et `ShortcutRegistry` (l'enregistrement auprès de l'OS, partagé avec
-// `bin/overlay-ui-x11.rs`). `App::hotkeys` porte le tout.
+// `bin/wakfu-companion-overlay-x11.rs`). `App::hotkeys` porte le tout.
 
 /// Voir `App::sync_topmost`.
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -294,8 +294,8 @@ const GAME_RECAP_EDGE_MARGIN_PX: i32 = 4;
 // `overlay_ui::render_content` (2026-09-03, §17.1 du plan) — voir leur doc là-bas, importés en
 // tête de ce fichier. Rien ne change à leur usage ici, seul leur PROPRIÉTAIRE change : la
 // construction d'UI (`render_content::build_ui`) doit pouvoir être appelée par un futur harnais
-// de rendu offscreen (`overlay-testkit`) sans dépendre du binaire `overlay-ui`, qui reste
-// Windows-only (import inconditionnel de `windows::`, voir plus haut).
+// de rendu offscreen (`overlay-testkit`) sans dépendre du binaire `wakfu-companion-overlay`, qui
+// reste Windows-only (import inconditionnel de `windows::`, voir plus haut).
 
 // `EngineCommand`/`SyncCommand`/`EngineHandles`/`spawn_engine_thread` ont migré vers
 // `overlay_ui::engine_thread` (§17.2 du plan, Niveau 2) — voir sa doc, importés en tête de ce
@@ -343,8 +343,8 @@ struct OverlayWindow {
     combat_metric: CombatMetric,
     /// État de la modale Options (2026-09-08, §9 du plan) — `Some` UNIQUEMENT pour `kind ==
     /// OverlayKind::Options`, voir `App::open_options_modal`. Même remarque que
-    /// `bin/overlay-ui-x11.rs` (code partagé côté `panels::options_modal`, duplication assumée
-    /// côté fenêtrage OS comme le reste de ce fichier).
+    /// `bin/wakfu-companion-overlay-x11.rs` (code partagé côté `panels::options_modal`, duplication
+    /// assumée côté fenêtrage OS comme le reste de ce fichier).
     options_state: Option<OptionsModalState>,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour `kind ==
     /// OverlayKind::Login`, voir `App::create_login_window`. Même règle qu'`options_state`.
@@ -2245,12 +2245,12 @@ impl App {
 
     /// Ouvre la modale Options (2026-09-08, §9 du plan) — bouton "Options" du carré de contrôle
     /// (`anchor_rect` = `game_rect` de la fenêtre Suivi cliquée) ou raccourci global
-    /// `ShortcutAction::Options` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il y
-    /// en a une). Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai
-    /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant
-    /// d'en rouvrir une. Même méthode que `bin/overlay-ui-x11.rs` (dupliquée, voir la doc de
-    /// `lib.rs` pour pourquoi le fenêtrage OS n'est PAS partagé entre les deux binaires).
-    /// Ouvre la modale Options, **rattachée à une fenêtre de jeu**.
+    /// `ShortcutAction::Options` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il
+    /// y en a une). Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai
+    /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant d'en
+    /// rouvrir une. Même méthode que `bin/wakfu-companion-overlay-x11.rs` (dupliquée, voir la doc
+    /// de `lib.rs` pour pourquoi le fenêtrage OS n'est PAS partagé entre les deux binaires). Ouvre
+    /// la modale Options, **rattachée à une fenêtre de jeu**.
     ///
     /// `anchor` est la fenêtre depuis laquelle elle est demandée : le bouton « Options » d'un
     /// bandeau Suivi la donne directement. Le raccourci global, lui, n'en a pas — il prend alors

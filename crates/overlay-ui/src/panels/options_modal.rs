@@ -1,9 +1,9 @@
-//! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
-//! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
-//! (voir `main.rs`/`bin/overlay-ui-x11.rs`). L'onglet "Paramètres" expose les réglages LOCAUX de
-//! l'overlay : le lancement avec l'ordinateur (2026-09-16), le chemin de `wakfu.log` à suivre, et
-//! la section « Combat » — le détail des combats et le suivi des sorts (2026-09-15), l'affichage
-//! du panneau de combat en dehors des combats (2026-09-13) et la notification de tour
+//! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré de
+//! contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O` (voir
+//! `main.rs`/`bin/wakfu-companion-overlay-x11.rs`). L'onglet "Paramètres" expose les réglages
+//! LOCAUX de l'overlay : le lancement avec l'ordinateur (2026-09-16), le chemin de `wakfu.log` à
+//! suivre, et la section « Combat » — le détail des combats et le suivi des sorts (2026-09-15),
+//! l'affichage du panneau de combat en dehors des combats (2026-09-13) et la notification de tour
 //! (2026-09-14). Tous sont persistés par `config::OverlayConfig`, jamais sur le compte —
 //! contrairement aux onglets "Suivi" et "Alertes".
 //!
@@ -76,11 +76,12 @@
 //! reste ici, `MODAL_BODY_TINT`), et les deux angles BAS sont désormais portés par l'alpha de la
 //! texture, plus par un `corner_radius`.
 //!
-//! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer l'INTENTION
-//! de l'utilisateur (`OptionsModalAction`) — c'est l'appelant (`main.rs`/`bin/overlay-ui-x11.rs`,
-//! qui seuls savent comment déclencher un dialogue de fichier natif et parler au thread Engine) qui
-//! valide via `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`]
-//! en retour pour le prochain redessin.
+//! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer
+//! l'INTENTION de l'utilisateur (`OptionsModalAction`) — c'est l'appelant
+//! (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, qui seuls savent comment déclencher un dialogue
+//! de fichier natif et parler au thread Engine) qui valide via
+//! `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`] en
+//! retour pour le prochain redessin.
 
 use overlay_sync::update::{self, UpdateStatus};
 
@@ -197,7 +198,7 @@ const RESUME_FIELD_WIDTH: f32 = 56.0;
 /// la composition de la liste suivie, « Options » y sert donc à autre chose : le chemin de
 /// `wakfu.log`). Chacun a un raccourci global qui le double (`Ctrl+Shift+A`/`Ctrl+Shift+O`) et doit
 /// mener au MÊME endroit — l'un et l'autre passent l'onglet à `App::open_options_modal`
-/// (`main.rs`/`bin/overlay-ui-x11.rs`) explicitement, sans jamais s'en remettre à
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`) explicitement, sans jamais s'en remettre à
 /// [`OptionsTab::default`] : un bouton et son raccourci qui atterriraient sur deux onglets
 /// différents serait le bug exact corrigé ce jour-là (retour utilisateur explicite).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +232,7 @@ impl Default for OptionsTab {
 }
 
 /// État mutable de la modale, propriété de la fenêtre OS qui l'affiche (voir
-/// `main.rs`/`bin/overlay-ui-x11.rs`, nouveau champ `OverlayWindow` réservé au cas
+/// `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, nouveau champ `OverlayWindow` réservé au cas
 /// `OverlayKind::Options`) — persiste d'une frame à l'autre, contrairement à [`OptionsModalAction`]
 /// qui ne vit que le temps d'un `show`.
 #[derive(Debug, Default, Clone)]
@@ -1535,12 +1536,13 @@ pub fn show(
     // Clavier — lu APRÈS les boutons : un clic de cette frame l'emporte sur une touche de la même
     // frame (cas de figure théorique, mais l'ordre doit être décidé plutôt que subi).
     //
-    // Ces deux touches sont traitées ICI, dans le panneau, et non par l'hôte, pour deux raisons.
-    // La première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord,
-    // il remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons
-    // du pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un
-    // Échap destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay
-    // entier (voir `main.rs`/`bin/overlay-ui-x11.rs`, où ce filet exclut désormais cette fenêtre).
+    // Ces deux touches sont traitées ICI, dans le panneau, et non par l'hôte, pour deux raisons. La
+    // première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord, il
+    // remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons du
+    // pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un Échap
+    // destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay entier
+    // (voir `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, où ce filet exclut désormais cette
+    // fenêtre).
     //
     // `TextEdit` ne retire pas ces événements de l'entrée globale (il travaille sur une copie
     // filtrée, `InputState::filtered_events`) : les lire ici reste fiable même quand le champ de

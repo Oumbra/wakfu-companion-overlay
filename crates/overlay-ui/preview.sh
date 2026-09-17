@@ -5,8 +5,8 @@
 #   1. Prépare vendor/wgpu-hal-30.0.1 (patch DirectComposition, voir patches/setup-vendor.sh) s'il
 #      est absent : `[patch.crates-io]` du Cargo.toml racine s'applique aussi sous Linux, sans ce
 #      dossier AUCUNE commande cargo touchant overlay-ui ne démarre.
-#   2. `cargo run -p overlay-ui --bin overlay-ui-x11 --profile preview` : compile puis lance
-#      directement les fenêtres overlay, câblées sur overlay-ingest + overlay-engine. Le profil
+#   2. `cargo run -p overlay-ui --bin wakfu-companion-overlay-x11 --profile preview` : compile puis
+#      lance directement les fenêtres overlay, câblées sur overlay-ingest + overlay-engine. Le profil
 #      `preview` (Cargo.toml racine) optimise comme `release` mais sans LTO fat ni
 #      `codegen-units = 1`, qui ne servent qu'au binaire livré et coûtaient 5 à 10 min par relance.
 #
@@ -20,7 +20,7 @@
 # clic-traversant (hotkey global), Ctrl+Shift+Q ou Ctrl+C quitte — combinaisons par défaut,
 # modifiables dans l'onglet Raccourcis des Options. Ce binaire ne câble que quatre des neuf actions
 # (bascule, quitter, Options, sélection multiple) — voir la doc de tête de
-# src/bin/overlay-ui-x11.rs.
+# src/bin/wakfu-companion-overlay-x11.rs.
 #
 # Usage :
 #   bash crates/overlay-ui/preview.sh                  # découverte automatique du wakfu.log
@@ -61,14 +61,14 @@ fi
 # Le binaire parle X11 (XWayland compris) : sans $DISPLAY, `GameWindowTracker::connect()` panique
 # avec un message bien moins clair que celui-ci.
 if [ -z "${DISPLAY:-}" ]; then
-  echo "\$DISPLAY est vide : overlay-ui-x11 a besoin d'un serveur X11 (XWayland sous KDE Wayland)." >&2
+  echo "\$DISPLAY est vide : ce binaire a besoin d'un serveur X11 (XWayland sous KDE Wayland)." >&2
   echo "Lancer ce script depuis une session graphique de bureau (mode Bureau sur Steam Deck)." >&2
   exit 1
 fi
 
-# Deux binaires coexistent dans le crate (overlay-ui pour Windows, overlay-ui-x11 pour Linux/X11) —
-# cargo ne peut pas choisir seul ; ici on est forcément sous Linux.
-printf '\n\033[36m=== overlay-ui — prévisualisation (overlay-ui-x11) ===\033[0m\n'
+# Deux binaires coexistent dans le crate (overlay-ui pour Windows, wakfu-companion-overlay-x11 pour
+# Linux/X11) — cargo ne peut pas choisir seul ; ici on est forcément sous Linux.
+printf '\n\033[36m=== overlay-ui — prévisualisation (wakfu-companion-overlay-x11) ===\033[0m\n'
 printf '\033[36mCtrl+Shift+W = bascule interactif / clic-traversant  |  Ctrl+Shift+Q ou Ctrl+C = quitter\033[0m\n'
 printf '\033[36mLes fenêtres overlay ne s’affichent qu’au-dessus d’une fenêtre de jeu Wakfu ouverte.\033[0m\n\n'
 
@@ -84,7 +84,7 @@ else
   printf '\033[90mAPI : déploiement dev (profil %s)\033[0m\n\n' "$PROFILE"
 fi
 
-CARGO_ARGS=(run -p overlay-ui --bin overlay-ui-x11 --profile "$PROFILE")
+CARGO_ARGS=(run -p overlay-ui --bin wakfu-companion-overlay-x11 --profile "$PROFILE")
 [ -n "$LOG_PATH" ] && CARGO_ARGS+=(-- "$LOG_PATH")
 
 exec cargo "${CARGO_ARGS[@]}"

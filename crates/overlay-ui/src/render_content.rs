@@ -36,14 +36,14 @@ pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 /// jamais s'attaquer à la cause : l'absence de place elle-même).
 ///
 /// Valeur choisie par observation du rendu offscreen (`overlay-testkit`, §17.1 du plan) : le popup
-/// par défaut d'egui (`design::tooltip`, fond plein, `inner_margin` 8px) contenant
-/// une étiquette courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
+/// par défaut d'egui (`design::tooltip`, fond plein, `inner_margin` 8px) contenant une étiquette
+/// courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
 /// `design::tokens::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
-/// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite :
-/// « agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
+/// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite : «
+/// agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
 /// jeu, décision non remise en cause ici (voir `main.rs::GAME_EDGE_MARGIN_PX`) — `main.rs`/`bin/
-/// overlay-ui-x11.rs` agrandissent `WINDOW_SIZE` de ce même montant pour que le reste du panneau ne
-/// soit pas compressé d'autant.
+/// wakfu-companion-overlay-x11.rs` agrandissent `WINDOW_SIZE` de ce même montant pour que le reste
+/// du panneau ne soit pas compressé d'autant.
 pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 
 /// Espace réservé **sous** la bande du panneau Suivi, pour ses infobulles — voir
@@ -132,7 +132,8 @@ pub enum OverlayKind {
     /// `Combat`/`Watchlist`, jamais créée automatiquement par `sync_windows` (une par fenêtre de
     /// jeu trouvée) : cette fenêtre OS est ouverte/fermée à la demande (clic sur le bouton
     /// "Options" du carré de contrôle, ou raccourci `Ctrl+Shift+O`), voir
-    /// `main.rs::App::open_options_modal`/`bin/overlay-ui-x11.rs` (même méthode dupliquée).
+    /// `main.rs::App::open_options_modal`/`bin/wakfu-companion-overlay-x11.rs` (même méthode
+    /// dupliquée).
     ///
     /// **Rattachée à une fenêtre de jeu, elle la couvre entière** (2026-09-17, décision
     /// utilisateur) : un voile sur le jeu et ses overlays, la modale centrée dedans à sa taille
@@ -360,11 +361,11 @@ pub struct RenderContent<'a> {
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
-/// `bool` (`close_toast` seul) depuis le 2026-09-08 : la modale Options ajoute deux autres
-/// signaux que `paint_content` doit remonter à l'appelant réel (`main.rs`/`bin/overlay-ui-x11.rs`,
-/// seuls capables de créer une fenêtre OS ou de lancer un dialogue de fichier natif) SANS que
-/// `paint_content`/`build_ui` eux-mêmes en dépendent — voir la doc de tête du module pour pourquoi
-/// ces deux fonctions restent PURES.
+/// `bool` (`close_toast` seul) depuis le 2026-09-08 : la modale Options ajoute deux autres signaux
+/// que `paint_content` doit remonter à l'appelant réel
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, seuls capables de créer une fenêtre OS ou de
+/// lancer un dialogue de fichier natif) SANS que `paint_content`/`build_ui` eux-mêmes en dépendent
+/// — voir la doc de tête du module pour pourquoi ces deux fonctions restent PURES.
 #[derive(Debug, Default)]
 pub struct RenderOutcome {
     /// Voir la doc historique de `build_ui` : fermeture du toast de suivi (clic sur la carte ou sa
@@ -710,10 +711,11 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // est `Some` uniquement pour ce `kind` (voir la doc de `RenderContent::options`) ;
                 // un appelant qui créerait une fenêtre `OverlayKind::Options` sans fournir cet état
                 // ne verrait simplement rien peint ici plutôt que de paniquer — jamais souhaitable
-                // en pratique (voir `main.rs`/`bin/overlay-ui-x11.rs`, qui le fournissent toujours
-                // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
-                // Fenêtre de connexion (2026-09-14) — voir `panels::login`. `login` est `Some`
-                // uniquement pour ce `kind` (même règle et même repli silencieux que `options`).
+                // en pratique (voir `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, qui le
+                // fournissent toujours pour ce cas), mais plus sûr qu'un `expect` sur un chemin de
+                // rendu. Fenêtre de connexion (2026-09-14) — voir `panels::login`. `login` est
+                // `Some` uniquement pour ce `kind` (même règle et même repli silencieux que
+                // `options`).
                 OverlayKind::Login => {
                     if let Some(state) = login {
                         let login_outcome = panels::login::show(

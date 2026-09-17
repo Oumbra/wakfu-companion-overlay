@@ -308,15 +308,16 @@
 //! entre les boutons de la planche de référence.
 //!
 //! **Refonte 2026-09-06 (marge du panneau, 15e retour)** : les refontes précédentes du 8e au 10e
-//! retour n'avaient corrigé que les REPLIS du placement (aujourd'hui dans `design::tooltip`) (quel `RectAlign::BOTTOM*`
-//! choisir une fois `TOP` rejeté) sans jamais s'attaquer à la cause — le switch Alliés/Ennemis reste
-//! collé au bord SUPÉRIEUR du panneau (`inner_margin` nul), donc `TOP` échoue TOUJOURS pour lui,
-//! quel que soit le repli disponible : les deux infobulles s'affichaient en dessous plutôt qu'au-
-//! dessus (nouveau retour utilisateur explicite : « les tooltips du switch alliés/ennemis
-//! s'affichent en dessous au lieu d'au dessus [...] agrandis légèrement l'overlay combat »). Voir
-//! `render_content::COMBAT_TOP_MARGIN` : le panneau gagne une marge haute (44px) suffisante pour que
-//! `TOP` tienne enfin — la fenêtre Combat (`main.rs`/`bin/overlay-ui-x11.rs::WINDOW_SIZE`) est
-//! agrandie d'autant pour ne rien compresser d'autre.
+//! retour n'avaient corrigé que les REPLIS du placement (aujourd'hui dans `design::tooltip`) (quel
+//! `RectAlign::BOTTOM*` choisir une fois `TOP` rejeté) sans jamais s'attaquer à la cause — le
+//! switch Alliés/Ennemis reste collé au bord SUPÉRIEUR du panneau (`inner_margin` nul), donc `TOP`
+//! échoue TOUJOURS pour lui, quel que soit le repli disponible : les deux infobulles s'affichaient
+//! en dessous plutôt qu'au- dessus (nouveau retour utilisateur explicite : « les tooltips du switch
+//! alliés/ennemis s'affichent en dessous au lieu d'au dessus [...] agrandis légèrement l'overlay
+//! combat »). Voir `render_content::COMBAT_TOP_MARGIN` : le panneau gagne une marge haute (44px)
+//! suffisante pour que `TOP` tienne enfin — la fenêtre Combat
+//! (`main.rs`/`bin/wakfu-companion-overlay-x11.rs::WINDOW_SIZE`) est agrandie d'autant pour ne rien
+//! compresser d'autre.
 //!
 //! **Refonte 2026-09-07 (vision ennemie, scroll infini)** — demande utilisateur explicite (les
 //! breaches peuvent aligner 40 à 60+ monstres, jamais affichables en liste plate lisible) :
@@ -399,7 +400,8 @@
 //! « Paramètres » (`panels::feature_switch::FeatureToggles`) :
 //!
 //! - « Activer le détail des combats » coupe le panneau ENTIER — c'est [`should_show`] qui le dit,
-//!   et les deux hôtes qui masquent la fenêtre OS (`main.rs`/`bin/overlay-ui-x11.rs`). Ce module
+//!   et les deux hôtes qui masquent la fenêtre OS
+//!   (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`). Ce module
 //!   ne peint donc jamais avec cette case décochée.
 //! - « Activer le suivi des sorts » coupe la seule ligne de sorts (paramètre `spells_enabled` de
 //!   [`show`], déjà combiné avec la case ci-dessus par l'hôte) : le bloc `combat_spell_block`,
@@ -1276,9 +1278,10 @@ pub(crate) fn format_fr_thousands(n: i64) -> String {
 /// entière est coupée, et une case d'encombrement (`always_visible`) ne peut pas rallumer un
 /// panneau que son interrupteur éteint. C'est la raison de l'ordre des deux tests ci-dessous.
 ///
-/// Vit ici, et pas dans les deux hôtes qui l'appliquent (`main.rs`/`bin/overlay-ui-x11.rs`, où le
-/// fenêtrage OS est délibérément dupliqué — voir la doc de `lib.rs`) : c'est une règle du panneau
-/// Combat, la même sous Windows et sous X11, et elle se teste sans fenêtre.
+/// Vit ici, et pas dans les deux hôtes qui l'appliquent
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, où le fenêtrage OS est délibérément dupliqué —
+/// voir la doc de `lib.rs`) : c'est une règle du panneau Combat, la même sous Windows et sous X11,
+/// et elle se teste sans fenêtre.
 pub fn should_show(
     snapshot: &SessionSnapshot,
     character_name: &str,

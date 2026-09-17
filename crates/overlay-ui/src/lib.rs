@@ -5,18 +5,18 @@
 //! uniquement) reste seul responsable du fenêtrage réel (winit/wgpu), des threads de fond et du
 //! câblage complet de l'application.
 //!
-//! `game_window`, `alert_sound`, `frame` et `engine_thread` sont exposés ici (§17.2 du plan,
-//! Niveau 2) bien qu'ils ne servent à AUCUN rendu offscreen — contrairement aux autres modules de
-//! cette liste, leur raison d'être n'est pas `overlay-testkit` mais de permettre à un DEUXIÈME
-//! binaire (`src/bin/overlay-ui-x11.rs`, Linux) de réutiliser tel quel tout ce qui, dans l'ancien
-//! `main.rs`, ne dépendait d'aucune API Windows : la découverte de fenêtre de jeu (`game_window`,
-//! déjà câblée sur `overlay_platform::linux::x11` côté Linux), les sons d'alerte (`alert_sound`,
-//! rodio pur, jamais d'appel Win32), la boucle de peinture par frame (`frame::render`, générique
-//! wgpu/egui) et le thread d'ingestion (`engine_thread::spawn_engine_thread`, aucun appel
-//! Windows). Seule `init_gpu` (choix du backend GPU — `DX12`/`DirectComposition` côté Windows,
-//! `Vulkan`/`GL` côté Linux, voir `spikes/s3-window-linux/src/main.rs`) reste dupliquée entre les
-//! deux binaires : ce n'est PAS du code partageable, le choix de backend diffère fondamentalement
-//! d'un OS à l'autre (§6.2 du plan).
+//! `game_window`, `alert_sound`, `frame` et `engine_thread` sont exposés ici (§17.2 du plan, Niveau
+//! 2) bien qu'ils ne servent à AUCUN rendu offscreen — contrairement aux autres modules de cette
+//! liste, leur raison d'être n'est pas `overlay-testkit` mais de permettre à un DEUXIÈME binaire
+//! (`src/bin/wakfu-companion-overlay-x11.rs`, Linux) de réutiliser tel quel tout ce qui, dans
+//! l'ancien `main.rs`, ne dépendait d'aucune API Windows : la découverte de fenêtre de jeu
+//! (`game_window`, déjà câblée sur `overlay_platform::linux::x11` côté Linux), les sons d'alerte
+//! (`alert_sound`, rodio pur, jamais d'appel Win32), la boucle de peinture par frame
+//! (`frame::render`, générique wgpu/egui) et le thread d'ingestion
+//! (`engine_thread::spawn_engine_thread`, aucun appel Windows). Seule `init_gpu` (choix du backend
+//! GPU — `DX12`/`DirectComposition` côté Windows, `Vulkan`/`GL` côté Linux, voir
+//! `spikes/s3-window-linux/src/main.rs`) reste dupliquée entre les deux binaires : ce n'est PAS du
+//! code partageable, le choix de backend diffère fondamentalement d'un OS à l'autre (§6.2 du plan).
 //!
 //! `logging` (initialisation `tracing`, gestionnaire Ctrl+C) est également générique — exposé pour
 //! la même raison.
@@ -28,9 +28,10 @@
 //! sous Linux), et la sélection du personnage visé (`chat_command::partner_character`) est une
 //! fonction pure testée ici plutôt que dupliquée dans chaque binaire.
 //!
-//! `config` (2026-09-08, modale Options — §9 du plan) : persistance du chemin de `wakfu.log`
-//! choisi par l'utilisateur, même raison que le paragraphe ci-dessus (aucun appel Windows,
-//! `resolve_log_path`/`save` appelés à l'identique par `main.rs` et `bin/overlay-ui-x11.rs`).
+//! `config` (2026-09-08, modale Options — §9 du plan) : persistance du chemin de `wakfu.log` choisi
+//! par l'utilisateur, même raison que le paragraphe ci-dessus (aucun appel Windows,
+//! `resolve_log_path`/`save` appelés à l'identique par `main.rs` et
+//! `bin/wakfu-companion-overlay-x11.rs`).
 //!
 //! Modules volontairement absents d'ici (restent privés à `main.rs`, spécifiques au fenêtrage
 //! Win32/aux threads compte lié L4-L5, sans intérêt pour un harnais de rendu offscreen NI pour le
