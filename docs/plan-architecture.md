@@ -2047,11 +2047,26 @@ via du drag & drop », position retenue « même après un redémarrage de l'ove
   croix fléchée du jeu (`Grab`/`Grabbing` y retombent déjà, `overlay_ui::cursor`), et le glyphe de
   remise à zéro capte le glissement comme le clic (`Sense::click_and_drag`) pour qu'un appui dessus
   ne fasse jamais partir la bande.
-- **Le panneau ne déplace rien** : il remonte le geste (`RecapOutcome::drag`, trois étapes portant
-  la POSITION du curseur et non l'écart parcouru — un hôte qui cumulerait des écarts verrait la
-  bande s'arrêter au premier pixel, la fenêtre suivant le curseur). L'hôte pose la fenêtre à
+- **Le panneau ne déplace rien** : il remonte le geste (`RecapOutcome::drag`, trois étapes dont
+  seule la première porte une position — le point de saisie). L'hôte pose la fenêtre à
   « curseur moins point de saisie », invariant du geste : rien ne s'accumule, rien ne dérive, même
   quand le bornage retient la bande contre un bord.
+- **Le curseur se lit à l'OS, en coordonnées d'écran** (`GetCursorPos` sous Windows,
+  `QueryPointer` sur la racine sous X11, sur la connexion que l'hôte X11 tient déjà ouverte) —
+  jamais celui qu'egui rapporte. **Correction du 2026-09-17, sur retour d'écran vidéo : la bande
+  vibrait au point d'être impossible à poser**, souris immobile. La première version calculait le
+  geste dans le repère de la fenêtre qu'elle déplaçait : bouger la fenêtre change la position
+  LOCALE du curseur sans que la souris bouge, ce qui la rebouge à la frame suivante. La formule
+  n'aurait été au repos que si la fenêtre se posait avant l'événement souris suivant, ce
+  qu'aucun des deux systèmes ne garantit (aller-retour serveur X11 / gestionnaire de fenêtres) :
+  le décalage déjà appliqué se réappliquait, la bande dépassait, revenait, sautait d'une centaine
+  de pixels par frame. Le repère d'écran ne dépend d'aucune fenêtre ; `drag_offset` ne prend même
+  pas la position de la bande en paramètre, et `RecapDrag::Moved` ne porte plus de position — la
+  coordonnée qui rebouclait n'existe plus.
+- **La fenêtre n'est pas retaillée tant que la bande est tenue** : une ligne qui s'empile en plein
+  geste déplacerait le bloc sous le curseur, et le bornage avec lui. La hauteur en attente
+  s'applique à la frame qui suit le relâchement. Le contenu, lui, continue de vivre — ce sont des
+  chiffres, ils ne déplacent rien.
 - **`overlay_ui::recap_placement`** porte l'ancrage d'origine (`DEFAULT_OFFSET`, les ex-constantes
   `GAME_RECAP_*_MARGIN_PX` des deux hôtes), le bornage à la zone cliente et l'aimantation
   (`SNAP_RADIUS_PX`, 12 px : reposée près de son ancrage, la bande y recolle et la config oublie sa
