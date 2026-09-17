@@ -1448,6 +1448,7 @@ mod linux_main {
                 start_with_os: autostart_actif,
                 pending_install: None,
                 pending_quit: false,
+                pending_restart: false,
                 alerts: alerts_tab::AlertsTabState {
                     duration_input: alerts_draft
                         .as_ref()
@@ -2100,6 +2101,8 @@ mod linux_main {
                 RetryUpdate,
                 /// « Fermer l'overlay », après confirmation — voir `main.rs`.
                 Quit,
+                /// « Redémarrer », après confirmation — voir `main.rs`.
+                Restart,
             }
             let mut post_redraw = PostRedraw::None;
             // La bande Récap vient d'être reposée : la config est réécrite une fois le geste
@@ -2505,6 +2508,7 @@ mod linux_main {
                             post_redraw = PostRedraw::InstallUpdate
                         }
                         OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
+                        OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
                     }
                     overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
                         .then(|| std::time::Instant::now() + repaint_delay);
@@ -2555,6 +2559,16 @@ mod linux_main {
                     logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                     event_loop.exit();
                 }
+                // Même sortie, un process neuf en plus — voir `main.rs` et `restart::relaunch`.
+                PostRedraw::Restart => match overlay_ui::restart::relaunch() {
+                    Ok(()) => {
+                        logging::log_session_end("Redémarrer l'overlay (fenêtre Options)");
+                        event_loop.exit();
+                    }
+                    Err(err) => {
+                        tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
+                    }
+                },
             }
         }
 
