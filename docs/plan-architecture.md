@@ -2083,10 +2083,42 @@ via du drag & drop », position retenue « même après un redémarrage de l'ove
   nomme le raccourci de bascule tel qu'il est réglé, et le bouton **« Replacer au défaut »**, la
   sortie de secours d'une bande posée dans un coin oublié.
 
+**Le cadenas, et le retour à l'ancrage d'origine (2026-09-17, soir)** — demande utilisateur :
+« deux modes qui permettent de déplacer l'overlay de récap », un cadenas fermé et un cadenas
+ouvert dont « les deux ne peuvent pas vivre en même temps ».
+
+- **Un seul bouton, deux visages** (`DsIcon::Lock` / `DsIcon::LockOpen`, faits l'un pour l'autre :
+  même corps au pixel près, seule l'anse change) : il porte l'état de la bande et le bascule d'un
+  clic. Verrouillée, la bande n'est plus un widget du tout — pas de zone d'interaction, donc aucun
+  geste et **le curseur redevient celui du système** au-dessus d'elle. Garder le `interact` en ne
+  renvoyant rien aurait laissé le curseur promettre un déplacement qui n'arrive pas.
+- **Verrouillée par défaut** (`config::OverlayConfig::recap_locked`, défaut `true`, persistée comme
+  la position) : tout le fond est une poignée, donc non verrouillée, le moindre clic dessus en mode
+  interactif déplace la bande. On la déverrouille pour la ranger, on la reverrouille ensuite.
+- **Le glyphe de replacement n'apparaît qu'une fois la bande déplacée**
+  (`RecapChrome::moved`) : il n'y a rien à défaire avant, et un bouton grisé en permanence
+  coûterait sa place pour ne rien dire. Un clic ouvre une confirmation — décision utilisateur :
+  « on remet le récap à son emplacement initial seulement si l'utilisateur appuie sur oui » — par
+  la fenêtre qui existait déjà, `OverlayKind::RecapReset`, désormais paramétrée par sa cible
+  (`RecapTarget::Session` pour les compteurs, `Position` pour la bande). Deux variantes auraient
+  dédoublé dans les deux hôtes tout le cycle « ouvrir / centrer / voiler / fermer » pour ne changer
+  qu'une phrase.
+- **La rangée se pose au-dessus du bloc, en haut à gauche, et bascule en dessous** quand la bande
+  est posée si haut dans la fenêtre de jeu que la rangée en sortirait
+  (`recap_placement::actions_below`, calculé par l'hôte : le panneau ne connaît pas sa position à
+  l'écran). La fenêtre OS garde la place des deux côtés — la réserve d'infobulle au-dessus,
+  `RECAP_ACTIONS_RESERVE` en dessous — **en permanence** : une taille qui dépendrait du côté, et
+  un côté de la position, se rebouclerait, exactement comme la vibration ci-dessus.
+- **Le bornage change de promesse** : il garde désormais le FOND dans le cadre, plus la fenêtre.
+  Jusque-là la bande butait 36 px sous le bord haut (la réserve d'infobulle était bornée avec elle)
+  sans que rien ne l'explique à l'écran ; les réserves peuvent maintenant déborder, ce qui rend au
+  passage le cas « rangée en bas » atteignable.
+
 **Captures** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, paire Kamas/XP empilée),
 `recap_session_ordinaire` (XP ramenée, trois lignes), `recap_tooltip_kamas_au_dessus`,
-`recap_tooltip_duree_reprises`, `recap_tooltip_remise_a_zero`, `recap_confirmation_remise_a_zero` —
-chrono et heure de début fixés (1 h 23 min 45 s, 20:12), ils n'existent pas dans le fichier par
+`recap_tooltip_duree_reprises`, `recap_tooltip_remise_a_zero`, `recap_confirmation_remise_a_zero`,
+`recap_actions_verrouille`, `recap_actions_deverrouille_deplace`, `recap_actions_en_bas` — chrono
+et heure de début fixés (1 h 23 min 45 s, 20:12), ils n'existent pas dans le fichier par
 construction.
 
 ### 9.1 novodecies Démarrage actif par défaut, bouton « Fermer l'overlay » (2026-09-16)
