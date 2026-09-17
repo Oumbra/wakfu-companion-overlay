@@ -3242,9 +3242,10 @@ fn capture_section_suivi(name: &str, options_state: panels::options_modal::Optio
     harness.run();
     // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
     // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
-    // de 148 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
-    // « Replacer au défaut », « Suivi » est remontée d'autant.
-    defile_les_parametres(&mut harness, 282.0);
+    // de 276 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
+    // « Replacer au défaut » (148), « Combat » son bouton de rafraîchissement (128) — « Suivi »
+    // est remontée d'autant.
+    defile_les_parametres(&mut harness, 154.0);
     harness.snapshot(name);
 }
 
@@ -3296,11 +3297,13 @@ fn options_parametres_section_compte() {
     // **102 points de plus depuis le 2026-09-17** : la ligne d'aide et le bouton « Replacer au
     // défaut » de la section « Recap » (bande déplaçable à la souris) l'ont repoussée d'autant.
     // **128 de plus le même jour** : la ligne d'aide et le bouton « Rafraîchir le panneau de
-    // combat » en fin de section « Combat » (voir `options_parametres_rafraichir_combat`).
+    // combat » en fin de section « Combat ».
     // **45 encore** : la ligne d'aide du cadenas de la bande Récap, arrivée le même jour par une
     // autre session. Sans cet ajustement, la section que ce test a pour objet de montrer sort du
     // cadre par le bas — une référence régénérée sans le voir ne montrerait plus rien.
-    defile_les_parametres(&mut harness, 879.0);
+    // **Puis 276 de moins le 2026-09-18** : l'entrée de déplacement de la bande Récap (148) et le
+    // bouton de rafraîchissement du combat (128) ont été retirés à la demande de l'utilisateur.
+    defile_les_parametres(&mut harness, 603.0);
     harness.snapshot("options_parametres_compte");
 }
 
@@ -3359,57 +3362,6 @@ fn options_parametres_section_mise_a_jour() {
     // défilement sature au bas du contenu : la valeur n'a plus qu'à être assez grande.
     defile_les_parametres(&mut harness, 1175.0);
     harness.snapshot("options_parametres_mise_a_jour");
-}
-
-/// **Le bouton « Rafraîchir le panneau de combat »** en fin de section « Combat » (2026-09-17) —
-/// le déclencheur MANUEL de la relecture complète de `wakfu.log`
-/// (`overlay_ui::engine_thread::EngineCommand::ResyncLog`).
-///
-/// Ce qu'il répare : un panneau Combat figé en plein combat — plus un dégât, plus une armure, plus
-/// un soin qui monte — alors que ses boutons répondent encore. Un chien de garde
-/// (`IngestWatchdog`) fait le même geste tout seul au bout de huit secondes ; ce bouton n'attend
-/// pas, et c'est le SEUL chemin manuel sous Linux (`ShortcutAction::Refresh` n'y est pas gréé).
-///
-/// Ce que la capture doit montrer : la ligne d'aide qui dit à quoi sert le bouton ET ce qu'il
-/// coûte (les combats terminés de la session sont oubliés), puis le bouton, centré comme
-/// « Se déconnecter » et « Fermer l'overlay ». Il reste VIF ici bien que le détail des combats
-/// soit actif ou non — la relecture reconstruit aussi le Suivi, le Récap et l'historique
-/// synchronisé, qui vivent sans panneau.
-#[test]
-fn options_parametres_rafraichir_combat() {
-    let mut options_state = parametres_avec_notifications();
-    options_state.account_connected = true;
-
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(
-            panels::options_modal::WINDOW_SIZE.0,
-            panels::options_modal::WINDOW_SIZE.1,
-        ))
-        .build_ui(move |ui| {
-            overlay_ui::style::apply(ui.ctx());
-            ui.style_mut().visuals.text_cursor.blink = false;
-            let icons = UiIcons::load(ui.ctx());
-            let remote_icons = RemoteIconStore::empty();
-            let mut remote_icon_textures = RemoteIconTextures::default();
-            let catalog = CatalogIndex::default();
-            panels::options_modal::show(
-                ui,
-                &mut options_state,
-                &mut panels::options_modal::OptionsModalContext {
-                    catalog: &catalog,
-                    remote_icons: &remote_icons,
-                    remote_icon_textures: &mut remote_icon_textures,
-                    icons: &icons,
-                    avatars: None,
-                    game_servers: &Default::default(),
-                },
-            );
-        });
-    harness.run();
-    // Juste assez pour amener la fin de la section « Combat » dans le cadre — voir
-    // [`defile_les_parametres`].
-    defile_les_parametres(&mut harness, 250.0);
-    harness.snapshot("options_parametres_rafraichir_combat");
 }
 
 /// **La confirmation de déconnexion** — l'autre moitié de la section « Compte ». Le bouton est la

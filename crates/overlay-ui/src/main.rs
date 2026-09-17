@@ -3672,9 +3672,6 @@ enum PostRedraw {
     /// « Recherche de mise à jour » (section « Mise à jour » de l'onglet « Paramètres ») :
     /// une vérification sans installation, demandée au thread de mise à jour.
     CheckUpdate,
-    /// « Rafraîchir le panneau de combat » (section « Combat ») : relecture complète de
-    /// `wakfu.log` demandée au thread Engine — voir `EngineCommand::ResyncLog`.
-    ResyncCombat,
     /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
     InstallUpdate,
     /// « Fermer l'overlay », **après confirmation** (pied de l'onglet « Paramètres »,
@@ -4216,7 +4213,6 @@ impl App {
             }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
             OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
-            OptionsModalAction::ResyncCombat => post_redraw = PostRedraw::ResyncCombat,
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
             OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
             OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
@@ -4264,10 +4260,6 @@ impl App {
                 let _ = self.update_command_tx.send(UpdateCommand::Check {
                     install_if_available: false,
                 });
-            }
-            PostRedraw::ResyncCombat => {
-                tracing::info!(">>> Rafraîchissement du panneau de combat (fenêtre Options).");
-                let _ = self.settings_tx.send(EngineCommand::ResyncLog);
             }
             PostRedraw::InstallUpdate => self.request_update_install(id),
             PostRedraw::RetryUpdate => {

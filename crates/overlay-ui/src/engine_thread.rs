@@ -71,9 +71,10 @@ pub enum EngineCommand {
     /// qui abandonne les lignes sans publier). Cette commande répare les deux d'un coup : tailer
     /// neuf, parser réinitialisé par le rattrapage, session reconstruite depuis le fichier.
     ///
-    /// **Déclenchée à la main** (bouton « Rafraîchir le panneau de combat » de la fenêtre Options,
-    /// et `ShortcutAction::Refresh` sous Windows) **ou automatiquement** par le chien de garde
-    /// d'ingestion — voir [`IngestWatchdog`].
+    /// **Déclenchée à la main** (`ShortcutAction::Refresh`, Windows seulement — le bouton
+    /// « Rafraîchir le panneau de combat » de la fenêtre Options a été retiré le 2026-09-18)
+    /// **ou automatiquement** par le chien de garde d'ingestion — voir [`IngestWatchdog`], seul
+    /// déclencheur sous Linux.
     ///
     /// Mécanique identique à [`Self::ChangeLogPath`] sur le même chemin (`forget_session` +
     /// watcher respawné), à une différence près : la publication du snapshot est SUSPENDUE le temps

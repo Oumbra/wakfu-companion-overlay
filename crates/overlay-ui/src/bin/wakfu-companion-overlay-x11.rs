@@ -2388,11 +2388,6 @@ mod linux_main {
                 ResolveRecipe(i64),
                 /// Section « Mise à jour » de la fenêtre Options — voir `main.rs`.
                 CheckUpdate,
-                /// « Rafraîchir le panneau de combat » (section « Combat ») — voir `main.rs`.
-                /// **Le seul déclencheur manuel sous Linux** : `ShortcutAction::Refresh` n'y est
-                /// pas gréé (`LINUX_SUPPORTED`), le chien de garde du thread Engine reste sinon
-                /// seul à pouvoir relancer la relecture.
-                ResyncCombat,
                 InstallUpdate,
                 /// « Réessayer » de l'écran « Mise à jour requise ».
                 RetryUpdate,
@@ -2932,7 +2927,6 @@ mod linux_main {
                             post_redraw = PostRedraw::ResolveRecipe(id)
                         }
                         OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
-                        OptionsModalAction::ResyncCombat => post_redraw = PostRedraw::ResyncCombat,
                         OptionsModalAction::InstallUpdate => {
                             post_redraw = PostRedraw::InstallUpdate
                         }
@@ -2980,10 +2974,6 @@ mod linux_main {
                     let _ = self.update_command_tx.send(UpdateCommand::Check {
                         install_if_available: false,
                     });
-                }
-                PostRedraw::ResyncCombat => {
-                    tracing::info!(">>> Rafraîchissement du panneau de combat (fenêtre Options).");
-                    let _ = self.settings_tx.send(EngineCommand::ResyncLog);
                 }
                 PostRedraw::InstallUpdate => self.request_update_install(id),
                 PostRedraw::RetryUpdate => {
