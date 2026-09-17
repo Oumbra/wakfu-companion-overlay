@@ -49,6 +49,15 @@ fn agent() -> ureq::Agent {
         .get_or_init(|| {
             ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
+                // Un statut 4xx/5xx est une RÉPONSE, pas une panne : chaque fonction ci-dessous
+                // lit `response.status()` et produit `SyncError::Http { status, path }`. Avec le
+                // défaut de `ureq` (`true`), `.call()` rendait `Err(StatusCode(401))`, converti en
+                // `SyncError::Network("http status: 401")` — et ces contrôles de statut étaient du
+                // code mort. Conséquence vécue le 2026-09-17 : un jeton refusé (401) passait pour
+                // « serveur injoignable », était conservé, et « Réessayer » bouclait sur le même
+                // refus au lieu de relancer l'appairage (`background::attempt_connect`) ; de même
+                // `queue::is_permanent_rejection` ne voyait jamais un 4xx.
+                .http_status_as_error(false)
                 .build()
                 .into()
         })
@@ -199,18 +208,19 @@ fn parse_json_body(
     path: &str,
     mut response: ureq::http::Response<ureq::Body>,
 ) -> Result<Value, SyncError> {
+    // Statut AVANT le corps : une réponse d'erreur n'est pas forcément du JSON (page HTML d'un
+    // proxy, corps vide), et un 401 doit remonter comme `Http`, jamais comme `Json`.
     let status = response.status().as_u16();
-    let value: Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|err| SyncError::Json(err.to_string()))?;
     if !(200..300).contains(&status) {
         return Err(SyncError::Http {
             status,
             path: path.to_string(),
         });
     }
-    Ok(value)
+    response
+        .body_mut()
+        .read_json()
+        .map_err(|err| SyncError::Json(err.to_string()))
 }
 
 /// Ce qu'`overlay-engine` a besoin de connaître du compte au démarrage — un seul
@@ -263,16 +273,16 @@ pub fn fetch_account_id(token: &str) -> Result<String, SyncError> {
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     let status = response.status().as_u16();
-    let body: Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|err| SyncError::Json(err.to_string()))?;
     if !(200..300).contains(&status) {
         return Err(SyncError::Http {
             status,
             path: "/api/v1/auth/me".to_string(),
         });
     }
+    let body: Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|err| SyncError::Json(err.to_string()))?;
     body.get("user")
         .and_then(|user| user.get("id"))
         .and_then(Value::as_str)
@@ -292,16 +302,16 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     let status = response.status().as_u16();
-    let body: Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|err| SyncError::Json(err.to_string()))?;
     if !(200..300).contains(&status) {
         return Err(SyncError::Http {
             status,
             path: "/api/v1/settings".to_string(),
         });
     }
+    let body: Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|err| SyncError::Json(err.to_string()))?;
     let data = body.get("data").cloned().unwrap_or(Value::Null);
     Ok(AccountSettings {
         roster: RosterIndex::from_settings_json(&data),
