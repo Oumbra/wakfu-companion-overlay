@@ -341,7 +341,9 @@ struct OverlayWindow {
     /// la fenêtre OS n'est retaillée que quand l'état affiché change de hauteur.
     last_login_height: Option<f32>,
     /// Fenêtre de jeu à laquelle cet overlay est ancré — **nulle pour la fenêtre de connexion**,
-    /// qui n'appartient à aucun personnage (voir `sync_topmost`, qui l'ignore).
+    /// qui n'appartient à aucun personnage (voir `sync_topmost`, qui l'ignore), **et pour la
+    /// fenêtre Options ouverte alors qu'aucun client Wakfu n'est à l'écran** (2026-09-17, voir
+    /// `is_detached` et `App::open_options_modal`).
     game_hwnd: HWND,
     /// Dernier rectangle connu de la fenêtre de jeu (mis à jour par `sync_windows`/`reposition`,
     /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
@@ -408,6 +410,17 @@ struct OverlayWindow {
     /// s'est affiché, là ça s'est caché »). Consommé par `App::about_to_wait`, qui redessine et
     /// vide ce champ une fois l'échéance atteinte.
     next_redraw_at: Option<std::time::Instant>,
+}
+
+impl OverlayWindow {
+    /// Cette fenêtre n'appartient à aucune fenêtre de jeu (`game_hwnd` nul) : la fenêtre de
+    /// connexion, toujours, et **la fenêtre Options ouverte sans client Wakfu à l'écran**
+    /// (2026-09-17, voir `App::open_options_modal`). `sync_windows` la laisse en place — rien ne
+    /// se ferme derrière elle — et `sync_topmost` ne la rétrograde jamais : sans fenêtre de jeu
+    /// dont suivre le premier plan, elle reste devant jusqu'à ce que l'utilisateur la referme.
+    fn is_detached(&self) -> bool {
+        self.game_hwnd == HWND::default()
+    }
 }
 
 struct App {
@@ -1049,7 +1062,7 @@ impl App {
         let snapshot = self.snapshot.load();
 
         self.windows.retain(|_, overlay| {
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                 return true; // n'appartient à aucune fenêtre de jeu
             }
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
@@ -1059,6 +1072,8 @@ impl App {
                 // `open_options_modal`), donc elle s'en va avec elle. Un écran de réglages qui
                 // survivrait au client qu'il configure n'aurait plus de raison d'être à l'écran —
                 // et le brouillon qu'il porte ne serait de toute façon plus applicable.
+                // Seule exception, ci-dessus : la modale ouverte SANS client à l'écran
+                // (`is_detached`), qui n'a aucune fenêtre de jeu derrière laquelle disparaître.
                 let quoi = if overlay.kind == OverlayKind::Options {
                     "sa fenêtre Options est fermée"
                 } else {
@@ -1991,7 +2006,7 @@ impl App {
         // multi-compte, qui gardent leur propre calcul indépendant.
         let mut relevant_game_hwnds: Vec<HWND> = Vec::new();
         for overlay in self.windows.values() {
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                 continue;
             }
             let this_relevant =
@@ -2015,7 +2030,15 @@ impl App {
             // manifestement l'attention ailleurs (retour utilisateur 2026-09-12). Rattachée à une
             // vraie fenêtre de jeu, elle n'a plus besoin d'exception : elle suit le premier plan
             // de SON personnage, et un second client Wakfu ne la voit pas.
-            let relevant = relevant_game_hwnds.contains(&overlay.game_hwnd);
+            //
+            // **Sauf ouverte sans aucun client à l'écran** (`is_detached`, 2026-09-17) : il n'y a
+            // alors aucun premier plan à suivre, et une fenêtre `WS_EX_TOOLWINDOW` rétrogradée
+            // — absente de la barre des tâches et de l'alt-tab — serait perdue derrière la
+            // première application venue, sans moyen de la retrouver ni d'en rouvrir une autre
+            // (une seule modale à la fois). Elle reste donc toujours « pertinente » : réaffirmée
+            // devant périodiquement comme un overlay dont le jeu a le focus, jamais démotée.
+            let relevant =
+                overlay.is_detached() || relevant_game_hwnds.contains(&overlay.game_hwnd);
 
             // Retour utilisateur 2026-09-02 : « l'overlay disparaît de manière indéterminée, il
             // n'y a rien qui permet de le réafficher ». Cause trouvée : Windows peut démoter un
@@ -2190,7 +2213,9 @@ impl App {
     /// bandeau Suivi la donne directement. Le raccourci global, lui, n'en a pas — il prend alors
     /// la fenêtre de jeu **au premier plan**, et à défaut le premier overlay connu. Sans ce
     /// rattachement la modale n'appartiendrait à personne, ce qui était précisément le défaut :
-    /// voir `sync_topmost`.
+    /// voir `sync_topmost`. **Aucune fenêtre de jeu du tout** (2026-09-17) : la modale s'ouvre
+    /// quand même, détachée — centrée sur l'écran principal, jamais refermée par `sync_windows`
+    /// (voir `OverlayWindow::is_detached`).
     ///
     /// `initial_tab` est l'onglet sur lequel la fenêtre s'ouvre — **`Paramètres` pour le bouton
     /// « Options » du bandeau de suivi** (demande utilisateur 2026-09-13 : ce bouton donne accès
@@ -2219,30 +2244,39 @@ impl App {
             );
             return;
         }
-        // Sans ancre explicite (raccourci global), la fenêtre de jeu AU PREMIER PLAN est la
-        // bonne réponse : c'est celle que l'utilisateur regarde au moment où il appuie. Repli sur
-        // le premier overlay connu si le premier plan n'est pas un client Wakfu.
-        let (game_hwnd, rect) = match anchor {
-            Some(ancre) => ancre,
-            None => {
-                let foreground = unsafe { GetForegroundWindow() };
-                self.windows
-                    .values()
-                    .find(|w| w.game_hwnd == foreground)
-                    .or_else(|| self.windows.values().next())
-                    .map(|w| (w.game_hwnd, w.game_rect))
-                    .unwrap_or((
-                        HWND::default(),
-                        GameRect {
-                            left: 0,
-                            top: 0,
-                            width: 1280,
-                            height: 720,
-                            client_top: 0,
-                        },
-                    ))
-            }
-        };
+        // Sans ancre explicite (raccourci global, icône de zone de notification), la fenêtre de
+        // jeu AU PREMIER PLAN est la bonne réponse : c'est celle que l'utilisateur regarde au
+        // moment où il appuie. Repli sur le premier overlay connu si le premier plan n'est pas un
+        // client Wakfu.
+        let anchor = anchor.or_else(|| {
+            let foreground = unsafe { GetForegroundWindow() };
+            self.windows
+                .values()
+                .filter(|w| !w.is_detached())
+                .find(|w| w.game_hwnd == foreground)
+                .or_else(|| self.windows.values().find(|w| !w.is_detached()))
+                .map(|w| (w.game_hwnd, w.game_rect))
+        });
+        // **Aucune fenêtre de jeu à l'écran ⇒ la modale s'ouvre quand même, seule** (2026-09-17).
+        // Jusque-là elle naissait rattachée à une HWND nulle et un rectangle inventé — et
+        // `sync_windows`, ne trouvant aucun client derrière cette HWND, la refermait au tick
+        // suivant : « Options » depuis la zone de notification ne faisait rien tant que le jeu
+        // n'était pas lancé, alors que c'est précisément là qu'on règle le chemin de `wakfu.log`
+        // ou les raccourcis avant de jouer. Une modale DÉTACHÉE (`OverlayWindow::is_detached`)
+        // est centrée sur l'écran principal comme la fenêtre de connexion, reste devant (voir
+        // `sync_topmost`) et n'est fermée que par l'utilisateur. Elle ne se rattache pas à un
+        // client lancé entre-temps : elle vit jusqu'à « Valider »/« Annuler », comme avant.
+        let detached = anchor.is_none();
+        let (game_hwnd, rect) = anchor.unwrap_or((
+            HWND::default(),
+            GameRect {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                client_top: 0,
+            },
+        ));
         // **Rattachée à `game_hwnd` comme n'importe quel overlay** depuis le 2026-09-12 : elle
         // suit donc le premier plan de ce personnage, et disparaît quand on passe sur un autre
         // client en multi-compte. Elle portait `HWND::default()` (nul) jusque-là, ce qui obligeait
@@ -2262,6 +2296,18 @@ impl App {
             // peut naître masqué (voir `sync_panel_visibility`).
             true,
         );
+        if detached {
+            // Pas de jeu sur lequel s'ancrer : au centre de l'écran principal, et le focus tout de
+            // suite — il n'y a personne à qui le voler. `last_position` est oublié : cette fenêtre
+            // n'est jamais recollée par `reposition` (voir `sync_windows`), la valeur d'ancrage
+            // calculée à la création ne correspond à rien.
+            Self::center_on_primary_monitor(event_loop, &overlay.window);
+            overlay.last_position = None;
+            overlay.window.focus_window();
+            tracing::info!(
+                "[options] aucune fenêtre de jeu à l'écran — fenêtre Options ouverte seule, centrée sur l'écran principal."
+            );
+        }
         // **Le brouillon d'alertes est une COPIE du profil du compte**, prise à l'ouverture : les
         // gestes de l'onglet la modifient librement, et seul « Valider » la renvoie (§5.1 du plan).
         // Sans compte lié, il n'y a ni liste à charger ni endroit où l'écrire — l'onglet le dit.

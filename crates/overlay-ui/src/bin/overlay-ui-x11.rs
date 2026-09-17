@@ -214,7 +214,8 @@ mod linux_main {
         /// la fenêtre depuis laquelle on l'a ouverte, comme n'importe quel overlay. Elle portait
         /// `0` jusque-là, ce qui obligeait `sync_windows`/`sync_topmost` à l'exclure de toute leur
         /// logique — et la laissait au-dessus de TOUT, y compris quand l'utilisateur était passé
-        /// sur une autre application.
+        /// sur une autre application. Reste `0` pour la fenêtre de connexion et pour la modale
+        /// ouverte sans aucun client à l'écran (2026-09-17, voir `is_detached`).
         game_window: u32,
         game_rect: GameRect,
         character_name: String,
@@ -233,6 +234,16 @@ mod linux_main {
         /// unitaires, déjà couvert avant ce binaire).
         topmost_state: TopmostState,
         next_redraw_at: Option<std::time::Instant>,
+    }
+
+    impl OverlayWindow {
+        /// Voir `main.rs::OverlayWindow::is_detached` : aucune fenêtre de jeu derrière
+        /// (`game_window == 0`) — la fenêtre de connexion, et la fenêtre Options ouverte sans
+        /// client Wakfu à l'écran (2026-09-17). Laissée en place par `sync_windows`, jamais
+        /// rétrogradée par `sync_topmost`.
+        fn is_detached(&self) -> bool {
+            self.game_window == 0
+        }
     }
 
     struct App {
@@ -666,13 +677,15 @@ mod linux_main {
             let snapshot = self.snapshot.load();
 
             self.windows.retain(|_, overlay| {
-                if overlay.kind == OverlayKind::Login {
+                if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                     return true; // n'appartient à aucune fenêtre de jeu
                 }
                 // **La modale Options suit la même règle depuis le 2026-09-12** : rattachée à la
                 // fenêtre de jeu depuis laquelle on l'a ouverte, elle s'en va avec elle. Un écran
                 // de réglages qui survivrait au client qu'il configure n'aurait plus de raison
-                // d'être à l'écran.
+                // d'être à l'écran. Seule exception, ci-dessus : la modale ouverte SANS client à
+                // l'écran (`is_detached`), qui n'a aucune fenêtre de jeu derrière laquelle
+                // disparaître (voir `main.rs::App::sync_windows`).
                 let still_here = found
                     .iter()
                     .any(|(_, info)| info.window == overlay.game_window);
@@ -1058,7 +1071,7 @@ mod linux_main {
             // rend TOUS les overlays de CE personnage relevant, pas seulement celui cliqué.
             let mut relevant_game_windows: Vec<u32> = Vec::new();
             for overlay in self.windows.values() {
-                if overlay.kind == OverlayKind::Login {
+                if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                     continue;
                 }
                 let this_relevant = active == Some(overlay.game_window)
@@ -1075,8 +1088,11 @@ mod linux_main {
                 }
                 // **La modale Options participe à ce calcul comme les autres depuis le
                 // 2026-09-12** — voir `main.rs::App::sync_topmost` pour le détail : rattachée à
-                // une vraie fenêtre de jeu, elle n'a plus besoin d'exception.
-                let relevant = relevant_game_windows.contains(&overlay.game_window);
+                // une vraie fenêtre de jeu, elle n'a plus besoin d'exception. **Sauf ouverte sans
+                // aucun client à l'écran** (`is_detached`, 2026-09-17) : aucun premier plan à
+                // suivre, elle reste toujours pertinente — jamais repassée `Normal`.
+                let relevant =
+                    overlay.is_detached() || relevant_game_windows.contains(&overlay.game_window);
                 let (next_state, action) = topmost::decide(overlay.topmost_state, relevant, now);
                 overlay.topmost_state = next_state;
                 // Même diagnostic que `main.rs::App::sync_topmost` (2026-09-06) : journalise les
@@ -1112,6 +1128,8 @@ mod linux_main {
         /// `anchor` est la fenêtre depuis laquelle elle est demandée : le bouton « Options » du
         /// carré de contrôle la donne directement. Le raccourci global n'en a pas — il prend alors
         /// la fenêtre de jeu ACTIVE (`_NET_ACTIVE_WINDOW`), et à défaut le premier overlay connu.
+        /// **Aucune fenêtre de jeu du tout** (2026-09-17) : la modale s'ouvre quand même,
+        /// détachée — voir `main.rs::App::open_options_modal`.
         ///
         /// Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai dialogue
         /// modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant d'en
@@ -1145,27 +1163,30 @@ mod linux_main {
             // Sans ancre explicite (raccourci global), la fenêtre de jeu ACTIVE est la bonne
             // réponse : c'est celle que l'utilisateur regarde au moment où il appuie. Repli sur le
             // premier overlay connu si l'active n'est pas un client Wakfu.
-            let (game_window, rect) = match anchor {
-                Some(ancre) => ancre,
-                None => {
-                    let active = self.game_window.active_window();
-                    self.windows
-                        .values()
-                        .find(|w| Some(w.game_window) == active)
-                        .or_else(|| self.windows.values().next())
-                        .map(|w| (w.game_window, w.game_rect))
-                        .unwrap_or((
-                            0,
-                            GameRect {
-                                left: 0,
-                                top: 0,
-                                width: 1280,
-                                height: 720,
-                                client_top: 0,
-                            },
-                        ))
-                }
-            };
+            let anchor = anchor.or_else(|| {
+                let active = self.game_window.active_window();
+                self.windows
+                    .values()
+                    .filter(|w| !w.is_detached())
+                    .find(|w| Some(w.game_window) == active)
+                    .or_else(|| self.windows.values().find(|w| !w.is_detached()))
+                    .map(|w| (w.game_window, w.game_rect))
+            });
+            // **Aucune fenêtre de jeu à l'écran ⇒ la modale s'ouvre quand même, seule**
+            // (2026-09-17) — voir `main.rs::App::open_options_modal` : détachée
+            // (`OverlayWindow::is_detached`), centrée sur l'écran principal, jamais refermée par
+            // `sync_windows`, ni rattachée à un client lancé entre-temps.
+            let detached = anchor.is_none();
+            let (game_window, rect) = anchor.unwrap_or((
+                0,
+                GameRect {
+                    left: 0,
+                    top: 0,
+                    width: 0,
+                    height: 0,
+                    client_top: 0,
+                },
+            ));
             // Toujours interactive (jamais clic-traversant), quel que soit `self.interactive` —
             // c'est une modale qui doit capter le clavier/la souris pour éditer le chemin, pas un
             // overlay passif d'information comme Combat/Suivi.
@@ -1180,6 +1201,16 @@ mod linux_main {
                 // `Combat` peut naître masqué (voir `sync_panel_visibility`).
                 true,
             );
+            if detached {
+                // Pas de jeu sur lequel s'ancrer : au centre de l'écran principal, et le focus
+                // tout de suite — voir `main.rs::App::open_options_modal`.
+                Self::center_on_primary_monitor(event_loop, &overlay.window);
+                overlay.last_position = None;
+                overlay.window.focus_window();
+                tracing::info!(
+                    "[options] aucune fenêtre de jeu à l'écran — fenêtre Options ouverte seule, centrée sur l'écran principal."
+                );
+            }
             // **Brouillons pris sur le compte** — même logique que `main.rs::open_options_modal`
             // (voir sa doc) : alertes, chat et suivi sont des COPIES de l'état du compte, renvoyées
             // seulement à « Valider » ; et le compte est relu à l'ouverture, sur un thread.
