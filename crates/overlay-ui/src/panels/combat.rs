@@ -796,142 +796,160 @@ pub fn show(
         })
     };
 
-    ui.horizontal_top(|ui| {
-        // Colonne de gauche : portraits — cadre exact (alliés ou ennemis jusqu'à `MAX_FRAME_SLOTS`),
-        // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
-        // module.
-        ui.vertical(|ui| {
-            // Switch Alliés/Ennemis : en tête de CETTE colonne depuis le 2026-09-15 (voir doc de
-            // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
-            // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
-            // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
-            show_side_row(ui, side, shortcuts);
-            ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
-            if !framed.is_empty() {
-                let marks = marks_in(framed, selection);
-                let clicked = frame.show(
-                    ui,
-                    portraits,
-                    icons,
-                    catalog,
-                    remote_icons,
-                    remote_icon_textures,
-                    framed,
-                    measured,
-                    total_damage,
-                    marks,
-                );
-                if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
-                    if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
-                        combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
-                        selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
-                    }
-                }
-            }
-            if !enemy_scroll.is_empty() {
-                let marks = marks_in(enemy_scroll, selection);
-                let clicked = EnemyFrameScroll::show(
-                    ui,
-                    frame,
-                    portraits,
-                    icons,
-                    catalog,
-                    remote_icons,
-                    remote_icon_textures,
-                    enemy_scroll,
-                    measured,
-                    total_damage,
-                    marks,
-                );
-                if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
-                    if let Some(idx) = combat_spell_block::fighter_index(fight, enemy_scroll[slot])
-                    {
-                        combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
-                        selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
-                    }
-                }
-            }
-            if !flat_portraits.is_empty() {
+    // **Le dernier pixel de la décoration**, dont la rangée d'actions se tient à
+    // `ACTIONS_DECORATION_GAP` (voir [`paint_actions_row`]) : le bas de la colonne de GAUCHE telle
+    // qu'elle vient d'être peinte — le cadre des portraits, ou le seul bandeau du switch dans un
+    // camp vide — moins les lignes transparentes que le gabarit garde sous sa dernière encre
+    // (`combat_frame::bottom_trim`). Mesuré sur l'allocation réelle plutôt que recalculé de
+    // constantes : les trois formes de cette colonne (cadre exact, cadre à défilement, liste
+    // plate) n'ont pas la même hauteur, et une seule d'entre elles finit sur un gabarit à rogner.
+    let decoration_bottom = ui
+        .horizontal_top(|ui| {
+            // Colonne de gauche : portraits — cadre exact (alliés ou ennemis jusqu'à `MAX_FRAME_SLOTS`),
+            // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
+            // module.
+            let left = ui.vertical(|ui| {
+                // Switch Alliés/Ennemis : en tête de CETTE colonne depuis le 2026-09-15 (voir doc de
+                // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
+                // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
+                // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
+                show_side_row(ui, side, shortcuts);
+                ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
                 if !framed.is_empty() {
-                    ui.add_space(ROW_GAP);
-                }
-                for (i, fighter) in flat_portraits.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(ROW_GAP);
-                    }
-                    paint_flat_portrait(
+                    let marks = marks_in(framed, selection);
+                    let clicked = frame.show(
                         ui,
                         portraits,
                         icons,
                         catalog,
                         remote_icons,
                         remote_icon_textures,
-                        fighter,
+                        framed,
                         measured,
                         total_damage,
+                        marks,
                     );
+                    if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
+                        if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
+                            combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
+                            selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
+                        }
+                    }
                 }
-            }
-        });
+                if !enemy_scroll.is_empty() {
+                    let marks = marks_in(enemy_scroll, selection);
+                    let clicked = EnemyFrameScroll::show(
+                        ui,
+                        frame,
+                        portraits,
+                        icons,
+                        catalog,
+                        remote_icons,
+                        remote_icon_textures,
+                        enemy_scroll,
+                        measured,
+                        total_damage,
+                        marks,
+                    );
+                    if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
+                        if let Some(idx) =
+                            combat_spell_block::fighter_index(fight, enemy_scroll[slot])
+                        {
+                            combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
+                            selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
+                        }
+                    }
+                }
+                if !flat_portraits.is_empty() {
+                    if !framed.is_empty() {
+                        ui.add_space(ROW_GAP);
+                    }
+                    for (i, fighter) in flat_portraits.iter().enumerate() {
+                        if i > 0 {
+                            ui.add_space(ROW_GAP);
+                        }
+                        paint_flat_portrait(
+                            ui,
+                            portraits,
+                            icons,
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                            fighter,
+                            measured,
+                            total_damage,
+                        );
+                    }
+                }
+                // Le gabarit ne termine la colonne que s'il est seul : une liste plate d'alliés
+                // excédentaires ou un cadre à défilement se poursuit sous lui, et c'est alors leur
+                // bas — sans rien à rogner — qui fait la décoration.
+                (!framed.is_empty() && enemy_scroll.is_empty() && flat_portraits.is_empty())
+                    .then_some(framed.len())
+            });
+            let trim = left.inner.map_or(0.0, super::combat_frame::bottom_trim);
+            let decoration_bottom = left.response.rect.max.y - 1.0 - trim;
 
-        ui.add_space(COLUMN_GAP);
+            ui.add_space(COLUMN_GAP);
 
-        // Colonne de droite : ligne leader (switch Alliés/Ennemis + total, voir `show_leader_row`)
-        // — TOUJOURS peinte, y compris sans combat ou camp vide, pour que le switch reste
-        // accessible (le déplacer ici, à la place de l'ancien bouton lien externe, ne doit pas le
-        // rendre inatteignable dans un état particulier) — puis soit un message d'état, soit un
-        // groupe nom+dégâts+barre compact par combattant ayant infligé des dégâts, trié par
-        // dégâts décroissant — indépendante du rythme vertical de la colonne des portraits
-        // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
-        // portrait »).
-        ui.vertical(|ui| {
-            // Sans retrancher `item_spacing.y`, contrairement aux autres `add_space` de ce
-            // fichier : cet espace-ci OUVRE la colonne (rien avant lui dans le `vertical`), egui
-            // n'y glisse donc aucun espacement propre — le retrancher coûtait 3 px et laissait les
-            // barres 3 px trop haut (mesuré sur les captures avant/après).
-            ui.add_space(BARS_COLUMN_TOP_OFFSET);
-            show_leader_row(ui, metric, shortcuts, total_damage_raw);
-            ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
-            if fighters.is_empty() || bars.is_empty() {
-                // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
-                // personne à soigner serait une fausse piste. Un camp peuplé mais sans rien à
-                // montrer pour la grandeur choisie, lui, le dit explicitement — sans ce message,
-                // basculer sur Armure dans un combat sans blindeur laissait la colonne vide sans
-                // qu'on sache si c'était zéro ou un bug.
-                // Un bloc, comme tout ce qui se lit : la phrase change de côté, pas de sens.
-                crate::mirror::upright(ui, |ui| {
-                    ui.weak(match (fight, fighters.is_empty()) {
-                        (None, _) => "Aucun combat pour l'instant.",
-                        (Some(_), true) => match side {
-                            CombatSide::Allies => "Aucun allié pour l'instant.",
-                            CombatSide::Enemies => "Aucun ennemi pour l'instant.",
-                        },
-                        (Some(_), false) => measured.empty_message(),
+            // Colonne de droite : ligne leader (switch Alliés/Ennemis + total, voir `show_leader_row`)
+            // — TOUJOURS peinte, y compris sans combat ou camp vide, pour que le switch reste
+            // accessible (le déplacer ici, à la place de l'ancien bouton lien externe, ne doit pas le
+            // rendre inatteignable dans un état particulier) — puis soit un message d'état, soit un
+            // groupe nom+dégâts+barre compact par combattant ayant infligé des dégâts, trié par
+            // dégâts décroissant — indépendante du rythme vertical de la colonne des portraits
+            // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
+            // portrait »).
+            ui.vertical(|ui| {
+                // Sans retrancher `item_spacing.y`, contrairement aux autres `add_space` de ce
+                // fichier : cet espace-ci OUVRE la colonne (rien avant lui dans le `vertical`), egui
+                // n'y glisse donc aucun espacement propre — le retrancher coûtait 3 px et laissait les
+                // barres 3 px trop haut (mesuré sur les captures avant/après).
+                ui.add_space(BARS_COLUMN_TOP_OFFSET);
+                show_leader_row(ui, metric, shortcuts, total_damage_raw);
+                ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
+                if fighters.is_empty() || bars.is_empty() {
+                    // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
+                    // personne à soigner serait une fausse piste. Un camp peuplé mais sans rien à
+                    // montrer pour la grandeur choisie, lui, le dit explicitement — sans ce message,
+                    // basculer sur Armure dans un combat sans blindeur laissait la colonne vide sans
+                    // qu'on sache si c'était zéro ou un bug.
+                    // Un bloc, comme tout ce qui se lit : la phrase change de côté, pas de sens.
+                    crate::mirror::upright(ui, |ui| {
+                        ui.weak(match (fight, fighters.is_empty()) {
+                            (None, _) => "Aucun combat pour l'instant.",
+                            (Some(_), true) => match side {
+                                CombatSide::Allies => "Aucun allié pour l'instant.",
+                                CombatSide::Enemies => "Aucun ennemi pour l'instant.",
+                            },
+                            (Some(_), false) => measured.empty_message(),
+                        });
                     });
-                });
-            } else {
-                // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
-                // 2026) — même rythme vertical que l'ancienne liste en dessous de six.
-                DamageBars::show(ui, &bars, measured, total_damage);
-            }
-            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
-            // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
-            // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
-            // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
-            // deux fois.
-            if let (Some(fight), Some(sel)) = (spell_fight, selection) {
-                ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
-                combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
-            }
-        });
-    });
+                } else {
+                    // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
+                    // 2026) — même rythme vertical que l'ancienne liste en dessous de six.
+                    DamageBars::show(ui, &bars, measured, total_damage);
+                }
+                // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
+                // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
+                // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
+                // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
+                // deux fois.
+                if let (Some(fight), Some(sel)) = (spell_fight, selection) {
+                    ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
+                    combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
+                }
+            });
+            decoration_bottom
+        })
+        .inner;
 
     // La lisière ne s'encre qu'ici, quand tout le panneau est peint : sous le cadre des portraits
     // elle serait invisible là où elle compte (voir [`paint_side_handle`]).
     paint_side_handle(ui, &handle);
-    // La rangée d'actions en dernier : elle est posée dans la réserve d'infobulle, au-dessus de
-    // tout le reste, et doit prendre le pointeur à qui passerait dessous.
-    let actions = paint_actions_row(ui, chrome);
+    // La rangée d'actions en dernier : au-dessus de tout le reste, et elle doit prendre le
+    // pointeur à qui passerait dessous.
+    let actions = paint_actions_row(ui, chrome, decoration_bottom);
     CombatOutcome {
         toggle_lock: actions.toggle_lock,
         restore_requested: actions.restore_requested,
@@ -1009,6 +1027,12 @@ const ACTIONS_ICON_SIZE: f32 = 14.0;
 /// voir `panels::recap::paint_actions_row`, dont cette rangée est la jumelle.
 const ACTIONS_PADDING: f32 = 4.0;
 const ACTIONS_GAP: f32 = 6.0;
+/// **Air entre le dernier pixel de la décoration et la pastille d'actions** (2026-09-17, demande
+/// utilisateur : « place ce groupe d'icônes à 5 px du dernier pixel de la décoration du
+/// template »). Même valeur que [`SIDE_ROW_GAP`], l'air posé le 15 sept. AU-DESSUS du cadre pour
+/// la même raison : le groupe appartient au cadre qu'il commande, il s'en tient à la même
+/// distance que sa coiffe.
+const ACTIONS_DECORATION_GAP: f32 = SIDE_ROW_GAP;
 
 /// Ce que la poignée latérale a récolté cette frame : le geste à remonter à l'hôte, et de quoi la
 /// peindre plus tard (voir [`paint_side_handle`]).
@@ -1102,7 +1126,8 @@ struct ActionsOutcome {
 
 /// **La rangée d'actions du panneau Combat** (2026-09-17, demande utilisateur : « le même système
 /// que l'overlay récap ») : le cadenas, et le glyphe de replacement quand il a lieu d'être —
-/// posés sur une pastille à eux, au coin BAS du bord extérieur du panneau.
+/// posés sur une pastille à eux, en COLONNE contre le bord extérieur, à
+/// [`ACTIONS_DECORATION_GAP`] sous le dernier pixel de la décoration du cadre des portraits.
 ///
 /// ## Un seul cadenas, deux visages
 ///
@@ -1132,19 +1157,29 @@ struct ActionsOutcome {
 /// Le bloc est déclaré `mirror::upright_in` sur sa pastille : sa PLACE part à droite avec le
 /// panneau, son contenu reste à l'endroit — un glyphe `Undo` réfléchi dirait « rétablir », soit
 /// l'inverse de ce qu'il fait.
-fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome {
+fn paint_actions_row(
+    ui: &mut egui::Ui,
+    chrome: CombatChrome,
+    decoration_bottom: f32,
+) -> ActionsOutcome {
     let ds = design::DesignSystem::get(ui.ctx());
     let glyphs = 1 + usize::from(chrome.moved);
-    let size = egui::vec2(
-        2.0 * ACTIONS_PADDING
-            + glyphs as f32 * ACTIONS_ICON_SIZE
-            + (glyphs - 1) as f32 * ACTIONS_GAP,
-        ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING,
-    );
     let panel = ui.max_rect();
-    // Collée au coin bas extérieur de la fenêtre : dans l'espace alloué au contenu, donc rien à
-    // déclipper — et rien à décaler non plus, le panneau ne peint pas jusque-là.
-    let pill = egui::Rect::from_min_size(egui::pos2(panel.min.x, panel.max.y - size.y), size);
+    // Le premier pixel libre sous la décoration, plus l'air demandé.
+    let top = decoration_bottom + 1.0 + ACTIONS_DECORATION_GAP;
+    let span = |count: usize| {
+        count as f32 * ACTIONS_ICON_SIZE + (count - 1) as f32 * ACTIONS_GAP + 2.0 * ACTIONS_PADDING
+    };
+    let thickness = ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING;
+    // Colonne par défaut ; rangée quand la hauteur restante ne lui suffit pas (voir doc de
+    // fonction) — la rangée, elle, tient sous les six gabarits.
+    let stacked = panel.max.y - top >= span(glyphs);
+    let size = if stacked {
+        egui::vec2(thickness, span(glyphs))
+    } else {
+        egui::vec2(span(glyphs), thickness)
+    };
+    let pill = egui::Rect::from_min_size(egui::pos2(panel.min.x, top), size);
     let mut outcome = ActionsOutcome::default();
     crate::mirror::upright_in(ui, pill, |ui| {
         // Un painter cloné, et non `ui.painter()` : les glyphes se peignent pendant que `ui` est
@@ -1152,13 +1187,26 @@ fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome 
         let painter = ui.painter().clone();
         painter.rect_filled(pill, HANDLE_ROUNDING, design::tokens::OVERLAY_BACKDROP);
         let slot = |index: usize| {
+            let offset = index as f32 * (ACTIONS_ICON_SIZE + ACTIONS_GAP);
+            let (dx, dy) = if stacked {
+                (0.0, offset)
+            } else {
+                (offset, 0.0)
+            };
             egui::Rect::from_min_size(
                 egui::pos2(
-                    pill.min.x + ACTIONS_PADDING + index as f32 * (ACTIONS_ICON_SIZE + ACTIONS_GAP),
-                    pill.min.y + ACTIONS_PADDING,
+                    pill.min.x + ACTIONS_PADDING + dx,
+                    pill.min.y + ACTIONS_PADDING + dy,
                 ),
                 egui::Vec2::splat(ACTIONS_ICON_SIZE),
             )
+        };
+        // En colonne, les glyphes s'empilent : la place libre est sur le côté. En rangée, ils se
+        // gênent latéralement et c'est le dessus qui est libre.
+        let side = if stacked {
+            design::TooltipSide::Right
+        } else {
+            design::TooltipSide::Above
         };
         let (icon, tooltip) = if chrome.locked {
             (design::DsIcon::Lock, "Déverrouiller la hauteur du panneau")
@@ -1168,8 +1216,16 @@ fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome 
                 "Verrouiller la hauteur du panneau",
             )
         };
-        outcome.toggle_lock =
-            paint_action(ui, &ds, &painter, slot(0), "combat-verrou", icon, tooltip);
+        outcome.toggle_lock = paint_action(
+            ui,
+            &ds,
+            &painter,
+            slot(0),
+            "combat-verrou",
+            icon,
+            tooltip,
+            side,
+        );
         // Court-circuit volontaire : panneau jamais déplacé, glyphe jamais peint — la pastille
         // s'est déjà dimensionnée dessus.
         outcome.restore_requested = chrome.moved
@@ -1181,13 +1237,15 @@ fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome 
                 "combat-replacer",
                 design::DsIcon::Undo,
                 "Replacer le panneau à sa hauteur d'origine",
+                side,
             );
     });
     outcome
 }
 
 /// Un glyphe-commande de la rangée d'actions : blanc au repos, or au survol, curseur « main »,
-/// infobulle au-dessus. Rend `true` la frame où il est cliqué.
+/// infobulle du côté que lui passe l'appelant (voir [`paint_actions_row`]). Rend `true` la frame
+/// où il est cliqué.
 ///
 /// **`click_and_drag`**, comme les glyphes de la bande Récap et pour la même raison : un bouton qui
 /// ne sentirait que le clic laisserait le glissement à ce qui est dessous, et un appui sur le
@@ -1201,6 +1259,7 @@ fn paint_action(
     id: &'static str,
     icon: design::DsIcon,
     tooltip: &'static str,
+    side: design::TooltipSide,
 ) -> bool {
     let response = ui.interact(rect, ui.id().with(id), egui::Sense::click_and_drag());
     let tint = if response.hovered() {
@@ -1213,11 +1272,7 @@ fn paint_action(
     let icon_rect = design::contain_rect(rect, ds.icon_native_size(icon));
     ds.paint_icon(painter, icon_rect, icon, tint);
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    // `Above`, le défaut du design system : la pastille est collée au bord bas de la fenêtre, une
-    // bulle ouverte en dessous en sortirait.
-    design::tooltip(&response)
-        .side(design::TooltipSide::Above)
-        .text(tooltip);
+    design::tooltip(&response).side(side).text(tooltip);
     response.clicked()
 }
 
