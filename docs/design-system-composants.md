@@ -457,14 +457,23 @@ gouttières de 2px, qui n'appartiennent à aucun onglet : sans peinture explicit
 traverse la barre de part en part, et le cerne se retrouve entaillé de deux encoches au droit de
 chaque séparateur.
 
-**Largeur : parts égales sur toute la largeur disponible, et c'est un choix, pas un relevé.** Le jeu
-dimensionne chaque onglet sur son libellé — ses six onglets font 77, 83, 103, 83, 133 et 106px pour
-des encres de 26, 44, 73, 28, 100 et 35 : ni un padding constant, ni le nombre de caractères, ni une
-largeur minimale unique n'en rendent compte. Sa barre ne remplit d'ailleurs pas la fenêtre (elle
-s'arrête à x=636 sur 705) parce que le **bouton de réinitialisation** occupe la droite. Appliquer une
-règle qu'on n'a pas mesurée à trois onglets qui n'ont pas ce bouton laissait la barre à 337px sur les
-743 du panneau, calée à gauche. `fit_content()` rend l'autre comportement, pour comparer à une
-capture du jeu ou pour une barre qui ne doit pas s'étirer.
+**Largeur : toute la largeur disponible, l'encre de chaque libellé plus une marge égale pour tous —
+et c'est un choix, pas un relevé.** Le jeu dimensionne chaque onglet sur son libellé — ses six
+onglets font 77, 83, 103, 83, 133 et 106px pour des encres de 26, 44, 73, 28, 100 et 35 : ni un
+padding constant, ni le nombre de caractères, ni une largeur minimale unique n'en rendent compte. Sa
+barre ne remplit d'ailleurs pas la fenêtre (elle s'arrête à x=636 sur 705) parce que le **bouton de
+réinitialisation** occupe la droite. Appliquer une règle qu'on n'a pas mesurée à des onglets qui
+n'ont pas ce bouton laissait la barre à 337px sur les 743 du panneau, calée à gauche.
+`fit_content()` rend l'autre comportement, pour comparer à une capture du jeu ou pour une barre qui
+ne doit pas s'étirer.
+
+**Ce fut des parts égales jusqu'au 2026-09-18** : chaque onglet recevait le même sixième de la barre
+quel que soit son mot. À sept onglets sur les 700px de la fenêtre Options, chaque part tombait à
+98px et « Personnages » (encre 100) débordait de sa case pendant que « Chat » nageait dans la
+sienne. La marge égale (`fill_widths`) donne à chaque mot la place qu'il demande et partage le
+reste : un long libellé élargit son onglet, jamais celui du voisin. Barre plus étroite que la somme
+des encres : marge nulle, onglets au prorata de leur encre — les mots s'écrêtent, mais
+uniformément. Les arrondis restent cumulés, la barre tombe pile sur le bord du panneau.
 
 **Inventé, faute de référence** :
 
@@ -507,8 +516,9 @@ C'est aussi pourquoi cette variante attendait le lot 2 : elle a besoin de `DsIco
 | Encre du pictogramme | **dérivée**, `TAB_ICON_RATIO` = 18/36 → 22 px sur 44 |
 
 Un onglet à pictogramme est donc **plus étroit** qu'un onglet texte (77 px de plancher) : il n'a pas
-de mot à contenir. En mode étiré (le défaut), il suit la même règle de parts égales que la variante
-texte ; `fit_content` lui donne les 66 px du jeu.
+de mot à contenir. En mode étiré (le défaut), il suit la même règle de marge égale que la variante
+texte, son encre étant celle du glyphe (`TAB_HEIGHT × TAB_ICON_RATIO`) — entre pictogrammes, les
+onglets restent donc égaux ; `fit_content` lui donne les 66 px du jeu.
 
 **Le ratio d'encre est dérivé, pas mesuré**, et c'est dit dans le jeton : `icon-tabs.png` est un
 gabarit **vide** — le jeu n'y a laissé aucun pictogramme. La valeur reprend le rapport du bouton

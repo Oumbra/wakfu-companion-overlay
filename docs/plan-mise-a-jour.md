@@ -471,6 +471,11 @@ Aujourd'hui : logo, titre, séparateur, rouage 72 px, version. Demain, sous le r
 
 ### 8.2 Fenêtre Options › Paramètres, nouvelle section « Mise à jour »
 
+> **Déplacée dans l'onglet « À propos » le 2026-09-18** (`panels::a_propos_tab`, dernier onglet du
+> menu, avec les boutons « Redémarrer l'overlay » et « Fermer l'overlay ») — voir
+> `plan-architecture.md` §9.1 tervicies. La section elle-même est inchangée ; ce qui suit décrit son
+> contenu, et « Paramètres » y est à lire « À propos ».
+
 Après « Compte », même rythme (`SECTION_GAP`, `heading`, `info_text`, `INFO_GAP`, ligne de
 `ROW_HEIGHT`) :
 

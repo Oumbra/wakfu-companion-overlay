@@ -2508,6 +2508,41 @@ pastille au bord droit, glyphes à l'endroit). Le reste du fichier tient ce qu'a
 montre : verrouillé, aucun geste remonté ; déverrouillé, la suite `Started`/`Moved`/`Released` ;
 et un glissement parti du cadenas qui ne déplace pas le panneau (`Sense::click_and_drag`).
 
+### 9.1 tervicies Onglet « À propos », largeur des onglets (2026-09-18)
+
+Demande utilisateur : « régler la largeur des éléments des onglets du menu de la modale Options,
+ajouter l'onglet "À propos" en dernier et y déplacer la section Mise à jour, les boutons
+"Redémarrer" et "Fermer l'overlay", renommer le bouton "Redémarrer l'overlay" ».
+
+**L'onglet** (`panels::a_propos_tab`, `OptionsTab::APropos`, septième et dernière entrée du menu) :
+la section « Mise à jour » telle qu'elle était (§9.1 tredecies — ligne d'information, case
+« Installer automatiquement… », bouton unique dont le libellé suit l'état), puis la paire de sorties
+« Redémarrer l'overlay » / « Fermer l'overlay » (§9.1 novodecies et unvicies, mêmes règles : paire
+centrée d'un seul tenant, `Secondary`, redémarrage à gauche). Ce sont les trois choses de la
+fenêtre qui concernent le **programme** et non ce qu'il affiche ; elles fermaient l'onglet
+« Paramètres » sous un défilement, à huit sections de la première. « Paramètres » se termine
+désormais sur « Compte ». L'onglet ne confirme rien : il remonte une intention
+(`AProposTabAction` — `CheckUpdate`, `Install`, `Restart`, `Quit`) et c'est la fenêtre qui ouvre la
+boîte qui convient, comme avant. `update_info_line` et `update_button` ont suivi dans le module. La
+version courante n'y est pas répétée : la bannière la porte.
+
+**« Redémarrer l'overlay », en toutes lettres** : « Redémarrer » tenait son complément de son voisin
+« Fermer l'overlay » ; les deux libellés se répondent maintenant mot pour mot.
+
+**Largeur des onglets** (`design::tabs`, §9.2) : à sept onglets sur les 700 px du panneau, les parts
+égales tombaient à 98 px et « Personnages » (encre 100) débordait de sa case. La règle par défaut
+devient **l'encre de chaque libellé plus une marge identique pour tous** (`fill_widths`) : la barre
+remplit toujours le panneau, mais un long mot élargit son onglet et jamais celui du voisin ; si la
+barre est plus étroite que la somme des encres, marge nulle et onglets au prorata. Les pictogrammes
+comptent pour l'emprise de leur glyphe, donc restent égaux entre eux. Toutes les captures de la
+fenêtre Options et la galerie bougent avec la barre.
+
+**Captures** : `options_a_propos` (au repos, sept onglets) et `options_a_propos_mise_a_jour` (version
+disponible) remplacent `options_parametres_sorties` et `options_parametres_mise_a_jour` ;
+`options_parametres_compte` sature désormais au bas de l'onglet, sur sa dernière section.
+`options_fermeture_overlay_confirmee_et_echap_repond_non` et
+`options_redemarrage_confirme_et_echap_repond_non` s'ouvrent sur « À propos ».
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
