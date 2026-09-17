@@ -2286,7 +2286,10 @@ mod linux_main {
                     // le `Resized` qui suit reconfigure la surface lui-même.
                     if overlay.kind == OverlayKind::Recap {
                         if let Some(height) = outcome.recap_height {
-                            if overlay.last_recap_height != Some(height) {
+                            // Jamais pendant qu'on la tient — voir `main.rs`, même raison.
+                            if overlay.last_recap_height != Some(height)
+                                && self.recap_drag.is_none()
+                            {
                                 let _ = overlay.window.request_inner_size(
                                     winit::dpi::LogicalSize::new(
                                         panels::recap::WIDTH as f64,
@@ -2331,23 +2334,22 @@ mod linux_main {
                                     grab: physical(pos),
                                 });
                             }
-                            panels::recap::RecapDrag::Moved(pos) => {
+                            // Le curseur vient du serveur X11 (`QueryPointer` sur la racine), et
+                            // non d'egui, dont la position est mesurée depuis le coin de cette
+                            // fenêtre-ci : s'en servir pour la déplacer reboucle et la fait
+                            // vibrer (voir `recap_placement::drag_offset`). Requête illisible :
+                            // la bande reste où elle est.
+                            panels::recap::RecapDrag::Moved => {
                                 if let Some(drag) = self.recap_drag.filter(|drag| drag.window == id)
                                 {
-                                    let posed = recap_placement::window_position(
-                                        self.recap_position,
-                                        client,
-                                        band,
-                                    );
-                                    let cursor = physical(pos);
-                                    let target = (
-                                        posed.0 + cursor.0 - drag.grab.0,
-                                        posed.1 + cursor.1 - drag.grab.1,
-                                    );
-                                    let offset = recap_placement::offset_of(target, client, band);
-                                    if self.recap_position != Some(offset) {
-                                        self.recap_position = Some(offset);
-                                        place(Some(offset));
+                                    if let Some(cursor) = self.game_window.cursor_position() {
+                                        let offset = recap_placement::drag_offset(
+                                            cursor, drag.grab, client, band,
+                                        );
+                                        if self.recap_position != Some(offset) {
+                                            self.recap_position = Some(offset);
+                                            place(Some(offset));
+                                        }
                                     }
                                 }
                             }

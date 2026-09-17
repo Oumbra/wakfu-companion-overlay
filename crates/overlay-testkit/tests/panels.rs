@@ -650,16 +650,17 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
         "l'appui sur le fond doit remonter la position de saisie"
     );
 
-    // La souris part vers le bas à droite. Dans le vrai overlay, la fenêtre suit — ici elle ne
-    // bouge pas, et c'est justement ce qui rend la POSITION lisible : c'est elle qui est remontée,
-    // telle quelle, pas l'écart depuis la frame précédente.
+    // La souris part vers le bas à droite. Le glissement se signale, **sans position** : celle
+    // que ce repère-ci donnerait est mesurée depuis le coin de la fenêtre, donc elle change
+    // quand l'hôte déplace cette fenêtre, et s'en servir pour la déplacer la faisait vibrer
+    // (2026-09-17, voir `recap_placement::drag_offset`). L'hôte lit le curseur d'écran.
     let deplacee = egui::pos2(160.0, 100.0);
     harness.event(egui::Event::PointerMoved(deplacee));
     harness.run();
     assert_eq!(
         gestes.borrow().last().copied(),
-        Some(panels::recap::RecapDrag::Moved(deplacee)),
-        "le glissement doit remonter où est le curseur maintenant"
+        Some(panels::recap::RecapDrag::Moved),
+        "le glissement doit se signaler à l'hôte"
     );
 
     press(&mut harness, deplacee, false);

@@ -62,7 +62,7 @@ pub struct GameRect {
     pub client_top: i32,
 }
 
-pub use imp::GameWindowTracker;
+pub use imp::{cursor_position, GameWindowTracker};
 
 #[cfg(target_os = "windows")]
 mod imp {
@@ -72,9 +72,25 @@ mod imp {
     use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
     use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetClientRect, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindow,
-        IsWindowVisible,
+        EnumWindows, GetClientRect, GetCursorPos, GetWindowRect, GetWindowTextLengthW,
+        GetWindowTextW, IsWindow, IsWindowVisible,
     };
+
+    /// Le curseur **en coordonnées d'écran**, en pixels physiques (le processus est
+    /// per-monitor DPI aware, comme les rectangles de fenêtre d'ici et les positions que winit
+    /// repose).
+    ///
+    /// Sert au glisser-déposer de la bande Récap — voir `recap_placement::drag_offset`, qui
+    /// explique pourquoi le curseur qu'egui rapporte, mesuré depuis le coin de la fenêtre qu'on
+    /// déplace, ne peut pas servir à la déplacer.
+    ///
+    /// `None` si l'appel échoue (bureau verrouillé, poste de travail inaccessible) : l'appelant
+    /// laisse alors la bande où elle est.
+    pub fn cursor_position() -> Option<(i32, i32)> {
+        let mut point = POINT::default();
+        unsafe { GetCursorPos(&mut point) }.ok()?;
+        Some((point.x, point.y))
+    }
 
     /// Suffixe distinctif et invariant du titre de la fenêtre du client Wakfu — voir le
     /// commentaire de module.
@@ -233,6 +249,20 @@ mod imp {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("GameWindowTracker").finish_non_exhaustive()
         }
+    }
+
+    /// **Toujours `None` hors Windows**, et personne ne l'appelle : le seul appelant est le
+    /// glisser-déposer de la bande Récap dans `main.rs`, qui est le binaire WINDOWS. Sous Linux,
+    /// l'hôte est `bin/wakfu-companion-overlay-x11.rs` et il lit le curseur sur la connexion X11
+    /// qu'il tient déjà ouverte (`overlay_platform::linux::x11::GameWindowTracker::
+    /// cursor_position`) plutôt que d'en rouvrir une par frame de glissement — d'où cette
+    /// fonction-ci, qui existe pour que la LIB `overlay-ui` garde la même surface sur les deux
+    /// plateformes, comme le reste de cet `imp`.
+    ///
+    /// Si elle devait tout de même servir un jour, `None` fait tenir la bande en place le temps
+    /// du geste : le pire cas est un glissement sans effet, jamais une bande posée n'importe où.
+    pub fn cursor_position() -> Option<(i32, i32)> {
+        None
     }
 
     impl GameWindowTracker {

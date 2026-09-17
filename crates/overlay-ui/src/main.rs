@@ -82,7 +82,7 @@ use overlay_ui::engine_thread::{
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_servers::GameServers;
-use overlay_ui::game_window::{GameRect, GameWindowTracker};
+use overlay_ui::game_window::{self, GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::alerts_tab;
@@ -3505,7 +3505,13 @@ impl App {
         // `reconfigure_surface` ici même (voir sa doc).
         if overlay.kind == OverlayKind::Recap {
             if let Some(height) = outcome.recap_height {
-                if overlay.last_recap_height != Some(height) {
+                // **Jamais pendant qu'on la tient** (2026-09-17, demande utilisateur du même
+                // retour d'écran) : retailler la fenêtre sous le curseur déplacerait le bloc
+                // pendant le geste, et le bornage avec lui. Le contenu, lui, continue de vivre
+                // — ce sont les chiffres, ils ne bougent rien. La hauteur en attente s'applique
+                // à la frame suivant le relâchement, `last_recap_height` étant resté sur
+                // l'ancienne valeur.
+                if overlay.last_recap_height != Some(height) && self.recap_drag.is_none() {
                     let size = winit::dpi::LogicalSize::new(
                         panels::recap::WIDTH as f64,
                         height as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
@@ -3518,15 +3524,15 @@ impl App {
                 }
             }
             // **La bande saisie à la souris** (2026-09-17, voir `panels::recap::RecapDrag`) :
-            // le panneau remonte où est le curseur, l'hôte pose la fenêtre — comme pour la
-            // remise à zéro, le panneau n'agit jamais lui-même.
+            // le panneau remonte le geste, l'hôte pose la fenêtre — comme pour la remise à zéro,
+            // le panneau n'agit jamais lui-même.
             //
-            // La position visée vaut toujours « le curseur à l'écran, moins le point du bloc par
-            // lequel on le tient » : le curseur à l'écran, c'est la fenêtre telle qu'elle est
-            // posée plus la position locale que le panneau vient de lire, et le point de saisie
-            // ne bouge pas de tout le geste. Rien ne s'accumule d'une frame à l'autre, donc rien
-            // ne dérive — en particulier quand le bornage retient la bande contre un bord alors
-            // que la souris, elle, continue.
+            // La position visée vaut toujours « le curseur À L'ÉCRAN, moins le point du bloc par
+            // lequel on le tient », le point de saisie étant figé au premier appui. Le curseur
+            // d'écran vient de l'OS (`game_window::cursor_position`) et non d'egui : la position
+            // qu'egui rapporte est mesurée depuis le coin de cette fenêtre-ci, donc s'en servir
+            // pour la déplacer reboucle et la fait vibrer — voir `recap_placement::drag_offset`,
+            // qui porte le diagnostic complet.
             let scale = overlay.window.scale_factor();
             let outer = overlay.window.outer_size();
             let (client, band) = RecapAnchor::new(None, scale).geometry(
@@ -3561,19 +3567,17 @@ impl App {
                 }
                 // `filter` sur la fenêtre saisie : en multicompte, chaque client a sa bande, et
                 // ce n'est pas parce que l'une est tenue que les autres bougent.
-                panels::recap::RecapDrag::Moved(pos) => {
+                panels::recap::RecapDrag::Moved => {
                     if let Some(drag) = self.recap_drag.filter(|drag| drag.window == id) {
-                        let posed =
-                            recap_placement::window_position(self.recap_position, client, band);
-                        let cursor = physical(pos);
-                        let target = (
-                            posed.0 + cursor.0 - drag.grab.0,
-                            posed.1 + cursor.1 - drag.grab.1,
-                        );
-                        let offset = recap_placement::offset_of(target, client, band);
-                        if self.recap_position != Some(offset) {
-                            self.recap_position = Some(offset);
-                            place(Some(offset));
+                        // Curseur illisible : la bande reste où elle est, ce geste-ci n'a
+                        // simplement pas d'effet cette frame.
+                        if let Some(cursor) = game_window::cursor_position() {
+                            let offset =
+                                recap_placement::drag_offset(cursor, drag.grab, client, band);
+                            if self.recap_position != Some(offset) {
+                                self.recap_position = Some(offset);
+                                place(Some(offset));
+                            }
                         }
                     }
                 }

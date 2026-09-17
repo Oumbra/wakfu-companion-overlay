@@ -155,6 +155,44 @@ pub fn window_position(offset: Option<(i32, i32)>, client: ClientArea, band: Ban
     (client.left + x, client.top + y - band.reserve)
 }
 
+/// Le décalage que vaut le curseur **à l'écran** pendant un glissement, pour une bande tenue par
+/// le point `grab`.
+///
+/// # Pourquoi le curseur d'écran, et pas celui que le panneau remonte
+///
+/// **Retour d'écran du 2026-09-17, capture vidéo à l'appui : la bande vibrait dans tous les sens,
+/// souris immobile**, au point d'être impossible à poser. Le geste était alors calculé dans le
+/// repère de la FENÊTRE : `nouvelle position = position posée + (curseur local − point de
+/// saisie)`, le curseur local étant celui qu'egui rapporte, mesuré depuis le coin de la bande.
+///
+/// Cette formule est une boucle : déplacer la fenêtre déplace son coin, donc change le curseur
+/// LOCAL **sans que la souris ait bougé**, ce qui redéplace la fenêtre à la frame suivante. Elle
+/// ne serait au repos que si la fenêtre se posait dans l'instant, avant l'événement souris
+/// suivant — or aucun des deux systèmes ne le garantit : entre la demande de déplacement et les
+/// événements qui en tiennent compte, il y a un aller-retour avec le serveur X11 ou le gestionnaire
+/// de fenêtres de Windows. Le décalage déjà appliqué se réapplique donc, la bande dépasse,
+/// revient, dépasse encore — les images de la vidéo la montrent sauter d'une centaine de pixels
+/// d'une frame à l'autre, curseur figé, contenu inchangé.
+///
+/// Le curseur d'ÉCRAN, lui, ne dépend d'aucune fenêtre : la cible vaut `curseur − point de
+/// saisie`, un point fixe du bloc reste sous le pointeur, et deux frames sans mouvement de souris
+/// donnent deux fois la même position — donc aucun replacement, donc rien qui vibre. C'est aussi
+/// pourquoi cette fonction **ne prend pas la position actuelle de la fenêtre** : elle ne peut
+/// structurellement pas la reboucler.
+///
+/// `cursor` et `grab` sont en pixels physiques : le curseur en coordonnées d'écran
+/// (`GetCursorPos` sous Windows, `QueryPointer` sous X11), le point de saisie depuis le coin
+/// haut-gauche de la FENÊTRE de la bande, réserve d'infobulle comprise — figé au début du geste,
+/// il ne se relit jamais.
+pub fn drag_offset(
+    cursor: (i32, i32),
+    grab: (i32, i32),
+    client: ClientArea,
+    band: Band,
+) -> (i32, i32) {
+    offset_of((cursor.0 - grab.0, cursor.1 - grab.1), client, band)
+}
+
 /// Le décalage que vaut une position de **fenêtre OS** — l'opération inverse de
 /// [`window_position`], celle qui traduit en réglage persistable la fenêtre que l'hôte vient de
 /// poser sous le curseur. Borné de la même façon, pour qu'un glissement contre un bord écrive la
@@ -289,5 +327,70 @@ mod tests {
         let juste_hors = (DEFAULT_OFFSET.0, DEFAULT_OFFSET.1 + SNAP_RADIUS_PX + 1);
         assert_eq!(snap(juste_hors), Some(juste_hors));
         assert_eq!(snap((900, 500)), Some((900, 500)));
+    }
+
+    /// **La régression du 2026-09-17** : la bande vibrait parce que le geste se calculait dans le
+    /// repère de la fenêtre qu'il déplaçait. Souris IMMOBILE, le geste doit rendre exactement la
+    /// même position d'une frame à l'autre — c'est ce qui fait qu'aucun replacement n'est demandé,
+    /// donc que rien ne bouge.
+    ///
+    /// Le test ne peut pas rejouer l'ancienne boucle : [`drag_offset`] ne prend pas la position
+    /// de la fenêtre, donc elle ne peut plus s'y glisser. C'est l'invariant, et il tient par la
+    /// signature autant que par cette assertion.
+    #[test]
+    fn souris_immobile_bande_immobile() {
+        let (client, band) = plein_ecran();
+        let grab = (100, 50);
+        let curseur = (740, 400);
+        let premiere = drag_offset(curseur, grab, client, band);
+        for _ in 0..10 {
+            assert_eq!(drag_offset(curseur, grab, client, band), premiere);
+        }
+    }
+
+    /// Le point du bloc par lequel on tient la bande reste sous le curseur : à un pixel de souris
+    /// correspond un pixel de bande, aller comme retour, sans traîne ni dépassement.
+    #[test]
+    fn la_bande_suit_le_curseur_pixel_pour_pixel() {
+        let (client, band) = plein_ecran();
+        let grab = (100, 50);
+        let depart = drag_offset((740, 400), grab, client, band);
+        let a_droite = drag_offset((741, 400), grab, client, band);
+        let en_bas = drag_offset((740, 401), grab, client, band);
+        let revenu = drag_offset((740, 400), grab, client, band);
+        assert_eq!(a_droite, (depart.0 + 1, depart.1));
+        assert_eq!(en_bas, (depart.0, depart.1 + 1));
+        assert_eq!(revenu, depart, "un aller-retour doit revenir au même pixel");
+    }
+
+    /// Le point de saisie est bien celui du geste : tenir la bande par son coin ou par son milieu
+    /// ne la pose pas au même endroit pour un même curseur.
+    #[test]
+    fn le_point_de_saisie_decide_de_la_pose() {
+        let (client, band) = plein_ecran();
+        let curseur = (740, 400);
+        let par_le_coin = drag_offset(curseur, (0, 0), client, band);
+        let par_le_milieu = drag_offset(curseur, (103, 57), client, band);
+        assert_eq!(par_le_coin, (740, 400 + band.reserve));
+        assert_eq!(
+            par_le_milieu,
+            (par_le_coin.0 - 103, par_le_coin.1 - 57),
+            "la bande se pose décalée du point par lequel on la tient"
+        );
+    }
+
+    /// Le bornage vaut pendant le geste comme à la pose : la souris continue vers le bord, la
+    /// bande s'arrête au cadre du jeu — et, la souris revenant, elle repart sans avoir accumulé
+    /// le trajet perdu (ce que le calcul en écarts, lui, aurait cumulé).
+    #[test]
+    fn contre_un_bord_la_bande_s_arrete_sans_accumuler() {
+        let (client, band) = plein_ecran();
+        let grab = (100, 50);
+        let contre_le_bord = drag_offset((5000, 400), grab, client, band);
+        let plus_loin_encore = drag_offset((9000, 400), grab, client, band);
+        assert_eq!(contre_le_bord.0, client.width - band.width);
+        assert_eq!(plus_loin_encore, contre_le_bord);
+        let revenue = drag_offset((740, 400), grab, client, band);
+        assert_eq!(revenue, (640, 350 + band.reserve));
     }
 }
