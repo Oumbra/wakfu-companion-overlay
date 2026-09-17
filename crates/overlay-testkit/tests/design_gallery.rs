@@ -1592,6 +1592,64 @@ fn galerie_de_la_confirmation() {
     harness.snapshot("design_gallery_confirm");
 }
 
+/// **Le voile modal** (`design::scrim`, 2026-09-17) — sa propre planche, pour la même raison que
+/// la confirmation : posé dans le canevas de la galerie, il assombrirait tout.
+///
+/// Un conteneur : il se montre avec du contenu (§1 bis du contrat) — ici une fenêtre du design
+/// system centrée par `centered`, dont le pied de page dépasse volontairement de rien : c'est le
+/// cas nominal, celui de la fenêtre de recette et des modales de l'onglet « Personnages ». Et du
+/// contenu factice dessous, comme pour la confirmation : c'est lui que le voile assombrit, et
+/// c'est lui qu'il faut juger. Les trois couches (`ScrimLayer`) ne se distinguent pas sur une
+/// capture — elles ne changent que ce qui passe au-dessus.
+#[test]
+fn galerie_du_voile() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(640.0, 420.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            let fenetre = ui.max_rect();
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    ui.add(design::heading("Objets suivis"));
+                    ui.add_space(6.0);
+                    let mut saisie = "Pierre ultime".to_owned();
+                    ui.add(
+                        design::input(&mut saisie)
+                            .width(400.0)
+                            .log_name("galerie.scrim-fond-champ"),
+                    );
+                    ui.add_space(10.0);
+                    ui.add(
+                        design::button("Valider")
+                            .variant(design::ButtonVariant::Primary)
+                            .size(design::ButtonSize::Compact)
+                            .width(180.0)
+                            .log_name("galerie.scrim-fond-valider"),
+                    );
+                    // Le voile sur la fenêtre ENTIÈRE, et une fenêtre du design system dedans.
+                    design::scrim(fenetre)
+                        .centered(Vec2::new(420.0, 300.0))
+                        .log_name("galerie.scrim")
+                        .show(ui, |ui| {
+                            let chrome = design::window("Objets de la recette")
+                                .footer("Annuler", "Suivre")
+                                .log_name("galerie.scrim-fenetre")
+                                .show(ui);
+                            design::panel().show(ui, chrome.content, |ui, _panel| {
+                                ui.add(design::label("Ce que le voile épargne reste cliquable."));
+                            });
+                        });
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_scrim");
+}
+
 /// La tuile à légende — sa propre planche, la principale ayant atteint le plafond de 8192 px.
 ///
 /// Trois états forcés côte à côte, une légende longue, un contenu élidé, et une grille de quatre

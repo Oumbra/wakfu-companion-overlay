@@ -397,7 +397,7 @@ pub fn show(
     grille(ui, panel, state, ctx);
 
     // Les modales passent APRÈS la grille : elles se posent sur la fenêtre entière, dans leur
-    // propre couche (voir `couche_modale`).
+    // propre couche (`design::scrim`, voir `modale_personnage`).
     if let Some(index) = state.pending_account_removal {
         confirmation_de_compte(ui, state, ctx, index);
     } else if state.account_editor.is_some() {
@@ -1088,37 +1088,6 @@ fn painted_ellipsed(
 // Les modales
 // -------------------------------------------------------------------------------------------
 
-/// Ouvre une couche AU-DESSUS du panneau et y peint le voile — l'idiome de
-/// `design::confirm_dialog`. Sans elle, le clip du panneau rognerait la bannière de la modale.
-///
-/// **`Order::Middle` et non `Foreground`**, contrairement à la boîte de confirmation : le panneau
-/// de `design::autocomplete` est une `egui::Area` en `Foreground`, et deux couches de MÊME ordre se
-/// départagent par leur identifiant — la modale passerait donc par-dessus le panneau de
-/// suggestions, qui disparaîtrait purement et simplement. `Middle` couvre tout le contenu de la
-/// fenêtre (qui vit dans la couche de base) et laisse le popup au-dessus, là où il doit être.
-fn couche_modale(ui: &mut egui::Ui, window: Rect, nom: &'static str) -> egui::Ui {
-    let mut couche = ui.new_child(egui::UiBuilder::new().max_rect(window).layer_id(
-        egui::LayerId::new(
-            egui::Order::Middle,
-            egui::Id::new(("personnages.modale", nom)),
-        ),
-    ));
-    couche.set_clip_rect(Rect::EVERYTHING);
-    couche.painter().rect_filled(
-        window,
-        0.0,
-        Color32::from_black_alpha(design::tokens::CONFIRM_SCRIM_ALPHA),
-    );
-    // Le voile **avale** les clics qui passent à côté de la modale : sans ça il ne serait qu'une
-    // teinte, et ce qu'il couvre resterait réellement cliquable — l'inverse de ce qu'il annonce.
-    couche.interact(
-        window,
-        egui::Id::new(("personnages.modale.voile", nom)),
-        egui::Sense::click(),
-    );
-    couche
-}
-
 /// Taille de la modale de personnage. **640 de large et non 600** : la largeur est commandée par la
 /// grille de classes (voir [`COLONNE`]), et il faut qu'elle tienne avec de la marge des deux côtés.
 const PERSO_MODALE: Vec2 = Vec2::new(640.0, 620.0);
@@ -1144,210 +1113,219 @@ fn modale_personnage(
     let Some(mut editeur) = state.editor.clone() else {
         return;
     };
-    let mut couche = couche_modale(ui, ctx.window, "personnage");
-    let rect = Rect::from_center_size(ctx.window.center(), PERSO_MODALE);
-    let mut modale = couche.new_child(egui::UiBuilder::new().max_rect(rect));
-    modale.set_clip_rect(Rect::EVERYTHING);
-    let chrome = design::window("Personnage")
-        .footer("Annuler", "Valider")
-        .close_button(true)
-        .log_name("personnages.modale")
-        .show(&mut modale);
+    // **`ScrimLayer::Middle` et non `Foreground`** : le panneau de `design::autocomplete` est une
+    // `egui::Area` en `Foreground`, et deux couches de MÊME ordre se départagent par leur
+    // identifiant — la modale passerait donc par-dessus le panneau de suggestions, qui
+    // disparaîtrait purement et simplement. `Middle` couvre tout le contenu de la fenêtre (qui
+    // vit dans la couche de base) et laisse le popup au-dessus, là où il doit être.
+    design::scrim(ctx.window)
+        .layer(design::ScrimLayer::Middle)
+        .centered(PERSO_MODALE)
+        .log_name("personnages.personnage")
+        .show(ui, |modale| {
+            let chrome = design::window("Personnage")
+                .footer("Annuler", "Valider")
+                .close_button(true)
+                .log_name("personnages.modale")
+                .show(modale);
 
-    design::panel().show(&mut modale, chrome.content, |ui, _panel| {
-        // La colonne centrée : tout ce qui suit s'y pose, donc tout est aligné sur la grille.
-        let zone = ui.max_rect();
-        let colonne = Rect::from_min_max(
-            egui::pos2(zone.center().x - COLONNE / 2.0, zone.top()),
-            egui::pos2(zone.center().x + COLONNE / 2.0, zone.bottom()),
-        );
-        let mut ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(colonne)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        let ui = &mut ui;
+            design::panel().show(modale, chrome.content, |ui, _panel| {
+                // La colonne centrée : tout ce qui suit s'y pose, donc tout est aligné sur la grille.
+                let zone = ui.max_rect();
+                let colonne = Rect::from_min_max(
+                    egui::pos2(zone.center().x - COLONNE / 2.0, zone.top()),
+                    egui::pos2(zone.center().x + COLONNE / 2.0, zone.bottom()),
+                );
+                let mut ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(colonne)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                let ui = &mut ui;
 
-        // 1. Le nom, en tête : c'est ce qu'on vient écrire.
-        //
-        // **Un `design::autocomplete` et non un champ nu** : voir règle 5 de la doc de module. Les
-        // noms déjà déclarés sur CE compte sont proposés désactivés — les redéclarer ne ferait
-        // qu'écraser ce qui existe, et la modification se fait au crayon de la tuile.
-        let deja: std::collections::HashSet<String> = ctx.roster.accounts[state.account]
-            .characters
-            .iter()
-            .filter(|c| Some(c.name.as_str()) != editeur_nom_initial(&editeur, state, ctx))
-            .map(|c| overlay_engine::roster::normalize_wakfu_name(&c.name))
-            .collect();
-        let entrees: Vec<design::AutocompleteEntry> = state
-            .journal
-            .iter()
-            .map(|vu| {
-                let mut entree = design::AutocompleteEntry::new(vu.name.clone(), 0);
-                entree.image = vu.class_name.as_deref().and_then(|class| {
-                    ctx.avatars
-                        .texture(class, vu.gender, false)
-                        .map(|handle| handle.id())
-                });
-                if deja.contains(&overlay_engine::roster::normalize_wakfu_name(&vu.name)) {
-                    entree.disabled = true;
-                    entree.mention = Some("déjà déclaré".to_string());
-                }
-                entree
-            })
-            .collect();
-        let issue = design::autocomplete(&mut editeur.name)
-            .placeholder("Nom du personnage, exactement comme en jeu…")
-            .entries(&entrees)
-            .width(COLONNE)
-            // **Ni loupe, ni champ vidé** (2026-09-16) : ce n'est pas une recherche, c'est le nom
-            // du personnage. Il s'écrit librement — le composant ne valide rien, un nom qu'aucune
-            // suggestion ne porte sort du champ tel quel — et choisir une suggestion le REMPLIT au
-            // lieu de l'effacer.
-            .search_icon(false)
-            .fill_on_select(true)
-            .log_name("personnages.modale.nom")
-            .show(ui);
-        // Une suggestion apporte AUSSI sa classe et son sexe : c'est tout l'intérêt de connaître le
-        // journal. Le sexe qu'elle porte est un masculin par défaut (voir `JournalCharacter`), donc
-        // il ne remplace jamais un choix déjà fait — la classe, elle, est sûre.
-        if let Some(index) = issue.selected {
-            if let Some(vu) = state.journal.get(index) {
-                if let Some(rang) = vu.class_name.as_deref().and_then(class_index) {
-                    editeur.class = Some(rang);
-                }
-            }
-        }
-        ui.add_space(12.0);
-
-        // 2. Sexe à gauche, recherche de classe à droite — une seule ligne, les deux filtres de la
-        //    grille qui suit.
-        let row = ui
-            .allocate_space(Vec2::new(COLONNE, design::tokens::SWITCH_SLOT_SIZE))
-            .1;
-        let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-        cell.spacing_mut().item_spacing.x = 0.0;
-        cell.horizontal_centered(|ui| {
-            // **Le premier slot est le masculin, et c'est le défaut** — voir règle 3.
-            ui.add(
-                design::switch(&mut editeur.gender)
-                    .slot(Gender::M, "Masculin")
-                    .icon(DsIcon::Male)
-                    .slot(Gender::F, "Féminin")
-                    .icon(DsIcon::Female)
-                    .log_name("personnages.modale.sexe"),
-            );
-            let mut droite = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(row)
-                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
-            );
-            droite.add(
-                design::input(&mut editeur.search)
-                    .size(InputSize::Search)
-                    .leading_icon(DsIcon::Search)
-                    .placeholder("Rechercher une classe…")
-                    .clearable(true)
-                    .width(270.0)
-                    .log_name("personnages.modale.recherche"),
-            );
-        });
-        ui.add_space(16.0);
-
-        // 3. Les classes. **Le filtre ne mord qu'à trois caractères** — le seuil de
-        //    `tokens::AUTOCOMPLETE_MIN_QUERY_LEN`, déjà celui du champ ci-dessus — et compare sur
-        //    une forme sans casse ni accents (voir [`normalise`]), sans quoi « cra » ne trouverait
-        //    pas « Crâ » et « eli » manquerait « Éliotrope ».
-        let visibles = classes_visibles(&editeur.search);
-        ui.spacing_mut().item_spacing = Vec2::splat(CLASSE_GAP);
-        for chunk in visibles.chunks(CLASSE_COLS) {
-            ui.horizontal(|ui| {
-                for (index, (class, label)) in chunk {
-                    // **La tuile fait exactement la taille du buste** : un liseré fin l'entoure,
-                    // quitte à rogner un pixel de l'image aux coins.
-                    let (rect, response) =
-                        ui.allocate_exact_size(Vec2::splat(AVATAR_SIZE), egui::Sense::click());
-                    let survol = response.contains_pointer();
-                    let retenue = editeur.class == Some(*index);
-                    // **Tout est gris, sauf ce qu'on vise.** Le même geste que la galerie
-                    // d'avatars : la couleur suit le curseur, et la classe retenue la garde.
-                    paint_class_avatar(
-                        ui,
-                        rect,
-                        class,
-                        editeur.gender,
-                        !(survol || retenue),
-                        ctx.avatars,
-                        ctx.icons,
-                    );
-                    ui.painter().rect_stroke(
-                        rect,
-                        TILE_RADIUS,
-                        egui::Stroke::new(
-                            if survol || retenue { 2.0 } else { 1.0 },
-                            if survol || retenue {
-                                design::tokens::TEXT_GOLD
-                            } else {
-                                TILE_BORDER
-                            },
-                        ),
-                        egui::StrokeKind::Inside,
-                    );
-                    // Le nom de la classe n'est plus écrit sous le portrait : il est dans
-                    // l'infobulle, au-dessus de la tuile visée.
-                    design::tooltip(&response).text(*label);
-                    if response.clicked() {
-                        editeur.class = Some(*index);
+                // 1. Le nom, en tête : c'est ce qu'on vient écrire.
+                //
+                // **Un `design::autocomplete` et non un champ nu** : voir règle 5 de la doc de module. Les
+                // noms déjà déclarés sur CE compte sont proposés désactivés — les redéclarer ne ferait
+                // qu'écraser ce qui existe, et la modification se fait au crayon de la tuile.
+                let deja: std::collections::HashSet<String> = ctx.roster.accounts[state.account]
+                    .characters
+                    .iter()
+                    .filter(|c| Some(c.name.as_str()) != editeur_nom_initial(&editeur, state, ctx))
+                    .map(|c| overlay_engine::roster::normalize_wakfu_name(&c.name))
+                    .collect();
+                let entrees: Vec<design::AutocompleteEntry> = state
+                    .journal
+                    .iter()
+                    .map(|vu| {
+                        let mut entree = design::AutocompleteEntry::new(vu.name.clone(), 0);
+                        entree.image = vu.class_name.as_deref().and_then(|class| {
+                            ctx.avatars
+                                .texture(class, vu.gender, false)
+                                .map(|handle| handle.id())
+                        });
+                        if deja.contains(&overlay_engine::roster::normalize_wakfu_name(&vu.name)) {
+                            entree.disabled = true;
+                            entree.mention = Some("déjà déclaré".to_string());
+                        }
+                        entree
+                    })
+                    .collect();
+                let issue = design::autocomplete(&mut editeur.name)
+                    .placeholder("Nom du personnage, exactement comme en jeu…")
+                    .entries(&entrees)
+                    .width(COLONNE)
+                    // **Ni loupe, ni champ vidé** (2026-09-16) : ce n'est pas une recherche, c'est le nom
+                    // du personnage. Il s'écrit librement — le composant ne valide rien, un nom qu'aucune
+                    // suggestion ne porte sort du champ tel quel — et choisir une suggestion le REMPLIT au
+                    // lieu de l'effacer.
+                    .search_icon(false)
+                    .fill_on_select(true)
+                    .log_name("personnages.modale.nom")
+                    .show(ui);
+                // Une suggestion apporte AUSSI sa classe et son sexe : c'est tout l'intérêt de connaître le
+                // journal. Le sexe qu'elle porte est un masculin par défaut (voir `JournalCharacter`), donc
+                // il ne remplace jamais un choix déjà fait — la classe, elle, est sûre.
+                if let Some(index) = issue.selected {
+                    if let Some(vu) = state.journal.get(index) {
+                        if let Some(rang) = vu.class_name.as_deref().and_then(class_index) {
+                            editeur.class = Some(rang);
+                        }
                     }
                 }
-            });
-        }
-        if visibles.is_empty() {
-            ui.add_space(20.0);
-            ui.add(
-                design::info_text("Aucune classe ne porte ce nom.")
-                    .width(COLONNE)
-                    .log_name("personnages.modale.vide"),
-            );
-        }
-    });
+                ui.add_space(12.0);
 
-    // **« Valider » exige un nom ET une classe** : un personnage sans classe n'aurait pas de buste,
-    // et un sans nom ne serait jamais reconnu dans le journal. Le bouton reste cliquable et ne fait
-    // simplement rien — la modale montre déjà ce qui manque (champ vide, aucune tuile dorée), et
-    // griser « Valider » sans dire pourquoi est le reproche classique.
-    let complet = !editeur.name.trim().is_empty() && editeur.class.is_some();
-    let ferme = match chrome.footer {
-        design::FooterClick::Validate if complet => {
-            let (class_name, _) = CLASSES[editeur.class.expect("vérifié juste au-dessus")];
-            let personnage = RosterCharacter {
-                name: editeur.name.trim().to_string(),
-                class_name: class_name.to_string(),
-                gender: editeur.gender,
+                // 2. Sexe à gauche, recherche de classe à droite — une seule ligne, les deux filtres de la
+                //    grille qui suit.
+                let row = ui
+                    .allocate_space(Vec2::new(COLONNE, design::tokens::SWITCH_SLOT_SIZE))
+                    .1;
+                let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
+                cell.spacing_mut().item_spacing.x = 0.0;
+                cell.horizontal_centered(|ui| {
+                    // **Le premier slot est le masculin, et c'est le défaut** — voir règle 3.
+                    ui.add(
+                        design::switch(&mut editeur.gender)
+                            .slot(Gender::M, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Gender::F, "Féminin")
+                            .icon(DsIcon::Female)
+                            .log_name("personnages.modale.sexe"),
+                    );
+                    let mut droite = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(row)
+                            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                    );
+                    droite.add(
+                        design::input(&mut editeur.search)
+                            .size(InputSize::Search)
+                            .leading_icon(DsIcon::Search)
+                            .placeholder("Rechercher une classe…")
+                            .clearable(true)
+                            .width(270.0)
+                            .log_name("personnages.modale.recherche"),
+                    );
+                });
+                ui.add_space(16.0);
+
+                // 3. Les classes. **Le filtre ne mord qu'à trois caractères** — le seuil de
+                //    `tokens::AUTOCOMPLETE_MIN_QUERY_LEN`, déjà celui du champ ci-dessus — et compare sur
+                //    une forme sans casse ni accents (voir [`normalise`]), sans quoi « cra » ne trouverait
+                //    pas « Crâ » et « eli » manquerait « Éliotrope ».
+                let visibles = classes_visibles(&editeur.search);
+                ui.spacing_mut().item_spacing = Vec2::splat(CLASSE_GAP);
+                for chunk in visibles.chunks(CLASSE_COLS) {
+                    ui.horizontal(|ui| {
+                        for (index, (class, label)) in chunk {
+                            // **La tuile fait exactement la taille du buste** : un liseré fin l'entoure,
+                            // quitte à rogner un pixel de l'image aux coins.
+                            let (rect, response) = ui.allocate_exact_size(
+                                Vec2::splat(AVATAR_SIZE),
+                                egui::Sense::click(),
+                            );
+                            let survol = response.contains_pointer();
+                            let retenue = editeur.class == Some(*index);
+                            // **Tout est gris, sauf ce qu'on vise.** Le même geste que la galerie
+                            // d'avatars : la couleur suit le curseur, et la classe retenue la garde.
+                            paint_class_avatar(
+                                ui,
+                                rect,
+                                class,
+                                editeur.gender,
+                                !(survol || retenue),
+                                ctx.avatars,
+                                ctx.icons,
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                TILE_RADIUS,
+                                egui::Stroke::new(
+                                    if survol || retenue { 2.0 } else { 1.0 },
+                                    if survol || retenue {
+                                        design::tokens::TEXT_GOLD
+                                    } else {
+                                        TILE_BORDER
+                                    },
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
+                            // Le nom de la classe n'est plus écrit sous le portrait : il est dans
+                            // l'infobulle, au-dessus de la tuile visée.
+                            design::tooltip(&response).text(*label);
+                            if response.clicked() {
+                                editeur.class = Some(*index);
+                            }
+                        }
+                    });
+                }
+                if visibles.is_empty() {
+                    ui.add_space(20.0);
+                    ui.add(
+                        design::info_text("Aucune classe ne porte ce nom.")
+                            .width(COLONNE)
+                            .log_name("personnages.modale.vide"),
+                    );
+                }
+            });
+
+            // **« Valider » exige un nom ET une classe** : un personnage sans classe n'aurait pas de buste,
+            // et un sans nom ne serait jamais reconnu dans le journal. Le bouton reste cliquable et ne fait
+            // simplement rien — la modale montre déjà ce qui manque (champ vide, aucune tuile dorée), et
+            // griser « Valider » sans dire pourquoi est le reproche classique.
+            let complet = !editeur.name.trim().is_empty() && editeur.class.is_some();
+            let ferme = match chrome.footer {
+                design::FooterClick::Validate if complet => {
+                    let (class_name, _) = CLASSES[editeur.class.expect("vérifié juste au-dessus")];
+                    let personnage = RosterCharacter {
+                        name: editeur.name.trim().to_string(),
+                        class_name: class_name.to_string(),
+                        gender: editeur.gender,
+                    };
+                    match editeur.index {
+                        Some(index) => {
+                            tracing::info!(nom = %personnage.name, "[options] personnage modifié");
+                            ctx.roster.replace(state.account, index, personnage);
+                        }
+                        None => {
+                            tracing::info!(nom = %personnage.name, "[options] personnage déclaré");
+                            ctx.roster.declare(state.account, personnage);
+                            // Le sexe choisi devient le défaut de la création suivante — voir règle 3.
+                            state.gender_default = editeur.gender;
+                        }
+                    }
+                    true
+                }
+                design::FooterClick::Validate => false,
+                design::FooterClick::Cancel => true,
+                design::FooterClick::None => chrome.close,
             };
-            match editeur.index {
-                Some(index) => {
-                    tracing::info!(nom = %personnage.name, "[options] personnage modifié");
-                    ctx.roster.replace(state.account, index, personnage);
-                }
-                None => {
-                    tracing::info!(nom = %personnage.name, "[options] personnage déclaré");
-                    ctx.roster.declare(state.account, personnage);
-                    // Le sexe choisi devient le défaut de la création suivante — voir règle 3.
-                    state.gender_default = editeur.gender;
-                }
+            if ferme {
+                state.editor = None;
+            } else {
+                state.editor = Some(editeur);
             }
-            true
-        }
-        design::FooterClick::Validate => false,
-        design::FooterClick::Cancel => true,
-        design::FooterClick::None => chrome.close,
-    };
-    if ferme {
-        state.editor = None;
-    } else {
-        state.editor = Some(editeur);
-    }
+        });
 }
 
 /// Le nom que l'édition en cours porte AU ROSTER (pas dans le champ) — ce qu'il ne faut pas
@@ -1394,84 +1372,87 @@ fn modale_compte(
     let Some(mut editeur) = state.account_editor.clone() else {
         return;
     };
-    let mut couche = couche_modale(ui, ctx.window, "compte");
-    let rect = Rect::from_center_size(ctx.window.center(), COMPTE_MODALE);
-    let mut modale = couche.new_child(egui::UiBuilder::new().max_rect(rect));
-    modale.set_clip_rect(Rect::EVERYTHING);
-    let chrome = design::window("Nouveau compte")
-        .footer("Annuler", "Valider")
-        .close_button(true)
-        .log_name("personnages.compte.modale")
-        .show(&mut modale);
+    // Même couche que la modale de personnage, pour la même raison (voir `modale_personnage`).
+    design::scrim(ctx.window)
+        .layer(design::ScrimLayer::Middle)
+        .centered(COMPTE_MODALE)
+        .log_name("personnages.compte")
+        .show(ui, |modale| {
+            let chrome = design::window("Nouveau compte")
+                .footer("Annuler", "Valider")
+                .close_button(true)
+                .log_name("personnages.compte.modale")
+                .show(modale);
 
-    design::panel().show(&mut modale, chrome.content, |ui, panel| {
-        let width = panel.inner.width();
-        ui.label(
-            RichText::new("Nom du compte")
-                .color(SUBDUED)
-                .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
-        );
-        ui.add_space(6.0);
-        ui.add(
-            design::input(&mut editeur.name)
-                .size(InputSize::Search)
-                .placeholder("Mules, Métiers, Second écran…")
+            design::panel().show(modale, chrome.content, |ui, panel| {
+                let width = panel.inner.width();
+                ui.label(
+                    RichText::new("Nom du compte")
+                        .color(SUBDUED)
+                        .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
+                );
+                ui.add_space(6.0);
+                ui.add(
+                    design::input(&mut editeur.name)
+                        .size(InputSize::Search)
+                        .placeholder("Mules, Métiers, Second écran…")
+                        .width(width)
+                        .log_name("personnages.compte.nom"),
+                );
+                ui.add_space(14.0);
+                ui.label(
+                    RichText::new("Serveur de jeu")
+                        .color(SUBDUED)
+                        .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
+                );
+                ui.add_space(6.0);
+                let courant = editeur.server.clone();
+                let mut select = design::select(&mut editeur.server)
+                    .width(220.0)
+                    .log_name("personnages.compte.serveur");
+                for serveur in ctx.servers.selectable(courant.as_deref()) {
+                    select = select.option(Some(serveur.code.clone()), serveur.label.clone());
+                }
+                select = select.option(None, "Aucun");
+                select.show(ui);
+                ui.add_space(14.0);
+                ui.add(
+                design::info_text(
+                    "Le serveur départage deux personnages de même nom. Il se change plus tard.",
+                )
                 .width(width)
-                .log_name("personnages.compte.nom"),
-        );
-        ui.add_space(14.0);
-        ui.label(
-            RichText::new("Serveur de jeu")
-                .color(SUBDUED)
-                .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
-        );
-        ui.add_space(6.0);
-        let courant = editeur.server.clone();
-        let mut select = design::select(&mut editeur.server)
-            .width(220.0)
-            .log_name("personnages.compte.serveur");
-        for serveur in ctx.servers.selectable(courant.as_deref()) {
-            select = select.option(Some(serveur.code.clone()), serveur.label.clone());
-        }
-        select = select.option(None, "Aucun");
-        select.show(ui);
-        ui.add_space(14.0);
-        ui.add(
-            design::info_text(
-                "Le serveur départage deux personnages de même nom. Il se change plus tard.",
-            )
-            .width(width)
-            .log_name("personnages.compte.aide"),
-        );
-    });
-
-    // Un compte sans nom est refusé : la liste déroulante en afficherait deux « Compte 2 »
-    // indiscernables. Comme pour la modale de personnage, « Valider » ne fait rien plutôt que d'être
-    // grisé sans explication.
-    let ferme = match chrome.footer {
-        design::FooterClick::Validate if !editeur.name.trim().is_empty() => {
-            let compte = overlay_engine::RosterAccount::new(
-                editeur.name.trim().to_string(),
-                editeur.server.clone(),
+                .log_name("personnages.compte.aide"),
             );
-            tracing::info!(nom = %compte.label, "[options] compte ajouté au roster");
-            ctx.roster.accounts.push(compte);
-            // Le nouveau compte devient celui qu'on regarde : c'est pour y déclarer qu'on vient de
-            // le créer.
-            state.account = ctx.roster.accounts.len() - 1;
-            state.select_mode = false;
-            state.selected.clear();
-            true
-        }
-        design::FooterClick::Validate => false,
-        design::FooterClick::Cancel => true,
-        design::FooterClick::None => chrome.close,
-    };
-    if ferme {
-        state.account_editor = None;
-    } else {
-        state.account_editor = Some(editeur);
-    }
+            });
+
+            // Un compte sans nom est refusé : la liste déroulante en afficherait deux « Compte 2 »
+            // indiscernables. Comme pour la modale de personnage, « Valider » ne fait rien plutôt que d'être
+            // grisé sans explication.
+            let ferme = match chrome.footer {
+                design::FooterClick::Validate if !editeur.name.trim().is_empty() => {
+                    let compte = overlay_engine::RosterAccount::new(
+                        editeur.name.trim().to_string(),
+                        editeur.server.clone(),
+                    );
+                    tracing::info!(nom = %compte.label, "[options] compte ajouté au roster");
+                    ctx.roster.accounts.push(compte);
+                    // Le nouveau compte devient celui qu'on regarde : c'est pour y déclarer qu'on vient de
+                    // le créer.
+                    state.account = ctx.roster.accounts.len() - 1;
+                    state.select_mode = false;
+                    state.selected.clear();
+                    true
+                }
+                design::FooterClick::Validate => false,
+                design::FooterClick::Cancel => true,
+                design::FooterClick::None => chrome.close,
+            };
+            if ferme {
+                state.account_editor = None;
+            } else {
+                state.account_editor = Some(editeur);
+            }
+        });
 }
 
 /// **La suppression d'un compte** — la question porte le nom du compte ET son décompte : un

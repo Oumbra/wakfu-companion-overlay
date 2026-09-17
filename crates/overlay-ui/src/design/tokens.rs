@@ -2128,12 +2128,21 @@ pub const CONFIRM_BUTTON_WIDTH: f32 = 168.0;
 /// Gouttière entre les deux — **8 px mesurés** (x = 208..216 sur la capture détourée).
 pub const CONFIRM_BUTTON_GAP: f32 = 8.0;
 
-/// Opacité du voile posé sur ce que la boîte interrompt.
+// ---------------------------------------------------------------------------------------------
+// `design::scrim` — voile modal.
+// ---------------------------------------------------------------------------------------------
+
+/// Opacité du voile posé sur ce qu'une fenêtre modale interrompt.
 ///
-/// **Le voile n'est pas une teinte, c'est une information** : tant que le dialogue est ouvert, ce
+/// **Le voile n'est pas une teinte, c'est une information** : tant que la fenêtre est ouverte, ce
 /// qu'il couvre est inerte. C'est pourquoi le composant le peint sur le rectangle que l'appelant
 /// lui donne — la FENÊTRE entière, pied de page compris — et non sur son seul panneau.
-pub const CONFIRM_SCRIM_ALPHA: u8 = 0x88;
+///
+/// Né `CONFIRM_SCRIM_ALPHA` avec la boîte de confirmation (2026-09-12), estimé à l'œil sur la
+/// capture `interface-confirm-box.png` du jeu (pas de mesure : le voile y couvre une scène dont on
+/// ne connaît pas la luminosité d'origine). Renommé le 2026-09-17 quand le voile est devenu un
+/// composant à part entière, partagé par quatre appelants.
+pub const SCRIM_ALPHA: u8 = 0x88;
 
 // ---------------------------------------------------------------------------------------------
 // `design::label` — libellé d'une ligne, élidé.

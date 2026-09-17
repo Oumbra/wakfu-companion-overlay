@@ -11,7 +11,7 @@
 //!
 //! [`design::window`] peint dans tout le `max_rect` du `Ui` qu'on lui donne : il suffit de lui en
 //! donner un plus petit, dans une couche au-dessus, derrière le voile de confirmation
-//! ([`design::tokens::CONFIRM_SCRIM_ALPHA`]). C'est le seul écran du lot qui n'a rien demandé au
+//! ([`design::tokens::SCRIM_ALPHA`]). C'est le seul écran du lot qui n'a rien demandé au
 //! design system.
 //!
 //! ## Ce que « Suivre » ajoute, et ce qu'il n'ajoute pas
@@ -71,42 +71,51 @@ pub fn show(
     state: &mut RecipeDialogState,
     ctx: &mut OptionsModalContext<'_>,
 ) -> RecipeChoice {
-    // **`id_salt` autant que `layer_id`.** Sans lui, cette fenêtre est un `Ui` enfant de plus dans
-    // la même chaîne que le panneau qu'elle recouvre : ses widgets héritent des mêmes identifiants,
-    // et egui voit alors « le même widget a changé de couche en cours de frame » — une assertion de
-    // debug qui panique. Le sel rend la sous-arborescence distincte, ce qu'elle est.
-    let mut couche = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(window)
-            .id_salt("suivi-recette")
-            .layer_id(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("suivi-recette"),
-            )),
-    );
-    couche.set_clip_rect(Rect::EVERYTHING);
-    couche.painter().rect_filled(
-        window,
-        0,
-        Color32::from_black_alpha(design::tokens::CONFIRM_SCRIM_ALPHA),
-    );
-    // Le voile **avale** les clics qui passent à côté : sans ça il ne serait qu'une teinte, et ce
-    // qu'il couvre resterait cliquable — l'inverse de ce qu'il annonce.
-    couche.interact(
-        window,
-        egui::Id::new("suivi-recette-voile"),
-        egui::Sense::click(),
-    );
-
-    let boite = Rect::from_center_size(window.center(), DIALOG_SIZE);
-    let mut fenetre = couche.new_child(egui::UiBuilder::new().max_rect(boite));
-    let chrome = design::window("Objets de la recette")
-        .footer("Annuler", "Suivre")
-        .log_name("suivi.recette")
-        .show(&mut fenetre);
-
+    // Le voile et la couche au-dessus de tout sont ceux de `design::scrim` (2026-09-17) — ce
+    // fichier en portait une copie à la main, sel d'identifiants compris.
     let mut nested_toggle: Option<String> = None;
-    design::panel().show(&mut fenetre, chrome.content, |ui, panel| {
+    let chrome = design::scrim(window)
+        .centered(DIALOG_SIZE)
+        .log_name("suivi.recette")
+        .show(ui, |fenetre| {
+            let chrome = design::window("Objets de la recette")
+                .footer("Annuler", "Suivre")
+                .log_name("suivi.recette")
+                .show(fenetre);
+            paint_body(fenetre, chrome.content, state, ctx, &mut nested_toggle);
+            chrome
+        })
+        .inner;
+
+    if let Some(chemin) = nested_toggle {
+        if !state.nested.remove(&chemin) {
+            state.nested.insert(chemin);
+        }
+    }
+
+    match chrome.footer {
+        design::FooterClick::Validate => {
+            let ingredients = state.ingredients.clone().unwrap_or_default();
+            RecipeChoice::Track(overlay_engine::flatten_for_tracking(
+                &ingredients,
+                state.quantity,
+                &state.nested,
+            ))
+        }
+        design::FooterClick::Cancel => RecipeChoice::Cancel,
+        design::FooterClick::None => RecipeChoice::Pending,
+    }
+}
+
+/// Le contenu de la fenêtre — l'objet source, la quantité, puis les ingrédients.
+fn paint_body(
+    fenetre: &mut egui::Ui,
+    content: Rect,
+    state: &mut RecipeDialogState,
+    ctx: &mut OptionsModalContext<'_>,
+    nested_toggle: &mut Option<String>,
+) {
+    design::panel().show(fenetre, content, |ui, panel| {
         let width = panel.inner.width();
 
         // L'objet source — même emplacement que dans la grille, à une taille réduite : c'est un
@@ -194,29 +203,10 @@ pub fn show(
                 "",
                 0.0,
                 content_width,
-                &mut nested_toggle,
+                nested_toggle,
             );
         });
     });
-
-    if let Some(chemin) = nested_toggle {
-        if !state.nested.remove(&chemin) {
-            state.nested.insert(chemin);
-        }
-    }
-
-    match chrome.footer {
-        design::FooterClick::Validate => {
-            let ingredients = state.ingredients.clone().unwrap_or_default();
-            RecipeChoice::Track(overlay_engine::flatten_for_tracking(
-                &ingredients,
-                state.quantity,
-                &state.nested,
-            ))
-        }
-        design::FooterClick::Cancel => RecipeChoice::Cancel,
-        design::FooterClick::None => RecipeChoice::Pending,
-    }
 }
 
 /// Peint un niveau d'ingrédients, et récursivement ceux des lignes dépliées.

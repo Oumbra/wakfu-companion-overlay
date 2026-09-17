@@ -41,6 +41,7 @@ pub mod meter;
 pub mod pagination;
 pub mod panel;
 pub mod portrait;
+pub mod scrim;
 pub mod scroll_area;
 pub mod select;
 pub mod separator;

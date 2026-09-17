@@ -1040,7 +1040,7 @@ fn couche_modale(ui: &mut egui::Ui, window: Rect, nom: &str) -> egui::Ui {
     couche.painter().rect_filled(
         window,
         0.0,
-        Color32::from_black_alpha(design::tokens::CONFIRM_SCRIM_ALPHA),
+        Color32::from_black_alpha(design::tokens::SCRIM_ALPHA),
     );
     let _ = &ui;
     couche

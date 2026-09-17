@@ -74,9 +74,11 @@
 //! retiré la sienne — elle portait sur un brouillon qu'« Annuler » rattrapait. C'est ce qui rend ce
 //! composant intéressant à corriger une fois : les trois ont suivi sans changer d'appel.
 
-use egui::{Color32, Rect, Sense, Ui, Vec2};
+use egui::{Color32, Rect, Ui, Vec2};
 
-use crate::design::{button, text, tokens, ButtonSize, ButtonVariant, DesignSystem, DsTexture};
+use crate::design::{
+    button, scrim, text, tokens, ButtonSize, ButtonVariant, DesignSystem, DsTexture,
+};
 
 /// Ce que l'utilisateur a répondu — ou qu'il n'a pas encore répondu.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -145,38 +147,27 @@ impl ConfirmDialog {
         let parent = self.over.unwrap_or_else(|| ui.max_rect());
         let nom = self.log_name.as_deref().unwrap_or("confirm");
 
-        // Tout est peint dans une couche AU-DESSUS : la boîte passe par-dessus ce qu'elle
-        // interrompt, y compris un panneau dont le clip la rognerait. Et `Rect::EVERYTHING` en
-        // clip, parce que le `Ui` d'où l'on vient peut être écrêté plus étroit que `parent`.
-        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(parent).layer_id(
-            egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("ds-confirm", nom))),
-        ));
-        ui.set_clip_rect(Rect::EVERYTHING);
-        let ui = &mut ui;
-
-        ui.painter().rect_filled(
-            parent,
-            0,
-            Color32::from_black_alpha(tokens::CONFIRM_SCRIM_ALPHA),
-        );
-        // Le voile **avale** les clics qui passent à côté de la boîte : sans ça il ne serait qu'une
-        // teinte, et ce qu'il couvre resterait réellement cliquable — l'inverse de ce qu'il annonce.
-        ui.interact(
-            parent,
-            egui::Id::new(("ds-confirm-scrim", nom)),
-            Sense::click(),
-        );
-
         // **C'est l'ensemble qui se centre, pas le corps.** La crête déborde de 36 px au-dessus et
         // le filet de pied de 9 px en dessous : centrer le seul corps ferait porter tout ce
         // débordement d'un côté, et la boîte paraîtrait posée trop bas dans ce qu'elle interrompt.
         let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
         let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+
+        // Le voile et la couche au-dessus de tout sont ceux de `design::scrim` (2026-09-17) : ce
+        // composant en est l'origine, et il en est désormais le premier appelant. `Foreground`,
+        // son défaut : une question interrompt tout, popups compris.
+        scrim(parent)
+            .centered(Vec2::new(tokens::CONFIRM_WIDTH, total))
+            .log_name(nom)
+            .show(ui, |ui| self.paint_box(ui, crest_rise, nom))
+            .inner
+    }
+
+    /// Le corps, ses deux ornements, la question et les deux réponses — dans le rectangle que le
+    /// voile vient de centrer (crête et filet de pied compris, voir `show`).
+    fn paint_box(&self, ui: &mut Ui, crest_rise: f32, nom: &str) -> ConfirmChoice {
         let rect = Rect::from_min_size(
-            egui::pos2(
-                parent.center().x - tokens::CONFIRM_WIDTH / 2.0,
-                parent.center().y - total / 2.0 + crest_rise,
-            ),
+            egui::pos2(ui.max_rect().left(), ui.max_rect().top() + crest_rise),
             Vec2::new(tokens::CONFIRM_WIDTH, tokens::CONFIRM_HEIGHT),
         );
 
