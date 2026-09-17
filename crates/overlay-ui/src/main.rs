@@ -627,10 +627,6 @@ struct App {
     /// politique que `chat_toast` : lus de la config locale au démarrage, réécrits à la validation
     /// de la fenêtre Options (section « Suivi » de l'onglet « Paramètres », 2026-09-16).
     countdown_toast: suivi_tab::CountdownToastSettings,
-    /// Voir `App::completion` — lus de la config au démarrage.
-    completion: suivi_tab::CompletionSettings,
-    /// Voir `App::completions_rx` — le canal créé par `main`, avant le thread Engine.
-    completions_rx: mpsc::Receiver<WatchlistCompleted>,
     /// **Ce que devient un suivi complété** EN VIGUEUR (retrait, animation) — même provenance et
     /// même politique que `countdown_toast`. Lu par `about_to_wait` à chaque complétion reçue du
     /// thread Engine : c'est lui qui décide s'il y a une célébration à jouer et un retrait à
@@ -863,6 +859,10 @@ struct AppState {
     chat_toast: chat_tab::ChatToastSettings,
     /// Voir `App::countdown_toast` — lu de la config au démarrage.
     countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Voir `App::completion` — lus de la config au démarrage.
+    completion: suivi_tab::CompletionSettings,
+    /// Voir `App::completions_rx` — le canal créé par `main`, avant le thread Engine.
+    completions_rx: mpsc::Receiver<WatchlistCompleted>,
     /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.
     recap_session: RecapSession,
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
