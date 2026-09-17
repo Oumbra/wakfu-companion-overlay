@@ -9,9 +9,9 @@
 //!
 //! **Ce que ces planches doivent montrer**, et qu'aucun test unitaire ne peut dire à notre place :
 //!
-//! - la pastille d'actions est **dans la réserve d'infobulle du haut** (celle du switch
-//!   Alliés/Ennemis, `render_content::COMBAT_TOP_MARGIN`), au coin extérieur du panneau : elle ne
-//!   décale rien et ne retaille pas la fenêtre ;
+//! - la pastille d'actions est au coin **BAS** du bord extérieur du panneau (demande utilisateur,
+//!   « place les deux icônes en bas plutôt qu'en haut ») : elle ne décale rien et ne retaille pas
+//!   la fenêtre — le contenu du panneau ne descend pas jusque-là ;
 //! - **un seul cadenas, deux visages** — fermé verrouillé, ouvert sinon — et le glyphe de
 //!   replacement seulement quand le panneau a été déplacé ;
 //! - la **lisière de préhension ne s'encre qu'au survol**, par-dessus le panneau (et non sous le
@@ -205,16 +205,17 @@ fn press(harness: &mut Harness<'_>, pos: egui::Pos2, pressed: bool) {
     });
 }
 
-/// Le cadenas, premier emplacement de la pastille d'actions — coin haut extérieur du panneau, dans
-/// la réserve d'infobulle. Le harnais pose le contenu à 8 px du bord, et la pastille commence
-/// `COMBAT_TOP_MARGIN` au-dessus : voir `panels::combat::paint_actions_row`.
+/// Le cadenas, premier emplacement de la pastille d'actions — coin BAS extérieur du panneau
+/// (2026-09-17, demande utilisateur). Le harnais laisse 8 px de marge tout autour d'un rendu de
+/// 800 × 600, la pastille (22 px de haut) est donc collée sous y = 592 : voir
+/// `panels::combat::paint_actions_row`.
 fn cadenas() -> egui::Pos2 {
-    egui::pos2(19.0, 19.0)
+    egui::pos2(19.0, 581.0)
 }
 
 /// Le glyphe de replacement, deuxième emplacement de la même pastille.
 fn replacer() -> egui::Pos2 {
-    egui::pos2(39.0, 19.0)
+    egui::pos2(39.0, 581.0)
 }
 
 /// Un point de la lisière de préhension — sur le bord extérieur, à mi-hauteur du panneau.
@@ -407,9 +408,9 @@ fn les_glyphes_d_actions_ne_font_pas_partir_le_panneau() {
     harness.run();
     press(&mut harness, cadenas(), true);
     harness.run();
-    harness.event(egui::Event::PointerMoved(egui::pos2(19.0, 200.0)));
+    harness.event(egui::Event::PointerMoved(egui::pos2(19.0, 400.0)));
     harness.run();
-    press(&mut harness, egui::pos2(19.0, 200.0), false);
+    press(&mut harness, egui::pos2(19.0, 400.0), false);
     harness.run();
     assert!(
         remontees.borrow().gestes.is_empty(),

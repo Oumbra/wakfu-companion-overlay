@@ -2586,9 +2586,6 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // sur le jeu — pas depuis cette fenêtre) et personne n'a cliqué « Replacer au
                 // défaut » : « Valider » emporte `None`, c'est-à-dire son ancrage d'origine.
                 recap_position: None,
-                // Idem pour la hauteur du panneau Combat (2026-09-17) : il se déplace par sa
-                // poignée latérale, sur le jeu, et « Replacer au défaut » n'a pas été cliqué.
-                combat_position_y: None,
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
