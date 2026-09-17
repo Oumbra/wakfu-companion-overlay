@@ -557,8 +557,10 @@ pub enum OptionsModalAction {
     /// déconnexion.
     InstallUpdate,
     /// « Fermer l'overlay », **confirmé** (bouton en pied de l'onglet « Paramètres », 2026-09-16) :
-    /// l'hôte arrête le programme — le même chemin que le raccourci « Quitter » et que l'entrée
-    /// de la zone de notification (`logging::log_session_end` puis `event_loop.exit()`). Immédiat
+    /// l'hôte arrête le programme — le même chemin que l'entrée « Quitter » de la zone de
+    /// notification (`logging::log_session_end` puis `event_loop.exit()`). Depuis le retrait du
+    /// raccourci « Quitter l'overlay » (2026-09-17), ce bouton et cette entrée sont les deux seules
+    /// sorties propres hors terminal. Immédiat
     /// et sans retour, comme `Disconnect` : ce que cette fenêtre avait en brouillon est perdu, et
     /// c'est ce que la confirmation rattrape.
     Quit,
@@ -1907,7 +1909,7 @@ mod tests {
         let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
         assert!(!state.is_dirty());
         state.shortcuts.set(
-            crate::shortcuts::ShortcutAction::Quit,
+            crate::shortcuts::ShortcutAction::Options,
             crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
         );
         assert!(state.is_dirty());

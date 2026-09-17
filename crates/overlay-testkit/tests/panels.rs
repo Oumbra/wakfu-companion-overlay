@@ -2926,7 +2926,7 @@ fn options_onglet_raccourcis() {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         shortcuts,
         raccourcis: RaccourcisTabState {
-            capturing: Some(ShortcutAction::Quit),
+            capturing: Some(ShortcutAction::Options),
             error: Some(panels::raccourcis_tab::MESSAGE_COMBINAISON_REFUSEE.to_string()),
             ..Default::default()
         },

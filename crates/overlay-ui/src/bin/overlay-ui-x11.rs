@@ -1845,10 +1845,9 @@ mod linux_main {
                     "Un compte est obligatoire : la fenêtre de connexion reste seule à l'écran \
                      tant qu'aucun n'est lié. \
                      {} pour basculer interactif / clic-traversant. \
-                     {} ou Ctrl+C (dans ce terminal) pour quitter. \
-                     {} pour la fenêtre Options, dont l'onglet « Raccourcis ».",
+                     {} pour la fenêtre Options, dont l'onglet « Raccourcis » et le bouton \
+                     « Fermer l'overlay » (ou Ctrl+C dans ce terminal) pour quitter.",
                     bindings.label(ShortcutAction::Toggle),
-                    bindings.label(ShortcutAction::Quit),
                     bindings.label(ShortcutAction::Options),
                 );
                 self.banner_printed = true;
@@ -2280,7 +2279,7 @@ mod linux_main {
                         install_if_available: true,
                     });
                 }
-                // Même sortie que le raccourci « Quitter » — voir `main.rs`.
+                // Même sortie que l'entrée « Quitter » de la zone de notification — voir `main.rs`.
                 PostRedraw::Quit => {
                     logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                     event_loop.exit();
@@ -2308,12 +2307,6 @@ mod linux_main {
                 };
                 match action {
                     ShortcutAction::Toggle => self.toggle_interactive(),
-                    ShortcutAction::Quit => {
-                        logging::log_session_end(
-                            &self.hotkeys.bindings().label(ShortcutAction::Quit),
-                        );
-                        event_loop.exit();
-                    }
                     ShortcutAction::WatchlistRemove => {
                         tracing::info!(
                             ">>> Supprimer ({})",

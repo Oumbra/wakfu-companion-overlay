@@ -731,7 +731,7 @@ mod tests {
         };
         let mut bindings = ShortcutBindings::default();
         bindings.set(
-            crate::shortcuts::ShortcutAction::Quit,
+            crate::shortcuts::ShortcutAction::Options,
             crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
         );
         config.set_shortcuts(&bindings);

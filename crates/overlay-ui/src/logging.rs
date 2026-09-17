@@ -24,8 +24,8 @@
 //!   normalement le process SANS dérouler les `Drop` (un `tracing_appender::non_blocking` perdrait
 //!   son tampon non vidé dans ce cas précis).
 //! - **Bornes de session** : chaque lancement ouvre (`init`) et ferme (`log_session_end`, appelé à
-//!   CHAQUE point de sortie du process — fermeture de fenêtre, hotkey Quitter, Ctrl+C, échec de
-//!   démarrage) une ligne `=== session … ===` portant le PID, qui sert d'identifiant de session
+//!   CHAQUE point de sortie du process — fermeture de fenêtre, bouton « Fermer l'overlay », zone
+//!   de notification, Ctrl+C, échec de démarrage) une ligne `=== session … ===` portant le PID, qui sert d'identifiant de session
 //!   (suffisant pour distinguer deux lancements consécutifs dans le fichier d'un même jour).
 //! - Le jeton de compte ne doit **jamais** apparaître dans ces logs (§10 du plan) — seuls des
 //!   messages de statut (succès/échec) sont journalisés côté appairage/réglages, jamais la valeur.
@@ -184,8 +184,9 @@ pub fn init() -> Option<PathBuf> {
     resolved_dir
 }
 
-/// À appeler à CHAQUE point de sortie du process (fermeture de fenêtre, hotkey Quitter, Ctrl+C,
-/// échec de démarrage) — voir les appels dans `main.rs`. `reason` identifie le déclencheur dans le
+/// À appeler à CHAQUE point de sortie du process (fermeture de fenêtre, bouton « Fermer
+/// l'overlay », zone de notification, Ctrl+C, échec de démarrage) — voir les appels dans
+/// `main.rs`. `reason` identifie le déclencheur dans le
 /// journal, pour distinguer un arrêt normal d'un plantage silencieux (aucune ligne `terminée` avant
 /// la prochaine `démarrée` = sortie anormale).
 pub fn log_session_end(reason: &str) {
@@ -197,7 +198,7 @@ pub fn log_session_end(reason: &str) {
 }
 
 /// Ctrl+C (`SIGINT`/`CTRL_C_EVENT`) est un moyen de sortie documenté dans la bannière de `main()`
-/// au même titre que le hotkey Quitter — sans gestionnaire dédié, le comportement PAR DÉFAUT de
+/// au même titre que le bouton « Fermer l'overlay » — sans gestionnaire dédié, le comportement PAR DÉFAUT de
 /// l'OS termine le process immédiatement, sans dérouler les `Drop` ni journaliser de fin de
 /// session : la moitié des sorties de l'appli n'auraient jamais de borne de fin exploitable.
 pub fn install_ctrlc_handler() {

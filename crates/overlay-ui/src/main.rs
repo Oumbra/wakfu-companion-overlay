@@ -3076,7 +3076,8 @@ enum PostRedraw {
     /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
     InstallUpdate,
     /// « Fermer l'overlay », **après confirmation** (pied de l'onglet « Paramètres »,
-    /// 2026-09-16) : arrête le programme par le chemin du raccourci « Quitter ».
+    /// 2026-09-16) : arrête le programme par le chemin de l'entrée « Quitter » de la zone de
+    /// notification — le raccourci global « Quitter l'overlay » a été retiré le 2026-09-17.
     Quit,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
@@ -3430,9 +3431,9 @@ impl App {
                     install_if_available: true,
                 });
             }
-            // Même sortie que le raccourci « Quitter » et l'entrée de la zone de notification :
-            // la borne de fin de session d'abord (§11 du plan), puis la boucle s'arrête — les
-            // fenêtres, modale comprise, tombent avec elle.
+            // Même sortie que l'entrée « Quitter » de la zone de notification : la borne de fin
+            // de session d'abord (§11 du plan), puis la boucle s'arrête — les fenêtres, modale
+            // comprise, tombent avec elle.
             PostRedraw::Quit => {
                 logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                 event_loop.exit();
@@ -3455,15 +3456,15 @@ impl ApplicationHandler<UserEvent> for App {
             tracing::info!(
                 "{} pour basculer interactif / clic-traversant. \
                  {} pour forcer un rafraîchissement (overlay bloqué/mal \
-                 positionné, ou Suivi resté vide). {} ou Ctrl+C (dans ce \
-                 terminal) pour quitter. {} pour la fenêtre Options — \
-                 son onglet « Raccourcis » personnalise tout ceci, et sa \
-                 section « Compte » déconnecte le compte lié. Un compte est \
-                 obligatoire : la fenêtre de connexion reste seule à l'écran \
-                 tant qu'aucun n'est lié.",
+                 positionné, ou Suivi resté vide). {} pour la fenêtre Options — \
+                 son onglet « Raccourcis » personnalise tout ceci, sa \
+                 section « Compte » déconnecte le compte lié, et son bouton \
+                 « Fermer l'overlay » quitte (comme la zone de notification, \
+                 ou Ctrl+C dans ce terminal). Un compte est obligatoire : la \
+                 fenêtre de connexion reste seule à l'écran tant qu'aucun \
+                 n'est lié.",
                 bindings.label(ShortcutAction::Toggle),
                 bindings.label(ShortcutAction::Refresh),
-                bindings.label(ShortcutAction::Quit),
                 bindings.label(ShortcutAction::Options),
             );
             self.banner_printed = true;
@@ -3541,11 +3542,13 @@ impl ApplicationHandler<UserEvent> for App {
             }
             // Filet « Échap quitte l'overlay », **sauf pour la modale Options**.
             //
-            // Il ne se déclenche en pratique jamais pour les autres fenêtres (voir la doc de
-            // `overlay_ui::shortcuts::ShortcutAction::Quit`) : elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le
-            // focus clavier, quel que soit le mode. Laissé en place au cas où l'une d'elles
-            // redeviendrait focalisable, mais le raccourci « Quitter » reste le SEUL moyen fiable de
-            // quitter sans passer par le terminal.
+            // Il ne se déclenche en pratique jamais pour les autres fenêtres (voir le commentaire
+            // historique du raccourci « Quitter » retiré, dans `overlay_ui::shortcuts::ShortcutAction`) :
+            // elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le focus clavier, quel
+            // que soit le mode. Laissé en place au cas où l'une d'elles redeviendrait focalisable ;
+            // les moyens fiables de quitter sans passer par le terminal sont le bouton « Fermer
+            // l'overlay » de l'onglet « Paramètres » et l'entrée « Quitter » de la zone de
+            // notification.
             //
             // La modale Options, elle, EST focalisable et délibérément (§9.1 du plan :
             // `WS_EX_NOACTIVATE` omis pour elle, il faut pouvoir taper dans le champ de chemin).
@@ -3605,10 +3608,6 @@ impl ApplicationHandler<UserEvent> for App {
             match action {
                 ShortcutAction::Toggle => self.toggle_interactive(),
                 ShortcutAction::Refresh => self.force_refresh(event_loop),
-                ShortcutAction::Quit => {
-                    logging::log_session_end(&self.hotkeys.bindings().label(ShortcutAction::Quit));
-                    event_loop.exit();
-                }
                 ShortcutAction::Details => self.open_details(),
                 ShortcutAction::Options => {
                     tracing::info!(
