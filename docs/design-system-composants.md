@@ -2572,6 +2572,10 @@ Composant feuille, mais il rend un `ConfirmChoice` et non une `Response`&nbsp;: 
 saurait pas dire *laquelle* des deux réponses a été cliquée, et ressortir le choix par un `&mut` en
 paramètre est la maladresse que §6 reproche ailleurs.
 
+**Son voile est `design::scrim` depuis le 2026-09-17** (voir sa fiche) : la boîte en est le
+premier appelant, et la couche `Foreground`, le clip, le clic avalé et le centrage de l'ensemble
+crête + corps + filet vivent là-bas.
+
 ### Le voile n'est pas une teinte, c'est une information
 
 Tant que la boîte est ouverte, ce qu'elle couvre est **inerte** — et c'est pourquoi `over` demande
@@ -3184,3 +3188,71 @@ sa case de 42).
   bouge pas. Quatre allers-retours sur rendu ont ensuite réglé le détail : taille du glyphe ramenée
   au plafond commun (elle avait grossi de 68 %), socles collés, survol qui allume le glyphe, et le
   liseré `#126068` de la case choisie avec son halo.
+
+## `design::scrim` — voile modal (2026-09-17)
+
+`crates/overlay-ui/src/design/components/scrim.rs`
+
+```rust
+use overlay_ui::design::{self, ScrimLayer};
+
+let chrome = design::scrim(fenetre)              // la FENÊTRE entière, pas le panneau appelant
+    .centered(Vec2::new(500.0, 580.0))           // le contenu, centré ; sinon il reçoit tout `fenetre`
+    .layer(ScrimLayer::Foreground)               // le défaut ; `Middle` sous les popups ; `Current` = fond
+    .log_name("suivi.recette")
+    .show(ui, |ui| design::window("Objets de la recette").show(ui))
+    .inner;
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `scrim(over)` | ce que le voile couvre et sur quoi le contenu se centre | — |
+| `centered` | taille du rectangle de contenu, centré sur `over` | tout `over` |
+| `layer` | `Foreground` / `Middle` / `Current` (voir ci-dessous) | `Foreground` |
+| `log_name` | nom d'instance — journal ET identifiants egui de la couche | `scrim` |
+
+Composant **conteneur**, forme closure (§1 bis) : il peint le voile, avale les clics, puis appelle
+le contenu dans un `Ui` enfant au rectangle voulu, clip à `Rect::EVERYTHING` (un ornement qui
+déborde du contenu, comme la crête de la boîte de confirmation, n'a pas à être rogné). Il rend un
+`InnerResponse` : `inner` est ce que le contenu a rendu, `response` celle du voile — `clicked()` y
+veut dire « à côté du contenu », journalisé en `debug`, et laissé à l'appelant (un vrai dialogue
+modal ne se ferme pas sur un clic à côté ; aucun appelant ne le fait).
+
+### D'où il vient : quatre copies du même voile
+
+Le voile est né dans `design::confirm_dialog` (2026-09-12) et a été **recopié trois fois** en cinq
+jours : `panels::recipe_dialog` (avec un `id_salt` que la copie d'origine n'avait pas — leçon
+apprise à la dure, une assertion de debug d'egui), `panels::personnages_tab::couche_modale` (en
+`Order::Middle`, pour une raison que seule cette copie documentait) et une maquette
+d'`overlay-testkit`. Le jour où la fenêtre Options a eu besoin du même voile sur la fenêtre de jeu
+entière, la cinquième copie n'a pas été écrite : le comportement est remonté ici et **les trois
+appelants de production sont passés dessus** — la boîte de confirmation en est le premier, sans
+que sa capture de galerie ne bouge d'un pixel. La maquette, figée, garde la sienne.
+
+Jeton : `SCRIM_ALPHA` (ex-`CONFIRM_SCRIM_ALPHA`, 0x88) — un seul préfixe par composant (§1 ter).
+
+### Trois couches, parce que trois cas
+
+| `ScrimLayer` | Où | Qui |
+| --- | --- | --- |
+| `Foreground` | par-dessus tout, popups compris | `confirm_dialog`, `recipe_dialog` |
+| `Middle` | au-dessus du contenu de base, **sous** les popups (`autocomplete`, `select`, en `Foreground`) | modales de `personnages_tab`, qui portent un champ à suggestions |
+| `Current` | la couche de l'appelant, sans en ouvrir : le voile **est** le fond de la fenêtre | la fenêtre Options rattachée au jeu (`RenderContent::veiled`) |
+
+Le mauvais choix ne se voit pas sur le voile lui-même mais sur ce qui flotte au-dessus : un
+sélecteur dont le popup disparaît, une modale qui passe derrière ses suggestions. `Current` existe
+pour la fenêtre Options : dans une couche `Foreground` non-`Area`, ses sélecteurs (des `Area` en
+`Foreground`, peintes AVANT les couches libres du même ordre) seraient passés sous la modale.
+
+### Le voile de la fenêtre Options
+
+Décision utilisateur du 2026-09-17 : « un voile qui recouvre toute la fenêtre du jeu et les
+overlays lorsque l'utilisateur ouvre la modale d'options alors que la fenêtre de jeu est ouverte.
+Si l'utilisateur ouvre la modale d'options sans le jeu, aucun voile ne doit être appliqué. »
+Rattachée à un client, la fenêtre OS de la modale est désormais **celle du jeu** (taille et
+position, en pixels physiques comme la confirmation de remise à zéro) : `paint_content` voile tout
+et centre la modale dedans à `WINDOW_SIZE`. Détachée (aucun client à l'écran), rien ne change :
+fenêtre à la taille de la modale, pas de voile. Capture : `options_modale_voilee` (`panels.rs`).
+
+Galerie : `design_gallery_scrim` — du contenu factice dessous, une fenêtre du design system
+centrée dessus.
