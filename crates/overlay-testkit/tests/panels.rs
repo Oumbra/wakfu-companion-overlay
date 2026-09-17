@@ -3106,6 +3106,10 @@ fn options_parametres_section_compte() {
 /// vers 0.21.0 », la ligne d'information avec le poids du téléchargement, la case d'installation
 /// automatique cochée. La version courante n'y est pas répétée (bannière), pas de « Notes de
 /// version » (décisions du mainteneur).
+///
+/// Le bas de l'onglet entre dans le cadre à ce défilement : la paire de sorties (« Redémarrer » et
+/// « Fermer l'overlay ») y est donc visible depuis le 2026-09-17, c'est
+/// `options_parametres_sorties` qui la cadre.
 #[test]
 fn options_parametres_section_mise_a_jour() {
     let mut options_state = parametres_avec_notifications();
@@ -3332,11 +3336,133 @@ fn options_fermeture_overlay_confirmee_et_echap_repond_non() {
     );
 }
 
-/// **Le pied de l'onglet « Paramètres »** (2026-09-16) : sous la section « Compte », le bouton
-/// « Fermer l'overlay » — secondaire, centré, sans section (ce n'est pas un réglage, c'est la
-/// sortie). Capturé après un défilement jusqu'en bas, la seule position où il se voit.
+/// **« Redémarrer » passe par la même confirmation que « Fermer l'overlay »** (2026-09-17, bouton
+/// à gauche de son voisin, en pied de l'onglet « Paramètres »).
+///
+/// Même contrat que la fermeture, pour la même raison : l'action arrête le process (un neuf prend
+/// sa place, mais le combat affiché et le brouillon de la fenêtre partent avec l'ancien), et
+/// « Annuler » ne la rattraperait pas. Échap répond « Non » sans que le filet clavier de la fenêtre
+/// relise le même appui ; « Oui » remonte `OptionsModalAction::Restart` — la seule intention que le
+/// panneau produit, l'hôte étant seul à savoir relancer un exe (`overlay_ui::restart::relaunch`).
 #[test]
-fn options_parametres_fermer_overlay() {
+fn options_redemarrage_confirme_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        pending_restart: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_restart);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte, la fenêtre reste.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat.clone(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : ni redémarrage, ni fermeture de la fenêtre derrière"
+    );
+
+    // 2. « Oui » remonte `Restart` — et rien d'autre. Coordonnées calculées depuis les tokens de
+    // `design::confirm_dialog`, comme pour la confirmation de fermeture (même géométrie).
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat,
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Restart],
+        "« Oui » remonte le redémarrage à l'hôte, et rien d'autre"
+    );
+}
+
+/// **Le pied de l'onglet « Paramètres »** (2026-09-16, « Redémarrer » ajouté le 2026-09-17) : sous
+/// la section « Compte », les deux sorties — « Redémarrer » puis « Fermer l'overlay », secondaires,
+/// centrées ENSEMBLE et sans section (ce ne sont pas des réglages). Capturé après un défilement
+/// jusqu'en bas, la seule position où elles se voient.
+///
+/// Ce que la capture garde : la paire centrée d'un seul tenant (et non un bouton par moitié de
+/// colonne), la gouttière du pied de page entre les deux, et « Redémarrer » à gauche.
+#[test]
+fn options_parametres_sorties() {
     let mut options_state = parametres_avec_notifications();
     options_state.account_connected = true;
 
@@ -3368,7 +3494,7 @@ fn options_parametres_fermer_overlay() {
     harness.run();
     // Bien au-delà de la hauteur de l'onglet : la zone défilable s'arrête d'elle-même au bas.
     defile_les_parametres(&mut harness, 2000.0);
-    harness.snapshot("options_parametres_fermer_overlay");
+    harness.snapshot("options_parametres_sorties");
 }
 
 #[test]
