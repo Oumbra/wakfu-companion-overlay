@@ -2142,9 +2142,16 @@ via du drag & drop », position retenue « même après un redémarrage de l'ove
   bouton seulement, par `App::persist_config`, qui est devenu le seul endroit sachant ce que
   `config.toml` doit contenir.
 - **Le mode interactif est requis** : en clic-traversant, l'OS fait passer les clics à travers et la
-  fenêtre ne les voit jamais. D'où la ligne d'aide de la section « Recap » des Paramètres, qui
-  nomme le raccourci de bascule tel qu'il est réglé, et le bouton **« Replacer au défaut »**, la
-  sortie de secours d'une bande posée dans un coin oublié.
+  fenêtre ne les voit jamais. D'où, à l'origine, la ligne d'aide de la section « Recap » des
+  Paramètres, qui nommait le raccourci de bascule tel qu'il est réglé, et le bouton
+  **« Replacer au défaut »**, la sortie de secours d'une bande posée dans un coin oublié.
+  **Retirés tous deux le 2026-09-18** (demande utilisateur : « supprime l'entrée […] de la section
+  recap de l'onglet paramètres ») — la bande porte depuis le 17 au soir son cadenas et son bouton
+  de retour (ci-dessous), l'entrée des Options les doublait, exactement comme celle de la section
+  « Combat » retirée la veille. Le champ `recap_position` a quitté l'état de la fenêtre Options
+  avec elle : le replacement n'a plus qu'un chemin, `App::answer_reset_confirm`. Conséquence à
+  garder en tête : plus aucun texte de l'interface ne dit que la poignée est inerte en
+  clic-traversant.
 
 **Le cadenas, et le retour à l'ancrage d'origine (2026-09-17, soir)** — demande utilisateur :
 « deux modes qui permettent de déplacer l'overlay de récap », un cadenas fermé et un cadenas
