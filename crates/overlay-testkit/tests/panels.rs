@@ -2042,8 +2042,8 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
 
 /// Les trois modes côte à côte (2026-09-17) : un objectif « 2/5 », un décompte « 3/5 » et un
 /// incrémental « 7 ». Sans marque, les deux premières tuiles seraient identiques : c'est le
-/// **glyphe de mode** (`design::SlotGlyph`, coin bas-gauche, sur la ligne de base de la fraction,
-/// dans l'or du nombre courant) qui les distingue — drapeau pour l'objectif, cible pour le
+/// **glyphe de mode** (`design::SlotGlyph`, coin haut-gauche, à trois pixels du liseré, dans
+/// l'or du nombre courant) qui les distingue — drapeau pour l'objectif, cible pour le
 /// décompte, rien pour l'incrémental. La seconde capture survole la tuile objectif : l'infobulle
 /// dit le mode après le nom, « Laine de Bouftou · Objectif » (voir `panels::watchlist::
 /// tile_tooltip`). Seule planche de la suite à exercer le drapeau : les autres suivis à cible du

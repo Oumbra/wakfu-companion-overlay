@@ -115,7 +115,8 @@ pub enum SlotCount {
     Target(i64),
 }
 
-/// Glyphe de **mode** incrusté dans le coin bas-gauche — le pendant du compteur, à l'autre coin.
+/// Glyphe de **mode** incrusté dans le coin haut-gauche — à l'opposé du compteur, qui tient le
+/// coin bas-droit.
 ///
 /// Décompte et objectif affichent la même fraction (« 2/5 » se lit « il en reste 2 » ou « j'en ai
 /// 2 ») : sans marque, deux tuiles de modes différents sont identiques au pixel près. Le glyphe
@@ -128,6 +129,10 @@ pub enum SlotCount {
 /// Peint au **vecteur** (traits et polygone cernés de noir comme les chiffres) plutôt qu'en
 /// texture : à 8 px, une icône du design system serait floue, et le cerne doit être celui du
 /// texte voisin.
+///
+/// **Ne se peint pas en mode sélection** : la case à cocher occupe le même coin, au même retrait
+/// ([`tokens::ITEM_SLOT_GLYPH_INSET`]), et le recouvrirait de toute façon. Le mode reste lisible
+/// dans l'infobulle et dans le sélecteur de l'onglet Suivi.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotGlyph {
     /// Décompte — une cible : anneau et point.
@@ -269,7 +274,7 @@ impl ItemSlot {
         self
     }
 
-    /// Glyphe de mode au coin bas-gauche — voir [`SlotGlyph`]. Sans appel, aucun glyphe.
+    /// Glyphe de mode au coin haut-gauche — voir [`SlotGlyph`]. Sans appel, aucun glyphe.
     pub fn glyph(mut self, glyph: Option<SlotGlyph>) -> Self {
         self.glyph = glyph;
         self
@@ -417,7 +422,7 @@ impl Widget for ItemSlot {
         if let Some(count) = self.count {
             paint_count(ui, rect, count);
         }
-        if let Some(glyph) = self.glyph {
+        if let (Some(glyph), None) = (self.glyph, self.selection) {
             paint_glyph(ui, rect, glyph, glyph_color(self.count));
         }
 
@@ -519,17 +524,13 @@ pub fn glyph_color(count: Option<SlotCount>) -> egui::Color32 {
     }
 }
 
-/// Carré du glyphe de mode dans un emplacement : coin bas-gauche, **posé sur la ligne de base de
-/// la fraction** (même hauteur que les chiffres de `/cible`, retour du 2026-09-17), en retrait du
-/// liseré.
+/// Carré du glyphe de mode dans un emplacement : coin **haut-gauche**, à
+/// [`tokens::ITEM_SLOT_GLYPH_INSET`] du bord sur les deux axes — le coin de la case à cocher,
+/// son cerne noir posé là où elle commence, hors de l'anneau du liseré.
 pub fn glyph_rect(rect: egui::Rect) -> egui::Rect {
-    let left = rect.left() + tokens::ITEM_SLOT_GLYPH_INSET_LEFT;
-    let bottom = rect.bottom()
-        - tokens::ITEM_SLOT_COUNT_INSET_BOTTOM
-        - tokens::ITEM_SLOT_GLYPH_BASELINE_LIFT;
-    egui::Rect::from_min_max(
-        egui::pos2(left, bottom - tokens::ITEM_SLOT_GLYPH_SIZE),
-        egui::pos2(left + tokens::ITEM_SLOT_GLYPH_SIZE, bottom),
+    egui::Rect::from_min_size(
+        rect.min + Vec2::splat(tokens::ITEM_SLOT_GLYPH_INSET),
+        Vec2::splat(tokens::ITEM_SLOT_GLYPH_SIZE),
     )
 }
 
@@ -595,16 +596,31 @@ mod tests {
     }
 
     #[test]
-    fn le_glyphe_se_pose_sur_la_ligne_de_base_de_la_fraction_en_retrait_du_lisere() {
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(64.0));
-        let g = glyph_rect(rect);
-        // Bas du glyphe = bas du texte de la cible (bottom - 4) remonté de la descente (2).
-        assert_eq!(g.bottom(), 64.0 - 4.0 - 2.0);
-        assert_eq!(g.height(), tokens::ITEM_SLOT_GLYPH_SIZE);
-        // Retrait gauche = retrait droit du compteur : les deux coins se répondent, et le glyphe
-        // reste hors de l'anneau du liseré (2 px de retrait + 2 px de trait).
-        assert_eq!(g.left(), tokens::ITEM_SLOT_COUNT_INSET_RIGHT);
-        assert!(g.left() >= tokens::ITEM_SLOT_PLAIN_STROKE * 2.0);
+    fn le_glyphe_tient_le_coin_haut_gauche_a_deux_pixels_au_moins_du_lisere() {
+        // Retour du 2026-09-17 : « en haut à gauche, deux à trois pixels d'écart de la bordure, en
+        // haut et sur le côté ». Même retrait sur les deux axes, et le liseré (pixels 2 à 4) reste
+        // lisible entre le bord et le glyphe, avec deux pixels de fond avant même son cerne.
+        let carre =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(tokens::ITEM_SLOT_SIZE));
+        let g = glyph_rect(carre);
+        assert_eq!(
+            g.min,
+            egui::pos2(tokens::ITEM_SLOT_GLYPH_INSET, tokens::ITEM_SLOT_GLYPH_INSET)
+        );
+        assert_eq!(g.size(), Vec2::splat(tokens::ITEM_SLOT_GLYPH_SIZE));
+        let (anneau, _) = border_ring(carre);
+        let fin_du_lisere = anneau.left() - carre.left() + tokens::ITEM_SLOT_PLAIN_STROKE;
+        assert!(
+            g.left() - 1.0 >= fin_du_lisere + 2.0 && g.top() - 1.0 >= fin_du_lisere + 2.0,
+            "le glyphe ({}) doit laisser au moins 2 px de fond après le liseré, qui finit à {fin_du_lisere}",
+            g.left()
+        );
+        // Le même coin que la case à cocher, son cerne d'un pixel posé là où elle commence : en
+        // mode sélection, elle le remplace.
+        assert_eq!(
+            g.min - Vec2::splat(1.0),
+            carre.min + Vec2::splat(tokens::ITEM_SLOT_SELECTION_INSET)
+        );
     }
 
     #[test]

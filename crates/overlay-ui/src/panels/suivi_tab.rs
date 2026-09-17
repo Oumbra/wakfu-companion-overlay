@@ -897,7 +897,7 @@ struct TileData {
     /// La cible, pour un décompte ou un objectif — `None` en incrémental, et la tuile ne porte
     /// alors aucun chiffre.
     target: Option<i64>,
-    /// Le mode, pour le glyphe du coin bas-gauche (voir `panels::watchlist::slot_glyph`).
+    /// Le mode, pour le glyphe du coin haut-gauche (voir `panels::watchlist::slot_glyph`).
     mode: WatchlistMode,
     icon: Option<IconRef>,
     rarity: overlay_engine::WakfuRarity,

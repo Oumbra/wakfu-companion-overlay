@@ -1692,14 +1692,18 @@ pub const ITEM_SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
 /// petit peu réduit pour qu'il ne déborde pas sur la bordure » (2026-09-17).
 pub const ITEM_SLOT_GLYPH_SIZE: f32 = 8.0;
 
-/// Marge du glyphe au bord gauche — la même que celle du compteur au bord droit, les deux
-/// occupent les deux coins bas de la tuile en miroir.
-pub const ITEM_SLOT_GLYPH_INSET_LEFT: f32 = ITEM_SLOT_COUNT_INSET_RIGHT;
-
-/// De combien le bas du glyphe remonte au-dessus du bas du texte de la cible — 2 px, la descente
-/// de la police à 10 px : le glyphe se pose ainsi **sur la ligne de base des chiffres** de la
-/// fraction, « au même niveau », et non sur le bas de leur boîte.
-pub const ITEM_SLOT_GLYPH_BASELINE_LIFT: f32 = 2.0;
+/// Retrait du glyphe depuis le coin **haut-gauche**, sur les deux axes — 8 px, un de plus que la
+/// case à cocher ([`ITEM_SLOT_SELECTION_INSET`]), qui occupe ce même coin en mode sélection.
+///
+/// Le liseré finit au pixel 4 (voir [`ITEM_SLOT_BORDER_INSET_RATIO`]), et son antialiasing en
+/// mord un cinquième. Contrairement à la case, le glyphe est **cerné de noir** d'un pixel tout
+/// autour : à 7, sa forme n'avait qu'un pixel de fond entre son cerne et le liseré, et se lisait
+/// collée. À 8, le cerne se pose là où commence la case (7) et la forme garde trois pixels de
+/// fond depuis le liseré. Retour utilisateur du 2026-09-17 : « en haut à gauche, avec deux à
+/// trois pixels d'écart de la bordure, en haut et sur le côté, pour qu'il ne soit pas collé » —
+/// le coin bas-gauche de la première version, sur la ligne de base de la fraction, se lisait
+/// comme un morceau du compteur.
+pub const ITEM_SLOT_GLYPH_INSET: f32 = ITEM_SLOT_SELECTION_INSET + 1.0;
 
 // ---------------------------------------------------------------------------------------------
 // Jauge — `design::meter`
