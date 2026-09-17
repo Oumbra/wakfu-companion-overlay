@@ -2198,6 +2198,32 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 
 ## 11. Distribution
 
+- **Windows : un exécutable fenêtré sans fenêtre, pas un service** (2026-09-17, demande
+  utilisateur : « l'overlay doit fonctionner sous forme de service, ou tout autre système invisible
+  à l'écran, plutôt qu'en fenêtre de terminal »). `overlay-ui.exe` était compilé en sous-système
+  *console* : un double-clic sur l'exe, ou son lancement automatique à l'ouverture de session
+  (`autostart`, §9.1 undecies), ouvrait une console noire qui restait à l'écran tant que l'overlay
+  tournait, et la fermer tuait l'overlay. Il est désormais en sous-système *windows*
+  (`#![cfg_attr(windows, windows_subsystem = "windows")]` en tête de `main.rs`, comme
+  `overlay-focus` depuis le 2026-09-14) : Windows ne lui crée aucune console, l'overlay ne se
+  manifeste que par ses fenêtres transparentes et son icône de zone de notification (menu
+  Quitter). Un **service Windows** au sens strict a été écarté, et pas seulement par économie : un
+  service s'exécute en session 0, isolée du bureau de l'utilisateur, sans possibilité d'afficher
+  quoi que ce soit par-dessus le jeu ni de lire ses fenêtres — c'est structurellement incompatible
+  avec un overlay. Le comportement attendu d'un service (tourne en fond, démarre avec la session,
+  se pilote sans terminal) est obtenu par la combinaison sous-système `windows` + inscription
+  `HKCU\…\Run` + icône de zone de notification. Conséquences :
+  - **Journal** : la couche console de `logging` (§15) n'a plus de destinataire par défaut ; le
+    fichier `%APPDATA%\wakfu-companion-overlay\logs\` est la seule sortie en usage réel. En
+    développement, `logging::attach_parent_console` (appelée en tout premier dans `main()`)
+    rattache le process à la console du terminal qui l'a lancé (`preview.ps1`, `cargo run`), de
+    sorte que le journal y reste lisible et que Ctrl+C y fonctionne comme avant ; lancé sans parent
+    doté d'une console, l'appel échoue silencieusement et l'exe reste muet.
+  - **Paniques** : le message de panique de la bibliothèque standard va sur `stderr`, donc nulle
+    part. `logging::install_panic_hook` (les deux binaires) le recopie dans le journal avant le
+    traitement par défaut — sans quoi un plantage n'aurait laissé qu'une session sans ligne de fin.
+  - Linux n'est pas concerné : `overlay-ui-x11` lancé par une entrée `.desktop` n'a jamais eu de
+    terminal, et lancé depuis un terminal il en hérite naturellement.
 - **Windows** : binaire + installeur NSIS/MSI. Signature Authenticode fortement recommandée (sans
   elle, SmartScreen effraie chaque nouvel utilisateur) — coût à budgéter, mais l'app reste
   installable sans.
@@ -2437,7 +2463,10 @@ la console n'en est qu'un miroir.
 - **Deux sorties, un seul contenu** : une couche console (`fmt::layer()`, ANSI) et une couche
   fichier (`fmt::layer().with_ansi(false)`), toutes deux sous le même `EnvFilter` — ce qui apparaît
   dans le terminal est exactement ce qui est écrit sur disque (horodatage, champs structurés,
-  thread, ligne compris).
+  thread, ligne compris). **Depuis le 2026-09-17, sous Windows, la console n'existe qu'en
+  développement** (§11 : exe fenêtré sans fenêtre, rattaché à la console du terminal parent par
+  `logging::attach_parent_console` quand il y en a un) : en usage réel, le fichier est la seule
+  sortie, et les paniques y sont recopiées par `logging::install_panic_hook`.
 - **Emplacement** : `<dossier de données de l'appli>/logs/` (même racine que
   `catalog_cache`/`token_store`/`watchlist`, résolue par `directories::ProjectDirs` — sous Windows
   `%APPDATA%\wakfu-companion-overlay\logs\`), fichier `overlay-ui.<AAAA-MM-JJ>.log`.
