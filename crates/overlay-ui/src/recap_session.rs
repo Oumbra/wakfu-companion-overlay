@@ -259,9 +259,7 @@ impl RecapSession {
             self.baseline = Some(*engine);
         }
         if !game_present {
-            if self.last_tick.take().is_none() {
-                return None;
-            }
+            self.last_tick.take()?;
             tracing::info!(
                 "[session] en pause à {} — reprise possible {}.",
                 format_duration(self.active),
