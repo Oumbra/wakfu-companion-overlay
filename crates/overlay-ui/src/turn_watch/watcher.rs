@@ -633,39 +633,58 @@ mod tests {
 
     #[test]
     fn le_tour_est_notifie_sous_le_voile_des_bonus_de_tour() {
-        // Le tour d'Oumbra commence derrière la sélection des bonus de tour : écran voilé, panneau
-        // plus doré. Le gabarit appris au repos doit le reconnaître, sinon un joueur qui n'a pas
-        // la fenêtre sous les yeux n'est jamais prévenu (bug du 2026-09-17).
+        // Vraies captures du 2026-09-17 : le tour de « Canis Furiosus » commence derrière la
+        // sélection des bonus de tour — écran voilé, panneau plus doré. Le gabarit appris au
+        // repos doit le reconnaître, sinon un joueur qui n'a pas la fenêtre sous les yeux n'est
+        // jamais prévenu.
         let mut w = Watcher::default();
         let t0 = Instant::now();
-        learn_oumbra(&mut w, t0);
-        let voile = vision::veiled(&fixture("repos-oumbra"));
+        let canis = "Canis Furiosus";
+        let repos = fixture("repos-canis");
+        let voile = fixture("voile-canis");
         let autre = fixture("repos-pugio-t18");
-        let f = facts(true, 2);
+        // Apprentissage : deux sorts, la bande au repos.
+        let f1 = facts(true, 1);
+        tick(&mut w, canis, canis, Some(&repos), &f1, true, t0);
+        let f2 = facts(true, 2);
+        let ev = tick(
+            &mut w,
+            canis,
+            canis,
+            Some(&repos),
+            &f2,
+            true,
+            t0 + Duration::from_secs(3),
+        );
+        assert!(
+            matches!(ev.as_slice(), [Event::TemplateLearned { character, .. }] if character == canis),
+            "{ev:?}"
+        );
+        // Le tour passe à un autre, puis revient sous le voile, fenêtre en arrière-plan.
         for i in 0..2 {
             tick(
                 &mut w,
-                "Oumbra",
-                "Oumbra",
+                canis,
+                canis,
                 Some(&autre),
-                &f,
+                &f2,
                 false,
                 t0 + Duration::from_secs(10 + i),
             );
         }
         let ev = tick(
             &mut w,
-            "Oumbra",
-            "Oumbra",
+            canis,
+            canis,
             Some(&voile),
-            &f,
+            &f2,
             false,
             t0 + Duration::from_secs(40),
         );
         assert_eq!(
             ev,
             vec![Event::Notify {
-                character: "Oumbra".to_string()
+                character: canis.to_string()
             }]
         );
     }
