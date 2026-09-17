@@ -3303,22 +3303,25 @@ fn options_parametres_section_compte() {
     // cadre par le bas — une référence régénérée sans le voir ne montrerait plus rien.
     // **Puis 276 de moins le 2026-09-18** : l'entrée de déplacement de la bande Récap (148) et le
     // bouton de rafraîchissement du combat (128) ont été retirés à la demande de l'utilisateur.
-    defile_les_parametres(&mut harness, 603.0);
+    // **Et le même jour, plus de valeur à tenir à jour** : « Compte » est devenue la DERNIÈRE
+    // section de l'onglet (« Mise à jour » et les sorties sont parties dans « À propos »), un
+    // défilement bien au-delà de la hauteur du contenu sature donc exactement sur elle.
+    defile_les_parametres(&mut harness, 2000.0);
     harness.snapshot("options_parametres_compte");
 }
 
-/// **La section « Mise à jour »** de l'onglet « Paramètres » (2026-09-15, `docs/plan-mise-a-jour.md`
-/// §8.2), capturée dans l'état qui compte : une version disponible, le bouton or « Mettre à jour
-/// vers 0.21.0 », la ligne d'information avec le poids du téléchargement, la case d'installation
-/// automatique cochée. La version courante n'y est pas répétée (bannière), pas de « Notes de
-/// version » (décisions du mainteneur).
+/// **L'onglet « À propos », une mise à jour disponible** (section « Mise à jour », 2026-09-15,
+/// `docs/plan-mise-a-jour.md` §8.2 ; onglet créé le 2026-09-18), capturé dans l'état qui compte :
+/// une version disponible, le bouton or « Mettre à jour vers 0.21.0 », la ligne d'information avec
+/// le poids du téléchargement, la case d'installation automatique cochée. La version courante n'y
+/// est pas répétée (bannière), pas de « Notes de version » (décisions du mainteneur).
 ///
-/// Le bas de l'onglet entre dans le cadre à ce défilement : la paire de sorties (« Redémarrer » et
-/// « Fermer l'overlay ») y est donc visible depuis le 2026-09-17, c'est
-/// `options_parametres_sorties` qui la cadre.
+/// Plus de défilement depuis le 2026-09-18 : la section a quitté le pied de « Paramètres » pour
+/// ouvrir cet onglet, où tout tient dans le cadre.
 #[test]
-fn options_parametres_section_mise_a_jour() {
+fn options_a_propos_mise_a_jour() {
     let mut options_state = parametres_avec_notifications();
+    options_state.tab = OptionsTab::APropos;
     options_state.auto_update = true;
     options_state.initial.auto_update = true;
     options_state.update = overlay_ui::update::UpdateStatus::Available {
@@ -3355,13 +3358,7 @@ fn options_parametres_section_mise_a_jour() {
             );
         });
     harness.run();
-    // Dernière section de l'onglet : elle ne se voit qu'après un défilement depuis le 2026-09-15
-    // — voir [`defile_les_parametres`]. 102 points de plus depuis le 2026-09-17, même raison que
-    // pour la section « Compte » ci-dessus, puis 173 encore le même jour (bouton de
-    // rafraîchissement du panneau de combat, ligne d'aide du cadenas de la bande Récap). Le
-    // défilement sature au bas du contenu : la valeur n'a plus qu'à être assez grande.
-    defile_les_parametres(&mut harness, 1175.0);
-    harness.snapshot("options_parametres_mise_a_jour");
+    harness.snapshot("options_a_propos_mise_a_jour");
 }
 
 /// **La confirmation de déconnexion** — l'autre moitié de la section « Compte ». Le bouton est la
@@ -3424,7 +3421,8 @@ fn options_deconnexion_confirmation() {
 }
 
 /// **« Fermer l'overlay » passe par une confirmation ; Échap y répond « Non », « Oui » arrête le
-/// programme** (2026-09-16, bouton en pied de l'onglet « Paramètres »).
+/// programme** (2026-09-16, bouton en pied de l'onglet « Paramètres » ; dans « À propos » depuis
+/// le 2026-09-18).
 ///
 /// Même contrat que la déconnexion : le bouton ne ferme jamais du premier clic (l'action arrête
 /// l'overlay, brouillon compris, « Annuler » ne la rattraperait pas), et l'Échap qui ferme la
@@ -3439,7 +3437,7 @@ fn options_fermeture_overlay_confirmee_et_echap_repond_non() {
     const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
 
     let etat = |pending_quit: bool| OptionsModalState {
-        tab: OptionsTab::Parametres,
+        tab: OptionsTab::APropos,
         path_input: CHEMIN.to_string(),
         account_connected: true,
         pending_quit,
@@ -3544,8 +3542,9 @@ fn options_fermeture_overlay_confirmee_et_echap_repond_non() {
     );
 }
 
-/// **« Redémarrer » passe par la même confirmation que « Fermer l'overlay »** (2026-09-17, bouton
-/// à gauche de son voisin, en pied de l'onglet « Paramètres »).
+/// **« Redémarrer l'overlay » passe par la même confirmation que « Fermer l'overlay »**
+/// (2026-09-17, bouton à gauche de son voisin, en pied de l'onglet « Paramètres » ; dans
+/// « À propos » depuis le 2026-09-18, où il a pris son libellé complet).
 ///
 /// Même contrat que la fermeture, pour la même raison : l'action arrête le process (un neuf prend
 /// sa place, mais le combat affiché et le brouillon de la fenêtre partent avec l'ancien), et
@@ -3559,7 +3558,7 @@ fn options_redemarrage_confirme_et_echap_repond_non() {
     const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
 
     let etat = OptionsModalState {
-        tab: OptionsTab::Parametres,
+        tab: OptionsTab::APropos,
         path_input: CHEMIN.to_string(),
         account_connected: true,
         pending_restart: true,
@@ -3662,16 +3661,19 @@ fn options_redemarrage_confirme_et_echap_repond_non() {
     );
 }
 
-/// **Le pied de l'onglet « Paramètres »** (2026-09-16, « Redémarrer » ajouté le 2026-09-17) : sous
-/// la section « Compte », les deux sorties — « Redémarrer » puis « Fermer l'overlay », secondaires,
-/// centrées ENSEMBLE et sans section (ce ne sont pas des réglages). Capturé après un défilement
-/// jusqu'en bas, la seule position où elles se voient.
+/// **L'onglet « À propos » au repos** (2026-09-18) : la section « Mise à jour » sans vérification
+/// depuis le lancement, puis les deux sorties — « Redémarrer l'overlay » et « Fermer l'overlay »,
+/// secondaires, centrées ENSEMBLE et sans section (ce ne sont pas des réglages). Elles fermaient
+/// l'onglet « Paramètres » depuis le 2026-09-16 (« Redémarrer » ajouté le 2026-09-17), sous un
+/// défilement ; ici tout tient dans le cadre.
 ///
 /// Ce que la capture garde : la paire centrée d'un seul tenant (et non un bouton par moitié de
-/// colonne), la gouttière du pied de page entre les deux, et « Redémarrer » à gauche.
+/// colonne), la gouttière du pied de page entre les deux, « Redémarrer l'overlay » à gauche et en
+/// toutes lettres — et, dans la barre du haut, sept onglets dont chacun tient son libellé.
 #[test]
-fn options_parametres_sorties() {
+fn options_a_propos() {
     let mut options_state = parametres_avec_notifications();
+    options_state.tab = OptionsTab::APropos;
     options_state.account_connected = true;
 
     let mut harness = Harness::builder()
@@ -3700,9 +3702,7 @@ fn options_parametres_sorties() {
             );
         });
     harness.run();
-    // Bien au-delà de la hauteur de l'onglet : la zone défilable s'arrête d'elle-même au bas.
-    defile_les_parametres(&mut harness, 2000.0);
-    harness.snapshot("options_parametres_sorties");
+    harness.snapshot("options_a_propos");
 }
 
 #[test]

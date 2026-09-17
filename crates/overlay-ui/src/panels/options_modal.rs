@@ -83,7 +83,7 @@
 //! `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`] en
 //! retour pour le prochain redessin.
 
-use overlay_sync::update::{self, UpdateStatus};
+use overlay_sync::update::UpdateStatus;
 
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabContext, AlertsTabState};
@@ -93,7 +93,7 @@ use crate::panels::notifications::{self, AlertMutes};
 use crate::panels::personnages_tab::{
     self, PersonnagesAvailability, PersonnagesTabContext, PersonnagesTabState,
 };
-use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
+use crate::panels::{a_propos_tab, raccourcis_tab, recipe_dialog, suivi_tab};
 use crate::recap_session::{self, ResumeSettings};
 use crate::shortcuts::ShortcutBindings;
 
@@ -217,6 +217,10 @@ pub enum OptionsTab {
     Raccourcis,
     /// Le chemin de `wakfu.log`. Ce fut l'onglet d'ouverture tant qu'il était le seul câblé.
     Parametres,
+    /// Le programme lui-même — mise à jour, redémarrage, arrêt (`panels::a_propos_tab`). **En
+    /// dernier**, demande utilisateur du 2026-09-18 : ce qu'on règle une fois, ou jamais, ferme le
+    /// menu.
+    APropos,
 }
 
 impl Default for OptionsTab {
@@ -731,8 +735,9 @@ pub fn show(
         .log_name("options")
         .show(ui);
 
-    // Les six onglets sont désormais tous câblés — « Personnages » a reçu son contenu le
-    // 2026-09-16 (`panels::personnages_tab`), et avec lui la dernière entrée grisée du menu.
+    // Les sept onglets sont tous câblés — « Personnages » a reçu son contenu le 2026-09-16
+    // (`panels::personnages_tab`), et avec lui la dernière entrée grisée du menu ; « À propos »
+    // est arrivé le 2026-09-18 avec ce qu'il a retiré au pied de « Paramètres ».
     chrome.tabs(
         ui,
         design::tabs(&mut state.tab)
@@ -742,6 +747,7 @@ pub fn show(
             .entry(OptionsTab::Personnages, "Personnages")
             .entry(OptionsTab::Raccourcis, "Raccourcis")
             .entry(OptionsTab::Parametres, "Paramètres")
+            .entry(OptionsTab::APropos, "À propos")
             .log_name("options-onglets"),
     );
 
@@ -873,17 +879,43 @@ pub fn show(
             raccourcis_tab::show(ui, panel, &mut state.raccourcis, &mut state.shortcuts);
             return;
         }
-        // **Tout l'onglet défile** depuis le 2026-09-15 : il portait quatre sections, il en porte
-        // huit — « Démarrage », « Combat », une section de notifications par fonctionnalité
-        // (`panels::notifications`), « Fichier », « Mise à jour » et « Compte ». La dernière
-        // tombait hors de la fenêtre sans que rien ne le dise, et agrandir la fenêtre pour suivre
-        // chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un jeu.
+        if state.tab == OptionsTab::APropos {
+            // L'onglet ne confirme rien : il remonte une intention, et c'est ici que s'ouvre la
+            // boîte qui convient — les trois s'excluent par le `else if` des dialogues, plus bas.
+            match a_propos_tab::show(
+                ui,
+                panel,
+                &mut a_propos_tab::AProposTabContext {
+                    update: &state.update,
+                    auto_update: &mut state.auto_update,
+                },
+            ) {
+                a_propos_tab::AProposTabAction::None => {}
+                a_propos_tab::AProposTabAction::CheckUpdate => {
+                    action = OptionsModalAction::CheckUpdate
+                }
+                a_propos_tab::AProposTabAction::Install(version) => {
+                    state.pending_install = Some(version)
+                }
+                a_propos_tab::AProposTabAction::Restart => state.pending_restart = true,
+                a_propos_tab::AProposTabAction::Quit => state.pending_quit = true,
+            }
+            return;
+        }
+        // **Tout l'onglet défile** depuis le 2026-09-15 : il portait quatre sections, il en a
+        // porté jusqu'à huit — « Démarrage », « Combat », une section de notifications par
+        // fonctionnalité (`panels::notifications`), « Fichier », « Mise à jour » et « Compte ». La
+        // dernière tombait hors de la fenêtre sans que rien ne le dise, et agrandir la fenêtre pour
+        // suivre chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un
+        // jeu.
         //
         // **L'ordre des sections** (remanié le 2026-09-16) va de ce qu'on règle souvent à ce qu'on
         // règle une fois : l'affichage d'abord — « Recap » puis « Combat » —, les notifications
-        // ensuite, et les quatre sections de maintenance à la fin — « Fichier » (le chemin de
+        // ensuite, et les sections de maintenance à la fin — « Fichier » (le chemin de
         // `wakfu.log`, que la découverte automatique trouve seule dans l'immense majorité des
-        // cas), « Démarrage », « Mise à jour », « Compte ».
+        // cas), « Démarrage », « Compte ». « Mise à jour » et les deux sorties de l'overlay, qui
+        // fermaient l'onglet, sont parties dans « À propos » le 2026-09-18 (`panels::a_propos_tab`)
+        // : elles concernent le programme, pas ce qu'il affiche.
         panel.scroll_area(ui, "options-parametres", |ui, width| {
             // La largeur utile vient de la zone défilable : la réserve de barre y est déjà
             // déduite (voir `design::PanelZones::scroll_area`).
@@ -1326,7 +1358,7 @@ pub fn show(
             // pas par usage : ce chemin se règle une fois, souvent jamais (la découverte
             // automatique le trouve seule, voir `overlay_ingest::discovery`), là où les sections
             // qui la précèdent maintenant se règlent au fil des sessions. Elle rejoint donc les
-            // deux autres sections de maintenance, « Mise à jour » et « Compte ».
+            // autres sections de maintenance.
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Fichier"));
 
@@ -1422,64 +1454,6 @@ pub fn show(
                 .log_name("options-demarrage-auto"),
             );
 
-            // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
-            // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la
-            // porte déjà. Une ligne d'information (dernière vérification, version disponible et son
-            // poids), la case d'installation automatique, et UN bouton dont le libellé suit l'état :
-            // « Recherche de mise à jour » → « Recherche… » → « Mettre à jour vers X » /
-            // « Réessayer ». Pas de bouton « Notes de version » pour l'instant (aucune note n'est
-            // rédigée aujourd'hui). L'habillage du bouton de recherche est à revoir avec le design
-            // system, plus tard.
-            //
-            // Comme « Se déconnecter » (section « Compte », dessous), « Mettre à jour » n'est PAS un brouillon : il ferme l'overlay
-            // de jeu le temps de l'installation — d'où sa confirmation. « Recherche », lui, ne touche
-            // à rien.
-            ui.add_space(SECTION_GAP);
-            ui.add(design::heading("Mise à jour"));
-            let (info, tone) = update_info_line(&state.update, std::time::Instant::now());
-            ui.add(
-                design::info_text(info)
-                    .tone(tone)
-                    .width(inner_width)
-                    .log_name("options-mise-a-jour-info"),
-            );
-            ui.add_space(INFO_GAP);
-            ui.add(
-                design::checkbox(
-                    &mut state.auto_update,
-                    "Installer automatiquement les mises à jour au démarrage",
-                )
-                .tooltip(
-                    "Au lancement, une version plus récente est téléchargée et installée avant \
-                     d'ouvrir l'overlay. Décochée, elle est seulement signalée ici.",
-                )
-                .log_name("options-mise-a-jour-auto"),
-            );
-            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-            let button_spec = update_button(&state.update);
-            let update_button = design::button(button_spec.label)
-                .variant(button_spec.variant)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .enabled(button_spec.enabled)
-                .tooltip(button_spec.tooltip)
-                .log_name("options-mise-a-jour-bouton");
-            let update_size = update_button.desired_size(ui);
-            let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            if ui
-                .put(
-                    egui::Rect::from_center_size(row.center(), update_size),
-                    update_button,
-                )
-                .clicked()
-            {
-                match &state.update {
-                    UpdateStatus::Available { version, .. } => {
-                        state.pending_install = Some(version.clone());
-                    }
-                    _ => action = OptionsModalAction::CheckUpdate,
-                }
-            }
-
             // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
             // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
             // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
@@ -1534,69 +1508,6 @@ pub fn show(
                 .clicked()
             {
                 state.pending_disconnect = true;
-            }
-
-            // **« Redémarrer » et « Fermer l'overlay »** (2026-09-16 pour la sortie, 2026-09-17
-            // pour le redémarrage), tout en bas de l'onglet, sans section : ce ne sont pas des
-            // réglages, ce sont les sorties. Jusque-là, quitter demandait le raccourci
-            // « Quitter » ou l'icône de la zone de notification — deux chemins qu'un joueur qui
-            // a la fenêtre Options sous les yeux ne voit pas ; et relancer demandait de faire les
-            // deux à la suite, à la main.
-            //
-            // **Secondaires et centrés** (demande utilisateur) : centrés comme « Se déconnecter »
-            // juste au-dessus, parce que ce sont les seules actions de cette fenêtre qui
-            // échappent à « Annuler » ; secondaires et non `Danger`, parce que ni l'une ni l'autre
-            // ne détruit quoi que ce soit — le compte reste appairé, les réglages validés restent
-            // écrits, relancer retrouve tout. Les confirmations, elles, restent : un clic en plein
-            // combat coupe le détail des dégâts sans retour, et le brouillon de la fenêtre part
-            // avec.
-            //
-            // **La paire est centrée, pas chaque bouton** : les deux largeurs naturelles et la
-            // gouttière du pied de page (`WINDOW_FOOTER_GUTTER`, la seule gouttière bouton-à-bouton
-            // relevée dans le jeu) forment un bloc, centré d'un seul tenant sur la colonne —
-            // centrer chacun dans une moitié les éloignerait l'un de l'autre au gré de la
-            // largeur de la fenêtre, et « Redémarrer » ne se lirait plus comme la variante de son
-            // voisin. « Redémarrer » est à GAUCHE : on lit l'action la moins définitive en
-            // premier.
-            ui.add_space(SECTION_GAP);
-            let restart = design::button("Redémarrer")
-                .variant(ButtonVariant::Secondary)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .tooltip(
-                    "Arrêter puis relancer l'overlay. Utile après avoir changé de fichier de \
-                     journal ou quand l'affichage ne suit plus le jeu.",
-                )
-                .log_name("options-redemarrer-overlay");
-            let quit = design::button("Fermer l'overlay")
-                .variant(ButtonVariant::Secondary)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .tooltip(
-                    "Arrêter l'overlay. Le compte reste appairé et les réglages validés sont \
-                     conservés pour la prochaine fois.",
-                )
-                .log_name("options-fermer-overlay");
-            let restart_size = restart.desired_size(ui);
-            let quit_size = quit.desired_size(ui);
-            let gutter = design::tokens::WINDOW_FOOTER_GUTTER;
-            let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            let paire_gauche =
-                row.center().x - (restart_size.x + gutter + quit_size.x) / 2.0;
-            let restart_rect = egui::Rect::from_min_size(
-                egui::pos2(paire_gauche, row.center().y - restart_size.y / 2.0),
-                restart_size,
-            );
-            let quit_rect = egui::Rect::from_min_size(
-                egui::pos2(
-                    restart_rect.right() + gutter,
-                    row.center().y - quit_size.y / 2.0,
-                ),
-                quit_size,
-            );
-            if ui.put(restart_rect, restart).clicked() {
-                state.pending_restart = true;
-            }
-            if ui.put(quit_rect, quit).clicked() {
-                state.pending_quit = true;
             }
         });
     });
@@ -1760,134 +1671,6 @@ pub fn show(
     action
 }
 
-/// La ligne d'information de la section « Mise à jour » et son ton — une fonction libre, pour
-/// que ses formulations soient testées sans peindre.
-pub fn update_info_line(
-    status: &UpdateStatus,
-    now: std::time::Instant,
-) -> (String, design::InfoTone) {
-    let since = |at: std::time::Instant| {
-        let secs = now.saturating_duration_since(at).as_secs();
-        if secs < 60 {
-            "à l'instant".to_string()
-        } else if secs < 3600 {
-            format!("il y a {} min", secs / 60)
-        } else {
-            format!("il y a {} h", secs / 3600)
-        }
-    };
-    match status {
-        UpdateStatus::Idle => (
-            "Aucune vérification depuis le lancement.".to_string(),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Checking => ("Recherche en cours…".to_string(), design::InfoTone::Info),
-        UpdateStatus::UpToDate { checked_at } => (
-            format!(
-                "Dernière vérification {} · vous êtes à jour.",
-                since(*checked_at)
-            ),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Available {
-            version,
-            download_size,
-            mandatory,
-            checked_at,
-            ..
-        } => (
-            format!(
-                "Dernière vérification {} · version {version} disponible · {}{}",
-                since(*checked_at),
-                update::human_size(*download_size),
-                if *mandatory { " · obligatoire" } else { "" }
-            ),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Downloading {
-            version,
-            received,
-            total,
-        } => (
-            format!(
-                "Téléchargement de la version {version} : {} / {}",
-                update::human_size(*received),
-                update::human_size(*total)
-            ),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Verifying { version } => (
-            format!("Vérification de la version {version}…"),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::ReadyToInstall { version, .. } | UpdateStatus::Installing { version } => (
-            format!("Installation de la version {version}…"),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Unavailable { reason, checked_at } => (
-            format!(
-                "Dernière vérification {} · impossible ({reason}).",
-                since(*checked_at)
-            ),
-            design::InfoTone::Alert,
-        ),
-        UpdateStatus::Failed {
-            headline, detail, ..
-        } => (
-            format!("Mise à jour impossible : {headline} ({detail})"),
-            design::InfoTone::Alert,
-        ),
-    }
-}
-
-/// Le bouton unique de la section « Mise à jour », selon l'état.
-pub struct UpdateButtonSpec {
-    pub label: String,
-    pub variant: ButtonVariant,
-    pub enabled: bool,
-    pub tooltip: &'static str,
-}
-
-pub fn update_button(status: &UpdateStatus) -> UpdateButtonSpec {
-    match status {
-        UpdateStatus::Available { version, .. } => UpdateButtonSpec {
-            label: format!("Mettre à jour vers {version}"),
-            variant: ButtonVariant::Primary,
-            enabled: true,
-            tooltip: "Ferme l'overlay, installe la nouvelle version et le relance",
-        },
-        UpdateStatus::Checking => UpdateButtonSpec {
-            label: "Recherche…".to_string(),
-            variant: ButtonVariant::Secondary,
-            enabled: false,
-            tooltip: "Lecture de la dernière version publiée",
-        },
-        UpdateStatus::Downloading { .. }
-        | UpdateStatus::Verifying { .. }
-        | UpdateStatus::ReadyToInstall { .. }
-        | UpdateStatus::Installing { .. } => UpdateButtonSpec {
-            label: "Mise à jour en cours…".to_string(),
-            variant: ButtonVariant::Secondary,
-            enabled: false,
-            tooltip: "L'overlay se relancera une fois la version installée",
-        },
-        UpdateStatus::Failed { .. } => UpdateButtonSpec {
-            label: "Réessayer".to_string(),
-            variant: ButtonVariant::Secondary,
-            enabled: true,
-            tooltip: "Rechercher à nouveau la dernière version publiée",
-        },
-        UpdateStatus::Idle | UpdateStatus::UpToDate { .. } | UpdateStatus::Unavailable { .. } => {
-            UpdateButtonSpec {
-                label: "Recherche de mise à jour".to_string(),
-                variant: ButtonVariant::Secondary,
-                enabled: true,
-                tooltip: "Lire la dernière version publiée, sans rien installer",
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1916,50 +1699,6 @@ mod tests {
         state.auto_update = false;
         assert!(state.is_dirty());
         assert!(!state.commit().auto_update);
-    }
-
-    #[test]
-    fn ligne_et_bouton_de_la_section_mise_a_jour_suivent_l_etat() {
-        use overlay_sync::update::UpdateStatus;
-        let now = std::time::Instant::now();
-        let (ligne, _) = update_info_line(
-            &UpdateStatus::UpToDate { checked_at: now },
-            now + std::time::Duration::from_secs(185),
-        );
-        assert_eq!(
-            ligne,
-            "Dernière vérification il y a 3 min · vous êtes à jour."
-        );
-        assert_eq!(
-            update_button(&UpdateStatus::Idle).label,
-            "Recherche de mise à jour"
-        );
-        let disponible = UpdateStatus::Available {
-            version: "0.21.0".into(),
-            download_size: 3_100_000,
-            mandatory: false,
-            notes_url: None,
-            checked_at: now,
-        };
-        let (ligne, tone) = update_info_line(&disponible, now);
-        assert_eq!(
-            ligne,
-            "Dernière vérification à l'instant · version 0.21.0 disponible · 3,1 Mo"
-        );
-        assert_eq!(tone, design::InfoTone::Info);
-        let bouton = update_button(&disponible);
-        assert_eq!(bouton.label, "Mettre à jour vers 0.21.0");
-        assert!(bouton.enabled);
-        assert_eq!(bouton.variant, ButtonVariant::Primary);
-        assert!(!update_button(&UpdateStatus::Checking).enabled);
-        let (_, tone) = update_info_line(
-            &UpdateStatus::Unavailable {
-                reason: "hors ligne".into(),
-                checked_at: now,
-            },
-            now,
-        );
-        assert_eq!(tone, design::InfoTone::Alert);
     }
 
     #[test]
