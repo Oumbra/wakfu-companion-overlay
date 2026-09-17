@@ -100,7 +100,7 @@ mod linux_main {
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
     use overlay_ui::render_content;
     use overlay_ui::render_content::{
-        AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent,
+        AuthCommand, AuthStatus, OverlayKind, RecapTarget, RenderContent, UserEvent,
     };
     use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
     use overlay_ui::startup::StartupProgress;
@@ -318,6 +318,8 @@ mod linux_main {
         /// (2026-09-17) : décalage du bloc depuis le coin de la zone cliente du jeu, `None` tant
         /// qu'il ne l'a pas déplacée, une seule position pour toutes les fenêtres de jeu.
         recap_position: Option<(i32, i32)>,
+        /// Voir `main.rs::App::recap_locked` — le cadenas de la bande Récap (2026-09-17).
+        recap_locked: bool,
         /// Le glissement de la bande en cours, s'il y en a un — voir `RecapDragState`.
         recap_drag: Option<RecapDragState>,
         banner_printed: bool,
@@ -410,6 +412,8 @@ mod linux_main {
         recap_session: RecapSession,
         /// La position de la bande Récap relue de la config — voir `App::recap_position`.
         recap_position: Option<(i32, i32)>,
+        /// Le verrou de la bande Récap relu de la config — voir `App::recap_locked`.
+        recap_locked: bool,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
         /// Même provenance que `combat_always_visible`.
         shortcuts: ShortcutBindings,
@@ -449,6 +453,7 @@ mod linux_main {
                 countdown_toast,
                 recap_session,
                 recap_position,
+                recap_locked,
                 shortcuts,
                 snapshot,
                 watchlist,
@@ -507,6 +512,7 @@ mod linux_main {
                 game_window,
                 recap_session,
                 recap_position,
+                recap_locked,
                 recap_drag: None,
                 banner_printed: false,
                 pending_dialog: None,
@@ -903,7 +909,7 @@ mod linux_main {
                 }
                 // La confirmation de remise à zéro couvre la fenêtre de jeu entière — voir
                 // `main.rs::App::anchor_position`.
-                OverlayKind::RecapReset => PhysicalPosition::new(rect.left, rect.top),
+                OverlayKind::RecapReset(_) => PhysicalPosition::new(rect.left, rect.top),
                 // Rattachée à une fenêtre de jeu, la fenêtre Options la couvre entière et voile
                 // tout sauf la modale, centrée par le rendu (2026-09-17) — voir
                 // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
@@ -949,10 +955,12 @@ mod linux_main {
                 // voir `main.rs`, même mécanique.
                 OverlayKind::Recap => (
                     panels::recap::WIDTH as f64,
-                    panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                    panels::recap::HEIGHT as f64
+                        + render_content::RECAP_TOOLTIP_RESERVE as f64
+                        + render_content::RECAP_ACTIONS_RESERVE as f64,
                 ),
                 // La taille de la fenêtre de jeu, pour que le voile la couvre — voir `main.rs`.
-                OverlayKind::RecapReset => (rect.width as f64, rect.height as f64),
+                OverlayKind::RecapReset(_) => (rect.width as f64, rect.height as f64),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
                 OverlayKind::Login => (
                     panels::login::WINDOW_WIDTH as f64,
@@ -961,7 +969,7 @@ mod linux_main {
             };
             // Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES, comme le rectangle
             // dont elle vient et la position qu'on lui pose — voir `main.rs`, même raison.
-            let covers_game = matches!(kind, OverlayKind::RecapReset)
+            let covers_game = matches!(kind, OverlayKind::RecapReset(_))
                 || (kind == OverlayKind::Options && game_window != 0);
             let inner_size: winit::dpi::Size = if covers_game {
                 winit::dpi::PhysicalSize::new(size.0, size.1).into()
@@ -972,7 +980,7 @@ mod linux_main {
                 OverlayKind::Combat => "Combat",
                 OverlayKind::Watchlist => "Suivi",
                 OverlayKind::Recap => "Recap",
-                OverlayKind::RecapReset => "Confirmation",
+                OverlayKind::RecapReset(_) => "Confirmation",
                 OverlayKind::Options => "Options",
                 OverlayKind::Login => "Connexion",
             };
@@ -1674,17 +1682,18 @@ mod linux_main {
             event_loop: &ActiveEventLoop,
             game_window: u32,
             rect: GameRect,
+            target: RecapTarget,
         ) {
             if self
                 .windows
                 .values()
-                .any(|w| w.kind == OverlayKind::RecapReset)
+                .any(|w| matches!(w.kind, OverlayKind::RecapReset(_)))
             {
                 return;
             }
             let overlay = Self::create_overlay_window(
                 event_loop,
-                OverlayKind::RecapReset,
+                OverlayKind::RecapReset(target),
                 game_window,
                 "Recap".to_string(),
                 rect,
@@ -1696,18 +1705,52 @@ mod linux_main {
             );
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
-            tracing::info!("[session] confirmation de remise à zéro ouverte.");
+            match target {
+                RecapTarget::Session => {
+                    tracing::info!("[session] confirmation de remise à zéro ouverte.")
+                }
+                RecapTarget::Position => {
+                    tracing::info!("[recap] confirmation de replacement ouverte.")
+                }
+            }
+        }
+
+        /// Voir `main.rs::toggle_recap_lock`.
+        fn toggle_recap_lock(&mut self) {
+            self.recap_locked = !self.recap_locked;
+            self.persist_config();
+            tracing::info!(
+                "[recap] bande {}.",
+                if self.recap_locked {
+                    "verrouillée"
+                } else {
+                    "déverrouillée"
+                }
+            );
         }
 
         /// Voir `main.rs::answer_recap_reset`.
-        fn answer_recap_reset(&mut self, confirm_window_id: WindowId, confirmed: bool) {
+        fn answer_recap_reset(
+            &mut self,
+            confirm_window_id: WindowId,
+            target: RecapTarget,
+            confirmed: bool,
+        ) {
             self.windows.remove(&confirm_window_id);
-            if confirmed {
-                let snapshot = self.snapshot.load();
-                self.recap_session
-                    .reset(&snapshot.totals, std::time::SystemTime::now());
-            } else {
-                tracing::info!("[session] remise à zéro annulée.");
+            match (target, confirmed) {
+                (RecapTarget::Session, true) => {
+                    let snapshot = self.snapshot.load();
+                    self.recap_session
+                        .reset(&snapshot.totals, std::time::SystemTime::now());
+                }
+                (RecapTarget::Session, false) => tracing::info!("[session] remise à zéro annulée."),
+                (RecapTarget::Position, true) => {
+                    self.recap_position = None;
+                    self.persist_config();
+                    self.reposition_recap();
+                    tracing::info!("[recap] bande revenue à son emplacement d'origine.");
+                }
+                (RecapTarget::Position, false) => tracing::info!("[recap] replacement annulé."),
             }
         }
 
@@ -1792,6 +1835,7 @@ mod linux_main {
             saved.set_countdown_toast(self.countdown_toast);
             saved.set_recap_resume(self.recap_session.resume_settings());
             saved.set_recap_position(self.recap_position);
+            saved.recap_locked = self.recap_locked;
             saved.set_features(self.features);
             saved.set_alert_mutes(self.alert_mutes);
             config::save(&saved);
@@ -2080,9 +2124,11 @@ mod linux_main {
                 OpenOptions(u32, GameRect, options_modal::OptionsTab),
                 CloseOptions,
                 /// Glyphe de remise à zéro du Récap cliqué — voir `main.rs`.
-                OpenRecapReset(u32, GameRect),
+                OpenRecapReset(u32, GameRect, RecapTarget),
                 /// La confirmation a répondu — voir `main.rs`.
-                AnswerRecapReset(bool),
+                AnswerRecapReset(RecapTarget, bool),
+                /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
+                ToggleRecapLock,
                 /// Carte d'alerte de chat cliquée — voir `main.rs`.
                 Whisper(String),
                 BrowseOptions,
@@ -2135,9 +2181,9 @@ mod linux_main {
                             }
                             _ => post_redraw = PostRedraw::CloseOptions,
                         }
-                    } else if overlay.kind == OverlayKind::RecapReset {
+                    } else if let OverlayKind::RecapReset(target) = overlay.kind {
                         // Fermer la question, c'est répondre « Non ».
-                        post_redraw = PostRedraw::AnswerRecapReset(false);
+                        post_redraw = PostRedraw::AnswerRecapReset(target, false);
                     } else {
                         logging::log_session_end("fermeture de fenêtre");
                         event_loop.exit();
@@ -2219,10 +2265,27 @@ mod linux_main {
                     // elle-même traversable si l'utilisateur avait basculé ce mode juste avant.
                     let interactive = matches!(
                         overlay.kind,
-                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
+                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset(_)
                     ) || self.interactive;
                     let this_game_rect = overlay.game_rect;
                     let this_game_window = overlay.game_window;
+                    let overlay_kind = overlay.kind;
+                    // Ce que la bande Récap sait d'elle-même par l'hôte (2026-09-17) — voir
+                    // `main.rs`, même calcul.
+                    let recap_chrome = panels::recap::RecapChrome {
+                        locked: self.recap_locked,
+                        moved: self.recap_position.is_some(),
+                        actions_below: overlay.kind == OverlayKind::Recap && {
+                            let outer = overlay.window.outer_size();
+                            let (client, band) =
+                                RecapAnchor::new(None, overlay.window.scale_factor()).geometry(
+                                    overlay.game_rect,
+                                    outer.width as i32,
+                                    outer.height as i32,
+                                );
+                            recap_placement::actions_below(self.recap_position, client, band)
+                        },
+                    };
                     // La vue de la session du Récap — voir `main.rs`.
                     let recap_view = panels::recap::RecapView {
                         totals: self.recap_session.totals(&snapshot.totals),
@@ -2276,6 +2339,7 @@ mod linux_main {
                             now,
                             recap_cells: self.features.recap_cells,
                             recap: &recap_view,
+                            recap_chrome,
                             options: overlay.options_state.as_mut(),
                             veiled,
                             login: overlay.login_state.as_mut(),
@@ -2294,7 +2358,8 @@ mod linux_main {
                                     winit::dpi::LogicalSize::new(
                                         panels::recap::WIDTH as f64,
                                         height as f64
-                                            + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                                            + render_content::RECAP_TOOLTIP_RESERVE as f64
+                                            + render_content::RECAP_ACTIONS_RESERVE as f64,
                                     ),
                                 );
                                 overlay.last_recap_height = Some(height);
@@ -2462,15 +2527,35 @@ mod linux_main {
                     }
                     // Remise à zéro du Récap (2026-09-17) — voir `main.rs`.
                     if outcome.recap_reset_requested {
-                        post_redraw = PostRedraw::OpenRecapReset(this_game_window, this_game_rect);
+                        post_redraw = PostRedraw::OpenRecapReset(
+                            this_game_window,
+                            this_game_rect,
+                            RecapTarget::Session,
+                        );
                     }
-                    match outcome.recap_reset_choice {
-                        overlay_ui::design::ConfirmChoice::Pending => {}
-                        overlay_ui::design::ConfirmChoice::Yes => {
-                            post_redraw = PostRedraw::AnswerRecapReset(true)
-                        }
-                        overlay_ui::design::ConfirmChoice::No => {
-                            post_redraw = PostRedraw::AnswerRecapReset(false)
+                    // Le glyphe de replacement de la rangée d'actions (2026-09-17) — voir
+                    // `main.rs`.
+                    if outcome.recap_restore_requested {
+                        post_redraw = PostRedraw::OpenRecapReset(
+                            this_game_window,
+                            this_game_rect,
+                            RecapTarget::Position,
+                        );
+                    }
+                    // Le cadenas : bascule immédiate et persistée, sans confirmation — rien ne
+                    // se perd, et le glyphe montre aussitôt l'état obtenu.
+                    if outcome.recap_toggle_lock {
+                        post_redraw = PostRedraw::ToggleRecapLock;
+                    }
+                    if let OverlayKind::RecapReset(target) = overlay_kind {
+                        match outcome.recap_reset_choice {
+                            overlay_ui::design::ConfirmChoice::Pending => {}
+                            overlay_ui::design::ConfirmChoice::Yes => {
+                                post_redraw = PostRedraw::AnswerRecapReset(target, true)
+                            }
+                            overlay_ui::design::ConfirmChoice::No => {
+                                post_redraw = PostRedraw::AnswerRecapReset(target, false)
+                            }
                         }
                     }
                     match outcome.options_action {
@@ -2523,10 +2608,13 @@ mod linux_main {
                     self.open_options_modal(event_loop, Some((window, rect)), tab)
                 }
                 PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
-                PostRedraw::OpenRecapReset(window, rect) => {
-                    self.open_recap_reset_confirm(event_loop, window, rect)
+                PostRedraw::OpenRecapReset(window, rect, target) => {
+                    self.open_recap_reset_confirm(event_loop, window, rect, target)
                 }
-                PostRedraw::AnswerRecapReset(confirmed) => self.answer_recap_reset(id, confirmed),
+                PostRedraw::AnswerRecapReset(target, confirmed) => {
+                    self.answer_recap_reset(id, target, confirmed)
+                }
+                PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
                 PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
@@ -2974,6 +3062,7 @@ mod linux_main {
                 std::time::SystemTime::now(),
             ),
             recap_position: saved_config.recap_position(),
+            recap_locked: saved_config.recap_locked,
             shortcuts: saved_config.shortcuts(),
             snapshot,
             watchlist,

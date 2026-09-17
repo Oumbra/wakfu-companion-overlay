@@ -225,6 +225,7 @@ fn harness_for(combat_on_right: bool) -> Harness<'static> {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,

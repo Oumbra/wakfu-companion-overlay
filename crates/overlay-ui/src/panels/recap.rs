@@ -106,6 +106,20 @@
 //! Il ne connaît donc pas non plus sa propre position à l'écran — le harnais de captures, qui
 //! rend le bloc à l'origine de son `Ui`, s'en trouve inchangé.
 //!
+//! ## Le verrou, et le retour à l'ancrage d'origine (2026-09-17, soir)
+//!
+//! Demande utilisateur : « deux modes qui permettent à l'utilisateur de déplacer l'overlay de
+//! récap » — un cadenas fermé et un cadenas ouvert, « les deux ne peuvent pas vivre en même
+//! temps », qui disent l'état de la bande et le changent d'un clic. Verrouillée, elle ne se
+//! saisit plus et **le curseur redevient celui du système** au-dessus d'elle ; déverrouillée, il
+//! repasse à `Grab`/`Grabbing` comme décrit plus haut. Voir [`RecapChrome`] et [`band_drag`].
+//!
+//! À côté du cadenas, et **seulement une fois la bande déplacée**, un glyphe `Undo` la renvoie à
+//! son ancrage d'origine — après confirmation, comme la remise à zéro des compteurs et par la
+//! même fenêtre (`OverlayKind::RecapReset`, dont la cible dit lequel des deux on remet à zéro).
+//! Les deux vivent sur une pastille posée hors du fond, en haut à gauche de la bande, qui bascule
+//! en bas quand il n'y a pas la place au-dessus — voir [`paint_actions_row`].
+//!
 //! ## Ce que ce module ne fait pas
 //!
 //! Pas d'état : ce bloc affiche une vue et remonte une intention. Il renvoie aussi la **hauteur**
@@ -140,8 +154,50 @@ pub struct RecapOutcome {
     pub height: f32,
     /// Le glyphe de remise à zéro vient d'être cliqué : à l'hôte d'ouvrir la confirmation.
     pub reset_requested: bool,
+    /// Le cadenas de la rangée d'actions vient d'être cliqué : à l'hôte d'inverser
+    /// [`RecapChrome::locked`] et de l'écrire dans la config (voir [`paint_actions_row`]).
+    pub toggle_lock: bool,
+    /// Le glyphe de replacement vient d'être cliqué : à l'hôte d'ouvrir la confirmation qui, sur
+    /// un « Oui », rend son ancrage d'origine à la bande.
+    pub restore_requested: bool,
     /// Le geste de déplacement de la bande, s'il y en a un cette frame — voir [`RecapDrag`].
     pub drag: RecapDrag,
+}
+
+/// **Ce que l'hôte sait de la bande et que le bloc ne peut pas savoir** (2026-09-17) : verrouillée
+/// ou non, déjà déplacée ou non, et de quel côté sa rangée d'actions tient.
+///
+/// Les trois viennent de l'extérieur pour la même raison : ce module ne garde aucun état et ne
+/// connaît pas sa position à l'écran (voir la doc de module). Le verrou vit dans la config
+/// (`config::OverlayConfig::recap_locked`), le déplacement aussi
+/// (`config::OverlayConfig::recap_position`), et le côté se calcule sur la fenêtre de jeu
+/// (`recap_placement::actions_below`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecapChrome {
+    /// **Bande verrouillée** : elle ne se saisit plus, et le curseur reste celui du système
+    /// au-dessus d'elle (voir [`band_drag`]). Le cadenas de la rangée affiche alors
+    /// [`DsIcon::Lock`] ; déverrouillée, [`DsIcon::LockOpen`] — jamais les deux, c'est un seul
+    /// bouton qui bascule.
+    pub locked: bool,
+    /// **La bande a une position à elle** (`config::OverlayConfig::recap_position` renseignée) :
+    /// c'est la seule condition d'affichage du glyphe de replacement — remettre à son ancrage
+    /// d'origine une bande qui y est déjà n'aurait rien à faire.
+    pub moved: bool,
+    /// **La rangée d'actions passe SOUS le fond** faute de place au-dessus dans la fenêtre de jeu
+    /// (voir [`paint_actions_row`] et `recap_placement::actions_below`).
+    pub actions_below: bool,
+}
+
+impl Default for RecapChrome {
+    /// L'état d'une bande jamais touchée : **verrouillée**, à son ancrage d'origine, actions
+    /// au-dessus. C'est aussi ce que rend le harnais de captures, qui n'a pas de fenêtre de jeu.
+    fn default() -> Self {
+        Self {
+            locked: true,
+            moved: false,
+            actions_below: false,
+        }
+    }
 }
 
 /// Le glisser-déposer de la bande, tel que l'hôte le reçoit (2026-09-17, voir la doc de module).
@@ -175,6 +231,32 @@ pub enum RecapDrag {
 /// Côté du glyphe de remise à zéro — plus discret que les cinq glyphes de case (16 px) : c'est
 /// une commande, pas une information.
 const RESET_ICON_SIZE: f32 = 14.0;
+
+/// Côté d'un glyphe de la **rangée d'actions** (cadenas, replacement) — [`RESET_ICON_SIZE`] :
+/// mêmes commandes, même discrétion, et deux tailles de glyphe-commande dans un bloc de 206 px
+/// n'auraient rien dit de plus.
+const ACTIONS_ICON_SIZE: f32 = RESET_ICON_SIZE;
+
+/// Rembourrage de la pastille de la rangée d'actions, autour de ses glyphes.
+///
+/// **Une pastille, et pas des glyphes nus** : cette rangée est le seul morceau du bloc peint HORS
+/// du fond translucide, donc directement sur l'écran de jeu, dont le fond est arbitraire — un
+/// cadenas blanc sur un mur de Bonta clair serait invisible. Elle reprend le fond et le rayon de
+/// la bande ([`BACKDROP_ROUNDING`], `tokens::OVERLAY_BACKDROP`) : c'est visiblement la même
+/// chose, posée juste à côté.
+const ACTIONS_PADDING: f32 = 4.0;
+
+/// Écart entre le cadenas et le glyphe de replacement, dans la pastille.
+const ACTIONS_GAP: f32 = 6.0;
+
+/// Écart entre la pastille d'actions et le fond de la bande — assez pour qu'on lise deux blocs,
+/// assez peu pour qu'on lise qu'ils vont ensemble.
+const ACTIONS_MARGIN: f32 = 2.0;
+
+/// **Hauteur totale de la rangée d'actions**, écart au fond compris : la place que la fenêtre OS
+/// doit garder au-dessus ou au-dessous du bloc pour elle (`render_content::RECAP_ACTIONS_RESERVE`,
+/// et `recap_placement::Band::actions`).
+pub const ACTIONS_HEIGHT: f32 = ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING + ACTIONS_MARGIN;
 
 /// Hauteur d'une ligne du bloc. 22 px : le corps de 15 px des chiffres (voir [`FONT_SIZE`]) plus
 /// le cerne d'un pixel de chaque côté, et assez d'interligne pour que deux lignes de glyphes de
@@ -431,13 +513,20 @@ pub fn format_duration(uptime: std::time::Duration) -> String {
     format!("{h:02}:{m:02}:{s:02}")
 }
 
-/// Peint le bloc et rend la hauteur qu'il occupe, fond compris, et l'intention de remise à zéro
-/// — voir la doc de module pour ce que l'hôte en fait. La largeur, elle, est fixe : [`WIDTH`].
-/// `visible` dit quelles cases facultatives peindre (voir [`RecapCells`]).
+/// Peint le bloc et rend la hauteur qu'il occupe, fond compris, et les intentions qu'on vient d'y
+/// exprimer — voir la doc de module pour ce que l'hôte en fait. La largeur, elle, est fixe :
+/// [`WIDTH`]. `visible` dit quelles cases facultatives peindre (voir [`RecapCells`]), `chrome` ce
+/// que l'hôte sait et que le bloc ne peut pas savoir (verrou, bande déplacée, côté de la rangée
+/// d'actions — voir [`RecapChrome`]).
 ///
 /// Le contenu est calé en HAUT À GAUCHE de `ui` : la fenêtre OS peut être plus grande que le bloc
 /// (elle l'est, entre deux ajustements de hauteur), le vide qui reste est transparent.
-pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOutcome {
+pub fn show(
+    ui: &mut egui::Ui,
+    view: &RecapView,
+    visible: RecapCells,
+    chrome: RecapChrome,
+) -> RecapOutcome {
     // **Le chrono avance tout seul.** Cette architecture ne rend une frame que lorsque quelque
     // chose change (`ControlFlow::Wait`, §6.1 du plan : l'overlay ne consomme rien au repos) — un
     // snapshot du moteur, un survol, un raccourci. La durée, elle, change sans que rien d'autre ne
@@ -498,7 +587,7 @@ pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOu
     // donne le pointeur au dernier widget déclaré, donc à celui qui est peint par-dessus. Le fond
     // est le plus bas, et c'est bien ce qu'on veut — tout ce qui est posé dessus lui reprend le
     // geste (voir `paint_reset_button`).
-    let drag = band_drag(ui, band);
+    let drag = band_drag(ui, band, chrome.locked);
 
     let content_left = band.min.x + PADDING_X;
     let row_top = |row: usize| band.min.y + PADDING_Y + row as f32 * (ROW_HEIGHT + ROW_GAP);
@@ -550,21 +639,33 @@ pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOu
         paint_cell(ui, &ds, cell_rect, &cells[index], &galleys[index]);
     }
     let reset_requested = paint_reset_button(ui, &ds, reset_rect);
+    let actions = paint_actions_row(ui, &ds, band, chrome);
 
     RecapOutcome {
         height: band.height(),
         reset_requested,
+        toggle_lock: actions.toggle_lock,
+        restore_requested: actions.restore_requested,
         drag,
     }
 }
 
 /// La bande saisie à la souris (voir la doc de module) : `Sense::drag()` sur tout le fond, le
-/// curseur qui dit que ça s'attrape, et le geste tel que l'hôte l'attend ([`RecapDrag`]).
+/// curseur qui dit que ça s'attrape, et le geste tel que l'hôte l'attend ([`RecapDrag`]) — **sauf
+/// verrouillée** ([`RecapChrome::locked`]), où rien de tout cela n'existe.
 ///
 /// `Sense::drag()` seul, sans le clic : la bande n'a rien à faire d'un clic sur son fond, et un
 /// `click_and_drag` imposerait à egui un seuil de quelques pixels avant de commencer — la bande
 /// resterait collée le temps de le franchir, puis sauterait.
-fn band_drag(ui: &mut egui::Ui, band: egui::Rect) -> RecapDrag {
+fn band_drag(ui: &mut egui::Ui, band: egui::Rect, locked: bool) -> RecapDrag {
+    // **Verrouillée, la bande n'est plus un widget du tout** (2026-09-17, demande utilisateur) :
+    // pas de zone d'interaction, donc pas de curseur « main » — « la souris repasse en mode
+    // normal » — et pas le moindre geste à remonter. Le rendre en ne renvoyant rien tout en
+    // gardant le `interact` aurait laissé le curseur changer au survol, c'est-à-dire promis un
+    // déplacement qui n'arrive pas.
+    if locked {
+        return RecapDrag::None;
+    }
     let response = ui.interact(band, ui.id().with("recap-fond"), egui::Sense::drag());
     if response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -588,6 +689,139 @@ fn band_drag(ui: &mut egui::Ui, band: egui::Rect) -> RecapDrag {
         return RecapDrag::Moved;
     }
     RecapDrag::None
+}
+
+/// Ce que la rangée d'actions vient de récolter — deux boutons, deux intentions, remontées
+/// telles quelles par [`RecapOutcome`] : ce module n'agit jamais lui-même.
+#[derive(Debug, Clone, Copy, Default)]
+struct ActionsOutcome {
+    toggle_lock: bool,
+    restore_requested: bool,
+}
+
+/// **La rangée d'actions de la bande** (2026-09-17, demande utilisateur) : le cadenas, et le
+/// glyphe de replacement quand il a lieu d'être — posés HORS du fond, sur une pastille à eux,
+/// alignés sur le bord gauche de la bande.
+///
+/// ## Un seul cadenas, deux visages
+///
+/// « Les deux ne peuvent pas vivre en même temps » : ce n'est pas un couple de boutons mais un
+/// seul, qui porte l'état de la bande. [`DsIcon::Lock`] quand elle est verrouillée (« clique pour
+/// libérer »), [`DsIcon::LockOpen`] quand elle ne l'est pas (« clique pour figer ») — les deux
+/// glyphes sont faits l'un pour l'autre, même corps au pixel près, seule l'anse change (voir leur
+/// doc dans `design::icons`).
+///
+/// ## Le glyphe de replacement n'apparaît qu'une fois la bande déplacée
+///
+/// [`RecapChrome::moved`], et rien d'autre : tant que la bande est à son ancrage d'origine, il n'y
+/// a rien à défaire, et un bouton grisé en permanence sur un overlay de 206 px coûterait sa place
+/// pour ne rien dire. La pastille se resserre sur le seul cadenas dans ce cas.
+///
+/// ## Au-dessus, sauf quand ça ne tient pas
+///
+/// La rangée se pose au-dessus de la bande — c'est là que l'utilisateur l'a demandée, « en haut à
+/// gauche » — et **bascule en dessous** quand la bande est posée si haut dans la fenêtre de jeu
+/// que la rangée en sortirait ([`RecapChrome::actions_below`], calculé par l'hôte dans
+/// `recap_placement::actions_below`). La fenêtre OS garde la place des deux côtés
+/// (`render_content::RECAP_ACTIONS_RESERVE`), de sorte que ce choix ne retaille jamais rien : une
+/// taille qui dépendrait du côté, et un côté de la position, se rebouclerait — la bande a déjà
+/// payé une vibration pour une boucle de ce genre (voir `recap_placement::drag_offset`).
+///
+/// Les infobulles s'ouvrent **du côté de la bande** (au-dessus d'une rangée basse, en dessous
+/// d'une rangée haute) : de l'autre côté, elles sortiraient de la fenêtre OS, qui ne réserve que
+/// la hauteur de la rangée elle-même.
+fn paint_actions_row(
+    ui: &mut egui::Ui,
+    ds: &design::DesignSystem,
+    band: egui::Rect,
+    chrome: RecapChrome,
+) -> ActionsOutcome {
+    let glyphs = 1 + usize::from(chrome.moved);
+    let pill_size = egui::vec2(
+        2.0 * ACTIONS_PADDING
+            + glyphs as f32 * ACTIONS_ICON_SIZE
+            + (glyphs - 1) as f32 * ACTIONS_GAP,
+        ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING,
+    );
+    let top = if chrome.actions_below {
+        band.max.y + ACTIONS_MARGIN
+    } else {
+        band.min.y - ACTIONS_MARGIN - pill_size.y
+    };
+    let pill = egui::Rect::from_min_size(egui::pos2(band.min.x, top), pill_size);
+    ui.painter()
+        .rect_filled(pill, BACKDROP_ROUNDING, tokens::OVERLAY_BACKDROP);
+
+    let side = if chrome.actions_below {
+        TooltipSide::Above
+    } else {
+        TooltipSide::Below
+    };
+    let slot = |index: usize| {
+        egui::Rect::from_min_size(
+            egui::pos2(
+                pill.min.x + ACTIONS_PADDING + index as f32 * (ACTIONS_ICON_SIZE + ACTIONS_GAP),
+                pill.min.y + ACTIONS_PADDING,
+            ),
+            egui::Vec2::splat(ACTIONS_ICON_SIZE),
+        )
+    };
+
+    let (icon, tooltip) = if chrome.locked {
+        (DsIcon::Lock, "Déverrouiller la bande")
+    } else {
+        (DsIcon::LockOpen, "Verrouiller la bande")
+    };
+    let toggle_lock = paint_action(ui, ds, slot(0), "recap-verrou", icon, tooltip, side);
+    // Court-circuit volontaire : bande jamais déplacée, glyphe jamais peint — la pastille s'est
+    // déjà dimensionnée dessus.
+    let restore_requested = chrome.moved
+        && paint_action(
+            ui,
+            ds,
+            slot(1),
+            "recap-replacer",
+            DsIcon::Undo,
+            "Replacer la bande",
+            side,
+        );
+
+    ActionsOutcome {
+        toggle_lock,
+        restore_requested,
+    }
+}
+
+/// Un glyphe-commande de la rangée d'actions : blanc au repos, or au survol, curseur « main »,
+/// infobulle du côté demandé. Rend `true` la frame où il est cliqué.
+///
+/// **`click_and_drag` comme le glyphe de remise à zéro** et pour la même raison (voir
+/// [`paint_reset_button`]) : un bouton qui ne sentirait que le clic laisserait le glissement au
+/// fond de la bande, et un appui sur le cadenas ferait partir celle-ci.
+#[allow(clippy::too_many_arguments)]
+fn paint_action(
+    ui: &mut egui::Ui,
+    ds: &design::DesignSystem,
+    rect: egui::Rect,
+    id: &'static str,
+    icon: DsIcon,
+    tooltip: &'static str,
+    side: TooltipSide,
+) -> bool {
+    let response = ui.interact(rect, ui.id().with(id), egui::Sense::click_and_drag());
+    let tint = if response.hovered() {
+        tokens::ICON_TINT_HOVER
+    } else {
+        TEXT_COLOR
+    };
+    let icon_rect = egui::Rect::from_center_size(
+        rect.center(),
+        fit(ds.icon_native_size(icon), ACTIONS_ICON_SIZE),
+    );
+    ds.paint_icon(ui.painter(), icon_rect, icon, tint);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response).side(side).text(tooltip);
+    response.clicked()
 }
 
 /// Le glyphe de remise à zéro (voir la doc de module) : `Undo`, blanc au repos, or au survol,
