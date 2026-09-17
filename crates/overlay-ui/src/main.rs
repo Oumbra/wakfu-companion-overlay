@@ -528,6 +528,12 @@ struct App {
     /// (`config::OverlayConfig::combat_always_visible`), lu au démarrage et remplacé à la
     /// validation de la fenêtre Options. `false` par défaut : voir `sync_panel_visibility`.
     combat_always_visible: bool,
+    /// Le panneau Combat est-il posé à DROITE de la fenêtre de jeu ? — réglage LOCAL persisté
+    /// (`config::OverlayConfig::combat_on_right`), même politique que `combat_always_visible` :
+    /// lu au démarrage, remplacé à la validation de la fenêtre Options. Deux effets, tous deux
+    /// immédiats : l'ancrage de la fenêtre Combat (`anchor_position`) et le miroir de son contenu
+    /// (`render_content::RenderContent::combat_on_right`, voir `overlay_ui::mirror`).
+    combat_on_right: bool,
     /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
     /// persisté (`config::OverlayConfig::turn_notification`), même politique que
     /// `combat_always_visible` : lu au démarrage, remplacé à la validation de la fenêtre Options.
@@ -645,6 +651,8 @@ struct AppState {
     /// Voir `App::combat_always_visible` — lu de la config au démarrage (`main`), jamais découvert
     /// autrement.
     combat_always_visible: bool,
+    /// Voir `App::combat_on_right` — même provenance que `combat_always_visible`.
+    combat_on_right: bool,
     /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
     turn_notification: bool,
     /// Voir `App::turn_notification_muted`.
@@ -691,6 +699,7 @@ impl App {
         let AppState {
             log_path,
             combat_always_visible,
+            combat_on_right,
             turn_notification,
             turn_notification_muted,
             features,
@@ -756,6 +765,7 @@ impl App {
             settings_tx,
             log_path,
             combat_always_visible,
+            combat_on_right,
             turn_notification,
             turn_notification_muted,
             features,
@@ -1110,7 +1120,7 @@ impl App {
                     .values_mut()
                     .find(|w| w.game_hwnd == info.hwnd && w.kind == kind)
                 {
-                    Self::reposition(existing, info.rect);
+                    Self::reposition(existing, info.rect, self.combat_on_right);
                     if existing.active_character != *character_name {
                         existing.active_character = character_name.clone();
                     }
@@ -1136,6 +1146,7 @@ impl App {
                     info.rect,
                     self.interactive,
                     visible,
+                    self.combat_on_right,
                 );
                 tracing::info!(
                     "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -1355,17 +1366,29 @@ impl App {
         }
     }
 
-    /// Position ancrée sur la fenêtre de jeu selon la zone (voir `OverlayKind`) : Combat reste
-    /// collé au bord gauche, centré verticalement (comportement d'origine, S1/L2) ; Suivi est
+    /// Position ancrée sur la fenêtre de jeu selon la zone (voir `OverlayKind`) : Combat est collé
+    /// à un bord VERTICAL, centré verticalement (comportement d'origine, S1/L2) ; Suivi est
     /// désormais collé au bord HAUT, centré horizontalement — demande utilisateur explicite
     /// 2026-09-01, à l'image du bandeau du web (`tracker-strip.component`).
+    ///
+    /// `combat_on_right` (2026-09-17) décide DUQUEL des deux bords verticaux il s'agit — case
+    /// « Afficher le panneau de combat à droite de la fenêtre de jeu » des Options. Il ne concerne
+    /// que la zone Combat ; le contenu de la fenêtre, lui, est retourné en miroir par le rendu
+    /// (voir `overlay_ui::mirror`), les deux allant toujours ensemble.
     fn anchor_position(
         kind: OverlayKind,
         rect: GameRect,
         overlay_width: i32,
         overlay_height: i32,
+        combat_on_right: bool,
     ) -> PhysicalPosition<i32> {
         match kind {
+            // Le même `GAME_EDGE_MARGIN_PX` des deux côtés : il vaut 0 (voir sa doc, « comme si
+            // l'overlay faisait partie du jeu »), la symétrie est donc exacte.
+            OverlayKind::Combat if combat_on_right => PhysicalPosition::new(
+                rect.left + rect.width - overlay_width - GAME_EDGE_MARGIN_PX,
+                rect.top + (rect.height - overlay_height) / 2,
+            ),
             OverlayKind::Combat => PhysicalPosition::new(
                 rect.left + GAME_EDGE_MARGIN_PX,
                 rect.top + (rect.height - overlay_height) / 2,
@@ -1406,6 +1429,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create_overlay_window(
         event_loop: &ActiveEventLoop,
         kind: OverlayKind,
@@ -1414,6 +1438,8 @@ impl App {
         rect: GameRect,
         interactive: bool,
         visible: bool,
+        // `combat_on_right` : voir `anchor_position` — le bord vertical où la zone Combat se colle.
+        combat_on_right: bool,
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
@@ -1523,7 +1549,13 @@ impl App {
         let avatars = (kind == OverlayKind::Options).then(|| AvatarAtlas::load(&gpu.egui_ctx));
 
         let outer = window.outer_size();
-        let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
+        let position = Self::anchor_position(
+            kind,
+            rect,
+            outer.width as i32,
+            outer.height as i32,
+            combat_on_right,
+        );
         window.set_outer_position(position);
         if kind == OverlayKind::Watchlist {
             // Diagnostic PERMANENT (pas juste temporaire) : l'écart entre `rect.top` (bord
@@ -1581,11 +1613,16 @@ impl App {
     /// Recolle une fenêtre overlay sur sa fenêtre de jeu selon son ancrage (voir
     /// `anchor_position`) ; n'appelle `set_outer_position` que si la position cible a changé, pour
     /// ne pas spammer le compositeur DWM 20×/s pour rien.
-    fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
+    fn reposition(overlay: &mut OverlayWindow, rect: GameRect, combat_on_right: bool) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
-        let desired =
-            Self::anchor_position(overlay.kind, rect, outer.width as i32, outer.height as i32);
+        let desired = Self::anchor_position(
+            overlay.kind,
+            rect,
+            outer.width as i32,
+            outer.height as i32,
+            combat_on_right,
+        );
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
             overlay.last_position = Some(desired);
@@ -2345,6 +2382,7 @@ impl App {
             // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul `Combat`
             // peut naître masqué (voir `sync_panel_visibility`).
             true,
+            self.combat_on_right,
         );
         if detached {
             // Pas de jeu sur lequel s'ancrer : au centre de l'écran principal, et le focus tout de
@@ -2465,6 +2503,7 @@ impl App {
             // La case part du réglage EN VIGUEUR, pas du défaut : la fenêtre montre l'état réel,
             // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
             combat_always_visible: self.combat_always_visible,
+            combat_on_right: self.combat_on_right,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             // Idem pour les trois interrupteurs : les cases s'ouvrent sur l'état réel.
@@ -2523,6 +2562,7 @@ impl App {
                 chat: chat_draft.clone(),
                 personnages: personnages_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
+                combat_on_right: self.combat_on_right,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 features: self.features,
@@ -2817,6 +2857,7 @@ impl App {
             rect,
             true,
             true,
+            self.combat_on_right,
         );
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -2899,6 +2940,22 @@ impl App {
                             "affiché"
                         } else {
                             "masqué"
+                        }
+                    );
+                }
+                // Le côté du panneau (2026-09-17) : rien d'autre à faire ici que de retenir la
+                // valeur. Le balayage des fenêtres de jeu recolle chaque overlay à son ancrage à
+                // chaque tick (`sync_windows` → `reposition`), et le rendu lit le nouveau côté à
+                // la frame suivante — la fenêtre Combat traverse donc l'écran toute seule.
+                let side_changed = commit.combat_on_right != self.combat_on_right;
+                if side_changed {
+                    self.combat_on_right = commit.combat_on_right;
+                    tracing::info!(
+                        "[options] panneau de combat : {}",
+                        if self.combat_on_right {
+                            "à droite"
+                        } else {
+                            "à gauche"
                         }
                     );
                 }
@@ -3034,6 +3091,7 @@ impl App {
                 self.commit_personnages(options_window_id);
                 if path_changed
                     || combat_changed
+                    || side_changed
                     || turn_changed
                     || turn_muted_changed
                     || shortcuts_changed
@@ -3047,6 +3105,7 @@ impl App {
                     let mut saved = config::OverlayConfig {
                         log_path: Some(candidate),
                         combat_always_visible: self.combat_always_visible,
+                        combat_on_right: self.combat_on_right,
                         turn_notification: self.turn_notification,
                         turn_notification_muted: self.turn_notification_muted,
                         auto_update: self.auto_update,
@@ -3273,6 +3332,7 @@ impl App {
                 watchlist,
                 watchlist_enabled: self.features.suivi,
                 spells_enabled: self.features.spells_visible(),
+                combat_on_right: self.combat_on_right,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,
                 catalog: &catalog,
@@ -4097,6 +4157,7 @@ fn main() {
     let mut app = App::new(AppState {
         log_path,
         combat_always_visible: saved_config.combat_always_visible,
+        combat_on_right: saved_config.combat_on_right,
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),

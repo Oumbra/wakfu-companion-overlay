@@ -50,6 +50,22 @@ pub struct OverlayConfig {
     /// un parsing en échec repart de `OverlayConfig::default()`, chemin de log compris).
     #[serde(default)]
     pub combat_always_visible: bool,
+    /// Le panneau Combat est-il posé **à droite** de la fenêtre de jeu plutôt qu'à gauche ?
+    ///
+    /// `false` par défaut : l'overlay Combat est collé au bord GAUCHE du client depuis toujours
+    /// (voir `main.rs::App::anchor_position`). `true` (demande utilisateur du 2026-09-17 —
+    /// « permettre à l'utilisateur d'afficher l'overlay combat à droite plutôt qu'à gauche ») le
+    /// colle au bord DROIT, et **retourne toute son interface en miroir vertical** pour qu'elle
+    /// s'ouvre vers l'intérieur de l'écran plutôt que de lui tourner le dos — portraits, images de
+    /// monstre, icônes et images de sort exceptées, qui restent à l'endroit (voir
+    /// `crate::mirror`).
+    ///
+    /// Même nature que [`Self::combat_always_visible`] : un choix d'encombrement à l'écran, donc
+    /// une config LOCALE (l'écran qu'on a devant soi, pas le joueur) et non un réglage de compte.
+    /// `#[serde(default)]` pour la même raison qu'elle — une config écrite avant ce champ reste
+    /// lisible et garde le panneau à gauche.
+    #[serde(default)]
+    pub combat_on_right: bool,
     /// Durée d'affichage de la carte d'alerte de **chat**, en secondes (onglet « Chat », voir
     /// `panels::chat_tab::ChatToastSettings`). **Ici et non au compte**, par exception au principe
     /// de la doc de module : ce réglage n'a pas d'équivalent web, et le serveur n'accepte que des
@@ -273,6 +289,7 @@ impl Default for OverlayConfig {
         Self {
             log_path: None,
             combat_always_visible: false,
+            combat_on_right: false,
             chat_alert_duration_seconds: None,
             chat_alert_manual_close: false,
             countdown_alert_duration_seconds: None,

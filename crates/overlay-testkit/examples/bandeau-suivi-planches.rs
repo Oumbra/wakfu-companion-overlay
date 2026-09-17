@@ -380,6 +380,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     watchlist: &entries,
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),

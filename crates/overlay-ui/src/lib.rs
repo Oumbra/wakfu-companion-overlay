@@ -51,6 +51,7 @@ pub mod frame;
 pub mod game_servers;
 pub mod game_window;
 pub mod logging;
+pub mod mirror;
 pub mod panels;
 pub mod portraits;
 pub mod rarity_bridge;
