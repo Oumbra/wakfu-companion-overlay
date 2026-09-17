@@ -2569,6 +2569,7 @@ mod linux_main {
     pub fn run() {
         let log_dir = logging::init();
         logging::install_ctrlc_handler();
+        logging::install_panic_hook();
         if let Some(dir) = &log_dir {
             tracing::info!("journal de session : {}", dir.display());
         }

@@ -40,6 +40,19 @@
 //! (`alert_sound::play_loot_alert`), pas seulement les entrées suivies. Seul le cas
 //! `reason: 'countdown'` était câblé jusqu'ici (voir `spawn_engine_thread`).
 
+// **Exécutable fenêtré sans fenêtre** (2026-09-17, demande utilisateur : l'overlay doit tourner de
+// façon invisible, jamais dans une fenêtre de terminal). Compilé en sous-système *console*
+// jusqu'ici, un double-clic sur l'exe — ou son lancement automatique à l'ouverture de session
+// (`autostart`) — ouvrait une console noire qui restait à l'écran tant que l'overlay tournait, et
+// la fermer tuait l'overlay. Avec ce sous-système, Windows n'en crée aucune : l'overlay ne se
+// manifeste que par ses fenêtres transparentes et son icône de zone de notification (Quitter y est,
+// `App::install_tray`). Le journal console n'est pas perdu pour autant en développement : lancé
+// depuis un terminal (`preview.ps1`), le process se rattache à la console de son parent — voir
+// `logging::attach_parent_console`. Ce n'est PAS un service Windows, et ne peut pas l'être : un
+// service vit en session 0, sans accès au bureau de l'utilisateur, donc sans possibilité d'afficher
+// quoi que ce soit par-dessus le jeu (§11 du plan). Même modèle qu'`overlay-focus`.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -3891,6 +3904,10 @@ fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> Pat
 }
 
 fn main() {
+    // En tout premier, avant la moindre ligne de journal : sans console propre (sous-système
+    // `windows`, voir l'attribut en tête de fichier), les couches console de `logging` n'ont un
+    // destinataire que si le terminal qui nous a lancés nous prête le sien.
+    logging::attach_parent_console();
     // Lancé par le clic d'un toast de tour (activation de protocole, voir
     // `turn_watch::notify`) : ce process n'existe que pour donner le premier plan à la fenêtre
     // du personnage, ce que l'overlay déjà en cours n'a pas le droit de faire. Rien d'autre n'est
@@ -3905,6 +3922,7 @@ fn main() {
     }
     let log_dir = logging::init();
     logging::install_ctrlc_handler();
+    logging::install_panic_hook();
     if let Some(dir) = &log_dir {
         tracing::info!("journal de session : {}", dir.display());
     }

@@ -60,6 +60,10 @@ windows = { version = "0.62.2", features = [
   "Win32_System_WinRT",
   "Win32_System_Registry",
   "Win32_System_Threading",
+  # `AttachConsole` — l'exe est fenêtré sans fenêtre (`windows_subsystem = "windows"`, voir
+  # `main.rs`) ; lancé depuis un terminal, il se rattache à la console de celui-ci pour que le
+  # journal reste lisible en développement (`logging::attach_parent_console`).
+  "Win32_System_Console",
   "Win32_System_LibraryLoader",
   "Win32_UI_Shell",
   "Foundation",

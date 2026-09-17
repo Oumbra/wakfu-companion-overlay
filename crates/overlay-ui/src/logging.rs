@@ -29,6 +29,18 @@
 //!   (suffisant pour distinguer deux lancements consécutifs dans le fichier d'un même jour).
 //! - Le jeton de compte ne doit **jamais** apparaître dans ces logs (§10 du plan) — seuls des
 //!   messages de statut (succès/échec) sont journalisés côté appairage/réglages, jamais la valeur.
+//! - **Console sous Windows (2026-09-17)** : l'exe est fenêtré sans fenêtre
+//!   (`windows_subsystem = "windows"`, voir `main.rs`), Windows ne lui ouvre donc plus de console.
+//!   La couche console n'a un destinataire que si le process a été lancé depuis un terminal et
+//!   s'est rattaché à sa console ([`attach_parent_console`], à appeler avant [`init`]) ; sinon
+//!   (double-clic, démarrage automatique, activation de protocole) ses écritures partent dans le
+//!   vide sans erreur — la bibliothèque standard traite un handle standard absent comme un puits —
+//!   et **le fichier est la seule sortie**. C'est une raison de plus de ne jamais rien y écrire
+//!   directement (`println!`) : ce qui n'est pas dans `tracing` n'est nulle part.
+//! - **Paniques** ([`install_panic_hook`]) : le message de panique de la bibliothèque standard va
+//!   sur `stderr`, c'est-à-dire nulle part dans le cas ci-dessus. Le hook le recopie d'abord dans
+//!   le journal (message + fichier:ligne), puis laisse faire le hook par défaut — un plantage se
+//!   lit donc dans le fichier, au lieu de n'y laisser qu'une session sans ligne de fin.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -65,6 +77,50 @@ fn build_appender(dir: &Path) -> std::io::Result<RollingFileAppender> {
 
 fn filter() -> EnvFilter {
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER))
+}
+
+/// Rattache le process à la console du process qui l'a lancé, s'il en a une — Windows seulement,
+/// sans effet ailleurs. À appeler **avant** [`init`], en tout premier dans `main()`.
+///
+/// Un exécutable de sous-système `windows` ne reçoit aucune console de Windows, même lancé depuis
+/// un terminal (c'est tout l'objet : rien à l'écran au double-clic ni au démarrage automatique).
+/// `AttachConsole(ATTACH_PARENT_PROCESS)` récupère celle du parent quand il en a une — `cargo run`
+/// sous `preview.ps1`, ou l'exe tapé dans un terminal — et renseigne les handles standard : les
+/// `println!`/couches console qui suivent y écrivent, et Ctrl+C dans ce terminal atteint le process
+/// (`install_ctrlc_handler`) comme avant. Sans parent doté d'une console (Explorateur, clé `Run`,
+/// activation de protocole), l'appel échoue : c'est le cas nominal, rien à journaliser (le journal
+/// n'est d'ailleurs pas encore initialisé), l'exe reste muet et invisible.
+///
+/// Même approche que les émulateurs de terminal et applications graphiques Rust distribuées en
+/// `windows_subsystem = "windows"` qui veulent quand même répondre à `--help` dans un terminal.
+#[cfg(windows)]
+pub fn attach_parent_console() {
+    use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    // SAFETY : appel FFI sans pointeur ni état partagé ; l'échec (pas de console parente) est
+    // rapporté dans le `Result`, jamais par un comportement indéfini.
+    let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+}
+
+/// Sans objet hors Windows : un exécutable Linux lancé depuis un terminal en hérite déjà, et
+/// lancé par le bureau il n'en a pas — dans les deux cas rien à faire.
+#[cfg(not(windows))]
+pub fn attach_parent_console() {}
+
+/// Recopie toute panique dans le journal avant le traitement par défaut — voir la doc du module.
+/// À appeler une fois, juste après [`init`] (un hook posé avant n'aurait pas de subscriber).
+pub fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let message = info
+            .payload_as_str()
+            .unwrap_or("(charge utile non textuelle)");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "emplacement inconnu".to_string());
+        tracing::error!(location = %location, "panique : {message}");
+        default_hook(info);
+    }));
 }
 
 /// Initialise la journalisation (console + fichier). DOIT être appelée une seule fois, en tout

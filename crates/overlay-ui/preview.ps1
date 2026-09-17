@@ -18,6 +18,11 @@
     cette console) pour quitter — les fenêtres overlay ne peuvent jamais recevoir le focus clavier
     (WS_EX_NOACTIVATE), Échap ne fonctionne donc pas en pratique.
 
+    L'exe est fenêtré sans fenêtre (windows_subsystem = "windows", voir src/main.rs) : lancé par
+    double-clic ou au démarrage de la session, il n'ouvre aucune console. Ici, le journal reste
+    visible et Ctrl+C fonctionne parce que le process se rattache à la console de ce terminal
+    au démarrage (overlay_ui::logging::attach_parent_console).
+
 .PARAMETER LogPath
     Chemin explicite vers un wakfu.log (utile pour rejouer un fichier plutôt que suivre le vrai
     log du jeu). Sans ce paramètre : découverte automatique (overlay_ingest::discovery).
