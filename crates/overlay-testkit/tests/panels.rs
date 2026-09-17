@@ -5024,7 +5024,10 @@ fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
     /// au profit de « Démarrage », plus courte d'autant (voir `options_modal::show`). **Puis
     /// descendue de 93 px le soir même** : les trois cases « Afficher … » de la section « Recap »
     /// (31 px par ligne) se sont glissées au-dessus — carré mesuré en y 374..393 sur la capture.
-    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 384.0);
+    /// **Puis de 50 px le 2026-09-17** : la ligne « Reprendre la session après une pause de moins
+    /// de … min » (case + compteur, plus haute qu'une case nue) a rejoint la section « Recap » avec
+    /// la session du récap — carré mesuré en y 424..443.
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 434.0);
 
     let clic = |detail_actif: bool| -> bool {
         let mut etat = parametres_avec_notifications();
