@@ -2543,6 +2543,48 @@ disponible) remplacent `options_parametres_sorties` et `options_parametres_mise_
 `options_fermeture_overlay_confirmee_et_echap_repond_non` et
 `options_redemarrage_confirme_et_echap_repond_non` s'ouvrent sur « À propos ».
 
+### 9.1 quattuorvicies Réinitialiser le compteur d'une tuile suivie (2026-09-18)
+
+Demande utilisateur : « ajouter un icône bouton "undo" au centre des item_slots de la barre de suivi
+visible au survol, avec le même design que l'icône bouton "modifier" de l'onglet Personnages sur les
+hero_slot [...] réinitialiser le compteur de l'élément suivant son mode : incrémental et objectif, la
+valeur repart à zéro ; décompte, la valeur repart de la valeur de la fraction. Avant l'application,
+une confirmBox apparaît ».
+
+**Le bouton** (`panels::watchlist::reset_button`) : la flèche `Undo` sur son disque de 26 px, au
+centre de la tuile, révélée au survol, trait et glyphe à l'or quand le pointeur le vise, curseur
+main. C'est **le même bouton** que le crayon d'une carte de héros : `tile_button` a quitté
+`personnages_tab` pour `panels::tile_button` (`disc_button` / `glyph_button`, l'infobulle restant à
+l'appelant), afin que les deux écrans partagent une géométrie et non deux copies. Sans voile sur la
+tuile, contrairement à la carte de héros : l'icône est petite, le disque presque opaque se détache
+seul, et un voile grisait le compteur et le liseré de rareté — ce qu'on regarde. Le disque laisse
+les coins : le glyphe de mode et le compteur qu'on va remettre se lisent encore. Il ne se montre ni
+en **mode sélection** (la tuile n'a qu'un geste), ni pendant une **célébration** (la tuile s'en va),
+ni pendant un **déplacement** (la tuile sous le pointeur est une destination). Le disque prend le
+clic, la tuile garde le glissement (hit-test d'egui : pur clic au-dessus, glisser en dessous) —
+presser sur le disque et tirer déplace donc la tuile, comme sur la carte de héros. Le nom de la
+tuile ne s'ouvre pas quand le bouton est visé : « Réinitialiser le compteur », en dessous comme lui.
+
+**La confirmation** : la fenêtre du Récap, `OverlayKind::ResetConfirm`, gagne une quatrième cible,
+`ResetTarget::WatchlistCounter`. L'entrée **ne voyage pas dans la cible** — `OverlayKind` est `Copy`
+et l'est dans les deux hôtes à chaque tour de boucle ; l'hôte la retient (`App::watchlist_reset_
+pending`) et la prête au rendu (`RenderContent::watchlist_reset`) pour que la question la nomme :
+« Réinitialiser le compteur de « Bottes Lantha » ? ». Le bandeau, lui, remonte seulement l'entrée
+cliquée (`WatchlistOutcome::reset_counter` → `RenderOutcome::watchlist_reset_requested`).
+
+**La remise** (`WatchlistState::reset_counter`, `EngineCommand::ResetWatchlistCounter`) : le
+compteur repart de `compteur_de_depart` — zéro en incrémental et en objectif, la cible en décompte,
+exactement ce dont part une entrée neuve. L'entrée est désignée par son identité (nom insensible à la
+casse et genre, `meme_entree`), jamais par un rang : entre le clic et la confirmation, la liste a pu
+bouger. Persisté et marqué `dirty` comme un ramassage : le compte voit le compteur repartir, sans
+quoi le prochain `merge_config` le rattraperait à son ancienne valeur. Une entrée qui n'existe plus
+ne fait rien, et rien n'est répliqué.
+
+**Captures** : `watchlist_reinitialisation_repos` / `_survol` (tuile en décompte 12/50, bouton visé,
+infobulle en dessous) et `suivi_confirmation_reinitialisation` (la question nomme l'objet). Le test
+de glisser-déposer du bandeau prend désormais la tuile par son bord (`BANDEAU_TUILE_0_PRISE`) : son
+centre est un bouton, il annonce une main.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le
