@@ -56,6 +56,6 @@ pub use spells::{
     ResolvedSpell, SpellEntry, SpellIndex, SpellTable,
 };
 pub use watchlist::{
-    watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistEntry,
-    WatchlistKind, WatchlistMode,
+    watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistAlertReason,
+    WatchlistEntry, WatchlistKind, WatchlistMode,
 };

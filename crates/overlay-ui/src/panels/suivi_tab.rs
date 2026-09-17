@@ -19,9 +19,10 @@
 //!    *composer* une liste, pas à la lire — les compteurs vivants restent au bandeau in-game, où
 //!    les lire est justement le but. La cible d'un décompte, elle, n'est pas une mesure mais un
 //!    **réglage** de l'entrée, au même titre que son mode : elle reste ([`design::SlotCount::Target`]).
-//! 2. **Le mode se choisit AVANT le nom.** Incrémental ou décompte, et en décompte la quantité de
-//!    départ : les deux sont figés à la création côté web (« Cible fixée à la création »), les
-//!    demander après coup mentirait sur ce que la tuile permet ensuite.
+//! 2. **Le mode se choisit AVANT le nom.** Incrémental, décompte ou objectif (2026-09-17 : l'inverse
+//!    du décompte, le compteur part de zéro et monte jusqu'à la quantité choisie), et pour les deux
+//!    modes à cible la quantité : les deux sont figés à la création côté web (« Cible fixée à la
+//!    création »), les demander après coup mentirait sur ce que la tuile permet ensuite.
 //! 3. **Le retrait se fait à la tuile, au survol, et sans confirmation.** La croix n'apparaît que
 //!    sur la tuile survolée et vire au rouge sous le pointeur. Aucune boîte : la fenêtre est
 //!    transactionnelle, « Annuler » rattrape tout et « Valider » est une seconde garde.
@@ -41,8 +42,8 @@
 //!
 //! ## Le son de l'alerte se règle ailleurs
 //!
-//! L'essai du son du **décompte arrivé à 0** — la seule alerte que le suivi déclenche
-//! ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`) — et sa
+//! L'essai du son du **décompte arrivé à 0 / objectif atteint** — la seule alerte que le suivi
+//! déclenche ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`) — et sa
 //! sourdine ont quitté cet onglet le 2026-09-15 pour la section « Suivi » de l'onglet
 //! « Paramètres », avec celles des Alertes, du Chat et du Combat
 //! ([`crate::panels::notifications`]). Cet onglet ne garde que ce qu'il liste : les objets suivis
@@ -141,6 +142,8 @@ pub enum AddMode {
     #[default]
     Up,
     Down,
+    /// Objectif (2026-09-17) : part de zéro et monte jusqu'à la quantité choisie.
+    Goal,
 }
 
 impl AddMode {
@@ -148,7 +151,14 @@ impl AddMode {
         match self {
             AddMode::Up => WatchlistMode::Up,
             AddMode::Down => WatchlistMode::Down,
+            AddMode::Goal => WatchlistMode::Goal,
         }
+    }
+
+    /// Vrai pour les deux modes qui demandent une quantité (décompte et objectif) — c'est ce test
+    /// qui fait apparaître la ligne « Quantité » du formulaire.
+    fn has_target(self) -> bool {
+        self.to_watchlist().has_target()
     }
 }
 
@@ -220,7 +230,7 @@ pub struct SuiviTabState {
     pub search: String,
     /// Mode du prochain ajout.
     pub mode: AddMode,
-    /// Quantité de départ du prochain décompte.
+    /// Quantité du prochain décompte (valeur de départ) ou objectif (valeur d'arrivée).
     pub target: i64,
     /// Mode « sélection multiple » ouvert.
     pub select_mode: bool,
@@ -420,13 +430,13 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// **Le bloc de formulaire** : le mode, et en décompte la quantité de départ.
+/// **Le bloc de formulaire** : le mode, et en décompte ou en objectif la quantité.
 ///
-/// La seconde ligne n'apparaît qu'en décompte : en incrémental le compteur part de zéro et monte,
-/// il n'y a aucune quantité à demander, et laisser la ligne grisée occuperait la place d'un réglage
-/// qui n'existe pas.
+/// La seconde ligne n'apparaît que pour un mode à cible : en incrémental le compteur part de zéro
+/// et monte sans limite, il n'y a aucune quantité à demander, et laisser la ligne grisée occuperait
+/// la place d'un réglage qui n'existe pas.
 fn add_form(ui: &mut egui::Ui, state: &mut SuiviTabState, width: f32) {
-    let rows = if state.mode == AddMode::Down { 2 } else { 1 };
+    let rows = if state.mode.has_target() { 2 } else { 1 };
     let height = FORM_ROW_HEIGHT * rows as f32 + FORM_ROW_GAP * (rows - 1) as f32;
     let block = ui.allocate_space(Vec2::new(width, height)).1;
     ui.painter()
@@ -435,7 +445,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut SuiviTabState, width: f32) {
     let mode_row = Rect::from_min_size(block.min, Vec2::new(width, FORM_ROW_HEIGHT));
     mode_line(ui, state, mode_row);
 
-    if state.mode == AddMode::Down {
+    if state.mode.has_target() {
         let target_row = Rect::from_min_size(
             egui::pos2(block.left(), mode_row.bottom() + FORM_ROW_GAP),
             Vec2::new(width, FORM_ROW_HEIGHT),
@@ -444,13 +454,13 @@ fn add_form(ui: &mut egui::Ui, state: &mut SuiviTabState, width: f32) {
     }
 }
 
-/// La ligne « Type de compteur » — **deux boutons segmentés**, l'actif en or.
+/// La ligne « Type de compteur » — **trois boutons segmentés**, l'actif en or.
 ///
-/// **Choix assumé, faute d'idiome relevé.** Le web emploie un interrupteur à deux positions avec
-/// fond glissant ; le jeu n'en a aucun — son vocabulaire pour un choix binaire est la case à
-/// cocher, et pour un choix exclusif entre deux actions nommées, le bouton. Deux cases mutuellement
-/// exclusives seraient un contresens (une case dit « oui/non », pas « l'un ou l'autre »), et une
-/// liste déroulante à deux entrées cacherait la moitié du choix derrière un clic.
+/// **Choix assumé, faute d'idiome relevé.** Le web emploie un interrupteur à positions avec fond
+/// glissant ; le jeu n'en a aucun — son vocabulaire pour un choix binaire est la case à cocher, et
+/// pour un choix exclusif entre des actions nommées, le bouton. Des cases mutuellement exclusives
+/// seraient un contresens (une case dit « oui/non », pas « l'un ou l'autre »), et une liste
+/// déroulante à trois entrées cacherait le choix derrière un clic.
 fn mode_line(ui: &mut egui::Ui, state: &mut SuiviTabState, row: Rect) {
     let mut cell =
         ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(FORM_ROW_PAD_X, 0.0))));
@@ -473,6 +483,11 @@ fn mode_line(ui: &mut egui::Ui, state: &mut SuiviTabState, row: Rect) {
                 AddMode::Down,
                 "Décompte",
                 "Le compteur part de la quantité choisie et descend vers zéro.",
+            ),
+            (
+                AddMode::Goal,
+                "Objectif",
+                "Le compteur part de zéro et monte jusqu'à la quantité choisie.",
             ),
         ] {
             let actif = actuel == mode;
@@ -708,8 +723,8 @@ fn add_field(
 /// Ajoute une entrée au brouillon, avec le mode et la cible du formulaire — et remet celui-ci à
 /// zéro, comme `resetAddForm` côté web.
 ///
-/// `count` part de ce que le mode impose, mais c'est indicatif : la validation le recalcule depuis
-/// l'état vivant du moteur (voir la doc de module).
+/// `count` part de ce que le mode impose (la cible en décompte, zéro sinon), mais c'est indicatif :
+/// la validation le recalcule depuis l'état vivant du moteur (voir la doc de module).
 fn push_entry(
     entries: &mut Vec<WatchlistEntry>,
     name: &str,
@@ -718,15 +733,20 @@ fn push_entry(
     state: &mut SuiviTabState,
 ) {
     let mode = state.mode.to_watchlist();
-    let countdown_target = match mode {
-        WatchlistMode::Down => state.target.max(TARGET_MIN),
-        WatchlistMode::Up => 0,
+    let countdown_target = if mode.has_target() {
+        state.target.max(TARGET_MIN)
+    } else {
+        0
     };
     entries.push(WatchlistEntry {
         name: name.to_string(),
         kind,
         mode,
-        count: countdown_target,
+        count: if mode == WatchlistMode::Down {
+            countdown_target
+        } else {
+            0
+        },
         countdown_target,
         catalog_id,
     });
@@ -798,7 +818,7 @@ fn tile_grid(
             key: entry_key(entry),
             name: entry.name.clone(),
             kind: entry.kind,
-            target: (entry.mode == WatchlistMode::Down).then_some(entry.countdown_target),
+            target: entry.mode.has_target().then_some(entry.countdown_target),
             icon: match entry.kind {
                 WatchlistKind::Item => ctx.catalog.find_item_icon(&entry.name, entry.catalog_id),
                 WatchlistKind::Enemy => {
@@ -876,7 +896,8 @@ struct TileData {
     key: String,
     name: String,
     kind: WatchlistKind,
-    /// La cible, pour un décompte — `None` en incrémental, et la tuile ne porte alors aucun chiffre.
+    /// La cible, pour un décompte ou un objectif — `None` en incrémental, et la tuile ne porte
+    /// alors aucun chiffre.
     target: Option<i64>,
     icon: Option<IconRef>,
     rarity: overlay_engine::WakfuRarity,
@@ -897,7 +918,7 @@ enum TileClick {
 /// | Élément | Ce qu'il dit |
 /// | --- | --- |
 /// | Cadre | ce qu'est l'entrée : bordure de **rareté** pour un objet, cadre neutre pour un monstre |
-/// | Bas-droit | la **cible** d'un décompte (`/50`) — et rien du tout pour un incrémental |
+/// | Bas-droit | la **cible** d'un décompte ou d'un objectif (`/50`) — et rien du tout pour un incrémental |
 /// | Croix haut-droite | retrait — **seulement sur la tuile survolée**, rouge sous le pointeur |
 /// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
 /// | Liseré rouge | la tuile est cochée — le ton destructif, la sélection ne mène qu'au retrait |

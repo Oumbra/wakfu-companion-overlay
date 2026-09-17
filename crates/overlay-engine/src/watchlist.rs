@@ -37,18 +37,43 @@ pub enum WatchlistKind {
     Item,
 }
 
-/// Miroir de `WatchlistCounterMode` — 'up' compte vers le haut depuis 0, 'down' décompte depuis
-/// `countdown_target` vers 0 (borné, jamais négatif — voir `WatchlistState::increment`).
+/// Miroir de `WatchlistCounterMode` — 'up' compte vers le haut depuis 0 sans borne, 'down'
+/// décompte depuis `countdown_target` vers 0 (borné, jamais négatif), 'goal' (objectif,
+/// 2026-09-17) monte depuis 0 vers `countdown_target` (borné, jamais au-delà) — voir
+/// `WatchlistState::increment`. Les deux modes à cible partagent le champ `countdown_target`
+/// (nom historique du JSON du compte, commun avec le web) : seule la LECTURE du compteur change,
+/// « ce qu'il reste » en décompte, « ce qui est fait » en objectif.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WatchlistMode {
     Up,
     Down,
+    Goal,
 }
 
-/// Émis par `WatchlistState::apply` quand un décompte (mode `down`) vient d'atteindre 0 — §9 du
-/// plan, « Alertes de drop » : « toast + son quand un objet suivi tombe ». Miroir minimal de
-/// `LootAlertEvent` (`loot-alert.service.ts`), réduit au seul cas `reason: 'countdown'` : le cas
+impl WatchlistMode {
+    /// Vrai pour les deux modes qui visent une cible (`Down` et `Goal`) — c'est ce test, et non
+    /// `== Down`, qu'un affichage « courant/cible » ou un bornage à la cible doit faire.
+    pub fn has_target(self) -> bool {
+        matches!(self, WatchlistMode::Down | WatchlistMode::Goal)
+    }
+}
+
+/// Ce qu'un [`WatchlistAlert`] annonce — le compteur est arrivé au bout de son échelle, dans un
+/// sens ou dans l'autre. Même son dans les deux cas (`alert_sound::play_countdown_alert`), seul
+/// le titre de la carte change (`panels::watchlist::WatchlistToastReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchlistAlertReason {
+    /// Un décompte (mode `down`) vient d'atteindre 0.
+    Countdown,
+    /// Un objectif (mode `goal`) vient d'atteindre sa cible.
+    Goal,
+}
+
+/// Émis par `WatchlistState::apply` quand un décompte (mode `down`) vient d'atteindre 0 ou qu'un
+/// objectif (mode `goal`) vient d'atteindre sa cible — §9 du plan, « Alertes de drop » :
+/// « toast + son quand un objet suivi tombe ». Miroir minimal de `LootAlertEvent`
+/// (`loot-alert.service.ts`), réduit aux cas `reason: 'countdown' | 'goal'` : le cas
 /// `reason: 'loot'` (son configurable par objet ramassé, indépendant de la watchlist — voir
 /// `ProfileService.findEnabledSoundItem`) est couvert séparément par `overlay_engine::profile::
 /// LootAlert`.
@@ -56,6 +81,7 @@ pub enum WatchlistMode {
 pub struct WatchlistAlert {
     pub name: String,
     pub kind: WatchlistKind,
+    pub reason: WatchlistAlertReason,
     /// Repris de `WatchlistEntry::catalog_id` de l'entrée qui vient de déclencher l'alerte —
     /// résolution non ambiguë de l'icône affichée par le toast (`panels::watchlist`) en cas
     /// d'homonymes, même principe que `LootAlert::catalog_id`.
@@ -184,16 +210,15 @@ impl WatchlistState {
             .map(|mut entry| {
                 if let Some(&count) = persisted.by_key.get(&counter_key(&entry.name, entry.kind)) {
                     // **Un compteur local au-delà de la cible est PÉRIMÉ, pas en avance**
-                    // (2026-09-15). En décompte, `count` est une position sur l'échelle
-                    // `[0, countdown_target]` : le voir dépasser la cible que le compte annonce ne
+                    // (2026-09-15). En décompte comme en objectif, `count` est une position sur
+                    // l'échelle `[0, countdown_target]` : le voir dépasser la cible que le compte annonce ne
                     // veut dire qu'une chose — la cible a été redéfinie ailleurs (sur le site,
                     // typiquement 50 → 10) et ce nombre-là se lisait sur l'ancienne. Le reprendre
                     // afficherait un « 50/10 » qui ne veut rien dire, la même incohérence que celle
                     // fermée dans `apply_definitions`, par l'autre bout. C'est alors le compte qui
                     // fait foi, et le fichier est réécrit pour ne pas y retomber au prochain
                     // démarrage (`stale`).
-                    let perime =
-                        entry.mode == WatchlistMode::Down && count > entry.countdown_target;
+                    let perime = entry.mode.has_target() && count > entry.countdown_target;
                     if perime {
                         stale = true;
                     } else {
@@ -244,8 +269,8 @@ impl WatchlistState {
     /// ramassage — le compteur qui fait foi est celui d'ici, pas celui du brouillon.
     ///
     /// Une entrée que le brouillon **ajoute** part de la valeur que son mode impose : `countdown_
-    /// target` en décompte (il décroît vers 0), 0 en incrémental. Une entrée que le brouillon
-    /// **retire** disparaît, compteur compris.
+    /// target` en décompte (il décroît vers 0), 0 en incrémental et en objectif (il monte). Une
+    /// entrée que le brouillon **retire** disparaît, compteur compris.
     ///
     /// ## Ce qui fait qu'une entrée est « la même », et donc garde son compteur
     ///
@@ -298,7 +323,7 @@ impl WatchlistState {
     /// notion de rattrapage en cours, exactement comme `roster` sur `Engine`. Renvoie les alertes
     /// (voir `WatchlistAlert`) déclenchées par CET événement, à faire remonter à l'hôte (toast +
     /// son) — vide dans l'immense majorité des cas (mode `up`, ou aucune entrée qui vient
-    /// d'atteindre 0).
+    /// d'atteindre 0 ou sa cible).
     pub fn apply(&mut self, entry: &LogEntry) -> Vec<WatchlistAlert> {
         let (changed, alerts) = match entry {
             LogEntry::Loot { item, quantity, .. } => self.increment(item, *quantity),
@@ -312,13 +337,15 @@ impl WatchlistState {
         alerts
     }
 
-    /// Incrémente (mode `up`) ou décompte vers 0 (mode `down`) TOUTE entrée dont le nom matche —
-    /// miroir exact d'`incrementWatched` : le matching se fait sur le nom SEUL, pas sur `kind`
-    /// (un objet et un ennemi de même nom incrémenteraient tous les deux, comme côté web).
-    /// Renvoie `true` si au moins une entrée a été modifiée (sert à ne persister sur disque que
-    /// quand c'est utile), et la liste des entrées qui viennent de FRANCHIR le seuil de 0 (compte
-    /// strictement positif avant, nul après) — un compte déjà à 0 qui reste à 0 n'alerte pas une
-    /// deuxième fois, miroir du `if (entry.count > 0 && next === 0)` d'`incrementWatched`.
+    /// Incrémente (mode `up`), décompte vers 0 (mode `down`) ou monte vers la cible (mode `goal`)
+    /// TOUTE entrée dont le nom matche — miroir exact d'`incrementWatched` : le matching se fait
+    /// sur le nom SEUL, pas sur `kind` (un objet et un ennemi de même nom incrémenteraient tous
+    /// les deux, comme côté web). Renvoie `true` si au moins une entrée a été modifiée (sert à ne
+    /// persister sur disque que quand c'est utile), et la liste des entrées qui viennent de
+    /// FRANCHIR le bout de leur échelle (0 en décompte : compte strictement positif avant, nul
+    /// après ; la cible en objectif : strictement en dessous avant, dessus après) — un compte
+    /// déjà au bout qui y reste n'alerte pas une deuxième fois, miroir du
+    /// `if (entry.count > 0 && next === 0)` d'`incrementWatched`.
     fn increment(&mut self, raw_name: &str, by: i64) -> (bool, Vec<WatchlistAlert>) {
         let normalized = raw_name.trim().to_lowercase();
         let mut changed = false;
@@ -336,6 +363,19 @@ impl WatchlistState {
                         alerts.push(WatchlistAlert {
                             name: entry.name.clone(),
                             kind: entry.kind,
+                            reason: WatchlistAlertReason::Countdown,
+                            catalog_id: entry.catalog_id,
+                        });
+                    }
+                }
+                WatchlistMode::Goal => {
+                    let was_below = entry.count < entry.countdown_target;
+                    entry.count = (entry.count + by).min(entry.countdown_target);
+                    if was_below && entry.count == entry.countdown_target {
+                        alerts.push(WatchlistAlert {
+                            name: entry.name.clone(),
+                            kind: entry.kind,
+                            reason: WatchlistAlertReason::Goal,
                             catalog_id: entry.catalog_id,
                         });
                     }
@@ -367,10 +407,13 @@ fn meme_entree(a: &WatchlistEntry, b: &WatchlistEntry) -> bool {
 /// `None` quand rien de ce qu'il mesurait ne survit à la redéfinition, l'appelant repart alors de
 /// `compteur_de_depart`.
 ///
-/// Trois cas, et un seul demande à réfléchir :
+/// Quatre cas, et un seul demande à réfléchir :
 ///
 /// - **Le mode change** : `None`. En décompte, `count` dit ce qu'il RESTE à ramasser ; en
-///   incrémental, ce qui l'a été — le même nombre y raconte l'inverse, le reporter mentirait.
+///   incrémental ou en objectif, ce qui l'a été — le même nombre y raconte l'inverse, le reporter
+///   mentirait. (Incrémental → objectif reporterait un nombre de même sens, mais un incrémental
+///   n'est borné par rien et peut déjà dépasser la nouvelle cible : repartir de zéro reste le
+///   choix simple, et celui du web — `setWatchlistMode` repart toujours de la valeur de départ.)
 /// - **Le mode tient, la cible aussi** — et toujours en incrémental, où la cible ne sert à rien
 ///   (une valeur résiduelle héritée du compte n'a donc pas à remettre un compteur à zéro) : le
 ///   compteur passe tel quel. C'est le cas courant, celui d'un réordonnancement ou d'une autre
@@ -381,6 +424,9 @@ fn meme_entree(a: &WatchlistEntry, b: &WatchlistEntry) -> bool {
 ///   (`suivi_tab::track_recipe_lines`). Une cible qui passe SOUS ce qui est déjà ramassé donne 0 :
 ///   l'objectif est atteint, sans alerte pour autant (seul un ramassage en déclenche une, voir
 ///   `increment`).
+/// - **La cible d'un objectif change** : le compteur EST déjà le ramassé, il passe tel quel — borné
+///   à la nouvelle cible, pour la même raison (une cible qui passe sous le fait : objectif atteint,
+///   sans alerte).
 fn compteur_reporte(existante: &WatchlistEntry, definition: &WatchlistEntry) -> Option<i64> {
     if existante.mode != definition.mode {
         return None;
@@ -390,16 +436,19 @@ fn compteur_reporte(existante: &WatchlistEntry, definition: &WatchlistEntry) -> 
     {
         return Some(existante.count);
     }
+    if definition.mode == WatchlistMode::Goal {
+        return Some(existante.count.min(definition.countdown_target));
+    }
     let ramassees = (existante.countdown_target - existante.count).max(0);
     Some((definition.countdown_target - ramassees).max(0))
 }
 
 /// La valeur dont part une entrée neuve, ou une entrée dont le comptage vient d'être redéfini :
-/// sa cible en décompte (il descend vers 0), 0 en incrémental (il monte).
+/// sa cible en décompte (il descend vers 0), 0 en incrémental et en objectif (ils montent).
 fn compteur_de_depart(entry: &WatchlistEntry) -> i64 {
     match entry.mode {
         WatchlistMode::Down => entry.countdown_target,
-        WatchlistMode::Up => 0,
+        WatchlistMode::Up | WatchlistMode::Goal => 0,
     }
 }
 
@@ -532,6 +581,7 @@ mod tests {
             vec![WatchlistAlert {
                 name: "Ortie Sauvage".to_string(),
                 kind: WatchlistKind::Item,
+                reason: WatchlistAlertReason::Countdown,
                 catalog_id: None,
             }]
         );
@@ -542,6 +592,65 @@ mod tests {
         let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Down, 1)]);
         assert!(!state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 1 -> 0, alerte
         assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // déjà à 0, silence
+    }
+
+    #[test]
+    fn mode_goal_monte_vers_la_cible_sans_jamais_la_depasser() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Goal, 5)]);
+        assert_eq!(state.entries()[0].count, 0);
+        state.apply(&loot("Ortie Sauvage", 2));
+        assert_eq!(state.entries()[0].count, 2);
+        state.apply(&loot("Ortie Sauvage", 10));
+        assert_eq!(state.entries()[0].count, 5);
+    }
+
+    #[test]
+    fn mode_goal_declenche_une_alerte_en_atteignant_la_cible_pour_la_premiere_fois() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Goal, 2)]);
+        assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 0 -> 1, pas encore 2
+        let alerts = state.apply(&loot("Ortie Sauvage", 1)); // 1 -> 2
+        assert_eq!(
+            alerts,
+            vec![WatchlistAlert {
+                name: "Ortie Sauvage".to_string(),
+                kind: WatchlistKind::Item,
+                reason: WatchlistAlertReason::Goal,
+                catalog_id: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn mode_goal_ne_realerte_pas_une_fois_la_cible_atteinte() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Goal, 1)]);
+        assert!(!state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 0 -> 1, alerte
+        assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // déjà à 1, silence
+        assert_eq!(state.entries()[0].count, 1);
+    }
+
+    #[test]
+    fn mode_goal_un_compteur_local_au_dela_de_la_cible_est_perime() {
+        let dir = std::env::temp_dir().join(format!(
+            "wakfu-overlay-watchlist-test-goal-{}",
+            std::process::id()
+        ));
+        let path = dir.join("counts.json");
+        let mut state = WatchlistState::new(path.clone());
+        state.merge_config(vec![item("Amulette du Bouftou", WatchlistMode::Goal, 50)]);
+        state.entries[0].count = 30;
+        state.persist(); // 30 sur disque, sur l'échelle 0..50
+
+        // La cible redéfinie à 10 sur le site : les 30 du fichier se lisaient sur l'ancienne
+        // échelle, le compte fait foi — même règle qu'en décompte.
+        let mut restarted = WatchlistState::new(path.clone());
+        let redefini = WatchlistEntry {
+            count: 4,
+            ..item("Amulette du Bouftou", WatchlistMode::Goal, 10)
+        };
+        restarted.merge_config(vec![redefini]);
+        assert_eq!(restarted.entries()[0].count, 4);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -797,6 +906,27 @@ mod definitions_tests {
         // Un décompte part de sa cible et descend ; un incrémental part de zéro et monte.
         assert_eq!(state.entries()[0].count, 50);
         assert_eq!(state.entries()[1].count, 0);
+    }
+
+    #[test]
+    fn un_objectif_ajoute_part_de_zero_et_garde_son_fait_quand_sa_cible_change() {
+        let dir = std::env::temp_dir().join("wco-defs-goal.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 50, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 0);
+        // Le moteur compte pendant que la fenêtre est ouverte.
+        state.entries[0].count = 45;
+        // Cible relevée à 80 : les 45 déjà ramassées restent 45 (35 à trouver).
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 80, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 45);
+        // Cible abaissée sous le fait : borné, objectif atteint.
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 10);
+        // Changer de mode repart de la valeur de départ du nouveau mode.
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Down, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 10);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 0);
     }
 
     #[test]

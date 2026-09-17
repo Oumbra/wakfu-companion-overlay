@@ -3990,6 +3990,19 @@ fn options_onglet_suivi_decompte() {
     );
 }
 
+/// Mode objectif (2026-09-17) : le troisième bouton en or, et la même ligne « Quantité » qu'en
+/// décompte — la quantité est ici celle à ATTEINDRE, le compteur partant de zéro.
+#[test]
+fn options_onglet_suivi_objectif() {
+    capture_onglet_suivi(
+        "options_suivi_objectif",
+        overlay_ui::panels::suivi_tab::AddMode::Goal,
+        false,
+        false,
+        None,
+    );
+}
+
 /// Sélection multiple : cases à cocher sur toutes les tuiles, **liseré et coche rouges** sur les
 /// cochées, et le bouton de suppression groupée en rouge — décision explicite de l'utilisateur
 /// (2026-09-13). Le ton destructif est le même que sur le bandeau : cocher ici ne mène nulle part
@@ -4537,7 +4550,37 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
 #[test]
 fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     use overlay_engine::WatchlistMode;
-    use overlay_ui::panels::suivi_tab::{AddMode, SuiviAvailability, SuiviTabState};
+    use overlay_ui::panels::suivi_tab::AddMode;
+
+    let ajoutee = entree_ajoutee_depuis_le_formulaire(AddMode::Down);
+    assert_eq!(ajoutee.mode, WatchlistMode::Down);
+    assert_eq!(
+        ajoutee.countdown_target, 250,
+        "la cible du formulaire doit suivre l'entrée créée"
+    );
+    assert_eq!(ajoutee.count, 250, "un décompte part de sa cible");
+}
+
+/// Même règle en objectif (2026-09-17) : la quantité du formulaire devient la cible, mais le
+/// compteur part de zéro — il monte vers elle, c'est ce qui distingue ce mode du décompte.
+#[test]
+fn options_suivi_le_mode_objectif_part_de_zero_vers_la_quantite() {
+    use overlay_engine::WatchlistMode;
+    use overlay_ui::panels::suivi_tab::AddMode;
+
+    let ajoutee = entree_ajoutee_depuis_le_formulaire(AddMode::Goal);
+    assert_eq!(ajoutee.mode, WatchlistMode::Goal);
+    assert_eq!(ajoutee.countdown_target, 250);
+    assert_eq!(ajoutee.count, 0, "un objectif part de zéro");
+}
+
+/// Ouvre l'onglet Suivi avec le formulaire en `mode` et une quantité de 250, tape « tofu » dans le
+/// champ d'ajout, choisit le résultat, et renvoie l'entrée que le brouillon a reçue. Vérifie au
+/// passage que le formulaire revient à son défaut après l'ajout, comme `resetAddForm` côté web.
+fn entree_ajoutee_depuis_le_formulaire(
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+) -> overlay_engine::WatchlistEntry {
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
 
     let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
         "items": [[201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1]],
@@ -4546,7 +4589,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
 
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
         suivi: SuiviTabState {
-            mode: AddMode::Down,
+            mode,
             target: 250,
             ..Default::default()
         },
@@ -4617,13 +4660,9 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
         1,
         "la sélection n'a rien ajouté au brouillon"
     );
-    assert_eq!(ajoutees[0].mode, WatchlistMode::Down);
-    assert_eq!(
-        ajoutees[0].countdown_target, 250,
-        "la cible du formulaire doit suivre l'entrée créée"
-    );
     // Le formulaire revient à son défaut après un ajout, comme `resetAddForm` côté web.
     assert_eq!(etat.borrow().suivi.target, 1);
+    ajoutees.into_iter().next().expect("une entrée ajoutée")
 }
 
 /// Curseur du jeu à la place du curseur système (voir `overlay_ui::cursor`) : ce que

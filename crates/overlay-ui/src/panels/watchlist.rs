@@ -258,7 +258,7 @@ use crate::ui_icons::UiIcons;
 /// « manuelle » retire la minuterie ET « automatique » retire la croix.
 pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Distingue les deux déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
+/// Distingue les déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
 /// `loot-alert.service.ts`) — seul le libellé affiché change (voir `toast_card`), le son a déjà
 /// été choisi par l'appelant (`main.rs::spawn_engine_thread`, `alert_sound::{play_countdown_alert,
 /// play_loot_alert}`) avant même la construction de ce toast.
@@ -266,6 +266,9 @@ pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5
 pub enum WatchlistToastReason {
     /// Un décompte de suivi (mode `down`) vient d'atteindre 0.
     Countdown,
+    /// Un objectif de suivi (mode `goal`, 2026-09-17) vient d'atteindre sa cible — même son que
+    /// le décompte (`alert_sound::play_countdown_alert`), seul le titre de la carte change.
+    Goal,
     /// Un objet à son activé (compte, voir `overlay_engine::profile`) vient d'être ramassé —
     /// `quantity` affichée seulement si > 1 (voir `toast_card`).
     Loot { quantity: i64 },
@@ -361,7 +364,8 @@ pub fn build_confetti() -> Vec<ConfettiPiece> {
         .collect()
 }
 
-/// Un décompte de suivi à 0 OU un ramassage à son activé (voir `WatchlistToastReason`) — construit
+/// Un décompte de suivi à 0, un objectif atteint OU un ramassage à son activé (voir
+/// `WatchlistToastReason`) — construit
 /// par `main.rs::spawn_engine_thread` à réception de l'alerte, publié via `ArcSwap` (comme
 /// `watchlist`/`snapshot`) pour que le thread UI l'affiche sans coupler le thread Engine au rendu.
 #[derive(Debug, Clone)]
@@ -1362,6 +1366,7 @@ fn toast_card(
     }
     let title = match &toast.reason {
         WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !",
+        WatchlistToastReason::Goal => "OBJECTIF ATTEINT !",
         WatchlistToastReason::Loot { .. } | WatchlistToastReason::Chat { .. } => "OBJET OBTENU !",
     };
     let name_text = match &toast.reason {
@@ -2142,13 +2147,15 @@ fn entry_tile(
 
 /// Traduit une entrée de suivi en compteur du design system.
 ///
-/// Les deux modes du panneau se lisent directement : `Up` compte vers le haut sans cible, `Down`
-/// compte vers une cible et affiche la fraction. Ce qui est *présentation* — l'ancrage de la
+/// Les trois modes du panneau se lisent directement : `Up` compte vers le haut sans cible, `Down`
+/// et `Goal` comptent vers une cible et affichent la fraction — « restant/cible » pour l'un,
+/// « fait/cible » pour l'autre, le même `count` lu dans un sens opposé, et c'est la seule
+/// différence à l'écran. Ce qui est *présentation* — l'ancrage de la
 /// fraction, la couleur du nombre courant, le cerne — a migré dans `design::item_slot` le
 /// 2026-09-11 ; ce qui reste ici est la lecture du mode, qui est du métier.
 fn slot_count(entry: &WatchlistEntry) -> Option<design::SlotCount> {
     Some(match entry.mode {
-        WatchlistMode::Down => design::SlotCount::Fraction {
+        WatchlistMode::Down | WatchlistMode::Goal => design::SlotCount::Fraction {
             current: entry.count,
             target: entry.countdown_target,
         },

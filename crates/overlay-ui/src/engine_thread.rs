@@ -18,7 +18,8 @@ use std::thread;
 use arc_swap::ArcSwap;
 use crossbeam_channel::RecvTimeoutError;
 use overlay_engine::{
-    CatalogIndex, DungeonIndex, Engine, SessionSnapshot, WatchlistEntry, WatchlistKind,
+    CatalogIndex, DungeonIndex, Engine, SessionSnapshot, WatchlistAlertReason, WatchlistEntry,
+    WatchlistKind,
 };
 use overlay_sync::AccountSettings;
 use serde_json::Value;
@@ -509,7 +510,11 @@ pub fn spawn_engine_thread(
                             if !features.suivi {
                                 continue;
                             }
-                            tracing::info!(name = %alert.name, "alerte de suivi (décompte à 0)");
+                            tracing::info!(
+                                name = %alert.name,
+                                reason = ?alert.reason,
+                                "alerte de suivi (décompte à 0 ou objectif atteint)"
+                            );
                             // **La carte s'affiche quoi qu'il arrive** : la sourdine ne coupe que
                             // le son (voir `EngineCommand::SetAlertMutes`).
                             if !mutes.suivi {
@@ -519,7 +524,12 @@ pub fn spawn_engine_thread(
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.name,
                                 kind: alert.kind,
-                                reason: WatchlistToastReason::Countdown,
+                                reason: match alert.reason {
+                                    WatchlistAlertReason::Countdown => {
+                                        WatchlistToastReason::Countdown
+                                    }
+                                    WatchlistAlertReason::Goal => WatchlistToastReason::Goal,
+                                },
                                 catalog_id: alert.catalog_id,
                                 created_at,
                                 confetti: panels::watchlist::build_confetti(),
