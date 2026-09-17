@@ -549,9 +549,16 @@ pub fn spawn_engine_thread(
                             tracing::info!(
                                 name = %alert.name,
                                 quantity = alert.quantity,
-                                "alerte de ramassage (son activé)"
+                                sound = alert.sound_enabled,
+                                "alerte de ramassage"
                             );
-                            alert_sound::play_loot_alert();
+                            // **La carte s'affiche quoi qu'il arrive**, comme pour le Suivi et
+                            // le Chat ci-dessus/ci-dessous : un objet en mode silencieux
+                            // (`panels::alerts_tab`) ne coupe que le son — voir
+                            // `overlay_engine::LootAlert::sound_enabled`.
+                            if alert.sound_enabled {
+                                alert_sound::play_loot_alert();
+                            }
                             let created_at = std::time::Instant::now();
                             watchlist_toast.store(Arc::new(Some(WatchlistToast {
                                 name: alert.name,

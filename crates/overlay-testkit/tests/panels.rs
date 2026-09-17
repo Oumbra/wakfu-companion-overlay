@@ -182,6 +182,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -255,6 +256,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -356,6 +358,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     watchlist: &[],
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -448,6 +451,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         watchlist: &[],
                         watchlist_enabled: true,
                         spells_enabled: true,
+                        combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
@@ -593,6 +597,7 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                         watchlist: &[],
                         watchlist_enabled: true,
                         spells_enabled: true,
+                        combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
@@ -728,6 +733,7 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     watchlist: &[],
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -812,6 +818,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
@@ -888,6 +895,7 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
@@ -954,6 +962,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1115,6 +1124,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 watchlist: &watchlist_entries,
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1190,6 +1200,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 watchlist: &entries,
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -1325,6 +1336,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     watchlist: &entries,
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
@@ -1472,6 +1484,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     watchlist: &[],
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -1572,6 +1585,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     // vide DÉJÀ la liste dans ce cas, d'où les deux ensemble.
                     watchlist_enabled: false,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -1676,6 +1690,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         watchlist: &entries,
                         watchlist_enabled: true,
                         spells_enabled: true,
+                        combat_on_right: false,
                         watchlist_selection: &mut selection.borrow_mut(),
                         watchlist_toast: None,
                         catalog: &catalog,
@@ -1795,6 +1810,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     watchlist: &entries,
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -2089,6 +2105,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     watchlist: &entries,
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
@@ -2190,6 +2207,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 watchlist: &entries,
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -2284,6 +2302,7 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     watchlist: &entries,
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
@@ -2372,6 +2391,7 @@ fn panneau_options_ne_panique_pas() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -2407,8 +2427,9 @@ fn panneau_options_ne_panique_pas() {
 /// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le
 /// filet global des deux hôtes (`main.rs` / `bin/wakfu-companion-overlay-x11.rs`,
 /// `event_loop.exit()`) et **fermait l'overlay entier** au lieu d'annuler la saisie — la modale
-/// étant la seule fenêtre overlay focalisable (§9.1 du plan), elle était aussi la seule à pouvoir
-/// déclencher ce filet.
+/// étant la seule fenêtre overlay focalisable (§9.1 du plan), elle était la première à déclencher
+/// ce filet. Le filet lui-même a disparu le 2026-09-17 : l'exclusion de cette fenêtre ne suffisait
+/// pas, la touche partant au bandeau resté au premier plan quand la modale s'ouvrait sans le focus.
 ///
 /// Le champ de chemin a le focus dès la première frame (`design::input::request_focus`), donc ces
 /// deux touches sont pressées **alors qu'un `TextEdit` est actif** : c'est exactement le cas où
@@ -2493,6 +2514,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // dans cet état, et personne ne l'a touchée : « Valider » emporte le réglage tel
                 // qu'il est, jamais un défaut recalculé au passage.
                 combat_always_visible: false,
+                // Et pour « Afficher le panneau de combat à droite de la fenêtre de jeu » : le
+                // panneau est à gauche dans cet état, il le reste.
+                combat_on_right: false,
                 // Même chose pour « Me prévenir quand un de mes personnages doit jouer » : décochée
                 // à l'ouverture, elle est emportée décochée.
                 turn_notification: false,
@@ -2651,6 +2675,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
@@ -2772,6 +2797,7 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         watchlist: &[],
                         watchlist_enabled: true,
                         spells_enabled: true,
+                        combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
@@ -5144,6 +5170,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
@@ -5809,6 +5836,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 watchlist: &[],
                 watchlist_enabled: true,
                 spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
@@ -5962,6 +5990,7 @@ fn capture_login_with_update(
                     watchlist: &[],
                     watchlist_enabled: true,
                     spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,

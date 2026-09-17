@@ -254,6 +254,11 @@ pub struct OptionsModalState {
     /// combat_always_visible`) et prise en compte seulement à « Valider », comme le chemin de log
     /// et les deux brouillons (§5.1 du plan).
     pub combat_always_visible: bool,
+    /// Le panneau Combat est-il posé à droite de la fenêtre de jeu ? — case à cocher de la section
+    /// « Combat » (2026-09-17), même mécanique de brouillon que la case ci-dessus : initialisée par
+    /// l'hôte au réglage en vigueur (`config::OverlayConfig::combat_on_right`), prise en compte
+    /// seulement à « Valider ».
+    pub combat_on_right: bool,
     /// Prévenir par une notification du système qu'un personnage du joueur doit jouer ? — case à
     /// cocher de la section « Combat » de l'onglet « Paramètres » (2026-09-14), même mécanique de
     /// brouillon que la case ci-dessus : initialisée par l'hôte au réglage en vigueur
@@ -418,6 +423,8 @@ pub struct OptionsInitial {
     /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
     /// pas pour rien.
     pub combat_always_visible: bool,
+    /// Le côté du panneau Combat tel qu'il était à l'ouverture — même rôle que le champ ci-dessus.
+    pub combat_on_right: bool,
     /// La notification de tour telle qu'elle était à l'ouverture — même rôle que le champ
     /// ci-dessus.
     pub turn_notification: bool,
@@ -461,6 +468,7 @@ impl OptionsModalState {
         OptionsCommit {
             path: self.path_input.clone(),
             combat_always_visible: self.combat_always_visible,
+            combat_on_right: self.combat_on_right,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             features: self.features,
@@ -502,6 +510,7 @@ impl OptionsModalState {
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
             || self.combat_always_visible != self.initial.combat_always_visible
+            || self.combat_on_right != self.initial.combat_on_right
             || self.turn_notification != self.initial.turn_notification
             || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.features != self.initial.features
@@ -599,6 +608,11 @@ pub struct OptionsCommit {
     pub path: String,
     /// État de la case « Afficher le panneau de combat en dehors des combats ».
     pub combat_always_visible: bool,
+    /// État de la case « Afficher le panneau de combat à droite de la fenêtre de jeu » — ce que
+    /// l'hôte persiste (`config::OverlayConfig::combat_on_right`), applique à l'ancrage de la
+    /// fenêtre (`main.rs::App::anchor_position`) et transmet au rendu
+    /// (`render_content::RenderContent::combat_on_right`).
+    pub combat_on_right: bool,
     /// État de la case « Me prévenir quand un de mes personnages doit jouer ».
     pub turn_notification: bool,
     /// État de la case « Couper le son des notifications » — emporté tel quel même si la case
@@ -1104,6 +1118,32 @@ pub fn show(
                 )
                 .log_name("options-combat-toujours-visible"),
             );
+            // **Le côté du panneau** (2026-09-17) — « permettre à l'utilisateur d'afficher
+            // l'overlay combat à droite plutôt qu'à gauche ». Juste sous l'affichage permanent :
+            // les deux règlent la même chose, la place que le panneau prend à l'écran (quand il
+            // est là, puis où il est), et les deux se lisent sans rien connaître du reste.
+            //
+            // Cocher la case ne déplace pas seulement la fenêtre : toute l'interface du panneau
+            // est retournée en miroir vertical (voir `crate::mirror`), sinon elle s'ouvrirait vers
+            // le bord de l'écran au lieu de s'ouvrir vers le jeu. Les portraits, les images de
+            // monstre, les icônes et les images de sort, eux, restent à l'endroit — c'est la
+            // raison d'être de ce module.
+            //
+            // Grisée sans changer de valeur quand le détail des combats est coupé, comme ses deux
+            // voisines : sans panneau, il n'y a pas de côté à choisir.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(
+                    &mut state.combat_on_right,
+                    "Afficher le panneau de combat à droite de la fenêtre de jeu",
+                )
+                .enabled(state.features.combat)
+                .tooltip(
+                    "Le panneau se colle au bord droit du jeu, et toute son interface est \
+                     retournée en miroir — les portraits et les icônes, eux, restent à l'endroit.",
+                )
+                .log_name("options-combat-a-droite"),
+            );
             // **L'interligne des lignes d'option** (2026-09-14) — voir `tokens::CHECKBOX_ROW_GAP` : le
             // jeu laisse 11px entre deux cases, pas zéro. Posé ici et pas dans `design::checkbox`
             // parce que le relevé le range du côté de la mise en page, et parce qu'un écart porté par
@@ -1604,9 +1644,10 @@ pub fn show(
     // première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord, il
     // remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons du
     // pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un Échap
-    // destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay entier
-    // (voir `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, où ce filet exclut désormais cette
-    // fenêtre).
+    // destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay entier.
+    // Ce filet excluait d'abord cette fenêtre (2026-09-08), puis a disparu tout court le
+    // 2026-09-17 — il fermait encore l'overlay quand la touche partait au bandeau resté au premier
+    // plan (voir `main.rs::window_event`). Échap n'a donc plus qu'un lecteur : ce panneau.
     //
     // `TextEdit` ne retire pas ces événements de l'entrée globale (il travaille sur une copie
     // filtrée, `InputState::filtered_events`) : les lire ici reste fiable même quand le champ de
@@ -1879,6 +1920,8 @@ mod tests {
             OptionsCommit {
                 path: "/jeu/wakfu.log".to_string(),
                 combat_always_visible: true,
+                // Le côté du panneau n'a pas été touché par ce test : emporté tel quel.
+                combat_on_right: false,
                 turn_notification: true,
                 turn_notification_muted: false,
                 features: FeatureToggles::default(),

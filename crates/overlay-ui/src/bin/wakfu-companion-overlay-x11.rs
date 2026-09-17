@@ -108,9 +108,8 @@ mod linux_main {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
-    use winit::event::{ElementState, WindowEvent};
+    use winit::event::WindowEvent;
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-    use winit::keyboard::{KeyCode, PhysicalKey};
     use winit::platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11, WindowType};
     use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
@@ -291,6 +290,10 @@ mod linux_main {
         /// (`config::OverlayConfig::combat_always_visible`), même politique que `main.rs` : lu au
         /// démarrage, remplacé à la validation de la fenêtre Options, `false` par défaut.
         combat_always_visible: bool,
+        /// Le panneau Combat est-il posé à DROITE de la fenêtre de jeu ? — réglage LOCAL persisté
+        /// (`config::OverlayConfig::combat_on_right`), même politique que `main.rs` : ancrage de la
+        /// fenêtre (`anchor_position`) et miroir de son contenu (`overlay_ui::mirror`).
+        combat_on_right: bool,
         /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
         /// persisté (`config::OverlayConfig::turn_notification`), même politique que
         /// `combat_always_visible`.
@@ -386,6 +389,8 @@ mod linux_main {
         log_path: PathBuf,
         /// Voir `App::combat_always_visible` — lu de la config au démarrage (`run`).
         combat_always_visible: bool,
+        /// Voir `App::combat_on_right` — même provenance.
+        combat_on_right: bool,
         /// Voir `App::turn_notification` — même provenance.
         turn_notification: bool,
         /// Le son de la notification de tour coupé (`config::OverlayConfig::
@@ -435,6 +440,7 @@ mod linux_main {
             let AppState {
                 log_path,
                 combat_always_visible,
+                combat_on_right,
                 turn_notification,
                 turn_notification_muted,
                 features,
@@ -491,6 +497,7 @@ mod linux_main {
                 settings_tx,
                 log_path,
                 combat_always_visible,
+                combat_on_right,
                 turn_notification,
                 turn_notification_muted,
                 features,
@@ -771,7 +778,12 @@ mod linux_main {
                         .values_mut()
                         .find(|w| w.game_window == info.window && w.kind == kind)
                     {
-                        Self::reposition(existing, info.rect, self.recap_position);
+                        Self::reposition(
+                            existing,
+                            info.rect,
+                            self.combat_on_right,
+                            self.recap_position,
+                        );
                         continue;
                     }
                     let visible = match kind {
@@ -793,6 +805,7 @@ mod linux_main {
                         info.rect,
                         self.interactive,
                         visible,
+                        self.combat_on_right,
                         self.recap_position,
                     );
                     tracing::info!(
@@ -856,16 +869,22 @@ mod linux_main {
             }
         }
 
-        /// Même ancrage que Windows (voir `main.rs::App::anchor_position`) : Combat au bord gauche
-        /// centré verticalement, Suivi au bord haut centré horizontalement.
+        /// Même ancrage que Windows (voir `main.rs::App::anchor_position`) : Combat au bord
+        /// gauche — ou DROIT si `combat_on_right` (2026-09-17) — centré verticalement, Suivi au
+        /// bord haut centré horizontalement.
         fn anchor_position(
             kind: OverlayKind,
             rect: GameRect,
             overlay_width: i32,
             overlay_height: i32,
+            combat_on_right: bool,
             recap: RecapAnchor,
         ) -> PhysicalPosition<i32> {
             match kind {
+                OverlayKind::Combat if combat_on_right => PhysicalPosition::new(
+                    rect.left + rect.width - overlay_width - GAME_EDGE_MARGIN_PX,
+                    rect.top + (rect.height - overlay_height) / 2,
+                ),
                 OverlayKind::Combat => PhysicalPosition::new(
                     rect.left + GAME_EDGE_MARGIN_PX,
                     rect.top + (rect.height - overlay_height) / 2,
@@ -894,9 +913,9 @@ mod linux_main {
             }
         }
 
-        // Huit paramètres depuis que la bande Récap se déplace (2026-09-17) : ce sont les
-        // caractéristiques d'UNE fenêtre à créer, toutes distinctes et toutes obligatoires. Un
-        // struct de paramètres ne ferait que déplacer la liste d'un cran, pour trois appelants.
+        // Neuf paramètres depuis que le panneau Combat se pose à droite et que la bande Récap se
+        // déplace (2026-09-17) : ce sont les caractéristiques d'UNE fenêtre à créer, toutes
+        // distinctes et toutes obligatoires — voir `main.rs`, même remarque.
         #[allow(clippy::too_many_arguments)]
         fn create_overlay_window(
             event_loop: &ActiveEventLoop,
@@ -906,6 +925,8 @@ mod linux_main {
             rect: GameRect,
             interactive: bool,
             visible: bool,
+            // `combat_on_right` : voir `anchor_position`.
+            combat_on_right: bool,
             // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones.
             recap_offset: Option<(i32, i32)>,
         ) -> OverlayWindow {
@@ -994,6 +1015,7 @@ mod linux_main {
                 rect,
                 outer.width as i32,
                 outer.height as i32,
+                combat_on_right,
                 RecapAnchor::new(recap_offset, window.scale_factor()),
             );
             window.set_outer_position(position);
@@ -1035,6 +1057,7 @@ mod linux_main {
         fn reposition(
             overlay: &mut OverlayWindow,
             rect: GameRect,
+            combat_on_right: bool,
             recap_offset: Option<(i32, i32)>,
         ) {
             overlay.game_rect = rect;
@@ -1044,6 +1067,7 @@ mod linux_main {
                 rect,
                 outer.width as i32,
                 outer.height as i32,
+                combat_on_right,
                 RecapAnchor::new(recap_offset, overlay.window.scale_factor()),
             );
             if overlay.last_position != Some(desired) {
@@ -1293,6 +1317,7 @@ mod linux_main {
                 // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul
                 // `Combat` peut naître masqué (voir `sync_panel_visibility`).
                 true,
+                self.combat_on_right,
                 // Sans objet : cette fenêtre-ci n'est pas la bande Récap.
                 None,
             );
@@ -1301,11 +1326,14 @@ mod linux_main {
                 // tout de suite — voir `main.rs::App::open_options_modal`.
                 Self::center_on_primary_monitor(event_loop, &overlay.window);
                 overlay.last_position = None;
-                overlay.window.focus_window();
                 tracing::info!(
                     "[options] aucune fenêtre de jeu à l'écran — fenêtre Options ouverte seule, centrée sur l'écran principal."
                 );
             }
+            // **Le focus clavier, rattachée ou non** (2026-09-17) — même correctif que
+            // `main.rs::App::open_options_modal` (voir sa doc) : sans lui, Échap et Entrée
+            // n'atteignaient pas la modale ouverte depuis un bandeau.
+            overlay.window.focus_window();
             // **Brouillons pris sur le compte** — même logique que `main.rs::open_options_modal`
             // (voir sa doc) : alertes, chat et suivi sont des COPIES de l'état du compte, renvoyées
             // seulement à « Valider » ; et le compte est relu à l'ouverture, sur un thread.
@@ -1383,6 +1411,7 @@ mod linux_main {
                 // suivi demande `Parametres`, le raccourci global le défaut d'`OptionsTab`.
                 tab: initial_tab,
                 combat_always_visible: self.combat_always_visible,
+                combat_on_right: self.combat_on_right,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 // Les cases « Activer … » s'ouvrent sur l'état réel — voir `main.rs`. Les deux
@@ -1437,6 +1466,7 @@ mod linux_main {
                     chat: chat_draft.clone(),
                     personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
+                    combat_on_right: self.combat_on_right,
                     turn_notification: self.turn_notification,
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
@@ -1660,6 +1690,7 @@ mod linux_main {
                 rect,
                 true,
                 true,
+                self.combat_on_right,
                 // La confirmation couvre la fenêtre de jeu entière — elle ne suit pas la bande.
                 None,
             );
@@ -1732,10 +1763,11 @@ mod linux_main {
         /// voir dans la même passe que le clic.
         fn reposition_recap(&mut self) {
             let recap_position = self.recap_position;
+            let combat_on_right = self.combat_on_right;
             for overlay in self.windows.values_mut() {
                 if overlay.kind == OverlayKind::Recap {
                     let rect = overlay.game_rect;
-                    Self::reposition(overlay, rect, recap_position);
+                    Self::reposition(overlay, rect, combat_on_right, recap_position);
                 }
             }
         }
@@ -1747,6 +1779,7 @@ mod linux_main {
             let mut saved = config::OverlayConfig {
                 log_path: Some(self.log_path.clone()),
                 combat_always_visible: self.combat_always_visible,
+                combat_on_right: self.combat_on_right,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 auto_update: self.auto_update,
@@ -1797,6 +1830,21 @@ mod linux_main {
                                 "affiché"
                             } else {
                                 "masqué"
+                            }
+                        );
+                    }
+                    // Le côté du panneau (2026-09-17) — voir `main.rs`, même mécanique : le
+                    // balayage des fenêtres de jeu recolle l'overlay à son nouvel ancrage, et le
+                    // rendu lit le nouveau côté à la frame suivante.
+                    let side_changed = commit.combat_on_right != self.combat_on_right;
+                    if side_changed {
+                        self.combat_on_right = commit.combat_on_right;
+                        tracing::info!(
+                            "[options] panneau de combat : {}",
+                            if self.combat_on_right {
+                                "à droite"
+                            } else {
+                                "à gauche"
                             }
                         );
                     }
@@ -1929,6 +1977,7 @@ mod linux_main {
                     self.commit_personnages(options_window_id);
                     if path_changed
                         || combat_changed
+                        || side_changed
                         || turn_changed
                         || turn_muted_changed
                         || shortcuts_changed
@@ -1942,6 +1991,7 @@ mod linux_main {
                         let mut saved = config::OverlayConfig {
                             log_path: Some(candidate),
                             combat_always_visible: self.combat_always_visible,
+                            combat_on_right: self.combat_on_right,
                             turn_notification: self.turn_notification,
                             turn_notification_muted: self.turn_notification_muted,
                             auto_update: self.auto_update,
@@ -2093,29 +2143,14 @@ mod linux_main {
                         event_loop.exit();
                     }
                 }
-                WindowEvent::KeyboardInput { event, .. } => {
-                    // Les fenêtres overlay ne demandent jamais le focus clavier en pratique (elles
-                    // restent `AlwaysOnTop` sans jamais voler l'entrée au jeu), mais Échap reste
-                    // câblé par prudence si jamais l'une d'elles l'obtenait malgré tout — même
-                    // filet que Windows (`main.rs`, jamais atteint non plus en pratique).
-                    //
-                    // **Sauf la modale Options**, qui est la seule fenêtre overlay focalisable et
-                    // l'est délibérément (§9.1 du plan). Ses deux touches — `Échap` annule,
-                    // `Entrée` valide — sont traitées par le panneau, qui les remonte en
-                    // `OptionsModalAction` (voir `panels::options_modal::show`) ; ce filet les
-                    // court-circuiterait en fermant l'overlay entier.
-                    // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une
-                    // fenêtre ordinaire ne quitte pas l'application — sa fermeture (`CloseRequested`)
-                    // le fait.
-                    if !matches!(
-                        overlay.kind,
-                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
-                    ) && event.state == ElementState::Pressed
-                        && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                    {
-                        event_loop.exit();
-                    }
-                }
+                // **Aucun filet « Échap quitte l'overlay »** — retiré le 2026-09-17 en même
+                // temps que son jumeau de `main.rs`, pour la même raison et avec le même
+                // raisonnement (voir le commentaire là-bas) : les fenêtres overlay PEUVENT
+                // recevoir le focus clavier, et une touche nue qui arrête le programme fermait
+                // la session d'un geste aussi ordinaire que « cliquer Options puis taper Échap ».
+                // Échap appartient aux panneaux qui le lisent ; les sorties propres sont le
+                // bouton « Fermer l'overlay », la zone de notification, la fermeture de fenêtre
+                // (`CloseRequested` ci-dessus) et Ctrl+C.
                 WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                     let max_dim = overlay.gpu.device.limits().max_texture_dimension_2d;
                     overlay.gpu.config.width = size.width.min(max_dim);
@@ -2227,6 +2262,7 @@ mod linux_main {
                             watchlist,
                             watchlist_enabled: self.features.suivi,
                             spells_enabled: self.features.spells_visible(),
+                            combat_on_right: self.combat_on_right,
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,
                             catalog: &catalog,
@@ -2922,6 +2958,7 @@ mod linux_main {
         let mut app = App::new(AppState {
             log_path,
             combat_always_visible: saved_config.combat_always_visible,
+            combat_on_right: saved_config.combat_on_right,
             turn_notification: saved_config.turn_notification,
             turn_notification_muted: saved_config.turn_notification_muted,
             features: saved_config.features(),

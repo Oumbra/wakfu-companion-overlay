@@ -2575,16 +2575,18 @@ impl Engine {
             }
             // Miroir de `registerLoot` (`stats-store.service.ts`), même gating
             // `currentBatchIsInitialLoad` que ci-dessus — indépendant de la watchlist (voir la
-            // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom a son activé au
-            // compte, suivi ou non.
+            // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom est dans la liste
+            // d'alertes du compte, suivi ou non, **son activé ou non** — écart voulu avec le
+            // web, qui ignore une entrée silencieuse (voir `profile::LootAlert`) : ici l'entrée
+            // silencieuse garde sa carte et ses confettis, seul le son se tait.
             if let LogEntry::Loot { item, quantity, .. } = entry {
-                if let Some(sound_entry) =
-                    crate::profile::find_enabled_sound_item(&self.sound_items, item)
+                if let Some(sound_entry) = crate::profile::find_sound_item(&self.sound_items, item)
                 {
                     self.pending_loot_alerts.push(crate::profile::LootAlert {
                         name: item.clone(),
                         quantity: *quantity,
                         catalog_id: sound_entry.catalog_id,
+                        sound_enabled: sound_entry.enabled,
                     });
                 }
             }

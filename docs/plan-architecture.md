@@ -459,8 +459,9 @@ trouvée**, créée/détruite dynamiquement au gré des clients qui se lancent/s
 affichant le combat de SON personnage (`overlay_engine::SessionSnapshot::fight_for_character`,
 résolu depuis le nom extrait du titre de fenêtre — voir §2 du plan overlay-engine et
 `crates/overlay-ui/src/main.rs::App::sync_windows`). Chaque fenêtre overlay se cale au bord gauche
-de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/redimensionnement
-(`crates/overlay-ui/src/game_window.rs`) :
+de SA fenêtre de jeu — au bord DROIT depuis le 2026-09-17 si la case correspondante est cochée, et
+son contenu est alors retourné en miroir, voir §9.1 vicies —, verticalement centrée dessus, et suit
+tout déplacement/redimensionnement (`crates/overlay-ui/src/game_window.rs`) :
 
 - **Identification par titre, pas par process.** Le titre de la fenêtre de jeu est
   `"<Nom du personnage> - WAKFU"` — variable, mais le suffixe `" - WAKFU"` est constant, ET c'est
@@ -864,6 +865,33 @@ elle seule.
 La boîte de confirmation a été **remontée au design system** à cette occasion (`design::confirm_dialog`,
 voir le catalogue des composants) : deux appelants, donc sa place n'est plus dans un panneau.
 L'extraction est à pixel constant.
+
+### Échap ne quitte plus l'overlay, nulle part (2026-09-17)
+
+Les deux hôtes portaient un filet `Échap → event_loop.exit()`, posé quand les fenêtres overlay
+étaient réputées ne jamais recevoir d'événement clavier (`WS_EX_NOACTIVATE`). La modale Options, la
+fenêtre de connexion puis la confirmation de remise à zéro en ont été exclues une à une — et le
+défaut a resurgi malgré tout (retour utilisateur : « la touche Échap en ayant la modale Options
+ferme complètement l'overlay »). Deux raisons cumulées :
+
+- **La prémisse est fausse** : en mode interactif, un clic sur un bandeau Combat/Suivi fait bel et
+  bien de sa propre `HWND` la fenêtre au premier plan malgré `WS_EX_NOACTIVATE` — c'est le constat,
+  journaux à l'appui, qui avait déjà imposé le calcul par personnage de `sync_topmost` (§ correctif
+  2026-09-06/07). Ces fenêtres-là n'étaient donc pas exclues, et n'avaient aucune raison de l'être.
+- **La modale s'ouvrait sans le focus** quand elle était rattachée à un client : le focus restait au
+  bandeau dont on venait de cliquer « Options ». Échap y partait, et le filet fermait la session.
+
+Le filet est **retiré des deux binaires** plutôt qu'allongé d'une exclusion de plus : une touche nue
+qui arrête le programme n'a pas sa place, exactement comme le raccourci global « Quitter l'overlay »
+retiré le même jour. Les sorties propres restent le bouton « Fermer l'overlay » de l'onglet
+« Paramètres » (confirmé), l'entrée « Quitter » de la zone de notification, Alt+F4 et la croix pour
+les fenêtres qui en ont une (`WindowEvent::CloseRequested`), et Ctrl+C au terminal. Échap appartient
+désormais aux seuls panneaux qui le lisent : il annule la modale Options, répond « Non » à une
+confirmation, referme un sélecteur.
+
+La modale Options **prend le focus clavier à l'ouverture, rattachée ou non** — sans quoi ni Échap ni
+Entrée ne l'atteignent. Le prendre au jeu est ici l'effet recherché : c'est la seule fenêtre
+délibérément focalisable (§9.1), et depuis le voile du même jour elle couvre le client entier.
 
 ### Deux défauts corrigés après un test en jeu (2026-09-12)
 
@@ -1540,7 +1568,8 @@ session), portée telle quelle dans `panels::login`.
   bannière (`LoginOutcome::drag_window` → `Window::drag_window`). Retaillée à chaque changement
   d'état à la hauteur que la carte a réellement occupée (`LoginOutcome::content_height`), en
   gardant son centre. Le logo est son icône de fenêtre et de barre des tâches. Échap n'y quitte
-  pas l'application ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
+  pas l'application — il ne le fait plus nulle part depuis le 2026-09-17 (voir « Échap ne quitte
+  plus l'overlay ») ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
 - **Cycle de vie piloté par le démarrage et `AuthStatus`** (`App::sync_session_windows`, avant
   `sync_windows` à chaque tick) : chargement en cours ⇒ la fenêtre de connexion seule, sur son
   rouage ; compte non lié ⇒ la fenêtre de connexion est la SEULE fenêtre (tout `Combat`/
@@ -2086,6 +2115,70 @@ et `options_parametres_mise_a_jour` bougent avec la hauteur de l'onglet. L'aide 
 tests (`defile_les_parametres`) retire désormais le pointeur AVANT les frames de repos : un bouton
 centré passant sous lui ouvrait son infobulle, dont l'animation empêchait `Harness::run` de se
 poser.
+
+### 9.1 vicies Panneau Combat à droite : un miroir de rendu (2026-09-17)
+
+**Demande utilisateur** : « permettre à l'utilisateur d'afficher l'overlay combat à droite plutôt
+qu'à gauche ; l'ensemble de l'overlay doit donc être affiché en miroir vertical, hormis les
+portraits, les images de monstre, les icônes (allié, ennemi, dégât, armure, soins) et les images de
+sort ».
+
+Deux choses vont ensemble et ne se séparent jamais : la fenêtre Combat s'ancre au bord DROIT du
+client (`App::anchor_position`, le même `GAME_EDGE_MARGIN_PX` de zéro qu'à gauche), et tout son
+contenu est réfléchi autour d'un axe vertical. Sans le miroir, le panneau tournerait le dos au jeu
+— cadre des portraits contre le bord de l'écran, colonne des barres vers l'intérieur, tout le
+contraire de la lecture qu'on en a à gauche.
+
+**Décision structurante : c'est un miroir de RENDU, pas une mise en page paramétrée.** Le panneau
+Combat est une centaine de rectangles calculés à la main (`panels::combat`, `combat_frame`,
+`combat_bars`, `combat_spell_block`, les composants de `design`), chacun posé depuis un `rect.min.x`
+ou un `Align2::LEFT_*`. Faire descendre un booléen « à droite » jusque dans chacun d'eux aurait
+voulu dire retourner chacun de ces calculs — puis le refaire à chaque futur ajustement du panneau,
+sous peine de voir la version miroir diverger en silence. `overlay_ui::mirror` prend le problème en
+UN endroit :
+
+- **à la sortie**, `mirror_painted` réfléchit les formes déjà peintes de la frame (dernier geste de
+  `render_content::paint_content`, infobulles comprises) ;
+- **à l'entrée**, `mirror_input` réfléchit les événements de pointeur avant qu'egui ne les voie
+  (`render_content::build_ui`).
+
+egui continue donc de raisonner dans le repère « à gauche » de bout en bout — mise en page, survol,
+clic, placement des infobulles — et aucun panneau ne sait qu'il est affiché en miroir. Un futur
+changement du panneau est en miroir sans rien demander à personne.
+
+**Ce qui ne se retourne pas.** Un `Shape::Rect` texturé est réfléchi tel quel (un rect réfléchi
+reste un rect normalisé, sa texture s'y peint dans le même sens) ; un `Shape::Mesh` porteur d'une
+vraie texture est **translaté** jusqu'à la place de son reflet, ce qui conserve rigoureusement sa
+géométrie interne — coordonnées de texture et bordures 9-slice comprises. Un maillage SANS texture
+(`TextureId::default()`, un dégradé) est bien réfléchi sommet par sommet : ce n'est pas une image.
+Le texte n'est pas encore un maillage à ce stade (`Shape::Text` porte son galley) : seule sa boîte
+change de côté, jamais l'ordre de ses glyphes.
+
+**L'axe est le centre de la fenêtre** (`Context::viewport_rect`) : la réflexion laisse la fenêtre
+globalement inchangée, donc ce qui y tenait y tient encore (une infobulle contrainte à droite se
+retrouve contrainte à gauche), et un contenu collé au bord gauche se retrouve collé au bord droit —
+ce que l'ancrage complète.
+
+**Piège rencontré, verrouillé par un test** : la couche de fond figure déjà dans
+`Memory::layer_ids` selon l'appelant, et la réfléchir deux fois ramène exactement le contenu à sa
+place de départ — un bug muet, puisque le rendu est alors celui d'avant. La liste des couches est
+dédoublonnée, et `mirror::tests::un_contenu_colle_a_gauche_ressort_colle_a_droite` le tient.
+
+**Réglage** : case « Afficher le panneau de combat à droite de la fenêtre de jeu », section
+« Combat » de l'onglet « Paramètres », sous l'affichage permanent et grisée avec lui quand le détail
+des combats est coupé. Config LOCALE (`config::OverlayConfig::combat_on_right`, `false` par défaut)
+comme ses voisines : ce qu'on accepte de voir par-dessus son jeu dépend de l'écran qu'on a devant
+soi, pas du joueur.
+
+**Limite connue** : une forme TOURNÉE (`RectShape::angle`, `TextShape::angle`) garde son angle, là
+où une réflexion devrait l'inverser autour d'un pivot lui-même réfléchi. Rien dans l'overlay ne
+tourne aujourd'hui — à traiter le jour où quelque chose tournera.
+
+**Captures** (`tests/combat_miroir.rs`) : `combat_miroir_gauche` et `combat_miroir_droite` (même
+fixture des deux côtés, c'est leur comparaison qui a du sens) et `combat_miroir_droite_infobulle`.
+Le curseur qu'`egui_kittest` dessine reste, lui, à la position de mise en page : il vient de
+`PlatformOutput::cursor_image`, pas des formes — en production c'est le curseur du système, à la
+position réelle du pointeur.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 

@@ -298,6 +298,15 @@ pub struct RenderContent<'a> {
     /// pas ici — la fenêtre Combat n'est alors pas montrée du tout
     /// (`panels::combat::should_show`).
     pub spells_enabled: bool,
+    /// **Le panneau Combat est-il posé à droite de la fenêtre de jeu ?** — case « Afficher le
+    /// panneau de combat à droite de la fenêtre de jeu » de la section « Combat » des Options
+    /// (2026-09-17, `config::OverlayConfig::combat_on_right`).
+    ///
+    /// `true` retourne TOUT le contenu de cette fenêtre en miroir vertical (voir [`crate::mirror`],
+    /// qui explique pourquoi c'est un miroir de rendu et pas une mise en page paramétrée) ; l'hôte,
+    /// lui, ancre la fenêtre au bord droit du client (`main.rs::App::anchor_position`). Sans objet
+    /// pour les autres zones : seule la fenêtre Combat change de côté.
+    pub combat_on_right: bool,
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
     /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
     pub watchlist_selection: &'a mut panels::watchlist::WatchlistSelection,
@@ -467,10 +476,19 @@ pub struct RenderOutcome {
 /// `main.rs::render`) détient un accès en écriture à l'`ArcSwap` correspondant.
 pub fn build_ui(
     ctx: &egui::Context,
-    raw_input: egui::RawInput,
+    mut raw_input: egui::RawInput,
     mut content: RenderContent<'_>,
 ) -> (egui::FullOutput, RenderOutcome) {
     let mut outcome = RenderOutcome::default();
+    // **Panneau Combat posé à droite** (2026-09-17) : le pointeur réel est à droite, egui met en
+    // page à gauche — les événements sont donc traduits AVANT d'entrer, pendant que les formes
+    // peintes sont réfléchies à la sortie (voir `crate::mirror` et la fin de `paint_content`).
+    // Survol, clic, glisser et placement des infobulles tombent juste sans qu'aucun panneau ne
+    // sache qu'il est affiché en miroir.
+    if content.kind == OverlayKind::Combat && content.combat_on_right {
+        let axis_x = crate::mirror::axis_of_input(ctx, &raw_input);
+        crate::mirror::mirror_input(&mut raw_input, axis_x);
+    }
     // Reconstruit un `RenderContent` FRAIS à chaque appel de la fermeture plutôt que de déplacer
     // `content` (capturé par la fermeture) directement dans `paint_content` : `ctx.run_ui` exige
     // `FnMut`, et déplacer un agrégat non-`Copy` hors de l'environnement capturé d'une fermeture ne
@@ -502,6 +520,7 @@ pub fn build_ui(
                 watchlist: content.watchlist,
                 watchlist_enabled: content.watchlist_enabled,
                 spells_enabled: content.spells_enabled,
+                combat_on_right: content.combat_on_right,
                 watchlist_selection: &mut *content.watchlist_selection,
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
@@ -546,6 +565,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         watchlist,
         watchlist_enabled,
         spells_enabled,
+        combat_on_right,
         watchlist_selection,
         watchlist_toast,
         catalog,
@@ -798,5 +818,18 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
     // Curseur du jeu à la place du curseur système (voir `crate::cursor`) — APRÈS tout le contenu,
     // une fois que chaque widget survolé a dit ce qu'il voulait (`PlatformOutput::cursor_icon`).
     crate::cursor::apply(ui.ctx(), now);
+    // **Panneau Combat posé à droite** (2026-09-17) : le contenu vient d'être peint comme
+    // d'habitude, dans le repère « à gauche » ; il ne reste qu'à réfléchir les formes produites
+    // autour du centre de la fenêtre — voir `crate::mirror`, qui porte la décision et son
+    // pourquoi. Tout DERNIER geste de la frame, infobulles comprises : une forme peinte après
+    // resterait à l'endroit.
+    //
+    // L'ENTRÉE fait le chemin inverse, en amont (`build_ui`) : le clic réel, à droite, est traduit
+    // en coordonnées de mise en page avant qu'egui ne le voie. C'est ce qui permet à tous les
+    // panneaux d'ignorer complètement ce réglage.
+    if kind == OverlayKind::Combat && combat_on_right {
+        let ctx = ui.ctx();
+        crate::mirror::mirror_painted(ctx, crate::mirror::axis_of(ctx));
+    }
     outcome
 }
