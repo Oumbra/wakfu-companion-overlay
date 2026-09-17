@@ -332,11 +332,13 @@ il n'y a alors rien à rattraper. Un lot REJETÉ ne compte jamais comme un progr
 le cas 2 visible. Une période de grâce de 30 s suit chaque relecture : une panne qui résiste doit
 réessayer, pas repasser le fichier entier dans QuickJS toutes les huit secondes.
 
-**Le déclenchement manuel** : le bouton « Rafraîchir le panneau de combat » en fin de section
-« Combat » de la fenêtre Options (les deux plateformes), et `ShortcutAction::Refresh` sous Windows —
-le « bouton nucléaire » du 2026-09-02 (`App::force_refresh`), qui redessinait et réaffirmait le
-premier plan sans jamais toucher au flux de log, c'est-à-dire sans rien pouvoir contre cette
-panne-là.
+**Le déclenchement manuel** : `ShortcutAction::Refresh` sous Windows — le « bouton nucléaire » du
+2026-09-02 (`App::force_refresh`), qui redessinait et réaffirmait le premier plan sans jamais
+toucher au flux de log, c'est-à-dire sans rien pouvoir contre cette panne-là. Le bouton
+« Rafraîchir le panneau de combat » qui fermait la section « Combat » de la fenêtre Options
+(les deux plateformes, 2026-09-17) a été **retiré le 2026-09-18** à la demande de l'utilisateur
+(« retire la partie […] de la section Combat de l'onglet Paramètres ») ; sous Linux, le chien de
+garde est donc le seul déclencheur.
 
 **La bascule est atomique.** Pendant la relecture, la publication du snapshot est SUSPENDUE : le
 panneau garde ce qu'il affichait jusqu'à ce que l'état reconstruit soit complet, puis bascule d'un
