@@ -1686,6 +1686,111 @@ fn galerie_des_images_non_carrees() {
     harness.snapshot("design_gallery_images_non_carrees");
 }
 
+/// **La célébration de complétion** — sa propre planche, parce qu'elle ne tient pas dans une
+/// rangée : c'est une séquence, et une capture d'un seul instant ne dirait pas si l'ordre est bon.
+///
+/// La rangée du haut fige sept instants de `design::item_slot().completion(...)` : au repos, le
+/// soulèvement, la couronne qui tourne, la condensation sur la rareté, l'éclat, la dissolution qui
+/// commence, la dissolution avancée. La rangée du bas montre les sept sceaux côte à côte, tous au
+/// même instant — c'est là qu'on voit si une teinte mesurée est fausse.
+///
+/// **Un temps figé rend toujours la même image** : aucune horloge n'intervient (l'appelant passe
+/// des secondes, les particules sont hachées sur leur index), le test compare donc comme les
+/// autres.
+#[test]
+fn galerie_de_la_completion() {
+    let mut harness = Harness::builder()
+        // 300 : les deux rangées de 64 px, leurs légendes, les deux titres et la marge du cadre.
+        .with_size(Vec2::new(880.0, 300.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    section_completion(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_completion");
+}
+
+fn section_completion(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "Complétion — la couronne se condense sur la rareté, puis l'emplacement se dissout",
+        "Un décompte arrivé à 0 ou un objectif atteint ne disparaît pas sans rien dire. Les instants ci-dessous sont ceux que `completion_phase` découpe ; l'hôte retire l'entrée au terme des 3,5 s.",
+    );
+
+    let instants = [
+        (None, "au repos"),
+        (Some(0.15), "0,15 s — soulèvement"),
+        (Some(1.20), "1,20 s — la couronne tourne"),
+        (Some(1.95), "1,95 s — condensation"),
+        (Some(2.10), "2,10 s — éclat et onde"),
+        (Some(2.60), "2,60 s — dissolution"),
+        (Some(3.10), "3,10 s — presque partie"),
+    ];
+    ui.horizontal(|ui| {
+        for (elapsed, nom) in instants {
+            ui.vertical(|ui| {
+                ui.add(
+                    design::item_slot()
+                        .frame(design::SlotFrame::Rarity(design::ItemRarity::Legendary))
+                        .count(design::SlotCount::Fraction {
+                            current: 0,
+                            target: 20,
+                        })
+                        .completion(elapsed)
+                        .log_name("galerie.completion.sequence"),
+                );
+                ui.label(RichText::new(nom).color(CAPTION).size(10.0));
+            });
+            ui.add_space(12.0);
+        }
+    });
+
+    ui.add_space(10.0);
+    ui.label(
+        RichText::new(
+            "Le sceau de chaque rareté, au même instant — et l'or d'un ennemi, qui n'en a pas",
+        )
+        .color(CAPTION)
+        .size(11.0),
+    );
+    let raretes = [
+        (Some(design::ItemRarity::Common), "commun"),
+        (Some(design::ItemRarity::Rare), "rare"),
+        (Some(design::ItemRarity::Mythical), "mythique"),
+        (Some(design::ItemRarity::Legendary), "légendaire"),
+        (Some(design::ItemRarity::Memory), "souvenir"),
+        (Some(design::ItemRarity::Epic), "épique"),
+        (Some(design::ItemRarity::Relic), "relique"),
+        (None, "ennemi"),
+    ];
+    ui.horizontal(|ui| {
+        for (rarete, nom) in raretes {
+            ui.vertical(|ui| {
+                ui.add(
+                    design::item_slot()
+                        .frame(match rarete {
+                            Some(r) => design::SlotFrame::Rarity(r),
+                            None => design::SlotFrame::Plain,
+                        })
+                        // Juste après la condensation : la couronne porte la teinte pleine.
+                        .completion(Some(2.15))
+                        .log_name("galerie.completion.sceau"),
+                );
+                ui.label(RichText::new(nom).color(CAPTION).size(10.0));
+            });
+            ui.add_space(12.0);
+        }
+    });
+}
+
 /// Une image factice de `taille` pixels : un damier à bord clair, qui rend une déformation
 /// LISIBLE sur la capture — un carré étiré y devient un rectangle aux cases allongées, ce qu'une
 /// silhouette de monstre ne montrerait pas aussi nettement.
