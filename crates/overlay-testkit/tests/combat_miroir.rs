@@ -264,3 +264,37 @@ fn infobulle_de_portrait_a_droite() {
     harness.run();
     harness.snapshot("combat_miroir_droite_infobulle");
 }
+
+/// **Le pointeur RÉEL, en coordonnées écran** — le chemin complet de la production, celui que les
+/// planches ci-dessus ne prennent pas (leur survol vise déjà la mise en page).
+///
+/// Où viser se déduit de la règle du miroir, sans rien savoir de sa mécanique : la BOÎTE d'un bloc
+/// va à la place de son reflet, donc le médaillon affiché est le reflet du médaillon mis en page.
+/// On pose la souris au milieu de celui-là — ce que fait l'utilisateur, qui vise ce qu'il voit —
+/// et la bulle doit s'ouvrir dessus.
+///
+/// C'est le défaut rapporté le 2026-09-17 (« graphiquement ils sont tracés à un endroit, mais le
+/// survol reste identique à leur version non mirrorée ») pris du côté du rendu ; le mappage
+/// lui-même, cases comprises, est verrouillé par les tests unitaires d'`overlay_ui::mirror`.
+#[test]
+fn infobulle_sous_le_pointeur_reel_a_droite() {
+    let mut harness = harness_for(true);
+    harness.run();
+    let layout = harness
+        .get_by_role_and_label(Role::Button, CASTER)
+        .rect()
+        .center();
+    let axis = overlay_ui::mirror::axis_of(&harness.ctx);
+    // La traduction d'entrée de la production, telle que `render_content::build_ui` l'appelle.
+    let mut input = egui::RawInput {
+        events: vec![egui::Event::PointerMoved(egui::pos2(
+            2.0 * axis - layout.x,
+            layout.y,
+        ))],
+        ..Default::default()
+    };
+    overlay_ui::mirror::mirror_input(&harness.ctx, &mut input, axis);
+    harness.input_mut().events.extend(input.events);
+    harness.run();
+    harness.snapshot("combat_miroir_droite_infobulle_pointeur");
+}

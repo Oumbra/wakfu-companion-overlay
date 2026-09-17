@@ -487,7 +487,7 @@ pub fn build_ui(
     // sache qu'il est affiché en miroir.
     if content.kind == OverlayKind::Combat && content.combat_on_right {
         let axis_x = crate::mirror::axis_of_input(ctx, &raw_input);
-        crate::mirror::mirror_input(&mut raw_input, axis_x);
+        crate::mirror::mirror_input(ctx, &mut raw_input, axis_x);
     }
     // Reconstruit un `RenderContent` FRAIS à chaque appel de la fermeture plutôt que de déplacer
     // `content` (capturé par la fermeture) directement dans `paint_content` : `ctx.run_ui` exige

@@ -36,10 +36,39 @@
 //! diverger en silence.
 //!
 //! Ici, le panneau se peint comme d'habitude ; ce sont les formes produites qui sont réfléchies
-//! avant d'être tessellées ([`apply`]), pendant que les événements de pointeur sont réfléchis en
-//! sens inverse avant d'entrer dans egui ([`mirror_input`]). egui continue de raisonner dans le
-//! repère « à gauche » de bout en bout — mise en page, survol, clic, placement des infobulles — et
-//! les panneaux n'ont à déclarer qu'une chose : **où sont leurs blocs**.
+//! avant d'être tessellées ([`apply`]), pendant que les événements de pointeur font le chemin
+//! inverse avant d'entrer dans egui ([`mirror_input`]). egui continue de raisonner dans le repère
+//! « à gauche » de bout en bout — mise en page, survol, clic, placement des infobulles — et les
+//! panneaux n'ont à déclarer qu'une chose : **où sont leurs blocs**.
+//!
+//! ## Le pointeur fait le chemin exactement inverse — par morceaux, lui aussi
+//!
+//! La première version de l'entrée était une réflexion, symétrique de la sortie d'alors. Elle est
+//! devenue FAUSSE le jour où les blocs ont cessé d'être réfléchis pour être déplacés, et l'essai
+//! en jeu du 2026-09-17 l'a dit sans ambiguïté : « graphiquement ils sont tracés à un endroit,
+//! mais le survol reste identique à leur version non mirrorée ». Sur un switch de trois cases,
+//! survoler la case de GAUCHE visait celle de DROITE : pas d'infobulle là où on la montrait, et un
+//! clic qui activait le voisin.
+//!
+//! La règle manquante tient en une phrase : **l'entrée doit être l'inverse exact de la sortie**,
+//! donc elle est par morceaux comme elle. [`apply`] laisse derrière lui la carte des blocs
+//! déplacés — leur boîte telle qu'elle est AFFICHÉE, et de combien elle a bougé ; [`mirror_input`]
+//! la relit :
+//!
+//! - le point tombe dans un bloc affiché → il subit le déplacement INVERSE de ce bloc. Il vise
+//!   donc l'élément qui est sous le curseur, sans retournement à l'intérieur du bloc ;
+//! - il tombe ailleurs — le décor — → il est réfléchi, comme le décor l'a été.
+//!
+//! Corollaire à la sortie : une infobulle née d'un survol suit le déplacement du bloc survolé au
+//! lieu d'aller à la place de son reflet. Sans ça, egui la placerait près du pointeur de MISE EN
+//! PAGE et le miroir l'enverrait là où ce pointeur se reflète — à l'autre bout du panneau.
+//!
+//! Deux limites, assumées : la carte est celle de la frame PRÉCÉDENTE (c'est la seule qui existe
+//! quand l'entrée est traduite — la frame en cours n'a encore rien peint), donc la première frame
+//! après l'armement du miroir, comme celle qui suit un redimensionnement, retombe sur la réflexion
+//! seule ; et un bloc ne connaît de lui-même que son ENCRE, si bien qu'une zone cliquable qui
+//! déborderait de ce que le bloc peint retombe elle aussi sur la réflexion — d'où l'ancre
+//! explicite d'[`upright_in`] dès qu'un bloc ne remplit pas son emplacement.
 //!
 //! ## L'axe : le centre de la fenêtre
 //!
@@ -94,8 +123,65 @@ struct Block {
     anchor: Option<Rect>,
 }
 
+/// **La carte que [`apply`] laisse à l'entrée de la frame suivante** : pour chaque bloc déplacé,
+/// sa boîte TELLE QU'ELLE EST AFFICHÉE et le déplacement qui l'y a menée — voir la doc de module
+/// (« Le pointeur fait le chemin exactement inverse »).
+///
+/// Ne contient que les blocs de la couche de FOND. Une infobulle, elle, n'est pas dans la carte :
+/// egui ne la survole jamais (sa couche n'est pas interactive), et l'y mettre ferait viser au
+/// pointeur qui la frôle un point logique arbitraire — le bloc en dessous perdrait son survol, la
+/// bulle se fermerait, et elle se rouvrirait à la frame d'après.
+#[derive(Clone, Default)]
+struct Shifted(Vec<ShiftedBlock>);
+
+#[derive(Clone, Copy)]
+struct ShiftedBlock {
+    on_screen: Rect,
+    dx: f32,
+}
+
+impl Shifted {
+    /// Le déplacement du bloc affiché sous ce point, s'il y en a un — **le dernier peint gagne**,
+    /// c'est celui qu'on voit par-dessus les autres.
+    fn under(&self, pos: Pos2) -> Option<f32> {
+        self.0
+            .iter()
+            .rev()
+            .find(|block| block.on_screen.contains(pos))
+            .map(|block| block.dx)
+    }
+}
+
+/// Ce qu'a subi la dernière position de pointeur traduite par [`mirror_input`] : de combien elle a
+/// été déplacée, et si c'était au titre d'un bloc (plutôt que du décor réfléchi).
+///
+/// Lu par [`apply`] pour poser les infobulles, et par [`mirror_input`] lui-même pour les
+/// déplacements RELATIFS, qui n'ont pas de position à quoi se raccrocher.
+#[derive(Clone, Copy)]
+struct PointerShift {
+    dx: f32,
+    in_block: bool,
+}
+
+/// Comment un bloc rejoint sa place à l'écran — voir [`shift_range`].
+#[derive(Clone, Copy)]
+enum Move {
+    /// Sa boîte va à la place de son reflet : le cas de tout bloc du panneau.
+    Mirrored,
+    /// Déplacement imposé : celui du bloc sous le pointeur, pour l'infobulle qui en naît.
+    By(f32),
+}
+
 fn state_id() -> egui::Id {
     egui::Id::new("wakfu-overlay-mirror")
+}
+
+fn shift_id() -> egui::Id {
+    egui::Id::new("wakfu-overlay-mirror-shifts")
+}
+
+fn pointer_id() -> egui::Id {
+    egui::Id::new("wakfu-overlay-mirror-pointer")
 }
 
 /// L'axe de réflexion pour ce contexte : l'abscisse du centre de la surface de rendu — voir la doc
@@ -211,7 +297,11 @@ fn leave(data: &mut egui::util::IdTypeMap) {
 /// zones connues d'egui (`Memory::layer_ids` : infobulles, popups, fenêtres flottantes). La couche
 /// de fond est traitée bloc par bloc ; **chaque autre couche est déplacée d'un seul tenant**,
 /// comme un bloc — une infobulle change de côté sans que son texte ni son cadre ne bougent l'un
-/// par rapport à l'autre.
+/// par rapport à l'autre. Quand le pointeur est posé sur un bloc, ces couches suivent le
+/// déplacement de CE bloc : une infobulle naît du survol, elle doit s'ouvrir là où on survole.
+///
+/// Laisse derrière elle la carte des blocs déplacés, que [`mirror_input`] lira à la frame suivante
+/// pour traduire le pointeur — voir la doc de module.
 pub fn apply(ctx: &Context) {
     let Some((axis_x, blocks)) = ctx.data_mut(|data| {
         let armed = data.remove_temp::<Armed>(state_id())?;
@@ -222,6 +312,13 @@ pub fn apply(ctx: &Context) {
     };
     let background = LayerId::background();
     let viewport = ctx.viewport_rect();
+    // Le déplacement qu'a subi le pointeur en entrant (voir `mirror_input`) : une infobulle née de
+    // ce survol le suit, au lieu d'aller à la place de son reflet.
+    let floating = match ctx.data(|data| data.get_temp::<PointerShift>(pointer_id())) {
+        Some(PointerShift { dx, in_block: true }) => Move::By(dx),
+        _ => Move::Mirrored,
+    };
+    let mut shifted = Vec::new();
 
     let mut layers: Vec<LayerId> = ctx.memory(|memory| memory.layer_ids().collect());
     // **Dédoublonné, sans quoi le miroir s'annulerait lui-même** : selon l'appelant, la couche de
@@ -244,7 +341,7 @@ pub fn apply(ctx: &Context) {
                 // Une zone (infobulle, popup) est un bloc à elle seule — voir la doc de fonction.
                 // Bornée à la fenêtre : egui l'y avait contrainte AVANT le miroir, du côté
                 // gauche ; son reflet la collerait au bord droit, coin arrondi contre l'arête.
-                shift_range(list, 0, count, None, axis_x, Some(viewport));
+                shift_range(list, 0, count, None, floating, axis_x, Some(viewport));
                 continue;
             }
             let mut layer_blocks: Vec<&Block> =
@@ -261,17 +358,27 @@ pub fn apply(ctx: &Context) {
                 // Pas de bornage ici, contrairement aux zones : les blocs d'un même panneau se
                 // répondent (les barres entre elles, le bandeau au-dessus d'elles), et en
                 // recaler un seul le désalignerait des autres.
-                shift_range(
+                let moved = shift_range(
                     list,
                     block.start.min(count),
                     block.end.min(count),
                     block.anchor,
+                    Move::Mirrored,
                     axis_x,
                     None,
                 );
+                // Dans l'ordre de peinture : `Shifted::under` prend le dernier, donc celui du
+                // dessus.
+                if let Some((anchor, dx)) = moved {
+                    shifted.push(ShiftedBlock {
+                        on_screen: anchor.translate(egui::vec2(dx, 0.0)),
+                        dx,
+                    });
+                }
             }
         }
     });
+    ctx.data_mut(|data| data.insert_temp(shift_id(), Shifted(shifted)));
 }
 
 /// Réfléchit chaque forme de la plage, une par une — le traitement du décor.
@@ -284,16 +391,20 @@ fn reflect_range(list: &mut egui::layers::PaintList, start: usize, end: usize, a
     }
 }
 
-/// Déplace la plage d'un seul tenant, de sorte que son ancre aille à la place de son reflet — le
+/// Déplace la plage d'un seul tenant, de sorte que son ancre aille à la place que dit `how` — le
 /// traitement d'un bloc (voir [`upright`]). Rien n'est réfléchi à l'intérieur.
+///
+/// Renvoie l'ancre retenue et le déplacement appliqué, de quoi tenir la carte que lira l'entrée
+/// ([`Shifted`]) ; `None` quand la plage ne peint rien de mesurable.
 fn shift_range(
     list: &mut egui::layers::PaintList,
     start: usize,
     end: usize,
     anchor: Option<Rect>,
+    how: Move,
     axis_x: f32,
     keep_inside: Option<Rect>,
-) {
+) -> Option<(Rect, f32)> {
     let anchor = anchor.unwrap_or_else(|| {
         let mut bounds = Rect::NOTHING;
         for index in start..end {
@@ -314,10 +425,13 @@ fn shift_range(
         bounds
     });
     if !anchor.is_finite() || !anchor.is_positive() {
-        return;
+        return None;
     }
     // Le bord gauche du bloc doit atterrir là où se trouve le reflet de son bord DROIT.
-    let mut dx = mirror_x(anchor.max.x, axis_x) - anchor.min.x;
+    let mut dx = match how {
+        Move::Mirrored => mirror_x(anchor.max.x, axis_x) - anchor.min.x,
+        Move::By(dx) => dx,
+    };
     if let Some(bounds) = keep_inside {
         let moved = anchor.translate(egui::vec2(dx, 0.0));
         if moved.width() <= bounds.width() {
@@ -327,10 +441,11 @@ fn shift_range(
     let delta = egui::vec2(dx, 0.0);
     for index in start..end {
         list.mutate_shape(egui::layers::ShapeIdx(index), |clipped| {
-            clipped.clip_rect = mirror_clip(clipped.clip_rect, anchor, delta, axis_x);
+            clipped.clip_rect = mirror_clip(clipped.clip_rect, anchor, delta, how, axis_x);
             clipped.shape.translate(delta);
         });
     }
+    Some((anchor, dx))
 }
 
 /// Le rectangle de découpe d'une forme appartenant à un bloc déplacé — **déplacé avec elle, ou
@@ -344,11 +459,22 @@ fn shift_range(
 ///   l'écran, pas une pièce du bloc : il est réfléchi comme le reste du décor. Un clip large et
 ///   centré est son propre reflet ; un clip qui épouse une colonne se retrouve sur la colonne
 ///   réfléchie, là où le bloc atterrit.
-fn mirror_clip(clip: Rect, anchor: Rect, delta: egui::Vec2, axis_x: f32) -> Rect {
+///
+/// `how` change la seconde branche quand le bloc ne va pas à la place de son reflet — voir le
+/// corps.
+fn mirror_clip(clip: Rect, anchor: Rect, delta: egui::Vec2, how: Move, axis_x: f32) -> Rect {
     if clip.min.x >= anchor.min.x && clip.max.x <= anchor.max.x {
-        clip.translate(delta)
-    } else {
-        mirror_rect(clip, axis_x)
+        return clip.translate(delta);
+    }
+    let reflected = mirror_rect(clip, axis_x);
+    match how {
+        Move::Mirrored => reflected,
+        // Déplacement IMPOSÉ (l'infobulle qui suit le bloc survolé) : le reflet d'un clip ne tombe
+        // plus là où le bloc atterrit, et la forme sortirait de son propre clip — donc il suit,
+        // sauf s'il est son propre reflet (un clip d'écran : infini, ou centré sur l'axe), qui est
+        // une région de l'écran et n'a aucune raison de bouger.
+        Move::By(_) if reflected == clip => clip,
+        Move::By(_) => clip.translate(delta),
     }
 }
 
@@ -453,24 +579,53 @@ fn reflect_shape(shape: &mut Shape, axis_x: f32) {
     }
 }
 
-/// Réfléchit les événements de pointeur de `input` autour de `axis_x`, **avant** qu'egui ne les
-/// voie : le pointeur réel est à droite, egui le reçoit à gauche, là où il a mis en page le
+/// **Traduit les événements de pointeur de `input` vers le repère de mise en page**, avant
+/// qu'egui ne les voie : le pointeur réel est à droite, egui le reçoit là où il a mis en page le
 /// panneau. Survol, clic, glisser et infobulles tombent donc juste sans qu'aucun panneau ne sache
 /// qu'il est affiché en miroir.
 ///
+/// **C'est l'inverse exact de [`apply`], morceau par morceau** — la doc de module dit pourquoi une
+/// simple réflexion ne suffit pas (et ce qu'elle cassait) : un point posé sur un bloc affiché
+/// remonte le déplacement de ce bloc, un point posé sur le décor est réfléchi. La carte des blocs
+/// est celle de la frame précédente, la seule qui existe à cet instant ; sans carte — première
+/// frame, panneau qui vient de passer à droite — tout est réfléchi, comme avant.
+///
 /// `screen_rect` (la taille de la fenêtre annoncée à egui) n'est pas touché : l'axe étant son
 /// centre, il est son propre reflet.
-pub fn mirror_input(input: &mut egui::RawInput, axis_x: f32) {
+pub fn mirror_input(ctx: &Context, input: &mut egui::RawInput, axis_x: f32) {
+    let shifted = ctx
+        .data(|data| data.get_temp::<Shifted>(shift_id()))
+        .unwrap_or_default();
+    let mut pointer = ctx.data(|data| data.get_temp::<PointerShift>(pointer_id()));
     for event in &mut input.events {
         match event {
-            egui::Event::PointerMoved(pos) => *pos = mirror_pos(*pos, axis_x),
-            egui::Event::PointerButton { pos, .. } => *pos = mirror_pos(*pos, axis_x),
-            egui::Event::Touch { pos, .. } => *pos = mirror_pos(*pos, axis_x),
-            // Déplacements RELATIFS : pas d'axe, seulement un sens à inverser.
-            egui::Event::MouseMoved(delta) => delta.x = -delta.x,
-            egui::Event::MouseWheel { delta, .. } => delta.x = -delta.x,
+            egui::Event::PointerMoved(pos)
+            | egui::Event::PointerButton { pos, .. }
+            | egui::Event::Touch { pos, .. } => {
+                let (moved, in_block) = match shifted.under(*pos) {
+                    Some(dx) => (egui::pos2(pos.x - dx, pos.y), true),
+                    None => (mirror_pos(*pos, axis_x), false),
+                };
+                pointer = Some(PointerShift {
+                    dx: pos.x - moved.x,
+                    in_block,
+                });
+                *pos = moved;
+            }
+            // Déplacements RELATIFS : pas de position à traduire, seulement un SENS — inversé sur
+            // le décor, qui est réfléchi ; conservé dans un bloc, qui est seulement déplacé. D'où
+            // la position retenue ci-dessus : elle seule dit dans lequel des deux on se trouve.
+            egui::Event::MouseMoved(delta) | egui::Event::MouseWheel { delta, .. }
+                if !pointer.is_some_and(|pointer| pointer.in_block) =>
+            {
+                delta.x = -delta.x;
+            }
             _ => {}
         }
+    }
+    // Relu par `apply` à la fin de cette même frame, pour poser les infobulles là où on survole.
+    if let Some(pointer) = pointer {
+        ctx.data_mut(|data| data.insert_temp(pointer_id(), pointer));
     }
 }
 
@@ -530,15 +685,27 @@ mod tests {
         let delta = egui::vec2(160.0, 0.0);
         let case = Rect::from_min_max(egui::pos2(4.0, 1.0), egui::pos2(18.0, 9.0));
         assert_eq!(
-            mirror_clip(case, anchor, delta, AXIS),
+            mirror_clip(case, anchor, delta, Move::Mirrored, AXIS),
             case.translate(delta),
             "la case d'un switch écrête son pictogramme : elle doit partir avec lui"
         );
         let fenetre = Rect::from_min_max(egui::pos2(-10.0, -10.0), egui::pos2(210.0, 90.0));
         assert_eq!(
-            mirror_clip(fenetre, anchor, delta, AXIS),
+            mirror_clip(fenetre, anchor, delta, Move::Mirrored, AXIS),
             mirror_rect(fenetre, AXIS),
             "un clip venu de plus haut est une région de l'écran, pas une pièce du bloc"
+        );
+        // Déplacement imposé (l'infobulle qui suit le bloc survolé) : un clip asymétrique suit,
+        // sans quoi la forme déplacée sortirait de son clip ; un clip d'écran ne bouge pas.
+        let asymetrique = Rect::from_min_max(egui::pos2(-10.0, -10.0), egui::pos2(60.0, 90.0));
+        assert_eq!(
+            mirror_clip(asymetrique, anchor, delta, Move::By(delta.x), AXIS),
+            asymetrique.translate(delta)
+        );
+        assert_eq!(
+            mirror_clip(fenetre, anchor, delta, Move::By(delta.x), AXIS),
+            fenetre,
+            "la fenêtre est son propre reflet : elle reste où elle est"
         );
     }
 
@@ -561,7 +728,7 @@ mod tests {
         let premier = Rect::from_min_max(egui::pos2(32.0, 12.0), egui::pos2(42.0, 22.0));
         let second = Rect::from_min_max(egui::pos2(50.0, 12.0), egui::pos2(60.0, 22.0));
 
-        let mut output = ctx.run_ui(input, |ui| {
+        let output = ctx.run_ui(input, |ui| {
             let ctx = ui.ctx().clone();
             arm(&ctx, axis_of(&ctx));
             ui.painter().rect_filled(decor, 0, egui::Color32::RED);
@@ -602,9 +769,12 @@ mod tests {
         assert_eq!(bleu.min.x - vert.min.x, second.min.x - premier.min.x);
     }
 
-    /// Le pointeur réel est à droite ; egui, qui a mis en page à gauche, doit le recevoir à gauche.
+    /// Le pointeur réel est à droite ; egui, qui a mis en page à gauche, doit le recevoir à
+    /// gauche. Sur le DÉCOR — ici sans aucune carte de blocs — c'est une réflexion, comme la
+    /// sortie.
     #[test]
     fn le_pointeur_est_traduit_vers_le_repere_de_mise_en_page() {
+        let ctx = Context::default();
         let mut input = egui::RawInput {
             events: vec![
                 egui::Event::PointerMoved(egui::pos2(180.0, 5.0)),
@@ -612,7 +782,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        mirror_input(&mut input, AXIS);
+        mirror_input(&ctx, &mut input, AXIS);
         assert_eq!(
             input.events[0],
             egui::Event::PointerMoved(egui::pos2(20.0, 5.0))
@@ -620,6 +790,126 @@ mod tests {
         assert_eq!(
             input.events[1],
             egui::Event::MouseMoved(egui::vec2(-3.0, 7.0))
+        );
+    }
+
+    /// La fenêtre des tests de frame complète : 200 × 100, donc un axe à 100 (`AXIS`).
+    const WINDOW: Rect = Rect {
+        min: egui::pos2(0.0, 0.0),
+        max: egui::pos2(200.0, 100.0),
+    };
+
+    /// Un switch de trois cases, déclaré comme un bloc — la disposition exacte qui a révélé le
+    /// bug. Sa boîte va à la place de son reflet : `[10, 70]` devient `[130, 190]`, et la case
+    /// « Dégâts » reste la PREMIÈRE, donc en `[130, 150]`.
+    const SWITCH: Rect = Rect {
+        min: egui::pos2(10.0, 10.0),
+        max: egui::pos2(70.0, 30.0),
+    };
+    fn case(index: usize) -> Rect {
+        let left = SWITCH.min.x + 20.0 * index as f32;
+        Rect::from_min_max(
+            egui::pos2(left, SWITCH.min.y),
+            egui::pos2(left + 20.0, SWITCH.max.y),
+        )
+    }
+
+    /// Peint une frame avec le switch ci-dessus (et, au besoin, une infobulle), miroir armé, et
+    /// rend les formes telles qu'elles sortent du miroir.
+    fn frame(ctx: &Context, tooltip: Option<Rect>) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(WINDOW),
+            ..Default::default()
+        };
+        let output = ctx.clone().run_ui(input, |ui| {
+            let ctx = ui.ctx().clone();
+            arm(&ctx, axis_of(&ctx));
+            upright_in(ui, SWITCH, |ui| {
+                for index in 0..3 {
+                    ui.painter()
+                        .rect_filled(case(index), 0, egui::Color32::GREEN);
+                }
+            });
+            if let Some(tooltip) = tooltip {
+                egui::Area::new(egui::Id::new("bulle"))
+                    .order(egui::Order::Tooltip)
+                    .fixed_pos(tooltip.min)
+                    .show(&ctx, |ui| {
+                        ui.painter().rect_filled(tooltip, 0, egui::Color32::YELLOW);
+                    });
+            }
+            apply(&ctx);
+        });
+        let shapes = output.shapes.clone();
+        output.drop_without_applying_deltas();
+        shapes
+    }
+
+    /// **Le cœur du correctif** : survoler la case qu'on VOIT vise cette case-là.
+    ///
+    /// La case « Dégâts » est peinte en `[130, 150]` ; le pointeur posé en son milieu doit
+    /// ressortir au milieu de la case « Dégâts » de la mise en page, `[10, 30]`. Une simple
+    /// réflexion aurait donné 60 — la TROISIÈME case, celle que l'essai en jeu activait à la
+    /// place de la première.
+    #[test]
+    fn le_pointeur_vise_la_case_qu_on_voit_pas_sa_symetrique() {
+        let ctx = Context::default();
+        frame(&ctx, None);
+        let mut input = egui::RawInput {
+            events: vec![egui::Event::PointerMoved(egui::pos2(140.0, 20.0))],
+            ..Default::default()
+        };
+        mirror_input(&ctx, &mut input, AXIS);
+        assert_eq!(
+            input.events[0],
+            egui::Event::PointerMoved(egui::pos2(20.0, 20.0)),
+            "le milieu de la première case affichée doit viser la première case, pas la dernière"
+        );
+
+        // Hors du bloc, le décor : réfléchi, comme avant.
+        let mut input = egui::RawInput {
+            events: vec![egui::Event::PointerMoved(egui::pos2(195.0, 80.0))],
+            ..Default::default()
+        };
+        mirror_input(&ctx, &mut input, AXIS);
+        assert_eq!(
+            input.events[0],
+            egui::Event::PointerMoved(egui::pos2(5.0, 80.0))
+        );
+    }
+
+    /// L'infobulle née d'un survol s'ouvre là où on survole : elle suit le bloc survolé, elle ne
+    /// va pas à la place de son reflet — qui est à l'autre bout du panneau.
+    #[test]
+    fn l_infobulle_suit_le_bloc_survole() {
+        let ctx = Context::default();
+        // Première frame : elle laisse la carte des blocs, que la traduction du pointeur relit.
+        frame(&ctx, None);
+        let mut input = egui::RawInput {
+            events: vec![egui::Event::PointerMoved(egui::pos2(140.0, 20.0))],
+            ..Default::default()
+        };
+        mirror_input(&ctx, &mut input, AXIS);
+
+        // egui pose la bulle sous la case de MISE EN PAGE ; c'est sous la case AFFICHÉE qu'elle
+        // doit finir, donc déplacée comme le switch.
+        let bulle = Rect::from_min_max(egui::pos2(12.0, 40.0), egui::pos2(42.0, 56.0));
+        // Deux frames : egui consacre la première d'une zone nouvelle à la dimensionner.
+        frame(&ctx, Some(bulle));
+        let shapes = frame(&ctx, Some(bulle));
+        // Reconnue à sa TAILLE, pas à sa couleur : une zone qui s'ouvre apparaît en fondu, donc
+        // avec un jaune déjà atténué par l'opacité de l'animation.
+        let peinte = shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                Shape::Rect(rect) if rect.rect.size() == bulle.size() => Some(rect.rect),
+                _ => None,
+            })
+            .expect("la bulle n'a pas été peinte");
+        assert_eq!(
+            peinte,
+            bulle.translate(egui::vec2(120.0, 0.0)),
+            "la bulle doit suivre le déplacement du switch (+120), pas se réfléchir"
         );
     }
 }
