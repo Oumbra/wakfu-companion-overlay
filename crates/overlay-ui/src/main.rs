@@ -2657,6 +2657,7 @@ impl App {
             start_with_os: autostart_actif,
             pending_install: None,
             pending_quit: false,
+            pending_restart: false,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -3398,6 +3399,10 @@ enum PostRedraw {
     /// 2026-09-16) : arrête le programme par le chemin de l'entrée « Quitter » de la zone de
     /// notification — le raccourci global « Quitter l'overlay » a été retiré le 2026-09-17.
     Quit,
+    /// « Redémarrer », **après confirmation** (pied de l'onglet « Paramètres », à gauche de
+    /// « Fermer l'overlay », 2026-09-17) : un process neuf est lancé (`restart::relaunch`) puis
+    /// celui-ci sort, par le même chemin que [`Self::Quit`].
+    Restart,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
     RetryUpdate,
@@ -3835,6 +3840,7 @@ impl App {
             OptionsModalAction::ResyncCombat => post_redraw = PostRedraw::ResyncCombat,
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
             OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
+            OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -3896,6 +3902,19 @@ impl App {
                 logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                 event_loop.exit();
             }
+            // Même sortie que « Fermer l'overlay », un process neuf en plus — lancé AVANT de
+            // sortir (voir `restart::relaunch`). Une relance impossible ne ferme rien : l'overlay
+            // en place reste ouvert, avec la cause au journal, plutôt que de laisser l'utilisateur
+            // sans overlay du tout.
+            PostRedraw::Restart => match overlay_ui::restart::relaunch() {
+                Ok(()) => {
+                    logging::log_session_end("Redémarrer l'overlay (fenêtre Options)");
+                    event_loop.exit();
+                }
+                Err(err) => {
+                    tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
+                }
+            },
         }
     }
 }

@@ -399,6 +399,11 @@ pub struct OptionsModalState {
     /// en bas de l'onglet « Paramètres » (2026-09-16). Quatrième boîte exclusive avec les trois
     /// autres (voir `show`) : elle ne ferme pas cette fenêtre, elle arrête le programme.
     pub pending_quit: bool,
+    /// La confirmation de REDÉMARRAGE est ouverte — bouton « Redémarrer », à gauche de « Fermer
+    /// l'overlay » (2026-09-17). Cinquième boîte exclusive avec les quatre autres (voir `show`) :
+    /// elle arrête le programme comme sa voisine, à ceci près qu'un nouveau process prend sa
+    /// place.
+    pub pending_restart: bool,
     /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
     ///
     /// Posée par le clic sur « Annuler », par la croix de la bannière (2026-09-13), par Échap, **ou
@@ -596,6 +601,16 @@ pub enum OptionsModalAction {
     /// et sans retour, comme `Disconnect` : ce que cette fenêtre avait en brouillon est perdu, et
     /// c'est ce que la confirmation rattrape.
     Quit,
+    /// « Redémarrer », **confirmé** (bouton en pied de l'onglet « Paramètres », à gauche de
+    /// « Fermer l'overlay », 2026-09-17) : l'hôte relance l'exe courant avec les mêmes arguments,
+    /// puis s'arrête comme pour [`Self::Quit`] — un seul overlay reste donc à l'écran, le neuf.
+    ///
+    /// **Pourquoi une sortie de plus** : recharger le catalogue, reprendre un `wakfu.log` qui a
+    /// tourné ou repartir d'un moteur propre demandait jusqu'ici de fermer l'overlay PUIS de le
+    /// relancer à la main — geste que rien, dans l'overlay, ne proposait. Immédiat et sans retour
+    /// comme `Quit` : le brouillon de cette fenêtre part avec le process, et c'est ce que la
+    /// confirmation rattrape.
+    Restart,
 }
 
 /// Ce que « Valider » emporte de l'onglet « Paramètres ».
@@ -704,13 +719,14 @@ pub fn show(
     //
     // **Plusieurs dialogues possibles, jamais en même temps** : la garde de fermeture, depuis le
     // 2026-09-13 la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »),
-    // puis celles d'installation d'une mise à jour et de fermeture de l'overlay. Ils s'excluent
-    // par construction (voir leur `else if` plus bas) ; la capture ci-dessus vaut pour tous —
-    // c'est le double appui d'Échap qu'elle empêche.
+    // puis celles d'installation d'une mise à jour, de fermeture de l'overlay et — depuis le
+    // 2026-09-17 — de redémarrage. Ils s'excluent par construction (voir leur `else if` plus bas) ;
+    // la capture ci-dessus vaut pour tous — c'est le double appui d'Échap qu'elle empêche.
     let dialogue_a_l_entree = state.pending_close
         || state.pending_disconnect
         || state.pending_install.is_some()
-        || state.pending_quit;
+        || state.pending_quit
+        || state.pending_restart;
 
     // Tout le décor de la fenêtre — `design::window` depuis le 2026-09-10 (lot 1 de
     // `docs/plan-composants-ui.md`). Il vivait ici, dans une fonction `chrome()` de ce panneau,
@@ -1571,32 +1587,66 @@ pub fn show(
                 state.pending_disconnect = true;
             }
 
-            // **« Fermer l'overlay »** (2026-09-16), tout en bas de l'onglet, sans section : ce
-            // n'est pas un réglage, c'est la sortie. Jusque-là, quitter demandait le raccourci
+            // **« Redémarrer » et « Fermer l'overlay »** (2026-09-16 pour la sortie, 2026-09-17
+            // pour le redémarrage), tout en bas de l'onglet, sans section : ce ne sont pas des
+            // réglages, ce sont les sorties. Jusque-là, quitter demandait le raccourci
             // « Quitter » ou l'icône de la zone de notification — deux chemins qu'un joueur qui
-            // a la fenêtre Options sous les yeux ne voit pas.
+            // a la fenêtre Options sous les yeux ne voit pas ; et relancer demandait de faire les
+            // deux à la suite, à la main.
             //
-            // **Secondaire et centré** (demande utilisateur) : centré comme « Se déconnecter »
-            // juste au-dessus, parce que ce sont les deux seules actions de cette fenêtre qui
-            // échappent à « Annuler » ; secondaire et non `Danger`, parce que fermer l'overlay
-            // ne détruit rien — le compte reste appairé, les réglages validés restent écrits,
-            // relancer retrouve tout. La confirmation, elle, reste : un clic sur ce bouton en
-            // plein combat coupe le détail des dégâts sans retour, et le brouillon de la
-            // fenêtre part avec.
+            // **Secondaires et centrés** (demande utilisateur) : centrés comme « Se déconnecter »
+            // juste au-dessus, parce que ce sont les seules actions de cette fenêtre qui
+            // échappent à « Annuler » ; secondaires et non `Danger`, parce que ni l'une ni l'autre
+            // ne détruit quoi que ce soit — le compte reste appairé, les réglages validés restent
+            // écrits, relancer retrouve tout. Les confirmations, elles, restent : un clic en plein
+            // combat coupe le détail des dégâts sans retour, et le brouillon de la fenêtre part
+            // avec.
+            //
+            // **La paire est centrée, pas chaque bouton** : les deux largeurs naturelles et la
+            // gouttière du pied de page (`WINDOW_FOOTER_GUTTER`, la seule gouttière bouton-à-bouton
+            // relevée dans le jeu) forment un bloc, centré d'un seul tenant sur la colonne —
+            // centrer chacun dans une moitié les éloignerait l'un de l'autre au gré de la
+            // largeur de la fenêtre, et « Redémarrer » ne se lirait plus comme la variante de son
+            // voisin. « Redémarrer » est à GAUCHE : on lit l'action la moins définitive en
+            // premier.
             ui.add_space(SECTION_GAP);
+            let restart = design::button("Redémarrer")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .tooltip(
+                    "Arrêter puis relancer l'overlay. Utile après avoir changé de fichier de \
+                     journal ou quand l'affichage ne suit plus le jeu.",
+                )
+                .log_name("options-redemarrer-overlay");
             let quit = design::button("Fermer l'overlay")
                 .variant(ButtonVariant::Secondary)
                 .size(ButtonSize::Height(ROW_HEIGHT))
                 .tooltip(
-                    "Arrêter l'overlay. Le compte reste appairé et les réglages validés sont                      conservés pour la prochaine fois.",
+                    "Arrêter l'overlay. Le compte reste appairé et les réglages validés sont \
+                     conservés pour la prochaine fois.",
                 )
                 .log_name("options-fermer-overlay");
+            let restart_size = restart.desired_size(ui);
             let quit_size = quit.desired_size(ui);
+            let gutter = design::tokens::WINDOW_FOOTER_GUTTER;
             let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            if ui
-                .put(egui::Rect::from_center_size(row.center(), quit_size), quit)
-                .clicked()
-            {
+            let paire_gauche =
+                row.center().x - (restart_size.x + gutter + quit_size.x) / 2.0;
+            let restart_rect = egui::Rect::from_min_size(
+                egui::pos2(paire_gauche, row.center().y - restart_size.y / 2.0),
+                restart_size,
+            );
+            let quit_rect = egui::Rect::from_min_size(
+                egui::pos2(
+                    restart_rect.right() + gutter,
+                    row.center().y - quit_size.y / 2.0,
+                ),
+                quit_size,
+            );
+            if ui.put(restart_rect, restart).clicked() {
+                state.pending_restart = true;
+            }
+            if ui.put(quit_rect, quit).clicked() {
                 state.pending_quit = true;
             }
         });
@@ -1676,6 +1726,23 @@ pub fn show(
                 action = OptionsModalAction::Quit;
             }
             design::ConfirmChoice::No => state.pending_quit = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    } else if state.pending_restart {
+        // **La confirmation de redémarrage** (2026-09-17) — même exclusion, même voile sur la
+        // fenêtre entière que ses voisines. Elle dit « Redémarrer l'overlay ? » et non « Fermer
+        // puis relancer » : ce que l'utilisateur perd est le même qu'à la fermeture (le combat
+        // affiché, le brouillon de cette fenêtre), ce qu'il retrouve est un overlay neuf.
+        let choix = design::confirm_dialog("Redémarrer l'overlay ?")
+            .over(window)
+            .log_name("options.redemarrage-overlay")
+            .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_restart = false;
+                action = OptionsModalAction::Restart;
+            }
+            design::ConfirmChoice::No => state.pending_restart = false,
             design::ConfirmChoice::Pending => {}
         }
     }

@@ -64,6 +64,7 @@ pub mod recap_placement;
 pub mod recap_session;
 pub mod remote_icons;
 pub mod render_content;
+pub mod restart;
 pub mod shortcuts;
 pub mod startup;
 pub mod style;
