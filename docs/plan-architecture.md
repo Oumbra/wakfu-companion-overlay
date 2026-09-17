@@ -2010,6 +2010,35 @@ résolu de `fightId`, miroir exact du web.
   `config.toml` écrit avant ce champ). Décochée, la fenêtre est **masquée, jamais détruite** —
   `App::sync_panel_visibility`, qui porte désormais Combat ET Récap, même politique.
 
+**Déplaçable au glisser-déposer** (2026-09-17, demande utilisateur : « placer l'overlay de recap
+via du drag & drop », position retenue « même après un redémarrage de l'overlay ») :
+
+- **Tout le fond de la bande se saisit**, sans poignée ni glyphe ajouté — le bloc fait 206 px calés
+  au pixel sur la rangée de boutons du jeu, il n'y a pas de place à prendre. Le curseur passe à la
+  croix fléchée du jeu (`Grab`/`Grabbing` y retombent déjà, `overlay_ui::cursor`), et le glyphe de
+  remise à zéro capte le glissement comme le clic (`Sense::click_and_drag`) pour qu'un appui dessus
+  ne fasse jamais partir la bande.
+- **Le panneau ne déplace rien** : il remonte le geste (`RecapOutcome::drag`, trois étapes portant
+  la POSITION du curseur et non l'écart parcouru — un hôte qui cumulerait des écarts verrait la
+  bande s'arrêter au premier pixel, la fenêtre suivant le curseur). L'hôte pose la fenêtre à
+  « curseur moins point de saisie », invariant du geste : rien ne s'accumule, rien ne dérive, même
+  quand le bornage retient la bande contre un bord.
+- **`overlay_ui::recap_placement`** porte l'ancrage d'origine (`DEFAULT_OFFSET`, les ex-constantes
+  `GAME_RECAP_*_MARGIN_PX` des deux hôtes), le bornage à la zone cliente et l'aimantation
+  (`SNAP_RADIUS_PX`, 12 px : reposée près de son ancrage, la bande y recolle et la config oublie sa
+  position). Partagé par les deux binaires — c'est de l'arithmétique sur des entiers, et ici elle
+  se teste sans serveur graphique.
+- **Persistance** : `config::OverlayConfig::recap_position_{x,y}`, décalage du BLOC (pas de sa
+  fenêtre, qui commence `RECAP_TOOLTIP_RESERVE` plus haut) depuis le coin de la zone CLIENTE du jeu
+  — relative à la fenêtre de jeu, donc valable quand le client se déplace ou change d'écran. Une
+  seule position pour toutes les fenêtres de jeu (décision utilisateur). Écrite au relâchement du
+  bouton seulement, par `App::persist_config`, qui est devenu le seul endroit sachant ce que
+  `config.toml` doit contenir.
+- **Le mode interactif est requis** : en clic-traversant, l'OS fait passer les clics à travers et la
+  fenêtre ne les voit jamais. D'où la ligne d'aide de la section « Recap » des Paramètres, qui
+  nomme le raccourci de bascule tel qu'il est réglé, et le bouton **« Replacer au défaut »**, la
+  sortie de secours d'une bande posée dans un coin oublié.
+
 **Captures** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, paire Kamas/XP empilée),
 `recap_session_ordinaire` (XP ramenée, trois lignes), `recap_tooltip_kamas_au_dessus`,
 `recap_tooltip_duree_reprises`, `recap_tooltip_remise_a_zero`, `recap_confirmation_remise_a_zero` —
