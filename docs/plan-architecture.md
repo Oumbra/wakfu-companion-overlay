@@ -2125,7 +2125,9 @@ reproche fait à `Ctrl+Alt+D` (déconnexion) le 2026-09-13. Même traitement : v
 sorties propres sont désormais ce bouton, l'entrée « Quitter » de la zone de notification, et
 Ctrl+C dans le terminal.
 
-**Captures** : `options_parametres_fermer_overlay` (bas de l'onglet) ; `options_parametres_compte`
+**Captures** : `options_parametres_sorties` (bas de l'onglet — la capture s'appelait
+`options_parametres_fermer_overlay` jusqu'au 2026-09-17, où « Redémarrer » est venu à côté, voir
+§9.1 unvicies) ; `options_parametres_compte`
 et `options_parametres_mise_a_jour` bougent avec la hauteur de l'onglet. L'aide de défilement des
 tests (`defile_les_parametres`) retire désormais le pointeur AVANT les frames de repos : un bouton
 centré passant sous lui ouvrait son infobulle, dont l'animation empêchait `Harness::run` de se
@@ -2233,6 +2235,48 @@ directement la position de mise en page.
 Le curseur qu'`egui_kittest` dessine reste, lui, à la position de mise en page : il vient de
 `PlatformOutput::cursor_image`, pas des formes — en production c'est le curseur du système, à la
 position réelle du pointeur.
+
+### 9.1 unvicies Bouton « Redémarrer », à gauche de « Fermer l'overlay » (2026-09-17)
+
+**Demande utilisateur** : « ajouter un bouton *Redémarrer* à gauche du bouton *Fermer l'overlay*
+permettant de relancer l'overlay complètement ».
+
+Redémarrer était jusqu'ici deux gestes : fermer (bouton du pied de l'onglet « Paramètres », §9.1
+novodecies), puis retrouver l'exe ou son raccourci. C'est le geste qu'on fait après avoir changé de
+fichier de journal, quand l'affichage ne suit plus une fenêtre de jeu recréée, ou pour repartir d'un
+moteur propre — assez souvent pour mériter son bouton, jamais assez pour mériter un raccourci
+global (le reproche fait à `Ctrl+Shift+Q`, retiré la veille : une combinaison qui arrête le
+programme d'un geste est un piège en plein combat).
+
+**La paire est centrée, pas chaque bouton.** Les deux largeurs naturelles et la gouttière du pied de
+page (`tokens::WINDOW_FOOTER_GUTTER`, la seule gouttière bouton-à-bouton relevée dans le jeu)
+forment un bloc centré d'un seul tenant sur la colonne. Centrer chacun dans une moitié les
+éloignerait au gré de la largeur de la fenêtre, et « Redémarrer » ne se lirait plus comme la
+variante de son voisin. Il est à GAUCHE (demande), ce qui met aussi l'action la moins définitive en
+premier. Même variante `Secondary` et même hauteur `ROW_HEIGHT` que « Fermer l'overlay » : ni l'un
+ni l'autre ne détruit quoi que ce soit.
+
+**Même contrat de confirmation** : `OptionsModalState::pending_restart` (« Redémarrer l'overlay ? »)
+est la cinquième boîte exclusive de la fenêtre, et Échap y répond « Non » sans être relu par le
+filet clavier. « Oui » remonte `OptionsModalAction::Restart` — un panneau ne produit pas d'effet de
+bord (§17.3 bis), l'hôte seul relance un process.
+
+**La relance, côté hôte** : `overlay_ui::restart::relaunch` lance `std::env::current_exe` avec les
+arguments de CE lancement, moins `--updated-from <version>` (ce drapeau dit « je viens d'une mise à
+jour » et déclenche le nettoyage du dossier de mise à jour, voir §12 — il serait faux ici) ; le
+chemin de `wakfu.log` passé en argument, lui, est conservé, sans quoi le process neuf retomberait
+sur la découverte automatique. Les deux hôtes (`main.rs` et `bin/wakfu-companion-overlay-x11.rs`)
+sortent ensuite comme pour « Fermer l'overlay » : `logging::log_session_end("Redémarrer l'overlay
+(fenêtre Options)")` puis `event_loop.exit()`. Le process neuf est lancé AVANT cette sortie, comme
+à l'installation d'une mise à jour (`update::apply::install_and_relaunch`) : les deux se croisent le
+temps que les fenêtres tombent, ce que rien ne gêne — l'overlay ne prend aucun verrou exclusif au
+démarrage. **Une relance impossible ne ferme rien** : l'erreur part au journal et l'overlay en place
+reste ouvert, plutôt que de laisser l'utilisateur sans overlay du tout.
+
+**Captures** : `options_parametres_sorties` (la paire, bas de l'onglet) ;
+`options_parametres_mise_a_jour` bouge avec elle, la ligne des sorties entrant dans son cadre.
+Comportement couvert sans peindre par `options_redemarrage_confirme_et_echap_repond_non`
+(`tests/panels.rs`) et par les tests d'arguments de `restart`.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
