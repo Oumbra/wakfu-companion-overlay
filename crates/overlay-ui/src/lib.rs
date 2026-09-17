@@ -33,6 +33,11 @@
 //! `resolve_log_path`/`save` appelés à l'identique par `main.rs` et
 //! `bin/wakfu-companion-overlay-x11.rs`).
 //!
+//! `recap_placement` (2026-09-17, bande Récap déplaçable) : l'ancrage de la bande sur la fenêtre
+//! de jeu, le décalage que l'utilisateur lui donne à la souris, son bornage et son aimantation.
+//! Exposé pour la même raison que `config` — les deux binaires font le même calcul, qui n'est que
+//! de l'arithmétique sur des entiers, et se teste ici sans serveur graphique.
+//!
 //! Modules volontairement absents d'ici (restent privés à `main.rs`, spécifiques au fenêtrage
 //! Win32/aux threads compte lié L4-L5, sans intérêt pour un harnais de rendu offscreen NI pour le
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
@@ -54,6 +59,7 @@ pub mod logging;
 pub mod panels;
 pub mod portraits;
 pub mod rarity_bridge;
+pub mod recap_placement;
 pub mod recap_session;
 pub mod remote_icons;
 pub mod render_content;

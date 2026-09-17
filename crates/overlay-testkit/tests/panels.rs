@@ -513,6 +513,182 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
     );
 }
 
+/// Appui (ou relâchement) du bouton principal à cet endroit — ce que `Harness` ne fournit pas
+/// tout fait, et qu'il faut pour jouer un glisser-déposer plutôt qu'un clic.
+fn press(harness: &mut Harness<'_>, pos: egui::Pos2, pressed: bool) {
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    });
+}
+
+/// **La bande Récap se saisit à la souris** (2026-09-17, demande utilisateur : « placer l'overlay
+/// de recap via du drag & drop ») — voir `panels::recap::RecapDrag`.
+///
+/// Ce test tient les deux moitiés de la règle, celles dont l'hôte dépend et qu'aucune capture ne
+/// montrerait (le bloc ne se déplace pas lui-même : il remonte le geste, et c'est la fenêtre OS
+/// qui bouge) :
+///
+/// 1. saisi sur son fond, le bloc remonte la POSITION du curseur à chaque étape — position et non
+///    écart parcouru, sans quoi l'hôte verrait la bande s'arrêter au premier pixel (voir la doc
+///    de `RecapDrag`) ;
+/// 2. saisi sur son glyphe de remise à zéro, il ne remonte RIEN : ce bouton capte le glissement
+///    comme le clic (`Sense::click_and_drag`) précisément pour que la bande ne parte pas à chaque
+///    appui dessus.
+///
+/// Le curseur du jeu passe à la croix fléchée sur le fond — `Grab`/`Grabbing` retombent déjà sur
+/// ce bitmap (`overlay_ui::cursor`, doc de module), c'est ce qui annonce à l'écran qu'il y a
+/// quelque chose à attraper là où rien n'est écrit.
+#[test]
+fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: 42_910,
+            kamas_gained: 128_400,
+            ..Default::default()
+        },
+        uptime: std::time::Duration::from_secs(5025),
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+    // Tout ce que le bloc a remonté depuis le début du test, dans l'ordre.
+    let gestes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let reset_requested = std::rc::Rc::new(std::cell::RefCell::new(false));
+
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::HEIGHT + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 16.0,
+        ))
+        .build_ui({
+            let gestes = std::rc::Rc::clone(&gestes);
+            let reset_requested = std::rc::Rc::clone(&reset_requested);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Recap,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &recap,
+                        recap_cells: Default::default(),
+                        options: None,
+                        veiled: false,
+                        login: None,
+                    },
+                );
+                if outcome.recap_drag != panels::recap::RecapDrag::None {
+                    gestes.borrow_mut().push(outcome.recap_drag);
+                }
+                if outcome.recap_reset_requested {
+                    *reset_requested.borrow_mut() = true;
+                }
+            }
+        });
+
+    // Le bloc occupe (8, 44) à (214, 158) dans cette fenêtre : la marge de la fenêtre (8 px) plus
+    // la réserve d'infobulle en haut (36 px). Ce point-ci est sur le fond, entre la case Kamas et
+    // la case XP — du fond nu, pas un chiffre.
+    let saisie = egui::pos2(118.0, 61.0);
+    harness.hover_at(saisie);
+    harness.run();
+    let images = overlay_ui::cursor::images();
+    assert!(
+        harness
+            .output()
+            .platform_output
+            .cursor_image
+            .as_ref()
+            .is_some_and(|image| std::sync::Arc::ptr_eq(&image.rgba, &images.moving.rgba)),
+        "le fond de la bande doit annoncer qu'il s'attrape : croix fléchée du jeu"
+    );
+
+    press(&mut harness, saisie, true);
+    harness.run();
+    assert_eq!(
+        gestes.borrow().first().copied(),
+        Some(panels::recap::RecapDrag::Started(saisie)),
+        "l'appui sur le fond doit remonter la position de saisie"
+    );
+
+    // La souris part vers le bas à droite. Dans le vrai overlay, la fenêtre suit — ici elle ne
+    // bouge pas, et c'est justement ce qui rend la POSITION lisible : c'est elle qui est remontée,
+    // telle quelle, pas l'écart depuis la frame précédente.
+    let deplacee = egui::pos2(160.0, 100.0);
+    harness.event(egui::Event::PointerMoved(deplacee));
+    harness.run();
+    assert_eq!(
+        gestes.borrow().last().copied(),
+        Some(panels::recap::RecapDrag::Moved(deplacee)),
+        "le glissement doit remonter où est le curseur maintenant"
+    );
+
+    press(&mut harness, deplacee, false);
+    harness.run();
+    assert_eq!(
+        gestes.borrow().last().copied(),
+        Some(panels::recap::RecapDrag::Released),
+        "le relâchement doit clore le geste — c'est là que l'hôte persiste la position"
+    );
+
+    // **Le glyphe de remise à zéro garde la priorité.** Appui-glissé-relâché sur lui : aucun
+    // geste de bande, et pas de remise à zéro non plus (un clic qu'on glisse s'annule, ce qui est
+    // la bonne réponse pour un geste destructeur).
+    gestes.borrow_mut().clear();
+    let glyphe = egui::pos2(196.0, 121.0);
+    harness.hover_at(glyphe);
+    harness.run();
+    press(&mut harness, glyphe, true);
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(196.0, 140.0)));
+    harness.run();
+    press(&mut harness, egui::pos2(196.0, 140.0), false);
+    harness.run();
+    assert!(
+        gestes.borrow().is_empty(),
+        "un appui sur le glyphe de remise à zéro ne doit jamais faire partir la bande : {:?}",
+        gestes.borrow()
+    );
+    assert!(
+        !*reset_requested.borrow(),
+        "une remise à zéro amorcée puis glissée s'annule"
+    );
+}
+
 /// La confirmation de remise à zéro (`OverlayKind::RecapReset`, 2026-09-17) : la boîte du design
 /// system centrée sous un voile qui couvre toute la fenêtre — la fenêtre de jeu, en vrai. Échap
 /// répond « Non », ce que ce test relève par `RenderOutcome::recap_reset_choice`.
@@ -2333,6 +2509,10 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
+                // La bande Récap n'a pas été déplacée dans cet état (elle se déplace à la souris,
+                // sur le jeu — pas depuis cette fenêtre) et personne n'a cliqué « Replacer au
+                // défaut » : « Valider » emporte `None`, c'est-à-dire son ancrage d'origine.
+                recap_position: None,
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -2888,7 +3068,9 @@ fn options_parametres_section_compte() {
     harness.run();
     // Cette section est passée sous le pli le 2026-09-15, quand les trois sections de
     // notifications se sont posées au-dessus d'elle — voir [`defile_les_parametres`].
-    defile_les_parametres(&mut harness, 600.0);
+    // **102 points de plus depuis le 2026-09-17** : la ligne d'aide et le bouton « Replacer au
+    // défaut » de la section « Recap » (bande déplaçable à la souris) l'ont repoussée d'autant.
+    defile_les_parametres(&mut harness, 702.0);
     harness.snapshot("options_parametres_compte");
 }
 
@@ -2937,8 +3119,9 @@ fn options_parametres_section_mise_a_jour() {
         });
     harness.run();
     // Dernière section de l'onglet : elle ne se voit qu'après un défilement depuis le 2026-09-15
-    // — voir [`defile_les_parametres`].
-    defile_les_parametres(&mut harness, 900.0);
+    // — voir [`defile_les_parametres`]. 102 points de plus depuis le 2026-09-17, même raison que
+    // pour la section « Compte » ci-dessus.
+    defile_les_parametres(&mut harness, 1002.0);
     harness.snapshot("options_parametres_mise_a_jour");
 }
 
@@ -5325,7 +5508,10 @@ fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
     /// **Puis de 50 px le 2026-09-17** : la ligne « Reprendre la session après une pause de moins
     /// de … min » (case + compteur, plus haute qu'une case nue) a rejoint la section « Recap » avec
     /// la session du récap — carré mesuré en y 424..443.
-    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 434.0);
+    /// **Puis de 102 px le 2026-09-17 (2)** : la bande Récap devenue déplaçable à la souris a
+    /// ajouté sous cette même section sa ligne d'aide (deux lignes de 23 px) et son bouton
+    /// « Replacer au défaut » (36 px), gouttières comprises — carré mesuré en y 526..545.
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 536.0);
 
     let clic = |detail_actif: bool| -> bool {
         let mut etat = parametres_avec_notifications();
@@ -5405,6 +5591,20 @@ fn options_parametres_recap_coupe() {
     etat.features.recap = false;
     etat.features.recap_cells.fights = false;
     capture_parametres("options_parametres_recap_coupe", etat);
+}
+
+/// **La bande Récap déplacée : le bouton « Replacer au défaut » s'allume** (2026-09-17). C'est le
+/// seul état où il est cliquable — ailleurs, la bande est à son ancrage d'origine et il n'y a rien
+/// à replacer, d'où son aspect grisé sur les autres planches de cet onglet.
+///
+/// Ce que la capture doit montrer : la ligne d'aide qui nomme le geste et le raccourci de bascule
+/// (le seul endroit où la fonctionnalité existe par écrit — un fond translucide qu'on peut
+/// attraper ne s'annonce nulle part), et le bouton vif juste dessous.
+#[test]
+fn options_parametres_recap_deplace() {
+    let mut etat = parametres_avec_notifications();
+    etat.recap_position = Some((460, 234));
+    capture_parametres("options_parametres_recap_deplace", etat);
 }
 
 #[test]

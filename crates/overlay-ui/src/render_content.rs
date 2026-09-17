@@ -418,6 +418,16 @@ pub struct RenderOutcome {
     /// Le glyphe de remise à zéro du bloc Récap vient d'être cliqué (`kind == Recap`) : l'hôte
     /// ouvre la fenêtre de confirmation (`OverlayKind::RecapReset`). Voir `panels::recap`.
     pub recap_reset_requested: bool,
+    /// La bande Récap est saisie à la souris (`kind == Recap`, 2026-09-17) : l'hôte déplace la
+    /// fenêtre OS, la borne à la fenêtre de jeu et persiste la position au relâchement. Voir
+    /// `panels::recap::RecapDrag`, qui dit pourquoi ce sont des POSITIONS et non des écarts.
+    ///
+    /// Le pendant, pour la Récap, de [`Self::drag_window`] côté fenêtre de connexion — mais
+    /// l'hôte ne peut pas s'en remettre ici à `Window::drag_window` : cette boucle-là appartient
+    /// à l'OS, elle ne rend la main qu'au relâchement (donc plus un pixel redessiné pendant le
+    /// geste sous Windows) et ne dit pas où la fenêtre a atterri, alors que c'est précisément ce
+    /// qu'il faut écrire dans la config.
+    pub recap_drag: crate::panels::recap::RecapDrag,
     /// Ce que la fenêtre de confirmation vient d'obtenir (`kind == RecapReset`) : `Yes` remet la
     /// session à zéro et ferme la fenêtre, `No` la ferme seulement, `Pending` la garde.
     pub recap_reset_choice: crate::design::ConfirmChoice,
@@ -739,6 +749,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     let recap_outcome = panels::recap::show(ui, recap, recap_cells);
                     outcome.recap_height = Some(recap_outcome.height);
                     outcome.recap_reset_requested = recap_outcome.reset_requested;
+                    outcome.recap_drag = recap_outcome.drag;
                 }
                 // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::RecapReset`.
                 // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.

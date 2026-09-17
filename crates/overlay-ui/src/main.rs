@@ -97,6 +97,7 @@ use overlay_ui::panels::personnages_tab::{self, PersonnagesAvailability, Personn
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
+use overlay_ui::recap_placement;
 use overlay_ui::recap_session::{self, RecapSession};
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content;
@@ -260,35 +261,12 @@ const GAME_EDGE_MARGIN_PX: i32 = 0;
 /// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
 /// boutons Menu/Boutique du jeu).
 const GAME_TOP_MARGIN_PX: i32 = 28;
-/// Même principe que [`GAME_TOP_MARGIN_PX`], mais **sous** la rangée de boutons du jeu ET sous
-/// leurs infobulles : c'est l'ancrage du bloc Récap (`OverlayKind::Recap`, 2026-09-16), demandé
-/// « en haut à gauche, en dessous des boutons du jeu ».
-///
-/// **Relevé sur capture d'écran annotée (2026-09-16, tard)** — l'utilisateur a tracé où le bloc
-/// doit commencer : juste sous l'infobulle « Ouvrir/Fermer le Shop », avec **le même écart que
-/// l'infobulle prend elle-même sous son bouton**. En pixels du client, depuis le haut de la
-/// fausse barre de titre : 24 px de barre de titre, 8 px de vide, les boutons jusqu'à y = 71,
-/// **2 px de vide, l'infobulle de y = 74 à 109** (36 px, une ligne de texte, centrée sur son
-/// bouton — pas sur le curseur), 2 px de vide, et le bloc à y = 112. Les valeurs précédentes
-/// (70 : dérivée du design system sans capture ; 120 : première capture, garde de 10 px) sont
-/// remplacées par ce relevé au pixel.
-///
-/// À corriger sur retour d'écran si une infobulle du jeu sur deux lignes passait dessous.
-///
-/// C'est l'ordonnée du **bloc**, pas de sa fenêtre OS : celle-ci commence
-/// `render_content::RECAP_TOOLTIP_RESERVE` px plus haut, pour que les infobulles des cases de la
-/// première ligne, qui s'ouvrent au-dessus, aient où s'afficher (voir `anchor_position`).
-const GAME_RECAP_TOP_MARGIN_PX: i32 = 112;
-/// Marge, en pixels physiques, entre le bord gauche de la fenêtre de jeu et le bord gauche du
-/// bloc Récap — **le même écart que les boutons du jeu** (demande utilisateur 2026-09-16 au soir),
-/// là où `GAME_EDGE_MARGIN_PX` (0) colle l'overlay Combat au bord.
-///
-/// Relevé sur la même capture que [`GAME_RECAP_TOP_MARGIN_PX`] : la zone cliente du jeu commence
-/// 4 px avant le socle du bouton Menu (le cadre du client fait 4 px, et le bouton est posé contre
-/// lui). Le bloc à 0 débordait donc de 4 px à gauche de la colonne des boutons. Sa largeur
-/// (`panels::recap::WIDTH`, 206 px) le fait finir au bord droit du bouton Boutique, comme tracé
-/// par l'utilisateur.
-const GAME_RECAP_EDGE_MARGIN_PX: i32 = 4;
+// L'ancrage du bloc Récap — « en haut à gauche, en dessous des boutons du jeu » (2026-09-16) —
+// et le décalage que l'utilisateur lui donne à la souris depuis le 2026-09-17 vivent dans
+// `overlay_ui::recap_placement` (`DEFAULT_OFFSET`, bornage et aimantation) : le binaire X11 fait
+// le même calcul au pixel près, et là-bas il se teste sans serveur graphique. Les constantes
+// `GAME_RECAP_TOP_MARGIN_PX`/`GAME_RECAP_EDGE_MARGIN_PX` qui vivaient ici sont devenues ce
+// `DEFAULT_OFFSET`, relevé sur capture d'écran annotée — toute leur histoire y est.
 
 // `OverlayKind`/`UserEvent`/`AuthStatus`/`AuthCommand`/`CLICK_THROUGH_OPACITY` ont migré vers
 // `overlay_ui::render_content` (2026-09-03, §17.1 du plan) — voir leur doc là-bas, importés en
@@ -436,6 +414,80 @@ impl OverlayWindow {
     }
 }
 
+/// Ce qu'il faut savoir **en plus** pour poser une fenêtre `Recap`, et elle seule : où
+/// l'utilisateur a mis la bande, et l'échelle d'affichage de son écran.
+///
+/// Un type plutôt que deux paramètres de plus à `App::anchor_position` : les quatre autres zones
+/// n'en ont que faire, et `RecapAnchor::default()` dit exactement ce qu'il faut passer pour
+/// elles (« jamais déplacée, échelle sans objet »). Le calcul, lui, n'est pas ici mais dans
+/// `overlay_ui::recap_placement`, partagé avec le binaire X11 — ce type ne fait que traduire le
+/// rectangle de fenêtre de jeu de CETTE plateforme dans le vocabulaire de ce module.
+#[derive(Debug, Clone, Copy)]
+struct RecapAnchor {
+    /// Décalage du bloc voulu par l'utilisateur (`config::OverlayConfig::recap_position`),
+    /// `None` tant qu'il ne l'a pas déplacé.
+    offset: Option<(i32, i32)>,
+    /// Échelle d'affichage de la fenêtre du bloc (`Window::scale_factor`) — elle ne sert qu'à
+    /// convertir la réserve d'infobulle, voir `recap_placement::Band::new`.
+    scale: f64,
+}
+
+impl Default for RecapAnchor {
+    /// « Jamais déplacée », et une échelle neutre : ce que passent les quatre zones qui ne sont
+    /// pas la Récap, et qui n'en lisent rien.
+    fn default() -> Self {
+        Self {
+            offset: None,
+            scale: 1.0,
+        }
+    }
+}
+
+impl RecapAnchor {
+    fn new(offset: Option<(i32, i32)>, scale: f64) -> Self {
+        Self { offset, scale }
+    }
+
+    /// La fenêtre de jeu et la fenêtre du bloc, dans le vocabulaire de `recap_placement`.
+    ///
+    /// `client_top` et non `top` (comme pour l'ancrage du Suivi) : le client Wakfu dessine sa
+    /// fausse barre de titre dans sa propre zone cliente, et c'est sous ce bord-là que tout
+    /// s'aligne — d'où aussi la hauteur, comptée depuis ce bord jusqu'au bas de la fenêtre.
+    fn geometry(
+        self,
+        rect: GameRect,
+        overlay_width: i32,
+        overlay_height: i32,
+    ) -> (recap_placement::ClientArea, recap_placement::Band) {
+        (
+            recap_placement::ClientArea {
+                left: rect.left,
+                top: rect.client_top,
+                width: rect.width,
+                height: rect.top + rect.height - rect.client_top,
+            },
+            recap_placement::Band::new(overlay_width, overlay_height, self.scale),
+        )
+    }
+}
+
+/// Un glissement de la bande Récap en cours (2026-09-17) — voir `panels::recap::RecapDrag`, qui
+/// dit pourquoi le geste se raconte en POSITIONS et non en écarts.
+///
+/// Un seul état, comme il n'y a qu'une souris : la fenêtre saisie, et l'endroit du bloc par
+/// lequel on l'a attrapée. C'est ce point de saisie, invariant du début à la fin du geste, qui
+/// rend le suivi exact — la position visée vaut toujours « où est le curseur à l'écran, moins
+/// l'endroit par lequel on tient la bande », sans rien accumuler d'une frame à l'autre. Un
+/// cumul d'écarts, lui, dériverait dès que le bornage retiendrait la bande contre un bord.
+#[derive(Debug, Clone, Copy)]
+struct RecapDragState {
+    /// La fenêtre `Recap` saisie — une autre fenêtre de jeu peut en avoir une aussi, et ce n'est
+    /// pas elle qu'on déplace.
+    window: WindowId,
+    /// Position de saisie DANS la fenêtre, en pixels physiques.
+    grab: (i32, i32),
+}
+
 struct App {
     windows: HashMap<WindowId, OverlayWindow>,
     /// Raccourcis globaux : combinaisons EFFECTIVES (défauts ou personnalisation lue de
@@ -568,6 +620,18 @@ struct App {
     /// (`panels::recap::RecapView`). Elle remplace `started_at`, l'instant de lancement du
     /// processus dont la durée était dérivée le premier jour.
     recap_session: RecapSession,
+    /// **Où l'utilisateur a posé la bande Récap** (2026-09-17) — décalage du bloc depuis le coin
+    /// de la zone cliente du jeu, `None` tant qu'il ne l'a pas déplacée (voir
+    /// `overlay_ui::recap_placement` et `config::OverlayConfig::recap_position`).
+    ///
+    /// **Une seule position pour toutes les fenêtres de jeu**, et pas une par personnage
+    /// (décision utilisateur du 2026-09-17) : elle est RELATIVE à la fenêtre de jeu, donc chaque
+    /// client affiche sa bande au même endroit chez lui. Elle vit ici, dans `App`, pour cette
+    /// raison — un champ d'`OverlayWindow` en ferait un réglage par fenêtre.
+    recap_position: Option<(i32, i32)>,
+    /// Le glissement de la bande Récap **en cours**, s'il y en a un — voir `RecapDragState` et
+    /// `panels::recap::RecapDrag`. `None` le reste du temps, c'est-à-dire presque toujours.
+    recap_drag: Option<RecapDragState>,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
     /// bannière.
@@ -671,6 +735,9 @@ struct AppState {
     countdown_toast: suivi_tab::CountdownToastSettings,
     /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.
     recap_session: RecapSession,
+    /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
+    /// recap_position`), et réécrite à chaque bande reposée.
+    recap_position: Option<(i32, i32)>,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
@@ -707,6 +774,7 @@ impl App {
             chat_toast,
             countdown_toast,
             recap_session,
+            recap_position,
             catalog,
             catalog_stale,
             remote_icons,
@@ -765,6 +833,8 @@ impl App {
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
             recap_session,
+            recap_position,
+            recap_drag: None,
             banner_printed: false,
             last_foreground_heartbeat: None,
             pending_dialog: None,
@@ -1111,7 +1181,7 @@ impl App {
                     .values_mut()
                     .find(|w| w.game_hwnd == info.hwnd && w.kind == kind)
                 {
-                    Self::reposition(existing, info.rect);
+                    Self::reposition(existing, info.rect, self.recap_position);
                     if existing.active_character != *character_name {
                         existing.active_character = character_name.clone();
                     }
@@ -1137,6 +1207,7 @@ impl App {
                     info.rect,
                     self.interactive,
                     visible,
+                    self.recap_position,
                 );
                 tracing::info!(
                     "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -1365,6 +1436,7 @@ impl App {
         rect: GameRect,
         overlay_width: i32,
         overlay_height: i32,
+        recap: RecapAnchor,
     ) -> PhysicalPosition<i32> {
         match kind {
             OverlayKind::Combat => PhysicalPosition::new(
@@ -1375,18 +1447,16 @@ impl App {
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
             ),
-            // Récap : à gauche, aligné sur la colonne des boutons du jeu, et sous ces boutons ET
-            // leurs infobulles — « en haut à gauche, en dessous des boutons du jeu » (2026-09-16).
-            // Voir `GAME_RECAP_EDGE_MARGIN_PX`/`GAME_RECAP_TOP_MARGIN_PX` pour d'où viennent ces
-            // pixels, et `client_top` (pas `top`) pour la même raison que le Suivi : le client
-            // dessine sa fausse barre de titre dans sa propre zone cliente. La fenêtre commence
-            // `RECAP_TOOLTIP_RESERVE` px au-dessus du bloc — la marge haute que `paint_content`
-            // lui donne pour ses infobulles ; le BLOC, lui, reste à `GAME_RECAP_TOP_MARGIN_PX`.
-            OverlayKind::Recap => PhysicalPosition::new(
-                rect.left + GAME_RECAP_EDGE_MARGIN_PX,
-                rect.client_top + GAME_RECAP_TOP_MARGIN_PX
-                    - render_content::RECAP_TOOLTIP_RESERVE as i32,
-            ),
+            // Récap : sous les boutons du jeu et leurs infobulles tant que l'utilisateur ne l'a
+            // pas déplacée, là où il l'a posée ensuite (2026-09-17) — tout le calcul, bornage
+            // compris, est dans `overlay_ui::recap_placement`, partagé avec le binaire X11. Le
+            // décalage vise le BLOC ; la fenêtre, elle, commence `RECAP_TOOLTIP_RESERVE` px plus
+            // haut (la marge que `paint_content` lui donne pour ses infobulles).
+            OverlayKind::Recap => {
+                let (client, band) = recap.geometry(rect, overlay_width, overlay_height);
+                let (x, y) = recap_placement::window_position(recap.offset, client, band);
+                PhysicalPosition::new(x, y)
+            }
             // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
             // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
             OverlayKind::RecapReset => PhysicalPosition::new(rect.left, rect.top),
@@ -1407,6 +1477,10 @@ impl App {
         }
     }
 
+    // Huit paramètres depuis que la bande Récap se déplace (2026-09-17) : ce sont les
+    // caractéristiques d'UNE fenêtre à créer, toutes distinctes et toutes obligatoires. Un
+    // struct de paramètres ne ferait que déplacer la liste d'un cran, pour trois appelants.
+    #[allow(clippy::too_many_arguments)]
     fn create_overlay_window(
         event_loop: &ActiveEventLoop,
         kind: OverlayKind,
@@ -1415,6 +1489,9 @@ impl App {
         rect: GameRect,
         interactive: bool,
         visible: bool,
+        // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones,
+        // qui n'en lisent rien.
+        recap_offset: Option<(i32, i32)>,
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
@@ -1524,7 +1601,13 @@ impl App {
         let avatars = (kind == OverlayKind::Options).then(|| AvatarAtlas::load(&gpu.egui_ctx));
 
         let outer = window.outer_size();
-        let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
+        let position = Self::anchor_position(
+            kind,
+            rect,
+            outer.width as i32,
+            outer.height as i32,
+            RecapAnchor::new(recap_offset, window.scale_factor()),
+        );
         window.set_outer_position(position);
         if kind == OverlayKind::Watchlist {
             // Diagnostic PERMANENT (pas juste temporaire) : l'écart entre `rect.top` (bord
@@ -1582,11 +1665,16 @@ impl App {
     /// Recolle une fenêtre overlay sur sa fenêtre de jeu selon son ancrage (voir
     /// `anchor_position`) ; n'appelle `set_outer_position` que si la position cible a changé, pour
     /// ne pas spammer le compositeur DWM 20×/s pour rien.
-    fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
+    fn reposition(overlay: &mut OverlayWindow, rect: GameRect, recap_offset: Option<(i32, i32)>) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
-        let desired =
-            Self::anchor_position(overlay.kind, rect, outer.width as i32, outer.height as i32);
+        let desired = Self::anchor_position(
+            overlay.kind,
+            rect,
+            outer.width as i32,
+            outer.height as i32,
+            RecapAnchor::new(recap_offset, overlay.window.scale_factor()),
+        );
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
             overlay.last_position = Some(desired);
@@ -2346,6 +2434,8 @@ impl App {
             // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul `Combat`
             // peut naître masqué (voir `sync_panel_visibility`).
             true,
+            // Sans objet : cette fenêtre-ci n'est pas la bande Récap.
+            None,
         );
         if detached {
             // Pas de jeu sur lequel s'ancrer : au centre de l'écran principal, et le focus tout de
@@ -2466,6 +2556,7 @@ impl App {
             countdown_toast: self.countdown_toast,
             // Idem pour la reprise de la session du Récap (2026-09-17).
             recap_resume: self.recap_session.resume_settings(),
+            recap_position: self.recap_position,
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
@@ -2519,6 +2610,7 @@ impl App {
                 mutes: self.alert_mutes,
                 countdown_toast: self.countdown_toast,
                 recap_resume: self.recap_session.resume_settings(),
+                recap_position: self.recap_position,
                 shortcuts: self.hotkeys.bindings().clone(),
                 auto_update: self.auto_update,
                 start_with_os: autostart_actif,
@@ -2807,6 +2899,8 @@ impl App {
             rect,
             true,
             true,
+            // La confirmation couvre la fenêtre de jeu entière — elle ne suit pas la bande.
+            None,
         );
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -2853,6 +2947,56 @@ impl App {
     /// message d'erreur et RIEN n'est pris en compte — ni les alertes, ni le suivi, ni l'affichage
     /// du panneau de combat. Un commit partiel laisserait l'utilisateur devant une fenêtre en
     /// erreur sans savoir ce qui a déjà été écrit.
+    /// Recolle chaque bande Récap sur sa fenêtre de jeu — pour les fois où c'est la POSITION qui
+    /// change alors que les fenêtres de jeu, elles, n'ont pas bougé (bouton « Replacer au
+    /// défaut »). `sync_windows` s'en charge le reste du temps, mais au prochain tick seulement :
+    /// le geste et son effet doivent être dans la même passe, comme pour les cases à cocher (voir
+    /// `sync_panel_visibility`).
+    fn reposition_recap(&mut self) {
+        let recap_position = self.recap_position;
+        for overlay in self.windows.values_mut() {
+            if overlay.kind == OverlayKind::Recap {
+                let rect = overlay.game_rect;
+                Self::reposition(overlay, rect, recap_position);
+            }
+        }
+    }
+
+    /// **Écrit `config.toml` en entier, depuis l'état courant de l'application.**
+    ///
+    /// Le fichier est réécrit d'un bloc (voir `config::save`) : n'y porter que le réglage qu'on
+    /// vient de changer effacerait tous les autres. Cette méthode est donc le SEUL endroit qui
+    /// sache ce que la config doit contenir — jusqu'au 2026-09-17 la même construction vivait au
+    /// milieu de `validate_and_commit_options`, et la bande Récap déplaçable lui ajoutait un
+    /// deuxième appelant (la pose de la bande, qui n'ouvre aucune fenêtre Options). Deux copies
+    /// de cette liste de champs auraient divergé au premier réglage ajouté, et le réglage oublié
+    /// dans l'une serait effacé par l'autre.
+    ///
+    /// Best-effort, comme tout le module `config` : un échec d'écriture est journalisé là-bas,
+    /// jamais fatal.
+    fn persist_config(&self) {
+        let mut saved = config::OverlayConfig {
+            log_path: Some(self.log_path.clone()),
+            combat_always_visible: self.combat_always_visible,
+            turn_notification: self.turn_notification,
+            turn_notification_muted: self.turn_notification_muted,
+            auto_update: self.auto_update,
+            // Jalon posé au démarrage (`autostart::enable_by_default_once`, avant la première
+            // fenêtre) : toujours vrai ici, et le laisser retomber sur `Default` réinscrirait
+            // l'overlay au prochain lancement.
+            autostart_initialized: true,
+            ..Default::default()
+        };
+        saved.set_shortcuts(self.hotkeys.bindings());
+        saved.set_chat_toast(self.chat_toast);
+        saved.set_countdown_toast(self.countdown_toast);
+        saved.set_recap_resume(self.recap_session.resume_settings());
+        saved.set_recap_position(self.recap_position);
+        saved.set_features(self.features);
+        saved.set_alert_mutes(self.alert_mutes);
+        config::save(&saved);
+    }
+
     fn validate_and_commit_options(
         &mut self,
         options_window_id: WindowId,
@@ -2985,6 +3129,17 @@ impl App {
                         "[options] reprise de la session du récap mise à jour"
                     );
                 }
+                // **La position de la bande Récap (2026-09-17)** — cette fenêtre ne sait pas
+                // la DÉPLACER (ça se fait à la souris, sur le jeu) : elle sait la renvoyer d'où
+                // elle vient, et c'est le bouton « Replacer au défaut ». Les bandes se recollent
+                // dans la même passe, pour que le geste et son effet ne soient pas séparés d'un
+                // tick.
+                let recap_position_changed = commit.recap_position != self.recap_position;
+                if recap_position_changed {
+                    self.recap_position = commit.recap_position;
+                    tracing::info!("[options] bande Récap replacée à son emplacement d'origine.");
+                    self.reposition_recap();
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -3032,27 +3187,10 @@ impl App {
                     || mutes_changed
                     || countdown_toast_changed
                     || recap_resume_changed
+                    || recap_position_changed
                     || auto_update_changed
                 {
-                    let mut saved = config::OverlayConfig {
-                        log_path: Some(candidate),
-                        combat_always_visible: self.combat_always_visible,
-                        turn_notification: self.turn_notification,
-                        turn_notification_muted: self.turn_notification_muted,
-                        auto_update: self.auto_update,
-                        // Jalon posé au démarrage (`autostart::enable_by_default_once`, avant la
-                        // première fenêtre) : toujours vrai ici, et le laisser retomber sur
-                        // `Default` réinscrirait l'overlay au prochain lancement.
-                        autostart_initialized: true,
-                        ..Default::default()
-                    };
-                    saved.set_shortcuts(self.hotkeys.bindings());
-                    saved.set_chat_toast(self.chat_toast);
-                    saved.set_countdown_toast(self.countdown_toast);
-                    saved.set_recap_resume(self.recap_session.resume_settings());
-                    saved.set_features(self.features);
-                    saved.set_alert_mutes(self.alert_mutes);
-                    config::save(&saved);
+                    self.persist_config();
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
                 // pied de page est partagé : un bouton dont l'effet dépendrait de l'onglet affiché
@@ -3141,6 +3279,12 @@ impl App {
     /// déclencheur parmi d'autres.
     fn redraw(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
         let mut post_redraw = PostRedraw::None;
+        // La bande Récap vient d'être reposée : la config est réécrite une fois le geste fini
+        // (jamais pendant, voir le traitement de `RenderOutcome::recap_drag` plus bas). Un
+        // drapeau local plutôt qu'une variante de `PostRedraw` : celui-là est écrasé par
+        // l'action suivante quand deux se présentent, et une position perdue ne se rattrape pas
+        // — il faudrait re-glisser la bande.
+        let mut persist_recap_position = false;
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
@@ -3301,6 +3445,84 @@ impl App {
                     overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
             }
+            // **La bande saisie à la souris** (2026-09-17, voir `panels::recap::RecapDrag`) :
+            // le panneau remonte où est le curseur, l'hôte pose la fenêtre — comme pour la
+            // remise à zéro, le panneau n'agit jamais lui-même.
+            //
+            // La position visée vaut toujours « le curseur à l'écran, moins le point du bloc par
+            // lequel on le tient » : le curseur à l'écran, c'est la fenêtre telle qu'elle est
+            // posée plus la position locale que le panneau vient de lire, et le point de saisie
+            // ne bouge pas de tout le geste. Rien ne s'accumule d'une frame à l'autre, donc rien
+            // ne dérive — en particulier quand le bornage retient la bande contre un bord alors
+            // que la souris, elle, continue.
+            let scale = overlay.window.scale_factor();
+            let outer = overlay.window.outer_size();
+            let (client, band) = RecapAnchor::new(None, scale).geometry(
+                overlay.game_rect,
+                outer.width as i32,
+                outer.height as i32,
+            );
+            // Le curseur arrive en points logiques (repère d'egui), tout le reste est en pixels
+            // d'écran — à 125 %, confondre les deux ferait partir la bande une fois et quart
+            // trop loin.
+            let physical = |pos: egui::Pos2| {
+                (
+                    (pos.x as f64 * scale).round() as i32,
+                    (pos.y as f64 * scale).round() as i32,
+                )
+            };
+            let mut place = |position: Option<(i32, i32)>| {
+                let (x, y) = recap_placement::window_position(position, client, band);
+                let posed = PhysicalPosition::new(x, y);
+                if overlay.last_position != Some(posed) {
+                    overlay.window.set_outer_position(posed);
+                    overlay.last_position = Some(posed);
+                }
+            };
+            match outcome.recap_drag {
+                panels::recap::RecapDrag::None => {}
+                panels::recap::RecapDrag::Started(pos) => {
+                    self.recap_drag = Some(RecapDragState {
+                        window: id,
+                        grab: physical(pos),
+                    });
+                }
+                // `filter` sur la fenêtre saisie : en multicompte, chaque client a sa bande, et
+                // ce n'est pas parce que l'une est tenue que les autres bougent.
+                panels::recap::RecapDrag::Moved(pos) => {
+                    if let Some(drag) = self.recap_drag.filter(|drag| drag.window == id) {
+                        let posed =
+                            recap_placement::window_position(self.recap_position, client, band);
+                        let cursor = physical(pos);
+                        let target = (
+                            posed.0 + cursor.0 - drag.grab.0,
+                            posed.1 + cursor.1 - drag.grab.1,
+                        );
+                        let offset = recap_placement::offset_of(target, client, band);
+                        if self.recap_position != Some(offset) {
+                            self.recap_position = Some(offset);
+                            place(Some(offset));
+                        }
+                    }
+                }
+                // La pose : l'aimantation d'abord (une bande revenue près de son ancrage
+                // d'origine y recolle et la config oublie sa position, voir
+                // `recap_placement::snap`), l'écriture ensuite — une seule, pour tout le geste.
+                panels::recap::RecapDrag::Released => {
+                    if self.recap_drag.is_some_and(|drag| drag.window == id) {
+                        self.recap_drag = None;
+                        self.recap_position = self.recap_position.and_then(recap_placement::snap);
+                        place(self.recap_position);
+                        persist_recap_position = true;
+                        match self.recap_position {
+                            Some((x, y)) => tracing::info!("[recap] bande posée en {x} / {y}."),
+                            None => {
+                                tracing::info!("[recap] bande revenue à son emplacement d'origine.")
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Fenêtre de connexion : retaillée à la hauteur que la carte vient d'occuper (chaque
         // état a la sienne), en gardant son centre — `request_inner_size` est synchrone sous
@@ -3438,6 +3660,12 @@ impl App {
         // `about_to_wait` est responsable de le consommer le moment venu.
         overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
             .then(|| std::time::Instant::now() + repaint_delay);
+
+        // Après la dernière ligne qui touche `overlay` : `persist_config` a besoin de tout
+        // `self`, fenêtres comprises.
+        if persist_recap_position {
+            self.persist_config();
+        }
 
         match post_redraw {
             PostRedraw::None => {}
@@ -4116,6 +4344,7 @@ fn main() {
             saved_config.recap_resume(),
             std::time::SystemTime::now(),
         ),
+        recap_position: saved_config.recap_position(),
         catalog,
         catalog_stale,
         remote_icons,

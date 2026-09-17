@@ -87,6 +87,25 @@
 //! (`OverlayKind::RecapReset`) — décision utilisateur du 2026-09-17 : « impose une confirmBox
 //! centrée au jeu avec un fond voilé sur toute la fenêtre du jeu et des overlays ».
 //!
+//! ## Glisser la bande où l'on veut (2026-09-17)
+//!
+//! Demande utilisateur : « placer l'overlay de recap via du drag & drop », et le retrouver au
+//! même endroit après un redémarrage. **Tout le fond de la bande est saisissable** — pas de
+//! poignée dédiée : le bloc fait 206 px de large, calés au pixel sur la rangée de boutons du
+//! jeu, et il n'y a pas de place à prendre pour un glyphe qui ne dirait rien de plus qu'un
+//! curseur « main ». Le curseur passe donc à `Grab` au survol du fond et à `Grabbing` pendant le
+//! glissement, et les infobulles des cases continuent de s'ouvrir par-dessus : un survol et un
+//! glissement ne se disputent rien.
+//!
+//! **Le glyphe de remise à zéro garde la priorité** : il capte le glissement comme le clic (voir
+//! [`paint_reset_button`]), de sorte qu'un appui dessus ne fasse jamais partir la bande.
+//!
+//! Comme la remise à zéro, ce module **ne déplace rien lui-même** : il remonte le geste
+//! ([`RecapDrag`]) et c'est l'hôte qui bouge la fenêtre OS, la borne à la fenêtre de jeu, et
+//! écrit la position dans la config au relâchement (`config::OverlayConfig::recap_position`).
+//! Il ne connaît donc pas non plus sa propre position à l'écran — le harnais de captures, qui
+//! rend le bloc à l'origine de son `Ui`, s'en trouve inchangé.
+//!
 //! ## Ce que ce module ne fait pas
 //!
 //! Pas d'état : ce bloc affiche une vue et remonte une intention. Il renvoie aussi la **hauteur**
@@ -121,6 +140,32 @@ pub struct RecapOutcome {
     pub height: f32,
     /// Le glyphe de remise à zéro vient d'être cliqué : à l'hôte d'ouvrir la confirmation.
     pub reset_requested: bool,
+    /// Le geste de déplacement de la bande, s'il y en a un cette frame — voir [`RecapDrag`].
+    pub drag: RecapDrag,
+}
+
+/// Le glisser-déposer de la bande, tel que l'hôte le reçoit (2026-09-17, voir la doc de module).
+///
+/// **Des positions, pas des déplacements.** Chaque étape porte la position du curseur DANS la
+/// fenêtre, en points logiques — pas l'écart parcouru depuis la frame précédente. C'est ce qui
+/// fait tenir le geste : la fenêtre suit le curseur, donc les coordonnées locales de celui-ci
+/// redeviennent ce qu'elles étaient dès que la fenêtre a bougé, et un hôte qui cumulerait des
+/// écarts verrait la bande s'arrêter au premier pixel. L'hôte mémorise la position de saisie
+/// ([`Self::Started`]) et pose, à chaque frame, la fenêtre de façon que le curseur retombe
+/// dessus — sans dérive possible, puisque rien ne s'accumule.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum RecapDrag {
+    /// Rien cette frame — le cas de l'immense majorité d'entre elles.
+    #[default]
+    None,
+    /// Le bouton vient d'être enfoncé sur le fond : la position de saisie, celle que l'hôte
+    /// garde jusqu'au relâchement.
+    Started(egui::Pos2),
+    /// Le glissement se poursuit : où est le curseur maintenant.
+    Moved(egui::Pos2),
+    /// Bouton relâché — l'hôte aimante la bande à son ancrage d'origine si elle en est proche,
+    /// et persiste la position. C'est la seule étape qui écrit sur le disque.
+    Released,
 }
 
 /// Côté du glyphe de remise à zéro — plus discret que les cinq glyphes de case (16 px) : c'est
@@ -445,6 +490,11 @@ pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOu
     let band = egui::Rect::from_min_size(origin, egui::vec2(WIDTH, height(rows)));
     ui.painter()
         .rect_filled(band, BACKDROP_ROUNDING, tokens::OVERLAY_BACKDROP);
+    // La préhension AVANT les cases et le glyphe de remise à zéro : dans une même couche, egui
+    // donne le pointeur au dernier widget déclaré, donc à celui qui est peint par-dessus. Le fond
+    // est le plus bas, et c'est bien ce qu'on veut — tout ce qui est posé dessus lui reprend le
+    // geste (voir `paint_reset_button`).
+    let drag = band_drag(ui, band);
 
     let content_left = band.min.x + PADDING_X;
     let row_top = |row: usize| band.min.y + PADDING_Y + row as f32 * (ROW_HEIGHT + ROW_GAP);
@@ -500,6 +550,32 @@ pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOu
     RecapOutcome {
         height: band.height(),
         reset_requested,
+        drag,
+    }
+}
+
+/// La bande saisie à la souris (voir la doc de module) : `Sense::drag()` sur tout le fond, le
+/// curseur qui dit que ça s'attrape, et le geste tel que l'hôte l'attend ([`RecapDrag`]).
+///
+/// `Sense::drag()` seul, sans le clic : la bande n'a rien à faire d'un clic sur son fond, et un
+/// `click_and_drag` imposerait à egui un seuil de quelques pixels avant de commencer — la bande
+/// resterait collée le temps de le franchir, puis sauterait.
+fn band_drag(ui: &mut egui::Ui, band: egui::Rect) -> RecapDrag {
+    let response = ui.interact(band, ui.id().with("recap-fond"), egui::Sense::drag());
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    // `interact_pointer_pos` (et non `pointer_latest_pos`) : la position que le pointeur a POUR
+    // CE widget, celle qui reste définie tant que le bouton n'est pas relâché même si le curseur
+    // sort du bloc — ce qui arrive à chaque frame où la fenêtre n'a pas encore rattrapé la
+    // souris.
+    match response.interact_pointer_pos() {
+        Some(pos) if response.drag_started() => RecapDrag::Started(pos),
+        Some(pos) if response.dragged() => RecapDrag::Moved(pos),
+        _ if response.drag_stopped() => RecapDrag::Released,
+        _ => RecapDrag::None,
     }
 }
 
@@ -509,8 +585,19 @@ pub fn show(ui: &mut egui::Ui, view: &RecapView, visible: RecapCells) -> RecapOu
 /// Peint à la main comme les cinq glyphes de case, et non par `design::icon_button` : les quatre
 /// contextes de ce composant posent un socle (texture du jeu ou voile), et un socle de 32 px sur
 /// une ligne de 22 serait le seul bouton « habillé » d'un bloc où tout le reste est nu.
+///
+/// **`click_and_drag` et non `click`** (2026-09-17) : depuis que le fond de la bande se saisit à
+/// la souris, un glyphe qui ne sentirait que le clic laisserait le fond — pourtant sous lui —
+/// recevoir le glissement, et la bande partirait à chaque appui sur ce bouton. En sentant le
+/// glissement lui aussi, il le capte et n'en fait rien ; le clic, lui, reste un clic tant que la
+/// souris ne bouge pas, et une remise à zéro amorcée puis glissée est annulée — ce qui est la
+/// bonne réponse pour un geste destructeur.
 fn paint_reset_button(ui: &mut egui::Ui, ds: &design::DesignSystem, rect: egui::Rect) -> bool {
-    let response = ui.interact(rect, ui.id().with("recap-reset"), egui::Sense::click());
+    let response = ui.interact(
+        rect,
+        ui.id().with("recap-reset"),
+        egui::Sense::click_and_drag(),
+    );
     let tint = if response.hovered() {
         tokens::ICON_TINT_HOVER
     } else {

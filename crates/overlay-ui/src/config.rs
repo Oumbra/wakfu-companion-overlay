@@ -187,6 +187,39 @@ pub struct OverlayConfig {
     /// (`crate::recap_session::DEFAULT_RESUME_MINUTES`, 60). Bornée à la lecture.
     #[serde(default)]
     pub recap_resume_minutes: Option<i64>,
+    /// **Où l'utilisateur a posé la bande Récap** (2026-09-17) : abscisse du BLOC en pixels
+    /// physiques depuis le bord gauche de la fenêtre de jeu. `None` = jamais déplacée, donc
+    /// l'ancrage d'origine sous les boutons du client (`main.rs::GAME_RECAP_EDGE_MARGIN_PX` /
+    /// `GAME_RECAP_TOP_MARGIN_PX`) — ce qui n'est pas la même chose que « posée exactement au
+    /// défaut » : c'est ce que l'aimantation du glisser-déposer rétablit, et le bouton
+    /// « Replacer au défaut » de la section « Recap » avec elle.
+    ///
+    /// **Relative à la fenêtre de jeu, jamais à l'écran** : le client se déplace, change de
+    /// taille, passe d'un écran à l'autre ; seul un décalage depuis son coin garde la bande là
+    /// où l'utilisateur l'a accrochée. L'origine est celle de l'ancrage
+    /// (`GameRect::left`/`client_top`, donc la zone cliente — le client dessine sa fausse barre
+    /// de titre dedans, voir `GameRect::client_top`).
+    ///
+    /// **C'est le coin du BLOC, pas celui de sa fenêtre OS** : celle-ci commence
+    /// `render_content::RECAP_TOOLTIP_RESERVE` px plus haut (la place de ses infobulles). Un
+    /// fichier qu'on ouvre à la main dit ainsi où l'on voit la bande, pas où commence une marge
+    /// invisible.
+    ///
+    /// **Ici et non au compte**, comme ses voisines : une position à l'écran dépend de la
+    /// fenêtre de jeu qu'on a sous les yeux, pas du joueur — et le serveur n'accepte que des
+    /// clés connues (même raison que `chat_alert_duration_seconds`).
+    ///
+    /// Deux clés PLATES plutôt qu'une table `[recap_position]`, pour la même raison que les
+    /// interrupteurs de fonctionnalité : un fichier qu'on ouvre à la main se lit mieux sans
+    /// table intermédiaire, et une table ne pourrait pas se glisser avant `[shortcuts]` sans
+    /// déplacer les clés de racine qui la suivent.
+    #[serde(default)]
+    pub recap_position_x: Option<i32>,
+    /// Ordonnée du bloc Récap, même origine et même politique que [`Self::recap_position_x`] —
+    /// les deux vont toujours ensemble (voir [`OverlayConfig::recap_position`], qui ne rend une
+    /// position que si les deux sont là).
+    #[serde(default)]
+    pub recap_position_y: Option<i32>,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -290,6 +323,8 @@ impl Default for OverlayConfig {
             recap_challenges_enabled: actif(),
             recap_resume_enabled: actif(),
             recap_resume_minutes: None,
+            recap_position_x: None,
+            recap_position_y: None,
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
@@ -366,6 +401,27 @@ impl OverlayConfig {
     pub fn set_recap_resume(&mut self, resume: crate::recap_session::ResumeSettings) {
         self.recap_resume_enabled = resume.enabled;
         self.recap_resume_minutes = Some(resume.minutes);
+    }
+
+    /// Où l'utilisateur a posé la bande Récap, `None` tant qu'il ne l'a pas déplacée — voir
+    /// [`Self::recap_position_x`].
+    ///
+    /// **Les deux coordonnées ou aucune** : une config à moitié écrite (édition à la main
+    /// malheureuse, fichier tronqué) retombe sur l'ancrage d'origine plutôt que de coller la
+    /// bande contre un bord, et surtout plutôt que de faire échouer la lecture de tout le
+    /// fichier — la même tolérance que la table `[shortcuts]`.
+    pub fn recap_position(&self) -> Option<(i32, i32)> {
+        self.recap_position_x.zip(self.recap_position_y)
+    }
+
+    /// Reporte la position de la bande Récap dans la config — `None` efface les deux clés et
+    /// rend son ancrage d'origine à la bande (bouton « Replacer au défaut », et aimantation du
+    /// glisser-déposer). Appelée au relâchement du bouton de la souris, jamais à chaque frame.
+    pub fn set_recap_position(&mut self, position: Option<(i32, i32)>) {
+        (self.recap_position_x, self.recap_position_y) = match position {
+            Some((x, y)) => (Some(x), Some(y)),
+            None => (None, None),
+        };
     }
 
     /// Les trois interrupteurs de fonctionnalité de cette config — voir
@@ -740,5 +796,50 @@ mod tests {
         let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
         assert_eq!(relu, config);
         assert_eq!(relu.shortcuts(), bindings);
+    }
+
+    /// La bande Récap déplacée (2026-09-17) : les deux coordonnées font l'aller-retour, elles
+    /// s'écrivent AVANT `[shortcuts]` (sans quoi la table les avalerait, voir le champ
+    /// `shortcuts`), et une config qui ne les porte pas — toutes celles écrites avant ce jour —
+    /// se relit sans erreur, bande à son ancrage d'origine.
+    #[test]
+    fn aller_retour_de_la_position_du_recap() {
+        let vierge = OverlayConfig::default();
+        assert_eq!(vierge.recap_position(), None);
+
+        let mut config = OverlayConfig {
+            log_path: Some(PathBuf::from("/config/wakfu.log")),
+            ..Default::default()
+        };
+        config.set_recap_position(Some((460, 234)));
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let position = raw.find("recap_position_x").expect("clé écrite");
+        let table = raw.find("[shortcuts]").expect("table écrite");
+        assert!(
+            position < table,
+            "les clés de position doivent précéder `[shortcuts]`, sinon la table les avale :\n{raw}"
+        );
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu.recap_position(), Some((460, 234)));
+
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert_eq!(ancienne.recap_position(), None);
+    }
+
+    /// Une seule des deux coordonnées ne fait pas une position — une bande collée contre un bord
+    /// serait pire que l'ancrage d'origine, et faire échouer toute la lecture pire encore (le
+    /// `log_path` partirait avec).
+    #[test]
+    fn une_demi_position_du_recap_ne_deplace_rien() {
+        let bancale: OverlayConfig =
+            toml::from_str("recap_position_x = 460").expect("config bancale lisible");
+        assert_eq!(bancale.recap_position(), None);
+
+        let mut config = OverlayConfig::default();
+        config.set_recap_position(Some((460, 234)));
+        config.set_recap_position(None);
+        assert_eq!(config.recap_position_x, None);
+        assert_eq!(config.recap_position_y, None);
     }
 }
