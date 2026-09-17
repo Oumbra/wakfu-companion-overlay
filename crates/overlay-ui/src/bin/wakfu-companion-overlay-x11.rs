@@ -311,6 +311,11 @@ mod linux_main {
         /// Réglages de la carte de décompte à zéro en vigueur — voir
         /// `main.rs::App::countdown_toast`.
         countdown_toast: suivi_tab::CountdownToastSettings,
+        /// **Ce que devient un suivi complété** EN VIGUEUR (retrait, animation) — même provenance et
+        /// même politique que `countdown_toast`. Lu par `about_to_wait` à chaque complétion reçue du
+        /// thread Engine : c'est lui qui décide s'il y a une célébration à jouer et un retrait à
+        /// envoyer (voir `panels::suivi_tab::CompletionSettings`).
+        completion: suivi_tab::CompletionSettings,
         game_window: GameWindowTracker,
         /// La session du Récap — voir `main.rs::App::recap_session` (2026-09-17).
         recap_session: RecapSession,
@@ -406,6 +411,8 @@ mod linux_main {
         /// Réglages de la carte de décompte à zéro en vigueur — voir
         /// `main.rs::App::countdown_toast`.
         countdown_toast: suivi_tab::CountdownToastSettings,
+        /// Voir `App::completion` — lus de la config au démarrage.
+        completion: suivi_tab::CompletionSettings,
         /// La session du Récap relue du disque — voir `main.rs::AppState::recap_session`.
         recap_session: RecapSession,
         /// La position de la bande Récap relue de la config — voir `App::recap_position`.
@@ -447,6 +454,7 @@ mod linux_main {
                 alert_mutes,
                 chat_toast,
                 countdown_toast,
+                completion,
                 recap_session,
                 recap_position,
                 shortcuts,
@@ -504,6 +512,7 @@ mod linux_main {
                 alert_mutes,
                 chat_toast,
                 countdown_toast,
+                completion,
                 game_window,
                 recap_session,
                 recap_position,
@@ -1421,6 +1430,7 @@ mod linux_main {
                 // La fermeture de la carte de décompte (2026-09-16) — réglage local, la ligne
                 // s'ouvre directement sur sa valeur, voir `main.rs`.
                 countdown_toast: self.countdown_toast,
+                completion: self.completion,
                 // La reprise de la session du Récap (2026-09-17), même principe.
                 recap_resume: self.recap_session.resume_settings(),
                 recap_position: self.recap_position,
@@ -1472,6 +1482,7 @@ mod linux_main {
                     features: self.features,
                     mutes: self.alert_mutes,
                     countdown_toast: self.countdown_toast,
+                    completion: self.completion,
                     recap_resume: self.recap_session.resume_settings(),
                     recap_position: self.recap_position,
                     shortcuts: self.hotkeys.bindings().clone(),
@@ -1790,6 +1801,7 @@ mod linux_main {
             saved.set_shortcuts(self.hotkeys.bindings());
             saved.set_chat_toast(self.chat_toast);
             saved.set_countdown_toast(self.countdown_toast);
+            saved.set_completion(self.completion);
             saved.set_recap_resume(self.recap_session.resume_settings());
             saved.set_recap_position(self.recap_position);
             saved.set_features(self.features);
@@ -1921,6 +1933,18 @@ mod linux_main {
                         let _ = self
                             .settings_tx
                             .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+                    }
+                    // **Les deux réglages de complétion (2026-09-17)** — ils ne partent PAS au
+                    // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
+                    // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
+                    // complétion (voir `about_to_wait`).
+                    if commit.completion != self.completion {
+                        self.completion = commit.completion;
+                        tracing::info!(
+                            remove = self.completion.remove,
+                            animate = self.completion.animate,
+                            "[options] complétion d'un suivi mise à jour"
+                        );
                     }
                     // La reprise de la session du Récap (2026-09-17) — voir `main.rs`.
                     let recap_resume_changed =
@@ -2967,6 +2991,7 @@ mod linux_main {
             alert_mutes: saved_config.alert_mutes(),
             chat_toast: saved_config.chat_toast(),
             countdown_toast: saved_config.countdown_toast(),
+            completion: saved_config.completion(),
             // Voir `main.rs` : à côté des combats en cours.
             recap_session: RecapSession::load(
                 overlay_engine::fight_store::default_store_dir().join(recap_session::FILE_NAME),

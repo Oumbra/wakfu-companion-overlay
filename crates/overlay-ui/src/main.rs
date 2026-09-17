@@ -532,6 +532,13 @@ struct App {
     /// politique que `chat_toast` : lus de la config locale au démarrage, réécrits à la validation
     /// de la fenêtre Options (section « Suivi » de l'onglet « Paramètres », 2026-09-16).
     countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Voir `App::completion` — lus de la config au démarrage.
+    completion: suivi_tab::CompletionSettings,
+    /// **Ce que devient un suivi complété** EN VIGUEUR (retrait, animation) — même provenance et
+    /// même politique que `countdown_toast`. Lu par `about_to_wait` à chaque complétion reçue du
+    /// thread Engine : c'est lui qui décide s'il y a une célébration à jouer et un retrait à
+    /// envoyer (voir `panels::suivi_tab::CompletionSettings`).
+    completion: suivi_tab::CompletionSettings,
     /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
     /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
     /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
@@ -781,6 +788,7 @@ impl App {
             game_servers,
             chat_toast,
             countdown_toast,
+            completion,
             recap_session,
             recap_position,
             catalog,
@@ -821,6 +829,7 @@ impl App {
             game_servers,
             chat_toast,
             countdown_toast,
+            completion,
             catalog,
             catalog_stale,
             remote_icons,
@@ -2604,6 +2613,7 @@ impl App {
             // Idem pour la fermeture de la carte de décompte (2026-09-16) — réglage local, donc
             // rien à attendre d'un compte : la ligne s'ouvre directement sur sa valeur.
             countdown_toast: self.countdown_toast,
+            completion: self.completion,
             // Idem pour la reprise de la session du Récap (2026-09-17).
             recap_resume: self.recap_session.resume_settings(),
             recap_position: self.recap_position,
@@ -2660,6 +2670,7 @@ impl App {
                 features: self.features,
                 mutes: self.alert_mutes,
                 countdown_toast: self.countdown_toast,
+                completion: self.completion,
                 recap_resume: self.recap_session.resume_settings(),
                 recap_position: self.recap_position,
                 shortcuts: self.hotkeys.bindings().clone(),
@@ -3044,6 +3055,7 @@ impl App {
         saved.set_shortcuts(self.hotkeys.bindings());
         saved.set_chat_toast(self.chat_toast);
         saved.set_countdown_toast(self.countdown_toast);
+        saved.set_completion(self.completion);
         saved.set_recap_resume(self.recap_session.resume_settings());
         saved.set_recap_position(self.recap_position);
         saved.set_features(self.features);
@@ -3186,6 +3198,18 @@ impl App {
                     let _ = self
                         .settings_tx
                         .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+                }
+                // **Les deux réglages de complétion (2026-09-17)** — ils ne partent PAS au
+                // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
+                // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
+                // complétion (voir `about_to_wait`).
+                if commit.completion != self.completion {
+                    self.completion = commit.completion;
+                    tracing::info!(
+                        remove = self.completion.remove,
+                        animate = self.completion.animate,
+                        "[options] complétion d'un suivi mise à jour"
+                    );
                 }
                 // **La reprise de la session du Récap (2026-09-17)** — réglage local, posé sur
                 // la session elle-même : il ne sert qu'au prochain retour d'une fenêtre de jeu.
@@ -4406,6 +4430,7 @@ fn main() {
         game_servers,
         chat_toast: saved_config.chat_toast(),
         countdown_toast: saved_config.countdown_toast(),
+        completion: saved_config.completion(),
         // À côté des combats en cours (`fight-*.json`) — voir la doc de module de
         // `recap_session` pour ce qui y est écrit et quand.
         recap_session: RecapSession::load(
