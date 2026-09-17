@@ -14,6 +14,7 @@
 //! | --- | --- | --- |
 //! | `design::assets` | manifeste : nom logique → fichier + découpage 9-slice | de la peinture |
 //! | `design::nine_slice` | peindre une texture à n'importe quelle taille | connaître un composant |
+//! | `design::fit` | inscrire une image de contenu dans sa boîte, à son rapport | choisir la boîte |
 //! | `design::fonts` | enregistrer les polices embarquées auprès d'egui | mettre en page |
 //! | `design::text` | le corps et la police d'un libellé | choisir quoi écrire |
 //! | `design::tokens` | couleurs et métriques mesurées, partagées | de la mise en page |
@@ -30,6 +31,7 @@
 
 pub mod assets;
 pub mod components;
+pub mod fit;
 pub mod fonts;
 pub mod icons;
 pub mod nine_slice;
@@ -41,6 +43,7 @@ use std::sync::Arc;
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::checkbox::{checkbox, paint as paint_checkbox, Checkbox, CheckboxState};
+pub use fit::{contain as contain_size, contain_rect};
 pub use icons::DsIcon;
 // Les trois fonctions de géométrie du repliable sont préfixées à la réexportation : `design::
 // closed_height` ne dirait pas de quoi, et le jour où un second conteneur en aura une, le nom nu

@@ -304,12 +304,15 @@ impl CombatFrame {
             // encore classifié, ennemi que le catalogue ne résout pas) n'ont pas d'équivalent gris.
             let (texture, dimmed) = match &portrait {
                 Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
-                    (texture.id(), false)
+                    (super::combat::sized(texture), false)
                 }
                 Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
-                    (texture.id(), fighter.is_ko)
+                    (super::combat::sized(texture), fighter.is_ko)
                 }
-                None => (icons.unknown_entity_texture().id(), fighter.is_ko),
+                None => (
+                    super::combat::sized(icons.unknown_entity_texture()),
+                    fighter.is_ko,
+                ),
             };
             crate::design::paint_portrait(
                 ui,

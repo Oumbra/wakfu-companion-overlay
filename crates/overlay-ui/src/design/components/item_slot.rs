@@ -7,7 +7,7 @@
 //! ui.add(
 //!     design::item_slot()
 //!         .frame(SlotFrame::Rarity(ItemRarity::Legendary))
-//!         .icon(texture_id)
+//!         .icon(egui::load::SizedTexture::from_handle(&handle))
 //!         .count(SlotCount::Fraction { current: 42, target: 500 }),
 //! );
 //! ```
@@ -27,11 +27,17 @@
 //!
 //! ## Ce que l'appelant fournit, et ce qu'il ne fournit pas
 //!
-//! L'icône arrive en [`egui::TextureId`], **déjà résolue**. Ce n'est pas une entorse au contrat
-//! (« aucune texture en paramètre ») : cette règle vise les assets du design system, que le
+//! L'icône arrive en [`egui::load::SizedTexture`], **déjà résolue**. Ce n'est pas une entorse au
+//! contrat (« aucune texture en paramètre ») : cette règle vise les assets du design system, que le
 //! composant doit résoudre depuis une intention. Une icône d'objet est du **contenu** — elle est
 //! téléchargée, mise en cache et indexée par le catalogue, tout cela hors du design system. Le
 //! composant ne saurait pas la nommer.
+//!
+//! Elle arrive **avec sa taille native**, et pas en `TextureId` nu, parce qu'elle est peinte à son
+//! rapport ([`crate::design::fit`]) : les icônes de `wakassets/items` et `wakassets/monsters` sont
+//! carrées, mais un monstre servi par `wakassets/monsterIllustrations` est une **bannière
+//! rectangulaire**, écrasée dans le carré de l'emplacement jusqu'au 2026-09-17 (retour
+//! utilisateur : « les images provenant de `wakassets/monsterIllustrations` sont déformées »).
 //!
 //! La **rareté**, en revanche, est une intention : [`ItemRarity`] est un type du design system, et
 //! c'est au panneau de traduire son `WakfuRarity` métier — un composant n'accède pas à
@@ -47,9 +53,9 @@
 //! le terminal — d'où [`ItemSlot::log_name`] dès que deux emplacements voisins doivent se
 //! distinguer.
 
-use egui::{Response, Sense, Ui, Vec2, Widget};
+use egui::{load::SizedTexture, Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{text, tokens, DesignSystem, DsTexture};
+use crate::design::{fit, text, tokens, DesignSystem, DsTexture};
 
 /// Rareté d'un objet, **du point de vue du design system** : elle ne sert qu'à choisir une bordure.
 ///
@@ -211,7 +217,7 @@ pub fn item_slot() -> ItemSlot {
 /// Voir [`item_slot`].
 pub struct ItemSlot {
     frame: SlotFrame,
-    icon: Option<egui::TextureId>,
+    icon: Option<SizedTexture>,
     count: Option<SlotCount>,
     size: f32,
     selection: Option<bool>,
@@ -226,9 +232,10 @@ impl ItemSlot {
         self
     }
 
-    /// Icône déjà résolue — voir la doc de module sur pourquoi ce n'est pas une texture du design
-    /// system. Sans icône, l'emplacement est peint vide.
-    pub fn icon(mut self, icon: egui::TextureId) -> Self {
+    /// Icône déjà résolue, **avec sa taille native** — voir la doc de module sur pourquoi ce n'est
+    /// pas une texture du design system, et pourquoi la taille l'accompagne. Sans icône,
+    /// l'emplacement est peint vide.
+    pub fn icon(mut self, icon: SizedTexture) -> Self {
         self.icon = Some(icon);
         self
     }
@@ -367,8 +374,12 @@ impl Widget for ItemSlot {
                 },
                 SlotLayer::Icon => {
                     if let Some(icon) = self.icon {
-                        egui::Image::new(egui::load::SizedTexture::new(icon, icon_rect.size()))
-                            .paint_at(ui, icon_rect);
+                        // Inscrite dans la fenêtre de l'emplacement, à son rapport : une bannière
+                        // de `monsterIllustrations` s'y pose entière et centrée, une icône carrée
+                        // la remplit comme avant (voir `design::fit`).
+                        let peint = fit::contain_rect(icon_rect, icon.size);
+                        egui::Image::new(SizedTexture::new(icon.id, peint.size()))
+                            .paint_at(ui, peint);
                     }
                 }
             }

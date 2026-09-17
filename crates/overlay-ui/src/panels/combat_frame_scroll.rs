@@ -189,25 +189,30 @@ impl EnemyFrameScroll {
                     remote_icon_textures,
                     fighter,
                 );
+                // **Inscrit dans l'emplacement, à son rapport** (`design::fit`) : la bande des
+                // ennemis est justement l'écran où les monstres servis par
+                // `wakassets/monsterIllustrations` — des bannières rectangulaires — étaient
+                // étirés en carré jusqu'au 2026-09-17.
+                let peindre = |ui: &egui::Ui, texture: &egui::TextureHandle, ko: bool| {
+                    let peint = crate::design::contain_rect(portrait_rect, texture.size_vec2());
+                    egui::Image::new(texture)
+                        .corner_radius(radius)
+                        .tint(super::combat::grey_tint_if_ko(ko))
+                        .paint_at(ui, peint);
+                };
                 match portrait {
                     Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
-                        egui::Image::new(&texture)
-                            .corner_radius(radius)
-                            .paint_at(ui, portrait_rect);
+                        // Le portrait de classe a sa version grise PRÉCALCULÉE dans l'atlas : le
+                        // teinter en plus l'assombrirait deux fois.
+                        peindre(ui, &texture, false);
                     }
                     Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
                         // Portrait RÉEL du monstre — pas de version grisée précalculée pour
                         // celle-ci, simple tint si KO (voir `grey_tint_if_ko`).
-                        egui::Image::new(&texture)
-                            .corner_radius(radius)
-                            .tint(super::combat::grey_tint_if_ko(fighter.is_ko))
-                            .paint_at(ui, portrait_rect);
+                        peindre(ui, &texture, fighter.is_ko);
                     }
                     None => {
-                        let image = egui::Image::new(icons.unknown_entity_texture())
-                            .corner_radius(radius)
-                            .tint(super::combat::grey_tint_if_ko(fighter.is_ko));
-                        image.paint_at(ui, portrait_rect);
+                        peindre(ui, icons.unknown_entity_texture(), fighter.is_ko);
                     }
                 }
                 // Marques du bloc de sorts ICI, dans la bande de clip et avant tout le reste

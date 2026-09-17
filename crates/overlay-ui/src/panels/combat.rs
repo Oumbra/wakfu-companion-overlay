@@ -1064,6 +1064,15 @@ pub(crate) enum FighterPortrait {
 /// générique — un ennemi n'a jamais de `class_name` (`breed` non déterministe côté ennemi, voir
 /// `overlay_engine::class_breed`) — d'où cette extraction, plutôt que dupliquer la résolution
 /// catalogue/icône distante dans les deux modules de cadre.
+/// La texture d'un portrait **avec sa taille native** — ce que `design::portrait` demande depuis le
+/// 2026-09-17 pour peindre à son rapport : un portrait de classe est carré, mais une icône de
+/// monstre servie par `wakassets/monsterIllustrations` est une bannière rectangulaire, et elle
+/// était étirée dans le médaillon (« les images provenant de `wakassets/monsterIllustrations` sont
+/// déformées »).
+pub(crate) fn sized(texture: &egui::TextureHandle) -> egui::load::SizedTexture {
+    egui::load::SizedTexture::from_handle(texture)
+}
+
 pub(crate) fn resolve_fighter_texture(
     ui: &egui::Ui,
     portraits: &PortraitAtlas,
@@ -1114,9 +1123,9 @@ fn paint_flat_portrait(
     // qu'un portrait de classe a sa version grise précalculée dans l'atlas, et qu'une icône
     // distante ou le repli n'en ont pas.
     let (texture, dimmed) = match &portrait {
-        Some(FighterPortrait::ClassPortrait(texture)) => (texture.id(), false),
-        Some(FighterPortrait::RemoteMonster(texture)) => (texture.id(), fighter.is_ko),
-        None => (icons.unknown_entity_texture().id(), fighter.is_ko),
+        Some(FighterPortrait::ClassPortrait(texture)) => (sized(texture), false),
+        Some(FighterPortrait::RemoteMonster(texture)) => (sized(texture), fighter.is_ko),
+        None => (sized(icons.unknown_entity_texture()), fighter.is_ko),
     };
     let response = ui.add(
         design::portrait(texture)

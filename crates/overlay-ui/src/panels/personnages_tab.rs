@@ -1162,7 +1162,7 @@ fn modale_personnage(
                         entree.image = vu.class_name.as_deref().and_then(|class| {
                             ctx.avatars
                                 .texture(class, vu.gender, false)
-                                .map(|handle| handle.id())
+                                .map(egui::load::SizedTexture::from_handle)
                         });
                         if deja.contains(&overlay_engine::roster::normalize_wakfu_name(&vu.name)) {
                             entree.disabled = true;

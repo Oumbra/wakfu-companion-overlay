@@ -177,12 +177,12 @@ impl Avatars {
         Self { color, grey }
     }
 
-    fn texture(&self, class: &str, gender: Gender, gris: bool) -> Option<egui::TextureId> {
+    fn texture(&self, class: &str, gender: Gender, gris: bool) -> Option<egui::load::SizedTexture> {
         let table = if gris { &self.grey } else { &self.color };
         table
             .iter()
             .find(|((name, sex), _)| *name == class && *sex == gender)
-            .map(|(_, handle)| handle.id())
+            .map(|(_, handle)| egui::load::SizedTexture::from_handle(handle))
     }
 }
 
@@ -465,9 +465,9 @@ fn paint_avatar(
 ) {
     let texture = avatars
         .texture(class, gender, gris)
-        .unwrap_or_else(|| icons.unknown_entity_texture().id());
+        .unwrap_or_else(|| egui::load::SizedTexture::from_handle(icons.unknown_entity_texture()));
     ui.painter().image(
-        texture,
+        texture.id,
         rect,
         Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         Color32::WHITE,

@@ -788,9 +788,9 @@ fn gallery(ui: &mut egui::Ui) {
         use overlay_ui::design::PortraitShape;
         // Un glyphe du manifeste tient lieu de portrait : la galerie n'a ni atlas de classes ni
         // catalogue distant. Ce qu'on vérifie ici est la FORME, le grisé et le pourcentage.
-        let faux = design::DesignSystem::get(ui.ctx())
-            .icon(DsIcon::Characters)
-            .id();
+        let faux = egui::load::SizedTexture::from_handle(
+            design::DesignSystem::get(ui.ctx()).icon(DsIcon::Characters),
+        );
         ui.horizontal(|ui| {
             for (shape, dimmed, percent, nom) in [
                 (PortraitShape::Square, false, None, "carré"),
@@ -871,7 +871,9 @@ fn gallery(ui: &mut egui::Ui) {
         use overlay_ui::design::{ItemRarity, SlotCount, SlotFrame};
         // Une icône factice : la galerie n'a pas de catalogue distant. Le glyphe du manifeste tient
         // ce rôle — ce qu'on vérifie ici est le CADRE et son ordre, pas l'icône.
-        let faux_icone = design::DesignSystem::get(ui.ctx()).icon(DsIcon::Kamas).id();
+        let faux_icone = egui::load::SizedTexture::from_handle(
+            design::DesignSystem::get(ui.ctx()).icon(DsIcon::Kamas),
+        );
         ui.horizontal_wrapped(|ui| {
             for (rarity, nom) in [
                 (ItemRarity::Common, "Common"),
@@ -1650,6 +1652,155 @@ fn galerie_du_voile() {
     harness.snapshot("design_gallery_scrim");
 }
 
+/// **Une image de contenu qui n'est pas carrée** — la planche qui verrouille `design::fit`.
+///
+/// Le CDN `wakassets` ne sert pas que des carrés : un monstre absent de `monsters/` est servi par
+/// `monsterIllustrations/`, qui porte des **bannières rectangulaires** (34 des 61 monstres d'un
+/// fichier utilisateur, voir `IconRef::image_urls`). Peintes dans un carré, elles y étaient
+/// **étirées** — retour utilisateur du 2026-09-17 : « les images provenant de
+/// `wakassets/monsterIllustrations` sont déformées ».
+///
+/// Chaque rangée montre le MÊME composant avec trois images : une carrée (le cas courant, qui ne
+/// doit RIEN changer), une bannière large et une haute. Une capture suffit alors à dire si la
+/// règle tient : la bannière doit rester entière et à son rapport, jamais remplir le carré.
+#[test]
+fn galerie_des_images_non_carrees() {
+    let mut harness = Harness::builder()
+        // 330 : les deux rangées et leurs légendes, plus la marge basse du cadre.
+        .with_size(Vec2::new(760.0, 330.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    section_images_non_carrees(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_images_non_carrees");
+}
+
+/// Une image factice de `taille` pixels : un damier à bord clair, qui rend une déformation
+/// LISIBLE sur la capture — un carré étiré y devient un rectangle aux cases allongées, ce qu'une
+/// silhouette de monstre ne montrerait pas aussi nettement.
+///
+/// Rend la **poignée**, que l'appelant doit garder vivante le temps du rendu : un
+/// `egui::TextureHandle` libère sa texture dès son dernier exemplaire tombé, et la planche ne
+/// montrerait plus que des cases vides (piège déjà payé sur `UiIcons`, voir les fixtures
+/// `wakassets`).
+fn fausse_image(ctx: &egui::Context, nom: &str, taille: [usize; 2]) -> egui::TextureHandle {
+    let [w, h] = taille;
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            let bord = x < 2 || y < 2 || x + 2 >= w || y + 2 >= h;
+            let case = ((x / 8) + (y / 8)) % 2 == 0;
+            pixels.push(match (bord, case) {
+                (true, _) => Color32::from_rgb(0xF4, 0xD8, 0x9F),
+                (_, true) => Color32::from_rgb(0x3C, 0x5A, 0x6E),
+                (_, false) => Color32::from_rgb(0x8A, 0x4B, 0x3C),
+            });
+        }
+    }
+    let image = egui::ColorImage {
+        size: taille,
+        pixels,
+        source_size: Vec2::new(w as f32, h as f32),
+    };
+    ctx.load_texture(nom, image, egui::TextureOptions::LINEAR)
+}
+
+fn section_images_non_carrees(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "Image de contenu — inscrite dans sa boîte, jamais étirée",
+        "Tout ce qui vient du CDN est peint à son rapport natif (`design::fit`, l'`object-fit: contain` du web) : une bannière de `monsterIllustrations` reste entière et centrée, une icône carrée remplit sa boîte comme avant.",
+    );
+    // **Gardées en mémoire egui**, comme les fixtures `wakassets` de la grande planche : le rendu
+    // a lieu APRÈS cette fonction, et une poignée locale aurait déjà libéré sa texture — la
+    // planche ne montrerait que des cases vides (essayé, et c'est bien ce qu'elle a montré).
+    let carree = charge_une_fois(ui, "galerie.fit.carree", |ctx| {
+        fausse_image(ctx, "fit-carree", [64, 64])
+    });
+    let large = charge_une_fois(ui, "galerie.fit.large", |ctx| {
+        fausse_image(ctx, "fit-large", [96, 32])
+    });
+    let haute = charge_une_fois(ui, "galerie.fit.haute", |ctx| {
+        fausse_image(ctx, "fit-haute", [32, 96])
+    });
+    let cas = [
+        (
+            egui::load::SizedTexture::from_handle(&carree),
+            "carrée 64 × 64",
+        ),
+        (
+            egui::load::SizedTexture::from_handle(&large),
+            "bannière 96 × 32",
+        ),
+        (
+            egui::load::SizedTexture::from_handle(&haute),
+            "haute 32 × 96",
+        ),
+    ];
+
+    ui.label(
+        RichText::new("Portrait — carré, rond")
+            .color(CAPTION)
+            .size(11.0),
+    );
+    ui.horizontal(|ui| {
+        for (texture, nom) in cas {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add(design::portrait(texture).size(48.0));
+                    ui.add(
+                        design::portrait(texture)
+                            .shape(design::PortraitShape::Round)
+                            .size(48.0),
+                    );
+                });
+                ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+            });
+            ui.add_space(18.0);
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new("Emplacement d'objet — cadre de rareté, cadre simple")
+            .color(CAPTION)
+            .size(11.0),
+    );
+    ui.horizontal(|ui| {
+        for (texture, nom) in cas {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        design::item_slot()
+                            .frame(design::SlotFrame::Rarity(design::ItemRarity::Rare))
+                            .icon(texture)
+                            .size(48.0)
+                            .log_name("galerie.fit.rarete"),
+                    );
+                    ui.add(
+                        design::item_slot()
+                            .frame(design::SlotFrame::Plain)
+                            .icon(texture)
+                            .size(48.0)
+                            .log_name("galerie.fit.simple"),
+                    );
+                });
+                ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+            });
+            ui.add_space(18.0);
+        }
+    });
+}
+
 /// La tuile à légende — sa propre planche, la principale ayant atteint le plafond de 8192 px.
 ///
 /// Trois états forcés côte à côte, une légende longue, un contenu élidé, et une grille de quatre
@@ -2046,7 +2197,7 @@ fn galerie_du_switch() {
 /// `preview_open`/`preview_active`/`preview_filter` forcent l'état peint : hors écran, aucun champ
 /// n'a le focus, donc rien ne s'ouvrirait jamais.
 fn section_autocomplete(ui: &mut egui::Ui) {
-    use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems, GEM_NATIVE};
+    use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems};
 
     // **Gardées en mémoire egui, pas rechargées à chaque frame** : un `TextureHandle` libère sa
     // texture quand le dernier exemplaire tombe, et un chargement local peindrait donc des cases
@@ -2066,9 +2217,8 @@ fn section_autocomplete(ui: &mut egui::Ui) {
     // visibles sur la même capture.
     let entree = |label: &str, categorie: u16, rarete, deja: bool, image: Option<usize>| {
         let mut entry = design::AutocompleteEntry::new(label, categorie);
-        entry.gem = Some(gems.texture_id(rarete));
-        entry.gem_size = GEM_NATIVE;
-        entry.image = image.map(|rang| objets.texture_id(rang));
+        entry.gem = Some(gems.sized_texture(rarete));
+        entry.image = image.map(|rang| objets.sized_texture(rang));
         entry.disabled = deja;
         if deja {
             entry.mention = Some("déjà suivi".to_owned());
@@ -2106,8 +2256,8 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         ),
     ];
     let filtre = |f: CategoryFilter, categorie: Option<u16>| match categorie {
-        None => design::AutocompleteFilter::all(f.label(), Some(cats.texture_id(f))),
-        Some(c) => design::AutocompleteFilter::category(c, f.label(), Some(cats.texture_id(f))),
+        None => design::AutocompleteFilter::all(f.label(), Some(cats.sized_texture(f))),
+        Some(c) => design::AutocompleteFilter::category(c, f.label(), Some(cats.sized_texture(f))),
     };
     let filtres = vec![
         filtre(CategoryFilter::All, None),

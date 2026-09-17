@@ -131,9 +131,11 @@ fn paint_body(
             .and_then(|icon| {
                 ctx.remote_icon_textures
                     .resolve(ui.ctx(), ctx.remote_icons, &icon)
-                    .map(|handle| handle.id())
+                    .map(|handle| egui::load::SizedTexture::from_handle(&handle))
             })
-            .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
+            .unwrap_or_else(|| {
+                egui::load::SizedTexture::from_handle(ctx.icons.unknown_entity_texture())
+            });
         cell.horizontal_centered(|ui| {
             ui.add(
                 design::item_slot()
@@ -281,9 +283,11 @@ fn ingredient_row(
         .and_then(|icon| {
             ctx.remote_icon_textures
                 .resolve(ui.ctx(), ctx.remote_icons, &icon)
-                .map(|handle| handle.id())
+                .map(|handle| egui::load::SizedTexture::from_handle(&handle))
         })
-        .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
+        .unwrap_or_else(|| {
+            egui::load::SizedTexture::from_handle(ctx.icons.unknown_entity_texture())
+        });
 
     let mut gauche = ui.new_child(
         egui::UiBuilder::new().max_rect(Rect::from_min_max(corps.min, colonne_qte.left_bottom())),

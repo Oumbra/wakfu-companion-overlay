@@ -74,6 +74,15 @@
 //! titre que le libellé. Le décor du composant, lui (socle du champ, loupe), reste résolu en
 //! interne par `DesignSystem::get`.
 //!
+//! Elles arrivent en [`egui::load::SizedTexture`], **taille native comprise** : tout ce qui vient
+//! du CDN est peint à son rapport ([`crate::design::fit`]). Une gemme fait 13 × 20, et un monstre
+//! servi par `wakassets/monsterIllustrations` est une bannière rectangulaire — les deux étaient
+//! écrasés en carré, la gemme jusqu'au 2026-09-12 (« très fortement agrandies et aplaties »),
+//! l'image jusqu'au 2026-09-17 (« les images provenant de `wakassets/monsterIllustrations` sont
+//! déformées »). Le champ `gem_size`, qui portait la taille de la gemme à côté de sa texture et
+//! qu'un appelant pouvait donc oublier, a disparu dans la même correction : la taille ne se sépare
+//! plus de la texture.
+//!
 //! ## Ce que le composant ne fait PAS
 //!
 //! Il ne **valide** rien : ce qui est tapé reste ce qui est tapé, et un texte qui ne correspond à
@@ -88,10 +97,10 @@
 //! n'est pas un paramètre du composant, c'est simplement ce que l'appelant décide de lui donner.
 
 use egui::emath::GuiRounding as _;
-use egui::{Align2, Response, Sense, TextureId, Ui, Vec2};
+use egui::{load::SizedTexture, Align2, Response, Sense, Ui, Vec2};
 
 use crate::design::components::icon_button::glyph_fit;
-use crate::design::{text, tokens, DesignSystem, DsIcon, InputSize};
+use crate::design::{fit, text, tokens, DesignSystem, DsIcon, InputSize};
 
 /// Une suggestion affichée par le panneau.
 ///
@@ -104,14 +113,12 @@ pub struct AutocompleteEntry {
     /// À quelle catégorie l'entrée appartient — comparée telle quelle à celle d'un filtre. Le
     /// composant n'interprète pas cette valeur, il l'égale.
     pub category: u16,
-    /// La gemme de rareté, peinte à son rapport natif dans une boîte carrée.
-    pub gem: Option<TextureId>,
-    /// Taille native de la gemme — nécessaire pour la poser sans l'écraser (une gemme du jeu fait
-    /// 13 × 20, pas un carré).
-    pub gem_size: Vec2,
-    /// L'image de l'objet, nue : dans ce panneau la rareté est portée par la gemme, un cadre de
-    /// rareté ferait doublon.
-    pub image: Option<TextureId>,
+    /// La gemme de rareté, peinte à son rapport natif dans une boîte carrée — sa taille vient avec
+    /// elle (une gemme du jeu fait 13 × 20, pas un carré).
+    pub gem: Option<SizedTexture>,
+    /// L'image de l'objet ou du monstre, nue : dans ce panneau la rareté est portée par la gemme,
+    /// un cadre de rareté ferait doublon. Peinte à son rapport elle aussi — voir la doc de module.
+    pub image: Option<SizedTexture>,
     /// Déjà dans la liste cible : grisée, non sélectionnable, sans surbrillance.
     pub disabled: bool,
     /// Mention alignée à droite (« déjà suivi »), affichée seulement si l'entrée est désactivée.
@@ -139,7 +146,6 @@ impl AutocompleteEntry {
             label: label.into(),
             category,
             gem: None,
-            gem_size: Vec2::splat(1.0),
             image: None,
             disabled: false,
             mention: None,
@@ -155,15 +161,16 @@ pub struct AutocompleteFilter {
     /// `None` = le bouton « Tout », qui relâche le filtre. **Ce n'est pas une catégorie** : c'est
     /// la remise à zéro, et il est actif tant qu'aucun filtre ne l'est.
     pub category: Option<u16>,
-    /// L'icône du filtre — contenu, comme les images d'entrée (voir la doc de module).
-    pub icon: Option<TextureId>,
+    /// L'icône du filtre — contenu, comme les images d'entrée (voir la doc de module), taille
+    /// native comprise.
+    pub icon: Option<SizedTexture>,
     /// Infobulle du bouton.
     pub tooltip: String,
 }
 
 impl AutocompleteFilter {
     /// Le bouton « Tout ».
-    pub fn all(tooltip: impl Into<String>, icon: Option<TextureId>) -> Self {
+    pub fn all(tooltip: impl Into<String>, icon: Option<SizedTexture>) -> Self {
         Self {
             category: None,
             icon,
@@ -172,7 +179,7 @@ impl AutocompleteFilter {
     }
 
     /// Un bouton de catégorie.
-    pub fn category(category: u16, tooltip: impl Into<String>, icon: Option<TextureId>) -> Self {
+    pub fn category(category: u16, tooltip: impl Into<String>, icon: Option<SizedTexture>) -> Self {
         Self {
             category: Some(category),
             icon,
@@ -859,12 +866,11 @@ impl<'a> Autocomplete<'a> {
                 } else {
                     egui::Color32::from_white_alpha(tokens::AUTOCOMPLETE_FILTER_IDLE_ALPHA)
                 };
-                egui::Image::from_texture(egui::load::SizedTexture::new(
-                    icon,
-                    Vec2::splat(tokens::AUTOCOMPLETE_FILTER_BUTTON),
-                ))
-                .tint(teinte)
-                .paint_at(ui, cell.shrink(tokens::AUTOCOMPLETE_FILTER_ICON_PAD));
+                let boite = cell.shrink(tokens::AUTOCOMPLETE_FILTER_ICON_PAD);
+                let peint = fit::contain_rect(boite, icon.size);
+                egui::Image::from_texture(SizedTexture::new(icon.id, peint.size()))
+                    .tint(teinte)
+                    .paint_at(ui, peint);
             }
             crate::design::tooltip(&response).text(&filtre.tooltip);
             if response.clicked() {
@@ -938,21 +944,27 @@ impl<'a> Autocomplete<'a> {
                 Vec2::splat(tokens::AUTOCOMPLETE_GEM_BOX),
             );
             // À son rapport NATIF, comme `object-fit: contain` : une gemme du jeu fait 13 × 20 et
-            // entre dans la boîte en 9 × 14. C'est à l'appelant de fournir `gem_size` — sans elle
-            // la gemme est écrasée en carré, et c'est précisément ce que l'onglet Alertes montrait
-            // jusqu'au 2026-09-12 au soir (« très fortement agrandies et aplaties »).
-            let taille = glyph_fit(entry.gem_size, tokens::AUTOCOMPLETE_GEM_BOX);
-            egui::Image::from_texture(egui::load::SizedTexture::new(gem, taille))
-                .paint_at(ui, egui::Rect::from_center_size(boite.center(), taille));
+            // entre dans la boîte en 9,1 × 14. La taille vient avec la texture depuis le
+            // 2026-09-17 — elle était un champ à part, qu'un appelant pouvait oublier, et c'est
+            // précisément ce que l'onglet Alertes montrait jusqu'au 2026-09-12 au soir (« très
+            // fortement agrandies et aplaties »).
+            let peint = fit::contain_rect(boite, gem.size);
+            egui::Image::from_texture(SizedTexture::new(gem.id, peint.size())).paint_at(ui, peint);
         }
         let colonne = egui::Rect::from_min_size(
             egui::pos2(marge + tokens::AUTOCOMPLETE_IMAGE_COLUMN_OFFSET, row.top()),
             Vec2::new(tokens::AUTOCOMPLETE_IMAGE_COLUMN, row.height()),
         );
         if let Some(image) = entry.image {
-            let taille = Vec2::splat(tokens::AUTOCOMPLETE_IMAGE_SIZE);
-            egui::Image::from_texture(egui::load::SizedTexture::new(image, taille))
-                .paint_at(ui, egui::Rect::from_center_size(colonne.center(), taille));
+            // Même règle que la gemme : la boîte est carrée, l'image y est inscrite à son rapport.
+            // Un monstre servi par `wakassets/monsterIllustrations` est une bannière, pas un carré.
+            let boite = egui::Rect::from_center_size(
+                colonne.center(),
+                Vec2::splat(tokens::AUTOCOMPLETE_IMAGE_SIZE),
+            );
+            let peint = fit::contain_rect(boite, image.size);
+            egui::Image::from_texture(SizedTexture::new(image.id, peint.size()))
+                .paint_at(ui, peint);
         }
         let x = colonne.right() + tokens::AUTOCOMPLETE_ROW_GAP;
 

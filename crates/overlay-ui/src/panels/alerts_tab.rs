@@ -470,13 +470,13 @@ fn add_field(
     categories.dedup();
     let mut filters = vec![design::AutocompleteFilter::all(
         "Toutes les catégories",
-        texture_id(ui, ctx, &IconRef::for_all_categories()),
+        texture(ui, ctx, &IconRef::for_all_categories()),
     )];
     for category in categories {
         filters.push(design::AutocompleteFilter::category(
             category_key(category),
             category_label(category),
-            texture_id(ui, ctx, &IconRef::for_item_category(category)),
+            texture(ui, ctx, &IconRef::for_item_category(category)),
         ));
     }
 
@@ -497,11 +497,8 @@ fn add_field(
             // rapport (13 × 20 → 9 × 14, comme `object-fit: contain` sur le web). Sans elle, il
             // la prenait pour un carré et l'écrasait en 14 × 14 — « très fortement agrandies et
             // aplaties », retour du 2026-09-12 au soir.
-            if let Some((id, size)) = texture(ui, ctx, &IconRef::for_rarity(item.rarity)) {
-                entry.gem = Some(id);
-                entry.gem_size = size;
-            }
-            entry.image = texture_id(ui, ctx, &item.icon);
+            entry.gem = texture(ui, ctx, &IconRef::for_rarity(item.rarity));
+            entry.image = texture(ui, ctx, &item.icon);
             entry.disabled = deja;
             if deja {
                 entry.mention = Some("déjà dans vos alertes".to_string());
@@ -672,8 +669,10 @@ fn alert_item(
     let icon_id = item
         .icon
         .as_ref()
-        .and_then(|icon| texture_id(ui, ctx, icon))
-        .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
+        .and_then(|icon| texture(ui, ctx, icon))
+        .unwrap_or_else(|| {
+            egui::load::SizedTexture::from_handle(ctx.icons.unknown_entity_texture())
+        });
 
     // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée** : `Ui::put` ouvre un scope, et
     // un scope avance le curseur du parent — la tuile suivante démarrerait au mauvais endroit.
@@ -893,25 +892,20 @@ fn category_label(category: WakfuItemCategory) -> &'static str {
     }
 }
 
-/// La texture d'une icône distante, si elle est déjà descendue du CDN — `None` sinon, et
-/// l'appelant se peint sans elle.
-fn texture_id(
-    ui: &egui::Ui,
-    ctx: &mut AlertsTabContext<'_>,
-    icon: &IconRef,
-) -> Option<egui::TextureId> {
-    texture(ui, ctx, icon).map(|(id, _)| id)
-}
-
-/// La texture ET sa taille native, pour ce qui doit être peint à son rapport — la gemme de rareté.
+/// La texture d'une icône distante **avec sa taille native**, si elle est déjà descendue du CDN —
+/// `None` sinon, et l'appelant se peint sans elle.
+///
+/// La taille n'est pas un supplément : tout ce qui vient du CDN est peint à son rapport
+/// (`design::fit`), gemme de 13 × 20 comme bannière de `monsterIllustrations`. C'est pourquoi les
+/// composants prennent une `SizedTexture` et non un `TextureId` nu.
 fn texture(
     ui: &egui::Ui,
     ctx: &mut AlertsTabContext<'_>,
     icon: &IconRef,
-) -> Option<(egui::TextureId, Vec2)> {
+) -> Option<egui::load::SizedTexture> {
     ctx.remote_icon_textures
         .resolve(ui.ctx(), ctx.remote_icons, icon)
-        .map(|handle| (handle.id(), handle.size_vec2()))
+        .map(|handle| egui::load::SizedTexture::from_handle(&handle))
 }
 
 #[cfg(test)]

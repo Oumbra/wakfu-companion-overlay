@@ -55,7 +55,7 @@ pub struct Tile {
     /// Rang dans la liste affichée.
     pub index: usize,
     /// Icône déjà résolue — la même que celle de la tuile, sinon le fantôme montrerait autre chose.
-    pub icon: egui::TextureId,
+    pub icon: egui::load::SizedTexture,
     /// Cadre de l'emplacement : c'est lui qui dit quelle entrée est en vol (rareté, ou neutre).
     pub frame: SlotFrame,
     /// Côté du carré.

@@ -335,11 +335,13 @@ pub fn show(
 
         match texture {
             Some(texture) => {
+                // Inscrite à son rapport, comme toute image du CDN (`design::fit`) : les icônes de
+                // `wakassets/spells` sont carrées aujourd'hui, la règle vaut le jour où l'une ne
+                // l'est plus.
+                let peint = crate::design::contain_rect(rect, texture.size_vec2());
                 egui::Image::new(&texture)
-                    .fit_to_exact_size(rect.size())
-                    .maintain_aspect_ratio(false)
                     .corner_radius(SPELL_ROUNDING as u8)
-                    .paint_at(ui, rect);
+                    .paint_at(ui, peint);
             }
             None => {
                 painter.rect_filled(rect, SPELL_ROUNDING, SPELL_PLACEHOLDER_FILL);

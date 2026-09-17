@@ -624,13 +624,13 @@ fn add_field(
     categories.dedup();
     let mut filters = vec![design::AutocompleteFilter::all(
         "Tout",
-        texture_id(ui, ctx, &IconRef::for_all_categories()),
+        texture(ui, ctx, &IconRef::for_all_categories()),
     )];
     for category in categories {
         filters.push(design::AutocompleteFilter::category(
             category_key(category),
             category_label(category),
-            texture_id(ui, ctx, &IconRef::for_item_category(category)),
+            texture(ui, ctx, &IconRef::for_item_category(category)),
         ));
     }
     // Le filtre « Monstres » ferme la bande, comme le web le fait en domaine « les deux ».
@@ -638,7 +638,7 @@ fn add_field(
         filters.push(design::AutocompleteFilter::category(
             MONSTER_FILTER_KEY,
             "Monstres",
-            texture_id(ui, ctx, &IconRef::for_monster_category()),
+            texture(ui, ctx, &IconRef::for_monster_category()),
         ));
     }
 
@@ -652,11 +652,8 @@ fn add_field(
             .any(|e| e.catalog_id == Some(item.id) || e.name == item.name);
         let mut entry =
             design::AutocompleteEntry::new(item.name.clone(), category_key(item.category));
-        if let Some((id, size)) = texture(ui, ctx, &IconRef::for_rarity(item.rarity)) {
-            entry.gem = Some(id);
-            entry.gem_size = size;
-        }
-        entry.image = texture_id(ui, ctx, &item.icon);
+        entry.gem = texture(ui, ctx, &IconRef::for_rarity(item.rarity));
+        entry.image = texture(ui, ctx, &item.icon);
         entry.disabled = deja;
         if deja {
             entry.mention = Some("déjà suivi".to_string());
@@ -675,7 +672,7 @@ fn add_field(
             .any(|e| e.catalog_id == Some(monstre.id) || e.name == monstre.name);
         // **Pas de gemme** : un monstre n'a pas de rareté.
         let mut entry = design::AutocompleteEntry::new(monstre.name.clone(), MONSTER_FILTER_KEY);
-        entry.image = texture_id(ui, ctx, &monstre.icon);
+        entry.image = texture(ui, ctx, &monstre.icon);
         entry.disabled = deja;
         if deja {
             entry.mention = Some("déjà suivi".to_string());
@@ -950,8 +947,10 @@ fn tracked_tile(
     let icon_id = tuile
         .icon
         .as_ref()
-        .and_then(|icon| texture_id(ui, ctx, icon))
-        .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
+        .and_then(|icon| texture(ui, ctx, icon))
+        .unwrap_or_else(|| {
+            egui::load::SizedTexture::from_handle(ctx.icons.unknown_entity_texture())
+        });
 
     // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée** : `Ui::put` ouvre un scope, et un
     // scope avance le curseur du parent — la tuile suivante démarrerait au mauvais endroit. Piège
@@ -1112,25 +1111,20 @@ fn category_label(category: overlay_engine::WakfuItemCategory) -> &'static str {
     }
 }
 
-/// La texture d'une icône distante, si elle est déjà descendue du CDN — `None` sinon, et l'appelant
-/// se peint sans elle.
-fn texture_id(
-    ui: &egui::Ui,
-    ctx: &mut SuiviTabContext<'_>,
-    icon: &IconRef,
-) -> Option<egui::TextureId> {
-    texture(ui, ctx, icon).map(|(id, _)| id)
-}
-
-/// La texture ET sa taille native, pour ce qui doit être peint à son rapport — la gemme de rareté.
+/// La texture d'une icône distante **avec sa taille native**, si elle est déjà descendue du CDN —
+/// `None` sinon, et l'appelant se peint sans elle.
+///
+/// La taille n'est pas un supplément : tout ce qui vient du CDN est peint à son rapport
+/// (`design::fit`), gemme de 13 × 20 comme bannière de `monsterIllustrations`. C'est pourquoi les
+/// composants prennent une `SizedTexture` et non un `TextureId` nu.
 fn texture(
     ui: &egui::Ui,
     ctx: &mut SuiviTabContext<'_>,
     icon: &IconRef,
-) -> Option<(egui::TextureId, Vec2)> {
+) -> Option<egui::load::SizedTexture> {
     ctx.remote_icon_textures
         .resolve(ui.ctx(), ctx.remote_icons, icon)
-        .map(|handle| (handle.id(), handle.size_vec2()))
+        .map(|handle| egui::load::SizedTexture::from_handle(&handle))
 }
 
 #[cfg(test)]

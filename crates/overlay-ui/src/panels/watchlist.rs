@@ -1471,14 +1471,15 @@ fn toast_card(
             .as_ref()
             .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
         let icon_tint = egui::Color32::from_white_alpha((255.0 * card_alpha) as u8);
-        match &remote_texture {
-            Some(texture) => egui::Image::new(texture)
-                .tint(icon_tint)
-                .paint_at(ui, icon_rect),
-            None => egui::Image::new(icons.unknown_entity_texture())
-                .tint(icon_tint)
-                .paint_at(ui, icon_rect),
-        }
+        // Inscrite dans le carré, à son rapport, comme partout ailleurs (`design::fit`) : une
+        // bannière de `wakassets/monsterIllustrations` y était étirée jusqu'au 2026-09-17.
+        let texture = remote_texture
+            .as_ref()
+            .unwrap_or(icons.unknown_entity_texture());
+        let peint = design::contain_rect(icon_rect, texture.size_vec2());
+        egui::Image::new(texture)
+            .tint(icon_tint)
+            .paint_at(ui, peint);
         icon_rect.right() + CARD_ICON_GAP
     };
     let text_top = card_rect.center().y - text_height / 2.0;
@@ -2067,8 +2068,8 @@ fn entry_tile(
         .as_ref()
         .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
     let icon_id = match &remote_texture {
-        Some(texture) => texture.id(),
-        None => icons.unknown_entity_texture().id(),
+        Some(texture) => egui::load::SizedTexture::from_handle(texture),
+        None => egui::load::SizedTexture::from_handle(icons.unknown_entity_texture()),
     };
 
     let frame = match entry.kind {

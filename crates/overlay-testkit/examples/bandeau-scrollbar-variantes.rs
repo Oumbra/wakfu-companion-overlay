@@ -164,9 +164,9 @@ fn planche(variante: &Variante, survole: bool) {
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
             overlay_ui::style::apply(&ctx);
-            let icone = design::DesignSystem::get(&ctx)
-                .icon(design::DsIcon::Kamas)
-                .id();
+            let icone = egui::load::SizedTexture::from_handle(
+                design::DesignSystem::get(&ctx).icon(design::DsIcon::Kamas),
+            );
 
             // **Damier de fond**, comme `panels.rs::modale_options_sur_damier_ne_panique_pas` : en
             // production la fenêtre est transparente et laisse voir le jeu. Une planche sur fond
