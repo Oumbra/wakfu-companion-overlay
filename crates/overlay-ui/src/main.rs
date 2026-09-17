@@ -3851,6 +3851,18 @@ fn main() {
     if let Some(dir) = &log_dir {
         tracing::info!("journal de session : {}", dir.display());
     }
+    // À quel déploiement cette session parle — figé par le profil de compilation
+    // (`overlay-sync/build.rs`) sauf surcharge `WAKFU_COMPANION_API_URL` : sans cette ligne, un
+    // 401 au journal ne dit pas si le jeton a été présenté au bon serveur (cas vécu le 2026-09-17).
+    tracing::info!(
+        "API : {} ({})",
+        overlay_sync::client::base_url(),
+        if std::env::var_os("WAKFU_COMPANION_API_URL").is_some() {
+            "surcharge WAKFU_COMPANION_API_URL"
+        } else {
+            "défaut du profil de compilation"
+        }
+    );
 
     // Référentiels de sorts (classes et monstres) construits DÈS LE DÉMARRAGE, jamais au premier
     // sort affiché en combat — décision utilisateur du 13 sept. 2026 : deux fichiers de quelques

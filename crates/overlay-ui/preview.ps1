@@ -68,13 +68,18 @@ Write-Host "=== overlay-ui — prévisualisation ($binName) ===" -ForegroundColo
 Write-Host "Ctrl+Shift+W = bascule interactif / clic-traversant  |  Ctrl+Shift+R = rafraîchir  |  Ctrl+Shift+Q ou Ctrl+C = quitter" -ForegroundColor Cyan
 Write-Host ""
 
-# Le binaire vise la PROD par défaut (`overlay_sync::client::DEFAULT_BASE_URL`, décision du
-# 2026-09-15) ; la prévisualisation locale reste le seul usage du déploiement dev. Une valeur déjà
-# posée dans l'environnement (ex. `wrangler pages dev` local) est respectée.
-if (-not $env:WAKFU_COMPANION_API_URL) {
-    $env:WAKFU_COMPANION_API_URL = "https://claude-dev.wakfu-companion.com"
+# L'origine de l'API est figée par le PROFIL de compilation (`crates/overlay-sync/build.rs`) :
+# `preview`/debug → déploiement dev, `-Release` → prod, sans rien poser ici — un exe de preview
+# lancé hors de ce script (raccourci, protocole `wakfu-companion:`) parle donc aussi à dev. Une
+# valeur déjà posée dans l'environnement (ex. `wrangler pages dev` local) surcharge ce défaut, le
+# binaire trace l'origine retenue au démarrage (« API : … » au journal).
+if ($env:WAKFU_COMPANION_API_URL) {
+    Write-Host "API : $env:WAKFU_COMPANION_API_URL (surcharge WAKFU_COMPANION_API_URL)" -ForegroundColor DarkGray
+} elseif ($Release) {
+    Write-Host "API : prod (profil release)" -ForegroundColor DarkGray
+} else {
+    Write-Host "API : déploiement dev (profil preview/debug)" -ForegroundColor DarkGray
 }
-Write-Host "API : $env:WAKFU_COMPANION_API_URL" -ForegroundColor DarkGray
 Write-Host ""
 
 $cargoArgs = @("run", "-p", "overlay-ui", "--bin", $binName)

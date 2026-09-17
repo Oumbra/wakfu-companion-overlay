@@ -14,20 +14,25 @@ use serde_json::Value;
 
 use crate::SyncError;
 
-// **Prod par défaut** (décision du mainteneur, 2026-09-15, docs/plan-mise-a-jour.md §10 point 6) :
-// un binaire de Release vise TOUJOURS `wakfu-companion.com`, jamais le déploiement dev. Le
-// domaine dev (`claude-dev.wakfu-companion.com`) n'est utilisé qu'en local, par les scripts de
-// prévisualisation (`crates/overlay-ui/preview.{ps1,sh}`), via `WAKFU_COMPANION_API_URL`.
+// **Origine de l'API figée à la compilation, d'après le profil** (voir `build.rs` du crate) :
+// `release` → prod (`https://wakfu-companion.com`), tout autre profil (`preview`, `debug`, tests)
+// → déploiement dev (`https://claude-dev.wakfu-companion.com`). Un binaire de Release vise donc
+// TOUJOURS la prod (décision du mainteneur, 2026-09-15, docs/plan-mise-a-jour.md §10 point 6), et
+// un exe de preview TOUJOURS dev, quelle que soit la façon dont il est lancé.
 //
 // Historique : jusqu'au 2026-09-15 la constante pointait sur le domaine dev, parce que les routes
-// d'appairage natif (`/api/v1/auth/native/*`) n'y étaient déployées qu'en preview. Tant que ce
-// n'est pas le cas en prod, un binaire compilé avec cette valeur ne peut pas se connecter — c'est
-// une condition de sortie de la première Release, pas une raison de repointer la constante.
-const DEFAULT_BASE_URL: &str = "https://wakfu-companion.com";
+// d'appairage natif (`/api/v1/auth/native/*`) n'y étaient déployées qu'en preview ; jusqu'au
+// 2026-09-17 elle valait la prod en dur, et seuls les scripts `preview.{ps1,sh}` posaient
+// `WAKFU_COMPANION_API_URL` — un `target/preview/overlay-ui.exe` lancé hors script visait la prod.
+// Tant que l'appairage natif n'est pas déployé en prod, un binaire `release` ne peut pas se
+// connecter — c'est une condition de sortie de la première Release, pas une raison de repointer.
+const DEFAULT_BASE_URL: &str = env!("WAKFU_COMPANION_API_DEFAULT_URL");
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Origine de l'API — `WAKFU_COMPANION_API_URL` en priorité (utile contre un `wrangler pages dev`
-/// local), repli sur `DEFAULT_BASE_URL` ci-dessus. Jamais codée en dur sans repli overridable.
+/// local), repli sur `DEFAULT_BASE_URL` ci-dessus (choisie par le profil de compilation). Jamais
+/// codée en dur sans repli overridable. Tracée une fois au démarrage par `overlay-ui` (`main.rs`),
+/// pour que le journal dise à quel déploiement une session a parlé.
 pub fn base_url() -> String {
     std::env::var("WAKFU_COMPANION_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
 }
@@ -378,4 +383,25 @@ pub fn fetch_game_servers() -> Result<Value, SyncError> {
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body("/api/v1/game-servers", response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_BASE_URL;
+
+    /// Le défaut compilé est l'une des deux origines connues, jamais une valeur vide ni un
+    /// `http://` ; en profil de développement (`cargo test` nu, comme `ci.yml`), c'est le
+    /// déploiement dev. Un profil optimisé n'est pas tranché ici : `preview` hérite de `release`
+    /// (donc sans `debug_assertions`) mais vise dev, seul `build.rs` connaît le nom du profil.
+    #[test]
+    fn default_base_url_follows_build_profile() {
+        assert!(
+            DEFAULT_BASE_URL == "https://claude-dev.wakfu-companion.com"
+                || DEFAULT_BASE_URL == "https://wakfu-companion.com",
+            "{DEFAULT_BASE_URL}"
+        );
+        if cfg!(debug_assertions) {
+            assert_eq!(DEFAULT_BASE_URL, "https://claude-dev.wakfu-companion.com");
+        }
+    }
 }

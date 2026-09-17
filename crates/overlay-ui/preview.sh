@@ -72,11 +72,17 @@ printf '\n\033[36m=== overlay-ui — prévisualisation (overlay-ui-x11) ===\033[
 printf '\033[36mCtrl+Shift+W = bascule interactif / clic-traversant  |  Ctrl+Shift+Q ou Ctrl+C = quitter\033[0m\n'
 printf '\033[36mLes fenêtres overlay ne s’affichent qu’au-dessus d’une fenêtre de jeu Wakfu ouverte.\033[0m\n\n'
 
-# Le binaire vise la PROD par défaut (`overlay_sync::client::DEFAULT_BASE_URL`, décision du
-# 2026-09-15) ; la prévisualisation locale reste le seul usage du déploiement dev. Une valeur déjà
-# posée dans l'environnement (ex. `wrangler pages dev` local) est respectée.
-export WAKFU_COMPANION_API_URL="${WAKFU_COMPANION_API_URL:-https://claude-dev.wakfu-companion.com}"
-printf '\033[90mAPI : %s\033[0m\n\n' "$WAKFU_COMPANION_API_URL"
+# L'origine de l'API est figée par le PROFIL de compilation (`crates/overlay-sync/build.rs`) :
+# `preview`/debug → déploiement dev, `release` → prod, sans rien poser ici — un exe de preview
+# lancé hors de ce script parle donc aussi à dev. Une valeur déjà posée dans l'environnement (ex.
+# `wrangler pages dev` local) surcharge ce défaut, le binaire trace l'origine retenue au démarrage.
+if [ -n "${WAKFU_COMPANION_API_URL:-}" ]; then
+  printf '\033[90mAPI : %s (surcharge WAKFU_COMPANION_API_URL)\033[0m\n\n' "$WAKFU_COMPANION_API_URL"
+elif [ "$PROFILE" = "release" ]; then
+  printf '\033[90mAPI : prod (profil release)\033[0m\n\n'
+else
+  printf '\033[90mAPI : déploiement dev (profil %s)\033[0m\n\n' "$PROFILE"
+fi
 
 CARGO_ARGS=(run -p overlay-ui --bin overlay-ui-x11 --profile "$PROFILE")
 [ -n "$LOG_PATH" ] && CARGO_ARGS+=(-- "$LOG_PATH")

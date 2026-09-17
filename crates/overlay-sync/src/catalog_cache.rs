@@ -15,9 +15,9 @@
 //! Régénéré depuis le vrai déploiement dev (`claude-dev.wakfu-companion.com`, 2026-09-02) via
 //! `cargo run -p overlay-sync --bin gen-catalog-fallback` (voir ce binaire) — jamais à la main.
 //! Catalogue complet réel (~489 Ko gzip, ~1,8 Mo bruts). À régénérer de la même façon si le
-//! catalogue serveur change significativement avant une release. Depuis le 2026-09-15,
-//! `client::base_url()` vise la prod par défaut : lancer le binaire tel quel régénère depuis la
-//! prod, poser `WAKFU_COMPANION_API_URL` pour régénérer depuis le déploiement dev.
+//! catalogue serveur change significativement avant une release. `client::base_url()` suit le
+//! profil de compilation (voir `build.rs` du crate) : `cargo run` (debug) régénère depuis le
+//! déploiement dev, `cargo run --release` depuis la prod ; `WAKFU_COMPANION_API_URL` surcharge.
 
 use std::io::Read;
 use std::path::PathBuf;
