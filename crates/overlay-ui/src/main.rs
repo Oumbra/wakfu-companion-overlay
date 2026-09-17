@@ -75,6 +75,7 @@ use overlay_ui::background::{
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
+use overlay_ui::combat_placement;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
@@ -101,7 +102,9 @@ use overlay_ui::recap_placement;
 use overlay_ui::recap_session::{self, RecapSession};
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content;
-use overlay_ui::render_content::{AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent};
+use overlay_ui::render_content::{
+    AuthCommand, AuthStatus, OverlayKind, RenderContent, ResetTarget, UserEvent,
+};
 use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
 use overlay_ui::startup::StartupProgress;
 use overlay_ui::turn_watch;
@@ -234,23 +237,26 @@ fn watchlist_target_height(toast_active: bool, select_open: bool) -> f64 {
             0.0
         }
 }
-/// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
-/// gauche de l'overlay Combat.
-///
-/// **Refonte 2026-09-04** (retour utilisateur, capture d'écran à l'appui) : la valeur initiale
-/// (12 px, « collé à quelques pixels près ») laissait un vide visible entre le bord de la fenêtre
-/// de jeu et le cadre — l'utilisateur veut désormais que l'overlay se fonde dans le jeu (« comme
-/// si l'overlay faisait partie du jeu »), donc un ancrage réellement à zéro. Voir aussi
-/// `render_content::paint_content` : la marge interne du panneau (`Frame::inner_margin`) doit être
-/// nulle elle aussi, sinon un vide subsiste malgré cette valeur à 0.
-const GAME_EDGE_MARGIN_PX: i32 = 0;
-/// Même principe que `GAME_EDGE_MARGIN_PX`, mais pour le bord HAUT — ancrage de l'overlay Suivi
+// **La marge au bord vertical du client a rejoint `overlay_ui::combat_placement`** (2026-09-17)
+// avec tout l'ancrage du panneau Combat : elle est NULLE, des deux côtés, et c'est une décision
+// d'écran plus qu'un calcul. Son relevé, qu'il ne faut pas perdre :
+//
+// **Refonte 2026-09-04** (retour utilisateur, capture d'écran à l'appui) : la valeur initiale
+// (12 px, « collé à quelques pixels près ») laissait un vide visible entre le bord de la fenêtre
+// de jeu et le cadre — l'utilisateur veut que l'overlay se fonde dans le jeu (« comme si l'overlay
+// faisait partie du jeu »), donc un ancrage réellement à zéro. Voir aussi
+// `render_content::paint_content` : la marge interne du panneau (`Frame::inner_margin`) doit être
+// nulle elle aussi, sinon un vide subsiste malgré cet ancrage.
+//
+// Le binaire X11, lui, était resté à 12 px — cette refonte ne l'avait pas suivi, et personne ne
+// l'avait vu puisque rien ne comparait les deux hôtes. Le calcul partagé les met d'accord.
+/// Marge, en pixels physiques, entre le bord HAUT de la zone cliente du jeu et l'overlay Suivi
 /// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
 /// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
 /// en haut-droite).
 ///
 /// **Historique de mise au point (2026-09-01, deux allers-retours avec capture d'écran)** : la
-/// valeur initiale (12 px, copiée de `GAME_EDGE_MARGIN_PX`) était bien trop petite — l'overlay
+/// valeur initiale (12 px, copiée de la marge latérale du Combat) était bien trop petite — l'overlay
 /// apparaissait quasiment collé au très haut de la fenêtre de jeu. Diagnostic confirmé par le
 /// `println!` de `create_overlay_window` (`rect.top=0 client_top=0, écart 0`) : **le client Wakfu
 /// dessine lui-même sa fausse barre de titre DANS sa zone cliente** (voir `GameRect::client_top`,
@@ -411,6 +417,82 @@ impl OverlayWindow {
     fn is_detached(&self) -> bool {
         self.game_hwnd == HWND::default()
     }
+}
+
+/// Ce qu'il faut savoir pour poser une fenêtre `Combat`, et elle seule : de quel côté du client
+/// elle se colle, à quelle hauteur l'utilisateur l'a mise, et l'échelle d'affichage de son écran.
+///
+/// Un type plutôt que trois paramètres de plus à `App::anchor_position`, exactement comme
+/// [`RecapAnchor`] — et `CombatAnchor::default()` dit ce qu'il faut passer pour les zones qui n'en
+/// lisent rien. Le calcul, lui, est dans `overlay_ui::combat_placement`, partagé avec le binaire
+/// X11 ; ce type ne fait que traduire le rectangle de fenêtre de jeu de CETTE plateforme dans son
+/// vocabulaire.
+#[derive(Debug, Clone, Copy)]
+struct CombatAnchor {
+    /// Case « Afficher le panneau de combat à droite de la fenêtre de jeu »
+    /// (`config::OverlayConfig::combat_on_right`) — le bord vertical, et lui seul.
+    on_right: bool,
+    /// Hauteur voulue par l'utilisateur (`config::OverlayConfig::combat_position_y`), `None` tant
+    /// qu'il ne l'a pas déplacé : le panneau est alors centré comme il l'a toujours été.
+    offset: Option<i32>,
+    /// Échelle d'affichage de la fenêtre (`Window::scale_factor`) — elle ne sert qu'à convertir la
+    /// réserve d'infobulle, voir `combat_placement::Panel::new`.
+    scale: f64,
+}
+
+impl Default for CombatAnchor {
+    /// « À gauche, jamais déplacé », et une échelle neutre : ce que passent les zones qui ne sont
+    /// pas le Combat, et qui n'en lisent rien.
+    fn default() -> Self {
+        Self {
+            on_right: false,
+            offset: None,
+            scale: 1.0,
+        }
+    }
+}
+
+impl CombatAnchor {
+    fn new(on_right: bool, offset: Option<i32>, scale: f64) -> Self {
+        Self {
+            on_right,
+            offset,
+            scale,
+        }
+    }
+
+    /// La fenêtre de jeu et celle du panneau, dans le vocabulaire de `combat_placement`.
+    ///
+    /// `top`/`height` de la fenêtre ENTIÈRE (et non `client_top` comme la Récap et le Suivi) :
+    /// c'est le repère sur lequel ce panneau est centré depuis l'origine, et en changer décalerait
+    /// le panneau de tout le monde sans que personne l'ait demandé.
+    fn geometry(
+        self,
+        rect: GameRect,
+        overlay_width: i32,
+        overlay_height: i32,
+    ) -> (combat_placement::ClientArea, combat_placement::Panel) {
+        (
+            combat_placement::ClientArea {
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+            },
+            combat_placement::Panel::new(overlay_width, overlay_height, self.scale),
+        )
+    }
+}
+
+/// Un glissement du panneau Combat en cours (2026-09-17) — le pendant de [`RecapDragState`], en
+/// une seule dimension : ce panneau ne se déplace qu'en HAUTEUR (voir `combat_placement`).
+#[derive(Debug, Clone, Copy)]
+struct CombatDragState {
+    /// La fenêtre `Combat` saisie — en multicompte, chaque client a la sienne, et ce n'est pas
+    /// parce que l'une est tenue que les autres bougent.
+    window: WindowId,
+    /// Ordonnée de saisie DANS la fenêtre, en pixels physiques — figée au premier appui.
+    grab_y: i32,
 }
 
 /// Ce qu'il faut savoir **en plus** pour poser une fenêtre `Recap`, et elle seule : où
@@ -593,6 +675,16 @@ struct App {
     /// immédiats : l'ancrage de la fenêtre Combat (`anchor_position`) et le miroir de son contenu
     /// (`render_content::RenderContent::combat_on_right`, voir `overlay_ui::mirror`).
     combat_on_right: bool,
+    /// **À quelle hauteur le panneau Combat est posé** (2026-09-17) — réglage LOCAL persisté
+    /// (`config::OverlayConfig::combat_position_y`), `None` tant que l'utilisateur ne l'a pas fait
+    /// glisser. Une seule valeur pour TOUTES les fenêtres de jeu, comme `recap_position` : un seul
+    /// panneau Combat par client, une seule hauteur, un seul verrou.
+    combat_position_y: Option<i32>,
+    /// Le panneau Combat est-il verrouillé en hauteur ? — le cadenas de sa rangée d'actions
+    /// (`config::OverlayConfig::combat_locked`, déverrouillé par défaut).
+    combat_locked: bool,
+    /// Le glissement du panneau Combat **en cours**, s'il y en a un — voir [`CombatDragState`].
+    combat_drag: Option<CombatDragState>,
     /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
     /// persisté (`config::OverlayConfig::turn_notification`), même politique que
     /// `combat_always_visible` : lu au démarrage, remplacé à la validation de la fenêtre Options.
@@ -641,6 +733,11 @@ struct App {
     /// client affiche sa bande au même endroit chez lui. Elle vit ici, dans `App`, pour cette
     /// raison — un champ d'`OverlayWindow` en ferait un réglage par fenêtre.
     recap_position: Option<(i32, i32)>,
+    /// **La bande Récap est-elle verrouillée ?** (2026-09-17) — le cadenas de sa rangée
+    /// d'actions (`panels::recap::RecapChrome::locked`), relu de la config au démarrage et
+    /// réécrit à chaque bascule. Ici et non dans `OverlayWindow`, pour la même raison que
+    /// `recap_position` : une seule bande pour tous les clients, un seul verrou.
+    recap_locked: bool,
     /// Le glissement de la bande Récap **en cours**, s'il y en a un — voir `RecapDragState` et
     /// `panels::recap::RecapDrag`. `None` le reste du temps, c'est-à-dire presque toujours.
     recap_drag: Option<RecapDragState>,
@@ -724,6 +821,10 @@ struct AppState {
     combat_always_visible: bool,
     /// Voir `App::combat_on_right` — même provenance que `combat_always_visible`.
     combat_on_right: bool,
+    /// Voir `App::combat_position_y` — relue de la config au démarrage.
+    combat_position_y: Option<i32>,
+    /// Voir `App::combat_locked` — relu de la config au démarrage.
+    combat_locked: bool,
     /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
     turn_notification: bool,
     /// Voir `App::turn_notification_muted`.
@@ -752,6 +853,9 @@ struct AppState {
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
     /// recap_position`), et réécrite à chaque bande reposée.
     recap_position: Option<(i32, i32)>,
+    /// Voir `App::recap_locked` — relu de la config au démarrage
+    /// (`config::OverlayConfig::recap_locked`).
+    recap_locked: bool,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
@@ -774,6 +878,8 @@ impl App {
             log_path,
             combat_always_visible,
             combat_on_right,
+            combat_position_y,
+            combat_locked,
             turn_notification,
             turn_notification_muted,
             features,
@@ -791,6 +897,7 @@ impl App {
             completion,
             recap_session,
             recap_position,
+            recap_locked,
             catalog,
             catalog_stale,
             remote_icons,
@@ -843,6 +950,9 @@ impl App {
             log_path,
             combat_always_visible,
             combat_on_right,
+            combat_position_y,
+            combat_locked,
+            combat_drag: None,
             turn_notification,
             turn_notification_muted,
             features,
@@ -852,6 +962,7 @@ impl App {
             game_window: GameWindowTracker::new(),
             recap_session,
             recap_position,
+            recap_locked,
             recap_drag: None,
             banner_printed: false,
             last_foreground_heartbeat: None,
@@ -1203,6 +1314,7 @@ impl App {
                         existing,
                         info.rect,
                         self.combat_on_right,
+                        self.combat_position_y,
                         self.recap_position,
                     );
                     if existing.active_character != *character_name {
@@ -1231,6 +1343,7 @@ impl App {
                     self.interactive,
                     visible,
                     self.combat_on_right,
+                    self.combat_position_y,
                     self.recap_position,
                 );
                 tracing::info!(
@@ -1465,20 +1578,25 @@ impl App {
         rect: GameRect,
         overlay_width: i32,
         overlay_height: i32,
-        combat_on_right: bool,
+        combat: CombatAnchor,
         recap: RecapAnchor,
     ) -> PhysicalPosition<i32> {
         match kind {
-            // Le même `GAME_EDGE_MARGIN_PX` des deux côtés : il vaut 0 (voir sa doc, « comme si
-            // l'overlay faisait partie du jeu »), la symétrie est donc exacte.
-            OverlayKind::Combat if combat_on_right => PhysicalPosition::new(
-                rect.left + rect.width - overlay_width - GAME_EDGE_MARGIN_PX,
-                rect.top + (rect.height - overlay_height) / 2,
-            ),
-            OverlayKind::Combat => PhysicalPosition::new(
-                rect.left + GAME_EDGE_MARGIN_PX,
-                rect.top + (rect.height - overlay_height) / 2,
-            ),
+            // Combat : collé à un bord vertical (`CombatAnchor::on_right`), centré verticalement
+            // tant que l'utilisateur ne l'a pas fait glisser, à sa hauteur ensuite (2026-09-17) —
+            // tout le calcul, bornage compris, est dans `overlay_ui::combat_placement`, partagé
+            // avec le binaire X11. La marge au bord (`GAME_EDGE_MARGIN_PX`) y est nulle des deux
+            // côtés, comme ici auparavant : « comme si l'overlay faisait partie du jeu ».
+            OverlayKind::Combat => {
+                let (client, panel) = combat.geometry(rect, overlay_width, overlay_height);
+                let (x, y) = combat_placement::window_position(
+                    combat.offset,
+                    combat.on_right,
+                    client,
+                    panel,
+                );
+                PhysicalPosition::new(x, y)
+            }
             OverlayKind::Watchlist => PhysicalPosition::new(
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
@@ -1495,7 +1613,7 @@ impl App {
             }
             // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
             // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
-            OverlayKind::RecapReset => PhysicalPosition::new(rect.left, rect.top),
+            OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
             // **Rattachée à une fenêtre de jeu, la fenêtre Options EST la fenêtre de jeu**
             // (2026-09-17) : elle la couvre entière, barre de titre comprise, comme la
             // confirmation ci-dessus — son voile part du coin, et c'est le rendu qui centre la
@@ -1528,6 +1646,9 @@ impl App {
         visible: bool,
         // `combat_on_right` : voir `anchor_position` — le bord vertical où la zone Combat se colle.
         combat_on_right: bool,
+        // À quelle hauteur poser le panneau Combat (`App::combat_position_y`, 2026-09-17) — sans
+        // objet pour les autres zones.
+        combat_offset: Option<i32>,
         // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones,
         // qui n'en lisent rien.
         recap_offset: Option<(i32, i32)>,
@@ -1561,11 +1682,13 @@ impl App {
             // qui s'ouvrent au-dessus (marge haute du contenu).
             OverlayKind::Recap => (
                 panels::recap::WIDTH as f64,
-                panels::recap::HEIGHT as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                panels::recap::HEIGHT as f64
+                    + render_content::RECAP_TOOLTIP_RESERVE as f64
+                    + render_content::RECAP_ACTIONS_RESERVE as f64,
             ),
             // La taille de la fenêtre de jeu, pour que le voile la couvre en entier — overlays
             // compris, puisque cette fenêtre est créée après eux et donc au-dessus.
-            OverlayKind::RecapReset => (rect.width as f64, rect.height as f64),
+            OverlayKind::ResetConfirm(_) => (rect.width as f64, rect.height as f64),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
         };
@@ -1574,7 +1697,7 @@ impl App {
         // aussi. Une taille logique serait multipliée par l'échelle d'affichage (125 % : un voile
         // d'un quart plus grand que le jeu, débordant en bas et à droite). Les autres zones ont
         // des tailles de MAQUETTE, en points logiques, et restent logiques.
-        let covers_game = matches!(kind, OverlayKind::RecapReset)
+        let covers_game = matches!(kind, OverlayKind::ResetConfirm(_))
             || (kind == OverlayKind::Options && game_hwnd != HWND::default());
         let inner_size: winit::dpi::Size = if covers_game {
             PhysicalSize::new(size.0, size.1).into()
@@ -1585,7 +1708,7 @@ impl App {
             OverlayKind::Combat => "Combat",
             OverlayKind::Watchlist => "Suivi",
             OverlayKind::Recap => "Recap",
-            OverlayKind::RecapReset => "Confirmation",
+            OverlayKind::ResetConfirm(_) => "Confirmation",
             OverlayKind::Options => "Options",
             OverlayKind::Login => "Connexion",
         };
@@ -1621,7 +1744,7 @@ impl App {
         // ne doivent JAMAIS voler le focus au jeu.
         // La confirmation de remise à zéro aussi (2026-09-17) : Échap doit pouvoir répondre
         // « Non », il lui faut le focus clavier.
-        if matches!(kind, OverlayKind::Options | OverlayKind::RecapReset) {
+        if matches!(kind, OverlayKind::Options | OverlayKind::ResetConfirm(_)) {
             Self::apply_extended_styles_focusable(hwnd);
         } else {
             Self::apply_extended_styles(hwnd);
@@ -1645,7 +1768,7 @@ impl App {
             rect,
             outer.width as i32,
             outer.height as i32,
-            combat_on_right,
+            CombatAnchor::new(combat_on_right, combat_offset, window.scale_factor()),
             RecapAnchor::new(recap_offset, window.scale_factor()),
         );
         window.set_outer_position(position);
@@ -1709,17 +1832,19 @@ impl App {
         overlay: &mut OverlayWindow,
         rect: GameRect,
         combat_on_right: bool,
+        combat_offset: Option<i32>,
         recap_offset: Option<(i32, i32)>,
     ) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
+        let scale = overlay.window.scale_factor();
         let desired = Self::anchor_position(
             overlay.kind,
             rect,
             outer.width as i32,
             outer.height as i32,
-            combat_on_right,
-            RecapAnchor::new(recap_offset, overlay.window.scale_factor()),
+            CombatAnchor::new(combat_on_right, combat_offset, scale),
+            RecapAnchor::new(recap_offset, scale),
         );
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
@@ -1888,6 +2013,15 @@ impl App {
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
         self.sync_topmost();
+        // **(e) Le flux de log lui-même** (2026-09-17) — un panneau Combat qui répond mais n'avance
+        // plus (« les boutons marchent, les dégâts ne montent plus ») ne se répare ni par un
+        // redessin ni par une réaffirmation topmost : ce qu'il affiche est fidèle au dernier
+        // `SessionSnapshot` publié, c'est la publication qui s'est arrêtée. Ce raccourci étant
+        // voulu comme la réponse universelle à « quelque chose s'est mal affiché » (voir plus
+        // haut), il relit désormais `wakfu.log` en entier et reconstruit la session — voir
+        // `EngineCommand::ResyncLog`. Le chien de garde du thread Engine (`IngestWatchdog`) fait
+        // de même tout seul au bout de huit secondes ; ce chemin-ci n'attend pas.
+        let _ = self.settings_tx.send(EngineCommand::ResyncLog);
         let settings_tx = self.settings_tx.clone();
         // Capturé AVANT le `move` : le thread n'a pas accès à `self` (et la combinaison peut de
         // toute façon changer entre-temps, la fenêtre Options étant ouvrable pendant l'appel).
@@ -2357,11 +2491,11 @@ impl App {
             .values()
             .filter(|w| {
                 w.is_topmost
-                    && (w.kind == OverlayKind::RecapReset
+                    && (matches!(w.kind, OverlayKind::ResetConfirm(_))
                         || (w.kind == OverlayKind::Options && !w.is_detached()))
             })
             .collect();
-        veils.sort_by_key(|w| w.kind == OverlayKind::RecapReset);
+        veils.sort_by_key(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)));
         for overlay in veils {
             unsafe {
                 let _ = SetWindowPos(
@@ -2481,7 +2615,8 @@ impl App {
             // peut naître masqué (voir `sync_panel_visibility`).
             true,
             self.combat_on_right,
-            // Sans objet : cette fenêtre-ci n'est pas la bande Récap.
+            // Sans objet : cette fenêtre-ci n'est ni le panneau Combat ni la bande Récap.
+            None,
             None,
         );
         if detached {
@@ -2644,6 +2779,7 @@ impl App {
             start_with_os: autostart_actif,
             pending_install: None,
             pending_quit: false,
+            pending_restart: false,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -2937,50 +3073,124 @@ impl App {
             .ok();
     }
 
-    /// Ouvre la confirmation de remise à zéro du Récap (2026-09-17, `OverlayKind::RecapReset`)
-    /// par-dessus la fenêtre de jeu d'où le glyphe a été cliqué — une seule à la fois, comme la
-    /// fenêtre Options. Toujours interactive et visible : c'est une question qu'on vient de poser.
-    fn open_recap_reset_confirm(
+    /// Ouvre une confirmation du Récap (2026-09-17, `OverlayKind::ResetConfirm`) par-dessus la
+    /// fenêtre de jeu d'où le glyphe a été cliqué — une seule à la fois, quelle que soit sa cible
+    /// (les compteurs ou la position, voir `ResetTarget`), comme la fenêtre Options. Toujours
+    /// interactive et visible : c'est une question qu'on vient de poser.
+    fn open_reset_confirm(
         &mut self,
         event_loop: &ActiveEventLoop,
         game_hwnd: HWND,
         rect: GameRect,
+        target: ResetTarget,
     ) {
         if self
             .windows
             .values()
-            .any(|w| w.kind == OverlayKind::RecapReset)
+            .any(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)))
         {
             return;
         }
         let mut overlay = Self::create_overlay_window(
             event_loop,
-            OverlayKind::RecapReset,
+            OverlayKind::ResetConfirm(target),
             game_hwnd,
             "Recap".to_string(),
             rect,
             true,
             true,
             self.combat_on_right,
-            // La confirmation couvre la fenêtre de jeu entière — elle ne suit pas la bande.
+            // La confirmation couvre la fenêtre de jeu entière — elle ne suit ni le panneau
+            // Combat ni la bande Récap.
+            None,
             None,
         );
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
-        tracing::info!("[session] confirmation de remise à zéro ouverte.");
+        match target {
+            ResetTarget::RecapSession => {
+                tracing::info!("[session] confirmation de remise à zéro ouverte.")
+            }
+            ResetTarget::RecapPosition => {
+                tracing::info!("[recap] confirmation de replacement ouverte.")
+            }
+            ResetTarget::CombatPosition => {
+                tracing::info!("[combat] confirmation de replacement ouverte.")
+            }
+        }
     }
 
-    /// La réponse à la confirmation de remise à zéro : « Oui » remet la session à zéro, les deux
-    /// réponses ferment la fenêtre. Le bloc Récap se redessine à son prochain tick avec les
-    /// chiffres à zéro — il se redessine toutes les secondes de toute façon.
-    fn answer_recap_reset(&mut self, confirm_window_id: WindowId, confirmed: bool) {
+    /// **Le cadenas de la bande Récap** (2026-09-17) : un seul bouton, deux états, pas de
+    /// confirmation — verrouiller ne perd rien et le glyphe montre aussitôt ce qu'on a obtenu.
+    /// Le réglage est écrit tout de suite : il doit survivre à un arrêt brutal comme la position
+    /// qu'il protège.
+    fn toggle_recap_lock(&mut self) {
+        self.recap_locked = !self.recap_locked;
+        self.persist_config();
+        tracing::info!(
+            "[recap] bande {}.",
+            if self.recap_locked {
+                "verrouillée"
+            } else {
+                "déverrouillée"
+            }
+        );
+    }
+
+    /// **Le cadenas du panneau Combat** (2026-09-17) : même geste que celui de la bande Récap, et
+    /// même politique — un seul bouton, deux états, pas de confirmation, écrit tout de suite.
+    fn toggle_combat_lock(&mut self) {
+        self.combat_locked = !self.combat_locked;
+        self.persist_config();
+        tracing::info!(
+            "[combat] panneau {}.",
+            if self.combat_locked {
+                "verrouillé"
+            } else {
+                "déverrouillé"
+            }
+        );
+    }
+
+    /// La réponse à une confirmation du Récap : « Oui » agit sur la cible, les deux réponses
+    /// ferment la fenêtre. Le bloc Récap se redessine à son prochain tick — il se redessine
+    /// toutes les secondes de toute façon.
+    ///
+    /// **Le replacement passe par le même chemin que le bouton « Replacer au défaut » de la
+    /// fenêtre Options** : `recap_position` à `None`, la config réécrite, et les fenêtres
+    /// replacées — « jamais déplacée » veut dire « suit l'ancrage », voir `recap_placement::snap`.
+    fn answer_reset_confirm(
+        &mut self,
+        confirm_window_id: WindowId,
+        target: ResetTarget,
+        confirmed: bool,
+    ) {
         self.windows.remove(&confirm_window_id);
-        if confirmed {
-            let snapshot = self.snapshot.load();
-            self.recap_session
-                .reset(&snapshot.totals, std::time::SystemTime::now());
-        } else {
-            tracing::info!("[session] remise à zéro annulée.");
+        match (target, confirmed) {
+            (ResetTarget::RecapSession, true) => {
+                let snapshot = self.snapshot.load();
+                self.recap_session
+                    .reset(&snapshot.totals, std::time::SystemTime::now());
+            }
+            (ResetTarget::RecapSession, false) => {
+                tracing::info!("[session] remise à zéro annulée.")
+            }
+            (ResetTarget::RecapPosition, true) => {
+                self.recap_position = None;
+                self.persist_config();
+                self.reposition_recap();
+                tracing::info!("[recap] bande revenue à son emplacement d'origine.");
+            }
+            (ResetTarget::RecapPosition, false) => tracing::info!("[recap] replacement annulé."),
+            (ResetTarget::CombatPosition, true) => {
+                self.combat_position_y = None;
+                self.persist_config();
+                self.reposition_combat();
+                tracing::info!("[combat] panneau revenu à sa hauteur d'origine.");
+            }
+            (ResetTarget::CombatPosition, false) => {
+                tracing::info!("[combat] replacement annulé.")
+            }
         }
     }
 
@@ -3016,12 +3226,32 @@ impl App {
     /// le geste et son effet doivent être dans la même passe, comme pour les cases à cocher (voir
     /// `sync_panel_visibility`).
     fn reposition_recap(&mut self) {
+        self.reposition_kind(OverlayKind::Recap);
+    }
+
+    /// Recolle chaque panneau Combat sur sa fenêtre de jeu — le pendant de
+    /// [`Self::reposition_recap`] pour la hauteur du panneau (glyphe de replacement de sa rangée
+    /// d'actions, bouton des Options).
+    fn reposition_combat(&mut self) {
+        self.reposition_kind(OverlayKind::Combat);
+    }
+
+    /// Recolle toutes les fenêtres d'une zone donnée, fenêtres de jeu inchangées — voir les deux
+    /// appelants ci-dessus.
+    fn reposition_kind(&mut self, kind: OverlayKind) {
         let recap_position = self.recap_position;
         let combat_on_right = self.combat_on_right;
+        let combat_position_y = self.combat_position_y;
         for overlay in self.windows.values_mut() {
-            if overlay.kind == OverlayKind::Recap {
+            if overlay.kind == kind {
                 let rect = overlay.game_rect;
-                Self::reposition(overlay, rect, combat_on_right, recap_position);
+                Self::reposition(
+                    overlay,
+                    rect,
+                    combat_on_right,
+                    combat_position_y,
+                    recap_position,
+                );
             }
         }
     }
@@ -3058,6 +3288,9 @@ impl App {
         saved.set_completion(self.completion);
         saved.set_recap_resume(self.recap_session.resume_settings());
         saved.set_recap_position(self.recap_position);
+        saved.recap_locked = self.recap_locked;
+        saved.combat_position_y = self.combat_position_y;
+        saved.combat_locked = self.combat_locked;
         saved.set_features(self.features);
         saved.set_alert_mutes(self.alert_mutes);
         config::save(&saved);
@@ -3325,10 +3558,14 @@ enum PostRedraw {
     OpenOptions(HWND, GameRect, options_modal::OptionsTab),
     CloseOptions,
     /// Glyphe de remise à zéro du bloc Récap cliqué : ouvrir la confirmation par-dessus CETTE
-    /// fenêtre de jeu (2026-09-17, voir `open_recap_reset_confirm`).
-    OpenRecapReset(HWND, GameRect),
-    /// La confirmation a répondu — `true` pour « Oui » (voir `answer_recap_reset`).
-    AnswerRecapReset(bool),
+    /// fenêtre de jeu (2026-09-17, voir `open_reset_confirm`).
+    OpenResetConfirm(HWND, GameRect, ResetTarget),
+    /// La confirmation a répondu — `true` pour « Oui » (voir `answer_reset_confirm`).
+    AnswerResetConfirm(ResetTarget, bool),
+    /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
+    ToggleRecapLock,
+    /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
+    ToggleCombatLock,
     /// Carte d'alerte de chat cliquée : préparer la réponse en privé à cet auteur (voir
     /// `whisper_from_toast`) — après le rendu, comme tout ce qui touche `self` entier.
     Whisper(String),
@@ -3344,12 +3581,19 @@ enum PostRedraw {
     /// « Recherche de mise à jour » (section « Mise à jour » de l'onglet « Paramètres ») :
     /// une vérification sans installation, demandée au thread de mise à jour.
     CheckUpdate,
+    /// « Rafraîchir le panneau de combat » (section « Combat ») : relecture complète de
+    /// `wakfu.log` demandée au thread Engine — voir `EngineCommand::ResyncLog`.
+    ResyncCombat,
     /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
     InstallUpdate,
     /// « Fermer l'overlay », **après confirmation** (pied de l'onglet « Paramètres »,
     /// 2026-09-16) : arrête le programme par le chemin de l'entrée « Quitter » de la zone de
     /// notification — le raccourci global « Quitter l'overlay » a été retiré le 2026-09-17.
     Quit,
+    /// « Redémarrer », **après confirmation** (pied de l'onglet « Paramètres », à gauche de
+    /// « Fermer l'overlay », 2026-09-17) : un process neuf est lancé (`restart::relaunch`) puis
+    /// celui-ci sort, par le même chemin que [`Self::Quit`].
+    Restart,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
     RetryUpdate,
@@ -3380,6 +3624,9 @@ impl App {
         // l'action suivante quand deux se présentent, et une position perdue ne se rattrape pas
         // — il faudrait re-glisser la bande.
         let mut persist_recap_position = false;
+        // Même mécanique pour la hauteur du panneau Combat (2026-09-17) : écrite une fois, au
+        // relâchement.
+        let mut persist_combat_position = false;
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
@@ -3459,7 +3706,7 @@ impl App {
         // traversable si l'utilisateur avait basculé ce mode juste avant.
         let interactive = matches!(
             overlay.kind,
-            OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
+            OverlayKind::Options | OverlayKind::Login | OverlayKind::ResetConfirm(_)
         ) || self.interactive;
         let this_game_rect = overlay.game_rect;
         let this_game_hwnd = overlay.game_hwnd;
@@ -3485,6 +3732,26 @@ impl App {
             started_at: self.recap_session.started_at_local(),
             resumed: self.recap_session.resumed(),
         };
+        // Ce que la bande Récap sait d'elle-même par l'hôte (2026-09-17) — verrou, position
+        // personnalisée, et de quel côté sa rangée d'actions tient. Le côté se décide sur la
+        // fenêtre de JEU (`recap_placement::actions_below`), que le panneau ne connaît pas.
+        let recap_chrome = panels::recap::RecapChrome {
+            locked: self.recap_locked,
+            moved: self.recap_position.is_some(),
+            actions_below: overlay.kind == OverlayKind::Recap && {
+                let outer = overlay.window.outer_size();
+                let (client, band) = RecapAnchor::new(None, overlay.window.scale_factor())
+                    .geometry(overlay.game_rect, outer.width as i32, outer.height as i32);
+                recap_placement::actions_below(self.recap_position, client, band)
+            },
+        };
+        // Ce que le panneau Combat sait de lui-même par l'hôte (2026-09-17) — verrou et hauteur
+        // personnalisée. Pas de côté à calculer ici : la rangée d'actions vit dans la fenêtre, et
+        // c'est le miroir qui la porte du bon côté (voir `panels::combat::paint_actions_row`).
+        let combat_chrome = panels::combat::CombatChrome {
+            locked: self.combat_locked,
+            moved: self.combat_position_y.is_some(),
+        };
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
             &overlay.window,
@@ -3503,6 +3770,7 @@ impl App {
                 watchlist_enabled: self.features.suivi,
                 spells_enabled: self.features.spells_visible(),
                 combat_on_right: self.combat_on_right,
+                combat_chrome,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_toast,
                 catalog: &catalog,
@@ -3518,6 +3786,7 @@ impl App {
                 recap: &recap_view,
                 options: overlay.options_state.as_mut(),
                 veiled,
+                recap_chrome,
                 login: overlay.login_state.as_mut(),
             },
         );
@@ -3538,7 +3807,9 @@ impl App {
                 if overlay.last_recap_height != Some(height) && self.recap_drag.is_none() {
                     let size = winit::dpi::LogicalSize::new(
                         panels::recap::WIDTH as f64,
-                        height as f64 + render_content::RECAP_TOOLTIP_RESERVE as f64,
+                        height as f64
+                            + render_content::RECAP_TOOLTIP_RESERVE as f64
+                            + render_content::RECAP_ACTIONS_RESERVE as f64,
                     );
                     if let Some(actual) = overlay.window.request_inner_size(size) {
                         Self::reconfigure_surface(&mut overlay.gpu, actual);
@@ -3618,6 +3889,73 @@ impl App {
                             Some((x, y)) => tracing::info!("[recap] bande posée en {x} / {y}."),
                             None => {
                                 tracing::info!("[recap] bande revenue à son emplacement d'origine.")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // **Le panneau Combat saisi par sa poignée latérale** (2026-09-17) : la même mécanique que
+        // la bande ci-dessus, en une seule dimension — le côté ne se déplace pas à la souris (voir
+        // `combat_placement`), seule la hauteur bouge. Le curseur vient de l'OS et non d'egui,
+        // pour la raison qui a fait vibrer la bande (`recap_placement::drag_offset`).
+        if overlay.kind == OverlayKind::Combat {
+            // Le côté est copié AVANT la fermeture qui pose la fenêtre : elle ne doit rien
+            // garder de `self`, dont d'autres champs changent juste après (la hauteur, l'état du
+            // glissement).
+            let on_right = self.combat_on_right;
+            let scale = overlay.window.scale_factor();
+            let outer = overlay.window.outer_size();
+            let (client, panel) = CombatAnchor::new(on_right, None, scale).geometry(
+                overlay.game_rect,
+                outer.width as i32,
+                outer.height as i32,
+            );
+            let mut place = |offset: Option<i32>| {
+                let (x, y) = combat_placement::window_position(offset, on_right, client, panel);
+                let posed = PhysicalPosition::new(x, y);
+                if overlay.last_position != Some(posed) {
+                    overlay.window.set_outer_position(posed);
+                    overlay.last_position = Some(posed);
+                }
+            };
+            match outcome.combat_drag {
+                panels::drag::PanelDrag::None => {}
+                panels::drag::PanelDrag::Started(pos) => {
+                    self.combat_drag = Some(CombatDragState {
+                        window: id,
+                        // Le curseur arrive en points logiques (repère d'egui), tout le reste est
+                        // en pixels d'écran — à 125 %, confondre les deux ferait partir le panneau
+                        // une fois et quart trop loin.
+                        grab_y: (pos.y as f64 * scale).round() as i32,
+                    });
+                }
+                panels::drag::PanelDrag::Moved => {
+                    if let Some(drag) = self.combat_drag.filter(|drag| drag.window == id) {
+                        // Curseur illisible : le panneau reste où il est, ce geste-ci n'a
+                        // simplement pas d'effet cette frame.
+                        if let Some((_, cursor_y)) = game_window::cursor_position() {
+                            let offset =
+                                combat_placement::drag_offset(cursor_y, drag.grab_y, client, panel);
+                            if self.combat_position_y != Some(offset) {
+                                self.combat_position_y = Some(offset);
+                                place(Some(offset));
+                            }
+                        }
+                    }
+                }
+                panels::drag::PanelDrag::Released => {
+                    if self.combat_drag.is_some_and(|drag| drag.window == id) {
+                        self.combat_drag = None;
+                        self.combat_position_y = self
+                            .combat_position_y
+                            .and_then(|offset| combat_placement::snap(offset, client, panel));
+                        place(self.combat_position_y);
+                        persist_combat_position = true;
+                        match self.combat_position_y {
+                            Some(y) => tracing::info!("[combat] panneau posé à la hauteur {y}."),
+                            None => {
+                                tracing::info!("[combat] panneau revenu à sa hauteur d'origine.")
                             }
                         }
                     }
@@ -3725,15 +4063,49 @@ impl App {
         // par-dessus la fenêtre de jeu de CE bloc ; sa réponse, elle, arrive par la fenêtre de
         // confirmation elle-même, une frame plus tard.
         if outcome.recap_reset_requested {
-            post_redraw = PostRedraw::OpenRecapReset(this_game_hwnd, this_game_rect);
+            post_redraw = PostRedraw::OpenResetConfirm(
+                this_game_hwnd,
+                this_game_rect,
+                ResetTarget::RecapSession,
+            );
         }
-        match outcome.recap_reset_choice {
-            overlay_ui::design::ConfirmChoice::Pending => {}
-            overlay_ui::design::ConfirmChoice::Yes => {
-                post_redraw = PostRedraw::AnswerRecapReset(true)
-            }
-            overlay_ui::design::ConfirmChoice::No => {
-                post_redraw = PostRedraw::AnswerRecapReset(false)
+        // Le glyphe de replacement de la rangée d'actions (2026-09-17) : même fenêtre, même
+        // voile, autre question — « on remet le récap à son emplacement initial seulement si
+        // l'utilisateur appuie sur oui ».
+        if outcome.recap_restore_requested {
+            post_redraw = PostRedraw::OpenResetConfirm(
+                this_game_hwnd,
+                this_game_rect,
+                ResetTarget::RecapPosition,
+            );
+        }
+        // Le cadenas : la bascule est immédiate et persistée, sans confirmation — rien ne se
+        // perd, et le glyphe montre aussitôt l'état obtenu. Après le rendu comme tout ce qui
+        // touche `self` entier (la fenêtre est empruntée jusque-là).
+        if outcome.recap_toggle_lock {
+            post_redraw = PostRedraw::ToggleRecapLock;
+        }
+        // Les deux mêmes commandes pour le panneau Combat (2026-09-17) — replacement sous
+        // confirmation, cadenas immédiat.
+        if outcome.combat_restore_requested {
+            post_redraw = PostRedraw::OpenResetConfirm(
+                this_game_hwnd,
+                this_game_rect,
+                ResetTarget::CombatPosition,
+            );
+        }
+        if outcome.combat_toggle_lock {
+            post_redraw = PostRedraw::ToggleCombatLock;
+        }
+        if let OverlayKind::ResetConfirm(target) = overlay.kind {
+            match outcome.reset_choice {
+                overlay_ui::design::ConfirmChoice::Pending => {}
+                overlay_ui::design::ConfirmChoice::Yes => {
+                    post_redraw = PostRedraw::AnswerResetConfirm(target, true)
+                }
+                overlay_ui::design::ConfirmChoice::No => {
+                    post_redraw = PostRedraw::AnswerResetConfirm(target, false)
+                }
             }
         }
         match outcome.options_action {
@@ -3752,8 +4124,10 @@ impl App {
             }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
             OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+            OptionsModalAction::ResyncCombat => post_redraw = PostRedraw::ResyncCombat,
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
             OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
+            OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -3763,7 +4137,7 @@ impl App {
 
         // Après la dernière ligne qui touche `overlay` : `persist_config` a besoin de tout
         // `self`, fenêtres comprises.
-        if persist_recap_position {
+        if persist_recap_position || persist_combat_position {
             self.persist_config();
         }
 
@@ -3773,10 +4147,14 @@ impl App {
                 self.open_options_modal(event_loop, Some((hwnd, rect)), tab)
             }
             PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
-            PostRedraw::OpenRecapReset(hwnd, rect) => {
-                self.open_recap_reset_confirm(event_loop, hwnd, rect)
+            PostRedraw::OpenResetConfirm(hwnd, rect, target) => {
+                self.open_reset_confirm(event_loop, hwnd, rect, target)
             }
-            PostRedraw::AnswerRecapReset(confirmed) => self.answer_recap_reset(id, confirmed),
+            PostRedraw::AnswerResetConfirm(target, confirmed) => {
+                self.answer_reset_confirm(id, target, confirmed)
+            }
+            PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
+            PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
             PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
             // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
             // ce qu'on y réglait (liste suivie, alertes) appartient au compte qu'on vient de
@@ -3795,6 +4173,10 @@ impl App {
                     install_if_available: false,
                 });
             }
+            PostRedraw::ResyncCombat => {
+                tracing::info!(">>> Rafraîchissement du panneau de combat (fenêtre Options).");
+                let _ = self.settings_tx.send(EngineCommand::ResyncLog);
+            }
             PostRedraw::InstallUpdate => self.request_update_install(id),
             PostRedraw::RetryUpdate => {
                 let _ = self.update_command_tx.send(UpdateCommand::Check {
@@ -3808,6 +4190,19 @@ impl App {
                 logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                 event_loop.exit();
             }
+            // Même sortie que « Fermer l'overlay », un process neuf en plus — lancé AVANT de
+            // sortir (voir `restart::relaunch`). Une relance impossible ne ferme rien : l'overlay
+            // en place reste ouvert, avec la cause au journal, plutôt que de laisser l'utilisateur
+            // sans overlay du tout.
+            PostRedraw::Restart => match overlay_ui::restart::relaunch() {
+                Ok(()) => {
+                    logging::log_session_end("Redémarrer l'overlay (fenêtre Options)");
+                    event_loop.exit();
+                }
+                Err(err) => {
+                    tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
+                }
+            },
         }
     }
 }
@@ -3902,9 +4297,9 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         _ => post_redraw = PostRedraw::CloseOptions,
                     }
-                } else if overlay.kind == OverlayKind::RecapReset {
+                } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
                     // Fermer la question, c'est répondre « Non ».
-                    post_redraw = PostRedraw::AnswerRecapReset(false);
+                    post_redraw = PostRedraw::AnswerResetConfirm(target, false);
                 } else {
                     logging::log_session_end("fermeture de fenêtre");
                     event_loop.exit();
@@ -4172,7 +4567,7 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
             required_features: wgpu::Features::empty(),
             // Plancher `webgl2` (l'overlay ne demande rien de plus), mais avec les limites
             // de RÉSOLUTION de l'adaptateur : la swapchain de la confirmation de remise à
-            // zéro couvre la fenêtre de jeu ENTIÈRE (`OverlayKind::RecapReset`), et
+            // zéro couvre la fenêtre de jeu ENTIÈRE (`OverlayKind::ResetConfirm`), et
             // `downlevel_webgl2_defaults()` plafonne une texture 2D à 2048 px — un jeu en
             // 2560×1392 faisait donc paniquer `Surface::configure` au clic sur le glyphe
             // (2026-09-17). L'idiome est celui que wgpu documente sur `using_resolution`.
@@ -4416,6 +4811,8 @@ fn main() {
         log_path,
         combat_always_visible: saved_config.combat_always_visible,
         combat_on_right: saved_config.combat_on_right,
+        combat_position_y: saved_config.combat_position_y,
+        combat_locked: saved_config.combat_locked,
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),
@@ -4439,6 +4836,7 @@ fn main() {
             std::time::SystemTime::now(),
         ),
         recap_position: saved_config.recap_position(),
+        recap_locked: saved_config.recap_locked,
         catalog,
         catalog_stale,
         remote_icons,

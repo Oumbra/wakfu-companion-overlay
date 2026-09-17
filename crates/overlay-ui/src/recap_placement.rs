@@ -82,6 +82,15 @@ pub struct Band {
     /// `render_content::RECAP_TOOLTIP_RESERVE` à l'échelle de l'écran — la hauteur qui sépare le
     /// haut de la fenêtre du haut du bloc.
     pub reserve: i32,
+    /// `render_content::RECAP_ACTIONS_RESERVE` à l'échelle de l'écran (2026-09-17) — la hauteur
+    /// que la fenêtre garde SOUS le bloc pour sa rangée d'actions (cadenas, replacement).
+    ///
+    /// **Gardée des deux côtés en permanence**, qu'elle serve en haut ou en bas : la rangée tient
+    /// au-dessus du bloc dans la réserve d'infobulle ([`Self::reserve`], plus haute qu'elle), et
+    /// en dessous dans celle-ci. Une fenêtre qui ne réserverait que le côté utilisé changerait de
+    /// taille avec le côté, le côté dépend de la position, et la position d'une fenêtre qui
+    /// change de taille — c'est la boucle qui a fait vibrer la bande (voir [`drag_offset`]).
+    pub actions: i32,
 }
 
 impl Band {
@@ -98,18 +107,27 @@ impl Band {
             width,
             height,
             reserve: (crate::render_content::RECAP_TOOLTIP_RESERVE as f64 * scale).round() as i32,
+            actions: (crate::render_content::RECAP_ACTIONS_RESERVE as f64 * scale).round() as i32,
         }
     }
 
     /// Hauteur du fond translucide seul — ce que l'utilisateur voit, et ce que le bornage garde
     /// dans la fenêtre de jeu.
     fn visible_height(self) -> i32 {
-        (self.height - self.reserve).max(0)
+        (self.height - self.reserve - self.actions).max(0)
     }
 }
 
-/// Borne un décalage à la zone cliente du jeu : la bande reste **entièrement visible**, réserve
-/// d'infobulle comprise en haut.
+/// Borne un décalage à la zone cliente du jeu : le **fond translucide** reste entièrement dans le
+/// cadre, du bord haut au bord bas.
+///
+/// **Ce qui est borné, c'est ce qu'on voit** — le bloc, pas sa fenêtre. Les deux réserves de
+/// celle-ci (les infobulles au-dessus, la rangée d'actions en dessous, voir [`Band`]) peuvent
+/// donc sortir du cadre : une infobulle qui s'ouvre par-dessus la barre du client, ou une rangée
+/// d'actions qui passe de l'autre côté du bloc ([`actions_below`]), valent mieux qu'un bloc à qui
+/// l'on interdit les 36 px du haut de l'écran de jeu. Jusqu'au 2026-09-17, le bornage gardait la
+/// réserve d'infobulle dans le cadre et la bande butait donc 36 px sous le bord haut, sans que
+/// rien ne l'explique à l'écran.
 ///
 /// Sans ce bornage, une bande poussée hors de l'écran n'aurait plus aucun moyen d'être rattrapée
 /// à la souris — c'est le seul geste qui la déplace. Il ne sert pas qu'au moment de la pose : il
@@ -124,9 +142,27 @@ impl Band {
 pub fn clamp(offset: (i32, i32), client: ClientArea, band: Band) -> (i32, i32) {
     let (x, y) = offset;
     let max_x = (client.width - band.width).max(0);
-    let min_y = band.reserve;
-    let max_y = (client.height - band.visible_height()).max(min_y);
-    (x.clamp(0, max_x), y.clamp(min_y, max_y))
+    let max_y = (client.height - band.visible_height()).max(0);
+    (x.clamp(0, max_x), y.clamp(0, max_y))
+}
+
+/// **De quel côté du bloc sa rangée d'actions tient-elle** (2026-09-17) : `false` au-dessus —
+/// c'est là que l'utilisateur l'a demandée, « en haut à gauche » — et `true` en dessous quand la
+/// bande est posée trop haut dans la fenêtre de jeu pour que la rangée y trouve sa place.
+///
+/// La place se compte dans la **zone cliente du jeu**, pas dans la fenêtre OS de la bande : c'est
+/// ce que l'utilisateur voit, et la fenêtre, elle, garde la hauteur de la rangée des deux côtés
+/// (voir [`Band::actions`]). Une bande collée en haut n'a rien au-dessus d'elle ; la rangée passe
+/// alors sous le bloc, où il reste forcément de la place puisque le bornage garde le bloc entier
+/// dans le cadre.
+///
+/// Le cas où ni l'un ni l'autre ne tient (fenêtre de jeu plus courte que le bloc, client réduit
+/// au minimum) retombe au-dessus : il vaut mieux une rangée qui déborde là où la bande déborde
+/// déjà qu'une règle qui s'inverse à chaque pixel de redimensionnement.
+pub fn actions_below(offset: Option<(i32, i32)>, client: ClientArea, band: Band) -> bool {
+    let (_, y) = clamp(offset.unwrap_or(DEFAULT_OFFSET), client, band);
+    let below = client.height - y - band.visible_height();
+    y < band.actions && below >= band.actions
 }
 
 /// L'aimantation de la pose : `None` quand la bande retombe à moins de [`SNAP_RADIUS_PX`] de son
@@ -210,7 +246,8 @@ mod tests {
     use super::*;
 
     /// Une fenêtre de jeu 1920×1080 dont la zone cliente commence au bord haut (le vrai client
-    /// Wakfu, non décoré), et une bande à trois lignes : 206×(78 + 36 de réserve).
+    /// Wakfu, non décoré), et une bande à trois lignes : 206×(78 de bloc, 36 de réserve
+    /// d'infobulle au-dessus, 24 de rangée d'actions en dessous).
     fn plein_ecran() -> (ClientArea, Band) {
         (
             ClientArea {
@@ -221,8 +258,9 @@ mod tests {
             },
             Band {
                 width: 206,
-                height: 114,
+                height: 138,
                 reserve: 36,
+                actions: 24,
             },
         )
     }
@@ -262,8 +300,9 @@ mod tests {
         };
         let band = Band {
             width: 206,
-            height: 114,
+            height: 138,
             reserve: 36,
+            actions: 24,
         };
         let window = window_position(Some((40, 200)), client, band);
         assert_eq!(window, (140, 130 + 200 - 36));
@@ -275,7 +314,7 @@ mod tests {
     #[test]
     fn la_bande_ne_peut_pas_sortir_de_la_fenetre_de_jeu() {
         let (client, band) = plein_ecran();
-        assert_eq!(clamp((-80, -80), client, band), (0, band.reserve));
+        assert_eq!(clamp((-80, -80), client, band), (0, 0));
         assert_eq!(
             clamp((5000, 5000), client, band),
             (1920 - 206, 1080 - band.visible_height())
@@ -309,10 +348,58 @@ mod tests {
         };
         let band = Band {
             width: 206,
-            height: 114,
+            height: 138,
             reserve: 36,
+            actions: 24,
         };
-        assert_eq!(clamp((50, 50), minuscule, band), (0, band.reserve));
+        assert_eq!(clamp((50, 50), minuscule, band), (0, 0));
+    }
+
+    /// **Le bloc peut toucher le bord haut du cadre** depuis le 2026-09-17 : c'est lui qui est
+    /// borné, pas sa fenêtre — la réserve d'infobulle, elle, déborde au-dessus. Auparavant la
+    /// bande butait 36 px plus bas sans que rien ne l'explique à l'écran.
+    #[test]
+    fn le_bloc_peut_toucher_le_bord_haut_du_cadre() {
+        let (client, band) = plein_ecran();
+        assert_eq!(clamp((4, 0), client, band), (4, 0));
+        assert_eq!(
+            window_position(Some((4, 0)), client, band),
+            (4, -band.reserve)
+        );
+    }
+
+    /// La rangée d'actions se pose **au-dessus** du bloc — c'est là qu'elle est demandée — tant
+    /// qu'il y a sa hauteur de place entre le haut du bloc et le bord du cadre.
+    #[test]
+    fn la_rangee_d_actions_reste_au_dessus_quand_la_place_y_est() {
+        let (client, band) = plein_ecran();
+        assert!(!actions_below(None, client, band));
+        assert!(!actions_below(Some((4, band.actions)), client, band));
+        assert!(!actions_below(Some((900, 500)), client, band));
+    }
+
+    /// Collée en haut du cadre, la bande n'a plus rien au-dessus d'elle : la rangée passe
+    /// dessous, où le bornage garantit qu'il reste de la place.
+    #[test]
+    fn une_bande_collee_en_haut_descend_sa_rangee() {
+        let (client, band) = plein_ecran();
+        assert!(actions_below(Some((4, 0)), client, band));
+        assert!(actions_below(Some((4, band.actions - 1)), client, band));
+    }
+
+    /// Cas dégénéré — un cadre à peine plus haut que le bloc : ni au-dessus ni en dessous la
+    /// rangée ne tient, et elle reste au-dessus plutôt que de s'inverser à chaque pixel de
+    /// redimensionnement.
+    #[test]
+    fn sans_place_nulle_part_la_rangee_reste_au_dessus() {
+        let (_, band) = plein_ecran();
+        let etroit = ClientArea {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: band.visible_height() + 10,
+        };
+        assert!(!actions_below(Some((4, 0)), etroit, band));
     }
 
     /// Reposée près de son ancrage, la bande y recolle et la config oublie sa position ; posée

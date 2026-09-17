@@ -198,6 +198,8 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -272,6 +274,8 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -372,6 +376,8 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     now,
                     recap: &recap,
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -465,6 +471,8 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         now,
                         recap: &recap,
                         recap_cells: Default::default(),
+                        recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,
@@ -611,6 +619,14 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                         now,
                         recap: &recap,
                         recap_cells: Default::default(),
+                        // **Déverrouillée** : le défaut de `RecapChrome` est l'inverse
+                        // (2026-09-17), et une bande verrouillée ne remonterait aucun geste —
+                        // c'est ce que vérifie `bande_recap_verrouillee_ne_bouge_pas`.
+                        recap_chrome: panels::recap::RecapChrome {
+                            locked: false,
+                            ..Default::default()
+                        },
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,
@@ -695,9 +711,9 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
     );
 }
 
-/// La confirmation de remise à zéro (`OverlayKind::RecapReset`, 2026-09-17) : la boîte du design
+/// La confirmation de remise à zéro (`OverlayKind::ResetConfirm`, 2026-09-17) : la boîte du design
 /// system centrée sous un voile qui couvre toute la fenêtre — la fenêtre de jeu, en vrai. Échap
-/// répond « Non », ce que ce test relève par `RenderOutcome::recap_reset_choice`.
+/// répond « Non », ce que ce test relève par `RenderOutcome::reset_choice`.
 #[test]
 fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
     let mut textures = Textures::new();
@@ -722,7 +738,9 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
             let outcome = paint_content(
                 ui,
                 RenderContent {
-                    kind: OverlayKind::RecapReset,
+                    kind: OverlayKind::ResetConfirm(
+                        overlay_ui::render_content::ResetTarget::RecapSession,
+                    ),
                     fight: None,
                     portraits,
                     combat_frame,
@@ -748,13 +766,15 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
                 },
             );
-            if outcome.recap_reset_choice != overlay_ui::design::ConfirmChoice::Pending {
-                *choice.borrow_mut() = outcome.recap_reset_choice;
+            if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
+                *choice.borrow_mut() = outcome.reset_choice;
             }
         }
     });
@@ -832,6 +852,8 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 shortcuts: &shortcuts,
                 now,
                 recap: &recap,
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
                     fights: false,
@@ -909,6 +931,8 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 shortcuts: &shortcuts,
                 now,
                 recap: &recap,
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
                     fights: true,
@@ -979,6 +1003,8 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -1141,6 +1167,8 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -1217,6 +1245,8 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -1353,6 +1383,8 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -1499,6 +1531,8 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -1600,6 +1634,8 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -1705,6 +1741,8 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         now,
                         recap: &Default::default(),
                         recap_cells: Default::default(),
+                        recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,
@@ -1825,6 +1863,8 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -2122,6 +2162,8 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -2224,6 +2266,8 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -2317,6 +2361,8 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     login: None,
                     veiled: false,
@@ -2408,6 +2454,8 @@ fn panneau_options_ne_panique_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
@@ -2695,6 +2743,8 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
@@ -2815,6 +2865,8 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         now,
                         recap: &Default::default(),
                         recap_cells: Default::default(),
+                        recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: Some(&mut options_state),
                         veiled: true,
                         login: None,
@@ -3148,7 +3200,12 @@ fn options_parametres_section_compte() {
     // notifications se sont posées au-dessus d'elle — voir [`defile_les_parametres`].
     // **102 points de plus depuis le 2026-09-17** : la ligne d'aide et le bouton « Replacer au
     // défaut » de la section « Recap » (bande déplaçable à la souris) l'ont repoussée d'autant.
-    defile_les_parametres(&mut harness, 702.0);
+    // **128 de plus le même jour** : la ligne d'aide et le bouton « Rafraîchir le panneau de
+    // combat » en fin de section « Combat » (voir `options_parametres_rafraichir_combat`).
+    // **45 encore** : la ligne d'aide du cadenas de la bande Récap, arrivée le même jour par une
+    // autre session. Sans cet ajustement, la section que ce test a pour objet de montrer sort du
+    // cadre par le bas — une référence régénérée sans le voir ne montrerait plus rien.
+    defile_les_parametres(&mut harness, 879.0);
     harness.snapshot("options_parametres_compte");
 }
 
@@ -3157,6 +3214,10 @@ fn options_parametres_section_compte() {
 /// vers 0.21.0 », la ligne d'information avec le poids du téléchargement, la case d'installation
 /// automatique cochée. La version courante n'y est pas répétée (bannière), pas de « Notes de
 /// version » (décisions du mainteneur).
+///
+/// Le bas de l'onglet entre dans le cadre à ce défilement : la paire de sorties (« Redémarrer » et
+/// « Fermer l'overlay ») y est donc visible depuis le 2026-09-17, c'est
+/// `options_parametres_sorties` qui la cadre.
 #[test]
 fn options_parametres_section_mise_a_jour() {
     let mut options_state = parametres_avec_notifications();
@@ -3198,9 +3259,62 @@ fn options_parametres_section_mise_a_jour() {
     harness.run();
     // Dernière section de l'onglet : elle ne se voit qu'après un défilement depuis le 2026-09-15
     // — voir [`defile_les_parametres`]. 102 points de plus depuis le 2026-09-17, même raison que
-    // pour la section « Compte » ci-dessus.
-    defile_les_parametres(&mut harness, 1002.0);
+    // pour la section « Compte » ci-dessus, puis 173 encore le même jour (bouton de
+    // rafraîchissement du panneau de combat, ligne d'aide du cadenas de la bande Récap). Le
+    // défilement sature au bas du contenu : la valeur n'a plus qu'à être assez grande.
+    defile_les_parametres(&mut harness, 1175.0);
     harness.snapshot("options_parametres_mise_a_jour");
+}
+
+/// **Le bouton « Rafraîchir le panneau de combat »** en fin de section « Combat » (2026-09-17) —
+/// le déclencheur MANUEL de la relecture complète de `wakfu.log`
+/// (`overlay_ui::engine_thread::EngineCommand::ResyncLog`).
+///
+/// Ce qu'il répare : un panneau Combat figé en plein combat — plus un dégât, plus une armure, plus
+/// un soin qui monte — alors que ses boutons répondent encore. Un chien de garde
+/// (`IngestWatchdog`) fait le même geste tout seul au bout de huit secondes ; ce bouton n'attend
+/// pas, et c'est le SEUL chemin manuel sous Linux (`ShortcutAction::Refresh` n'y est pas gréé).
+///
+/// Ce que la capture doit montrer : la ligne d'aide qui dit à quoi sert le bouton ET ce qu'il
+/// coûte (les combats terminés de la session sont oubliés), puis le bouton, centré comme
+/// « Se déconnecter » et « Fermer l'overlay ». Il reste VIF ici bien que le détail des combats
+/// soit actif ou non — la relecture reconstruit aussi le Suivi, le Récap et l'historique
+/// synchronisé, qui vivent sans panneau.
+#[test]
+fn options_parametres_rafraichir_combat() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    // Juste assez pour amener la fin de la section « Combat » dans le cadre — voir
+    // [`defile_les_parametres`].
+    defile_les_parametres(&mut harness, 250.0);
+    harness.snapshot("options_parametres_rafraichir_combat");
 }
 
 /// **La confirmation de déconnexion** — l'autre moitié de la section « Compte ». Le bouton est la
@@ -3383,11 +3497,133 @@ fn options_fermeture_overlay_confirmee_et_echap_repond_non() {
     );
 }
 
-/// **Le pied de l'onglet « Paramètres »** (2026-09-16) : sous la section « Compte », le bouton
-/// « Fermer l'overlay » — secondaire, centré, sans section (ce n'est pas un réglage, c'est la
-/// sortie). Capturé après un défilement jusqu'en bas, la seule position où il se voit.
+/// **« Redémarrer » passe par la même confirmation que « Fermer l'overlay »** (2026-09-17, bouton
+/// à gauche de son voisin, en pied de l'onglet « Paramètres »).
+///
+/// Même contrat que la fermeture, pour la même raison : l'action arrête le process (un neuf prend
+/// sa place, mais le combat affiché et le brouillon de la fenêtre partent avec l'ancien), et
+/// « Annuler » ne la rattraperait pas. Échap répond « Non » sans que le filet clavier de la fenêtre
+/// relise le même appui ; « Oui » remonte `OptionsModalAction::Restart` — la seule intention que le
+/// panneau produit, l'hôte étant seul à savoir relancer un exe (`overlay_ui::restart::relaunch`).
 #[test]
-fn options_parametres_fermer_overlay() {
+fn options_redemarrage_confirme_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        pending_restart: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_restart);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte, la fenêtre reste.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat.clone(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : ni redémarrage, ni fermeture de la fenêtre derrière"
+    );
+
+    // 2. « Oui » remonte `Restart` — et rien d'autre. Coordonnées calculées depuis les tokens de
+    // `design::confirm_dialog`, comme pour la confirmation de fermeture (même géométrie).
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat,
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Restart],
+        "« Oui » remonte le redémarrage à l'hôte, et rien d'autre"
+    );
+}
+
+/// **Le pied de l'onglet « Paramètres »** (2026-09-16, « Redémarrer » ajouté le 2026-09-17) : sous
+/// la section « Compte », les deux sorties — « Redémarrer » puis « Fermer l'overlay », secondaires,
+/// centrées ENSEMBLE et sans section (ce ne sont pas des réglages). Capturé après un défilement
+/// jusqu'en bas, la seule position où elles se voient.
+///
+/// Ce que la capture garde : la paire centrée d'un seul tenant (et non un bouton par moitié de
+/// colonne), la gouttière du pied de page entre les deux, et « Redémarrer » à gauche.
+#[test]
+fn options_parametres_sorties() {
     let mut options_state = parametres_avec_notifications();
     options_state.account_connected = true;
 
@@ -3419,7 +3655,7 @@ fn options_parametres_fermer_overlay() {
     harness.run();
     // Bien au-delà de la hauteur de l'onglet : la zone défilable s'arrête d'elle-même au bas.
     defile_les_parametres(&mut harness, 2000.0);
-    harness.snapshot("options_parametres_fermer_overlay");
+    harness.snapshot("options_parametres_sorties");
 }
 
 #[test]
@@ -5236,6 +5472,8 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -5590,7 +5828,9 @@ fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
     /// **Puis de 102 px le 2026-09-17 (2)** : la bande Récap devenue déplaçable à la souris a
     /// ajouté sous cette même section sa ligne d'aide (deux lignes de 23 px) et son bouton
     /// « Replacer au défaut » (36 px), gouttières comprises — carré mesuré en y 526..545.
-    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 536.0);
+    /// **Puis de 46 px le 2026-09-17 (3)** : le cadenas de la bande (verrouillée par défaut) a
+    /// allongé cette même ligne d'aide de deux lignes de 23 px.
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 582.0);
 
     let clic = |detail_actif: bool| -> bool {
         let mut etat = parametres_avec_notifications();
@@ -5902,6 +6142,8 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 now,
                 recap: &Default::default(),
                 recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -6056,6 +6298,8 @@ fn capture_login_with_update(
                     now,
                     recap: &Default::default(),
                     recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: Some(&mut login_state),
@@ -6470,5 +6714,296 @@ fn options_onglet_personnages_suppression_compte() {
             },
             ..Default::default()
         },
+    );
+}
+
+/// **La rangée d'actions de la bande Récap** (2026-09-17, demande utilisateur) — bande
+/// DÉVERROUILLÉE et DÉPLACÉE : le cadenas ouvert et, à côté de lui, le glyphe de replacement que
+/// seul un déplacement fait apparaître. La pastille est posée hors du fond, en haut à gauche,
+/// dans la réserve d'infobulle de la fenêtre.
+#[test]
+fn bande_recap_deverrouillee_et_deplacee_montre_ses_deux_glyphes() {
+    capture_rangee_actions(
+        panels::recap::RecapChrome {
+            locked: false,
+            moved: true,
+            actions_below: false,
+        },
+        "recap_actions_deverrouille_deplace",
+    );
+}
+
+/// La même bande **verrouillée et jamais déplacée** : un seul glyphe, le cadenas fermé, et la
+/// pastille se resserre dessus — « les deux ne peuvent pas vivre en même temps », et il n'y a
+/// rien à replacer.
+#[test]
+fn bande_recap_verrouillee_ne_montre_que_son_cadenas() {
+    capture_rangee_actions(
+        panels::recap::RecapChrome::default(),
+        "recap_actions_verrouille",
+    );
+}
+
+/// La rangée **sous** le bloc (`RecapChrome::actions_below`) : ce que l'hôte demande quand la
+/// bande est posée si haut dans la fenêtre de jeu que sa rangée en sortirait — voir
+/// `recap_placement::actions_below`.
+#[test]
+fn bande_recap_collee_en_haut_descend_sa_rangee_d_actions() {
+    capture_rangee_actions(
+        panels::recap::RecapChrome {
+            locked: false,
+            moved: true,
+            actions_below: true,
+        },
+        "recap_actions_en_bas",
+    );
+}
+
+/// Le bloc Récap d'une session ordinaire, rendu avec le `chrome` donné, et sa capture — les trois
+/// tests ci-dessus ne diffèrent que par là.
+fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime: std::time::Duration::from_secs(5025),
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
+                watchlist_selection: &mut Default::default(),
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                recap: &recap,
+                recap_cells: Default::default(),
+                recap_chrome: chrome,
+                combat_chrome: Default::default(),
+                options: None,
+                veiled: false,
+                login: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// **Verrouillée, la bande ne bouge plus et ne le laisse pas croire** (2026-09-17, demande
+/// utilisateur : « si l'overlay est en mode lock, l'overlay ne peut plus être déplacé et la souris
+/// repasse en mode normal »).
+///
+/// Trois moitiés de la règle, qu'aucune capture ne montrerait :
+///
+/// 1. verrouillée, un appui-glissé sur le fond ne remonte RIEN, et le survol ne promet rien non
+///    plus — pas de croix fléchée du jeu, sur laquelle `Grab`/`Grabbing` retombent (voir
+///    `overlay_ui::cursor`) ;
+/// 2. le cadenas remonte sa bascule à l'hôte, qui seul tient le réglage et l'écrit ;
+/// 3. le glyphe de replacement n'existe QUE si la bande a été déplacée — au même pixel, sans
+///    déplacement, il n'y a rien à cliquer.
+#[test]
+fn bande_recap_verrouillee_ne_bouge_pas() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: 42_910,
+            kamas_gained: 128_400,
+            ..Default::default()
+        },
+        uptime: std::time::Duration::from_secs(5025),
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+    // Le chrome que l'hôte passerait — le test le change entre deux passes, comme l'hôte le
+    // ferait après un clic sur le cadenas.
+    let chrome = std::rc::Rc::new(std::cell::Cell::new(panels::recap::RecapChrome::default()));
+    let gestes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let bascules = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let replacements = std::rc::Rc::new(std::cell::Cell::new(0usize));
+
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::HEIGHT
+                + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE
+                + overlay_ui::render_content::RECAP_ACTIONS_RESERVE
+                + 16.0,
+        ))
+        .build_ui({
+            let chrome = std::rc::Rc::clone(&chrome);
+            let gestes = std::rc::Rc::clone(&gestes);
+            let bascules = std::rc::Rc::clone(&bascules);
+            let replacements = std::rc::Rc::clone(&replacements);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Recap,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        combat_on_right: false,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &recap,
+                        recap_cells: Default::default(),
+                        recap_chrome: chrome.get(),
+                        combat_chrome: Default::default(),
+                        options: None,
+                        veiled: false,
+                        login: None,
+                    },
+                );
+                if outcome.recap_drag != panels::recap::RecapDrag::None {
+                    gestes.borrow_mut().push(outcome.recap_drag);
+                }
+                if outcome.recap_toggle_lock {
+                    bascules.set(bascules.get() + 1);
+                }
+                if outcome.recap_restore_requested {
+                    replacements.set(replacements.get() + 1);
+                }
+            }
+        });
+
+    // (1) Le fond, verrouillé : ni curseur ni geste.
+    let saisie = egui::pos2(118.0, 61.0);
+    harness.hover_at(saisie);
+    harness.run();
+    let images = overlay_ui::cursor::images();
+    assert!(
+        !harness
+            .output()
+            .platform_output
+            .cursor_image
+            .as_ref()
+            .is_some_and(|image| std::sync::Arc::ptr_eq(&image.rgba, &images.moving.rgba)),
+        "verrouillée, la bande ne doit pas annoncer qu'elle s'attrape"
+    );
+    press(&mut harness, saisie, true);
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(160.0, 100.0)));
+    harness.run();
+    press(&mut harness, egui::pos2(160.0, 100.0), false);
+    harness.run();
+    assert!(
+        gestes.borrow().is_empty(),
+        "verrouillée, la bande ne doit remonter aucun geste : {:?}",
+        gestes.borrow()
+    );
+
+    // (2) Le cadenas, premier glyphe de la pastille : bande jamais déplacée, il est seul.
+    let cadenas = egui::pos2(19.0, 31.0);
+    harness.hover_at(cadenas);
+    harness.run();
+    press(&mut harness, cadenas, true);
+    harness.run();
+    press(&mut harness, cadenas, false);
+    harness.run();
+    assert_eq!(bascules.get(), 1, "le cadenas doit remonter sa bascule");
+
+    // (3) Le deuxième emplacement de la pastille n'existe pas tant que la bande n'a pas bougé…
+    let replacer = egui::pos2(39.0, 31.0);
+    harness.hover_at(replacer);
+    harness.run();
+    press(&mut harness, replacer, true);
+    harness.run();
+    press(&mut harness, replacer, false);
+    harness.run();
+    assert_eq!(
+        replacements.get(),
+        0,
+        "sans déplacement, il n'y a pas de glyphe de replacement à cliquer"
+    );
+
+    // … et il apparaît dès que l'hôte dit que la bande a une position à elle.
+    chrome.set(panels::recap::RecapChrome {
+        locked: false,
+        moved: true,
+        actions_below: false,
+    });
+    harness.hover_at(replacer);
+    harness.run();
+    press(&mut harness, replacer, true);
+    harness.run();
+    press(&mut harness, replacer, false);
+    harness.run();
+    assert_eq!(
+        replacements.get(),
+        1,
+        "déplacée, la bande doit offrir son retour à l'ancrage d'origine"
+    );
+    assert_eq!(
+        bascules.get(),
+        1,
+        "le glyphe de replacement n'est pas le cadenas"
     );
 }

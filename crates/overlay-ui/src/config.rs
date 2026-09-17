@@ -66,6 +66,46 @@ pub struct OverlayConfig {
     /// lisible et garde le panneau à gauche.
     #[serde(default)]
     pub combat_on_right: bool,
+    /// **À quelle hauteur l'utilisateur a posé le panneau Combat** (2026-09-17) : ordonnée de son
+    /// CONTENU, en pixels physiques depuis le bord haut de la fenêtre de jeu. `None` = jamais
+    /// déplacé, donc le centrage vertical d'origine (`combat_placement::default_offset`) — ce qui
+    /// n'est pas la même chose que « posé exactement au centre » : c'est ce que l'aimantation du
+    /// glisser rétablit, et le glyphe de replacement de la rangée d'actions avec elle.
+    ///
+    /// **Une seule clé, pour les deux côtés** : « même s'il change de côté, la hauteur est
+    /// conservée » (demande utilisateur). L'abscisse, elle, n'est jamais un réglage — elle vaut le
+    /// bord gauche ou le bord droit du client selon [`Self::combat_on_right`], voir
+    /// `combat_placement::window_position`.
+    ///
+    /// **Relative à la fenêtre de jeu, jamais à l'écran**, comme [`Self::recap_position_x`] et
+    /// pour la même raison : le client se déplace, change de taille, passe d'un écran à l'autre.
+    /// L'origine est `GameRect::top` — la fenêtre de jeu ENTIÈRE, sur laquelle ce panneau est
+    /// centré depuis toujours, et non la zone cliente comme la bande Récap.
+    ///
+    /// **C'est le haut du CONTENU, pas celui de sa fenêtre OS** : celle-ci commence
+    /// `render_content::COMBAT_TOP_MARGIN` px plus haut (la place de l'infobulle du switch
+    /// Alliés/Ennemis, où vit aussi la rangée d'actions). Un fichier qu'on ouvre à la main dit
+    /// ainsi où l'on voit le panneau, pas où commence une marge invisible.
+    ///
+    /// **Locale et non au compte**, comme ses voisines : une position à l'écran dépend de la
+    /// fenêtre de jeu qu'on a sous les yeux, pas du joueur — et le serveur n'accepte que des clés
+    /// connues (même raison que `chat_alert_duration_seconds`).
+    #[serde(default)]
+    pub combat_position_y: Option<i32>,
+    /// **Le panneau Combat est-il verrouillé ?** (2026-09-17) — le cadenas de sa rangée d'actions
+    /// (`panels::combat::CombatChrome::locked`). Verrouillé, sa poignée latérale disparaît : plus
+    /// rien ne se saisit, et le curseur reste celui du système au-dessus d'elle.
+    ///
+    /// **Le défaut est `false`, DÉVERROUILLÉ** — demande explicite de l'utilisateur (« par défaut
+    /// il sera unlock, et l'utilisateur pourra cliquer pour verrouiller la position »), et
+    /// l'inverse du défaut de la bande Récap ([`Self::recap_locked`]) : ce qui se saisit ici n'est
+    /// pas tout le fond du panneau mais une poignée dédiée, une lisière de quelques pixels sur son
+    /// bord extérieur (`panels::combat::HANDLE_WIDTH`) — un clic malencontreux dans le panneau ne
+    /// le déplace donc pas, et il n'y a rien à protéger par défaut.
+    ///
+    /// **Locale et non au compte**, comme la hauteur qu'elle protège.
+    #[serde(default)]
+    pub combat_locked: bool,
     /// Durée d'affichage de la carte d'alerte de **chat**, en secondes (onglet « Chat », voir
     /// `panels::chat_tab::ChatToastSettings`). **Ici et non au compte**, par exception au principe
     /// de la doc de module : ce réglage n'a pas d'équivalent web, et le serveur n'accepte que des
@@ -262,6 +302,21 @@ pub struct OverlayConfig {
     /// position que si les deux sont là).
     #[serde(default)]
     pub recap_position_y: Option<i32>,
+    /// **La bande Récap est-elle verrouillée ?** (2026-09-17) — le cadenas de sa rangée
+    /// d'actions (`panels::recap::RecapChrome::locked`). Verrouillée, elle ne se saisit plus à la
+    /// souris et le curseur redevient celui du système au-dessus d'elle.
+    ///
+    /// **Le défaut est `true`, verrouillée** : tout le fond de la bande est une poignée (elle n'a
+    /// pas la place d'en porter une dédiée, voir `panels::recap`), donc non verrouillée, le
+    /// moindre clic dessus en mode interactif la déplace. On la déverrouille pour la ranger, on
+    /// la reverrouille ensuite — c'est le geste que les deux glyphes racontent. Une config écrite
+    /// avant cette clé se verrouille donc au premier lancement, y compris pour une bande déjà
+    /// déplacée : sa position, elle, ne bouge pas.
+    ///
+    /// **Locale et non au compte**, comme la position qu'elle protège : le serveur n'accepte que
+    /// des clés connues (même raison que `chat_alert_duration_seconds`).
+    #[serde(default = "actif")]
+    pub recap_locked: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
     /// (2026-09-15, voir `panels::notifications`).
@@ -349,6 +404,8 @@ impl Default for OverlayConfig {
             log_path: None,
             combat_always_visible: false,
             combat_on_right: false,
+            combat_position_y: None,
+            combat_locked: false,
             chat_alert_duration_seconds: None,
             chat_alert_manual_close: false,
             countdown_alert_duration_seconds: None,
@@ -370,6 +427,7 @@ impl Default for OverlayConfig {
             recap_resume_minutes: None,
             recap_position_x: None,
             recap_position_y: None,
+            recap_locked: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
