@@ -81,15 +81,30 @@ pub struct SoundItemEntry {
 }
 
 /// Émis par `Engine::ingest_batch` quand un objet ramassé (`LogEntry::Loot`) correspond à une
-/// [`SoundItemEntry`] activée — distinct de `WatchlistAlert` (files de drain séparées sur
-/// `Engine`, voir `drain_loot_alerts`/`drain_watchlist_alerts`) : les deux mécanismes sont
+/// [`SoundItemEntry`], **activée ou non** — distinct de `WatchlistAlert` (files de drain séparées
+/// sur `Engine`, voir `drain_loot_alerts`/`drain_watchlist_alerts`) : les deux mécanismes sont
 /// indépendants côté web (un objet peut être suivi sans avoir son son activé, et réciproquement),
 /// pas un type unique artificiellement partagé.
+///
+/// ## Un objet silencieux alerte quand même — écart voulu avec le site (2026-09-17)
+///
+/// Côté web, `registerLoot` ne déclenche rien pour une entrée `enabled: false` : « Son
+/// désactivé » y coupe le son ET le toast. L'overlay présente cette même bascule comme un mode
+/// **silencieux** (tuile de `panels::alerts_tab`, haut-parleur barré), et tient partout la règle
+/// « couper le son, ce n'est pas couper la fonctionnalité » (`panels::notifications`) : la sourdine
+/// du Suivi et celle du Chat gardent leur carte. Jusqu'à ce jour la liste d'alertes faisait
+/// exception sans le dire — un objet silencieux ne produisait ni toast ni confettis, signalé comme
+/// bug par l'utilisateur. L'alerte est donc émise pour toute entrée de la liste, et c'est
+/// [`Self::sound_enabled`] qui dit à l'hôte s'il doit jouer le son ; retirer l'objet de la liste
+/// reste le geste qui coupe tout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LootAlert {
     pub name: String,
     pub quantity: i64,
     pub catalog_id: Option<i64>,
+    /// `SoundItemEntry::enabled` de l'entrée qui a déclenché l'alerte : `false` = objet en mode
+    /// silencieux, la carte s'affiche sans son.
+    pub sound_enabled: bool,
 }
 
 /// Tout ce que la clé `profile` du compte porte d'alertes — la liste des objets **et** les deux
@@ -245,7 +260,8 @@ impl AlertProfile {
 
     /// L'entrée activée dont le nom correspond, le cas échéant — miroir exact de
     /// `ProfileService.findEnabledSoundItem` : nom insensible à la casse et aux espaces
-    /// superflus, seule une entrée `enabled` déclenche une alerte.
+    /// superflus. **Ce n'est pas le déclencheur d'alerte** de l'overlay, qui alerte aussi pour une
+    /// entrée silencieuse (voir [`find_sound_item`] et la doc de [`LootAlert`]).
     pub fn find_enabled(&self, item_name: &str) -> Option<&SoundItemEntry> {
         find_enabled_sound_item(&self.sound_items, item_name)
     }
@@ -335,16 +351,29 @@ fn merge_with_defaults(stored: Option<Vec<SoundItemEntry>>) -> Vec<SoundItemEntr
     items
 }
 
-/// Miroir exact de `ProfileService.findEnabledSoundItem` : nom insensible à la casse et aux
-/// espaces superflus, seule une entrée `enabled` déclenche une alerte.
-pub fn find_enabled_sound_item<'a>(
+/// L'entrée dont le nom correspond, **activée ou non** — nom insensible à la casse et aux espaces
+/// superflus, comme `ProfileService.findEnabledSoundItem` côté web, sans son filtre `enabled`.
+///
+/// C'est le déclencheur d'alerte de l'overlay (`Engine::ingest_batch`) : une entrée silencieuse
+/// alerte sans son, voir la doc de [`LootAlert`]. La première entrée de ce nom l'emporte, comme
+/// côté web.
+pub fn find_sound_item<'a>(
     items: &'a [SoundItemEntry],
     item_name: &str,
 ) -> Option<&'a SoundItemEntry> {
     let normalized = item_name.trim().to_lowercase();
     items
         .iter()
-        .find(|entry| entry.enabled && entry.name.trim().to_lowercase() == normalized)
+        .find(|entry| entry.name.trim().to_lowercase() == normalized)
+}
+
+/// Miroir exact de `ProfileService.findEnabledSoundItem` : [`find_sound_item`] restreint aux
+/// entrées `enabled`. **Pas le déclencheur d'alerte** de l'overlay (voir [`LootAlert`]).
+pub fn find_enabled_sound_item<'a>(
+    items: &'a [SoundItemEntry],
+    item_name: &str,
+) -> Option<&'a SoundItemEntry> {
+    find_sound_item(items, item_name).filter(|entry| entry.enabled)
 }
 
 #[cfg(test)]
@@ -373,6 +402,18 @@ mod tests {
     fn une_entree_desactivee_ne_declenche_jamais_rien() {
         let items = vec![entry("Pierre d'aventure", false)];
         assert_eq!(find_enabled_sound_item(&items, "Pierre d'aventure"), None);
+    }
+
+    #[test]
+    fn une_entree_silencieuse_est_trouvee_sans_filtre_de_son() {
+        // Le déclencheur de l'overlay : l'objet silencieux alerte (carte), sans son — voir
+        // `LootAlert`. Le filtre `enabled` reste réservé au miroir web.
+        let items = vec![entry("Pierre d'aventure", false)];
+        assert_eq!(
+            find_sound_item(&items, "  PIERRE D'AVENTURE  "),
+            Some(&items[0])
+        );
+        assert_eq!(find_sound_item(&items, "Larve Bleue"), None);
     }
 
     #[test]

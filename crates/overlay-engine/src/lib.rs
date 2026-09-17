@@ -40,9 +40,9 @@ pub use history::{
 pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
 pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
 pub use profile::{
-    find_enabled_sound_item, profile_patch_entry, AlertProfile, LootAlert, SoundItemEntry,
-    DEFAULT_ALERT_DURATION_SECONDS, DEFAULT_SOUND_ITEM_NAMES, MAX_ALERT_DURATION_SECONDS,
-    MIN_ALERT_DURATION_SECONDS,
+    find_enabled_sound_item, find_sound_item, profile_patch_entry, AlertProfile, LootAlert,
+    SoundItemEntry, DEFAULT_ALERT_DURATION_SECONDS, DEFAULT_SOUND_ITEM_NAMES,
+    MAX_ALERT_DURATION_SECONDS, MIN_ALERT_DURATION_SECONDS,
 };
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use recipe::{flatten_for_tracking, resolve_recipe, RecipeIngredient};
