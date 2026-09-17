@@ -2233,6 +2233,30 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
     traitement par défaut — sans quoi un plantage n'aurait laissé qu'une session sans ligne de fin.
   - Linux n'est pas concerné : `overlay-ui-x11` lancé par une entrée `.desktop` n'a jamais eu de
     terminal, et lancé depuis un terminal il en hérite naturellement.
+- **Nom et icône de l'exécutable Windows** (2026-09-17, demande utilisateur). Le binaire livré
+  s'appelle `wakfu-companion-overlay.exe` — un bloc `[[bin]]` dans `crates/overlay-ui/Cargo.toml`,
+  le nom du PAQUET (`overlay-ui`) étant un nom de module interne qui ne dit ni le produit ni le
+  jeu et se perd dans une liste de processus. Les assets de Release portaient déjà le bon nom
+  (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`), c'est le fichier qui ne le portait
+  pas. Les deux autres binaires du crate gardent le leur : `overlay-ui-x11` (Linux, §17.2) et
+  `overlay-focus` (gestionnaire du protocole `wakfu-companion:`, cherché PAR NOM par
+  `turn_watch::notify`).
+  - **Icône** : posée par `crates/overlay-ui/build.rs` via `winresource`, à partir du logo du
+    projet — le même fichier (`assets/ui/logo-purple.png`) que la zone de notification, la fenêtre
+    de connexion et l'icône de fenêtre. L'`.ico` n'est pas commité, il est dérivé du PNG à chaque
+    build (paliers 16/24/32/48/64/128 px réduits en Lanczos, plutôt que laisser Windows réduire un
+    128 px pour une barre des tâches) : une retouche du logo ne peut pas laisser l'exe avec
+    l'ancienne image. Le même `build.rs` renseigne le bloc de version (`ProductName`,
+    `FileDescription` — ce que le gestionnaire des tâches affiche comme nom d'application).
+  - **Ce que ça n'atteint pas** : une cross-compilation vers Windows depuis Linux
+    (`cargo check --target …`, le seul moyen de vérifier ce binaire en session cloud) n'embarque
+    PAS la ressource — `winresource` n'est une `build-dependency` que sur un hôte Windows.
+    `build.rs` émet alors un `cargo:warning` explicite plutôt que de produire un exe muet. Un
+    binaire livré est toujours compilé sous Windows (`release.yml`).
+  - **Mise à jour en place** : `overlay_sync::update` remplace le fichier courant
+    (`std::env::current_exe`), sans le renommer. Une installation antérieure garde donc son
+    `overlay-ui.exe` jusqu'à ce que l'utilisateur retélécharge — aucune Release n'ayant encore été
+    distribuée, le cas est théorique.
 - **Windows** : binaire + installeur NSIS/MSI. Signature Authenticode fortement recommandée (sans
   elle, SmartScreen effraie chaque nouvel utilisateur) — coût à budgéter, mais l'app reste
   installable sans.

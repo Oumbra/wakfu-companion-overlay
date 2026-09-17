@@ -207,7 +207,8 @@ instant ; les sauts (`0.19.0` → `0.27.2`) sont normaux et sans conséquence.
 1. **`version`** — lit `[workspace.package] version` ; si le tag `v{version}` existe déjà, s'arrête
    (idempotent : un push sur `main` sans bump ne republie rien).
 2. **`build-windows`** / **`build-linux`** (parallèles) — `vendor-wgpu-hal`, cache, puis
-   `cargo build --release -p overlay-ui --bin overlay-ui` (Windows) et `--bin overlay-ui-x11`
+   `cargo build --release -p overlay-ui --bin wakfu-companion-overlay` (Windows) et
+   `--bin overlay-ui-x11`
    (Linux), avec `WAKFU_OVERLAY_COMMIT=${{ github.sha }}`. Artefacts éphémères.
 3. **`publish`** — `cargo xtask dist` (nouvelle sous-commande de l'outillage existant) : télécharge
    les assets des 3 Releases précédentes (`gh release download`, jeton du job), décompresse,
