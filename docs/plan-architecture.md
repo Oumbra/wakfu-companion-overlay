@@ -2439,15 +2439,42 @@ différences près que la demande impose :
   en termes de hauteur ». Il n'apparaît qu'une fois le panneau déplacé (`CombatChrome::moved`), et
   un clic ouvre la confirmation (`ResetTarget::CombatPosition`) : « Replacer le panneau de combat à
   sa hauteur d'origine ? ». Le côté, lui, reste une case des Options.
-- **La pastille des deux glyphes est au coin BAS du bord extérieur.** La première version la
-  posait en haut, dans la réserve d'infobulle du switch Alliés/Ennemis : elle y tenait sans rien
-  décaler, mais juste au-dessus du switch, dans la zone que l'infobulle de celui-ci occupe au
-  survol. Demande utilisateur du même soir : « place les deux icônes en bas plutôt qu'en haut par
-  défaut ». En bas, elle est DANS l'espace alloué au contenu — que le panneau n'atteint qu'avec les
-  combats les plus peuplés —, donc ni réserve ajoutée, ni clip élargi ; ses infobulles s'ouvrent
-  au-dessus, en dessous elles sortiraient de la fenêtre. Elle est déclarée `mirror::upright_in` :
-  sa PLACE part à droite avec le panneau, son contenu reste à l'endroit — un `Undo` réfléchi dirait
-  « rétablir », soit l'inverse de ce qu'il fait.
+- **La pastille des deux glyphes est en COLONNE, à 5 px sous la décoration du cadre.** Trois
+  demandes du même soir l'ont amenée là. D'abord « en bas plutôt qu'en haut » : la première version
+  la posait dans la réserve d'infobulle du switch Alliés/Ennemis, donc juste au-dessus de lui, dans
+  la zone que sa propre infobulle occupe au survol. Ensuite « l'icône de cadenas et en dessous
+  l'icône de rollback » : le cadenas est le glyphe TOUJOURS présent, il est donc au-dessus — sa
+  place ne bouge pas quand le second apparaît, c'est le groupe qui grandit vers le bas. Enfin « à
+  5 px du dernier pixel de la décoration du template » : le groupe n'est pas accroché au bas de la
+  fenêtre, qui ne bouge jamais, mais au bas du CADRE, dont la hauteur change avec l'effectif du
+  camp affiché (130 px à un combattant, 393 px à six) — basculer Alliés/Ennemis le déplace donc
+  aussi, dès que les deux camps n'ont pas le même nombre.
+- **Le repère est le dernier pixel d'ENCRE, pas le bas du canevas** : deux gabarits sur six
+  finissent par des lignes entièrement transparentes (2 px pour celui à un combattant, 3 px pour
+  celui à quatre), viser le canevas donnerait 7 ou 8 px d'écart apparent là où les quatre autres en
+  donneraient 5. D'où `combat_frame::TemplateInfo::painted_bottom`, mesuré une fois sur les PNG, à
+  côté de la hauteur et des centres de médaillons. L'écart lui-même vaut `SIDE_ROW_GAP`, les 5 px
+  déjà posés le 15 sept. AU-DESSUS du cadre : le groupe se tient à la même distance que sa coiffe.
+- **La position est mesurée sur l'allocation, pas recalculée** : `decoration_bottom` vient du rect
+  de la colonne de gauche telle qu'elle vient d'être peinte, moins ce vide résiduel. Cette colonne
+  a trois formes (cadre exact, cadre à défilement des ennemis au-delà de six, liste plate des
+  alliés excédentaires) et une seule finit sur un gabarit à rogner ; dans un camp vide, elle se
+  réduit au bandeau du switch et le groupe se pose 5 px sous lui, sans cas particulier.
+- **La colonne se replie en RANGÉE quand elle ne rentre pas.** Le contenu du panneau ne fait que
+  480 px : sous le gabarit à six combattants il reste 34 px, et la colonne en demande 47 (5 + 42) —
+  le glyphe de replacement sortirait de la fenêtre, donc de l'écran, avec lui le seul geste qui
+  ramène le panneau. Devant la maquette, l'utilisateur a tranché : « pour ce genre de cas, s'il se
+  présente, il faut afficher les deux icônes côte à côte ». La rangée n'en demande que 27 et tient
+  sous les six gabarits, ce qui évite d'agrandir la fenêtre pour un cas sur six. Conséquence pour
+  le harnais : les 800 × 600 par défaut ne montrent JAMAIS ce repli — la planche
+  `combat_actions_rangee_fenetre_reelle` est rendue à la taille de la fenêtre OS, comme celle des
+  infobulles du Récap.
+- **Les infobulles s'ouvrent à DROITE en colonne**, où la place est libre : au-dessus elles
+  couvriraient l'ornement dont le groupe se tient à 5 px, en dessous elles sortiraient sous les
+  grands gabarits. En rangée, les glyphes se gênent latéralement et c'est le dessus qui est libre.
+- La pastille est déclarée `mirror::upright_in` : sa PLACE part à droite avec le panneau, son
+  contenu reste à l'endroit — un `Undo` réfléchi dirait « rétablir », soit l'inverse de ce qu'il
+  fait.
 - **Le geste est mutualisé** : `panels::drag::PanelDrag` (ex-`RecapDrag`, qui en est désormais un
   alias) et `panels::drag::from_response` servent les deux overlays. Une divergence entre les deux
   se serait payée en vibration d'un seul côté, le plus difficile des bugs à voir.
