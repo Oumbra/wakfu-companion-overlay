@@ -604,6 +604,11 @@ struct App {
     /// Par où les complétions arrivent du thread Engine — voir
     /// [`WatchlistCompleted`].
     completions_rx: mpsc::Receiver<WatchlistCompleted>,
+    /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — posée à
+    /// l'ouverture de `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, reprise à la
+    /// réponse. Ici et non dans la cible : `OverlayKind` est `Copy` (voir
+    /// `ResetTarget::WatchlistCounter`). Prêtée au rendu de la confirmation, qui nomme l'objet.
+    watchlist_reset_pending: Option<WatchlistEntry>,
     /// Publié par le thread Engine à chaque décompte de suivi qui vient d'atteindre 0 (voir
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
@@ -947,6 +952,7 @@ impl App {
             watchlist_selection: panels::watchlist::WatchlistSelection::default(),
             watchlist_completions: Default::default(),
             completions_rx,
+            watchlist_reset_pending: None,
             watchlist_toast,
             alert_profile,
             chat_filters,
@@ -3219,7 +3225,30 @@ impl App {
             ResetTarget::CombatPosition => {
                 tracing::info!("[combat] confirmation de replacement ouverte.")
             }
+            ResetTarget::WatchlistCounter => {
+                tracing::info!(
+                    name = self
+                        .watchlist_reset_pending
+                        .as_ref()
+                        .map(|e| e.name.as_str()),
+                    "[suivi] confirmation de réinitialisation du compteur ouverte."
+                )
+            }
         }
+    }
+
+    /// **Le bouton de réinitialisation d'une tuile du bandeau** (2026-09-18) : retenir l'entrée,
+    /// puis ouvrir la même confirmation que le Récap — voir `ResetTarget::WatchlistCounter` sur
+    /// pourquoi l'entrée est retenue ici plutôt que portée par la cible.
+    fn open_watchlist_reset_confirm(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        game_hwnd: HWND,
+        rect: GameRect,
+        entry: WatchlistEntry,
+    ) {
+        self.watchlist_reset_pending = Some(entry);
+        self.open_reset_confirm(event_loop, game_hwnd, rect, ResetTarget::WatchlistCounter);
     }
 
     /// **Le cadenas de la bande Récap** (2026-09-17) : un seul bouton, deux états, pas de
@@ -3293,6 +3322,25 @@ impl App {
             }
             (ResetTarget::CombatPosition, false) => {
                 tracing::info!("[combat] replacement annulé.")
+            }
+            // **Le compteur repart** : c'est le moteur qui le remet (il seul tient les compteurs
+            // vivants), republie la liste et réplique au compte — même chemin qu'un ramassage.
+            // L'entrée est désignée par son identité : la liste a pu bouger entre-temps.
+            (ResetTarget::WatchlistCounter, true) => match self.watchlist_reset_pending.take() {
+                Some(entry) => {
+                    tracing::info!(name = %entry.name, "[suivi] réinitialisation du compteur confirmée.");
+                    let _ = self.settings_tx.send(EngineCommand::ResetWatchlistCounter {
+                        name: entry.name,
+                        kind: entry.kind,
+                    });
+                }
+                None => tracing::warn!(
+                    "[suivi] réinitialisation confirmée sans entrée retenue, rien fait."
+                ),
+            },
+            (ResetTarget::WatchlistCounter, false) => {
+                self.watchlist_reset_pending = None;
+                tracing::info!("[suivi] réinitialisation du compteur annulée.")
             }
         }
     }
@@ -3653,6 +3701,10 @@ enum PostRedraw {
     OpenResetConfirm(HWND, GameRect, ResetTarget),
     /// La confirmation a répondu — `true` pour « Oui » (voir `answer_reset_confirm`).
     AnswerResetConfirm(ResetTarget, bool),
+    /// Bouton de réinitialisation d'une tuile du bandeau cliqué : retenir l'entrée et ouvrir la
+    /// confirmation par-dessus CETTE fenêtre de jeu (2026-09-18, voir
+    /// `open_watchlist_reset_confirm`).
+    OpenWatchlistResetConfirm(HWND, GameRect, WatchlistEntry),
     /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
     ToggleRecapLock,
     /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
@@ -3861,6 +3913,7 @@ impl App {
                 combat_chrome,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_completions: &self.watchlist_completions,
+                watchlist_reset: self.watchlist_reset_pending.as_ref(),
                 watchlist_toast,
                 catalog: &catalog,
                 catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -4148,6 +4201,12 @@ impl App {
         if let Some(url) = &outcome.open_url {
             let _ = open::that(url);
         }
+        // Le bouton de réinitialisation d'une tuile du bandeau (2026-09-18) : même confirmation
+        // que le Récap, par-dessus la fenêtre de jeu de CE bandeau, l'entrée retenue par l'hôte.
+        if let Some(entry) = outcome.watchlist_reset_requested {
+            post_redraw =
+                PostRedraw::OpenWatchlistResetConfirm(this_game_hwnd, this_game_rect, entry);
+        }
         // Le glyphe de remise à zéro du bloc Récap (2026-09-17) : la confirmation s'ouvre
         // par-dessus la fenêtre de jeu de CE bloc ; sa réponse, elle, arrive par la fenêtre de
         // confirmation elle-même, une frame plus tard.
@@ -4240,6 +4299,9 @@ impl App {
             }
             PostRedraw::AnswerResetConfirm(target, confirmed) => {
                 self.answer_reset_confirm(id, target, confirmed)
+            }
+            PostRedraw::OpenWatchlistResetConfirm(hwnd, rect, entry) => {
+                self.open_watchlist_reset_confirm(event_loop, hwnd, rect, entry)
             }
             PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
             PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),

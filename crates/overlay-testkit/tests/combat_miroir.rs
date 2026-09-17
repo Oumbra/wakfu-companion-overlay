@@ -214,6 +214,7 @@ fn harness_for(combat_on_right: bool) -> Harness<'static> {
                 combat_on_right,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,

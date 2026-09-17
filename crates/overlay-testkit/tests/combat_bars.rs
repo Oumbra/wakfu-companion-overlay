@@ -131,6 +131,7 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,

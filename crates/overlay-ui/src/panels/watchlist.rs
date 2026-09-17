@@ -1103,6 +1103,8 @@ pub fn show(
     let mut bascule_tuile: Option<String> = None;
     // Idem pour le glisser-déposer : le rang pris et le rang visé, lus à la frame du dépôt.
     let mut deplacement: Option<(usize, usize)> = None;
+    // Idem pour le bouton de réinitialisation d'une tuile — l'entrée, pour l'hôte.
+    let mut reset_counter: Option<WatchlistEntry> = None;
     // Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
     // (voir `bulk_button_row`).
     let mut tiles_rect: Option<egui::Rect> = None;
@@ -1181,6 +1183,9 @@ pub fn show(
                     }
                     if let Some(depuis) = tuile.reorder.dropped {
                         deplacement = Some((depuis, i));
+                    }
+                    if tuile.reset_requested {
+                        reset_counter = Some(entry.clone());
                     }
                 }
             });
@@ -1270,6 +1275,7 @@ pub fn show(
         open_options,
         open_web_app,
         edit,
+        reset_counter,
     }
 }
 
@@ -1334,6 +1340,12 @@ pub struct WatchlistOutcome {
     /// **Ce que le bandeau demande d'écrire**, à la frame où le geste est fait — `None` le reste
     /// du temps. Voir [`WatchlistEdit`].
     pub edit: Option<WatchlistEdit>,
+    /// **L'entrée dont le bouton de réinitialisation vient d'être cliqué** (2026-09-18) — `None`
+    /// le reste du temps. Le bandeau ne remet rien lui-même : l'hôte ouvre la confirmation
+    /// (`OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`) et, sur « Oui », envoie
+    /// `EngineCommand::ResetWatchlistCounter`. L'entrée entière plutôt qu'une clé : la question
+    /// posée nomme l'objet, et le moteur veut son nom et son genre.
+    pub reset_counter: Option<WatchlistEntry>,
 }
 
 /// Une écriture demandée par le bandeau, et le geste qui l'a produite.
@@ -2179,6 +2191,8 @@ fn control_button(
 struct Tile {
     response: egui::Response,
     reorder: crate::panels::tile_reorder::Gesture,
+    /// Le bouton de réinitialisation du compteur vient d'être cliqué — voir [`reset_button`].
+    reset_requested: bool,
 }
 
 /// Ce qu'une tuile sait d'elle-même en plus de son entrée — les deux vont ensemble (ils décident du
@@ -2297,12 +2311,77 @@ fn entry_tile(
     // conventions du composant ». La barre étant passée AU-DESSUS (voir `strip_scroll_area`), il
     // n'y a plus rien à éviter dessous. Tue pendant un déplacement : un nom affiché sous le
     // pointeur masquerait le liseré de la tuile visée, qu'on essaie justement de lire.
-    if !reorder.in_flight() {
+    // **Le bouton de réinitialisation, au centre, révélé au survol** (2026-09-18) — voir
+    // [`reset_button`] pour ce qu'il est et quand il ne se montre pas.
+    let reset = (selection.is_none() && completion.is_none() && !reorder.in_flight())
+        .then(|| reset_button(ui, &response, rect, index))
+        .flatten();
+    let reset_requested = reset.as_ref().is_some_and(|bouton| bouton.clicked());
+    // **Le nom ne s'ouvre que si le bouton n'est pas visé** : deux infobulles à la fois se
+    // recouvriraient, et c'est « Réinitialiser » qu'on lit alors. Tue pendant un déplacement : un
+    // nom affiché sous le pointeur masquerait le liseré de la tuile visée, qu'on essaie justement
+    // de lire.
+    if !reorder.in_flight()
+        && !reset
+            .as_ref()
+            .is_some_and(|bouton| bouton.contains_pointer())
+    {
         design::tooltip(&response)
             .side(design::TooltipSide::Below)
             .text(tile_tooltip(entry));
     }
-    Tile { response, reorder }
+    Tile {
+        response,
+        reorder,
+        reset_requested,
+    }
+}
+
+/// **Le bouton de réinitialisation d'une tuile** — la flèche `Undo` sur son disque, au centre de
+/// l'emplacement, révélée au survol : le même bouton, au même endroit, que le crayon de
+/// modification d'une carte de héros (`panels::tile_button`, demande du 2026-09-18 « avec le même
+/// design que l'icône bouton "modifier" »). `None` quand la tuile n'est pas survolée.
+///
+/// Ce qu'il fait, après confirmation par l'hôte : le compteur repart de ce que son mode impose —
+/// zéro en incrémental et en objectif, la cible en décompte (voir
+/// `WatchlistState::reset_counter`). La tuile, elle, ne dit rien de plus : le disque recouvre le
+/// centre de l'icône et laisse ses coins, où vivent le glyphe de mode et le compteur qu'on va
+/// remettre.
+///
+/// **Sans voile sur la tuile**, contrairement à la carte de héros : le voile y sert à détacher le
+/// crayon d'un buste clair ; ici l'icône est petite et le disque, presque opaque, se détache seul
+/// — et un voile grisait le compteur et le liseré de rareté, c'est-à-dire ce qu'on regarde.
+///
+/// Trois moments où il ne se montre pas, décidés par l'appelant :
+/// - en **mode sélection**, où la tuile est une case à cocher et n'a qu'un geste ;
+/// - pendant une **célébration**, où le compteur vient d'aboutir et la tuile s'en va ;
+/// - pendant un **déplacement**, où la tuile sous le pointeur est une destination.
+///
+/// Le disque prend le clic, la tuile garde le glissement (hit-test d'egui : le bouton, pur clic,
+/// est au-dessus ; la tuile, qui sent le glissement, reste dessous) — presser sur le disque et
+/// tirer déplace donc bien la tuile, comme sur la carte de héros. Le curseur, lui, est la main du
+/// bouton et non la croix de la tuile : posé après, il gagne.
+fn reset_button(
+    ui: &mut egui::Ui,
+    tuile: &egui::Response,
+    rect: egui::Rect,
+    index: usize,
+) -> Option<egui::Response> {
+    if !tuile.contains_pointer() {
+        return None;
+    }
+    let bouton = crate::panels::tile_button::disc_button(
+        ui,
+        rect.center(),
+        DsIcon::Undo,
+        egui::Id::new(("suivi.reinitialiser", index)),
+    );
+    // En dessous, comme le nom de la tuile — c'est la règle du bandeau (voir `entry_tile`).
+    design::tooltip(&bouton)
+        .anchor(rect)
+        .side(design::TooltipSide::Below)
+        .text("Réinitialiser le compteur");
+    Some(bouton)
 }
 
 /// Texte de l'infobulle d'une tuile : le nom, puis **le mode après un point médian** pour un

@@ -330,6 +330,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -514,6 +515,7 @@ fn bloc_de_sorts_coupe_par_les_options() {
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,

@@ -108,6 +108,18 @@ pub enum EngineCommand {
         /// `WatchlistState::apply_definitions`).
         retirees: Vec<WatchlistEntry>,
     },
+    /// **Remise à zéro du compteur d'une entrée suivie** (2026-09-18) — le bouton de
+    /// réinitialisation d'une tuile du bandeau, une fois la confirmation obtenue. Le compteur
+    /// repart de ce que son mode impose (voir `WatchlistState::reset_counter`) ; la définition ne
+    /// bouge pas.
+    ///
+    /// L'entrée est désignée par son identité (nom et genre), jamais par son rang : entre le clic et
+    /// la confirmation, la liste a pu changer. Une entrée qui n'existe plus ne fait rien. Comme un
+    /// ramassage, la nouvelle valeur part au compte par `SyncCommand::SyncWatchlist`.
+    ResetWatchlistCounter {
+        name: String,
+        kind: WatchlistKind,
+    },
     /// Recherches de chat validées depuis l'onglet « Chat » (2026-09-13) — même principe que
     /// `SetAlertProfile` : appliquées tout de suite, l'écriture au compte (`chatFilters`) part en
     /// parallèle côté hôte.
@@ -634,6 +646,17 @@ pub fn spawn_engine_thread(
                             // brouillon — sauf ceux des entrées retirées pendant l'édition, voir
                             // la doc de la commande.
                             engine.set_watchlist_definitions(definitions, &retirees);
+                        }
+                        EngineCommand::ResetWatchlistCounter { name, kind } => {
+                            if engine.reset_watchlist_counter(&name, kind) {
+                                tracing::info!(name = %name, ?kind, "[suivi] compteur réinitialisé");
+                            } else {
+                                tracing::warn!(
+                                    name = %name,
+                                    ?kind,
+                                    "[suivi] compteur à réinitialiser introuvable, rien fait"
+                                );
+                            }
                         }
                         EngineCommand::ChangeLogPath(new_path) => {
                             tracing::info!(

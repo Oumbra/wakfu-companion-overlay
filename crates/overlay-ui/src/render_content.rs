@@ -191,7 +191,7 @@ pub enum OverlayKind {
 /// **Ce qu'une confirmation remet à son état d'origine** (2026-09-17) — voir
 /// `OverlayKind::ResetConfirm`, qui la porte.
 ///
-/// Trois cibles, une seule fenêtre : le voile, le centrage sur le jeu et le composant
+/// Quatre cibles, une seule fenêtre : le voile, le centrage sur le jeu et le composant
 /// (`design::confirm_dialog`) sont les mêmes, seule la phrase change. Autant de variantes
 /// d'`OverlayKind` auraient dédoublé, dans les DEUX hôtes, tout le cycle « ouvrir / centrer /
 /// voiler / fermer ».
@@ -211,6 +211,15 @@ pub enum ResetTarget {
     /// Le CÔTÉ, lui, n'est jamais remis par là : c'est une case des Options, pas un geste — « pas
     /// en termes de droite-gauche, juste en termes de hauteur » (demande utilisateur).
     CombatPosition,
+    /// Le **compteur d'une entrée suivie** (2026-09-18) : il repart de ce que son mode impose —
+    /// zéro en incrémental et en objectif, la cible en décompte. Le glyphe `Undo` au centre d'une
+    /// tuile du bandeau, révélé au survol (`panels::watchlist::reset_button`).
+    ///
+    /// **L'entrée n'est pas ici**, et c'est une contrainte assumée : `OverlayKind` est `Copy`, et
+    /// il l'est dans les deux hôtes à chaque tour de boucle. L'hôte la retient de son côté
+    /// (`App::watchlist_reset_pending`) et la prête au rendu par [`RenderContent::watchlist_reset`],
+    /// pour que la question la nomme.
+    WatchlistCounter,
 }
 
 /// État de la connexion au compte (lot L4, §7.2 du plan) — publié par le thread Auth
@@ -364,6 +373,11 @@ pub struct RenderContent<'a> {
     /// retrait qu'elles déclenchent ne doit pas dépendre du rendu (voir
     /// `panels::watchlist::WatchlistCompletions`).
     pub watchlist_completions: &'a panels::watchlist::WatchlistCompletions,
+    /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — `Some` pour la
+    /// seule fenêtre `ResetConfirm(ResetTarget::WatchlistCounter)`, qui la nomme dans sa question ;
+    /// `None` partout ailleurs. Voir [`ResetTarget::WatchlistCounter`] sur pourquoi elle ne voyage
+    /// pas dans la cible elle-même.
+    pub watchlist_reset: Option<&'a WatchlistEntry>,
     pub watchlist_toast: Option<&'a WatchlistToast>,
     pub catalog: &'a CatalogIndex,
     pub catalog_stale: bool,
@@ -460,6 +474,11 @@ pub struct RenderOutcome {
     /// (`EngineCommand::SetWatchlistDefinitions`), par le même chemin que la validation de l'onglet
     /// « Suivi » : voir `panels::watchlist::WatchlistOutcome::edit`.
     pub watchlist_edit: Option<panels::watchlist::WatchlistEdit>,
+    /// Le bouton de réinitialisation d'une tuile du bandeau vient d'être cliqué (`kind ==
+    /// Watchlist`, 2026-09-18) : l'entrée, pour que l'hôte ouvre la confirmation
+    /// `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)` en la retenant. Voir
+    /// `panels::watchlist::WatchlistOutcome::reset_counter`.
+    pub watchlist_reset_requested: Option<WatchlistEntry>,
     /// URL que l'hôte doit ouvrir dans le navigateur, le cas échéant : clic sur "Détails" du
     /// panneau Suivi (la web app) ou sur "Ouvrir la page" de la carte d'appairage (l'URL de
     /// vérification).
@@ -599,6 +618,7 @@ pub fn build_ui(
                 combat_on_right: content.combat_on_right,
                 watchlist_selection: &mut *content.watchlist_selection,
                 watchlist_completions: content.watchlist_completions,
+                watchlist_reset: content.watchlist_reset,
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
                 catalog_stale: content.catalog_stale,
@@ -648,6 +668,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         combat_chrome,
         watchlist_selection,
         watchlist_completions,
+        watchlist_reset,
         watchlist_toast,
         catalog,
         catalog_stale,
@@ -833,6 +854,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     outcome.open_watchlist = watchlist_outcome.open_watchlist;
                     outcome.open_options = watchlist_outcome.open_options;
                     outcome.watchlist_edit = watchlist_outcome.edit;
+                    outcome.watchlist_reset_requested = watchlist_outcome.reset_counter;
                     if watchlist_outcome.open_web_app {
                         outcome.open_url = Some(overlay_sync::client::base_url().to_string());
                     }
@@ -878,19 +900,31 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 OverlayKind::ResetConfirm(target) => {
                     let (question, log_name) = match target {
                         ResetTarget::RecapSession => (
-                            "Remettre le récap de session à zéro ?",
+                            "Remettre le récap de session à zéro ?".to_string(),
                             "recap.remise-a-zero",
                         ),
                         ResetTarget::RecapPosition => (
-                            "Replacer le récap à son emplacement d'origine ?",
+                            "Replacer le récap à son emplacement d'origine ?".to_string(),
                             "recap.replacement",
                         ),
                         // « Sa zone initiale » ne parle que de HAUTEUR : le côté reste celui que
                         // la case des Options a choisi, et la phrase ne doit pas laisser croire
                         // qu'un « Oui » ramènerait aussi le panneau à gauche.
                         ResetTarget::CombatPosition => (
-                            "Replacer le panneau de combat à sa hauteur d'origine ?",
+                            "Replacer le panneau de combat à sa hauteur d'origine ?".to_string(),
                             "combat.replacement",
+                        ),
+                        // La question nomme l'objet : « ce compteur » ne dirait pas lequel une
+                        // fois le voile posé sur le bandeau. Sans entrée prêtée par l'hôte (ne
+                        // devrait pas arriver), la question reste posable.
+                        ResetTarget::WatchlistCounter => (
+                            match watchlist_reset {
+                                Some(entry) => {
+                                    format!("Réinitialiser le compteur de « {} » ?", entry.name)
+                                }
+                                None => "Réinitialiser ce compteur ?".to_string(),
+                            },
+                            "suivi.reinitialisation",
                         ),
                     };
                     outcome.reset_choice = crate::design::confirm_dialog(question)

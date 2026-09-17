@@ -187,6 +187,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -264,6 +265,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -367,6 +369,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -463,6 +466,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -612,6 +616,7 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -760,6 +765,7 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -787,6 +793,96 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
 
     harness.run();
     harness.snapshot("recap_confirmation_remise_a_zero");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        *choice.borrow(),
+        overlay_ui::design::ConfirmChoice::No,
+        "Échap doit répondre « Non »"
+    );
+}
+
+/// **La confirmation de réinitialisation d'un compteur** (`ResetTarget::WatchlistCounter`,
+/// 2026-09-18) : la même fenêtre, le même voile que le Récap — et la question NOMME l'objet, par
+/// l'entrée que l'hôte prête au rendu (`RenderContent::watchlist_reset`). Échap répond « Non ».
+#[test]
+fn confirmation_de_reinitialisation_d_un_compteur_nomme_l_objet() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let choice = std::rc::Rc::new(std::cell::RefCell::new(
+        overlay_ui::design::ConfirmChoice::Pending,
+    ));
+    let entree = WatchlistEntry {
+        name: "Bottes Lantha".to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Down,
+        count: 12,
+        countdown_target: 50,
+        catalog_id: None,
+    };
+
+    let mut harness = Harness::new_ui({
+        let choice = std::rc::Rc::clone(&choice);
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            let outcome = paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::ResetConfirm(
+                        overlay_ui::render_content::ResetTarget::WatchlistCounter,
+                    ),
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: Some(&entree),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
+                    options: None,
+                    veiled: false,
+                    login: None,
+                },
+            );
+            if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
+                *choice.borrow_mut() = outcome.reset_choice;
+            }
+        }
+    });
+
+    harness.run();
+    harness.snapshot("suivi_confirmation_reinitialisation");
 
     harness.key_press(egui::Key::Escape);
     harness.run();
@@ -848,6 +944,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -928,6 +1025,7 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1000,6 +1098,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1165,6 +1264,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1244,6 +1344,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1383,6 +1484,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1532,6 +1634,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1636,6 +1739,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1728,6 +1832,9 @@ struct Bandeau {
     now: std::time::Instant,
     /// Ce que le panneau a demandé d'écrire à la dernière frame — le pendant de `RenderOutcome`.
     edition: std::rc::Rc<std::cell::RefCell<Option<panels::watchlist::WatchlistEdit>>>,
+    /// L'entrée dont le bouton de réinitialisation a été cliqué — le pendant de
+    /// `RenderOutcome::watchlist_reset_requested` (2026-09-18).
+    reset: std::rc::Rc<std::cell::RefCell<Option<WatchlistEntry>>>,
     window_width: f32,
 }
 
@@ -1770,6 +1877,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     ));
     let edition: Rc<RefCell<Option<panels::watchlist::WatchlistEdit>>> =
         Rc::new(RefCell::new(None));
+    let reset: Rc<RefCell<Option<WatchlistEntry>>> = Rc::new(RefCell::new(None));
 
     let window_width = bandeau_largeur(entries.len());
     let harness = egui_kittest::Harness::builder()
@@ -1778,6 +1886,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
             let selection = Rc::clone(&selection);
             let completions = Rc::clone(&completions);
             let edition = Rc::clone(&edition);
+            let reset = Rc::clone(&reset);
             move |ui| {
                 let ctx = ui.ctx().clone();
                 let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
@@ -1799,6 +1908,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         combat_on_right: false,
                         watchlist_selection: &mut selection.borrow_mut(),
                         watchlist_completions: &completions.borrow(),
+                        watchlist_reset: None,
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -1821,6 +1931,9 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                 if outcome.watchlist_edit.is_some() {
                     *edition.borrow_mut() = outcome.watchlist_edit;
                 }
+                if outcome.watchlist_reset_requested.is_some() {
+                    *reset.borrow_mut() = outcome.watchlist_reset_requested;
+                }
             }
         });
     Bandeau {
@@ -1829,6 +1942,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
         completions,
         now,
         edition,
+        reset,
         window_width,
     }
 }
@@ -1924,6 +2038,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -2000,8 +2115,11 @@ fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
     harness.run();
 
     // La croix fléchée dit que la tuile se déplace, avant même qu'on l'ait prise — `overlay_ui::
-    // cursor` la traduit ensuite en bitmap du jeu.
-    harness.hover_at(BANDEAU_TUILE_0);
+    // cursor` la traduit ensuite en bitmap du jeu. **Prise par son bord, pas par son centre** :
+    // depuis le 2026-09-18, le centre d'une tuile survolée porte le bouton de réinitialisation
+    // (`panels::watchlist::reset_button`), qui annonce une main — voir
+    // `panneau_suivi_le_bouton_de_reinitialisation_demande_confirmation`.
+    harness.hover_at(BANDEAU_TUILE_0_PRISE);
     harness.run();
     assert_eq!(
         harness.output().platform_output.cursor_icon,
@@ -2009,7 +2127,7 @@ fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
         "une tuile survolée doit annoncer qu'elle se déplace"
     );
 
-    harness.drag_at(BANDEAU_TUILE_0);
+    harness.drag_at(BANDEAU_TUILE_0_PRISE);
     harness.run();
     harness.hover_at(BANDEAU_TUILE_2);
     harness.run();
@@ -2068,6 +2186,57 @@ fn panneau_suivi_deplacement_en_vol() {
     harness.snapshot("watchlist_deplacement");
 }
 
+/// **Le bouton de réinitialisation d'une tuile** (2026-09-18) : au centre de la tuile survolée,
+/// la flèche `Undo` sur son disque — le même bouton que le crayon d'une carte de héros
+/// (`panels::tile_button`). Il annonce une main, et son clic ne remet RIEN lui-même : il remonte
+/// l'entrée à l'hôte, qui ouvre la confirmation (`ResetTarget::WatchlistCounter`) — c'est elle qui
+/// décide, et c'est le moteur qui remet (`WatchlistState::reset_counter`, testé de son côté).
+///
+/// La capture montre la tuile survolée, avec le bouton posé sur un compteur en cours (12/50 en
+/// décompte) : le disque recouvre le centre de l'icône et laisse les coins, où vivent le glyphe de
+/// mode et le compteur qu'on va remettre.
+#[test]
+fn panneau_suivi_le_bouton_de_reinitialisation_demande_confirmation() {
+    overlay_ui::build_info::freeze_for_snapshots();
+    let mut entries = entrees_de_bandeau();
+    entries[0].mode = WatchlistMode::Down;
+    entries[0].countdown_target = 50;
+    entries[0].count = 12;
+    entries[1].count = 7;
+    let Bandeau {
+        mut harness,
+        reset,
+        edition,
+        ..
+    } = harnais_bandeau(entries);
+    harness.run();
+
+    // Au repos, rien : le bouton n'existe que sous le pointeur.
+    harness.snapshot("watchlist_reinitialisation_repos");
+
+    harness.hover_at(BANDEAU_TUILE_0);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand,
+        "le centre d'une tuile survolée est un bouton, il annonce une main"
+    );
+    harness.snapshot("watchlist_reinitialisation_survol");
+
+    clique(&mut harness, BANDEAU_TUILE_0);
+
+    let demande = reset.borrow();
+    let demande = demande
+        .as_ref()
+        .expect("aucune réinitialisation remontée : le bouton n'est pas branché");
+    assert_eq!(demande.name, "Bottes Lantha");
+    assert_eq!(demande.mode, WatchlistMode::Down);
+    assert!(
+        edition.borrow().is_none(),
+        "un clic sur le bouton ne doit ni déplacer ni retirer la tuile"
+    );
+}
+
 /// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
 ///
 /// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
@@ -2100,6 +2269,7 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
         completions: _,
         now: _,
         edition: restantes,
+        reset: _,
         window_width,
     } = harnais_bandeau(entrees_de_bandeau());
     harness.run();
@@ -2226,6 +2396,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -2331,6 +2502,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -2427,6 +2599,7 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -2521,6 +2694,7 @@ fn panneau_options_ne_panique_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -2807,6 +2981,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -2930,6 +3105,7 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -5508,6 +5684,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -6167,6 +6344,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -6324,6 +6502,7 @@ fn capture_login_with_update(
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -6843,6 +7022,7 @@ fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -6943,6 +7123,7 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
                         watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,

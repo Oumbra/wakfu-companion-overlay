@@ -51,7 +51,7 @@ use crate::history::{
 use crate::log_time::{format_iso_utc, time_of_day_ms, LogDateTracker};
 use crate::model::{DamageElement, FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
-use crate::watchlist::{WatchlistEntry, WatchlistState};
+use crate::watchlist::{WatchlistEntry, WatchlistKind, WatchlistState};
 
 /// Fenêtre de corrélation perte de kamas → ramassage suivant pour reconnaître un achat marchand/
 /// HDV — miroir exact de `PURCHASE_WINDOW_MS` (`stats-store.service.ts`). Réutilisée aussi pour
@@ -2340,6 +2340,15 @@ impl Engine {
         retirees: &[WatchlistEntry],
     ) {
         self.watchlist.apply_definitions(definitions, retirees);
+    }
+
+    /// **Remet le compteur d'une entrée suivie à sa valeur de départ** (2026-09-18) — le bouton
+    /// de réinitialisation d'une tuile du bandeau, après confirmation. Voir
+    /// [`WatchlistState::reset_counter`](crate::watchlist::WatchlistState::reset_counter) pour ce
+    /// que « départ » veut dire selon le mode, et pourquoi l'entrée est désignée par son identité
+    /// plutôt que par son rang. Renvoie `false` si aucune entrée ne correspond plus.
+    pub fn reset_watchlist_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
+        self.watchlist.reset_counter(name, kind)
     }
 
     /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte

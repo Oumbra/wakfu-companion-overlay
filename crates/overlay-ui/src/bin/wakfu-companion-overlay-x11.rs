@@ -272,6 +272,9 @@ mod linux_main {
         /// Par où les complétions arrivent du thread Engine — voir
         /// `engine_thread::WatchlistCompleted`.
         completions_rx: mpsc::Receiver<WatchlistCompleted>,
+        /// Voir `main.rs::App::watchlist_reset_pending` — l'entrée dont la réinitialisation attend
+        /// confirmation (2026-09-18).
+        watchlist_reset_pending: Option<WatchlistEntry>,
         catalog: Arc<ArcSwap<CatalogIndex>>,
         /// Voir `main.rs::App::catalog_stale` — indicateur « catalogue daté » de la zone Combat.
         catalog_stale: Arc<AtomicBool>,
@@ -578,6 +581,7 @@ mod linux_main {
                 watchlist_selection: panels::watchlist::WatchlistSelection::default(),
                 watchlist_completions: Default::default(),
                 completions_rx,
+                watchlist_reset_pending: None,
                 interactive: true,
                 snapshot,
                 watchlist,
@@ -1830,7 +1834,28 @@ mod linux_main {
                 ResetTarget::CombatPosition => {
                     tracing::info!("[combat] confirmation de replacement ouverte.")
                 }
+                ResetTarget::WatchlistCounter => {
+                    tracing::info!(
+                        name = self
+                            .watchlist_reset_pending
+                            .as_ref()
+                            .map(|e| e.name.as_str()),
+                        "[suivi] confirmation de réinitialisation du compteur ouverte."
+                    )
+                }
             }
+        }
+
+        /// Voir `main.rs::open_watchlist_reset_confirm`.
+        fn open_watchlist_reset_confirm(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            game_window: u32,
+            rect: GameRect,
+            entry: WatchlistEntry,
+        ) {
+            self.watchlist_reset_pending = Some(entry);
+            self.open_reset_confirm(event_loop, game_window, rect, ResetTarget::WatchlistCounter);
         }
 
         /// Voir `main.rs::toggle_combat_lock`.
@@ -1895,6 +1920,27 @@ mod linux_main {
                 }
                 (ResetTarget::CombatPosition, false) => {
                     tracing::info!("[combat] replacement annulé.")
+                }
+                (ResetTarget::WatchlistCounter, true) => {
+                    match self.watchlist_reset_pending.take() {
+                        Some(entry) => {
+                            tracing::info!(
+                                name = %entry.name,
+                                "[suivi] réinitialisation du compteur confirmée."
+                            );
+                            let _ = self.settings_tx.send(EngineCommand::ResetWatchlistCounter {
+                                name: entry.name,
+                                kind: entry.kind,
+                            });
+                        }
+                        None => tracing::warn!(
+                            "[suivi] réinitialisation confirmée sans entrée retenue, rien fait."
+                        ),
+                    }
+                }
+                (ResetTarget::WatchlistCounter, false) => {
+                    self.watchlist_reset_pending = None;
+                    tracing::info!("[suivi] réinitialisation du compteur annulée.")
                 }
             }
         }
@@ -2372,6 +2418,8 @@ mod linux_main {
                 OpenResetConfirm(u32, GameRect, ResetTarget),
                 /// La confirmation a répondu — voir `main.rs`.
                 AnswerResetConfirm(ResetTarget, bool),
+                /// Bouton de réinitialisation d'une tuile du bandeau cliqué — voir `main.rs`.
+                OpenWatchlistResetConfirm(u32, GameRect, WatchlistEntry),
                 /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
                 ToggleRecapLock,
                 /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
@@ -2585,6 +2633,7 @@ mod linux_main {
                             combat_chrome,
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_completions: &self.watchlist_completions,
+                            watchlist_reset: self.watchlist_reset_pending.as_ref(),
                             watchlist_toast,
                             catalog: &catalog,
                             catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -2855,6 +2904,14 @@ mod linux_main {
                     if let Some(url) = &outcome.open_url {
                         let _ = open::that(url);
                     }
+                    // Réinitialisation du compteur d'une tuile (2026-09-18) — voir `main.rs`.
+                    if let Some(entry) = outcome.watchlist_reset_requested {
+                        post_redraw = PostRedraw::OpenWatchlistResetConfirm(
+                            this_game_window,
+                            this_game_rect,
+                            entry,
+                        );
+                    }
                     // Remise à zéro du Récap (2026-09-17) — voir `main.rs`.
                     if outcome.recap_reset_requested {
                         post_redraw = PostRedraw::OpenResetConfirm(
@@ -2955,6 +3012,9 @@ mod linux_main {
                 }
                 PostRedraw::AnswerResetConfirm(target, confirmed) => {
                     self.answer_reset_confirm(id, target, confirmed)
+                }
+                PostRedraw::OpenWatchlistResetConfirm(window, rect, entry) => {
+                    self.open_watchlist_reset_confirm(event_loop, window, rect, entry)
                 }
                 PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
                 PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),

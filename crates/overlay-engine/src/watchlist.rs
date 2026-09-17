@@ -386,6 +386,40 @@ impl WatchlistState {
         (changed, alerts)
     }
 
+    /// **Remet le compteur d'une entrée à sa valeur de départ** — le bouton de réinitialisation
+    /// d'une tuile du bandeau in-game (2026-09-18) : zéro en incrémental et en objectif, la cible
+    /// en décompte, exactement ce dont part une entrée neuve ([`compteur_de_depart`]).
+    ///
+    /// L'entrée est désignée par ce qui fait son identité ([`meme_entree`] : nom insensible à la
+    /// casse et genre), pas par un rang — entre le clic et la confirmation, la liste a pu bouger
+    /// (retrait depuis le site, réordonnancement). Renvoie `true` si une entrée a été remise ;
+    /// `false` si aucune ne correspond plus, auquel cas rien n'est écrit ni répliqué.
+    ///
+    /// Persiste et marque `dirty` comme un ramassage : le compte doit voir le compteur repartir, sans
+    /// quoi le prochain `merge_config` le rattraperait à son ancienne valeur.
+    pub fn reset_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
+        let cible = WatchlistEntry {
+            name: name.to_string(),
+            kind,
+            mode: WatchlistMode::Up,
+            count: 0,
+            countdown_target: 0,
+            catalog_id: None,
+        };
+        let mut changed = false;
+        for entry in &mut self.entries {
+            if meme_entree(entry, &cible) {
+                entry.count = compteur_de_depart(entry);
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist();
+            self.dirty = true;
+        }
+        changed
+    }
+
     fn persist(&self) {
         let by_key = self
             .entries
@@ -944,6 +978,39 @@ mod definitions_tests {
         state.apply_definitions(vec![entry("Sel", WatchlistMode::Up, 0, 0)], &[]);
         assert_eq!(state.entries().len(), 1);
         assert_eq!(state.entries()[0].name, "Sel");
+    }
+
+    #[test]
+    fn reinitialiser_un_compteur_le_ramene_a_sa_valeur_de_depart() {
+        let dir = std::env::temp_dir().join("wco-defs-reset.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(
+            vec![
+                entry("Plume", WatchlistMode::Up, 0, 0),
+                entry("Bouftou", WatchlistMode::Down, 50, 0),
+                entry("Sel", WatchlistMode::Goal, 20, 0),
+            ],
+            &[],
+        );
+        state.entries[0].count = 7;
+        state.entries[1].count = 12;
+        state.entries[2].count = 15;
+        let _ = state.drain_pending_sync();
+
+        // Incrémental : zéro. Décompte : la cible. Objectif : zéro.
+        assert!(state.reset_counter("plume", WatchlistKind::Item));
+        assert!(state.reset_counter("Bouftou", WatchlistKind::Item));
+        assert!(state.reset_counter("Sel", WatchlistKind::Item));
+        assert_eq!(state.entries()[0].count, 0);
+        assert_eq!(state.entries()[1].count, 50);
+        assert_eq!(state.entries()[2].count, 0);
+        // Le compte doit voir les compteurs repartir.
+        assert!(state.drain_pending_sync().is_some());
+
+        // Une entrée qui n'existe plus (ou pas sous ce genre) : rien, et rien à répliquer.
+        assert!(!state.reset_counter("Plume", WatchlistKind::Enemy));
+        assert!(!state.reset_counter("Inconnu", WatchlistKind::Item));
+        assert!(state.drain_pending_sync().is_none());
     }
 
     #[test]
