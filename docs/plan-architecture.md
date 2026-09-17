@@ -865,6 +865,33 @@ La boîte de confirmation a été **remontée au design system** à cette occasi
 voir le catalogue des composants) : deux appelants, donc sa place n'est plus dans un panneau.
 L'extraction est à pixel constant.
 
+### Échap ne quitte plus l'overlay, nulle part (2026-09-17)
+
+Les deux hôtes portaient un filet `Échap → event_loop.exit()`, posé quand les fenêtres overlay
+étaient réputées ne jamais recevoir d'événement clavier (`WS_EX_NOACTIVATE`). La modale Options, la
+fenêtre de connexion puis la confirmation de remise à zéro en ont été exclues une à une — et le
+défaut a resurgi malgré tout (retour utilisateur : « la touche Échap en ayant la modale Options
+ferme complètement l'overlay »). Deux raisons cumulées :
+
+- **La prémisse est fausse** : en mode interactif, un clic sur un bandeau Combat/Suivi fait bel et
+  bien de sa propre `HWND` la fenêtre au premier plan malgré `WS_EX_NOACTIVATE` — c'est le constat,
+  journaux à l'appui, qui avait déjà imposé le calcul par personnage de `sync_topmost` (§ correctif
+  2026-09-06/07). Ces fenêtres-là n'étaient donc pas exclues, et n'avaient aucune raison de l'être.
+- **La modale s'ouvrait sans le focus** quand elle était rattachée à un client : le focus restait au
+  bandeau dont on venait de cliquer « Options ». Échap y partait, et le filet fermait la session.
+
+Le filet est **retiré des deux binaires** plutôt qu'allongé d'une exclusion de plus : une touche nue
+qui arrête le programme n'a pas sa place, exactement comme le raccourci global « Quitter l'overlay »
+retiré le même jour. Les sorties propres restent le bouton « Fermer l'overlay » de l'onglet
+« Paramètres » (confirmé), l'entrée « Quitter » de la zone de notification, Alt+F4 et la croix pour
+les fenêtres qui en ont une (`WindowEvent::CloseRequested`), et Ctrl+C au terminal. Échap appartient
+désormais aux seuls panneaux qui le lisent : il annule la modale Options, répond « Non » à une
+confirmation, referme un sélecteur.
+
+La modale Options **prend le focus clavier à l'ouverture, rattachée ou non** — sans quoi ni Échap ni
+Entrée ne l'atteignent. Le prendre au jeu est ici l'effet recherché : c'est la seule fenêtre
+délibérément focalisable (§9.1), et depuis le voile du même jour elle couvre le client entier.
+
 ### Deux défauts corrigés après un test en jeu (2026-09-12)
 
 **1. La modale restait au-dessus de tout.** Elle naissait avec un `game_hwnd` nul — « pas rattachée
@@ -1540,7 +1567,8 @@ session), portée telle quelle dans `panels::login`.
   bannière (`LoginOutcome::drag_window` → `Window::drag_window`). Retaillée à chaque changement
   d'état à la hauteur que la carte a réellement occupée (`LoginOutcome::content_height`), en
   gardant son centre. Le logo est son icône de fenêtre et de barre des tâches. Échap n'y quitte
-  pas l'application ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
+  pas l'application — il ne le fait plus nulle part depuis le 2026-09-17 (voir « Échap ne quitte
+  plus l'overlay ») ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
 - **Cycle de vie piloté par le démarrage et `AuthStatus`** (`App::sync_session_windows`, avant
   `sync_windows` à chaque tick) : chargement en cours ⇒ la fenêtre de connexion seule, sur son
   rouage ; compte non lié ⇒ la fenêtre de connexion est la SEULE fenêtre (tout `Combat`/
