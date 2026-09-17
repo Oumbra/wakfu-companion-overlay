@@ -2040,8 +2040,17 @@ au-dessus, parce que fermer ne détruit rien (compte appairé, réglages validé
 comme lui parce que ce sont les deux seules actions de la fenêtre qui échappent à « Annuler ». La
 confirmation (`OptionsModalState::pending_quit`, « Fermer l'overlay ? ») est la quatrième boîte
 exclusive de la fenêtre ; « Oui » remonte `OptionsModalAction::Quit`, et l'hôte sort par le chemin
-du raccourci « Quitter » et de la zone de notification (`logging::log_session_end` puis
-`event_loop.exit()`, §11 — la borne de fin de session dit « Fermer l'overlay (fenêtre Options) »).
+de la zone de notification (`logging::log_session_end` puis `event_loop.exit()`, §11 — la borne de
+fin de session dit « Fermer l'overlay (fenêtre Options) »).
+
+**Le raccourci global « Quitter l'overlay » (`Ctrl+Shift+Q`) est retiré le lendemain**
+(2026-09-17, demande utilisateur), ce bouton le rendant superflu — et une combinaison globale qui
+arrête le programme d'un geste, sans confirmation, était un piège en plein combat, exactement le
+reproche fait à `Ctrl+Alt+D` (déconnexion) le 2026-09-13. Même traitement : variante retirée de
+`ShortcutAction`, clé `quit` d'un `config.toml` antérieur ignorée en silence à la relecture
+(`RETIRED_KEYS`), bannière de démarrage et captures (`options_onglet_raccourcis`) ajustées. Les
+sorties propres sont désormais ce bouton, l'entrée « Quitter » de la zone de notification, et
+Ctrl+C dans le terminal.
 
 **Captures** : `options_parametres_fermer_overlay` (bas de l'onglet) ; `options_parametres_compte`
 et `options_parametres_mise_a_jour` bougent avec la hauteur de l'onglet. L'aide de défilement des
