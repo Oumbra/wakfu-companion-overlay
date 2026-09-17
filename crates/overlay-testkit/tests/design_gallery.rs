@@ -305,7 +305,7 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Barre d'onglets — 44 px, pleine largeur à parts égales, quatre états",
+        "Barre d'onglets — 44 px, pleine largeur à marge égale, quatre états",
         "Le survolé a EXACTEMENT le fond de l'actif : seul le libellé les distingue (blanc pour l'actif, doré pour les autres). Un portage qui ne jouerait que sur le fond les rendrait indiscernables.",
     );
     // Une valeur de sélection par barre : un `&mut` partagé afficherait quatre fois le même état.
@@ -402,7 +402,7 @@ fn gallery(ui: &mut egui::Ui) {
             .log_name("galerie.onglets-icone-etires")
             .show(ui);
         ui.label(
-            RichText::new("par défaut — parts égales sur la largeur disponible")
+            RichText::new("par défaut — pleine largeur, une marge égale autour de chaque glyphe")
                 .color(CAPTION)
                 .size(12.0),
         );
