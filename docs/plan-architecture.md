@@ -881,6 +881,20 @@ supprimées — elle suit le premier plan de SON personnage, disparaît quand on
 s'en va avec le client qu'elle configure. Même traitement côté X11 (`game_window`,
 `_NET_ACTIVE_WINDOW`).
 
+**Complément (2026-09-17) : la fenêtre Options s'ouvre même sans fenêtre de jeu.** Le rattachement
+ci-dessus avait un angle mort : sans client Wakfu à l'écran, « Options » (icône de zone de
+notification ou raccourci global) créait une modale rattachée à une `HWND` nulle et à un rectangle
+inventé, que `sync_windows` refermait au tick suivant faute de client derrière — l'entrée ne
+faisait donc rien tant que le jeu n'était pas lancé, alors que c'est précisément le moment où l'on
+règle le chemin de `wakfu.log`, les raccourcis ou le démarrage automatique. La modale est désormais
+**détachée** dans ce cas (`OverlayWindow::is_detached`, `game_hwnd` nul comme la fenêtre de
+connexion) : centrée sur l'écran principal, laissée en place par `sync_windows`, et jamais
+rétrogradée par `sync_topmost` — une fenêtre `WS_EX_TOOLWINDOW` passée derrière serait perdue,
+hors barre des tâches et alt-tab, sans moyen d'en rouvrir une autre. Elle ne se rattache pas à un
+client lancé entre-temps et vit jusqu'à « Valider »/« Annuler », comme avant. Une modale ouverte
+DEPUIS une fenêtre de jeu garde la règle du 2026-09-12 : elle s'en va avec elle. Même traitement
+côté X11 (`game_window == 0`).
+
 **2. Les noms d'objet étaient illisibles dans la grille.** Trois tuiles affichaient « Plan "Epée
 de » à l'identique. La cause n'était pas la mise en forme du texte mais `Ui::put`, qui **avance le
 curseur du parent** : la tuile suivante démarrait 27 px trop tôt et son fond opaque effaçait la fin
