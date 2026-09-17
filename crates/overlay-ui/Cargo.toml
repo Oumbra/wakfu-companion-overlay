@@ -5,6 +5,19 @@ edition.workspace = true
 publish.workspace = true
 description = "Fenetre overlay transparente (Windows, DirectComposition — voir S1) rendant les deux premiers panneaux de L2 (degats du combat en cours, recap de session) a partir d'overlay-engine/overlay-ingest."
 
+# **Nom de l'exécutable livré** (Windows) — `wakfu-companion-overlay.exe`, et non le nom du paquet.
+# Sans ce bloc, Cargo nomme le binaire d'après `[package] name` : l'utilisateur téléchargeait un
+# `overlay-ui.exe`, un nom de module interne qui ne dit ni le produit ni le jeu, et qui se perd dans
+# une liste de processus. Le nom des ASSETS de Release, lui, portait déjà le bon
+# (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`, voir `.github/workflows/release.yml`).
+#
+# `src/bin/*.rs` reste découvert automatiquement à côté : `overlay-ui-x11` (Linux/X11, §17.2 du
+# plan) et `overlay-focus` (gestionnaire du protocole `wakfu-companion:`, voir son en-tête) gardent
+# leur nom — le second est cherché PAR NOM par l'overlay (`turn_watch::notify`).
+[[bin]]
+name = "wakfu-companion-overlay"
+path = "src/main.rs"
+
 [dependencies]
 overlay-engine = { path = "../overlay-engine" }
 overlay-ingest = { path = "../overlay-ingest" }
@@ -70,3 +83,21 @@ windows = { version = "0.62.2", features = [
   "UI_Notifications",
   "Data_Xml_Dom",
 ] }
+
+# Icône et métadonnées de l'exécutable Windows (`build.rs`) — l'icône est celle de la zone de
+# notification et de la fenêtre, dérivée d'`assets/ui/logo-purple.png` au build plutôt que commitée
+# en `.ico` : une seule source de vérité pour le logo du projet.
+#
+# `[target.'cfg(windows)']` d'un bloc `build-dependencies` désigne la plateforme HÔTE (c'est là que
+# tourne `build.rs`) — pas la cible. C'est ce qu'on veut : on ne compile jamais le binaire Windows
+# ailleurs que sous Windows (`release.yml`, job `build-windows`), et `build.rs` revérifie la cible
+# (`CARGO_CFG_TARGET_OS`) avant de poser quoi que ce soit.
+[target.'cfg(windows)'.build-dependencies]
+# Compile la ressource `.rc` (icône + bloc de version) et la fait lier dans l'exe. Fork maintenu de
+# `winres`. `default-features = false` retire sa lecture de `[package.metadata.winresource]` (et
+# avec elle `toml`/`syn` du graphe de build) : les quelques propriétés posées le sont dans
+# `build.rs`, à côté de l'icône, plutôt qu'à deux endroits.
+winresource = { version = "0.1", default-features = false }
+# Décodage du PNG source, redimensionnement, encodage `.ico` multi-tailles. Mêmes fonctionnalités
+# que la dépendance applicative ci-dessus, plus `ico`.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }

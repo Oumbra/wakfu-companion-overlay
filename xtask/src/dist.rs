@@ -24,7 +24,7 @@
 //! ```text
 //! cargo run --manifest-path xtask/Cargo.toml --release -- dist \
 //!     --version 0.21.0 --commit a1b2c3d \
-//!     --asset windows-x86_64=target/release/overlay-ui.exe \
+//!     --asset windows-x86_64=target/release/wakfu-companion-overlay.exe \
 //!     --asset linux-x86_64=target/release/overlay-ui-x11 \
 //!     --out dist [--previous previous/] [--min-version 0.17.0] [--notes-url URL] \
 //!     [--public-key wakfu-overlay.pub] [--unsigned]

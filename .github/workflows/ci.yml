@@ -6,8 +6,9 @@
 # `workflow_dispatch` uniquement une fois écrit (§17.2 : « jamais un gate CI par défaut »
 # pour ce harnais précis) — le contenu de ce fichier n'a donc pas vocation à y faire de la place.
 #
-# `overlay-ui::main` (le binaire `overlay-ui`) importe `windows::` sans `cfg` et ne compile QUE
-# sous Windows — d'où le découpage par paquet/binaire plutôt que `--workspace` partout : sa LIB
+# `overlay-ui::main` (le binaire `wakfu-companion-overlay`, nommé ainsi par le `[[bin]]` de son
+# Cargo.toml et non d'après le paquet) importe `windows::` sans `cfg` et ne compile QUE sous
+# Windows — d'où le découpage par paquet/binaire plutôt que `--workspace` partout : sa LIB
 # (`--lib`) compile nativement sous Linux (voir `crates/overlay-ui/src/lib.rs`), tout comme le
 # second binaire du même paquet, `overlay-ui-x11` (§17.2 du plan) — build/clippy/test le ciblent
 # donc explicitement en plus de `--lib`.

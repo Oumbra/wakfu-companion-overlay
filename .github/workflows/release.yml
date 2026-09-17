@@ -101,16 +101,16 @@ jobs:
           # Le cache des jobs de `ci.yml` est en profil dev : une clé distincte évite de le
           # polluer avec des artefacts release (LTO fat) et réciproquement.
           key: release
-      - name: cargo build --release (overlay-ui)
+      - name: cargo build --release (binaire Windows)
         env:
           # `build.rs` embarque ce hash dans `build_info` (bannière, journal, manifeste) — voir sa doc :
           # surcharge prévue pour une chaîne de release, prioritaire sur `git`.
           WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
-        run: cargo build --release -p overlay-ui --bin overlay-ui
+        run: cargo build --release -p overlay-ui --bin wakfu-companion-overlay
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
-          path: target/release/overlay-ui.exe
+          path: target/release/wakfu-companion-overlay.exe
           if-no-files-found: error
           retention-days: 3
 
@@ -177,7 +177,7 @@ jobs:
           cargo run --manifest-path xtask/Cargo.toml --release -- dist \
             --version "${{ needs.version.outputs.version }}" \
             --commit "${{ needs.version.outputs.commit }}" \
-            --asset "windows-x86_64=binaries/windows-x86_64/overlay-ui.exe" \
+            --asset "windows-x86_64=binaries/windows-x86_64/wakfu-companion-overlay.exe" \
             --asset "linux-x86_64=binaries/linux-x86_64/overlay-ui-x11" \
             --previous previous \
             --public-key wakfu-overlay.pub \
