@@ -32,6 +32,26 @@
 //!    Ce qui la lève : **recevoir une entrée soi-même**. Une fenêtre-leurre de trois pixels sous
 //!    le curseur, un clic synthétique dessus, et le process est « celui qui a reçu la dernière
 //!    entrée » — le jeu ne reçoit rien, le curseur ne bouge pas ([`focus_via_decoy`]).
+//! 3. Ce process est lancé **par le shell**, comme un programme qu'on double-clique : un
+//!    exécutable de sous-système *console* reçoit alors de Windows une fenêtre de terminal, qui
+//!    surgit par-dessus le jeu, apparaît dans la barre des tâches et lui dispute le premier plan
+//!    le temps de sa course. Les deux gestionnaires possibles (ci-dessous) sont donc fenêtrés sans
+//!    fenêtre — `overlay-focus` depuis le 2026-09-14, l'overlay lui-même depuis le 2026-09-17
+//!    (`windows_subsystem = "windows"` en tête de `main.rs`) : rien à l'écran dans les deux cas.
+//!    **Attention avant de changer le sous-système de l'un ou de l'autre** : c'est le seul
+//!    garde-fou : ce gestionnaire ne doit jamais rien afficher.
+//!
+//! ### Quel gestionnaire est enregistré, et lequel arrive chez l'utilisateur
+//!
+//! [`register_protocol`] préfère `overlay-focus.exe` (minuscule, démarre plus vite) **quand il est
+//! à côté de l'overlay**, et enregistre l'overlay lui-même sinon. Ce « sinon » est le cas
+//! NOMINAL hors développement : la Release ne publie qu'un binaire par plateforme
+//! (`.github/workflows/release.yml`, et `overlay_sync::update` en remplace exactement un), donc
+//! `overlay-focus.exe` n'existe que dans un `target/` de compilation. C'est ce qui a fait durer le
+//! défaut de la console : corrigé le 2026-09-14 en déportant le focus dans un binaire sans
+//! console, il est resté entier chez l'utilisateur, où le gestionnaire était — et reste —
+//! l'overlay. Livrer deux fichiers supposerait de les mettre à jour tous les deux ; c'est le
+//! sous-système de l'overlay qui a été corrigé à la place.
 //!
 //! ## Le son
 //!
@@ -139,9 +159,10 @@ fn register_protocol() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    // Le binaire dédié `overlay-focus.exe`, à côté de l'overlay, n'a pas de console (voir
-    // `src/bin/overlay-focus.rs`) et démarre plus vite : c'est lui qu'on enregistre quand il est
-    // là ; l'overlay lui-même sinon (il sait aussi le faire, voir `main`).
+    // Le binaire dédié `overlay-focus.exe` démarre plus vite : c'est lui qu'on enregistre quand il
+    // est à côté de l'overlay (poste de développement) ; l'overlay lui-même sinon — le cas de
+    // toute Release, qui ne publie qu'un binaire (voir la doc de module, « Quel gestionnaire est
+    // enregistré »). Ni l'un ni l'autre n'ouvre de fenêtre.
     unsafe {
         let set = |subkey: &str, name: Option<&str>, value: &str| {
             let subkey_w = wide(subkey);

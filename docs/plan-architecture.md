@@ -2231,6 +2231,17 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   - **Paniques** : le message de panique de la bibliothèque standard va sur `stderr`, donc nulle
     part. `logging::install_panic_hook` (les deux binaires) le recopie dans le journal avant le
     traitement par défaut — sans quoi un plantage n'aurait laissé qu'une session sans ligne de fin.
+  - **Clic sur une notification de tour** (§9.1 decies) : c'est le MÊME défaut, et il est couvert
+    par le même correctif. Le clic d'un toast est une activation de protocole — Windows lance le
+    gestionnaire de `wakfu-companion:` **par le shell**, donc avec une console s'il est en
+    sous-système *console*, qui surgit par-dessus le jeu et lui prend le premier plan. Le correctif
+    du 2026-09-14 (déporter le focus dans `overlay-focus.exe`, fenêtré sans fenêtre) n'a jamais
+    atteint l'utilisateur : `notify::register_protocol` ne préfère ce binaire que s'il est **à côté
+    de l'overlay**, or la Release ne publie qu'un binaire par plateforme et `overlay_sync::update`
+    n'en remplace qu'un — chez l'utilisateur, le gestionnaire est donc l'overlay lui-même. Signalé
+    à nouveau le 2026-09-17, et réglé par le passage de l'overlay au sous-système *windows* plutôt
+    que par la livraison d'un second fichier à tenir à jour. **Aucun des deux gestionnaires ne doit
+    repasser en sous-système console.**
   - Linux n'est pas concerné : `overlay-ui-x11` lancé par une entrée `.desktop` n'a jamais eu de
     terminal, et lancé depuis un terminal il en hérite naturellement.
 - **Nom et icône de l'exécutable Windows** (2026-09-17, demande utilisateur). Le binaire livré

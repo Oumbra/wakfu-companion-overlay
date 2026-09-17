@@ -9,7 +9,10 @@
 //! rien à l'écran, et un binaire minuscule qui démarre plus vite que l'overlay (qui, depuis le
 //! 2026-09-17, est lui aussi fenêtré sans fenêtre — ce binaire reste préférable pour sa taille et
 //! son temps de démarrage). `notify::register_identity` l'enregistre comme gestionnaire s'il est à
-//! côté de l'overlay.
+//! côté de l'overlay — ce qui n'arrive que sur un poste de développement : la Release ne publie
+//! qu'un binaire par plateforme, et c'est donc l'overlay qui est le gestionnaire chez
+//! l'utilisateur. C'est pourquoi le correctif du 2026-09-14 n'y a rien changé tant que l'overlay
+//! est resté un exécutable console (voir la doc de `notify`).
 //!
 //! Sous Linux ce binaire n'a pas d'objet et se termine aussitôt — il existe pour que le workspace
 //! compile partout.
