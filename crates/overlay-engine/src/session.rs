@@ -177,11 +177,13 @@ pub struct FighterDamage {
     /// `LogEntry::EnemyDefeated` (voir `SessionState::apply`, cas `EnemyDefeated`), qui malgré son
     /// nom couvre aussi bien "X est KO !" (réservé aux alliés, `KO_RE`) que "X est hors-combat !"
     /// (diffusé à tout combattant, `HORS_COMBAT_RE`) — voir `log-parser.ts`. Ne redevient JAMAIS
-    /// `false` une fois posé (pas de suivi de "ressuscité en plein combat" ici) : c'est un simple
-    /// indicateur d'affichage (portrait grisé, `overlay-ui::panels::combat`), pas une donnée de
-    /// synchro — `build_fight_sync_event` continue de dériver `defeated`/`fled` indépendamment à
-    /// partir de `resolved_enemies`/`fled_names` pour le payload serveur, ce champ-ci n'y participe
-    /// pas. `#[serde(default)]` même raison que `xp_gained` ci-dessus (champ ajouté après coup).
+    /// `false` une fois posé (pas de suivi de "ressuscité en plein combat" ici). Sert à
+    /// l'affichage (portrait grisé, `overlay-ui::panels::combat`) **et** à la synchro depuis le
+    /// 2026-09-17 : `build_fight_sync_event` le lit en complément de `resolved_enemies`/
+    /// `fled_names` pour remplir `FightParticipantPayload::defeated`, seul moyen de transmettre
+    /// l'état KO d'un combattant restauré après un redémarrage en plein combat (`restore_fight`
+    /// repart d'un `resolved_enemies` vide, alors que ce champ-ci est persisté par `fight_store`).
+    /// `#[serde(default)]` même raison que `xp_gained` ci-dessus (champ ajouté après coup).
     #[serde(default)]
     pub is_ko: bool,
     /// Sorts lancés par ce combattant pendant son DERNIER tour, dans l'ordre du log — la donnée du
@@ -404,9 +406,13 @@ struct FightWorking {
     /// « combat courant » à vider/recréer, chaque `fight_id` a son propre index depuis sa
     /// création).
     fighter_index: HashMap<String, Vec<usize>>,
-    /// Noms d'ennemis (normalisés en minuscules) déjà "résolus" — vaincus explicitement
+    /// Noms de combattants (normalisés en minuscules) déjà "résolus" — vaincus explicitement
     /// (`EnemyDefeated`) ou en fuite (`EnemyFled`) — voir le filet de rattrapage de `apply` pour
-    /// `CombatEnd`. Miroir simplifié de `FightWorking.defeatedNames`/`fledNames`
+    /// `CombatEnd`. Malgré son nom, ce set contient **aussi des alliés** : `EnemyDefeated` couvre
+    /// « X est KO ! » (réservé aux alliés) autant que « X est hors-combat ! » (voir la doc de
+    /// `FighterDamage::is_ko`), et `build_fight_sync_event` s'appuie dessus pour les deux camps.
+    /// Seul le filet de rattrapage de `CombatEnd` reste réservé aux ennemis (une victoire n'a
+    /// jamais mis un allié KO). Miroir simplifié de `FightWorking.defeatedNames`/`fledNames`
     /// (`stats-store.service.ts`) : pas de comptage PAR INSTANCE comme `defeatedInstanceCounts`
     /// côté web — un nom marqué résolu l'est pour TOUTES ses instances d'un coup. Écart assumé,
     /// hors périmètre de ce portage (qui couvre l'attribution des dégâts/soins, pas le comptage de
@@ -463,15 +469,15 @@ struct FightWorking {
     /// et le retour utilisateur 2026-09-02 (captures d'écran à l'appui : « Balise de Contact »,
     /// mécanisme allié, listé côté ennemis).
     summon_names: std::collections::HashSet<String>,
-    /// Noms (minuscules) d'ennemis résolus par une FUITE (`EnemyFled`) — sous-ensemble de
-    /// `resolved_enemies` (voir `mark_resolved`) : sert uniquement à distinguer `defeated`/`fled`
-    /// au moment de construire `FightParticipantPayload` (L5, §7.1), `resolved_enemies` seul ne le
-    /// permettant pas (les deux causes de résolution y sont fusionnées, voir sa doc). Perdu si
-    /// l'overlay redémarre en cours de combat (`restore_fight` ne le reconstruit pas, comme le
-    /// reste de l'état d'attribution) — un ennemi déjà fui avant un redémarrage serait alors
-    /// compté `defeated` plutôt que `fled` s'il se trouve aussi implicitement résolu par le filet
-    /// de rattrapage : écart mineur assumé, cohérent avec les autres pertes déjà documentées de
-    /// `restore_fight`.
+    /// Noms (minuscules) de combattants résolus par une FUITE (`EnemyFled`) — allié compris, comme
+    /// `resolved_enemies` dont c'est un sous-ensemble (voir `mark_resolved`) : sert uniquement à
+    /// distinguer `defeated`/`fled` au moment de construire `FightParticipantPayload` (L5, §7.1),
+    /// `resolved_enemies` seul ne le permettant pas (les deux causes de résolution y sont
+    /// fusionnées, voir sa doc). Perdu si l'overlay redémarre en cours de combat (`restore_fight`
+    /// ne le reconstruit pas, comme le reste de l'état d'attribution) — un ennemi déjà fui avant un
+    /// redémarrage serait alors compté `defeated` plutôt que `fled` s'il se trouve aussi
+    /// implicitement résolu par le filet de rattrapage : écart mineur assumé, cohérent avec les
+    /// autres pertes déjà documentées de `restore_fight`.
     fled_names: std::collections::HashSet<String>,
     /// Budget de lignes `FighterJoined` encore "attendues comme déjà connues" pour un combat
     /// RESTAURÉ (voir `restore_fight`) — vide (`HashMap::new()`) pour un combat découvert
@@ -1863,14 +1869,24 @@ fn build_fight_sync_event(
             *counter += 1;
             sig_participants.push((fighter.name.clone(), instance_index));
 
-            let (defeated, fled) = if fighter.is_ally {
-                (false, false)
-            } else {
-                let lower = fighter.name.to_lowercase();
-                let fled = fight.fled_names.contains(&lower);
-                let defeated = !fled && fight.resolved_enemies.contains(&lower);
-                (defeated, fled)
-            };
+            // `defeated`/`fled` se calculent de la MÊME façon pour les deux camps — miroir de
+            // `buildEntityDamageRows` (`stats-store.service.ts`), qui ne consulte jamais le camp :
+            // `registerFightDefeat`/`registerFightFlee` alimentent `defeatedInstanceCounts`/
+            // `fledInstanceCounts` pour tout combattant, allié compris. Jusqu'au 2026-09-17, cette
+            // branche renvoyait `(false, false)` dès que `is_ally` : l'état KO des personnages du
+            // joueur ne quittait jamais l'overlay (colonne `fight_participants.defeated` toujours
+            // `false` pour un allié), et un combat rechargé depuis l'archive du compte affichait
+            // toute l'équipe debout — alors que la même partie jouée avec le client web le
+            // transmettait correctement.
+            //
+            // `is_ko` compte au même titre que `resolved_enemies` : les deux sont posés ensemble
+            // par `EnemyDefeated` (voir `apply`), mais `is_ko` seul survit à un redémarrage de
+            // l'overlay en plein combat (persisté par `fight_store`, alors que `restore_fight`
+            // repart d'un `resolved_enemies` vide). Un combattant qui a FUI n'est jamais compté
+            // vaincu, même résolu (`EnemyFled` pose `resolved_enemies` sans poser `is_ko`).
+            let lower = fighter.name.to_lowercase();
+            let fled = fight.fled_names.contains(&lower);
+            let defeated = !fled && (fighter.is_ko || fight.resolved_enemies.contains(&lower));
             // Un allié n'a jamais d'id monstre (aucun monstre ne porte un nom de personnage) —
             // miroir de `HistorySyncService.monsterId`, appelé côté web UNIQUEMENT pour `side ===
             // 'enemy'`.
@@ -3584,8 +3600,9 @@ mod tests {
     }
 
     /// `EnemyDefeated` couvre aussi bien "X est KO !" (allié) que "X est hors-combat !" (n'importe
-    /// qui) — voir `FighterDamage::is_ko`. Régression visée : ne pas confondre avec
-    /// `resolved_enemies`, qui n'a de sens que pour les ennemis (voir `build_fight_sync_event`).
+    /// qui) — voir `FighterDamage::is_ko`. Régression visée : ne poser le drapeau que sur le
+    /// combattant nommé, jamais sur tout le camp. Le versant synchro du même signal est couvert par
+    /// `le_payload_de_synchro_transmet_le_ko_dun_allie`.
     #[test]
     fn enemy_defeated_marque_is_ko_meme_pour_un_allie() {
         let mut state = SessionState::default();
@@ -4239,6 +4256,69 @@ mod tests {
             participant.spells.len(),
             1,
             "la ventilation des dégâts ne contient que le sort de dégâts"
+        );
+    }
+
+    /// Un allié mis KO part `defeated: true` vers le compte, exactement comme le client web le
+    /// transmet (`buildEntityDamageRows` ne consulte jamais le camp). Régression corrigée le
+    /// 2026-09-17 (remontée utilisateur) : `build_fight_sync_event` forçait `(false, false)` dès
+    /// que `is_ally`, l'état KO des personnages du joueur n'atteignait donc jamais
+    /// `fight_participants.defeated` et un combat rechargé depuis l'archive affichait toute
+    /// l'équipe debout. L'ennemi du même combat, jamais résolu explicitement, vérifie au passage
+    /// que le filet de rattrapage de `CombatEnd` reste, lui, réservé aux ennemis.
+    #[test]
+    fn le_payload_de_synchro_transmet_le_ko_dun_allie() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 8, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &fighter_joined(1, "Caliburnus", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &fighter_joined(1, "Bwork", 1, true),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &enemy_defeated(1, "Oumbra"), // "Oumbra est KO !"
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        let participant = |name: &str| {
+            fight
+                .participants
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("participant {name} absent du payload"))
+        };
+
+        let ko = participant("Oumbra");
+        assert_eq!(ko.side, FightSide::Ally);
+        assert!(ko.defeated, "un allié mis KO doit partir defeated");
+        assert!(!ko.fled);
+
+        let debout = participant("Caliburnus");
+        assert!(
+            !debout.defeated,
+            "un allié jamais mis KO ne doit pas partir defeated"
+        );
+
+        assert!(
+            participant("Bwork").defeated,
+            "le filet de rattrapage d'un combat gagné crédite l'ennemi jamais résolu"
         );
     }
 
