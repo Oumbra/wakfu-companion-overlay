@@ -199,6 +199,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -274,6 +275,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -375,6 +377,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     recap: &recap,
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -469,6 +472,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         recap: &recap,
                         recap_cells: Default::default(),
                         recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,
@@ -622,6 +626,7 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                             locked: false,
                             ..Default::default()
                         },
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,
@@ -706,9 +711,9 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
     );
 }
 
-/// La confirmation de remise à zéro (`OverlayKind::RecapReset`, 2026-09-17) : la boîte du design
+/// La confirmation de remise à zéro (`OverlayKind::ResetConfirm`, 2026-09-17) : la boîte du design
 /// system centrée sous un voile qui couvre toute la fenêtre — la fenêtre de jeu, en vrai. Échap
-/// répond « Non », ce que ce test relève par `RenderOutcome::recap_reset_choice`.
+/// répond « Non », ce que ce test relève par `RenderOutcome::reset_choice`.
 #[test]
 fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
     let mut textures = Textures::new();
@@ -733,7 +738,9 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
             let outcome = paint_content(
                 ui,
                 RenderContent {
-                    kind: OverlayKind::RecapReset(overlay_ui::render_content::RecapTarget::Session),
+                    kind: OverlayKind::ResetConfirm(
+                        overlay_ui::render_content::ResetTarget::RecapSession,
+                    ),
                     fight: None,
                     portraits,
                     combat_frame,
@@ -760,13 +767,14 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
                 },
             );
-            if outcome.recap_reset_choice != overlay_ui::design::ConfirmChoice::Pending {
-                *choice.borrow_mut() = outcome.recap_reset_choice;
+            if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
+                *choice.borrow_mut() = outcome.reset_choice;
             }
         }
     });
@@ -845,6 +853,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 now,
                 recap: &recap,
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
                     fights: false,
@@ -923,6 +932,7 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 now,
                 recap: &recap,
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
                     fights: true,
@@ -994,6 +1004,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -1157,6 +1168,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -1234,6 +1246,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -1371,6 +1384,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -1518,6 +1532,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -1620,6 +1635,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -1726,6 +1742,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         recap: &Default::default(),
                         recap_cells: Default::default(),
                         recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,
@@ -1847,6 +1864,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -2145,6 +2163,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: None,
@@ -2248,6 +2267,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -2342,6 +2362,7 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     login: None,
                     veiled: false,
@@ -2434,6 +2455,7 @@ fn panneau_options_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
@@ -2564,6 +2586,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // sur le jeu — pas depuis cette fenêtre) et personne n'a cliqué « Replacer au
                 // défaut » : « Valider » emporte `None`, c'est-à-dire son ancrage d'origine.
                 recap_position: None,
+                // Idem pour la hauteur du panneau Combat (2026-09-17) : il se déplace par sa
+                // poignée latérale, sur le jeu, et « Replacer au défaut » n'a pas été cliqué.
+                combat_position_y: None,
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
@@ -2719,6 +2744,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
@@ -2840,6 +2866,7 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         recap: &Default::default(),
                         recap_cells: Default::default(),
                         recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: Some(&mut options_state),
                         veiled: true,
                         login: None,
@@ -5214,6 +5241,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -5883,6 +5911,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -6038,6 +6067,7 @@ fn capture_login_with_update(
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
                     login: Some(&mut login_state),
@@ -6555,6 +6585,7 @@ fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
                 recap: &recap,
                 recap_cells: Default::default(),
                 recap_chrome: chrome,
+                combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
                 login: None,
@@ -6653,6 +6684,7 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                         recap: &recap,
                         recap_cells: Default::default(),
                         recap_chrome: chrome.get(),
+                        combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
                         login: None,

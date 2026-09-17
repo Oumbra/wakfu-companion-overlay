@@ -125,6 +125,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,

@@ -74,6 +74,7 @@ mod linux_main {
     };
     use overlay_ui::build_info;
     use overlay_ui::chat_command::{self, ChatCommand};
+    use overlay_ui::combat_placement;
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
         spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
@@ -100,7 +101,7 @@ mod linux_main {
     use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
     use overlay_ui::render_content;
     use overlay_ui::render_content::{
-        AuthCommand, AuthStatus, OverlayKind, RecapTarget, RenderContent, UserEvent,
+        AuthCommand, AuthStatus, OverlayKind, RenderContent, ResetTarget, UserEvent,
     };
     use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
     use overlay_ui::startup::StartupProgress;
@@ -128,8 +129,11 @@ mod linux_main {
     const WATCHLIST_INNER_MARGIN: f64 = 12.0;
     const WATCHLIST_WIDTH_FRACTION: f64 = 0.5;
     const WATCHLIST_MAX_CEILING: f64 = 1000.0;
-    const GAME_EDGE_MARGIN_PX: i32 = 12;
     const GAME_TOP_MARGIN_PX: i32 = 28;
+    // `GAME_EDGE_MARGIN_PX` (12 px ici, 0 sous Windows depuis le 2026-09-04) a disparu le
+    // 2026-09-17 avec l'ancrage du panneau Combat, parti dans `overlay_ui::combat_placement` :
+    // la marge y est nulle des deux côtés, comme l'utilisateur l'avait demandé pour Windows —
+    // ce binaire ne l'avait jamais suivi.
     // L'ancrage du bloc Récap et le décalage que l'utilisateur lui donne à la souris
     // (2026-09-17) vivent dans `overlay_ui::recap_placement`, partagé avec `main.rs` :
     // `DEFAULT_OFFSET` a remplacé les constantes `GAME_RECAP_*_MARGIN_PX` qui étaient ici, et
@@ -294,6 +298,12 @@ mod linux_main {
         /// (`config::OverlayConfig::combat_on_right`), même politique que `main.rs` : ancrage de la
         /// fenêtre (`anchor_position`) et miroir de son contenu (`overlay_ui::mirror`).
         combat_on_right: bool,
+        /// Voir `main.rs::App::combat_position_y` — la hauteur du panneau Combat (2026-09-17).
+        combat_position_y: Option<i32>,
+        /// Voir `main.rs::App::combat_locked` — le cadenas du panneau Combat.
+        combat_locked: bool,
+        /// Le glissement du panneau en cours, s'il y en a un — voir `CombatDragState`.
+        combat_drag: Option<CombatDragState>,
         /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
         /// persisté (`config::OverlayConfig::turn_notification`), même politique que
         /// `combat_always_visible`.
@@ -335,7 +345,64 @@ mod linux_main {
         )>,
     }
 
-    /// Ce qu'il faut savoir en plus pour poser une fenêtre `Recap` — voir
+    /// Ce qu'il faut savoir pour poser une fenêtre `Combat` — voir
+    /// `main.rs::CombatAnchor`, même type et même rôle : traduire le rectangle de fenêtre de jeu
+    /// de CETTE plateforme dans le vocabulaire d'`overlay_ui::combat_placement`, qui fait le
+    /// calcul (bord vertical, hauteur, bornage, aimantation) pour les deux hôtes.
+    #[derive(Debug, Clone, Copy)]
+    struct CombatAnchor {
+        on_right: bool,
+        offset: Option<i32>,
+        scale: f64,
+    }
+
+    impl Default for CombatAnchor {
+        fn default() -> Self {
+            Self {
+                on_right: false,
+                offset: None,
+                scale: 1.0,
+            }
+        }
+    }
+
+    impl CombatAnchor {
+        fn new(on_right: bool, offset: Option<i32>, scale: f64) -> Self {
+            Self {
+                on_right,
+                offset,
+                scale,
+            }
+        }
+
+        /// `rect.top`/`rect.height` — la fenêtre de jeu ENTIÈRE, le repère sur lequel ce panneau
+        /// est centré depuis l'origine (voir `main.rs::CombatAnchor::geometry`).
+        fn geometry(
+            self,
+            rect: GameRect,
+            overlay_width: i32,
+            overlay_height: i32,
+        ) -> (combat_placement::ClientArea, combat_placement::Panel) {
+            (
+                combat_placement::ClientArea {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                },
+                combat_placement::Panel::new(overlay_width, overlay_height, self.scale),
+            )
+        }
+    }
+
+    /// Un glissement du panneau Combat en cours — voir `main.rs::CombatDragState`, même rôle et
+    /// même raison d'être en une seule dimension.
+    #[derive(Debug, Clone, Copy)]
+    struct CombatDragState {
+        window: WindowId,
+        grab_y: i32,
+    }
+
     /// `main.rs::RecapAnchor`, même type et même rôle : traduire le rectangle de fenêtre de jeu
     /// de CETTE plateforme dans le vocabulaire d'`overlay_ui::recap_placement`, qui fait le
     /// calcul pour les deux.
@@ -393,6 +460,10 @@ mod linux_main {
         combat_always_visible: bool,
         /// Voir `App::combat_on_right` — même provenance.
         combat_on_right: bool,
+        /// Voir `App::combat_position_y` — relue de la config au démarrage.
+        combat_position_y: Option<i32>,
+        /// Voir `App::combat_locked` — relu de la config au démarrage.
+        combat_locked: bool,
         /// Voir `App::turn_notification` — même provenance.
         turn_notification: bool,
         /// Le son de la notification de tour coupé (`config::OverlayConfig::
@@ -445,6 +516,8 @@ mod linux_main {
                 log_path,
                 combat_always_visible,
                 combat_on_right,
+                combat_position_y,
+                combat_locked,
                 turn_notification,
                 turn_notification_muted,
                 features,
@@ -503,6 +576,8 @@ mod linux_main {
                 log_path,
                 combat_always_visible,
                 combat_on_right,
+                combat_position_y,
+                combat_locked,
                 turn_notification,
                 turn_notification_muted,
                 features,
@@ -514,6 +589,7 @@ mod linux_main {
                 recap_position,
                 recap_locked,
                 recap_drag: None,
+                combat_drag: None,
                 banner_printed: false,
                 pending_dialog: None,
                 pending_recipe: None,
@@ -788,6 +864,7 @@ mod linux_main {
                             existing,
                             info.rect,
                             self.combat_on_right,
+                            self.combat_position_y,
                             self.recap_position,
                         );
                         continue;
@@ -812,6 +889,7 @@ mod linux_main {
                         self.interactive,
                         visible,
                         self.combat_on_right,
+                        self.combat_position_y,
                         self.recap_position,
                     );
                     tracing::info!(
@@ -883,18 +961,23 @@ mod linux_main {
             rect: GameRect,
             overlay_width: i32,
             overlay_height: i32,
-            combat_on_right: bool,
+            combat: CombatAnchor,
             recap: RecapAnchor,
         ) -> PhysicalPosition<i32> {
             match kind {
-                OverlayKind::Combat if combat_on_right => PhysicalPosition::new(
-                    rect.left + rect.width - overlay_width - GAME_EDGE_MARGIN_PX,
-                    rect.top + (rect.height - overlay_height) / 2,
-                ),
-                OverlayKind::Combat => PhysicalPosition::new(
-                    rect.left + GAME_EDGE_MARGIN_PX,
-                    rect.top + (rect.height - overlay_height) / 2,
-                ),
+                // Combat : bord vertical au choix, centré verticalement tant qu'il n'a pas été
+                // déplacé, à sa hauteur ensuite (2026-09-17) — tout le calcul est dans
+                // `overlay_ui::combat_placement`, voir `main.rs::App::anchor_position`.
+                OverlayKind::Combat => {
+                    let (client, panel) = combat.geometry(rect, overlay_width, overlay_height);
+                    let (x, y) = combat_placement::window_position(
+                        combat.offset,
+                        combat.on_right,
+                        client,
+                        panel,
+                    );
+                    PhysicalPosition::new(x, y)
+                }
                 OverlayKind::Watchlist => PhysicalPosition::new(
                     rect.left + (rect.width - overlay_width) / 2,
                     rect.client_top + GAME_TOP_MARGIN_PX,
@@ -909,7 +992,7 @@ mod linux_main {
                 }
                 // La confirmation de remise à zéro couvre la fenêtre de jeu entière — voir
                 // `main.rs::App::anchor_position`.
-                OverlayKind::RecapReset(_) => PhysicalPosition::new(rect.left, rect.top),
+                OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
                 // Rattachée à une fenêtre de jeu, la fenêtre Options la couvre entière et voile
                 // tout sauf la modale, centrée par le rendu (2026-09-17) — voir
                 // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
@@ -933,6 +1016,8 @@ mod linux_main {
             visible: bool,
             // `combat_on_right` : voir `anchor_position`.
             combat_on_right: bool,
+            // À quelle hauteur poser le panneau Combat (`App::combat_position_y`, 2026-09-17).
+            combat_offset: Option<i32>,
             // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones.
             recap_offset: Option<(i32, i32)>,
         ) -> OverlayWindow {
@@ -960,7 +1045,7 @@ mod linux_main {
                         + render_content::RECAP_ACTIONS_RESERVE as f64,
                 ),
                 // La taille de la fenêtre de jeu, pour que le voile la couvre — voir `main.rs`.
-                OverlayKind::RecapReset(_) => (rect.width as f64, rect.height as f64),
+                OverlayKind::ResetConfirm(_) => (rect.width as f64, rect.height as f64),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
                 OverlayKind::Login => (
                     panels::login::WINDOW_WIDTH as f64,
@@ -969,7 +1054,7 @@ mod linux_main {
             };
             // Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES, comme le rectangle
             // dont elle vient et la position qu'on lui pose — voir `main.rs`, même raison.
-            let covers_game = matches!(kind, OverlayKind::RecapReset(_))
+            let covers_game = matches!(kind, OverlayKind::ResetConfirm(_))
                 || (kind == OverlayKind::Options && game_window != 0);
             let inner_size: winit::dpi::Size = if covers_game {
                 winit::dpi::PhysicalSize::new(size.0, size.1).into()
@@ -980,7 +1065,7 @@ mod linux_main {
                 OverlayKind::Combat => "Combat",
                 OverlayKind::Watchlist => "Suivi",
                 OverlayKind::Recap => "Recap",
-                OverlayKind::RecapReset(_) => "Confirmation",
+                OverlayKind::ResetConfirm(_) => "Confirmation",
                 OverlayKind::Options => "Options",
                 OverlayKind::Login => "Connexion",
             };
@@ -1023,7 +1108,7 @@ mod linux_main {
                 rect,
                 outer.width as i32,
                 outer.height as i32,
-                combat_on_right,
+                CombatAnchor::new(combat_on_right, combat_offset, window.scale_factor()),
                 RecapAnchor::new(recap_offset, window.scale_factor()),
             );
             window.set_outer_position(position);
@@ -1066,17 +1151,19 @@ mod linux_main {
             overlay: &mut OverlayWindow,
             rect: GameRect,
             combat_on_right: bool,
+            combat_offset: Option<i32>,
             recap_offset: Option<(i32, i32)>,
         ) {
             overlay.game_rect = rect;
             let outer = overlay.window.outer_size();
+            let scale = overlay.window.scale_factor();
             let desired = Self::anchor_position(
                 overlay.kind,
                 rect,
                 outer.width as i32,
                 outer.height as i32,
-                combat_on_right,
-                RecapAnchor::new(recap_offset, overlay.window.scale_factor()),
+                CombatAnchor::new(combat_on_right, combat_offset, scale),
+                RecapAnchor::new(recap_offset, scale),
             );
             if overlay.last_position != Some(desired) {
                 overlay.window.set_outer_position(desired);
@@ -1326,7 +1413,8 @@ mod linux_main {
                 // `Combat` peut naître masqué (voir `sync_panel_visibility`).
                 true,
                 self.combat_on_right,
-                // Sans objet : cette fenêtre-ci n'est pas la bande Récap.
+                // Sans objet : cette fenêtre-ci n'est ni le panneau Combat ni la bande Récap.
+                None,
                 None,
             );
             if detached {
@@ -1420,6 +1508,7 @@ mod linux_main {
                 tab: initial_tab,
                 combat_always_visible: self.combat_always_visible,
                 combat_on_right: self.combat_on_right,
+                combat_position_y: self.combat_position_y,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 // Les cases « Activer … » s'ouvrent sur l'état réel — voir `main.rs`. Les deux
@@ -1475,6 +1564,7 @@ mod linux_main {
                     personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
                     combat_on_right: self.combat_on_right,
+                    combat_position_y: self.combat_position_y,
                     turn_notification: self.turn_notification,
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
@@ -1675,44 +1765,63 @@ mod linux_main {
                 .ok();
         }
 
-        /// Voir `main.rs::open_recap_reset_confirm` — la confirmation de remise à zéro du Récap,
+        /// Voir `main.rs::open_reset_confirm` — la confirmation de remise à zéro du Récap,
         /// par-dessus la fenêtre de jeu d'où le glyphe a été cliqué, une seule à la fois.
-        fn open_recap_reset_confirm(
+        fn open_reset_confirm(
             &mut self,
             event_loop: &ActiveEventLoop,
             game_window: u32,
             rect: GameRect,
-            target: RecapTarget,
+            target: ResetTarget,
         ) {
             if self
                 .windows
                 .values()
-                .any(|w| matches!(w.kind, OverlayKind::RecapReset(_)))
+                .any(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)))
             {
                 return;
             }
             let overlay = Self::create_overlay_window(
                 event_loop,
-                OverlayKind::RecapReset(target),
+                OverlayKind::ResetConfirm(target),
                 game_window,
                 "Recap".to_string(),
                 rect,
                 true,
                 true,
                 self.combat_on_right,
-                // La confirmation couvre la fenêtre de jeu entière — elle ne suit pas la bande.
+                // La confirmation couvre la fenêtre de jeu entière — elle ne suit ni le panneau
+                // Combat ni la bande Récap.
+                None,
                 None,
             );
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
             match target {
-                RecapTarget::Session => {
+                ResetTarget::RecapSession => {
                     tracing::info!("[session] confirmation de remise à zéro ouverte.")
                 }
-                RecapTarget::Position => {
+                ResetTarget::RecapPosition => {
                     tracing::info!("[recap] confirmation de replacement ouverte.")
                 }
+                ResetTarget::CombatPosition => {
+                    tracing::info!("[combat] confirmation de replacement ouverte.")
+                }
             }
+        }
+
+        /// Voir `main.rs::toggle_combat_lock`.
+        fn toggle_combat_lock(&mut self) {
+            self.combat_locked = !self.combat_locked;
+            self.persist_config();
+            tracing::info!(
+                "[combat] panneau {}.",
+                if self.combat_locked {
+                    "verrouillé"
+                } else {
+                    "déverrouillé"
+                }
+            );
         }
 
         /// Voir `main.rs::toggle_recap_lock`.
@@ -1729,28 +1838,41 @@ mod linux_main {
             );
         }
 
-        /// Voir `main.rs::answer_recap_reset`.
-        fn answer_recap_reset(
+        /// Voir `main.rs::answer_reset_confirm`.
+        fn answer_reset_confirm(
             &mut self,
             confirm_window_id: WindowId,
-            target: RecapTarget,
+            target: ResetTarget,
             confirmed: bool,
         ) {
             self.windows.remove(&confirm_window_id);
             match (target, confirmed) {
-                (RecapTarget::Session, true) => {
+                (ResetTarget::RecapSession, true) => {
                     let snapshot = self.snapshot.load();
                     self.recap_session
                         .reset(&snapshot.totals, std::time::SystemTime::now());
                 }
-                (RecapTarget::Session, false) => tracing::info!("[session] remise à zéro annulée."),
-                (RecapTarget::Position, true) => {
+                (ResetTarget::RecapSession, false) => {
+                    tracing::info!("[session] remise à zéro annulée.")
+                }
+                (ResetTarget::RecapPosition, true) => {
                     self.recap_position = None;
                     self.persist_config();
                     self.reposition_recap();
                     tracing::info!("[recap] bande revenue à son emplacement d'origine.");
                 }
-                (RecapTarget::Position, false) => tracing::info!("[recap] replacement annulé."),
+                (ResetTarget::RecapPosition, false) => {
+                    tracing::info!("[recap] replacement annulé.")
+                }
+                (ResetTarget::CombatPosition, true) => {
+                    self.combat_position_y = None;
+                    self.persist_config();
+                    self.reposition_combat();
+                    tracing::info!("[combat] panneau revenu à sa hauteur d'origine.");
+                }
+                (ResetTarget::CombatPosition, false) => {
+                    tracing::info!("[combat] replacement annulé.")
+                }
             }
         }
 
@@ -1805,12 +1927,30 @@ mod linux_main {
         /// `main.rs::App::reposition_recap`, même rôle : le bouton « Replacer au défaut » doit se
         /// voir dans la même passe que le clic.
         fn reposition_recap(&mut self) {
+            self.reposition_kind(OverlayKind::Recap);
+        }
+
+        /// Recolle chaque panneau Combat sur sa fenêtre de jeu — voir
+        /// `main.rs::App::reposition_combat`.
+        fn reposition_combat(&mut self) {
+            self.reposition_kind(OverlayKind::Combat);
+        }
+
+        /// Recolle toutes les fenêtres d'une zone, fenêtres de jeu inchangées.
+        fn reposition_kind(&mut self, kind: OverlayKind) {
             let recap_position = self.recap_position;
             let combat_on_right = self.combat_on_right;
+            let combat_position_y = self.combat_position_y;
             for overlay in self.windows.values_mut() {
-                if overlay.kind == OverlayKind::Recap {
+                if overlay.kind == kind {
                     let rect = overlay.game_rect;
-                    Self::reposition(overlay, rect, combat_on_right, recap_position);
+                    Self::reposition(
+                        overlay,
+                        rect,
+                        combat_on_right,
+                        combat_position_y,
+                        recap_position,
+                    );
                 }
             }
         }
@@ -1836,6 +1976,8 @@ mod linux_main {
             saved.set_recap_resume(self.recap_session.resume_settings());
             saved.set_recap_position(self.recap_position);
             saved.recap_locked = self.recap_locked;
+            saved.combat_position_y = self.combat_position_y;
+            saved.combat_locked = self.combat_locked;
             saved.set_features(self.features);
             saved.set_alert_mutes(self.alert_mutes);
             config::save(&saved);
@@ -1980,6 +2122,15 @@ mod linux_main {
                     // **La position de la bande Récap (2026-09-17)** — le bouton « Replacer au
                     // défaut », seul geste de cette fenêtre sur la bande : la déplacer se fait à
                     // la souris, sur le jeu. Voir `main.rs`.
+                    let combat_position_changed =
+                        commit.combat_position_y != self.combat_position_y;
+                    if combat_position_changed {
+                        self.combat_position_y = commit.combat_position_y;
+                        tracing::info!(
+                            "[options] panneau de combat replacé à sa hauteur d'origine."
+                        );
+                        self.reposition_combat();
+                    }
                     let recap_position_changed = commit.recap_position != self.recap_position;
                     if recap_position_changed {
                         self.recap_position = commit.recap_position;
@@ -2032,24 +2183,16 @@ mod linux_main {
                         || recap_resume_changed
                         || auto_update_changed
                     {
-                        let mut saved = config::OverlayConfig {
-                            log_path: Some(candidate),
-                            combat_always_visible: self.combat_always_visible,
-                            combat_on_right: self.combat_on_right,
-                            turn_notification: self.turn_notification,
-                            turn_notification_muted: self.turn_notification_muted,
-                            auto_update: self.auto_update,
-                            // Jalon posé au démarrage — voir `main.rs`.
-                            autostart_initialized: true,
-                            ..Default::default()
-                        };
-                        saved.set_shortcuts(self.hotkeys.bindings());
-                        saved.set_chat_toast(self.chat_toast);
-                        saved.set_countdown_toast(self.countdown_toast);
-                        saved.set_recap_resume(self.recap_session.resume_settings());
-                        saved.set_features(self.features);
-                        saved.set_alert_mutes(self.alert_mutes);
-                        config::save(&saved);
+                        // **`persist_config` et rien d'autre** (2026-09-17) : cette liste de
+                        // champs vivait ici en double de celle de `persist_config`, et elle avait
+                        // déjà divergé — la position ET le verrou de la bande Récap y manquaient,
+                        // si bien que valider cette fenêtre sous Linux effaçait du disque une
+                        // bande qu'on venait de déplacer. C'est exactement le risque que la doc de
+                        // `main.rs::App::persist_config` annonce (« deux copies de cette liste
+                        // auraient divergé au premier réglage ajouté »), et la hauteur du panneau
+                        // Combat en aurait été la troisième victime. `self.log_path` porte déjà le
+                        // chemin validé (voir plus haut), il n'y a donc rien à passer.
+                        self.persist_config();
                     }
                     // « Valider » commit TOUS les onglets — voir `main.rs`.
                     self.commit_alerts(options_window_id);
@@ -2124,11 +2267,13 @@ mod linux_main {
                 OpenOptions(u32, GameRect, options_modal::OptionsTab),
                 CloseOptions,
                 /// Glyphe de remise à zéro du Récap cliqué — voir `main.rs`.
-                OpenRecapReset(u32, GameRect, RecapTarget),
+                OpenResetConfirm(u32, GameRect, ResetTarget),
                 /// La confirmation a répondu — voir `main.rs`.
-                AnswerRecapReset(RecapTarget, bool),
+                AnswerResetConfirm(ResetTarget, bool),
                 /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
                 ToggleRecapLock,
+                /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
+                ToggleCombatLock,
                 /// Carte d'alerte de chat cliquée — voir `main.rs`.
                 Whisper(String),
                 BrowseOptions,
@@ -2153,6 +2298,8 @@ mod linux_main {
             // perdue ne se rattrape pas, elle ne doit pas dépendre d'un `PostRedraw` qu'une
             // autre action écraserait).
             let mut persist_recap_position = false;
+            // Même mécanique pour la hauteur du panneau Combat (2026-09-17).
+            let mut persist_combat_position = false;
 
             let Some(overlay) = self.windows.get_mut(&id) else {
                 return;
@@ -2181,9 +2328,9 @@ mod linux_main {
                             }
                             _ => post_redraw = PostRedraw::CloseOptions,
                         }
-                    } else if let OverlayKind::RecapReset(target) = overlay.kind {
+                    } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
                         // Fermer la question, c'est répondre « Non ».
-                        post_redraw = PostRedraw::AnswerRecapReset(target, false);
+                        post_redraw = PostRedraw::AnswerResetConfirm(target, false);
                     } else {
                         logging::log_session_end("fermeture de fenêtre");
                         event_loop.exit();
@@ -2265,7 +2412,7 @@ mod linux_main {
                     // elle-même traversable si l'utilisateur avait basculé ce mode juste avant.
                     let interactive = matches!(
                         overlay.kind,
-                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset(_)
+                        OverlayKind::Options | OverlayKind::Login | OverlayKind::ResetConfirm(_)
                     ) || self.interactive;
                     let this_game_rect = overlay.game_rect;
                     let this_game_window = overlay.game_window;
@@ -2285,6 +2432,11 @@ mod linux_main {
                                 );
                             recap_placement::actions_below(self.recap_position, client, band)
                         },
+                    };
+                    // Le chrome du panneau Combat — voir `main.rs::App::redraw`.
+                    let combat_chrome = panels::combat::CombatChrome {
+                        locked: self.combat_locked,
+                        moved: self.combat_position_y.is_some(),
                     };
                     // La vue de la session du Récap — voir `main.rs`.
                     let recap_view = panels::recap::RecapView {
@@ -2326,6 +2478,7 @@ mod linux_main {
                             watchlist_enabled: self.features.suivi,
                             spells_enabled: self.features.spells_visible(),
                             combat_on_right: self.combat_on_right,
+                            combat_chrome,
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_toast,
                             catalog: &catalog,
@@ -2437,6 +2590,78 @@ mod linux_main {
                             }
                         }
                     }
+                    // **Le panneau Combat saisi par sa poignée latérale** (2026-09-17) — voir
+                    // `main.rs::App::redraw`, même calcul au pixel près, en une seule dimension :
+                    // seule la hauteur bouge.
+                    if overlay.kind == OverlayKind::Combat {
+                        // Le côté est copié AVANT la fermeture qui pose la fenêtre : elle ne
+                        // doit rien garder de `self`, dont d'autres champs changent juste après
+                        // (la hauteur, l'état du glissement).
+                        let on_right = self.combat_on_right;
+                        let scale = overlay.window.scale_factor();
+                        let outer = overlay.window.outer_size();
+                        let (client, panel) = CombatAnchor::new(on_right, None, scale).geometry(
+                            overlay.game_rect,
+                            outer.width as i32,
+                            outer.height as i32,
+                        );
+                        let mut place = |offset: Option<i32>| {
+                            let (x, y) =
+                                combat_placement::window_position(offset, on_right, client, panel);
+                            let posed = PhysicalPosition::new(x, y);
+                            if overlay.last_position != Some(posed) {
+                                overlay.window.set_outer_position(posed);
+                                overlay.last_position = Some(posed);
+                            }
+                        };
+                        match outcome.combat_drag {
+                            panels::drag::PanelDrag::None => {}
+                            panels::drag::PanelDrag::Started(pos) => {
+                                self.combat_drag = Some(CombatDragState {
+                                    window: id,
+                                    grab_y: (pos.y as f64 * scale).round() as i32,
+                                });
+                            }
+                            panels::drag::PanelDrag::Moved => {
+                                if let Some(drag) =
+                                    self.combat_drag.filter(|drag| drag.window == id)
+                                {
+                                    if let Some((_, cursor_y)) = self.game_window.cursor_position()
+                                    {
+                                        let offset = combat_placement::drag_offset(
+                                            cursor_y,
+                                            drag.grab_y,
+                                            client,
+                                            panel,
+                                        );
+                                        if self.combat_position_y != Some(offset) {
+                                            self.combat_position_y = Some(offset);
+                                            place(Some(offset));
+                                        }
+                                    }
+                                }
+                            }
+                            panels::drag::PanelDrag::Released => {
+                                if self.combat_drag.is_some_and(|drag| drag.window == id) {
+                                    self.combat_drag = None;
+                                    self.combat_position_y =
+                                        self.combat_position_y.and_then(|offset| {
+                                            combat_placement::snap(offset, client, panel)
+                                        });
+                                    place(self.combat_position_y);
+                                    persist_combat_position = true;
+                                    match self.combat_position_y {
+                                        Some(y) => tracing::info!(
+                                            "[combat] panneau posé à la hauteur {y}."
+                                        ),
+                                        None => tracing::info!(
+                                            "[combat] panneau revenu à sa hauteur d'origine."
+                                        ),
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // Fenêtre de connexion : retaillée à la hauteur de la carte et recentrée —
                     // voir `main.rs`. Sous X11, `request_inner_size` est asynchrone (le
                     // `Resized` qui suit reconfigure la surface, voir plus haut) : le décalage de
@@ -2527,19 +2752,19 @@ mod linux_main {
                     }
                     // Remise à zéro du Récap (2026-09-17) — voir `main.rs`.
                     if outcome.recap_reset_requested {
-                        post_redraw = PostRedraw::OpenRecapReset(
+                        post_redraw = PostRedraw::OpenResetConfirm(
                             this_game_window,
                             this_game_rect,
-                            RecapTarget::Session,
+                            ResetTarget::RecapSession,
                         );
                     }
                     // Le glyphe de replacement de la rangée d'actions (2026-09-17) — voir
                     // `main.rs`.
                     if outcome.recap_restore_requested {
-                        post_redraw = PostRedraw::OpenRecapReset(
+                        post_redraw = PostRedraw::OpenResetConfirm(
                             this_game_window,
                             this_game_rect,
-                            RecapTarget::Position,
+                            ResetTarget::RecapPosition,
                         );
                     }
                     // Le cadenas : bascule immédiate et persistée, sans confirmation — rien ne
@@ -2547,14 +2772,25 @@ mod linux_main {
                     if outcome.recap_toggle_lock {
                         post_redraw = PostRedraw::ToggleRecapLock;
                     }
-                    if let OverlayKind::RecapReset(target) = overlay_kind {
-                        match outcome.recap_reset_choice {
+                    // Les deux mêmes commandes pour le panneau Combat (2026-09-17).
+                    if outcome.combat_restore_requested {
+                        post_redraw = PostRedraw::OpenResetConfirm(
+                            this_game_window,
+                            this_game_rect,
+                            ResetTarget::CombatPosition,
+                        );
+                    }
+                    if outcome.combat_toggle_lock {
+                        post_redraw = PostRedraw::ToggleCombatLock;
+                    }
+                    if let OverlayKind::ResetConfirm(target) = overlay_kind {
+                        match outcome.reset_choice {
                             overlay_ui::design::ConfirmChoice::Pending => {}
                             overlay_ui::design::ConfirmChoice::Yes => {
-                                post_redraw = PostRedraw::AnswerRecapReset(target, true)
+                                post_redraw = PostRedraw::AnswerResetConfirm(target, true)
                             }
                             overlay_ui::design::ConfirmChoice::No => {
-                                post_redraw = PostRedraw::AnswerRecapReset(target, false)
+                                post_redraw = PostRedraw::AnswerResetConfirm(target, false)
                             }
                         }
                     }
@@ -2598,7 +2834,7 @@ mod linux_main {
             }
 
             // Après la dernière ligne qui touche `overlay` — voir `main.rs`.
-            if persist_recap_position {
+            if persist_recap_position || persist_combat_position {
                 self.persist_config();
             }
 
@@ -2608,13 +2844,14 @@ mod linux_main {
                     self.open_options_modal(event_loop, Some((window, rect)), tab)
                 }
                 PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
-                PostRedraw::OpenRecapReset(window, rect, target) => {
-                    self.open_recap_reset_confirm(event_loop, window, rect, target)
+                PostRedraw::OpenResetConfirm(window, rect, target) => {
+                    self.open_reset_confirm(event_loop, window, rect, target)
                 }
-                PostRedraw::AnswerRecapReset(target, confirmed) => {
-                    self.answer_recap_reset(id, target, confirmed)
+                PostRedraw::AnswerResetConfirm(target, confirmed) => {
+                    self.answer_reset_confirm(id, target, confirmed)
                 }
                 PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
+                PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
                 PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),
@@ -2822,7 +3059,7 @@ mod linux_main {
                 required_features: wgpu::Features::empty(),
                 // Plancher `webgl2` (l'overlay ne demande rien de plus), mais avec les limites
                 // de RÉSOLUTION de l'adaptateur : la swapchain de la confirmation de remise à
-                // zéro couvre la fenêtre de jeu ENTIÈRE (`OverlayKind::RecapReset`), et
+                // zéro couvre la fenêtre de jeu ENTIÈRE (`OverlayKind::ResetConfirm`), et
                 // `downlevel_webgl2_defaults()` plafonne une texture 2D à 2048 px — un jeu en
                 // 2560×1392 faisait donc paniquer `Surface::configure` au clic sur le glyphe
                 // (2026-09-17). L'idiome est celui que wgpu documente sur `using_resolution`.
@@ -3049,6 +3286,8 @@ mod linux_main {
             log_path,
             combat_always_visible: saved_config.combat_always_visible,
             combat_on_right: saved_config.combat_on_right,
+            combat_position_y: saved_config.combat_position_y,
+            combat_locked: saved_config.combat_locked,
             turn_notification: saved_config.turn_notification,
             turn_notification_muted: saved_config.turn_notification_muted,
             features: saved_config.features(),

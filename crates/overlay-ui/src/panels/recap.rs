@@ -84,7 +84,7 @@
 //! cette ligne se range dans la largeur qui reste à gauche du glyphe — les autres lignes ne bougent
 //! pas. Un clic ne remet rien à zéro ici : il est REMONTÉ ([`RecapOutcome::reset_requested`]) et
 //! l'hôte ouvre une boîte de confirmation par-dessus toute la fenêtre de jeu
-//! (`OverlayKind::RecapReset`) — décision utilisateur du 2026-09-17 : « impose une confirmBox
+//! (`OverlayKind::ResetConfirm`) — décision utilisateur du 2026-09-17 : « impose une confirmBox
 //! centrée au jeu avec un fond voilé sur toute la fenêtre du jeu et des overlays ».
 //!
 //! ## Glisser la bande où l'on veut (2026-09-17)
@@ -116,7 +116,7 @@
 //!
 //! À côté du cadenas, et **seulement une fois la bande déplacée**, un glyphe `Undo` la renvoie à
 //! son ancrage d'origine — après confirmation, comme la remise à zéro des compteurs et par la
-//! même fenêtre (`OverlayKind::RecapReset`, dont la cible dit lequel des deux on remet à zéro).
+//! même fenêtre (`OverlayKind::ResetConfirm`, dont la cible dit lequel des deux on remet à zéro).
 //! Les deux vivent sur une pastille posée hors du fond, en haut à gauche de la bande, qui bascule
 //! en bas quand il n'y a pas la place au-dessus — voir [`paint_actions_row`].
 //!
@@ -202,31 +202,11 @@ impl Default for RecapChrome {
 
 /// Le glisser-déposer de la bande, tel que l'hôte le reçoit (2026-09-17, voir la doc de module).
 ///
-/// **Une seule position circule ici : le point de saisie** ([`Self::Started`]), pris une fois
-/// pour toutes au début du geste. Le suivi, lui, ne passe pas par ce module : l'hôte lit le
-/// curseur à l'ÉCHELLE DE L'ÉCRAN et pose la fenêtre à `curseur − point de saisie` (voir
-/// `recap_placement::drag_offset`).
-///
-/// **[`Self::Moved`] ne porte donc aucune position**, et ce n'est pas un oubli. La version du
-/// matin remontait ici la position du curseur DANS la fenêtre, à charge pour l'hôte d'en déduire
-/// le déplacement : c'est une boucle, puisque bouger la fenêtre change cette position sans que la
-/// souris bouge — la bande en vibrait au point d'être impossible à poser (retour d'écran du jour,
-/// vidéo à l'appui, diagnostic complet dans `recap_placement::drag_offset`). Le type interdit
-/// désormais de la refaire : la coordonnée qui rebouclait n'existe plus.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub enum RecapDrag {
-    /// Rien cette frame — le cas de l'immense majorité d'entre elles.
-    #[default]
-    None,
-    /// Le bouton vient d'être enfoncé sur le fond : la position de saisie DANS la fenêtre, en
-    /// points logiques, celle que l'hôte garde jusqu'au relâchement.
-    Started(egui::Pos2),
-    /// Le glissement se poursuit — le signal suffit, l'hôte sait où est le curseur.
-    Moved,
-    /// Bouton relâché — l'hôte aimante la bande à son ancrage d'origine si elle en est proche,
-    /// et persiste la position. C'est la seule étape qui écrit sur le disque.
-    Released,
-}
+/// **Un alias**, et non un type à elle : le panneau Combat se déplace de la même façon depuis le
+/// soir du même jour, et les deux gestes sont le MÊME — voir `panels::drag`, qui porte le type, sa
+/// doc et la vibration qui l'a façonné. Les hôtes continuent d'écrire `RecapDrag::Started` : c'est
+/// bien de la bande qu'ils parlent à cet endroit-là.
+pub type RecapDrag = crate::panels::drag::PanelDrag;
 
 /// Côté du glyphe de remise à zéro — plus discret que les cinq glyphes de case (16 px) : c'est
 /// une commande, pas une information.
@@ -666,29 +646,13 @@ fn band_drag(ui: &mut egui::Ui, band: egui::Rect, locked: bool) -> RecapDrag {
     if locked {
         return RecapDrag::None;
     }
+    // `interact_pointer_pos` côté `panels::drag` (et non `pointer_latest_pos`) : la position que le
+    // pointeur a POUR CE widget, celle qui reste définie tant que le bouton n'est pas relâché même
+    // si le curseur sort du bloc — ce qui arrive à chaque frame où la fenêtre n'a pas encore
+    // rattrapé la souris. Elle n'est lue qu'au PREMIER appui, pour le point de saisie : la suite du
+    // geste se règle sur le curseur d'écran, hors de ce repère (voir [`RecapDrag`]).
     let response = ui.interact(band, ui.id().with("recap-fond"), egui::Sense::drag());
-    if response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-    } else if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-    }
-    // `interact_pointer_pos` (et non `pointer_latest_pos`) : la position que le pointeur a POUR
-    // CE widget, celle qui reste définie tant que le bouton n'est pas relâché même si le curseur
-    // sort du bloc — ce qui arrive à chaque frame où la fenêtre n'a pas encore rattrapé la
-    // souris. Elle n'est lue qu'au PREMIER appui, pour le point de saisie : la suite du geste se
-    // règle sur le curseur d'écran, hors de ce repère (voir [`RecapDrag`]).
-    if response.drag_started() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            return RecapDrag::Started(pos);
-        }
-    }
-    if response.drag_stopped() {
-        return RecapDrag::Released;
-    }
-    if response.dragged() {
-        return RecapDrag::Moved;
-    }
-    RecapDrag::None
+    crate::panels::drag::from_response(ui, &response)
 }
 
 /// Ce que la rangée d'actions vient de récolter — deux boutons, deux intentions, remontées

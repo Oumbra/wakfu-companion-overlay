@@ -705,7 +705,15 @@ pub fn show(
     // sorts » ET les deux marques qu'il pose sur les médaillons : sans bloc à lire, un liseré et
     // un point sur un portrait ne désigneraient plus rien.
     spells_enabled: bool,
-) {
+    // Ce que l'hôte sait de la fenêtre et que le panneau ne peut pas savoir : verrou et hauteur
+    // personnalisée de son déplacement vertical (2026-09-17) — voir [`CombatChrome`].
+    chrome: CombatChrome,
+) -> CombatOutcome {
+    // **La poignée de déplacement déclarée en TOUT PREMIER** (2026-09-17) : dans une même couche,
+    // egui donne le pointeur au DERNIER widget déclaré — la lisière du bord est donc la plus basse
+    // de la pile, et le cadre des portraits, dont l'ornement la chevauche, garde ses clics. Elle
+    // se PEINT en revanche à la fin, par-dessus tout (voir [`side_handle`]).
+    let handle = side_handle(ui, chrome.locked);
     // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`) — c'est
     // l'ordre des PORTRAITS, cadre et liste plate confondus. Calculé ICI, avant toute mise en page
     // (plutôt que dans un `match fight` qui pourrait s'arrêter avant), pour que la ligne leader
@@ -917,6 +925,301 @@ pub fn show(
             }
         });
     });
+
+    // La lisière ne s'encre qu'ici, quand tout le panneau est peint : sous le cadre des portraits
+    // elle serait invisible là où elle compte (voir [`paint_side_handle`]).
+    paint_side_handle(ui, &handle);
+    // La rangée d'actions en dernier : elle est posée dans la réserve d'infobulle, au-dessus de
+    // tout le reste, et doit prendre le pointeur à qui passerait dessous.
+    let actions = paint_actions_row(ui, chrome);
+    CombatOutcome {
+        toggle_lock: actions.toggle_lock,
+        restore_requested: actions.restore_requested,
+        drag: handle.drag,
+    }
+}
+
+/// **Ce que l'hôte sait de la fenêtre Combat et que le panneau ne peut pas savoir** (2026-09-17) :
+/// verrouillée ou non, et déjà déplacée ou non.
+///
+/// Les deux viennent de l'extérieur pour la même raison que `panels::recap::RecapChrome` : ce
+/// module ne garde aucun état et ne connaît pas sa position à l'écran. Le verrou vit dans la
+/// config (`config::OverlayConfig::combat_locked`), la hauteur aussi
+/// (`config::OverlayConfig::combat_position_y`).
+///
+/// Pas d'équivalent du `actions_below` de la bande Récap : la rangée d'actions du panneau Combat
+/// vit DANS sa fenêtre, dans la réserve d'infobulle du haut, et le bornage garde cette fenêtre
+/// entière dans le cadre du jeu (voir `combat_placement`) — elle ne peut donc jamais manquer de
+/// place.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CombatChrome {
+    /// **Panneau verrouillé** : sa poignée latérale n'existe plus — rien à saisir, et le curseur
+    /// reste celui du système au-dessus d'elle (voir [`side_handle`]). Le cadenas de la rangée
+    /// affiche alors [`design::DsIcon::Lock`] ; déverrouillé, `LockOpen` — jamais les deux, c'est
+    /// un seul bouton qui bascule.
+    ///
+    /// **Le défaut est `false`, déverrouillé** — demande explicite de l'utilisateur, et l'inverse
+    /// de la bande Récap : ici la poignée est une lisière dédiée de quelques pixels, pas tout le
+    /// fond du panneau. Voir `config::OverlayConfig::combat_locked`.
+    pub locked: bool,
+    /// **Le panneau a une hauteur à lui** (`config::OverlayConfig::combat_position_y` renseignée) :
+    /// c'est la seule condition d'affichage du glyphe de replacement — remettre au centre un
+    /// panneau qui y est déjà n'aurait rien à faire.
+    pub moved: bool,
+}
+
+/// Ce que [`show`] rend à l'hôte, au-delà de l'affichage : deux intentions et un geste, jamais une
+/// action — ce module ne déplace ni ne persiste rien lui-même (voir `panels::drag`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CombatOutcome {
+    /// Le cadenas vient d'être cliqué : à l'hôte d'inverser [`CombatChrome::locked`] et de
+    /// l'écrire dans la config.
+    pub toggle_lock: bool,
+    /// Le glyphe de replacement vient d'être cliqué : à l'hôte d'ouvrir la confirmation qui, sur
+    /// un « Oui », rend son centrage vertical au panneau.
+    pub restore_requested: bool,
+    /// Le geste de déplacement vertical du panneau, s'il y en a un cette frame.
+    pub drag: crate::panels::drag::PanelDrag,
+}
+
+/// **Largeur de la poignée latérale** — la lisière du bord EXTÉRIEUR du panneau par laquelle il se
+/// déplace de haut en bas (« il faudra qu'il déplace l'overlay en slidant sur la bordure
+/// latérale », demande utilisateur du 2026-09-17).
+///
+/// 8 px : assez large pour s'attraper sans viser, assez fine pour ne mordre que sur l'ornement du
+/// cadre des portraits — et pas sur les médaillons eux-mêmes, qui sont cliquables (bloc de sorts).
+/// Le cadre étant déclaré APRÈS la poignée, il lui reprend de toute façon le pointeur là où les
+/// deux se recouvrent (voir [`side_handle`]).
+pub const HANDLE_WIDTH: f32 = 8.0;
+
+/// Arrondi de la poignée et de la pastille d'actions — celui des bandeaux posés sur le jeu
+/// (`LEADER_PANEL_ROUNDING`, `panels::recap::BACKDROP_ROUNDING`) : visiblement la même matière.
+const HANDLE_ROUNDING: f32 = LEADER_PANEL_ROUNDING;
+
+/// Hauteur du motif de préhension peint au milieu de la poignée — trois traits, le vocabulaire
+/// universel du « ça se prend ». Il ne couvre pas toute la lisière : une barre pleine de 480 px
+/// sur le bord de l'écran de jeu serait un meuble, pas un indice.
+const HANDLE_GRIP_HEIGHT: f32 = 18.0;
+
+/// Côté d'un glyphe de la rangée d'actions — `panels::recap::ACTIONS_ICON_SIZE` à l'identique :
+/// mêmes commandes, même discrétion, sur deux overlays qui se déplacent de la même façon.
+const ACTIONS_ICON_SIZE: f32 = 14.0;
+
+/// Rembourrage de la pastille d'actions autour de ses glyphes, et écart entre les deux glyphes —
+/// voir `panels::recap::paint_actions_row`, dont cette rangée est la jumelle.
+const ACTIONS_PADDING: f32 = 4.0;
+const ACTIONS_GAP: f32 = 6.0;
+
+/// Ce que la poignée latérale a récolté cette frame : le geste à remonter à l'hôte, et de quoi la
+/// peindre plus tard (voir [`paint_side_handle`]).
+struct Handle {
+    drag: crate::panels::drag::PanelDrag,
+    /// La lisière, et `true` si elle est survolée ou tenue — `None` quand le panneau est
+    /// verrouillé : il n'y a alors rien à peindre du tout.
+    ink: Option<(egui::Rect, bool)>,
+}
+
+/// **La poignée latérale du panneau** (2026-09-17, demande utilisateur) : une lisière de
+/// [`HANDLE_WIDTH`] px sur le bord EXTÉRIEUR, sur toute la hauteur du panneau, par laquelle il se
+/// déplace de haut en bas — et rien d'autre : jamais de gauche à droite, le côté se choisit aux
+/// Options (`config::OverlayConfig::combat_on_right`).
+///
+/// **Bord extérieur, quel que soit le côté affiché** : la poignée est déclarée à GAUCHE dans le
+/// repère de mise en page, et le miroir la porte à droite quand le panneau y est posé (voir
+/// `crate::mirror`, qui réfléchit le décor). Elle tombe donc contre le bord de la fenêtre de jeu,
+/// là où il n'y a rien d'autre à cliquer et où la souris se pose sans viser — on la pousse contre
+/// le bord de l'écran.
+///
+/// **Verrouillé, ce n'est plus un widget du tout** — pas de zone d'interaction, donc pas de
+/// curseur « attrapable », rien de peint et pas le moindre geste : exactement la règle de
+/// `panels::recap::band_drag`, et pour la même raison (promettre un déplacement qui n'arrive pas
+/// est pire que ne rien promettre).
+fn side_handle(ui: &mut egui::Ui, locked: bool) -> Handle {
+    if locked {
+        return Handle {
+            drag: crate::panels::drag::PanelDrag::None,
+            ink: None,
+        };
+    }
+    let panel = ui.max_rect();
+    let rect = egui::Rect::from_min_max(
+        panel.min,
+        egui::pos2(panel.min.x + HANDLE_WIDTH, panel.max.y),
+    );
+    let response = ui.interact(rect, ui.id().with("combat-poignee"), egui::Sense::drag());
+    let held = response.dragged() || response.hovered();
+    Handle {
+        drag: crate::panels::drag::from_response(ui, &response),
+        ink: Some((rect, held)),
+    }
+}
+
+/// **La lisière ne se voit qu'au survol** — et c'est un choix, pas une économie.
+///
+/// Un rail peint en permanence sur le bord d'un panneau volontairement transparent serait un
+/// meuble : le fond translucide de l'overlay (`tokens::OVERLAY_BACKDROP`) disparaît de toute façon
+/// sur un décor sombre, et là où il se verrait, il mordrait sur l'ornement du cadre des portraits.
+/// Ce qui annonce la fonctionnalité, c'est le CADENAS — toujours là, à deux pixels de la lisière,
+/// avec son infobulle — plus le curseur `Grab` dès qu'on approche, et la ligne d'aide des Options.
+/// C'est exactement ce que fait la bande Récap, dont le fond entier se saisit sans rien peindre.
+///
+/// **Peinte ici, à la fin du panneau**, alors que la poignée est DÉCLARÉE en tête de [`show`] :
+/// l'ordre de déclaration décide qui reçoit le pointeur (le dernier gagne, donc les portraits
+/// gardent leurs clics), l'ordre de peinture décide qui recouvre qui. Peinte en tête, la lisière
+/// passait sous le cadre des portraits — invisible précisément là où la main va.
+fn paint_side_handle(ui: &mut egui::Ui, handle: &Handle) {
+    let Some((rect, held)) = handle.ink else {
+        return;
+    };
+    if !held {
+        return;
+    }
+    let painter = ui.painter();
+    painter.rect_filled(rect, HANDLE_ROUNDING, design::tokens::OVERLAY_BACKDROP);
+    // Le voile blanc du survol de tout ce panneau, posé PAR-DESSUS le fond plutôt qu'à sa place :
+    // c'est le même empilement que les boutons du jeu, et il garde la lisière lisible sur un
+    // décor clair comme sur un décor sombre.
+    painter.rect_filled(rect, HANDLE_ROUNDING, design::tokens::OVERLAY_TINT_STRONG);
+    let grip =
+        egui::Rect::from_center_size(rect.center(), egui::vec2(HANDLE_WIDTH, HANDLE_GRIP_HEIGHT));
+    for i in 0..3 {
+        let y = grip.min.y + (grip.height() - 1.0) * i as f32 / 2.0;
+        painter.hline(
+            grip.min.x + 2.0..=grip.max.x - 2.0,
+            y,
+            egui::Stroke::new(1.0, design::tokens::ICON_TINT_HOVER),
+        );
+    }
+}
+
+/// Ce que la rangée d'actions vient de récolter — deux boutons, deux intentions, remontées telles
+/// quelles par [`CombatOutcome`].
+#[derive(Debug, Clone, Copy, Default)]
+struct ActionsOutcome {
+    toggle_lock: bool,
+    restore_requested: bool,
+}
+
+/// **La rangée d'actions du panneau Combat** (2026-09-17, demande utilisateur : « le même système
+/// que l'overlay récap ») : le cadenas, et le glyphe de replacement quand il a lieu d'être —
+/// posés sur une pastille à eux, en haut du bord extérieur, DANS la réserve d'infobulle de la
+/// fenêtre (`render_content::COMBAT_TOP_MARGIN`).
+///
+/// ## Un seul cadenas, deux visages
+///
+/// Comme pour la bande Récap : ce n'est pas un couple de boutons mais un seul, qui porte l'état du
+/// panneau. [`design::DsIcon::Lock`] verrouillé (« clique pour libérer »), `LockOpen` sinon
+/// (« clique pour figer ») — les deux glyphes sont faits l'un pour l'autre, même corps au pixel
+/// près, seule l'anse change.
+///
+/// ## Le glyphe de replacement n'apparaît qu'une fois le panneau déplacé
+///
+/// [`CombatChrome::moved`], et rien d'autre : tant que le panneau est à son centrage d'origine, il
+/// n'y a rien à défaire. La pastille se resserre sur le seul cadenas dans ce cas.
+///
+/// ## Dans la réserve, et pas dans le panneau
+///
+/// Cette réserve existait déjà, pour que l'infobulle du switch Alliés/Ennemis s'ouvre au-dessus de
+/// lui (voir `render_content::COMBAT_TOP_MARGIN`) : la pastille y tient sans rien décaler, et sans
+/// que la fenêtre OS change de taille. Les infobulles de ses deux glyphes s'ouvrent donc EN
+/// DESSOUS — au-dessus, elles sortiraient de la fenêtre.
+///
+/// Le bloc est déclaré `mirror::upright_in` sur sa pastille : sa PLACE part à droite avec le
+/// panneau, son contenu reste à l'endroit — un glyphe `Undo` réfléchi dirait « rétablir », soit
+/// l'inverse de ce qu'il fait.
+fn paint_actions_row(ui: &mut egui::Ui, chrome: CombatChrome) -> ActionsOutcome {
+    let ds = design::DesignSystem::get(ui.ctx());
+    let glyphs = 1 + usize::from(chrome.moved);
+    let size = egui::vec2(
+        2.0 * ACTIONS_PADDING
+            + glyphs as f32 * ACTIONS_ICON_SIZE
+            + (glyphs - 1) as f32 * ACTIONS_GAP,
+        ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING,
+    );
+    let panel = ui.max_rect();
+    // La pastille est peinte HORS de l'espace alloué au contenu, dans la marge que la fenêtre
+    // garde au-dessus de lui : d'où le clip élargi à la fenêtre entière, sans quoi egui la
+    // rognerait au bord du panneau.
+    let pill = egui::Rect::from_min_size(
+        egui::pos2(
+            panel.min.x,
+            panel.min.y - crate::render_content::COMBAT_TOP_MARGIN,
+        ),
+        size,
+    );
+    let mut outcome = ActionsOutcome::default();
+    crate::mirror::upright_in(ui, pill, |ui| {
+        let painter = ui
+            .painter()
+            .clone()
+            .with_clip_rect(ui.ctx().viewport_rect());
+        painter.rect_filled(pill, HANDLE_ROUNDING, design::tokens::OVERLAY_BACKDROP);
+        let slot = |index: usize| {
+            egui::Rect::from_min_size(
+                egui::pos2(
+                    pill.min.x + ACTIONS_PADDING + index as f32 * (ACTIONS_ICON_SIZE + ACTIONS_GAP),
+                    pill.min.y + ACTIONS_PADDING,
+                ),
+                egui::Vec2::splat(ACTIONS_ICON_SIZE),
+            )
+        };
+        let (icon, tooltip) = if chrome.locked {
+            (design::DsIcon::Lock, "Déverrouiller la hauteur du panneau")
+        } else {
+            (
+                design::DsIcon::LockOpen,
+                "Verrouiller la hauteur du panneau",
+            )
+        };
+        outcome.toggle_lock =
+            paint_action(ui, &ds, &painter, slot(0), "combat-verrou", icon, tooltip);
+        // Court-circuit volontaire : panneau jamais déplacé, glyphe jamais peint — la pastille
+        // s'est déjà dimensionnée dessus.
+        outcome.restore_requested = chrome.moved
+            && paint_action(
+                ui,
+                &ds,
+                &painter,
+                slot(1),
+                "combat-replacer",
+                design::DsIcon::Undo,
+                "Replacer le panneau à sa hauteur d'origine",
+            );
+    });
+    outcome
+}
+
+/// Un glyphe-commande de la rangée d'actions : blanc au repos, or au survol, curseur « main »,
+/// infobulle en dessous. Rend `true` la frame où il est cliqué.
+///
+/// **`click_and_drag`**, comme les glyphes de la bande Récap et pour la même raison : un bouton qui
+/// ne sentirait que le clic laisserait le glissement à ce qui est dessous, et un appui sur le
+/// cadenas ferait partir le panneau.
+#[allow(clippy::too_many_arguments)]
+fn paint_action(
+    ui: &mut egui::Ui,
+    ds: &design::DesignSystem,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    id: &'static str,
+    icon: design::DsIcon,
+    tooltip: &'static str,
+) -> bool {
+    let response = ui.interact(rect, ui.id().with(id), egui::Sense::click_and_drag());
+    let tint = if response.hovered() {
+        design::tokens::ICON_TINT_HOVER
+    } else {
+        TEXT_COLOR
+    };
+    // Le glyphe inscrit dans son carré, proportions natives gardées (`design::contain_rect`) :
+    // les icônes du jeu ne sont pas toutes carrées, et un cadenas étiré se voit.
+    let icon_rect = design::contain_rect(rect, ds.icon_native_size(icon));
+    ds.paint_icon(painter, icon_rect, icon, tint);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response)
+        .side(design::TooltipSide::Below)
+        .text(tooltip);
+    response.clicked()
 }
 
 /// Bandeau du switch Alliés/Ennemis, en tête de la colonne des PORTRAITS (échange de place avec le
