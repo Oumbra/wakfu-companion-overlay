@@ -406,13 +406,21 @@ pub enum SuiviTabAction {
 /// fonctions de clé côte à côte, c'est une sélection qui survit à un aller-retour dans l'un et se
 /// perd dans l'autre.
 pub(crate) fn entry_key(entry: &WatchlistEntry) -> String {
+    key_of(&entry.name, entry.catalog_id)
+}
+
+/// La même clé, **construite depuis un nom et un id** plutôt que depuis une entrée entière.
+///
+/// Écrite pour les complétions (2026-09-17) : le thread Engine annonce qu'un suivi vient
+/// d'aboutir à partir d'une `WatchlistAlert`, qui porte bien le nom et l'id du catalogue mais
+/// n'est pas une `WatchlistEntry`. Recopier le `format!` là-bas aurait rendu la clé de l'alerte
+/// silencieusement divergente de celle de la tuile le jour où l'une des deux change — exactement
+/// le défaut que la doc d'[`entry_key`] met en garde de commettre entre deux écrans.
+pub fn key_of(name: &str, catalog_id: Option<i64>) -> String {
     format!(
         "{}::{}",
-        entry.name,
-        entry
-            .catalog_id
-            .map(|id| id.to_string())
-            .unwrap_or_default()
+        name,
+        catalog_id.map(|id| id.to_string()).unwrap_or_default()
     )
 }
 

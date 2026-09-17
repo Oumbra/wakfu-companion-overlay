@@ -359,6 +359,11 @@ pub struct RenderContent<'a> {
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
     /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
     pub watchlist_selection: &'a mut panels::watchlist::WatchlistSelection,
+    /// Les célébrations de complétion en cours (2026-09-17) — l'état vit chez l'hôte pour la même
+    /// raison que la sélection, en plus fort : c'est lui qui les fait avancer sur son tick, et le
+    /// retrait qu'elles déclenchent ne doit pas dépendre du rendu (voir
+    /// `panels::watchlist::WatchlistCompletions`).
+    pub watchlist_completions: &'a panels::watchlist::WatchlistCompletions,
     pub watchlist_toast: Option<&'a WatchlistToast>,
     pub catalog: &'a CatalogIndex,
     pub catalog_stale: bool,
@@ -593,6 +598,7 @@ pub fn build_ui(
                 spells_enabled: content.spells_enabled,
                 combat_on_right: content.combat_on_right,
                 watchlist_selection: &mut *content.watchlist_selection,
+                watchlist_completions: content.watchlist_completions,
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
                 catalog_stale: content.catalog_stale,
@@ -641,6 +647,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         combat_on_right,
         combat_chrome,
         watchlist_selection,
+        watchlist_completions,
         watchlist_toast,
         catalog,
         catalog_stale,
@@ -814,7 +821,10 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         },
                         watchlist,
                         watchlist_enabled,
-                        watchlist_selection,
+                        panels::watchlist::WatchlistPanelState {
+                            selection: watchlist_selection,
+                            completions: watchlist_completions,
+                        },
                         watchlist_toast,
                         now,
                     );

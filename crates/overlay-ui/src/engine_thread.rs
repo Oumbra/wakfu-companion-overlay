@@ -350,10 +350,34 @@ pub type SharedRoster = Arc<ArcSwap<Option<overlay_engine::RosterIndex>>>;
 /// `overlay_engine::roster`, doc de module).
 pub type SharedRosterDraft = Arc<ArcSwap<Option<overlay_engine::Roster>>>;
 
+/// **Un suivi vient d'aboutir** — annoncé par le thread Engine à l'hôte, qui décide ce qu'il en
+/// fait (2026-09-17).
+///
+/// Un canal plutôt qu'un `ArcSwap` comme le toast, et la différence est essentielle : un toast
+/// peut être écrasé par le suivant sans dommage — on n'en montre qu'un à la fois — là où une
+/// complétion **perdue serait une entrée jamais retirée**, donc une liste qui diverge du compte.
+///
+/// **Envoyé même Suivi coupé**, contrairement au toast et au son : décision utilisateur du
+/// 2026-09-17, « le retrait est une conséquence du seuil, pas de l'animation ». Le moteur compte
+/// de toute façon quand la fonctionnalité est éteinte (voir `EngineCommand::SetFeatures`) ; ce qui
+/// s'éteint est l'affichage, pas le comptage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchlistCompleted {
+    /// La clé de l'entrée, telle que la bande et l'onglet « Suivi » la désignent
+    /// (`panels::suivi_tab::key_of`).
+    pub key: String,
+    /// Le nom, pour le journal — l'hôte ne peint rien avec.
+    pub name: String,
+}
+
 pub struct EngineHandles {
     pub snapshot: Arc<ArcSwap<SessionSnapshot>>,
     pub watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
     pub watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
+    /// Par où les complétions remontent à l'hôte — voir [`WatchlistCompleted`]. Le `Receiver`
+    /// correspondant est sondé à chaque tick de la boucle d'événements, pas au rendu : une fenêtre
+    /// masquée doit retirer ses entrées comme une fenêtre visible.
+    pub completions: mpsc::Sender<WatchlistCompleted>,
     pub catalog: Arc<ArcSwap<CatalogIndex>>,
     /// Référentiel des donjons (L5, §7.1 du plan) — voir le thread Catalogue. Contrairement au
     /// catalogue, aucun panneau ne le consomme directement : seul l'Engine s'en sert, pour la
@@ -389,6 +413,7 @@ pub fn spawn_engine_thread(
         snapshot,
         watchlist,
         watchlist_toast,
+        completions,
         alert_profile: alert_profile_out,
         catalog,
         dungeons,
@@ -753,6 +778,17 @@ pub fn spawn_engine_thread(
                         // `EngineCommand::SetFeatures` — l'interrupteur met en sourdine, il ne met
                         // pas en file d'attente.
                         for alert in engine.drain_watchlist_alerts() {
+                            // **La complétion part AVANT le garde de fonctionnalité**, et c'est la
+                            // seule chose de cette boucle qui le fasse : décision utilisateur du
+                            // 2026-09-17, le retrait est une conséquence du SEUIL, pas de
+                            // l'animation ni de l'affichage. Suivi coupé, personne ne verra ni la
+                            // carte ni la célébration — l'entrée aboutie n'en a pas moins fini son
+                            // travail, et l'hôte doit pouvoir la retirer. Voir
+                            // `WatchlistCompleted`.
+                            let _ = completions.send(WatchlistCompleted {
+                                key: panels::suivi_tab::key_of(&alert.name, alert.catalog_id),
+                                name: alert.name.clone(),
+                            });
                             if !features.suivi {
                                 continue;
                             }

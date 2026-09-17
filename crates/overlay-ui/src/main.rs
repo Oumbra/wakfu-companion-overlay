@@ -79,7 +79,7 @@ use overlay_ui::combat_placement;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
-    SharedRosterDraft,
+    SharedRosterDraft, WatchlistCompleted,
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
 use overlay_ui::game_servers::GameServers;
@@ -136,6 +136,13 @@ use winit::platform::windows::WindowAttributesExtWindows;
 // `bin/wakfu-companion-overlay-x11.rs`). `App::hotkeys` porte le tout.
 
 /// Voir `App::sync_topmost`.
+/// Écart entre deux images pendant qu'une tuile du Suivi célèbre son aboutissement — 60 Hz.
+///
+/// La boucle de l'overlay est réactive et se réveille sinon toutes les 50 ms (voir
+/// `about_to_wait`) : une couronne qui tourne à 20 images par seconde saccade visiblement. Ce
+/// rythme n'est demandé que le temps de la célébration, jamais en continu.
+const COMPLETION_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
+
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
 /// `App::sync_topmost`. Assez court pour qu'un changement de fenêtre volontaire et soutenu
@@ -591,6 +598,12 @@ struct App {
     /// par la boucle d'événements sans savoir quelle fenêtre existe. Il n'y a de toute façon qu'un
     /// bandeau Suivi à la fois.
     watchlist_selection: panels::watchlist::WatchlistSelection,
+    /// **Les célébrations de complétion en cours** (2026-09-17) — alimentées par
+    /// `completions_rx`, avancées par `tick_watchlist_completions`, lues par le rendu du bandeau.
+    watchlist_completions: panels::watchlist::WatchlistCompletions,
+    /// Par où les complétions arrivent du thread Engine — voir
+    /// [`WatchlistCompleted`].
+    completions_rx: mpsc::Receiver<WatchlistCompleted>,
     /// Publié par le thread Engine à chaque décompte de suivi qui vient d'atteindre 0 (voir
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
@@ -616,6 +629,8 @@ struct App {
     countdown_toast: suivi_tab::CountdownToastSettings,
     /// Voir `App::completion` — lus de la config au démarrage.
     completion: suivi_tab::CompletionSettings,
+    /// Voir `App::completions_rx` — le canal créé par `main`, avant le thread Engine.
+    completions_rx: mpsc::Receiver<WatchlistCompleted>,
     /// **Ce que devient un suivi complété** EN VIGUEUR (retrait, animation) — même provenance et
     /// même politique que `countdown_toast`. Lu par `about_to_wait` à chaque complétion reçue du
     /// thread Engine : c'est lui qui décide s'il y a une célébration à jouer et un retrait à
@@ -895,6 +910,7 @@ impl App {
             chat_toast,
             countdown_toast,
             completion,
+            completions_rx,
             recap_session,
             recap_position,
             recap_locked,
@@ -929,6 +945,8 @@ impl App {
             snapshot,
             watchlist,
             watchlist_selection: panels::watchlist::WatchlistSelection::default(),
+            watchlist_completions: Default::default(),
+            completions_rx,
             watchlist_toast,
             alert_profile,
             chat_filters,
@@ -2840,6 +2858,92 @@ impl App {
         tracing::info!("[options] modale ouverte — raccourcis globaux suspendus.");
     }
 
+    /// **Les suivis qui viennent d'aboutir** — reçus du thread Engine, célébrés, puis retirés
+    /// (2026-09-17).
+    ///
+    /// Appelée à chaque tick de la boucle d'événements, **pas au rendu**, et c'est tout l'intérêt :
+    /// décision utilisateur, « le retrait est une conséquence du seuil, pas de l'animation ». Une
+    /// fenêtre Suivi masquée, un Suivi coupé, un joueur qui regardait ailleurs : l'entrée aboutie
+    /// part quand même, et part au compte.
+    ///
+    /// Le retrait emprunte le chemin de la suppression groupée du bandeau, sans rien y ajouter :
+    /// `SetWatchlistDefinitions` avec la liste amputée → `WatchlistState::apply_definitions` →
+    /// `drain_watchlist_sync` → `SyncCommand::SyncWatchlist` → `PATCH /api/v1/settings`. Le moteur
+    /// garde les compteurs des entrées restantes, et un échec réseau est retenté par le thread
+    /// Sync — le retrait ne se perd pas dans une coupure.
+    fn tick_watchlist_completions(&mut self) {
+        let now = std::time::Instant::now();
+        while let Ok(completed) = self.completions_rx.try_recv() {
+            tracing::info!(
+                name = %completed.name,
+                remove = self.completion.remove,
+                animate = self.completion.animate,
+                "[suivi] entrée complétée"
+            );
+            self.watchlist_completions.push(
+                completed.key,
+                now,
+                self.completion.removal_delay_seconds(),
+                self.completion.remove,
+            );
+        }
+
+        // **Redessiner le bandeau tant qu'une tuile célèbre.** La boucle est réactive (§6.1) :
+        // sans cette demande, l'animation n'avancerait qu'au tick de 50 ms et au gré des lots du
+        // moteur — soit des à-coups visibles sur une couronne qui tourne. Le rythme est rendu à la
+        // bande dès la dernière image : trois secondes et demie de 60 Hz, pas une de plus.
+        if self.watchlist_completions.is_animating(now) {
+            let prochaine = now + COMPLETION_FRAME;
+            for overlay in self.windows.values_mut() {
+                if matches!(overlay.kind, OverlayKind::Watchlist) {
+                    overlay.next_redraw_at = Some(match overlay.next_redraw_at {
+                        Some(deja) => deja.min(prochaine),
+                        None => prochaine,
+                    });
+                }
+            }
+        }
+
+        let a_retirer = self.watchlist_completions.drain_due(now);
+        if a_retirer.is_empty() {
+            return;
+        }
+        // **La liste de référence est celle du moteur**, relue à l'instant du retrait et non à
+        // celui du franchissement : entre les deux, le joueur a pu ajouter une entrée depuis la
+        // fenêtre Options ou le site. Repartir d'une copie prise 3,5 s plus tôt la ferait
+        // disparaître.
+        let definitions: Vec<WatchlistEntry> = self
+            .watchlist
+            .load()
+            .iter()
+            .filter(|entry| {
+                !a_retirer.contains(&panels::suivi_tab::key_of(&entry.name, entry.catalog_id))
+            })
+            .cloned()
+            .collect();
+        // Rien à écrire si aucune des clés ne correspond plus à une entrée vivante : elles ont pu
+        // être retirées entre-temps depuis la fenêtre Options ou le site. Réécrire la clé pour
+        // rien repousserait son horodatage, et le « dernier écrivain gagne » du serveur ferait
+        // perdre une modification faite ailleurs (même précaution que `commit_suivi`).
+        if definitions.len() == self.watchlist.load().len() {
+            return;
+        }
+        tracing::info!(
+            retirees = a_retirer.len(),
+            restantes = definitions.len(),
+            "[suivi] entrées complétées retirées, réplication au compte en route"
+        );
+        let _ = self
+            .settings_tx
+            .send(EngineCommand::SetWatchlistDefinitions {
+                definitions,
+                // Rien à oublier en plus : l'entrée complétée quitte la liste sans y revenir,
+                // exactement comme un retrait depuis le bandeau. Le jour où elle est recréée,
+                // c'est une entrée neuve, qui repart de la valeur de son mode.
+                retirees: Vec::new(),
+            });
+    }
+
     /// Lance l'explorateur de fichiers natif (`rfd`) sur un thread dédié — bloquant côté OS, ne
     /// doit JAMAIS geler la boucle winit (même raison que tous les threads réseau de ce dépôt,
     /// voir §7.3 du plan pour la justification appliquée à `overlay-sync`). Le résultat (chemin
@@ -3772,6 +3876,7 @@ impl App {
                 combat_on_right: self.combat_on_right,
                 combat_chrome,
                 watchlist_selection: &mut self.watchlist_selection,
+                watchlist_completions: &self.watchlist_completions,
                 watchlist_toast,
                 catalog: &catalog,
                 catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -4349,6 +4454,9 @@ impl ApplicationHandler<UserEvent> for App {
         if event_loop.exiting() {
             return;
         }
+        // **Les suivis qui viennent d'aboutir**, avant tout le reste du tick : leur retrait ne
+        // dépend ni d'une fenêtre visible ni d'un rendu (voir `tick_watchlist_completions`).
+        self.tick_watchlist_completions();
         // Hotkey global : thread OS dédié, sondé ici sans bloquer (voir S1). `while let` (pas un
         // simple `if`) : chaque appui PHYSIQUE produit deux événements (`Pressed` PUIS `Released`,
         // voir `HotKeyState`) — les deux peuvent être en file au même tick à ~20 Hz. Filtré sur
@@ -4775,12 +4883,16 @@ fn main() {
         install_if_available: saved_config.auto_update,
     });
     let remote_icons = RemoteIconStore::spawn(proxy.clone());
+    // **Le canal des complétions** (2026-09-17) — voir `engine_thread::WatchlistCompleted` sur
+    // pourquoi un canal et pas un `ArcSwap` : une complétion perdue est une entrée jamais retirée.
+    let (completions_tx, completions_rx) = mpsc::channel();
     spawn_engine_thread(
         log_path.clone(),
         EngineHandles {
             snapshot: Arc::clone(&snapshot),
             watchlist: Arc::clone(&watchlist),
             watchlist_toast: Arc::clone(&watchlist_toast),
+            completions: completions_tx,
             alert_profile: Arc::clone(&alert_profile),
             chat_filters: Arc::clone(&chat_filters),
             roster: Arc::clone(&roster),
@@ -4828,6 +4940,7 @@ fn main() {
         chat_toast: saved_config.chat_toast(),
         countdown_toast: saved_config.countdown_toast(),
         completion: saved_config.completion(),
+        completions_rx,
         // À côté des combats en cours (`fight-*.json`) — voir la doc de module de
         // `recap_session` pour ce qui y est écrit et quand.
         recap_session: RecapSession::load(

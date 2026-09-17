@@ -811,6 +811,114 @@ const BULK_BUTTON_MIN_WIDTH: f32 = 150.0;
 /// Gouttière entre la bande de tuiles et le bouton.
 const BULK_BUTTON_GAP: f32 = 8.0;
 
+/// **Une célébration en cours** — une entrée qui vient d'aboutir et que la bande fête avant de la
+/// laisser partir (2026-09-17, voir `design::item_slot::completion`).
+///
+/// Ce n'est pas la même chose que le toast : le toast dit CE QUI s'est passé, n'importe où à
+/// l'écran, et disparaît ; la célébration se joue SUR la tuile, et se termine par un retrait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Celebration {
+    /// Clé de l'entrée (`panels::suivi_tab::key_of`) — pas l'entrée elle-même : son compteur
+    /// vient justement de changer, et il changera encore si l'objet retombe.
+    key: String,
+    /// Instant du franchissement du seuil — l'origine de l'animation.
+    started_at: std::time::Instant,
+    /// La tuile joue-t-elle l'animation ? Faux quand la case « Activer l'animation de complétion »
+    /// est décochée — l'entrée est alors retirée sans rien montrer.
+    animate: bool,
+    /// Quand retirer l'entrée. `None` quand la case « Supprimer les éléments suivis lorsqu'ils
+    /// sont complétés » est décochée : la tuile célèbre (si elle le doit) et reste.
+    remove_at: Option<std::time::Instant>,
+}
+
+/// **Les célébrations en cours**, portées par l'hôte et prêtées à [`show`] — comme
+/// [`WatchlistSelection`], et pour une raison plus forte encore : le **retrait ne dépend pas du
+/// rendu**.
+///
+/// Décision utilisateur du 2026-09-17 : « le retrait est une conséquence du seuil, pas de
+/// l'animation ». Une célébration qui se joue pendant que la fenêtre Suivi est masquée, ou avec le
+/// Suivi coupé, doit quand même retirer l'entrée à son terme. C'est donc l'hôte qui fait avancer
+/// cette liste, sur son tick, et le panneau qui la consulte quand il peint — jamais l'inverse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchlistCompletions {
+    en_cours: Vec<Celebration>,
+}
+
+impl WatchlistCompletions {
+    /// Note qu'une entrée vient d'aboutir — `now` est l'instant du franchissement, `delay` le
+    /// temps à laisser à la célébration (voir
+    /// `panels::suivi_tab::CompletionSettings::removal_delay_seconds`), et `remove` si l'entrée
+    /// doit partir au bout.
+    ///
+    /// **Une même clé ne célèbre qu'une fois à la fois** : un objet ramassé deux fois dans le même
+    /// lot ne peut pas franchir deux fois son seuil (le moteur n'alerte que sur le franchissement),
+    /// mais une entrée remise à sa cible depuis le site pendant la célébration le pourrait — la
+    /// seconde remplace alors la première plutôt que de superposer deux animations sur une tuile.
+    pub fn push(&mut self, key: String, now: std::time::Instant, delay: f32, remove: bool) {
+        let celebration = Celebration {
+            started_at: now,
+            animate: delay > 0.0,
+            remove_at: remove.then(|| now + std::time::Duration::from_secs_f32(delay)),
+            key,
+        };
+        match self.en_cours.iter_mut().find(|c| c.key == celebration.key) {
+            Some(deja) => *deja = celebration,
+            None => self.en_cours.push(celebration),
+        }
+    }
+
+    /// Depuis combien de secondes cette entrée célèbre — `None` si elle ne célèbre pas, ou si son
+    /// animation est finie (ou n'a jamais été demandée).
+    ///
+    /// C'est ce que [`show`] passe à `design::item_slot().completion(…)`.
+    pub fn elapsed(&self, key: &str, now: std::time::Instant) -> Option<f32> {
+        let celebration = self.en_cours.iter().find(|c| c.key == key)?;
+        if !celebration.animate {
+            return None;
+        }
+        let elapsed = now
+            .saturating_duration_since(celebration.started_at)
+            .as_secs_f32();
+        (elapsed < design::tokens::ITEM_SLOT_COMPLETION_DURATION).then_some(elapsed)
+    }
+
+    /// Y a-t-il une animation en cours à cet instant ? L'hôte s'en sert pour ne redessiner à
+    /// 60 Hz **que** le temps d'une célébration — le reste du temps, la bande garde son rythme.
+    pub fn is_animating(&self, now: std::time::Instant) -> bool {
+        self.en_cours
+            .iter()
+            .any(|c| self.elapsed(&c.key, now).is_some())
+    }
+
+    /// Retire de la liste tout ce qui est arrivé à terme, et **rend les clés des entrées à
+    /// supprimer** — à l'hôte de construire la liste amputée et de l'envoyer au moteur.
+    ///
+    /// Une célébration sans retrait (`remove_at` à `None`) est simplement oubliée quand son
+    /// animation est finie : elle n'a plus rien à dire, et la garder ferait grossir la liste à
+    /// chaque objet suivi jusqu'à la fin de la session.
+    pub fn drain_due(&mut self, now: std::time::Instant) -> Vec<String> {
+        let mut a_retirer = Vec::new();
+        self.en_cours
+            .retain(|celebration| match celebration.remove_at {
+                Some(echeance) if echeance <= now => {
+                    a_retirer.push(celebration.key.clone());
+                    false
+                }
+                Some(_) => true,
+                // Sans retrait : on la garde le temps de l'animation, pas au-delà. Le calcul est
+                // refait ici plutôt qu'appelé sur `self` — `retain` tient déjà la liste.
+                None => {
+                    celebration.animate
+                        && now
+                            .saturating_duration_since(celebration.started_at)
+                            .as_secs_f32()
+                            < design::tokens::ITEM_SLOT_COMPLETION_DURATION
+                }
+            });
+        a_retirer
+    }
+}
+
 /// **La sélection multiple du bandeau** — ouverte par le « − » du carré de contrôle ou par
 /// `Ctrl+Shift+S`, refermée par le même geste.
 ///
@@ -911,6 +1019,22 @@ pub struct WatchlistAssets<'a> {
     pub shortcuts: &'a ShortcutBindings,
 }
 
+/// **Ce que l'hôte retient du bandeau entre deux frames** — prêté à [`show`], qui ne garde rien
+/// (§17.3 bis du plan).
+///
+/// Deux états qui n'ont pas la même raison de vivre chez l'hôte, et les deux sont bonnes :
+/// [`WatchlistSelection`] parce que son raccourci clavier est **global** et arrive par la boucle
+/// d'événements, jamais par le `Ui` ; [`WatchlistCompletions`] parce que le retrait qu'elle
+/// déclenche **ne doit pas dépendre du rendu** (voir sa doc).
+///
+/// Une structure plutôt que deux paramètres de plus, pour la même raison que [`WatchlistAssets`] :
+/// `show` touchait la limite d'arguments de clippy. Les regrouper n'est pas qu'une commodité —
+/// ils voyagent ensemble depuis l'hôte et se lisent ensemble au rendu d'une tuile.
+pub struct WatchlistPanelState<'a> {
+    pub selection: &'a mut WatchlistSelection,
+    pub completions: &'a WatchlistCompletions,
+}
+
 /// Renvoie `true` quand l'utilisateur vient de fermer le toast affiché (clic sur la carte ou sur
 /// sa croix, voir `toast_card`) — `main.rs::window_event` est seul à détenir un accès en écriture
 /// à l'`ArcSwap` du toast, donc seul à pouvoir agir sur ce signal.
@@ -936,10 +1060,14 @@ pub fn show(
     assets: WatchlistAssets<'_>,
     entries: &[WatchlistEntry],
     tracking_enabled: bool,
-    selection: &mut WatchlistSelection,
+    etat: WatchlistPanelState<'_>,
     toast: Option<&WatchlistToast>,
     now: std::time::Instant,
 ) -> WatchlistOutcome {
+    let WatchlistPanelState {
+        selection,
+        completions,
+    } = etat;
     let WatchlistAssets {
         icons,
         catalog,
@@ -978,6 +1106,9 @@ pub fn show(
     // Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
     // (voir `bulk_button_row`).
     let mut tiles_rect: Option<egui::Rect> = None;
+    // Les gerbes de confettis des tuiles qui célèbrent — peintes après la `ScrollArea` (voir plus
+    // bas) : `(centre de la tuile, secondes écoulées)`.
+    let mut gerbes: Vec<(egui::Pos2, f32)> = Vec::new();
     let mut bascule_mode = false;
 
     // **Les boutons ne défilent pas, les tuiles si.** Le carré de contrôle est peint DEHORS, dans
@@ -1017,6 +1148,7 @@ pub fn show(
                         ui.add_space(TILE_GAP);
                     }
                     let cle = crate::panels::suivi_tab::entry_key(entry);
+                    let celebration = completions.elapsed(&cle, now);
                     let tuile = entry_tile(
                         ui,
                         icons,
@@ -1027,12 +1159,20 @@ pub fn show(
                         TileState {
                             index: i,
                             selection: selection.is_open().then(|| selection.contains(&cle)),
+                            completion: celebration,
                         },
                     );
                     tiles_rect = Some(match tiles_rect {
                         Some(deja) => deja.union(tuile.response.rect),
                         None => tuile.response.rect,
                     });
+                    // **La gerbe se peint plus tard, hors de la zone défilante** : ses confettis
+                    // partent jusqu'à une tuile et demie autour du centre, et seraient tranchés
+                    // net par le clip de la bande. On ne retient ici que d'où elle part et depuis
+                    // quand.
+                    if let Some(elapsed) = celebration {
+                        gerbes.push((tuile.response.rect.center(), elapsed));
+                    }
                     // **Le clic coche, il ne supprime pas.** Hors sélection, le geste de la tuile
                     // est de se déplacer (voir `entry_tile`) ; elle ne gagne le clic que le temps
                     // du mode.
@@ -1096,6 +1236,12 @@ pub fn show(
             reason: WatchlistEditReason::Reorder,
             definitions,
         });
+    }
+
+    // **Les gerbes de confettis des tuiles qui célèbrent**, une fois la bande peinte et hors de sa
+    // zone défilante — voir `completion_burst`.
+    for (centre, elapsed) in gerbes {
+        completion_burst(ui, centre, elapsed);
     }
 
     ui.add_space(6.0);
@@ -2043,6 +2189,9 @@ struct TileState {
     index: usize,
     /// `None` hors du mode sélection, `Some(cochée)` dedans.
     selection: Option<bool>,
+    /// Depuis combien de secondes cette entrée célèbre son aboutissement — `None` si elle ne
+    /// célèbre pas (voir [`WatchlistCompletions::elapsed`]).
+    completion: Option<f32>,
 }
 
 fn entry_tile(
@@ -2054,7 +2203,11 @@ fn entry_tile(
     entry: &WatchlistEntry,
     etat: TileState,
 ) -> Tile {
-    let TileState { index, selection } = etat;
+    let TileState {
+        index,
+        selection,
+        completion,
+    } = etat;
     // Tout ce qui suit était peint à la main ici jusqu'au 2026-09-11 — fond, bordure de rareté,
     // icône, compteur, et surtout leur ORDRE. Il vit maintenant dans `design::item_slot`, qui
     // verrouille cet ordre par un test : la bordure sous l'icône pour un objet, le trait par-dessus
@@ -2087,6 +2240,11 @@ fn entry_tile(
         // « Suivi » (`suivi_tab::tracked_tile`) — les deux écrans cochent les mêmes entrées pour
         // la même action, ils ne peuvent pas se le dire avec deux couleurs.
         .selection_tone(design::SelectionTone::Danger)
+        // **La célébration d'un aboutissement** (2026-09-17) — la couronne, l'éclat et la
+        // dissolution appartiennent au composant, qui les pose sur son propre anneau. Le panneau
+        // ne lui donne que le temps écoulé ; la gerbe de confettis, qui déborde largement du
+        // carré, reste à sa charge (voir `completion_burst`).
+        .completion(completion)
         .log_name("suivi.tuile");
     if let Some(count) = slot_count(entry) {
         slot = slot.count(count);
@@ -2178,6 +2336,112 @@ pub(crate) fn slot_glyph(mode: WatchlistMode) -> Option<design::SlotGlyph> {
 /// différence à l'écran. Ce qui est *présentation* — l'ancrage de la
 /// fraction, la couleur du nombre courant, le cerne — a migré dans `design::item_slot` le
 /// 2026-09-11 ; ce qui reste ici est la lecture du mode, qui est du métier.
+/// **La gerbe de confettis d'un suivi qui vient d'aboutir** — 34 pièces qui partent du centre de
+/// la tuile et retombent (2026-09-17).
+///
+/// **Ici et pas dans `design::item_slot`** : un emplacement ne peint pas hors de lui-même, et
+/// cette gerbe porte jusqu'à une tuile et demie autour de son centre. Le composant, lui, garde ce
+/// qui tient dans son carré — la couronne, l'éclat, la dissolution.
+///
+/// **Peinte sur une couche de premier plan**, pas dans le flux : les tuiles vivent dans une
+/// `ScrollArea` dont le clip tranche tout ce qui dépasse, et une gerbe tranchée au ras de la bande
+/// ne ressemble à rien. La couche prend le clip de la FENÊTRE, qui est déjà agrandie le temps
+/// qu'un toast s'affiche (`main.rs::watchlist_target_height`) — et un toast s'affiche toujours en
+/// même temps qu'une célébration, les deux naissent de la même alerte.
+///
+/// **La dispersion est déterministe**, tirée d'un hachage de l'index de la pièce comme les
+/// particules du composant : une même seconde de célébration rend deux fois la même image, ce
+/// qu'un test de capture exige. C'est la différence avec `build_confetti`, qui sème son générateur
+/// sur l'horloge — le toast, lui, n'est jamais capturé à un instant précis de sa chute.
+fn completion_burst(ui: &egui::Ui, centre: egui::Pos2, elapsed: f32) {
+    let depart = design::tokens::ITEM_SLOT_COMPLETION_SEAL_END - BURST_LEAD;
+    if elapsed < depart {
+        return;
+    }
+    let t = elapsed - depart;
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        ui.id().with("suivi-gerbe"),
+    ));
+    for i in 0..BURST_PIECES {
+        let (angle_brut, vitesse_brute, retard) = burst_seed(i);
+        let vie = BURST_LIFE_MIN + (BURST_LIFE_MAX - BURST_LIFE_MIN) * vitesse_brute;
+        let age = t - retard * BURST_STAGGER;
+        if age <= 0.0 || age >= vie {
+            continue;
+        }
+        // Vers le haut, en éventail : une gerbe qui part aussi vers le bas se confondrait avec la
+        // dissolution de la tuile, qui monte au contraire.
+        let angle =
+            -std::f32::consts::FRAC_PI_2 + (angle_brut - 0.5) * BURST_SPREAD * std::f32::consts::PI;
+        let vitesse = BURST_SPEED_MIN + (BURST_SPEED_MAX - BURST_SPEED_MIN) * vitesse_brute;
+        let position = egui::pos2(
+            centre.x + angle.cos() * vitesse * age,
+            centre.y + angle.sin() * vitesse * age + 0.5 * BURST_GRAVITY * age * age,
+        );
+        let fondu = 1.0 - age / vie;
+        let couleur = CONFETTI_COLORS[i % CONFETTI_COLORS.len()].gamma_multiply(fondu);
+        // Le battement d'un rectangle qui tourne sur lui-même : la hauteur se pince au lieu d'une
+        // vraie rotation, qui coûterait une `Shape::Path` par pièce.
+        let battement = (age * BURST_SPIN + angle_brut * std::f32::consts::TAU)
+            .cos()
+            .abs();
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                position,
+                egui::vec2(
+                    BURST_PIECE_SIZE.x,
+                    BURST_PIECE_SIZE.y * (0.35 + 0.65 * battement),
+                ),
+            ),
+            0.0,
+            couleur,
+        );
+    }
+}
+
+/// Angle, vitesse et retard d'une pièce de la gerbe, tirés de son seul index — voir
+/// [`completion_burst`] sur le pourquoi du déterminisme.
+fn burst_seed(i: usize) -> (f32, f32, f32) {
+    let hash = |graine: u64| {
+        let mut x = graine.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        x ^= x >> 29;
+        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x ^= x >> 32;
+        (x >> 40) as f32 / (1u32 << 24) as f32
+    };
+    let i = i as u64 + 1;
+    (hash(i * 5), hash(i * 5 + 1), hash(i * 5 + 2))
+}
+
+/// Ce dont la gerbe DEVANCE la fin de la condensation — elle part avec l'éclat, pas après lui :
+/// c'est le même instant qui scelle la rareté et fait éclater la tuile.
+const BURST_LEAD: f32 = 0.20;
+/// Nombre de pièces — un peu plus que le toast (`CONFETTI_PIECE_COUNT`), qui les étale sur toute
+/// sa largeur là où celles-ci partent d'un point.
+const BURST_PIECES: usize = 34;
+/// Ouverture de l'éventail, en demi-tours : 0,9 π de part et d'autre de la verticale.
+const BURST_SPREAD: f32 = 0.9;
+/// Vitesses de départ, en px/s.
+const BURST_SPEED_MIN: f32 = 170.0;
+/// Voir [`BURST_SPEED_MIN`].
+const BURST_SPEED_MAX: f32 = 310.0;
+/// Chute, en px/s² — assez forte pour que la gerbe retombe dans la seconde plutôt que de sortir de
+/// la fenêtre par le haut.
+const BURST_GRAVITY: f32 = 620.0;
+/// Durées de vie d'une pièce, en secondes.
+const BURST_LIFE_MIN: f32 = 0.85;
+/// Voir [`BURST_LIFE_MIN`].
+const BURST_LIFE_MAX: f32 = 1.35;
+/// Étalement des départs, en secondes — une gerbe dont tout part à la même image se lit comme un
+/// seul objet qui explose, pas comme des confettis.
+const BURST_STAGGER: f32 = 0.14;
+/// Vitesse du battement d'une pièce, en radians par seconde.
+const BURST_SPIN: f32 = 9.0;
+/// Taille d'une pièce — celle du toast (`CONFETTI_PIECE_SIZE` y vaut 8 px de côté), en un peu plus
+/// étroit : une gerbe est plus dense qu'une chute, des pièces carrées s'y empâtent.
+const BURST_PIECE_SIZE: egui::Vec2 = egui::vec2(5.0, 9.0);
+
 fn slot_count(entry: &WatchlistEntry) -> Option<design::SlotCount> {
     Some(match entry.mode {
         WatchlistMode::Down | WatchlistMode::Goal => design::SlotCount::Fraction {
@@ -2227,5 +2491,94 @@ mod tests {
             Some(design::SlotGlyph::Goal)
         );
         assert_eq!(slot_glyph(WatchlistMode::Up), None);
+    }
+
+    /// Instant de référence des tests ci-dessous — `Instant` n'a pas de constructeur public à
+    /// partir d'une date, on part donc de maintenant et on avance.
+    fn t0() -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn apres(origine: std::time::Instant, secondes: f32) -> std::time::Instant {
+        origine + std::time::Duration::from_secs_f32(secondes)
+    }
+
+    #[test]
+    fn une_completion_celebre_puis_rend_sa_cle_a_retirer() {
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        completions.push("Larme::42".to_string(), t0, duree, true);
+
+        assert_eq!(completions.elapsed("Larme::42", t0), Some(0.0));
+        assert!(completions.is_animating(apres(t0, duree / 2.0)));
+        assert!(
+            completions.drain_due(apres(t0, duree / 2.0)).is_empty(),
+            "rien ne part avant la fin de la célébration",
+        );
+
+        let dues = completions.drain_due(apres(t0, duree + 0.01));
+        assert_eq!(dues, vec!["Larme::42".to_string()], "la clé part au terme");
+        assert!(
+            completions.drain_due(apres(t0, duree + 1.0)).is_empty(),
+            "et elle ne part qu'une fois — un second envoi réécrirait la clé du compte pour rien",
+        );
+    }
+
+    #[test]
+    fn sans_animation_le_retrait_est_immediat_et_aucune_tuile_ne_bouge() {
+        // Case « Activer l'animation de complétion » décochée : `removal_delay_seconds` rend 0.
+        // L'entrée doit partir au tick suivant, et la tuile ne doit rien jouer entre-temps.
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        completions.push("Bois::".to_string(), t0, 0.0, true);
+
+        assert_eq!(
+            completions.elapsed("Bois::", t0),
+            None,
+            "aucune célébration à peindre",
+        );
+        assert!(!completions.is_animating(t0));
+        assert_eq!(completions.drain_due(t0), vec!["Bois::".to_string()]);
+    }
+
+    #[test]
+    fn sans_retrait_la_tuile_celebre_et_reste() {
+        // Case « Supprimer les éléments suivis lorsqu'ils sont complétés » décochée : la
+        // célébration se joue, mais aucune clé ne part — et la liste ne grossit pas indéfiniment,
+        // la célébration finie est oubliée.
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        completions.push("Croc::7".to_string(), t0, duree, false);
+
+        assert!(completions.elapsed("Croc::7", apres(t0, 1.0)).is_some());
+        assert!(completions.drain_due(apres(t0, 1.0)).is_empty());
+
+        assert!(completions.drain_due(apres(t0, duree + 0.01)).is_empty());
+        assert!(
+            completions.en_cours.is_empty(),
+            "une célébration sans retrait doit être oubliée une fois jouée, sinon la liste \
+             grossit à chaque objet suivi jusqu'à la fin de la session",
+        );
+    }
+
+    #[test]
+    fn une_meme_entree_ne_celebre_pas_deux_fois_en_parallele() {
+        // Cas réel possible : l'entrée est remise à sa cible depuis le site pendant qu'elle
+        // célèbre, et franchit son seuil une seconde fois. La seconde remplace la première —
+        // deux animations superposées sur une tuile ne veulent rien dire.
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        completions.push("Larme::42".to_string(), t0, duree, true);
+        completions.push("Larme::42".to_string(), apres(t0, 1.0), duree, true);
+
+        assert_eq!(completions.en_cours.len(), 1);
+        assert_eq!(
+            completions.elapsed("Larme::42", apres(t0, 1.0)),
+            Some(0.0),
+            "l'animation repart de la seconde complétion",
+        );
     }
 }
