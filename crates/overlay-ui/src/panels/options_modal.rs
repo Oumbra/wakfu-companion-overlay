@@ -574,6 +574,14 @@ pub enum OptionsModalAction {
     /// à jour une vérification sans installation (`background::UpdateCommand::Check`). Immédiat,
     /// comme `Disconnect` — mais sans rien à confirmer, il ne change rien à la machine.
     CheckUpdate,
+    /// « Rafraîchir le panneau de combat » (section « Combat », 2026-09-17) : l'hôte demande au
+    /// thread Engine de relire `wakfu.log` depuis sa première ligne et de reconstruire la session
+    /// (`engine_thread::EngineCommand::ResyncLog`, voir sa doc pour la panne que ce geste répare).
+    ///
+    /// Immédiat et sans confirmation, comme `CheckUpdate` : le geste ne détruit rien que le fichier
+    /// de log ne puisse rendre, et c'est un bouton de dépannage — le faire passer par « Valider »
+    /// obligerait à fermer la fenêtre pour constater l'effet.
+    ResyncCombat,
     /// « Mettre à jour vers X », **confirmé** : l'hôte referme cette fenêtre et les overlays de
     /// jeu, repasse par l'écran de chargement et laisse le thread de mise à jour télécharger,
     /// mettre en place, puis installe et relance (`App::install_update_if_ready`). Immédiat et
@@ -1197,6 +1205,51 @@ pub fn show(
                 }
             },
             );
+
+            // **« Rafraîchir le panneau de combat »** (2026-09-17) — le déclencheur MANUEL de la
+            // resynchronisation du flux de log (`EngineCommand::ResyncLog`, voir sa doc pour la
+            // panne qu'il répare : un panneau figé en plein combat, boutons encore vivants).
+            //
+            // **En fin de section « Combat », pas dans « Mise à jour » ni en pied d'onglet** : ce
+            // n'est pas une action sur la machine, c'est le dépannage du panneau que les cases
+            // au-dessus règlent — on le cherche là où on cherche le panneau.
+            //
+            // Un rattrapage automatique existe (voir `IngestWatchdog`) et couvre le cas nominal ;
+            // ce bouton reste la réponse immédiate, sans attendre les huit secondes du chien de
+            // garde, et la seule qui existe sous Linux — `ShortcutAction::Refresh` n'y est pas
+            // gréé (`LINUX_SUPPORTED`).
+            //
+            // Toujours actif, même détail des combats décoché : la relecture reconstruit aussi le
+            // Suivi, le Récap et l'historique synchronisé, qui continuent de vivre sans panneau.
+            ui.add_space(SECTION_GAP);
+            ui.add(
+                design::info_text(
+                    "Si le panneau de combat cesse de se mettre à jour pendant un combat, relire le \
+                     journal du jeu le reconstruit à partir de ce qu'il contient. Les combats déjà \
+                     terminés de la session en cours sont alors oubliés.",
+                )
+                .width(inner_width)
+                .log_name("options-combat-rafraichir-info"),
+            );
+            ui.add_space(INFO_GAP);
+            let resync = design::button("Rafraîchir le panneau de combat")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .tooltip(
+                    "Relit le journal du jeu depuis le début et reconstruit le combat en cours.",
+                )
+                .log_name("options-combat-rafraichir");
+            let resync_size = resync.desired_size(ui);
+            let resync_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            if ui
+                .put(
+                    egui::Rect::from_center_size(resync_row.center(), resync_size),
+                    resync,
+                )
+                .clicked()
+            {
+                action = OptionsModalAction::ResyncCombat;
+            }
 
             // **Les trois sections de notifications** (2026-09-15) — le Suivi, les Alertes et le
             // Chat, dans l'ordre du menu d'onglets, juste après « Combat » qui porte déjà les
