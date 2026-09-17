@@ -52,10 +52,6 @@
 /// écrit.
 pub const ENTRY_NAME: &str = "WakfuCompanionOverlay";
 
-/// Ce que le gestionnaire de démarrage du bureau affiche (Linux) — le même libellé que le centre
-/// de notifications Windows (`turn_watch::notify`).
-const DISPLAY_NAME: &str = "Wakfu Companion Overlay";
-
 /// L'overlay est-il inscrit au démarrage de la session ? Lit l'état RÉEL du système, jamais un
 /// réglage mémorisé — voir la doc de module.
 pub fn is_enabled() -> bool {
@@ -201,6 +197,12 @@ mod imp {
 mod imp {
     use std::path::{Path, PathBuf};
 
+    /// Ce que le gestionnaire de démarrage du bureau affiche (`Name=` du `.desktop`) — le même
+    /// libellé que le centre de notifications Windows (`turn_watch::notify`). Vit ici et non à la
+    /// racine du module : Windows n'en a pas l'usage (la valeur sous `Run` n'a pas de libellé), et
+    /// la constante y serait du code mort.
+    const DISPLAY_NAME: &str = "Wakfu Companion Overlay";
+
     /// Le dossier des entrées de démarrage de session, selon la spécification XDG
     /// « Desktop Application Autostart » : `$XDG_CONFIG_HOME/autostart`, `~/.config/autostart`
     /// à défaut. `directories::BaseDirs` applique déjà cette règle, et c'est la dépendance qui
@@ -264,7 +266,7 @@ mod imp {
              Exec=\"{exe}\"\n\
              Terminal=false\n\
              X-GNOME-Autostart-enabled=true\n",
-            name = super::DISPLAY_NAME,
+            name = DISPLAY_NAME,
             exe = exe.display(),
         )
     }
