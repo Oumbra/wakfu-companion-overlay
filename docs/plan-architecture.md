@@ -2400,7 +2400,7 @@ entiers, et ici il se teste sans serveur graphique.
   haut (la réserve d'infobulle du switch Alliés/Ennemis). Un fichier de config qu'on ouvre à la
   main dit ainsi où l'on voit le panneau.
 - **Ce qui est borné, en revanche, c'est la FENÊTRE entière** — l'inverse de la bande Récap. Le
-  panneau peint sa rangée d'actions DANS cette réserve : une fenêtre qui sortirait par le haut
+  panneau peint sa rangée d'actions dedans, au coin bas : une fenêtre qui sortirait du cadre
   emporterait le cadenas, donc le seul geste qui ramène le panneau. Le prix est que le contenu ne
   monte pas plus haut que 44 px sous le bord du cadre — exactement la marge qu'il prend déjà.
 - **Aucune bascule de côté pour la rangée, aucune réserve ajoutée** : la place existait déjà, la
@@ -2421,10 +2421,9 @@ Trois conséquences qui ne s'improvisent pas :
   qui : peinte en tête, elle passait sous ce même cadre — invisible précisément là où la main va.
 - **Elle ne s'encre qu'au survol.** Un rail permanent sur le bord d'un panneau volontairement
   transparent serait un meuble, et le fond translucide de l'overlay disparaît de toute façon sur un
-  décor sombre (vu sur capture). Ce qui annonce la fonctionnalité, c'est le cadenas — toujours là,
-  à deux pixels de la lisière, avec son infobulle —, le curseur `Grab` dès qu'on approche, et la
-  ligne d'aide des Options. C'est ce que fait déjà la bande Récap, dont tout le fond se saisit sans
-  rien peindre.
+  décor sombre (vu sur capture). Ce qui annonce la fonctionnalité, c'est le cadenas — au même bord,
+  avec son infobulle — et le curseur `Grab` dès qu'on approche. C'est ce que fait déjà la bande
+  Récap, dont tout le fond se saisit sans rien peindre.
 - **Bord EXTÉRIEUR quel que soit le côté** : la lisière est déclarée à gauche dans le repère de
   mise en page, et le miroir la porte à droite avec le reste du décor. Elle tombe donc contre le
   bord de l'écran de jeu, là où la souris se pose sans viser — on la pousse contre le bord.
@@ -2440,15 +2439,24 @@ différences près que la demande impose :
   en termes de hauteur ». Il n'apparaît qu'une fois le panneau déplacé (`CombatChrome::moved`), et
   un clic ouvre la confirmation (`ResetTarget::CombatPosition`) : « Replacer le panneau de combat à
   sa hauteur d'origine ? ». Le côté, lui, reste une case des Options.
-- **La pastille des deux glyphes vit dans la réserve d'infobulle**, au coin haut extérieur, et elle
-  est déclarée `mirror::upright_in` : sa PLACE part à droite avec le panneau, son contenu reste à
-  l'endroit — un `Undo` réfléchi dirait « rétablir », soit l'inverse de ce qu'il fait.
+- **La pastille des deux glyphes est au coin BAS du bord extérieur.** La première version la
+  posait en haut, dans la réserve d'infobulle du switch Alliés/Ennemis : elle y tenait sans rien
+  décaler, mais juste au-dessus du switch, dans la zone que l'infobulle de celui-ci occupe au
+  survol. Demande utilisateur du même soir : « place les deux icônes en bas plutôt qu'en haut par
+  défaut ». En bas, elle est DANS l'espace alloué au contenu — que le panneau n'atteint qu'avec les
+  combats les plus peuplés —, donc ni réserve ajoutée, ni clip élargi ; ses infobulles s'ouvrent
+  au-dessus, en dessous elles sortiraient de la fenêtre. Elle est déclarée `mirror::upright_in` :
+  sa PLACE part à droite avec le panneau, son contenu reste à l'endroit — un `Undo` réfléchi dirait
+  « rétablir », soit l'inverse de ce qu'il fait.
 - **Le geste est mutualisé** : `panels::drag::PanelDrag` (ex-`RecapDrag`, qui en est désormais un
   alias) et `panels::drag::from_response` servent les deux overlays. Une divergence entre les deux
   se serait payée en vibration d'un seul côté, le plus difficile des bugs à voir.
-- **Sortie de secours** : ligne d'aide et bouton « Replacer au défaut » dans la section « Combat »
-  des Paramètres, comme pour la bande — en clic-traversant l'OS fait passer les clics à travers et
-  la poignée ne les voit jamais, c'est donc le seul endroit où la fonctionnalité existe par écrit.
+- **Rien dans la fenêtre Options** — et c'est une décision explicite de l'utilisateur, prise le
+  même soir : la ligne d'aide et le bouton « Replacer au défaut » qui doublaient ceux de la bande
+  Récap dans la section « Combat » ont été retirés (« retire l'entrée dans la section combat »). Le
+  cadenas et son glyphe voisin se suffisent ; la seule conséquence à garder en tête est qu'en mode
+  clic-traversant la poignée est inerte (l'OS fait passer les clics à travers), et que plus aucun
+  texte de l'interface ne le dit — contrairement à la bande, qui garde sa ligne d'aide.
 
 **Au passage, un bug d'écriture de config corrigé côté Linux** : `validate_and_commit_options` du
 binaire X11 reconstruisait sa propre `OverlayConfig` au lieu d'appeler `persist_config`, et cette
