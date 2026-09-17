@@ -1018,15 +1018,20 @@ pub fn show(
             // ne les voit jamais). C'est donc le seul endroit où la fonctionnalité EXISTE par
             // écrit, d'où le rappel du raccourci de bascule tel qu'il est réglé, jamais en dur.
             //
+            // **Et depuis le 2026-09-17 au soir, elle dit le cadenas** : la bande naît
+            // VERROUILLÉE (`config::OverlayConfig::recap_locked`), donc quelqu'un qui lirait
+            // seulement « la saisir et la faire glisser » essaierait en vain.
+            //
             // Le bouton, lui, est la sortie de secours : une bande posée dans un coin oublié, ou
             // sur un écran qu'on n'a plus, se rattrape d'un clic. Grisé tant qu'elle n'a pas
             // bougé — il n'y aurait rien à replacer.
             ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
             ui.add(
                 design::info_text(format!(
-                    "La bande se déplace à la souris : la saisir sur le jeu et la faire glisser \
-                     ({} pour passer en mode interactif). Sa position est retenue d'un \
-                     lancement à l'autre.",
+                    "La bande se déplace à la souris, cadenas ouvert : cliquer le cadenas à son \
+                     coin, puis la saisir sur le jeu et la faire glisser ({} pour passer en mode \
+                     interactif). Verrouillée, elle ne bouge plus. Verrou et position sont \
+                     retenus d'un lancement à l'autre.",
                     state.shortcuts.label(ShortcutAction::Toggle)
                 ))
                 .width(inner_width)

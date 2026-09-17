@@ -99,6 +99,20 @@ pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
 /// distinctes disent que ce sont deux panneaux dont les infobulles divergent (de côté, déjà).
 pub const RECAP_TOOLTIP_RESERVE: f32 = 36.0;
 
+/// **Place gardée SOUS le bloc Récap pour sa rangée d'actions** (2026-09-17) — le cadenas et le
+/// glyphe de replacement, quand la bande est posée trop haut dans la fenêtre de jeu pour que la
+/// rangée tienne au-dessus (voir `panels::recap::paint_actions_row`).
+///
+/// La rangée mesure `panels::recap::ACTIONS_HEIGHT` ; au-dessus, elle loge dans la réserve
+/// d'infobulle, plus haute qu'elle — en dessous, il n'y avait rien, d'où cette constante. La
+/// fenêtre OS la garde **en permanence**, de quelque côté que la rangée tombe : sa taille ne doit
+/// pas dépendre d'un côté qui dépend de sa position (voir `recap_placement::Band::actions`).
+///
+/// Le prix, en mode interactif, est une lisière de 24 px sous la bande qui capte les clics au
+/// lieu de les laisser au jeu — la même dépense que les 36 px du haut, et pour une raison du même
+/// ordre : ce que le bloc peint hors de son fond doit être dans sa fenêtre.
+pub const RECAP_ACTIONS_RESERVE: f32 = crate::panels::recap::ACTIONS_HEIGHT;
+
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
 /// pas de boucle 60 Hz forcée, l'overlay ne consomme rien tant que rien ne change). Publique : à
@@ -158,7 +172,13 @@ pub enum OverlayKind {
     /// recap_reset_requested`), fermée à la réponse (`RenderOutcome::recap_reset_choice`) — le
     /// modèle est `Options` : à la demande, focalisable (Échap répond « Non »), toujours
     /// interactive.
-    RecapReset,
+    ///
+    /// **Elle porte sa cible depuis le 2026-09-17 au soir** ([`RecapTarget`]) : la même fenêtre,
+    /// le même voile et le même composant servent aussi à confirmer le retour de la bande à son
+    /// ancrage d'origine (glyphe `Undo` de la rangée d'actions). Deux variantes d'`OverlayKind`
+    /// auraient dédoublé, dans les deux hôtes, tout le cycle « ouvrir / centrer / voiler / fermer »
+    /// pour ne changer qu'une phrase.
+    RecapReset(RecapTarget),
     /// Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) — voir `panels::login`. **La
     /// première interface de l'overlay**, et la seule tant que `AuthStatus` n'est pas `Connected` :
     /// une fenêtre logicielle classique (barre des tâches, focus, centrée sur l'écran), jamais un
@@ -166,6 +186,19 @@ pub enum OverlayKind {
     /// n'est pas lié et la retire dès qu'il l'est ; aucun `Combat`/`Watchlist` n'existe pendant
     /// qu'elle est affichée. Il n'y a pas de mode invité : un compte est obligatoire.
     Login,
+}
+
+/// **Ce qu'une confirmation du Récap remet à zéro** (2026-09-17) — voir
+/// `OverlayKind::RecapReset`, qui la porte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecapTarget {
+    /// Les **compteurs** de la session : XP, kamas, combats, challenges, chrono. Le glyphe `Undo`
+    /// au bout de la dernière ligne du bloc (`panels::recap::paint_reset_button`).
+    Session,
+    /// La **position** de la bande : elle retourne sous les boutons du jeu et la config oublie ses
+    /// deux clés. Le glyphe `Undo` de la rangée d'actions
+    /// (`panels::recap::paint_actions_row`), affiché seulement si la bande a été déplacée.
+    Position,
 }
 
 /// État de la connexion au compte (lot L4, §7.2 du plan) — publié par le thread Auth
@@ -363,6 +396,10 @@ pub struct RenderContent<'a> {
     /// zones ; la confirmation de remise à zéro (`RecapReset`) voile toujours, c'est sa raison
     /// d'être.
     pub veiled: bool,
+    /// Ce que l'hôte sait de la bande Récap et que le bloc ne peut pas savoir (`kind == Recap`) :
+    /// verrou, bande déplacée, côté de la rangée d'actions — voir `panels::recap::RecapChrome`.
+    /// Sans objet pour les autres zones, qui laissent son défaut.
+    pub recap_chrome: panels::recap::RecapChrome,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
     /// (l'horloge de l'anneau animé et le survol vivent d'une frame à l'autre).
@@ -427,6 +464,13 @@ pub struct RenderOutcome {
     /// Le glyphe de remise à zéro du bloc Récap vient d'être cliqué (`kind == Recap`) : l'hôte
     /// ouvre la fenêtre de confirmation (`OverlayKind::RecapReset`). Voir `panels::recap`.
     pub recap_reset_requested: bool,
+    /// Le cadenas de la bande vient d'être cliqué (`kind == Recap`, 2026-09-17) : l'hôte inverse
+    /// le verrou et l'écrit dans la config (`config::OverlayConfig::recap_locked`). Voir
+    /// `panels::recap::RecapChrome`.
+    pub recap_toggle_lock: bool,
+    /// Le glyphe de replacement de la bande vient d'être cliqué (`kind == Recap`, 2026-09-17) :
+    /// l'hôte ouvre la confirmation `OverlayKind::RecapReset(RecapTarget::Position)`.
+    pub recap_restore_requested: bool,
     /// La bande Récap est saisie à la souris (`kind == Recap`, 2026-09-17) : l'hôte déplace la
     /// fenêtre OS, la borne à la fenêtre de jeu et persiste la position au relâchement. Voir
     /// `panels::recap::RecapDrag`, qui dit pourquoi ce sont des POSITIONS et non des écarts.
@@ -536,6 +580,7 @@ pub fn build_ui(
                 recap: content.recap,
                 options: content.options.as_deref_mut(),
                 veiled: content.veiled,
+                recap_chrome: content.recap_chrome,
                 login: content.login.as_deref_mut(),
             },
         );
@@ -581,6 +626,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         recap,
         options,
         veiled,
+        recap_chrome,
         login,
     } = content;
 
@@ -635,7 +681,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         },
         OverlayKind::Options => egui::Margin::ZERO,
         // La confirmation couvre sa fenêtre entière : le voile va bord à bord.
-        OverlayKind::RecapReset => egui::Margin::ZERO,
+        OverlayKind::RecapReset(_) => egui::Margin::ZERO,
         // Récap : calé à gauche de sa fenêtre, et SEUL le haut gagne une marge, celle des
         // infobulles ([`RECAP_TOOLTIP_RESERVE`], même principe que `COMBAT_TOP_MARGIN`) — le bloc
         // peint son propre fond et se place lui-même sous cette marge (voir `panels::recap::show`).
@@ -777,19 +823,30 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // la hauteur qu'il vient d'occuper, dont l'hôte se sert pour redimensionner la
                 // fenêtre OS, et le clic sur son glyphe de remise à zéro (2026-09-17).
                 OverlayKind::Recap => {
-                    let recap_outcome = panels::recap::show(ui, recap, recap_cells);
+                    let recap_outcome = panels::recap::show(ui, recap, recap_cells, recap_chrome);
                     outcome.recap_height = Some(recap_outcome.height);
                     outcome.recap_reset_requested = recap_outcome.reset_requested;
+                    outcome.recap_toggle_lock = recap_outcome.toggle_lock;
+                    outcome.recap_restore_requested = recap_outcome.restore_requested;
                     outcome.recap_drag = recap_outcome.drag;
                 }
                 // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::RecapReset`.
                 // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.
-                OverlayKind::RecapReset => {
-                    outcome.recap_reset_choice =
-                        crate::design::confirm_dialog("Remettre le récap de session à zéro ?")
-                            .over(ui.max_rect())
-                            .log_name("recap.remise-a-zero")
-                            .show(ui);
+                OverlayKind::RecapReset(target) => {
+                    let (question, log_name) = match target {
+                        RecapTarget::Session => (
+                            "Remettre le récap de session à zéro ?",
+                            "recap.remise-a-zero",
+                        ),
+                        RecapTarget::Position => (
+                            "Replacer le récap à son emplacement d'origine ?",
+                            "recap.replacement",
+                        ),
+                    };
+                    outcome.recap_reset_choice = crate::design::confirm_dialog(question)
+                        .over(ui.max_rect())
+                        .log_name(log_name)
+                        .show(ui);
                 }
                 OverlayKind::Options => {
                     if let Some(state) = options {
