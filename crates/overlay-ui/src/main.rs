@@ -116,9 +116,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, WindowEvent};
+use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
 #[cfg(target_os = "windows")]
@@ -2354,11 +2353,22 @@ impl App {
             // calculée à la création ne correspond à rien.
             Self::center_on_primary_monitor(event_loop, &overlay.window);
             overlay.last_position = None;
-            overlay.window.focus_window();
             tracing::info!(
                 "[options] aucune fenêtre de jeu à l'écran — fenêtre Options ouverte seule, centrée sur l'écran principal."
             );
         }
+        // **Le focus clavier, rattachée ou non** (2026-09-17). Il n'était demandé que pour la
+        // modale détachée : ouverte depuis un bandeau, la fenêtre naissait devant mais SANS le
+        // focus, qui restait au bandeau qu'on venait de cliquer (en mode interactif, ce clic fait
+        // de lui la fenêtre au premier plan malgré `WS_EX_NOACTIVATE` — voir `sync_topmost`). Ses
+        // deux touches ne l'atteignaient donc pas : Échap ne l'annulait pas, Entrée ne validait
+        // pas, et le filet « Échap quitte l'overlay » du bandeau, lui, fermait tout (retour
+        // utilisateur, voir `window_event`).
+        //
+        // Le prendre au jeu est ici l'effet recherché, et non un vol : cette fenêtre est la seule
+        // délibérément focalisable (§9.1 du plan, il faut pouvoir taper dans le champ de chemin),
+        // et depuis le voile du même jour elle couvre le client entier — on ne joue pas derrière.
+        overlay.window.focus_window();
         // **Le brouillon d'alertes est une COPIE du profil du compte**, prise à l'ouverture : les
         // gestes de l'onglet la modifient librement, et seul « Valider » la renvoie (§5.1 du plan).
         // Sans compte lié, il n'y a ni liste à charger ni endroit où l'écrire — l'onglet le dit.
@@ -3582,39 +3592,31 @@ impl ApplicationHandler<UserEvent> for App {
                     event_loop.exit();
                 }
             }
-            // Filet « Échap quitte l'overlay », **sauf pour la modale Options**.
+            // **Aucun filet « Échap quitte l'overlay ».** Il y en a eu un jusqu'au 2026-09-17
+            // (`Échap` → `event_loop.exit()` pour toute fenêtre autre que la modale Options, la
+            // fenêtre de connexion et la confirmation de remise à zéro), posé quand les fenêtres
+            // overlay étaient réputées ne jamais recevoir d'événement clavier — `WS_EX_NOACTIVATE`
+            // était censé les tenir hors du premier plan.
             //
-            // Il ne se déclenche en pratique jamais pour les autres fenêtres (voir le commentaire
-            // historique du raccourci « Quitter » retiré, dans `overlay_ui::shortcuts::ShortcutAction`) :
-            // elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le focus clavier, quel
-            // que soit le mode. Laissé en place au cas où l'une d'elles redeviendrait focalisable ;
-            // les moyens fiables de quitter sans passer par le terminal sont le bouton « Fermer
-            // l'overlay » de l'onglet « Paramètres » et l'entrée « Quitter » de la zone de
-            // notification.
+            // **Cette prémisse est fausse, et le filet a fermé l'overlay entier** (retour
+            // utilisateur, 2026-09-17 : « la touche Échap en ayant la modale Options ferme
+            // complètement l'overlay »). En mode interactif, un clic sur un bandeau Combat/Suivi
+            // fait bel et bien de SA PROPRE `HWND` la fenêtre au premier plan malgré
+            // `WS_EX_NOACTIVATE` — c'est le même constat, journaux à l'appui, qui a imposé le
+            // calcul par personnage de `sync_topmost` (voir son correctif 2026-09-06/07). Le
+            // geste qui déclenchait le défaut est donc parfaitement ordinaire : cliquer
+            // « Options » dans le bandeau Suivi (ce clic donne le premier plan AU BANDEAU), puis
+            // taper Échap pour refermer la modale — la touche partait au bandeau, pas à la
+            // modale, et tuait la session.
             //
-            // La modale Options, elle, EST focalisable et délibérément (§9.1 du plan :
-            // `WS_EX_NOACTIVATE` omis pour elle, il faut pouvoir taper dans le champ de chemin).
-            // Sans cette exclusion, taper Échap dedans tuait l'overlay entier au lieu d'annuler la
-            // saisie. Ses deux touches (`Échap` annule, `Entrée` valide) sont traitées par le
-            // panneau lui-même, qui les remonte en `OptionsModalAction` — voir
-            // `panels::options_modal::show`.
-            // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une fenêtre
-            // logicielle ordinaire ne quitte pas l'application — sa croix de barre des tâches
-            // et Alt+F4 (`CloseRequested` ci-dessus) le font, comme le menu de zone de
-            // notification.
-            // La confirmation de remise à zéro est exclue de même (2026-09-17) : elle est
-            // focalisable pour qu'Échap réponde « Non » (`design::confirm_dialog`), pas pour
-            // quitter l'overlay.
-            WindowEvent::KeyboardInput { event, .. } => {
-                if !matches!(
-                    overlay.kind,
-                    OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
-                ) && event.state == ElementState::Pressed
-                    && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                {
-                    event_loop.exit();
-                }
-            }
+            // Le filet disparaît plutôt que de s'allonger d'une exclusion de plus : une touche
+            // nue qui arrête le programme n'a pas sa place, exactement comme le raccourci global
+            // « Quitter l'overlay » retiré le même jour. Les sorties propres sont le bouton
+            // « Fermer l'overlay » de l'onglet « Paramètres » (confirmé), l'entrée « Quitter » de
+            // la zone de notification, Alt+F4 / la croix pour les fenêtres qui en ont une
+            // (`CloseRequested` ci-dessus) et Ctrl+C au terminal. Échap, lui, appartient
+            // désormais aux seuls panneaux qui le lisent : il annule la modale Options, répond
+            // « Non » à une confirmation, referme un sélecteur.
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 Self::reconfigure_surface(&mut overlay.gpu, size);
             }

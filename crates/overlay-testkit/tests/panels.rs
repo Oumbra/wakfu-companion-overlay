@@ -2231,8 +2231,9 @@ fn panneau_options_ne_panique_pas() {
 /// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le
 /// filet global des deux hôtes (`main.rs` / `bin/wakfu-companion-overlay-x11.rs`,
 /// `event_loop.exit()`) et **fermait l'overlay entier** au lieu d'annuler la saisie — la modale
-/// étant la seule fenêtre overlay focalisable (§9.1 du plan), elle était aussi la seule à pouvoir
-/// déclencher ce filet.
+/// étant la seule fenêtre overlay focalisable (§9.1 du plan), elle était la première à déclencher
+/// ce filet. Le filet lui-même a disparu le 2026-09-17 : l'exclusion de cette fenêtre ne suffisait
+/// pas, la touche partant au bandeau resté au premier plan quand la modale s'ouvrait sans le focus.
 ///
 /// Le champ de chemin a le focus dès la première frame (`design::input::request_focus`), donc ces
 /// deux touches sont pressées **alors qu'un `TextEdit` est actif** : c'est exactement le cas où

@@ -1540,9 +1540,10 @@ pub fn show(
     // première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord, il
     // remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons du
     // pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un Échap
-    // destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay entier
-    // (voir `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, où ce filet exclut désormais cette
-    // fenêtre).
+    // destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay entier.
+    // Ce filet excluait d'abord cette fenêtre (2026-09-08), puis a disparu tout court le
+    // 2026-09-17 — il fermait encore l'overlay quand la touche partait au bandeau resté au premier
+    // plan (voir `main.rs::window_event`). Échap n'a donc plus qu'un lecteur : ce panneau.
     //
     // `TextEdit` ne retire pas ces événements de l'entrée globale (il travaille sur une copie
     // filtrée, `InputState::filtered_events`) : les lire ici reste fiable même quand le champ de

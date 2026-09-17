@@ -23,9 +23,11 @@
 //! affiché partout (`Ctrl+Shift+W`).
 //!
 //! **Portée réelle des raccourcis** : `global_hotkey` (XGrabKey sous X11, `RegisterHotKey` sous
-//! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (les fenêtres portent
-//! `WS_EX_NOACTIVATE` et ne reçoivent jamais d'événement clavier, voir le filet « Échap » de
-//! `main.rs::window_event`), donc **volés au jeu et à toute autre application** : d'où le
+//! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (celles-ci portent
+//! `WS_EX_NOACTIVATE` et ne reçoivent qu'exceptionnellement un événement clavier : un clic en mode
+//! interactif peut malgré tout leur donner le premier plan, ce qui a coûté le filet « Échap » de
+//! `main.rs::window_event`, retiré le 2026-09-17), donc **volés au jeu et à toute autre
+//! application** : d'où le
 //! garde-fou [`Shortcut::is_valid`] — une lettre nue ne peut pas être bindée, elle serait prise à
 //! Wakfu lui-même dès la première ligne de chat écrite.
 //!

@@ -107,9 +107,8 @@ mod linux_main {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
-    use winit::event::{ElementState, WindowEvent};
+    use winit::event::WindowEvent;
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-    use winit::keyboard::{KeyCode, PhysicalKey};
     use winit::platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11, WindowType};
     use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
@@ -1216,11 +1215,14 @@ mod linux_main {
                 // tout de suite — voir `main.rs::App::open_options_modal`.
                 Self::center_on_primary_monitor(event_loop, &overlay.window);
                 overlay.last_position = None;
-                overlay.window.focus_window();
                 tracing::info!(
                     "[options] aucune fenêtre de jeu à l'écran — fenêtre Options ouverte seule, centrée sur l'écran principal."
                 );
             }
+            // **Le focus clavier, rattachée ou non** (2026-09-17) — même correctif que
+            // `main.rs::App::open_options_modal` (voir sa doc) : sans lui, Échap et Entrée
+            // n'atteignaient pas la modale ouverte depuis un bandeau.
+            overlay.window.focus_window();
             // **Brouillons pris sur le compte** — même logique que `main.rs::open_options_modal`
             // (voir sa doc) : alertes, chat et suivi sont des COPIES de l'état du compte, renvoyées
             // seulement à « Valider » ; et le compte est relu à l'ouverture, sur un thread.
@@ -1951,29 +1953,14 @@ mod linux_main {
                         event_loop.exit();
                     }
                 }
-                WindowEvent::KeyboardInput { event, .. } => {
-                    // Les fenêtres overlay ne demandent jamais le focus clavier en pratique (elles
-                    // restent `AlwaysOnTop` sans jamais voler l'entrée au jeu), mais Échap reste
-                    // câblé par prudence si jamais l'une d'elles l'obtenait malgré tout — même
-                    // filet que Windows (`main.rs`, jamais atteint non plus en pratique).
-                    //
-                    // **Sauf la modale Options**, qui est la seule fenêtre overlay focalisable et
-                    // l'est délibérément (§9.1 du plan). Ses deux touches — `Échap` annule,
-                    // `Entrée` valide — sont traitées par le panneau, qui les remonte en
-                    // `OptionsModalAction` (voir `panels::options_modal::show`) ; ce filet les
-                    // court-circuiterait en fermant l'overlay entier.
-                    // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une
-                    // fenêtre ordinaire ne quitte pas l'application — sa fermeture (`CloseRequested`)
-                    // le fait.
-                    if !matches!(
-                        overlay.kind,
-                        OverlayKind::Options | OverlayKind::Login | OverlayKind::RecapReset
-                    ) && event.state == ElementState::Pressed
-                        && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                    {
-                        event_loop.exit();
-                    }
-                }
+                // **Aucun filet « Échap quitte l'overlay »** — retiré le 2026-09-17 en même
+                // temps que son jumeau de `main.rs`, pour la même raison et avec le même
+                // raisonnement (voir le commentaire là-bas) : les fenêtres overlay PEUVENT
+                // recevoir le focus clavier, et une touche nue qui arrête le programme fermait
+                // la session d'un geste aussi ordinaire que « cliquer Options puis taper Échap ».
+                // Échap appartient aux panneaux qui le lisent ; les sorties propres sont le
+                // bouton « Fermer l'overlay », la zone de notification, la fermeture de fenêtre
+                // (`CloseRequested` ci-dessus) et Ctrl+C.
                 WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                     let max_dim = overlay.gpu.device.limits().max_texture_dimension_2d;
                     overlay.gpu.config.width = size.width.min(max_dim);
