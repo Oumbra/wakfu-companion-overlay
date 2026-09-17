@@ -113,6 +113,18 @@ fn harness_for(
     on_right: bool,
     remontees: std::rc::Rc<std::cell::RefCell<Remontees>>,
 ) -> Harness<'static> {
+    harness_sized(chrome, on_right, remontees, None)
+}
+
+/// Le même harnais à une taille de rendu imposée — `None` pour les 800 × 600 par défaut, qui
+/// laissent voir tout le panneau au large. La fenêtre OS réelle ([`FENETRE_REELLE`]) sert à la
+/// planche du repli en rangée : c'est une contrainte que les 800 × 600 ne montrent pas.
+fn harness_sized(
+    chrome: std::rc::Rc<std::cell::Cell<CombatChrome>>,
+    on_right: bool,
+    remontees: std::rc::Rc<std::cell::RefCell<Remontees>>,
+    size: Option<egui::Vec2>,
+) -> Harness<'static> {
     let fight: FightSnapshot = replay_real_log()
         .fights
         .first()
@@ -132,7 +144,7 @@ fn harness_for(
     let auth_sink = NoopAuthSink;
     let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
-    Harness::new_ui(move |ui| {
+    let build = move |ui: &mut egui::Ui| {
         let ctx = ui.ctx().clone();
         let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
         let outcome = paint_content(
@@ -184,15 +196,35 @@ fn harness_for(
         if outcome.combat_restore_requested {
             remontees.replacements += 1;
         }
-    })
+    };
+    match size {
+        Some(size) => Harness::builder().with_size(size).build_ui(build),
+        None => Harness::new_ui(build),
+    }
 }
+
+/// **La fenêtre OS du panneau**, marge du harnais comprise : `main.rs::WINDOW_SIZE` (420 × 524,
+/// dont 44 px de réserve d'infobulle en haut) plus les 8 px que le harnais laisse de chaque côté.
+/// C'est à cette taille, et à elle seule, que la rangée d'actions manque de place sous le gabarit
+/// à six combattants et se replie côte à côte.
+const FENETRE_REELLE: egui::Vec2 = egui::vec2(420.0 + 16.0, 524.0 + 16.0);
 
 /// Un harnais sans rien à écouter — pour les planches, qui ne vérifient que le rendu.
 fn planche(chrome: CombatChrome, on_right: bool) -> Harness<'static> {
-    harness_for(
+    planche_sized(chrome, on_right, None)
+}
+
+/// La même planche à une taille de rendu imposée.
+fn planche_sized(
+    chrome: CombatChrome,
+    on_right: bool,
+    size: Option<egui::Vec2>,
+) -> Harness<'static> {
+    harness_sized(
         std::rc::Rc::new(std::cell::Cell::new(chrome)),
         on_right,
         std::rc::Rc::new(std::cell::RefCell::new(Remontees::default())),
+        size,
     )
 }
 
@@ -205,17 +237,25 @@ fn press(harness: &mut Harness<'_>, pos: egui::Pos2, pressed: bool) {
     });
 }
 
-/// Le cadenas, premier emplacement de la pastille d'actions — coin BAS extérieur du panneau
-/// (2026-09-17, demande utilisateur). Le harnais laisse 8 px de marge tout autour d'un rendu de
-/// 800 × 600, la pastille (22 px de haut) est donc collée sous y = 592 : voir
-/// `panels::combat::paint_actions_row`.
+/// **Où tombe la pastille d'actions dans ces planches** (2026-09-17, demande utilisateur : « à 5 px
+/// du dernier pixel de la décoration du template ») : le harnais laisse 8 px de marge, la fenêtre
+/// ajoute `COMBAT_TOP_MARGIN` (44) avant le contenu, le bandeau du switch et son air occupent
+/// `BARS_COLUMN_TOP_OFFSET` (53), et le rejeu remplit le gabarit à six médaillons, dont la dernière
+/// encre est à 392 px de son sommet — soit 8 + 44 + 53 + 392 = 497. Le groupe commence donc 6 px
+/// plus bas (le pixel suivant, plus les 5 px d'air), et son premier glyphe est centré 11 px après.
+const PASTILLE_TOP: f32 = 503.0;
+const GLYPHE_1: f32 = PASTILLE_TOP + 11.0;
+/// Le deuxième glyphe, un cran plus loin dans le sens de l'empilement (14 px d'icône + 6 px d'air).
+const GLYPHE_2: f32 = GLYPHE_1 + 20.0;
+
+/// Le cadenas, premier emplacement de la pastille — en colonne, contre le bord extérieur.
 fn cadenas() -> egui::Pos2 {
-    egui::pos2(19.0, 581.0)
+    egui::pos2(19.0, GLYPHE_1)
 }
 
-/// Le glyphe de replacement, deuxième emplacement de la même pastille.
+/// Le glyphe de replacement, EN DESSOUS du cadenas (la colonne s'empile vers le bas).
 fn replacer() -> egui::Pos2 {
-    egui::pos2(39.0, 581.0)
+    egui::pos2(19.0, GLYPHE_2)
 }
 
 /// Un point de la lisière de préhension — sur le bord extérieur, à mi-hauteur du panneau.
@@ -236,6 +276,47 @@ fn panneau_deverrouille_et_deplace_montre_ses_deux_glyphes() {
     );
     harness.run();
     harness.snapshot("combat_actions_deverrouille_deplace");
+}
+
+/// **Le repli côte à côte, dans la fenêtre réelle** (2026-09-17, décision utilisateur devant la
+/// maquette : « pour ce genre de cas, s'il se présente, il faut afficher les deux icônes côte à
+/// côte »).
+///
+/// Le gabarit à six combattants laisse 34 px sous sa dernière encre dans un contenu de 480 px, et
+/// la colonne en demande 47 (5 px d'air + 42 px de pastille) : le glyphe de replacement sortirait
+/// de la fenêtre, donc de l'écran, avec lui le seul geste qui ramène le panneau. Le groupe se
+/// couche donc en rangée, qui n'en demande que 27.
+///
+/// Les 800 × 600 des autres planches ne montrent pas cette contrainte — d'où la taille imposée
+/// ici. Et le clic ne vise pas la capture mais la PREUVE du repli : à `x = 39` il n'y a rien du
+/// tout quand le groupe est en colonne (large de 22 px), le replacement ne serait pas remonté.
+#[test]
+fn panneau_plein_replie_ses_actions_cote_a_cote() {
+    let chrome = std::rc::Rc::new(std::cell::Cell::new(CombatChrome {
+        locked: false,
+        moved: true,
+    }));
+    let remontees = std::rc::Rc::new(std::cell::RefCell::new(Remontees::default()));
+    let mut harness = harness_sized(
+        chrome,
+        false,
+        std::rc::Rc::clone(&remontees),
+        Some(FENETRE_REELLE),
+    );
+    harness.run();
+    harness.snapshot("combat_actions_rangee_fenetre_reelle");
+
+    // Le deuxième emplacement d'une RANGÉE : à droite du cadenas, sur la même ligne.
+    let replacer_couche = egui::pos2(39.0, GLYPHE_1);
+    press(&mut harness, replacer_couche, true);
+    harness.run();
+    press(&mut harness, replacer_couche, false);
+    harness.run();
+    assert_eq!(
+        remontees.borrow().replacements,
+        1,
+        "le glyphe de replacement doit être à DROITE du cadenas quand la colonne ne rentre pas"
+    );
 }
 
 /// **Verrouillé et jamais déplacé** : un seul glyphe, le cadenas FERMÉ, et la pastille se resserre
