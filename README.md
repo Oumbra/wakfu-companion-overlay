@@ -92,8 +92,9 @@ clé privée `minisign` des secrets du dépôt et revérifie la signature avec
 l'instant que **mesuré** (rapport dans le résumé du job) ; il sera publié quand la mesure le
 justifiera.
 
-Un binaire de Release vise toujours l'API de prod ; les scripts de prévisualisation pointent, eux,
-sur le déploiement dev via `WAKFU_COMPANION_API_URL`.
+Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tout autre profil
+(`preview`, debug) vise le déploiement dev — le choix est figé à la compilation
+(`crates/overlay-sync/build.rs`), `WAKFU_COMPANION_API_URL` le surcharge à l'exécution.
 
 ## Crates (`crates/`)
 

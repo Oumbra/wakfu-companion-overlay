@@ -2211,7 +2211,9 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   fusion `dev` → `main`, manifeste `latest.json` signé `minisign`, module `overlay_sync::update`
   (`ureq` + `self-replace` + `minisign-verify`), installation au démarrage derrière l'écran de
   chargement, différentiel après mesure. **Un binaire de Release vise toujours la prod**
-  (`DEFAULT_BASE_URL`), le domaine dev n'est plus utilisé qu'en local par les scripts de preview.
+  (`DEFAULT_BASE_URL`, figée par le profil de compilation dans `overlay-sync/build.rs` depuis le
+  2026-09-17 : `release` → prod, `preview`/debug → dev), le domaine dev n'est plus utilisé qu'en
+  local, par tout binaire compilé hors `release`.
   - ~~Le bundle moteur peut être mis à jour **sans** nouvelle version du binaire (asset versionné +
     signature)~~ — **retiré le 2026-09-15** (décision 7 du plan de mise à jour) : le bundle est
     vendu et diverge volontairement du dépôt web (`engine-js/VENDORED_FROM.txt`, 2026-09-13), et
