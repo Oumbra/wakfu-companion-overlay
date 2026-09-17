@@ -50,6 +50,7 @@ use overlay_engine::{Gender, Roster, RosterCharacter};
 use crate::avatars::{AvatarAtlas, AVATAR_SIZE};
 use crate::design::{self, DsIcon, IconContext, InputSize};
 use crate::game_servers::GameServers;
+use crate::panels::tile_button::{self, paint_glyph};
 use crate::panels::{bulk_select, tile_reorder};
 use crate::ui_icons::UiIcons;
 
@@ -76,8 +77,9 @@ const TILE_FILL: Color32 = Color32::from_rgb(0x0E, 0x11, 0x15);
 const TILE_BORDER: Color32 = Color32::from_rgb(0x59, 0x51, 0x40);
 const TILE_BORDER_WIDTH: f32 = 2.0;
 /// Le même cadre, éclairci, pour la tuile survolée : le voile seul se lit sur une carte d'objet
-/// claire, pas sur un buste déjà sombre.
-const TILE_BORDER_HOVER: Color32 = Color32::from_rgb(0x9A, 0x8C, 0x6E);
+/// claire, pas sur un buste déjà sombre. C'est aussi le trait du socle de ses boutons
+/// (`tile_button::HOVER_BORDER`, d'où la valeur vient).
+const TILE_BORDER_HOVER: Color32 = tile_button::HOVER_BORDER;
 /// **Arrondi des tuiles** — celui du champ de saisie (`tokens::INPUT_RADIUS`), demandé le
 /// 2026-09-16 : « un peu plus forcé, le même que la bordure de l'input texte ».
 const TILE_RADIUS: u8 = design::tokens::INPUT_RADIUS;
@@ -90,15 +92,11 @@ const TILE_W: f32 = AVATAR_SIZE + 2.0 * TILE_PAD;
 const TILE_BAND: f32 = 22.0;
 /// 2 de cadre + 10 + 80 de buste + 2 + 22 de bandeau + 2 de cadre.
 const TILE_H: f32 = 118.0;
-/// Côté du glyphe d'un badge révélé au survol.
-const BADGE: f32 = 14.0;
-/// Diamètre du socle rond qui porte le bouton de modification.
-const BADGE_DISC: f32 = 26.0;
+/// Côté du glyphe d'un badge révélé au survol — `tile_button::BADGE`, qui porte aussi le socle.
+const BADGE: f32 = tile_button::BADGE;
 /// Distance de la croix nue au coin haut-droit — `alerts_tab::TILE_BADGE_INSET`, l'idiome des
 /// tuiles d'Alertes et de Chat, que ce bouton-là reprend tel quel.
 const CROSS_INSET: f32 = 8.0;
-/// Fond du socle — assez opaque pour détacher le glyphe du buste, assez sombre pour rester du jeu.
-const BADGE_DISC_FILL: Color32 = Color32::from_black_alpha(0xB4);
 /// Gouttière minimale entre deux tuiles — `alerts_tab::TILE_GAP`. La grille en pose davantage
 /// quand la largeur restante le permet : les tuiles ont une largeur FIXE, c'est donc l'espacement
 /// qui absorbe le reste, jamais la tuile qui s'étire.
@@ -871,7 +869,9 @@ fn hero_tile(
 }
 
 /// **Un bouton de tuile** : un glyphe, une zone cliquable, une infobulle — et, quand `socle` le
-/// demande, le disque qui dit « ceci est un bouton ».
+/// demande, le disque qui dit « ceci est un bouton ». La géométrie et les teintes sont celles de
+/// `panels::tile_button`, partagées avec le bandeau in-game depuis le 2026-09-18 ; ne reste ici
+/// que ce qui est propre à cet onglet, l'infobulle et son ancrage.
 ///
 /// **Le socle n'est PAS pour les deux** (décision du 2026-09-16) : il porte le bouton de
 /// modification, posé au centre du buste, où rien d'autre ne signalerait qu'on peut cliquer. La
@@ -887,40 +887,11 @@ fn tile_button(
     socle: bool,
     id: egui::Id,
 ) -> egui::Response {
-    let disc = Rect::from_center_size(center, Vec2::splat(BADGE_DISC));
-    // Main sous le pointeur, comme la croix des tuiles d'Alertes et de Chat : la tuile en dessous
-    // n'en affiche pas, c'est donc ici que le geste se signale.
-    let response = ui
-        .interact(disc, id, egui::Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let survol = response.contains_pointer();
-    if socle {
-        let painter = ui.painter();
-        painter.circle_filled(center, BADGE_DISC / 2.0, BADGE_DISC_FILL);
-        painter.circle_stroke(
-            center,
-            BADGE_DISC / 2.0,
-            egui::Stroke::new(
-                1.0,
-                if survol {
-                    design::tokens::TEXT_GOLD
-                } else {
-                    TILE_BORDER_HOVER
-                },
-            ),
-        );
-    }
-    paint_glyph(
-        ui,
-        center,
-        icon,
-        BADGE,
-        if survol {
-            design::tokens::TEXT_GOLD
-        } else {
-            design::tokens::ICON_TINT
-        },
-    );
+    let response = if socle {
+        tile_button::disc_button(ui, center, icon, id)
+    } else {
+        tile_button::glyph_button(ui, center, icon, id)
+    };
     // **Ancrée sur la tuile, pas sur le bouton** : ancrée sur lui, l'infobulle de « Modifier »
     // s'ouvrait juste au-dessus de son socle, c'est-à-dire par-dessus le bouton « Supprimer ».
     design::tooltip(&response).anchor(tuile).text(tooltip);
@@ -1016,19 +987,6 @@ fn paint_class_avatar(
         rect,
         Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         Color32::WHITE,
-    );
-}
-
-/// Un glyphe peint à l'échelle demandée, sans socle — le « + » de la tuile d'ajout.
-fn paint_glyph(ui: &egui::Ui, center: Pos2, icon: DsIcon, side: f32, tint: Color32) {
-    let ds = design::DesignSystem::get(ui.ctx());
-    let native = ds.icon_native_size(icon);
-    let fit = native.x.max(native.y);
-    ds.paint_icon(
-        ui.painter(),
-        Rect::from_center_size(center, native * (side / fit)),
-        icon,
-        tint,
     );
 }
 

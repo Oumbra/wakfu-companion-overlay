@@ -25,5 +25,6 @@ pub mod raccourcis_tab;
 pub mod recap;
 pub mod recipe_dialog;
 pub mod suivi_tab;
+pub mod tile_button;
 pub mod tile_reorder;
 pub mod watchlist;
