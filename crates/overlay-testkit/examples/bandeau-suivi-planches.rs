@@ -395,8 +395,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     // montrent les infobulles telles qu'elles sont sans personnalisation.
                     shortcuts: &ShortcutBindings::default(),
                     now,
-                    session_totals: &Default::default(),
-                    session_uptime: std::time::Duration::ZERO,
+                    recap: &Default::default(),
                     recap_cells: Default::default(),
                     options: None,
                     login: None,
