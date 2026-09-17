@@ -3750,7 +3750,14 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("overlay-ui-device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+            // Plancher `webgl2` (l'overlay ne demande rien de plus), mais avec les limites
+            // de RÉSOLUTION de l'adaptateur : la swapchain de la confirmation de remise à
+            // zéro couvre la fenêtre de jeu ENTIÈRE (`OverlayKind::RecapReset`), et
+            // `downlevel_webgl2_defaults()` plafonne une texture 2D à 2048 px — un jeu en
+            // 2560×1392 faisait donc paniquer `Surface::configure` au clic sur le glyphe
+            // (2026-09-17). L'idiome est celui que wgpu documente sur `using_resolution`.
+            required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                .using_resolution(adapter.limits()),
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             trace: wgpu::Trace::Off,
             ..Default::default()
@@ -3759,6 +3766,10 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         .expect("création du device");
 
     let size = window.inner_size();
+    // Même clamp défensif qu'à la reconfiguration (voir `reconfigure_surface` côté
+    // Windows, `WindowEvent::Resized` côté Linux) : une erreur wgpu est FATALE par défaut,
+    // une fenêtre plus grande que ce que le GPU accepte ne doit jamais tuer l'overlay.
+    let max_dim = device.limits().max_texture_dimension_2d;
     let caps = surface.get_capabilities(&adapter);
     let format = caps
         .formats
@@ -3770,8 +3781,8 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
     let config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
-        width: size.width.max(1),
-        height: size.height.max(1),
+        width: size.width.clamp(1, max_dim),
+        height: size.height.clamp(1, max_dim),
         present_mode: wgpu::PresentMode::Fifo,
         desired_maximum_frame_latency: 2,
         alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
