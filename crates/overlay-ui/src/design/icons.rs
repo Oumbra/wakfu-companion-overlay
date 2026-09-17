@@ -309,6 +309,29 @@ ds_icons! {
         /// `DsIcon::content_size`. Même statut que [`DsIcon::BagIn`].
         Lock => "icon-lock", socle;
 
+        /// Cadenas ouvert (`icons/icon-lock-open.png`, 16 × 14) — déverrouillé, le pendant de
+        /// [`DsIcon::Lock`].
+        ///
+        /// **Dessiné, pas détouré** (2026-09-17) : le jeu n'a pas de cadenas ouvert à prélever. Le
+        /// corps reprend `icon-lock.png` pixel pour pixel, l'anse seule change — pivotée HORS du
+        /// gabarit du corps, son montant libre à droite, dans le vide. Retenue par l'utilisateur
+        /// sur planche parmi cinq anses, puis quatre réglages de celle-ci. Blanc pur et alpha
+        /// binaire comme sa source, donc aucune frange à tolérer dans
+        /// `les_glyphes_d_icone_sont_detoures_au_pixel_pres`.
+        ///
+        /// `socle` par DESTINATION et non par mesure : elle n'a jamais vécu sur un bouton du jeu,
+        /// mais elle alternera avec [`DsIcon::Lock`] sur le même bouton icône, et deux états d'un
+        /// même bouton doivent partager l'étalon. **Conséquence à connaître** : `icon_draw_size`
+        /// ramène la PLUS GRANDE dimension à [`tokens::ICON_BUTTON_CONTENT`], or l'anse sortie
+        /// porte celle-ci de 14 à 16 px. À socle égal, le corps du cadenas ouvert est donc peint
+        /// 12,5 % plus court que celui du fermé — un saut visible là où les deux états alternent.
+        /// Si cet écart gêne à l'usage, la variante compacte écartée sur la planche (débordement
+        /// de 2 px, boîte 14 × 14, donc même grande dimension que `Lock`) s'accorde sans toucher
+        /// au code.
+        ///
+        /// **Pas encore d'appelant** : rien ne se verrouille dans l'overlay à ce jour.
+        LockOpen => "icon-lock-open", socle;
+
         /// Histogramme croissant (`icons/icon-order.png`, 14 × 14) — tri par valeur. Détouré
         /// `--from-button --floor 45` (ombre portée du glyphe sur aplat, voir
         /// `references/recettes-icones.md`), d'où `DsIcon::content_size`. Même statut que
