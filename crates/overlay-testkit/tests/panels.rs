@@ -186,6 +186,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -262,6 +263,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -364,6 +366,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -459,6 +462,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         spells_enabled: true,
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -607,6 +611,7 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                         spells_enabled: true,
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -754,6 +759,7 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -841,6 +847,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 spells_enabled: true,
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -920,6 +927,7 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 spells_enabled: true,
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -991,6 +999,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1155,6 +1164,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1233,6 +1243,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1371,6 +1382,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1519,6 +1531,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1622,6 +1635,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1655,12 +1669,63 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     }
 }
 
+/// **Le bandeau pendant qu'une tuile célèbre son aboutissement** (2026-09-17) — quatre instants
+/// de la séquence sur une bande réelle, à côté de deux tuiles qui, elles, ne célèbrent pas.
+///
+/// La galerie du design system montre déjà la séquence sur un emplacement isolé
+/// (`design_gallery_completion`) ; ce que celle-ci ajoute est ce que la galerie ne peut pas
+/// montrer : la tuile qui célèbre **au milieu de ses voisines**, avec la **gerbe de confettis** du
+/// panneau — qui sort de la zone défilante et n'appartient donc pas au composant.
+///
+/// **Le temps est injecté**, comme pour le toast : `push` reçoit un instant de départ reculé
+/// d'autant, et `now` reste celui du rendu. Aucune horloge réelle n'intervient — les confettis
+/// comme les particules sont hachés sur leur index.
+#[test]
+fn bandeau_suivi_celebration() {
+    // Voir `watchlist_bandeau_geste` : ce test capture, il doit donc figer la version.
+    overlay_ui::build_info::freeze_for_snapshots();
+    let entries = entrees_de_bandeau();
+    let cle = format!("{}::", entries[1].name);
+    let mut bandeau = harnais_bandeau(entries);
+
+    // **Un seul harnais pour les quatre instants** : `egui_kittest` refuse plusieurs
+    // `SnapshotResults` dans un même test, et c'est une bonne contrainte — quatre harnais, ce
+    // serait quatre fenêtres différentes pour une seule séquence.
+    for (elapsed, nom) in [
+        (0.20, "souleve"),
+        (1.20, "couronne"),
+        (2.10, "eclat"),
+        (2.80, "dissolution"),
+    ] {
+        let mut completions = panels::watchlist::WatchlistCompletions::default();
+        // Départ reculé de `elapsed` depuis l'instant du RENDU (pas celui d'ici) : au rendu, la
+        // célébration en est donc exactement là, à la microseconde près.
+        completions.push(
+            cle.clone(),
+            bandeau.now - std::time::Duration::from_secs_f32(elapsed),
+            overlay_ui::design::tokens::ITEM_SLOT_COMPLETION_DURATION,
+            true,
+        );
+        *bandeau.completions.borrow_mut() = completions;
+        bandeau.harness.run();
+        bandeau
+            .harness
+            .snapshot(format!("watchlist_celebration_{nom}"));
+    }
+}
+
 /// Le harnais du bandeau in-game, avec l'état que l'hôte lui prête rendu inspectable — trois tests
 /// s'en servent (sélection multiple, glisser-déposer, planche du geste).
 struct Bandeau {
     harness: egui_kittest::Harness<'static>,
     /// Le pendant du champ `App::watchlist_selection`.
     selection: std::rc::Rc<std::cell::RefCell<panels::watchlist::WatchlistSelection>>,
+    /// Le pendant du champ `App::watchlist_completions` — voir [`bandeau_suivi_celebration`].
+    completions: std::rc::Rc<std::cell::RefCell<panels::watchlist::WatchlistCompletions>>,
+    /// L'instant que le harnais passe au rendu, figé à sa création. **Indispensable pour une
+    /// capture d'animation** : un `Instant::now()` pris par l'appelant serait postérieur de
+    /// quelques millisecondes, et la capture dépendrait alors de la vitesse de la machine.
+    now: std::time::Instant,
     /// Ce que le panneau a demandé d'écrire à la dernière frame — le pendant de `RenderOutcome`.
     edition: std::rc::Rc<std::cell::RefCell<Option<panels::watchlist::WatchlistEdit>>>,
     window_width: f32,
@@ -1700,6 +1765,9 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     let selection = Rc::new(RefCell::new(
         panels::watchlist::WatchlistSelection::default(),
     ));
+    let completions = Rc::new(RefCell::new(
+        panels::watchlist::WatchlistCompletions::default(),
+    ));
     let edition: Rc<RefCell<Option<panels::watchlist::WatchlistEdit>>> =
         Rc::new(RefCell::new(None));
 
@@ -1708,6 +1776,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR + 88.0))
         .build_ui({
             let selection = Rc::clone(&selection);
+            let completions = Rc::clone(&completions);
             let edition = Rc::clone(&edition);
             move |ui| {
                 let ctx = ui.ctx().clone();
@@ -1729,6 +1798,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         spells_enabled: true,
                         combat_on_right: false,
                         watchlist_selection: &mut selection.borrow_mut(),
+                        watchlist_completions: &completions.borrow(),
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -1756,6 +1826,8 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     Bandeau {
         harness,
         selection,
+        completions,
+        now,
         edition,
         window_width,
     }
@@ -1851,6 +1923,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -2024,6 +2097,8 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let Bandeau {
         mut harness,
         selection,
+        completions: _,
+        now: _,
         edition: restantes,
         window_width,
     } = harnais_bandeau(entrees_de_bandeau());
@@ -2150,6 +2225,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -2254,6 +2330,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -2349,6 +2426,7 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -2442,6 +2520,7 @@ fn panneau_options_ne_panique_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -2579,6 +2658,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
                 // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
                 countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
+                // Idem pour les deux cases de complétion de la même section (2026-09-17) :
+                // jamais touchées, donc emportées actives — le défaut demandé.
+                completion: overlay_ui::panels::suivi_tab::CompletionSettings::default(),
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
@@ -2728,6 +2810,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -2850,6 +2933,7 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         spells_enabled: true,
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -3100,6 +3184,54 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
         vec![],
         "Échap répond « Non » : ni déconnexion, ni fermeture de la fenêtre derrière"
     );
+}
+
+/// **La section « Suivi » de l'onglet « Paramètres »** — le son, la fermeture de la carte, et les
+/// deux cases qui décident de ce que devient un suivi complété (2026-09-17).
+///
+/// Sa propre capture, parce qu'aucune autre ne la montre : `capture_parametres` s'arrête au haut
+/// de l'onglet, et les sections qui défilent (« Compte », « Mise à jour ») sont bien plus bas. Les
+/// deux cases « Supprimer les éléments suivis lorsqu'ils sont complétés » et « Activer l'animation
+/// de complétion » n'auraient donc été vérifiées nulle part.
+#[test]
+fn options_parametres_section_suivi() {
+    // Voir `options_parametres_section_compte` : ce test peint sans passer par
+    // `Textures::get_or_load`, c'est `parametres_avec_notifications` qui pose le gel de version.
+    let options_state = parametres_avec_notifications();
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui({
+            let mut options_state = options_state;
+            move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                ui.style_mut().visuals.text_cursor.blink = false;
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+            }
+        });
+    harness.run();
+    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
+    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet.
+    defile_les_parametres(&mut harness, 430.0);
+    harness.snapshot("options_parametres_section_suivi");
 }
 
 /// **La section « Compte » de l'onglet « Paramètres »** (2026-09-13) — la déconnexion, qui était
@@ -5409,6 +5541,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 spells_enabled: true,
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -6079,6 +6212,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 spells_enabled: true,
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -6235,6 +6369,7 @@ fn capture_login_with_update(
                     spells_enabled: true,
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -6753,6 +6888,7 @@ fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
                 spells_enabled: true,
                 combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -6852,6 +6988,7 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                         spells_enabled: true,
                         combat_on_right: false,
                         watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,

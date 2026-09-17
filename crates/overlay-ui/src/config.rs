@@ -130,6 +130,32 @@ pub struct OverlayConfig {
     /// La carte de décompte ne se ferme qu'à la main — même exception, même raison.
     #[serde(default)]
     pub countdown_alert_manual_close: bool,
+    /// **Retirer un suivi complété** — case « Supprimer les éléments suivis lorsqu'ils sont
+    /// complétés » de la section « Suivi » de l'onglet « Paramètres » (2026-09-17, voir
+    /// `panels::suivi_tab::CompletionSettings`).
+    ///
+    /// Un décompte arrivé à 0 et un objectif atteint ont fini leur travail : cochée — le défaut —
+    /// l'entrée disparaît de la bande **et du compte** une fois la célébration jouée. Décochée,
+    /// elle reste, compteur à sa cible.
+    ///
+    /// **Ici et non au compte**, même exception et même raison que
+    /// [`Self::countdown_alert_duration_seconds`] : ce réglage n'a pas d'équivalent web, et le
+    /// serveur n'accepte que des clés connues. Son EFFET, lui, part bien au compte — c'est la
+    /// liste de suivi amputée qui monte par `PATCH /api/v1/settings`.
+    ///
+    /// `#[serde(default = "actif")]` et non le simple `#[serde(default)]` de ses voisines, qui
+    /// vaudrait `false` : c'est le comportement demandé, il ne doit pas dépendre de l'ancienneté
+    /// du fichier de configuration.
+    #[serde(default = "actif")]
+    pub suivi_remove_on_complete: bool,
+    /// **Célébrer un suivi complété** — case « Activer l'animation de complétion » de la même
+    /// section, sous la précédente mais **indépendante** d'elle (les quatre combinaisons ont un
+    /// sens, voir `panels::suivi_tab::CompletionSettings`).
+    ///
+    /// Décochée, un suivi complété est retiré sans cérémonie — ou reste tel quel si le retrait
+    /// l'est aussi. Même politique que sa voisine pour le reste.
+    #[serde(default = "actif")]
+    pub suivi_completion_animation: bool,
     /// Prévenir par une **notification du système** qu'un personnage du joueur doit jouer
     /// (section « Combat » de l'onglet Paramètres, 2026-09-14).
     ///
@@ -395,6 +421,8 @@ impl Default for OverlayConfig {
             recap_duration_enabled: actif(),
             recap_fights_enabled: actif(),
             recap_challenges_enabled: actif(),
+            suivi_remove_on_complete: actif(),
+            suivi_completion_animation: actif(),
             recap_resume_enabled: actif(),
             recap_resume_minutes: None,
             recap_position_x: None,
@@ -457,6 +485,21 @@ impl OverlayConfig {
     pub fn set_countdown_toast(&mut self, toast: crate::panels::suivi_tab::CountdownToastSettings) {
         self.countdown_alert_duration_seconds = Some(toast.duration_seconds);
         self.countdown_alert_manual_close = toast.manual_close;
+    }
+
+    /// Ce que devient un suivi complété, d'après cette config — voir
+    /// [`crate::panels::suivi_tab::CompletionSettings`].
+    pub fn completion(&self) -> crate::panels::suivi_tab::CompletionSettings {
+        crate::panels::suivi_tab::CompletionSettings {
+            remove: self.suivi_remove_on_complete,
+            animate: self.suivi_completion_animation,
+        }
+    }
+
+    /// Reporte les deux réglages de complétion dans la config.
+    pub fn set_completion(&mut self, completion: crate::panels::suivi_tab::CompletionSettings) {
+        self.suivi_remove_on_complete = completion.remove;
+        self.suivi_completion_animation = completion.animate;
     }
 
     /// Le réglage de reprise de la session du Récap effectif — défaut pour une config qui ne le

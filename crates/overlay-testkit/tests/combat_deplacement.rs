@@ -167,6 +167,7 @@ fn harness_sized(
                 spells_enabled: false,
                 combat_on_right: on_right,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,

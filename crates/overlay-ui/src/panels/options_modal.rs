@@ -297,6 +297,11 @@ pub struct OptionsModalState {
     /// vigueur (`config::OverlayConfig::countdown_toast`) et pris en compte à « Valider », comme
     /// [`Self::mutes`] et [`Self::features`].
     pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// **Ce que devient un suivi complété** — les deux cases « Supprimer les éléments suivis
+    /// lorsqu'ils sont complétés » et « Activer l'animation de complétion » de la même section
+    /// (2026-09-17, voir [`suivi_tab::CompletionSettings`]). Réglage LOCAL, même trajet que
+    /// [`Self::countdown_toast`].
+    pub completion: suivi_tab::CompletionSettings,
     /// **La reprise de la session du Récap** — ligne « Reprendre la session après une pause de
     /// moins de … min » de la section « Recap » (2026-09-17, voir
     /// [`crate::recap_session::ResumeSettings`]). Réglage LOCAL, même trajet que
@@ -443,6 +448,8 @@ pub struct OptionsInitial {
     pub mutes: AlertMutes,
     /// La fermeture de la carte de décompte telle qu'elle était à l'ouverture — même rôle.
     pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Les deux réglages de complétion tels qu'ils étaient à l'ouverture — même rôle.
+    pub completion: suivi_tab::CompletionSettings,
     /// La reprise de la session du Récap telle qu'elle était à l'ouverture — même rôle.
     pub recap_resume: ResumeSettings,
     /// La position de la bande Récap telle qu'elle était à l'ouverture — même rôle.
@@ -479,6 +486,7 @@ impl OptionsModalState {
             features: self.features,
             mutes: self.mutes,
             countdown_toast: self.countdown_toast,
+            completion: self.completion,
             recap_resume: self.recap_resume,
             recap_position: self.recap_position,
             shortcuts: self.shortcuts.clone(),
@@ -521,6 +529,7 @@ impl OptionsModalState {
             || self.features != self.initial.features
             || self.mutes != self.initial.mutes
             || self.countdown_toast != self.initial.countdown_toast
+            || self.completion != self.initial.completion
             || self.recap_resume != self.initial.recap_resume
             || self.recap_position != self.initial.recap_position
             || self.alerts_draft != self.initial.alerts
@@ -657,6 +666,9 @@ pub struct OptionsCommit {
     /// (`config::OverlayConfig::set_countdown_toast`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetCountdownToast`).
     pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Ce que devient un suivi complété — même trajet que `countdown_toast` : enregistré dans la
+    /// config locale (`config::OverlayConfig::set_completion`) et gardé en vigueur par l'hôte.
+    pub completion: suivi_tab::CompletionSettings,
     /// La reprise de la session du Récap ([`crate::recap_session::ResumeSettings`]) — ce que
     /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
     /// (`recap_session::RecapSession::set_resume_settings`).
@@ -1317,6 +1329,44 @@ pub fn show(
                 },
             ) {
                 action = OptionsModalAction::TestCountdownSound;
+            }
+
+            // **Ce que devient un suivi qui vient d'aboutir** (2026-09-17, demande utilisateur).
+            //
+            // Ces deux cases sont la réponse à « et si le retrait était une erreur ? » : le geste
+            // n'est pas rattrapable après coup, il est réglable AVANT. Les deux sont actives par
+            // défaut, et **indépendantes** — les quatre combinaisons ont un sens (voir
+            // `suivi_tab::CompletionSettings`), l'animation n'est donc pas grisée quand le retrait
+            // est décoché : une tuile peut célébrer et rester.
+            //
+            // Elles ne passent pas par `notifications::section` : ce n'est ni un son ni une carte,
+            // c'est ce qu'il advient de l'ENTRÉE. Grisées avec le reste de la section quand le
+            // Suivi est éteint, comme tout ce qui le concerne ici.
+            for (value, label, tooltip, log_name) in [
+                (
+                    &mut state.completion.remove,
+                    "Supprimer les éléments suivis lorsqu'ils sont complétés",
+                    "Un décompte arrivé à 0 ou un objectif atteint a fini son travail : son \
+                     élément disparaît du bandeau ET du compte. Décochée, il reste, compteur à sa \
+                     cible.",
+                    "options-suivi-retrait",
+                ),
+                (
+                    &mut state.completion.animate,
+                    "Activer l'animation de complétion",
+                    "La tuile se soulève, sa bordure devient arc-en-ciel et tournoie, se fige sur \
+                     la couleur de rareté de l'objet, puis éclate en confettis — trois secondes et \
+                     demie. Décochée, l'élément s'en va sans cérémonie.",
+                    "options-suivi-animation",
+                ),
+            ] {
+                ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+                ui.add(
+                    design::checkbox(value, label)
+                        .enabled(state.features.suivi)
+                        .tooltip(tooltip)
+                        .log_name(log_name),
+                );
             }
 
             ui.add_space(SECTION_GAP);
@@ -2052,6 +2102,7 @@ mod tests {
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
+                completion: suivi_tab::CompletionSettings::default(),
                 recap_resume: ResumeSettings::default(),
                 // La bande Récap n'a pas bougé dans cette fenêtre de test, et « Replacer au
                 // défaut » n'a pas été cliqué : `None`, c'est-à-dire son ancrage d'origine.

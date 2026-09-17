@@ -1706,6 +1706,80 @@ pub const ITEM_SLOT_GLYPH_SIZE: f32 = 8.0;
 pub const ITEM_SLOT_GLYPH_INSET: f32 = ITEM_SLOT_SELECTION_INSET + 1.0;
 
 // ---------------------------------------------------------------------------------------------
+// Sceau de complétion — `design::item_slot`, méthode `completion`
+//
+// Un décompte arrivé à 0 ou un objectif atteint ne disparaît pas sans rien dire : sa bordure
+// devient arc-en-ciel et tournoie, l'arc-en-ciel se **condense sur la couleur de rareté de
+// l'objet**, la tuile éclate et se dissout. Variante « Rareté scellée » choisie par l'utilisateur
+// le 2026-09-17 parmi quatre maquettes animées.
+//
+// **Les durées ci-dessous sont un découpage, pas une mesure** : rien dans le jeu ne les dicte.
+// Elles viennent du budget que l'utilisateur a posé — « pas plus de 4 secondes, quelque chose
+// qu'on remarque au moment où il y a le toast » — et de la maquette qu'il a validée, où elles
+// étaient jouées à cette vitesse. Elles se lisent comme des instants cumulés depuis le
+// franchissement du seuil, d'où les bornes croissantes.
+
+/// Fin du **soulèvement** — l'emplacement grandit de [`ITEM_SLOT_COMPLETION_LIFT_SCALE`] pour
+/// annoncer que quelque chose lui arrive.
+pub const ITEM_SLOT_COMPLETION_LIFT_END: f32 = 0.30;
+
+/// Fin de la **rotation arc-en-ciel** : trois tours, accélérés (voir `completion_phase`).
+pub const ITEM_SLOT_COMPLETION_SPIN_END: f32 = 1.80;
+
+/// Fin de la **condensation** : la couronne a fini de passer de l'arc-en-ciel à la couleur de
+/// rareté de l'objet.
+pub const ITEM_SLOT_COMPLETION_SEAL_END: f32 = 2.15;
+
+/// Début de la **dissolution** de l'emplacement en particules.
+pub const ITEM_SLOT_COMPLETION_DISSOLVE_START: f32 = 2.30;
+
+/// Fin de la dissolution : l'emplacement ne peint plus rien après cet instant.
+pub const ITEM_SLOT_COMPLETION_DISSOLVE_END: f32 = 3.35;
+
+/// **Durée totale de la célébration**, en secondes — ce que l'hôte attend avant de retirer
+/// l'entrée (`main.rs`), et la borne au-delà de laquelle `completion_phase` rend une phase vide.
+///
+/// Les 0,15 s qui séparent cette valeur de [`ITEM_SLOT_COMPLETION_DISSOLVE_END`] ne sont pas un
+/// arrondi : elles laissent la gerbe de confettis du panneau (`panels::watchlist`) finir sa chute
+/// sur un emplacement déjà vide, plutôt que de la couper net.
+pub const ITEM_SLOT_COMPLETION_DURATION: f32 = 3.50;
+
+/// Échelle atteinte au sommet du soulèvement — +9 %, assez pour que la tuile se détache de ses
+/// voisines sans bousculer la rangée (le panneau ne réserve aucune place pour ce dépassement).
+pub const ITEM_SLOT_COMPLETION_LIFT_SCALE: f32 = 1.09;
+
+/// Nombre de tours de la couronne pendant la phase de rotation.
+pub const ITEM_SLOT_COMPLETION_TURNS: f32 = 3.0;
+
+/// Largeur de la couronne au repos puis au plus fort de la rotation, en px à
+/// [`ITEM_SLOT_SIZE`] — elle s'épaissit en tournant, puis se resserre en se scellant sur la
+/// rareté. Proportionnelles au côté de l'emplacement, comme tout le reste du composant.
+pub const ITEM_SLOT_COMPLETION_CROWN_MIN: f32 = 2.0;
+/// Voir [`ITEM_SLOT_COMPLETION_CROWN_MIN`].
+pub const ITEM_SLOT_COMPLETION_CROWN_MAX: f32 = 5.0;
+
+/// Nombre de segments qui composent la couronne. `egui` n'a pas de dégradé conique : l'arc-en-ciel
+/// est une suite de traits colorés posés le long du contour, et 48 suffisent pour qu'on n'en
+/// distingue aucun à 64 px (un par 1,3 px de périmètre à cette taille).
+pub const ITEM_SLOT_COMPLETION_CROWN_SEGMENTS: usize = 48;
+
+/// Saturation et valeur de l'arc-en-ciel de la couronne — pleines, à peine adoucies : cette
+/// couronne est peinte par-dessus un jeu, elle doit se voir.
+pub const ITEM_SLOT_COMPLETION_RAINBOW_SATURATION: f32 = 0.92;
+/// Voir [`ITEM_SLOT_COMPLETION_RAINBOW_SATURATION`].
+pub const ITEM_SLOT_COMPLETION_RAINBOW_VALUE: f32 = 1.0;
+
+/// Nombre de particules de la dissolution. Déterministes (voir `completion_phase`) : une capture
+/// de référence doit rendre deux fois la même image.
+pub const ITEM_SLOT_COMPLETION_MOTES: usize = 64;
+
+/// Hauteur dont une particule monte avant de s'éteindre, en fraction du côté de l'emplacement.
+pub const ITEM_SLOT_COMPLETION_MOTE_RISE: f32 = 0.42;
+
+/// Côté d'une particule de dissolution, en px.
+pub const ITEM_SLOT_COMPLETION_MOTE_SIZE: f32 = 2.0;
+
+// ---------------------------------------------------------------------------------------------
 // Jauge — `design::meter`
 //
 // Ces valeurs viennent de `panels::combat`, où elles décrivaient la barre de dégâts. Elles ont été

@@ -1963,6 +1963,54 @@ ui.add(
 
 Textures : les sept `DsTexture::ItemBorder*`, entrées au manifeste avec ce composant.
 
+### `completion` — la célébration d'un suivi accompli (2026-09-17)
+
+```rust
+design::item_slot()
+    .frame(SlotFrame::Rarity(ItemRarity::Legendary))
+    .completion(Some(elapsed_seconds))   // None = emplacement ordinaire
+```
+
+Un décompte arrivé à 0 ou un objectif atteint ne disparaît pas sans rien dire : l'emplacement se
+soulève, sa bordure devient une couronne arc-en-ciel qui tourne **en accélérant**, la couronne se
+**condense sur la couleur de rareté de l'objet**, éclate, et l'emplacement se dissout en
+particules. Variante « Rareté scellée », choisie par l'utilisateur parmi quatre maquettes animées.
+
+| Jusqu'à | Ce qui se passe |
+| --- | --- |
+| 0,30 s | soulèvement — on regarde CETTE tuile |
+| 1,80 s | la couronne tourne, trois tours, accélérés |
+| 2,15 s | condensation sur la rareté, éclat, onde |
+| 3,35 s | dissolution en particules |
+| 3,50 s | plus rien — l'hôte retire l'entrée du Suivi et du compte |
+
+**L'appelant passe un temps, pas une phase.** Le panneau connaît l'instant du franchissement, pas
+le découpage de l'animation, qui est une décision du design system (`completion_phase`, fonction
+libre testée comme `paint_order`). C'est aussi ce qui rend la capture de référence possible : un
+temps figé rend toujours la même image, et les particules sont **hachées sur leur index** plutôt
+que tirées d'une horloge.
+
+**La couleur du sceau vient du cadre, jamais de l'appelant** (« une intention, pas une couleur ») :
+`ItemRarity::seal_color()`, sept teintes **mesurées** sur les `Border-*.webp` eux-mêmes — la partie
+la plus saturée du liseré, moyennée sur son vingtième le plus vif. Un ennemi (`SlotFrame::Plain`)
+n'a pas de rareté et se scelle sur l'**or** que cette interface emploie déjà pour dire « accompli ».
+
+**`egui` n'a pas de dégradé conique** : l'arc-en-ciel est une suite de 48 traits posés le long du
+contour arrondi (`ring_point`), chacun de la teinte de sa position. La couronne tourne parce que la
+teinte glisse — aucune géométrie ne bouge, ce qui la garde exactement sur le liseré qu'elle
+recouvre. Le contour part du **milieu du bord haut** : la couture rouge → violet s'y remarque
+moins que sur un coin.
+
+Ce que le composant ne fait PAS : la **gerbe de confettis**. Elle sort largement du carré, et un
+emplacement ne peint pas hors de lui-même — c'est au panneau de la poser (`panels::watchlist`).
+
+Un défaut rattrapé par la première planche de galerie : l'éclat se peignait **à pleine puissance
+dès la première image**, `1 - progress(...)` valant 1 pendant toute la rotation faute de garde. Un
+test le fige désormais.
+
+Capture : `design_gallery_completion.png` — les sept instants de la séquence, puis les sept sceaux
+côte à côte au même instant, qui est là qu'une teinte mesurée de travers se verrait.
+
 ### L'ordre de peinture EST le composant
 
 **La bordure de rareté se peint SOUS l'icône. Le cadre simple, PAR-DESSUS.** Ce n'est pas une

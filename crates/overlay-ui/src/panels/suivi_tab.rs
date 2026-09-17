@@ -205,6 +205,62 @@ impl CountdownToastSettings {
     }
 }
 
+/// **Ce que devient un suivi qui vient d'aboutir** — les deux cases de la section « Suivi » de
+/// l'onglet « Paramètres » (2026-09-17, demande utilisateur).
+///
+/// Un décompte arrivé à 0 et un objectif atteint ont fini leur travail : l'entrée ne sert plus à
+/// rien et encombre la bande. Elle est donc **retirée**, du Suivi comme du compte, une fois la
+/// célébration jouée — et c'est ce retrait qui rendait la question « et si c'était une erreur ? »
+/// inévitable. La réponse de l'utilisateur, le 2026-09-17, est de ne PAS rendre le geste
+/// rattrapable après coup mais de le rendre **réglable avant** : ces deux cases, actives par
+/// défaut.
+///
+/// **Les deux sont indépendantes**, et les quatre combinaisons ont un sens :
+///
+/// | Retrait | Animation | Ce qui se passe |
+/// | --- | --- | --- |
+/// | ✔ | ✔ | la tuile célèbre, puis disparaît (le défaut) |
+/// | ✔ | ✘ | la tuile disparaît tout de suite, sans cérémonie |
+/// | ✘ | ✔ | la tuile célèbre et reste, compteur à sa cible |
+/// | ✘ | ✘ | rien ne bouge — seul le toast signale l'événement |
+///
+/// **Persistés localement** (`config::OverlayConfig`), pour la même raison que
+/// [`CountdownToastSettings`] : pas d'équivalent web, et le serveur n'accepte que des clés
+/// connues. Le retrait, lui, part bien au compte — c'est son effet qui est synchronisé, pas le
+/// réglage qui le déclenche.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionSettings {
+    /// Retirer l'entrée du Suivi — et du compte — quand elle est complétée.
+    pub remove: bool,
+    /// Jouer la célébration sur la tuile (voir `design::item_slot::completion`).
+    pub animate: bool,
+}
+
+impl Default for CompletionSettings {
+    fn default() -> Self {
+        Self {
+            remove: true,
+            animate: true,
+        }
+    }
+}
+
+impl CompletionSettings {
+    /// Le délai à attendre avant de retirer l'entrée, en secondes — la durée de la célébration
+    /// quand elle est jouée, **zéro sinon**.
+    ///
+    /// C'est ici, et pas dans l'hôte, parce que les deux réglages se lisent ensemble : sans
+    /// animation il n'y a rien à attendre, et une attente de 3,5 s devant une tuile immobile
+    /// passerait pour un bug.
+    pub fn removal_delay_seconds(self) -> f32 {
+        if self.animate {
+            design::tokens::ITEM_SLOT_COMPLETION_DURATION
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Ce qu'il faut à la section « Suivi » de l'onglet « Paramètres » pour régler la fermeture de
 /// cette carte — voir `panels::notifications::ToastClose` : le bornage reste ici, le peintre n'en
 /// refait pas un à lui.
@@ -350,13 +406,21 @@ pub enum SuiviTabAction {
 /// fonctions de clé côte à côte, c'est une sélection qui survit à un aller-retour dans l'un et se
 /// perd dans l'autre.
 pub(crate) fn entry_key(entry: &WatchlistEntry) -> String {
+    key_of(&entry.name, entry.catalog_id)
+}
+
+/// La même clé, **construite depuis un nom et un id** plutôt que depuis une entrée entière.
+///
+/// Écrite pour les complétions (2026-09-17) : le thread Engine annonce qu'un suivi vient
+/// d'aboutir à partir d'une `WatchlistAlert`, qui porte bien le nom et l'id du catalogue mais
+/// n'est pas une `WatchlistEntry`. Recopier le `format!` là-bas aurait rendu la clé de l'alerte
+/// silencieusement divergente de celle de la tuile le jour où l'une des deux change — exactement
+/// le défaut que la doc d'[`entry_key`] met en garde de commettre entre deux écrans.
+pub fn key_of(name: &str, catalog_id: Option<i64>) -> String {
     format!(
         "{}::{}",
-        entry.name,
-        entry
-            .catalog_id
-            .map(|id| id.to_string())
-            .unwrap_or_default()
+        name,
+        catalog_id.map(|id| id.to_string()).unwrap_or_default()
     )
 }
 
