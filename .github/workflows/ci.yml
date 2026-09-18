@@ -118,7 +118,7 @@ jobs:
           workspaces: |
             . -> target
             xtask -> target
-      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
+      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform --all-targets -- -D warnings
       - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay-x11 -- -D warnings
       - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
@@ -157,7 +157,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
-      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
+      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform
       - run: cargo test --no-fail-fast -p overlay-ui --lib
       - name: binaire Linux/X11 — compile (pas de tests unitaires, voir son fichier)
         run: cargo build -p overlay-ui --bin wakfu-companion-overlay-x11
@@ -223,7 +223,7 @@ jobs:
       # sans qu'aucune ne soit tenue à un verdict que l'autre n'applique pas.
       - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay -- -D warnings
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
-        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
+        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync
 
   mem-budget:
     runs-on: ubuntu-24.04

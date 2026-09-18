@@ -171,7 +171,7 @@ ne voit jamais de doublon.
 wakfu-companion-overlay/
 ├── Cargo.toml                     # workspace
 ├── crates/
-│   ├── overlay-app/               # binaire : câblage, config, cycle de vie
+│   ├── overlay-app/               # binaire : câblage, config, cycle de vie (harnais L1, retiré le 2026-09-19)
 │   │   └── src/{main.rs,config.rs,paths.rs,hotkey.rs}
 │   ├── overlay-ingest/            # tail de wakfu.log
 │   │   └── src/{watcher.rs,tailer.rs,rotation.rs,discovery.rs}
@@ -3115,7 +3115,7 @@ la console n'en est qu'un miroir.
   `tracing-subscriber`, zéro dépendance supplémentaire) — UTC plutôt qu'heure locale pour un tri
   lexical fiable et aucune ambiguïté de fuseau/heure d'été.
 - **Niveau** : `info` sur le code de l'appli, `warn` sur `wgpu_hal`/`wgpu_core`/`naga` (bruyants),
-  réglable sans recompiler via `RUST_LOG` (même convention que `overlay-app`).
+  réglable sans recompiler via `RUST_LOG`.
 - **Bornes de session** : chaque lancement journalise `=== session démarrée ===` (PID, version,
   hash de commit — voir §11, OS)
   en tout premier dans `main()`, et `=== session terminée ===` (même PID, + la raison) à CHAQUE
@@ -3125,7 +3125,7 @@ la console n'en est qu'un miroir.
   anormale (crash).
 - Le jeton de compte ne transite **jamais** dans ces logs (§10) — seuls des messages de statut
   (succès/échec d'appairage, de sauvegarde, de récupération des réglages) y apparaissent.
-- `overlay-app` (harnais L1, pas l'overlay final) garde un `tracing_subscriber::fmt` console
+- `overlay-app` (harnais L1, retiré du workspace le 2026-09-19 — constat C14 RGPD) gardait un `tracing_subscriber::fmt` console
   uniquement — pas de fichier, pas de rotation : pas l'usage visé par ce lot.
 
 ---
@@ -3186,7 +3186,7 @@ fenêtre système, sans GPU physique, exécutable dans une session Claude cloud 
 standard.
 
 - **Nouveau crate `crates/overlay-testkit`** (lib + tests). Jamais dans le graphe de dépendances du
-  binaire livré — vérifié en CI par `cargo tree -p overlay-app` (aucune occurrence attendue).
+  binaire livré — vérifiable par `cargo tree -p overlay-ui` (aucune occurrence attendue).
 - **Frontière à extraire de `crates/overlay-ui/src/main.rs::render()`** : une fonction pure
   `build_ui(ctx: &egui::Context, content: RenderContent<'_>) -> egui::FullOutput`, qui ne contient
   que ce qui est aujourd'hui dans la fermeture `ctx.run_ui(...)`. `render()` garde tout ce qui
@@ -3382,7 +3382,7 @@ réduite pour l'instant.**
   (quelques lignes de séparation décalées de sub-pixels — rendu logiciel lavapipe, pas une
   régression), corrigé dans l'urgence en régénérant le snapshot depuis CET environnement, PUIS
   traité à la racine le même jour (voir juste en dessous). Point vérifié dans cette session :
-  `cargo tree -p overlay-app | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
+  `cargo tree -p overlay-ui | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
   le graphe du binaire livré.
 - **Clôturé (2026-09-04, suite)** — les trois manques listés ci-dessus au moment de l'écriture de
   ce paragraphe sont désormais traités :
@@ -3573,7 +3573,7 @@ maîtrisée) et pour `ureq`/`tokio` (refus d'un second modèle de concurrence sa
   documentées et pinnées — jamais d'`apt-get` ad hoc au fil d'une session.
 - **Dépendances Rust nouvelles** (`egui_kittest`, `x11rb` pour les assertions du harnais, une
   éventuelle lib de diff d'image) : en `[dev-dependencies]` d'`overlay-testkit` ou du harnais
-  Niveau 2 uniquement — jamais dans `overlay-ui`/`overlay-app`, chacune justifiée par une ligne
+  Niveau 2 uniquement — jamais dans `overlay-ui`, chacune justifiée par une ligne
   écrite (modèle §7.3 pour `ureq` vs `tokio`).
 - Aucune de ces dépendances ne remonte dans `[patch.crates-io]` du `Cargo.toml` racine — réservé au
   patch DirectComposition de production.

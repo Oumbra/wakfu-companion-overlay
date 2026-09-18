@@ -12,7 +12,7 @@
 //!   séquences rapprochées entre threads (auth/catalogue/moteur, voir `main.rs`).
 //! - **Niveau** : `info` par défaut sur le code de l'appli, `warn` sur les dépendances graphiques
 //!   bruyantes (wgpu/naga) — réglable sans recompiler via la variable d'env `RUST_LOG`
-//!   (`tracing_subscriber::EnvFilter`, même convention que `overlay-app`), et à chaud par la case
+//!   (`tracing_subscriber::EnvFilter`), et à chaud par la case
 //!   « Journal détaillé » de la fenêtre Options ([`set_verbose`]).
 //! - **Rien de personnel en `info`** (constat C6 de `docs/analyse-rgpd.md`, 2026-09-18) : ni nom
 //!   de personnage, ni pseudonyme d'autre joueur, ni chemin portant le nom de compte du système

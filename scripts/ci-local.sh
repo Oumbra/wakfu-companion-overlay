@@ -124,7 +124,7 @@ step "fixtures sans données réelles"  bash "$SCRIPT_DIR/check-fixtures.sh"
 step "fmt — workspace"                cargo fmt --all -- --check
 step "fmt — xtask"                    cargo fmt --manifest-path xtask/Cargo.toml -- --check
 
-step "clippy — crates métier"         cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
+step "clippy — crates métier"         cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform --all-targets -- -D warnings
 if [ "$PLATFORM" = linux ]; then
   step "clippy — overlay-ui (lib + x11)" cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay-x11 -- -D warnings
   step "clippy — overlay-testkit"        cargo clippy -p overlay-testkit --all-targets -- -D warnings
@@ -314,7 +314,7 @@ etape_captures_conteneur() {
 
 
 if [ "$LINT_ONLY" -eq 0 ]; then
-  step "test — crates métier"         cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
+  step "test — crates métier"         cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform
   if [ "$PLATFORM" = linux ]; then
     step "test — overlay-ui (lib)"     cargo test --no-fail-fast -p overlay-ui --lib
     step "build — binaire Linux/X11"   cargo build -p overlay-ui --bin wakfu-companion-overlay-x11

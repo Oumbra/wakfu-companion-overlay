@@ -19,7 +19,7 @@ suivie. Pas encore de file d'envoi ni de synchro d'historique (L5, à venir).
 ## Pourquoi `ureq` plutôt que `reqwest`+`tokio`
 
 Ce crate ne fait que quelques requêtes ponctuelles (pairing, un `GET /settings`), toujours sur son
-propre thread (`overlay-app`/`overlay-ui` le spawn dédié, jamais le thread Engine ni le main
+propre thread (`overlay-ui` le spawn dédié, jamais le thread Engine ni le main
 thread) — jamais sur un chemin chaud. `reqwest`+`tokio` (rt `current_thread`) reste prévu pour la
 vraie file d'envoi asynchrone de L5 ; l'introduire déjà ici aurait été une dépendance non justifiée
 par le besoin réel de cette itération.

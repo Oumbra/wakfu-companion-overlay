@@ -128,7 +128,7 @@ impl Tailer {
         // `false` n'arrive qu'au prochain appel, s'il détecte une rotation (plus haut). Sans ce
         // flag posé ici (et pas seulement dans la branche `len == self.offset` ci-dessus), une
         // ligne ajoutée en direct juste après le rattrapage initial restait à tort étiquetée
-        // rattrapage — observé en conditions réelles via `overlay-app` sur un vrai `wakfu.log`.
+        // rattrapage — observé en conditions réelles sur un vrai `wakfu.log` (harnais L1, depuis retiré).
         self.caught_up = true;
         self.pending.extend_from_slice(&buf);
 

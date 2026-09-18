@@ -2053,7 +2053,7 @@ fn build_trade_sync_event(
 
 /// Frontière métier complète (§2 du plan) : `LineBatch` → `LogEntry` (QuickJS) → `SessionSnapshot`
 /// (agrégation Rust). Un thread dédié le possède (§3) ; jamais partagé entre threads directement,
-/// voir `overlay-app` pour le câblage réel (`ArcSwap<SessionSnapshot>` publié vers l'UI).
+/// voir `overlay-ui` (`engine_thread`) pour le câblage réel (`ArcSwap<SessionSnapshot>` publié vers l'UI).
 pub struct Engine {
     parser: crate::quickjs_engine::LogParserEngine,
     state: SessionState,

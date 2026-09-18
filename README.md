@@ -187,7 +187,6 @@ Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tou
 | Crate | Lot | Contenu |
 | --- | --- | --- |
 | [`overlay-ingest`](crates/overlay-ingest/) | L1 ✅ | Suivi de `wakfu.log` : découverte de chemin, lecture incrémentale, rotation/troncature. `cargo test -p overlay-ingest`. |
-| [`overlay-app`](crates/overlay-app/) | L1 ✅ | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
 | [`overlay-engine`](crates/overlay-engine/) | L2 ✅ | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
 | [`overlay-ui`](crates/overlay-ui/) | L2 ✅ | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` (Windows) ou `preview.sh` (Linux) depuis le dossier du crate. |
 | [`overlay-platform`](crates/overlay-platform/) | L2 ✅ | Primitives spécifiques à l'OS pour `overlay-ui` : découverte de la fenêtre du jeu, décision topmost, clic-traversant. |

@@ -86,7 +86,7 @@ fn verify_keyring_write(token: &str) -> bool {
 }
 
 /// `None` si aucun jeton n'a jamais été enregistré (ou trousseau ET fichier absents/illisibles) —
-/// jamais une erreur : l'overlay doit démarrer sans compte lié (mode invité), voir `overlay-app`.
+/// jamais une erreur : l'overlay doit pouvoir démarrer sans compte lié et afficher sa fenêtre de connexion.
 pub fn load_token() -> Option<String> {
     entry()
         .ok()
