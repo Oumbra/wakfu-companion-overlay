@@ -90,6 +90,13 @@ jobs:
       # qui n'est plus celui du gate. Voir l'en-tête du script.
       - name: image de base du rendu, cohérente partout
         run: bash scripts/verifier-digest-rendu.sh
+      # Même nature, même place : textuel et instantané. Le dépôt est public — une fixture
+      # `wakfu.log` brute y publierait un jeton de session, une IP, un nom de compte Windows et les
+      # pseudonymes et messages de tous les joueurs croisés ce jour-là (constat C1 de
+      # `docs/analyse-rgpd.md`). Doublé par le hook `pre-commit`, qui ne survit pas à un conteneur
+      # de session cloud : c'est CETTE étape qui fait foi.
+      - name: fixtures sans données réelles
+        run: bash scripts/check-fixtures.sh
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - run: cargo fmt --all -- --check

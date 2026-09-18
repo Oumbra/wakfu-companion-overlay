@@ -116,6 +116,11 @@ fi
 # `fmt` du CI. Voir l'en-tête du script appelé.
 step "digest de l'image de rendu"     bash "$SCRIPT_DIR/verifier-digest-rendu.sh"
 
+# Même nature : purement textuel, quelques millisecondes. Double l'étape homonyme du CI, et le hook
+# `pre-commit` — le dépôt est public, une fixture `wakfu.log` brute y publierait un jeton de
+# session, une IP, un nom de compte Windows et les messages de tous les joueurs croisés ce jour-là.
+step "fixtures sans données réelles"  bash "$SCRIPT_DIR/check-fixtures.sh"
+
 step "fmt — workspace"                cargo fmt --all -- --check
 step "fmt — xtask"                    cargo fmt --manifest-path xtask/Cargo.toml -- --check
 
