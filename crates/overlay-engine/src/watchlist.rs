@@ -117,7 +117,7 @@ const APP_NAME: &str = "wakfu-companion-overlay-test";
 /// construction ; les tests de ce module passent un chemin de fichier temporaire explicite à
 /// `load_from`/`save_to` plutôt que de dépendre de celui-ci.
 pub fn default_store_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    crate::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("watchlist-counts.json"))
         .unwrap_or_else(|| PathBuf::from("watchlist-counts.json"))
 }

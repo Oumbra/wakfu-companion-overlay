@@ -50,7 +50,7 @@ const MAX_FIGHT_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 6
 
 /// Dossier de stockage par défaut — voir la doc de module.
 pub fn default_store_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    crate::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("data"))
         .unwrap_or_else(|| PathBuf::from("data"))
 }

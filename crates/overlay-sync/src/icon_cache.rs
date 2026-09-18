@@ -14,7 +14,7 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 const APP_NAME: &str = "wakfu-companion-overlay-test";
 
 fn cache_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.data_dir().join("icons"))
+    overlay_engine::app_dirs::project_dirs(APP_NAME).map(|dirs| dirs.data_dir().join("icons"))
 }
 
 fn file_path(kind: IconKind, gfx_id: &str) -> Option<PathBuf> {

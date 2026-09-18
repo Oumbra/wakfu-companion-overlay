@@ -5061,6 +5061,9 @@ fn main() {
     let (class_spells, monster_spells) = overlay_engine::preload_spell_indexes();
     tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
+    // Une seule racine de dossiers depuis le 2026-09-19 (constat C13) : ce que l'ancienne
+    // contenait est déplacé avant toute lecture, et elle disparaît.
+    config::migrate_legacy_root();
     let mut saved_config = config::load();
     // **Journal détaillé**, dès que la config est lue (constat C6 de `docs/analyse-rgpd.md`) :
     // `logging::init` démarre toujours au niveau ordinaire — c'est le défaut voulu, rien de

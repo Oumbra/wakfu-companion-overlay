@@ -3,6 +3,7 @@
 //! voir `engine-js/`) puis en `SessionSnapshot` agrégé (Rust, voir `session.rs`) — les deux
 //! premières briques que les panneaux de l'UI (L2) afficheront.
 
+pub mod app_dirs;
 pub mod catalog;
 pub mod chat_alert;
 pub mod class_breed;

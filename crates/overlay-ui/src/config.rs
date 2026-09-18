@@ -615,25 +615,118 @@ impl OverlayConfig {
     }
 }
 
-/// **La racine de `config.toml` et des gabarits de tour** — publique depuis 2026-09-18 pour
-/// `crate::local_data` (l'effacement complet doit connaître les DEUX racines du dépôt, constat
-/// C13) et pour `turn_watch::templates::data_dir`, qui la reconstruisait à côté.
-///
-/// Le nom de projet porte le suffixe `-test` sous `cfg(test)`, comme dans `overlay_sync` et
+/// Nom de projet — suffixe `-test` sous `cfg(test)`, comme dans `overlay_sync` et
 /// `overlay_engine` : un test qui écrit — ou qui efface — ne doit jamais atteindre le dossier réel
 /// de la personne qui lance la suite.
+#[cfg(not(test))]
+const APP_NAME: &str = "wakfu-companion-overlay";
+#[cfg(test)]
+const APP_NAME: &str = "wakfu-companion-overlay-test";
+
+/// **La racine de `config.toml` et des gabarits de tour** — la même que tout le reste de l'overlay
+/// depuis le 2026-09-19 (`overlay_engine::app_dirs`, constat C13 de `docs/analyse-rgpd.md`) ;
+/// publique pour `crate::local_data` et `turn_watch::templates::data_dir`.
 pub fn project_dirs() -> Option<directories::ProjectDirs> {
-    // Mêmes qualifieurs que le reste du dépôt (organisation GitHub `Oumbra`, voir
-    // `overlay_sync::token_store` pour le même motif appliqué au jeton de compte natif).
-    #[cfg(not(test))]
-    const APP_NAME: &str = "wakfu-companion-overlay";
-    #[cfg(test)]
-    const APP_NAME: &str = "wakfu-companion-overlay-test";
-    directories::ProjectDirs::from("com", "Oumbra", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
+}
+
+/// L'ancienne racine de ce module (`%APPDATA%\Oumbra\wakfu-companion-overlay` sous Windows,
+/// jusqu'au 2026-09-19) — pour [`migrate_legacy_root`] et l'effacement complet, rien d'autre.
+pub fn legacy_project_dirs() -> Option<directories::ProjectDirs> {
+    overlay_engine::app_dirs::legacy_project_dirs(APP_NAME)
 }
 
 fn config_file() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("config.toml"))
+}
+
+/// **Déplace ce que l'ancienne racine contenait vers la racine unique, puis la supprime** — à
+/// appeler au démarrage, avant [`load`]. Constat C13 (2026-09-19) : sous Windows, `config.toml`
+/// et `turn-templates/` vivaient sous `%APPDATA%\Oumbra\wakfu-companion-overlay\`, tout le reste
+/// sous `%APPDATA%\wakfu-companion-overlay\`. Sous Linux les deux racines se confondent et il
+/// n'y a rien à faire ; une installation neuve non plus (ancienne racine absente).
+///
+/// Best-effort comme le reste du module : un déplacement qui échoue est journalisé et l'ancien
+/// fichier reste où il est — l'overlay repart alors avec les réglages par défaut plutôt que de
+/// refuser de démarrer. Ce qui existe déjà à destination gagne (une migration antérieure, ou un
+/// overlay plus récent qui a déjà écrit là), l'ancien exemplaire est alors simplement supprimé.
+pub fn migrate_legacy_root() {
+    let (Some(legacy), Some(current)) = (legacy_project_dirs(), project_dirs()) else {
+        return;
+    };
+    let legacy_root = legacy.project_path();
+    if legacy_root == current.project_path() || !legacy_root.exists() {
+        return;
+    }
+    let moves = [
+        (
+            legacy.config_dir().join("config.toml"),
+            current.config_dir().join("config.toml"),
+        ),
+        (
+            legacy.data_dir().join("turn-templates"),
+            current.data_dir().join("turn-templates"),
+        ),
+    ];
+    migrate_paths(legacy_root, &moves);
+}
+
+/// Le geste de [`migrate_legacy_root`] sur des chemins explicites — testable sur un dossier
+/// temporaire. `legacy_root` n'est supprimée que si chaque déplacement a réussi.
+fn migrate_paths(legacy_root: &std::path::Path, moves: &[(PathBuf, PathBuf)]) {
+    let mut failed = false;
+    for (from, to) in moves {
+        if !from.exists() {
+            continue;
+        }
+        if to.exists() {
+            tracing::info!(
+                "[config] {} existe déjà, l'ancien exemplaire {} est abandonné.",
+                to.display(),
+                from.display()
+            );
+            continue;
+        }
+        let moved = to
+            .parent()
+            .map(std::fs::create_dir_all)
+            .transpose()
+            .and_then(|_| std::fs::rename(from, to));
+        match moved {
+            Ok(()) => tracing::info!(
+                "[config] {} déplacé vers {} (racine unique, constat C13).",
+                from.display(),
+                to.display()
+            ),
+            Err(err) => {
+                failed = true;
+                tracing::warn!(
+                    "[config] {} non déplacé vers {} : {err} — laissé en place.",
+                    from.display(),
+                    to.display()
+                );
+            }
+        }
+    }
+    if failed {
+        return;
+    }
+    match std::fs::remove_dir_all(legacy_root) {
+        Ok(()) => {
+            tracing::info!(
+                "[config] ancienne racine {} supprimée.",
+                legacy_root.display()
+            );
+            // `%APPDATA%\Oumbra\` ne contenait que nous : il part s'il est vide, et reste sinon.
+            if let Some(parent) = legacy_root.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+        }
+        Err(err) => tracing::warn!(
+            "[config] ancienne racine {} non supprimée : {err}",
+            legacy_root.display()
+        ),
+    }
 }
 
 /// Charge la config persistée — `OverlayConfig::default()` (donc `log_path: None`) au tout premier
@@ -723,6 +816,82 @@ pub fn resolve_log_path(cli_arg: Option<PathBuf>, config: &OverlayConfig) -> Opt
 
 #[cfg(test)]
 mod tests {
+    /// La migration de l'ancienne racine : ce qui existe est déplacé, ce qui existe déjà à
+    /// destination gagne, et l'ancienne racine part avec son parent s'il est vide.
+    #[test]
+    fn l_ancienne_racine_est_migree_puis_supprimee() {
+        let base = std::env::temp_dir().join(format!("overlay-migration-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let legacy_root = base.join("Oumbra").join("app");
+        let current_root = base.join("app");
+        std::fs::create_dir_all(legacy_root.join("config")).unwrap();
+        std::fs::create_dir_all(legacy_root.join("data").join("turn-templates")).unwrap();
+        std::fs::write(legacy_root.join("config").join("config.toml"), "ancien").unwrap();
+        std::fs::write(
+            legacy_root
+                .join("data")
+                .join("turn-templates")
+                .join("Perso.png"),
+            b"png",
+        )
+        .unwrap();
+        // Le fichier de compteurs a déjà été écrit dans la racine courante : il gagne.
+        std::fs::create_dir_all(current_root.join("data")).unwrap();
+        std::fs::write(current_root.join("data").join("garde.json"), "courant").unwrap();
+
+        let moves = [
+            (
+                legacy_root.join("config").join("config.toml"),
+                current_root.join("config").join("config.toml"),
+            ),
+            (
+                legacy_root.join("data").join("turn-templates"),
+                current_root.join("data").join("turn-templates"),
+            ),
+            (
+                legacy_root.join("data").join("absent"),
+                current_root.join("data").join("absent"),
+            ),
+        ];
+        super::migrate_paths(&legacy_root, &moves);
+
+        assert_eq!(
+            std::fs::read_to_string(current_root.join("config").join("config.toml")).unwrap(),
+            "ancien"
+        );
+        assert!(current_root
+            .join("data")
+            .join("turn-templates")
+            .join("Perso.png")
+            .is_file());
+        assert_eq!(
+            std::fs::read_to_string(current_root.join("data").join("garde.json")).unwrap(),
+            "courant",
+            "ce qui vivait déjà dans la racine courante est intact"
+        );
+        assert!(!legacy_root.exists(), "l'ancienne racine doit partir");
+        assert!(
+            !base.join("Oumbra").exists(),
+            "son parent, vide, part avec elle"
+        );
+
+        // Une destination déjà présente gagne : l'ancien exemplaire est abandonné, pas fusionné.
+        std::fs::create_dir_all(legacy_root.join("config")).unwrap();
+        std::fs::write(
+            legacy_root.join("config").join("config.toml"),
+            "encore plus ancien",
+        )
+        .unwrap();
+        super::migrate_paths(&legacy_root, &moves[..1]);
+        assert_eq!(
+            std::fs::read_to_string(current_root.join("config").join("config.toml")).unwrap(),
+            "ancien"
+        );
+        assert!(!legacy_root.exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     use super::*;
 
     #[test]

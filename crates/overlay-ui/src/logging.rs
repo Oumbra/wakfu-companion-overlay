@@ -215,7 +215,7 @@ pub fn set_verbose(verbose: bool) {
 /// noms de personnages, chemin du log et auteur de message, constat C6 de
 /// `docs/analyse-rgpd.md`).
 pub fn log_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.data_dir().join("logs"))
+    overlay_engine::app_dirs::project_dirs(APP_NAME).map(|dirs| dirs.data_dir().join("logs"))
 }
 
 fn build_appender(dir: &Path) -> std::io::Result<RollingFileAppender> {

@@ -121,7 +121,7 @@ pub fn updates_dir() -> PathBuf {
     const APP_NAME: &str = "wakfu-companion-overlay";
     #[cfg(test)]
     const APP_NAME: &str = "wakfu-companion-overlay-test";
-    directories::ProjectDirs::from("", "", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("updates"))
         .unwrap_or_else(|| PathBuf::from("updates"))
 }

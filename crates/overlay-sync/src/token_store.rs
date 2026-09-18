@@ -24,7 +24,7 @@ fn entry() -> Result<keyring::Entry, SyncError> {
 }
 
 fn token_file_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("native-session.token"))
         .unwrap_or_else(|| PathBuf::from("native-session.token"))
 }

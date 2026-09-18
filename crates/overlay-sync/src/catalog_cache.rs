@@ -36,7 +36,7 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 const APP_NAME: &str = "wakfu-companion-overlay-test";
 
 fn cache_file_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("catalog-cache.json"))
         .unwrap_or_else(|| PathBuf::from("catalog-cache.json"))
 }

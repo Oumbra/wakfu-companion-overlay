@@ -8,7 +8,7 @@
 //! | Portée | Déclencheur | Ce qui part |
 //! | --- | --- | --- |
 //! | [`Scope::OnDisconnect`] | toute déconnexion (fenêtre Options, zone de notification, jeton refusé) — `background::spawn_auth_thread` | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
-//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › Compte, écran de connexion) | les **deux racines** de dossiers en entier, le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
+//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › Compte, écran de connexion) | la racine de dossiers en entier (et l'ancienne, si elle subsiste), le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
 //!
 //! Les deux gestes commencent par **effacer la session côté serveur**
 //! ([`revoke_server_session`]) : un jeton effacé du disque restait valide en base, donc utilisable
@@ -25,15 +25,15 @@
 //! elle est déjà vidée par le thread de synchro lui-même (`SyncCommand::Deactivate`, constat C3,
 //! 2026-09-18) — la purger ici en doublon fermerait la base sous les pieds de ce thread.
 //!
-//! ## Pourquoi deux racines à effacer
+//! ## Une racine, plus l'ancienne tant qu'elle existe
 //!
-//! `directories::ProjectDirs` est appelé avec **deux triplets** dans le dépôt (constat C13) :
-//! `("", "", "wakfu-companion-overlay")` pour les journaux, les données d'`overlay-engine` et tout
-//! `overlay-sync` ; `("com", "Oumbra", "wakfu-companion-overlay")` pour `config.toml` et les
-//! gabarits de tour. Sous Linux les deux retombent sur le même dossier XDG, sous **Windows non** :
-//! `%APPDATA%\wakfu-companion-overlay\…` d'un côté, `%APPDATA%\Oumbra\wakfu-companion-overlay\…`
-//! de l'autre. Un effacement qui n'en connaîtrait qu'une laisserait la moitié des fichiers en
-//! place — les chemins sont donc listés puis **dédupliqués** ([`targets`]).
+//! Depuis le 2026-09-19 tout le dépôt construit ses dossiers par `overlay_engine::app_dirs`
+//! (constat C13) : une seule racine, `wakfu-companion-overlay`. L'ancienne racine de `config.toml`
+//! et des gabarits (`%APPDATA%\Oumbra\wakfu-companion-overlay\` sous Windows) est migrée puis
+//! supprimée au démarrage (`config::migrate_legacy_root`) ; [`Scope::Everything`] la liste quand
+//! même, au cas où elle aurait survécu à une migration en échec — un effacement complet ne doit
+//! rien laisser derrière lui. Sous Linux les deux se confondent : les chemins sont **dédupliqués**
+//! ([`targets`]).
 //!
 //! ## Ce que « best-effort » veut dire ici
 //!
@@ -78,7 +78,7 @@ const SHARED_APP_NAME: &str = "wakfu-companion-overlay-test";
 pub enum Scope {
     /// Les fichiers à tiers et à captures, plus les journaux. Configuration et caches conservés.
     OnDisconnect,
-    /// Tout : les deux racines de dossiers, le jeton du trousseau, l'inscription au démarrage.
+    /// Tout : la racine de dossiers (et l'ancienne), le jeton du trousseau, l'inscription au démarrage.
     Everything,
 }
 
@@ -122,9 +122,10 @@ impl PurgeReport {
     }
 }
 
-/// La racine de données et de configuration « sans qualifieur ».
+/// La racine de données et de configuration de l'overlay — la même que `crate::config`, avec le
+/// nom de projet de CE crate (suffixe `-test` sous `cfg(test)`).
 fn shared_dirs() -> Option<directories::ProjectDirs> {
-    directories::ProjectDirs::from("", "", SHARED_APP_NAME)
+    overlay_engine::app_dirs::project_dirs(SHARED_APP_NAME)
 }
 
 /// **Les chemins que `scope` emporte**, dans l'ordre de suppression et sans doublon.
@@ -153,16 +154,18 @@ pub fn targets(scope: Scope) -> Vec<PathBuf> {
             );
         }
         Scope::Everything => {
-            // Les deux racines en entier — voir « Pourquoi deux racines » dans la doc de module.
-            // Rien n'est énuméré fichier par fichier ici : un cache ajouté demain dans l'une de
-            // ces racines doit partir avec le reste sans que ce module l'apprenne.
+            // La racine en entier — voir « Une racine, plus l'ancienne » dans la doc de module.
+            // Rien n'est énuméré fichier par fichier ici : un cache ajouté demain dans cette
+            // racine doit partir avec le reste sans que ce module l'apprenne.
             if let Some(dirs) = shared_dirs() {
                 paths.push(dirs.data_dir().to_path_buf());
                 paths.push(dirs.config_dir().to_path_buf());
             }
-            if let Some(dirs) = crate::config::project_dirs() {
-                paths.push(dirs.data_dir().to_path_buf());
-                paths.push(dirs.config_dir().to_path_buf());
+            // L'ancienne racine de `config.toml` et des gabarits, si la migration du démarrage
+            // l'a laissée (échec, ou fichier apparu depuis) : `project_path()` est son dossier
+            // propre, jamais un dossier partagé avec autre chose.
+            if let Some(dirs) = crate::config::legacy_project_dirs() {
+                paths.push(dirs.project_path().to_path_buf());
             }
         }
     }

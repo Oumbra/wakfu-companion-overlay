@@ -41,7 +41,7 @@ impl ReferenceData {
 }
 
 fn cache_file_path(which: ReferenceData) -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join(which.file_name()))
         .unwrap_or_else(|| PathBuf::from(which.file_name()))
 }

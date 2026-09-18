@@ -162,7 +162,7 @@ impl SyncQueue {
     /// classique `directories` sous Windows/Linux, même motif que `icon_cache.rs`/
     /// `reference_data_cache.rs`).
     pub fn default_store_path() -> Option<std::path::PathBuf> {
-        directories::ProjectDirs::from("", "", APP_NAME)
+        overlay_engine::app_dirs::project_dirs(APP_NAME)
             .map(|dirs| dirs.data_dir().join("sync-queue.sqlite3"))
     }
 

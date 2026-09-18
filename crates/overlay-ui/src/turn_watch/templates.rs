@@ -1,5 +1,6 @@
 //! Persistance des gabarits de nom appris — un PNG 8 bits par personnage, dans le dossier de
-//! données de l'overlay (`turn-templates/`, même racine que `logs/` et `catalog_cache`).
+//! données de l'overlay (`turn-templates/`, même racine que `logs/` et `catalog_cache` depuis le
+//! 2026-09-19, voir `overlay_engine::app_dirs`).
 //!
 //! Un gabarit vaut pour un client à une échelle d'interface donnée : il est indexé par le nom du
 //! personnage tel que le titre de fenêtre le donne. Changer l'échelle d'interface du jeu rendra
@@ -14,11 +15,8 @@ use std::path::PathBuf;
 
 use super::vision::Glyph;
 
-/// Dossier de données de l'overlay — **la racine de `config`**, qu'on lui demande plutôt que de
-/// reconstruire ses qualifieurs ici : le commentaire qui annonçait « même racine que `logs/` et
-/// `catalog_cache` » était inexact (constat C13 de `docs/analyse-rgpd.md`, deux racines sous
-/// Windows), et deux appels à `ProjectDirs::from` avec des arguments à garder synchrones à la main
-/// n.attendaient que de diverger une seconde fois.
+/// Dossier de données de l'overlay — demandé à `config` plutôt que reconstruit ici : une seule
+/// racine pour tout le dépôt (`overlay_engine::app_dirs`, constat C13 de `docs/analyse-rgpd.md`).
 pub fn data_dir() -> Option<PathBuf> {
     crate::config::project_dirs().map(|d| d.data_dir().to_path_buf())
 }
