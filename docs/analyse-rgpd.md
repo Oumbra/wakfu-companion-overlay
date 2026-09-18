@@ -27,7 +27,7 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | C1 | Un **vrai `wakfu.log` non anonymisé** est versionné en double dans un **dépôt public** : jeton d'authentification du client de jeu, IP locale, nom de compte Windows, 6 personnages avec leurs identifiants numériques, **119 pseudonymes de tiers et l'intégralité de leurs messages de chat** — *fixture pseudonymisée le 2026-09-18 ; reste la réécriture d'historique, décision du mainteneur* | **Critique** | §3.1 |
 | C2 | La doctrine « vie privée » du plan d'architecture (« jamais de capture d'écran, jamais d'automatisation d'entrées ») est **contredite par le code** : capture de la fenêtre de jeu toutes les 500 ms en combat, frappes clavier et clic souris synthétiques | Élevée | §3.2 |
 | C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers — *décision du 2026-09-18 : noms conservés (option A), autocomplétion retirée, persistance locale bornée ; reste la politique de confidentialité côté site* | Élevée | §3.3 |
-| C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *✅ traité côté overlay le 2026-09-18 : section « Vos données » dans « À propos », ligne d'acceptation sous « Se connecter », licence MIT ; reste la politique de confidentialité du site (§7)* | Élevée | §3.4 |
+| C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *✅ traité côté overlay le 2026-09-18 : section « Vos données » dans « À propos », ligne d'acceptation sous « Se connecter », licence MIT ; ✅ côté site le même jour : politique de confidentialité (section « 1.4 Overlay de bureau »), CGU et mentions légales étendues à l'overlay (`Oumbra/wakfu-companion` `3ba4684`, `a9587a9`, `8e3fdd8`) — **clos*** | Élevée | §3.4 |
 | C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent — *✅ traité côté overlay le 2026-09-18 : purge à la déconnexion, bouton « Supprimer les données locales » (fenêtre Options et écran de connexion) ; avec la suppression de la session côté serveur (`DELETE /api/v1/auth/native/session`) ; reste la durée de vie du jeton* | Élevée | §3.5 |
 | C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris — *✅ traité le 2026-09-18 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; journaux vidés à la déconnexion et supprimés par le bouton d'effacement (C5)* | Moyenne | §3.6 |
 
@@ -277,7 +277,7 @@ Ce sont des décisions utilisateur documentées ailleurs dans le plan (§9.1 dec
 et le §10 dit aussi que « le jeton ne transite jamais en clair sur disque hors trousseau », ce
 que le repli fichier de `token_store.rs:32-49` contredit.
 
-**Recommandations.** ✅ §10 réécrit le 2026-09-18 ; reste la politique de confidentialité (C4).
+**Recommandations.** ✅ §10 réécrit le 2026-09-18 ; ✅ politique de confidentialité et CGU du site alignées le même jour (C4).
 Réécrire le §10 pour décrire la réalité : capture de fenêtre locale sous
 option, pixels non conservés hors de la bande du nom, entrées synthétiques limitées à trois
 commandes de chat, repli fichier du jeton signalé. La même description doit alimenter la
@@ -389,9 +389,23 @@ porte sous « Se connecter » la ligne « En vous connectant, vous acceptez » s
 l'information précède le geste (art. 13.1), et la carte passe de 385 à 432 px. Le dépôt a un
 fichier `LICENSE` (MIT, décision du mainteneur) déclaré dans `[workspace.package] license` et
 hérité par chaque crate. Le bouton d'effacement (C5) est arrivé le même jour, et l'écran de
-connexion en porte le lien — la carte passe de 432 à 462 px. **Reste**, côté site, une politique
-de confidentialité qui parle encore du seul navigateur et ne mentionne ni l'overlay, ni GitHub,
-ni `vertylo.github.io` (§7).
+connexion en porte le lien — la carte passe de 432 à 462 px.
+
+**Côté site, même jour (`Oumbra/wakfu-companion`, branche `claude/dev`).** La politique de
+confidentialité (`3ba4684`) gagne une section « 1.4 Overlay de bureau », dans les quatre langues,
+qui reprend point par point la section « Vos données » ci-dessus : lecture du seul `wakfu.log`,
+appairage par code et jeton au trousseau (repli fichier), appareil visible et révocable dans
+« Mon compte », envoi une fois appairé des combats **avec le nom de chaque participant, alliés
+compris**, des achats, des échanges avec le nom du partenaire, des personnages, alertes, filtres
+de chat et compteurs, capture de fenêtre optionnelle (Windows, décochée par défaut, jamais
+envoyée), fichiers locaux et journal 14 jours (avec le cas « journal détaillé »), effets de la
+déconnexion (session supprimée côté serveur, C5) et du bouton « Supprimer les données locales »,
+et les deux destinataires tiers GitHub et `vertylo.github.io` nommés (C10, C11) ; renvois depuis
+les sections 1, 1.3, 2, 4 (GitHub, Inc.), 5 et 6. Les CGU (`a9587a9`) décrivent l'overlay et ses
+deux fonctions optionnelles (frappe simulée sur raccourci ou alerte, lecture d'image pour la
+notification de tour) et reformulent la position vis-à-vis des CGU d'Ankama en conséquence (voir
+`analyse-cgu.md`) ; les mentions légales (`8e3fdd8`) couvrent les éléments du jeu embarqués dans
+le binaire. Les trois textes sont datés du 18 septembre 2026. **C4 est clos.**
 
 ### 3.5 C5 — Pas de droit à l'effacement exerçable (élevée)
 
@@ -536,8 +550,9 @@ C5 — est fait (✅ 2026-09-18 : vidés à la déconnexion, supprimés par le b
   un réglage qui n'aurait pris effet qu'au lancement suivant raterait justement le problème qu'on
   cherche à voir. `RUST_LOG`, réglage du développeur, prime sur la case.
 
-Ce qui reste : **effacer les journaux** avec le reste des données locales (C5, P1), et la mention
-dans la politique de confidentialité côté site (C4).
+Ce qui reste : **effacer les journaux** avec le reste des données locales (C5, P1). La mention
+dans la politique de confidentialité côté site (C4) est faite (section 1.4, journal 14 jours et
+cas « journal détaillé », 2026-09-18).
 
 ### 3.7 Constats secondaires
 
@@ -584,18 +599,22 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 
 ## 6. Plan d'action priorisé
 
+Le reliquat, vérifié dans le code le 2026-09-18, est tenu à jour dans trois fichiers par périmètre :
+[`analyse-rgpd-overlay.md`](analyse-rgpd-overlay.md), [`analyse-rgpd-site.md`](analyse-rgpd-site.md)
+et [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
+
 | Priorité | Action | Constats | Qui |
 | --- | --- | --- | --- |
 | **P0** | ✅ Fixture pseudonymisée, tests réalignés, garde-fou `pre-commit` + CI (2026-09-18) | C1, §4 | Session |
 | **P0** | ⏳ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`, ticket GitHub Support | C1 | Mainteneur, hors session Claude |
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
-| **P1** | Politique de confidentialité côté site (à étendre à l'overlay) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | Site (politique) |
+| **P1** | ✅ Politique de confidentialité côté site étendue à l'overlay (section 1.4), CGU et mentions légales aussi (`Oumbra/wakfu-companion` `3ba4684`, `a9587a9`, `8e3fdd8`) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | ✅ Site + overlay |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
 | **P1** | ✅ Bouton « Supprimer les données locales » (fenêtre Options et écran de connexion, avec confirmation, puis fermeture) ; purge des combats, du récap, des compteurs, des gabarits et du contenu des journaux à la déconnexion ; session supprimée côté serveur par `DELETE /api/v1/auth/native/session`, appelée aux deux gestes (2026-09-18, `overlay_ui::local_data`) | C5, C8 | ✅ Overlay + serveur |
-| **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). Reste la mention dans la politique de confidentialité et le contact d'opposition | C3 | Site (politique) |
+| **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). ✅ Mention dans la politique de confidentialité (1.4 : nom des participants et du partenaire d'échange, 2026-09-18) ; le droit d'opposition par `contact@wakfu-companion.com` y figurait déjà (§6). ✅ Base *intérêt légitime* (art. 6.1.f) et mise en balance énoncées dans la politique, section 1.3, avec l'adresse de retrait d'un pseudonyme (`50adcf8`, 2026-09-18). Reste la courte note interne de mise en balance (document du responsable de traitement, pas un texte publié) | C3 | Mainteneur (note interne) |
 | **P2** | ✅ Journal (2026-09-18) : code d'appairage et auteur de chat retirés, `EngineError::Deserialize` expurgée, noms et chemins en `debug`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut. Reste l'effacement, avec C5 | C6 | Overlay |
 | **P2** | Jeton de repli : mode restrictif à la création, ACL/DPAPI Windows, avertissement dans l'interface | C7 | Overlay |
-| **P2** | Unifier les racines de dossiers ; autostart non activé par défaut ; icônes servies par l'API ou embarquées ; nommer GitHub et `vertylo.github.io` comme destinataires | C10-C13 | Overlay |
+| **P2** | Unifier les racines de dossiers ; autostart non activé par défaut ; icônes servies par l'API ou embarquées ; ✅ GitHub et `vertylo.github.io` nommés comme destinataires (politique de confidentialité 1.4 et 2, 2026-09-18) | C10-C13 | Overlay |
 | **P3** | `overlay-app` : masquer le chat ; `PATCH` par sous-clé côté serveur ; origine d'API affichée quand surchargée | C9, C14, C16 | Overlay + serveur |
 
 ## 7. Ce que ce document ne couvre pas

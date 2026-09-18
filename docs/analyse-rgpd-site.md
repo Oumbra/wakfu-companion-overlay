@@ -1,0 +1,24 @@
+# Analyse RGPD — reste à faire côté site et API
+
+Reliquat de [`analyse-rgpd.md`](analyse-rgpd.md) pour le dépôt `Oumbra/wakfu-companion` (site web
+et API Cloudflare Pages), établi le 2026-09-18. Les autres volets :
+[`analyse-rgpd-overlay.md`](analyse-rgpd-overlay.md) et
+[`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
+
+C'est ici que se trouve l'essentiel du reliquat : l'overlay ne peut être conforme seul, plusieurs de
+ses corrections supposent un pendant côté service.
+
+| Prio | Tâche | Constat |
+| --- | --- | --- |
+| **P0** | **Fusionner `claude/dev` → `main`** : c'est la seule tâche qui bloque encore. Au 2026-09-18 (soir), `origin/claude/dev` a 8 commits d'avance sur `origin/main`, dont `DELETE /api/v1/auth/native/session` (`58988ff`), les quatre textes juridiques ci-dessous (`3ba4684`, `a9587a9`, `8e3fdd8`, `50adcf8`) et la réparation du déploiement (`80d38fe`, `wrangler-action`). Tant que ce n'est pas fusionné, la prod sert une politique datée du 26 août sans un mot sur l'overlay, et un binaire de Release reçoit un 404 à la déconnexion — la purge locale aboutit (best-effort), mais la ligne de session reste en base | C4, C5 |
+| ~~P1~~ | ✅ **Politique de confidentialité** — section « 1.4 Overlay de bureau » dans les quatre langues, datée du 18 septembre 2026 (`3ba4684` sur `claude/dev`, 2026-09-18), avec renvois depuis les sections 1, 1.3, 2, 4, 5 et 6. Contenu demandé : lecture de `wakfu.log` seul ; envoi au compte des combats **avec le nom des participants**, achats, échanges, personnages, alertes, recherches ; lecture optionnelle de la fenêtre de jeu (bande basse, jamais conservée, décochée par défaut) ; entrées synthétiques limitées à deux commandes de chat ; journal local 14 j / 16 Mio ; destinataires tiers **GitHub** (vérification de mise à jour) et **`vertylo.github.io`** (icônes) ; données locales et bouton d'effacement ; session native supprimée à la déconnexion. Relue contre le code de l'overlay le 2026-09-18 : combats en cours effacés à la fin du combat ou au-delà de 24 h (`fight_store::MAX_FIGHT_AGE`), périmètre de la déconnexion (`local_data::Scope::OnDisconnect` : combats, compteurs, gabarits, journaux), bouton « Supprimer les données locales » aussi sur l'écran de connexion (`panels/login.rs`), vérification GitHub sans identifiant ni version (`update/manifest.rs`, agent `ureq` sans en-tête maison) — tout concorde. Seule imprécision, sans enjeu : le plafond de 16 Mio/jour du journal n'est pas cité | C2, C3, C4, C6, C10, C11 |
+| ~~P1~~ | ✅ **Tiers rencontrés en combat / échange** (option A du 2026-09-18, noms conservés en clair) : la politique dit désormais que les combats partent avec le nom de chaque participant et les échanges avec celui du partenaire (1.4), la durée (« tant que le compte existe », §5) et l'adresse d'opposition (§6) y étaient déjà. ✅ Base *intérêt légitime* (art. 6.1.f) et mise en balance énoncées en section 1.3, avec l'adresse de retrait d'un pseudonyme (`50adcf8`, 2026-09-18). Reste une courte note interne de mise en balance, côté mainteneur (voir [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md)) | C3 |
+| ~~P1~~ | ✅ **CGU du site** réécrites (`a9587a9`, 2026-09-18) : l'overlay entre dans l'objet, la section 2 décrit ses deux fonctions optionnelles (frappe simulée, lecture de fenêtre) et reformule la position vis-à-vis des CGU d'Ankama en cohérence avec [`analyse-cgu.md`](analyse-cgu.md). Mentions légales complétées au passage (`8e3fdd8`) : éléments du jeu embarqués dans le binaire | C2 |
+| ~~P2~~ → P3 | **Jeton natif** : vérifié dans le code le 2026-09-18 — même durée que le cookie web, 30 jours glissants (`server/auth/pairing.ts:70` crée la session avec `SESSION_TTL_MS`, et `flow.ts::resolveSession` prolonge le porteur `Bearer` exactement comme le cookie). Reste à le dire dans la politique : la section 5 n'attribue les « 30 jours glissants » qu'au cookie de connexion, le jeton de l'overlay (1.4) n'a pas de durée annoncée. Une phrase suffit | C5 |
+| P3 | `PATCH` par sous-clé côté serveur pour `profile` et `roster`, ou fusion côté serveur, pour ne plus renvoyer le profil entier à chaque réglage d'alerte. Inchangé : `PATCH /api/v1/settings` écrit par clé entière (`functions/api/v1/settings.ts`) | C9 |
+
+## Hors périmètre de l'analyse, listé en §7 pour ne pas l'oublier
+
+Durées de conservation de l'historique, suppression de compte, sessions actives et révocation,
+sous-traitants (hébergeur, base Postgres/Neon, fournisseurs OAuth Discord/Google), registre des
+traitements (art. 30) et, si le service est ouvert au public, mentions légales.
