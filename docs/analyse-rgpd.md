@@ -277,7 +277,8 @@ Ce sont des décisions utilisateur documentées ailleurs dans le plan (§9.1 dec
 et le §10 dit aussi que « le jeton ne transite jamais en clair sur disque hors trousseau », ce
 que le repli fichier de `token_store.rs:32-49` contredit.
 
-**Recommandations.** Réécrire le §10 pour décrire la réalité : capture de fenêtre locale sous
+**Recommandations.** ✅ §10 réécrit le 2026-09-18 ; reste la politique de confidentialité (C4).
+Réécrire le §10 pour décrire la réalité : capture de fenêtre locale sous
 option, pixels non conservés hors de la bande du nom, entrées synthétiques limitées à trois
 commandes de chat, repli fichier du jeton signalé. La même description doit alimenter la
 politique de confidentialité (C4). Pour la capture : ne rendre que le rectangle utile quand
@@ -456,7 +457,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 | **P0** | ⏳ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`, ticket GitHub Support | C1 | Mainteneur, hors session Claude |
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | Politique de confidentialité côté site (à étendre à l'overlay) ; lien à l'écran de connexion ; ✅ section « Vos données » dans « À propos » (2026-09-18) ; fichier de licence | C4 | Serveur + overlay |
-| **P1** | Réécrire le §10 du plan d'architecture pour décrire la capture de fenêtre, les entrées synthétiques et le repli fichier du jeton | C2 | Overlay (`docs:`) |
+| **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
 | **P1** | Bouton « Supprimer les données locales » ; purge de la file, des combats, des gabarits et des journaux à la déconnexion ; révocation serveur | C5, C8 | Overlay + serveur |
 | **P1** | Décision sur les noms de tiers dans `fights`/`trades` (rôle anonyme ou haché salé) ; autocomplétion limitée aux personnages de l'utilisateur | C3 | Serveur + overlay |
 | **P2** | Journal : retirer code d'appairage et auteur de chat, expurger `EngineError::Deserialize`, noms en `debug`, plafond de taille, réglage utilisateur | C6 | Overlay |

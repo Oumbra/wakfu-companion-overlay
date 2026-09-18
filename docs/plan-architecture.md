@@ -617,8 +617,10 @@ automatiquement par un navigateur, ce qui n'existe pas ici).
 > **Ne jamais** aller lire le cookie dans la base du navigateur : fragile, intrusif, indéfendable.
 
 **Stockage du jeton** : trousseau OS via `keyring` (Credential Manager sous Windows, Secret Service
-sous Linux). Repli explicite et signalé à l'utilisateur : fichier `0600` sous
-`$XDG_DATA_HOME/wakfu-overlay/` quand aucun Secret Service n'est disponible (WM minimalistes).
+sous Linux). Repli explicite et signalé au journal (pas encore dans l'interface, C7 de
+[`analyse-rgpd.md`](analyse-rgpd.md)) : fichier `0600` sous `$XDG_DATA_HOME/wakfu-overlay/` quand
+aucun Secret Service n'est disponible (WM minimalistes) ou que le trousseau ne relit pas ce qu'il
+a écrit. Ce que ce jeton ouvre et comment il se révoque : §10.
 
 ### 7.3 File d'envoi (miroir Rust de `SyncQueueService`) — ✅ fait (lot L5, 2026-09-02)
 
@@ -2716,16 +2718,46 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 
 ## 10. Sécurité, vie privée, conformité
 
-- **Contrainte de conception non négociable** : lecture d'un fichier texte produit par le jeu, et
-  rien d'autre. Jamais de lecture mémoire, jamais d'injection DLL/hook, jamais de capture d'écran,
-  jamais d'automatisation d'entrées. C'est la posture déjà tenue par l'app web ; l'overlay ne
-  l'élargit pas.
-  > **Constat de l'analyse RGPD du 2026-09-18** ([`analyse-rgpd.md`](analyse-rgpd.md), C2) :
-  > deux de ces interdits ne sont plus tenus par le code — capture de la fenêtre de jeu sous
-  > option (§9.1 decies, `turn_watch/capture.rs`) et frappes/clic synthétiques (§9.1 sexies,
-  > §9.1 nonies, `chat_command.rs`, `notify.rs`) — et le jeton peut être écrit en clair en repli
-  > (§7.2, `token_store.rs`). Ce paragraphe est à réécrire pour décrire la réalité ; l'analyse
-  > tient lieu de description exacte en attendant.
+- **Contrainte de conception non négociable** : la source des données de jeu est un fichier texte
+  produit par le jeu (`wakfu.log`), et rien d'autre. Jamais de lecture mémoire, jamais d'injection
+  DLL/hook. C'est la posture déjà tenue par l'app web ; l'overlay ne l'élargit pas.
+
+  > Jusqu'au 2026-09-18 ce paragraphe promettait aussi « jamais de capture d'écran, jamais
+  > d'automatisation d'entrées », ce que le code ne tenait plus (constat C2 de
+  > [`analyse-rgpd.md`](analyse-rgpd.md)). Les deux points qui suivent, et le point « Jeton de
+  > session » en fin de section, décrivent **ce que l'overlay fait réellement**, dans les limites que l'utilisateur a fixées ; c'est cette
+  > description, pas l'ancienne promesse, qui doit alimenter toute information donnée aux
+  > utilisateurs (politique de confidentialité, « À propos »).
+
+- **Lecture de la fenêtre de jeu, sous option, jamais de l'écran.** La notification de tour
+  (§9.1 decies, `turn_watch/capture.rs`) a besoin de savoir à qui c'est de jouer dans une fenêtre
+  Wakfu qui n'a pas le focus. Pour cela, en combat et toutes les 500 ms, l'overlay demande à
+  Windows le rendu de **la zone client de la fenêtre de jeu uniquement** (`PrintWindow`,
+  `PW_CLIENTONLY`) — jamais le bureau, jamais une autre application —, n'en copie en mémoire que
+  la **bande basse** (`BAND_HEIGHT`, 400 lignes, là où le jeu affiche le widget de tour et le nom du
+  personnage), l'analyse, et la jette. Rien n'est enregistré sur disque hors les gabarits du nom
+  (`templates.rs`, C8), rien n'est transmis. La fonction est réglée par une case à cocher
+  **décochée par défaut** (`OverlayConfig::turn_notification`) : décochée, aucune lecture de
+  fenêtre n'a lieu.
+- **Entrées synthétiques : deux cas, tous deux déclenchés par l'utilisateur, aucun ne joue à sa
+  place.**
+  1. Les raccourcis multicompte F1/F2 (§9.1 sexies, `chat_command.rs`) tapent dans le client au
+     premier plan une commande de chat que **le jeu expose lui-même** (`/i "Nom"`, `/fol "Nom"`) —
+     Wakfu permet déjà d'associer un raccourci à un texte envoyé au chat ; l'overlay ne fait que
+     renseigner le nom de l'autre personnage à la place de l'utilisateur. Rien n'est tapé si la
+     fenêtre au premier plan n'est pas une fenêtre de jeu, et ce sont les **seules** frappes
+     synthétisées.
+  2. Le clic sur la notification de tour doit amener la fenêtre du personnage au premier plan ;
+     Windows l'interdit à un process qui n'a pas reçu d'entrée. Le contournement (`notify.rs`,
+     `focus_via_decoy`) est un clic synthétique **sur une fenêtre-leurre de 5 px de l'overlay**,
+     sous le curseur, remis à sa place ensuite — le jeu ne reçoit ni clic ni déplacement. Il n'a
+     lieu **que** parce que l'utilisateur vient de cliquer le toast, et seulement si la
+     notification de tour est activée.
+
+  Ni l'un ni l'autre n'agit dans le combat, n'automatise une action de jeu ni ne procure un
+  avantage : la notification évite de manquer son tour, les raccourcis évitent de taper un nom.
+  Ce n'est pas du botting, et l'overlay ne doit jamais le devenir : toute nouvelle entrée
+  synthétique est une décision à inscrire ici, pas un détail d'implémentation.
 - Aucune donnée ne sort en mode invité (§7.3).
 - Le contenu du log est **hostile par nature** (messages de chat écrits par des tiers) : tout texte
   affiché est traité comme donnée, jamais interprété ; longueurs bornées ; parsing sans
@@ -2733,8 +2765,15 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 - Mises à jour : binaire et bundle moteur signés (`minisign`/ed25519), signature **vérifiée avant
   exécution ou chargement**. Un asset de Release non vérifié n'est jamais chargé — un moteur JS
   téléchargé est du code exécutable, pas de la donnée.
-- Le jeton de session ne transite jamais en clair sur disque hors trousseau (§7.2), n'apparaît
-  jamais dans les logs de l'overlay.
+- **Jeton de session** (§7.2) : c'est le jeton du compte *wakfu-companion*, jamais celui du jeu.
+  C'est un **jeton porteur** — quiconque le détient peut appeler l'API au nom de l'utilisateur
+  (`Authorization: Bearer`, `client.rs`) jusqu'à révocation : il n'est donc pas anodin. Il est
+  rangé dans le **trousseau de l'OS** (Credential Manager, Secret Service) ; quand aucun trousseau
+  n'est disponible ou ne relit ce qu'il a écrit, l'overlay le **replie en clair** dans un fichier
+  de son dossier de données (`token_store.rs::save_token_file`, `0600` sous Linux, aucune ACL
+  particulière sous Windows — C7), et le dit au journal (`warn!`), pas encore dans l'interface. Il
+  est **effacé** des deux emplacements à la déconnexion (`clear_token`) et **révocable** côté
+  serveur (« Sessions actives »). Il n'apparaît jamais dans les logs de l'overlay.
 
 ---
 
