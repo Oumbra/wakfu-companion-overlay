@@ -64,7 +64,7 @@ fn fight() -> FightSnapshot {
         ongoing: true,
         result: None,
         fighters: vec![
-            fighter("Anonyme-Ouginak1", Some("iop"), true, 12_480, 0, 0),
+            fighter("Percuteur", Some("iop"), true, 12_480, 0, 0),
             fighter("Fayto", Some("feca"), true, 3_120, 9_460, 640),
             fighter("Sagitta Lucis", Some("eniripsa"), true, 1_890, 1_200, 7_310),
             fighter("Caliburnus", Some("cra"), true, 6_740, 460, 1_050),

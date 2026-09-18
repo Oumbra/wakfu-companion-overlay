@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Hook `pre-commit` — refuse un commit qui remettrait des données réelles dans une fixture.
+#
+# Activé par `bash scripts/install-hooks.sh` (positionne `core.hooksPath` sur `.githooks/`).
+#
+# Purement textuel, quelques millisecondes : contrairement au `pre-push`, il peut se permettre de
+# tourner à CHAQUE commit sans finir contourné. Il ne rejoue aucun lint — c'est le rôle du
+# `pre-push`, et un hook lent à ce moment-là se ferait désactiver le premier jour.
+#
+# Ne bloque QUE sur ce que `scripts/check-fixtures.sh` sait reconnaître, et seulement quand une
+# fixture `wakfu.log` est effectivement dans le lot : un commit qui n'y touche pas passe sans rien
+# exécuter.
+#
+# Contournement ponctuel assumé : `git commit --no-verify`.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+[ -f "$repo_root/scripts/check-fixtures.sh" ] || exit 0
+
+git diff --cached --name-only --diff-filter=ACM | grep -q 'tests/wakfu\.log$' || exit 0
+
+printf '\033[1m[pre-commit]\033[0m fixture wakfu.log dans le lot, vérification des données réelles\n'
+if bash "$repo_root/scripts/check-fixtures.sh"; then
+  exit 0
+fi
+
+printf '\nCommit INTERROMPU. Forcer malgré tout : git commit --no-verify\n' >&2
+exit 1
