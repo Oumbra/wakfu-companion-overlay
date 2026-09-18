@@ -733,6 +733,10 @@ struct App {
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
     game_window: GameWindowTracker,
+    /// Le scan précédent trouvait au moins une fenêtre de jeu — pour n'envoyer
+    /// `EngineCommand::GameClosed` qu'au passage à « aucune », une fois par fermeture (voir
+    /// `sync_windows`).
+    game_was_present: bool,
     /// **La session du Récap** (2026-09-17, `overlay_ui::recap_session`) : chrono qui n'avance
     /// que fenêtre de jeu présente, compteurs de session, reprise après une pause tolérée,
     /// remise à zéro confirmée. Nourrie à chaque tick par `sync_windows` (c'est le balayage des
@@ -984,6 +988,7 @@ impl App {
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
+            game_was_present: false,
             recap_session,
             recap_position,
             recap_locked,
@@ -1387,11 +1392,16 @@ impl App {
         // **La session du Récap suit ce balayage** (2026-09-17) : au moins une fenêtre de jeu à
         // l'écran, le chrono avance ; plus aucune, il s'arrête — et c'est ici que la reprise
         // (ou la nouvelle session) se décide au retour d'une fenêtre. Voir `recap_session`.
-        self.recap_session.observe(
-            !found.is_empty(),
-            &snapshot.totals,
-            std::time::SystemTime::now(),
-        );
+        let game_present = !found.is_empty();
+        self.recap_session
+            .observe(game_present, &snapshot.totals, std::time::SystemTime::now());
+        // **Le dernier client vient de se fermer** (2026-09-18) : le moteur purge du disque les
+        // combats en cours abandonnés — voir `EngineCommand::GameClosed`. Au passage seulement,
+        // jamais à chaque tick sans client.
+        if self.game_was_present && !game_present {
+            let _ = self.settings_tx.send(EngineCommand::GameClosed);
+        }
+        self.game_was_present = game_present;
     }
 
     /// Affiche ou masque chaque fenêtre `Combat` selon qu'un combat est en cours pour SON

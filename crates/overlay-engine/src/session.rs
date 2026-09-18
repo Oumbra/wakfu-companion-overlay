@@ -2237,6 +2237,19 @@ impl Engine {
         self.in_initial_sweep = false;
     }
 
+    /// Supprime du disque les combats en cours **abandonnés** (plus d'une journée sans une ligne
+    /// de log, voir `fight_store::MAX_FIGHT_AGE`) et rend leur nombre — `EngineCommand::GameClosed`
+    /// côté `overlay-ui`, envoyée quand la dernière fenêtre de jeu se ferme (2026-09-18).
+    ///
+    /// Ne touche pas à `state` : un combat abandonné y reste `ongoing` sans plus jamais bouger,
+    /// comme avant, et ne sera simplement pas restauré au prochain lancement. Ce que cette purge
+    /// borne, c'est la durée de vie sur disque des noms de ses combattants — le démarrage faisait
+    /// déjà ce ménage, mais un overlay qui tourne plusieurs jours n'y repasse jamais
+    /// (`docs/analyse-rgpd.md` §3.3).
+    pub fn prune_stale_fights(&mut self) -> usize {
+        crate::fight_store::prune_stale_fights(&self.fight_store_dir)
+    }
+
     /// Remplace le roster utilisé pour classer les alliés (voir `resolve_ally_class`) — appelé
     /// par l'hôte (`overlay-ui`) une fois l'auth/le fetch `GET /api/v1/settings` résolus, et à
     /// chaque nouveau fetch (roster modifié sur le compte). `None` = pas de roster connu (mode

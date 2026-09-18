@@ -340,6 +340,9 @@ mod linux_main {
         /// envoyer (voir `panels::suivi_tab::CompletionSettings`).
         completion: suivi_tab::CompletionSettings,
         game_window: GameWindowTracker,
+        /// Le scan précédent trouvait au moins une fenêtre de jeu — voir
+        /// `main.rs::App::game_was_present`.
+        game_was_present: bool,
         /// La session du Récap — voir `main.rs::App::recap_session` (2026-09-17).
         recap_session: RecapSession,
         /// Où l'utilisateur a posé la bande Récap — voir `main.rs::App::recap_position`
@@ -613,6 +616,7 @@ mod linux_main {
                 countdown_toast,
                 completion,
                 game_window,
+                game_was_present: false,
                 recap_session,
                 recap_position,
                 recap_locked,
@@ -927,12 +931,18 @@ mod linux_main {
                     self.windows.insert(overlay.window.id(), overlay);
                 }
             }
-            // La session du Récap suit ce balayage — voir `main.rs::App::sync_windows`.
+            // La session du Récap suit ce balayage, et la fermeture du dernier client part au
+            // moteur — voir `main.rs::App::sync_windows`.
+            let game_present = !found.is_empty();
             self.recap_session.observe(
-                !found.is_empty(),
+                game_present,
                 &snapshot.totals,
                 std::time::SystemTime::now(),
             );
+            if self.game_was_present && !game_present {
+                let _ = self.settings_tx.send(EngineCommand::GameClosed);
+            }
+            self.game_was_present = game_present;
         }
 
         /// Affiche ou masque les fenêtres dont la présence est CONDITIONNELLE — `Combat` (combat

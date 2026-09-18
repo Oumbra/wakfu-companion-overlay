@@ -81,6 +81,13 @@ pub enum EngineCommand {
     /// de la relecture (voir `resync_in_flight` dans la boucle), pour que le panneau garde son
     /// contenu jusqu'au basculement au lieu de se vider puis de se remplir sous les yeux.
     ResyncLog,
+    /// **La dernière fenêtre de jeu vient de se fermer** (2026-09-18) — envoyée par l'hôte au
+    /// passage « au moins un client » → « aucun » de son scan (`sync_windows`), jamais tant qu'un
+    /// client reste ouvert. Le moteur en profite pour supprimer du disque les combats en cours
+    /// abandonnés (`Engine::prune_stale_fights`) : plus de client, plus de combat qui puisse se
+    /// terminer, et un fichier `fight-*.json` qui n'a pas bougé depuis plus d'une journée garde
+    /// pour rien les noms de ses combattants (`docs/analyse-rgpd.md` §3.3).
+    GameClosed,
     /// Profil d'alerte validé depuis l'onglet « Alertes » de la fenêtre Options (2026-09-12) —
     /// liste d'objets à son activé ET réglages du toast.
     ///
@@ -685,6 +692,15 @@ pub fn spawn_engine_thread(
                             // d'état à préserver le temps de la relecture — et l'utilisateur qui
                             // change de fichier s'attend précisément à voir l'ancien disparaître.
                             resync_in_flight = None;
+                        }
+                        EngineCommand::GameClosed => {
+                            let removed = engine.prune_stale_fights();
+                            if removed > 0 {
+                                tracing::info!(
+                                    removed,
+                                    "[fenêtre de jeu] plus aucun client — combats en cours abandonnés purgés du disque"
+                                );
+                            }
                         }
                         EngineCommand::ResyncLog => {
                             tracing::info!(
