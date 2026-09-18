@@ -66,7 +66,7 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// de sa fenêtre.
 ///
 /// Valeur inchangée, la mesure ne dépend pas du côté : une infobulle d'une ligne (« Supprimer
-/// (Ctrl+Shift+S) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px) d'écart, soit
+/// (Ctrl+Shift+D) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px) d'écart, soit
 /// 32 px ; la marge basse de `paint_content` (6 px) en fournit déjà une partie, 28 px complètent
 /// avec 2 px de garde.
 ///
@@ -366,7 +366,7 @@ pub struct RenderContent<'a> {
     /// Sans objet pour les autres zones, qui laissent son défaut.
     pub combat_chrome: panels::combat::CombatChrome,
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
-    /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
+    /// raccourci global `Ctrl+Shift+D` : voir `panels::watchlist::WatchlistSelection`.
     pub watchlist_selection: &'a mut panels::watchlist::WatchlistSelection,
     /// Les célébrations de complétion en cours (2026-09-17) — l'état vit chez l'hôte pour la même
     /// raison que la sélection, en plus fort : c'est lui qui les fait avancer sur son tick, et le

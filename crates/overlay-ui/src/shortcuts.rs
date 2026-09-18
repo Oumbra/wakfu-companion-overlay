@@ -104,18 +104,33 @@ pub enum ShortcutAction {
     /// (`panels::watchlist::control_button_row`, `panels::combat::paint_side_switch`), à l'image du
     /// jeu. C'est cette demande-là qui rend la personnalisation utile : ces libellés d'infobulle
     /// suivent désormais la combinaison RÉELLE.
+    ///
+    /// **`Ctrl+Shift+S` depuis le 2026-09-18** (demande utilisateur), en même temps que le libellé
+    /// est passé de « Ouvrir les détails (site) » à « Ouvrir le site » : l'action ne s'appelle plus
+    /// « détails », sa lettre non plus — **S comme site**. Le `D` libéré revient à
+    /// [`Self::WatchlistRemove`], qui l'a échangé contre son `S` (voir sa doc) ; les deux bougent
+    /// donc ensemble, un `Ctrl+Shift+S` qui ouvrirait le site ET retirerait du suivi serait un
+    /// conflit refusé par [`ShortcutBindings::conflict`].
     Details,
     /// Bouton "Ajouter" du carré de contrôle — reste INERTE comme le bouton lui-même (voir la doc
     /// de module de `panels::watchlist` : aucune sélection/formulaire câblés côté overlay pour
     /// cette itération), juste enregistré/journalisé.
     WatchlistAdd,
     /// Bouton "Supprimer" du carré de contrôle — même remarque que [`Self::WatchlistAdd`].
+    ///
+    /// **`Ctrl+Shift+D` depuis le 2026-09-18** (demande utilisateur) : échange de lettre avec
+    /// [`Self::Details`], parti sur le `S` de « site » — **D comme delete**, la lettre du retrait
+    /// dans à peu près tous les logiciels.
     WatchlistRemove,
     /// Bascule Alliés/Ennemis du panneau Combat, EN MODE TOGGLE (retour utilisateur explicite :
     /// « ça inverse la sélection [...] si actuellement c'est sélectionné allié [...] ça passe en
     /// ennemi et inversement ») plutôt que deux raccourcis séparés un par camp — voir
     /// `panels::combat::CombatSide::toggled` et `main.rs::App::toggle_combat_side`, appliqué à
     /// CHAQUE fenêtre Combat ouverte, pas seulement celle au premier plan.
+    ///
+    /// **`Ctrl+Shift+T` depuis le 2026-09-18** (demande utilisateur), après un `Ctrl+Shift+E` né
+    /// du groupe du 2026-09-06 : **T comme toggle**, ce que fait exactement l'action — le `E`
+    /// d'« ennemis » ne disait que la moitié d'une bascule qui va aussi dans l'autre sens.
     CombatSide,
     /// Fait tourner la grandeur mesurée par le panneau Combat — Dégâts → Armure → Soins → Dégâts
     /// (demande utilisateur du 2026-09-14, `Ctrl+Shift+V`). Même mode TOGGLE que [`Self::CombatSide`]
@@ -201,7 +216,7 @@ impl ShortcutAction {
             Self::Toggle => "Interactif / clic-traversant",
             Self::Refresh => "Rafraîchir l'affichage",
             Self::Options => "Ouvrir les options",
-            Self::Details => "Ouvrir les détails (site)",
+            Self::Details => "Ouvrir le site",
             Self::WatchlistAdd => "Ajouter au suivi",
             Self::WatchlistRemove => "Retirer du suivi",
             Self::CombatSide => "Alterner Alliés / Ennemis",
@@ -231,10 +246,10 @@ impl ShortcutAction {
             Self::Toggle => Shortcut::new(ctrl_shift, Code::KeyW),
             Self::Refresh => Shortcut::new(ctrl_shift, Code::KeyR),
             Self::Options => Shortcut::new(ctrl_shift, Code::KeyO),
-            Self::Details => Shortcut::new(ctrl_shift, Code::KeyD),
+            Self::Details => Shortcut::new(ctrl_shift, Code::KeyS),
             Self::WatchlistAdd => Shortcut::new(ctrl_shift, Code::KeyA),
-            Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyS),
-            Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyE),
+            Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyD),
+            Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyT),
             Self::CombatMetric => Shortcut::new(ctrl_shift, Code::KeyV),
             // Nues, par exception assumée — voir la doc de ces deux variantes.
             Self::InvitePartner => Shortcut::new(Modifiers::empty(), Code::F1),
@@ -816,22 +831,26 @@ fn code_from_egui(key: egui::Key) -> Option<Code> {
 mod tests {
     use super::*;
 
-    /// Les combinaisons par défaut sont EXACTEMENT celles qui étaient en dur avant ce module (voir
-    /// la doc des anciennes constantes de `main.rs`) : une mise à jour de l'overlay ne doit pas
-    /// changer les raccourcis sous les doigts d'un utilisateur qui n'a rien personnalisé.
+    /// Les combinaisons par défaut restent celles qui étaient en dur avant ce module (voir la doc
+    /// des anciennes constantes de `main.rs`) : une mise à jour de l'overlay ne doit pas changer
+    /// les raccourcis sous les doigts d'un utilisateur qui n'a rien personnalisé. Les trois
+    /// exceptions sont des demandes explicites de l'utilisateur, datées dans la doc des variantes
+    /// concernées — c'est ce test qui les rend visibles.
     #[test]
     fn defauts_identiques_aux_anciennes_constantes() {
         let bindings = ShortcutBindings::default();
         assert_eq!(bindings.label(ShortcutAction::Toggle), "Ctrl+Shift+W");
         assert_eq!(bindings.label(ShortcutAction::Refresh), "Ctrl+Shift+R");
         assert_eq!(bindings.label(ShortcutAction::Options), "Ctrl+Shift+O");
-        assert_eq!(bindings.label(ShortcutAction::Details), "Ctrl+Shift+D");
+        // Échangés l'un avec l'autre le 2026-09-18 (S comme « site », D comme « delete »).
+        assert_eq!(bindings.label(ShortcutAction::Details), "Ctrl+Shift+S");
         assert_eq!(bindings.label(ShortcutAction::WatchlistAdd), "Ctrl+Shift+A");
         assert_eq!(
             bindings.label(ShortcutAction::WatchlistRemove),
-            "Ctrl+Shift+S"
+            "Ctrl+Shift+D"
         );
-        assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+E");
+        // Ctrl+Shift+E jusqu'au 2026-09-18 — T comme « toggle ».
+        assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+T");
         // Né le 2026-09-14 avec le switch de grandeur, combinaison choisie par l'utilisateur.
         assert_eq!(bindings.label(ShortcutAction::CombatMetric), "Ctrl+Shift+V");
         // Nées nues (2026-09-13), à la demande de l'utilisateur — voir la doc de ces variantes.

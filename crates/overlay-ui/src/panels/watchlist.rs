@@ -17,7 +17,7 @@
 //!   « Paramètres » ;
 //! - "−" ouvre la **sélection multiple de la bande elle-même** ([`WatchlistSelection`]) : chaque
 //!   tuile gagne une case à cocher en ton destructif, un bouton de suppression groupée apparaît
-//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::edit`]). `Ctrl+Shift+S`
+//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::edit`]). `Ctrl+Shift+D`
 //!   fait le même geste au clavier. Le panneau reste en LECTURE SEULE sur les entrées (voir
 //!   `overlay_engine::watchlist` pour la frontière définitions/compteurs) : il demande, il
 //!   n'applique pas.
@@ -146,7 +146,7 @@
 //! DROITE (côté `Right`) — voir
 //! `control_button`, dont le côté d'infobulle dépend maintenant de la COLONNE (paramètre
 //! `TooltipSide`), pas du rôle inerte/cliquable du bouton. `CONTROL_TOOLTIP_RESERVE` (mesurée sur
-//! "Supprimer (Ctrl+Shift+S)", le plus long des quatre libellés — désormais sur la colonne DROITE)
+//! "Supprimer (Ctrl+Shift+D)", le plus long des quatre libellés — désormais sur la colonne DROITE)
 //! est réutilisée SYMÉTRIQUEMENT des deux côtés du carré (voir `content_width`) : plus un seul
 //! côté à réserver, il en faut désormais un de chaque, sans quoi l'infobulle du bouton de droite
 //! (« Supprimer »/« Options ») n'aurait pas la place de s'afficher entièrement à droite.
@@ -513,7 +513,7 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// plus rien à gauche non plus — la fenêtre démarre au premier pixel des boutons, décision de la
 /// veille — et la réserve ne vaut plus que pour la DROITE. Les quatre infobulles s'accrochent
 /// maintenant au carré entier (voir `control_button_row`), large de `control_row_width` = 60 px :
-/// « Supprimer (Ctrl+Shift+S) », le plus long des quatre libellés, mesure 140 px et se rabat
+/// « Supprimer (Ctrl+Shift+D) », le plus long des quatre libellés, mesure 140 px et se rabat
 /// alignée sur le bord GAUCHE du carré (`BOTTOM_START`, faute de place à gauche pour la centrer),
 /// il lui faut donc 140 − 60 = 80 px au-delà du carré. Arrondi à 88 px.
 ///
@@ -521,7 +521,7 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// seule, la fenêtre gagne 12 px de large qu'elle ne peint pas — le prix d'une infobulle entière,
 /// et elle reste transparente.
 ///
-/// Le cas non couvert, assumé : « Quitter la sélection (Ctrl+Shift+S) », le libellé que « − »
+/// Le cas non couvert, assumé : « Quitter la sélection (Ctrl+Shift+D) », le libellé que « − »
 /// prend pendant la sélection multiple, est bien plus long. Il se rabat alors sur ce que la
 /// fenêtre offre — mais ce mode ouvre déjà sa propre bande sous les tuiles, et la fenêtre est
 /// alors plus large que ces 88 px.
@@ -534,7 +534,7 @@ const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
 ///
 /// Valeur mesurée (captures de `panels.rs::panneau_suivi_vide_boutons_en_ligne_infobulles_dessous`,
 /// diff pixel avec le rendu non survolé) sur le plus long des quatre libellés, « Supprimer
-/// (Ctrl+Shift+S) » : 140 px d'infobulle, soit 70 px de chaque côté du centre de son bouton ; le
+/// (Ctrl+Shift+D) » : 140 px d'infobulle, soit 70 px de chaque côté du centre de son bouton ; le
 /// centre du premier et du dernier bouton est à 16 px du bord de la rangée, il reste donc 54 px à
 /// couvrir hors rangée. Arrondi à 64 px pour la marge d'erreur (anticrénelage, arrondi du texte).
 const CONTROL_ROW_TOOLTIP_RESERVE: f32 = 64.0;
@@ -600,7 +600,7 @@ impl ControlLayout {
         match self {
             ControlLayout::Square => CONTROL_TOOLTIP_RESERVE,
             // La rangée du Suivi coupé n'affiche que « Détails » et « Options », deux libellés
-            // plus courts que le « Supprimer (Ctrl+Shift+S) » sur lequel la réserve a été mesurée.
+            // plus courts que le « Supprimer (Ctrl+Shift+D) » sur lequel la réserve a été mesurée.
             ControlLayout::Row | ControlLayout::RowTrackingOff => CONTROL_ROW_TOOLTIP_RESERVE,
         }
     }
@@ -920,7 +920,7 @@ impl WatchlistCompletions {
 }
 
 /// **La sélection multiple du bandeau** — ouverte par le « − » du carré de contrôle ou par
-/// `Ctrl+Shift+S`, refermée par le même geste.
+/// `Ctrl+Shift+D`, refermée par le même geste.
 ///
 /// Porté par l'hôte et prêté à [`show`], comme tout état de cette UI : un panneau peint et rend
 /// compte, il ne retient rien (§17.3 bis du plan). Ici la raison est concrète — le raccourci
