@@ -24,7 +24,8 @@
 //! à cette fenêtre (`App::sync_session_windows`). Le logo du site est l'icône de fenêtre et
 //! l'icône de zone de notification, dont le menu — Options / Mise à jour / Déconnecter /
 //! Quitter — est le seul accès à l'overlay quand aucune fenêtre de jeu n'est ouverte
-//! (`App::install_tray`).
+//! (`App::install_tray`). « Mise à jour » rouvre cette même fenêtre sur son écran de mise à jour,
+//! seul cas où elle coexiste avec les overlays de jeu (`App::open_manual_update_window`).
 //!
 //! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
 //! synchro serveur, L5). Pas de thème configurable ni de disposition repositionnable/persistée par
@@ -802,12 +803,14 @@ struct App {
 /// **Menu validé par l'utilisateur (2026-09-14)** : Options / Déconnecter / Quitter, rien d'autre
 /// — puis **« Mise à jour » ajoutée après « Options » à sa demande (2026-09-15)** : un clic lance
 /// la recherche de mise à jour (`UpdateCommand::Check`, la même que le bouton « Recherche de mise
-/// à jour » de la fenêtre Options, §8 de `docs/plan-mise-a-jour.md`). Toujours active : une
-/// recherche n'a pas besoin de compte, et le thread ignore de lui-même une demande pendant une
-/// opération en cours ou à moins de trente secondes de la précédente. C'est le seul accès à
-/// l'overlay quand ni fenêtre de jeu ni fenêtre de connexion ne sont à l'écran — et le seul moyen
-/// de quitter proprement une fois connecté (les overlays ancrés sur le jeu n'ont ni croix ni
-/// barre des tâches).
+/// à jour » de la fenêtre Options, §8 de `docs/plan-mise-a-jour.md`) et, **depuis le 2026-09-18,
+/// l'affiche** — la fenêtre de connexion/démarrage s'ouvre sur son écran de mise à jour, rouage
+/// et verdict compris (voir `open_manual_update_window`). Toujours active : une recherche n'a pas
+/// besoin de compte, et le thread ignore de lui-même une demande pendant une opération en cours
+/// ou à moins de trente secondes de la précédente. C'est le seul accès à l'overlay quand ni
+/// fenêtre de jeu ni fenêtre de connexion ne sont à l'écran — et le seul moyen de quitter
+/// proprement une fois connecté (les overlays ancrés sur le jeu n'ont ni croix ni barre des
+/// tâches).
 struct TrayMenu {
     /// Gardée en vie : l'icône disparaît de la zone de notification à la destruction.
     _icon: TrayIcon,
@@ -894,6 +897,12 @@ struct AppState {
     /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
     /// redemander les réglages de compte à la volée — voir sa doc.
     settings_tx: mpsc::Sender<EngineCommand>,
+    /// **Écran de mise à jour ouvert à la demande** (2026-09-18) — posé par l'entrée « Mise à
+    /// jour » du menu de la zone de notification (voir `open_manual_update_window`), retiré par
+    /// « Fermer ». Tant qu'il vaut `true`, `sync_session_windows` garde la fenêtre de connexion
+    /// ouverte **même compte lié**, en mode mise à jour (`LoginState::manual_update`) : c'est le
+    /// seul endroit où cette fenêtre coexiste avec les overlays de jeu.
+    manual_update: bool,
 }
 
 impl App {
@@ -999,6 +1008,7 @@ impl App {
             pending_recipe: None,
             tray: None,
             menu_events: MenuEvent::receiver(),
+            manual_update: false,
         }
     }
 
@@ -1031,7 +1041,14 @@ impl App {
         let connected = !loading && auth.is_connected();
         let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
         if connected {
-            if has_login {
+            // Seule exception à « compte lié = pas de fenêtre de connexion » : l'écran de mise à
+            // jour demandé depuis le menu de la zone de notification, qui vit alors à côté des
+            // overlays de jeu jusqu'à « Fermer » (voir `open_manual_update_window`).
+            if self.manual_update {
+                if !has_login {
+                    self.create_login_window(event_loop);
+                }
+            } else if has_login {
                 self.windows.retain(|_, w| w.kind != OverlayKind::Login);
                 tracing::info!(
                     "[connexion] compte lié et chargements terminés — fenêtre de connexion fermée, overlays de jeu activés."
@@ -1056,19 +1073,23 @@ impl App {
             if !has_login {
                 self.create_login_window(event_loop);
             }
-            // L'écran de chargement tombe (ou revient, sur « Se connecter ») : la carte doit se
-            // redessiner tout de suite, pas au prochain événement venu d'ailleurs.
-            for overlay in self.windows.values_mut() {
-                if let Some(state) = overlay.login_state.as_mut() {
-                    if state.loading != loading {
-                        state.loading = loading;
-                        overlay.next_redraw_at = Some(std::time::Instant::now());
-                        if !loading {
-                            tracing::info!(
-                                "[connexion] chargements terminés — écran de connexion."
-                            );
-                        }
+        }
+        // L'écran de chargement tombe (ou revient, sur « Se connecter »), l'écran de mise à jour
+        // s'ouvre ou se referme : la carte doit se redessiner tout de suite, pas au prochain
+        // événement venu d'ailleurs.
+        let manual_update = self.manual_update;
+        for overlay in self.windows.values_mut() {
+            if let Some(state) = overlay.login_state.as_mut() {
+                if state.loading != loading {
+                    state.loading = loading;
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
+                    if !loading {
+                        tracing::info!("[connexion] chargements terminés — écran de connexion.");
                     }
+                }
+                if state.manual_update != manual_update {
+                    state.manual_update = manual_update;
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
             }
         }
@@ -1257,6 +1278,48 @@ impl App {
         }
     }
 
+    /// Entrée « Mise à jour » du menu de la zone de notification (2026-09-18, demande de
+    /// l'utilisateur) : **la recherche s'affiche**, elle ne court plus en silence.
+    ///
+    /// La fenêtre montrée est celle de la connexion et du démarrage (`panels::login`, la même
+    /// carte de 400 px), passée en mode mise à jour (`LoginState::manual_update`) : le rouage du
+    /// jeu et « Recherche d'une mise à jour… », puis le verdict — « Vous êtes déjà à jour »,
+    /// « Version X disponible » et son bouton, ou l'échec. Avant, seul le journal et la fenêtre
+    /// Options disaient ce que ce clic avait donné.
+    ///
+    /// Compte lié, cette fenêtre n'existe pas : c'est `manual_update` qui la fait naître et vivre
+    /// à côté des overlays de jeu (voir `sync_session_windows`), jusqu'à « Fermer ». Compte non
+    /// lié, elle est déjà là et change simplement d'écran.
+    ///
+    /// La commande part au thread comme avant (`UpdateCommand::Check { install_if_available:
+    /// false }`) : il l'ignore s'il travaille déjà, ou à moins de trente secondes de la
+    /// vérification précédente — l'écran montre alors tout de suite le verdict qu'il connaît
+    /// déjà, ce qui est exactement ce qu'on vient lui demander.
+    fn open_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::info!(">>> Recherche de mise à jour (zone de notification).");
+        self.manual_update = true;
+        let _ = self.update_command_tx.send(UpdateCommand::Check {
+            install_if_available: false,
+        });
+        // Sans attendre le prochain tick : la fenêtre doit apparaître au clic.
+        self.sync_session_windows(event_loop);
+        if let Some(overlay) = self.windows.values().find(|w| w.kind == OverlayKind::Login) {
+            overlay.window.focus_window();
+        }
+    }
+
+    /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle : on sort du mode manuel.
+    /// `sync_session_windows` referme alors la fenêtre si un compte est lié, ou la ramène à
+    /// l'écran de connexion sinon.
+    fn close_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.manual_update {
+            return;
+        }
+        tracing::info!("[mise à jour] écran de mise à jour refermé.");
+        self.manual_update = false;
+        self.sync_session_windows(event_loop);
+    }
+
     /// Clics sur le menu de l'icône de zone de notification — voir `TrayMenu`. « Déconnecter »
     /// agit tout de suite, sans la confirmation de la fenêtre Options : un menu contextuel ne
     /// peut pas en ouvrir, et l'entrée est explicite.
@@ -1269,10 +1332,7 @@ impl App {
                 tracing::info!(">>> Options (zone de notification)");
                 self.open_options_modal(event_loop, None, options_modal::OptionsTab::Parametres);
             } else if event.id == *tray.update.id() {
-                tracing::info!(">>> Recherche de mise à jour (zone de notification).");
-                let _ = self.update_command_tx.send(UpdateCommand::Check {
-                    install_if_available: false,
-                });
+                self.open_manual_update_window(event_loop);
             } else if event.id == *tray.disconnect.id() {
                 tracing::info!(">>> Déconnexion du compte demandée (zone de notification).");
                 let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
@@ -3744,6 +3804,11 @@ enum PostRedraw {
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
     RetryUpdate,
+    /// « Mettre à jour maintenant » de l'écran de mise à jour manuelle : le téléchargement part,
+    /// et son avancement s'affiche sur la même carte (voir `open_manual_update_window`).
+    StartManualUpdate,
+    /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
+    CloseManualUpdate,
 }
 
 impl App {
@@ -4149,6 +4214,16 @@ impl App {
             if outcome.retry_update {
                 post_redraw = PostRedraw::RetryUpdate;
             }
+            // Écran de mise à jour manuelle (voir `open_manual_update_window`).
+            if outcome.check_update {
+                post_redraw = PostRedraw::CheckUpdate;
+            }
+            if outcome.install_update {
+                post_redraw = PostRedraw::StartManualUpdate;
+            }
+            if outcome.close_update {
+                post_redraw = PostRedraw::CloseManualUpdate;
+            }
         }
         // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
         // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
@@ -4359,6 +4434,16 @@ impl App {
                     tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
                 }
             },
+            // Même chemin que « Mettre à jour vers X » de la fenêtre Options
+            // (`request_update_install`), sans fenêtre Options à refermer : le démarrage est
+            // rebloqué le temps du téléchargement, ce qui referme les overlays de jeu et laisse
+            // l'écran de mise à jour seul à l'écran, avec sa jauge.
+            PostRedraw::StartManualUpdate => {
+                tracing::info!(">>> Mise à jour demandée (écran de mise à jour).");
+                self.startup.set_update_blocking(true);
+                let _ = self.update_command_tx.send(UpdateCommand::Download);
+            }
+            PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
         }
     }
 }
@@ -4456,6 +4541,16 @@ impl ApplicationHandler<UserEvent> for App {
                 } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
                     // Fermer la question, c'est répondre « Non ».
                     post_redraw = PostRedraw::AnswerResetConfirm(target, false);
+                } else if overlay
+                    .login_state
+                    .as_ref()
+                    .is_some_and(|state| state.manual_update)
+                {
+                    // **La croix de l'écran de mise à jour ferme CET écran, pas l'overlay** — même
+                    // raison que la modale Options ci-dessus : cette fenêtre est focalisable, sa
+                    // croix est atteignable, et l'utilisateur qui vient de demander une recherche
+                    // de mise à jour ne demande pas à quitter sa session de jeu.
+                    post_redraw = PostRedraw::CloseManualUpdate;
                 } else {
                     logging::log_session_end("fermeture de fenêtre");
                     event_loop.exit();

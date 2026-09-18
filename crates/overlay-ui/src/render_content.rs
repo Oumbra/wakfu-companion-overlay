@@ -535,6 +535,15 @@ pub struct RenderOutcome {
     /// Ce que la fenêtre de confirmation vient d'obtenir (`kind == ResetConfirm`) : `Yes` remet la
     /// session à zéro et ferme la fenêtre, `No` la ferme seulement, `Pending` la garde.
     pub reset_choice: crate::design::ConfirmChoice,
+    /// « Rechercher à nouveau » de l'écran de mise à jour manuelle — une vérification sans
+    /// installation (voir `panels::login::LoginOutcome::check_update`).
+    pub check_update: bool,
+    /// « Mettre à jour maintenant » / « Réessayer » de l'écran de mise à jour manuelle — l'hôte
+    /// lance le téléchargement (voir `panels::login::LoginOutcome::install_update`).
+    pub install_update: bool,
+    /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle — l'hôte sort du mode manuel
+    /// (voir `panels::login::LoginOutcome::close_update`).
+    pub close_update: bool,
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
@@ -881,6 +890,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         outcome.open_url = login_outcome.open_url;
                         outcome.drag_window = login_outcome.drag_window;
                         outcome.retry_update = login_outcome.retry_update;
+                        outcome.check_update = login_outcome.check_update;
+                        outcome.install_update = login_outcome.install_update;
+                        outcome.close_update = login_outcome.close_update;
                         outcome.login_height = Some(login_outcome.content_height);
                     }
                 }
