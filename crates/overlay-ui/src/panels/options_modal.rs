@@ -926,6 +926,7 @@ pub fn show(
                     update: &state.update,
                     auto_update: &mut state.auto_update,
                     verbose_log: &mut state.verbose_log,
+                    api_override: overlay_sync::client::base_url_override(),
                 },
             ) {
                 a_propos_tab::AProposTabAction::None => {}

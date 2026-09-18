@@ -34,7 +34,15 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// codée en dur sans repli overridable. Tracée une fois au démarrage par `overlay-ui` (`main.rs`),
 /// pour que le journal dise à quel déploiement une session a parlé.
 pub fn base_url() -> String {
-    std::env::var("WAKFU_COMPANION_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
+    base_url_override().unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
+}
+
+/// L'origine **surchargée** par `WAKFU_COMPANION_API_URL`, si elle l'est — `None` quand l'overlay
+/// parle au déploiement de son profil de compilation. Sert à le dire à l'utilisateur (« À propos »,
+/// constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) : c'est là que partent ses données, il doit
+/// pouvoir le voir sans ouvrir le journal.
+pub fn base_url_override() -> Option<String> {
+    std::env::var("WAKFU_COMPANION_API_URL").ok()
 }
 
 /// **Un seul agent pour tout le processus**, cloné à chaque appel (`ureq::Agent` est un `Arc`

@@ -235,7 +235,7 @@ pub const SECTIONS: &[Section] = &[
         links: &[Link::WakfuTerms],
     },
     Section {
-        title: "Vos données",
+        title: VOS_DONNEES_TITLE,
         blocks: &[
             info(
                 "Seul wakfu.log est lu, sur cet ordinateur. Il contient aussi les noms d'autres \
@@ -278,6 +278,20 @@ pub const SECTIONS: &[Section] = &[
     },
 ];
 
+/// Titre de la section sous laquelle se glisse [`api_override_notice`].
+const VOS_DONNEES_TITLE: &str = "Vos données";
+
+/// Le bloc d'alerte « À propos » quand l'origine de l'API est surchargée par l'environnement
+/// (`overlay_sync::client::base_url_override`) — `None` sinon, et rien n'est affiché : le cas
+/// normal ne mérite pas une ligne.
+pub fn api_override_notice(api_override: Option<&str>) -> Option<String> {
+    api_override.map(|origin| {
+        format!(
+            "Cet overlay n'envoie pas ses données à wakfu-companion.com mais à {origin} :              l'origine du serveur est surchargée par la variable d'environnement              WAKFU_COMPANION_API_URL. Si vous ne l'avez pas posée vous-même, retirez-la."
+        )
+    })
+}
+
 /// Texte de la section « Journal » — ce que l'overlay écrit chez l'utilisateur, et ce que la case
 /// ajoute. Sorti en constante pour être vérifiable par un test, comme les blocs de [`SECTIONS`].
 const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : les 14 \
@@ -295,6 +309,9 @@ pub struct AProposTabContext<'a> {
     /// La case « Journal détaillé » — un brouillon, que « Valider » applique et qu'« Annuler »
     /// abandonne, comme sa voisine.
     pub verbose_log: &'a mut bool,
+    /// L'origine d'API surchargée par l'environnement, s'il y en a une
+    /// (`overlay_sync::client::base_url_override`, lue par l'hôte) — voir [`api_override_notice`].
+    pub api_override: Option<String>,
 }
 
 /// L'intention que l'onglet remonte à la fenêtre Options, au plus une par frame.
@@ -344,6 +361,21 @@ pub fn show(
                         .width(inner_width)
                         .log_name(format!("a-propos-{}-{}", index + 1, block_index + 1)),
                 );
+            }
+            // **Origine d'API surchargée** (constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) :
+            // quand `WAKFU_COMPANION_API_URL` est posée, « wakfu-companion.com » dans le bloc
+            // ci-dessus n'est plus vrai — l'utilisateur doit voir où partent ses données, pas
+            // seulement le journal. Bloc d'alerte sous la section « Vos données », jamais ailleurs.
+            if section.title == VOS_DONNEES_TITLE {
+                if let Some(text) = api_override_notice(ctx.api_override.as_deref()) {
+                    ui.add_space(INFO_GAP);
+                    ui.add(
+                        design::info_text(text)
+                            .tone(InfoTone::Alert)
+                            .width(inner_width)
+                            .log_name("a-propos-api-surchargee"),
+                    );
+                }
             }
             ui.add_space(INFO_GAP);
             if let Some(url) = link_row(ui, inner_width, section.links) {
@@ -752,6 +784,14 @@ mod tests {
     /// Les trois sections, dans l'ordre demandé, chacune avec au moins un lien — et la mention de
     /// non-affiliation à Ankama (analyse CGU §3.5) ainsi que l'adresse de contact (RGPD, art. 13)
     /// y figurent en toutes lettres.
+    #[test]
+    fn l_origine_surchargee_est_dite_et_le_cas_normal_reste_muet() {
+        assert_eq!(api_override_notice(None), None);
+        let texte = api_override_notice(Some("http://127.0.0.1:8788")).unwrap();
+        assert!(texte.contains("http://127.0.0.1:8788"));
+        assert!(texte.contains("WAKFU_COMPANION_API_URL"));
+    }
+
     #[test]
     fn les_sections_d_information_portent_ce_qui_est_attendu() {
         let titres: Vec<&str> = SECTIONS.iter().map(|s| s.title).collect();
