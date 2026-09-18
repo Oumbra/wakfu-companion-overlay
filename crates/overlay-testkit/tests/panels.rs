@@ -6467,6 +6467,28 @@ fn capture_login_with_update(
     update: overlay_ui::update::UpdateStatus,
     height: f32,
 ) -> f32 {
+    capture_login_card(nom, auth_status, update, false, height)
+}
+
+/// L'écran de **mise à jour manuelle** (2026-09-18) : la même carte, ouverte par l'entrée « Mise
+/// à jour » du menu de la zone de notification, compte lié (`AuthStatus::Connected` — c'est le
+/// cas nominal : sans compte, la fenêtre serait de toute façon là).
+fn capture_login_manual_update(
+    nom: &str,
+    update: overlay_ui::update::UpdateStatus,
+    height: f32,
+) -> f32 {
+    capture_login_card(nom, AuthStatus::Connected, update, true, height)
+}
+
+/// Le corps commun des trois façades ci-dessus — `manual` pose `LoginState::manual_update`.
+fn capture_login_card(
+    nom: &str,
+    auth_status: AuthStatus,
+    update: overlay_ui::update::UpdateStatus,
+    manual: bool,
+    height: f32,
+) -> f32 {
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -6488,6 +6510,7 @@ fn capture_login_with_update(
         animate: false,
         loading: false,
         update,
+        manual_update: manual,
     };
     let measured = Rc::new(Cell::new(0.0_f32));
     let measured_in = Rc::clone(&measured);
@@ -7246,3 +7269,121 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
         "le glyphe de replacement n'est pas le cadenas"
     );
 }
+
+// ── Écran de mise à jour manuelle (2026-09-18) ─────────────────────────────────────────────────
+//
+// Ce que montre la carte quand la recherche a été demandée depuis l'entrée « Mise à jour » du menu
+// de la zone de notification (`LoginState::manual_update`, voir `panels::login::
+// paint_manual_update`) : le rouage pendant la recherche, puis son verdict. Une capture par état,
+// un harnais par test, et la hauteur vérifiée comme pour tous les autres écrans de cette fenêtre.
+
+/// Recherche en cours : le rouage du jeu et « Recherche d'une mise à jour… » — exactement la
+/// composition de l'écran de chargement, même hauteur (`panels::login::INITIAL_HEIGHT`).
+#[test]
+fn ecran_mise_a_jour_recherche() {
+    let measured = capture_login_manual_update(
+        "login_maj_recherche",
+        overlay_ui::update::UpdateStatus::Checking,
+        432.0,
+    );
+    assert_eq!(measured, 432.0);
+}
+
+/// Téléchargement lancé depuis cet écran : la jauge y reste, l'utilisateur suit la mise à jour là
+/// où il l'a demandée.
+#[test]
+fn ecran_mise_a_jour_telechargement() {
+    let measured = capture_login_manual_update(
+        "login_maj_telechargement",
+        overlay_ui::update::UpdateStatus::Downloading {
+            version: "0.21.0".to_string(),
+            received: 4_200_000,
+            total: 11_800_000,
+        },
+        432.0,
+    );
+    assert_eq!(measured, 432.0);
+}
+
+/// Le verdict le plus fréquent : « Vous êtes déjà à jour », et de quoi refermer. La version citée
+/// est celle du build, figée à `0.0.0` par `freeze_for_snapshots`.
+#[test]
+fn ecran_mise_a_jour_a_jour() {
+    let measured = capture_login_manual_update(
+        "login_maj_a_jour",
+        overlay_ui::update::UpdateStatus::UpToDate {
+            checked_at: std::time::Instant::now(),
+        },
+        LOGIN_MAJ_A_JOUR_HEIGHT,
+    );
+    assert_eq!(
+        measured, LOGIN_MAJ_A_JOUR_HEIGHT,
+        "login_maj_a_jour : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Une version plus récente existe : l'utilisateur décide quand (« Mettre à jour maintenant » ou
+/// « Plus tard »).
+#[test]
+fn ecran_mise_a_jour_disponible() {
+    let measured = capture_login_manual_update(
+        "login_maj_disponible",
+        overlay_ui::update::UpdateStatus::Available {
+            version: "0.21.0".to_string(),
+            download_size: 11_800_000,
+            mandatory: false,
+            notes_url: None,
+            checked_at: std::time::Instant::now(),
+        },
+        LOGIN_MAJ_DISPONIBLE_HEIGHT,
+    );
+    assert_eq!(
+        measured, LOGIN_MAJ_DISPONIBLE_HEIGHT,
+        "login_maj_disponible : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Manifeste illisible (hors ligne, serveur muet) : la recherche n'a pas abouti.
+#[test]
+fn ecran_mise_a_jour_verification_impossible() {
+    let measured = capture_login_manual_update(
+        "login_maj_indisponible",
+        overlay_ui::update::UpdateStatus::Unavailable {
+            reason: "GET /latest.json — erreur réseau : délai dépassé après 10 s".to_string(),
+            checked_at: std::time::Instant::now(),
+        },
+        LOGIN_MAJ_ECHEC_HEIGHT,
+    );
+    assert_eq!(
+        measured, LOGIN_MAJ_ECHEC_HEIGHT,
+        "login_maj_indisponible : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Mise à jour NON obligatoire en échec : l'overlay continue avec sa version, l'écran le dit et
+/// propose de réessayer (l'échec d'une mise à jour **obligatoire**, lui, a son propre écran —
+/// voir `fenetre_de_connexion_mise_a_jour_requise`).
+#[test]
+fn ecran_mise_a_jour_echec() {
+    let measured = capture_login_manual_update(
+        "login_maj_echec",
+        overlay_ui::update::UpdateStatus::Failed {
+            headline: "Téléchargement interrompu".to_string(),
+            detail: "réseau : connexion réinitialisée après 4,2 Mo sur 11,8 Mo".to_string(),
+            mandatory: false,
+        },
+        LOGIN_MAJ_ECHEC_HEIGHT,
+    );
+    assert_eq!(
+        measured, LOGIN_MAJ_ECHEC_HEIGHT,
+        "login_maj_echec : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Hauteurs des écrans de mise à jour manuelle, mesurées par la carte elle-même.
+const LOGIN_MAJ_A_JOUR_HEIGHT: f32 = 382.0;
+const LOGIN_MAJ_DISPONIBLE_HEIGHT: f32 = 432.0;
+/// « Vérification impossible » et « Mise à jour impossible » ont la même composition, donc la même
+/// hauteur — un titre d'une ligne, trois lignes d'explication, le détail technique, le bouton et
+/// le lien.
+const LOGIN_MAJ_ECHEC_HEIGHT: f32 = 473.0;
