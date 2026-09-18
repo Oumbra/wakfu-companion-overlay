@@ -70,6 +70,23 @@ for f in "${FIXTURES[@]}"; do
       | grep -cvE ' Anonyme-[A-Za-zÀ-ÿ]+[0-9]+ breed ' || true)
   [ "$n" -gt 0 ] && signaler "$f : $n entrée(s) en combat d'un joueur réel" \
     "attendu « Anonyme-<Classe><N> » — voir l'en-tête de tests/session_real_log.rs"
+
+  # 6. Identifiant de compte ANKAMA d'un ami. La donnée la plus identifiante qu'un wakfu.log
+  #    contienne, et celle qu'on voit le moins : `<Personnage> (<compte>#<NNNN>) a rejoint notre
+  #    monde.` Le `<compte>#<NNNN>` est global — stable d'un personnage à l'autre, et le même
+  #    jusque sur les forums Ankama. Manquée par la première passe d'inventaire du 2026-09-18.
+  n=$(grep -oE '\([A-Za-z0-9_.-]+#[0-9]{4}\)' "$f" 2> /dev/null | grep -cvE '\(anonyme[0-9]{2}#[0-9]{4}\)' || true)
+  [ "$n" -gt 0 ] && signaler "$f : $n identifiant(s) de compte Ankama" \
+    "attendu « anonymeNN#NNNN » — liste d'amis de l'utilisateur"
+
+  # 7. Échange entre deux joueurs : deux noms et deux identifiants numériques sur une ligne.
+  # `[^\r\n]` serait un piège ici : POSIX ERE ne connaît pas ces échappements, la classe vaudrait
+  # « ni backslash, ni r, ni n » et la capture s'arrêterait au premier « r ». `grep` travaille de
+  # toute façon ligne à ligne.
+  n=$(grep -oE '\[Trade\] .*' "$f" 2> /dev/null \
+      | grep -cvE 'between Anonyme-[A-Za-zÀ-ÿ]+[0-9]+ \(id=9[0-9]{7}\) and Anonyme-[A-Za-zÀ-ÿ]+[0-9]+ \(id=9[0-9]{7}\)' || true)
+  [ "$n" -gt 0 ] && signaler "$f : $n ligne(s) d'échange à joueur réel" \
+    "attendu « Anonyme-<Classe><N> (id=9000000N) » des deux côtés"
 done
 
 if [ "$ECHECS" -gt 0 ]; then

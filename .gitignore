@@ -31,3 +31,15 @@ __pycache__/
 # ne vit que dans le gestionnaire de mots de passe du mainteneur et les secrets GitHub Actions.
 # Seule la clé publique (wakfu-overlay.pub) est commitée.
 *.key
+
+# Journal du client Wakfu déposé dans le dépôt pour déboguer — un vrai `wakfu.log` porte un jeton
+# de session, une IP locale, le nom de compte Windows, les personnages avec leurs identifiants
+# numériques et les pseudonymes ET messages de tous les joueurs croisés (constat C1 de
+# `docs/analyse-rgpd.md`). C'est exactement par un `git add` distrait qu'il en est arrivé deux dans
+# l'historique, à une époque où le dépôt était privé.
+#
+# Les deux fixtures PSEUDONYMISÉES sont les seules exceptions, et `scripts/check-fixtures.sh`
+# (hook `pre-commit` + étape de CI) vérifie qu'elles le restent.
+wakfu.log
+!crates/overlay-engine/tests/wakfu.log
+!spikes/s2-engine-quickjs/tests/wakfu.log
