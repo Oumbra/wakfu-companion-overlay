@@ -124,12 +124,22 @@ pub fn show(
     // l'icône de la zone de notification — deux chemins qu'un joueur qui a la fenêtre Options sous
     // les yeux ne voit pas ; et relancer demandait de faire les deux à la suite, à la main.
     //
-    // **Secondaires et centrés** (demande utilisateur) : centrés comme « Se déconnecter » dans
-    // l'onglet « Paramètres », parce que ce sont des actions qui échappent à « Annuler » ;
-    // secondaires et non `Danger`, parce que ni l'une ni l'autre ne détruit quoi que ce soit — le
-    // compte reste appairé, les réglages validés restent écrits, relancer retrouve tout. Les
-    // confirmations, elles, restent : un clic en plein combat coupe le détail des dégâts sans
-    // retour, et le brouillon de la fenêtre part avec.
+    // **Centrés** (demande utilisateur), comme « Se déconnecter » dans l'onglet « Paramètres »,
+    // parce que ce sont des actions qui échappent à « Annuler ». Les confirmations, elles,
+    // restent : un clic en plein combat coupe le détail des dégâts sans retour, et le brouillon de
+    // la fenêtre part avec.
+    //
+    // **« Fermer l'overlay » est `Danger` depuis le 2026-09-18** (demande utilisateur). Les deux
+    // boutons étaient secondaires à leur arrivée, au motif que ni l'une ni l'autre des deux sorties
+    // ne détruit quoi que ce soit — le compte reste appairé, les réglages validés restent écrits.
+    // C'est vrai des DONNÉES, pas de la SESSION : fermer est la seule action de toute la fenêtre
+    // qui ne se rejoue pas depuis l'overlay (il faut le relancer depuis le bureau), et ce qui part
+    // avec — combat en cours, compteurs de session — ne revient pas. Le rouge dit cette
+    // irréversibilité-là, celle que la variante signale partout ailleurs dans l'interface.
+    //
+    // **« Redémarrer l'overlay » reste secondaire** : il ressort, lui, et de lui-même. Deux rouges
+    // côte à côte n'auraient plus distingué la sortie de son voisin réversible — c'est justement
+    // la distinction qui a motivé le changement.
     //
     // **« Redémarrer l'overlay », en toutes lettres** (2026-09-18, en même temps que le
     // déplacement) : il disait « Redémarrer » tant qu'il était collé à « Fermer l'overlay », qui
@@ -151,7 +161,7 @@ pub fn show(
         )
         .log_name("options-redemarrer-overlay");
     let quit = design::button("Fermer l'overlay")
-        .variant(ButtonVariant::Secondary)
+        .variant(ButtonVariant::Danger)
         .size(ButtonSize::Height(ROW_HEIGHT))
         .tooltip(
             "Arrêter l'overlay. Le compte reste appairé et les réglages validés sont \
