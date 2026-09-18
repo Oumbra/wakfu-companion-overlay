@@ -18,7 +18,10 @@
 # Sur le poste du mainteneur, RTK est installé et branché en global (`rtk init -g`) ; le conteneur
 # éphémère, lui, repart sans binaire, et une commande réécrite sans `rtk` dans le PATH échouerait
 # toutes en « command not found ». D'où l'installation ici, dans /usr/local/bin (toujours dans le
-# PATH, à la différence de ~/.local/bin que choisit le script par défaut).
+# PATH, à la différence de ~/.local/bin que choisit le script par défaut). Voie principale : le
+# script officiel (binaire précompilé). Repli si celui-ci échoue : `cargo run -p xtask --
+# setup-tools`, qui installe RTK (et tout futur outil Cargo global du dépôt) via `cargo install` —
+# la même commande, réutilisable telle quelle sur un poste de dev ou une autre machine.
 #
 # Ne fait rien hors session cloud : un poste de développeur a déjà ses paquets système, et ce
 # script ne doit pas décider à sa place d'en installer.
@@ -54,7 +57,9 @@ bash scripts/install-hooks.sh >/dev/null
 
 # 4. RTK — binaire Linux précompilé, version épinglée (même esprit que rust-toolchain.toml : une
 #    montée de version est un changement explicite, pas une dérive d'un conteneur à l'autre).
-#    Le script officiel vérifie la somme SHA-256 de l'archive contre checksums.txt de la Release.
+#    Le script officiel vérifie la somme SHA-256 de l'archive contre checksums.txt de la Release —
+#    à préférer à `xtask setup-tools` (voir plus bas) quand c'est disponible : instantané, et la
+#    version installée correspond exactement à celle du poste du mainteneur.
 #    Un échec ici n'est pas bloquant : `rtk-hook.sh` laisse passer les commandes telles quelles
 #    quand le binaire manque, la session tourne juste sans condensation.
 RTK_VERSION_PINNED="v0.49.0"
@@ -62,7 +67,10 @@ if ! command -v rtk >/dev/null 2>&1; then
   echo "session-start : installation de rtk ${RTK_VERSION_PINNED}"
   if ! curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh |
       RTK_INSTALL_DIR=/usr/local/bin RTK_VERSION="${RTK_VERSION_PINNED}" sh >/dev/null; then
-    echo "session-start : installation de rtk échouée, sortie des commandes non condensée."
+    echo "session-start : installation du binaire précompilé échouée, repli sur \`xtask setup-tools\` (cargo install)."
+    if ! cargo run --quiet --manifest-path xtask/Cargo.toml -- setup-tools; then
+      echo "session-start : xtask setup-tools a aussi échoué, sortie des commandes non condensée."
+    fi
   fi
 fi
 
