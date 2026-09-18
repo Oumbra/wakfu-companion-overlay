@@ -64,8 +64,8 @@ use windows::Data::Xml::Dom::XmlDocument;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_WRITE,
-    REG_OPTION_NON_VOLATILE, REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
@@ -146,6 +146,34 @@ pub fn register_identity(dir: &std::path::Path, icon_png: &[u8]) {
         }
     }
     tracing::info!("[tour] identité de notification : {DISPLAY_NAME} ({APP_USER_MODEL_ID})");
+}
+
+/// **Retire du registre tout ce que [`register_identity`] y a écrit** — les deux arbres `HKCU`,
+/// celui de l'identité de notification (`Software\\Classes\\AppUserModelId\\…`, nom d'affichage et
+/// chemin de l'icône) et celui du protocole d'activation (`Software\\Classes\\wakfu-companion`, la
+/// ligne de commande de l'exécutable — donc souvent le nom d'utilisateur OS dans son chemin).
+///
+/// Appelé par `crate::local_data` sur [`crate::local_data::Scope::Everything`] : l'effacement
+/// complet promet l'état d'une installation neuve, et l'icône déposée à côté des gabarits part
+/// avec le dossier de données. Best-effort comme l'enregistrement : une clé absente (identité
+/// jamais posée parce que les notifications de tour n'ont jamais servi) est le résultat attendu,
+/// un refus est journalisé et rien de plus.
+pub fn unregister_identity() {
+    unsafe {
+        for subkey in [
+            format!("Software\\Classes\\AppUserModelId\\{APP_USER_MODEL_ID}"),
+            format!("Software\\Classes\\{PROTOCOL}"),
+        ] {
+            let subkey_w = wide(&subkey);
+            let status = RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(subkey_w.as_ptr()));
+            if status.is_err() {
+                // `ERROR_FILE_NOT_FOUND` inclus : rien à retirer, c'est le cas le plus courant.
+                tracing::debug!("[données locales] HKCU\\{subkey} non retiré : {status:?}");
+            } else {
+                tracing::info!("[données locales] clé de registre retirée : HKCU\\{subkey}");
+            }
+        }
+    }
 }
 
 /// Schéma d'URI du protocole d'activation — `wakfu-companion:focus?hwnd=<entier>`.
@@ -270,7 +298,7 @@ pub fn focus_window(hwnd: isize) {
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(dir.join("focus.log"))
+                .open(dir.join(super::FOCUS_LOG))
             {
                 let _ = writeln!(
                     f,

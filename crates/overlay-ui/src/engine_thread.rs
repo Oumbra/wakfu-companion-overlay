@@ -541,13 +541,26 @@ pub fn spawn_engine_thread(
                         // Déconnexion volontaire : repli mode invité — plus de roster connu
                         // (classification retombe sur `breed`), Suivi vidé (la LISTE suivie est
                         // lue depuis le compte ; sans compte, il n'y a plus de liste à afficher),
-                        // plus aucun son de ramassage activé (même raison). Les compteurs déjà
-                        // persistés sur disque ne sont pas effacés : une reconnexion ultérieure au
-                        // MÊME compte les retrouve (`merge_config`).
+                        // plus aucun son de ramassage activé (même raison).
+                        //
+                        // **La session suivie est OUBLIÉE, disque compris** (2026-09-18, constat
+                        // C5 de `docs/analyse-rgpd.md`) : `forget_session` efface les
+                        // `fight-*.json` des combats en cours — leurs combattants sont des tiers —
+                        // et remet l'état à zéro. Les deux vont ensemble et dans cet ordre : vider
+                        // le disque sans vider la mémoire ne durerait pas, la prochaine ligne de
+                        // log réécrirait chaque combat encore `ongoing` (`drain_sync_events` ->
+                        // `fight_store::save_fight`). Ce qui survit est ce qu'`Engine` porte hors
+                        // de `state` (catalogue, donjons, référentiels) : rien qui nomme personne.
+                        //
+                        // Les compteurs de Suivi persistés (`watchlist-counts.json`) partent avec,
+                        // mais depuis `local_data::purge` (voir `background::spawn_auth_thread`) :
+                        // ils sont répliqués au compte (`client::patch_watchlist_counts`), donc
+                        // retrouvés à la reconnexion — le fichier local n'est qu'un cache.
                         EngineCommand::Disconnect => {
                             tracing::info!(
-                                "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé)"
+                                "compte déconnecté — Engine repasse en mode invité (repli `breed`, Suivi vidé), session suivie oubliée"
                             );
+                            engine.forget_session();
                             roster_out.store(Arc::new(None));
                             roster_draft_out.store(Arc::new(None));
                             engine.set_roster(None);

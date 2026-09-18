@@ -1,0 +1,398 @@
+//! **Effacement des données locales** — le droit à l'effacement (RGPD art. 17) rendu exerçable
+//! depuis l'overlay, constat **C5** de [`docs/analyse-rgpd.md`](../../../docs/analyse-rgpd.md)
+//! §3.5 : la déconnexion n'effaçait que le jeton, et rien dans l'interface ne purgeait les
+//! combats en cours, la file d'envoi, les gabarits de tour, les journaux ni la configuration.
+//!
+//! ## Deux portées, jamais une seule
+//!
+//! | Portée | Déclencheur | Ce qui part |
+//! | --- | --- | --- |
+//! | [`Scope::OnDisconnect`] | toute déconnexion (fenêtre Options, zone de notification, jeton refusé) — `background::spawn_auth_thread` | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
+//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › Compte, écran de connexion) | les **deux racines** de dossiers en entier, le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
+//!
+//! La portée de déconnexion ne touche ni la configuration ni les caches : se déconnecter n'est pas
+//! désinstaller, et reperdre son chemin de `wakfu.log` ou son catalogue à chaque déconnexion serait
+//! une punition, pas une protection. C'est le bouton qui va jusque-là, et il le dit avant.
+//!
+//! La file de synchro (`sync-queue.sqlite3`) n'est pas dans la liste de [`Scope::OnDisconnect`] :
+//! elle est déjà vidée par le thread de synchro lui-même (`SyncCommand::Deactivate`, constat C3,
+//! 2026-09-18) — la purger ici en doublon fermerait la base sous les pieds de ce thread.
+//!
+//! ## Pourquoi deux racines à effacer
+//!
+//! `directories::ProjectDirs` est appelé avec **deux triplets** dans le dépôt (constat C13) :
+//! `("", "", "wakfu-companion-overlay")` pour les journaux, les données d'`overlay-engine` et tout
+//! `overlay-sync` ; `("com", "Oumbra", "wakfu-companion-overlay")` pour `config.toml` et les
+//! gabarits de tour. Sous Linux les deux retombent sur le même dossier XDG, sous **Windows non** :
+//! `%APPDATA%\wakfu-companion-overlay\…` d'un côté, `%APPDATA%\Oumbra\wakfu-companion-overlay\…`
+//! de l'autre. Un effacement qui n'en connaîtrait qu'une laisserait la moitié des fichiers en
+//! place — les chemins sont donc listés puis **dédupliqués** ([`targets`]).
+//!
+//! ## Ce que « best-effort » veut dire ici
+//!
+//! Aucune suppression n'est vitale et aucune n'interrompt quoi que ce soit : un fichier absent est
+//! le résultat attendu, un fichier verrouillé (antivirus, journal du jour ouvert par un autre
+//! process) est journalisé dans le [`PurgeReport`] et la purge continue. Le rapport est rendu à
+//! l'appelant, qui le journalise — ce que l'interface en montre, elle, est un compte de fichiers,
+//! jamais une bannière d'erreur par chemin.
+//!
+//! ## Les journaux du jour sont VIDÉS, pas supprimés
+//!
+//! Une déconnexion ne ferme pas l'overlay : il revient à son écran de connexion et continue de
+//! journaliser. Or `tracing_appender` tient le fichier du jour **ouvert** et ne rouvre qu'à la
+//! rotation (minuit) — supprimer ce fichier laisse le programme écrire dans un inode sans nom, et
+//! le journal serait muet jusqu'au lendemain, précisément quand on cherche pourquoi la
+//! reconnexion échoue. [`Scope::OnDisconnect`] **tronque** donc chaque fichier de `logs/`
+//! ([`truncate_logs`]) : le contenu — noms de personnages, chemin du log, auteur de message
+//! (constat C6) — part pour de bon, le fichier reste et l'appender continue d'écrire dedans.
+//!
+//! [`Scope::Everything`] n'a pas ce souci : l'overlay se ferme juste après, le dossier part en
+//! entier.
+//!
+//! **L'appelant doit garantir que rien ne réécrit derrière.** Les threads qui écrivent ces
+//! fichiers tiennent leur contenu en mémoire : une purge seule serait défaite par la prochaine
+//! sauvegarde périodique. C'est pourquoi la déconnexion fait d'abord oublier sa session au moteur
+//! (`Engine::forget_session`, appelé sur `EngineCommand::Disconnect`) et au récap de l'hôte
+//! (`recap_session::RecapSession::purge`), et pourquoi le bouton **ferme l'overlay** juste après.
+
+use std::path::{Path, PathBuf};
+
+/// Nom de projet de la racine « sans qualifieur » — celle de `logging::log_dir`,
+/// `overlay_engine::fight_store`/`watchlist` et de tout `overlay_sync` (jeton, file de synchro,
+/// caches, mises à jour). Les crates concernés ont chacun la même constante, avec la même variante
+/// de test : un test qui purge ne doit jamais viser le vrai dossier de l'utilisateur.
+#[cfg(not(test))]
+const SHARED_APP_NAME: &str = "wakfu-companion-overlay";
+#[cfg(test)]
+const SHARED_APP_NAME: &str = "wakfu-companion-overlay-test";
+
+/// Ce que la purge emporte — voir le tableau de la doc de module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Les fichiers à tiers et à captures, plus les journaux. Configuration et caches conservés.
+    OnDisconnect,
+    /// Tout : les deux racines de dossiers, le jeton du trousseau, l'inscription au démarrage.
+    Everything,
+}
+
+impl Scope {
+    /// Comment la portée se nomme au journal — l'interface, elle, a ses propres libellés.
+    fn log_name(self) -> &'static str {
+        match self {
+            Scope::OnDisconnect => "déconnexion",
+            Scope::Everything => "effacement complet",
+        }
+    }
+}
+
+/// Ce qu'une purge a fait — rendu à l'appelant plutôt que journalisé ici : c'est lui qui sait
+/// depuis quel geste elle part, et le journal fait partie de ce qui est effacé.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PurgeReport {
+    /// Chemins effectivement supprimés.
+    pub removed: Vec<PathBuf>,
+    /// Fichiers vidés sur place plutôt que supprimés — les journaux, voir la doc de module.
+    pub truncated: Vec<PathBuf>,
+    /// Chemins déjà absents — le cas le plus courant, et un succès.
+    pub absent: usize,
+    /// Chemins que le système a refusé de supprimer, avec la cause.
+    pub failed: Vec<(PathBuf, String)>,
+}
+
+impl PurgeReport {
+    /// Une ligne pour le journal : ce qui est parti, ce qui a résisté.
+    pub fn summary(&self) -> String {
+        let mut line = format!(
+            "{} chemin(s) supprimé(s), {} journal(aux) vidé(s), {} déjà absent(s)",
+            self.removed.len(),
+            self.truncated.len(),
+            self.absent
+        );
+        if !self.failed.is_empty() {
+            line.push_str(&format!(", {} en échec", self.failed.len()));
+        }
+        line
+    }
+}
+
+/// La racine de données et de configuration « sans qualifieur ».
+fn shared_dirs() -> Option<directories::ProjectDirs> {
+    directories::ProjectDirs::from("", "", SHARED_APP_NAME)
+}
+
+/// **Les chemins que `scope` emporte**, dans l'ordre de suppression et sans doublon.
+///
+/// Les journaux viennent **en dernier** : le rapport de purge y est écrit par l'appelant, autant
+/// qu'il ait une chance d'y rester jusqu'au bout.
+pub fn targets(scope: Scope) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    match scope {
+        Scope::OnDisconnect => {
+            // `data/` : un fichier par combat en cours (`fight-*.json`, ses combattants nommés) et
+            // le récap de session (`recap-session.json`), qui vit dans le même dossier.
+            paths.push(overlay_engine::fight_store::default_store_dir());
+            // Compteurs de Suivi : répliqués au compte (`client::patch_watchlist_counts`), donc
+            // retrouvés à la reconnexion — le fichier local n'est qu'un cache de secours.
+            paths.push(overlay_engine::watchlist::default_store_path());
+            // Gabarits de tour : un PNG du nom du personnage RENDU À L'ÉCRAN et le nom en clair
+            // à côté (constat C8).
+            paths.extend(crate::turn_watch::templates::dir());
+            // `focus.log`, lui, est écrit par un process éphémère qui n'existe plus quand on
+            // arrive ici (`turn_watch::notify::focus_window`) : rien ne le tient ouvert, il part
+            // franchement. Le dossier `logs/` est traité à part, voir [`truncate_logs`].
+            paths.extend(
+                crate::turn_watch::templates::data_dir()
+                    .map(|dir| dir.join(crate::turn_watch::FOCUS_LOG)),
+            );
+        }
+        Scope::Everything => {
+            // Les deux racines en entier — voir « Pourquoi deux racines » dans la doc de module.
+            // Rien n'est énuméré fichier par fichier ici : un cache ajouté demain dans l'une de
+            // ces racines doit partir avec le reste sans que ce module l'apprenne.
+            if let Some(dirs) = shared_dirs() {
+                paths.push(dirs.data_dir().to_path_buf());
+                paths.push(dirs.config_dir().to_path_buf());
+            }
+            if let Some(dirs) = crate::config::project_dirs() {
+                paths.push(dirs.data_dir().to_path_buf());
+                paths.push(dirs.config_dir().to_path_buf());
+            }
+        }
+    }
+    dedup(paths)
+}
+
+/// Retire les doublons **et les chemins contenus dans un autre** de la liste : sous Linux les deux
+/// racines se confondent, et `logs/` est sous la racine que [`Scope::Everything`] efface déjà.
+/// Supprimer un dossier deux fois n'est pas faux (le second passage compte un absent), mais le
+/// rapport serait trompeur.
+fn dedup(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut kept: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    for path in paths {
+        if kept.iter().any(|k| path == *k || path.starts_with(k)) {
+            continue;
+        }
+        kept.retain(|k| !k.starts_with(&path));
+        kept.push(path);
+    }
+    kept
+}
+
+/// **Efface ce que `scope` emporte** et rend le rapport. Pour [`Scope::Everything`], efface aussi
+/// ce qui ne vit pas dans ces dossiers : le jeton du trousseau système
+/// (`overlay_sync::token_store`), l'inscription au démarrage de l'ordinateur (`crate::autostart` —
+/// `HKCU\…\Run` ou un `.desktop`) et, sous Windows, les deux clés de registre de l'identité de
+/// notification et du protocole d'activation (`turn_watch::notify::unregister_identity`).
+///
+/// **Ne ferme pas l'overlay et ne déconnecte pas** : c'est à l'appelant, et c'est indispensable
+/// pour [`Scope::Everything`] (voir la doc de module).
+pub fn purge(scope: Scope) -> PurgeReport {
+    if scope == Scope::Everything {
+        // Le jeton d'abord : il est le seul élément effacé dont la perte est irréversible côté
+        // utilisateur (il faudra réappairer), et le seul qui ne soit pas un fichier à nous.
+        overlay_sync::token_store::clear_token();
+        crate::autostart::apply(false);
+        #[cfg(windows)]
+        crate::turn_watch::notify::unregister_identity();
+    }
+    let mut report = purge_paths(&targets(scope));
+    if scope == Scope::OnDisconnect {
+        truncate_logs(&mut report);
+    }
+    tracing::info!(
+        "[données locales] {} : {}.",
+        scope.log_name(),
+        report.summary()
+    );
+    for (path, err) in &report.failed {
+        tracing::warn!("[données locales] {} non supprimé : {err}", path.display());
+    }
+    report
+}
+
+/// **Le geste complet du bouton « Supprimer les données locales »**, pour les deux hôtes — qui
+/// enchaînent ensuite `logging::log_session_end` et la sortie de leur boucle d'événements.
+///
+/// Le récap de session part **avant** le reste, et pas seulement parce qu'il est dans les dossiers
+/// effacés : son `Drop` réécrit `recap-session.json` quand il a des compteurs non pliés
+/// (`RecapSession::save`, qui recrée son dossier parent au passage). Purgé sans ce préalable, le
+/// fichier reviendrait quelques millisecondes après la purge, à la chute de l'hôte.
+///
+/// Ce qu'un thread de fond pourrait encore recréer entre cet appel et la fin du process (une icône
+/// mise en cache, un événement remis en file) est le prix de ne pas arrêter chaque thread d'abord :
+/// des dossiers presque vides, sans rien qui nomme personne. La fermeture immédiate est ce qui
+/// borne cette fenêtre — voir la doc de module.
+pub fn purge_everything_before_shutdown(
+    recap: &mut crate::recap_session::RecapSession,
+    engine_totals: &overlay_engine::SessionTotals,
+) -> PurgeReport {
+    recap.purge(engine_totals, std::time::SystemTime::now());
+    purge(Scope::Everything)
+}
+
+/// Supprime chaque chemin de `paths` — fichier ou dossier entier —, sans jamais s'arrêter au
+/// premier échec. Séparé de [`purge`] pour être testable sur un dossier temporaire : appelé avec
+/// [`targets`], il viserait les données réelles de la machine.
+fn purge_paths(paths: &[PathBuf]) -> PurgeReport {
+    let mut report = PurgeReport::default();
+    for path in paths {
+        match remove(path) {
+            Ok(true) => report.removed.push(path.clone()),
+            Ok(false) => report.absent += 1,
+            Err(err) => report.failed.push((path.clone(), err.to_string())),
+        }
+    }
+    report
+}
+
+/// **Vide chaque fichier de `logs/` sur place** — voir « Les journaux du jour sont VIDÉS » dans la
+/// doc de module. Un dossier absent (aucune écriture encore, ou `ProjectDirs` muet) n'est pas une
+/// erreur : il n'y a alors rien à vider.
+fn truncate_logs(report: &mut PurgeReport) {
+    let Some(dir) = crate::logging::log_dir() else {
+        return;
+    };
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            report.absent += 1;
+            return;
+        }
+        Err(err) => {
+            report.failed.push((dir, err.to_string()));
+            return;
+        }
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+        {
+            Ok(_) => report.truncated.push(path),
+            Err(err) => report.failed.push((path, err.to_string())),
+        }
+    }
+}
+
+/// `Ok(true)` supprimé, `Ok(false)` déjà absent, `Err` refusé par le système.
+fn remove(path: &Path) -> std::io::Result<bool> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path)?;
+    } else {
+        std::fs::remove_file(path)?;
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_dir(nom: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("overlay-local-data-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn purge_efface_fichiers_et_dossiers_et_compte_les_absents() {
+        let racine = tmp_dir("purge");
+        let fichier = racine.join("fight-1.json");
+        std::fs::write(&fichier, "{}").unwrap();
+        let dossier = racine.join("turn-templates");
+        std::fs::create_dir_all(dossier.join("sous-dossier")).unwrap();
+        std::fs::write(dossier.join("Heros.png"), "png").unwrap();
+        let absent = racine.join("jamais-ecrit.json");
+
+        let rapport = purge_paths(&[fichier.clone(), dossier.clone(), absent]);
+
+        assert!(!fichier.exists(), "le fichier devait partir");
+        assert!(!dossier.exists(), "le dossier devait partir en entier");
+        assert_eq!(rapport.removed.len(), 2);
+        assert_eq!(rapport.absent, 1);
+        assert!(rapport.failed.is_empty(), "{:?}", rapport.failed);
+        assert!(rapport.summary().contains("2 chemin(s) supprimé(s)"));
+
+        let _ = std::fs::remove_dir_all(racine);
+    }
+
+    /// Le cas Linux de la doc de module : les deux racines `ProjectDirs` se confondent, et `logs/`
+    /// est sous la racine que l'effacement complet emporte déjà. Un doublon dans la liste ne
+    /// casserait rien, mais le rapport compterait des absents inventés.
+    #[test]
+    fn les_chemins_contenus_dans_un_autre_sont_retires() {
+        let racine = PathBuf::from("/tmp/overlay-dedup");
+        let liste = dedup(vec![
+            racine.join("logs"),
+            racine.clone(),
+            racine.clone(),
+            racine.join("data/fight-1.json"),
+            PathBuf::from("/tmp/overlay-dedup-bis"),
+        ]);
+        assert_eq!(
+            liste,
+            vec![racine, PathBuf::from("/tmp/overlay-dedup-bis")],
+            "la racine doit absorber ses descendants, et un voisin de même préfixe rester"
+        );
+    }
+
+    /// Les deux portées ne visent pas les mêmes chemins, et aucune ne doit rendre une liste vide
+    /// sur une machine où `ProjectDirs` répond (sinon le bouton ne ferait rien du tout).
+    ///
+    /// **Ce test LIT des chemins, il n'efface rien** — et aucun test de ce module n'appelle
+    /// [`purge`] ni [`truncate_logs`] : ils viseraient les données réelles de la machine qui lance
+    /// la suite. Les variantes `#[cfg(test)]` des noms de projet ne protègent que le crate en
+    /// cours de test (`crate::config` ici), pas celles d'`overlay-engine` ni d'`overlay-sync`, qui
+    /// sont alors compilés en mode normal. Seul [`purge_paths`], qui prend ses chemins en
+    /// argument, se teste sur un dossier temporaire.
+    #[test]
+    fn les_deux_portees_visent_ce_qu_elles_doivent() {
+        let deconnexion = targets(Scope::OnDisconnect);
+        let tout = targets(Scope::Everything);
+        assert!(!deconnexion.is_empty(), "portée de déconnexion vide");
+        assert!(!tout.is_empty(), "portée d'effacement complet vide");
+
+        let config = crate::config::project_dirs()
+            .map(|dirs| dirs.config_dir().join("config.toml"))
+            .expect("racine de configuration");
+        assert!(
+            !deconnexion.iter().any(|p| config.starts_with(p)),
+            "la déconnexion ne doit pas emporter config.toml : se déconnecter n'est pas désinstaller"
+        );
+        assert!(
+            tout.iter().any(|p| config.starts_with(p)),
+            "l'effacement complet doit emporter config.toml"
+        );
+
+        // Les combats en cours et les gabarits partent à la déconnexion (tiers, captures)...
+        for attendu in [
+            overlay_engine::fight_store::default_store_dir(),
+            crate::turn_watch::templates::dir().expect("dossier des gabarits"),
+        ] {
+            assert!(
+                deconnexion.iter().any(|p| attendu.starts_with(p)),
+                "{} devait être visé par la déconnexion",
+                attendu.display()
+            );
+        }
+        // ...mais le dossier des journaux n'est PAS dans la liste : il est vidé sur place, jamais
+        // supprimé, tant que l'overlay tourne (voir la doc de module).
+        let logs = crate::logging::log_dir().expect("dossier des journaux");
+        assert!(
+            !deconnexion.iter().any(|p| logs.starts_with(p)),
+            "le dossier des journaux ne doit pas être supprimé à la déconnexion"
+        );
+    }
+}

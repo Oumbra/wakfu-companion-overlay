@@ -211,7 +211,10 @@ pub fn set_verbose(verbose: bool) {
     tracing::info!(verbose, "niveau de journal réglé");
 }
 
-fn log_dir() -> Option<PathBuf> {
+/// Dossier des journaux — public pour que `crate::local_data` puisse les effacer (ils portent
+/// noms de personnages, chemin du log et auteur de message, constat C6 de
+/// `docs/analyse-rgpd.md`).
+pub fn log_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.data_dir().join("logs"))
 }
 

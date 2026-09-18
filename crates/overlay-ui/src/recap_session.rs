@@ -360,6 +360,31 @@ impl RecapSession {
         self.save(engine);
     }
 
+    /// **Efface la session persistée** — le fichier sur disque ET ce que l'objet en garde, puis
+    /// repart d'une session neuve à `now`. Appelée par l'hôte quand le compte se déconnecte
+    /// (2026-09-18, constat C5 de `docs/analyse-rgpd.md` §3.5) : `recap-session.json` est effacé
+    /// avec les combats en cours par `local_data::purge`, et il serait réécrit trente secondes
+    /// plus tard (voir [`Self::save`]) ou à la fermeture ([`Drop`]) si l'objet gardait ses
+    /// compteurs. Remettre la session à zéro est donc ce qui fait TENIR la purge, en plus d'être
+    /// juste : la session suivie appartenait au compte qu'on vient de quitter.
+    ///
+    /// Différente de [`Self::reset`], qui est le bouton du bloc Récap : celui-là repart de zéro
+    /// **et réécrit** le fichier tout de suite, celle-ci n'écrit rien et laisse `dirty` à faux.
+    pub fn purge(&mut self, engine: &SessionTotals, now: SystemTime) {
+        if let Some(path) = &self.path {
+            match std::fs::remove_file(path) {
+                Ok(()) => tracing::info!("[session] {} effacé.", path.display()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => tracing::warn!("[session] {} non effacé : {err}", path.display()),
+            }
+        }
+        self.start_fresh(engine, now);
+        // `start_fresh` lève `dirty` pour que la nouvelle session se persiste ; ici, justement
+        // pas : rien ne doit réécrire le fichier qu'on vient d'effacer avant que l'utilisateur
+        // n'ait rejoué (le premier `observe` le relèvera de lui-même).
+        self.dirty = false;
+    }
+
     /// Les compteurs de la session : ceux pliés, plus ce que le moteur a gagné depuis le pliage.
     /// Jamais négatif par champ — un moteur qui redescendrait sous la référence (ne devrait pas
     /// arriver, voir la doc de module) ne ferait pas reculer la session.
@@ -483,6 +508,35 @@ fn format_pause(pause: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Constat C5 : la déconnexion efface `recap-session.json`, et l'objet ne doit pas le
+    /// réécrire derrière — ni à la sauvegarde périodique, ni à la fermeture (`Drop`).
+    #[test]
+    fn la_purge_efface_le_fichier_et_ne_le_reecrit_pas() {
+        let dir = std::env::temp_dir().join(format!("overlay-recap-purge-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(FILE_NAME);
+        let engine = SessionTotals {
+            kamas_gained: 1_234,
+            ..SessionTotals::default()
+        };
+        {
+            let mut session = RecapSession::load(path.clone(), ResumeSettings::default(), at(0));
+            let _ = session.observe(true, &engine, at(60));
+            session.save(&engine);
+            assert!(path.exists(), "le fichier devait être écrit avant la purge");
+
+            session.purge(&engine, at(120));
+            assert!(!path.exists(), "la purge devait effacer le fichier");
+        }
+        // Sortie de portée : le `Drop` ne doit rien avoir réécrit.
+        assert!(
+            !path.exists(),
+            "le fichier ne doit pas revenir à la fermeture de la session purgée"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
     use super::*;
 
     const T0: SystemTime = UNIX_EPOCH;

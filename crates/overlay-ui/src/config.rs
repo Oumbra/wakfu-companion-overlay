@@ -615,10 +615,21 @@ impl OverlayConfig {
     }
 }
 
-fn project_dirs() -> Option<directories::ProjectDirs> {
+/// **La racine de `config.toml` et des gabarits de tour** — publique depuis 2026-09-18 pour
+/// `crate::local_data` (l'effacement complet doit connaître les DEUX racines du dépôt, constat
+/// C13) et pour `turn_watch::templates::data_dir`, qui la reconstruisait à côté.
+///
+/// Le nom de projet porte le suffixe `-test` sous `cfg(test)`, comme dans `overlay_sync` et
+/// `overlay_engine` : un test qui écrit — ou qui efface — ne doit jamais atteindre le dossier réel
+/// de la personne qui lance la suite.
+pub fn project_dirs() -> Option<directories::ProjectDirs> {
     // Mêmes qualifieurs que le reste du dépôt (organisation GitHub `Oumbra`, voir
     // `overlay_sync::token_store` pour le même motif appliqué au jeton de compte natif).
-    directories::ProjectDirs::from("com", "Oumbra", "wakfu-companion-overlay")
+    #[cfg(not(test))]
+    const APP_NAME: &str = "wakfu-companion-overlay";
+    #[cfg(test)]
+    const APP_NAME: &str = "wakfu-companion-overlay-test";
+    directories::ProjectDirs::from("com", "Oumbra", APP_NAME)
 }
 
 fn config_file() -> Option<PathBuf> {

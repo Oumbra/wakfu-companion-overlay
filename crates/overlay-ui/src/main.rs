@@ -750,6 +750,17 @@ struct App {
     /// (`panels::recap::RecapView`). Elle remplace `started_at`, l'instant de lancement du
     /// processus dont la durée était dérivée le premier jour.
     recap_session: RecapSession,
+    /// **Le compte était-il lié au tick précédent ?** (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5) — le seul rôle de ce drapeau est de reconnaître la TRANSITION
+    /// « connecté -> plus connecté », quelle qu'en soit l'origine : bouton de la section « Compte »,
+    /// entrée de la zone de notification, ou jeton refusé par le serveur. Le thread
+    /// d'authentification purge alors les données locales à tiers
+    /// (`local_data::Scope::OnDisconnect`), mais le récap de session appartient à cet hôte : sans ce
+    /// drapeau, l'objet en mémoire réécrirait `recap-session.json` trente secondes plus tard.
+    ///
+    /// Faux au démarrage : un lancement sans compte lié n'a rien à purger, et l'état de chargement
+    /// (`AuthStatus::Connecting`) ne compte pour aucune des deux valeurs.
+    account_was_connected: bool,
     /// **Où l'utilisateur a posé la bande Récap** (2026-09-17) — décalage du bloc depuis le coin
     /// de la zone cliente du jeu, `None` tant qu'il ne l'a pas déplacée (voir
     /// `overlay_ui::recap_placement` et `config::OverlayConfig::recap_position`).
@@ -1007,6 +1018,7 @@ impl App {
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
             game_was_present: false,
+            account_was_connected: false,
             recap_session,
             recap_position,
             recap_locked,
@@ -1063,7 +1075,16 @@ impl App {
                     "[connexion] compte lié et chargements terminés — fenêtre de connexion fermée, overlays de jeu activés."
                 );
             }
+            self.account_was_connected = true;
         } else {
+            // **Transition « connecté -> plus connecté »** (voir `account_was_connected`) : le récap
+            // de session part avec le compte, sinon il serait réécrit juste après la purge du thread
+            // d'authentification (`local_data::Scope::OnDisconnect`).
+            if self.account_was_connected && !loading {
+                let snapshot = self.snapshot.load();
+                self.recap_session
+                    .purge(&snapshot.totals, std::time::SystemTime::now());
+            }
             let had_options = self
                 .windows
                 .values()
@@ -1081,6 +1102,11 @@ impl App {
             }
             if !has_login {
                 self.create_login_window(event_loop);
+            }
+            // Le compte quitté est acté — mais jamais pendant le chargement, où `connected`
+            // est faux sans que personne ne se soit déconnecté (voir le champ).
+            if !loading {
+                self.account_was_connected = false;
             }
         }
         // L'écran de chargement tombe (ou revient, sur « Se connecter »), l'écran de mise à jour
@@ -2181,6 +2207,29 @@ impl App {
         tracing::info!(">>> Déconnexion du compte demandée (fenêtre Options).");
     }
 
+    /// **« Supprimer les données locales », confirmé** (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5) — depuis la section « Compte » de la fenêtre Options
+    /// (`OptionsModalAction::PurgeLocalData`) ou depuis la fenêtre de connexion
+    /// (`RenderOutcome::purge_local_data`, le seul chemin quand aucun compte n'est lié).
+    ///
+    /// Efface tout ce que l'overlay a écrit sur cette machine, puis **arrête le programme** par le
+    /// même chemin que « Fermer l'overlay » : c'est la seule façon de garantir qu'aucun thread ne
+    /// réécrive ce qui vient de partir (voir `local_data`, doc de module). La borne de fin de
+    /// session est posée AVANT la purge — après, il n'y a plus de journal où l'écrire.
+    fn purge_local_data_and_quit(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::warn!(
+            ">>> Effacement des données locales confirmé — l'overlay efface tout ce qu'il a écrit \
+             sur cette machine, puis se ferme."
+        );
+        logging::log_session_end("Supprimer les données locales");
+        let snapshot = self.snapshot.load();
+        let _ = overlay_ui::local_data::purge_everything_before_shutdown(
+            &mut self.recap_session,
+            &snapshot.totals,
+        );
+        event_loop.exit();
+    }
+
     /// **Installe la mise à jour prête et relance** — appelé à chaque tick d'`about_to_wait`, AVANT
     /// tout le reste. Le thread de mise à jour s'arrête à `ReadyToInstall` (exe vérifié sur le
     /// disque, voir `background::spawn_update_thread`) : le remplacement de l'exe courant et la
@@ -2866,6 +2915,9 @@ impl App {
             // lié — l'hôte est seul à connaître `AuthStatus` (voir `spawn_auth_thread`).
             account_connected: matches!(**self.auth_status.load(), AuthStatus::Connected),
             pending_disconnect: false,
+            // « Supprimer les données locales » : jamais en cours à l'ouverture, comme les cinq
+            // autres confirmations de cette fenêtre.
+            pending_purge: false,
             personnages: PersonnagesTabState {
                 // Le compte affiché à l'ouverture est le principal, celui que tout roster a.
                 account: personnages_draft
@@ -3838,6 +3890,12 @@ enum PostRedraw {
     StartManualUpdate,
     /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
     CloseManualUpdate,
+    /// **« Supprimer les données locales »**, *confirmé* — depuis la section « Compte » de la
+    /// fenêtre Options ou depuis la fenêtre de connexion (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5) : tout ce que l'overlay a écrit sur cette machine est effacé,
+    /// puis le programme s'arrête par le même chemin que [`Self::Quit`] — voir
+    /// `purge_local_data_and_quit`.
+    PurgeLocalData,
 }
 
 impl App {
@@ -4253,6 +4311,9 @@ impl App {
             if outcome.close_update {
                 post_redraw = PostRedraw::CloseManualUpdate;
             }
+            if outcome.purge_local_data {
+                post_redraw = PostRedraw::PurgeLocalData;
+            }
         }
         // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
         // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
@@ -4387,6 +4448,7 @@ impl App {
             // ne parvient jamais ici.
             OptionsModalAction::OpenUrl(_) => {}
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
+            OptionsModalAction::PurgeLocalData => post_redraw = PostRedraw::PurgeLocalData,
             OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
             OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
         }
@@ -4449,6 +4511,9 @@ impl App {
             PostRedraw::Quit => {
                 logging::log_session_end("Fermer l'overlay (fenêtre Options)");
                 event_loop.exit();
+            }
+            PostRedraw::PurgeLocalData => {
+                self.purge_local_data_and_quit(event_loop);
             }
             // Même sortie que « Fermer l'overlay », un process neuf en plus — lancé AVANT de
             // sortir (voir `restart::relaunch`). Une relance impossible ne ferme rien : l'overlay

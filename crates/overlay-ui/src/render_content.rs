@@ -495,6 +495,12 @@ pub struct RenderOutcome {
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion — l'hôte
     /// relance la vérification avec installation (voir `panels::login::LoginOutcome`).
     pub retry_update: bool,
+    /// **« Supprimer »** de l'écran de confirmation d'effacement de la fenêtre de connexion
+    /// (2026-09-18, constat C5 de `docs/analyse-rgpd.md`) : l'hôte efface les données locales
+    /// (`local_data::Scope::Everything`) puis arrête le programme — le même chemin que
+    /// `OptionsModalAction::PurgeLocalData`, pour un overlay sans compte lié où cette fenêtre est
+    /// la seule interface.
+    pub purge_local_data: bool,
     /// Le cadenas du panneau Combat vient d'être cliqué (`kind == Combat`, 2026-09-17) : l'hôte
     /// inverse le verrou et l'écrit dans la config (`config::OverlayConfig::combat_locked`). Voir
     /// `panels::combat::CombatChrome`.
@@ -893,6 +899,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         outcome.check_update = login_outcome.check_update;
                         outcome.install_update = login_outcome.install_update;
                         outcome.close_update = login_outcome.close_update;
+                        outcome.purge_local_data = login_outcome.purge_local_data;
                         outcome.login_height = Some(login_outcome.content_height);
                     }
                 }

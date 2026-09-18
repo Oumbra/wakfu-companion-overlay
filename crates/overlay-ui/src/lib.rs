@@ -60,6 +60,7 @@ pub mod engine_thread;
 pub mod frame;
 pub mod game_servers;
 pub mod game_window;
+pub mod local_data;
 pub mod logging;
 pub mod mirror;
 pub mod panels;

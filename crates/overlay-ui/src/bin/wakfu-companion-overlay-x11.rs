@@ -347,6 +347,10 @@ mod linux_main {
         game_was_present: bool,
         /// La session du Récap — voir `main.rs::App::recap_session` (2026-09-17).
         recap_session: RecapSession,
+        /// Voir `main.rs::App::account_was_connected` — le drapeau qui reconnaît la transition
+        /// « connecté -> plus connecté » pour effacer le récap de session avec le compte
+        /// (2026-09-18, constat C5 de `docs/analyse-rgpd.md`).
+        account_was_connected: bool,
         /// Où l'utilisateur a posé la bande Récap — voir `main.rs::App::recap_position`
         /// (2026-09-17) : décalage du bloc depuis le coin de la zone cliente du jeu, `None` tant
         /// qu'il ne l'a pas déplacée, une seule position pour toutes les fenêtres de jeu.
@@ -632,6 +636,7 @@ mod linux_main {
                 completion,
                 game_window,
                 game_was_present: false,
+                account_was_connected: false,
                 recap_session,
                 recap_position,
                 recap_locked,
@@ -740,7 +745,16 @@ mod linux_main {
                         "[connexion] compte lié et chargements terminés — fenêtre de connexion fermée, overlays de jeu activés."
                     );
                 }
+                self.account_was_connected = true;
             } else {
+                // **Transition « connecté -> plus connecté »** — voir `main.rs::sync_session_windows`,
+                // même geste : le récap de session part avec le compte, sinon il serait réécrit juste
+                // après la purge du thread d'authentification.
+                if self.account_was_connected && !loading {
+                    let snapshot = self.snapshot.load();
+                    self.recap_session
+                        .purge(&snapshot.totals, std::time::SystemTime::now());
+                }
                 let had_options = self
                     .windows
                     .values()
@@ -758,6 +772,10 @@ mod linux_main {
                 }
                 if !has_login {
                     self.create_login_window(event_loop);
+                }
+                // Le compte quitté est acté — jamais pendant le chargement, voir le champ.
+                if !loading {
+                    self.account_was_connected = false;
                 }
             }
             let manual_update = self.manual_update;
@@ -1601,6 +1619,9 @@ mod linux_main {
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
                 pending_disconnect: false,
+                // « Supprimer les données locales » : jamais en cours à l'ouverture, comme les
+                // cinq autres confirmations de cette fenêtre.
+                pending_purge: false,
                 personnages: PersonnagesTabState {
                     // Le compte affiché à l'ouverture est le principal, celui que tout roster a.
                     account: personnages_draft
@@ -2504,6 +2525,10 @@ mod linux_main {
                 /// Section « Mise à jour » de la fenêtre Options — voir `main.rs`.
                 CheckUpdate,
                 InstallUpdate,
+                /// « Supprimer les données locales », après confirmation — voir `main.rs`
+                /// (constat C5 de `docs/analyse-rgpd.md` §3.5) : tout ce que l'overlay a écrit
+                /// sur cette machine est effacé, puis le programme s'arrête.
+                PurgeLocalData,
                 /// « Réessayer » de l'écran « Mise à jour requise ».
                 RetryUpdate,
                 /// « Fermer l'overlay », après confirmation — voir `main.rs`.
@@ -2945,6 +2970,9 @@ mod linux_main {
                         if outcome.close_update {
                             post_redraw = PostRedraw::CloseManualUpdate;
                         }
+                        if outcome.purge_local_data {
+                            post_redraw = PostRedraw::PurgeLocalData;
+                        }
                     }
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
@@ -3080,6 +3108,9 @@ mod linux_main {
                         OptionsModalAction::InstallUpdate => {
                             post_redraw = PostRedraw::InstallUpdate
                         }
+                        OptionsModalAction::PurgeLocalData => {
+                            post_redraw = PostRedraw::PurgeLocalData
+                        }
                         OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
                         OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
                     }
@@ -3137,6 +3168,22 @@ mod linux_main {
                 // Même sortie que l'entrée « Quitter » de la zone de notification — voir `main.rs`.
                 PostRedraw::Quit => {
                     logging::log_session_end("Fermer l'overlay (fenêtre Options)");
+                    event_loop.exit();
+                }
+                // Voir `main.rs::App::purge_local_data_and_quit` — même geste, même ordre : la
+                // borne de fin de session d'abord (après, il n'y a plus de journal où l'écrire),
+                // le récap avant le reste (son `Drop` le réécrirait), puis la sortie.
+                PostRedraw::PurgeLocalData => {
+                    tracing::warn!(
+                        ">>> Effacement des données locales confirmé — l'overlay efface tout ce \
+                         qu'il a écrit sur cette machine, puis se ferme."
+                    );
+                    logging::log_session_end("Supprimer les données locales");
+                    let snapshot = self.snapshot.load();
+                    let _ = overlay_ui::local_data::purge_everything_before_shutdown(
+                        &mut self.recap_session,
+                        &snapshot.totals,
+                    );
                     event_loop.exit();
                 }
                 // Même sortie, un process neuf en plus — voir `main.rs` et `restart::relaunch`.

@@ -14,13 +14,18 @@ use std::path::PathBuf;
 
 use super::vision::Glyph;
 
-/// Dossier de données de l'overlay — même racine que `config`, `logs/` et `catalog_cache`.
+/// Dossier de données de l'overlay — **la racine de `config`**, qu'on lui demande plutôt que de
+/// reconstruire ses qualifieurs ici : le commentaire qui annonçait « même racine que `logs/` et
+/// `catalog_cache` » était inexact (constat C13 de `docs/analyse-rgpd.md`, deux racines sous
+/// Windows), et deux appels à `ProjectDirs::from` avec des arguments à garder synchrones à la main
+/// n.attendaient que de diverger une seconde fois.
 pub fn data_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "Oumbra", "wakfu-companion-overlay")
-        .map(|d| d.data_dir().to_path_buf())
+    crate::config::project_dirs().map(|d| d.data_dir().to_path_buf())
 }
 
-fn dir() -> Option<PathBuf> {
+/// Dossier des gabarits appris — public pour que `crate::local_data` puisse l'effacer (un PNG du
+/// nom du personnage rendu à l'écran et le nom en clair, constat C8).
+pub fn dir() -> Option<PathBuf> {
     data_dir().map(|d| d.join("turn-templates"))
 }
 

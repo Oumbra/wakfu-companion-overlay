@@ -63,9 +63,12 @@ use crate::ui_icons::UiIcons;
 pub const WINDOW_WIDTH: f32 = 400.0;
 /// Hauteur de la fenêtre OS sur l'écran de chargement, et celle de l'état « non connecté » qui
 /// lui succède le plus souvent — les deux écrans font exactement la même taille, pour que le
-/// passage de l'un à l'autre ne fasse pas bouger la fenêtre. Les autres états sont mesurés à
+/// passage de l'un à l'autre ne fasse pas bouger la fenêtre. Mesurée par la carte elle-même
+/// (`LoginOutcome::content_height`, vérifié par `fenetre_de_connexion_non_connecte`) : 385 px à
+/// l'origine, 432 avec la ligne d'acceptation des textes du service (2026-09-18, constat C4), 462
+/// avec le lien « Supprimer les données locales » (le même jour, constat C5). Les autres états sont mesurés à
 /// chaque frame ([`LoginOutcome::content_height`]) et l'hôte ajuste la fenêtre.
-pub const INITIAL_HEIGHT: f32 = 432.0;
+pub const INITIAL_HEIGHT: f32 = 462.0;
 
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
 /// Fond de la carte — `rgba(8,10,14,.90)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
@@ -216,6 +219,15 @@ pub struct LoginState {
     /// demandé, pas basculer sur l'écran de démarrage. Seule une mise à jour **obligatoire** en
     /// échec passe devant (voir `paint_update_required`).
     pub manual_update: bool,
+    /// **La confirmation d'effacement des données locales est-elle ouverte ?** (2026-09-18,
+    /// constat C5 de `docs/analyse-rgpd.md` §3.5) — le lien « Supprimer les données locales » de
+    /// l'écran « non connecté » la lève, ses deux boutons la referment.
+    ///
+    /// Un état de la carte plutôt qu'une boîte de dialogue : `design::confirm_dialog` est du jeu
+    /// (textures 9-slice, crête dorée) et cette fenêtre est du SITE — voir « Palette du site, pas
+    /// du jeu » dans la doc de module. Poser la boîte du jeu ici aurait été le seul endroit de
+    /// l'overlay où les deux langages visuels se superposent.
+    pub purge_confirm: bool,
 }
 
 impl LoginState {
@@ -226,6 +238,7 @@ impl LoginState {
             loading: true,
             update: UpdateStatus::Idle,
             manual_update: false,
+            purge_confirm: false,
         }
     }
 }
@@ -255,6 +268,11 @@ pub struct LoginOutcome {
     /// manuel (`LoginState::manual_update`), ce qui referme la fenêtre si un compte est lié, ou
     /// la ramène à l'écran de connexion sinon.
     pub close_update: bool,
+    /// **« Supprimer »** de l'écran de confirmation d'effacement (2026-09-18, constat C5) :
+    /// l'hôte efface les données locales (`local_data::Scope::Everything`) puis arrête le
+    /// programme — comme l'action `PurgeLocalData` de la fenêtre Options, dont c'est le pendant
+    /// pour un overlay sans compte lié, où cette fenêtre est la seule interface.
+    pub purge_local_data: bool,
 }
 
 /// Peint la fenêtre de connexion dans tout `ui` et rend ce qu'elle demande à l'hôte.
@@ -470,6 +488,86 @@ pub fn show(
         y += body_height;
     } else {
         match auth_status {
+            // **L'effacement des données locales, à confirmer** (2026-09-18, constat C5 de
+            // `docs/analyse-rgpd.md` §3.5) — un écran de la carte, pas une boîte du jeu : voir
+            // `LoginState::purge_confirm`. Il prend la place de l'écran « non connecté » tant que
+            // la question est posée, et n'existe que là : un appairage en cours ou une erreur de
+            // connexion ont leur propre geste à finir d'abord.
+            AuthStatus::Disconnected { failure: None }
+            | AuthStatus::Connecting
+            | AuthStatus::Connected
+                if state.purge_confirm =>
+            {
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Supprimer les données locales ?",
+                    &h2_font,
+                    TEXT,
+                    H2_LINE,
+                ) + H2_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "L'overlay va effacer de cet ordinateur tout ce qu'il y a écrit : réglages, \
+                 combats en cours, file d'envoi, gabarits de tour, journaux, caches et session \
+                 enregistrée.",
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
+                ) + P_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Il se fermera ensuite. Votre compte et son historique, eux, restent sur le \
+                 site.",
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
+                );
+                y += ACTIONS_MARGIN_TOP;
+                // Deux boutons côte à côte, à la disposition de l'écran d'appairage : l'action
+                // qu'on est venu faire à DROITE en primaire (cyan du site), le retour en arrière
+                // à gauche en secondaire. C'est l'utilisateur qui a demandé l'effacement en
+                // arrivant ici — cet écran ne surgit jamais de lui-même —, et lui donner un
+                // « Supprimer » effacé pour l'en dissuader mentirait sur ce que le geste engage :
+                // ce qui protège du clic par inadvertance, c'est ce double écran, pas la
+                // couleur.
+                let half = (body_width - ACTIONS_GAP) / 2.0;
+                let cancel_rect =
+                    Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(half, BUTTON_HEIGHT));
+                let confirm_rect = Rect::from_min_size(
+                    Pos2::new(body_left + half + ACTIONS_GAP, y),
+                    Vec2::new(half, BUTTON_HEIGHT),
+                );
+                if button(
+                    ui,
+                    cancel_rect,
+                    "Annuler",
+                    ButtonKind::Secondary,
+                    "login-effacement-annuler",
+                ) {
+                    tracing::info!("[données locales] effacement annulé.");
+                    state.purge_confirm = false;
+                }
+                if button(
+                    ui,
+                    confirm_rect,
+                    "Supprimer",
+                    ButtonKind::Primary,
+                    "login-effacement-confirmer",
+                ) {
+                    tracing::info!(
+                        "[données locales] effacement confirmé depuis la fenêtre de connexion."
+                    );
+                    state.purge_confirm = false;
+                    outcome.purge_local_data = true;
+                }
+                y += BUTTON_HEIGHT;
+            }
             AuthStatus::Disconnected { failure: None }
             | AuthStatus::Connecting
             | AuthStatus::Connected => {
@@ -522,6 +620,23 @@ pub fn show(
                 // de clic — les mêmes pages que l'onglet « À propos » ouvre.
                 y += LINK_MARGIN_TOP;
                 y += paint_consent_notice(ui, center_x, y, &mut outcome);
+                // **Le droit à l'effacement, exerçable ici** (RGPD art. 17,
+                // `docs/analyse-rgpd.md` §3.5, constat C5) : sans compte lié, cette fenêtre est la
+                // SEULE interface de l'overlay — la fenêtre Options, qui porte le même bouton dans
+                // sa section « Compte », est alors inatteignable. Un lien discret et non un bouton :
+                // ce n'est pas ce qu'on vient faire sur cet écran, mais il faut pouvoir le faire
+                // après s'être déconnecté, c'est-à-dire exactement ici.
+                y += LINK_MARGIN_TOP;
+                y += link(
+                    ui,
+                    Pos2::new(center_x, y),
+                    "Supprimer les données locales",
+                    "login-effacer-donnees",
+                    || {
+                        tracing::info!("[données locales] effacement demandé — confirmation.");
+                        state.purge_confirm = true;
+                    },
+                );
             }
             AuthStatus::PairingStarted {
                 pairing_code,

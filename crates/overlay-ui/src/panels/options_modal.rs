@@ -375,6 +375,12 @@ pub struct OptionsModalState {
     /// champ distinct de [`Self::pending_close`] : les deux boîtes posent des questions
     /// différentes, et une seule peut être ouverte à la fois (voir `show`).
     pub pending_disconnect: bool,
+    /// La confirmation d'**effacement des données locales** est ouverte — bouton « Supprimer les
+    /// données locales » de la section « Compte » (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5). Sixième boîte exclusive avec les cinq autres (voir `show`) :
+    /// elle efface les dossiers de l'overlay ET arrête le programme, c'est la plus irréversible
+    /// des six.
+    pub pending_purge: bool,
     /// Où en est la mise à jour automatique — copié par l'hôte depuis l'état publié par le
     /// thread de mise à jour AVANT chaque rendu (jamais figé à l'ouverture : une vérification
     /// lancée depuis cette fenêtre doit s'y voir aboutir). Décide de la ligne d'information et
@@ -580,6 +586,17 @@ pub enum OptionsModalAction {
     /// raccourcis, ce que cette action déclenche ne passe pas par « Valider » et ne se rattrape pas
     /// par « Annuler ».
     Disconnect,
+    /// **« Supprimer les données locales »**, depuis la section « Compte » (**confirmée**, voir
+    /// `show`) — 2026-09-18, constat C5 de `docs/analyse-rgpd.md` §3.5 : le droit à l'effacement
+    /// (RGPD art. 17) exercé depuis l'overlay.
+    ///
+    /// L'hôte efface les deux racines de dossiers, le jeton du trousseau, l'inscription au
+    /// démarrage de l'ordinateur et les clés de registre (`local_data::Scope::Everything`), puis
+    /// **arrête le programme** comme [`Self::Quit`] : les threads qui écrivent ces fichiers
+    /// tiennent leur contenu en mémoire, et la seule façon de garantir que rien ne réécrit derrière
+    /// est de ne plus tourner. Immédiat et sans retour, plus encore que `Disconnect` — il faudra
+    /// relancer l'overlay, réappairer le compte et reposer le chemin de `wakfu.log`.
+    PurgeLocalData,
     /// Résoudre les ingrédients de cet objet, depuis l'onglet « Suivi » — l'appelant seul a le
     /// réseau (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
@@ -733,6 +750,7 @@ pub fn show(
     // la capture ci-dessus vaut pour tous — c'est le double appui d'Échap qu'elle empêche.
     let dialogue_a_l_entree = state.pending_close
         || state.pending_disconnect
+        || state.pending_purge
         || state.pending_install.is_some()
         || state.pending_quit
         || state.pending_restart;
@@ -1532,6 +1550,49 @@ pub fn show(
             {
                 state.pending_disconnect = true;
             }
+
+            // **« Supprimer les données locales »** (2026-09-18, constat C5 de
+            // `docs/analyse-rgpd.md` §3.5) — le droit à l'effacement (RGPD art. 17) rendu
+            // exerçable : la déconnexion n'effaçait que le jeton, et rien ici ne purgeait les
+            // combats en cours, la file d'envoi, les gabarits de tour, les journaux ni la
+            // configuration.
+            //
+            // **Actif même sans compte lié**, à la différence de son voisin : c'est exactement
+            // l'état où le droit s'exerce — après s'être déconnecté, et une fois la fenêtre de
+            // connexion seule à l'écran, elle porte le même geste (`panels::login`).
+            //
+            // Rouge et centré comme « Se déconnecter », et pour la même raison en plus forte :
+            // c'est la seule action de cette fenêtre qui ne laisse RIEN derrière elle.
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::info_text(
+                    "« Supprimer les données locales » efface de cet ordinateur tout ce que \
+                     l'overlay y a écrit : réglages, combats en cours, file d'envoi, gabarits de \
+                     tour, journaux, caches et session enregistrée. L'overlay se ferme ensuite, et \
+                     repart comme une installation neuve — votre compte et son historique, eux, \
+                     restent sur le site.",
+                )
+                .tone(design::InfoTone::Alert)
+                .width(inner_width)
+                .log_name("options-compte-effacement"),
+            );
+            ui.add_space(INFO_GAP);
+            let purge = design::button("Supprimer les données locales")
+                .variant(ButtonVariant::Danger)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .tooltip("Effacer de cet ordinateur tout ce que l'overlay y a écrit, puis fermer")
+                .log_name("options-effacer-donnees");
+            let purge_size = purge.desired_size(ui);
+            let purge_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            if ui
+                .put(
+                    egui::Rect::from_center_size(purge_row.center(), purge_size),
+                    purge,
+                )
+                .clicked()
+            {
+                state.pending_purge = true;
+            }
         });
     });
 
@@ -1593,6 +1654,25 @@ pub fn show(
                 action = OptionsModalAction::Disconnect;
             }
             design::ConfirmChoice::No => state.pending_disconnect = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    } else if state.pending_purge {
+        // **La confirmation d'effacement** (2026-09-18) — même exclusion, même voile sur la
+        // fenêtre entière que ses voisines. Elle nomme les deux conséquences dans l'ordre où
+        // l'utilisateur les subit : l'effacement, puis la fermeture. Le bloc d'information de la
+        // section « Compte » dit ce que « toutes » recouvre ; la question, elle, tient en deux
+        // lignes (`tokens::CONFIRM_TEXT_WIDTH`).
+        let choix =
+            design::confirm_dialog("Supprimer toutes les données locales et fermer l'overlay ?")
+                .over(window)
+                .log_name("options.effacement-donnees")
+                .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_purge = false;
+                action = OptionsModalAction::PurgeLocalData;
+            }
+            design::ConfirmChoice::No => state.pending_purge = false,
             design::ConfirmChoice::Pending => {}
         }
     } else if state.pending_quit {

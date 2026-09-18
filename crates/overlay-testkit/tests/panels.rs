@@ -3615,6 +3615,128 @@ fn options_deconnexion_confirmation() {
     harness.snapshot("options_deconnexion_confirmation");
 }
 
+/// **« Supprimer les données locales » passe par une confirmation ; Échap y répond « Non »,
+/// « Oui » remonte l'effacement** (2026-09-18, second bouton de la section « Compte », constat C5
+/// de `docs/analyse-rgpd.md` §3.5).
+///
+/// Le contrat est celui de ses cinq voisines, à son maximum : l'action efface les dossiers de
+/// l'overlay ET arrête le programme (`local_data::Scope::Everything` puis `event_loop.exit()`,
+/// voir `main.rs::App::purge_local_data_and_quit`), il n'y a donc rien derrière à rattraper.
+/// `OptionsModalAction::PurgeLocalData` est la seule intention que le panneau produit — lui ne
+/// touche à aucun fichier, comme tous les panneaux de ce crate.
+#[test]
+fn options_effacement_confirme_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = || OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        // **Sans compte lié**, à la différence des autres tests de cette section : c'est l'état
+        // où le droit à l'effacement s'exerce, et le bouton doit y rester actif.
+        account_connected: false,
+        pending_purge: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_purge);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : rien n'est effacé, et la fenêtre derrière reste ouverte"
+    );
+
+    // 2. « Oui » remonte `PurgeLocalData` — et rien d'autre.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    // Même géométrie que les autres confirmations de cette fenêtre (voir
+    // `options_fermeture_overlay_confirmee_et_echap_repond_non`) : tokens, pas mesures.
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::PurgeLocalData],
+        "« Oui » remonte l'effacement à l'hôte, et rien d'autre"
+    );
+}
+
 /// **« Fermer l'overlay » passe par une confirmation ; Échap y répond « Non », « Oui » arrête le
 /// programme** (2026-09-16, bouton en pied de l'onglet « Paramètres » ; dans « À propos » depuis
 /// le 2026-09-18).
@@ -6463,6 +6585,20 @@ fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
     capture_login_with_update(nom, auth_status, Default::default(), height)
 }
 
+/// La carte dans son écran de **confirmation d'effacement des données locales** (2026-09-18,
+/// constat C5 de `docs/analyse-rgpd.md` §3.5) — un état de `LoginState`, pas d'`AuthStatus` :
+/// c'est le lien « Supprimer les données locales » de l'écran « non connecté » qui le lève.
+fn capture_login_purge_confirm(nom: &str, height: f32) -> f32 {
+    capture_login_card(
+        nom,
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        true,
+        height,
+    )
+}
+
 /// Même capture, avec un état de mise à jour (`overlay_ui::update::UpdateStatus`) posé sur la
 /// carte — ce que `main.rs` copie depuis le thread de mise à jour avant chaque rendu.
 fn capture_login_with_update(
@@ -6471,7 +6607,7 @@ fn capture_login_with_update(
     update: overlay_ui::update::UpdateStatus,
     height: f32,
 ) -> f32 {
-    capture_login_card(nom, auth_status, update, false, height)
+    capture_login_card(nom, auth_status, update, false, false, height)
 }
 
 /// L'écran de **mise à jour manuelle** (2026-09-18) : la même carte, ouverte par l'entrée « Mise
@@ -6482,15 +6618,17 @@ fn capture_login_manual_update(
     update: overlay_ui::update::UpdateStatus,
     height: f32,
 ) -> f32 {
-    capture_login_card(nom, AuthStatus::Connected, update, true, height)
+    capture_login_card(nom, AuthStatus::Connected, update, true, false, height)
 }
 
-/// Le corps commun des trois façades ci-dessus — `manual` pose `LoginState::manual_update`.
+/// Le corps commun des quatre façades ci-dessus — `manual` pose `LoginState::manual_update`,
+/// `purge_confirm` l'écran de confirmation d'effacement des données locales.
 fn capture_login_card(
     nom: &str,
     auth_status: AuthStatus,
     update: overlay_ui::update::UpdateStatus,
     manual: bool,
+    purge_confirm: bool,
     height: f32,
 ) -> f32 {
     use std::cell::Cell;
@@ -6515,6 +6653,7 @@ fn capture_login_card(
         loading: false,
         update,
         manual_update: manual,
+        purge_confirm,
     };
     let measured = Rc::new(Cell::new(0.0_f32));
     let measured_in = Rc::clone(&measured);
@@ -6599,7 +6738,15 @@ fn verifie_login(nom: &str, height: f32) {
 
 #[test]
 fn fenetre_de_connexion_non_connecte() {
-    verifie_login("login_non_connecte", 432.0);
+    verifie_login("login_non_connecte", 462.0);
+}
+
+/// L'écran de confirmation d'effacement, ouvert depuis le lien de l'écran « non connecté » — la
+/// seule interface qui reste quand aucun compte n'est lié (constat C5).
+#[test]
+fn fenetre_de_connexion_effacement_donnees() {
+    let measured = capture_login_purge_confirm("login_effacement", 425.0);
+    assert_eq!(measured, 425.0);
 }
 
 #[test]
@@ -6616,7 +6763,7 @@ fn fenetre_de_connexion_erreur() {
 /// `panels::login::INITIAL_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
 #[test]
 fn fenetre_de_connexion_chargement() {
-    verifie_login("login_chargement", 432.0);
+    verifie_login("login_chargement", 462.0);
 }
 
 // ── Mise à jour automatique (2026-09-15, docs/plan-mise-a-jour.md §8.1) ────────────────────────
@@ -6637,9 +6784,9 @@ fn fenetre_de_connexion_telechargement() {
             received: 4_200_000,
             total: 11_800_000,
         },
-        432.0,
+        462.0,
     );
-    assert_eq!(measured, 432.0);
+    assert_eq!(measured, 462.0);
 }
 
 /// Une version disponible que l'on n'installe pas automatiquement : signalée sous le rouage,
@@ -6656,9 +6803,9 @@ fn fenetre_de_connexion_version_disponible() {
             notes_url: None,
             checked_at: std::time::Instant::now(),
         },
-        432.0,
+        462.0,
     );
-    assert_eq!(measured, 432.0);
+    assert_eq!(measured, 462.0);
 }
 
 /// Mise à jour OBLIGATOIRE en échec : la carte passe au rouge, « MISE À JOUR REQUISE », le détail

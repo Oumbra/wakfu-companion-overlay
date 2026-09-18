@@ -542,6 +542,17 @@ pub fn spawn_auth_thread(
                             tracing::info!(
                                 "[compte] déconnecté — jeton effacé, retour à la fenêtre de connexion."
                             );
+                            // **Les données locales à tiers partent avec le compte** (2026-09-18,
+                            // constat C5 de `docs/analyse-rgpd.md` §3.5) : combats en cours, récap
+                            // de session, compteurs de Suivi, gabarits de tour, et le contenu des
+                            // journaux. APRÈS les deux commandes ci-dessus, jamais avant : le
+                            // moteur oublie sa session sur `EngineCommand::Disconnect`
+                            // (`forget_session`) et le thread de synchro vide sa file sur
+                            // `Deactivate` — purger d'abord laisserait chacun réécrire ce qu'il
+                            // tient encore en mémoire. Le récap, lui, appartient à l'hôte, qui
+                            // l'efface en voyant le statut changer
+                            // (`recap_session::RecapSession::purge`).
+                            let _ = crate::local_data::purge(crate::local_data::Scope::OnDisconnect);
                         }
                         Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
                         Err(_) => return,  // App fermée (canal fermé avec l'émetteur) — rien à faire.
