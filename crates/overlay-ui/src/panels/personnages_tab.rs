@@ -28,9 +28,12 @@
 //!    y va exprès). Et seul « Modifier » porte un socle rond — au centre du buste, rien d'autre ne
 //!    dirait qu'on peut cliquer ; la croix, elle, garde le glyphe nu des tuiles d'Alertes et de
 //!    Chat, l'idiome de l'application.
-//! 5. **Le nom se complète depuis le journal** (voir [`JournalCharacter`]) sans jamais s'y
-//!    contraindre : l'overlay lit `wakfu.log`, il connaît donc des noms que le site ne connaîtra
-//!    jamais. Il les PROPOSE. Un nom qu'aucune suggestion ne porte sort du champ tel quel.
+//! 5. **Le nom se tape, il n'est jamais proposé** (2026-09-18). L'overlay lit `wakfu.log`, il
+//!    connaît donc les alliés de chaque combat — et jusqu'à ce jour il les PROPOSAIT dans le champ
+//!    de nom. Ces alliés sont, pour l'essentiel, d'autres joueurs : un clic distrait faisait monter
+//!    un tiers sur le compte comme s'il était un personnage de l'utilisateur, et sa classe avec
+//!    (`docs/analyse-rgpd.md` §3.3, C3). L'autocomplétion a donc été retirée, pas restreinte :
+//!    le champ est un `design::input` nu, et le nom qu'on y écrit sort tel quel.
 //!
 //! ## Deux écarts à la maquette, et pourquoi
 //!
@@ -178,49 +181,6 @@ pub enum PersonnagesAvailability {
     Loading,
 }
 
-/// **Un personnage déjà vu dans `wakfu.log`**, tel que le champ de nom le propose.
-///
-/// Dérivé par l'hôte des combats de la session (`SessionSnapshot::fights`, combattants alliés) à
-/// l'ouverture de la fenêtre : la classe y est celle que le `breed` de la ligne `[_FL_]` donne.
-/// **Le sexe n'est PAS dans le log** — `session::resolve_ally_class` retombe sur `Gender::M` faute
-/// de mieux — donc la suggestion pré-remplit un masculin que le switch corrige d'un clic.
-#[derive(Debug, Clone, PartialEq)]
-pub struct JournalCharacter {
-    pub name: String,
-    pub class_name: Option<String>,
-    pub gender: Gender,
-}
-
-/// **Les personnages alliés déjà vus cette session**, prêts à être proposés par le champ de nom —
-/// dédupliqués par nom normalisé, triés par nom, et **privés de ceux qui n'ont aucune classe**
-/// (`FighterDamage::class_name` vaut `None` pour un allié que rien n'a encore classifié : une
-/// suggestion sans classe n'apporterait que son orthographe, et la modale exige une classe).
-///
-/// Dérivée du snapshot de session plutôt que collectée par le moteur : les combats y sont déjà
-/// tous là, avec leurs combattants et la classe que leur `breed` a donnée — un index cumulatif de
-/// plus côté moteur, publié à chaque frame, coûterait sans rien apporter.
-pub fn journal_from_session(snapshot: &overlay_engine::SessionSnapshot) -> Vec<JournalCharacter> {
-    let mut vus: Vec<JournalCharacter> = Vec::new();
-    let mut connus: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for fight in &snapshot.fights {
-        for fighter in fight.fighters.iter().filter(|f| f.is_ally) {
-            let Some(class_name) = fighter.class_name.clone() else {
-                continue;
-            };
-            if !connus.insert(overlay_engine::roster::normalize_wakfu_name(&fighter.name)) {
-                continue;
-            }
-            vus.push(JournalCharacter {
-                name: fighter.name.clone(),
-                class_name: Some(class_name),
-                gender: fighter.gender,
-            });
-        }
-    }
-    vus.sort_by(|a, b| a.name.cmp(&b.name));
-    vus
-}
-
 /// La modale de personnage, quand elle est ouverte.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEditor {
@@ -258,8 +218,6 @@ pub struct PersonnagesTabState {
     pub pending_account_removal: Option<usize>,
     /// **Le sexe que la prochaine création proposera** — voir règle 3 de la doc de module.
     pub gender_default: Gender,
-    /// Les noms vus au journal, posés par l'hôte à l'ouverture de la fenêtre.
-    pub journal: Vec<JournalCharacter>,
 }
 
 impl Default for PersonnagesTabState {
@@ -273,7 +231,6 @@ impl Default for PersonnagesTabState {
             pending_account_removal: None,
             // ♂ par défaut, décision du 2026-09-16.
             gender_default: Gender::M,
-            journal: Vec::new(),
         }
     }
 }
@@ -1103,54 +1060,17 @@ fn modale_personnage(
 
                 // 1. Le nom, en tête : c'est ce qu'on vient écrire.
                 //
-                // **Un `design::autocomplete` et non un champ nu** : voir règle 5 de la doc de module. Les
-                // noms déjà déclarés sur CE compte sont proposés désactivés — les redéclarer ne ferait
-                // qu'écraser ce qui existe, et la modification se fait au crayon de la tuile.
-                let deja: std::collections::HashSet<String> = ctx.roster.accounts[state.account]
-                    .characters
-                    .iter()
-                    .filter(|c| Some(c.name.as_str()) != editeur_nom_initial(&editeur, state, ctx))
-                    .map(|c| overlay_engine::roster::normalize_wakfu_name(&c.name))
-                    .collect();
-                let entrees: Vec<design::AutocompleteEntry> = state
-                    .journal
-                    .iter()
-                    .map(|vu| {
-                        let mut entree = design::AutocompleteEntry::new(vu.name.clone(), 0);
-                        entree.image = vu.class_name.as_deref().and_then(|class| {
-                            ctx.avatars
-                                .texture(class, vu.gender, false)
-                                .map(egui::load::SizedTexture::from_handle)
-                        });
-                        if deja.contains(&overlay_engine::roster::normalize_wakfu_name(&vu.name)) {
-                            entree.disabled = true;
-                            entree.mention = Some("déjà déclaré".to_string());
-                        }
-                        entree
-                    })
-                    .collect();
-                let issue = design::autocomplete(&mut editeur.name)
-                    .placeholder("Nom du personnage, exactement comme en jeu…")
-                    .entries(&entrees)
-                    .width(COLONNE)
-                    // **Ni loupe, ni champ vidé** (2026-09-16) : ce n'est pas une recherche, c'est le nom
-                    // du personnage. Il s'écrit librement — le composant ne valide rien, un nom qu'aucune
-                    // suggestion ne porte sort du champ tel quel — et choisir une suggestion le REMPLIT au
-                    // lieu de l'effacer.
-                    .search_icon(false)
-                    .fill_on_select(true)
-                    .log_name("personnages.modale.nom")
-                    .show(ui);
-                // Une suggestion apporte AUSSI sa classe et son sexe : c'est tout l'intérêt de connaître le
-                // journal. Le sexe qu'elle porte est un masculin par défaut (voir `JournalCharacter`), donc
-                // il ne remplace jamais un choix déjà fait — la classe, elle, est sûre.
-                if let Some(index) = issue.selected {
-                    if let Some(vu) = state.journal.get(index) {
-                        if let Some(rang) = vu.class_name.as_deref().and_then(class_index) {
-                            editeur.class = Some(rang);
-                        }
-                    }
-                }
+                // **Un champ nu, sans suggestion** : voir règle 5 de la doc de module. La forme est
+                // celle de la barre de recherche du jeu (28 px, croix d'effacement), comme l'ancienne
+                // autocomplétion qui n'en était qu'un habillage — ni loupe, ce n'est pas une recherche.
+                ui.add(
+                    design::input(&mut editeur.name)
+                        .size(InputSize::Search)
+                        .clearable(true)
+                        .placeholder("Nom du personnage, exactement comme en jeu…")
+                        .width(COLONNE)
+                        .log_name("personnages.modale.nom"),
+                );
                 ui.add_space(12.0);
 
                 // 2. Sexe à gauche, recherche de classe à droite — une seule ligne, les deux filtres de la
@@ -1284,22 +1204,6 @@ fn modale_personnage(
                 state.editor = Some(editeur);
             }
         });
-}
-
-/// Le nom que l'édition en cours porte AU ROSTER (pas dans le champ) — ce qu'il ne faut pas
-/// compter comme un doublon de lui-même dans les suggestions.
-fn editeur_nom_initial<'a>(
-    editeur: &CharacterEditor,
-    state: &PersonnagesTabState,
-    ctx: &'a PersonnagesTabContext<'_>,
-) -> Option<&'a str> {
-    let index = editeur.index?;
-    ctx.roster
-        .accounts
-        .get(state.account)?
-        .characters
-        .get(index)
-        .map(|c| c.name.as_str())
 }
 
 /// Les classes que la recherche laisse passer, avec leur rang dans [`CLASSES`].

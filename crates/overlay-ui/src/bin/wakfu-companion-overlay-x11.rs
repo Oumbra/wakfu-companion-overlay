@@ -92,7 +92,7 @@ mod linux_main {
     use overlay_ui::panels::login::{self, LoginState};
     use overlay_ui::panels::notifications::AlertMutes;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
-    use overlay_ui::panels::personnages_tab::{self, PersonnagesAvailability, PersonnagesTabState};
+    use overlay_ui::panels::personnages_tab::{PersonnagesAvailability, PersonnagesTabState};
     use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
@@ -1521,8 +1521,6 @@ mod linux_main {
                 Some(roster) => (Some(roster.clone()), PersonnagesAvailability::Ready),
                 None => (None, PersonnagesAvailability::Loading),
             };
-            // Les noms déjà vus dans `wakfu.log` cette session, que le champ de nom propose.
-            let journal = personnages_tab::journal_from_session(&self.snapshot.load());
             // Lu une seule fois par ouverture, jamais à chaque frame : c'est un accès au registre
             // (Windows) ou au disque (Linux), et la case est un brouillon comme les autres — elle ne
             // doit surtout pas se remettre d'aplomb toute seule pendant qu'on la regarde.
@@ -1558,7 +1556,6 @@ mod linux_main {
                         .as_ref()
                         .map(|roster| roster.default_index())
                         .unwrap_or(0),
-                    journal,
                     ..Default::default()
                 },
                 // La section « Mise à jour » lit l'état publié par le thread de mise à jour ; rafraîchi
