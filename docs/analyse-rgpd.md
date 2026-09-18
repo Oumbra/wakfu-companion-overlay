@@ -24,7 +24,7 @@ Six constats appellent une action, du plus urgent au moins urgent :
 
 | # | Constat | Gravité | Réf. |
 | --- | --- | --- | --- |
-| C1 | Un **vrai `wakfu.log` non anonymisé** est versionné en double dans un **dépôt public** : jeton d'authentification du client de jeu, IP locale, nom de compte Windows, 6 personnages avec leurs identifiants numériques, **119 pseudonymes de tiers et l'intégralité de leurs messages de chat** | **Critique** | §3.1 |
+| C1 | Un **vrai `wakfu.log` non anonymisé** est versionné en double dans un **dépôt public** : jeton d'authentification du client de jeu, IP locale, nom de compte Windows, 6 personnages avec leurs identifiants numériques, **119 pseudonymes de tiers et l'intégralité de leurs messages de chat** — *fixture pseudonymisée le 2026-09-18 ; reste la réécriture d'historique, décision du mainteneur* | **Critique** | §3.1 |
 | C2 | La doctrine « vie privée » du plan d'architecture (« jamais de capture d'écran, jamais d'automatisation d'entrées ») est **contredite par le code** : capture de la fenêtre de jeu toutes les 500 ms en combat, frappes clavier et clic souris synthétiques | Élevée | §3.2 |
 | C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers | Élevée | §3.3 |
 | C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » | Élevée | §3.4 |
@@ -163,12 +163,29 @@ versionnés, présents sur `dev` et `main`, dans un dépôt **public depuis le 2
 - **119 pseudonymes distincts d'autres joueurs** sur les canaux Commerce, Communauté, Recrutement
   et Proximité, avec **le texte intégral de leurs messages** (propositions commerciales,
   questions, annonces de guilde avec mention Discord…) ;
+- **43 lignes de liste d'amis** — `[Information (jeu)] <Personnage> (<compte>#<NNNN>) a rejoint
+  notre monde.` / `vient de quitter notre monde.` : **12 identifiants de compte Ankama** distincts
+  et les 16 personnages qui vont avec. *Manqué par la première passe de cette analyse, trouvé le
+  2026-09-18 pendant la pseudonymisation.* C'est la donnée la plus identifiante du fichier : un
+  `compte#NNNN` n'est pas un pseudonyme de personnage mais l'**identifiant global** de la personne
+  chez Ankama, stable d'un personnage à l'autre et le même jusque sur les forums. Ces 12 personnes
+  sont de surcroît, par construction, les *amis* de l'utilisateur — la liste publie donc aussi un
+  lien social ;
+- une ligne d'**échange** (ligne 9517, `[Trade] Ending the exchange between <nom> (id=…) and <nom>
+  (id=…)`), également manquée par la première passe, avec un septième personnage de l'utilisateur
+  qui n'apparaît dans aucun combat ;
 - les coordonnées `Point3` de tous les combattants, kamas, XP, butin.
 
 Des noms réels sont en outre recopiés en dur dans le code de test : pseudo et message d'un tiers
 dans `tests/chat_alert_live.rs:47-48`, lignes `[_FL_]` réelles avec identifiant numérique dans
 `tests/combat_orphelin.rs:16-32`, personnage tiers dans `src/session.rs:3573`, extrait réel dans
 `tests/watchlist_boss_sans_ligne_ko.log`.
+
+> **Leçon de méthode.** Les deux constats ajoutés ci-dessus ont été trouvés en cherchant les
+> *identifiants numériques restants* et les *formes de ligne distinctes*, pas en relisant le
+> fichier : un journal de 11 000 lignes ne se relit pas, et l'inventaire « à l'œil » d'une première
+> passe rate ce qui n'apparaît que quarante fois sur onze mille. C'est la raison d'être de
+> `scripts/check-fixtures.sh` — une règle par catégorie, vérifiable, plutôt qu'une lecture.
 
 **Analyse.** Un pseudonyme de jeu associé à des propos, à un serveur et à un horodatage est une
 donnée à caractère personnel (identifiant indirect, art. 4.1). Sa publication dans un dépôt
@@ -178,22 +195,70 @@ confidentialité (art. 5.1.f). Le jeton et l'IP relèvent en plus de la sécurit
 la lecture retenue, la mise en public du 2026-09-15 peut constituer une violation de données
 (art. 4.12) à documenter en interne (art. 33.5).
 
-**Recommandations.**
+**Recommandations, et ce qui a été fait.**
 
-1. Retirer les deux fichiers de la branche **et de l'historique** (`git filter-repo`), sur `dev`
-   comme sur `main`, puis demander à GitHub la purge des objets orphelins (les commits restent
-   accessibles par hash sinon). Le `push --force` sur `dev` est interdit par `CLAUDE.md` : cette
-   opération est **une décision du mainteneur**, à mener hors session Claude.
-2. Remplacer la fixture par une version **pseudonymisée de façon déterministe** : script qui
-   remplace chaque nom de joueur (auteurs de chat, `[_FL_]`, échanges, XP, sorts) par un nom
-   synthétique stable (`Joueur-0042`), efface le jeton, les IP, le chemin utilisateur, et
-   remplace le contenu des messages de chat par du texte généré qui conserve les mots-clés
-   attendus par les tests. Les 32 tests qui s'appuient sur le vrai log (`session_real_log.rs`,
-   `chat_alert_live.rs`, `combat_orphelin.rs`…) doivent alors être réalignés sur les nouveaux
-   noms.
-3. Ajouter une règle `.gitignore` sur `**/wakfu.log` hors fixture pseudonymisée, et une
-   vérification `pre-commit`/CI refusant toute ligne `Authentication token` ou `C:\Users\`.
-4. Consigner l'incident (date de mise en public, contenu, mesures) dans un registre interne.
+1. ✅ **Fait le 2026-09-18** — fixture remplacée par une version **pseudonymisée de façon
+   déterministe**, dans les deux copies : jeton en `00000000-0000-0000-0000-000000000000`, IP
+   locale en `192.0.2.10` (plage de documentation, RFC 5737), nom de compte Windows en
+   `anonymous`, modèle d'écran neutralisé, 7 personnages du compte en `Anonyme-<Classe><N>`
+   (`Anonyme-Ouginak1`…) avec des identifiants numériques en `9000_000x`, 20 identifiants de
+   comptes tiers en `9000_1xxx`, 119 auteurs de chat en `Anonyme-NNN` et leurs 258 messages
+   remplacés par du lorem ipsum de longueur voisine, 12 identifiants de compte Ankama de la liste
+   d'amis en `anonymeNN#NNNN`. Les noms de personnages y passent par la **même table** que les
+   auteurs de chat : deux des seize amis parlaient aussi sur un canal public, et gardent donc un
+   seul pseudonyme.
+
+   Les identifiants numériques réels recopiés dans le code de test (`src/session.rs`,
+   `tests/combat_orphelin.rs`, `tests/watchlist_boss_sans_ligne_ko.log`) sont neutralisés de la
+   même façon. Le pseudonyme `Oumbra`, lui, reste : c'est le compte GitHub du mainteneur et le nom
+   de personnage générique de toute la suite de tests (`ProjectDirs::from("com", "Oumbra", …)`,
+   `APP_USER_MODEL_ID`, une centaine de sites) — le retirer ne cacherait rien que le dépôt ne
+   publie déjà par son propre nom.
+
+   Le contenu du chat n'est contraint par aucun test : le seul test de reconnaissance de messages
+   (`chat_alert_live.rs`) construit ses lignes à la main, et les captures de l'onglet Chat sont
+   peintes à partir de données synthétiques. La substitution garde en revanche le canal,
+   l'horodatage, la répartition des auteurs et **les répétitions** — un même message republié cinq
+   fois le reste, sinon la fenêtre de déduplication du parseur ne se comporterait plus pareil.
+
+   La structure du fichier est intacte au bit près : 10 975 lignes, 10 998 CR et 10 975 LF, dont
+   **23 retours chariot isolés au milieu de lignes**. Un éditeur qui « normalise les fins de
+   ligne » les transforme en sauts de ligne et coupe autant d'enregistrements en deux — c'est
+   arrivé une fois, le jour même, et c'est pour ça que la substitution se fait en mode binaire.
+
+2. ✅ **Fait le 2026-09-18** — `.gitignore` sur `wakfu.log` hors les deux fixtures, et
+   `scripts/check-fixtures.sh` : sept règles, une par catégorie trouvée (jeton, chemin
+   `C:\Users\<nom>`, IP privée, auteur de chat, combattant humain, identifiant de compte Ankama,
+   ligne d'échange). Branché aux deux bouts, comme le
+   demande le `CLAUDE.md` : hook `pre-commit` (`.githooks/`) **et** étape du job `fmt` de
+   `.github/workflows/ci.yml` **et** de `scripts/ci-local.sh`. Le hook seul ne suffirait pas —
+   `core.hooksPath` ne survit pas au conteneur d'une session cloud.
+
+3. ⏳ **Décision du mainteneur, hors session Claude** — retirer le contenu réel de l'**historique**.
+   La fixture n'apparaît que dans **2 commits sur 936** (`c0168a4` et `ef8e2fb`, tous deux du
+   2026-08-31), mais un commit embarque le SHA de son parent : réécrire le plus ancien change
+   l'identifiant de **934 commits**. Leur contenu, lui, est conservé — messages, auteurs, dates,
+   ordre, diffs. Ce qui casse réellement : les liens vers les anciens SHA, **les signatures des
+   commits réécrits** (`filter-repo` ne peut pas les re-signer), le commit cible de la Release
+   `v0.22.0`, et tout clone ou fork existant. Le `push --force` sur `dev` et `main` est interdit à
+   une session Claude par le `CLAUDE.md`.
+
+   Trois façons de procéder :
+
+   - **ne rien réécrire** : le fichier réel reste téléchargeable à jamais via
+     `raw/c0168a4/spikes/…/wakfu.log` — ne referme rien ;
+   - **remplacer le contenu** (`filter-repo --blob-callback`, substituant l'ancien blob par la
+     fixture pseudonymisée) : le fichier reste présent partout où il l'était, `git log` et
+     `git blame` restent cohérents, seul le contenu sensible devient introuvable — **recommandé** ;
+   - **supprimer le fichier** (`--path --invert-paths`) : même coût en SHA, mais les deux commits
+     historiques perdent la fixture dont leurs tests dépendent.
+
+   Dans tous les cas, le force-push ne suffit pas : GitHub continue de servir les anciens objets à
+   qui connaît le SHA jusqu'à un ramassage que **seul le support déclenche**. Ouvrir un ticket
+   GitHub Support citant les anciens SHA fait partie du geste, et vérifier d'abord *Insights →
+   Forks* — un fork garde les objets.
+
+4. ⏳ Consigner l'incident (date de mise en public, contenu, mesures) dans un registre interne.
 
 ### 3.2 C2 — Doctrine de vie privée contredite par le code (élevée)
 
@@ -371,7 +436,8 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 
 | Priorité | Action | Constats | Qui |
 | --- | --- | --- | --- |
-| **P0** | Retirer les deux `wakfu.log` réels du dépôt et de l'historique, purge GitHub, fixture pseudonymisée, tests réalignés, garde-fou CI | C1, §4 | Mainteneur (réécriture d'historique) puis session |
+| **P0** | ✅ Fixture pseudonymisée, tests réalignés, garde-fou `pre-commit` + CI (2026-09-18) | C1, §4 | Session |
+| **P0** | ⏳ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`, ticket GitHub Support | C1 | Mainteneur, hors session Claude |
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | Politique de confidentialité côté site ; lien à l'écran de connexion et section « Données » dans « À propos » ; fichier de licence | C4 | Serveur + overlay |
 | **P1** | Réécrire le §10 du plan d'architecture pour décrire la capture de fenêtre, les entrées synthétiques et le repli fichier du jeton | C2 | Overlay (`docs:`) |
