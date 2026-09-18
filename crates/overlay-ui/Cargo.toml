@@ -105,3 +105,13 @@ winresource = { version = "0.1", default-features = false }
 # Décodage du PNG source, redimensionnement, encodage `.ico` multi-tailles. Mêmes fonctionnalités
 # que la dépendance applicative ci-dessus, plus `ico`.
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Icône de zone de notification et son menu (Options / Mise à jour / Déconnecter / Quitter —
+# 2026-09-18) : équivalent Linux/KDE de `tray-icon` ci-dessus, voir `overlay_ui::linux_tray`.
+# Implémente StatusNotifierItem (DBus) en pur Rust, sans GTK/libappindicator — `zbus` est déjà
+# dans l'arbre (tiré par `rfd` -> `ashpd`), aucune dépendance système supplémentaire à la
+# compilation. Feature `blocking` (API synchrone) a besoin d'un runtime async sous-jacent pour son
+# `compat::block_on` interne — `async-io` plutôt que `tokio` (défaut de la crate) : ce binaire n'a
+# par ailleurs aucun besoin de tokio.
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }

@@ -16,11 +16,17 @@
 //! fenêtrage de ce fichier, voir `lib.rs`) : fenêtre X11 ordinaire (pas `Utility`), donc présente
 //! dans la barre des tâches, centrée sur l'écran principal, icône de fenêtre = logo du site.
 //!
+//! **Icône de zone de notification (2026-09-18)** : `overlay_ui::linux_tray`, via `ksni`
+//! (StatusNotifierItem/DBus, pure Rust) plutôt que `tray-icon` (GTK/libappindicator sous Linux,
+//! écarté pour cette raison). Même menu que Windows — Options / Mise à jour / Déconnecter /
+//! Quitter (`App::install_tray`/`handle_tray_menu`) — affiché nativement par tout hôte SNI (KDE
+//! Plasma, Discord en est un exemple courant). Sans hôte SNI (GNOME sans extension, Game
+//! Mode/Gamescope), la pose échoue silencieusement (`tracing::warn!`, jamais fatal) et les
+//! anciens accès restent valables : raccourci global, fermeture de la fenêtre de connexion
+//! (`CloseRequested`) ou Ctrl+C pour quitter, section « Compte » de la fenêtre Options pour se
+//! déconnecter.
+//!
 //! **Ce qui reste propre à Windows, documenté honnêtement (§17.2 « État ») :**
-//! - Pas d'icône de zone de notification : `tray-icon` tire GTK/libappindicator sous Linux et,
-//!   sous GNOME, une telle icône dépend d'une extension. « Quitter » passe par le raccourci
-//!   global, la fermeture de la fenêtre de connexion (`CloseRequested`) ou Ctrl+C ; « Déconnecter »
-//!   par la section « Compte » de la fenêtre Options.
 //! - Pas de hotkey rafraîchissement/détails (`ShortcutAction::LINUX_SUPPORTED` seulement :
 //!   bascule, sortie, Options, sélection multiple du bandeau, invitation/suivi multicompte) —
 //!   les autres restent personnalisables et persistées, simplement inertes ici.
@@ -378,7 +384,21 @@ mod linux_main {
         /// module). La mécanique est portée quand même — les deux hôtes ne divergent pas, et le
         /// jour où un accès Linux existe (raccourci, bouton d'un panneau), il n'y a qu'à poser ce
         /// drapeau.
+        ///
+        /// **Déclencheur posé le 2026-09-18** : l'entrée « Mise à jour » du menu de la zone de
+        /// notification (`tray`) le fait passer à `true`, comme côté Windows.
         manual_update: bool,
+        /// Icône de zone de notification (StatusNotifierItem/DBus, §17.2 du plan) — voir
+        /// `overlay_ui::linux_tray`, équivalent Linux de `main.rs::App::tray`. `None` si la pose a
+        /// échoué (pas de bus de session, pas d'hôte SNI — jamais fatal).
+        tray: Option<ksni::blocking::Handle<overlay_ui::linux_tray::LinuxTray>>,
+        /// Par où les clics du menu du tray arrivent, sondé sans bloquer comme `hotkey_events` —
+        /// voir `handle_tray_menu`.
+        tray_rx: Option<mpsc::Receiver<overlay_ui::linux_tray::TrayEvent>>,
+        /// Dernier état (connecté/non) communiqué au tray — évite d'invoquer `Handle::update`
+        /// (aller-retour vers le thread DBus du service) à chaque tick alors que rien n'a changé,
+        /// voir `sync_session_windows`.
+        tray_synced_connected: bool,
     }
 
     /// Ce qu'il faut savoir pour poser une fenêtre `Combat` — voir
@@ -646,6 +666,9 @@ mod linux_main {
                 pending_dialog: None,
                 pending_recipe: None,
                 manual_update: false,
+                tray: None,
+                tray_rx: None,
+                tray_synced_connected: false,
             }
         }
 
@@ -793,6 +816,75 @@ mod linux_main {
                     if state.manual_update != manual_update {
                         state.manual_update = manual_update;
                         overlay.window.request_redraw();
+                    }
+                }
+            }
+            if let Some(tray) = &self.tray {
+                if self.tray_synced_connected != connected {
+                    overlay_ui::linux_tray::sync_tray_menu(tray, connected);
+                    self.tray_synced_connected = connected;
+                }
+            }
+        }
+
+        /// Pose l'icône de zone de notification — voir `overlay_ui::linux_tray::install_tray`,
+        /// équivalent Linux de `main.rs::App::install_tray`. Appelée une seule fois, au premier
+        /// `resumed()`.
+        fn install_tray(&mut self) {
+            if self.tray.is_some() {
+                return;
+            }
+            if let Some((handle, rx)) = overlay_ui::linux_tray::install_tray() {
+                self.tray = Some(handle);
+                self.tray_rx = Some(rx);
+            }
+        }
+
+        /// Voir `main.rs::App::open_manual_update_window` — même geste, déclenché ici par
+        /// l'entrée « Mise à jour » du menu de la zone de notification.
+        fn open_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
+            tracing::info!(">>> Recherche de mise à jour (zone de notification).");
+            self.manual_update = true;
+            let _ = self.update_command_tx.send(UpdateCommand::Check {
+                install_if_available: false,
+            });
+            self.sync_session_windows(event_loop);
+            if let Some(overlay) = self.windows.values().find(|w| w.kind == OverlayKind::Login) {
+                overlay.window.focus_window();
+            }
+        }
+
+        /// Sonde `tray_rx` sans bloquer, comme `hotkey_events` — voir `about_to_wait`. Même
+        /// routage que `main.rs::App::handle_tray_menu`.
+        fn handle_tray_menu(&mut self, event_loop: &ActiveEventLoop) {
+            let Some(rx) = &self.tray_rx else {
+                return;
+            };
+            // Vidé dans un vecteur d'abord : `rx` emprunte `self.tray_rx`, et les branches
+            // ci-dessous ont besoin d'un `&mut self` (voir `open_options_modal` et consorts).
+            let events: Vec<_> = rx.try_iter().collect();
+            for event in events {
+                match event {
+                    overlay_ui::linux_tray::TrayEvent::Options => {
+                        tracing::info!(">>> Options (zone de notification)");
+                        self.open_options_modal(
+                            event_loop,
+                            None,
+                            options_modal::OptionsTab::Parametres,
+                        );
+                    }
+                    overlay_ui::linux_tray::TrayEvent::ManualUpdate => {
+                        self.open_manual_update_window(event_loop);
+                    }
+                    overlay_ui::linux_tray::TrayEvent::Disconnect => {
+                        tracing::info!(
+                            ">>> Déconnexion du compte demandée (zone de notification)."
+                        );
+                        let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+                    }
+                    overlay_ui::linux_tray::TrayEvent::Quit => {
+                        logging::log_session_end("Quitter (zone de notification)");
+                        event_loop.exit();
                     }
                 }
             }
@@ -2445,6 +2537,7 @@ mod linux_main {
 
     impl ApplicationHandler<UserEvent> for App {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.install_tray();
             self.sync_session_windows(event_loop);
             self.sync_windows(event_loop);
             if !self.banner_printed {
@@ -3269,6 +3362,9 @@ mod linux_main {
                     ),
                 }
             }
+
+            // Menu de l'icône de zone de notification — même sondage que les hotkeys.
+            self.handle_tray_menu(event_loop);
 
             // Résultat du dialogue de fichier natif (`App::start_file_dialog`), le cas échéant —
             // sondé sans bloquer, comme `hotkey_events` ci-dessus. `try_recv` retourne `Empty`

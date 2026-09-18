@@ -42,6 +42,13 @@
 //! Exposé pour la même raison que `config` — les deux binaires font le même calcul, qui n'est que
 //! de l'arithmétique sur des entiers, et se teste ici sans serveur graphique.
 //!
+//! `linux_tray` (2026-09-18, icône de zone de notification côté KDE/X11) : équivalent Linux de ce
+//! que `install_tray`/`sync_tray_menu`/`handle_tray_menu` sont à `main.rs` côté Windows, via
+//! `ksni` (StatusNotifierItem/DBus, pure Rust, sans GTK/libappindicator). `#[cfg(not(target_os =
+//! "windows"))]` plutôt que dans `main.rs` : seul `bin/wakfu-companion-overlay-x11.rs` s'en sert,
+//! mais le placer ici évite de dupliquer la conversion RGBA -> ARGB de `ui_icons::app_logo_rgba`
+//! dans le binaire lui-même.
+//!
 //! Modules volontairement absents d'ici (restent privés à `main.rs`, spécifiques au fenêtrage
 //! Win32/aux threads compte lié L4-L5, sans intérêt pour un harnais de rendu offscreen NI pour le
 //! binaire Linux en mode invité, voir §17.2 « État ») : aucun pour l'instant.
@@ -60,6 +67,8 @@ pub mod engine_thread;
 pub mod frame;
 pub mod game_servers;
 pub mod game_window;
+#[cfg(not(target_os = "windows"))]
+pub mod linux_tray;
 pub mod local_data;
 pub mod logging;
 pub mod mirror;
