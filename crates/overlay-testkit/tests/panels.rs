@@ -6572,7 +6572,7 @@ fn verifie_login(nom: &str, height: f32) {
 
 #[test]
 fn fenetre_de_connexion_non_connecte() {
-    verifie_login("login_non_connecte", 385.0);
+    verifie_login("login_non_connecte", 432.0);
 }
 
 #[test]
@@ -6589,7 +6589,7 @@ fn fenetre_de_connexion_erreur() {
 /// `panels::login::INITIAL_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
 #[test]
 fn fenetre_de_connexion_chargement() {
-    verifie_login("login_chargement", 385.0);
+    verifie_login("login_chargement", 432.0);
 }
 
 // ── Mise à jour automatique (2026-09-15, docs/plan-mise-a-jour.md §8.1) ────────────────────────
@@ -6610,9 +6610,9 @@ fn fenetre_de_connexion_telechargement() {
             received: 4_200_000,
             total: 11_800_000,
         },
-        385.0,
+        432.0,
     );
-    assert_eq!(measured, 385.0);
+    assert_eq!(measured, 432.0);
 }
 
 /// Une version disponible que l'on n'installe pas automatiquement : signalée sous le rouage,
@@ -6629,9 +6629,9 @@ fn fenetre_de_connexion_version_disponible() {
             notes_url: None,
             checked_at: std::time::Instant::now(),
         },
-        385.0,
+        432.0,
     );
-    assert_eq!(measured, 385.0);
+    assert_eq!(measured, 432.0);
 }
 
 /// Mise à jour OBLIGATOIRE en échec : la carte passe au rouge, « MISE À JOUR REQUISE », le détail

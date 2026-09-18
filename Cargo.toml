@@ -15,9 +15,11 @@ members = ["crates/*"]
 # `xtask/` a volontairement sa PROPRE version, figée : c'est de l'outillage de CI jamais distribué
 # (son `[workspace]` vide le tient hors de ce workspace, voir son Cargo.toml), rien n'y est versionné
 # pour l'utilisateur.
-version = "0.64.4"
+version = "0.65.0"
 edition = "2021"
 publish = false
+# Licence du dépôt (fichier `LICENSE` à la racine) — décision du mainteneur, 2026-09-18.
+license = "MIT"
 
 # Profil des binaires LIVRÉS (Release GitHub, voir docs/plan-mise-a-jour.md §6 — phase 0). Sans ce
 # bloc, `cargo build --release` gardait les symboles de débogage et n'optimisait pas entre crates :

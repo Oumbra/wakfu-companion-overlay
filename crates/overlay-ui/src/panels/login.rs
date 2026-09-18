@@ -17,7 +17,9 @@
 //!   de `wakfu.log`, vérification du jeton stocké et récupération des réglages du compte (voir
 //!   `crate::startup`) — et ne cède la place qu'à l'overlay (compte lié) ou à l'écran suivant ;
 //! - **non connecté** (`Disconnected { failure: None }`) : « Vous n'êtes pas connecté » + « Se
-//!   connecter » ;
+//!   connecter », et dessous la ligne d'acceptation — « En vous connectant, vous acceptez » les
+//!   conditions d'utilisation et la politique de confidentialité du service, en liens (2026-09-18,
+//!   `docs/analyse-rgpd.md` §3.4 : l'information des personnes se donne avant le geste) ;
 //! - **appairage** (`PairingStarted`) : le code en grand, le compte à rebours, « Copier le code »,
 //!   « Rouvrir la page », et le lien « Annuler l'appairage » ;
 //! - **erreur** (`Disconnected { failure: Some(_) }`) : « Connexion impossible », le titre court de
@@ -56,7 +58,7 @@ pub const WINDOW_WIDTH: f32 = 400.0;
 /// lui succède le plus souvent — les deux écrans font exactement la même taille, pour que le
 /// passage de l'un à l'autre ne fasse pas bouger la fenêtre. Les autres états sont mesurés à
 /// chaque frame ([`LoginOutcome::content_height`]) et l'hôte ajuste la fenêtre.
-pub const INITIAL_HEIGHT: f32 = 385.0;
+pub const INITIAL_HEIGHT: f32 = 432.0;
 
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
 /// Fond de la carte — `rgba(8,10,14,.90)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
@@ -125,6 +127,11 @@ const BUTTON_RADIUS: f32 = 6.0;
 const BUTTON_FONT: f32 = 14.0;
 const LINK_MARGIN_TOP: f32 = 14.0;
 const LINK_SIZE: f32 = 12.0;
+/// Écart entre la phrase d'acceptation et la ligne de ses deux liens (voir
+/// [`paint_consent_notice`]).
+const CONSENT_GAP: f32 = 3.0;
+/// Ce qui sépare les deux liens de la ligne d'acceptation — le point médian du pied du site.
+const CONSENT_SEPARATOR: &str = "  ·  ";
 const CODE_MARGIN_TOP: f32 = 18.0;
 const CODE_PAD_TOP: f32 = 16.0;
 const CODE_PAD_BOTTOM: f32 = 14.0;
@@ -460,6 +467,11 @@ pub fn show(
                     auth_command_tx.send(AuthCommand::Retry);
                 }
                 y += BUTTON_HEIGHT;
+                // Information des personnes (art. 12-13 du RGPD, `docs/analyse-rgpd.md` §3.4) :
+                // ce que la connexion engage est dit AVANT le geste, les deux textes à portée
+                // de clic — les mêmes pages que l'onglet « À propos » ouvre.
+                y += LINK_MARGIN_TOP;
+                y += paint_consent_notice(ui, center_x, y, &mut outcome);
             }
             AuthStatus::PairingStarted {
                 pairing_code,
@@ -1016,6 +1028,79 @@ fn link(
         on_click();
     }
     size.y + 2.0
+}
+
+/// La ligne d'acceptation sous « Se connecter » : « En vous connectant, vous acceptez », puis les
+/// deux textes du service en liens, centrés, séparés d'un point médian — ceux de l'onglet
+/// « À propos » ([`super::a_propos_tab::Link`]), pour que libellés et URL n'existent qu'une fois.
+/// Un clic remonte l'URL à l'hôte (`LoginOutcome::open_url`), comme « Rouvrir la page ». Rend la
+/// hauteur occupée.
+fn paint_consent_notice(
+    ui: &mut egui::Ui,
+    center_x: f32,
+    top: f32,
+    outcome: &mut LoginOutcome,
+) -> f32 {
+    use super::a_propos_tab::Link;
+
+    let font = text::label_font(ui.ctx(), LINK_SIZE);
+    let sentence = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            "En vous connectant, vous acceptez".to_owned(),
+            font.clone(),
+            TEXT_DIM,
+        )
+    });
+    let sentence_height = sentence.rect.height();
+    ui.painter().galley(
+        Pos2::new(center_x - sentence.rect.width() / 2.0, top),
+        sentence,
+        TEXT_DIM,
+    );
+    let row_top = top + sentence_height + CONSENT_GAP;
+
+    // Les trois largeurs d'abord, pour centrer la ligne entière et non chaque lien.
+    let width_of = |ui: &mut egui::Ui, s: &str| {
+        ui.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), TEXT_DIM))
+            .rect
+            .width()
+    };
+    let terms_width = width_of(ui, Link::TermsOfService.label());
+    let separator_width = width_of(ui, CONSENT_SEPARATOR);
+    let privacy_width = width_of(ui, Link::PrivacyPolicy.label());
+    let left = center_x - (terms_width + separator_width + privacy_width) / 2.0;
+
+    let row_height = link(
+        ui,
+        Pos2::new(left + terms_width / 2.0, row_top),
+        Link::TermsOfService.label(),
+        "login-conditions",
+        || {
+            tracing::info!("[connexion] conditions d'utilisation demandées.");
+            outcome.open_url = Some(Link::TermsOfService.url());
+        },
+    );
+    ui.painter().text(
+        Pos2::new(left + terms_width, row_top),
+        Align2::LEFT_TOP,
+        CONSENT_SEPARATOR,
+        font,
+        TEXT_DIM,
+    );
+    link(
+        ui,
+        Pos2::new(
+            left + terms_width + separator_width + privacy_width / 2.0,
+            row_top,
+        ),
+        Link::PrivacyPolicy.label(),
+        "login-confidentialite",
+        || {
+            tracing::info!("[connexion] politique de confidentialité demandée.");
+            outcome.open_url = Some(Link::PrivacyPolicy.url());
+        },
+    );
+    sentence_height + CONSENT_GAP + row_height
 }
 
 /// Trois points cyan qui pulsent, un libellé, et à droite un compte à rebours facultatif — rend
