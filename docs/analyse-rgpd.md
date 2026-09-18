@@ -28,8 +28,8 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | C2 | La doctrine « vie privée » du plan d'architecture (« jamais de capture d'écran, jamais d'automatisation d'entrées ») est **contredite par le code** : capture de la fenêtre de jeu toutes les 500 ms en combat, frappes clavier et clic souris synthétiques | Élevée | §3.2 |
 | C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers — *décision du 2026-09-18 : noms conservés (option A), autocomplétion retirée, persistance locale bornée ; reste la politique de confidentialité côté site* | Élevée | §3.3 |
 | C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *✅ traité côté overlay le 2026-09-18 : section « Vos données » dans « À propos », ligne d'acceptation sous « Se connecter », licence MIT ; reste la politique de confidentialité du site (§7)* | Élevée | §3.4 |
-| C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent | Élevée | §3.5 |
-| C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris — *✅ traité le 2026-09-18 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; reste l'effacement des journaux, avec C5* | Moyenne | §3.6 |
+| C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent — *✅ traité côté overlay le 2026-09-18 : purge à la déconnexion, bouton « Supprimer les données locales » (fenêtre Options et écran de connexion) ; reste la révocation du jeton côté serveur* | Élevée | §3.5 |
+| C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris — *✅ traité le 2026-09-18 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; journaux vidés à la déconnexion et supprimés par le bouton d'effacement (C5)* | Moyenne | §3.6 |
 
 Les constats secondaires (C7 à C17) sont au §3.7. Le plan d'action priorisé est au §6.
 
@@ -374,8 +374,10 @@ d'utilisation de Wakfu » (voir `analyse-cgu.md` §5.4) et « Vos données » �
 avec le nom des participants, achats, échanges avec le nom du partenaire, personnages, alertes,
 recherches de chat), les deux destinataires tiers nommés (GitHub à chaque lancement,
 `vertylo.github.io` pour les icônes — C10, C11), ce qui reste sur la machine et où (jeton au
-trousseau, combats en cours, file d'envoi, journal de 14 jours, caches, gabarits de tour — C8), le
-fait que la déconnexion n'efface que le jeton, et l'exercice des droits (page « Mon compte »,
+trousseau, combats en cours, file d'envoi, journal de 14 jours, caches, gabarits de tour — C8), ce
+que la déconnexion efface et ce que « Supprimer les données locales » emporte (texte réécrit le
+2026-09-18 avec C5 : il disait « se déconnecter n'efface que le jeton », ce qui n'est plus vrai —
+une information devenue fausse est un écart en soi), et l'exercice des droits (page « Mon compte »,
 `contact@wakfu-companion.com`), avec deux boutons vers la politique de confidentialité et les CGU
 du service. Les textes décrivent le code tel qu'il est, capture de fenêtre et frappe synthétique
 comprises (C2).
@@ -386,7 +388,8 @@ porte sous « Se connecter » la ligne « En vous connectant, vous acceptez » s
 « À propos », donc les mêmes URL (`/terms-of-service`, `/privacy-policy` sur l'origine de l'API) ;
 l'information précède le geste (art. 13.1), et la carte passe de 385 à 432 px. Le dépôt a un
 fichier `LICENSE` (MIT, décision du mainteneur) déclaré dans `[workspace.package] license` et
-hérité par chaque crate. **Restent** : le bouton d'effacement (C5) et, côté site, une politique
+hérité par chaque crate. Le bouton d'effacement (C5) est arrivé le même jour, et l'écran de
+connexion en porte le lien — la carte passe de 432 à 462 px. **Reste**, côté site, une politique
 de confidentialité qui parle encore du seul navigateur et ne mentionne ni l'overlay, ni GitHub,
 ni `vertylo.github.io` (§7).
 
@@ -414,6 +417,46 @@ tiers, et les gabarits sont des captures d'écran.
 - (serveur) Route de révocation appelée à la déconnexion ; durée de vie du jeton natif.
 - Unifier les deux racines `ProjectDirs` (C13) pour que l'effacement soit complet.
 
+**✅ Traité côté overlay le 2026-09-18** (`overlay_ui::local_data`, deux portées).
+
+*À la déconnexion*, quelle qu'en soit l'origine — bouton de la section « Compte », entrée de la
+zone de notification, jeton refusé par le serveur : `data/` (les `fight-*.json` et
+`recap-session.json`), `watchlist-counts.json`, `turn-templates/` et le contenu des journaux
+partent. Trois précautions décidées avec le mainteneur, sans lesquelles la purge ne tiendrait pas :
+
+- le moteur **oublie sa session** sur `EngineCommand::Disconnect` (`Engine::forget_session`) —
+  sinon la ligne de log suivante réécrit chaque combat encore `ongoing` ;
+- l'hôte **efface le récap** à la transition « connecté → plus connecté »
+  (`RecapSession::purge`, drapeau `account_was_connected`) — sinon la sauvegarde périodique, ou
+  le `Drop` de fin de programme, recrée `recap-session.json` ;
+- les journaux sont **vidés sur place, pas supprimés** : `tracing_appender` tient le fichier du
+  jour ouvert et ne rouvre qu'à la rotation, un fichier supprimé rendrait l'overlay muet jusqu'au
+  lendemain — précisément quand on cherche pourquoi la reconnexion échoue. Le contenu (noms de
+  personnages, chemin du log, auteur de message — constat C6) part quand même.
+
+Ce que la déconnexion ne touche PAS, à dessein : la configuration et les caches. Se déconnecter
+n'est pas désinstaller, et reperdre son chemin de `wakfu.log` à chaque déconnexion serait une
+punition, pas une protection. Les compteurs de Suivi, eux, partent : ils sont répliqués au compte
+(`client::patch_watchlist_counts`) et revenus à la reconnexion.
+
+*Le bouton « Supprimer les données locales »* est à deux endroits, parce qu'il faut pouvoir
+l'atteindre APRÈS s'être déconnecté, quand la fenêtre Options n'existe plus : dans la section
+« Compte » de l'onglet « Paramètres » (rouge, actif même sans compte lié) et en lien sur l'écran
+« non connecté » de la fenêtre de connexion, qui porte alors son propre écran de confirmation —
+la boîte du jeu (`design::confirm_dialog`) est du jeu, cette fenêtre est du site. Il efface les
+**deux racines** `ProjectDirs` en entier (donc réglages, combats, file d'envoi, gabarits, récap,
+compteurs, journaux, caches et mises à jour en attente), le jeton du **trousseau système**,
+l'**inscription au démarrage** de l'ordinateur et, sous Windows, les deux **clés de registre** de
+l'overlay (identité de notification, protocole `wakfu-companion:`) — puis **ferme l'overlay**.
+Cette fermeture n'est pas un effet de bord : les threads qui écrivent ces fichiers tiennent leur
+contenu en mémoire, ne plus tourner est la seule garantie que rien ne réécrive derrière.
+
+**Restent ouverts** : la route de révocation côté serveur et la durée de vie du jeton natif (hors
+overlay, aucune route de ce genre n'existe côté API) ; l'option de ligne de commande
+`--purge-local-data` (écartée le 2026-09-18 — les deux points d'entrée de l'interface suffisent
+tant qu'il n'y a pas de désinstalleur) ; l'unification des deux racines (C13), que l'effacement
+contourne en les listant toutes les deux plutôt qu'en attendant la migration.
+
 ### 3.6 C6 — Journal applicatif trop bavard et sans plafond (moyenne)
 
 `logs/overlay-ui.<date>.log`, niveau `info` par défaut en release (`logging.rs:60`), rotation
@@ -440,7 +483,8 @@ Non journalisés (bon) : le jeton, les corps de réponse HTTP, les lignes brutes
 mot suffisent au diagnostic) ; tronquer et expurger le JSON dans `EngineError::Deserialize`
 (position de l'erreur + type de l'entrée, pas le contenu) ; journaliser les noms de personnages
 au niveau `debug` ; remplacer le chemin complet par son suffixe ; plafonner la taille ; offrir
-un réglage « journal détaillé » décoché par défaut ; effacer les journaux avec C5.
+un réglage « journal détaillé » décoché par défaut. Le dernier point — effacer les journaux avec
+C5 — est fait (✅ 2026-09-18 : vidés à la déconnexion, supprimés par le bouton d'effacement).
 
 **Traité le 2026-09-18** (0.65.2 → 0.66.0), sauf l'effacement, qui reste rattaché à C5 :
 
@@ -478,7 +522,7 @@ dans la politique de confidentialité côté site (C4).
 | # | Constat | Réf. | Recommandation |
 | --- | --- | --- | --- |
 | C7 | Jeton en clair sur disque en repli, `0600` posé **après** l'écriture et **Unix seulement** ; aucune ACL Windows ; repli déclenché aussi quand la relecture du trousseau diffère | `token_store.rs:32-49, 68-86` | Créer le fichier avec le mode restrictif dès l'ouverture (`OpenOptions::mode(0o600)`), poser une ACL utilisateur sous Windows ou chiffrer par DPAPI ; avertir l'utilisateur dans l'interface, pas seulement au journal |
-| C8 | Gabarits de tour : PNG du nom rendu à l'écran + nom en clair, jamais purgés | `templates.rs:77-95` | Effacer avec C5 ; documenter dans « À propos » |
+| C8 | Gabarits de tour : PNG du nom rendu à l'écran + nom en clair, jamais purgés — *✅ 2026-09-18 : `turn-templates/` effacé à la déconnexion et par le bouton (C5)* | `templates.rs:77-95` | Documenter dans « À propos » |
 | C9 | `profile` renvoyé entier (pseudo, avatar) pour un réglage d'alerte ; `roster` réémet tout champ inconnu (`flatten extra`) | `profile.rs:278-316`, `roster.rs:86-90` | (serveur) `PATCH` par sous-clé ou fusion côté serveur ; à défaut, documenter que le contenu transmis n'est pas énumérable |
 | C10 | Icônes chargées depuis `vertylo.github.io` : IP + centres d'intérêt vers un tiers non contractualisé | `catalog.rs:85,108`, `remote_icons.rs:238-250` | Servir les icônes depuis l'API ou les embarquer ; sinon nommer ce destinataire dans l'information |
 | C11 | Vérification de mise à jour vers GitHub à chaque lancement | `background.rs:731+` | Nommer GitHub comme destinataire ; la case `auto_update` existe déjà, préciser qu'elle coupe aussi la vérification si c'est le cas |
@@ -525,7 +569,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | Politique de confidentialité côté site (à étendre à l'overlay) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | Site (politique) |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
-| **P1** | Bouton « Supprimer les données locales » ; purge de la file, des combats, des gabarits et des journaux à la déconnexion ; révocation serveur | C5, C8 | Overlay + serveur |
+| **P1** | ✅ Bouton « Supprimer les données locales » (fenêtre Options et écran de connexion, avec confirmation, puis fermeture) ; purge des combats, du récap, des compteurs, des gabarits et du contenu des journaux à la déconnexion (2026-09-18, `overlay_ui::local_data`). **Reste** : la révocation du jeton côté serveur | C5, C8 | Overlay ✅ / serveur |
 | **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). Reste la mention dans la politique de confidentialité et le contact d'opposition | C3 | Site (politique) |
 | **P2** | ✅ Journal (2026-09-18) : code d'appairage et auteur de chat retirés, `EngineError::Deserialize` expurgée, noms et chemins en `debug`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut. Reste l'effacement, avec C5 | C6 | Overlay |
 | **P2** | Jeton de repli : mode restrictif à la création, ACL/DPAPI Windows, avertissement dans l'interface | C7 | Overlay |
