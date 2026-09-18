@@ -36,6 +36,7 @@ const USER_PARENTS: [&str; 2] = ["users", "home"];
 /// À utiliser dans tout `info!`/`warn!`/`error!` qui cite un chemin ; `debug!` et `trace!` gardent
 /// le chemin réel (voir la doc du module).
 pub fn redact_path(path: &Path) -> String {
+    let separator = separator_of(path);
     let (prefix, rest) = match home_dir().and_then(|home| {
         path.strip_prefix(&home)
             .ok()
@@ -62,12 +63,15 @@ pub fn redact_path(path: &Path) -> String {
             matches!(component, Component::Normal(_)) && USER_PARENTS.contains(&lower.as_str());
 
         match component {
-            // Le séparateur d'une racine (`/`, `C:\`) fait partie du segment rendu : ne pas en
-            // ajouter un second derrière lui, sinon `/home` deviendrait `//home`.
-            Component::RootDir | Component::Prefix(_) => out.push_str(&raw),
+            // Le séparateur d'une racine fait partie du segment rendu : ne pas en ajouter un
+            // second derrière lui, sinon `/home` deviendrait `//home`. Il est réécrit avec le
+            // séparateur d'ENTRÉE (voir [`separator_of`]) : `Component::RootDir` rend `\` sous
+            // Windows, même pour un chemin écrit avec des `/`.
+            Component::RootDir => out.push(separator),
+            Component::Prefix(_) => out.push_str(&raw),
             _ => {
-                if !out.is_empty() && !out.ends_with(MAIN_SEPARATOR) && !out.ends_with('/') {
-                    out.push(MAIN_SEPARATOR);
+                if !out.is_empty() && !out.ends_with(separator) {
+                    out.push(separator);
                 }
                 out.push_str(if named_user { USER_PLACEHOLDER } else { &raw });
             }
@@ -86,6 +90,21 @@ pub fn redact_path(path: &Path) -> String {
 /// configuration) — le nom d'utilisateur y est masqué de la même façon.
 pub fn redact_path_str(path: &str) -> String {
     redact_path(Path::new(path))
+}
+
+/// **Le séparateur à réutiliser en sortie** : celui que porte le chemin d'entrée, et seulement à
+/// défaut celui de la plateforme.
+///
+/// `Path::components` normalise ce qu'il rend : sous Windows, `/opt/jeux/wakfu` ressort en
+/// `\opt\jeux\wakfu`. Un chemin lu dans une configuration, un message d'erreur ou une fixture
+/// changeait donc de forme au passage — or c'est justement la forme du chemin qu'on lit au journal
+/// (Steam/Proton, Wine, installation native) et que ce module promet de conserver. Les quatre tests
+/// de ce fichier l'ont attrapé sur le runner Windows du CI (2026-09-18).
+fn separator_of(path: &Path) -> char {
+    path.to_string_lossy()
+        .chars()
+        .find(|c| *c == '/' || *c == '\\')
+        .unwrap_or(MAIN_SEPARATOR)
 }
 
 /// Dossier personnel de l'utilisateur courant. `std::env::home_dir` est de nouveau recommandée
@@ -146,8 +165,21 @@ mod tests {
     #[test]
     fn dossier_personnel_reduit_au_tilde() {
         let home = home_dir().expect("dossier personnel résolu dans l'environnement de test");
-        let rendu = redact_path(&home.join(".steam/steam/steamapps/compatdata"));
-        assert_eq!(rendu, "~/.steam/steam/steamapps/compatdata");
+        let rendu = redact_path(
+            &home
+                .join(".steam")
+                .join("steam")
+                .join("steamapps")
+                .join("compatdata"),
+        );
+        // Ce chemin-ci est construit par `Path::join`, donc avec le séparateur de la PLATEFORME :
+        // l'attendu l'est aussi. Les autres tests de ce module partent de chemins POSIX écrits en
+        // dur, et vérifient qu'ils ressortent tels quels — voir `separator_of`.
+        let s = MAIN_SEPARATOR;
+        assert_eq!(
+            rendu,
+            format!("~{s}.steam{s}steam{s}steamapps{s}compatdata")
+        );
     }
 
     /// Un chemin sans rien de personnel traverse la fonction sans y perdre un segment — c'est ce
