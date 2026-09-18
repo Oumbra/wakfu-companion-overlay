@@ -34,8 +34,6 @@ déployé, avant toute release réelle de l'overlay.
 
 ## Ce qui manque volontairement ici
 
-- Pas d'UI d'appairage dans la fenêtre overlay — le code est affiché en console
-  (`overlay-ui::spawn_auth_thread`). Le panneau "État de synchro" du plan (§9) le remplacera.
 - Pas de révocation/déconnexion côté overlay (`token_store::clear_token` existe mais n'est appelé
   qu'en repli sur un jeton invalide, jamais sur demande utilisateur).
 - Le mode invité (aucun compte lié, ou appairage jamais complété) n'est **jamais** une erreur :

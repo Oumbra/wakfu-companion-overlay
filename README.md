@@ -6,15 +6,81 @@ Overlay de jeu natif (Rust) pour [Wakfu](https://www.wakfu.com/), portage de
 alertes de drop, avec synchronisation de l'historique (combats, achats et récupérations de kamas à
 l'Hôtel de Vente, échanges) vers le même compte que l'application web.
 
-**Plateformes visées : Windows et Linux (X11 / XWayland).** macOS est hors périmètre.
-
-État : spikes de validation technique (`spikes/`) terminés ; L1 (ingestion) fait, L2 (UI) en
-cours — deux panneaux réels (dégâts du combat, récap de session) tournent déjà sur un vrai
-`wakfu.log` (`crates/`, workspace Cargo à la racine).
+**Plateformes visées : Windows et Linux (X11 / XWayland).**
 
 📄 **[Plan d'architecture technique](docs/plan-architecture.md)** — stack, modèle de threads,
 ingestion du log, rendu et click-through par OS, synchronisation serveur, budget mémoire,
 feuille de route et revue d'experts.
+
+## Installation
+
+Cette section s'adresse à qui veut simplement **utiliser** l'overlay. Pour compiler le projet
+soi-même, voir [« Mise en route (développement) »](#mise-en-route-développement) plus bas.
+
+Les binaires sont publiés sur la page **[Releases](https://github.com/Oumbra/wakfu-companion-overlay/releases/latest)**
+du dépôt, un par plateforme, compressés en gzip simple (pas une archive `.zip`/`.tar` — un seul
+fichier, à décompresser tel quel) :
+
+- `wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`
+- `wakfu-companion-overlay-{version}-linux-x86_64.gz`
+
+Une fois installée, l'overlay se met à jour **seul** au démarrage suivant (`docs/plan-mise-a-jour.md`) :
+cette étape manuelle ne se refait qu'à la toute première installation.
+
+### Windows
+
+1. Télécharger `wakfu-companion-overlay-{version}-windows-x86_64.exe.gz` depuis la Release.
+2. Le décompresser en `.exe`. L'Explorateur Windows n'ouvre pas les `.gz` nativement ; deux façons
+   de s'en sortir sans rien installer de nouveau :
+   - **7-Zip** (souvent déjà présent) : clic droit sur le fichier → *7-Zip → Extraire ici*.
+   - **PowerShell**, sans outil externe :
+     ```powershell
+     $in  = [IO.File]::OpenRead("wakfu-companion-overlay-{version}-windows-x86_64.exe.gz")
+     $out = [IO.File]::Create("wakfu-companion-overlay.exe")
+     $gz  = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+     $gz.CopyTo($out)
+     $gz.Dispose(); $out.Dispose(); $in.Dispose()
+     ```
+3. Lancer `wakfu-companion-overlay.exe`. Aucune dépendance à installer : DirectComposition et
+   DirectX 12 (backend `dx12` de wgpu) font partie de Windows 10/11.
+
+### Linux (X11 / XWayland)
+
+L'overlay vise **X11**, natif ou via **XWayland** — c'est le cas de toute session de bureau
+courante (GNOME, KDE, XFCE…), même sous Wayland natif, tant que XWayland est installé (il l'est par
+défaut sur la quasi-totalité des distributions grand public).
+
+1. Télécharger `wakfu-companion-overlay-{version}-linux-x86_64.gz` depuis la Release.
+2. Décompresser et rendre exécutable :
+   ```bash
+   gunzip wakfu-companion-overlay-{version}-linux-x86_64.gz
+   mv wakfu-companion-overlay-{version}-linux-x86_64 wakfu-companion-overlay
+   chmod +x wakfu-companion-overlay
+   ```
+3. Lancer : `./wakfu-companion-overlay`.
+
+Le binaire lie dynamiquement quelques bibliothèques système, quasiment toujours déjà présentes sur
+un poste de jeu (session X11 + son + carte graphique), mais listées ici pour les images minimales
+(conteneur, serveur, installation "core") :
+
+| Bibliothèque | Rôle | Debian / Ubuntu | Fedora | Arch / SteamOS | openSUSE |
+| --- | --- | --- | --- | --- | --- |
+| Vulkan (chargeur + pilote) | rendu wgpu — **aucun repli OpenGL**, un pilote Vulkan fonctionnel est obligatoire | `libvulkan1` + `mesa-vulkan-drivers` (ou pilote proprio NVIDIA) | `vulkan-loader` + `mesa-vulkan-drivers` | `vulkan-icd-loader` + `vulkan-radeon`/`vulkan-intel`/`nvidia-utils` selon le GPU | `libvulkan1` + `Mesa-vulkan-device-select` |
+| ALSA | lecture des sons d'alerte (`rodio`/`cpal`) | `libasound2` (`libasound2t64` sur les versions récentes) | `alsa-lib` | `alsa-lib` | `libasound2` |
+| X11 / xkbcommon | fenêtre, clic-traversant, raccourcis (`winit`, `x11rb`) | `libx11-6`, `libxkbcommon-x11-0` | `libX11`, `libxkbcommon-x11` | `libx11`, `libxkbcommon-x11` | `libX11-6`, `libxkbcommon-x11-0` |
+
+Sur un poste qui fait déjà tourner des jeux (pilote GPU installé, session graphique standard), ces
+paquets sont déjà en place — aucune manipulation n'est en général nécessaire.
+
+**Steam Deck (SteamOS)** : lancer le binaire depuis le **mode Bureau** (double-clic ou terminal) ;
+SteamOS fournit déjà XWayland, ALSA et le pilote Vulkan RADV, sans rien à installer. Le mode Jeu ne
+lance pas d'exécutable arbitraire hors de Steam — passer par le mode Bureau, éventuellement en
+ajoutant le binaire comme jeu non-Steam pour un accès rapide.
+
+**Compatibilité glibc** : le binaire est compilé sur Ubuntu (dernière image `ubuntu-latest` du CI).
+Sur une distribution **beaucoup plus ancienne** que sa glibc, le lancement peut échouer avec une
+erreur du type `version 'GLIBC_2.xx' not found` — dans ce cas, mettre à jour la distribution ou
+compiler depuis les sources (section suivante) plutôt que chercher un correctif ponctuel.
 
 ## Mise en route (développement)
 
@@ -121,9 +187,12 @@ Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tou
 | Crate | Lot | Contenu |
 | --- | --- | --- |
 | [`overlay-ingest`](crates/overlay-ingest/) | L1 ✅ | Suivi de `wakfu.log` : découverte de chemin, lecture incrémentale, rotation/troncature. `cargo test -p overlay-ingest`. |
-| [`overlay-app`](crates/overlay-app/) | L1 (câblage) | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
-| [`overlay-engine`](crates/overlay-engine/) | L2 🟡 | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
-| [`overlay-ui`](crates/overlay-ui/) | L2 🟡 | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` (Windows) ou `preview.sh` (Linux) depuis le dossier du crate. |
+| [`overlay-app`](crates/overlay-app/) | L1 ✅ | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
+| [`overlay-engine`](crates/overlay-engine/) | L2 ✅ | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
+| [`overlay-ui`](crates/overlay-ui/) | L2 ✅ | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` (Windows) ou `preview.sh` (Linux) depuis le dossier du crate. |
+| [`overlay-platform`](crates/overlay-platform/) | L2 ✅ | Primitives spécifiques à l'OS pour `overlay-ui` : découverte de la fenêtre du jeu, décision topmost, clic-traversant. |
+| [`overlay-sync`](crates/overlay-sync/) | L3–L5 ✅ | Réseau : appairage/auth native, catalogue (fetch + cache disque + repli embarqué), file de synchro SQLite idempotente vers l'API. |
+| [`overlay-testkit`](crates/overlay-testkit/) | L7 | Harnais de rendu offscreen des panneaux `overlay-ui` (153 captures de référence, voir « Captures de référence » plus haut). |
 
 ## Spikes (`spikes/`)
 
@@ -131,6 +200,8 @@ Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tou
 | --- | --- | --- |
 | [`s1-window-windows`](spikes/s1-window-windows/) | ✅ validé | `.\preview.ps1` depuis le dossier du spike |
 | [`s2-engine-quickjs`](spikes/s2-engine-quickjs/) | ✅ validé | voir son README |
+| [`s3-window-linux`](spikes/s3-window-linux/) | ✅ validé | `harness.sh` depuis le dossier du spike (Xvfb) |
+| [`s4-capture-hors-focus`](spikes/s4-capture-hors-focus/) | ✅ validé | voir son README (Windows) |
 
 ## Licence
 

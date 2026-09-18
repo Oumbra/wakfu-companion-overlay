@@ -143,8 +143,7 @@ pilotant le libellé) affiché sous la bande de tuiles pendant `TOAST_DURATION` 
 interactif. Réduit par rapport au web (`loot-alert.component.ts` : confettis, durée configurable) —
 un seul emplacement de toast, le plus récent des deux déclencheurs écrase l'autre.
 
-Voir §9 du plan pour le contenu complet visé : **État de synchro** n'est pas encore câblé — le
-pairing reste console-only pour l'instant (voir plus bas), dépend de L5. **Récap de session**
+Voir §9 du plan pour le contenu complet visé. **Récap de session**
 (kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 : n'apportait plus rien une
 fois le reste simplifié) — sera repensé dans un autre chantier, `overlay_engine::session::
 SessionTotals` existe toujours côté moteur. **Disposition persistée par écran** : retirée (décision

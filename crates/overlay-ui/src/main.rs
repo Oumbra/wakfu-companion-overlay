@@ -27,10 +27,10 @@
 //! (`App::install_tray`). « Mise à jour » rouvre cette même fenêtre sur son écran de mise à jour,
 //! seul cas où elle coexiste avec les overlays de jeu (`App::open_manual_update_window`).
 //!
-//! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
-//! synchro serveur, L5). Pas de thème configurable ni de disposition repositionnable/persistée par
-//! écran — décision du mainteneur (§9 du plan, 2026-09-02) : un overlay n'est pas un site, palette
-//! fixe et ancrage automatique (`App::anchor_position`) seuls assumés. Le récap de session reste
+//! Pas de thème configurable ni de disposition repositionnable/persistée par écran, ni d'indicateur
+//! d'état de synchro — décisions du mainteneur (§9 du plan, 2026-09-02 et 2026-09-18) : un overlay
+//! n'est pas un site, palette fixe et ancrage automatique (`App::anchor_position`) seuls assumés ;
+//! la synchro (retries + backoff, L5) finit toujours par passer, rien d'alarmant à afficher. Le récap de session reste
 //! également **global** (identique sur toutes les fenêtres, pas ventilé par personnage —
 //! limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec `overlay-engine`
 //! tel qu'il existe aujourd'hui.
