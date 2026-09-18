@@ -799,6 +799,12 @@ struct App {
     /// Clics sur le menu de l'icône de zone de notification — même sondage non bloquant que
     /// `hotkey_events`, à chaque `about_to_wait`.
     menu_events: &'static tray_icon::menu::MenuEventReceiver,
+    /// **Écran de mise à jour ouvert à la demande** (2026-09-18) — posé par l'entrée « Mise à
+    /// jour » du menu de la zone de notification (voir `open_manual_update_window`), retiré par
+    /// « Fermer ». Tant qu'il vaut `true`, `sync_session_windows` garde la fenêtre de connexion
+    /// ouverte **même compte lié**, en mode mise à jour (`LoginState::manual_update`) : c'est le
+    /// seul endroit où cette fenêtre coexiste avec les overlays de jeu.
+    manual_update: bool,
 }
 
 /// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
@@ -904,12 +910,6 @@ struct AppState {
     /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
     /// redemander les réglages de compte à la volée — voir sa doc.
     settings_tx: mpsc::Sender<EngineCommand>,
-    /// **Écran de mise à jour ouvert à la demande** (2026-09-18) — posé par l'entrée « Mise à
-    /// jour » du menu de la zone de notification (voir `open_manual_update_window`), retiré par
-    /// « Fermer ». Tant qu'il vaut `true`, `sync_session_windows` garde la fenêtre de connexion
-    /// ouverte **même compte lié**, en mode mise à jour (`LoginState::manual_update`) : c'est le
-    /// seul endroit où cette fenêtre coexiste avec les overlays de jeu.
-    manual_update: bool,
 }
 
 impl App {
