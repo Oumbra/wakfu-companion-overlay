@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "overlay-engine"
-version = "0.70.1"
+version = "0.70.2"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -2923,7 +2923,7 @@ dependencies = [
 
 [[package]]
 name = "overlay-ingest"
-version = "0.70.1"
+version = "0.70.2"
 dependencies = [
  "crossbeam-channel",
  "notify",
@@ -2934,14 +2934,14 @@ dependencies = [
 
 [[package]]
 name = "overlay-platform"
-version = "0.70.1"
+version = "0.70.2"
 dependencies = [
  "x11rb",
 ]
 
 [[package]]
 name = "overlay-sync"
-version = "0.70.1"
+version = "0.70.2"
 dependencies = [
  "directories",
  "flate2",
@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "overlay-testkit"
-version = "0.70.1"
+version = "0.70.2"
 dependencies = [
  "egui",
  "egui_kittest",
@@ -2976,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "overlay-ui"
-version = "0.70.1"
+version = "0.70.2"
 dependencies = [
  "arc-swap",
  "chrono",
