@@ -7435,9 +7435,9 @@ fn ecran_mise_a_jour_recherche() {
     let measured = capture_login_manual_update(
         "login_maj_recherche",
         overlay_ui::update::UpdateStatus::Checking,
-        432.0,
+        462.0,
     );
-    assert_eq!(measured, 432.0);
+    assert_eq!(measured, 462.0);
 }
 
 /// Téléchargement lancé depuis cet écran : la jauge y reste, l'utilisateur suit la mise à jour là
@@ -7451,9 +7451,9 @@ fn ecran_mise_a_jour_telechargement() {
             received: 4_200_000,
             total: 11_800_000,
         },
-        432.0,
+        462.0,
     );
-    assert_eq!(measured, 432.0);
+    assert_eq!(measured, 462.0);
 }
 
 /// Le verdict le plus fréquent : « Vous êtes déjà à jour », et de quoi refermer. La version citée
