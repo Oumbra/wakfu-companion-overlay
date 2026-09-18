@@ -27,7 +27,7 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | C1 | Un **vrai `wakfu.log` non anonymisé** est versionné en double dans un **dépôt public** : jeton d'authentification du client de jeu, IP locale, nom de compte Windows, 6 personnages avec leurs identifiants numériques, **119 pseudonymes de tiers et l'intégralité de leurs messages de chat** — *fixture pseudonymisée le 2026-09-18 ; reste la réécriture d'historique, décision du mainteneur* | **Critique** | §3.1 |
 | C2 | La doctrine « vie privée » du plan d'architecture (« jamais de capture d'écran, jamais d'automatisation d'entrées ») est **contredite par le code** : capture de la fenêtre de jeu toutes les 500 ms en combat, frappes clavier et clic souris synthétiques | Élevée | §3.2 |
 | C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers | Élevée | §3.3 |
-| C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » | Élevée | §3.4 |
+| C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *section « Vos données » et liens ajoutés dans « À propos » le 2026-09-18 au soir ; restent l'écran de connexion et la licence* | Élevée | §3.4 |
 | C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent | Élevée | §3.5 |
 | C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris | Moyenne | §3.6 |
 
@@ -338,6 +338,22 @@ confidentialité] » sous le bouton « Se connecter » ; une section « Données
 listant ce qui est lu, envoyé, conservé et où, avec le bouton d'effacement de C5 ; un fichier de
 licence à la racine du dépôt.
 
+**Ce qui a été fait (2026-09-18, le soir).** L'onglet « À propos » ouvre désormais sur trois
+sections d'information avant « Mise à jour » (`panels/a_propos_tab.rs`, constante `SECTIONS`) :
+« Wakfu Companion » (non-affiliation, liens vers le site et le code source), « Conditions
+d'utilisation de Wakfu » (voir `analyse-cgu.md` §5.4) et « Vos données » — ce qui est lu (le seul
+`wakfu.log`, chat jamais envoyé ni enregistré), ce qui part au compte une fois appairé (combats
+avec le nom des participants, achats, échanges avec le nom du partenaire, personnages, alertes,
+recherches de chat), les deux destinataires tiers nommés (GitHub à chaque lancement,
+`vertylo.github.io` pour les icônes — C10, C11), ce qui reste sur la machine et où (jeton au
+trousseau, combats en cours, file d'envoi, journal de 14 jours, caches, gabarits de tour — C8), le
+fait que la déconnexion n'efface que le jeton, et l'exercice des droits (page « Mon compte »,
+`contact@wakfu-companion.com`), avec deux boutons vers la politique de confidentialité et les CGU
+du service. Les textes décrivent le code tel qu'il est, capture de fenêtre et frappe synthétique
+comprises (C2). **Restent** : la ligne sous « Se connecter », le fichier de licence, le bouton
+d'effacement (C5) — et, côté site, une politique de confidentialité qui parle encore du seul
+navigateur et ne mentionne ni l'overlay, ni GitHub, ni `vertylo.github.io` (§7).
+
 ### 3.5 C5 — Pas de droit à l'effacement exerçable (élevée)
 
 La déconnexion (`background.rs:483-495`) efface le jeton et vide la mémoire du moteur
@@ -439,7 +455,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 | **P0** | ✅ Fixture pseudonymisée, tests réalignés, garde-fou `pre-commit` + CI (2026-09-18) | C1, §4 | Session |
 | **P0** | ⏳ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`, ticket GitHub Support | C1 | Mainteneur, hors session Claude |
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
-| **P1** | Politique de confidentialité côté site ; lien à l'écran de connexion et section « Données » dans « À propos » ; fichier de licence | C4 | Serveur + overlay |
+| **P1** | Politique de confidentialité côté site (à étendre à l'overlay) ; lien à l'écran de connexion ; ✅ section « Vos données » dans « À propos » (2026-09-18) ; fichier de licence | C4 | Serveur + overlay |
 | **P1** | Réécrire le §10 du plan d'architecture pour décrire la capture de fenêtre, les entrées synthétiques et le repli fichier du jeton | C2 | Overlay (`docs:`) |
 | **P1** | Bouton « Supprimer les données locales » ; purge de la file, des combats, des gabarits et des journaux à la déconnexion ; révocation serveur | C5, C8 | Overlay + serveur |
 | **P1** | Décision sur les noms de tiers dans `fights`/`trades` (rôle anonyme ou haché salé) ; autocomplétion limitée aux personnages de l'utilisateur | C3 | Serveur + overlay |

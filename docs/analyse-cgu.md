@@ -121,7 +121,8 @@ jeu »). La tolérance des sites de fans (art. 5.3.3) est discrétionnaire et ne
 Le nom du produit (`wakfu-companion-overlay`), le protocole `wakfu-companion:` enregistré pour le
 toast, et l'identité du toast utilisent la marque (art. 13.3). Aucune mention de non-affiliation à
 Ankama n'existe nulle part dans l'interface — ni dans l'onglet « À propos »
-(`panels/a_propos_tab.rs`), ni dans le README.
+(`panels/a_propos_tab.rs`), ni dans le README. *Ajoutée dans l'onglet « À propos » le 2026-09-18 au
+soir (voir §5, point 4) ; le README reste.*
 
 ### 3.6 Données de tiers envoyées à l'API — risque faible
 
@@ -172,7 +173,12 @@ garder en tête dans toute communication publique.
    réellement, quelle que soit la décision.
 4. **Ajouter une mention de non-affiliation** (« projet de fan, non affilié à Ankama ; WAKFU est
    une marque d'Ankama ») dans l'onglet « À propos » et le README, et documenter la provenance
-   des sons.
+   des sons. ✅ *Onglet « À propos », 2026-09-18 au soir* (`panels/a_propos_tab.rs`, constante
+   `SECTIONS`) : section « Wakfu Companion » (non-affiliation, marque, propriété des éléments du
+   jeu, retrait sur demande) et section « Conditions d'utilisation de Wakfu », qui dit ce que
+   l'overlay fait — lecture du log, **et** les deux fonctions des §3.1 et §3.2, nommées telles
+   quelles — puis rappelle l'interdiction des programmes non autorisés et laisse l'appréciation au
+   joueur, avec un bouton vers `wakfu.com/fr/cgu`. Restent le README et la provenance des sons.
 5. **Demander une autorisation écrite à Ankama** pour les assets graphiques et l'usage du nom, ou
    vérifier que leur politique à l'égard des contenus de fans couvre ce cas. À défaut, réduire les
    assets embarqués à ce qui ne reproduit pas l'art du jeu.
