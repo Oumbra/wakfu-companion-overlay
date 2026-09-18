@@ -366,6 +366,15 @@ mod linux_main {
             WindowId,
             mpsc::Receiver<Vec<overlay_engine::RecipeIngredient>>,
         )>,
+        /// Écran de mise à jour ouvert à la demande — voir `main.rs::App::manual_update`, même
+        /// rôle et même effet sur `sync_session_windows`.
+        ///
+        /// **Aucun déclencheur sous Linux aujourd'hui** : cet écran s'ouvre par l'entrée « Mise à
+        /// jour » du menu de la zone de notification, et cet hôte n'en a pas (voir la doc de
+        /// module). La mécanique est portée quand même — les deux hôtes ne divergent pas, et le
+        /// jour où un accès Linux existe (raccourci, bouton d'un panneau), il n'y a qu'à poser ce
+        /// drapeau.
+        manual_update: bool,
     }
 
     /// Ce qu'il faut savoir pour poser une fenêtre `Combat` — voir
@@ -631,6 +640,7 @@ mod linux_main {
                 banner_printed: false,
                 pending_dialog: None,
                 pending_recipe: None,
+                manual_update: false,
             }
         }
 
@@ -718,7 +728,13 @@ mod linux_main {
             let connected = !loading && auth.is_connected();
             let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
             if connected {
-                if has_login {
+                // Seule exception à « compte lié = pas de fenêtre de connexion » : l'écran de
+                // mise à jour demandé à la main (voir `App::manual_update`).
+                if self.manual_update {
+                    if !has_login {
+                        self.create_login_window(event_loop);
+                    }
+                } else if has_login {
                     self.windows.retain(|_, w| w.kind != OverlayKind::Login);
                     tracing::info!(
                         "[connexion] compte lié et chargements terminés — fenêtre de connexion fermée, overlays de jeu activés."
@@ -743,20 +759,36 @@ mod linux_main {
                 if !has_login {
                     self.create_login_window(event_loop);
                 }
-                for overlay in self.windows.values_mut() {
-                    if let Some(state) = overlay.login_state.as_mut() {
-                        if state.loading != loading {
-                            state.loading = loading;
-                            overlay.window.request_redraw();
-                            if !loading {
-                                tracing::info!(
-                                    "[connexion] chargements terminés — écran de connexion."
-                                );
-                            }
+            }
+            let manual_update = self.manual_update;
+            for overlay in self.windows.values_mut() {
+                if let Some(state) = overlay.login_state.as_mut() {
+                    if state.loading != loading {
+                        state.loading = loading;
+                        overlay.window.request_redraw();
+                        if !loading {
+                            tracing::info!(
+                                "[connexion] chargements terminés — écran de connexion."
+                            );
                         }
+                    }
+                    if state.manual_update != manual_update {
+                        state.manual_update = manual_update;
+                        overlay.window.request_redraw();
                     }
                 }
             }
+        }
+
+        /// Voir `main.rs::App::close_manual_update_window` — « Fermer » / « Plus tard » de l'écran
+        /// de mise à jour.
+        fn close_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
+            if !self.manual_update {
+                return;
+            }
+            tracing::info!("[mise à jour] écran de mise à jour refermé.");
+            self.manual_update = false;
+            self.sync_session_windows(event_loop);
         }
 
         /// Voir `main.rs::App::create_login_window` — fenêtre X11 ORDINAIRE (pas de type
@@ -2478,6 +2510,11 @@ mod linux_main {
                 Quit,
                 /// « Redémarrer », après confirmation — voir `main.rs`.
                 Restart,
+                /// « Mettre à jour maintenant » de l'écran de mise à jour manuelle — voir
+                /// `main.rs`.
+                StartManualUpdate,
+                /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
+                CloseManualUpdate,
             }
             let mut post_redraw = PostRedraw::None;
             // La bande Récap vient d'être reposée : la config est réécrite une fois le geste
@@ -2518,6 +2555,14 @@ mod linux_main {
                     } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
                         // Fermer la question, c'est répondre « Non ».
                         post_redraw = PostRedraw::AnswerResetConfirm(target, false);
+                    } else if overlay
+                        .login_state
+                        .as_ref()
+                        .is_some_and(|state| state.manual_update)
+                    {
+                        // La croix de l'écran de mise à jour ferme CET écran, pas l'overlay —
+                        // voir `main.rs`.
+                        post_redraw = PostRedraw::CloseManualUpdate;
                     } else {
                         logging::log_session_end("fermeture de fenêtre");
                         event_loop.exit();
@@ -2890,6 +2935,16 @@ mod linux_main {
                         if outcome.retry_update {
                             post_redraw = PostRedraw::RetryUpdate;
                         }
+                        // Écran de mise à jour manuelle — voir `main.rs`.
+                        if outcome.check_update {
+                            post_redraw = PostRedraw::CheckUpdate;
+                        }
+                        if outcome.install_update {
+                            post_redraw = PostRedraw::StartManualUpdate;
+                        }
+                        if outcome.close_update {
+                            post_redraw = PostRedraw::CloseManualUpdate;
+                        }
                     }
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
@@ -3094,6 +3149,14 @@ mod linux_main {
                         tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
                     }
                 },
+                // Voir `main.rs` : même chemin que « Mettre à jour vers X » de la fenêtre
+                // Options, sans fenêtre Options à refermer.
+                PostRedraw::StartManualUpdate => {
+                    tracing::info!(">>> Mise à jour demandée (écran de mise à jour).");
+                    self.startup.set_update_blocking(true);
+                    let _ = self.update_command_tx.send(UpdateCommand::Download);
+                }
+                PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
             }
         }
 

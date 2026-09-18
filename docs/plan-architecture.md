@@ -1664,9 +1664,12 @@ session), portée telle quelle dans `panels::login`.
   contextuel n'en ouvre pas). **« Mise à jour » ajoutée après « Options » (2026-09-15, demande de
   l'utilisateur)** : lance la recherche de mise à jour (`UpdateCommand::Check`, même commande que
   le bouton de la fenêtre Options — §8.3 de `docs/plan-mise-a-jour.md`), toujours active puisqu'une
-  recherche ne dépend pas du compte ; le résultat se lit dans la section « Mise à jour » de la
-  fenêtre Options. C'est le seul accès à l'overlay quand ni jeu ni fenêtre de connexion
-  ne sont à l'écran, et le seul moyen de quitter proprement une fois connecté.
+  recherche ne dépend pas du compte. **Depuis le 2026-09-18, ce clic MONTRE la recherche**
+  (`App::open_manual_update_window`, §8.4 du même plan) : la fenêtre de connexion/démarrage s'ouvre
+  sur son écran de mise à jour — rouage et « Recherche d'une mise à jour… », puis « Vous êtes déjà
+  à jour », « Version X disponible » ou l'échec. C'est le seul accès à l'overlay quand ni jeu ni
+  fenêtre de connexion ne sont à l'écran, et le seul moyen de quitter proprement une fois
+  connecté.
 - **L'ancienne carte d'appairage de la zone Combat** (code, icône de relance 🔌, « Connexion… »)
   est retirée : la zone Combat n'existe plus que compte lié.
 - **Captures** (`tests/panels.rs`, `login_*.png`, un harnais par test — `egui_kittest` exige
@@ -1835,8 +1838,16 @@ d'exécution (`self-replace`) et relance avec `--updated-from`, toujours derriè
 chargement, jamais pendant une session. Captures : `login_telechargement`,
 `login_version_disponible`, `login_mise_a_jour_requise`, `options_parametres_mise_a_jour`.
 
-**À retravailler** (retour du mainteneur) : la mise en forme de l'écran de chargement, dans une
-itération dédiée — le mécanisme est en place, pas son dessin.
+**Écran de mise à jour (2026-09-18, demande de l'utilisateur, §8.4 du plan dédié)** : l'entrée
+« Mise à jour » du menu de la zone de notification ouvre la **même carte** que la connexion et le
+démarrage, en mode `LoginState::manual_update` — rouage et « Recherche d'une mise à jour… », puis
+le verdict et ce qu'on peut en faire. La recherche ne court plus en silence. C'est aussi le seul
+cas où cette fenêtre coexiste avec les overlays de jeu (`App::sync_session_windows`). Captures :
+`login_maj_recherche`, `login_maj_telechargement`, `login_maj_a_jour`, `login_maj_disponible`,
+`login_maj_indisponible`, `login_maj_echec`.
+
+**À retravailler** (retour du mainteneur) : la mise en forme de l'écran de chargement **du
+démarrage**, dans une itération dédiée — le mécanisme est en place, pas son dessin.
 
 ### 9.1 quaterdecies Interrupteurs du panneau Combat : détail des combats, suivi des sorts (2026-09-15)
 

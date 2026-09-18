@@ -516,11 +516,55 @@ Une vérification manuelle ne se lance pas si une est en cours (bouton désactiv
 (menu Options / Mise à jour / Déconnecter / Quitter, `App::install_tray`). Un clic lance la
 recherche (`UpdateCommand::Check { install_if_available: false }`, la même commande que le bouton
 « Recherche de mise à jour » de la fenêtre Options — même anti-rafale de 30 s, même refus pendant
-une opération en cours). Toujours active : une recherche ne dépend pas du compte. Le verdict se lit
-dans la section « Mise à jour » de la fenêtre Options ; le menu, lui, ne change pas de libellé.
+une opération en cours). Toujours active : une recherche ne dépend pas du compte.
 
 Non fait, à décider plus tard : un libellé qui suit l'état (« Mettre à jour vers X » quand une
 version est disponible, même action que le bouton) — une ligne dans `sync_tray_menu`.
+
+### 8.4 L'écran de mise à jour (2026-09-18)
+
+> **Demande de l'utilisateur** : « le clic sur *Mise à jour* dans le menu de notification doit
+> ouvrir le panneau de l'overlay, le même que le panneau de connexion/démarrage, avec le loader et
+> le message de recherche de mise à jour en cours ou le message "vous êtes [déjà] à jour" ».
+
+Jusque-là, ce clic cherchait **en silence** : le verdict ne se lisait que dans la section « Mise à
+jour » de la fenêtre Options (§8.2) ou dans le journal. Il ouvre désormais **la carte de connexion
+et de démarrage** (`panels::login`, 400 px, même logo, même anneau, même rouage) sur un écran
+dédié — `LoginState::manual_update`, peint par `panels::login::paint_manual_update`, ouvert par
+`App::open_manual_update_window` :
+
+| `UpdateStatus` | Corps de la carte |
+| --- | --- |
+| `Idle`, `Checking` | rouage + « Recherche d'une mise à jour… » |
+| `Downloading`, `Verifying`, `ReadyToInstall`, `Installing` | rouage + l'étape en cours, jauge et compteur pendant le téléchargement |
+| `UpToDate` | « Vous êtes déjà à jour » + la version en cours + « Fermer » |
+| `Available` | « Version X disponible » + la taille à télécharger + « Mettre à jour maintenant » et « Plus tard » |
+| `Unavailable` | « Vérification impossible » + le détail technique + « Réessayer » et « Fermer » |
+| `Failed` non obligatoire | « Mise à jour impossible » + `headline` + le détail technique + « Réessayer » et « Fermer » |
+
+Points de conception, tous vérifiables sur les captures (`login_maj_*`) :
+
+- **Seule exception à « compte lié = pas de fenêtre de connexion »** : `App::manual_update` fait
+  vivre cette fenêtre à côté des overlays de jeu (`sync_session_windows`), jusqu'à « Fermer ».
+  Compte non lié, la fenêtre est déjà là et change simplement d'écran.
+- **Il prime sur l'écran de chargement**, et pas l'inverse : un téléchargement lancé depuis cet
+  écran rebloque le démarrage (`StartupProgress::set_update_blocking`, même chemin que « Mettre à
+  jour vers X » de la fenêtre Options), donc les overlays de jeu se referment — l'avancement doit
+  rester là où l'utilisateur l'a demandé. Seule une mise à jour **obligatoire** en échec passe
+  devant (§8.1, écran « Mise à jour requise »).
+- **La croix de la fenêtre ferme cet écran, pas l'overlay** — même règle que la croix de la
+  fenêtre Options, et pour la même raison : c'est une des rares fenêtres focalisables.
+- **La commande envoyée est inchangée** : l'anti-rafale de 30 s du thread s'applique toujours, et
+  une demande refusée laisse simplement l'écran afficher le verdict déjà connu — ce qui est
+  exactement ce qu'on venait lui demander.
+- **Captures** : six références de plus dans `tests/panels.rs` (`login_maj_recherche`,
+  `login_maj_telechargement`, `login_maj_a_jour`, `login_maj_disponible`,
+  `login_maj_indisponible`, `login_maj_echec`), hauteur de carte vérifiée comme pour les autres
+  écrans de cette fenêtre, version figée par `freeze_for_snapshots`.
+
+Sous Linux (`bin/wakfu-companion-overlay-x11.rs`), la mécanique est portée à l'identique mais
+**rien ne l'ouvre** : cet hôte n'a pas de zone de notification (`tray-icon` y tire
+GTK/libappindicator). Le jour où un accès existe, il n'y a qu'à poser `App::manual_update`.
 
 ---
 
