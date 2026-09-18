@@ -30,7 +30,7 @@
 //! - **appairage** (`PairingStarted`) : le code en grand, le compte à rebours, « Copier le code »,
 //!   « Rouvrir la page », et le lien « Annuler l'appairage » ;
 //! - **erreur** (`Disconnected { failure: Some(_) }`) : « Connexion impossible », le titre court de
-//!   l'échec, le détail technique et « Réessayer ».
+//!   l'échec, le détail technique, « Réessayer » et « Copier le détail » (pour le support) ;
 //!
 //! **Palette du site, pas du jeu.** C'est un choix délibéré et validé : cette fenêtre n'est pas un
 //! overlay posé sur le jeu mais une fenêtre logicielle classique, la porte d'entrée du compte
@@ -811,20 +811,38 @@ pub fn show(
                 // Détail technique, sur une ligne, tronqué au besoin.
                 y += DETAIL_MARGIN_TOP;
                 y = paint_detail(ui, body_left, body_width, y, &failure.detail);
+                // Deux boutons côte à côte, comme sur la carte d'appairage : « Réessayer », et
+                // « Copier le détail » pour le support (constat C17 de `docs/analyse-rgpd.md`,
+                // décision du 2026-09-19 : un bouton de copie, pas de bloc repliable) — le détail
+                // tronqué à l'écran part entier dans le presse-papiers, titre compris, sans
+                // recopie à la main ni capture d'écran.
                 y += ACTIONS_MARGIN_TOP;
-                let button_rect = Rect::from_min_size(
-                    Pos2::new(body_left, y),
-                    Vec2::new(body_width, BUTTON_HEIGHT),
+                let half = (body_width - ACTIONS_GAP) / 2.0;
+                let retry_rect =
+                    Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(half, BUTTON_HEIGHT));
+                let copy_rect = Rect::from_min_size(
+                    Pos2::new(body_left + half + ACTIONS_GAP, y),
+                    Vec2::new(half, BUTTON_HEIGHT),
                 );
                 if button(
                     ui,
-                    button_rect,
+                    retry_rect,
                     "Réessayer",
                     ButtonKind::Primary,
                     "login-reessayer",
                 ) {
                     tracing::info!("[connexion] « Réessayer » — nouvelle tentative demandée.");
                     auth_command_tx.send(AuthCommand::Retry);
+                }
+                if button(
+                    ui,
+                    copy_rect,
+                    "Copier le détail",
+                    ButtonKind::Secondary,
+                    "login-copier-detail",
+                ) {
+                    tracing::info!("[connexion] détail de l'échec copié.");
+                    ctx.copy_text(failure_clipboard_text(&failure.headline, &failure.detail));
                 }
                 y += BUTTON_HEIGHT;
             }
@@ -1324,6 +1342,12 @@ impl StatusTone {
 /// L'encadré du détail technique (police à chasse fixe, une ligne, tronquée au besoin) — le même
 /// sur l'écran d'erreur de connexion, « Mise à jour requise » et les échecs de mise à jour
 /// manuelle. Rend la position sous l'encadré.
+/// Ce que « Copier le détail » met dans le presse-papiers : le titre court puis le détail
+/// technique complet, sur deux lignes — de quoi coller tel quel dans un message au support.
+pub fn failure_clipboard_text(headline: &str, detail: &str) -> String {
+    format!("{headline}\n{detail}")
+}
+
 fn paint_detail(ui: &mut egui::Ui, body_left: f32, body_width: f32, y: f32, detail: &str) -> f32 {
     let font = FontId::monospace(DETAIL_SIZE);
     let galley = ui.fonts_mut(|f| {
