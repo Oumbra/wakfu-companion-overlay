@@ -35,6 +35,18 @@
 # ## Usage
 #
 # Onglet Actions → « Régénérer les captures (rendu du CI) » → « Run workflow », sur `dev`.
+#
+# Deux choses à savoir la première fois :
+#
+#   - **Droit d'écriture.** Le `permissions: contents: write` ci-dessous ne peut qu'ABAISSER le
+#     plafond fixé par le dépôt. Si Settings → Actions → General → Workflow permissions est réglé
+#     sur « Read repository contents », le `git push` final échoue en 403 et il faut passer le dépôt
+#     en « Read and write ». Le reste du run, lui, aura fonctionné : les références régénérées
+#     restent récupérables dans l'artefact.
+#   - **Le commit poussé ne relance PAS le CI.** GitHub ne redéclenche pas un workflow sur un push
+#     fait avec le `GITHUB_TOKEN` (garde-fou anti-boucle). Ce n'est pas gênant : ce run vient de
+#     jouer le gate dans l'environnement qui en décide, les références correspondent donc par
+#     construction. Le run suivant, déclenché par le premier push humain, le confirmera.
 name: Régénérer les captures (rendu du CI)
 
 on:
