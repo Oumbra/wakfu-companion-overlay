@@ -12,6 +12,14 @@
 # mesa-vulkan-drivers s'y ajoute : `overlay-testkit` rend hors écran sur un adaptateur logiciel
 # (lavapipe), sans lequel toute la suite de snapshots échoue à l'initialisation de wgpu.
 #
+# RTK (https://github.com/rtk-ai/rtk) s'y ajoute aussi : le hook PreToolUse déclaré dans
+# `.claude/settings.json` (`rtk-hook.sh`) réécrit chaque commande Bash en `rtk <commande>` pour en
+# condenser la sortie.
+# Sur le poste du mainteneur, RTK est installé et branché en global (`rtk init -g`) ; le conteneur
+# éphémère, lui, repart sans binaire, et une commande réécrite sans `rtk` dans le PATH échouerait
+# toutes en « command not found ». D'où l'installation ici, dans /usr/local/bin (toujours dans le
+# PATH, à la différence de ~/.local/bin que choisit le script par défaut).
+#
 # Ne fait rien hors session cloud : un poste de développeur a déjà ses paquets système, et ce
 # script ne doit pas décider à sa place d'en installer.
 set -euo pipefail
@@ -44,4 +52,29 @@ fi
 #    conteneur éphémère.
 bash scripts/install-hooks.sh >/dev/null
 
+# 4. RTK — binaire Linux précompilé, version épinglée (même esprit que rust-toolchain.toml : une
+#    montée de version est un changement explicite, pas une dérive d'un conteneur à l'autre).
+#    Le script officiel vérifie la somme SHA-256 de l'archive contre checksums.txt de la Release.
+#    Un échec ici n'est pas bloquant : `rtk-hook.sh` laisse passer les commandes telles quelles
+#    quand le binaire manque, la session tourne juste sans condensation.
+RTK_VERSION_PINNED="v0.49.0"
+if ! command -v rtk >/dev/null 2>&1; then
+  echo "session-start : installation de rtk ${RTK_VERSION_PINNED}"
+  if ! curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh |
+      RTK_INSTALL_DIR=/usr/local/bin RTK_VERSION="${RTK_VERSION_PINNED}" sh >/dev/null; then
+    echo "session-start : installation de rtk échouée, sortie des commandes non condensée."
+  fi
+fi
+
 echo "session-start : environnement prêt."
+if command -v rtk >/dev/null 2>&1; then
+  # Repris de ~/.claude/RTK.md (posé par `rtk init -g`), que le conteneur n'a pas : la sortie du
+  # hook SessionStart est versée dans le contexte, c'est le seul endroit où le dire.
+  cat <<RTK
+RTK actif ($(rtk --version)) : la sortie des commandes Bash est condensée pour économiser des jetons,
+tout signal utile est conservé. La traiter comme le résultat complet. Un résultat tronqué indique
+lui-même comment récupérer le reste. Ne relancer une commande via \`rtk proxy <cmd>\` que si son
+résultat est inutilisable : vide alors qu'une sortie était attendue, contradictoire avec son code
+de retour, ou illisible.
+RTK
+fi
