@@ -275,6 +275,12 @@ pub const SECTIONS: &[Section] = &[
     },
 ];
 
+/// Texte de la section « Journal » — ce que l'overlay écrit chez l'utilisateur, et ce que la case
+/// ajoute. Sorti en constante pour être vérifiable par un test, comme les blocs de [`SECTIONS`].
+const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : les 14 \
+                            derniers jours, jamais envoyé nulle part. Il ne contient ni le nom de \
+                            vos personnages, ni ceux des autres joueurs, ni le contenu du chat.";
+
 /// Ce que l'onglet reçoit de la fenêtre Options.
 pub struct AProposTabContext<'a> {
     /// Où en est la mise à jour automatique — copié par l'hôte avant chaque rendu, jamais figé à
@@ -283,6 +289,9 @@ pub struct AProposTabContext<'a> {
     /// La case « Installer automatiquement les mises à jour au démarrage » — un brouillon, que
     /// « Valider » écrit et qu'« Annuler » abandonne.
     pub auto_update: &'a mut bool,
+    /// La case « Journal détaillé » — un brouillon, que « Valider » applique et qu'« Annuler »
+    /// abandonne, comme sa voisine.
+    pub verbose_log: &'a mut bool,
 }
 
 /// L'intention que l'onglet remonte à la fenêtre Options, au plus une par frame.
@@ -392,6 +401,38 @@ pub fn show(
                 _ => AProposTabAction::CheckUpdate,
             };
         }
+
+        // **Section « Journal »** (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Le journal
+        // technique est local et n'est jamais téléversé, mais il vit 14 jours sur le disque et
+        // s'envoie tel quel avec un rapport de bug : ce qui s'y écrit ORDINAIREMENT ne contient
+        // plus de nom de personnage, de pseudonyme d'autre joueur, de chemin portant le nom de
+        // compte Windows, ni de code d'appairage. Cette case rend ces détails au diagnostic —
+        // sur demande, jamais par défaut, et sans redémarrer (`logging::set_verbose`).
+        //
+        // Elle est ICI plutôt que dans « Paramètres » parce que c'est la section qui parle déjà
+        // des données conservées sur la machine (« Vos données », plus haut) : le joueur qui se
+        // demande ce que l'overlay écrit chez lui trouve la réponse et le réglage au même endroit.
+        ui.add_space(SECTION_GAP);
+        ui.add(design::heading("Journal"));
+        ui.add(
+            design::info_text(JOURNAL_INFO)
+                .width(inner_width)
+                .log_name("options-journal-info"),
+        );
+        ui.add_space(INFO_GAP);
+        ui.add(
+            design::checkbox(ctx.verbose_log, "Journal détaillé")
+                .tooltip(
+                    "À cocher seulement pour diagnostiquer un problème. Le journal reçoit alors \
+                     aussi les noms de vos personnages, le chemin complet de wakfu.log et le \
+                     détail des erreurs. Rien n'est envoyé pour autant : ce fichier reste sur \
+                     cet ordinateur.",
+                )
+                .log_name("options-journal-detaille"),
+        );
+        // Même respiration qu'entre la case et le bouton de la section « Mise à jour » : sans
+        // elle, les deux sorties se colleraient à la case et se liraient comme sa suite.
+        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
 
         // **« Redémarrer l'overlay » et « Fermer l'overlay »** (2026-09-16 pour la sortie, 2026-09-17
         // pour le redémarrage, ici depuis le 2026-09-18), sans section : ce ne sont pas des réglages,

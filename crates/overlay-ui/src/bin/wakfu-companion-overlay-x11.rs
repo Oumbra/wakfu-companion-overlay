@@ -290,6 +290,8 @@ mod linux_main {
         update_command_tx: mpsc::Sender<UpdateCommand>,
         /// Voir `main.rs::App::auto_update`.
         auto_update: bool,
+        /// Voir `main.rs::App::verbose_log`.
+        verbose_log: bool,
         /// Profil d'alerte et recherches de chat du compte — voir `main.rs::App::alert_profile`.
         alert_profile: SharedAlertProfile,
         chat_filters: SharedChatFilters,
@@ -525,6 +527,8 @@ mod linux_main {
         update_status: Arc<ArcSwap<UpdateStatus>>,
         update_command_tx: mpsc::Sender<UpdateCommand>,
         auto_update: bool,
+        /// Voir `main.rs::App::verbose_log`.
+        verbose_log: bool,
         alert_profile: SharedAlertProfile,
         chat_filters: SharedChatFilters,
         roster_draft: SharedRosterDraft,
@@ -567,6 +571,7 @@ mod linux_main {
                 update_status,
                 update_command_tx,
                 auto_update,
+                verbose_log,
                 alert_profile,
                 chat_filters,
                 roster_draft,
@@ -598,6 +603,7 @@ mod linux_main {
                 update_status,
                 update_command_tx,
                 auto_update,
+                verbose_log,
                 alert_profile,
                 chat_filters,
                 roster_draft,
@@ -1269,7 +1275,10 @@ mod linux_main {
                 .find(|key| *key == active)
                 .or_else(|| windows.first().copied())
                 .map(|xid| xid as usize);
-            tracing::info!(">>> Répondre en privé : {author}");
+            // Le nom du destinataire est celui d'un TIERS (constat C6 de `docs/analyse-rgpd.md`) :
+            // l'action se journalise, pas la personne visée — le nom part en `debug`.
+            tracing::info!(">>> Répondre en privé à l'auteur de l'alerte de chat.");
+            tracing::debug!(author, ">>> Répondre en privé");
             chat_command::send_whisper(author, target);
         }
 
@@ -1572,6 +1581,7 @@ mod linux_main {
                 // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
                 update: (**self.update_status.load()).clone(),
                 auto_update: self.auto_update,
+                verbose_log: self.verbose_log,
                 // **Le démarrage avec l'ordinateur se lit dans le SYSTÈME**, pas dans un champ
                 // de l'hôte : c'est le seul réglage de cette fenêtre qu'un autre programme peut
                 // avoir changé entre deux ouvertures (réglages du bureau, fichier supprimé à la
@@ -1608,6 +1618,7 @@ mod linux_main {
                     recap_resume: self.recap_session.resume_settings(),
                     shortcuts: self.hotkeys.bindings().clone(),
                     auto_update: self.auto_update,
+                    verbose_log: self.verbose_log,
                     start_with_os: autostart_actif,
                 },
                 pending_close: false,
@@ -2128,6 +2139,7 @@ mod linux_main {
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 auto_update: self.auto_update,
+                verbose_log: self.verbose_log,
                 // Jalon posé au démarrage — voir `main.rs`.
                 autostart_initialized: true,
                 ..Default::default()
@@ -2321,6 +2333,13 @@ mod linux_main {
                             }
                         );
                     }
+                    // **Le journal détaillé (2026-09-18, constat C6)** — appliqué À CHAUD, voir
+                    // `main.rs` pour le motif.
+                    let verbose_log_changed = commit.verbose_log != self.verbose_log;
+                    if verbose_log_changed {
+                        self.verbose_log = commit.verbose_log;
+                        logging::set_verbose(self.verbose_log);
+                    }
                     // La config est réécrite EN ENTIER, et seulement si l'un des réglages a bougé —
                     // même raison que `main.rs` : le fichier est réécrit d'un bloc.
                     let chat_toast_changed = self.commit_chat(options_window_id);
@@ -2337,6 +2356,7 @@ mod linux_main {
                         || countdown_toast_changed
                         || recap_resume_changed
                         || auto_update_changed
+                        || verbose_log_changed
                     {
                         // **`persist_config` et rien d'autre** (2026-09-17) : cette liste de
                         // champs vivait ici en double de celle de `persist_config`, et elle avait
@@ -2376,7 +2396,15 @@ mod linux_main {
             self.sync_windows(event_loop);
             if !self.banner_printed {
                 tracing::info!("=== wakfu-companion-overlay (Linux/X11, §17.2 du plan) ===");
-                tracing::info!("Suivi de {}", self.log_path.display());
+                // Chemin EXPURGÉ du nom d'utilisateur du système (constat C6 de
+                // `docs/analyse-rgpd.md`, `overlay_ingest::privacy`) : la forme du chemin — Steam,
+                // Wine, installation native, dossier déplacé — reste entière, c'est elle qu'on lit
+                // ici ; le chemin réel part en `debug` (« Journal détaillé »).
+                tracing::info!(
+                    "Suivi de {}",
+                    overlay_ingest::privacy::redact_path(&self.log_path)
+                );
+                tracing::debug!(path = %self.log_path.display(), "chemin de journal suivi");
                 // Libellés LUS dans les raccourcis effectifs (personnalisables) : une bannière
                 // qui annoncerait les défauts à qui les a changés serait un contresens.
                 let bindings = self.hotkeys.bindings();
@@ -3334,7 +3362,7 @@ mod linux_main {
             None => {
                 tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
                 for candidate in discovery::candidate_paths() {
-                    tracing::error!("  - {}", candidate.display());
+                    tracing::error!("  - {}", overlay_ingest::privacy::redact_path(&candidate));
                 }
                 tracing::error!(
                     "Précisez le chemin explicitement : cargo run -p overlay-ui \
@@ -3351,7 +3379,11 @@ mod linux_main {
         logging::install_ctrlc_handler();
         logging::install_panic_hook();
         if let Some(dir) = &log_dir {
-            tracing::info!("journal de session : {}", dir.display());
+            tracing::info!(
+                "journal de session : {}",
+                overlay_ingest::privacy::redact_path(dir)
+            );
+            tracing::debug!(dir = %dir.display(), "dossier du journal de session");
         }
 
         // Référentiels de sorts (classes et monstres) construits DÈS LE DÉMARRAGE, jamais au premier
@@ -3361,6 +3393,11 @@ mod linux_main {
         tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
         let mut saved_config = config::load();
+        // **Journal détaillé**, dès que la config est lue (constat C6 de `docs/analyse-rgpd.md`) :
+        // `logging::init` démarre toujours au niveau ordinaire — c'est le défaut voulu, rien de
+        // personnel dans le fichier tant que rien n'a été demandé — et c'est ici, et seulement si
+        // la case est cochée, que les `debug!` s'ouvrent.
+        logging::set_verbose(saved_config.verbose_log);
         // Actif par défaut, une seule fois par installation — voir `autostart`, doc de module.
         overlay_ui::autostart::enable_by_default_once(&mut saved_config);
 
@@ -3511,6 +3548,7 @@ mod linux_main {
             update_status,
             update_command_tx,
             auto_update: saved_config.auto_update,
+            verbose_log: saved_config.verbose_log,
             alert_profile,
             chat_filters,
             roster_draft,

@@ -366,6 +366,25 @@ pub struct OverlayConfig {
     /// config depuis leurs champs, `..Default::default()` le remettrait à `false`).
     #[serde(default)]
     pub autostart_initialized: bool,
+    /// **Journal détaillé** — case de la section « Journal » de l'onglet « À propos » (2026-09-18,
+    /// constat C6 de `docs/analyse-rgpd.md`). **Décochée par défaut**, et c'est tout l'objet du
+    /// réglage.
+    ///
+    /// Le journal de session ordinaire ne contient plus rien de personnel : ni nom de personnage,
+    /// ni pseudonyme de tiers, ni chemin portant le nom d'utilisateur du système, ni code
+    /// d'appairage, ni contenu de lot refusé (voir `crate::logging`, `overlay_ingest::privacy`).
+    /// Ces informations n'ont pas disparu du code pour autant : elles sont journalisées en
+    /// `debug!`, niveau que cette case — et elle seule — active à chaud
+    /// (`logging::set_verbose`).
+    ///
+    /// Autrement dit : le diagnostic fin reste possible, mais il est demandé, pas subi. Le
+    /// réglage ne change rien à ce qui est ENVOYÉ (rien de tout cela ne quitte la machine) ; il ne
+    /// change que ce qui est ÉCRIT dans un fichier local conservé 14 jours.
+    ///
+    /// `#[serde(default)]` — `false` : une config écrite avant ce champ n'a évidemment pas
+    /// demandé le mode détaillé.
+    #[serde(default)]
+    pub verbose_log: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -432,6 +451,7 @@ impl Default for OverlayConfig {
             chat_alert_muted: false,
             auto_update: actif(),
             autostart_initialized: false,
+            verbose_log: false,
             shortcuts: BTreeMap::new(),
         }
     }

@@ -2852,6 +2852,10 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
+                // Et pour la case « Journal détaillé » de la section « Journal » (2026-09-18,
+                // constat C6 de `docs/analyse-rgpd.md`) : décochée à l'ouverture — c'est son
+                // défaut, et il n'y a aucune raison qu'un « Valider » la relève au passage.
+                verbose_log: false,
                 // Et pour la case « Lancer l'overlay au démarrage de l'ordinateur » : posée à
                 // `false` à l'ouverture de cet état de test, emportée telle quelle. Rien n'est
                 // écrit dans le système ici — c'est l'hôte qui le fait, sur cette valeur.

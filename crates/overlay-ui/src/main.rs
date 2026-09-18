@@ -678,6 +678,11 @@ struct App {
     /// au démarrage (où il décide de la première commande envoyée au thread), remplacé à la
     /// validation de la fenêtre Options, effectif au prochain lancement.
     auto_update: bool,
+    /// **Journal détaillé** — réglage LOCAL persisté (`config::OverlayConfig::verbose_log`),
+    /// décoché par défaut (constat C6 de `docs/analyse-rgpd.md`). Appliqué au démarrage puis à
+    /// chaque validation de la fenêtre Options, à chaud (`logging::set_verbose`) : contrairement
+    /// à `auto_update`, il n'attend pas le prochain lancement.
+    verbose_log: bool,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
     log_path: PathBuf,
@@ -891,6 +896,8 @@ struct AppState {
     update_status: Arc<ArcSwap<UpdateStatus>>,
     update_command_tx: mpsc::Sender<UpdateCommand>,
     auto_update: bool,
+    /// Voir `App::verbose_log`.
+    verbose_log: bool,
     /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
     /// redemander les réglages de compte à la volée — voir sa doc.
     settings_tx: mpsc::Sender<EngineCommand>,
@@ -932,6 +939,7 @@ impl App {
             update_status,
             update_command_tx,
             auto_update,
+            verbose_log,
             settings_tx,
         } = state;
 
@@ -974,6 +982,7 @@ impl App {
             update_status,
             update_command_tx,
             auto_update,
+            verbose_log,
             settings_tx,
             log_path,
             combat_always_visible,
@@ -1511,7 +1520,11 @@ impl App {
                         turn_watch::templates::save(&character, &glyph);
                     }
                     turn_watch::watcher::Event::Notify { character } => {
-                        tracing::info!("[tour] >>> {character} doit jouer — notification.");
+                        // Nom du personnage en `debug` (constat C6 de `docs/analyse-rgpd.md`) — la
+                        // notification, elle, reste tracée en clair : c'est elle qu'on vient
+                        // chercher quand le toast n'est pas apparu.
+                        tracing::info!("[tour] >>> notification de tour.");
+                        tracing::debug!(%character, "[tour] >>> doit jouer");
                         // Le clic ramène la fenêtre de CE personnage au premier plan — par un
                         // process frais lancé sur l'URI du toast (voir `turn_watch::notify`).
                         if let Err(err) = turn_watch::notify::show(
@@ -2218,7 +2231,10 @@ impl App {
             .copied()
             .find(|key| *key == foreground)
             .or_else(|| windows.first().copied());
-        tracing::info!(">>> Répondre en privé : {author}");
+        // Le nom du destinataire est celui d'un TIERS (constat C6 de `docs/analyse-rgpd.md`) :
+        // l'action se journalise, pas la personne visée — le nom part en `debug`.
+        tracing::info!(">>> Répondre en privé à l'auteur de l'alerte de chat.");
+        tracing::debug!(author, ">>> Répondre en privé");
         chat_command::send_whisper(author, target);
     }
 
@@ -2802,6 +2818,7 @@ impl App {
             // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
             update: (**self.update_status.load()).clone(),
             auto_update: self.auto_update,
+            verbose_log: self.verbose_log,
             // **Le démarrage avec l'ordinateur se lit dans le SYSTÈME**, pas dans un champ de
             // l'hôte : c'est le seul réglage de cette fenêtre qu'un autre programme peut avoir
             // changé entre deux ouvertures (Gestionnaire des tâches, réglages du bureau). Voir
@@ -2840,6 +2857,7 @@ impl App {
                 recap_resume: self.recap_session.resume_settings(),
                 shortcuts: self.hotkeys.bindings().clone(),
                 auto_update: self.auto_update,
+                verbose_log: self.verbose_log,
                 start_with_os: autostart_actif,
             },
             pending_close: false,
@@ -3434,6 +3452,7 @@ impl App {
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             auto_update: self.auto_update,
+            verbose_log: self.verbose_log,
             // Jalon posé au démarrage (`autostart::enable_by_default_once`, avant la première
             // fenêtre) : toujours vrai ici, et le laisser retomber sur `Default` réinscrirait
             // l'overlay au prochain lancement.
@@ -3644,6 +3663,15 @@ impl App {
                         }
                     );
                 }
+                // **Le journal détaillé (2026-09-18, constat C6)** — appliqué À CHAUD, sans
+                // attendre un redémarrage : la case sert à diagnostiquer un problème en cours,
+                // un réglage qui ne prendrait effet qu'au prochain lancement raterait justement
+                // ce qu'on cherche à voir.
+                let verbose_log_changed = commit.verbose_log != self.verbose_log;
+                if verbose_log_changed {
+                    self.verbose_log = commit.verbose_log;
+                    logging::set_verbose(self.verbose_log);
+                }
                 // **La config est réécrite EN ENTIER**, et seulement si l'un des réglages a bougé :
                 // le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que le réglage
                 // modifié effacerait les autres.
@@ -3663,6 +3691,7 @@ impl App {
                     || countdown_toast_changed
                     || recap_resume_changed
                     || auto_update_changed
+                    || verbose_log_changed
                 {
                     self.persist_config();
                 }
@@ -4370,7 +4399,15 @@ impl ApplicationHandler<UserEvent> for App {
         self.sync_windows(event_loop);
         if !self.banner_printed {
             tracing::info!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
-            tracing::info!("Suivi de {}", self.log_path.display());
+            // Chemin EXPURGÉ du nom d'utilisateur du système (constat C6 de
+            // `docs/analyse-rgpd.md`, `overlay_ingest::privacy`) : la forme du chemin — Steam,
+            // Wine, installation native, dossier déplacé — reste entière, c'est elle qu'on lit
+            // ici ; le chemin réel part en `debug` (« Journal détaillé »).
+            tracing::info!(
+                "Suivi de {}",
+                overlay_ingest::privacy::redact_path(&self.log_path)
+            );
+            tracing::debug!(path = %self.log_path.display(), "chemin de journal suivi");
             // Libellés LUS dans les raccourcis effectifs : une bannière qui annoncerait les
             // combinaisons par défaut à qui les a personnalisées serait un contresens.
             let bindings = self.hotkeys.bindings();
@@ -4807,7 +4844,7 @@ fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> Pat
         None => {
             tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
             for candidate in discovery::candidate_paths() {
-                tracing::error!("  - {}", candidate.display());
+                tracing::error!("  - {}", overlay_ingest::privacy::redact_path(&candidate));
             }
             tracing::error!(
                 "Précisez le chemin explicitement : cargo run -p overlay-ui -- <chemin>"
@@ -4839,7 +4876,11 @@ fn main() {
     logging::install_ctrlc_handler();
     logging::install_panic_hook();
     if let Some(dir) = &log_dir {
-        tracing::info!("journal de session : {}", dir.display());
+        tracing::info!(
+            "journal de session : {}",
+            overlay_ingest::privacy::redact_path(dir)
+        );
+        tracing::debug!(dir = %dir.display(), "dossier du journal de session");
     }
     // À quel déploiement cette session parle — figé par le profil de compilation
     // (`overlay-sync/build.rs`) sauf surcharge `WAKFU_COMPANION_API_URL` : sans cette ligne, un
@@ -4861,6 +4902,11 @@ fn main() {
     tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
     let mut saved_config = config::load();
+    // **Journal détaillé**, dès que la config est lue (constat C6 de `docs/analyse-rgpd.md`) :
+    // `logging::init` démarre toujours au niveau ordinaire — c'est le défaut voulu, rien de
+    // personnel dans le fichier tant que rien n'a été demandé — et c'est ici, et seulement si
+    // la case est cochée, que les `debug!` s'ouvrent.
+    logging::set_verbose(saved_config.verbose_log);
     // Actif par défaut, une seule fois par installation — voir `autostart`, doc de module.
     overlay_ui::autostart::enable_by_default_once(&mut saved_config);
 
@@ -5010,6 +5056,7 @@ fn main() {
         update_status,
         update_command_tx,
         auto_update: saved_config.auto_update,
+        verbose_log: saved_config.verbose_log,
         settings_tx,
     });
     event_loop.run_app(&mut app).expect("boucle d'événements");

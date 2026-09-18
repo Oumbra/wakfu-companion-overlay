@@ -384,6 +384,11 @@ pub struct OptionsModalState {
     /// jour », même mécanique de brouillon que les autres cases : initialisée par l'hôte au
     /// réglage en vigueur (`config::OverlayConfig::auto_update`), prise en compte à « Valider ».
     pub auto_update: bool,
+    /// **Journal détaillé ?** — case de la section « Journal » de l'onglet « À propos »
+    /// (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Brouillon comme ses voisines ;
+    /// l'hôte l'applique à chaud à « Valider » (`logging::set_verbose`) et le persiste
+    /// (`config::OverlayConfig::verbose_log`).
+    pub verbose_log: bool,
     /// **Lancer l'overlay au démarrage de l'ordinateur ?** — case unique de la section
     /// « Démarrage » (2026-09-16). Brouillon comme ses voisines, à une différence près : l'état
     /// dont elle part et celui qu'elle repose ne sont PAS dans `config.toml` mais dans le système
@@ -451,6 +456,8 @@ pub struct OptionsInitial {
     pub shortcuts: ShortcutBindings,
     /// La mise à jour automatique telle qu'elle était à l'ouverture — même rôle.
     pub auto_update: bool,
+    /// Le journal détaillé tel qu'il était à l'ouverture — même rôle.
+    pub verbose_log: bool,
     /// Le démarrage avec l'ordinateur tel qu'il était à l'ouverture — même rôle. Lu dans le
     /// système par l'hôte (`crate::autostart::is_enabled`), pas dans la config.
     pub start_with_os: bool,
@@ -482,6 +489,7 @@ impl OptionsModalState {
             recap_resume: self.recap_resume,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
+            verbose_log: self.verbose_log,
             start_with_os: self.start_with_os,
         }
     }
@@ -528,6 +536,7 @@ impl OptionsModalState {
             || self.personnages_draft != self.initial.personnages
             || self.shortcuts != self.initial.shortcuts
             || self.auto_update != self.initial.auto_update
+            || self.verbose_log != self.initial.verbose_log
             || self.start_with_os != self.initial.start_with_os
     }
 }
@@ -671,6 +680,9 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::auto_update`) ; il ne s'applique qu'au prochain
     /// lancement.
     pub auto_update: bool,
+    /// État de la case « Journal détaillé » — ce que l'hôte applique à chaud
+    /// (`logging::set_verbose`) et persiste (`config::OverlayConfig::verbose_log`).
+    pub verbose_log: bool,
     /// État de la case « Lancer l'overlay au démarrage de l'ordinateur » — ce que l'hôte pose
     /// dans le SYSTÈME (`crate::autostart::apply`), et nulle part ailleurs : ce réglage n'a pas
     /// de ligne dans `config.toml`, voir la doc de module de `crate::autostart`.
@@ -895,6 +907,7 @@ pub fn show(
                 &mut a_propos_tab::AProposTabContext {
                     update: &state.update,
                     auto_update: &mut state.auto_update,
+                    verbose_log: &mut state.verbose_log,
                 },
             ) {
                 a_propos_tab::AProposTabAction::None => {}
@@ -1754,6 +1767,7 @@ mod tests {
                 recap_resume: ResumeSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
+                verbose_log: false,
                 // La case « Lancer l'overlay au démarrage de l'ordinateur » est posée décochée
                 // par `fenetre_ouverte` : « Valider » l'emporte telle quelle, sans rien lire du
                 // système — c'est l'hôte qui s'en charge (voir `crate::autostart`).
