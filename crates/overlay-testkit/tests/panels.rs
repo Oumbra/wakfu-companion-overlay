@@ -1513,7 +1513,9 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
         (BANDEAU_MOINS, "watchlist_tooltip_supprimer_dessous"),
         (BANDEAU_DETAILS, "watchlist_tooltip_details_dessous"),
         (BANDEAU_OPTIONS, "watchlist_tooltip_options_dessous"),
-        (BANDEAU_TUILE_0, "watchlist_tooltip_tuile_dessous"),
+        // Hors du disque de réinitialisation : c'est le NOM de la tuile que cette planche montre
+        // (voir `BANDEAU_TUILE_0_PRISE`).
+        (BANDEAU_TUILE_0_PRISE, "watchlist_tooltip_tuile_dessous"),
     ] {
         harness.hover_at(pos);
         harness.run();
@@ -2096,6 +2098,11 @@ const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(116.0, 40.0);
 const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(268.0, 40.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
+///
+/// **C'est aussi le point qui survole la tuile SANS viser son bouton** depuis le 2026-09-18 : le
+/// disque de réinitialisation (26 px, centré) occupe le centre, et le nom de la tuile ne s'ouvre
+/// pas quand il est visé (voir `panels::watchlist::entry_tile`). Un test qui veut l'infobulle du
+/// NOM survole donc ici, jamais [`BANDEAU_TUILE_0`].
 const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(99.0, 23.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
@@ -2532,9 +2539,10 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
 /// incrémental « 7 ». Sans marque, les deux premières tuiles seraient identiques : c'est le
 /// **glyphe de mode** (`design::SlotGlyph`, coin haut-gauche, à trois pixels du liseré, dans
 /// l'or du nombre courant) qui les distingue — drapeau pour l'objectif, cible pour le
-/// décompte, rien pour l'incrémental. La seconde capture survole la tuile objectif : l'infobulle
-/// dit le mode après le nom, « Laine de Bouftou · Objectif » (voir `panels::watchlist::
-/// tile_tooltip`). Seule planche de la suite à exercer le drapeau : les autres suivis à cible du
+/// décompte, rien pour l'incrémental. La seconde capture survole la tuile objectif **par son bord**
+/// (son centre porte le bouton de réinitialisation depuis le 2026-09-18) : l'infobulle dit le mode
+/// après le nom, « Laine de Bouftou · Objectif » (voir `panels::watchlist::tile_tooltip`). Le
+/// disque, lui, est visible au centre — une tuile survolée le montre toujours. Seule planche de la suite à exercer le drapeau : les autres suivis à cible du
 /// harnais sont tous des décomptes.
 #[test]
 fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
@@ -2624,7 +2632,9 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
     harness.run();
     harness.snapshot("watchlist_glyphes_de_mode");
 
-    harness.hover_at(BANDEAU_TUILE_0);
+    // Hors du disque de réinitialisation, pour la même raison (voir `BANDEAU_TUILE_0_PRISE`) :
+    // c'est « Laine de Bouftou · Objectif » que cette planche doit montrer.
+    harness.hover_at(BANDEAU_TUILE_0_PRISE);
     harness.run();
     harness.snapshot("watchlist_tooltip_tuile_objectif");
 }
