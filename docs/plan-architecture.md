@@ -2720,6 +2720,12 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   rien d'autre. Jamais de lecture mémoire, jamais d'injection DLL/hook, jamais de capture d'écran,
   jamais d'automatisation d'entrées. C'est la posture déjà tenue par l'app web ; l'overlay ne
   l'élargit pas.
+  > **Constat de l'analyse RGPD du 2026-09-18** ([`analyse-rgpd.md`](analyse-rgpd.md), C2) :
+  > deux de ces interdits ne sont plus tenus par le code — capture de la fenêtre de jeu sous
+  > option (§9.1 decies, `turn_watch/capture.rs`) et frappes/clic synthétiques (§9.1 sexies,
+  > §9.1 nonies, `chat_command.rs`, `notify.rs`) — et le jeton peut être écrit en clair en repli
+  > (§7.2, `token_store.rs`). Ce paragraphe est à réécrire pour décrire la réalité ; l'analyse
+  > tient lieu de description exacte en attendant.
 - Aucune donnée ne sort en mode invité (§7.3).
 - Le contenu du log est **hostile par nature** (messages de chat écrits par des tiers) : tout texte
   affiché est traité comme donnée, jamais interprété ; longueurs bornées ; parsing sans
