@@ -28,7 +28,7 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | C2 | La doctrine « vie privée » du plan d'architecture (« jamais de capture d'écran, jamais d'automatisation d'entrées ») est **contredite par le code** : capture de la fenêtre de jeu toutes les 500 ms en combat, frappes clavier et clic souris synthétiques | Élevée | §3.2 |
 | C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers — *décision du 2026-09-18 : noms conservés (option A), autocomplétion retirée, persistance locale bornée ; reste la politique de confidentialité côté site* | Élevée | §3.3 |
 | C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *✅ traité côté overlay le 2026-09-18 : section « Vos données » dans « À propos », ligne d'acceptation sous « Se connecter », licence MIT ; reste la politique de confidentialité du site (§7)* | Élevée | §3.4 |
-| C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent — *✅ traité côté overlay le 2026-09-18 : purge à la déconnexion, bouton « Supprimer les données locales » (fenêtre Options et écran de connexion) ; reste la révocation du jeton côté serveur* | Élevée | §3.5 |
+| C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent — *✅ traité côté overlay le 2026-09-18 : purge à la déconnexion, bouton « Supprimer les données locales » (fenêtre Options et écran de connexion) ; avec la suppression de la session côté serveur (`DELETE /api/v1/auth/native/session`) ; reste la durée de vie du jeton* | Élevée | §3.5 |
 | C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris — *✅ traité le 2026-09-18 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; journaux vidés à la déconnexion et supprimés par le bouton d'effacement (C5)* | Moyenne | §3.6 |
 
 Les constats secondaires (C7 à C17) sont au §3.7. Le plan d'action priorisé est au §6.
@@ -403,6 +403,12 @@ démarrage automatique et les clés de registre. Aucun bouton ne purge quoi que 
 export n'existe ; aucune révocation du jeton côté serveur n'est appelée (le jeton reste valide
 pour qui l'aurait copié ; pas d'expiration ni de rotation, `token_store.rs`, `background.rs`).
 
+**Correction du 2026-09-18** : ce constat ajoutait « aucune route de ce genre n'existe côté API ».
+C'était faux — `POST /api/v1/auth/logout` existe depuis le lot 5 et accepte le porteur natif
+(`functions/api/_auth.ts::requireCsrf` rend `true` pour un `Authorization: Bearer`). Ce qui
+manquait, c'était l'APPEL depuis l'overlay, et une route qui EFFACE la ligne de session plutôt que
+de la marquer révoquée.
+
 **Analyse.** Art. 17 (effacement) et art. 25 (protection par défaut). La plupart de ces fichiers
 concernent l'utilisateur lui-même, mais `fight-*.json` et `sync-queue.sqlite3` contiennent des
 tiers, et les gabarits sont des captures d'écran.
@@ -451,11 +457,27 @@ l'overlay (identité de notification, protocole `wakfu-companion:`) — puis **f
 Cette fermeture n'est pas un effet de bord : les threads qui écrivent ces fichiers tiennent leur
 contenu en mémoire, ne plus tourner est la seule garantie que rien ne réécrive derrière.
 
-**Restent ouverts** : la route de révocation côté serveur et la durée de vie du jeton natif (hors
-overlay, aucune route de ce genre n'existe côté API) ; l'option de ligne de commande
-`--purge-local-data` (écartée le 2026-09-18 — les deux points d'entrée de l'interface suffisent
-tant qu'il n'y a pas de désinstalleur) ; l'unification des deux racines (C13), que l'effacement
-contourne en les listant toutes les deux plutôt qu'en attendant la migration.
+**✅ La session est effacée côté serveur** (2026-09-18, le soir). Nouvelle route côté
+`wakfu-companion` : `DELETE /api/v1/auth/native/session`
+(`functions/api/v1/auth/native/session.ts`), porteur `Authorization: Bearer` **obligatoire** — un
+cookie y est refusé, un navigateur l'enverrait tout seul et une page tierce pourrait faire effacer
+la session de son visiteur. Elle **supprime** la ligne de `sessions` (nouveau
+`AuthStore.deleteSession`) là où `/logout` se contente d'un `revoked_at` : l'effacement demandé ne
+s'arrête pas à la validité du jeton, la trace elle-même — `user_id`, horodatages, `user_agent` —
+fait partie de ce qui part. Elle purge au passage les appairages natifs **périmés**
+(`native_pairings` porte un jeton en clair jusqu'au premier sondage, et Cloudflare Pages n'a pas de
+cron).
+
+L'overlay l'appelle aux deux gestes (`local_data::revoke_server_session`), **avant**
+`token_store::clear_token` : sans le jeton, plus rien ne désigne la session à effacer. Best-effort
+de bout en bout — hors ligne, la purge locale aboutit quand même et la session expire d'elle-même ;
+à la fermeture, l'attente est bornée à 3 s pour ne pas figer la fenêtre.
+
+**Restent ouverts** : la durée de vie et la rotation du jeton natif (côté serveur, 30 jours
+glissants comme toute session) ; l'option de ligne de commande `--purge-local-data` (écartée le
+2026-09-18 — les deux points d'entrée de l'interface suffisent tant qu'il n'y a pas de
+désinstalleur) ; l'unification des deux racines (C13), que l'effacement contourne en les listant
+toutes les deux plutôt qu'en attendant la migration.
 
 ### 3.6 C6 — Journal applicatif trop bavard et sans plafond (moyenne)
 
@@ -569,7 +591,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | Politique de confidentialité côté site (à étendre à l'overlay) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | Site (politique) |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
-| **P1** | ✅ Bouton « Supprimer les données locales » (fenêtre Options et écran de connexion, avec confirmation, puis fermeture) ; purge des combats, du récap, des compteurs, des gabarits et du contenu des journaux à la déconnexion (2026-09-18, `overlay_ui::local_data`). **Reste** : la révocation du jeton côté serveur | C5, C8 | Overlay ✅ / serveur |
+| **P1** | ✅ Bouton « Supprimer les données locales » (fenêtre Options et écran de connexion, avec confirmation, puis fermeture) ; purge des combats, du récap, des compteurs, des gabarits et du contenu des journaux à la déconnexion ; session supprimée côté serveur par `DELETE /api/v1/auth/native/session`, appelée aux deux gestes (2026-09-18, `overlay_ui::local_data`) | C5, C8 | ✅ Overlay + serveur |
 | **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). Reste la mention dans la politique de confidentialité et le contact d'opposition | C3 | Site (politique) |
 | **P2** | ✅ Journal (2026-09-18) : code d'appairage et auteur de chat retirés, `EngineError::Deserialize` expurgée, noms et chemins en `debug`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut. Reste l'effacement, avec C5 | C6 | Overlay |
 | **P2** | Jeton de repli : mode restrictif à la création, ACL/DPAPI Windows, avertissement dans l'interface | C7 | Overlay |
