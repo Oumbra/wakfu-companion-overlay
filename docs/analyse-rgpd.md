@@ -26,7 +26,7 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | --- | --- | --- | --- |
 | C1 | Un **vrai `wakfu.log` non anonymisé** est versionné en double dans un **dépôt public** : jeton d'authentification du client de jeu, IP locale, nom de compte Windows, 6 personnages avec leurs identifiants numériques, **119 pseudonymes de tiers et l'intégralité de leurs messages de chat** — *fixture pseudonymisée le 2026-09-18 ; reste la réécriture d'historique, décision du mainteneur* | **Critique** | §3.1 |
 | C2 | La doctrine « vie privée » du plan d'architecture (« jamais de capture d'écran, jamais d'automatisation d'entrées ») est **contredite par le code** : capture de la fenêtre de jeu toutes les 500 ms en combat, frappes clavier et clic souris synthétiques | Élevée | §3.2 |
-| C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers | Élevée | §3.3 |
+| C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers — *décision du 2026-09-18 : noms conservés (option A), autocomplétion retirée, persistance locale bornée ; reste la politique de confidentialité côté site* | Élevée | §3.3 |
 | C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *section « Vos données » et liens ajoutés dans « À propos » le 2026-09-18 au soir ; restent l'écran de connexion et la licence* | Élevée | §3.4 |
 | C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent | Élevée | §3.5 |
 | C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris | Moyenne | §3.6 |
@@ -305,7 +305,34 @@ parité voulue avec le site (`docs/plan-architecture.md` §7.1, « parité web s
 décision appartient donc au **service**, pas au seul overlay, et toute correction côté client
 doit être accompagnée côté serveur.
 
-**Recommandations.**
+**Décision du 2026-09-18 (utilisateur) — option A : les noms restent en clair.** Trois options
+ont été pesées : (A) garder les pseudonymes et documenter le traitement ; (B) remplacer les alliés
+par un rôle (« Allié 2 · Iop ») ; (C) hacher `peerName` avec un sel propre au compte. B et C font
+perdre l'essentiel de l'utilité de l'historique (« avec qui ai-je joué / échangé ? », et un
+hachage ne se réaffiche pas) pour un gain que A obtient déjà par l'information et le droit
+d'opposition. La minimisation (art. 5.1.c) n'oblige pas à supprimer une donnée utile, elle
+oblige à ne pas garder ce qui ne sert pas. Ce que A exige, et qui reste **à faire côté site**
+(`Oumbra/wakfu-companion`, hors périmètre de ce document) : une phrase dans la politique de
+confidentialité (« l'historique conserve le pseudonyme des joueurs rencontrés en combat ou en
+échange ; base : intérêt légitime ; conservation : N mois ; tout joueur peut demander le retrait
+de son pseudonyme à <adresse> ») et une courte note interne de mise en balance.
+
+Ce qui ne dépendait que de l'overlay est fait le même jour :
+
+- ✅ **Autocomplétion retirée** (`fix:` 0.64.2) — pas restreinte : le champ de nom de la modale
+  Personnage est une saisie nue (`personnages_tab.rs`, règle 5 de sa doc de module).
+- ✅ **`fight-*.json` bornés à l'exécution** (`fix:` 0.64.3) — la règle des 24 h, qui ne jouait
+  qu'au démarrage, est rejouée à chaque fois que le scan ne trouve plus aucune fenêtre de jeu
+  (`EngineCommand::GameClosed` → `Engine::prune_stale_fights`). Le seuil est gardé plutôt que de
+  tout effacer, pour le client qui plante en plein combat et s'y reconnecte après relance.
+- ✅ **`sync-queue.sqlite3` ne survit plus au compte** (`fix:` 0.64.4) — la file ne contenait déjà
+  que ce que le serveur n'a pas encore accepté (une entrée est effacée dès l'envoi réussi), donc
+  une purge par ancienneté courte y aurait *perdu de l'historique* ; le vrai problème était
+  l'enfilage sans compte, indéfini. Désormais : sans compte, les événements restent en mémoire
+  (tampon borné) jusqu'à l'activation ; « Se déconnecter » vide la file ; une entrée en attente
+  depuis plus de trente jours est abandonnée (`SyncQueue::MAX_PENDING_AGE`).
+
+Recommandations initiales, conservées pour mémoire :
 
 - (serveur + client) Décider ce que l'historique a réellement besoin de connaître des tiers. Pour
   le combat, un libellé de rôle (« Allié 2 · Iop ») suffit à l'affichage des dégâts d'équipe ; pour
@@ -374,8 +401,8 @@ tiers, et les gabarits sont des captures d'écran.
 - Bouton « Supprimer les données locales » (À propos ou Paramètres › Compte) qui efface les deux
   arbres de dossiers, avec confirmation ; l'exposer aussi en ligne de commande
   (`--purge-local-data`) pour la désinstallation.
-- À la déconnexion : purger `sync-queue.sqlite3`, `fight-*.json`, `turn-templates/` et les
-  journaux, ou proposer de le faire.
+- À la déconnexion : purger `sync-queue.sqlite3` (✅ 2026-09-18, voir C3), `fight-*.json`,
+  `turn-templates/` et les journaux, ou proposer de le faire.
 - (serveur) Route de révocation appelée à la déconnexion ; durée de vie du jeton natif.
 - Unifier les deux racines `ProjectDirs` (C13) pour que l'effacement soit complet.
 
@@ -459,7 +486,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 | **P1** | Politique de confidentialité côté site (à étendre à l'overlay) ; lien à l'écran de connexion ; ✅ section « Vos données » dans « À propos » (2026-09-18) ; fichier de licence | C4 | Serveur + overlay |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
 | **P1** | Bouton « Supprimer les données locales » ; purge de la file, des combats, des gabarits et des journaux à la déconnexion ; révocation serveur | C5, C8 | Overlay + serveur |
-| **P1** | Décision sur les noms de tiers dans `fights`/`trades` (rôle anonyme ou haché salé) ; autocomplétion limitée aux personnages de l'utilisateur | C3 | Serveur + overlay |
+| **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). Reste la mention dans la politique de confidentialité et le contact d'opposition | C3 | Site (politique) |
 | **P2** | Journal : retirer code d'appairage et auteur de chat, expurger `EngineError::Deserialize`, noms en `debug`, plafond de taille, réglage utilisateur | C6 | Overlay |
 | **P2** | Jeton de repli : mode restrictif à la création, ACL/DPAPI Windows, avertissement dans l'interface | C7 | Overlay |
 | **P2** | Unifier les racines de dossiers ; autostart non activé par défaut ; icônes servies par l'API ou embarquées ; nommer GitHub et `vertylo.github.io` comme destinataires | C10-C13 | Overlay |
