@@ -217,9 +217,9 @@ pub enum OptionsTab {
     Raccourcis,
     /// Le chemin de `wakfu.log`. Ce fut l'onglet d'ouverture tant qu'il était le seul câblé.
     Parametres,
-    /// Le programme lui-même — mise à jour, redémarrage, arrêt (`panels::a_propos_tab`). **En
-    /// dernier**, demande utilisateur du 2026-09-18 : ce qu'on règle une fois, ou jamais, ferme le
-    /// menu.
+    /// Le programme lui-même — ce qu'il est, ce qu'il fait des données, sa mise à jour, son
+    /// redémarrage, son arrêt (`panels::a_propos_tab`). **En dernier**, demande utilisateur du
+    /// 2026-09-18 : ce qu'on règle une fois, ou jamais, ferme le menu.
     APropos,
 }
 
@@ -578,6 +578,13 @@ pub enum OptionsModalAction {
     /// à jour une vérification sans installation (`background::UpdateCommand::Check`). Immédiat,
     /// comme `Disconnect` — mais sans rien à confirmer, il ne change rien à la machine.
     CheckUpdate,
+    /// Un lien des sections d'information de l'onglet « À propos » (2026-09-18 : site, code
+    /// source, CGU de Wakfu, politique de confidentialité, conditions d'utilisation) : ouvrir
+    /// cette URL dans le navigateur. **Le rendu la traduit en `RenderOutcome::open_url`**
+    /// (`render_content`), le seul chemin par lequel une page s'ouvre — aucun panneau n'appelle
+    /// `open::that` lui-même, les captures de non-régression cliquent réellement sur ces boutons.
+    /// Les hôtes n'ont donc rien à en faire quand elle leur parvient ; ils l'ignorent.
+    OpenUrl(String),
     /// « Mettre à jour vers X », **confirmé** : l'hôte referme cette fenêtre et les overlays de
     /// jeu, repasse par l'écran de chargement et laisse le thread de mise à jour télécharger,
     /// mettre en place, puis installe et relance (`App::install_update_if_ready`). Immédiat et
@@ -891,6 +898,9 @@ pub fn show(
                 },
             ) {
                 a_propos_tab::AProposTabAction::None => {}
+                a_propos_tab::AProposTabAction::OpenUrl(url) => {
+                    action = OptionsModalAction::OpenUrl(url)
+                }
                 a_propos_tab::AProposTabAction::CheckUpdate => {
                     action = OptionsModalAction::CheckUpdate
                 }

@@ -4272,6 +4272,9 @@ impl App {
             }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
             OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+            // Déjà traduite en `outcome.open_url` par `render_content` (voir la variante) ;
+            // ne parvient jamais ici.
+            OptionsModalAction::OpenUrl(_) => {}
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
             OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
             OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,

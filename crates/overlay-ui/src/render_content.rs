@@ -963,6 +963,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         } else {
                             panels::options_modal::show(ui, state, &mut context)
                         };
+                        // Un lien de l'onglet « À propos » (2026-09-18) suit le même chemin que
+                        // « Détails » du panneau Suivi : l'intention devient une URL à ouvrir
+                        // par l'hôte (voir `RenderOutcome::open_url`), et l'action de la
+                        // modale est consommée ici — les hôtes ne la voient jamais.
+                        if let panels::options_modal::OptionsModalAction::OpenUrl(url) =
+                            &outcome.options_action
+                        {
+                            outcome.open_url = Some(url.clone());
+                            outcome.options_action =
+                                panels::options_modal::OptionsModalAction::None;
+                        }
                     }
                 }
             }

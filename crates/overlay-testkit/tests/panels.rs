@@ -3502,8 +3502,11 @@ fn options_parametres_section_compte() {
 /// le poids du téléchargement, la case d'installation automatique cochée. La version courante n'y
 /// est pas répétée (bannière), pas de « Notes de version » (décisions du mainteneur).
 ///
-/// Plus de défilement depuis le 2026-09-18 : la section a quitté le pied de « Paramètres » pour
-/// ouvrir cet onglet, où tout tient dans le cadre.
+/// **Défilé jusqu'en bas** : depuis le soir du 2026-09-18, trois sections d'information (« Wakfu
+/// Companion », « Conditions d'utilisation de Wakfu », « Vos données » — voir
+/// `panels::a_propos_tab::SECTIONS`) précèdent « Mise à jour », qui a donc quitté le cadre. La
+/// capture garde la fin de l'onglet : la fin de « Vos données » avec ses deux liens, la section
+/// « Mise à jour » entière, et la paire de sorties sous elle.
 #[test]
 fn options_a_propos_mise_a_jour() {
     let mut options_state = parametres_avec_notifications();
@@ -3544,6 +3547,8 @@ fn options_a_propos_mise_a_jour() {
             );
         });
     harness.run();
+    // Bien au-delà de la hauteur du contenu : le défilement se borne au bas de l'onglet.
+    defile_les_parametres(&mut harness, 2000.0);
     harness.snapshot("options_a_propos_mise_a_jour");
 }
 
@@ -3847,15 +3852,18 @@ fn options_redemarrage_confirme_et_echap_repond_non() {
     );
 }
 
-/// **L'onglet « À propos » au repos** (2026-09-18) : la section « Mise à jour » sans vérification
-/// depuis le lancement, puis les deux sorties — « Redémarrer l'overlay » et « Fermer l'overlay »,
-/// secondaires, centrées ENSEMBLE et sans section (ce ne sont pas des réglages). Elles fermaient
-/// l'onglet « Paramètres » depuis le 2026-09-16 (« Redémarrer » ajouté le 2026-09-17), sous un
-/// défilement ; ici tout tient dans le cadre.
+/// **L'onglet « À propos » à l'ouverture** (2026-09-18) : le haut de l'onglet, sans défilement —
+/// les sections d'information qui ouvrent l'onglet depuis le soir du 2026-09-18 (demande
+/// utilisateur : RGPD, CGU Wakfu et informations importantes du site/overlay, **avant** « Mise à
+/// jour » — voir `panels::a_propos_tab::SECTIONS`). « Wakfu Companion » (non-affiliation à
+/// Ankama, liens « Site web » et « Code source ») puis « Conditions d'utilisation de Wakfu », dont
+/// le troisième bloc est le seul ton `Alert` de l'onglet ; « Vos données », « Mise à jour » et les
+/// sorties sont sous le pli, capturées par `options_a_propos_mise_a_jour`.
 ///
-/// Ce que la capture garde : la paire centrée d'un seul tenant (et non un bouton par moitié de
-/// colonne), la gouttière du pied de page entre les deux, « Redémarrer l'overlay » à gauche et en
-/// toutes lettres — et, dans la barre du haut, sept onglets dont chacun tient son libellé.
+/// Ce que la capture garde : des blocs d'information à pleine largeur qui passent à la ligne sans
+/// mot coupé, la pastille de chacun sur sa première ligne, les liens alignés à gauche sur l'axe
+/// des contrôles et séparés de la gouttière du pied de page, la barre de défilement qui dit
+/// qu'il y a une suite — et, dans la barre du haut, sept onglets dont chacun tient son libellé.
 #[test]
 fn options_a_propos() {
     let mut options_state = parametres_avec_notifications();

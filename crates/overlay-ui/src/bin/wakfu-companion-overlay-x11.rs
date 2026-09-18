@@ -2984,6 +2984,9 @@ mod linux_main {
                             post_redraw = PostRedraw::ResolveRecipe(id)
                         }
                         OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+                        // Déjà traduite en `outcome.open_url` par `render_content` (voir la
+                        // variante) ; ne parvient jamais ici.
+                        OptionsModalAction::OpenUrl(_) => {}
                         OptionsModalAction::InstallUpdate => {
                             post_redraw = PostRedraw::InstallUpdate
                         }
