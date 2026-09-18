@@ -3500,6 +3500,51 @@ fn options_parametres_section_compte() {
     harness.snapshot("options_parametres_compte");
 }
 
+/// **La section « Compte » quand le jeton est dans le fichier de repli** (constat C7 de
+/// `docs/analyse-rgpd.md`, 2026-09-19) : l'avis rouge « Le trousseau du système est indisponible :
+/// la session est conservée en clair dans … » s'intercale entre le texte d'information et « Se
+/// déconnecter ». L'état vient de `token_on_disk`, posé par l'hôte — jamais du disque de la machine
+/// qui rend la capture, sinon cette référence dépendrait de qui l'a produite (le poste de
+/// développement du mainteneur a précisément ce fichier, celui du CI non).
+///
+/// Le chemin affiché est celui de la machine de rendu (`token_file_location`), figé par le
+/// conteneur du CI : `~/.local/share/wakfu-companion-overlay/native-session.token`.
+#[test]
+fn options_parametres_section_compte_jeton_fichier() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
+    options_state.token_on_disk = true;
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    defile_les_parametres(&mut harness, 2000.0);
+    harness.snapshot("options_parametres_compte_jeton_fichier");
+}
+
 /// **L'onglet « À propos », une mise à jour disponible** (section « Mise à jour », 2026-09-15,
 /// `docs/plan-mise-a-jour.md` §8.2 ; onglet créé le 2026-09-18), capturé dans l'état qui compte :
 /// une version disponible, le bouton or « Mettre à jour vers 0.21.0 », la ligne d'information avec

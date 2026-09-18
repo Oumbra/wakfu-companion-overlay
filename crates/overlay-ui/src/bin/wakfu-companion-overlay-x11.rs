@@ -1710,6 +1710,7 @@ mod linux_main {
                 shortcuts: self.hotkeys.bindings().clone(),
                 raccourcis: Default::default(),
                 account_connected: self.auth_status.load().is_connected(),
+                token_on_disk: overlay_sync::token_store::token_file_in_use(),
                 pending_disconnect: false,
                 // « Supprimer les données locales » : jamais en cours à l'ouverture, comme les
                 // cinq autres confirmations de cette fenêtre.

@@ -2914,6 +2914,8 @@ impl App {
             // Le bouton « Déconnecter » de la section « Compte » n'a de sens que sur un compte
             // lié — l'hôte est seul à connaître `AuthStatus` (voir `spawn_auth_thread`).
             account_connected: matches!(**self.auth_status.load(), AuthStatus::Connected),
+            // L'avis « session conservée en clair » de la section « Compte » (constat C7).
+            token_on_disk: overlay_sync::token_store::token_file_in_use(),
             pending_disconnect: false,
             // « Supprimer les données locales » : jamais en cours à l'ouverture, comme les cinq
             // autres confirmations de cette fenêtre.

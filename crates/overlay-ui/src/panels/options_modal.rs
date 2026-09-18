@@ -371,6 +371,12 @@ pub struct OptionsModalState {
     /// `AuthStatus`). Décide si le bouton « Se déconnecter » de l'onglet « Paramètres » est actif : le
     /// presser sans compte lié ne ferait rien de visible, mieux vaut que ça se voie avant le clic.
     pub account_connected: bool,
+    /// Le jeton de session est dans le **fichier de repli** plutôt que dans le trousseau du
+    /// système (`overlay_sync::token_store::token_file_in_use`) — posé par l'hôte à l'ouverture,
+    /// comme [`Self::account_connected`], et jamais lu par le panneau lui-même : une capture du
+    /// harnais ne doit pas dépendre de ce que le disque de la machine contient (constat C7,
+    /// 2026-09-19). Affiche l'avis [`token_file_notice`] dans la section « Compte ».
+    pub token_on_disk: bool,
     /// La confirmation de déconnexion est ouverte — voir la section « Compte » de [`show`]. Un
     /// champ distinct de [`Self::pending_close`] : les deux boîtes posent des questions
     /// différentes, et une seule peut être ouverte à la fois (voir `show`).
@@ -1533,10 +1539,9 @@ pub fn show(
             );
             // **Jeton hors trousseau** (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) : quand
             // le trousseau du système a manqué, la session est dans un fichier en clair — le
-            // journal le disait, pas l'interface. Lu à chaque rendu (un `stat`, la fenêtre est
-            // rarement ouverte) plutôt que figé à l'ouverture : la déconnexion retire le fichier
-            // et l'avis doit partir avec lui.
-            if let Some(text) = token_file_notice(overlay_sync::token_store::token_file_in_use()) {
+            // journal le disait, pas l'interface. Posé par l'hôte à l'ouverture : la déconnexion
+            // ferme cette fenêtre, l'avis n'a donc pas à se rafraîchir pendant qu'elle est ouverte.
+            if let Some(text) = token_file_notice(state.token_on_disk) {
                 ui.add_space(INFO_GAP);
                 ui.add(
                     design::info_text(text)
