@@ -29,7 +29,7 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | C3 | Les **pseudonymes d'autres joueurs** (coéquipiers, partenaire d'échange) sont transmis au serveur avec leurs performances, persistés en clair sur disque, et proposés à l'autocomplétion du roster — sans information ni moyen d'opposition pour ces tiers — *décision du 2026-09-18 : noms conservés (option A), autocomplétion retirée, persistance locale bornée ; reste la politique de confidentialité côté site* | Élevée | §3.3 |
 | C4 | **Aucune information** sur le traitement dans l'application : pas de lien vers une politique de confidentialité, pas de mention à l'écran de connexion ni dans « À propos » — *✅ traité côté overlay le 2026-09-18 : section « Vos données » dans « À propos », ligne d'acceptation sous « Se connecter », licence MIT ; reste la politique de confidentialité du site (§7)* | Élevée | §3.4 |
 | C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent | Élevée | §3.5 |
-| C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris | Moyenne | §3.6 |
+| C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris — *✅ traité le 2026-09-18 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; reste l'effacement des journaux, avec C5* | Moyenne | §3.6 |
 
 Les constats secondaires (C7 à C17) sont au §3.7. Le plan d'action priorisé est au §6.
 
@@ -442,6 +442,37 @@ mot suffisent au diagnostic) ; tronquer et expurger le JSON dans `EngineError::D
 au niveau `debug` ; remplacer le chemin complet par son suffixe ; plafonner la taille ; offrir
 un réglage « journal détaillé » décoché par défaut ; effacer les journaux avec C5.
 
+**Traité le 2026-09-18** (0.65.2 → 0.66.0), sauf l'effacement, qui reste rattaché à C5 :
+
+- **Code d'appairage retiré** (`background.rs`) : seule l'URL de vérification reste journalisée.
+  Le code n'avait pas à y être pour être utilisable — il s'affiche dans la fenêtre de connexion,
+  qui est le seul endroit où on le lit.
+- **`EngineError::Deserialize` expurgée** (`quickjs_engine.rs`) : ni le lot, ni le message brut de
+  `serde_json` — qui cite volontiers la valeur fautive (« invalid type: string "…" ») — ne sont
+  rendus par `Display`. Restent la nature de l'erreur, sa position, la taille du lot et les
+  valeurs du tag `kind`, c'est-à-dire des noms de variantes. Le détail complet reste accessible
+  par `Error::source`, journalisé en `debug` seulement. Deux tests le verrouillent.
+- **Chemins expurgés** (`overlay_ingest::privacy::redact_path`, appliqué à tous les `info!`/`warn!`
+  qui citent un chemin) : le dossier personnel devient `~`, tout segment portant un nom de compte
+  devient `<utilisateur>` — y compris dans un préfixe Wine, où le nom n'est pas celui du système
+  (`…/pfx/drive_c/users/<utilisateur>/…`). La forme du chemin, seule chose utile quand un
+  `wakfu.log` n'est pas trouvé, reste entière.
+- **Noms de personnages, pseudonymes de tiers et titres de fenêtre de jeu** (qui portent le nom du
+  personnage) passés en `debug!` : `session.rs`, `personnages_tab.rs`, `turn_watch/{watcher,
+  templates}.rs`, `engine_thread.rs`, `chat_command.rs`, les deux binaires.
+- **Plafond de 16 Mio par jour** (`logging::CappedAppender`) : la rotation journalière bornait la
+  durée de conservation, pas le volume qu'une panne en boucle écrit sur un disque qui n'est pas le
+  nôtre. Au-delà, l'écriture sur disque s'arrête après une ligne qui le dit ; la console continue
+  de tout recevoir, et le fichier du lendemain repart d'un compteur vide.
+- **Réglage « Journal détaillé »** (fenêtre Options › À propos, section « Journal »), décoché par
+  défaut, persisté (`config.toml`, `verbose_log`) et appliqué **à chaud**
+  (`tracing_subscriber::reload`) : cocher la case ouvre les `debug!` ci-dessus sans redémarrer —
+  un réglage qui n'aurait pris effet qu'au lancement suivant raterait justement le problème qu'on
+  cherche à voir. `RUST_LOG`, réglage du développeur, prime sur la case.
+
+Ce qui reste : **effacer les journaux** avec le reste des données locales (C5, P1), et la mention
+dans la politique de confidentialité côté site (C4).
+
 ### 3.7 Constats secondaires
 
 | # | Constat | Réf. | Recommandation |
@@ -482,7 +513,8 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
   clavier ; aucune frappe enregistrée.
 - Un seul fichier du jeu lu ; validation stricte du nom `wakfu.log` pour le chemin manuel
   (`discovery.rs:109-154`).
-- Rétention des journaux bornée dans le temps (14 jours) ; combats en cours purgés à 24 h.
+- Rétention des journaux bornée dans le temps (14 jours) **et en volume** (16 Mio par jour,
+  2026-09-18) ; rien de personnel au niveau `info` (C6) ; combats en cours purgés à 24 h.
 
 ## 6. Plan d'action priorisé
 
@@ -495,7 +527,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
 | **P1** | Bouton « Supprimer les données locales » ; purge de la file, des combats, des gabarits et des journaux à la déconnexion ; révocation serveur | C5, C8 | Overlay + serveur |
 | **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). Reste la mention dans la politique de confidentialité et le contact d'opposition | C3 | Site (politique) |
-| **P2** | Journal : retirer code d'appairage et auteur de chat, expurger `EngineError::Deserialize`, noms en `debug`, plafond de taille, réglage utilisateur | C6 | Overlay |
+| **P2** | ✅ Journal (2026-09-18) : code d'appairage et auteur de chat retirés, `EngineError::Deserialize` expurgée, noms et chemins en `debug`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut. Reste l'effacement, avec C5 | C6 | Overlay |
 | **P2** | Jeton de repli : mode restrictif à la création, ACL/DPAPI Windows, avertissement dans l'interface | C7 | Overlay |
 | **P2** | Unifier les racines de dossiers ; autostart non activé par défaut ; icônes servies par l'API ou embarquées ; nommer GitHub et `vertylo.github.io` comme destinataires | C10-C13 | Overlay |
 | **P3** | `overlay-app` : masquer le chat ; `PATCH` par sous-clé côté serveur ; origine d'API affichée quand surchargée | C9, C14, C16 | Overlay + serveur |
