@@ -47,6 +47,13 @@
 #     fait avec le `GITHUB_TOKEN` (garde-fou anti-boucle). Ce n'est pas gênant : ce run vient de
 #     jouer le gate dans l'environnement qui en décide, les références correspondent donc par
 #     construction. Le run suivant, déclenché par le premier push humain, le confirmera.
+#   - **Ce fichier doit exister sur `main`** pour être lançable — depuis l'onglet Actions comme
+#     depuis l'API (`gh workflow run … --ref dev` répond « not found on the default branch »).
+#     GitHub n'enregistre un `workflow_dispatch` que depuis la branche par défaut ; le `--ref`
+#     ne choisit que la branche où le run s'exécute. Vécu le 2026-09-18 : le workflow n'existait
+#     que sur `dev`, l'onglet Actions ne listait que « CI » et « Release », et rien ne le disait.
+#     Un commit sur `main` qui n'apporte que ce fichier suffit (la Release ne publie rien si le
+#     tag de la version courante existe déjà) ; une fusion complète de `dev` n'est pas requise.
 name: Régénérer les captures (rendu du CI)
 
 on:
