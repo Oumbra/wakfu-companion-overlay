@@ -3245,6 +3245,49 @@ trois comportements.
   chemin légitime pour les RÉGÉNÉRER (`UPDATE_SNAPSHOTS=1 bash scripts/ci-local.sh
   --captures-conteneur`).
 
+**Régénération sans Docker — workflow `regen-captures.yml`, 2026-09-18** (décision utilisateur).
+Le dispositif ci-dessus supposait un poste capable de faire tourner Docker. Le poste du mainteneur
+ne l'est pas (Windows, ni Docker ni distribution WSL installée), et une session Claude cloud n'a pas
+davantage de démon Docker. Conséquence mesurée :
+
+- **Six runs rouges consécutifs** (n° 390 à 395, du 2026-09-17 au 2026-09-18), tous sur le même
+  gate, **65 références périmées** accumulées par quatre changements visuels d'affilée — retrait du
+  replacement Récap (`02c1cc9`), retrait du rafraîchissement du combat (`f1a4837`), largeur des
+  onglets (`f5eba5d`), onglet « À propos » (`64d09f8`, qui ajoute un onglet à la barre et change
+  donc les 50 captures `options_*` sans en régénérer une seule). Le gate ne disait plus « ce rendu a
+  régressé » mais « tu développes sous Windows », et le verdict a cessé d'être lu — exactement la
+  spirale de la semaine rouge de septembre. Rattrapé par `3ac9eff` (56 planches régénérées, run 396
+  vert) **depuis un environnement qui avait le rendu épinglé** : ce que le poste du mainteneur n'a
+  pas, et c'est précisément le manque que le workflow ci-dessous comble.
+- **`--captures-conteneur` était de surcroît SILENCIEUSEMENT IGNORÉ sous MSYS** : le bloc qui
+  l'honore vivait à l'intérieur d'un `if PLATFORM = linux`. La commande recommandée par la doc du
+  Dockerfile lançait un `cargo build --workspace`, affichait « Tout est vert », et ne régénérait
+  rien. La seule voie de régénération documentée ne pouvait pas fonctionner sur le seul poste de
+  développement du dépôt.
+
+Le workflow `.github/workflows/regen-captures.yml` (`workflow_dispatch`) est la troisième voie :
+l'environnement du CI régénère lui-même. Même image, même digest, même
+`scripts/setup-render-env.sh` que le job `test-linux` — c'est la condition pour que les références
+produites soient celles que le gate acceptera. Il rejoue d'abord le gate SANS mise à jour (pour
+conserver les `*.diff.png`, qu'`egui_kittest` efface en mode mise à jour), puis régénère, publie
+l'artefact `captures-regenerees` (avant / diff / après, limité aux références réellement réécrites),
+et commite sur `dev` avec le bump que `scripts/bump-version.sh` aurait produit en local.
+
+**Ce qu'il n'automatise pas, et ne doit pas automatiser** : la relecture. La règle « régénérer est
+une AFFIRMATION » ci-dessus reste entière — le workflow écrit, il ne bénit pas. C'est l'artefact
+qu'on relit, et lui seul, pour attraper la régression qui allait devenir référence.
+
+**Garde-fous ajoutés le même jour**, chacun sur un trou constaté et non supposé :
+
+| Trou | Ce qui le bouche |
+| --- | --- |
+| Digest de l'image de rendu recopié dans trois fichiers, aucun contrôle | `scripts/verifier-digest-rendu.sh`, lancé par le job `fmt` et par `ci-local.sh` |
+| Captures jamais jouées sous Windows par `ci-local.sh` | étape sortie de la branche par plateforme — `overlay-testkit` ne dépend que de la LIB `overlay-ui`, il rend partout |
+| Un écart local ne disait rien (« rendu non épinglé ») | tri par ampleur : ≤ 300 px = bruit de rastérisation, au-delà = référence périmée, comptée en échec. Mesure du 2026-09-18 (97 captures en écart sous Windows) : 32 entre 48 et 224 px, 65 entre 552 et 97 201 px, **rien entre 224 et 552** |
+| `main.rs` (4 000 lignes, Windows-only) compilé par le seul CI | `cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay` dans `build-windows` ET dans `ci-local.sh` côté Windows — trois runs rouges du 2026-09-17 venaient de là (`ff133d0`/`669f934`, réparés par `1af5aec`) |
+| Push d'un changement de rendu sans références | avertissement (non bloquant) du hook `pre-push` |
+| `ubuntu-latest` bascule sur Ubuntu 26 le 2026-10-19 | `runs-on: ubuntu-24.04` épinglé sur les quatre jobs Linux |
+
 **État (2026-09-04) : Niveau 1 implémenté et validé de bout en bout, portée volontairement
 réduite pour l'instant.**
 

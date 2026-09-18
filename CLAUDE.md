@@ -148,6 +148,27 @@ Une étape ajoutée ou retirée dans `.github/workflows/ci.yml` doit l'être **a
 `scripts/ci-local.sh`, et réciproquement : les deux se doublent volontairement, un garde-fou ne
 protège que ce qu'il connaît.
 
+## Un changement visuel porte ses références régénérées — sinon le CI bloque
+
+Le gate de captures (`overlay-testkit`, §17.1 du plan) compare 153 PNG sous un rendu Linux **figé**.
+Une référence produite ailleurs — sous Windows, sous un autre Mesa — le fait rougir à coup sûr. Le
+réflexe « je régénère en local » est donc faux ici, et il n'existe qu'**une** façon d'en produire
+sans Docker (poste Windows, session cloud) :
+
+> GitHub → Actions → **« Régénérer les captures (rendu du CI) »** → *Run workflow* sur `dev`.
+> (`.github/workflows/regen-captures.yml` ; il réécrit les références, publie l'avant/diff/après en
+> artefact, et pousse le commit `test:`.)
+
+**Relire l'artefact fait partie du geste**, il n'est pas facultatif : régénérer, c'est affirmer « ce
+nouveau rendu est correct », et git ne sait pas montrer cette affirmation — un PNG modifié s'affiche
+`Bin 693015 -> 698936 bytes`. C'est là qu'on attrape le libellé rogné qui allait devenir la
+référence pour toujours.
+
+Ce qui arrive quand on l'oublie est documenté : six runs rouges d'affilée et 65 références périmées
+du 2026-09-17 au 2026-09-18. `bash scripts/ci-local.sh` (sans option) le dit désormais avant le
+push — il compte en échec les écarts trop grands pour du bruit de rastérisation —, et le hook
+`pre-push` avertit quand un push touche du code de rendu sans une seule référence.
+
 ## Coût du CI (dépôt public — minutes Actions gratuites, sobriété conservée)
 
 Le dépôt est **public** (vérifié sur l'API GitHub le 2026-09-15, `"private": false`) : les jobs

@@ -45,9 +45,29 @@ entrent tout seuls dans ce conteneur quand la machine ne sait pas compiler (voir
 Avant de pousser (le hook `pre-push` le fait pour les lints) :
 
 ```bash
-bash scripts/ci-local.sh          # tout : format, clippy, tests
+bash scripts/ci-local.sh          # tout : format, clippy, tests, captures
 bash scripts/ci-local.sh --lint   # format + clippy seulement (rapide)
 ```
+
+### Captures de référence
+
+Le CI compare 153 captures d'interface sous un rendu Linux **figé** (conteneur épinglé par digest +
+Mesa épinglé). Une référence régénérée ailleurs — sous Windows, sous un autre Mesa — fait rougir le
+gate à coup sûr. Deux chemins, selon la machine :
+
+```bash
+# Linux + Docker : on se place dans l'environnement du CI
+bash scripts/ci-local.sh --captures-conteneur
+UPDATE_SNAPSHOTS=1 bash scripts/ci-local.sh --captures-conteneur   # régénérer
+```
+
+Sans Docker (poste Windows, session cloud) : **GitHub → Actions → « Régénérer les captures (rendu
+du CI) » → Run workflow**. Il régénère dans le conteneur du CI, publie l'avant/diff/après en
+artefact — **à relire, c'est là qu'on attrape une régression promue en référence** — et pousse le
+commit.
+
+Un `bash scripts/ci-local.sh` ordinaire joue les captures sur toute plateforme et signale les écarts
+trop grands pour du bruit de rastérisation (seuil réglable par `WAKFU_SEUIL_BRUIT_CAPTURES`).
 
 ## Numéro de version
 
