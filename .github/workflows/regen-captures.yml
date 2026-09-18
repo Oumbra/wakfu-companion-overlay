@@ -1,0 +1,241 @@
+# Régénère les références de captures DANS l'environnement de rendu du CI, sur demande.
+#
+# ## Pourquoi ce workflow existe
+#
+# Depuis que la comparaison de captures est un GATE (2026-09-13, §17.1 du plan), tout changement
+# visuel voulu doit porter ses références régénérées. Or ces références ne valent que produites
+# sous le rendu figé du CI (conteneur épinglé par digest + Mesa épinglé par
+# `scripts/setup-render-env.sh`) : une référence régénérée sous Windows ou sous un Mesa quelconque
+# fait rougir le gate à coup sûr.
+#
+# Restaient deux façons d'en produire, et aucune ne marchait sur le poste du mainteneur :
+#
+#   - `scripts/ci-local.sh --captures-conteneur`, qui exige Docker — absent de ce poste (et une
+#     session cloud n'a pas de démon Docker non plus) ;
+#   - récupérer l'artefact `captures-en-ecart` d'un run rouge et recopier les `*.new.png` à la main,
+#     ce qui impose un aller-retour par le navigateur à chaque changement visuel.
+#
+# Résultat observé : du 2026-09-17 au 2026-09-18, SIX runs consécutifs rouges sur le même gate,
+# 65 références périmées accumulées par quatre changements visuels successifs (retrait du
+# replacement Récap, retrait du rafraîchissement, largeur des onglets, onglet « À propos »), dont
+# aucun n'avait pu régénérer quoi que ce soit. Le gate ne disait plus « ce rendu a régressé », il
+# disait « tu es sous Windows ».
+#
+# Ce workflow est la troisième voie : l'environnement du CI régénère lui-même, sur un clic.
+#
+# ## Ce qu'il ne dispense PAS de faire
+#
+# Régénérer une référence reste une AFFIRMATION — « ce nouveau rendu est correct » — et git ne sait
+# pas la montrer (un PNG modifié s'affiche « Bin 693015 -> 698936 bytes »). Le workflow publie donc
+# l'artefact `captures-regenerees` : pour chaque référence réécrite, l'AVANT (`*.old.png`), le diff
+# (`*.diff.png`) et l'APRÈS. **Les relire est le geste que ce workflow automatise l'écriture, pas la
+# revue** — c'est là qu'on attrape le libellé rogné ou l'infobulle du mauvais côté qui, sinon,
+# devient la référence pour toujours.
+#
+# ## Usage
+#
+# Onglet Actions → « Régénérer les captures (rendu du CI) » → « Run workflow », sur `dev`.
+name: Régénérer les captures (rendu du CI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pousser:
+        description: "Committer et pousser les références régénérées sur la branche choisie"
+        type: boolean
+        default: true
+      motif:
+        description: "Ce que ce nouveau rendu est censé montrer (repris dans le corps du commit)"
+        type: string
+        required: false
+
+# Le commit de régénération est poussé par ce workflow : sans ce droit, `git push` échoue en 403.
+# Rien d'autre n'est demandé.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  regenerer:
+    # Épinglé, comme tous les jobs de `ci.yml` : voir la doc de `runs-on` là-bas.
+    runs-on: ubuntu-24.04
+
+    # **MÊME image, MÊME digest que le job `test-linux` de `.github/workflows/ci.yml`.** C'est la
+    # condition de tout : régénérer sous une autre image produirait des références que le gate
+    # rejetterait aussitôt. `scripts/verifier-digest-rendu.sh` (lancé par le job `fmt` du CI et par
+    # `scripts/ci-local.sh`) échoue si ces deux digests — et celui de `.github/ci-image/Dockerfile`
+    # — cessent d'être identiques.
+    container:
+      image: ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
+
+    steps:
+      # `main`/`master` ne reçoit que des fusions faites par le mainteneur (CLAUDE.md) : un commit
+      # automatique n'y a rien à faire. Vérifié AVANT le clone, pour échouer en deux secondes plutôt
+      # qu'après dix minutes de compilation.
+      - name: refuser la branche principale
+        if: inputs.pousser
+        run: |
+          case "${{ github.ref_name }}" in
+            main|master)
+              echo "::error::Régénération poussée sur '${{ github.ref_name }}' refusée — le travail va sur 'dev'."
+              exit 1
+              ;;
+          esac
+          echo "branche : ${{ github.ref_name }}"
+
+      # Voir la même étape dans `ci.yml` : une image Ubuntu nue n'a ni `git` ni `ca-certificates`,
+      # et `checkout` retomberait sur un téléchargement d'archive REST — dont on ne pourrait plus
+      # rien pousser.
+      - name: amorçage (git pour checkout — hors périmètre du rendu)
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git
+
+      - uses: actions/checkout@v4
+        with:
+          # Les identifiants du clone servent au `git push` final. `fetch-depth: 0` n'est pas requis
+          # (`bump-version.sh` ne lit que HEAD), mais un clone superficiel refuse le push quand la
+          # branche a avancé entre-temps — le coût est de quelques secondes.
+          fetch-depth: 0
+
+      # Le dépôt appartient à root, le conteneur tourne en root : sans cette ligne git refuse d'y
+      # opérer (« detected dubious ownership ») dès le premier `git status`.
+      - name: dépôt de confiance (conteneur)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: environnement de rendu épinglé (Mesa/lavapipe, instantané daté — voir le script)
+        run: bash scripts/setup-render-env.sh
+
+      - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: ./.github/actions/vendor-wgpu-hal
+
+      # Même clé de cache que `test-linux` : ce workflow compile exactement le même arbre, il n'y a
+      # aucune raison de le recompiler de zéro.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # **Premier passage SANS mise à jour**, pour obtenir les images de diagnostic. En mode mise à
+      # jour, `egui_kittest` écrit la nouvelle référence et EFFACE les `*.diff.png`/`*.new.png` : on
+      # perdrait l'« avant/après » sur lequel la régénération se relit. Ce passage ne recompile rien
+      # (même binaire de test, seule une variable d'environnement change au second).
+      #
+      # `continue-on-error` : un écart est ATTENDU ici — c'est la raison d'être du run.
+      - name: captures — état avant régénération (diagnostic)
+        id: avant
+        continue-on-error: true
+        run: cargo test --no-fail-fast -p overlay-testkit
+
+      # Les `*.diff.png` du passage précédent, mis à l'abri : le passage suivant les supprime.
+      - name: mettre les diffs à l'abri
+        run: |
+          set -eu
+          mkdir -p diagnostic-captures/diff
+          cp crates/overlay-testkit/tests/snapshots/*.diff.png diagnostic-captures/diff/ 2>/dev/null || true
+          echo "diffs conservés : $(ls -1 diagnostic-captures/diff | wc -l)"
+
+      # `UPDATE_SNAPSHOTS=1` = mode « UpdateFailing » d'`egui_kittest` : seules les références EN
+      # ÉCART sont réécrites, l'ancienne étant sauvegardée en `*.old.png`. Jamais `force`, qui
+      # réécrirait les 153 références et noierait le diff git sous des octets sans changement.
+      - name: captures — régénération
+        env:
+          UPDATE_SNAPSHOTS: "1"
+        run: cargo test --no-fail-fast -p overlay-testkit
+
+      # Ne sont mises dans l'artefact que les références RÉELLEMENT réécrites : l'« après » est
+      # sélectionné sur `git diff`, pas sur le dossier entier (les 153 références pèsent plus de
+      # 100 Mo, et l'artefact ne doit montrer que ce qu'il y a à relire).
+      - name: récapitulatif et tri de l'artefact
+        id: recap
+        run: |
+          set -eu
+          mkdir -p diagnostic-captures/avant diagnostic-captures/apres
+          # Indexé tout de suite, et la liste lue dans l'INDEX : `git diff` seul ignorerait une
+          # référence NOUVELLE (un test ajouté sans sa capture, cas de `d5c259c`), qui est
+          # justement celle qu'il faut relire le plus attentivement. `.gitignore` écarte déjà
+          # `*.old.png`/`*.new.png`/`*.diff.png`, ce `-A` ne peut donc rien emporter d'autre.
+          git add -A crates/overlay-testkit/tests/snapshots/
+          git diff --cached --name-only -- crates/overlay-testkit/tests/snapshots/ > /tmp/modifiees.txt
+          nombre=$(wc -l < /tmp/modifiees.txt | tr -d ' ')
+          echo "nombre=$nombre" >> "$GITHUB_OUTPUT"
+
+          while IFS= read -r chemin; do
+            [ -n "$chemin" ] || continue
+            nom=$(basename "$chemin" .png)
+            cp "$chemin" "diagnostic-captures/apres/$nom.png"
+            if [ -f "crates/overlay-testkit/tests/snapshots/$nom.old.png" ]; then
+              cp "crates/overlay-testkit/tests/snapshots/$nom.old.png" "diagnostic-captures/avant/$nom.png"
+            fi
+          done < /tmp/modifiees.txt
+
+          {
+            echo "## Références régénérées : $nombre"
+            echo
+            if [ "$nombre" -eq 0 ]; then
+              echo "Aucune — le gate était déjà vert dans cet environnement de rendu."
+            else
+              echo "Relire l'artefact **captures-regenerees** AVANT de considérer le gate réglé :"
+              echo "\`avant/\` est l'ancien rendu, \`diff/\` les pixels en écart, \`apres/\` ce qui"
+              echo "vient d'être committé. C'est là qu'on attrape une régression promue en référence."
+              echo
+              sed 's|^crates/overlay-testkit/tests/snapshots/|- `|; s|$|`|' /tmp/modifiees.txt
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: captures régénérées — avant, diff, après
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures-regenerees
+          path: diagnostic-captures/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # `.gitignore` couvre déjà `*.old.png`/`*.new.png`/`*.diff.png`, mais `diagnostic-captures/`
+      # est un dossier que ce workflow invente : le retirer évite qu'un `git add` malheureux ne
+      # l'emporte, et garde `git status` lisible dans le journal.
+      - name: retirer les images de diagnostic
+        run: |
+          rm -rf diagnostic-captures
+          rm -f crates/overlay-testkit/tests/snapshots/*.old.png \
+                crates/overlay-testkit/tests/snapshots/*.new.png \
+                crates/overlay-testkit/tests/snapshots/*.diff.png
+
+      # Commit `test:` — le type que CLAUDE.md prescrit pour des références de captures, et dont
+      # `scripts/bump-version.sh` tire le même patch que le hook `post-commit` en local. Sans cet
+      # appel le commit partirait sans son bump : `core.hooksPath` est une config locale, elle
+      # n'existe pas sur un runner.
+      #
+      # `git add` limité au dossier des références : le bump ajoutera lui-même `Cargo.toml` et les
+      # deux `Cargo.lock`, et rien d'autre du répertoire de travail n'a à partir dans ce commit.
+      - name: committer et pousser
+        if: inputs.pousser && steps.recap.outputs.nombre != '0'
+        env:
+          MOTIF: ${{ inputs.motif }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/overlay-testkit/tests/snapshots/
+          provenance="${{ steps.recap.outputs.nombre }} référence(s) réécrite(s) dans le conteneur de rendu épinglé du CI (run ${{ github.run_id }}) ; avant/diff/après dans l'artefact captures-regenerees."
+          if [ -n "${MOTIF:-}" ]; then
+            git commit -m "test: références régénérées dans l'environnement du CI" \
+                       -m "$MOTIF" -m "$provenance"
+          else
+            git commit -m "test: références régénérées dans l'environnement du CI" -m "$provenance"
+          fi
+          bash scripts/bump-version.sh
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: rien à pousser
+        if: inputs.pousser && steps.recap.outputs.nombre == '0'
+        run: echo "::notice::Aucune référence en écart — rien à committer."
