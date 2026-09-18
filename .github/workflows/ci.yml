@@ -27,7 +27,11 @@
 # ce script est le garde-fou qui évite de découvrir un `fmt`/`clippy` rouge après coup, et il ne
 # protège que ce qu'il connaît. UNE seule divergence assumée : le job `test-linux` tourne ici dans
 # un conteneur au rendu figé (voir sa doc), là où le script local tourne sur la machine du dev — il
-# se contente d'avertir quand son Mesa diffère de celui du CI.
+# ne compte alors en échec que les écarts de capture trop grands pour du bruit de rastérisation.
+#
+# Workflow voisin : `.github/workflows/regen-captures.yml` (« Régénérer les captures »), lancé à la
+# main, réécrit les références DANS ce même conteneur. C'est la seule voie de régénération depuis un
+# poste Windows ou une session cloud, qui n'ont pas de Docker.
 #
 # La version de Rust vient de `rust-toolchain.toml` (épinglée), pas d'un `@stable` flottant : voir
 # la doc de ce fichier — c'est la dérive de version qui a tenu ce CI rouge du 2026-09-01 au
@@ -68,18 +72,31 @@ env:
   # « ajoute un backtrace » pour comprendre.
   RUST_BACKTRACE: 1
 
+# **`ubuntu-24.04`, jamais `ubuntu-latest`** (épinglé le 2026-09-18). GitHub annonce la bascule de
+# `ubuntu-latest` vers Ubuntu 26 à partir du 2026-10-19 (annotation « notice » sur chaque run,
+# actions/runner-images#14748) : c'est un changement d'OS, de version d'APT et de toolchain système
+# qui arriverait un matin, sur du code que personne n'a touché. Ce dépôt a déjà payé ce prix une
+# fois — dix jours de CI rouge sur une toolchain Rust flottante —, et le job `test-linux` épingle
+# jusqu'au DIGEST de son conteneur pour la même raison. La date de la bascule est le bon moment pour
+# monter à `ubuntu-26.04` : dans son propre commit, en regardant ce qui casse.
 jobs:
   fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # Purement textuel, aucune compilation : d'où sa place dans le job le plus rapide. Vérifie que
+      # l'image de base du rendu porte le MÊME digest dans `ci.yml`, `regen-captures.yml` et
+      # `.github/ci-image/Dockerfile` — une divergence ferait régénérer les références sous un Mesa
+      # qui n'est plus celui du gate. Voir l'en-tête du script.
+      - name: image de base du rendu, cohérente partout
+        run: bash scripts/verifier-digest-rendu.sh
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path xtask/Cargo.toml -- --check
 
   clippy-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
@@ -100,7 +117,7 @@ jobs:
       - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 
   test-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # **Conteneur ÉPINGLÉ PAR DIGEST, pas par tag** : le tag `ubuntu:24.04` désigne une image
     # différente à chaque point release. Depuis que la comparaison de captures est un GATE (voir
     # l'étape `overlay-testkit` plus bas), l'environnement de rendu ne peut plus bouger tout seul —
@@ -186,11 +203,23 @@ jobs:
         with:
           workspaces: . -> target
       - run: cargo build --workspace
+      # **Le code `cfg(windows)` n'était linté nulle part** (ajouté le 2026-09-18). `clippy-linux`
+      # compile `overlay-ui --lib` sous Linux : tout ce qui est derrière un `cfg(windows)` y est
+      # invisible — `turn_watch/capture.rs` (PrintWindow/GDI) et `turn_watch/notify.rs` en entier,
+      # et le binaire `wakfu-companion-overlay` (`main.rs`, 4 000 lignes) n'y compile même pas. Côté
+      # Windows, ce job ne faisait qu'un `build` : aucun lint. Résultat au premier essai de cette
+      # étape : un `chunks_exact_mut` que clippy réclame depuis toujours dans `capture.rs`, jamais vu
+      # de personne.
+      #
+      # Même PORTÉE que la ligne équivalente de `clippy-linux` (lib + le binaire de la plateforme,
+      # pas `--all-targets`) : les deux jobs se répartissent ainsi les deux moitiés de `overlay-ui`
+      # sans qu'aucune ne soit tenue à un verdict que l'autre n'applique pas.
+      - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay -- -D warnings
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
         run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
 
   mem-budget:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
