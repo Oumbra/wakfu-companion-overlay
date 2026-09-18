@@ -12,11 +12,21 @@
 //!   séquences rapprochées entre threads (auth/catalogue/moteur, voir `main.rs`).
 //! - **Niveau** : `info` par défaut sur le code de l'appli, `warn` sur les dépendances graphiques
 //!   bruyantes (wgpu/naga) — réglable sans recompiler via la variable d'env `RUST_LOG`
-//!   (`tracing_subscriber::EnvFilter`, même convention que `overlay-app`).
+//!   (`tracing_subscriber::EnvFilter`, même convention que `overlay-app`), et à chaud par la case
+//!   « Journal détaillé » de la fenêtre Options ([`set_verbose`]).
+//! - **Rien de personnel en `info`** (constat C6 de `docs/analyse-rgpd.md`, 2026-09-18) : ni nom
+//!   de personnage, ni pseudonyme d'autre joueur, ni chemin portant le nom de compte du système
+//!   (`overlay_ingest::privacy::redact_path`), ni code d'appairage, ni contenu d'un lot refusé
+//!   (`EngineError::Deserialize` n'en rend que la forme). Tout cela existe encore, en `debug!`,
+//!   derrière la case ci-dessus — décochée par défaut. Le fichier est local et n'est jamais
+//!   téléversé, mais il vit 14 jours et s'envoie tel quel avec un rapport de bug : ce qu'il
+//!   contient par défaut est ce qu'on accepte de voir partir avec.
 //! - **Rotation** : un fichier par jour (`tracing_appender::rolling::Rotation::DAILY`), 14
 //!   conservés au-delà desquels les plus anciens sont supprimés automatiquement
 //!   (`max_log_files`) — pas de perte de repli si l'overlay tourne des semaines sans être
 //!   redémarré, pas de croissance illimitée sur un poste laissé tel quel.
+//! - **Plafond de volume** : 16 Mio par jour ([`MAX_LOG_BYTES_PER_DAY`], `CappedAppender`). La
+//!   rotation bornait la DURÉE de conservation, pas le volume qu'une panne en boucle écrit.
 //! - **Écriture SYNCHRONE** (pas de `tracing_appender::non_blocking`) : le volume de lignes émis
 //!   ici est faible (pas un chemin chaud comme le rendu ~20 Hz), et ça garantit qu'aucune ligne
 //!   n'est perdue si le process s'arrête brutalement — Ctrl+C en particulier (voir
