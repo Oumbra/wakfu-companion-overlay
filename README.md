@@ -131,3 +131,7 @@ Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tou
 | --- | --- | --- |
 | [`s1-window-windows`](spikes/s1-window-windows/) | ✅ validé | `.\preview.ps1` depuis le dossier du spike |
 | [`s2-engine-quickjs`](spikes/s2-engine-quickjs/) | ✅ validé | voir son README |
+
+## Licence
+
+[MIT](LICENSE).
