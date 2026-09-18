@@ -211,16 +211,22 @@ impl Watcher {
 
         if !state.engaged && fight.engaged_by_log {
             state.engaged = true;
-            tracing::info!("[tour] {} : combat engagé, placement terminé", input.window);
+            tracing::info!("[tour] combat engagé, placement terminé");
+            tracing::debug!(window = %input.window, "[tour] combat engagé, placement terminé");
         }
 
         // Le titre vient de basculer sur un combattant du combat engagé : c'est son tour, sans
         // rien lire à l'écran.
         if switched && fight.current_in_fight {
             if state.engaged {
-                tracing::info!(
-                    "[tour] {} : la fenêtre passe aux commandes de {current}",
-                    input.window
+                // Le titre de la fenêtre de jeu porte le nom du personnage, et `current` EST ce
+                // nom (constat C6 de `docs/analyse-rgpd.md`) : la bascule se journalise, le
+                // personnage part en `debug` (« Journal détaillé »).
+                tracing::info!("[tour] la fenêtre passe aux commandes d'un autre personnage");
+                tracing::debug!(
+                    window = %input.window,
+                    character = %current,
+                    "[tour] la fenêtre passe aux commandes de ce personnage"
                 );
                 Self::activate(state, current, input.foreground, input.now, &mut events);
             } else {
@@ -239,7 +245,8 @@ impl Watcher {
         let panel = vision::find_gold_panel(band);
         if !state.engaged && panel.is_some_and(|p| vision::panel_shows_end_turn(band, p)) {
             state.engaged = true;
-            tracing::info!("[tour] {} : combat engagé, placement terminé", input.window);
+            tracing::info!("[tour] combat engagé, placement terminé");
+            tracing::debug!(window = %input.window, "[tour] combat engagé, placement terminé");
         }
         let area = match self.geometry_by_size.get(&size) {
             Some(area) => *area,
@@ -247,12 +254,12 @@ impl Watcher {
                 Some(p) => {
                     let area = vision::name_area_above(p, band);
                     tracing::info!(
-                        "[tour] {} : bande du nom localisée ({}x{} → {:?})",
-                        input.window,
+                        "[tour] bande du nom localisée ({}x{} → {:?})",
                         size.0,
                         size.1,
                         area
                     );
+                    tracing::debug!(window = %input.window, "[tour] bande du nom localisée");
                     self.geometry_by_size.insert(size, area);
                     area
                 }
@@ -284,15 +291,19 @@ impl Watcher {
                             Some((first, seq)) if *seq != learning.event_seq => {
                                 if vision::similarity(first, &glyph) >= LEARN_THRESHOLD {
                                     tracing::info!(
-                                        "[tour] {current} : gabarit du nom {} ({}x{}, fenêtre {})",
+                                        "[tour] gabarit du nom {} ({}x{})",
                                         if disagrees {
                                             "remplacé — l'ancien ne reconnaissait plus"
                                         } else {
                                             "acquis"
                                         },
                                         glyph.w,
-                                        glyph.h,
-                                        input.window
+                                        glyph.h
+                                    );
+                                    tracing::debug!(
+                                        character = %current,
+                                        window = %input.window,
+                                        "[tour] gabarit du nom appris"
                                     );
                                     self.templates.insert(current.to_string(), glyph.clone());
                                     events.push(Event::TemplateLearned {

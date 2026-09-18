@@ -149,12 +149,12 @@ fn save_to(path: &Path, counts: &PersistedCounts) {
     };
     if let Some(parent) = path.parent() {
         if std::fs::create_dir_all(parent).is_err() {
-            tracing::warn!(path = %path.display(), "impossible de créer le dossier des compteurs de suivi");
+            tracing::warn!(path = %overlay_ingest::privacy::redact_path(path), "impossible de créer le dossier des compteurs de suivi");
             return;
         }
     }
     if let Err(err) = std::fs::write(path, json) {
-        tracing::warn!(path = %path.display(), %err, "impossible d'écrire les compteurs de suivi (perdus au redémarrage)");
+        tracing::warn!(path = %overlay_ingest::privacy::redact_path(path), %err, "impossible d'écrire les compteurs de suivi (perdus au redémarrage)");
     }
 }
 

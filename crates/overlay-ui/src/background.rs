@@ -653,10 +653,17 @@ fn attempt_connect(
     let token = match overlay_sync::pair_and_wait(
         |handle| {
             tracing::info!("=== Connexion du compte ===");
+            // **Le code d'appairage n'est PAS journalisé** (constat C6 de `docs/analyse-rgpd.md`) :
+            // c'est un secret à usage unique, exploitable par quiconque lit le fichier pendant sa
+            // fenêtre de validité — et le journal vit 14 jours, en clair, sur un poste partagé le
+            // cas échéant. Il n'avait de toute façon pas à y être pour être utilisable : il
+            // s'affiche dans la fenêtre de connexion (`AuthStatus::PairingStarted`, juste en
+            // dessous), qui est le seul endroit où on le lit vraiment. Ce qui reste ici — l'URL de
+            // vérification, sans paramètre — suffit au diagnostic (« le navigateur s'ouvre-t-il ?
+            // sur quelle origine ? »).
             tracing::info!(
-                "Ouvre {} et confirme le code : {}",
-                handle.verification_url,
-                handle.pairing_code
+                "Confirme l'appairage sur {} — le code est affiché dans la fenêtre de connexion.",
+                handle.verification_url
             );
             // Voir `AuthStatus::PairingStarted` : c'est ce qui rend le code visible dans la
             // fenêtre de connexion, pas seulement dans ces logs.

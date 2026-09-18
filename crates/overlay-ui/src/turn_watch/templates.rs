@@ -65,10 +65,16 @@ pub fn load_all() -> HashMap<String, Glyph> {
             .and_then(|b| Glyph::from_png(&b).map_err(|e| e.to_string()))
         {
             Ok(glyph) => {
-                tracing::info!("[tour] gabarit chargé : {name} ({}x{})", glyph.w, glyph.h);
+                // Nom de personnage en `debug` seulement (constat C6 de `docs/analyse-rgpd.md`)
+                // : ce qui se diagnostique ici, c'est le NOMBRE de gabarits relus et leur taille.
+                tracing::info!("[tour] gabarit chargé ({}x{})", glyph.w, glyph.h);
+                tracing::debug!(character = %name, "[tour] gabarit chargé");
                 out.insert(name, glyph);
             }
-            Err(err) => tracing::warn!("[tour] gabarit illisible {} : {err}", path.display()),
+            Err(err) => tracing::warn!(
+                "[tour] gabarit illisible {} : {err}",
+                overlay_ingest::privacy::redact_path(&path)
+            ),
         }
     }
     out
@@ -86,10 +92,16 @@ pub fn save(character: &str, glyph: &Glyph) {
         std::fs::write(dir.join(format!("{stem}.name")), character).map_err(|e| e.to_string())
     })();
     match result {
-        Ok(()) => tracing::info!(
-            "[tour] gabarit enregistré : {character} → {}",
-            dir.display()
-        ),
-        Err(err) => tracing::warn!("[tour] gabarit non enregistré ({character}) : {err}"),
+        Ok(()) => {
+            tracing::info!(
+                "[tour] gabarit enregistré → {}",
+                overlay_ingest::privacy::redact_path(&dir)
+            );
+            tracing::debug!(%character, "[tour] gabarit enregistré");
+        }
+        Err(err) => {
+            tracing::warn!("[tour] gabarit non enregistré : {err}");
+            tracing::debug!(%character, "[tour] gabarit non enregistré");
+        }
     }
 }

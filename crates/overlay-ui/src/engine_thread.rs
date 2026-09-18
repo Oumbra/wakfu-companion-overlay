@@ -909,11 +909,22 @@ pub fn spawn_engine_thread(
                             Vec::new()
                         };
                         for alert in &chat_alerts {
+                            // **Sans l'auteur** (constat C6 de `docs/analyse-rgpd.md`) : c'est le
+                            // pseudonyme d'un TIERS, qui n'a rien demandé, recopié dans un fichier
+                            // conservé 14 jours. Le mot-clé et le canal disent tout ce qu'on vient
+                            // lire ici — l'alerte est-elle partie, sur quelle recherche, sur quel
+                            // canal ; qui l'a écrite se lit dans la carte à l'écran, pas au
+                            // journal. Le nom reste disponible en `debug` (« Journal détaillé »)
+                            // pour un diagnostic de correspondance.
                             tracing::info!(
-                                author = %alert.author,
                                 word = %alert.filter.text,
                                 channel = overlay_engine::channel_label(alert.channel),
                                 "alerte de chat (recherche trouvée)"
+                            );
+                            tracing::debug!(
+                                author = %alert.author,
+                                word = %alert.filter.text,
+                                "alerte de chat : auteur"
                             );
                         }
                         if let Some(alert) = chat_alerts.into_iter().last() {

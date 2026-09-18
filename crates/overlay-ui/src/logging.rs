@@ -42,11 +42,13 @@
 //!   le journal (message + fichier:ligne), puis laisse faire le hook par défaut — un plantage se
 //!   lit donc dans le fichier, au lieu de n'y laisser qu'une session sans ligne de fin.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
@@ -59,7 +61,145 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 /// `warn`).
 const DEFAULT_FILTER: &str = "info,wgpu_hal=warn,wgpu_core=warn,naga=warn";
 
+/// Filtre du mode « Journal détaillé » : `debug` sur le code de l'appli, dépendances graphiques
+/// toujours muselées (un `debug` global sur `wgpu`/`naga` noierait le fichier en quelques
+/// secondes, et ce n'est pas ce que l'utilisateur demande en cochant la case).
+const VERBOSE_FILTER: &str = "debug,wgpu_hal=warn,wgpu_core=warn,naga=warn,rquickjs=info";
+
+/// **Plafond de taille du journal, par jour** (16 Mio) — constat C6 de `docs/analyse-rgpd.md`.
+///
+/// La rotation journalière et les 14 fichiers conservés bornaient la DURÉE de conservation, pas le
+/// VOLUME : une panne en boucle (fichier de jeu illisible, lot rejeté à chaque lot, panique
+/// répétée) écrit autant de lignes que la boucle en produit, sans limite, sur un disque qui n'est
+/// pas le nôtre. Au-delà de ce plafond, l'écriture sur DISQUE s'arrête pour la journée après une
+/// dernière ligne qui le dit ; la console, elle, continue de tout recevoir.
+///
+/// 16 Mio est très au-dessus d'une journée de fonctionnement normal (quelques centaines de Kio) et
+/// laisse largement de quoi diagnostiquer une panne bavarde avant la coupure.
+const MAX_LOG_BYTES_PER_DAY: u64 = 16 * 1024 * 1024;
+
 static SESSION_ID: OnceLock<u32> = OnceLock::new();
+
+/// Poignée de rechargement du filtre — voir [`set_verbose`]. `None` tant que [`init`] n'a pas été
+/// appelée (tests hors harnais de journalisation, binaire de focus de `main`).
+static FILTER_HANDLE: OnceLock<reload::Handle<EnvFilter, tracing_subscriber::Registry>> =
+    OnceLock::new();
+
+/// Le fichier écrit-il encore, ou le plafond du jour est-il atteint ? Lu par la fenêtre Options
+/// pour ne pas promettre un journal qui ne s'écrit plus.
+static DAILY_CAP_REACHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `RollingFileAppender` plafonné en volume — voir [`MAX_LOG_BYTES_PER_DAY`].
+///
+/// Le compteur est remis à zéro au changement de jour UTC, c'est-à-dire exactement quand
+/// `tracing-appender` ouvre son fichier suivant (`Rotation::DAILY`, même horloge) : le plafond
+/// s'applique donc bien PAR FICHIER, sans avoir à demander à l'appender quel fichier il tient (il
+/// ne l'expose pas).
+struct CappedAppender<W: Write> {
+    inner: W,
+    /// Jours écoulés depuis l'époque Unix, en UTC — l'unité de rotation.
+    day: u64,
+    written: u64,
+    /// La ligne de coupure n'est écrite qu'une fois par jour, sinon elle remplacerait le flot
+    /// qu'elle vient d'arrêter.
+    cut_announced: bool,
+}
+
+/// Jours écoulés depuis l'époque Unix (UTC). Avant l'époque (horloge système déréglée), `0` :
+/// toute valeur constante convient, le compteur ne sert qu'à détecter un CHANGEMENT de jour.
+fn utc_day() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs() / 86_400)
+        .unwrap_or(0)
+}
+
+impl<W: Write> CappedAppender<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            day: utc_day(),
+            written: 0,
+            cut_announced: false,
+        }
+    }
+}
+
+impl<W: Write> Write for CappedAppender<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let today = utc_day();
+        if today != self.day {
+            self.day = today;
+            self.written = 0;
+            self.cut_announced = false;
+            DAILY_CAP_REACHED.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        if self.written >= MAX_LOG_BYTES_PER_DAY {
+            if !self.cut_announced {
+                self.cut_announced = true;
+                DAILY_CAP_REACHED.store(true, std::sync::atomic::Ordering::Relaxed);
+                let mio = MAX_LOG_BYTES_PER_DAY / (1024 * 1024);
+                // Écrite directement : passer par `tracing` ici rappellerait ce `write`.
+                let _ = self.inner.write_all(
+                    format!(
+                        "=== journal interrompu : plafond de {mio} Mio atteint pour aujourd'hui \
+                         (la console continue de tout recevoir ; reprise au prochain fichier) ===\n"
+                    )
+                    .as_bytes(),
+                );
+                let _ = self.inner.flush();
+            }
+            // Ligne AVALÉE, pas perdue en erreur : un journal plein ne doit jamais faire échouer
+            // ce qui journalise (`tracing` remonterait l'erreur à chaque appel derrière).
+            return Ok(buf.len());
+        }
+        let written = self.inner.write(buf)?;
+        self.written += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Le plafond du jour est-il atteint (plus rien n'est écrit sur disque) ? Voir
+/// [`MAX_LOG_BYTES_PER_DAY`].
+pub fn daily_cap_reached() -> bool {
+    DAILY_CAP_REACHED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// **Réglage « Journal détaillé »** (fenêtre Options › À propos), appliqué À CHAUD : coché, le
+/// fichier reçoit aussi les `debug!` — les noms de personnages, le chemin réel de `wakfu.log`, le
+/// destinataire d'une réponse en privé, le détail d'une erreur de désérialisation. Décoché (le
+/// défaut), ces lignes-là n'existent nulle part.
+///
+/// C'est le pendant assumé du constat C6 (`docs/analyse-rgpd.md`) : ces informations restent
+/// diagnosticables, mais seulement quand l'utilisateur les a demandées, et jamais dans le journal
+/// d'une session ordinaire.
+///
+/// Sans effet si `RUST_LOG` est posée (réglage du développeur, qui prime) ou si [`init`] n'a pas
+/// tourné.
+pub fn set_verbose(verbose: bool) {
+    let Some(handle) = FILTER_HANDLE.get() else {
+        return;
+    };
+    if std::env::var_os("RUST_LOG").is_some() {
+        return;
+    }
+    let wanted = if verbose {
+        VERBOSE_FILTER
+    } else {
+        DEFAULT_FILTER
+    };
+    // `reload` reconstruit le cache d'intérêt de `tracing` : les `debug!` déjà compilés
+    // redeviennent actifs sans redémarrage.
+    if let Err(err) = handle.reload(EnvFilter::new(wanted)) {
+        tracing::warn!("réglage du niveau de journal impossible : {err}");
+        return;
+    }
+    tracing::info!(verbose, "niveau de journal réglé");
+}
 
 fn log_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.data_dir().join("logs"))
@@ -146,11 +286,13 @@ pub fn init() -> Option<PathBuf> {
                 // (il n'est pas `Clone`) — le `Mutex` est le pont standard de `tracing-subscriber`
                 // (impl générique `MakeWriter for Mutex<W: Write>`) pour une écriture SYNCHRONE
                 // (voir doc du module : pas de `non_blocking`, pour ne rien perdre sur Ctrl+C).
+                // `CappedAppender` s'intercale pour borner le VOLUME du jour (voir
+                // `MAX_LOG_BYTES_PER_DAY`) — la couche console, elle, n'est pas plafonnée.
                 let layer = tracing_subscriber::fmt::layer()
                     .with_ansi(false)
                     .with_thread_names(true)
                     .with_line_number(true)
-                    .with_writer(std::sync::Mutex::new(appender));
+                    .with_writer(std::sync::Mutex::new(CappedAppender::new(appender)));
                 (Some(layer), Some(dir))
             }
             Err(err) => {
@@ -167,8 +309,15 @@ pub fn init() -> Option<PathBuf> {
         }
     };
 
+    // Filtre RECHARGEABLE : la case « Journal détaillé » de la fenêtre Options le remplace à
+    // chaud (voir [`set_verbose`]). Le journal démarre toujours au niveau ordinaire — la config
+    // n'est pas encore lue à cet instant, et c'est bien le défaut voulu : rien de personnel dans
+    // le fichier tant que l'utilisateur n'a rien demandé.
+    let (filter_layer, filter_handle) = reload::Layer::new(filter());
+    let _ = FILTER_HANDLE.set(filter_handle);
+
     tracing_subscriber::registry()
-        .with(filter())
+        .with(filter_layer)
         .with(stdout_layer)
         .with(file_layer)
         .init();
@@ -207,5 +356,67 @@ pub fn install_ctrlc_handler() {
         std::process::exit(0);
     }) {
         tracing::warn!("installation du gestionnaire Ctrl+C impossible : {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Le plafond du jour coupe l'écriture sur disque après une ligne qui l'annonce, et n'échoue
+    /// jamais : `tracing` remonterait l'erreur à chaque appel derrière (voir `CappedAppender`).
+    #[test]
+    fn le_plafond_coupe_l_ecriture_sans_echouer() {
+        let mut appender = CappedAppender::new(Vec::new());
+        let ligne = vec![b'x'; 1024];
+        let mut ecrit = 0u64;
+        while ecrit < MAX_LOG_BYTES_PER_DAY {
+            appender
+                .write_all(&ligne)
+                .expect("écriture sous le plafond");
+            ecrit += ligne.len() as u64;
+        }
+        let avant_coupure = appender.inner.len();
+
+        // Au-delà : accepté (pas d'erreur), mais plus rien du contenu ne part sur disque.
+        appender
+            .write_all(b"une ligne de trop")
+            .expect("une écriture au-dessus du plafond ne doit jamais échouer");
+        appender
+            .write_all(b"et une autre")
+            .expect("idem pour les suivantes");
+
+        let apres = String::from_utf8_lossy(&appender.inner[avant_coupure..]).into_owned();
+        assert!(
+            apres.contains("plafond de 16 Mio atteint"),
+            "la coupure doit être annoncée dans le fichier : {apres:?}"
+        );
+        assert!(
+            !apres.contains("une ligne de trop") && !apres.contains("et une autre"),
+            "rien ne doit plus être écrit après la coupure : {apres:?}"
+        );
+        assert_eq!(
+            apres.matches("plafond de").count(),
+            1,
+            "la ligne de coupure ne s'écrit qu'une fois"
+        );
+        assert!(daily_cap_reached());
+    }
+
+    /// Le changement de jour UTC — celui-là même qui fait ouvrir un nouveau fichier à
+    /// `tracing-appender` — remet le compteur à zéro.
+    #[test]
+    fn le_changement_de_jour_rouvre_le_robinet() {
+        let mut appender = CappedAppender::new(Vec::new());
+        appender.written = MAX_LOG_BYTES_PER_DAY;
+        appender.write_all(b"bloquee").expect("pas d'erreur");
+        assert!(!String::from_utf8_lossy(&appender.inner).contains("bloquee"));
+
+        appender.day -= 1;
+        appender.write_all(b"jour suivant").expect("pas d'erreur");
+        assert!(
+            String::from_utf8_lossy(&appender.inner).contains("jour suivant"),
+            "le nouveau fichier du jour repart d'un compteur vide"
+        );
     }
 }

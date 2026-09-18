@@ -125,10 +125,17 @@ pub fn send_whisper(character: &str, target: Option<usize>) {
                     Err(err) => tracing::warn!("[chat] focus du jeu non rendu : {err}"),
                 }
             }
+            // Nom du destinataire en `debug` seulement — pseudonyme d'un tiers, constat C6 de
+            // `docs/analyse-rgpd.md`. Ce qui compte au journal, c'est que la ligne ait été tapée
+            // (ou non) : l'échec est un problème de saisie clavier, pas de destinataire.
             match imp::type_open_line(&line, CHAT_OPEN_DELAY) {
-                Ok(()) => tracing::info!("[chat] réponse en privé préparée pour {character}"),
+                Ok(()) => {
+                    tracing::info!("[chat] réponse en privé préparée");
+                    tracing::debug!(%character, "[chat] réponse en privé préparée");
+                }
                 Err(err) => {
-                    tracing::warn!("[chat] réponse en privé vers {character} en échec : {err}")
+                    tracing::warn!("[chat] réponse en privé en échec : {err}");
+                    tracing::debug!(%character, "[chat] réponse en privé en échec");
                 }
             }
         })

@@ -18,17 +18,105 @@ const ENGINE_BUNDLE: &str = include_str!("../engine-js/dist/engine.bundle.js");
 pub enum EngineError {
     #[error("erreur QuickJS : {0}")]
     QuickJs(#[from] rquickjs::Error),
-    #[error("désérialisation d'un LogEntry a échoué : {source} — JSON reçu : {json}")]
+    /// Échec de désérialisation d'un lot analysé par le parser vendu.
+    ///
+    /// **Ni le JSON reçu ni le message brut de `serde_json` ne sont rendus par `Display`**
+    /// (constat C6 de `docs/analyse-rgpd.md`) : le lot contient les entrées `Chat { author,
+    /// message }` du moment, et le message de `serde_json` cite volontiers la valeur fautive
+    /// (« invalid type: string "…" »). Recopier l'un ou l'autre dans un journal conservé 14 jours
+    /// contredisait la promesse « le contenu du chat n'est ni transmis ni écrit sur disque » — et
+    /// ce chemin-là est précisément celui qu'emprunte un incident, donc le plus susceptible d'être
+    /// joint à un rapport de bug.
+    ///
+    /// Ce qu'il reste, [`DeserializeContext`], suffit à situer et à rejouer le défaut : nature de
+    /// l'erreur, position, taille du lot, et les valeurs de `kind` qu'il portait. Le détail
+    /// complet reste accessible à l'appelant par [`std::error::Error::source`], à ne journaliser
+    /// qu'en `debug` (réglage « Journal détaillé »).
+    #[error("désérialisation d'un LogEntry a échoué : {context}")]
     Deserialize {
         source: serde_json::Error,
-        json: String,
+        context: DeserializeContext,
     },
+}
+
+/// Ce qu'on garde d'un lot que `serde` a refusé : sa FORME, jamais son contenu — voir
+/// [`EngineError::Deserialize`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeserializeContext {
+    /// `data` (JSON valide mais forme inattendue), `syntax`, `eof` ou `io`.
+    pub classification: &'static str,
+    /// Position de l'erreur dans le JSON produit par le parser vendu — 1-based, `serde_json`.
+    pub line: usize,
+    pub column: usize,
+    /// Taille du lot refusé, en octets : distingue une entrée isolée d'un rattrapage entier.
+    pub bytes: usize,
+    /// Les valeurs du champ discriminant `kind` portées par le lot, dédupliquées et ordonnées —
+    /// vide si le JSON n'est même pas analysable en `serde_json::Value`. Ce sont des noms de
+    /// VARIANTES (`chat`, `fighter-joined`…), pas des données de joueur.
+    pub kinds: Vec<String>,
+}
+
+impl std::fmt::Display for DeserializeContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} à la ligne {} colonne {}, lot de {} octet(s)",
+            self.classification, self.line, self.column, self.bytes
+        )?;
+        if self.kinds.is_empty() {
+            f.write_str(", aucun `kind` lisible")
+        } else {
+            write!(f, ", kind(s) : {}", self.kinds.join(", "))
+        }
+    }
+}
+
+impl DeserializeContext {
+    fn new(json: &str, source: &serde_json::Error) -> Self {
+        use serde_json::error::Category;
+        Self {
+            classification: match source.classify() {
+                Category::Io => "erreur d'entrée/sortie",
+                Category::Syntax => "JSON mal formé",
+                Category::Data => "forme inattendue",
+                Category::Eof => "JSON tronqué",
+            },
+            line: source.line(),
+            column: source.column(),
+            bytes: json.len(),
+            kinds: kinds_of(json),
+        }
+    }
+}
+
+/// Relit le lot uniquement pour en extraire les valeurs de `kind` — le seul champ dont on sait
+/// qu'il ne porte aucune donnée de joueur (c'est le tag `#[serde(tag = "kind")]` de
+/// [`LogEntry`], donc un ensemble fermé de noms de variantes). Tout le reste est laissé de côté.
+fn kinds_of(json: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let entries: Vec<&serde_json::Value> = match &value {
+        serde_json::Value::Array(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    let mut kinds: Vec<String> = entries
+        .iter()
+        .filter_map(|entry| entry.get("kind"))
+        .filter_map(serde_json::Value::as_str)
+        // Une valeur de `kind` inattendue reste un nom de variante côté parser vendu, mais rien
+        // ne le garantit si le JSON est corrompu : bornée, pour ne pas recopier une ligne entière.
+        .map(|kind| kind.chars().take(32).collect::<String>())
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    kinds
 }
 
 fn deserialize<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, EngineError> {
     serde_json::from_str(json).map_err(|source| EngineError::Deserialize {
+        context: DeserializeContext::new(json, &source),
         source,
-        json: json.to_string(),
     })
 }
 
@@ -143,6 +231,48 @@ impl LogParserEngine {
 mod tests {
     use super::*;
     use crate::model::LogEntry;
+
+    /// Garde-fou du constat C6 : ce que l'erreur de désérialisation rend lisible ne doit JAMAIS
+    /// contenir le lot — un message de chat s'y retrouverait, et de là dans le journal de session.
+    #[test]
+    fn l_erreur_de_deserialisation_ne_recopie_pas_le_lot() {
+        // Forme volontairement fautive (`damage` attendu en nombre) sur une entrée de chat :
+        // c'est exactement le cas que le constat décrit.
+        let lot = r#"[{"kind":"chat","time":"10:00:00","channel":"commerce","author":"Oumbra","message":"WTS mon secret"},{"kind":"fight-start","fightId":"pas un nombre"}]"#;
+        let err =
+            deserialize::<Vec<LogEntry>>(lot).expect_err("ce lot ne doit pas se désérialiser");
+        let rendu = err.to_string();
+        for interdit in ["WTS mon secret", "Oumbra", "pas un nombre"] {
+            assert!(
+                !rendu.contains(interdit),
+                "l'erreur rendue ne doit pas contenir {interdit:?} : {rendu}"
+            );
+        }
+        // …tout en restant diagnostiquable : nature, position, taille et variantes du lot.
+        let EngineError::Deserialize { context, .. } = &err else {
+            panic!("variante inattendue : {err}");
+        };
+        assert_eq!(context.bytes, lot.len());
+        assert_eq!(context.kinds, vec!["chat", "fight-start"]);
+        assert!(
+            rendu.contains("chat"),
+            "les `kind` situent le lot : {rendu}"
+        );
+    }
+
+    /// Un lot syntaxiquement cassé ne livre aucun `kind` — et surtout aucun fragment de ligne.
+    #[test]
+    fn l_erreur_sur_un_json_casse_reste_muette() {
+        let lot = r#"[{"kind":"chat","author":"Oumbra","message":"WTS mon secr"#;
+        let err = deserialize::<Vec<LogEntry>>(lot).expect_err("JSON tronqué");
+        let rendu = err.to_string();
+        assert!(!rendu.contains("Oumbra"), "{rendu}");
+        assert!(!rendu.contains("WTS"), "{rendu}");
+        let EngineError::Deserialize { context, .. } = &err else {
+            panic!("variante inattendue : {err}");
+        };
+        assert!(context.kinds.is_empty(), "{:?}", context.kinds);
+    }
 
     /// Lignes réelles (format vendu, mêmes textes que `log-parser.spec.ts` côté web — voir son test
     /// "identifie une invocation SANS aucune annonce 'Invoque' détectable") : "SorHon" fait tomber

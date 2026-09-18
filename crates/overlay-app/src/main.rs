@@ -23,7 +23,10 @@ fn main() {
         .init();
 
     let path = resolve_path();
-    tracing::info!("=== overlay-app (L1) — suivi de {} ===", path.display());
+    tracing::info!(
+        "=== overlay-app (L1) — suivi de {} ===",
+        overlay_ingest::privacy::redact_path(&path)
+    );
     tracing::info!("Ctrl+C pour arrêter.");
 
     let rx = watcher::spawn(&path);
@@ -71,7 +74,7 @@ fn resolve_path() -> PathBuf {
         None => {
             tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
             for candidate in discovery::candidate_paths() {
-                tracing::error!("  - {}", candidate.display());
+                tracing::error!("  - {}", overlay_ingest::privacy::redact_path(&candidate));
             }
             tracing::error!(
                 "Précisez le chemin explicitement : cargo run -p overlay-app -- <chemin>"

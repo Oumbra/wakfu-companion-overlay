@@ -71,12 +71,12 @@ pub fn save_fight(dir: &Path, fight: &FightSnapshot) {
         return; // ne devrait jamais arriver (types simples, toujours sérialisables)
     };
     if let Err(err) = std::fs::create_dir_all(dir) {
-        tracing::warn!(dir = %dir.display(), %err, "impossible de créer le dossier de sauvegarde des combats");
+        tracing::warn!(dir = %overlay_ingest::privacy::redact_path(dir), %err, "impossible de créer le dossier de sauvegarde des combats");
         return;
     }
     let path = fight_path(dir, fight.fight_id);
     if let Err(err) = std::fs::write(&path, json) {
-        tracing::warn!(path = %path.display(), %err, "impossible d'écrire l'état du combat (non restaurable après redémarrage)");
+        tracing::warn!(path = %overlay_ingest::privacy::redact_path(&path), %err, "impossible d'écrire l'état du combat (non restaurable après redémarrage)");
     }
 }
 
@@ -87,7 +87,7 @@ pub fn delete_fight(dir: &Path, fight_id: i64) {
     let path = fight_path(dir, fight_id);
     if let Err(err) = std::fs::remove_file(&path) {
         if err.kind() != std::io::ErrorKind::NotFound {
-            tracing::warn!(path = %path.display(), %err, "impossible de supprimer l'état de combat persisté");
+            tracing::warn!(path = %overlay_ingest::privacy::redact_path(&path), %err, "impossible de supprimer l'état de combat persisté");
         }
     }
 }

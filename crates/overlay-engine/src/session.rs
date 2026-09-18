@@ -778,11 +778,17 @@ impl SessionState {
             .map(|(id, _)| *id)
             .collect();
         for fight_id in stale {
+            // Nom du personnage en `debug` (constat C6 de `docs/analyse-rgpd.md`) : les deux
+            // identifiants de combat suffisent à suivre l'enchaînement dans le journal.
             tracing::info!(
                 fight_id,
                 joined_fight_id,
-                character = name,
                 "combat abandonné : le personnage en a rejoint un autre"
+            );
+            tracing::debug!(
+                fight_id,
+                character = name,
+                "combat abandonné par ce personnage"
             );
             self.abandon_fight(fight_id, Some(time));
         }

@@ -497,7 +497,11 @@ fn account_row(
     if compte_choisi != state.account {
         state.account = compte_choisi;
         state.reset_gestes();
-        tracing::info!(
+        // Libellé du compte en `debug` (constat C6 de `docs/analyse-rgpd.md`) — c'est un nom
+        // choisi par l'utilisateur, souvent son pseudonyme de compte Ankama. L'index suffit à
+        // relire l'enchaînement des gestes dans l'onglet.
+        tracing::info!(index = compte_choisi, "[options] compte affiché changé");
+        tracing::debug!(
             compte = %account_label(ctx.roster, compte_choisi),
             "[options] compte affiché changé"
         );
@@ -624,7 +628,8 @@ fn grille(
                 // Une clé cochée qui ne désigne plus rien ferait mentir le compteur du bouton
                 // groupé — même précaution qu'au Chat.
                 state.selected.retain(|k| k != &perso.name);
-                tracing::info!(nom = %perso.name, "[options] personnage retiré du compte");
+                tracing::info!("[options] personnage retiré du compte");
+                tracing::debug!(nom = %perso.name, "[options] personnage retiré du compte");
             }
             let compte = &mut ctx.roster.accounts[state.account];
             if index < compte.characters.len() {
@@ -1182,11 +1187,13 @@ fn modale_personnage(
                     };
                     match editeur.index {
                         Some(index) => {
-                            tracing::info!(nom = %personnage.name, "[options] personnage modifié");
+                            tracing::info!("[options] personnage modifié");
+                            tracing::debug!(nom = %personnage.name, "[options] personnage modifié");
                             ctx.roster.replace(state.account, index, personnage);
                         }
                         None => {
-                            tracing::info!(nom = %personnage.name, "[options] personnage déclaré");
+                            tracing::info!("[options] personnage déclaré");
+                            tracing::debug!(nom = %personnage.name, "[options] personnage déclaré");
                             ctx.roster.declare(state.account, personnage);
                             // Le sexe choisi devient le défaut de la création suivante — voir règle 3.
                             state.gender_default = editeur.gender;
@@ -1296,7 +1303,8 @@ fn modale_compte(
                         editeur.name.trim().to_string(),
                         editeur.server.clone(),
                     );
-                    tracing::info!(nom = %compte.label, "[options] compte ajouté au roster");
+                    tracing::info!("[options] compte ajouté au roster");
+                    tracing::debug!(nom = %compte.label, "[options] compte ajouté au roster");
                     ctx.roster.accounts.push(compte);
                     // Le nouveau compte devient celui qu'on regarde : c'est pour y déclarer qu'on vient de
                     // le créer.
@@ -1341,7 +1349,8 @@ fn confirmation_de_compte(
         .show(ui)
     {
         design::ConfirmChoice::Yes => {
-            tracing::info!(compte = %nom, "[options] compte retiré du roster");
+            tracing::info!("[options] compte retiré du roster");
+            tracing::debug!(compte = %nom, "[options] compte retiré du roster");
             ctx.roster.remove_account(index);
             state.account = ctx.roster.default_index();
             state.reset_gestes();

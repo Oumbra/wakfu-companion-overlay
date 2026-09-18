@@ -205,7 +205,10 @@ fn register_protocol() {
             None,
             &format!("\"{}\" \"%1\"", handler.display()),
         );
-        tracing::info!("[tour] protocole {PROTOCOL}: → {}", handler.display());
+        tracing::info!(
+            "[tour] protocole {PROTOCOL}: → {}",
+            overlay_ingest::privacy::redact_path(&handler)
+        );
     }
 }
 

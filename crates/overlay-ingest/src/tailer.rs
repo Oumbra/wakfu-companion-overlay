@@ -101,7 +101,7 @@ impl Tailer {
             || len < self.offset
             || (self.identity.is_some() && prefix_changed);
         if rotated {
-            tracing::info!(path = %self.path.display(), "rotation/troncature détectée, relecture depuis le début");
+            tracing::info!(path = %crate::privacy::redact_path(&self.path), "rotation/troncature détectée, relecture depuis le début");
             self.offset = 0;
             self.pending.clear();
             self.caught_up = false;
