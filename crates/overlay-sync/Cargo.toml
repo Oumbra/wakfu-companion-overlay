@@ -3,6 +3,7 @@ name = "overlay-sync"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "Auth native par appairage (lot L4, docs/plan-architecture.md §7.2) + recuperation du roster de personnages (GET /api/v1/settings) — premiere brique reseau de l'overlay."
 
 [dependencies]

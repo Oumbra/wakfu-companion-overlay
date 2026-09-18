@@ -3,6 +3,7 @@ name = "overlay-ui"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "Fenetre overlay transparente (Windows, DirectComposition — voir S1) rendant les deux premiers panneaux de L2 (degats du combat en cours, recap de session) a partir d'overlay-engine/overlay-ingest."
 
 # **Nom des exécutables livrés** — `wakfu-companion-overlay.exe` sous Windows, et non le nom du
