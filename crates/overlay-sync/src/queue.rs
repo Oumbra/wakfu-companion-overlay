@@ -41,6 +41,14 @@ const SYNC_BATCH_SIZE: usize = 50;
 /// Miroir de `MAX_ATTEMPTS` — seuls les échecs "permanents" (voir `is_permanent_rejection`)
 /// comptent, jamais un simple problème réseau.
 const MAX_ATTEMPTS: i64 = 10;
+/// Âge au-delà duquel une entrée encore en file est abandonnée (`prune_older_than`, 2026-09-18)
+/// — **sans équivalent web, et volontairement large** : la file n'accumule que ce que le serveur
+/// n'a pas encore accepté, et une entrée y attend en clair, avec les pseudonymes des autres
+/// combattants (`docs/analyse-rgpd.md` §3.3). Trente jours de serveur injoignable, ce n'est plus
+/// une panne à rattraper : c'est un historique qu'on n'enverra jamais, et rien ne justifie de le
+/// garder sur disque. En deçà, JAMAIS de purge par ancienneté — trois jours hors ligne sont trois
+/// jours de combats à envoyer, pas à jeter.
+pub const MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
 
 /// `sha256_hex(uid|kind|signature)` — miroir exact de `computeClientKey` (`client-key.util.ts`).
 /// Calculé ici (au moment de l'envoi), jamais dans `overlay_engine::history` : ce dernier ne
@@ -201,6 +209,27 @@ impl SyncQueue {
                 .map(|_| ())
                 .map_err(|err| SyncError::TokenStore(err.to_string())),
         }
+    }
+
+    /// Vide la file et rend le nombre d'entrées jetées — à la **déconnexion du compte**
+    /// (`SyncCommand::Deactivate`, 2026-09-18) : ce qui attendait n'a plus de destinataire, et
+    /// le garder sur disque pour une reconnexion hypothétique conserverait sans fin les noms
+    /// des tiers qu'il porte (`docs/analyse-rgpd.md` §3.3). Un compte reconnecté plus tard
+    /// retrouvera de toute façon les combats encore dans `wakfu.log` au rattrapage suivant.
+    pub fn clear(&self) -> Result<usize, SyncError> {
+        self.conn
+            .execute("DELETE FROM sync_queue", [])
+            .map_err(|err| SyncError::TokenStore(err.to_string()))
+    }
+
+    /// Jette les entrées en file depuis plus de `max_age` (voir `MAX_PENDING_AGE`) et rend leur
+    /// nombre. `queued_at` est la date de PREMIÈRE mise en file : un payload corrigé entre-temps
+    /// (voir `enqueue`) ne rajeunit pas l'entrée.
+    pub fn prune_older_than(&self, max_age: std::time::Duration) -> Result<usize, SyncError> {
+        let cutoff = now_ms() - max_age.as_millis() as i64;
+        self.conn
+            .execute("DELETE FROM sync_queue WHERE queued_at < ?1", [cutoff])
+            .map_err(|err| SyncError::TokenStore(err.to_string()))
     }
 
     /// Nombre d'entrées actuellement en file, tous types confondus — diagnostic/indicateur UI.
@@ -619,6 +648,40 @@ mod tests {
             }
         }
         assert_eq!(queue.pending_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn clear_vide_la_file_et_compte_ce_quelle_jette() {
+        let queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("a", "Eclat")).unwrap();
+        queue.enqueue(&fight_event("b", 1)).unwrap();
+        assert_eq!(queue.clear().unwrap(), 2);
+        assert_eq!(queue.pending_count().unwrap(), 0);
+        assert_eq!(queue.clear().unwrap(), 0, "rien de plus au second passage");
+    }
+
+    #[test]
+    fn prune_older_than_ne_jette_que_les_entrees_perimees() {
+        let queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("vieille", "Eclat")).unwrap();
+        queue.enqueue(&purchase_event("recente", "Eclat")).unwrap();
+        // Vieillit la première entrée d'un mois et un jour, directement en base : `queued_at` est
+        // la seule chose que la purge regarde.
+        let cutoff = now_ms() - (MAX_PENDING_AGE.as_millis() as i64) - 24 * 3600 * 1000;
+        queue
+            .conn
+            .execute(
+                "UPDATE sync_queue SET queued_at = ?1 WHERE signature = 'vieille'",
+                [cutoff],
+            )
+            .unwrap();
+        assert_eq!(queue.prune_older_than(MAX_PENDING_AGE).unwrap(), 1);
+        assert_eq!(queue.pending_count().unwrap(), 1);
+        let restante: String = queue
+            .conn
+            .query_row("SELECT signature FROM sync_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(restante, "recente");
     }
 
     #[test]

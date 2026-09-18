@@ -269,6 +269,17 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
             // `uid` (pour `client_key`) ET `token` (pour authentifier l'envoi, voir
             // `SyncCommand::Activate`) — toujours mis à jour ensemble.
             let mut account: Option<(String, String)> = None;
+            // **Ce qui arrive SANS compte reste en mémoire** (2026-09-18) : rien n'est écrit dans
+            // `sync-queue.sqlite3` tant qu'aucun compte ne peut le recevoir. Le cas ordinaire est
+            // le démarrage — le rattrapage de `wakfu.log` produit ses événements pendant que le
+            // thread Auth résout encore l'`uid` — et ce tampon les fait patienter jusqu'à
+            // `Activate`, qui les verse dans la file. L'autre cas est le mode invité, où ils
+            // seraient sinon restés sur disque sans destinataire, avec les pseudonymes des autres
+            // combattants (`docs/analyse-rgpd.md` §3.3). Borné par `HELD_EVENTS_CAP` : au-delà,
+            // le plus ancien cède la place — perte sans conséquence, le rattrapage du prochain
+            // lancement rejoue ce que `wakfu.log` contient encore.
+            let mut held: std::collections::VecDeque<overlay_engine::SyncEvent> =
+                std::collections::VecDeque::new();
             // Dernier instantané de Suivi reçu et pas encore répliqué avec succès (voir la doc de
             // `spawn_sync_thread` ci-dessus) — `None` tant qu'aucun `SyncCommand::SyncWatchlist`
             // n'est arrivé, ou après un envoi réussi.
@@ -284,23 +295,42 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
             loop {
                 match command_rx.recv_timeout(wait) {
                     Ok(SyncCommand::Activate { uid, token }) => {
-                        tracing::info!("file de synchro activée (compte connecté, lot L5)");
+                        tracing::info!(
+                            held = held.len(),
+                            "file de synchro activée (compte connecté, lot L5)"
+                        );
                         account = Some((uid, token));
+                        // Ce qui attendait depuis plus d'un mois n'a plus de sens — voir
+                        // `MAX_PENDING_AGE` ; ensuite seulement, ce que le démarrage a retenu.
+                        match queue.prune_older_than(overlay_sync::MAX_PENDING_AGE) {
+                            Ok(0) | Err(_) => {}
+                            Ok(removed) => tracing::info!(
+                                removed,
+                                "entrées d'historique abandonnées — en attente depuis plus d'un mois"
+                            ),
+                        }
+                        enqueue_all(&queue, held.drain(..));
                     }
                     Ok(SyncCommand::Deactivate) => {
+                        // Rien de ce qui attendait n'a plus de destinataire — ni en base, ni en
+                        // mémoire (voir `held` et `SyncQueue::clear`).
+                        let dropped = queue.clear().unwrap_or(0) + held.len();
+                        held.clear();
                         tracing::info!(
-                            "file de synchro désactivée (compte déconnecté) — contenu déjà en file conservé sur disque"
+                            dropped,
+                            "file de synchro désactivée (compte déconnecté) — contenu en attente effacé"
                         );
                         account = None;
                     }
                     Ok(SyncCommand::Enqueue(events)) => {
-                        for event in &events {
-                            if let Err(err) = queue.enqueue(event) {
-                                tracing::warn!(
-                                    %err,
-                                    kind = event.kind.as_str(),
-                                    "échec d'enfilage d'un événement d'historique (SQLite)"
-                                );
+                        if account.is_some() {
+                            enqueue_all(&queue, events);
+                        } else {
+                            for event in events {
+                                if held.len() >= HELD_EVENTS_CAP {
+                                    held.pop_front();
+                                }
+                                held.push_back(event);
                             }
                         }
                     }
@@ -352,6 +382,28 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
             }
         })
         .expect("échec de création du thread Sync");
+}
+
+/// Nombre maximal d'événements d'historique retenus en mémoire sans compte connecté (voir `held`
+/// dans `spawn_sync_thread`). Un `wakfu.log` d'une journée chargée en produit quelques centaines ;
+/// cinq mille couvrent largement le rattrapage initial, pour quelques Mo au pire.
+const HELD_EVENTS_CAP: usize = 5_000;
+
+/// Écrit chaque événement dans la file SQLite — l'échec d'un seul n'arrête pas les autres, et se
+/// contente d'un avertissement au journal (best-effort, comme l'ouverture de la file).
+fn enqueue_all(
+    queue: &overlay_sync::SyncQueue,
+    events: impl IntoIterator<Item = overlay_engine::SyncEvent>,
+) {
+    for event in events {
+        if let Err(err) = queue.enqueue(&event) {
+            tracing::warn!(
+                %err,
+                kind = event.kind.as_str(),
+                "échec d'enfilage d'un événement d'historique (SQLite)"
+            );
+        }
+    }
 }
 
 /// Débounce avant le premier essai d'un envoi watchlist — miroir de `WRITE_DEBOUNCE_MS`

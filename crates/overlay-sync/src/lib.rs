@@ -18,7 +18,7 @@ pub use client::{
     post_json_authenticated, AccountSettings,
 };
 pub use pairing::{pair_and_wait, PairingHandle};
-pub use queue::{client_key, FlushOutcome, SyncQueue};
+pub use queue::{client_key, FlushOutcome, SyncQueue, MAX_PENDING_AGE};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {

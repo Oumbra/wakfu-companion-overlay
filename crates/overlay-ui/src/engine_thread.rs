@@ -799,9 +799,10 @@ pub fn spawn_engine_thread(
                         }
                         watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
                         // L5, §7.1 du plan : relayé tel quel au thread Sync, qu'un compte soit lié
-                        // ou non — `SyncCommand::Enqueue` en mode invité est simplement ignoré par
-                        // ce dernier (aucune écriture réseau), jamais retenu ici. Ne bloque jamais
-                        // ce thread : l'écriture SQLite/l'envoi vivent ailleurs.
+                        // ou non — sans compte, ce dernier le retient en mémoire jusqu'à
+                        // l'activation, sans rien écrire sur disque (voir `spawn_sync_thread`),
+                        // jamais retenu ici. Ne bloque jamais ce thread : l'écriture SQLite/l'envoi
+                        // vivent ailleurs.
                         let sync_events = engine.drain_sync_events();
                         if !sync_events.is_empty() {
                             let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
