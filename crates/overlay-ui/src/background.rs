@@ -533,6 +533,11 @@ pub fn spawn_auth_thread(
                             break;
                         }
                         Ok(AuthCommand::Disconnect) if connected => {
+                            // **Le serveur d'abord, le disque ensuite** (2026-09-18, constat C5) :
+                            // c'est le jeton qui désigne la session à effacer côté serveur, et
+                            // `clear_token` le fait disparaître. L'ordre inverse laisserait une
+                            // session valide en base sans plus aucun moyen de la nommer.
+                            crate::local_data::revoke_server_session();
                             overlay_sync::token_store::clear_token();
                             let _ = settings_tx.send(EngineCommand::Disconnect);
                             let _ = sync_tx.send(SyncCommand::Deactivate);

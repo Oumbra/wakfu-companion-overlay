@@ -290,6 +290,46 @@ pub fn fetch_account_id(token: &str) -> Result<String, SyncError> {
         .ok_or_else(|| SyncError::Json("champ user.id absent de /api/v1/auth/me".into()))
 }
 
+/// **`DELETE /api/v1/auth/native/session` — efface la session côté SERVEUR** (2026-09-18, constat
+/// C5 de `docs/analyse-rgpd.md` §3.5).
+///
+/// Effacer le jeton de la machine ne le rendait pas invalide : il restait utilisable par qui en
+/// aurait pris copie avant, et n'avait ni expiration courte ni rotation. Cette route (ajoutée le
+/// même jour côté `wakfu-companion`, `functions/api/v1/auth/native/session.ts`) supprime la ligne
+/// de la table `sessions` — pas seulement un `revoked_at` — et purge au passage les appairages
+/// natifs périmés, qui portent un jeton en clair jusqu'au premier sondage.
+///
+/// **À appeler AVANT `token_store::clear_token`** : c'est le jeton qui prouve au serveur de quelle
+/// session il s'agit. Une fois effacé localement, plus rien ne permet de la désigner.
+///
+/// Rend `deleted` : `false` si la ligne n'existait plus (appel rejoué). L'appelant traite l'échec
+/// comme non bloquant — un effacement local hors ligne doit aboutir de toute façon, et le serveur
+/// finira par voir la session expirer.
+pub fn delete_native_session(token: &str) -> Result<bool, SyncError> {
+    const PATH: &str = "/api/v1/auth/native/session";
+    let url = format!("{}{PATH}", base_url());
+    let mut response = agent()
+        .delete(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(SyncError::Http {
+            status,
+            path: PATH.to_string(),
+        });
+    }
+    let body: Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|err| SyncError::Json(err.to_string()))?;
+    Ok(body
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false))
+}
+
 /// `GET /api/v1/settings` avec `Authorization: Bearer <token>` — voir `functions/api/_auth.ts`
 /// (dépôt `wakfu-companion`) pour l'acceptation du porteur en plus du cookie. `RosterIndex::
 /// from_settings_json`/`watchlist_from_settings_json` attendent l'objet `data` de cette réponse,

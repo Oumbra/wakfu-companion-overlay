@@ -262,9 +262,10 @@ pub const SECTIONS: &[Section] = &[
                  file d'envoi, un journal technique de 14 jours, ses caches et, si la \
                  notification de tour est active, l'image du nom de vos personnages — sous \
                  %APPDATA% (Windows) ou ~/.config et ~/.local/share (Linux). Se déconnecter \
-                 efface le jeton, les combats en cours, les compteurs de suivi, l'image des noms \
-                 et le contenu du journal ; « Supprimer les données locales », dans la section \
-                 « Compte » de l'onglet Paramètres, efface tout le reste puis ferme l'overlay.",
+                 efface le jeton — ici et sur le serveur, où la session est supprimée —, les \
+                 combats en cours, les compteurs de suivi, l'image des noms et le contenu du \
+                 journal ; « Supprimer les données locales », dans la section « Compte » de \
+                 l'onglet Paramètres, efface tout le reste puis ferme l'overlay.",
             ),
             info(
                 "Vos droits d'accès, de rectification, d'effacement et de portabilité s'exercent \

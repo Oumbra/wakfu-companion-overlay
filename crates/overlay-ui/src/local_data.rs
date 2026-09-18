@@ -10,6 +10,13 @@
 //! | [`Scope::OnDisconnect`] | toute déconnexion (fenêtre Options, zone de notification, jeton refusé) — `background::spawn_auth_thread` | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
 //! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › Compte, écran de connexion) | les **deux racines** de dossiers en entier, le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
 //!
+//! Les deux gestes commencent par **effacer la session côté serveur**
+//! ([`revoke_server_session`]) : un jeton effacé du disque restait valide en base, donc utilisable
+//! par qui en aurait pris copie (2026-09-18, route `DELETE /api/v1/auth/native/session` ajoutée
+//! côté `wakfu-companion` pour ce constat). C'est la seule partie de l'effacement qui ne dépend pas
+//! de cette machine, et la seule qui puisse échouer sans conséquence : hors ligne, la purge locale
+//! se fait quand même et la session expire d'elle-même côté serveur.
+//!
 //! La portée de déconnexion ne touche ni la configuration ni les caches : se déconnecter n'est pas
 //! désinstaller, et reperdre son chemin de `wakfu.log` ou son catalogue à chaque déconnexion serait
 //! une punition, pas une protection. C'est le bouton qui va jusque-là, et il le dit avant.
@@ -226,8 +233,73 @@ pub fn purge_everything_before_shutdown(
     recap: &mut crate::recap_session::RecapSession,
     engine_totals: &overlay_engine::SessionTotals,
 ) -> PurgeReport {
+    revoke_server_session_within(SHUTDOWN_REVOKE_BUDGET);
     recap.purge(engine_totals, std::time::SystemTime::now());
     purge(Scope::Everything)
+}
+
+/// Ce qu'on accorde à la révocation serveur quand l'overlay est en train de se fermer — voir
+/// [`revoke_server_session_within`]. Le client HTTP, lui, tolère dix secondes
+/// (`overlay_sync::client`) : c'est bon pour un thread de fond, pas pour une fenêtre que
+/// l'utilisateur vient de condamner et qui resterait figée d'autant.
+const SHUTDOWN_REVOKE_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// **Efface la session côté serveur** (`client::delete_native_session`) — le jeton cesse d'être
+/// utilisable pour qui en aurait pris copie, ce que l'effacement local ne pouvait pas obtenir
+/// (constat C5 de `docs/analyse-rgpd.md` §3.5, route ajoutée côté `wakfu-companion` le
+/// 2026-09-18).
+///
+/// **Bloquante, et c'est voulu** : appelée par le thread d'authentification à la déconnexion
+/// (`background::spawn_auth_thread`), juste avant `token_store::clear_token` — sans le jeton, plus
+/// rien ne désigne la session à effacer. Aucune fenêtre n'attend ce thread.
+///
+/// Best-effort de bout en bout : sans jeton (déjà effacé, mode invité) il n'y a rien à révoquer,
+/// et un échec réseau est journalisé sans rien interrompre. Un effacement local doit aboutir hors
+/// ligne ; la session, elle, finira par expirer côté serveur.
+pub fn revoke_server_session() {
+    let Some(token) = overlay_sync::token_store::load_token() else {
+        return;
+    };
+    match overlay_sync::client::delete_native_session(&token) {
+        Ok(true) => tracing::info!("[compte] session effacée côté serveur."),
+        Ok(false) => {
+            tracing::info!("[compte] aucune session à effacer côté serveur (déjà faite).")
+        }
+        Err(err) => tracing::warn!(
+            "[compte] session non effacée côté serveur ({err}) — le jeton local part quand même."
+        ),
+    }
+}
+
+/// [`revoke_server_session`] avec un budget de temps — pour le chemin où l'overlay **se ferme**
+/// derrière (le bouton « Supprimer les données locales »).
+///
+/// Un thread porte l'appel, et l'attente est bornée : passé le budget, on cesse d'attendre et
+/// l'effacement local continue. La requête, elle, n'est pas annulée — elle part et vit sa vie le
+/// peu de temps qu'il reste au processus, ce qui est mieux que rien et ne coûte rien à personne.
+/// Le thread n'est pas joint (il détient son propre agent HTTP et ne touche à aucun état partagé).
+fn revoke_server_session_within(budget: std::time::Duration) {
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    if std::thread::Builder::new()
+        .name("overlay-revoke".into())
+        .spawn(move || {
+            revoke_server_session();
+            let _ = done_tx.send(());
+        })
+        .is_err()
+    {
+        // Pas de thread disponible : tenter l'appel ici plutôt que de renoncer. L'interface est
+        // déjà condamnée, elle peut bien attendre le temps du client HTTP.
+        revoke_server_session();
+        return;
+    }
+    if done_rx.recv_timeout(budget).is_err() {
+        tracing::warn!(
+            "[compte] effacement de la session côté serveur toujours en cours après {} s — \
+             l'effacement local continue sans l'attendre.",
+            budget.as_secs()
+        );
+    }
 }
 
 /// Supprime chaque chemin de `paths` — fichier ou dossier entier —, sans jamais s'arrêter au
