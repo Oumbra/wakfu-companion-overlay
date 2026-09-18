@@ -188,12 +188,23 @@ pub fn fetch_item_detail(id: i64) -> Result<Value, SyncError> {
     parse_json_body(&path, response)
 }
 
-/// Récupère les octets bruts d'une URL absolue quelconque — PAS `base_url()` (utilisé tel quel
-/// pour un CDN externe, ex. les icônes `wakassets`, voir `overlay_engine::catalog::IconRef::
-/// image_url`), pas d'en-tête d'authentification (jamais nécessaire hors du propre domaine de
-/// l'API). Toute réponse non 2xx est une erreur — pas de distinction faite ici entre "objet
-/// inconnu de ce CDN" et une vraie panne réseau, l'appelant traite les deux de la même façon
-/// (repli sur l'icône générique).
+/// L'URL d'une icône `wakassets` **relayée par l'API** — `GET /api/v1/icons/{folder}/{gfxId}.png`
+/// sur [`base_url`], pour un chemin `items/1234.png` (`overlay_engine::catalog::IconRef::
+/// image_paths`). Depuis le 2026-09-19 (constat C10 de `docs/analyse-rgpd.md`) l'overlay ne
+/// contacte plus `vertylo.github.io` : c'est le service, qui connaît déjà le compte, qui va
+/// chercher l'image et la garde en cache à sa périphérie.
+pub fn icon_url(path: &str) -> String {
+    format!(
+        "{}/api/v1/icons/{}",
+        base_url().trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
+/// Récupère les octets bruts d'une URL absolue (les icônes, voir [`icon_url`]), sans en-tête
+/// d'authentification : ces routes sont publiques. Toute réponse non 2xx est une erreur — pas de
+/// distinction faite ici entre "icône inconnue" et une vraie panne réseau, l'appelant traite les
+/// deux de la même façon (repli sur l'icône générique).
 pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
     let mut response = agent()
         .get(url)

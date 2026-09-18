@@ -1658,7 +1658,7 @@ fn galerie_du_voile() {
 ///
 /// Le CDN `wakassets` ne sert pas que des carrés : un monstre absent de `monsters/` est servi par
 /// `monsterIllustrations/`, qui porte des **bannières rectangulaires** (34 des 61 monstres d'un
-/// fichier utilisateur, voir `IconRef::image_urls`). Peintes dans un carré, elles y étaient
+/// fichier utilisateur, voir `IconRef::image_paths`). Peintes dans un carré, elles y étaient
 /// **étirées** — retour utilisateur du 2026-09-17 : « les images provenant de
 /// `wakassets/monsterIllustrations` sont déformées ».
 ///

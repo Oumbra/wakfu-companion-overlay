@@ -6,7 +6,7 @@
 //!
 //! Les images du CDN `wakassets` ne sont pas toutes carrées. `monsters/` l'est, mais
 //! `monsterIllustrations/` — le second dossier essayé pour un monstre, seule source de 34 des 61
-//! monstres d'un fichier utilisateur (voir `IconRef::image_urls`) — sert des **bannières
+//! monstres d'un fichier utilisateur (voir `IconRef::image_paths`) — sert des **bannières
 //! rectangulaires**. Peintes dans le carré d'un portrait ou d'un emplacement, elles y étaient
 //! **étirées** : « les images provenant de `wakassets/monsterIllustrations` sont déformées ».
 //!

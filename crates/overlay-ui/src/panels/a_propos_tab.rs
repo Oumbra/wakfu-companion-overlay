@@ -251,10 +251,10 @@ pub const SECTIONS: &[Section] = &[
                  part.",
             ),
             info(
-                "Deux services tiers sont contactés : GitHub, à chaque lancement, pour vérifier \
-                 s'il existe une nouvelle version, et vertylo.github.io pour les icônes \
-                 d'objets, de monstres et de sorts. Chacun voit votre adresse IP, comme tout \
-                 site consulté.",
+                "Un seul service tiers est contacté : GitHub, à chaque lancement, pour vérifier \
+                 s'il existe une nouvelle version — il voit votre adresse IP, comme tout site \
+                 consulté, sans identifiant ni numéro de version. Les icônes d'objets, de \
+                 monstres et de sorts sont servies par wakfu-companion.com.",
             ),
             info(
                 "Sur cet ordinateur, l'overlay conserve sa configuration, le jeton de session \

@@ -298,8 +298,8 @@ pub fn referential_path(is_ally: bool) -> &'static str {
 }
 
 /// Numéro d'image à partir de l'URL `picture` du fichier (`…/wakassets/spells/2282.png` → `2282`)
-/// — c'est ce numéro, et non l'URL complète, que `IconRef` transporte : `IconRef::image_url`
-/// reconstruit l'URL `wakassets` (et `overlay_sync::icon_cache` nomme son fichier de cache
+/// — c'est ce numéro, et non l'URL complète, que `IconRef` transporte : `IconRef::image_path`
+/// reconstruit le chemin `wakassets` (et `overlay_sync::icon_cache` nomme son fichier de cache
 /// d'après lui). Les référentiels doivent donc pointer sur `wakassets/spells/` — vérifié par le
 /// test `toutes_les_images_des_referentiels_sont_sur_wakassets_spells` pour qu'une mise à jour d'un
 /// fichier vers un autre hébergement ne casse pas silencieusement l'affichage.
@@ -411,7 +411,7 @@ mod tests {
                     assert!(
                         picture.starts_with(WAKASSETS_SPELLS_URL_PREFIX)
                             && picture.ends_with(".png"),
-                        "{file} : {} ({}) : image hors de wakassets/spells — `IconRef::image_url` \
+                        "{file} : {} ({}) : image hors de wakassets/spells — `IconRef::image_path` \
                          ne saurait pas la reconstruire : {}",
                         spell.fr,
                         spell.id,
@@ -430,10 +430,7 @@ mod tests {
             .expect("Hachure (Ouginak)");
         assert_eq!(entry.name, "Hachure");
         assert_eq!(entry.owner, "ouginak");
-        assert_eq!(
-            entry.icon.as_ref().unwrap().image_url(),
-            "https://vertylo.github.io/wakassets/spells/6262.png"
-        );
+        assert_eq!(entry.icon.as_ref().unwrap().image_path(), "spells/6262.png");
     }
 
     /// « Rafale » existe chez deux classes : la classe du lanceur départage, le repli sans classe
