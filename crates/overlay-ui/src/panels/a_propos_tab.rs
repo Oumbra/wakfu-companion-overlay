@@ -287,7 +287,9 @@ const VOS_DONNEES_TITLE: &str = "Vos données";
 pub fn api_override_notice(api_override: Option<&str>) -> Option<String> {
     api_override.map(|origin| {
         format!(
-            "Cet overlay n'envoie pas ses données à wakfu-companion.com mais à {origin} :              l'origine du serveur est surchargée par la variable d'environnement              WAKFU_COMPANION_API_URL. Si vous ne l'avez pas posée vous-même, retirez-la."
+            "Cet overlay n'envoie pas ses données à wakfu-companion.com mais à {origin} : \
+             l'origine du serveur est surchargée par la variable d'environnement \
+             WAKFU_COMPANION_API_URL. Si vous ne l'avez pas posée vous-même, retirez-la."
         )
     })
 }

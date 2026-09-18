@@ -29,18 +29,54 @@ fn token_file_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("native-session.token"))
 }
 
+/// Le fichier de repli **existe** : le trousseau a manqué au moins une fois et le jeton est sur
+/// disque en clair. C'est ce que la fenêtre Options (section « Compte ») dit à l'utilisateur
+/// (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) — le `warn!` du journal ne suffit pas, il ne
+/// le lit pas. `clear_token` (déconnexion, effacement) retire le fichier, et l'avis avec lui.
+pub fn token_file_in_use() -> bool {
+    token_file_path().is_file()
+}
+
+/// Où vit le fichier de repli — pour le dire à l'utilisateur à côté de [`token_file_in_use`].
+pub fn token_file_location() -> PathBuf {
+    token_file_path()
+}
+
 fn save_token_file(token: &str) -> Result<(), SyncError> {
-    let path = token_file_path();
+    save_token_file_at(&token_file_path(), token)
+}
+
+fn save_token_file_at(path: &std::path::Path, token: &str) -> Result<(), SyncError> {
+    use std::io::Write as _;
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| SyncError::TokenStore(err.to_string()))?;
     }
-    std::fs::write(&path, token).map_err(|err| SyncError::TokenStore(err.to_string()))?;
+    // **Le mode restrictif se pose à la création, pas après** (constat C7, 2026-09-19) : un
+    // `fs::write` puis `set_permissions` laissait le fichier lisible par tout utilisateur de la
+    // machine (umask courante, `0644`) le temps de l'écriture. `mode(0o600)` ne vaut qu'à la
+    // création — un fichier déjà là garde ses bits, d'où le `set_permissions` conservé derrière.
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|err| SyncError::TokenStore(err.to_string()))?;
+    file.write_all(token.as_bytes())
+        .map_err(|err| SyncError::TokenStore(err.to_string()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .map_err(|err| SyncError::TokenStore(err.to_string()))?;
     }
+    // Sous Windows, `%APPDATA%` est déjà réservé au compte utilisateur par l'ACL héritée du
+    // profil ; pas de DPAPI pour l'instant (choix du 2026-09-19 : signaler d'abord, chiffrer
+    // ensuite si le cas se présente réellement).
     tracing::warn!(
         path = %path.display(),
         "trousseau OS indisponible — jeton natif stocké en clair sur disque (voir §7.2 du plan)"
@@ -135,5 +171,32 @@ mod tests {
             })
             .unwrap();
         handle.join().unwrap();
+    }
+
+    /// Le fichier de repli naît en `0600` — et le reste quand il préexistait plus permissif.
+    /// Dans un dossier à part : le test ci-dessus peut lui aussi passer par le fichier de repli
+    /// (trousseau absent en CI), les deux ne doivent pas se marcher dessus.
+    #[cfg(unix)]
+    #[test]
+    fn le_fichier_de_repli_est_prive_des_sa_creation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("token-store-mode-{}", std::process::id()));
+        let path = dir.join("native-session.token");
+        let _ = std::fs::remove_dir_all(&dir);
+        save_token_file_at(&path, "jeton-de-test-mode").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        save_token_file_at(&path, "jeton-de-test-mode-2").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "un fichier préexistant est remis en 0600");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "jeton-de-test-mode-2",
+            "tronqué puis réécrit, pas complété"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -726,6 +726,20 @@ pub struct OptionsModalContext<'a> {
     pub game_servers: &'a crate::game_servers::GameServers,
 }
 
+/// L'avis de la section « Compte » quand le jeton de session est dans le fichier de repli plutôt
+/// que dans le trousseau du système (`overlay_sync::token_store::token_file_in_use`) — `None` dans
+/// le cas normal, et rien n'est affiché. Sorti en fonction pour être vérifiable par un test.
+pub fn token_file_notice(in_use: bool) -> Option<String> {
+    in_use.then(|| {
+        format!(
+            "Le trousseau du système est indisponible : la session est conservée en clair dans \
+             {}. Elle est lisible par tout programme qui s'exécute sous votre compte — se \
+             déconnecter la supprime.",
+            overlay_sync::token_store::token_file_location().display()
+        )
+    })
+}
+
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
 /// module) et renvoie l'action déclenchée par cette frame, le cas échéant.
 pub fn show(
@@ -1517,6 +1531,20 @@ pub fn show(
                 .width(inner_width)
                 .log_name("options-compte-info"),
             );
+            // **Jeton hors trousseau** (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) : quand
+            // le trousseau du système a manqué, la session est dans un fichier en clair — le
+            // journal le disait, pas l'interface. Lu à chaque rendu (un `stat`, la fenêtre est
+            // rarement ouverte) plutôt que figé à l'ouverture : la déconnexion retire le fichier
+            // et l'avis doit partir avec lui.
+            if let Some(text) = token_file_notice(overlay_sync::token_store::token_file_in_use()) {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(text)
+                        .tone(design::InfoTone::Alert)
+                        .width(inner_width)
+                        .log_name("options-compte-jeton-fichier"),
+                );
+            }
             ui.add_space(INFO_GAP);
             // **Rouge et centré** (demande utilisateur, 2026-09-13), là où ce bouton était secondaire
             // et aligné à gauche comme les réglages au-dessus. Les deux vont ensemble : c'est la seule
@@ -1778,6 +1806,14 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn l_avis_du_jeton_fichier_nomme_le_fichier_et_se_tait_sinon() {
+        assert_eq!(token_file_notice(false), None);
+        let texte = token_file_notice(true).unwrap();
+        assert!(texte.contains("native-session.token"));
+        assert!(texte.contains("se déconnecter"));
+    }
 
     /// L'état d'une fenêtre qu'on vient d'ouvrir : référence et brouillon accordés, donc rien en
     /// attente.
