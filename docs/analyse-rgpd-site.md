@@ -27,7 +27,7 @@ ses corrections supposent un pendant côté service.
   (identités, sessions, configuration, historique).
 - ✅ **Sessions actives et révocation** : `GET`/`DELETE /api/v1/auth/sessions`, page « Mon compte » ;
   sessions mortes effacées 30 jours après leur fin (voir le tableau) ; rotation du jeton natif
-  côté serveur (reste l'appel côté overlay).
+  côté serveur et appelée par l'overlay (2026-09-19).
 - ✅ **Sous-traitants** nommés (mentions légales §2, politique §4) : Cloudflare, Inc. (hébergement),
   Databricks, Inc. / Neon (PostgreSQL, serveurs dans l'UE), Discord et Google (connexion), GitHub
   (mises à jour de l'overlay).
