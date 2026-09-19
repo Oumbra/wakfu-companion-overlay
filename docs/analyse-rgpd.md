@@ -275,7 +275,7 @@ la lecture retenue, la mise en public du 2026-09-15 peut constituer une violatio
    nouveaux : `c0168a4` → `5db868a`, `ef8e2fb` → `2700533`, `97c1990` → `a5e5dc9`, `v0.22.0`
    `2c7a14e` → `46bc23d`. Le workflow de release, déclenché par le push sur `main`, a trouvé le
    tag posé et n'a rien publié. Les binaires de la Release affichent l'ancien hash `2c7a14e` dans
-   leur bannière (cosmétique). **Reste le ticket GitHub Support** : au 2026-09-19 l'API sert
+   leur bannière (cosmétique). **Ticket GitHub Support n° 4773188 ouvert le 2026-09-19**, en attente : l'API sert
    encore l'ancien `c0168a4`, et `refs/pull/1/head` (PR #1 fusionnée, ancienne tête `a308e52`)
    retient l'ancien historique.
 
@@ -645,7 +645,7 @@ et [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 | Priorité | Action | Constats | Qui |
 | --- | --- | --- | --- |
 | **P0** | ✅ Fixture pseudonymisée, tests réalignés, garde-fou `pre-commit` + CI (2026-09-18) | C1, §4 | Session |
-| **P0** | ✅ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`/`v0.22.0` (2026-09-19, poussé par le mainteneur) — ⏳ reste le ticket GitHub Support | C1 | Mainteneur |
+| **P0** | ✅ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`/`v0.22.0` (2026-09-19, poussé par le mainteneur) — ⏳ ticket GitHub Support n° 4773188 ouvert le 2026-09-19, en attente | C1 | Mainteneur |
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | ✅ Politique de confidentialité côté site étendue à l'overlay (section 1.4), CGU et mentions légales aussi (`Oumbra/wakfu-companion` `3ba4684`, `a9587a9`, `8e3fdd8`) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | ✅ Site + overlay |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
