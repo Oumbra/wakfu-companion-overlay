@@ -15,15 +15,17 @@
 //! « Valider » ([`apply`]), comme elle le fait déjà du reste : brouillon en attendant, rien
 //! d'écrit si la case n'a pas bougé.
 //!
-//! ## Actif par défaut — une fois, au premier lancement
+//! ## Décoché par défaut — seule la case inscrit l'overlay
 //!
-//! Demande utilisateur du 2026-09-16 : « option de démarrage active par défaut ». Le système ne
-//! sachant pas distinguer « jamais inscrit » de « retiré exprès », le défaut ne peut pas se
-//! rejouer à chaque lancement : il s'applique **une seule fois**, au premier lancement qui trouve
-//! le jalon `config::OverlayConfig::autostart_initialized` à `false`
-//! ([`enable_by_default_once`]), après quoi seule la case de la fenêtre Options — ou le système
-//! lui-même — change l'inscription. C'est la seule entorse à « rien dans `config.toml` », et elle
-//! ne duplique pas l'état : elle dit seulement que le défaut a été posé.
+//! Rien n'est écrit dans le système tant que l'utilisateur n'a pas coché la case lui-même.
+//! L'overlay s'est inscrit d'office au premier lancement du 2026-09-16 au 2026-09-19 (demande
+//! utilisateur du 16, jalon `autostart_initialized` dans `config.toml`) ; le constat C12 de
+//! `docs/analyse-rgpd.md` (loyauté, art. 5.1.a : un programme qui se lance avec la session sans
+//! qu'on le lui ait demandé) l'a fait retirer le 2026-09-19, décision du mainteneur. Une
+//! inscription posée par ces versions-là reste en place — le système ne distingue pas « posée
+//! par défaut » de « cochée exprès », et la retirer d'office serait le même geste à l'envers ;
+//! la case la montre et la retire. La ligne `autostart_initialized` d'une config existante est
+//! ignorée à la lecture et disparaît à la prochaine sauvegarde.
 //!
 //! ## Ce qui est écrit, et où
 //!
@@ -56,24 +58,6 @@ pub const ENTRY_NAME: &str = "WakfuCompanionOverlay";
 /// réglage mémorisé — voir la doc de module.
 pub fn is_enabled() -> bool {
     imp::is_enabled()
-}
-
-/// **Pose le défaut « actif », une fois par installation** — voir la doc de module. Appelée par
-/// les hôtes au démarrage, juste après `config::load` et avant toute fenêtre : si le jalon
-/// `autostart_initialized` est levé, ne fait rien ; sinon inscrit l'overlay ([`apply`]), lève le
-/// jalon et le sauvegarde. Un échec d'inscription (droits, stratégie de groupe) lève le jalon
-/// quand même : le défaut a été proposé, la case de la fenêtre Options reste là pour réessayer —
-/// le rejouer à chaque lancement ne ferait que remplir le journal du même refus.
-pub fn enable_by_default_once(config: &mut crate::config::OverlayConfig) {
-    if config.autostart_initialized {
-        return;
-    }
-    tracing::info!(
-        "[démarrage] premier lancement : inscription au démarrage de l'ordinateur par défaut."
-    );
-    apply(true);
-    config.autostart_initialized = true;
-    crate::config::save(config);
 }
 
 /// Inscrit ou retire l'overlay du démarrage de la session. Best-effort : n'écrit que si l'état

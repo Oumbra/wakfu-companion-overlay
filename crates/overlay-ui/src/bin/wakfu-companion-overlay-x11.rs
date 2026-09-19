@@ -2286,8 +2286,6 @@ mod linux_main {
                 turn_notification_muted: self.turn_notification_muted,
                 auto_update: self.auto_update,
                 verbose_log: self.verbose_log,
-                // Jalon posé au démarrage — voir `main.rs`.
-                autostart_initialized: true,
                 ..Default::default()
             };
             saved.set_shortcuts(self.hotkeys.bindings());
@@ -3602,14 +3600,12 @@ mod linux_main {
         // Une seule racine de dossiers depuis le 2026-09-19 (constat C13) : sous Linux les deux
         // se confondent et l'appel ne fait rien, mais l'ordre reste le même que sous Windows.
         config::migrate_legacy_root();
-        let mut saved_config = config::load();
+        let saved_config = config::load();
         // **Journal détaillé**, dès que la config est lue (constat C6 de `docs/analyse-rgpd.md`) :
         // `logging::init` démarre toujours au niveau ordinaire — c'est le défaut voulu, rien de
         // personnel dans le fichier tant que rien n'a été demandé — et c'est ici, et seulement si
         // la case est cochée, que les `debug!` s'ouvrent.
         logging::set_verbose(saved_config.verbose_log);
-        // Actif par défaut, une seule fois par installation — voir `autostart`, doc de module.
-        overlay_ui::autostart::enable_by_default_once(&mut saved_config);
 
         // `--updated-from X` (relance après une mise à jour, voir `overlay_sync::update::apply`)
 
