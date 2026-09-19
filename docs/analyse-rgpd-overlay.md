@@ -1,14 +1,14 @@
 # Analyse RGPD — reste à faire côté overlay
 
 Reliquat de [`analyse-rgpd.md`](analyse-rgpd.md) pour ce dépôt (`wakfu-companion-overlay`), établi
-le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19. Les six constats principaux
-(C1 à C6) sont clos côté overlay ; des constats secondaires, il ne reste que C12. Les deux autres volets :
+le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19. **Plus rien à faire côté
+overlay** : les six constats principaux (C1 à C6) et tous les constats secondaires sont clos. Les
+deux autres volets :
 [`analyse-rgpd-site.md`](analyse-rgpd-site.md) et
 [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 
 | Prio | Tâche | Constat | État |
 | --- | --- | --- | --- |
-| P2 | **Démarrage automatique** : ne plus l'activer d'office au premier lancement — le demander, ou laisser décoché (loyauté, art. 5.1.a) | C12 | `autostart::enable_by_default_once` inscrit toujours par défaut (vérifié le 2026-09-19) |
 | — | Optionnel, écarté le 2026-09-18 : `--purge-local-data` en ligne de commande ; à rouvrir seulement si un désinstalleur arrive | C5 | — |
 
 ## Fait le 2026-09-19 (décisions du mainteneur)
@@ -22,6 +22,7 @@ le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19. Les 
 | C16 | `WAKFU_OVERLAY_UPDATE_URL` : seul `https://` est accepté, ou `http://` vers `127.0.0.1`/`localhost`/`[::1]` (le rejeu local de `xtask dist` reste possible) ; valeur refusée ignorée avec un `warn!`. `WAKFU_COMPANION_API_URL` : bloc d'alerte sous « Vos données » dans « À propos », nommant l'origine réelle | `overlay-sync/src/update/mod.rs::override_allowed`, `panels/a_propos_tab.rs::api_override_notice` |
 | C17 | Bouton « Copier le détail » à côté de « Réessayer » sur l'écran d'erreur de connexion (titre + détail complet dans le presse-papiers) — décision : pas de bloc repliable | `panels/login.rs::failure_clipboard_text` |
 | C11 | Rien à changer : la case ne coupe que l'installation, la vérification est annoncée « à chaque lancement » dans « À propos » et la politique | — |
+| C12 | Démarrage automatique **décoché par défaut** : `autostart::enable_by_default_once` et le jalon `config.toml::autostart_initialized` retirés, seule la case de la fenêtre Options inscrit l'overlay. Une inscription posée d'office par les versions du 16 au 19 reste en place (la retirer d'office serait le même geste à l'envers), la case la montre et la retire | `overlay-ui/src/autostart.rs`, `overlay-ui/src/config.rs`, §9.1 novodecies du plan |
 
 ## Ce qui est clos côté overlay (pour mémoire)
 
@@ -37,4 +38,4 @@ le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19. Les 
 - C6 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, « Journal détaillé »
   décoché par défaut, journaux vidés à la déconnexion.
 - C8 : `turn-templates/` effacé à la déconnexion et par le bouton.
-- C7, C10, C11, C13, C14, C16, C17 : voir le tableau du 2026-09-19 ci-dessus.
+- C7, C10, C11, C12, C13, C14, C16, C17 : voir le tableau du 2026-09-19 ci-dessus.

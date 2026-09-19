@@ -2213,22 +2213,25 @@ ouvert dont « les deux ne peuvent pas vivre en même temps ».
 et heure de début fixés (1 h 23 min 45 s, 20:12), ils n'existent pas dans le fichier par
 construction.
 
-### 9.1 novodecies Démarrage actif par défaut, bouton « Fermer l'overlay » (2026-09-16)
+### 9.1 novodecies Démarrage actif par défaut (retiré), bouton « Fermer l'overlay » (2026-09-16)
 
 Deux demandes utilisateur du même jour, toutes deux dans l'onglet « Paramètres ».
 
 **« Option de démarrage active par défaut. »** La case « Lancer l'overlay au démarrage de
 l'ordinateur » (section « Démarrage », `overlay_ui::autostart`) lit et écrit l'état RÉEL du système
 (clé `Run` sous Windows, `.desktop` sous Linux), jamais une copie en config — et le système ne
-distingue pas « jamais inscrit » de « retiré exprès ». Un défaut ne peut donc pas se rejouer à
-chaque lancement, sous peine de réinscrire ce que l'utilisateur vient de décocher. Il s'applique
-**une seule fois par installation** : `autostart::enable_by_default_once`, appelée par les deux
-hôtes juste après `config::load`, inscrit l'overlay puis lève le jalon
-`config::OverlayConfig::autostart_initialized` (sauvegardé dans la foulée — la seule écriture de
-`config.toml` hors « Valider »). Une config écrite avant ce champ vaut « jamais fait » : les
-installations existantes sont inscrites, une fois, à leur premier lancement de cette version. Les
-hôtes réécrivent le jalon à `true` à chaque sauvegarde (ils rebâtissent la config depuis leurs
-champs). Un échec d'inscription lève le jalon quand même : la case reste là pour réessayer.
+distingue pas « jamais inscrit » de « retiré exprès ». Le défaut s'appliquait donc **une seule fois
+par installation** (`autostart::enable_by_default_once`, jalon
+`config::OverlayConfig::autostart_initialized` sauvegardé dans la foulée).
+
+**Retiré le 2026-09-19** (constat C12 de [`analyse-rgpd.md`](analyse-rgpd.md), décision du
+mainteneur) : un programme qui s'inscrit au démarrage de la session sans qu'on le lui ait demandé
+contrevient à la loyauté du traitement (art. 5.1.a). La case est **décochée par défaut** et seule
+la case inscrit l'overlay ; `enable_by_default_once` et le jalon n'existent plus, `config.toml`
+n'est de nouveau écrit qu'à « Valider ». Une inscription posée d'office par les versions du 16 au
+19 reste en place — la retirer d'office serait le même geste à l'envers —, la case la montre et la
+retire ; la ligne `autostart_initialized` d'une config existante est ignorée et disparaît à la
+prochaine sauvegarde.
 
 **« Un bouton pour fermer l'overlay à la toute fin de l'onglet, secondaire, centré, avec une
 confirmation. »** Sous la section « Compte », sans section propre (ce n'est pas un réglage, c'est
