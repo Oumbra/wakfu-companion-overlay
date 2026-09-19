@@ -134,8 +134,8 @@ else
   # `cfg(windows)` : `turn_watch/capture.rs`, `turn_watch/notify.rs`), ni surtout `main.rs`, les
   # 4 000 lignes du binaire livré. Le hook `pre-push` appelant ce mode, un `main.rs` qui ne compile
   # plus passait le push sans un mot — vécu du 2026-09-17 : trois runs `build-windows` rouges
-  # d'affilée sur deux champs déclarés dans `App` au lieu d'`AppState` (commits ff133d0/669f934,
-  # réparés par 1af5aec). Le CI le voyait ; rien avant lui.
+  # d'affilée sur deux champs déclarés dans `App` au lieu d'`AppState` (commits a1d31c4/669f934,
+  # réparés par 30ba296). Le CI le voyait ; rien avant lui.
   #
   # Même portée que le CI, où le job `build-windows` lance désormais la MÊME commande.
   step "clippy — overlay-ui (lib + binaire Windows)" cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay -- -D warnings

@@ -2465,7 +2465,7 @@ main, soit environ 250 lignes qui ne font que placer des rectangles.
 
 **`DsIcon` est un type distinct de `DsTexture`** (décision utilisateur, 2026-09-10).
 
-**Motif révisé le même jour**, après les commits `0923a45`, `a372320` et `4762cee` d'une session
+**Motif révisé le même jour**, après les commits `7a86c38`, `37979c3` et `bff39e2` d'une session
 parallèle. L'argument d'origine — « chaque glyphe a une taille d'encre propre, un fond 9-slice n'en
 a pas, et peindre `icon-minus` (14×2) dans un carré l'étirerait » — **ne tient plus** :
 `icon_button::glyph_fit(native, box_side)` met désormais tout glyphe à l'échelle **en préservant son
@@ -2496,7 +2496,7 @@ Exécution, le jour venu :
    ne décrit plus que des fonds 9-slice.
 3. `design::icon` — une **feuille** au sens du contrat, qui réutilise `glyph_fit` tel quel.
 4. `icon_button` et `Input::leading_icon` prennent un `DsIcon`.
-5. La galerie des glyphes (`a372320`) suit le nouveau type ; snapshots régénérés.
+5. La galerie des glyphes (`37979c3`) suit le nouveau type ; snapshots régénérés.
 
 Coût mémoire, mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
 sans effet sur le budget de 300 Mo (§8 du plan).
@@ -2572,7 +2572,7 @@ Ni urgent ni structurant, mais chacun retire du code d'un panneau.
 Trois écarts avaient été constatés le 2026-09-10. Revérifiés le 2026-09-11, il en reste **un et
 demi** :
 
-- ~~**`modal-header.png` dupliqué octet pour octet**~~ — **résolu** par `5ccf0d2` (« refactor :
+- ~~**`modal-header.png` dupliqué octet pour octet**~~ — **résolu** par `a576055` (« refactor :
   bannière de modale au manifeste »). La copie `crates/overlay-ui/assets/ui/options/` n'existe plus,
   `options_modal` passe par `DsTexture::ModalHeader`, et le manifeste documente la résorption.
 - **Deux barres de défilement**, mais ce n'est **pas un doublon accidentel** :

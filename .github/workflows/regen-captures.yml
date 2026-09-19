@@ -179,7 +179,7 @@ jobs:
           set -eu
           mkdir -p diagnostic-captures/avant diagnostic-captures/apres
           # Indexé tout de suite, et la liste lue dans l'INDEX : `git diff` seul ignorerait une
-          # référence NOUVELLE (un test ajouté sans sa capture, cas de `d5c259c`), qui est
+          # référence NOUVELLE (un test ajouté sans sa capture, cas de `d0afbb9`), qui est
           # justement celle qu'il faut relire le plus attentivement. `.gitignore` écarte déjà
           # `*.old.png`/`*.new.png`/`*.diff.png`, ce `-A` ne peut donc rien emporter d'autre.
           git add -A crates/overlay-testkit/tests/snapshots/

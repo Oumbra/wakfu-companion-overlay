@@ -234,9 +234,9 @@ la lecture retenue, la mise en public du 2026-09-15 peut constituer une violatio
    `.github/workflows/ci.yml` **et** de `scripts/ci-local.sh`. Le hook seul ne suffirait pas —
    `core.hooksPath` ne survit pas au conteneur d'une session cloud.
 
-3. ⏳ **Décision du mainteneur, hors session Claude** — retirer le contenu réel de l'**historique**.
-   La fixture n'apparaît que dans **2 commits sur 936** (`c0168a4` et `ef8e2fb`, tous deux du
-   2026-08-31), mais un commit embarque le SHA de son parent : réécrire le plus ancien change
+3. ✅ **Fait le 2026-09-19** — historique réécrit (voir le bilan après les trois options).
+   *Analyse d'origine :* la fixture n'apparaît que dans **2 commits sur 936** (`c0168a4` et
+   `ef8e2fb`, anciens SHA, tous deux du 2026-08-31), mais un commit embarque le SHA de son parent : réécrire le plus ancien change
    l'identifiant de **934 commits**. Leur contenu, lui, est conservé — messages, auteurs, dates,
    ordre, diffs. Ce qui casse réellement : les liens vers les anciens SHA, **les signatures des
    commits réécrits** (`filter-repo` ne peut pas les re-signer), le commit cible de la Release
@@ -258,7 +258,30 @@ la lecture retenue, la mise en public du 2026-09-15 peut constituer une violatio
    GitHub Support citant les anciens SHA fait partie du geste, et vérifier d'abord *Insights →
    Forks* — un fork garde les objets.
 
-4. ⏳ Consigner l'incident (date de mise en public, contenu, mesures) dans un registre interne.
+   **Bilan du 2026-09-19.** Option « remplacer le contenu », préparée par une session Claude dans
+   un clone miroir et poussée par le mainteneur lui-même (`push --atomic --force` de `dev`, `main`
+   et `v0.22.0`, à 12 h 08). `git filter-repo` borné à `c0168a4..` : **992 commits réécrits sur
+   994**, les deux premiers (dont la racine `d64c6c3`, seul commit signé du dépôt) gardent leur
+   SHA et leur signature — la crainte sur les signatures était sans objet. Le blob réel
+   `4aff23f` est remplacé par la fixture pseudonymisée du commit de pseudonymisation (blob
+   `ef06dfc`) ; dans la même passe, les valeurs recopiées dans le code et la documentation (six
+   noms de personnages du compte, trois identifiants numériques, un pseudonyme et un message de
+   tiers, 222 blobs) sont remplacées par les mêmes pseudonymes, pour une table unique dans tout
+   l'historique. Vérifié avant le push : blob réel absent après `gc --prune=now`, aucune valeur
+   réelle dans les 3 526 blobs texte (337 clés + motifs génériques), 994 commits avant et après
+   dans le même ordre, auteurs/dates/messages identiques (17 messages ne diffèrent que par un SHA
+   cité mis à jour), seuls 16 chemins changent, arbre de la pointe de `dev` identique à une ligne
+   près (la ligne 162 de ce fichier citait encore un identifiant numérique réel). Anciens SHA →
+   nouveaux : `c0168a4` → `5db868a`, `ef8e2fb` → `2700533`, `97c1990` → `a5e5dc9`, `v0.22.0`
+   `2c7a14e` → `46bc23d`. Le workflow de release, déclenché par le push sur `main`, a trouvé le
+   tag posé et n'a rien publié. Les binaires de la Release affichent l'ancien hash `2c7a14e` dans
+   leur bannière (cosmétique). **Reste le ticket GitHub Support** : au 2026-09-19 l'API sert
+   encore l'ancien `c0168a4`, et `refs/pull/1/head` (PR #1 fusionnée, ancienne tête `a308e52`)
+   retient l'ancien historique.
+
+4. ⏳ Consigner l'incident (date de mise en public, contenu, mesures) dans un registre interne —
+   note rédigée le 2026-09-19 (dossier de réécriture), à compléter du numéro de ticket et à
+   conserver hors dépôt par le mainteneur.
 
 ### 3.2 C2 — Doctrine de vie privée contredite par le code (élevée)
 
@@ -622,7 +645,7 @@ et [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 | Priorité | Action | Constats | Qui |
 | --- | --- | --- | --- |
 | **P0** | ✅ Fixture pseudonymisée, tests réalignés, garde-fou `pre-commit` + CI (2026-09-18) | C1, §4 | Session |
-| **P0** | ⏳ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`, ticket GitHub Support | C1 | Mainteneur, hors session Claude |
+| **P0** | ✅ Réécriture d'historique (`filter-repo`, remplacement du blob), force-push `dev`/`main`/`v0.22.0` (2026-09-19, poussé par le mainteneur) — ⏳ reste le ticket GitHub Support | C1 | Mainteneur |
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | ✅ Politique de confidentialité côté site étendue à l'overlay (section 1.4), CGU et mentions légales aussi (`Oumbra/wakfu-companion` `3ba4684`, `a9587a9`, `8e3fdd8`) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | ✅ Site + overlay |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |

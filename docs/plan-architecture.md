@@ -3311,11 +3311,11 @@ davantage de démon Docker. Conséquence mesurée :
 
 - **Six runs rouges consécutifs** (n° 390 à 395, du 2026-09-17 au 2026-09-18), tous sur le même
   gate, **65 références périmées** accumulées par quatre changements visuels d'affilée — retrait du
-  replacement Récap (`02c1cc9`), retrait du rafraîchissement du combat (`f1a4837`), largeur des
-  onglets (`f5eba5d`), onglet « À propos » (`64d09f8`, qui ajoute un onglet à la barre et change
+  replacement Récap (`b9c3aaf`), retrait du rafraîchissement du combat (`f260891`), largeur des
+  onglets (`0eeeacf`), onglet « À propos » (`345fa7a`, qui ajoute un onglet à la barre et change
   donc les 50 captures `options_*` sans en régénérer une seule). Le gate ne disait plus « ce rendu a
   régressé » mais « tu développes sous Windows », et le verdict a cessé d'être lu — exactement la
-  spirale de la semaine rouge de septembre. Rattrapé par `3ac9eff` (56 planches régénérées, run 396
+  spirale de la semaine rouge de septembre. Rattrapé par `3e71f1c` (56 planches régénérées, run 396
   vert) **depuis un environnement qui avait le rendu épinglé** : ce que le poste du mainteneur n'a
   pas, et c'est précisément le manque que le workflow ci-dessous comble.
 - **`--captures-conteneur` était de surcroît SILENCIEUSEMENT IGNORÉ sous MSYS** : le bloc qui
@@ -3343,7 +3343,7 @@ qu'on relit, et lui seul, pour attraper la régression qui allait devenir réfé
 | Digest de l'image de rendu recopié dans trois fichiers, aucun contrôle | `scripts/verifier-digest-rendu.sh`, lancé par le job `fmt` et par `ci-local.sh` |
 | Captures jamais jouées sous Windows par `ci-local.sh` | étape sortie de la branche par plateforme — `overlay-testkit` ne dépend que de la LIB `overlay-ui`, il rend partout |
 | Un écart local ne disait rien (« rendu non épinglé ») | tri par ampleur : ≤ 300 px = bruit de rastérisation, au-delà = référence périmée, comptée en échec. Mesure du 2026-09-18 (97 captures en écart sous Windows) : 32 entre 48 et 224 px, 65 entre 552 et 97 201 px, **rien entre 224 et 552** |
-| `main.rs` (4 000 lignes, Windows-only) compilé par le seul CI | `cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay` dans `build-windows` ET dans `ci-local.sh` côté Windows — trois runs rouges du 2026-09-17 venaient de là (`ff133d0`/`669f934`, réparés par `1af5aec`) |
+| `main.rs` (4 000 lignes, Windows-only) compilé par le seul CI | `cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay` dans `build-windows` ET dans `ci-local.sh` côté Windows — trois runs rouges du 2026-09-17 venaient de là (`a1d31c4`/`d978bd2`, réparés par `30ba296`) |
 | Push d'un changement de rendu sans références | avertissement (non bloquant) du hook `pre-push` |
 | `ubuntu-latest` bascule sur Ubuntu 26 le 2026-10-19 | `runs-on: ubuntu-24.04` épinglé sur les quatre jobs Linux |
 

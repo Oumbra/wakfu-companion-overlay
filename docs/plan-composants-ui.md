@@ -18,10 +18,10 @@ pas atteint. Le lot 6 a commencé par opportunité, comme prévu.
 
 | Lot | Objet | État |
 | --- | --- | --- |
-| 0 | Ménage — sans dépendance, sans décision | ✅ `5ccf0d2`, `2941efd`, `973ead6` |
-| 1 | La couche conteneur (`window`, `panel`, `heading`) | ✅ `3becdc7` — 1.3 requalifié, voir ci-dessous |
+| 0 | Ménage — sans dépendance, sans décision | ✅ `a576055`, `c941f4f`, `2bbdcaa` |
+| 1 | La couche conteneur (`window`, `panel`, `heading`) | ✅ `9669682` — 1.3 requalifié, voir ci-dessous |
 | 2 | Icônes et infobulle | ✅ 2026-09-11 — `DsIcon`, `design::icon`, `design::tooltip` |
-| 3 | Tests de géométrie des composants livrés | ✅ `a1f24e8` — critère révisé, voir le lot |
+| 3 | Tests de géométrie des composants livrés | ✅ `4d17ddf` — critère révisé, voir le lot |
 | 4 | Formulaires — vague 2 du catalogue | ✅ 2026-09-11 — critère de fin atteint |
 | 5 | Données — vague 3 du catalogue | composants livrés sauf `badge` (bloqué) ; **critère de fin non atteint** |
 | 6 | Finitions — vague 4 du catalogue | **abandonné** (décision utilisateur 2026-09-12) — `separator` et `confirm_dialog` avaient déjà été faits par opportunité |
@@ -47,9 +47,9 @@ Trois ajouts propres à ce plan :
 
 | # | Décision | Commit |
 | --- | --- | --- |
-| 1 | **Vocabulaire des panneaux flottants** : Combat et Suivi prennent les *formes* et la *typographie* du jeu, et **gardent l'accent cyan**, promu en jeton `tokens::OVERLAY_ACCENT`. Un seul jeu de composants, teinte prise à un jeton — jamais un paramètre de thème. | `022df01` |
-| 2 | **Le contrat de composant a deux familles** : *feuille* (`impl egui::Widget`) et *conteneur* (`show` générique sur le retour du contenu). Critère mécanique, deux formes admises, §1 bis du contrat. | `d8fe801` |
-| 3 | **`DsIcon` distinct de `DsTexture`** — nettoyage de typage, sans urgence (motif révisé, voir lot 2). | `eb2c35f`, `1c8d215` |
+| 1 | **Vocabulaire des panneaux flottants** : Combat et Suivi prennent les *formes* et la *typographie* du jeu, et **gardent l'accent cyan**, promu en jeton `tokens::OVERLAY_ACCENT`. Un seul jeu de composants, teinte prise à un jeton — jamais un paramètre de thème. | `0969bca` |
+| 2 | **Le contrat de composant a deux familles** : *feuille* (`impl egui::Widget`) et *conteneur* (`show` générique sur le retour du contenu). Critère mécanique, deux formes admises, §1 bis du contrat. | `1a22ca1` |
+| 3 | **`DsIcon` distinct de `DsTexture`** — nettoyage de typage, sans urgence (motif révisé, voir lot 2). | `eb2c35f`, `92cdef0` |
 
 ## Acquis — ne pas refaire
 
@@ -57,13 +57,13 @@ Trois ajouts propres à ce plan :
   défilable, texte d'information. Tous dans la galerie.
 - **Le 9-slice est réglé** — marges dimensionnées sur l'étendue du décor, pas sur le rayon des coins.
 - **La mise à l'échelle des glyphes est réglée** — `icon_button::glyph_fit` préserve le ratio natif,
-  partagée avec `Input::leading_icon` depuis `4762cee`.
-- **`panels::options_modal::chrome` est déjà un conteneur** au sens du nouveau contrat (`0963ab3`) :
+  partagée avec `Input::leading_icon` depuis `bff39e2`.
+- **`panels::options_modal::chrome` est déjà un conteneur** au sens du nouveau contrat (`2d2b9c0`) :
   il peint bannière, corps, onglets, pied et panneau, rend sa zone de contenu et le clic de son
   pied, et expose un `scroll_area(ui, id, |ui, w| …)` en forme closure. Il est dans un panneau faute
   d'endroit où le mettre. Le lot 1 le déplace ; il ne le réécrit pas.
 - **Le décor de la modale vient de vraies textures du jeu** — bannière et corps, marges 9-slice
-  mesurées (`2168dbc`).
+  mesurées (`738fa8e`).
 
 ## Coordination avec les sessions parallèles
 
@@ -132,7 +132,7 @@ grep -c "pub .*:" <(sed -n '/pub struct RenderContent/,/^}/p' crates/overlay-ui/
 Et le snapshot `options_modale_sur_damier.png` **inchangé** — c'est ce qui prouve que le
 déplacement n'a rien altéré.
 
-**Résultat mesuré** (`5ccf0d2`) : 51 lignes ajoutées, 123 retirées ; `RenderContent` passe de 18 à
+**Résultat mesuré** (`a576055`) : 51 lignes ajoutées, 123 retirées ; `RenderContent` passe de 18 à
 17 champs ; les 12 tests d'`overlay-testkit` passent sans qu'aucun snapshot ne bouge. La copie du
 PNG et le dossier `assets/ui/options/` ont disparu.
 
@@ -331,7 +331,7 @@ critère de fin interdit — elle attend donc sa propre décision, dans son prop
 ## 2.1 — fait le 2026-09-11
 
 Reporté une première fois le même jour, terrain occupé : une session parallèle poussait alors une
-trentaine de SVG dans `assets/design-system/icons-svg/`. Elle les a retirés (`6bffdc5 revert: retire
+trentaine de SVG dans `assets/design-system/icons-svg/`. Elle les a retirés (`a0e96ef revert: retire
 les ébauches SVG des icônes`), le terrain s'est libéré, le refactor a suivi.
 
 Les cinq étapes du catalogue sont faites : `design/icons.rs` et sa table, retrait des 38 variantes
@@ -415,11 +415,11 @@ Deux rappels qui valent pour tout ce lot :
 
 | Composant | État |
 | --- | --- |
-| `design::stepper` | ✅ `da37c8b` — avec `Input::read_only`, que son champ central a rendu nécessaire |
-| `input` — `Search` | ✅ déjà couvert par `Input::leading_icon` (`0923a45`, session parallèle) |
-| `input` — `read_only` | ✅ `da37c8b` |
+| `design::stepper` | ✅ `3dfb809` — avec `Input::read_only`, que son champ central a rendu nécessaire |
+| `input` — `Search` | ✅ déjà couvert par `Input::leading_icon` (`7a86c38`, session parallèle) |
+| `input` — `read_only` | ✅ `3dfb809` |
 | `design::collapsible` | ✅ — relevé refait sur le bon asset, voir ci-dessous |
-| `input` — état d'erreur | ✅ `41791df` — quatrième état, branché sur la modale Options |
+| `input` — état d'erreur | ✅ `59fba14` — quatrième état, branché sur la modale Options |
 | `design::slider` | ✅ — `slider-handle.png` extrait de `interface-options-son.png`, rainure peinte |
 | `tabs` — variante icône | ✅ 2026-09-11, après le lot 2 — `.icon()` sur une entrée, le libellé devient l'infobulle |
 
