@@ -15,7 +15,7 @@
 | OS | Windows / Linux / macOS | **Windows + Linux**. macOS retiré (supprime le main-thread NSApp, les permissions Accessibility, la notarisation) |
 | Fichier lu | `wakfu-chat.log` | **`wakfu.log`** (nom réel, enveloppe log Java du client) |
 | Données | « extraire des JSON du dépôt web » | Le catalogue est en **Postgres/Neon derrière une API** — consommation via `GET /api/v1/catalog/` |
-| Serveur | absent du plan | **Synchronisation historique combats / achats HDV / kamas HDV / échanges**, idempotente, sur l'API existante |
+| Serveur | absent du plan | **Synchronisation historique combats / achats HDV / kamas HDV / échanges / extractions de pacte**, idempotente, sur l'API existante |
 
 ---
 
@@ -585,6 +585,7 @@ bornée au cadre, le côté reste une case des Options), et suit tout déplaceme
 | Achat marchand/HDV | `POST /api/v1/history/purchases` | `clientKey`, `itemId`\|`itemName`, `quantity`, `totalCost`, `occurredAt`, `gameServer` |
 | **Récupération de kamas HDV** | `POST /api/v1/history/purchases` | même endpoint, `itemName = "__hdv_kamas_sale__"` (constante `HDV_KAMAS_SALE_ITEM`) — c'est ainsi que le web l'enregistre |
 | Échange joueur | `POST /api/v1/history/trades` | `clientKey`, `peerName`, `selfName`, `kamasAcquired/Given`, `items[]` |
+| **Extraction de pacte** (2026-09-19) | `POST /api/v1/history/pacts` | `clientKey`, `occurredAt`, `gameServer`, `items[]` (`itemId`\|`itemName`, `quantity`) — ni prix ni combat d'origine. Détectée comme côté web : la ligne `Action [WALKON] performed on interactive element : <id>` (événement `interactive-walkon` du parseur vendu) ouvre une fenêtre de 3 min (`PACT_EXTRACTION_WINDOW_MS`), prolongée par chaque ramassage qui la rejoint ; tout ramassage de cette fenêtre est **exclu du butin de combat** (comme un achat marchand/HDV), et le lot est committé par la première ligne postérieure à la fenêtre — jamais forcé en fin de lot de lignes, une fenêtre pouvant légitimement chevaucher deux lots en lecture incrémentale |
 
 `clientKey = sha256_hex("{uid}|{kind}|{signature}")`, signature produite **par l'Engine** (donc par
 le code TS partagé) — l'hôte Rust ne fait que le hachage, comme `SyncQueueService` le fait côté web.
