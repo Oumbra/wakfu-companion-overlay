@@ -22,7 +22,6 @@ use overlay_engine::{
     WatchlistKind,
 };
 use overlay_sync::AccountSettings;
-use serde_json::Value;
 use winit::event_loop::EventLoopProxy;
 
 use crate::alert_sound;
@@ -346,13 +345,14 @@ pub enum SyncCommand {
 
 /// Regroupe les `Arc<ArcSwap<_>>` partagés avec le reste de l'app que le thread Engine consomme —
 /// factorisé pour que `spawn_engine_thread` reste sous la limite `clippy::too_many_arguments`.
-/// Le profil d'alerte du compte et l'objet `profile` BRUT dont il est tiré, partagés entre le
-/// thread Engine (qui les publie) et l'hôte (qui ouvre la fenêtre Options).
+/// Le profil d'alerte du compte, partagé entre le thread Engine (qui le publie) et l'hôte (qui
+/// ouvre la fenêtre Options).
 ///
-/// `None` tant qu'aucun compte n'a répondu, et de nouveau `None` après une déconnexion. Le JSON
-/// brut voyage avec le profil parce qu'il faut repartir de LUI pour réécrire la clé `profile` sans
-/// effacer le pseudo et l'avatar — voir `overlay_engine::AlertProfile::patch_value`.
-pub type SharedAlertProfile = Arc<ArcSwap<Option<(overlay_engine::AlertProfile, Option<Value>)>>>;
+/// `None` tant qu'aucun compte n'a répondu, et de nouveau `None` après une déconnexion. Jusqu'au
+/// 2026-09-19 l'objet `profile` brut du compte voyageait avec lui, parce qu'il fallait repartir de
+/// LUI pour réécrire la clé sans effacer le pseudo et l'avatar ; l'écriture est partielle depuis
+/// (`AlertProfile::patch_fields`, constat C9), et ces champs n'ont plus à être retenus.
+pub type SharedAlertProfile = Arc<ArcSwap<Option<overlay_engine::AlertProfile>>>;
 
 /// Les recherches de chat du compte, partagées de la même façon que [`SharedAlertProfile`] :
 /// `None` tant qu'aucun compte n'a répondu (et après une déconnexion), `Some` sinon — même vide.
@@ -531,10 +531,7 @@ pub fn spawn_engine_thread(
                             engine.set_watchlist_entries(settings.watchlist);
                             alert_profile = settings.alerts;
                             engine.set_sound_items(alert_profile.sound_items.clone());
-                            alert_profile_out.store(Arc::new(Some((
-                                alert_profile.clone(),
-                                settings.profile_raw,
-                            ))));
+                            alert_profile_out.store(Arc::new(Some(alert_profile.clone())));
                             engine.set_chat_filters(settings.chat_filters.clone());
                             chat_filters_out.store(Arc::new(Some(settings.chat_filters)));
                         }
@@ -583,14 +580,8 @@ pub fn spawn_engine_thread(
                             engine.set_sound_items(profile.sound_items.clone());
                             // Le brouillon validé devient la référence : rouvrir la fenêtre doit
                             // repartir de ce qu'on vient de régler, pas de ce que le compte
-                            // renvoyait avant. Le JSON brut du compte est conservé tel quel — la
-                            // prochaine réécriture doit toujours repartir de LUI.
-                            let raw = alert_profile_out
-                                .load()
-                                .as_ref()
-                                .as_ref()
-                                .and_then(|(_, raw)| raw.clone());
-                            alert_profile_out.store(Arc::new(Some((profile.clone(), raw))));
+                            // renvoyait avant.
+                            alert_profile_out.store(Arc::new(Some(profile.clone())));
                             alert_profile = profile;
                         }
                         EngineCommand::SetChatFilters(filters) => {
@@ -614,7 +605,7 @@ pub fn spawn_engine_thread(
                             // publications viennent de la même valeur, elles ne peuvent pas
                             // diverger (voir `SharedRosterDraft`).
                             let index = overlay_engine::RosterIndex::from_settings_json(
-                                &serde_json::json!({ "roster": roster.patch_value() }),
+                                &serde_json::json!({ "roster": roster.settings_value() }),
                             );
                             roster_out.store(Arc::new(Some(index.clone())));
                             engine.set_roster(Some(index));

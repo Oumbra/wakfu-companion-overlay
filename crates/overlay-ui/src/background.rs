@@ -597,6 +597,69 @@ fn auth_failure(err: &overlay_sync::SyncError, step: &str) -> AuthFailure {
     }
 }
 
+/// Âge au-delà duquel un jeton natif stocké est **renouvelé au démarrage** (voir
+/// [`rotate_token_if_due`]) — 7 jours, contre 30 de validité glissante : un jeton copié n'ouvre
+/// donc plus rien une semaine plus tard, sans que l'utilisateur ait rien à faire, et un poste
+/// lancé chaque jour n'appelle la route qu'une fois par semaine.
+const TOKEN_ROTATION_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// **Renouvelle le jeton s'il a plus de [`TOKEN_ROTATION_AGE`]** — ou si son âge est inconnu
+/// (sauvegardé avant que la date ne soit tenue, 2026-09-19) — et rend le jeton à utiliser pour la
+/// suite de la session (`POST /api/v1/auth/native/session`, constat C5 de `docs/analyse-rgpd.md`
+/// §3.5 ; côté serveur, `server/auth/pairing.ts::rotateNativeSession`).
+///
+/// Appelé **entre** la validation du jeton stocké (`GET /api/v1/settings` réussi) et l'activation
+/// de la file d'envoi — c'est le seul endroit du processus qui garde un jeton en mémoire
+/// (`SyncCommand::Activate`), et il reçoit ainsi le nouveau d'emblée ; tout le reste (`local_data`,
+/// validations de la fenêtre Options) relit le trousseau à chaque appel. La grâce de 5 min laissée
+/// à l'ancien jeton n'a donc rien à couvrir ici que d'éventuelles requêtes déjà parties.
+///
+/// **Le nouveau jeton est persisté AVANT d'être utilisé**, et un échec n'est jamais une
+/// déconnexion : la route absente (déploiement pas encore à jour), un 401 ou une panne réseau
+/// laissent l'ancien jeton en place, qui vient d'être accepté — ce n'est pas lui qui est en cause.
+/// Si le serveur a répondu mais que la sauvegarde échoue, le nouveau jeton sert quand même pour
+/// cette session (l'ancien meurt dans 5 min) ; il sera redemandé au prochain lancement, comme
+/// après n'importe quel échec de `save_token`.
+fn rotate_token_if_due(token: String) -> String {
+    match overlay_sync::token_store::token_age() {
+        Some(age) if age < TOKEN_ROTATION_AGE => {
+            tracing::debug!(
+                age_days = age.as_secs() / 86_400,
+                "[compte] jeton natif récent, pas de rotation"
+            );
+            return token;
+        }
+        Some(age) => tracing::info!(
+            age_days = age.as_secs() / 86_400,
+            "[compte] jeton natif de plus de 7 jours — renouvellement."
+        ),
+        None => {
+            tracing::info!("[compte] date d'émission du jeton natif inconnue — renouvellement.")
+        }
+    }
+    match overlay_sync::client::rotate_native_session(&token) {
+        Ok(rotated) => {
+            if let Err(err) = overlay_sync::token_store::save_token(&rotated.token) {
+                tracing::warn!(
+                    "[compte] nouveau jeton natif non sauvegardé ({err}) — utilisé pour cette session, sera redemandé au prochain lancement."
+                );
+            }
+            tracing::info!(
+                expires_at = %rotated.expires_at,
+                previous_valid_until = %rotated.previous_token_valid_until,
+                "[compte] jeton natif renouvelé — l'ancien n'est plus accepté que quelques minutes."
+            );
+            rotated.token
+        }
+        Err(err) => {
+            tracing::warn!(
+                "[compte] renouvellement du jeton natif impossible ({err}) — jeton actuel conservé, prochaine tentative au prochain lancement."
+            );
+            token
+        }
+    }
+}
+
 /// Une tentative complète de connexion au compte : jeton déjà stocké et encore valide, sinon —
 /// et seulement si `pair_if_needed` — nouvel appairage. `Ok(())` si les réglages de compte
 /// (roster + watchlist) ont bien été récupérés et transmis (`settings_tx`) ; sinon `AttemptEnd`
@@ -629,6 +692,9 @@ fn attempt_connect(
                     settings.watchlist.len()
                 );
                 let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                // Jeton validé, file pas encore activée : le moment de le renouveler (voir
+                // `rotate_token_if_due`) — la file reçoit celui qui vaut pour la session.
+                let token = rotate_token_if_due(token);
                 activate_sync_queue(&token, sync_tx);
                 return Ok(());
             }

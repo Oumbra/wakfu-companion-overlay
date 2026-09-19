@@ -65,7 +65,7 @@ use std::thread;
 use arc_swap::ArcSwap;
 use egui_wgpu::wgpu;
 use global_hotkey::GlobalHotKeyEvent;
-use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
+use overlay_engine::{CatalogIndex, DungeonIndex, Roster, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_sync::update::{apply as update_apply, UpdateStatus};
 use overlay_ui::alert_sound;
@@ -2806,7 +2806,7 @@ impl App {
         // Sans compte lié, il n'y a ni liste à charger ni endroit où l'écrire — l'onglet le dit.
         let alerts_snapshot = self.alert_profile.load();
         let (alerts_draft, alerts_availability) = match alerts_snapshot.as_ref() {
-            Some((profile, _)) => (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready),
+            Some(profile) => (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready),
             None if matches!(**self.auth_status.load(), AuthStatus::Connected) => {
                 // Compte lié mais réglages pas encore revenus : c'est le seul cas où un rouage dit
                 // la vérité.
@@ -3159,8 +3159,11 @@ impl App {
     /// roster est appliqué localement d'abord (le combat en cours doit reconnaître le personnage
     /// déclaré sans attendre le réseau), puis écrit sur le compte depuis un thread.
     ///
-    /// **La clé `roster` est remplacée en entier**, d'où le brouillon fidèle — voir
-    /// `overlay_engine::roster`, doc de module, et `overlay_sync::client::patch_roster`.
+    /// **Seul l'écart part au compte** (`Roster::patch_against`, constat C9, 2026-09-19) : les
+    /// comptes modifiés ou créés, et les identifiants des comptes retirés — la référence est le
+    /// roster publié par le thread Engine, c'est-à-dire celui du compte ou celui de la dernière
+    /// validation. Voir `overlay_engine::roster`, doc de module, et
+    /// `overlay_sync::client::patch_roster`.
     fn commit_personnages(&mut self, options_window_id: WindowId) {
         let Some(roster) = self
             .windows
@@ -3171,14 +3174,13 @@ impl App {
             return;
         };
         let reference = self.roster_draft.load();
-        if reference.as_ref().as_ref() == Some(&roster) {
+        let patch = roster.patch_against(reference.as_ref().as_ref().unwrap_or(&Roster::default()));
+        if patch.is_empty() {
             return;
         }
-        let _ = self
-            .settings_tx
-            .send(EngineCommand::SetRoster(roster.clone()));
+        let _ = self.settings_tx.send(EngineCommand::SetRoster(roster));
         thread::spawn(move || match overlay_sync::token_store::load_token() {
-            Some(token) => match overlay_sync::client::patch_roster(&token, &roster) {
+            Some(token) => match overlay_sync::client::patch_roster(&token, &patch) {
                 Ok(_) => tracing::info!("[options] roster enregistré sur le compte."),
                 Err(err) => {
                     tracing::warn!(%err, "[options] échec de l'enregistrement du roster")
@@ -3216,11 +3218,7 @@ impl App {
             return;
         };
         let connu = self.alert_profile.load();
-        let (reference, raw) = match connu.as_ref() {
-            Some((profile, raw)) => (Some(profile.clone()), raw.clone()),
-            None => (None, None),
-        };
-        if reference.as_ref() == Some(&draft) {
+        if connu.as_ref().as_ref() == Some(&draft) {
             return;
         }
 
@@ -3230,10 +3228,11 @@ impl App {
             .send(EngineCommand::SetAlertProfile(draft.clone()));
 
         // Et écrit au compte sur un thread — jamais sur la boucle winit (§7.3 du plan, même règle
-        // que tous les appels réseau de ce dépôt).
-        let profile_value = draft.patch_value(raw.as_ref());
+        // que tous les appels réseau de ce dépôt). Les trois champs d'alerte seulement : le
+        // serveur fusionne (`AlertProfile::patch_fields`, constat C9, 2026-09-19).
+        let fields = draft.patch_fields();
         thread::spawn(move || match overlay_sync::token_store::load_token() {
-            Some(token) => match overlay_sync::client::patch_profile(&token, &profile_value) {
+            Some(token) => match overlay_sync::client::patch_profile(&token, &fields) {
                 Ok(_) => tracing::info!("[options] alertes enregistrées sur le compte."),
                 // Best-effort, comme la réplication des compteurs de Suivi : le réglage est déjà
                 // actif localement, et la prochaine validation réessaiera. Un échec réseau ne doit

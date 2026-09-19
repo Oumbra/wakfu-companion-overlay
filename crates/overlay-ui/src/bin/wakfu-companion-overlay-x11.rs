@@ -68,7 +68,7 @@ mod linux_main {
     use arc_swap::ArcSwap;
     use egui_wgpu::wgpu;
     use global_hotkey::GlobalHotKeyEvent;
-    use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
+    use overlay_engine::{CatalogIndex, DungeonIndex, Roster, SessionSnapshot, WatchlistEntry};
     use overlay_ingest::discovery;
     use overlay_platform::linux::topmost::{self, TopmostAction, TopmostState};
     use overlay_platform::linux::x11::{GameRect, GameWindowTracker};
@@ -1624,9 +1624,7 @@ mod linux_main {
             // seulement à « Valider » ; et le compte est relu à l'ouverture, sur un thread.
             let alerts_snapshot = self.alert_profile.load();
             let (alerts_draft, alerts_availability) = match alerts_snapshot.as_ref() {
-                Some((profile, _)) => {
-                    (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready)
-                }
+                Some(profile) => (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready),
                 None if self.auth_status.load().is_connected() => {
                     (None, alerts_tab::AlertsAvailability::Loading)
                 }
@@ -1845,17 +1843,17 @@ mod linux_main {
                 return;
             };
             let reference = self.roster_draft.load();
-            if reference.as_ref().as_ref() == Some(&roster) {
+            let patch =
+                roster.patch_against(reference.as_ref().as_ref().unwrap_or(&Roster::default()));
+            if patch.is_empty() {
                 return;
             }
             // Appliqué localement d'abord : le combat en cours doit reconnaître le personnage
             // déclaré sans attendre le réseau.
-            let _ = self
-                .settings_tx
-                .send(EngineCommand::SetRoster(roster.clone()));
+            let _ = self.settings_tx.send(EngineCommand::SetRoster(roster));
             thread::spawn(move || {
                 match overlay_sync::token_store::load_token() {
-                    Some(token) => match overlay_sync::client::patch_roster(&token, &roster) {
+                    Some(token) => match overlay_sync::client::patch_roster(&token, &patch) {
                         Ok(_) => {
                             tracing::info!("[options] roster enregistré sur le compte.")
                         }
@@ -1880,20 +1878,16 @@ mod linux_main {
                 return;
             };
             let connu = self.alert_profile.load();
-            let (reference, raw) = match connu.as_ref() {
-                Some((profile, raw)) => (Some(profile.clone()), raw.clone()),
-                None => (None, None),
-            };
-            if reference.as_ref() == Some(&draft) {
+            if connu.as_ref().as_ref() == Some(&draft) {
                 return;
             }
             let _ = self
                 .settings_tx
                 .send(EngineCommand::SetAlertProfile(draft.clone()));
-            let profile_value = draft.patch_value(raw.as_ref());
+            let fields = draft.patch_fields();
             thread::spawn(move || {
                 match overlay_sync::token_store::load_token() {
-                Some(token) => match overlay_sync::client::patch_profile(&token, &profile_value) {
+                Some(token) => match overlay_sync::client::patch_profile(&token, &fields) {
                     Ok(_) => tracing::info!("[options] alertes enregistrées sur le compte."),
                     Err(err) => {
                         tracing::warn!(%err, "[options] échec de l'enregistrement des alertes")

@@ -9,9 +9,10 @@
 //!
 //! Il édite un **brouillon** du roster du compte ([`overlay_engine::Roster`]), comme les trois
 //! autres onglets de liste : rien n'est écrit tant que « Valider » n'a pas été cliqué, et
-//! « Annuler » abandonne tout (voir `panels::options_modal`). La validation réécrit la clé
-//! `roster` ENTIÈRE (`overlay_sync::client::patch_roster`) — d'où la forme fidèle du brouillon,
-//! `id`/`isDefault` et champs inconnus compris, expliquée dans `overlay_engine::roster`.
+//! « Annuler » abandonne tout (voir `panels::options_modal`). La validation n'envoie au compte
+//! que l'écart avec le roster connu (`Roster::patch_against`, `overlay_sync::client::patch_roster`)
+//! — d'où la forme fidèle du brouillon, `id`/`isDefault` compris, expliquée dans
+//! `overlay_engine::roster`.
 //!
 //! ## Les règles de l'écran
 //!

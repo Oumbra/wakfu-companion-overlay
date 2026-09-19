@@ -4,6 +4,7 @@
 //! Linux sans Secret Service).
 
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::SyncError;
 
@@ -24,9 +25,52 @@ fn entry() -> Result<keyring::Entry, SyncError> {
 }
 
 fn token_file_path() -> PathBuf {
+    data_file("native-session.token")
+}
+
+/// **Quand le jeton courant a été émis** — secondes Unix, à côté du fichier de repli. Ce n'est pas
+/// un secret (une date), et le trousseau n'a pas de place pour une seconde valeur : un fichier
+/// suffit. Écrit par [`save_token`], lu par [`token_age`], retiré par [`clear_token`].
+fn issued_at_file_path() -> PathBuf {
+    data_file("native-session.issued-at")
+}
+
+fn data_file(name: &str) -> PathBuf {
     overlay_engine::app_dirs::project_dirs(APP_NAME)
-        .map(|dirs| dirs.data_dir().join("native-session.token"))
-        .unwrap_or_else(|| PathBuf::from("native-session.token"))
+        .map(|dirs| dirs.data_dir().join(name))
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// Depuis combien de temps le jeton courant a été émis — `None` si la date n'a jamais été
+/// enregistrée (jeton sauvegardé par une version antérieure au 2026-09-19) ou n'est plus lisible.
+/// C'est ce que `background::attempt_connect` compare au seuil de rotation ; un âge inconnu vaut
+/// « à renouveler », ce qui pose la date au passage.
+pub fn token_age() -> Option<Duration> {
+    let secs: u64 = std::fs::read_to_string(issued_at_file_path())
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH + Duration::from_secs(secs))
+        .ok()
+}
+
+fn record_issued_now() {
+    let path = issued_at_file_path();
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let written = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .unwrap_or(Ok(()))
+        .and_then(|_| std::fs::write(&path, secs.to_string()));
+    if let Err(err) = written {
+        // Pas bloquant : sans date, le prochain lancement renouvellera le jeton une fois de plus.
+        tracing::warn!(path = %path.display(), %err, "date d'émission du jeton non enregistrée");
+    }
 }
 
 /// Le fichier de repli **existe** : le trousseau a manqué au moins une fois et le jeton est sur
@@ -91,7 +135,9 @@ fn load_token_file() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Sauvegarde le jeton natif — trousseau OS, repli fichier si indisponible.
+/// Sauvegarde le jeton natif — trousseau OS, repli fichier si indisponible — et **date son
+/// émission** ([`token_age`]) : un jeton sauvegardé est un jeton que le serveur vient d'émettre,
+/// à l'appairage comme à la rotation (`client::rotate_native_session`).
 ///
 /// ⚠️ Écrit PUIS relit immédiatement avant de faire confiance au trousseau (`verify_keyring_write`)
 /// — un `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit réellement
@@ -102,6 +148,7 @@ fn load_token_file() -> Option<String> {
 /// l'appairage à **chaque** lancement sans que rien ne le signale — exactement ce que §7.2 du plan
 /// interdit ("jamais silencieux").
 pub fn save_token(token: &str) -> Result<(), SyncError> {
+    record_issued_now();
     if verify_keyring_write(token) {
         return Ok(());
     }
@@ -130,13 +177,14 @@ pub fn load_token() -> Option<String> {
         .or_else(load_token_file)
 }
 
-/// Efface le jeton des deux emplacements possibles — best-effort (une absence des deux côtés
-/// n'est pas une erreur).
+/// Efface le jeton des deux emplacements possibles, et sa date d'émission — best-effort (une
+/// absence n'est pas une erreur).
 pub fn clear_token() {
     if let Ok(e) = entry() {
         let _ = e.delete_credential();
     }
     let _ = std::fs::remove_file(token_file_path());
+    let _ = std::fs::remove_file(issued_at_file_path());
 }
 
 #[cfg(test)]
@@ -162,12 +210,16 @@ mod tests {
                 save_token("jeton-de-test-123")
                     .expect("save_token ne doit jamais échouer totalement (repli fichier)");
                 assert_eq!(load_token().as_deref(), Some("jeton-de-test-123"));
+                // Daté à la sauvegarde : c'est ce que la rotation au démarrage consulte.
+                let age = token_age().expect("date d'émission enregistrée avec le jeton");
+                assert!(age < Duration::from_secs(60), "{age:?}");
 
                 clear_token();
                 assert!(
                     load_token().is_none(),
                     "clear_token doit effacer les deux emplacements"
                 );
+                assert!(token_age().is_none(), "la date part avec le jeton");
             })
             .unwrap();
         handle.join().unwrap();

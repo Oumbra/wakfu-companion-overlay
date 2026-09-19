@@ -48,9 +48,9 @@
 //! ## Ce que le portage demandera, et qui n'existe pas encore
 //!
 //! 1. **Un roster ÉDITABLE côté moteur.** `RosterIndex::from_settings_json` jette `id`, `label` et
-//!    `isDefault` ; or `PATCH /api/v1/settings` **remplace la valeur entière de la clé** —
-//!    réécrire `roster` sans ces champs effacerait les comptes du site. Garder le JSON brut, comme
-//!    `AccountSettings::profile_raw` le fait déjà pour `profile`.
+//!    `isDefault` ; or `PATCH /api/v1/settings` **remplaçait alors la valeur entière de la clé** —
+//!    réécrire `roster` sans ces champs effacerait les comptes du site. (Fait : `Roster` ; et
+//!    depuis le 2026-09-19 l'écriture est partielle, `Roster::patch_against`.)
 //! 2. **`patch_roster`** dans `overlay_sync::client`, sur le modèle de `patch_chat_filters`.
 //! 3. **Un chargeur d'avatars dans `overlay-ui`** — [`Avatars`] en est le brouillon, gris
 //!    précalculé compris.

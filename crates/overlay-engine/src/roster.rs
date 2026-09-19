@@ -6,7 +6,8 @@
 //!
 //! Pas d'IO ici (aucune dépendance réseau) : `from_settings_json` prend un `serde_json::Value`
 //! déjà récupéré par `overlay-sync`, exactement comme le reste d'`overlay-engine` ne connaît que
-//! des données déjà lues, et [`Roster::patch_value`] rend un `Value` que `overlay-sync` postera.
+//! des données déjà lues, et [`Roster::patch_against`] rend un [`RosterPatch`] que `overlay-sync`
+//! postera.
 //!
 //! ## Pourquoi deux types pour la même donnée
 //!
@@ -14,25 +15,35 @@
 //! `label`, `isDefault`) et aplatit les comptes en tables par nom normalisé. C'était sans
 //! conséquence tant que l'overlay ne faisait que lire.
 //!
-//! **Ça ne l'est plus dès qu'il écrit** : `PATCH /api/v1/settings` remplace la valeur ENTIÈRE
-//! d'une clé (voir `functions/api/v1/settings.ts::onRequestPatch`), donc réécrire `roster` depuis
-//! un index effacerait du compte l'identité même des comptes — et le site ne saurait plus lequel
-//! est le principal. [`Roster`] garde donc la forme exacte du JSON, **y compris les champs que
-//! l'overlay ne connaît pas** (voir `RosterAccount::extra`), sur le même principe que
-//! `AccountSettings::profile_raw` pour la clé `profile`.
+//! **Ça ne l'est plus dès qu'il écrit** : un compte s'écrit identifié par son `id`, avec son
+//! libellé et son statut de principal, que l'index a jetés — les réinventer ferait perdre au site
+//! le fil de ses comptes. [`Roster`] garde donc la forme du JSON telle que le site l'édite.
+//!
+//! ## L'écriture est PARTIELLE depuis le 2026-09-19
+//!
+//! Constat C9 de `docs/analyse-rgpd.md` (minimisation) : l'entrée du `PATCH` porte `patch` au lieu
+//! de `value`, et le serveur fusionne compte par compte, champ par champ
+//! (`server/settings/patch.ts`, dépôt `wakfu-companion`). L'overlay n'envoie que les comptes qu'il
+//! a modifiés ou créés, entiers, et les identifiants de ceux qu'il a retirés
+//! ([`Roster::patch_against`]) ; les autres comptes, et sur un compte envoyé les champs que
+//! l'overlay ne connaît pas, restent tels quels sur le compte sans avoir transité par lui.
+//!
+//! Jusque-là, le serveur remplaçant la valeur ENTIÈRE de la clé, `RosterAccount` gardait sous un
+//! `#[serde(flatten)]` tout champ inconnu pour le renvoyer à l'identique — une préférence par
+//! compte ajoutée un jour par le site aurait sinon été effacée par une validation depuis l'overlay.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use unicode_normalization::UnicodeNormalization;
 
 /// Miroir de `Gender` (`class-icons.data.ts`) — féminin/masculin, les deux seules valeurs que le
 /// jeu propose à la création de personnage. `Serialize` sert à la persistance disque des combats
 /// en cours (voir `fight_store.rs`) — `FighterDamage::gender` doit survivre à un redémarrage — et
-/// à la réécriture du roster sur le compte ([`Roster::patch_value`]).
+/// à la réécriture du roster sur le compte ([`Roster::patch_against`]).
 /// `Hash` : clé de `HashMap` côté `overlay-ui` (`portraits::PortraitAtlas`, une texture par
 /// couple classe/sexe).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -58,8 +69,8 @@ pub struct RosterCharacter {
 /// (L5, §7.1 du plan) : le log Wakfu ne contient aucune indication de serveur (voir
 /// `GameServerService`, dépôt web), il faut donc le rattacher au compte qui l'a déclaré.
 ///
-/// **Sérialisable à l'identique de ce qui a été lu** : voir `extra`, et la doc de module pour ce
-/// qu'un aller-retour appauvrissant coûterait.
+/// Les champs que l'overlay ne connaît pas ne sont pas lus : ils n'ont plus à être renvoyés depuis
+/// que l'écriture est partielle (voir la doc de module) — le serveur les conserve de lui-même.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RosterAccount {
     /// Identifiant stable du compte, créé par le site (`generateId`) ou par [`new_account_id`].
@@ -83,11 +94,6 @@ pub struct RosterAccount {
     /// supprimable** — ni par le site, ni par l'overlay (voir [`Roster::remove_account`]).
     #[serde(rename = "isDefault", default, skip_serializing_if = "is_false")]
     pub is_default: bool,
-    /// **Tout le reste du compte, tel qu'il est arrivé.** Rien n'en porte aujourd'hui, et c'est
-    /// précisément pourquoi ce champ existe : le jour où le site ajoute une préférence par compte,
-    /// une validation faite depuis l'overlay ne doit pas l'effacer du compte de l'utilisateur.
-    #[serde(flatten)]
-    extra: Map<String, Value>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -103,8 +109,22 @@ impl RosterAccount {
             characters: Vec::new(),
             game_server,
             is_default: false,
-            extra: Map::new(),
         }
+    }
+
+    /// Le compte tel qu'un correctif `roster` le porte — **tous ses champs connus, explicites** :
+    /// le serveur fusionne champ par champ et garde ce qu'il ne reçoit pas, donc un `gameServer`
+    /// retiré (« Aucun ») doit partir en `null` — valeur légitime côté site (`gameServer?: string
+    /// | null`) — et non être omis comme le fait la sérialisation de lecture, qui l'aurait laissé
+    /// intact sur le compte. Même raison pour `isDefault`, toujours écrit.
+    fn patch_object(&self) -> Value {
+        serde_json::json!({
+            "id": self.id,
+            "label": self.label,
+            "characters": self.characters,
+            "gameServer": self.game_server,
+            "isDefault": self.is_default,
+        })
     }
 
     /// Le personnage de ce compte portant ce nom (comparaison normalisée, comme partout ici).
@@ -157,9 +177,9 @@ fn base36(mut value: u64) -> String {
 /// personnages dans l'ordre que l'utilisateur leur a donné (le glisser-déposer de l'onglet et
 /// celui de la page profil écrivent le même tableau).
 ///
-/// C'est la valeur de la clé `roster` de `GET /api/v1/settings`, et c'est elle que
-/// [`Roster::patch_value`] rend au `PATCH` — voir la doc de module pour pourquoi elle ne se
-/// reconstruit pas depuis [`RosterIndex`].
+/// C'est la valeur de la clé `roster` de `GET /api/v1/settings`, et c'est de son écart avec la
+/// version connue du compte que [`Roster::patch_against`] tire le correctif à envoyer — voir la
+/// doc de module pour pourquoi elle ne se reconstruit pas depuis [`RosterIndex`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Roster {
     pub accounts: Vec<RosterAccount>,
@@ -186,10 +206,39 @@ impl Roster {
         Self { accounts }
     }
 
-    /// La valeur de la clé `roster` à poster — voir `overlay_sync::client::patch_roster`, qui
-    /// l'enveloppe dans son entrée `{ key, value, updatedAt }`.
-    pub fn patch_value(&self) -> Value {
+    /// La valeur de la clé `roster` telle que le compte la porterait — ce dont [`RosterIndex`] se
+    /// refait après une édition (`engine_thread`, `EngineCommand::SetRoster`). **Pas ce qui part
+    /// au compte** : l'écriture est un correctif, voir [`Roster::patch_against`].
+    pub fn settings_value(&self) -> Value {
         serde_json::to_value(&self.accounts).unwrap_or(Value::Array(Vec::new()))
+    }
+
+    /// **Le correctif à envoyer** pour passer de `known` — le roster tel que le compte l'a
+    /// renvoyé, ou tel que la dernière validation l'a laissé — à `self` : les comptes de `self`
+    /// absents de `known` ou différents de leur homologue (même `id`), entiers ; les `id` de
+    /// `known` que `self` n'a plus. Vide (`RosterPatch::is_empty`) quand rien n'a changé.
+    ///
+    /// Un compte dont un seul personnage a changé part entier : la fusion côté serveur est
+    /// superficielle (`characters` est remplacé en bloc), et c'est la liste entière que l'onglet
+    /// édite. Ce qui ne part pas, c'est tout compte non touché — et, sur un compte envoyé, tout
+    /// champ que l'overlay ne connaît pas.
+    pub fn patch_against(&self, known: &Roster) -> RosterPatch {
+        let accounts = self
+            .accounts
+            .iter()
+            .filter(|compte| !known.accounts.iter().any(|connu| connu == *compte))
+            .map(RosterAccount::patch_object)
+            .collect();
+        let removed_ids = known
+            .accounts
+            .iter()
+            .filter(|connu| !self.accounts.iter().any(|compte| compte.id == connu.id))
+            .map(|connu| connu.id.clone())
+            .collect();
+        RosterPatch {
+            accounts,
+            removed_ids,
+        }
     }
 
     /// Le compte principal, celui que le site interdit de supprimer — le premier à défaut (voir
@@ -262,16 +311,37 @@ impl Roster {
     }
 }
 
-/// L'entrée `{ key, value, updatedAt }` d'un `PATCH /api/v1/settings` pour la clé `roster` —
-/// jumeau de `chat_alert::chat_filters_patch_entry` et de `profile::profile_patch_entry`.
+/// Le correctif de la clé `roster` — ce que [`Roster::patch_against`] produit et que
+/// [`roster_patch_entry`] enveloppe. Forme serveur : `{ accounts: [{ id, … }], removedIds }`
+/// (`server/settings/patch.ts::parseSettingPatch`, qui refuse un correctif vide — d'où
+/// [`RosterPatch::is_empty`], à tester avant d'envoyer).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RosterPatch {
+    /// Comptes nouveaux ou modifiés, entiers ([`RosterAccount::patch_object`]), fusionnés par `id`
+    /// côté serveur — un `id` inconnu du compte y crée le compte, en fin de liste.
+    pub accounts: Vec<Value>,
+    /// Comptes retirés — le serveur les efface, quels que soient leurs champs.
+    pub removed_ids: Vec<String>,
+}
+
+impl RosterPatch {
+    /// Rien à envoyer : ni compte modifié, ni compte retiré.
+    pub fn is_empty(&self) -> bool {
+        self.accounts.is_empty() && self.removed_ids.is_empty()
+    }
+}
+
+/// L'entrée `{ key, patch, updatedAt }` d'un `PATCH /api/v1/settings` pour la clé `roster` —
+/// jumeau de `profile::profile_patch_entry` (et de `chat_alert::chat_filters_patch_entry`, qui
+/// envoie une `value` entière : une liste de recherches n'a pas de sous-clé à fusionner).
 ///
-/// La valeur est le tableau ENTIER des comptes ([`Roster::patch_value`]), jamais le seul compte
-/// modifié : le serveur remplace la valeur de la clé, il ne fusionne pas (voir doc de module).
-/// `updatedAt` arbitre le « dernier écrivain gagne », horodaté à l'instant de l'appel.
-pub fn roster_patch_entry(roster: &Roster) -> Value {
+/// `updatedAt` arbitre le « dernier écrivain gagne », horodaté à l'instant de l'appel ; pour une
+/// fusion, le serveur exige de plus que la clé n'ait pas bougé depuis sa propre lecture, et
+/// renvoie sinon la version du compte dans `rejected` (voir `overlay_sync::client::patch_settings`).
+pub fn roster_patch_entry(patch: &RosterPatch) -> Value {
     serde_json::json!({
         "key": "roster",
-        "value": roster.patch_value(),
+        "patch": { "accounts": patch.accounts, "removedIds": patch.removed_ids },
         "updatedAt": chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -501,19 +571,103 @@ mod tests {
     // ---------------------------------------------------------------------------------------
 
     #[test]
-    fn un_aller_retour_ne_perd_rien_de_ce_que_le_compte_portait() {
-        // `theme` n'existe nulle part dans l'overlay : c'est exactement le champ qu'une écriture
-        // naïve effacerait du compte de l'utilisateur.
+    fn un_aller_retour_rend_la_valeur_que_le_compte_portait() {
         let data = serde_json::json!({ "roster": [{
             "id": "acc-1",
             "label": "",
             "isDefault": true,
             "gameServer": "pandora",
-            "theme": "sombre",
             "characters": [{ "name": "Oumbra", "className": "sram", "gender": "m" }],
         }]});
         let roster = Roster::from_settings_json(&data);
-        assert_eq!(roster.patch_value(), data["roster"]);
+        assert_eq!(roster.settings_value(), data["roster"]);
+    }
+
+    fn deux_comptes() -> Roster {
+        Roster::from_settings_json(&serde_json::json!({ "roster": [
+            { "id": "acc-1", "label": "", "isDefault": true, "gameServer": "pandora",
+              "theme": "sombre",
+              "characters": [{ "name": "Oumbra", "className": "sram", "gender": "m" }] },
+            { "id": "acc-2", "label": "Mules", "characters": [] },
+        ]}))
+    }
+
+    #[test]
+    fn sans_changement_le_correctif_est_vide() {
+        let connu = deux_comptes();
+        assert!(connu.patch_against(&connu).is_empty());
+    }
+
+    #[test]
+    fn seul_le_compte_touche_part_et_il_part_entier() {
+        // `theme` (inconnu de l'overlay) n'est ni lu ni renvoyé : le serveur le garde de
+        // lui-même, c'est tout l'objet de l'écriture partielle. Le compte non touché ne part
+        // pas du tout.
+        let connu = deux_comptes();
+        let mut edite = connu.clone();
+        edite.declare(
+            1,
+            RosterCharacter {
+                name: "Anonyme-Sadida1".into(),
+                class_name: "sadida".into(),
+                gender: Gender::F,
+            },
+        );
+        let patch = edite.patch_against(&connu);
+        assert!(patch.removed_ids.is_empty());
+        assert_eq!(patch.accounts.len(), 1);
+        let compte = &patch.accounts[0];
+        assert_eq!(compte["id"], "acc-2");
+        assert_eq!(compte["label"], "Mules");
+        assert_eq!(compte["isDefault"], false);
+        assert_eq!(compte["gameServer"], Value::Null);
+        assert_eq!(compte["characters"][0]["name"], "Anonyme-Sadida1");
+        assert!(compte.get("theme").is_none());
+    }
+
+    #[test]
+    fn un_serveur_retire_part_en_null_et_non_omis() {
+        // Omis, le serveur garderait l'ancien : « Aucun » doit vraiment s'écrire.
+        let connu = deux_comptes();
+        let mut edite = connu.clone();
+        edite.accounts[0].game_server = None;
+        let patch = edite.patch_against(&connu);
+        assert_eq!(patch.accounts.len(), 1);
+        assert_eq!(patch.accounts[0]["id"], "acc-1");
+        assert_eq!(patch.accounts[0]["gameServer"], Value::Null);
+        assert_eq!(patch.accounts[0]["isDefault"], true);
+    }
+
+    #[test]
+    fn un_compte_retire_ne_part_que_par_son_identifiant() {
+        let connu = deux_comptes();
+        let mut edite = connu.clone();
+        edite.remove_account(1);
+        let patch = edite.patch_against(&connu);
+        assert!(patch.accounts.is_empty());
+        assert_eq!(patch.removed_ids, vec!["acc-2".to_string()]);
+    }
+
+    #[test]
+    fn un_compte_nouveau_part_entier_avec_son_identifiant() {
+        let connu = deux_comptes();
+        let mut edite = connu.clone();
+        edite
+            .accounts
+            .push(RosterAccount::new("Métiers", Some("rubilax".into())));
+        let patch = edite.patch_against(&connu);
+        assert_eq!(patch.accounts.len(), 1);
+        assert_eq!(patch.accounts[0]["label"], "Métiers");
+        assert_eq!(patch.accounts[0]["gameServer"], "rubilax");
+        assert!(!patch.accounts[0]["id"].as_str().unwrap().is_empty());
+        let entree = roster_patch_entry(&patch);
+        assert_eq!(entree["key"], "roster");
+        assert!(entree.get("value").is_none());
+        assert_eq!(
+            entree["patch"]["accounts"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(entree["patch"]["removedIds"], serde_json::json!([]));
     }
 
     #[test]

@@ -47,7 +47,9 @@ pub use profile::{
 };
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use recipe::{flatten_for_tracking, resolve_recipe, RecipeIngredient};
-pub use roster::{roster_patch_entry, Gender, Roster, RosterAccount, RosterCharacter, RosterIndex};
+pub use roster::{
+    roster_patch_entry, Gender, Roster, RosterAccount, RosterCharacter, RosterIndex, RosterPatch,
+};
 pub use session::{
     Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals,
     SpellCastRecord, MAX_LAST_TURN_CASTS,

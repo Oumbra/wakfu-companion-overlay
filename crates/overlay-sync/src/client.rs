@@ -8,7 +8,7 @@ use std::time::Duration;
 use overlay_engine::{
     chat_filters_from_account_data, chat_filters_patch_entry, profile_patch_entry,
     roster_patch_entry, watchlist_from_settings_json, watchlist_patch_entry, AlertProfile,
-    ChatFilter, Roster, RosterIndex, WatchlistEntry,
+    ChatFilter, Roster, RosterIndex, RosterPatch, WatchlistEntry,
 };
 use serde_json::Value;
 
@@ -121,31 +121,67 @@ pub fn patch_json_authenticated(token: &str, path: &str, body: &Value) -> Result
     parse_json_body(path, response)
 }
 
+/// `PATCH /api/v1/settings` d'une seule entrée — le tronc commun des quatre `patch_*` ci-dessous.
+/// Un lot d'une seule entrée EST l'écriture par clé (pas de route `/settings/{key}` séparée côté
+/// serveur, `server/README.md` lot 6).
+///
+/// La réponse est un 200 même quand la clé est **refusée** (`rejected: [{ key, remoteUpdatedAt,
+/// value }]`) : le compte portait une version plus récente — écrite depuis le site après notre
+/// horodatage, ou, pour un correctif (`patch`, clés `profile` et `roster`), entre la lecture du
+/// serveur et son écriture (compare-and-set, `functions/api/v1/settings.ts::onRequestPatch`). Le
+/// refus est **journalisé, pas rejoué** : le réglage reste appliqué localement, le compte garde sa
+/// version, et le prochain `GET` (prochain lancement, ou « Réessayer ») réaligne l'overlay dessus.
+/// Rejouer le correctif sur la version fraîche reviendrait à faire gagner l'écriture la plus
+/// ancienne — l'inverse de l'arbitrage.
+fn patch_settings(token: &str, entry: Value) -> Result<Value, SyncError> {
+    let key = entry
+        .get("key")
+        .and_then(Value::as_str)
+        .unwrap_or("?")
+        .to_string();
+    let body = serde_json::json!({ "entries": [entry] });
+    let response = patch_json_authenticated(token, "/api/v1/settings", &body)?;
+    if let Some(rejected) = response.get("rejected").and_then(Value::as_array) {
+        for refus in rejected {
+            let remote_updated_at = refus
+                .get("remoteUpdatedAt")
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            tracing::warn!(
+                key = %key,
+                remote_updated_at,
+                "[compte] écriture refusée — le compte porte une version plus récente, conservée"
+            );
+        }
+    }
+    Ok(response)
+}
+
 /// `PATCH /api/v1/settings` pour répliquer les compteurs de Suivi (watchlist) vers le compte —
 /// voir `overlay_engine::watchlist::watchlist_patch_entry` pour le format de l'entrée envoyée, et
 /// `docs/plan-architecture.md` §14 point 3 (chantier fermé le 2026-09-07, retour utilisateur : un
-/// Suivi jamais visible sur le site). Un lot d'une seule entrée EST l'écriture par clé (pas de
-/// route `/settings/{key}` séparée côté serveur).
+/// Suivi jamais visible sur le site). Valeur entière : une liste plate n'a pas de sous-clé à
+/// fusionner.
 pub fn patch_watchlist(token: &str, entries: &[WatchlistEntry]) -> Result<Value, SyncError> {
-    let body = serde_json::json!({ "entries": [watchlist_patch_entry(entries)] });
-    patch_json_authenticated(token, "/api/v1/settings", &body)
+    patch_settings(token, watchlist_patch_entry(entries))
 }
 
 /// `PATCH /api/v1/settings` pour écrire la clé `profile` — les alertes de ramassage réglées dans
 /// l'onglet « Alertes » de la fenêtre Options (2026-09-12).
 ///
-/// **`profile` doit être l'objet ENTIER**, pas les seuls champs d'alerte : le serveur remplace la
-/// valeur de la clé, il ne fusionne pas. C'est `AlertProfile::patch_value` qui le construit, à
-/// partir de l'objet reçu au `GET` (`AccountSettings::profile_raw`) — l'appeler autrement
-/// effacerait le pseudo et l'avatar du compte.
+/// **Écriture partielle depuis le 2026-09-19** (constat C9 de `docs/analyse-rgpd.md`) : `fields`
+/// est le correctif produit par `AlertProfile::patch_fields` — les trois champs d'alerte, rien
+/// d'autre — et le serveur le fusionne dans la valeur en compte (`server/settings/patch.ts`). Le
+/// pseudo, l'avatar et le mode d'affichage des personnages, que l'overlay n'affiche nulle part,
+/// ne transitent plus par lui ; jusque-là il devait renvoyer l'objet entier reçu au `GET` pour ne
+/// pas les effacer.
 ///
 /// L'horodatage est celui du poste. L'arbitrage serveur est « dernier écrivain gagne » sur cette
-/// valeur (`server/settings/merge.ts`) : une horloge locale en retard fait perdre l'écriture, ce
-/// qui est le comportement voulu — mieux vaut refuser que régresser une modification plus récente
-/// faite depuis le site.
-pub fn patch_profile(token: &str, profile: &Value) -> Result<Value, SyncError> {
-    let body = serde_json::json!({ "entries": [profile_patch_entry(profile)] });
-    patch_json_authenticated(token, "/api/v1/settings", &body)
+/// clé (`server/settings/merge.ts`) : une horloge locale en retard fait perdre l'écriture, ce qui
+/// est le comportement voulu — mieux vaut refuser que régresser une modification plus récente
+/// faite depuis le site (voir [`patch_settings`] pour ce que devient un refus).
+pub fn patch_profile(token: &str, fields: &Value) -> Result<Value, SyncError> {
+    patch_settings(token, profile_patch_entry(fields))
 }
 
 /// `PATCH /api/v1/settings` pour écrire la clé `chatFilters` — les recherches réglées dans
@@ -153,20 +189,20 @@ pub fn patch_profile(token: &str, profile: &Value) -> Result<Value, SyncError> {
 /// n'appartient qu'aux recherches, sa valeur est remplacée en entier, rien à préserver. Même
 /// arbitrage serveur « dernier écrivain gagne » que `patch_profile`.
 pub fn patch_chat_filters(token: &str, filters: &[ChatFilter]) -> Result<Value, SyncError> {
-    let body = serde_json::json!({ "entries": [chat_filters_patch_entry(filters)] });
-    patch_json_authenticated(token, "/api/v1/settings", &body)
+    patch_settings(token, chat_filters_patch_entry(filters))
 }
 
 /// `PATCH /api/v1/settings` pour écrire la clé `roster` — les comptes et leurs personnages tels
 /// que l'onglet « Personnages » de la fenêtre Options les a édités (2026-09-16).
 ///
-/// **Le roster doit être celui qui a été LU**, modifié, pas un reconstruit : la clé porte l'identité
-/// des comptes (`id`, `label`, `isDefault`) et des champs que l'overlay n'affiche nulle part — voir
-/// `overlay_engine::roster`, doc de module, qui explique ce qu'une réécriture appauvrissante
-/// coûterait au compte. Même arbitrage serveur « dernier écrivain gagne » que `patch_profile`.
-pub fn patch_roster(token: &str, roster: &Roster) -> Result<Value, SyncError> {
-    let body = serde_json::json!({ "entries": [roster_patch_entry(roster)] });
-    patch_json_authenticated(token, "/api/v1/settings", &body)
+/// **Écriture partielle depuis le 2026-09-19** (constat C9) : `patch` est l'écart entre le roster
+/// édité et celui que le compte avait renvoyé (`Roster::patch_against`) — les seuls comptes
+/// modifiés ou créés, entiers, et les identifiants des comptes retirés ; le serveur fusionne par
+/// `id`. Un correctif vide est refusé en 400 : l'appelant teste `RosterPatch::is_empty` avant.
+/// Jusque-là le roster partait entier, tel que lu, pour ne rien effacer du compte — voir
+/// `overlay_engine::roster`, doc de module. Même arbitrage serveur que `patch_profile`.
+pub fn patch_roster(token: &str, patch: &RosterPatch) -> Result<Value, SyncError> {
+    patch_settings(token, roster_patch_entry(patch))
 }
 
 /// `GET /api/v1/items/{id}` — le détail d'un objet, dont **sa recette** (`functions/api/v1/
@@ -265,14 +301,6 @@ pub struct AccountSettings {
     /// `overlay_engine::profile`). INDÉPENDANT de `watchlist` : un objet peut avoir son son
     /// activé sans être suivi, et réciproquement.
     pub alerts: AlertProfile,
-    /// **L'objet `profile` brut, tel que le compte l'a renvoyé** — `None` si la clé est absente.
-    ///
-    /// Conservé pour une seule raison, et elle est décisive : `PATCH /api/v1/settings` remplace la
-    /// valeur ENTIÈRE d'une clé, et `profile` porte aussi le pseudo, l'avatar et le mode
-    /// d'affichage des personnages, que l'overlay n'affiche nulle part. Réécrire les alertes sans
-    /// repartir de cet objet effacerait ces champs du compte — voir
-    /// `AlertProfile::patch_value`, qui le prend en entrée.
-    pub profile_raw: Option<Value>,
     /// Recherches de chat (`data.chatFilters`, voir `overlay_engine::chat_alert`) — la liste que
     /// l'onglet « Chat » édite et que le moteur confronte à chaque message.
     pub chat_filters: Vec<ChatFilter>,
@@ -307,6 +335,55 @@ pub fn fetch_account_id(token: &str) -> Result<String, SyncError> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| SyncError::Json("champ user.id absent de /api/v1/auth/me".into()))
+}
+
+/// Ce que `POST /api/v1/auth/native/session` rend — voir [`rotate_native_session`]. Les dates sont
+/// laissées telles que le serveur les écrit (ISO 8601) : elles ne servent qu'au journal, l'âge du
+/// jeton se mesure à la date de sauvegarde (`token_store::token_age`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RotatedSession {
+    pub token: String,
+    pub expires_at: String,
+    /// Jusqu'à quand l'ancien jeton reste accepté — 5 min après l'appel
+    /// (`NATIVE_SESSION_ROTATION_GRACE_MS`, `server/auth/pairing.ts`), le temps que le nouveau
+    /// soit persisté et que les requêtes déjà parties aboutissent.
+    pub previous_token_valid_until: String,
+}
+
+/// **`POST /api/v1/auth/native/session` — renouvelle le jeton** (2026-09-19, constat C5 de
+/// `docs/analyse-rgpd.md` §3.5 : un jeton de 30 jours glissants, jamais renouvelé, restait le
+/// même pendant toute la vie d'une session — des mois).
+///
+/// Le serveur émet un jeton neuf de 30 jours glissants pour le même compte et le même appareil,
+/// et **remplace** l'ancienne session (`sessions.superseded_at`) : plus listée dans « Mon compte »,
+/// plus jamais prolongée, acceptée encore 5 min (voir `RotatedSession::previous_token_valid_until`)
+/// puis refusée. Le rythme appartient à l'overlay — le serveur ne force rien —, c'est
+/// `background::attempt_connect` qui le fixe (au démarrage, jeton de plus de 7 jours).
+///
+/// **À l'appelant de persister le nouveau jeton AVANT de s'en servir** (`token_store::save_token`),
+/// et de ne jamais traiter comme un jeton refusé un 401 survenu pendant la grâce : c'est une
+/// course, pas une révocation. Une rotation depuis un jeton déjà remplacé mais encore en grâce est
+/// admise côté serveur (plantage entre la réponse et l'écriture au trousseau).
+pub fn rotate_native_session(token: &str) -> Result<RotatedSession, SyncError> {
+    const PATH: &str = "/api/v1/auth/native/session";
+    let url = format!("{}{PATH}", base_url());
+    let response = agent()
+        .post(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .send_empty()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    let body = parse_json_body(PATH, response)?;
+    let champ = |nom: &str| {
+        body.get(nom)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| SyncError::Json(format!("champ {nom} absent de {PATH}")))
+    };
+    Ok(RotatedSession {
+        token: champ("token")?,
+        expires_at: champ("expiresAt")?,
+        previous_token_valid_until: champ("previousTokenValidUntil")?,
+    })
 }
 
 /// **`DELETE /api/v1/auth/native/session` — efface la session côté SERVEUR** (2026-09-18, constat
@@ -377,7 +454,6 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
         roster_draft: Roster::from_settings_json(&data),
         watchlist: watchlist_from_settings_json(&data),
         alerts: AlertProfile::from_settings_json(&data),
-        profile_raw: data.get("profile").cloned(),
         chat_filters: chat_filters_from_account_data(&data),
     })
 }
