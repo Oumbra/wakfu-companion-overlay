@@ -521,7 +521,7 @@ planté entre la réponse et l'écriture). Sa durée de vie — 30 jours glissan
 utilisation, comme le cookie — était déjà vérifiée dans le code et dite dans la politique ; la
 politique dit maintenant aussi que l'overlay peut le renouveler de lui-même (§1.4). Au passage, le
 serveur efface désormais toute session expirée ou révoquée 30 jours après sa fin (art. 5.1.e,
-politique §5) — voir [`analyse-rgpd-site.md`](analyse-rgpd-site.md).
+politique §5) — voir [`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd-site.md).
 
 **✅ Et l'overlay l'appelle** (2026-09-19, `background::rotate_token_if_due`) : au démarrage,
 une fois le jeton stocké accepté par `GET /api/v1/settings` et **avant** d'activer la file d'envoi
@@ -645,7 +645,7 @@ selon la règle « les deux se doublent ») refuse les motifs `Authentication to
 ## 6. Plan d'action priorisé
 
 Le reliquat, vérifié dans le code le 2026-09-18, est tenu à jour dans trois fichiers par périmètre :
-[`analyse-rgpd-overlay.md`](analyse-rgpd-overlay.md), [`analyse-rgpd-site.md`](analyse-rgpd-site.md)
+[`analyse-rgpd-overlay.md`](analyse-rgpd-overlay.md), [`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd-site.md)
 et [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 
 | Priorité | Action | Constats | Qui |

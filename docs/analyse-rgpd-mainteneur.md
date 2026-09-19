@@ -3,7 +3,7 @@
 Reliquat de [`analyse-rgpd.md`](analyse-rgpd.md) qui ne se traite ni dans l'overlay ni dans le
 site : des gestes sur l'historique git et de la documentation interne, établis le 2026-09-18. Les
 autres volets : [`analyse-rgpd-overlay.md`](analyse-rgpd-overlay.md) et
-[`analyse-rgpd-site.md`](analyse-rgpd-site.md).
+[`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd-site.md) (dépôt du site).
 
 Ces gestes sont **interdits à une session Claude** par le `CLAUDE.md` (pas de `push --force` sur
 `dev`, jamais de push sur `main`) : ils sont à faire depuis le poste du mainteneur.

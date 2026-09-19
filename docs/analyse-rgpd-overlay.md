@@ -4,7 +4,7 @@ Reliquat de [`analyse-rgpd.md`](analyse-rgpd.md) pour ce dépôt (`wakfu-compani
 le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19. **Plus rien à faire côté
 overlay** : les six constats principaux (C1 à C6) et tous les constats secondaires sont clos. Les
 deux autres volets :
-[`analyse-rgpd-site.md`](analyse-rgpd-site.md) et
+[`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd-site.md) (dépôt du site) et
 [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 
 | Prio | Tâche | Constat | État |
