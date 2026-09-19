@@ -434,7 +434,7 @@ tiers, et les gabarits sont des captures d'écran.
   (`--purge-local-data`) pour la désinstallation.
 - À la déconnexion : purger `sync-queue.sqlite3` (✅ 2026-09-18, voir C3), `fight-*.json`,
   `turn-templates/` et les journaux, ou proposer de le faire.
-- (serveur) Route de révocation appelée à la déconnexion (✅ `DELETE /api/v1/auth/native/session`) ; durée de vie du jeton natif (✅ annoncée dans la politique, sections 1.4 et 5, `acf4a20` du 2026-09-19).
+- (serveur) Route de révocation appelée à la déconnexion (✅ `DELETE /api/v1/auth/native/session`) ; durée de vie du jeton natif (✅ annoncée dans la politique, sections 1.4 et 5, `acf4a20` du 2026-09-19) ; rotation du jeton (✅ côté serveur, `POST /api/v1/auth/native/session`, `433960a` du 2026-09-19 — reste l'appel côté overlay, voir ci-dessous).
 - Unifier les deux racines `ProjectDirs` (C13) pour que l'effacement soit complet.
 
 **✅ Traité côté overlay le 2026-09-18** (`overlay_ui::local_data`, deux portées).
@@ -487,12 +487,27 @@ L'overlay l'appelle aux deux gestes (`local_data::revoke_server_session`), **ava
 de bout en bout — hors ligne, la purge locale aboutit quand même et la session expire d'elle-même ;
 à la fermeture, l'attente est bornée à 3 s pour ne pas figer la fenêtre.
 
-**Restent ouverts** : la rotation du jeton natif (sa durée de vie — 30 jours glissants, prolongés à
-chaque utilisation, comme le cookie — est vérifiée dans le code et dite dans la politique depuis
-le 2026-09-19) ; l'option de ligne de commande `--purge-local-data` (écartée le
+**✅ La rotation du jeton natif existe côté serveur** (2026-09-19, `Oumbra/wakfu-companion`
+`433960a`) : `POST /api/v1/auth/native/session`, porteur `Bearer`, corps vide, répond
+`{ token, issuedAt, expiresAt, previousTokenValidUntil }`. L'ancienne session est *remplacée*
+(colonne `superseded_at`) et reste acceptée **5 minutes** — le temps d'écrire le nouveau jeton au
+trousseau et de laisser aboutir les requêtes déjà parties — puis meurt sans jamais être
+prolongée ; elle disparaît aussitôt de « Mon compte » et « déconnecter tous mes appareils »
+l'emporte aussi. Une seconde rotation depuis l'ancien jeton encore en grâce est admise (overlay
+planté entre la réponse et l'écriture). Sa durée de vie — 30 jours glissants, prolongés à chaque
+utilisation, comme le cookie — était déjà vérifiée dans le code et dite dans la politique ; la
+politique dit maintenant aussi que l'overlay peut le renouveler de lui-même (§1.4). Au passage, le
+serveur efface désormais toute session expirée ou révoquée 30 jours après sa fin (art. 5.1.e,
+politique §5) — voir [`analyse-rgpd-site.md`](analyse-rgpd-site.md).
+
+**Reste côté overlay** : appeler cette route — au démarrage quand le jeton a plus de sept jours,
+par exemple ; le serveur ne force rien, le rythme appartient au client — en écrivant le nouveau
+jeton au trousseau **avant** de basculer, et sans traiter comme un « jeton refusé » un 401 qui
+surviendrait sur une requête partie avec l'ancien jeton après la grâce.
+
+**Écartés ou réglés autrement** : l'option de ligne de commande `--purge-local-data` (écartée le
 2026-09-18 — les deux points d'entrée de l'interface suffisent tant qu'il n'y a pas de
-désinstalleur) ; l'unification des deux racines (C13), que l'effacement contourne en les listant
-toutes les deux plutôt qu'en attendant la migration.
+désinstalleur) ; l'unification des deux racines (C13, ✅ 2026-09-19, `overlay_engine::app_dirs`).
 
 ### 3.6 C6 — Journal applicatif trop bavard et sans plafond (moyenne)
 
@@ -561,7 +576,7 @@ cas « journal détaillé », 2026-09-18).
 | --- | --- | --- | --- |
 | C7 | Jeton en clair sur disque en repli, `0600` posé **après** l'écriture et **Unix seulement** ; aucune ACL Windows ; repli déclenché aussi quand la relecture du trousseau diffère — *✅ 2026-09-19 : mode posé à la création, avis dans la fenêtre Options (section « Compte »)* | `token_store.rs:32-49, 68-86` | Créer le fichier avec le mode restrictif dès l'ouverture (`OpenOptions::mode(0o600)`), poser une ACL utilisateur sous Windows ou chiffrer par DPAPI ; avertir l'utilisateur dans l'interface, pas seulement au journal |
 | C8 | Gabarits de tour : PNG du nom rendu à l'écran + nom en clair, jamais purgés — *✅ 2026-09-18 : `turn-templates/` effacé à la déconnexion et par le bouton (C5)* | `templates.rs:77-95` | Documenter dans « À propos » |
-| C9 | `profile` renvoyé entier (pseudo, avatar) pour un réglage d'alerte ; `roster` réémet tout champ inconnu (`flatten extra`) — *✅ côté serveur le 2026-09-19 (`Oumbra/wakfu-companion` `f31309f`) : `PATCH /api/v1/settings` accepte `patch` à la place de `value` pour `profile` (fusion superficielle) et `roster` (fusion par `id`, `removedIds`), le site n'envoie plus que l'écart ; **reste l'overlay**, qui envoie toujours la valeur entière (acceptée)* | `profile.rs:278-316`, `roster.rs:86-90` | (overlay) `profile_patch_entry` → `{ key: "profile", patch: { soundItems, alertDurationSeconds, alertManualClose } }` ; roster → le seul compte touché + `removedIds` ; `extra`/`flatten` devient inutile |
+| C9 | `profile` renvoyé entier (pseudo, avatar) pour un réglage d'alerte ; `roster` réémet tout champ inconnu (`flatten extra`) — *✅ côté serveur le 2026-09-19 (`Oumbra/wakfu-companion` `c2f3fdb`) : `PATCH /api/v1/settings` accepte `patch` à la place de `value` pour `profile` (fusion superficielle) et `roster` (fusion par `id`, `removedIds`), le site n'envoie plus que l'écart ; **reste l'overlay**, qui envoie toujours la valeur entière (acceptée)* | `profile.rs:278-316`, `roster.rs:86-90` | (overlay) `profile_patch_entry` → `{ key: "profile", patch: { soundItems, alertDurationSeconds, alertManualClose } }` ; roster → le seul compte touché + `removedIds` ; `extra`/`flatten` devient inutile |
 | C10 | Icônes chargées depuis `vertylo.github.io` : IP + centres d'intérêt vers un tiers non contractualisé — *✅ 2026-09-19 : relais `GET /api/v1/icons/…` côté API, l'overlay ne contacte plus `vertylo.github.io`* | `catalog.rs:85,108`, `remote_icons.rs:238-250` | Servir les icônes depuis l'API ou les embarquer ; sinon nommer ce destinataire dans l'information |
 | C11 | Vérification de mise à jour vers GitHub à chaque lancement — *✅ 2026-09-18/19 : GitHub nommé dans « À propos » et la politique ; la case `auto_update` ne coupe que l'installation, la vérification est annoncée « à chaque lancement »* | `background.rs:731+` | Nommer GitHub comme destinataire ; la case `auto_update` existe déjà, préciser qu'elle coupe aussi la vérification si c'est le cas |
 | C12 | Démarrage automatique **activé par défaut** au premier lancement, sans le demander ; survit à la déconnexion — *✅ 2026-09-19 : décoché par défaut, `enable_by_default_once` et le jalon `autostart_initialized` retirés ; seule la case inscrit l'overlay* | `autostart.rs` | Demander au premier lancement ou laisser décoché par défaut (loyauté, art. 5.1.a) |
@@ -611,12 +626,12 @@ et [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 | **P0** | Documenter l'incident de mise en public (2026-09-15) | C1 | Mainteneur |
 | **P1** | ✅ Politique de confidentialité côté site étendue à l'overlay (section 1.4), CGU et mentions légales aussi (`Oumbra/wakfu-companion` `3ba4684`, `a9587a9`, `8e3fdd8`) ; ✅ liens à l'écran de connexion, section « Vos données » dans « À propos », licence MIT (2026-09-18) | C4 | ✅ Site + overlay |
 | **P1** | ✅ §10 du plan d'architecture réécrit : lecture de la bande basse de la fenêtre de jeu sous option décochée par défaut, deux entrées synthétiques déclenchées par l'utilisateur, jeton porteur avec repli fichier signalé au journal (2026-09-18) | C2 | Overlay (`docs:`) |
-| **P1** | ✅ Bouton « Supprimer les données locales » (fenêtre Options et écran de connexion, avec confirmation, puis fermeture) ; purge des combats, du récap, des compteurs, des gabarits et du contenu des journaux à la déconnexion ; session supprimée côté serveur par `DELETE /api/v1/auth/native/session`, appelée aux deux gestes (2026-09-18, `overlay_ui::local_data`) | C5, C8 | ✅ Overlay + serveur |
+| **P1** | ✅ Bouton « Supprimer les données locales » (fenêtre Options et écran de connexion, avec confirmation, puis fermeture) ; purge des combats, du récap, des compteurs, des gabarits et du contenu des journaux à la déconnexion ; session supprimée côté serveur par `DELETE /api/v1/auth/native/session`, appelée aux deux gestes (2026-09-18, `overlay_ui::local_data`) ; ✅ rotation du jeton côté serveur (`POST /api/v1/auth/native/session`, `433960a`, 2026-09-19) — reste à l'appeler depuis l'overlay (§3.5) | C5, C8 | ✅ Overlay + serveur |
 | **P1** | ✅ Décision sur les noms de tiers : conservés en clair (option A, 2026-09-18) ; autocomplétion retirée, `fight-*.json` purgés à la fermeture du jeu, file de synchro vidée à la déconnexion et sans écriture hors compte (0.64.2 → 0.64.4). ✅ Mention dans la politique de confidentialité (1.4 : nom des participants et du partenaire d'échange, 2026-09-18) ; le droit d'opposition par `contact@wakfu-companion.com` y figurait déjà (§6). ✅ Base *intérêt légitime* (art. 6.1.f) et mise en balance énoncées dans la politique, section 1.3, avec l'adresse de retrait d'un pseudonyme (`50adcf8`, 2026-09-18). Reste la courte note interne de mise en balance (document du responsable de traitement, pas un texte publié) | C3 | Mainteneur (note interne) |
 | **P2** | ✅ Journal (2026-09-18) : code d'appairage et auteur de chat retirés, `EngineError::Deserialize` expurgée, noms et chemins en `debug`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut. Reste l'effacement, avec C5 | C6 | Overlay |
 | **P2** | ✅ Jeton de repli (2026-09-19) : `0600` posé à la création (`OpenOptions::mode`), et l'avis « session conservée en clair dans … » dans la section « Compte » de la fenêtre Options. Pas de DPAPI : `%APPDATA%` est déjà réservé au compte par l'ACL du profil, à revoir si le cas se présente | C7 | Overlay |
 | **P2** | ✅ Une seule racine de dossiers (`overlay_engine::app_dirs`, migration de l'ancienne au démarrage, 2026-09-19) ; ✅ icônes relayées par l'API (`GET /api/v1/icons/{folder}/{gfxId}.png`, `vertylo.github.io` ne voit plus l'utilisateur, 2026-09-19 — politique 1.4, 2 et 4 réécrites, « À propos » aussi) ; ✅ GitHub nommé comme seul destinataire tiers ; ✅ démarrage automatique décoché par défaut (2026-09-19) | C10-C13 | Overlay |
-| **P3** | ✅ `overlay-app` retiré du workspace (2026-09-19) ; ✅ origine d'API surchargée affichée en alerte dans « À propos », `WAKFU_OVERLAY_UPDATE_URL` limitée à `https://` (ou `http://` local) ; ✅ « Copier le détail » sur l'écran d'erreur de connexion ; ✅ fusion côté serveur de `PATCH /api/v1/settings` (`patch` pour `profile`/`roster`, `f31309f`, 2026-09-19). Reste : faire envoyer le correctif partiel par l'overlay (`profile.rs`, `roster.rs`) au lieu de la valeur entière | C9, C14, C16, C17 | Overlay |
+| **P3** | ✅ `overlay-app` retiré du workspace (2026-09-19) ; ✅ origine d'API surchargée affichée en alerte dans « À propos », `WAKFU_OVERLAY_UPDATE_URL` limitée à `https://` (ou `http://` local) ; ✅ « Copier le détail » sur l'écran d'erreur de connexion ; ✅ fusion côté serveur de `PATCH /api/v1/settings` (`patch` pour `profile`/`roster`, `c2f3fdb`, 2026-09-19). Reste : faire envoyer le correctif partiel par l'overlay (`profile.rs`, `roster.rs`) au lieu de la valeur entière | C9, C14, C16, C17 | Overlay |
 
 ## 7. Ce que ce document ne couvre pas
 
