@@ -49,6 +49,7 @@
   var COMBAT_START_MARKER = "CREATION DU COMBAT";
   var MARKET_OCCUPATION_START_RE = /^Lancement de l'occupation MARKET sur la board\b/;
   var MARKET_OCCUPATION_END_RE = /^On arrête l'occupation MARKET sur la board\b/;
+  var WALKON_RE = /^Action \[WALKON\] performed on interactive element : \d+$/;
   var CLIENT_BUILD_DATE_RE = /\[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]/;
   var FIGHTER_JOIN_RE = /^fightId=(-?\d+) (.+?) breed : (\d+) \[(-?\d+)\] isControlledByAI=(true|false) obstacleId : (-?\d+) join the fight/;
   var DAMAGE_RE = new RegExp(`^(.+?): ([+-])(${NUM}) PV\\b(.*)$`);
@@ -167,6 +168,9 @@
       }
       if (MARKET_OCCUPATION_END_RE.test(content)) {
         return { kind: "market-occupation", time, active: false };
+      }
+      if (WALKON_RE.test(content)) {
+        return { kind: "interactive-walkon", time };
       }
       if (INVOCATION_INSTANTIATED_RE.test(content)) {
         const state = this.getFightState(this.resolveCurrentFightId());

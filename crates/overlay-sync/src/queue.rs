@@ -265,10 +265,13 @@ impl SyncQueue {
     ) -> Result<FlushOutcome, SyncError> {
         let mut any_sent = false;
 
+        // Même ordre que le web (`drain`, parcours des clés d'`HISTORY_ENDPOINTS`) : un type
+        // d'événement par requête, les endpoints étant distincts.
         for kind in [
             HistoryEventKind::Fight,
             HistoryEventKind::Purchase,
             HistoryEventKind::Trade,
+            HistoryEventKind::Pact,
         ] {
             loop {
                 let batch = self.select_batch(kind, SYNC_BATCH_SIZE)?;

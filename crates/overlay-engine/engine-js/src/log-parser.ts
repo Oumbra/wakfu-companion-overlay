@@ -158,6 +158,10 @@ const COMBAT_START_MARKER = 'CREATION DU COMBAT';
 /** Ouverture/fermeture d'une session marchand/HDV, hors de toute enveloppe `[Catégorie]` — voir MarketOccupationEntry. */
 const MARKET_OCCUPATION_START_RE = /^Lancement de l'occupation MARKET sur la board\b/;
 const MARKET_OCCUPATION_END_RE = /^On arrête l'occupation MARKET sur la board\b/;
+/** "Action [WALKON] performed on interactive element : <id>", hors de toute enveloppe
+ * `[Catégorie]` (comme MARKET_OCCUPATION_*_RE ci-dessus) — voir InteractiveWalkonEntry. L'id
+ * n'est volontairement pas capturé (générique par nature). */
+const WALKON_RE = /^Action \[WALKON\] performed on interactive element : \d+$/;
 /** Ligne technique émise une seule fois, tout au début de chaque session client ("1.92 (build -1
  * [2026-08-20 @ 14H18min45])") — seule source fiable de la date CALENDAIRE réelle du fichier (le
  * reste du log n'expose que l'heure HH:MM:SS,mmm, voir HEADER_RE). Voir LogDateAnchorEntry. */
@@ -462,6 +466,10 @@ export class LogParser {
     }
     if (MARKET_OCCUPATION_END_RE.test(content)) {
       return { kind: 'market-occupation', time, active: false };
+    }
+
+    if (WALKON_RE.test(content)) {
+      return { kind: 'interactive-walkon', time };
     }
 
     if (INVOCATION_INSTANTIATED_RE.test(content)) {

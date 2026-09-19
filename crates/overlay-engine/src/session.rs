@@ -43,9 +43,10 @@ use crate::dungeon_run::{
     GroupableFight,
 };
 use crate::history::{
-    fight_signature, purchase_signature, trade_signature, FightLootPayload,
-    FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,
-    HistoryPayload, PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+    fight_signature, pact_extraction_signature, purchase_signature, trade_signature,
+    FightLootPayload, FightParticipantPayload, FightPayload, FightSide, FightSpellPayload,
+    HistoryEventKind, HistoryPayload, PactExtractionItemPayload, PactExtractionPayload,
+    PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
     HDV_KAMAS_SALE_ITEM,
 };
 use crate::log_time::{format_iso_utc, time_of_day_ms, LogDateTracker};
@@ -59,6 +60,13 @@ use crate::watchlist::{WatchlistEntry, WatchlistKind, WatchlistState};
 /// `SessionState::consider_hdv_kama_gain`/`resolve_pending_hdv_kama_gain`) — même fenêtre côté web
 /// (`considerHdvKamaGain`).
 const PURCHASE_WINDOW_MS: i64 = 2_000;
+
+/// Délai de grâce, en ms, prolongé à chaque `LogEntry::InteractiveWalkon` (élément interactif du
+/// décor — le pacte notamment) ET à chaque ramassage qui rejoint le lot d'extraction courant,
+/// au-delà duquel la fenêtre d'extraction de pacte se ferme — miroir exact de
+/// `PACT_EXTRACTION_WINDOW_MS` (`stats-store.service.ts`), calibré côté web sur un vrai fichier
+/// utilisateur (écarts de 30 à 80 s entre un WALKON et le premier ramassage qu'il corrèle).
+const PACT_EXTRACTION_WINDOW_MS: i64 = 3 * 60 * 1000;
 
 /// Résout `itemId`/`itemName`, mutuellement exclusifs — miroir exact d'`HistorySyncService.
 /// itemPayload` (`history-sync.service.ts`) : un id catalogue connu remplace TOUJOURS le nom brut
@@ -316,6 +324,22 @@ pub struct LootItem {
     pub time: String,
     pub item: String,
     pub quantity: i64,
+}
+
+/// Lot d'objets accumulés pendant une fenêtre d'extraction de pacte — voir
+/// `SessionState::pending_pact_batch`. Miroir de `pendingPactBatch` (`stats-store.service.ts`),
+/// à une différence de structure près : un `Vec` plutôt qu'une table de hachage, pour garder
+/// l'ORDRE DE RAMASSAGE des objets (le `Map` JS le garde nativement). Cet ordre est celui des
+/// lignes envoyées au serveur (`pact_extraction_items.line_index`, clé d'une correction d'objet
+/// homonyme côté web) — une table de hachage Rust le rendrait arbitraire d'une exécution à
+/// l'autre. La signature, elle, trie de toute façon (voir `pact_extraction_signature`).
+#[derive(Debug, Clone, PartialEq)]
+struct PactBatch {
+    /// `(clé de fusion — nom en minuscules, nom d'origine, quantité cumulée)`.
+    items: Vec<(String, String, i64)>,
+    /// Heure brute du PREMIER objet du lot : c'est elle qui date l'extraction (miroir de
+    /// `pendingPactBatch.firstTime`), pas celle du WALKON qui a ouvert la fenêtre.
+    first_time: String,
 }
 
 /// Nombre d'objets ramassés gardés en mémoire pour l'affichage (§9 : « Alertes de drop » — ici
@@ -722,6 +746,18 @@ struct SessionState {
     /// qui vient d'être expliqué par un échange tout juste conclu (cas où le `TradeCompleted`
     /// PRÉCÈDE la ligne de gain).
     last_trade_completed_at_ms: Option<i64>,
+    /// Heure du jour (ms) au-delà de laquelle la fenêtre d'extraction de pacte courante est
+    /// considérée expirée — posée/prolongée à chaque `InteractiveWalkon` ET à chaque ramassage qui
+    /// rejoint le lot (voir `PACT_EXTRACTION_WINDOW_MS`, `check_pact_window_expiry`). `None` =
+    /// aucune fenêtre ouverte. Miroir de `pactWindowExpiresAtMs`.
+    pact_window_expires_at_ms: Option<i64>,
+    /// Objets accumulés depuis l'ouverture de la fenêtre de pacte courante — flushés en un
+    /// `SyncEvent` `Pact` dès qu'une ligne arrive après expiration, **jamais forcés en fin de lot**
+    /// (contrairement à `pending_hdv_kama_gain`) : une fenêtre de plusieurs minutes peut
+    /// légitimement chevaucher deux lots successifs en lecture incrémentale, la couper
+    /// prématurément fragmenterait une seule extraction réelle en plusieurs lignes. Miroir de
+    /// `pendingPactBatch`.
+    pending_pact_batch: Option<PactBatch>,
     /// Combats passés de `ongoing` à terminés SANS ligne `CombatEnd` depuis le dernier lot (voir
     /// `abandon_fight`) — drainé par `Engine::ingest_batch`, qui supprime leur fichier
     /// `fight_store` : `touched_fight_ids` ne connaît que les combats nommés par une entrée du
@@ -839,6 +875,13 @@ impl SessionState {
     ) -> Vec<String> {
         let mut implicitly_defeated_enemies = Vec::new();
 
+        // Ferme (flush) une fenêtre d'extraction de pacte déjà expirée AVANT de traiter cette
+        // ligne — voir `pact_window_expires_at_ms` : si CETTE ligne est celle qui dépasse
+        // l'expiration, elle n'a pas à rejoindre le lot qu'on vient de clore (elle sera réévaluée
+        // normalement juste après, comme un nouveau `InteractiveWalkon` rouvrirait la fenêtre le
+        // cas échéant). Miroir de `checkPactWindowExpiry`, appelé au même endroit côté web.
+        self.check_pact_window_expiry(entry, ctx, sync_events);
+
         // Détection d'achat marchand/HDV (miroir du préambule d'`apply` côté web,
         // `stats-store.service.ts`) : une perte de kamas immédiatement suivie (fenêtre
         // `PURCHASE_WINDOW_MS`) d'un ramassage en fait un achat, jamais du butin de combat — voir
@@ -870,7 +913,16 @@ impl SessionState {
                     }
                 }
             }
-            if !purchase_loot {
+            // Un ramassage survenant pendant une fenêtre d'extraction de pacte ouverte (voir
+            // `pact_window_expires_at_ms`) n'est jamais du butin de combat, même si un combat est
+            // actif au même moment (`fight_id` résolu par le parser pour un personnage en combat
+            // sur un autre compte, ou combat encore ouvert en mémoire) — même règle que pour un
+            // achat, qui reste prioritaire. Miroir d'`isPacteLoot` (`stats-store.service.ts`).
+            let pact_loot = !purchase_loot && self.pact_window_expires_at_ms.is_some();
+            if pact_loot {
+                self.add_to_pact_batch(item, *quantity, time);
+            }
+            if !purchase_loot && !pact_loot {
                 if let Some(fight_id) = fight_id {
                     if let Some(fight) = self.fights.get_mut(fight_id) {
                         // Fusionne avec une ligne déjà accumulée pour ce même objet plutôt que
@@ -1314,6 +1366,14 @@ impl SessionState {
                 time,
                 ..
             } => {
+                // `loot_count`/`recent_loot` comptent TOUT ramassage, qu'il vienne d'un combat,
+                // d'un achat marchand/HDV ou d'une extraction de pacte : ce sont les objets
+                // ramassés de la session, pas le butin d'un combat (seul ce dernier, `FightWorking
+                // ::loot`, exclut les trois cas — voir le préambule d'`apply`). Écart assumé avec
+                // le web, qui range les objets de pacte dans un `sessionPactItems` distinct de
+                // `sessionLoot` parce que sa carte Récap leur consacre une section : la bande de
+                // récap de l'overlay n'affiche qu'un compteur d'objets, où les séparer ferait
+                // simplement disparaître ces objets de l'affichage.
                 self.totals.loot_count += quantity;
                 self.recent_loot.push(LootItem {
                     time: time.clone(),
@@ -1323,6 +1383,9 @@ impl SessionState {
                 if self.recent_loot.len() > RECENT_LOOT_CAPACITY {
                     self.recent_loot.remove(0);
                 }
+            }
+            LogEntry::InteractiveWalkon { time } => {
+                self.open_or_extend_pact_window(time);
             }
             LogEntry::TradeCompleted { time, sides } => {
                 // Voir `pending_hdv_kama_gain` : un gain de kamas hors combat qui vient tout juste
@@ -1366,6 +1429,78 @@ impl SessionState {
     /// `Engine::ingest_batch` en fin de lot, pour ne jamais le perdre si la prochaine ligne tarde
     /// à arriver (voire une reconnexion qui viderait silencieusement l'état). Miroir exact de
     /// `flushPendingHdvKamaGain`, appelé au même moment côté web (fin d'`ingest()`).
+    /// Ferme (flush) la fenêtre d'extraction de pacte courante si `entry` arrive après son
+    /// expiration — miroir de `checkPactWindowExpiry`, appelée en tête d'`apply`. Une ligne sans
+    /// heure exploitable (jamais observée en pratique, `time_of_day_ms` ne renvoie `None` que sur
+    /// un horodatage malformé) laisse la fenêtre telle quelle plutôt que de clore un lot sur une
+    /// base non datable.
+    fn check_pact_window_expiry(
+        &mut self,
+        entry: &LogEntry,
+        ctx: ApplyContext<'_>,
+        sync_events: &mut Vec<SyncEvent>,
+    ) {
+        let Some(expires_at) = self.pact_window_expires_at_ms else {
+            return;
+        };
+        if time_of_day_ms(entry.time()).is_some_and(|ms| ms > expires_at) {
+            self.flush_pending_pact_batch(ctx, sync_events);
+        }
+    }
+
+    /// Ouvre une nouvelle fenêtre d'extraction de pacte, ou prolonge celle déjà en cours — appelée
+    /// par `InteractiveWalkon` ET par chaque ramassage qui rejoint le lot courant
+    /// (`add_to_pact_batch`), pour ne pas couper un lot qui s'étale sur plus que la fenêtre.
+    /// Miroir d'`openOrExtendPactWindow`.
+    fn open_or_extend_pact_window(&mut self, time: &str) {
+        if let Some(time_ms) = time_of_day_ms(time) {
+            self.pact_window_expires_at_ms = Some(time_ms + PACT_EXTRACTION_WINDOW_MS);
+        }
+    }
+
+    /// Ajoute un objet au lot d'extraction de pacte en cours (créé si besoin) — miroir
+    /// d'`addToPactBatch`. Fusionne par nom normalisé en minuscules, comme le web.
+    fn add_to_pact_batch(&mut self, item: &str, quantity: i64, time: &str) {
+        let batch = self.pending_pact_batch.get_or_insert_with(|| PactBatch {
+            items: Vec::new(),
+            first_time: time.to_string(),
+        });
+        let key = item.to_lowercase();
+        match batch
+            .items
+            .iter_mut()
+            .find(|(existing, _, _)| *existing == key)
+        {
+            Some((_, _, existing_quantity)) => *existing_quantity += quantity,
+            None => batch.items.push((key, item.to_string(), quantity)),
+        }
+        self.open_or_extend_pact_window(time);
+    }
+
+    /// Committe le lot d'extraction de pacte en cours en un `SyncEvent` `Pact` — miroir de
+    /// `flushPendingPactBatch`/`registerPactExtraction`. Jamais appelée en fin de lot de lignes
+    /// (voir la doc de `pending_pact_batch`).
+    fn flush_pending_pact_batch(
+        &mut self,
+        ctx: ApplyContext<'_>,
+        sync_events: &mut Vec<SyncEvent>,
+    ) {
+        self.pact_window_expires_at_ms = None;
+        let Some(batch) = self.pending_pact_batch.take() else {
+            return;
+        };
+        if batch.items.is_empty() {
+            return;
+        }
+        let occurred_at_ms = self.date_tracker.full_timestamp_ms(&batch.first_time);
+        tracing::debug!(
+            items = batch.items.len(),
+            time = %batch.first_time,
+            "extraction de pacte clôturée"
+        );
+        sync_events.push(build_pact_sync_event(&batch, occurred_at_ms, ctx));
+    }
+
     fn flush_pending_hdv_kama_gain(
         &mut self,
         ctx: ApplyContext<'_>,
@@ -1752,6 +1887,42 @@ impl SessionState {
 /// apply`, préambule achat ; `flush_pending_hdv_kama_gain`) : même construction de payload, seule
 /// la provenance de `item`/`quantity`/`total_cost` diffère. Miroir de `HistorySyncService.
 /// recordPurchase`.
+/// Construit l'événement d'historique d'une extraction de pacte — miroir de
+/// `HistorySyncService.recordPactExtraction`.
+fn build_pact_sync_event(
+    batch: &PactBatch,
+    occurred_at_ms: i64,
+    ctx: ApplyContext<'_>,
+) -> SyncEvent {
+    let signature_items: Vec<(String, i64)> = batch
+        .items
+        .iter()
+        .map(|(_, name, quantity)| (name.clone(), *quantity))
+        .collect();
+    let signature = pact_extraction_signature(&batch.first_time, &signature_items);
+    let items = batch
+        .items
+        .iter()
+        .map(|(_, name, quantity)| {
+            let (item_id, item_name) = item_payload(ctx.catalog, name);
+            PactExtractionItemPayload {
+                item_id,
+                item_name,
+                quantity: *quantity,
+            }
+        })
+        .collect();
+    SyncEvent {
+        kind: HistoryEventKind::Pact,
+        signature,
+        payload: HistoryPayload::PactExtraction(PactExtractionPayload {
+            occurred_at: format_iso_utc(occurred_at_ms),
+            game_server: ctx.game_server.map(str::to_string),
+            items,
+        }),
+    }
+}
+
 fn build_purchase_sync_event(
     item: &str,
     quantity: i64,
@@ -2677,6 +2848,7 @@ fn entry_fight_id(entry: &LogEntry) -> Option<i64> {
         | LogEntry::KamaLoss { .. }
         | LogEntry::CombatStart { .. }
         | LogEntry::MarketOccupation { .. }
+        | LogEntry::InteractiveWalkon { .. }
         | LogEntry::LogDateAnchor { .. }
         | LogEntry::TradeCompleted { .. } => None,
     }

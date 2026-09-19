@@ -8,3 +8,8 @@ diverge donc normalement du dépôt d'origine (décision utilisateur, 2026-09-13
   générale de 1 s avalait les relancers rapides d'un même sort.
 - 2026-09-13 log-parser.ts + log-entry.model.ts : nouvel événement `turn-ended`
   ("N secondes reportées pour le tour suivant."), frontière de tour pour les homonymes.
+- 2026-09-19 log-parser.ts + log-entry.model.ts : nouvel événement `interactive-walkon`
+  ("Action [WALKON] performed on interactive element : <id>"), porté depuis le web
+  (commit dc0a253, « feat: detecte et suit les extractions de pacte ») plus récent que le
+  commit de référence ci-dessus — ouvre la fenêtre d'extraction de pacte, voir
+  `session::SessionState::open_or_extend_pact_window`.

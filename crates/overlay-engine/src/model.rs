@@ -167,6 +167,12 @@ pub enum LogEntry {
         time: String,
         active: bool,
     },
+    /// « Action [WALKON] performed on interactive element : <id> » — le joueur marche sur un
+    /// élément interactif du décor (le pacte notamment, mais le signal est générique). Ouvre ou
+    /// prolonge la fenêtre d'extraction de pacte, voir `session::SessionState::open_or_extend_pact_window`.
+    InteractiveWalkon {
+        time: String,
+    },
     ChallengeResult {
         time: String,
         name: String,
@@ -230,6 +236,7 @@ impl LogEntry {
             | LogEntry::CombatEnd { time, .. }
             | LogEntry::Loot { time, .. }
             | LogEntry::MarketOccupation { time, .. }
+            | LogEntry::InteractiveWalkon { time }
             | LogEntry::ChallengeResult { time, .. }
             | LogEntry::LogDateAnchor { time, .. }
             | LogEntry::FighterJoined { time, .. }

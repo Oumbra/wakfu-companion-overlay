@@ -164,6 +164,20 @@ export interface MarketOccupationEntry {
   active: boolean;
 }
 
+/**
+ * "Action [WALKON] performed on interactive element : <id>" — le joueur marche sur un élément
+ * interactif du décor, hors de toute enveloppe `[Catégorie]`. Signal générique (n'importe quel
+ * élément interactif, pas seulement le pacte) : sert à ouvrir/prolonger une fenêtre pendant
+ * laquelle tout ramassage est considéré comme une extraction de pacte plutôt que du butin de
+ * combat — voir `SessionState::apply` (overlay) et stats-store.service.ts,
+ * PACT_EXTRACTION_WINDOW_MS (web). L'id lui-même n'est volontairement pas capturé (générique par
+ * nature, propre à chaque map).
+ */
+export interface InteractiveWalkonEntry {
+  kind: 'interactive-walkon';
+  time: string;
+}
+
 export interface ChallengeResultEntry {
   kind: 'challenge-result';
   time: string;
@@ -251,4 +265,5 @@ export type LogEntry =
   | FighterJoinedEntry
   | TradeCompletedEntry
   | MarketOccupationEntry
+  | InteractiveWalkonEntry
   | LogDateAnchorEntry;
