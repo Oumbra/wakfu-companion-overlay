@@ -52,6 +52,8 @@ const CHAT_CONTENT_RE = /^(.+?) : (.*)$/;
 const KAMA_GAIN_RE = new RegExp(`^Vous avez gagné (${NUM}) kamas\\.?$`);
 const KAMA_LOSS_RE = new RegExp(`^Vous avez perdu (${NUM}) kamas\\.?$`);
 const RAMASSE_RE = new RegExp(`^Vous avez ramassé (${NUM})x (.+?)\\s*\\.?$`);
+/** Distinct de KAMA_LOSS_RE (pas de suffixe "x", jamais de "kamas" ici) — voir ItemLossEntry. */
+const ITEM_LOSS_RE = new RegExp(`^Vous avez perdu (${NUM})x (.+?)\\s*\\.?$`);
 const CHALLENGE_SUCCESS_RE = /^Le challenge "(.+?)" est réussi\.?$/;
 const CHALLENGE_FAIL_RE = /^Le challenge "(.+?)" a échoué\.?$/;
 const XP_RE = new RegExp(`^(.+?) : \\+(${NUM}) points d'XP\\.`);
@@ -155,9 +157,19 @@ const OCCUPATION_RE = /^Lancement de l'occupation pour le joueur (.+)$/;
 /** Marqueur technique fiable de fin de combat, émis systématiquement (y compris pour un entraînement contre un mannequin, qui n'affiche jamais l'écran de fin de combat). Capture l'id pour distinguer plusieurs combats concurrents (multi-compte). */
 const FIGHT_END_RE = /^\[FIGHT\] End fight with id (-?\d+)$/;
 const COMBAT_START_MARKER = 'CREATION DU COMBAT';
-/** Ouverture/fermeture d'une session marchand/HDV, hors de toute enveloppe `[Catégorie]` — voir MarketOccupationEntry. */
+/** Arrêt/lancement du client Wakfu lui-même (classe `cFw`, hors de toute enveloppe `[Catégorie]`)
+ * — voir ClientLifecycleEntry. */
+const CLIENT_SHUTDOWN_MARKER = 'Stopping cFC...';
+const CLIENT_STARTUP_MARKER = 'Starting cFC...';
+/** Ouverture/fermeture d'une session marchand/HDV, hors de toute enveloppe `[Catégorie]` — voir MarketOccupationEntry.
+ * Deux formes de fermeture, toutes deux terminales : "On arrête ..." (fermeture normale par le
+ * joueur) et "On annule ... (fromServer=true, sendMessage=false)" (interruption côté serveur, ex.
+ * joueur qui s'éloigne de la board ou entre en combat). La seconde n'était pas reconnue :
+ * `inMarketOccupation` restait armé jusqu'au prochain "On arrête" (1h30 plus tard) et TOUT le
+ * butin des 17 combats intermédiaires était rejeté comme achat HDV (bug réel, fichier utilisateur du
+ * 2026-09-15 — voir SessionState::in_market_occupation, StatsStoreService.inMarketOccupation). */
 const MARKET_OCCUPATION_START_RE = /^Lancement de l'occupation MARKET sur la board\b/;
-const MARKET_OCCUPATION_END_RE = /^On arrête l'occupation MARKET sur la board\b/;
+const MARKET_OCCUPATION_END_RE = /^On (?:arrête|annule) l'occupation MARKET sur la board\b/;
 /** "Action [WALKON] performed on interactive element : <id>", hors de toute enveloppe
  * `[Catégorie]` (comme MARKET_OCCUPATION_*_RE ci-dessus) — voir InteractiveWalkonEntry. L'id
  * n'est volontairement pas capturé (générique par nature). */
@@ -461,6 +473,13 @@ export class LogParser {
       return { kind: 'combat-start', time };
     }
 
+    if (content === CLIENT_SHUTDOWN_MARKER) {
+      return { kind: 'client-lifecycle', time, event: 'shutdown' };
+    }
+    if (content === CLIENT_STARTUP_MARKER) {
+      return { kind: 'client-lifecycle', time, event: 'startup' };
+    }
+
     if (MARKET_OCCUPATION_START_RE.test(content)) {
       return { kind: 'market-occupation', time, active: true };
     }
@@ -647,6 +666,19 @@ export class LogParser {
     };
   }
 
+  /**
+   * Clôture forcée d'un combat qui n'aura jamais de marqueur FIGHT_END_RE (client fermé en plein
+   * combat, voir ClientLifecycleEntry) : même nettoyage qu'une fin propre. Sans ça, ses
+   * combattants resteraient indéfiniment rattachés à un combat fantôme — et `resolveCurrentFightId`
+   * continuerait de le renvoyer comme unique combat actif pour toute ligne sans nom (butin, gain de
+   * kamas hors combat...). Si des lignes de ce combat arrivent malgré tout ensuite (autre client
+   * multi-compte encore dedans, ou personnage qui y revient à la reconnexion), il est simplement
+   * recréé comme un nouveau combat par parseFighterJoin.
+   */
+  closeFight(fightId: number): void {
+    this.forgetFight(fightId);
+  }
+
   /** Oublie un combat terminé : libère les noms de combattants qui n'appartiennent à aucun autre combat actif, pour éviter qu'un nom de monstre courant reste faussement ambigu pour un futur combat sans rapport. */
   private forgetFight(fightId: number): void {
     const members = this.fightMemberNames.get(fightId);
@@ -736,6 +768,15 @@ export class LogParser {
     const loss = KAMA_LOSS_RE.exec(content);
     if (loss) {
       return { kind: 'kama-loss', time, amount: parseFrenchNumber(loss[1]) };
+    }
+    const itemLoss = ITEM_LOSS_RE.exec(content);
+    if (itemLoss) {
+      return {
+        kind: 'item-loss',
+        time,
+        item: itemLoss[2].trim(),
+        quantity: parseFrenchNumber(itemLoss[1]),
+      };
     }
     const loot = RAMASSE_RE.exec(content);
     if (loot) {

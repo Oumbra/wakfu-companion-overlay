@@ -225,6 +225,20 @@ impl LogParserEngine {
         })?;
         Ok(())
     }
+
+    /// Fait oublier au parser un combat qui n'aura jamais son `[FIGHT] End fight` (client fermé en
+    /// plein combat) — voir `LogParser.closeFight` et [`crate::session::Engine::ingest_batch`], qui
+    /// l'appelle pour chaque combat qu'il suspend. Sans cela, le parser continue de désigner ce
+    /// combat fantôme comme seul combat actif et lui rattache toute ligne sans nom (butin, gain de
+    /// kamas hors combat) — c'est le bug que le web a corrigé de la même façon, depuis son store.
+    pub fn close_fight(&self, fight_id: i64) -> Result<(), EngineError> {
+        self.context.with(|ctx| {
+            let engine: Object = ctx.globals().get("wakfuEngine")?;
+            let close: Function = engine.get("closeFight")?;
+            close.call::<(i64,), ()>((fight_id,))
+        })?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -746,6 +746,11 @@ struct SessionState {
     /// qui vient d'être expliqué par un échange tout juste conclu (cas où le `TradeCompleted`
     /// PRÉCÈDE la ligne de gain).
     last_trade_completed_at_ms: Option<i64>,
+    /// Ligne « Vous avez perdu Nx X » en attente d'un ramassage immédiat (fenêtre
+    /// `PURCHASE_WINDOW_MS`), signature du cycle de démantèlement d'objet — miroir de
+    /// `pendingItemLoss` : `(heure du jour en ms)`. Même rôle que `pending_purchase`, mais pour
+    /// exclure du butin de combat seulement, sans rien enregistrer.
+    pending_item_loss: Option<i64>,
     /// Heure du jour (ms) au-delà de laquelle la fenêtre d'extraction de pacte courante est
     /// considérée expirée — posée/prolongée à chaque `InteractiveWalkon` ET à chaque ramassage qui
     /// rejoint le lot (voir `PACT_EXTRACTION_WINDOW_MS`, `check_pact_window_expiry`). `None` =
@@ -835,14 +840,18 @@ impl SessionState {
     /// laissé SUSPENDU (`FightWorking::suspended`) : si Wakfu remet le personnage dans ce même
     /// combat à la reconnexion, ses lignes `[_FL_]` rejouées le rouvrent sans dupliquer personne
     /// (voir `apply`, cas `FighterJoined`).
-    fn suspend_all_ongoing_fights(&mut self, time: Option<&str>) {
+    /// Renvoie les combats effectivement suspendus — l'appelant (`Engine::ingest_batch`) les fait
+    /// oublier au parser vendu (`LogParserEngine::close_fight`), qui sinon continuerait de les
+    /// désigner comme combat actif pour toute ligne sans nom.
+    fn suspend_all_ongoing_fights(&mut self, time: Option<&str>) -> Vec<i64> {
         let ongoing: Vec<i64> = self
             .fights
             .iter()
             .filter(|(_, fight)| fight.snapshot.ongoing)
             .map(|(id, _)| *id)
             .collect();
-        for fight_id in ongoing {
+        for fight_id in &ongoing {
+            let fight_id = *fight_id;
             tracing::info!(fight_id, "combat suspendu : client déconnecté ou relancé");
             self.abandon_fight(fight_id, time);
             if let Some(fight) = self.fights.get_mut(&fight_id) {
@@ -854,6 +863,7 @@ impl SessionState {
                 fight.pending_restored_joins = budget;
             }
         }
+        ongoing
     }
 
     /// Renvoie les noms d'ennemis crédités IMPLICITEMENT comme vaincus par le filet de rattrapage
@@ -922,7 +932,19 @@ impl SessionState {
             if pact_loot {
                 self.add_to_pact_batch(item, *quantity, time);
             }
-            if !purchase_loot && !pact_loot {
+            // Cycle de démantèlement d'objet (« Vous avez perdu X » puis « Vous avez ramassé
+            // des ressources ») : le ramassage qui suit immédiatement une perte d'objet n'est pas
+            // du butin de combat non plus — miroir d'`isDismantleLoot`, mêmes priorités (achat,
+            // puis pacte, puis démantèlement).
+            let dismantle_loot = !purchase_loot
+                && !pact_loot
+                && match (self.pending_item_loss, time_of_day_ms(time)) {
+                    (Some(loss_time_ms), Some(time_ms)) => {
+                        time_ms - loss_time_ms <= PURCHASE_WINDOW_MS
+                    }
+                    _ => false,
+                };
+            if !purchase_loot && !pact_loot && !dismantle_loot {
                 if let Some(fight_id) = fight_id {
                     if let Some(fight) = self.fights.get_mut(fight_id) {
                         // Fusionne avec une ligne déjà accumulée pour ce même objet plutôt que
@@ -944,6 +966,9 @@ impl SessionState {
         }
         if !matches!(entry, LogEntry::KamaLoss { .. }) {
             self.pending_purchase = None;
+        }
+        if !matches!(entry, LogEntry::ItemLoss { .. }) {
+            self.pending_item_loss = None;
         }
 
         // Un gain de kamas hors combat en attente de confirmation (voir `pending_hdv_kama_gain`)
@@ -1387,6 +1412,9 @@ impl SessionState {
             LogEntry::InteractiveWalkon { time } => {
                 self.open_or_extend_pact_window(time);
             }
+            LogEntry::ItemLoss { time, .. } => {
+                self.pending_item_loss = time_of_day_ms(time);
+            }
             LogEntry::TradeCompleted { time, sides } => {
                 // Voir `pending_hdv_kama_gain` : un gain de kamas hors combat qui vient tout juste
                 // d'être expliqué par CET échange est déjà traité ci-dessus (résolution en tête de
@@ -1398,11 +1426,24 @@ impl SessionState {
                     sync_events.push(event);
                 }
             }
+            // `client-lifecycle` : la coupure du client est traitée EN AMONT du parseur, par
+            // `Engine::ingest_batch` (voir `is_client_cut_line`, qui reconnaît aussi la perte de
+            // connexion et la bannière de démarrage) — rien à refaire ici.
+            //
+            // `market-occupation` : volontairement INEXPLOITÉ, contrairement au web
+            // (`isPurchaseLoot = priceKnown || this.inMarketOccupation`). Le drapeau n'est
+            // refermé que par « On arrête/annule l'occupation MARKET » ou un `client-lifecycle` ;
+            // sur `tests/wakfu.log` (vrai fichier, 2026-08-04), l'ouverture de 20:33:04 n'a JAMAIS
+            // aucune des deux — armer ce drapeau y requalifierait en achat HDV les 628 ramassages
+            // des 1 h 30 suivantes, c'est-à-dire tout le butin de tous les combats du fichier.
+            // Les logs récents (celui qui a servi à calibrer le web, 2026-09-15) portent bien la
+            // ligne de fermeture : le jour où un fichier récent le confirme ici aussi, câbler
+            // l'exclusion (le signal, lui, est déjà parsé et désérialisé).
+            //
             // Hors périmètre de ce premier slice (voir le commentaire de module) : chat,
             // combat-defeat-marker, combat-start (ne porte pas de fightId, voir le TS vendu),
-            // market-occupation, et les variantes sans fightId (kamas/loot hors combat, dégâts non
-            // résolus, spell-cast/enemy-defeated/fled/challenge-result sans fightId résolu par le
-            // parser).
+            // et les variantes sans fightId (kamas/loot hors combat, dégâts non résolus,
+            // spell-cast/enemy-defeated/fled/challenge-result sans fightId résolu par le parser).
             _ => {}
         }
         implicitly_defeated_enemies
@@ -2648,7 +2689,17 @@ impl Engine {
                 self.apply_entry(entry, batch.is_initial_load, &mut touched_fight_ids);
             }
             entries.extend(run);
-            self.state.suspend_all_ongoing_fights(Self::line_time(line));
+            // Le parser vendu doit oublier ces combats en même temps que l'état de session : sans
+            // ça, `resolveCurrentFightId` continue de rattacher au combat fantôme toute ligne sans
+            // nom (butin, vente HDV) — c'est ainsi qu'une vente de 1,8 M kamas s'est retrouvée
+            // créditée au combat suivant côté web (voir `LogParser.closeFight`). Un combat que le
+            // personnage retrouve à la reconnexion est simplement recréé par la jointure `[_FL_]`
+            // qui suit, des deux côtés.
+            for fight_id in self.state.suspend_all_ongoing_fights(Self::line_time(line)) {
+                if let Err(err) = self.parser.close_fight(fight_id) {
+                    tracing::warn!(fight_id, %err, "le parser n'a pas pu oublier ce combat");
+                }
+            }
             run_start = index + 1;
         }
         let run = self.parser.parse_lines(&batch.lines[run_start..])?;
@@ -2848,6 +2899,8 @@ fn entry_fight_id(entry: &LogEntry) -> Option<i64> {
         | LogEntry::KamaLoss { .. }
         | LogEntry::CombatStart { .. }
         | LogEntry::MarketOccupation { .. }
+        | LogEntry::ItemLoss { .. }
+        | LogEntry::ClientLifecycle { .. }
         | LogEntry::InteractiveWalkon { .. }
         | LogEntry::LogDateAnchor { .. }
         | LogEntry::TradeCompleted { .. } => None,

@@ -39,7 +39,9 @@ pub use history::{
     PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
     HDV_KAMAS_SALE_ITEM,
 };
-pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
+pub use model::{
+    ChatChannel, ClientLifecycleEvent, DamageElement, FightResult, LogEntry, TradeItem, TradeSide,
+};
 pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
 pub use profile::{
     find_enabled_sound_item, find_sound_item, profile_patch_entry, AlertProfile, LootAlert,

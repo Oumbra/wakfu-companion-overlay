@@ -29,6 +29,7 @@
   var KAMA_GAIN_RE = new RegExp(`^Vous avez gagn\xE9 (${NUM}) kamas\\.?$`);
   var KAMA_LOSS_RE = new RegExp(`^Vous avez perdu (${NUM}) kamas\\.?$`);
   var RAMASSE_RE = new RegExp(`^Vous avez ramass\xE9 (${NUM})x (.+?)\\s*\\.?$`);
+  var ITEM_LOSS_RE = new RegExp(`^Vous avez perdu (${NUM})x (.+?)\\s*\\.?$`);
   var CHALLENGE_SUCCESS_RE = /^Le challenge "(.+?)" est réussi\.?$/;
   var CHALLENGE_FAIL_RE = /^Le challenge "(.+?)" a échoué\.?$/;
   var XP_RE = new RegExp(`^(.+?) : \\+(${NUM}) points d'XP\\.`);
@@ -47,8 +48,10 @@
   var OCCUPATION_RE = /^Lancement de l'occupation pour le joueur (.+)$/;
   var FIGHT_END_RE = /^\[FIGHT\] End fight with id (-?\d+)$/;
   var COMBAT_START_MARKER = "CREATION DU COMBAT";
+  var CLIENT_SHUTDOWN_MARKER = "Stopping cFC...";
+  var CLIENT_STARTUP_MARKER = "Starting cFC...";
   var MARKET_OCCUPATION_START_RE = /^Lancement de l'occupation MARKET sur la board\b/;
-  var MARKET_OCCUPATION_END_RE = /^On arrête l'occupation MARKET sur la board\b/;
+  var MARKET_OCCUPATION_END_RE = /^On (?:arrête|annule) l'occupation MARKET sur la board\b/;
   var WALKON_RE = /^Action \[WALKON\] performed on interactive element : \d+$/;
   var CLIENT_BUILD_DATE_RE = /\[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]/;
   var FIGHTER_JOIN_RE = /^fightId=(-?\d+) (.+?) breed : (\d+) \[(-?\d+)\] isControlledByAI=(true|false) obstacleId : (-?\d+) join the fight/;
@@ -162,6 +165,12 @@
       }
       if (content === COMBAT_START_MARKER) {
         return { kind: "combat-start", time };
+      }
+      if (content === CLIENT_SHUTDOWN_MARKER) {
+        return { kind: "client-lifecycle", time, event: "shutdown" };
+      }
+      if (content === CLIENT_STARTUP_MARKER) {
+        return { kind: "client-lifecycle", time, event: "startup" };
       }
       if (MARKET_OCCUPATION_START_RE.test(content)) {
         return { kind: "market-occupation", time, active: true };
@@ -307,6 +316,18 @@
         summonedBy
       };
     }
+    /**
+     * Clôture forcée d'un combat qui n'aura jamais de marqueur FIGHT_END_RE (client fermé en plein
+     * combat, voir ClientLifecycleEntry) : même nettoyage qu'une fin propre. Sans ça, ses
+     * combattants resteraient indéfiniment rattachés à un combat fantôme — et `resolveCurrentFightId`
+     * continuerait de le renvoyer comme unique combat actif pour toute ligne sans nom (butin, gain de
+     * kamas hors combat...). Si des lignes de ce combat arrivent malgré tout ensuite (autre client
+     * multi-compte encore dedans, ou personnage qui y revient à la reconnexion), il est simplement
+     * recréé comme un nouveau combat par parseFighterJoin.
+     */
+    closeFight(fightId) {
+      this.forgetFight(fightId);
+    }
     /** Oublie un combat terminé : libère les noms de combattants qui n'appartiennent à aucun autre combat actif, pour éviter qu'un nom de monstre courant reste faussement ambigu pour un futur combat sans rapport. */
     forgetFight(fightId) {
       const members = this.fightMemberNames.get(fightId);
@@ -391,6 +412,15 @@
       const loss = KAMA_LOSS_RE.exec(content);
       if (loss) {
         return { kind: "kama-loss", time, amount: parseFrenchNumber(loss[1]) };
+      }
+      const itemLoss = ITEM_LOSS_RE.exec(content);
+      if (itemLoss) {
+        return {
+          kind: "item-loss",
+          time,
+          item: itemLoss[2].trim(),
+          quantity: parseFrenchNumber(itemLoss[1])
+        };
       }
       const loot = RAMASSE_RE.exec(content);
       if (loot) {
@@ -702,6 +732,9 @@
   function resetParser() {
     parser.reset();
   }
+  function closeFight(fightId) {
+    parser.closeFight(fightId);
+  }
   function parseBatch(linesJoined) {
     const out = [];
     for (const line of linesJoined.split("\n")) {
@@ -710,5 +743,5 @@
     }
     return JSON.stringify(out);
   }
-  globalThis.wakfuEngine = { parseLine, flush, resetParser, parseBatch };
+  globalThis.wakfuEngine = { parseLine, flush, resetParser, parseBatch, closeFight };
 })();

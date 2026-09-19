@@ -135,6 +135,23 @@ export interface CombatStartEntry {
   time: string;
 }
 
+/**
+ * Cycle de vie du client Wakfu lui-même, hors de toute enveloppe `[Catégorie]` : "Stopping cFC..."
+ * (`'shutdown'`, fermeture propre du client — précédée de "Sending DisconnectionMessage to
+ * Servers. Reason : {UI Closed}") ou "Starting cFC..." (`'startup'`, nouveau lancement — seul
+ * signal disponible après un crash/kill du client, qui n'écrit jamais de "Stopping"). Un combat
+ * encore actif à cet instant n'aura JAMAIS son `[FIGHT] End fight` (cas réel : entraînement sur
+ * mannequin quitté en fermant le jeu). Côté overlay, la coupure est détectée en amont du parseur
+ * (`Engine::is_client_cut_line`, qui reconnaît aussi la perte de connexion et la bannière de
+ * démarrage) : cet événement-ci ne sert qu'à refermer la session marchand/HDV restée ouverte
+ * (voir `SessionState::in_market_occupation`).
+ */
+export interface ClientLifecycleEntry {
+  kind: 'client-lifecycle';
+  time: string;
+  event: 'shutdown' | 'startup';
+}
+
 export interface CombatEndEntry {
   kind: 'combat-end';
   time: string;
@@ -176,6 +193,21 @@ export interface MarketOccupationEntry {
 export interface InteractiveWalkonEntry {
   kind: 'interactive-walkon';
   time: string;
+}
+
+/**
+ * "Vous avez perdu Nx <objet> ." (distinct de KamaLossEntry, qui ne couvre que la perte de kamas).
+ * Sert uniquement de signal d'adjacence pour la détection du cycle de démantèlement d'objet ("Vous
+ * avez perdu X / Vous avez ramassé des ressources / Vous avez détruit N objet(s) et récupéré M
+ * ressources") : un ramassage survenant juste après cette ligne est exclu du butin de combat,
+ * exactement comme un achat HDV (même risque de rattachement erroné à un combat concurrent encore
+ * actif en mémoire au même moment) — voir `SessionState::pending_item_loss`.
+ */
+export interface ItemLossEntry {
+  kind: 'item-loss';
+  time: string;
+  item: string;
+  quantity: number;
 }
 
 export interface ChallengeResultEntry {
@@ -259,6 +291,7 @@ export type LogEntry =
   | CombatDefeatMarkerEntry
   | TurnEndedEntry
   | CombatStartEntry
+  | ClientLifecycleEntry
   | CombatEndEntry
   | LootEntry
   | ChallengeResultEntry
@@ -266,4 +299,5 @@ export type LogEntry =
   | TradeCompletedEntry
   | MarketOccupationEntry
   | InteractiveWalkonEntry
-  | LogDateAnchorEntry;
+  | LogDateAnchorEntry
+  | ItemLossEntry;
