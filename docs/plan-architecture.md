@@ -908,12 +908,14 @@ par une revue à trois experts) à de vraies données.
   d'`AlertProfile`, et « Valider » commit **tous les onglets à la fois** — le pied de page est
   partagé, un bouton dont l'effet dépendrait de l'onglet affiché serait imprévisible. Un chemin de
   log refusé n'écrit donc rien, alertes comprises.
-- **Écriture au compte** : `PATCH /api/v1/settings` sur la clé `profile`, reconstruite **à partir
-  de l'objet brut reçu au `GET`** (`AlertProfile::patch_value`) — le serveur remplace la valeur
-  entière de la clé, et cette clé porte aussi le pseudo, l'avatar et le mode d'affichage des
-  personnages, que l'overlay n'affiche nulle part. Écriture sautée si le brouillon n'a pas changé :
-  l'arbitrage est « dernier écrivain gagne », une écriture inutile écraserait une modification
-  faite depuis le site.
+- **Écriture au compte** : `PATCH /api/v1/settings` sur la clé `profile`, **partielle** depuis
+  le 2026-09-19 (constat C9 de `docs/analyse-rgpd.md`) : l'entrée porte `patch` et les seuls trois
+  champs d'alerte (`AlertProfile::patch_fields`), le serveur fusionne champ par champ. Le pseudo,
+  l'avatar et le mode d'affichage des personnages, que l'overlay n'affiche nulle part, ne
+  transitent plus par lui — jusque-là la clé était reconstruite à partir de l'objet brut reçu au
+  `GET`, parce que le serveur en remplaçait la valeur entière. Écriture sautée si le brouillon n'a
+  pas changé : l'arbitrage est « dernier écrivain gagne », une écriture inutile écraserait une
+  modification faite depuis le site.
 - **La durée réglée pilote vraiment le toast** : `WatchlistToast::hide_at` est passé à
   `Option<Instant>`, `None` valant « ne se ferme qu'à la main ». Régler une durée sans effet aurait
   été pire que pas de réglage.
@@ -2792,8 +2794,16 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   n'est disponible ou ne relit ce qu'il a écrit, l'overlay le **replie en clair** dans un fichier
   de son dossier de données (`token_store.rs::save_token_file`, `0600` sous Linux, aucune ACL
   particulière sous Windows — C7), et le dit au journal (`warn!`), pas encore dans l'interface. Il
-  est **effacé** des deux emplacements à la déconnexion (`clear_token`) et **révocable** côté
-  serveur (« Sessions actives »). Il n'apparaît jamais dans les logs de l'overlay.
+  est **effacé** des deux emplacements à la déconnexion (`clear_token`), **effacé côté serveur**
+  au même geste (`DELETE /api/v1/auth/native/session`, C5) et **révocable** depuis le site
+  (« Sessions actives »). Il est **renouvelé** au démarrage quand il a plus de 7 jours (2026-09-19,
+  `background::rotate_token_if_due`, `POST /api/v1/auth/native/session`) : le serveur émet un jeton
+  neuf de 30 jours glissants et remplace l'ancienne session, encore acceptée 5 min le temps de
+  persister le nouveau et de drainer les requêtes parties — le nouveau est écrit au trousseau AVANT
+  d'être utilisé, un échec conserve l'ancien et n'est jamais une déconnexion, et la file d'envoi
+  (seul détenteur d'un jeton en mémoire) est activée après la rotation, avec le nouveau. La date
+  d'émission vit à côté du fichier de repli (`native-session.issued-at`, une date, pas un secret).
+  Il n'apparaît jamais dans les logs de l'overlay.
 
 ---
 
