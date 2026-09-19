@@ -587,6 +587,19 @@ bornée au cadre, le côté reste une case des Options), et suit tout déplaceme
 | Échange joueur | `POST /api/v1/history/trades` | `clientKey`, `peerName`, `selfName`, `kamasAcquired/Given`, `items[]` |
 | **Extraction de pacte** (2026-09-19) | `POST /api/v1/history/pacts` | `clientKey`, `occurredAt`, `gameServer`, `items[]` (`itemId`\|`itemName`, `quantity`) — ni prix ni combat d'origine. Détectée comme côté web : la ligne `Action [WALKON] performed on interactive element : <id>` (événement `interactive-walkon` du parseur vendu) ouvre une fenêtre de 3 min (`PACT_EXTRACTION_WINDOW_MS`), prolongée par chaque ramassage qui la rejoint ; tout ramassage de cette fenêtre est **exclu du butin de combat** (comme un achat marchand/HDV), et le lot est committé par la première ligne postérieure à la fenêtre — jamais forcé en fin de lot de lignes, une fenêtre pouvant légitimement chevaucher deux lots en lecture incrémentale |
 
+**Un écart assumé avec le web (2026-09-19) : la session marchand/HDV.** Le parseur vendu reconnaît
+désormais son ouverture et ses DEUX fermetures (« On arrête » et « On annule », cette dernière
+portée du web en même temps que `client-lifecycle` et `item-loss`), mais `SessionState` ne s'en
+sert PAS pour exclure du butin de combat, contrairement à `isPurchaseLoot = priceKnown ||
+inMarketOccupation` côté web. Raison mesurée : dans `crates/overlay-engine/tests/wakfu.log` (vrai
+fichier, 2026-08-04), l'ouverture de 20:33:04 n'a jamais de fermeture d'aucune forme — armer le
+drapeau y requalifierait en achat HDV les **628 ramassages des 1 h 30 suivantes**, c'est-à-dire
+tout le butin de tous les combats du fichier. Les logs récents portent bien la ligne de fermeture
+(c'est sur l'un d'eux que le web a été calibré) : le jour où un fichier récent le confirme ici
+aussi, l'exclusion se câble en trois lignes — le signal est déjà parsé et désérialisé. Le cycle de
+démantèlement (`item-loss` + fenêtre de 2 s), lui, est câblé : même forme que la fenêtre d'achat,
+donc sans ce risque de drapeau resté armé.
+
 `clientKey = sha256_hex("{uid}|{kind}|{signature}")`, signature produite **par l'Engine** (donc par
 le code TS partagé) — l'hôte Rust ne fait que le hachage, comme `SyncQueueService` le fait côté web.
 
