@@ -5,7 +5,7 @@ name = "xtask"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Outillage de CI (docs/plan-architecture.md §8/§11/§17.2, docs/plan-mise-a-jour.md §6) : mem-budget mesure le RSS apres un scenario scripte et echoue au-dessus du plafond documente ; dist assemble et signe les assets d'une Release ; setup-tools installe les outils Cargo globaux du depot (version epinglee par outil), reutilisable par .claude/hooks/session-start.sh. `[workspace]` vide ici (meme raison que spikes/, voir son README bug reel n.6) : evite de peser sur la resolution de dependances du workspace principal (x11rb, sysinfo...) sans avoir a etre membre de `crates/*`."
+description = "Outillage de CI (docs/plan-architecture.md §8/§11/§17.2, docs/plan-mise-a-jour.md §6) : mem-budget mesure le RSS apres un scenario scripte et echoue au-dessus du plafond documente ; dist assemble et signe les assets d'une Release ; setup-tools installe les outils Cargo globaux du depot (version epinglee par outil). `[workspace]` vide ici (meme raison que spikes/, voir son README bug reel n.6) : evite de peser sur la resolution de dependances du workspace principal (x11rb, sysinfo...) sans avoir a etre membre de `crates/*`."
 
 [dependencies]
 flate2 = "1.1.10"

@@ -8,7 +8,7 @@
 //! la CI par défaut, §17.2 : « jamais un gate CI par défaut » pour ce harnais précis), `dist`
 //! (assets, manifeste signé et mesure du différentiel d'une Release — `.github/workflows/
 //! release.yml`, docs/plan-mise-a-jour.md §6) et `setup-tools` (outils Cargo globaux du dépôt,
-//! voir sa doc — appelée entre autres par `.claude/hooks/session-start.sh`).
+//! voir sa doc).
 
 mod dist;
 mod mem_budget;

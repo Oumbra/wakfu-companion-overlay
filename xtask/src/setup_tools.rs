@@ -1,20 +1,19 @@
 //! `xtask setup-tools` — installe les outils Cargo globaux dont ce dépôt a besoin (aujourd'hui :
-//! RTK, voir `.claude/hooks/rtk-hook.sh` et `.claude/hooks/session-start.sh`), avec une version
+//! RTK, voir `.claude/hooks/rtk-hook.sh`), avec une version
 //! épinglée par outil — même esprit que `rust-toolchain.toml` : une montée de version est un
 //! changement explicite dans son propre commit, jamais une dérive d'une machine à l'autre.
 //!
-//! **Point d'entrée unique**, appelé aussi bien à la main sur un poste de dev qu'automatiquement
-//! par `session-start.sh` en session cloud — pour ne jamais dupliquer la logique d'installation à
-//! deux endroits qui finiraient par diverger (cette duplication existait avant : le `curl | sh`
-//! du script était la seule voie, celle-ci en est le pendant « via Cargo » demandé pour un usage
-//! hors session cloud).
+//! **Point d'entrée unique**, sur un poste de dev comme dans un conteneur de session cloud — pour
+//! ne jamais dupliquer la logique d'installation à deux endroits qui finiraient par diverger
+//! (cette duplication a existé : un hook `SessionStart`, retiré le 2026-09-20, installait RTK par
+//! le `curl | sh` officiel ; celle-ci en est le pendant « via Cargo »).
 //!
 //! Chaque outil est un paquet crates.io ordinaire (`cargo install --locked --version …`) : RTK y
 //! est distribué sous le nom `brokk-rtk` (republication du même projet, `rtk-ai/rtk`, sous un nom
 //! de crate différent — `rtk` était déjà pris sur crates.io par un paquet sans rapport), mais
 //! produit bien un binaire nommé `rtk`. **Sa version crates.io ne suit pas forcément le même
-//! numéro que les tags GitHub du projet** (ex. le binaire précompilé `v0.49.0` installé par
-//! `session-start.sh` avant cette commande) : c'est la même famille d'outil, pas un miroir
+//! numéro que les tags GitHub du projet** (ex. le binaire précompilé `v0.49.0` du poste du
+//! mainteneur) : c'est la même famille d'outil, pas un miroir
 //! version pour version. Si l'exactitude du numéro de version compte plus que la simplicité
 //! d'installation via Cargo, préférer le script officiel (`rtk-ai/rtk/install.sh`).
 //!

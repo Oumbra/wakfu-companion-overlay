@@ -6,7 +6,7 @@
 #
 # Réservé à la session cloud : sur le poste du mainteneur, RTK est déjà branché en global par
 # `rtk init -g` (~/.claude/settings.json), et doubler le hook n'apporterait rien. Et si le binaire
-# manque (installation échouée dans session-start.sh), ne rien répondre : Claude Code garde alors
+# manque (le conteneur ne l'installe pas de lui-même), ne rien répondre : Claude Code garde alors
 # la commande d'origine, ce qui vaut toujours mieux qu'une réécriture vers un `rtk` introuvable.
 set -euo pipefail
 
