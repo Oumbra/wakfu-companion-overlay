@@ -4,6 +4,26 @@ Toutes les réponses, explications et descriptions d'étapes communiquées à l'
 rédigées **en français**, même si le code, les dépendances ou la documentation technique sont en
 anglais.
 
+# Commandes shell : passer par `rtk` (obligatoire)
+
+[`rtk`](https://github.com/rtk-ai/rtk) (`rtk --help` pour la liste complète) est un proxy CLI qui condense la sortie des commandes avant qu'elle n'atteigne le contexte — même signal, beaucoup moins de tokens. **Toute commande que `rtk` sait filtrer doit être préfixée par `rtk`**, jamais lancée en natif. Le hook global `PreToolUse` (`rtk hook claude`) réécrit déjà la plupart des appels simples ; le préfixe explicite reste la règle pour ne pas dépendre de ce filet (commandes composées, pipes, `cd ... &&`, scripts) et pour que la commande réellement exécutée soit celle affichée.
+
+| Besoin | Écrire | Pas |
+| --- | --- | --- |
+| Git (usage premier) | `rtk git status` / `diff` / `log` / `show` / `add` / `commit` / `checkout` / `push` / `pull` / `branch` / `fetch` / `stash` / `worktree` (accepte `-C`, `-c`, `--no-pager`) | `git ...` |
+| Recherche de contenu | `rtk grep ...`, `rtk rg ...`, `rtk ast-grep ...` | `grep`/`rg` natifs |
+| Fichiers et arborescence | `rtk find ...`, `rtk ls ...`, `rtk tree ...`, `rtk wc ...` | `find`/`ls`/`tree`/`wc` |
+| Lecture d'un fichier en shell | `rtk read <fichier>` | `cat`/`head`/`sed -n` |
+| npm / npx / outils du projet | `rtk npm run build`, `rtk npm start`, `rtk npx ...`, `rtk tsc`, `rtk lint`, `rtk prettier`, `rtk playwright ...`, `rtk pip ...` | appels natifs |
+| GitHub, HTTP, JSON | `rtk gh ...`, `rtk curl ...`, `rtk json ...`, `rtk diff ...` | `gh`/`curl`/`jq`/`diff` |
+| Commande sans filtre dédié | `rtk err <cmd>` (erreurs/avertissements seulement), `rtk test <cmd>` (échecs seulement), `rtk summary <cmd>` (résumé heuristique) | sortie brute |
+
+- Enchaîner plusieurs commandes liées dans un seul appel (`rtk git add -A && rtk git commit -m "..."`) plutôt que multiplier les tours.
+- Traiter la sortie condensée comme le résultat complet. Une sortie tronquée indique son propre chemin de récupération (`rtk recall <hash>`). Repasser en `rtk proxy <cmd>` (sortie brute, usage tracé) **uniquement** si le résultat est inutilisable : vide alors qu'une sortie était attendue, contredisant le code de sortie, ou illisible.
+- `rtk run <cmd>` (aucun filtre, aucun suivi) est réservé aux commandes qui cassent sous filtre — à justifier dans le message.
+- Les outils dédiés (`Read`, `Grep`, `Glob`, `Edit`) restent préférables au shell quand ils suffisent ; la règle ci-dessus vaut dès qu'on passe par Bash/PowerShell.
+- **Mode dégradé** : si `rtk` est absent (`command -v rtk` échoue — typiquement une session cloud dont l'environnement n'a pas de setup script, ou la machine d'un autre contributeur), le signaler **une seule fois** puis utiliser les commandes natives sans réessayer le préfixe. Ne pas tenter d'installer `rtk` soi-même : en session cloud il s'installe via le setup script de l'environnement (UI claude.ai/code, résultat mis en cache ~7 jours ; le script officiel `install.sh` peut échouer en 403 sur les release assets GitHub — repli `cargo install --git https://github.com/rtk-ai/rtk --locked`), en local c'est un choix de l'utilisateur. Le hook `PreToolUse` de `.claude/settings.json` est déjà protégé et devient un no-op sans `rtk`.
+
 # Branche de travail : `dev` — règle impérative
 
 **Tout travail de session Claude sur ce dépôt est commité et poussé sur la branche `dev`**, quelle
