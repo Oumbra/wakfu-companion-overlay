@@ -452,7 +452,7 @@ tiers, et les gabarits sont des captures d'écran.
 
 **Recommandations.**
 
-- Bouton « Supprimer les données locales » (À propos ou Paramètres › Compte) qui efface les deux
+- Bouton « Supprimer les données locales » (À propos › Vos données) qui efface les deux
   arbres de dossiers, avec confirmation ; l'exposer aussi en ligne de commande
   (`--purge-local-data`) pour la désinstallation.
 - À la déconnexion : purger `sync-queue.sqlite3` (✅ 2026-09-18, voir C3), `fight-*.json`,
@@ -589,7 +589,7 @@ C5 — est fait (✅ 2026-09-18 : vidés à la déconnexion, supprimés par le b
   durée de conservation, pas le volume qu'une panne en boucle écrit sur un disque qui n'est pas le
   nôtre. Au-delà, l'écriture sur disque s'arrête après une ligne qui le dit ; la console continue
   de tout recevoir, et le fichier du lendemain repart d'un compteur vide.
-- **Réglage « Journal détaillé »** (fenêtre Options › À propos, section « Journal »), décoché par
+- **Réglage « Journal détaillé »** (fenêtre Options › Paramètres, section « Journal »), décoché par
   défaut, persisté (`config.toml`, `verbose_log`) et appliqué **à chaud**
   (`tracing_subscriber::reload`) : cocher la case ouvre les `debug!` ci-dessus sans redémarrer —
   un réglage qui n'aurait pris effet qu'au lancement suivant raterait justement le problème qu'on
