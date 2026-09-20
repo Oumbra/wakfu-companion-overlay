@@ -56,27 +56,69 @@ pub fn spawn_catalog_thread(
     thread::Builder::new()
         .name("overlay-catalog".into())
         .spawn(move || {
-            load_catalog(&catalog, &catalog_stale, &proxy);
+            // Le réseau exige la session (routes réservées à l'overlay, voir
+            // `overlay_sync::session`) : cache disque publié tout de suite, puis attente du
+            // verdict du thread Auth avant `load_catalog` — l'écran de chargement couvre déjà
+            // cette validation. Sans session, le cache (ou le repli embarqué) reste en place.
+            let mut known_hash = publish_cached_catalog(&catalog, &proxy);
+            let (token, mut generation) = overlay_sync::session::wait_resolved();
+            if token.is_some() {
+                known_hash = load_catalog(&catalog, &catalog_stale, &proxy, known_hash);
+            } else if known_hash.is_none() {
+                load_embedded_catalog(&catalog, &catalog_stale, &proxy);
+            }
             // Quel que soit le chemin pris ci-dessus (cache, réseau, repli, échec) : le
             // catalogue a fini de se charger, l'écran de chargement peut le décompter.
             startup.mark_catalog();
             let _ = proxy.send_event(UserEvent::StartupProgress);
+            // Chaque session publiée ensuite (premier « Se connecter », reconnexion après
+            // « Déconnecter ») vaut un rafraîchissement : un premier lancement sans jeton n'a
+            // que le repli embarqué jusque-là.
+            loop {
+                generation = overlay_sync::session::wait_token_after(generation).1;
+                known_hash = load_catalog(&catalog, &catalog_stale, &proxy, known_hash);
+            }
         })
         .expect("échec de création du thread Catalogue");
 }
 
-fn load_catalog(
+/// Publie le cache disque du catalogue s'il existe et rend son empreinte (`indexHash`) — la
+/// première étape de `load_catalog`, sortie pour s'exécuter AVANT l'attente de la session.
+fn publish_cached_catalog(
+    catalog: &Arc<ArcSwap<CatalogIndex>>,
+    proxy: &EventLoopProxy<UserEvent>,
+) -> Option<String> {
+    let (hash, index) = overlay_sync::catalog_cache::load()?;
+    catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
+    let _ = proxy.send_event(UserEvent::NewSnapshot);
+    Some(hash)
+}
+
+/// Repli hors-ligne EMBARQUÉ (§7.4 du plan, `catalog_cache::embedded_fallback`) — uniquement sans
+/// cache disque : un cache déjà chargé reste toujours préférable (référentiel plus récent que le
+/// placeholder embarqué), le réseau injoignable ou l'absence de session n'y changent rien.
+fn load_embedded_catalog(
     catalog: &Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: &Arc<AtomicBool>,
     proxy: &EventLoopProxy<UserEvent>,
 ) {
-    let mut cached_hash = None;
-    if let Some((hash, index)) = overlay_sync::catalog_cache::load() {
-        catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
-        let _ = proxy.send_event(UserEvent::NewSnapshot);
-        cached_hash = Some(hash);
-    }
+    catalog.store(Arc::new(CatalogIndex::from_compact_json(
+        &overlay_sync::catalog_cache::embedded_fallback(),
+    )));
+    catalog_stale.store(true, Ordering::Relaxed);
+    let _ = proxy.send_event(UserEvent::NewSnapshot);
+}
 
+/// Rafraîchit le catalogue depuis le réseau (session requise, voir `spawn_catalog_thread`) :
+/// `cached_hash` est l'empreinte de l'index déjà en mémoire (cache disque publié par
+/// `publish_cached_catalog`, ou réseau d'un précédent passage), `None` s'il n'y en a aucun. Rend
+/// l'empreinte de ce qui est en mémoire à la sortie, à repasser au prochain appel.
+fn load_catalog(
+    catalog: &Arc<ArcSwap<CatalogIndex>>,
+    catalog_stale: &Arc<AtomicBool>,
+    proxy: &EventLoopProxy<UserEvent>,
+    cached_hash: Option<String>,
+) -> Option<String> {
     let latest_hash = match overlay_sync::client::fetch_catalog_version() {
         Ok(hash) => hash,
         Err(err) => {
@@ -89,20 +131,16 @@ fn load_catalog(
                     %err,
                     "catalogue injoignable ET aucun cache local — repli sur le catalogue embarqué (daté)"
                 );
-                catalog.store(Arc::new(CatalogIndex::from_compact_json(
-                    &overlay_sync::catalog_cache::embedded_fallback(),
-                )));
-                catalog_stale.store(true, Ordering::Relaxed);
-                let _ = proxy.send_event(UserEvent::NewSnapshot);
+                load_embedded_catalog(catalog, catalog_stale, proxy);
             } else {
                 tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
             }
-            return;
+            return cached_hash;
         }
     };
     if cached_hash.as_deref() == Some(latest_hash.as_str()) {
         tracing::info!("catalogue déjà à jour (cache local)");
-        return;
+        return cached_hash;
     }
     match overlay_sync::client::fetch_catalog_index() {
         Ok(index) => {
@@ -114,11 +152,15 @@ fn load_catalog(
                     "échec de mise en cache du catalogue (retéléchargé au prochain lancement)"
                 );
             }
+            Some(latest_hash)
         }
-        Err(err) => tracing::warn!(
-            %err,
-            "téléchargement du catalogue impossible, repli sur le cache local"
-        ),
+        Err(err) => {
+            tracing::warn!(
+                %err,
+                "téléchargement du catalogue impossible, repli sur le cache local"
+            );
+            cached_hash
+        }
     }
 }
 
@@ -138,20 +180,37 @@ pub fn spawn_dungeon_thread(
     thread::Builder::new()
         .name("overlay-dungeons".into())
         .spawn(move || {
-            load_dungeons(&dungeons, &proxy);
+            // Même attente de session que le thread Catalogue (voir `spawn_catalog_thread`).
+            publish_cached_dungeons(&dungeons, &proxy);
+            let (token, mut generation) = overlay_sync::session::wait_resolved();
+            if token.is_some() {
+                load_dungeons(&dungeons, &proxy);
+            }
             startup.mark_dungeons();
             let _ = proxy.send_event(UserEvent::StartupProgress);
+            loop {
+                generation = overlay_sync::session::wait_token_after(generation).1;
+                load_dungeons(&dungeons, &proxy);
+            }
         })
         .expect("échec de création du thread Donjons");
 }
 
-fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<UserEvent>) {
+fn publish_cached_dungeons(
+    dungeons: &Arc<ArcSwap<DungeonIndex>>,
+    proxy: &EventLoopProxy<UserEvent>,
+) {
     if let Some(rows) = overlay_sync::reference_data_cache::load(
         overlay_sync::reference_data_cache::ReferenceData::Dungeons,
     ) {
         dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
         let _ = proxy.send_event(UserEvent::NewSnapshot);
     }
+}
+
+/// Rafraîchit le référentiel de donjons depuis le réseau (session requise, voir
+/// `spawn_dungeon_thread`).
+fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<UserEvent>) {
     match overlay_sync::client::fetch_dungeons() {
         Ok(rows) => {
             dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
@@ -515,6 +574,12 @@ pub fn spawn_auth_thread(
                 );
 
                 let mut connected = result.is_ok();
+                if !connected {
+                    // Verdict rendu sans session (pas de jeton, jeton refusé, appairage annulé ou
+                    // échoué) : les threads Catalogue/Donjons qui attendent ce verdict repartent
+                    // sur leur cache (`session::wait_resolved`), et `client` répond `NoSession`.
+                    overlay_sync::session::clear();
+                }
                 status.store(Arc::new(match result {
                     Ok(()) => AuthStatus::Connected,
                     Err(AttemptEnd::Idle) => AuthStatus::Disconnected { failure: None },
@@ -539,6 +604,7 @@ pub fn spawn_auth_thread(
                             // session valide en base sans plus aucun moyen de la nommer.
                             crate::local_data::revoke_server_session();
                             overlay_sync::token_store::clear_token();
+                            overlay_sync::session::clear();
                             let _ = settings_tx.send(EngineCommand::Disconnect);
                             let _ = sync_tx.send(SyncCommand::Deactivate);
                             connected = false;
@@ -590,6 +656,7 @@ fn auth_failure(err: &overlay_sync::SyncError, step: &str) -> AuthFailure {
         SyncError::PairingExpired => "Appairage expiré",
         SyncError::PairingCancelled => "Appairage annulé",
         SyncError::TokenStore(_) => "Stockage de la session impossible",
+        SyncError::NoSession => "Aucune session",
     };
     AuthFailure {
         headline: headline.to_string(),
@@ -811,6 +878,10 @@ fn attempt_connect(
 /// session (roster/watchlist restent pleinement fonctionnels, seul l'historique ne remonte pas au
 /// compte) plutôt que de faire échouer toute la connexion pour un besoin annexe.
 fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
+    // Jeton validé par `GET /api/v1/settings` juste avant : c'est lui que les routes réservées à
+    // l'overlay attendent (`overlay_sync::session`, 2026-09-20) — publié AVANT `/auth/me`, dont
+    // l'échec ne concerne que la file d'historique, pas le catalogue ni les icônes.
+    overlay_sync::session::publish(token);
     match overlay_sync::client::fetch_account_id(token) {
         Ok(uid) => {
             let _ = sync_tx.send(SyncCommand::Activate {

@@ -205,6 +205,14 @@ pub fn patch_roster(token: &str, patch: &RosterPatch) -> Result<Value, SyncError
     patch_settings(token, roster_patch_entry(patch))
 }
 
+/// Jeton à poser sur une route **réservée à l'overlay** — catalogue, objets, monstres, donjons,
+/// familles, icônes (2026-09-20, voir la doc de tête de `session.rs`) : côté serveur, ces routes
+/// ne répondent plus qu'au site (`Sec-Fetch-Site: same-origin`) et à une session valide, 403
+/// sinon. `NoSession` tant que le thread Auth n'a rien publié : l'appelant garde son cache.
+fn session_token() -> Result<String, SyncError> {
+    crate::session::current().ok_or(SyncError::NoSession)
+}
+
 /// `GET /api/v1/items/{id}` — le détail d'un objet, dont **sa recette** (`functions/api/v1/
 /// items/[id].ts` côté dépôt web).
 ///
@@ -213,12 +221,14 @@ pub fn patch_roster(token: &str, patch: &RosterPatch) -> Result<Value, SyncError
 /// embarquer alourdirait un index que tout l'overlay charge au démarrage, pour un besoin qui ne
 /// concerne qu'un dialogue.
 ///
-/// **Sans authentification** : ce référentiel est public, comme le catalogue et les donjons.
+/// Avec la session courante (voir [`session_token`]) : route réservée à l'overlay et au site.
 pub fn fetch_item_detail(id: i64) -> Result<Value, SyncError> {
+    let token = session_token()?;
     let path = format!("/api/v1/items/{id}");
     let url = format!("{}{path}", base_url());
     let response = agent()
         .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body(&path, response)
@@ -237,13 +247,16 @@ pub fn icon_url(path: &str) -> String {
     )
 }
 
-/// Récupère les octets bruts d'une URL absolue (les icônes, voir [`icon_url`]), sans en-tête
-/// d'authentification : ces routes sont publiques. Toute réponse non 2xx est une erreur — pas de
-/// distinction faite ici entre "icône inconnue" et une vraie panne réseau, l'appelant traite les
-/// deux de la même façon (repli sur l'icône générique).
+/// Récupère les octets bruts d'une URL absolue (les icônes, voir [`icon_url`]), avec la session
+/// courante (voir [`session_token`] — le relais d'icônes est réservé à l'overlay et au site
+/// depuis le 2026-09-20). Toute réponse non 2xx est une erreur — pas de distinction faite ici
+/// entre "icône inconnue" et une vraie panne réseau, l'appelant traite les deux de la même façon
+/// (repli sur l'icône générique).
 pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
+    let token = session_token()?;
     let mut response = agent()
         .get(url)
+        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     let status = response.status().as_u16();
@@ -463,9 +476,11 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
 /// contenu réellement servi par `fetch_catalog_index`, à comparer à celle du cache disque avant de
 /// retélécharger ~350 Ko pour rien (voir §7.4 du plan).
 pub fn fetch_catalog_version() -> Result<String, SyncError> {
+    let token = session_token()?;
     let url = format!("{}/api/v1/catalog/version", base_url());
     let response = agent()
         .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     let body = parse_json_body("/api/v1/catalog/version", response)?;
@@ -482,9 +497,11 @@ pub fn fetch_catalog_version() -> Result<String, SyncError> {
 /// mesurés côté serveur — jamais appelé sans avoir d'abord comparé `fetch_catalog_version` au
 /// cache disque (voir `catalog_cache.rs`).
 pub fn fetch_catalog_index() -> Result<Value, SyncError> {
+    let token = session_token()?;
     let url = format!("{}/api/v1/catalog/", base_url());
     let response = agent()
         .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body("/api/v1/catalog/", response)
@@ -495,9 +512,11 @@ pub fn fetch_catalog_index() -> Result<Value, SyncError> {
 /// voir `functions/api/v1/dungeons.ts` côté `wakfu-companion`). Pas de endpoint `/version` séparé
 /// pour ce référentiel (voir `reference_data_cache.rs`) — toujours rechargé en entier.
 pub fn fetch_dungeons() -> Result<Value, SyncError> {
+    let token = session_token()?;
     let url = format!("{}/api/v1/dungeons", base_url());
     let response = agent()
         .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body("/api/v1/dungeons", response)
@@ -506,9 +525,11 @@ pub fn fetch_dungeons() -> Result<Value, SyncError> {
 /// `GET /api/v1/monster-families` — miroir de `fetch_dungeons` pour les familles de monstres (voir
 /// `overlay_engine::MonsterFamilyIndex::from_json`).
 pub fn fetch_monster_families() -> Result<Value, SyncError> {
+    let token = session_token()?;
     let url = format!("{}/api/v1/monster-families", base_url());
     let response = agent()
         .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     parse_json_body("/api/v1/monster-families", response)
@@ -519,8 +540,9 @@ pub fn fetch_monster_families() -> Result<Value, SyncError> {
 /// la règle du dépôt web, et le code écrit dans `roster[].gameServer` doit être un `code` de cette
 /// table pour que le site le reconnaisse.
 ///
-/// Sans authentification, comme le catalogue et les donjons — table minuscule et quasi statique,
-/// mise en cache disque au même titre (`reference_data_cache::ReferenceData::GameServers`).
+/// Sans authentification (contrairement au catalogue et aux donjons depuis le 2026-09-20 : cette
+/// table n'est pas une donnée du jeu sous licence) — minuscule et quasi statique, mise en cache
+/// disque au même titre (`reference_data_cache::ReferenceData::GameServers`).
 pub fn fetch_game_servers() -> Result<Value, SyncError> {
     let url = format!("{}/api/v1/game-servers", base_url());
     let response = agent()

@@ -8,6 +8,7 @@ pub mod icon_cache;
 pub mod pairing;
 pub mod queue;
 pub mod reference_data_cache;
+pub mod session;
 pub mod token_store;
 pub mod update;
 
@@ -36,4 +37,8 @@ pub enum SyncError {
     PairingCancelled,
     #[error("erreur d'accès au trousseau/fichier de jeton : {0}")]
     TokenStore(String),
+    /// Route réservée à l'overlay appelée sans session publiée (voir `session`) — l'appelant
+    /// garde son cache ou son repli ; ce n'est ni une panne réseau ni un refus du serveur.
+    #[error("aucune session : jeton non encore disponible")]
+    NoSession,
 }

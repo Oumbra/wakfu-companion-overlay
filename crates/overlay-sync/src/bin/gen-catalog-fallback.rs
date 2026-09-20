@@ -13,6 +13,18 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
+    // `GET /api/v1/catalog/` est réservé au site et à une session de l'overlay depuis le
+    // 2026-09-20 (voir `session.rs`) : ce binaire a besoin d'un jeton natif valide — celui d'un
+    // overlay appairé, ou un jeton obtenu par le flux d'appairage (`pairing.rs`).
+    match std::env::var("WAKFU_COMPANION_API_TOKEN") {
+        Ok(token) if !token.trim().is_empty() => overlay_sync::session::publish(token.trim()),
+        _ => {
+            eprintln!(
+                "WAKFU_COMPANION_API_TOKEN manquant : le catalogue n'est servi qu'à une session valide (Authorization: Bearer)"
+            );
+            std::process::exit(2);
+        }
+    }
     let index = overlay_sync::fetch_catalog_index().unwrap_or_else(|err| {
         eprintln!(
             "échec de récupération du catalogue depuis {} : {err}",
