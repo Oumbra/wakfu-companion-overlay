@@ -171,7 +171,13 @@ Tant qu'elle n'a qu'un seul utilisateur, rester locale est le bon choix.
 
 **Estimation** : ¼ séance (documentation seule).
 
-## 0.3 — Un hook `SessionStart` pour l'environnement cloud ✅
+## 0.3 — Un hook `SessionStart` pour l'environnement cloud ✅ (retiré le 2026-09-20)
+
+> **Retiré à la demande du mainteneur le 2026-09-20**, en même temps que le découpage de `CLAUDE.md`
+> en règles par sujet : le script `.claude/hooks/session-start.sh` et son entrée dans
+> `.claude/settings.json` n'existent plus. Les trois manipulations décrites ci-dessous sont à
+> nouveau manuelles en session cloud ; `CLAUDE.md` (« Branche de travail », consignes cloud) les
+> rappelle. Le texte qui suit est conservé pour l'historique.
 
 ### État actuel
 

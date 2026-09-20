@@ -28,6 +28,9 @@ En session cloud, trois consignes propres au conteneur éphémère :
   contourner.
 - **Ce qui n'est pas commité et poussé sur `dev` est perdu** à la fin de la session : pousser avant
   de conclure, même pour un travail intermédiaire.
+- Un conteneur neuf n'est pas prêt pour `cargo` : `bash patches/setup-vendor.sh` (vendor
+  `wgpu-hal`), `apt-get install libasound2-dev pkg-config mesa-vulkan-drivers`, et les hooks git
+  ci-dessus. Rien ne le fait à votre place.
 
 ## Interdits
 
