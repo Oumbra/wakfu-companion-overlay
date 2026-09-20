@@ -792,6 +792,18 @@ DERNIER instantané compte.
 ### 7.5 Catalogue
 
 - `GET /api/v1/catalog/version` au démarrage → si changement, `GET /api/v1/catalog/` (≈ 349 Ko gzip).
+- **Session requise (2026-09-20).** Côté `wakfu-companion` (`docs/analyse-cgu.md`, recommandation
+  4 : la licence de données WAKFU n'autorise ni sous-licence ni cession), `catalog/*`,
+  `items/{id}`, `monsters/{id}`, `monster-loot`, `monster-families`, `dungeons` et le relais
+  d'icônes `icons/*` ne répondent plus qu'au site (`Sec-Fetch-Site: same-origin`) et à une
+  session valide (`Authorization: Bearer`), 403 sinon. L'overlay pose donc son jeton natif sur ces
+  routes — le même que pour l'historique et les réglages — via `overlay_sync::session` : le thread
+  Auth le publie dès qu'une session est validée (`activate_sync_queue`) et le retire à la
+  déconnexion ; les threads Catalogue et Donjons publient leur cache disque, attendent le verdict
+  du thread Auth (`session::wait_resolved`, couvert par l'écran de chargement), puis rafraîchissent
+  — et rafraîchissent encore à chaque nouvelle session (`wait_token_after` : premier « Se
+  connecter », reconnexion). Sans session : cache disque, sinon repli embarqué. `gen-catalog-fallback`
+  lit le jeton dans `WAKFU_COMPANION_API_TOKEN`.
 - Cache disque dans `$XDG_CACHE_HOME` / `%LOCALAPPDATA%`, validé par `ETag`/version.
 - Repli hors-ligne : `assets/catalog/catalog-index.json.gz` embarqué (`include_bytes!`), utilisé si
   aucun cache et pas de réseau — l'overlay reste utilisable, avec un bandeau « catalogue daté ».
