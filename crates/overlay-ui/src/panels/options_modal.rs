@@ -172,6 +172,14 @@ const SECTION_GAP: f32 = 17.0;
 /// toucher ; le jeu règle son pas de 24 à 32 px selon l'interface, 28 est dedans.
 const RESUME_STEPPER_SIZE: f32 = 28.0;
 
+/// Texte de la section « Journal » — ce que l'overlay écrit chez l'utilisateur, et ce que la case
+/// ajoute. Sorti en constante pour être vérifiable par un test, comme les blocs de
+/// `a_propos_tab::SECTIONS` (la section y est née le 2026-09-18, ici depuis le 2026-09-21).
+pub const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : les 14 \
+                                derniers jours, jamais envoyé nulle part. Il ne contient ni le nom \
+                                de vos personnages, ni ceux des autres joueurs, ni le contenu du \
+                                chat.";
+
 /// Largeur du champ du même pas — quatre chiffres (« 1440 ») et leurs marges.
 const RESUME_FIELD_WIDTH: f32 = 56.0;
 
@@ -382,8 +390,9 @@ pub struct OptionsModalState {
     /// différentes, et une seule peut être ouverte à la fois (voir `show`).
     pub pending_disconnect: bool,
     /// La confirmation d'**effacement des données locales** est ouverte — bouton « Supprimer les
-    /// données locales » de la section « Compte » (2026-09-18, constat C5 de
-    /// `docs/analyse-rgpd.md` §3.5). Sixième boîte exclusive avec les cinq autres (voir `show`) :
+    /// données locales » sous « Vos données » de l'onglet « À propos » (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5 ; dans « Compte » jusqu'au 2026-09-21). Sixième boîte exclusive
+    /// avec les cinq autres (voir `show`) :
     /// elle efface les dossiers de l'overlay ET arrête le programme, c'est la plus irréversible
     /// des six.
     pub pending_purge: bool,
@@ -592,8 +601,8 @@ pub enum OptionsModalAction {
     /// raccourcis, ce que cette action déclenche ne passe pas par « Valider » et ne se rattrape pas
     /// par « Annuler ».
     Disconnect,
-    /// **« Supprimer les données locales »**, depuis la section « Compte » (**confirmée**, voir
-    /// `show`) — 2026-09-18, constat C5 de `docs/analyse-rgpd.md` §3.5 : le droit à l'effacement
+    /// **« Supprimer les données locales »**, depuis « Vos données » de l'onglet « À propos »
+    /// (**confirmée**, voir `show`) — 2026-09-18, constat C5 de `docs/analyse-rgpd.md` §3.5 : le droit à l'effacement
     /// (RGPD art. 17) exercé depuis l'overlay.
     ///
     /// L'hôte efface les deux racines de dossiers, le jeton du trousseau, l'inscription au
@@ -938,14 +947,13 @@ pub fn show(
         }
         if state.tab == OptionsTab::APropos {
             // L'onglet ne confirme rien : il remonte une intention, et c'est ici que s'ouvre la
-            // boîte qui convient — les trois s'excluent par le `else if` des dialogues, plus bas.
+            // boîte qui convient — les quatre s'excluent par le `else if` des dialogues, plus bas.
             match a_propos_tab::show(
                 ui,
                 panel,
                 &mut a_propos_tab::AProposTabContext {
                     update: &state.update,
                     auto_update: &mut state.auto_update,
-                    verbose_log: &mut state.verbose_log,
                     api_override: overlay_sync::client::base_url_override(),
                 },
             ) {
@@ -961,6 +969,7 @@ pub fn show(
                 }
                 a_propos_tab::AProposTabAction::Restart => state.pending_restart = true,
                 a_propos_tab::AProposTabAction::Quit => state.pending_quit = true,
+                a_propos_tab::AProposTabAction::PurgeLocalData => state.pending_purge = true,
             }
             return;
         }
@@ -971,13 +980,15 @@ pub fn show(
         // suivre chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un
         // jeu.
         //
-        // **L'ordre des sections** (remanié le 2026-09-16) va de ce qu'on règle souvent à ce qu'on
-        // règle une fois : l'affichage d'abord — « Recap » puis « Combat » —, les notifications
-        // ensuite, et les sections de maintenance à la fin — « Fichier » (le chemin de
-        // `wakfu.log`, que la découverte automatique trouve seule dans l'immense majorité des
-        // cas), « Démarrage », « Compte ». « Mise à jour » et les deux sorties de l'overlay, qui
-        // fermaient l'onglet, sont parties dans « À propos » le 2026-09-18 (`panels::a_propos_tab`)
-        // : elles concernent le programme, pas ce qu'il affiche.
+        // **L'ordre des sections** (remanié le 2026-09-16, puis le 2026-09-21) va de ce qu'on
+        // règle souvent à ce qu'on règle une fois : l'affichage d'abord — « Recap » puis
+        // « Combat » —, les notifications ensuite, et les sections de maintenance à la fin —
+        // « Démarrage », « Fichier » (le chemin de `wakfu.log`, que la découverte automatique
+        // trouve seule dans l'immense majorité des cas), « Journal », « Compte ». « Mise à jour »
+        // et les deux sorties de l'overlay, qui fermaient l'onglet, sont parties dans « À propos »
+        // le 2026-09-18 (`panels::a_propos_tab`) : elles concernent le programme, pas ce qu'il
+        // affiche. « Journal » a fait le chemin inverse le 2026-09-21, et « Supprimer les données
+        // locales » a quitté « Compte » pour « Vos données », le même jour.
         panel.scroll_area(ui, "options-parametres", |ui, width| {
             // La largeur utile vient de la zone défilable : la réserve de barre y est déjà
             // déduite (voir `design::PanelZones::scroll_area`).
@@ -1412,6 +1423,38 @@ pub fn show(
                 action = OptionsModalAction::TestChatSound;
             }
 
+            // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
+            // avant même qu'on le lance.
+            //
+            // Elle a ouvert l'onglet quelques heures, à la place que « Fichier » occupait, puis a
+            // été descendue juste après « Fichier » (demande utilisateur du 2026-09-16 :
+            // « déplace la section Démarrage après la section Fichier ») : comme le chemin de
+            // `wakfu.log`, ce réglage se pose une fois et ne se retouche plus — c'est de la
+            // maintenance, pas un réglage de session. **Remontée avant « Fichier » le 2026-09-21**
+            // (demande utilisateur : « déplace la section "démarrage" avant la section
+            // "fichier" ») : elle ouvre la maintenance, une case seule avant le champ et le bloc
+            // « Journal » qui le suit. Elle reste la seule section dont le réglage agit hors de
+            // l'overlay.
+            //
+            // **Ce réglage n'est pas dans `config.toml`** : son état réel appartient au système
+            // (clé `Run` sous Windows, fichier `.desktop` sous Linux) et se désactive aussi depuis
+            // le Gestionnaire des tâches ou les réglages du bureau. Il est donc lu à l'ouverture
+            // et reposé à « Valider » — voir `crate::autostart`, dont la doc de module porte le
+            // raisonnement complet.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Démarrage"));
+            ui.add(
+                design::checkbox(
+                    &mut state.start_with_os,
+                    "Lancer l'overlay au démarrage de l'ordinateur",
+                )
+                .tooltip(
+                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
+                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
+                )
+                .log_name("options-demarrage-auto"),
+            );
+
             // **Section « Fichier »** — le chemin de `wakfu.log` que l'overlay suit.
             //
             // **Descendue ici le 2026-09-16** (demande utilisateur : « déplacer la section
@@ -1487,33 +1530,37 @@ pub fn show(
                 );
             }
 
-            // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
-            // avant même qu'on le lance.
+            // **Section « Journal »** (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Le
+            // journal technique est local et n'est jamais téléversé, mais il vit 14 jours sur le
+            // disque et s'envoie tel quel avec un rapport de bug : ce qui s'y écrit ORDINAIREMENT
+            // ne contient plus de nom de personnage, de pseudonyme d'autre joueur, de chemin
+            // portant le nom de compte Windows, ni de code d'appairage. Cette case rend ces
+            // détails au diagnostic — sur demande, jamais par défaut, et sans redémarrer
+            // (`logging::set_verbose`).
             //
-            // Elle a ouvert l'onglet quelques heures, à la place que « Fichier » occupait, puis a
-            // été **descendue ici, juste après « Fichier »** (demande utilisateur du 2026-09-16 :
-            // « déplace la section Démarrage après la section Fichier ») : comme le chemin de
-            // `wakfu.log`, ce réglage se pose une fois et ne se retouche plus — c'est de la
-            // maintenance, pas un réglage de session. Elle reste la seule section dont le réglage
-            // agit hors de l'overlay.
-            //
-            // **Ce réglage n'est pas dans `config.toml`** : son état réel appartient au système
-            // (clé `Run` sous Windows, fichier `.desktop` sous Linux) et se désactive aussi depuis
-            // le Gestionnaire des tâches ou les réglages du bureau. Il est donc lu à l'ouverture
-            // et reposé à « Valider » — voir `crate::autostart`, dont la doc de module porte le
-            // raisonnement complet.
+            // **Sous « Fichier » depuis le 2026-09-21** (demande utilisateur : « déplace la section
+            // "journal" de l'onglet "À propos" et tout son contenu en dessous de la section
+            // "Fichier" »). Elle est née dans « À propos », à côté de « Vos données » qui parle
+            // déjà de ce que l'overlay écrit sur la machine ; mais sa case est un réglage,
+            // brouillon comme les autres, et elle suit le fichier que le journal accompagne dans
+            // un rapport de bug.
             ui.add_space(SECTION_GAP);
-            ui.add(design::heading("Démarrage"));
+            ui.add(design::heading("Journal"));
             ui.add(
-                design::checkbox(
-                    &mut state.start_with_os,
-                    "Lancer l'overlay au démarrage de l'ordinateur",
-                )
-                .tooltip(
-                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
-                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
-                )
-                .log_name("options-demarrage-auto"),
+                design::info_text(JOURNAL_INFO)
+                    .width(inner_width)
+                    .log_name("options-journal-info"),
+            );
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::checkbox(&mut state.verbose_log, "Journal détaillé")
+                    .tooltip(
+                        "À cocher seulement pour diagnostiquer un problème. Le journal reçoit \
+                         alors aussi les noms de vos personnages, le chemin complet de wakfu.log \
+                         et le détail des erreurs. Rien n'est envoyé pour autant : ce fichier \
+                         reste sur cet ordinateur.",
+                    )
+                    .log_name("options-journal-detaille"),
             );
 
             // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
@@ -1585,48 +1632,12 @@ pub fn show(
                 state.pending_disconnect = true;
             }
 
-            // **« Supprimer les données locales »** (2026-09-18, constat C5 de
-            // `docs/analyse-rgpd.md` §3.5) — le droit à l'effacement (RGPD art. 17) rendu
-            // exerçable : la déconnexion n'effaçait que le jeton, et rien ici ne purgeait les
-            // combats en cours, la file d'envoi, les gabarits de tour, les journaux ni la
-            // configuration.
-            //
-            // **Actif même sans compte lié**, à la différence de son voisin : c'est exactement
-            // l'état où le droit s'exerce — après s'être déconnecté, et une fois la fenêtre de
-            // connexion seule à l'écran, elle porte le même geste (`panels::login`).
-            //
-            // Rouge et centré comme « Se déconnecter », et pour la même raison en plus forte :
-            // c'est la seule action de cette fenêtre qui ne laisse RIEN derrière elle.
-            ui.add_space(INFO_GAP);
-            ui.add(
-                design::info_text(
-                    "« Supprimer les données locales » efface de cet ordinateur tout ce que \
-                     l'overlay y a écrit : réglages, combats en cours, file d'envoi, gabarits de \
-                     tour, journaux, caches et session enregistrée. L'overlay se ferme ensuite, et \
-                     repart comme une installation neuve — votre compte et son historique, eux, \
-                     restent sur le site.",
-                )
-                .tone(design::InfoTone::Alert)
-                .width(inner_width)
-                .log_name("options-compte-effacement"),
-            );
-            ui.add_space(INFO_GAP);
-            let purge = design::button("Supprimer les données locales")
-                .variant(ButtonVariant::Danger)
-                .size(ButtonSize::Height(ROW_HEIGHT))
-                .tooltip("Effacer de cet ordinateur tout ce que l'overlay y a écrit, puis fermer")
-                .log_name("options-effacer-donnees");
-            let purge_size = purge.desired_size(ui);
-            let purge_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-            if ui
-                .put(
-                    egui::Rect::from_center_size(purge_row.center(), purge_size),
-                    purge,
-                )
-                .clicked()
-            {
-                state.pending_purge = true;
-            }
+            // **« Supprimer les données locales » a fermé cette section du 2026-09-18 au
+            // 2026-09-21**, sous « Se déconnecter ». Il est parti sous « Vos données », dans
+            // « À propos » (demande utilisateur) : ce n'est pas un réglage de compte mais le droit
+            // à l'effacement, et le bloc qui dit ce que l'overlay conserve sur la machine est
+            // là-bas — voir `panels::a_propos_tab::PURGE_INFO`. La confirmation, elle, reste ici
+            // (`pending_purge`), commune aux deux onglets.
         });
     });
 
@@ -1693,9 +1704,9 @@ pub fn show(
     } else if state.pending_purge {
         // **La confirmation d'effacement** (2026-09-18) — même exclusion, même voile sur la
         // fenêtre entière que ses voisines. Elle nomme les deux conséquences dans l'ordre où
-        // l'utilisateur les subit : l'effacement, puis la fermeture. Le bloc d'information de la
-        // section « Compte » dit ce que « toutes » recouvre ; la question, elle, tient en deux
-        // lignes (`tokens::CONFIRM_TEXT_WIDTH`).
+        // l'utilisateur les subit : l'effacement, puis la fermeture. Le bloc d'information sous
+        // « Vos données » (`a_propos_tab::PURGE_INFO`) dit ce que « toutes » recouvre ; la
+        // question, elle, tient en deux lignes (`tokens::CONFIRM_TEXT_WIDTH`).
         let choix =
             design::confirm_dialog("Supprimer toutes les données locales et fermer l'overlay ?")
                 .over(window)

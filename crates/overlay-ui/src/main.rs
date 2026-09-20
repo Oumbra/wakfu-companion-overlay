@@ -2208,8 +2208,8 @@ impl App {
     }
 
     /// **« Supprimer les données locales », confirmé** (2026-09-18, constat C5 de
-    /// `docs/analyse-rgpd.md` §3.5) — depuis la section « Compte » de la fenêtre Options
-    /// (`OptionsModalAction::PurgeLocalData`) ou depuis la fenêtre de connexion
+    /// `docs/analyse-rgpd.md` §3.5) — depuis « Vos données » de l'onglet « À propos » de la
+    /// fenêtre Options (`OptionsModalAction::PurgeLocalData`) ou depuis la fenêtre de connexion
     /// (`RenderOutcome::purge_local_data`, le seul chemin quand aucun compte n'est lié).
     ///
     /// Efface tout ce que l'overlay a écrit sur cette machine, puis **arrête le programme** par le
@@ -3887,8 +3887,8 @@ enum PostRedraw {
     StartManualUpdate,
     /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
     CloseManualUpdate,
-    /// **« Supprimer les données locales »**, *confirmé* — depuis la section « Compte » de la
-    /// fenêtre Options ou depuis la fenêtre de connexion (2026-09-18, constat C5 de
+    /// **« Supprimer les données locales »**, *confirmé* — depuis « Vos données » de l'onglet
+    /// « À propos » de la fenêtre Options ou depuis la fenêtre de connexion (2026-09-18, constat C5 de
     /// `docs/analyse-rgpd.md` §3.5) : tout ce que l'overlay a écrit sur cette machine est effacé,
     /// puis le programme s'arrête par le même chemin que [`Self::Quit`] — voir
     /// `purge_local_data_and_quit`.

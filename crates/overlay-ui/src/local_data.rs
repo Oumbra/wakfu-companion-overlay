@@ -8,7 +8,7 @@
 //! | Portée | Déclencheur | Ce qui part |
 //! | --- | --- | --- |
 //! | [`Scope::OnDisconnect`] | toute déconnexion (fenêtre Options, zone de notification, jeton refusé) — `background::spawn_auth_thread` | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
-//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › Compte, écran de connexion) | la racine de dossiers en entier (et l'ancienne, si elle subsiste), le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
+//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › À propos › Vos données, écran de connexion) | la racine de dossiers en entier (et l'ancienne, si elle subsiste), le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
 //!
 //! Les deux gestes commencent par **effacer la session côté serveur**
 //! ([`revoke_server_session`]) : un jeton effacé du disque restait valide en base, donc utilisable

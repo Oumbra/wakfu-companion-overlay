@@ -264,8 +264,8 @@ pub const SECTIONS: &[Section] = &[
                  %APPDATA% (Windows) ou ~/.config et ~/.local/share (Linux). Se déconnecter \
                  efface le jeton — ici et sur le serveur, où la session est supprimée —, les \
                  combats en cours, les compteurs de suivi, l'image des noms et le contenu du \
-                 journal ; « Supprimer les données locales », dans la section « Compte » de \
-                 l'onglet Paramètres, efface tout le reste puis ferme l'overlay.",
+                 journal ; « Supprimer les données locales », ci-dessous, efface tout le reste \
+                 puis ferme l'overlay.",
             ),
             info(
                 "Vos droits d'accès, de rectification, d'effacement et de portabilité s'exercent \
@@ -278,8 +278,26 @@ pub const SECTIONS: &[Section] = &[
     },
 ];
 
-/// Titre de la section sous laquelle se glisse [`api_override_notice`].
+/// Titre de la section sous laquelle se glissent [`api_override_notice`] et le bloc
+/// « Supprimer les données locales » ([`PURGE_INFO`]).
 const VOS_DONNEES_TITLE: &str = "Vos données";
+
+/// Le bloc d'alerte qui précède le bouton « Supprimer les données locales » — ce que « tout »
+/// recouvre, et ce qui reste (le compte, sur le site). Sorti en constante pour être vérifiable
+/// par un test, comme les blocs de [`SECTIONS`].
+///
+/// **Sous « Vos données » depuis le 2026-09-21** (demande utilisateur : « déplace le bloc
+/// d'information "Supprimer les données locales" et son bouton associé en dessous de la section
+/// "Vos données" »). Il fermait jusque-là la section « Compte » de l'onglet « Paramètres », à
+/// côté de « Se déconnecter » — mais ce n'est pas un réglage de compte : c'est le droit à
+/// l'effacement (RGPD art. 17, constat C5 de `docs/analyse-rgpd.md` §3.5), et le bloc qui dit ce
+/// que l'overlay conserve sur la machine est ici. Le geste et son explication se lisent au même
+/// endroit.
+pub const PURGE_INFO: &str = "« Supprimer les données locales » efface de cet ordinateur tout ce \
+                              que l'overlay y a écrit : réglages, combats en cours, file d'envoi, \
+                              gabarits de tour, journaux, caches et session enregistrée. L'overlay \
+                              se ferme ensuite, et repart comme une installation neuve — votre \
+                              compte et son historique, eux, restent sur le site.";
 
 /// Le bloc d'alerte « À propos » quand l'origine de l'API est surchargée par l'environnement
 /// (`overlay_sync::client::base_url_override`) — `None` sinon, et rien n'est affiché : le cas
@@ -294,12 +312,6 @@ pub fn api_override_notice(api_override: Option<&str>) -> Option<String> {
     })
 }
 
-/// Texte de la section « Journal » — ce que l'overlay écrit chez l'utilisateur, et ce que la case
-/// ajoute. Sorti en constante pour être vérifiable par un test, comme les blocs de [`SECTIONS`].
-const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : les 14 \
-                            derniers jours, jamais envoyé nulle part. Il ne contient ni le nom de \
-                            vos personnages, ni ceux des autres joueurs, ni le contenu du chat.";
-
 /// Ce que l'onglet reçoit de la fenêtre Options.
 pub struct AProposTabContext<'a> {
     /// Où en est la mise à jour automatique — copié par l'hôte avant chaque rendu, jamais figé à
@@ -308,9 +320,6 @@ pub struct AProposTabContext<'a> {
     /// La case « Installer automatiquement les mises à jour au démarrage » — un brouillon, que
     /// « Valider » écrit et qu'« Annuler » abandonne.
     pub auto_update: &'a mut bool,
-    /// La case « Journal détaillé » — un brouillon, que « Valider » applique et qu'« Annuler »
-    /// abandonne, comme sa voisine.
-    pub verbose_log: &'a mut bool,
     /// L'origine d'API surchargée par l'environnement, s'il y en a une
     /// (`overlay_sync::client::base_url_override`, lue par l'hôte) — voir [`api_override_notice`].
     pub api_override: Option<String>,
@@ -332,6 +341,9 @@ pub enum AProposTabAction {
     Restart,
     /// « Fermer l'overlay » — à confirmer.
     Quit,
+    /// « Supprimer les données locales » — à confirmer : l'hôte efface tout ce que l'overlay a
+    /// écrit sur cet ordinateur, puis ferme (voir `OptionsModalAction::PurgeLocalData`).
+    PurgeLocalData,
 }
 
 pub fn show(
@@ -382,6 +394,46 @@ pub fn show(
             ui.add_space(INFO_GAP);
             if let Some(url) = link_row(ui, inner_width, section.links) {
                 action = AProposTabAction::OpenUrl(url);
+            }
+            // **« Supprimer les données locales »**, sous les liens de « Vos données » — voir
+            // [`PURGE_INFO`] pour le pourquoi de la place. Le bloc d'information est en ton
+            // `Alert` comme l'avertissement CGU : c'est l'autre phrase de l'onglet dont l'ignorance
+            // a un prix.
+            //
+            // **Actif même sans compte lié** : c'est exactement l'état où le droit à l'effacement
+            // s'exerce — après s'être déconnecté ; et une fois la fenêtre de connexion seule à
+            // l'écran, elle porte le même geste (`panels::login`).
+            //
+            // Rouge et centré comme « Fermer l'overlay », plus bas, et pour la même raison en plus
+            // forte : c'est la seule action de toute la fenêtre qui ne laisse RIEN derrière elle.
+            // La confirmation, chez l'appelant, nomme les deux conséquences dans l'ordre.
+            if section.title == VOS_DONNEES_TITLE {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(PURGE_INFO)
+                        .tone(InfoTone::Alert)
+                        .width(inner_width)
+                        .log_name("options-compte-effacement"),
+                );
+                ui.add_space(INFO_GAP);
+                let purge = design::button("Supprimer les données locales")
+                    .variant(ButtonVariant::Danger)
+                    .size(ButtonSize::Height(ROW_HEIGHT))
+                    .tooltip(
+                        "Effacer de cet ordinateur tout ce que l'overlay y a écrit, puis fermer",
+                    )
+                    .log_name("options-effacer-donnees");
+                let purge_size = purge.desired_size(ui);
+                let purge_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+                if ui
+                    .put(
+                        egui::Rect::from_center_size(purge_row.center(), purge_size),
+                        purge,
+                    )
+                    .clicked()
+                {
+                    action = AProposTabAction::PurgeLocalData;
+                }
             }
         }
 
@@ -439,37 +491,11 @@ pub fn show(
             };
         }
 
-        // **Section « Journal »** (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Le journal
-        // technique est local et n'est jamais téléversé, mais il vit 14 jours sur le disque et
-        // s'envoie tel quel avec un rapport de bug : ce qui s'y écrit ORDINAIREMENT ne contient
-        // plus de nom de personnage, de pseudonyme d'autre joueur, de chemin portant le nom de
-        // compte Windows, ni de code d'appairage. Cette case rend ces détails au diagnostic —
-        // sur demande, jamais par défaut, et sans redémarrer (`logging::set_verbose`).
-        //
-        // Elle est ICI plutôt que dans « Paramètres » parce que c'est la section qui parle déjà
-        // des données conservées sur la machine (« Vos données », plus haut) : le joueur qui se
-        // demande ce que l'overlay écrit chez lui trouve la réponse et le réglage au même endroit.
-        ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Journal"));
-        ui.add(
-            design::info_text(JOURNAL_INFO)
-                .width(inner_width)
-                .log_name("options-journal-info"),
-        );
-        ui.add_space(INFO_GAP);
-        ui.add(
-            design::checkbox(ctx.verbose_log, "Journal détaillé")
-                .tooltip(
-                    "À cocher seulement pour diagnostiquer un problème. Le journal reçoit alors \
-                     aussi les noms de vos personnages, le chemin complet de wakfu.log et le \
-                     détail des erreurs. Rien n'est envoyé pour autant : ce fichier reste sur \
-                     cet ordinateur.",
-                )
-                .log_name("options-journal-detaille"),
-        );
-        // Même respiration qu'entre la case et le bouton de la section « Mise à jour » : sans
-        // elle, les deux sorties se colleraient à la case et se liraient comme sa suite.
-        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+        // **La section « Journal » a vécu ici du 2026-09-18 au 2026-09-21**, entre « Mise à
+        // jour » et les sorties, au motif que « Vos données » parlait déjà de ce que l'overlay
+        // écrit sur la machine. Elle est repartie dans « Paramètres », sous « Fichier » (demande
+        // utilisateur) : sa case est un réglage, brouillon comme les autres, et l'onglet garde
+        // ce qui n'en est pas — voir `panels::options_modal`.
 
         // **« Redémarrer l'overlay » et « Fermer l'overlay »** (2026-09-16 pour la sortie, 2026-09-17
         // pour le redémarrage, ici depuis le 2026-09-18), sans section : ce ne sont pas des réglages,

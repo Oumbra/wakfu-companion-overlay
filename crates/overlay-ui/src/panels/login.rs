@@ -622,8 +622,8 @@ pub fn show(
                 y += paint_consent_notice(ui, center_x, y, &mut outcome);
                 // **Le droit à l'effacement, exerçable ici** (RGPD art. 17,
                 // `docs/analyse-rgpd.md` §3.5, constat C5) : sans compte lié, cette fenêtre est la
-                // SEULE interface de l'overlay — la fenêtre Options, qui porte le même bouton dans
-                // sa section « Compte », est alors inatteignable. Un lien discret et non un bouton :
+                // SEULE interface de l'overlay — la fenêtre Options, qui porte le même bouton sous
+                // « Vos données » de l'onglet « À propos », est alors inatteignable. Un lien discret et non un bouton :
                 // ce n'est pas ce qu'on vient faire sur cet écran, mais il faut pouvoir le faire
                 // après s'être déconnecté, c'est-à-dire exactement ici.
                 y += LINK_MARGIN_TOP;
