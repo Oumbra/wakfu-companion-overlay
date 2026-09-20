@@ -35,7 +35,7 @@ ce que Claude *écrit*.
   Claude Code le propose à l'ouverture du dépôt ; à la main :
   `claude plugin marketplace add JuliusBrussee/caveman && claude plugin install caveman@caveman`.
   En session cloud, c'est le setup script de l'environnement qui l'installe.
-- Niveau par défaut : `.caveman.json` à la racine (`defaultMode`, ici `full`). Changer en session :
+- Niveau par défaut : `.caveman.json` à la racine (`defaultMode`, ici `lite`). Changer en session :
   `/caveman lite|full|ultra|off` (`/caveman-help` rappelle les niveaux) ; `CAVEMAN_DEFAULT_MODE`
   en variable d'environnement prime sur le fichier.
 - La règle « répondre en français » prime : Caveman compresse le style, pas la langue.
