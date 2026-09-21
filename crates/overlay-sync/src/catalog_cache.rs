@@ -18,6 +18,8 @@
 //! catalogue serveur change significativement avant une release. `client::base_url()` suit le
 //! profil de compilation (voir `build.rs` du crate) : `cargo run` (debug) régénère depuis le
 //! déploiement dev, `cargo run --release` depuis la prod ; `WAKFU_COMPANION_API_URL` surcharge.
+//! Depuis le 2026-09-20 la route exige une session : le binaire réutilise le jeton de l'overlay
+//! appairé sur le poste, contre ce même déploiement.
 
 use std::io::Read;
 use std::path::PathBuf;

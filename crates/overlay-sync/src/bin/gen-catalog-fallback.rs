@@ -3,6 +3,12 @@
 //! gen-catalog-fallback` (option `WAKFU_COMPANION_API_URL` comme le reste du crate, voir
 //! `client::base_url`, pour cibler dev/prod/un `wrangler pages dev` local).
 //!
+//! **Session requise** (2026-09-20, `session.rs`) : `GET /api/v1/catalog/` n'est servi qu'au site
+//! et à une session de l'overlay. Ce binaire réutilise le jeton natif que l'overlay de ce poste a
+//! enregistré à son appairage (`token_store::load_token`, trousseau du système ou fichier de
+//! repli) — le même que l'overlay pose sur cette route. Il faut donc un overlay appairé contre le
+//! déploiement visé : un jeton n'est valable que pour le déploiement qui l'a émis.
+//!
 //! À lancer avant toute release réelle : le fichier actuellement commité est un PLACEHOLDER réduit
 //! (2 entrées), construit dans un sandbox de dev sans accès réseau à Neon/`*.pages.dev` — voir la
 //! doc de tête de `catalog_cache.rs` pour le détail de cette limite. Ce binaire, lui, N'A PAS cette
@@ -13,14 +19,14 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-    // `GET /api/v1/catalog/` est réservé au site et à une session de l'overlay depuis le
-    // 2026-09-20 (voir `session.rs`) : ce binaire a besoin d'un jeton natif valide — celui d'un
-    // overlay appairé, ou un jeton obtenu par le flux d'appairage (`pairing.rs`).
-    match std::env::var("WAKFU_COMPANION_API_TOKEN") {
-        Ok(token) if !token.trim().is_empty() => overlay_sync::session::publish(token.trim()),
-        _ => {
+    // Jeton de l'overlay appairé sur ce poste (voir la doc de tête) : sans lui, inutile d'appeler
+    // l'API, elle répondra 403.
+    match overlay_sync::token_store::load_token() {
+        Some(token) => overlay_sync::session::publish(&token),
+        None => {
             eprintln!(
-                "WAKFU_COMPANION_API_TOKEN manquant : le catalogue n'est servi qu'à une session valide (Authorization: Bearer)"
+                "aucun jeton natif enregistré sur ce poste : appairer l'overlay contre {} d'abord (le catalogue n'est servi qu'à une session valide)",
+                overlay_sync::client::base_url()
             );
             std::process::exit(2);
         }
