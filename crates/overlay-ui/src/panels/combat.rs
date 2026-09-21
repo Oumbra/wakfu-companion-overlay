@@ -1083,8 +1083,9 @@ fn side_handle(ui: &mut egui::Ui, locked: bool) -> Handle {
 /// Un rail peint en permanence sur le bord d'un panneau volontairement transparent serait un
 /// meuble : le fond translucide de l'overlay (`tokens::OVERLAY_BACKDROP`) disparaît de toute façon
 /// sur un décor sombre, et là où il se verrait, il mordrait sur l'ornement du cadre des portraits.
-/// Ce qui annonce la fonctionnalité, c'est le CADENAS — toujours là, à deux pixels de la lisière,
-/// avec son infobulle — plus le curseur `Grab` dès qu'on approche, et la ligne d'aide des Options.
+/// Ce qui annonce la fonctionnalité, c'est le CADENAS — présent dès que le pointeur est sur le
+/// panneau (voir [`paint_actions_row`]), à deux pixels de la lisière, avec son infobulle — plus le
+/// curseur `Grab` dès qu'on approche, et la ligne d'aide des Options.
 /// C'est exactement ce que fait la bande Récap, dont le fond entier se saisit sans rien peindre.
 ///
 /// **Peinte ici, à la fin du panneau**, alors que la poignée est DÉCLARÉE en tête de [`show`] :
@@ -1157,14 +1158,34 @@ struct ActionsOutcome {
 /// Le bloc est déclaré `mirror::upright_in` sur sa pastille : sa PLACE part à droite avec le
 /// panneau, son contenu reste à l'endroit — un glyphe `Undo` réfléchi dirait « rétablir », soit
 /// l'inverse de ce qu'il fait.
+///
+/// ## Seulement au survol (2026-09-21, demande utilisateur)
+///
+/// La pastille n'existe que **pointeur posé sur le panneau** — la même règle que la bande Récap
+/// (`panels::recap::paint_actions_row`), et pour la même raison : deux glyphes en permanence au
+/// pied d'un panneau transparent seraient un meuble de plus sur l'écran de jeu, alors qu'ils ne
+/// servent qu'au moment où la main y est. La zone de survol est le panneau ENTIER (`ui.max_rect()`)
+/// : c'est ce que l'utilisateur appelle « l'overlay », et il est symétrique autour de l'axe du
+/// miroir — le pointeur réfléchi par `mirror::mirror_input` y tombe si et seulement si le vrai y
+/// est. En mode clic-traversant, la fenêtre ne reçoit aucun pointeur, donc la pastille n'y
+/// apparaît jamais — cohérent, on ne pourrait pas la cliquer non plus.
 fn paint_actions_row(
     ui: &mut egui::Ui,
     chrome: CombatChrome,
     decoration_bottom: f32,
 ) -> ActionsOutcome {
+    let panel = ui.max_rect();
+    // `latest_pos` et non `hover_pos` : la position brute du pointeur tant qu'il est dans la
+    // fenêtre (`None` dès qu'il en sort, egui_winit remonte `PointerGone`), sans la notion de
+    // couche — une infobulle ouverte au-dessus du cadenas ne doit pas faire disparaître celui-ci.
+    let hovered = ui
+        .input(|i| i.pointer.latest_pos())
+        .is_some_and(|pos| panel.contains(pos));
+    if !hovered {
+        return ActionsOutcome::default();
+    }
     let ds = design::DesignSystem::get(ui.ctx());
     let glyphs = 1 + usize::from(chrome.moved);
-    let panel = ui.max_rect();
     // Le premier pixel libre sous la décoration, plus l'air demandé.
     let top = decoration_bottom + 1.0 + ACTIONS_DECORATION_GAP;
     let span = |count: usize| {

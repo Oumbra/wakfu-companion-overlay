@@ -7216,9 +7216,42 @@ fn bande_recap_collee_en_haut_descend_sa_rangee_d_actions() {
     );
 }
 
-/// Le bloc Récap d'une session ordinaire, rendu avec le `chrome` donné, et sa capture — les trois
-/// tests ci-dessus ne diffèrent que par là.
+/// **Sans pointeur, pas de pastille** (2026-09-21, demande utilisateur : « afficher les icônes de
+/// verrouillage et de réinitialisation de position seulement lors du survol des overlays ») : la
+/// même bande que `recap_actions_deverrouille_deplace`, rendue sans que la souris y soit — rien
+/// au-dessus du bloc, la réserve d'infobulle reste vide.
+#[test]
+fn bande_recap_sans_pointeur_ne_montre_pas_sa_pastille() {
+    capture_rangee_actions_survolee(
+        panels::recap::RecapChrome {
+            locked: false,
+            moved: true,
+            actions_below: false,
+        },
+        "recap_actions_hors_survol",
+        false,
+    );
+}
+
+/// **Un point neutre de la bande, pour faire apparaître la pastille** (2026-09-21) : dans le fond,
+/// mais sur aucune case — chacune ouvre une infobulle — ni sur la pastille elle-même, dont le
+/// survol dorerait le glyphe. Le coin haut gauche du fond : 4 px sous la réserve d'infobulle
+/// (`RECAP_TOOLTIP_RESERVE`) et la marge du harnais, 4 px après le bord gauche, dans le
+/// rembourrage du bloc.
+const RECAP_SURVOL_NEUTRE: egui::Pos2 = egui::pos2(
+    8.0 + 4.0,
+    8.0 + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 4.0,
+);
+
+/// Le bloc Récap d'une session ordinaire, rendu avec le `chrome` donné et **le pointeur sur la
+/// bande** — sans lui, la rangée d'actions n'existe pas (2026-09-21). Les trois tests de rangée
+/// ci-dessus ne diffèrent que par le `chrome`.
 fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
+    capture_rangee_actions_survolee(chrome, nom, true);
+}
+
+/// [`capture_rangee_actions`], avec ou sans pointeur sur la bande.
+fn capture_rangee_actions_survolee(chrome: panels::recap::RecapChrome, nom: &str, survol: bool) {
     let snapshot = replay_real_log();
 
     let mut textures = Textures::new();
@@ -7285,6 +7318,10 @@ fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
     });
 
     harness.run();
+    if survol {
+        harness.hover_at(RECAP_SURVOL_NEUTRE);
+        harness.run();
+    }
     harness.snapshot(nom);
 }
 

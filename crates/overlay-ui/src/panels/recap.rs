@@ -118,7 +118,8 @@
 //! son ancrage d'origine — après confirmation, comme la remise à zéro des compteurs et par la
 //! même fenêtre (`OverlayKind::ResetConfirm`, dont la cible dit lequel des deux on remet à zéro).
 //! Les deux vivent sur une pastille posée hors du fond, en haut à gauche de la bande, qui bascule
-//! en bas quand il n'y a pas la place au-dessus — voir [`paint_actions_row`].
+//! en bas quand il n'y a pas la place au-dessus — et qui **n'apparaît qu'au survol** de la bande
+//! (2026-09-21) — voir [`paint_actions_row`].
 //!
 //! ## Ce que ce module ne fait pas
 //!
@@ -694,6 +695,16 @@ struct ActionsOutcome {
 /// Les infobulles s'ouvrent **du côté de la bande** (au-dessus d'une rangée basse, en dessous
 /// d'une rangée haute) : de l'autre côté, elles sortiraient de la fenêtre OS, qui ne réserve que
 /// la hauteur de la rangée elle-même.
+///
+/// ## Seulement au survol (2026-09-21, demande utilisateur)
+///
+/// La pastille n'existe que **pointeur posé sur la bande ou sur elle** : le reste du temps, rien
+/// n'est peint ni déclaré — un cadenas en permanence au-dessus d'un bloc de cinq chiffres est un
+/// meuble de plus sur l'écran de jeu, alors qu'il ne sert qu'au moment où la main y est. La zone
+/// de survol réunit la bande ET la pastille (les 2 px d'air compris) : sans ça, quitter la bande
+/// pour aller cliquer le cadenas le ferait disparaître sous la souris. En mode clic-traversant, la
+/// fenêtre ne reçoit aucun pointeur, donc la pastille n'y apparaît jamais — c'est cohérent, on ne
+/// pourrait pas la cliquer non plus.
 fn paint_actions_row(
     ui: &mut egui::Ui,
     ds: &design::DesignSystem,
@@ -713,6 +724,15 @@ fn paint_actions_row(
         band.min.y - ACTIONS_MARGIN - pill_size.y
     };
     let pill = egui::Rect::from_min_size(egui::pos2(band.min.x, top), pill_size);
+    // `latest_pos` et non `hover_pos` : la position brute du pointeur tant qu'il est dans la
+    // fenêtre (`None` dès qu'il en sort, egui_winit remonte `PointerGone`), sans la notion de
+    // couche — une infobulle ouverte au-dessus du cadenas ne doit pas faire disparaître celui-ci.
+    let hovered = ui
+        .input(|i| i.pointer.latest_pos())
+        .is_some_and(|pos| band.union(pill).contains(pos));
+    if !hovered {
+        return ActionsOutcome::default();
+    }
     ui.painter()
         .rect_filled(pill, BACKDROP_ROUNDING, tokens::OVERLAY_BACKDROP);
 

@@ -12,6 +12,9 @@
 //! - la pastille d'actions est au coin **BAS** du bord extérieur du panneau (demande utilisateur,
 //!   « place les deux icônes en bas plutôt qu'en haut ») : elle ne décale rien et ne retaille pas
 //!   la fenêtre — le contenu du panneau ne descend pas jusque-là ;
+//! - la pastille **n'existe qu'au survol du panneau** (2026-09-21, demande utilisateur) : les
+//!   planches d'actions posent le pointeur sur un point neutre du panneau ([`survol_neutre`]), et
+//!   une planche sans pointeur montre le panneau nu ;
 //! - **un seul cadenas, deux visages** — fermé verrouillé, ouvert sinon — et le glyphe de
 //!   replacement seulement quand le panneau a été déplacé ;
 //! - la **lisière de préhension ne s'encre qu'au survol**, par-dessus le panneau (et non sous le
@@ -265,6 +268,16 @@ fn poignee() -> egui::Pos2 {
     egui::pos2(11.0, 300.0)
 }
 
+/// **Un point neutre du panneau, pour faire apparaître la pastille** (2026-09-21) : dans le
+/// panneau (donc sous `ui.max_rect()`, qui commence sous la réserve d'infobulle), mais sur rien —
+/// ni portrait, ni barre, ni lisière, ni la pastille elle-même, dont le survol dorerait le glyphe
+/// et ouvrirait son infobulle. Le bas de la moitié droite des 800 × 600 : les barres du gabarit à
+/// six s'arrêtent bien avant, et le point est son propre reflet à 2 px près quand le panneau est
+/// posé à droite (l'axe du miroir est le centre de la fenêtre).
+fn survol_neutre() -> egui::Pos2 {
+    egui::pos2(400.0, 580.0)
+}
+
 /// **Le panneau déverrouillé et déjà déplacé** : cadenas OUVERT et, à côté de lui, le glyphe de
 /// replacement que seul un déplacement fait apparaître.
 #[test]
@@ -277,7 +290,26 @@ fn panneau_deverrouille_et_deplace_montre_ses_deux_glyphes() {
         false,
     );
     harness.run();
+    harness.hover_at(survol_neutre());
+    harness.run();
     harness.snapshot("combat_actions_deverrouille_deplace");
+}
+
+/// **Sans pointeur, pas de pastille** (2026-09-21, demande utilisateur : « afficher les icônes de
+/// verrouillage et de réinitialisation de position seulement lors du survol des overlays ») : le
+/// même panneau que ci-dessus, rendu sans que la souris y soit — le coin bas du bord extérieur est
+/// nu. C'est aussi ce que montrent désormais toutes les autres planches de Combat.
+#[test]
+fn panneau_sans_pointeur_ne_montre_pas_sa_pastille() {
+    let mut harness = planche(
+        CombatChrome {
+            locked: false,
+            moved: true,
+        },
+        false,
+    );
+    harness.run();
+    harness.snapshot("combat_actions_hors_survol");
 }
 
 /// **Le repli côte à côte, dans la fenêtre réelle** (2026-09-17, décision utilisateur devant la
@@ -306,6 +338,10 @@ fn panneau_plein_replie_ses_actions_cote_a_cote() {
         Some(FENETRE_REELLE),
     );
     harness.run();
+    // Le point neutre des 800 × 600 sortirait de cette fenêtre : le sien est au bas de sa moitié
+    // droite, sous les barres, à 8 px de la marge du harnais.
+    harness.hover_at(egui::pos2(300.0, 520.0));
+    harness.run();
     harness.snapshot("combat_actions_rangee_fenetre_reelle");
 
     // Le deuxième emplacement d'une RANGÉE : à droite du cadenas, sur la même ligne.
@@ -332,6 +368,8 @@ fn panneau_verrouille_ne_montre_que_son_cadenas() {
         },
         false,
     );
+    harness.run();
+    harness.hover_at(survol_neutre());
     harness.run();
     harness.snapshot("combat_actions_verrouille");
 }
@@ -364,6 +402,8 @@ fn panneau_a_droite_garde_ses_actions_au_bord_exterieur() {
         },
         true,
     );
+    harness.run();
+    harness.hover_at(survol_neutre());
     harness.run();
     harness.snapshot("combat_actions_a_droite");
 }
@@ -488,6 +528,12 @@ fn les_glyphes_d_actions_ne_font_pas_partir_le_panneau() {
         false,
         std::rc::Rc::clone(&remontees),
     );
+    harness.run();
+    // Le pointeur ARRIVE sur le panneau avant d'appuyer, comme une vraie souris (2026-09-21) : la
+    // pastille n'existe qu'au survol, et egui décide de la cible d'un appui sur les widgets de la
+    // frame PRÉCÉDENTE — sans cette frame de survol, le cadenas n'y serait pas encore, et l'appui
+    // à 3 px de la lisière retomberait sur elle (rayon d'interaction de 5 px).
+    harness.hover_at(cadenas());
     harness.run();
     press(&mut harness, cadenas(), true);
     harness.run();
