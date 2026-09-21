@@ -5,9 +5,9 @@
 //!
 //! **Session requise** (2026-09-20, `session.rs`) : `GET /api/v1/catalog/` n'est servi qu'au site
 //! et à une session de l'overlay. Ce binaire réutilise le jeton natif que l'overlay de ce poste a
-//! enregistré à son appairage (`token_store::load_token`, trousseau du système ou fichier de
-//! repli) — le même que l'overlay pose sur cette route. Il faut donc un overlay appairé contre le
-//! déploiement visé : un jeton n'est valable que pour le déploiement qui l'a émis.
+//! enregistré à son appairage contre le déploiement visé (`token_store::load_token`, un
+//! emplacement par déploiement — un exe de preview appairé contre dev et un exe de release appairé
+//! contre la prod cohabitent) : le même jeton que l'overlay pose sur cette route.
 //!
 //! À lancer avant toute release réelle : le fichier actuellement commité est un PLACEHOLDER réduit
 //! (2 entrées), construit dans un sandbox de dev sans accès réseau à Neon/`*.pages.dev` — voir la

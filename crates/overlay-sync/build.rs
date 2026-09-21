@@ -14,6 +14,8 @@
 //! La règle est désormais portée par le build lui-même : *un exe de preview parle à dev, un exe de
 //! release parle à prod*, quelle que soit la façon dont on le lance. `WAKFU_COMPANION_API_URL`
 //! reste la surcharge à l'exécution (voir `client::base_url`), pour un `wrangler pages dev` local.
+//! Depuis le 2026-09-21 le jeton est lui aussi rangé par déploiement (`token_store::slot`) : les
+//! deux exes ne s'écrasent plus leur session.
 //!
 //! Cargo n'expose pas le nom d'un profil personnalisé aux build scripts (`PROFILE` vaut `release`
 //! pour `preview`, qui en hérite) ; on le lit dans `OUT_DIR`, qui vaut toujours

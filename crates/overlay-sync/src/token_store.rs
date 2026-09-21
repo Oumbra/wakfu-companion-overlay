@@ -2,6 +2,15 @@
 //! Service sous Linux) en priorité, repli fichier `0600` explicite et signalé (jamais silencieux,
 //! `docs/plan-architecture.md` §7.2) quand aucun trousseau n'est disponible (WM minimalistes sous
 //! Linux sans Secret Service).
+//!
+//! **Un jeton par déploiement** (2026-09-21). Un jeton natif n'est valable que pour le
+//! déploiement qui l'a émis (sa ligne de session vit dans SA base) ; un poste peut faire tourner un
+//! exe de release (prod) et un exe de preview (dev) — voir `build.rs`. Jusque-là ils partageaient
+//! le même emplacement et s'écrasaient mutuellement, d'où le 401 en boucle décrit dans `build.rs`.
+//! L'emplacement est désormais dérivé de `client::base_url()` ([`slot`]) : la prod garde les noms
+//! historiques (`native-session`, aucune migration pour les sessions existantes), tout autre
+//! déploiement suffixe l'hôte (`native-session@claude-dev.wakfu-companion.com`). C'est aussi ce
+//! qui permet à `gen-catalog-fallback` de retrouver le jeton du déploiement qu'il vise.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,20 +28,53 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 const APP_NAME: &str = "wakfu-companion-overlay-test";
 
 const ACCOUNT: &str = "native-session";
+/// Hôte du déploiement dont l'emplacement n'est pas suffixé — la prod, pour ne pas invalider les
+/// sessions appairées avant le 2026-09-21 (voir la doc de tête).
+const UNSUFFIXED_HOST: &str = "wakfu-companion.com";
+
+/// Nom d'emplacement (compte du trousseau, base des fichiers de repli) pour le déploiement visé —
+/// voir la doc de tête.
+fn slot() -> String {
+    slot_for(&crate::client::base_url())
+}
+
+fn slot_for(base_url: &str) -> String {
+    let host = base_url
+        .trim_end_matches('/')
+        .split("://")
+        .nth(1)
+        .unwrap_or(base_url)
+        .to_ascii_lowercase();
+    if host == UNSUFFIXED_HOST {
+        return ACCOUNT.to_string();
+    }
+    // `localhost:8788` (`wrangler pages dev`) : `:` interdit dans un nom de fichier Windows.
+    let host: String = host
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{ACCOUNT}@{host}")
+}
 
 fn entry() -> Result<keyring::Entry, SyncError> {
-    keyring::Entry::new(APP_NAME, ACCOUNT).map_err(|err| SyncError::TokenStore(err.to_string()))
+    keyring::Entry::new(APP_NAME, &slot()).map_err(|err| SyncError::TokenStore(err.to_string()))
 }
 
 fn token_file_path() -> PathBuf {
-    data_file("native-session.token")
+    data_file(&format!("{}.token", slot()))
 }
 
 /// **Quand le jeton courant a été émis** — secondes Unix, à côté du fichier de repli. Ce n'est pas
 /// un secret (une date), et le trousseau n'a pas de place pour une seconde valeur : un fichier
 /// suffit. Écrit par [`save_token`], lu par [`token_age`], retiré par [`clear_token`].
 fn issued_at_file_path() -> PathBuf {
-    data_file("native-session.issued-at")
+    data_file(&format!("{}.issued-at", slot()))
 }
 
 fn data_file(name: &str) -> PathBuf {
@@ -190,6 +232,20 @@ pub fn clear_token() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_emplacement_par_deploiement_la_prod_gardant_le_nom_historique() {
+        assert_eq!(slot_for("https://wakfu-companion.com"), "native-session");
+        assert_eq!(slot_for("https://WAKFU-companion.com/"), "native-session");
+        assert_eq!(
+            slot_for("https://claude-dev.wakfu-companion.com"),
+            "native-session@claude-dev.wakfu-companion.com"
+        );
+        assert_eq!(
+            slot_for("http://localhost:8788"),
+            "native-session@localhost_8788"
+        );
+    }
 
     /// Garde-fou de non-régression : trouvé en session (2026-09-01) en testant contre un vrai
     /// déploiement — `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit
