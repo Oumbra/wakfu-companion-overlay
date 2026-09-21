@@ -511,10 +511,42 @@ pub fn spawn_engine_thread(
             // Les deux sourdines — aucune tant que l'hôte n'a rien dit (`AlertMutes::default`),
             // c'est-à-dire tout sonne, comme pour une installation neuve.
             let mut mutes = AlertMutes::default();
+            // **Aucune ligne n'est ingérée avant le premier `ApplySettings`** (2026-09-21).
+            //
+            // Constat sur le journal du jour : « rattrapage initial de wakfu.log terminé » à
+            // 13:36:16, « réglages de compte appliqués à l'Engine » à 13:36:27. Tout le rattrapage
+            // tournait donc SANS roster — et les événements d'historique qu'il produit en gardent
+            // la trace pour toujours : leur signature (donc leur `clientKey`) ne dépend pas du
+            // roster, le serveur ne les reprend jamais. Sur le compte dev : cinq achats HDV avec
+            // `gameServer: null` (le serveur se déduit d'un personnage du roster reconnu), et un
+            // échange entre deux personnages du MÊME roster envoyé deux fois (une fois par côté),
+            // alors que `build_trade_sync_event` — comme `registerTrade` côté web — l'ignore dès
+            // que le roster est connu. Les combats du rattrapage partaient de même sans classe
+            // de roster ni `xpGained` par participant.
+            //
+            // Depuis la fenêtre de connexion (2026-09-14, §9.1 undecies), rien ne s'affiche tant
+            // qu'aucun compte n'est lié : différer l'ingestion jusqu'aux réglages ne retarde donc
+            // rien de visible. Les lots sont retenus dans l'ordre exact du fichier (rattrapage
+            // puis direct, `is_initial_load` conservé) et rejoués d'un trait au premier
+            // `ApplySettings`, par le même chemin que le direct — le parser QuickJS voit la même
+            // séquence que s'il avait tout lu au fil de l'eau. `log_replayed`, lui, garde son
+            // sens de « fichier lu par le watcher » : c'est ce que l'écran de chargement attend
+            // (`StartupProgress`), et un utilisateur sans jeton stocké doit pouvoir cliquer
+            // « Se connecter » sans attendre un rattrapage qui ne viendra qu'après.
+            //
+            // Une relecture demandée avant ça (`ChangeLogPath`, chien de garde) vide ce qui est
+            // retenu : le nouveau watcher relit le fichier depuis sa première ligne.
+            let mut account_settings_applied = false;
+            let mut deferred_batches: std::collections::VecDeque<overlay_ingest::LineBatch> =
+                std::collections::VecDeque::new();
+            // Lots à traiter AVANT de relire le canal du watcher — remplis d'un coup par le premier
+            // `ApplySettings` (voir `deferred_batches`), vidés un par un par la boucle ci-dessous.
+            let mut ready_batches: std::collections::VecDeque<overlay_ingest::LineBatch> =
+                std::collections::VecDeque::new();
             loop {
                 // Non bloquant : n'attend jamais activement les réglages de compte, seulement les
-                // lignes de log (voir recv_timeout plus bas) — un compte jamais lié ne doit pas
-                // retarder l'ingestion d'un seul milliseconde.
+                // lignes de log (voir recv_timeout plus bas) — le rattrapage est LU sans attendre
+                // (voir `deferred_batches`), seule son ingestion attend le roster.
                 while let Ok(command) = settings_rx.try_recv() {
                     match command {
                         EngineCommand::ApplySettings(settings) => {
@@ -534,6 +566,18 @@ pub fn spawn_engine_thread(
                             alert_profile_out.store(Arc::new(Some(alert_profile.clone())));
                             engine.set_chat_filters(settings.chat_filters.clone());
                             chat_filters_out.store(Arc::new(Some(settings.chat_filters)));
+                            if !account_settings_applied {
+                                account_settings_applied = true;
+                                let batch_count = deferred_batches.len();
+                                let line_count: usize =
+                                    deferred_batches.iter().map(|b| b.lines.len()).sum();
+                                tracing::info!(
+                                    batch_count,
+                                    line_count,
+                                    "roster connu — rejeu des lots de wakfu.log retenus depuis le démarrage"
+                                );
+                                ready_batches.append(&mut deferred_batches);
+                            }
                         }
                         // Déconnexion volontaire : repli mode invité — plus de roster connu
                         // (classification retombe sur `breed`), Suivi vidé (la LISTE suivie est
@@ -682,6 +726,11 @@ pub fn spawn_engine_thread(
                             // (voir `Engine::forget_session`).
                             engine.forget_session();
                             snapshot.store(Arc::new(engine.snapshot()));
+                            // Ce qui était retenu ou en cours de rejeu venait de l'ANCIEN fichier
+                            // (voir `deferred_batches`) : le nouveau est relu depuis sa première
+                            // ligne, rien de l'ancien ne doit s'y ajouter.
+                            deferred_batches.clear();
+                            ready_batches.clear();
                             rx = overlay_ingest::watcher::spawn(&new_path);
                             // Le chien de garde doit suivre le NOUVEAU fichier, et repartir sur un
                             // compteur neuf : le rattrapage qui commence est un progrès, pas un
@@ -762,6 +811,10 @@ pub fn spawn_engine_thread(
                     // exactement ce qu'on veut ici, et l'inverse de ce qu'une rotation doit faire
                     // (§5.3 du plan).
                     engine.forget_session();
+                    // Même règle que `ChangeLogPath` : la relecture repart de la première ligne,
+                    // les lots retenus ou en cours de rejeu (voir `deferred_batches`) sont caducs.
+                    deferred_batches.clear();
+                    ready_batches.clear();
                     rx = overlay_ingest::watcher::spawn(&current_log_path);
                     watchdog.note_resync(now, log_len(&current_log_path).unwrap_or(0));
                     resync_in_flight = Some(ResyncInFlight {
@@ -769,224 +822,244 @@ pub fn spawn_engine_thread(
                         saw_batch: false,
                     });
                 }
-                match rx.recv_timeout(std::time::Duration::from_millis(200)) {
-                    Ok(Ok(batch)) => {
-                        if !batch.is_initial_load && !log_replayed {
-                            log_replayed = true;
-                            startup.mark_log_replayed();
-                            let _ = proxy.send_event(UserEvent::StartupProgress);
-                        }
-                        if let Err(err) = engine.ingest_batch(&batch) {
-                            tracing::warn!(%err, "échec d'ingestion d'un lot, ligne(s) ignorée(s)");
-                            // Volontairement PAS de `watchdog.note_applied` : un lot rejeté n'est
-                            // pas un progrès, c'est précisément l'une des deux pannes que le chien
-                            // de garde doit voir (voir sa doc).
+                // Un lot différé (voir `deferred_batches`) passe avant toute nouvelle lecture :
+                // ils sont rejoués dans l'ordre exact du fichier, sans jamais s'intercaler avec
+                // un lot du direct arrivé entre-temps.
+                let batch = match ready_batches.pop_front() {
+                    Some(batch) => batch,
+                    None => match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                        Ok(Ok(batch)) => batch,
+                        Ok(Err(err)) => {
+                            tracing::warn!(%err, "erreur de lecture de wakfu.log");
                             continue;
                         }
-                        let now = std::time::Instant::now();
-                        watchdog.note_applied(now, log_len(&current_log_path).unwrap_or(0));
-                        // Relecture en cours : on ingère sans publier tant que les lots sont ceux
-                        // du rattrapage — voir `resync_in_flight`. Le premier lot du direct (ou
-                        // l'échéance de sûreté) rend la main au flux normal.
-                        let publish = match resync_in_flight.as_mut() {
-                            Some(state) => {
-                                state.saw_batch = true;
-                                // Le premier lot du direct (ou l'échéance de sûreté) rend la main
-                                // au flux normal ; les lots du rattrapage, eux, restent muets.
-                                !(batch.is_initial_load && now < state.deadline)
+                        Err(RecvTimeoutError::Timeout) => {
+                            if !log_replayed {
+                                log_replayed = true;
+                                tracing::info!("rattrapage initial de wakfu.log terminé");
+                                startup.mark_log_replayed();
+                                let _ = proxy.send_event(UserEvent::StartupProgress);
                             }
-                            None => true,
-                        };
-                        if publish {
-                            resync_in_flight = None;
-                            snapshot.store(Arc::new(engine.snapshot()));
-                        }
-                        watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
-                        // L5, §7.1 du plan : relayé tel quel au thread Sync, qu'un compte soit lié
-                        // ou non — sans compte, ce dernier le retient en mémoire jusqu'à
-                        // l'activation, sans rien écrire sur disque (voir `spawn_sync_thread`),
-                        // jamais retenu ici. Ne bloque jamais ce thread : l'écriture SQLite/l'envoi
-                        // vivent ailleurs.
-                        let sync_events = engine.drain_sync_events();
-                        if !sync_events.is_empty() {
-                            let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
-                        }
-                        // Compteurs de Suivi (§14 point 3 du plan, chantier fermé le 2026-09-07) —
-                        // même relais sans blocage, mécanisme distinct de `Enqueue` ci-dessus (voir
-                        // la doc de `SyncCommand::SyncWatchlist`).
-                        if let Some(entries) = engine.drain_watchlist_sync() {
-                            let _ = sync_tx.send(SyncCommand::SyncWatchlist(entries));
-                        }
-                        // **Toujours drainé, même Suivi coupé** : laisser les alertes
-                        // s'accumuler dans le moteur les ferait toutes sortir d'un coup à la
-                        // réactivation, des heures après le ramassage qui les a produites. Voir
-                        // `EngineCommand::SetFeatures` — l'interrupteur met en sourdine, il ne met
-                        // pas en file d'attente.
-                        for alert in engine.drain_watchlist_alerts() {
-                            // **La complétion part AVANT le garde de fonctionnalité**, et c'est la
-                            // seule chose de cette boucle qui le fasse : décision utilisateur du
-                            // 2026-09-17, le retrait est une conséquence du SEUIL, pas de
-                            // l'animation ni de l'affichage. Suivi coupé, personne ne verra ni la
-                            // carte ni la célébration — l'entrée aboutie n'en a pas moins fini son
-                            // travail, et l'hôte doit pouvoir la retirer. Voir
-                            // `WatchlistCompleted`.
-                            let _ = completions.send(WatchlistCompleted {
-                                key: panels::suivi_tab::key_of(&alert.name, alert.catalog_id),
-                                name: alert.name.clone(),
-                            });
-                            if !features.suivi {
-                                continue;
+                            // **Fin normale d'une relecture** : le watcher pousse les lots du
+                            // rattrapage d'un trait (voir `overlay_ingest::watcher::run`), son premier
+                            // silence en marque donc la fin — c'est déjà la règle qu'applique
+                            // `log_replayed` juste au-dessus. L'état reconstruit bascule ici d'un seul
+                            // coup, y compris quand le fichier était vide ou absent (aucun lot n'est
+                            // alors jamais arrivé, et le panneau doit tout de même refléter cette
+                            // session vide plutôt que de garder indéfiniment l'ancienne).
+                            let resync_done = resync_in_flight
+                                .as_ref()
+                                .is_some_and(|state| state.saw_batch || now >= state.deadline);
+                            if resync_done {
+                                resync_in_flight = None;
+                                snapshot.store(Arc::new(engine.snapshot()));
+                                let _ = proxy.send_event(UserEvent::NewSnapshot);
+                                tracing::info!("[rafraîchissement] panneau de combat resynchronisé");
                             }
-                            tracing::info!(
-                                name = %alert.name,
-                                reason = ?alert.reason,
-                                "alerte de suivi (décompte à 0 ou objectif atteint)"
-                            );
-                            // **La carte s'affiche quoi qu'il arrive** : la sourdine ne coupe que
-                            // le son (voir `EngineCommand::SetAlertMutes`).
-                            if !mutes.suivi {
-                                alert_sound::play_countdown_alert();
-                            }
-                            let created_at = std::time::Instant::now();
-                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
-                                name: alert.name,
-                                kind: alert.kind,
-                                reason: match alert.reason {
-                                    WatchlistAlertReason::Countdown => {
-                                        WatchlistToastReason::Countdown
-                                    }
-                                    WatchlistAlertReason::Goal => WatchlistToastReason::Goal,
-                                },
-                                catalog_id: alert.catalog_id,
-                                created_at,
-                                confetti: panels::watchlist::build_confetti(),
-                                hide_at: local_toast_deadline(created_at, &countdown_toast),
-                            })));
+                            continue;
                         }
-                        // Ramassage d'un objet à son activé (compte) — INDÉPENDANT de la
-                        // watchlist ci-dessus, même mécanisme de toast (un seul emplacement
-                        // affiché à la fois : le plus récent des deux écrase l'autre, jamais de
-                        // file d'attente — acceptable, ces alertes sont rares et ≤ 5 s chacune).
-                        for alert in engine.drain_loot_alerts() {
-                            // Même règle que ci-dessus : drainé quoi qu'il arrive, silencieux
-                            // quand la fonctionnalité est coupée.
-                            if !features.alerts {
-                                continue;
-                            }
-                            tracing::info!(
-                                name = %alert.name,
-                                quantity = alert.quantity,
-                                sound = alert.sound_enabled,
-                                "alerte de ramassage"
-                            );
-                            // **La carte s'affiche quoi qu'il arrive**, comme pour le Suivi et
-                            // le Chat ci-dessus/ci-dessous : un objet en mode silencieux
-                            // (`panels::alerts_tab`) ne coupe que le son — voir
-                            // `overlay_engine::LootAlert::sound_enabled`.
-                            if alert.sound_enabled {
-                                alert_sound::play_loot_alert();
-                            }
-                            let created_at = std::time::Instant::now();
-                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
-                                name: alert.name,
-                                kind: WatchlistKind::Item,
-                                reason: WatchlistToastReason::Loot {
-                                    quantity: alert.quantity,
-                                },
-                                catalog_id: alert.catalog_id,
-                                created_at,
-                                confetti: panels::watchlist::build_confetti(),
-                                hide_at: toast_deadline(created_at, &alert_profile),
-                            })));
-                        }
-                        // Message de chat correspondant à une recherche (compte, onglet « Chat »)
-                        // — INDÉPENDANT des deux alertes ci-dessus, même emplacement de toast.
-                        // **Un seul son par lot** (règle du web, `ChatPanelComponent`) et la
-                        // carte du DERNIER message trouvé : un lot en rafale ne doit pas
-                        // empiler cinq sons.
-                        // Drainé même recherche coupée (voir les deux blocs ci-dessus), puis
-                        // jeté : c'est `features.chat` qui décide si le lot fait du bruit.
-                        let chat_alerts = engine.drain_chat_alerts();
-                        let chat_alerts = if features.chat {
-                            chat_alerts
-                        } else {
-                            Vec::new()
-                        };
-                        for alert in &chat_alerts {
-                            // **Sans l'auteur** (constat C6 de `docs/analyse-rgpd.md`) : c'est le
-                            // pseudonyme d'un TIERS, qui n'a rien demandé, recopié dans un fichier
-                            // conservé 14 jours. Le mot-clé et le canal disent tout ce qu'on vient
-                            // lire ici — l'alerte est-elle partie, sur quelle recherche, sur quel
-                            // canal ; qui l'a écrite se lit dans la carte à l'écran, pas au
-                            // journal. Le nom reste disponible en `debug` (« Journal détaillé »)
-                            // pour un diagnostic de correspondance.
-                            tracing::info!(
-                                word = %alert.filter.text,
-                                channel = overlay_engine::channel_label(alert.channel),
-                                "alerte de chat (recherche trouvée)"
-                            );
-                            tracing::debug!(
-                                author = %alert.author,
-                                word = %alert.filter.text,
-                                "alerte de chat : auteur"
-                            );
-                        }
-                        if let Some(alert) = chat_alerts.into_iter().last() {
-                            // Même règle que pour le décompte : muette, l'alerte garde sa carte.
-                            if !mutes.chat {
-                                alert_sound::play_chat_alert();
-                            }
-                            let created_at = std::time::Instant::now();
-                            watchlist_toast.store(Arc::new(Some(WatchlistToast {
-                                name: alert.author.clone(),
-                                kind: WatchlistKind::Item,
-                                reason: WatchlistToastReason::Chat {
-                                    channel: alert.channel,
-                                    word: alert.filter.text,
-                                    author: alert.author,
-                                    message: alert.message,
-                                },
-                                catalog_id: None,
-                                created_at,
-                                // Pas de confettis : ce n'est pas une célébration.
-                                confetti: Vec::new(),
-                                hide_at: local_toast_deadline(created_at, &chat_toast),
-                            })));
-                        }
-                        // Le réveil de l'UI suit la publication : rien de neuf à montrer pendant
-                        // une relecture suspendue, et une frame de plus par lot ferait clignoter
-                        // les fenêtres pour un snapshot qu'elles reliraient identique.
-                        if publish {
-                            let _ = proxy.send_event(UserEvent::NewSnapshot);
-                        }
+                        Err(RecvTimeoutError::Disconnected) => break, // watcher arrêté (process en fin de vie)
+                    },
+                };
+                // **Rien n'est ingéré avant les réglages du compte** (2026-09-21) — voir
+                // `deferred_batches` : le lot est retenu tel quel, dans l'ordre, et rejoué dès
+                // qu'`ApplySettings` a posé le roster. Le tailer, lui, a bien livré : ce n'est
+                // pas la panne que guette le chien de garde, qui reprend son jugement au rejeu.
+                if !account_settings_applied {
+                    watchdog.note_applied(
+                        std::time::Instant::now(),
+                        log_len(&current_log_path).unwrap_or(0),
+                    );
+                    deferred_batches.push_back(batch);
+                    continue;
+                }
+                if !batch.is_initial_load && !log_replayed {
+                    log_replayed = true;
+                    startup.mark_log_replayed();
+                    let _ = proxy.send_event(UserEvent::StartupProgress);
+                }
+                if let Err(err) = engine.ingest_batch(&batch) {
+                    tracing::warn!(%err, "échec d'ingestion d'un lot, ligne(s) ignorée(s)");
+                    // Volontairement PAS de `watchdog.note_applied` : un lot rejeté n'est
+                    // pas un progrès, c'est précisément l'une des deux pannes que le chien
+                    // de garde doit voir (voir sa doc).
+                    continue;
+                }
+                let now = std::time::Instant::now();
+                watchdog.note_applied(now, log_len(&current_log_path).unwrap_or(0));
+                // Relecture en cours : on ingère sans publier tant que les lots sont ceux
+                // du rattrapage — voir `resync_in_flight`. Le premier lot du direct (ou
+                // l'échéance de sûreté) rend la main au flux normal.
+                let publish = match resync_in_flight.as_mut() {
+                    Some(state) => {
+                        state.saw_batch = true;
+                        // Le premier lot du direct (ou l'échéance de sûreté) rend la main
+                        // au flux normal ; les lots du rattrapage, eux, restent muets.
+                        !(batch.is_initial_load && now < state.deadline)
                     }
-                    Ok(Err(err)) => tracing::warn!(%err, "erreur de lecture de wakfu.log"),
-                    Err(RecvTimeoutError::Timeout) => {
-                        if !log_replayed {
-                            log_replayed = true;
-                            tracing::info!("rattrapage initial de wakfu.log terminé");
-                            startup.mark_log_replayed();
-                            let _ = proxy.send_event(UserEvent::StartupProgress);
-                        }
-                        // **Fin normale d'une relecture** : le watcher pousse les lots du
-                        // rattrapage d'un trait (voir `overlay_ingest::watcher::run`), son premier
-                        // silence en marque donc la fin — c'est déjà la règle qu'applique
-                        // `log_replayed` juste au-dessus. L'état reconstruit bascule ici d'un seul
-                        // coup, y compris quand le fichier était vide ou absent (aucun lot n'est
-                        // alors jamais arrivé, et le panneau doit tout de même refléter cette
-                        // session vide plutôt que de garder indéfiniment l'ancienne).
-                        let resync_done = resync_in_flight
-                            .as_ref()
-                            .is_some_and(|state| state.saw_batch || now >= state.deadline);
-                        if resync_done {
-                            resync_in_flight = None;
-                            snapshot.store(Arc::new(engine.snapshot()));
-                            let _ = proxy.send_event(UserEvent::NewSnapshot);
-                            tracing::info!("[rafraîchissement] panneau de combat resynchronisé");
-                        }
+                    None => true,
+                };
+                if publish {
+                    resync_in_flight = None;
+                    snapshot.store(Arc::new(engine.snapshot()));
+                }
+                watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
+                // L5, §7.1 du plan : relayé tel quel au thread Sync, qu'un compte soit lié
+                // ou non — sans compte, ce dernier le retient en mémoire jusqu'à
+                // l'activation, sans rien écrire sur disque (voir `spawn_sync_thread`),
+                // jamais retenu ici. Ne bloque jamais ce thread : l'écriture SQLite/l'envoi
+                // vivent ailleurs.
+                let sync_events = engine.drain_sync_events();
+                if !sync_events.is_empty() {
+                    let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
+                }
+                // Compteurs de Suivi (§14 point 3 du plan, chantier fermé le 2026-09-07) —
+                // même relais sans blocage, mécanisme distinct de `Enqueue` ci-dessus (voir
+                // la doc de `SyncCommand::SyncWatchlist`).
+                if let Some(entries) = engine.drain_watchlist_sync() {
+                    let _ = sync_tx.send(SyncCommand::SyncWatchlist(entries));
+                }
+                // **Toujours drainé, même Suivi coupé** : laisser les alertes
+                // s'accumuler dans le moteur les ferait toutes sortir d'un coup à la
+                // réactivation, des heures après le ramassage qui les a produites. Voir
+                // `EngineCommand::SetFeatures` — l'interrupteur met en sourdine, il ne met
+                // pas en file d'attente.
+                for alert in engine.drain_watchlist_alerts() {
+                    // **La complétion part AVANT le garde de fonctionnalité**, et c'est la
+                    // seule chose de cette boucle qui le fasse : décision utilisateur du
+                    // 2026-09-17, le retrait est une conséquence du SEUIL, pas de
+                    // l'animation ni de l'affichage. Suivi coupé, personne ne verra ni la
+                    // carte ni la célébration — l'entrée aboutie n'en a pas moins fini son
+                    // travail, et l'hôte doit pouvoir la retirer. Voir
+                    // `WatchlistCompleted`.
+                    let _ = completions.send(WatchlistCompleted {
+                        key: panels::suivi_tab::key_of(&alert.name, alert.catalog_id),
+                        name: alert.name.clone(),
+                    });
+                    if !features.suivi {
                         continue;
                     }
-                    Err(RecvTimeoutError::Disconnected) => break, // watcher arrêté (process en fin de vie)
+                    tracing::info!(
+                        name = %alert.name,
+                        reason = ?alert.reason,
+                        "alerte de suivi (décompte à 0 ou objectif atteint)"
+                    );
+                    // **La carte s'affiche quoi qu'il arrive** : la sourdine ne coupe que
+                    // le son (voir `EngineCommand::SetAlertMutes`).
+                    if !mutes.suivi {
+                        alert_sound::play_countdown_alert();
+                    }
+                    let created_at = std::time::Instant::now();
+                    watchlist_toast.store(Arc::new(Some(WatchlistToast {
+                        name: alert.name,
+                        kind: alert.kind,
+                        reason: match alert.reason {
+                            WatchlistAlertReason::Countdown => {
+                                WatchlistToastReason::Countdown
+                            }
+                            WatchlistAlertReason::Goal => WatchlistToastReason::Goal,
+                        },
+                        catalog_id: alert.catalog_id,
+                        created_at,
+                        confetti: panels::watchlist::build_confetti(),
+                        hide_at: local_toast_deadline(created_at, &countdown_toast),
+                    })));
+                }
+                // Ramassage d'un objet à son activé (compte) — INDÉPENDANT de la
+                // watchlist ci-dessus, même mécanisme de toast (un seul emplacement
+                // affiché à la fois : le plus récent des deux écrase l'autre, jamais de
+                // file d'attente — acceptable, ces alertes sont rares et ≤ 5 s chacune).
+                for alert in engine.drain_loot_alerts() {
+                    // Même règle que ci-dessus : drainé quoi qu'il arrive, silencieux
+                    // quand la fonctionnalité est coupée.
+                    if !features.alerts {
+                        continue;
+                    }
+                    tracing::info!(
+                        name = %alert.name,
+                        quantity = alert.quantity,
+                        sound = alert.sound_enabled,
+                        "alerte de ramassage"
+                    );
+                    // **La carte s'affiche quoi qu'il arrive**, comme pour le Suivi et
+                    // le Chat ci-dessus/ci-dessous : un objet en mode silencieux
+                    // (`panels::alerts_tab`) ne coupe que le son — voir
+                    // `overlay_engine::LootAlert::sound_enabled`.
+                    if alert.sound_enabled {
+                        alert_sound::play_loot_alert();
+                    }
+                    let created_at = std::time::Instant::now();
+                    watchlist_toast.store(Arc::new(Some(WatchlistToast {
+                        name: alert.name,
+                        kind: WatchlistKind::Item,
+                        reason: WatchlistToastReason::Loot {
+                            quantity: alert.quantity,
+                        },
+                        catalog_id: alert.catalog_id,
+                        created_at,
+                        confetti: panels::watchlist::build_confetti(),
+                        hide_at: toast_deadline(created_at, &alert_profile),
+                    })));
+                }
+                // Message de chat correspondant à une recherche (compte, onglet « Chat »)
+                // — INDÉPENDANT des deux alertes ci-dessus, même emplacement de toast.
+                // **Un seul son par lot** (règle du web, `ChatPanelComponent`) et la
+                // carte du DERNIER message trouvé : un lot en rafale ne doit pas
+                // empiler cinq sons.
+                // Drainé même recherche coupée (voir les deux blocs ci-dessus), puis
+                // jeté : c'est `features.chat` qui décide si le lot fait du bruit.
+                let chat_alerts = engine.drain_chat_alerts();
+                let chat_alerts = if features.chat {
+                    chat_alerts
+                } else {
+                    Vec::new()
+                };
+                for alert in &chat_alerts {
+                    // **Sans l'auteur** (constat C6 de `docs/analyse-rgpd.md`) : c'est le
+                    // pseudonyme d'un TIERS, qui n'a rien demandé, recopié dans un fichier
+                    // conservé 14 jours. Le mot-clé et le canal disent tout ce qu'on vient
+                    // lire ici — l'alerte est-elle partie, sur quelle recherche, sur quel
+                    // canal ; qui l'a écrite se lit dans la carte à l'écran, pas au
+                    // journal. Le nom reste disponible en `debug` (« Journal détaillé »)
+                    // pour un diagnostic de correspondance.
+                    tracing::info!(
+                        word = %alert.filter.text,
+                        channel = overlay_engine::channel_label(alert.channel),
+                        "alerte de chat (recherche trouvée)"
+                    );
+                    tracing::debug!(
+                        author = %alert.author,
+                        word = %alert.filter.text,
+                        "alerte de chat : auteur"
+                    );
+                }
+                if let Some(alert) = chat_alerts.into_iter().last() {
+                    // Même règle que pour le décompte : muette, l'alerte garde sa carte.
+                    if !mutes.chat {
+                        alert_sound::play_chat_alert();
+                    }
+                    let created_at = std::time::Instant::now();
+                    watchlist_toast.store(Arc::new(Some(WatchlistToast {
+                        name: alert.author.clone(),
+                        kind: WatchlistKind::Item,
+                        reason: WatchlistToastReason::Chat {
+                            channel: alert.channel,
+                            word: alert.filter.text,
+                            author: alert.author,
+                            message: alert.message,
+                        },
+                        catalog_id: None,
+                        created_at,
+                        // Pas de confettis : ce n'est pas une célébration.
+                        confetti: Vec::new(),
+                        hide_at: local_toast_deadline(created_at, &chat_toast),
+                    })));
+                }
+                // Le réveil de l'UI suit la publication : rien de neuf à montrer pendant
+                // une relecture suspendue, et une frame de plus par lot ferait clignoter
+                // les fenêtres pour un snapshot qu'elles reliraient identique.
+                if publish {
+                    let _ = proxy.send_event(UserEvent::NewSnapshot);
                 }
             }
         })
