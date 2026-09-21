@@ -1827,7 +1827,12 @@ mod tests {
     fn l_avis_du_jeton_fichier_nomme_le_fichier_et_se_tait_sinon() {
         assert_eq!(token_file_notice(false), None);
         let texte = token_file_notice(true).unwrap();
-        assert!(texte.contains("native-session.token"));
+        // Le nom du fichier dépend du déploiement visé (`token_store::slot`, 2026-09-21) :
+        // `native-session.token` en prod, `native-session@<hôte>.token` ailleurs — dont ici, un
+        // build de test parlant à dev. On vérifie donc l'emplacement réel, pas un nom figé.
+        let emplacement = overlay_sync::token_store::token_file_location();
+        assert!(texte.contains(&emplacement.display().to_string()));
+        assert!(texte.contains("native-session"));
         assert!(texte.contains("se déconnecter"));
     }
 

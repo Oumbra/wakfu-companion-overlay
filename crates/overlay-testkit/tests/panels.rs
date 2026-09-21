@@ -3508,7 +3508,9 @@ fn options_parametres_section_compte() {
 /// développement du mainteneur a précisément ce fichier, celui du CI non).
 ///
 /// Le chemin affiché est celui de la machine de rendu (`token_file_location`), figé par le
-/// conteneur du CI : `~/.local/share/wakfu-companion-overlay/native-session.token`.
+/// conteneur du CI : `~/.local/share/wakfu-companion-overlay/native-session@claude-dev.wakfu-companion.com.token`
+/// — suffixé par l'hôte parce qu'un build de test parle à dev (`token_store::slot`, un jeton par
+/// déploiement depuis le 2026-09-21 ; seule la prod garde le nom nu `native-session.token`).
 #[test]
 fn options_parametres_section_compte_jeton_fichier() {
     let mut options_state = parametres_avec_notifications();
@@ -3554,8 +3556,9 @@ fn options_parametres_section_compte_jeton_fichier() {
 /// **Défilé jusqu'en bas** : depuis le soir du 2026-09-18, trois sections d'information (« Wakfu
 /// Companion », « Conditions d'utilisation de Wakfu », « Vos données » — voir
 /// `panels::a_propos_tab::SECTIONS`) précèdent « Mise à jour », qui a donc quitté le cadre. La
-/// capture garde la fin de l'onglet : la fin de « Vos données » avec ses deux liens, la section
-/// « Mise à jour » entière, et la paire de sorties sous elle.
+/// capture garde la fin de l'onglet : la fin de « Vos données » avec ses deux liens, le bloc
+/// d'alerte et le bouton « Supprimer les données locales » qui la ferment (venus de « Compte » le
+/// 2026-09-21), la section « Mise à jour » entière, et la paire de sorties sous elle.
 #[test]
 fn options_a_propos_mise_a_jour() {
     let mut options_state = parametres_avec_notifications();
