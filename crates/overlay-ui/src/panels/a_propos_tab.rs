@@ -25,7 +25,9 @@
 //! reproche fait au §10 du plan d'architecture.
 //!
 //! 1. **« Wakfu Companion »** — ce qu'est le programme : un projet de fan, non affilié à Ankama,
-//!    dont les éléments du jeu restent la propriété d'Ankama. Liens : le site, le code source.
+//!    dont les éléments du jeu restent la propriété d'Ankama, puis la mention de droits d'auteur
+//!    que la licence d'utilisation des données Wakfu exige ([`copyright_notice`], seul bloc
+//!    calculé à l'exécution : il porte l'année en cours). Liens : le site, le code source.
 //! 2. **« Conditions d'utilisation de Wakfu »** — ce que l'overlay fait et ne fait pas vis-à-vis du
 //!    client de jeu, ce que les CGU d'Ankama en disent, et à qui revient l'appréciation du risque
 //!    (au joueur : c'est son compte). Lien : les CGU sur wakfu.com.
@@ -194,7 +196,7 @@ pub struct Section {
 /// que pas de texte.
 pub const SECTIONS: &[Section] = &[
     Section {
-        title: "Wakfu Companion",
+        title: WAKFU_COMPANION_TITLE,
         blocks: &[
             info(
                 "Wakfu Companion est un overlay non officiel pour Wakfu : un projet de fan, \
@@ -299,6 +301,34 @@ pub const PURGE_INFO: &str = "« Supprimer les données locales » efface de cet
                               se ferme ensuite, et repart comme une installation neuve — votre \
                               compte et son historique, eux, restent sur le site.";
 
+/// Titre de la première section — celle sous laquelle se peint [`copyright_notice`].
+const WAKFU_COMPANION_TITLE: &str = "Wakfu Companion";
+
+/// La mention de droits d'auteur que la **licence d'utilisation des données Wakfu** d'Ankama
+/// (v1 du 2019-03-11, `docs/analyse-cgu.md` §1) impose à tout projet qui exploite ses données de
+/// jeu : « WAKFU MMORPG : © 2012-[année en cours] Ankama Studio. Tous droits réservés. » Le
+/// catalogue d'objets et de monstres (noms, raretés, catégories — `overlay_engine::catalog`) en
+/// descend, donc la mention est due, au mot près, à la première place où l'overlay parle de
+/// lui-même. L'année vient de [`copyright_year`].
+pub fn copyright_notice(year: i32) -> String {
+    format!("WAKFU MMORPG : © 2012-{year} Ankama Studio. Tous droits réservés.")
+}
+
+/// L'année de la mention : celle de l'horloge locale — sauf sous le gel des captures
+/// (`build_info::freeze_for_snapshots`), où elle vaut [`FROZEN_COPYRIGHT_YEAR`] pour que les
+/// références de l'onglet ne changent pas au 1er janvier sans qu'on l'ait demandé.
+pub fn copyright_year() -> i32 {
+    use chrono::Datelike;
+    if crate::build_info::is_frozen() {
+        FROZEN_COPYRIGHT_YEAR
+    } else {
+        chrono::Local::now().year()
+    }
+}
+
+/// L'année peinte dans les captures de non-régression — voir [`copyright_year`].
+pub const FROZEN_COPYRIGHT_YEAR: i32 = 2026;
+
 /// Le bloc d'alerte « À propos » quand l'origine de l'API est surchargée par l'environnement
 /// (`overlay_sync::client::base_url_override`) — `None` sinon, et rien n'est affiché : le cas
 /// normal ne mérite pas une ligne.
@@ -374,6 +404,19 @@ pub fn show(
                         .tone(block.tone)
                         .width(inner_width)
                         .log_name(format!("a-propos-{}-{}", index + 1, block_index + 1)),
+                );
+            }
+            // **Mention de droits d'auteur** (licence des données Wakfu, 2026-09-21) : sous les
+            // blocs de « Wakfu Companion », en ton `Info` comme eux — c'est une information due,
+            // pas un avertissement. Calculée ici et non dans `SECTIONS` parce qu'elle porte
+            // l'année en cours (voir `copyright_year`).
+            if section.title == WAKFU_COMPANION_TITLE {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(copyright_notice(copyright_year()))
+                        .tone(InfoTone::Info)
+                        .width(inner_width)
+                        .log_name("a-propos-droits-ankama"),
                 );
             }
             // **Origine d'API surchargée** (constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) :
@@ -818,6 +861,19 @@ mod tests {
         let texte = api_override_notice(Some("http://127.0.0.1:8788")).unwrap();
         assert!(texte.contains("http://127.0.0.1:8788"));
         assert!(texte.contains("WAKFU_COMPANION_API_URL"));
+    }
+
+    /// La mention exigée par la licence des données Wakfu, au mot près, et l'année en cours —
+    /// hors gel des captures, où c'est l'année figée qui est peinte.
+    #[test]
+    fn la_mention_de_droits_est_celle_de_la_licence_ankama() {
+        assert_eq!(
+            copyright_notice(2026),
+            "WAKFU MMORPG : © 2012-2026 Ankama Studio. Tous droits réservés."
+        );
+        // Ce test ne gèle rien : l'année est celle de l'horloge, jamais antérieure à celle de la
+        // licence ni à celle des captures.
+        assert!(copyright_year() >= FROZEN_COPYRIGHT_YEAR);
     }
 
     #[test]

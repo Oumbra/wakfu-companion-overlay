@@ -70,6 +70,13 @@ pub fn freeze_for_snapshots() {
     let _ = FROZEN.set(FROZEN_LABEL);
 }
 
+/// Vrai une fois [`freeze_for_snapshots`] appelée — pour tout ce qui, comme la bannière, ne doit
+/// pas varier d'une capture à l'autre sans changement demandé (l'année de la mention de droits
+/// d'auteur de l'onglet « À propos », `panels::a_propos_tab::copyright_year`).
+pub fn is_frozen() -> bool {
+    FROZEN.get().is_some()
+}
+
 /// Le libellé figé des captures. Même gabarit qu'un vrai numéro (trois composantes d'un chiffre),
 /// pour que la référence rende compte de la place réellement occupée en production.
 pub const FROZEN_LABEL: &str = "0.0.0";
@@ -83,6 +90,7 @@ mod tests {
         assert_eq!(BANNER_LABEL, VERSION);
         // Sans surcharge posée, c'est bien la vraie version qui est peinte.
         assert_eq!(banner_label(), BANNER_LABEL);
+        assert!(!is_frozen());
     }
 
     #[test]

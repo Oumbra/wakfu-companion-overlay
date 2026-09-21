@@ -4030,7 +4030,9 @@ fn options_redemarrage_confirme_et_echap_repond_non() {
 /// les sections d'information qui ouvrent l'onglet depuis le soir du 2026-09-18 (demande
 /// utilisateur : RGPD, CGU Wakfu et informations importantes du site/overlay, **avant** « Mise à
 /// jour » — voir `panels::a_propos_tab::SECTIONS`). « Wakfu Companion » (non-affiliation à
-/// Ankama, liens « Site web » et « Code source ») puis « Conditions d'utilisation de Wakfu », dont
+/// Ankama, mention « WAKFU MMORPG : © 2012-2026 Ankama Studio » exigée par la licence des données
+/// — année figée par `build_info::freeze_for_snapshots`, 2026-09-21 —, liens « Site web » et
+/// « Code source ») puis « Conditions d'utilisation de Wakfu », dont
 /// le troisième bloc est le seul ton `Alert` de l'onglet ; « Vos données », « Mise à jour » et les
 /// sorties sont sous le pli, capturées par `options_a_propos_mise_a_jour`.
 ///
