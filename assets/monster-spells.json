@@ -8,7 +8,7 @@
         "en": "10 MP",
         "es": "10 PM",
         "pt": "10 PM",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/9.png"
       },
       {
         "id": 14,
@@ -16,7 +16,7 @@
         "en": "50% damage inflicted ; -100 Rear Resistance",
         "es": "50% de daños infligidos ; -100 de resistencia por la espalda",
         "pt": "50% de danos infligidos ; -100 Resistência de costas",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/44.png"
       },
       {
         "id": 15,
@@ -24,7 +24,7 @@
         "en": "50% heals performed",
         "es": "50% de curas realizadas",
         "pt": "50% de curas realizadas",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/15.png"
       },
       {
         "id": 18,
@@ -32,7 +32,7 @@
         "en": "1 MP",
         "es": "1 PM",
         "pt": "1 PM",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/9.png"
       },
       {
         "id": 19,
@@ -40,7 +40,7 @@
         "en": "30 Dodge",
         "es": "30 Esquiva",
         "pt": "30 Esquiva",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/49.png"
       },
       {
         "id": 20,
@@ -48,7 +48,7 @@
         "en": "Bonus non identifié",
         "es": "Bonus non identifié",
         "pt": "Bonus non identifié",
-        "picture": null,
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/28.png",
         "unresolved": true
       },
       {
@@ -57,7 +57,7 @@
         "en": "30% damage inflicted",
         "es": "30% de daños infligidos",
         "pt": "30% de danos infligidos",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/7.png"
       },
       {
         "id": 28,
@@ -65,7 +65,7 @@
         "en": "20% Critical Hit",
         "es": "20% de golpe crítico",
         "pt": "20% de golpe crítico",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/25.png"
       },
       {
         "id": 29,
@@ -73,7 +73,7 @@
         "en": "50 Elemental Resistance",
         "es": "50 Resistencia elemental",
         "pt": "50 Resistência elementar",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/24.png"
       },
       {
         "id": 30,
@@ -81,7 +81,7 @@
         "en": "2 MP",
         "es": "2 PM",
         "pt": "2 PM",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/9.png"
       },
       {
         "id": 33,
@@ -89,7 +89,7 @@
         "en": "50 Lock",
         "es": "50 Placaje",
         "pt": "50 Bloqueio",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/39.png"
       },
       {
         "id": 43,
@@ -97,7 +97,7 @@
         "en": "3 Range",
         "es": "3 Alcance",
         "pt": "3 Alcance",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/18.png"
       },
       {
         "id": 45,
@@ -105,7 +105,7 @@
         "en": "3 MP",
         "es": "3 PM",
         "pt": "3 PM",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/9.png"
       },
       {
         "id": 46,
@@ -113,7 +113,7 @@
         "en": "100% heals performed",
         "es": "100% de curas realizadas",
         "pt": "100% de curas realizadas",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/14.png"
       },
       {
         "id": 47,
@@ -121,7 +121,7 @@
         "en": "100 Lock",
         "es": "100 Placaje",
         "pt": "100 Bloqueio",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/12.png"
       },
       {
         "id": 48,
@@ -129,7 +129,7 @@
         "en": "50% damage inflicted",
         "es": "50% de daños infligidos",
         "pt": "50% de danos infligidos",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/44.png"
       },
       {
         "id": 62,
@@ -137,7 +137,7 @@
         "en": "100% damage inflicted",
         "es": "100% de daños infligidos",
         "pt": "100% de danos infligidos",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/34.png"
       },
       {
         "id": 63,
@@ -145,7 +145,7 @@
         "en": "50% Critical Hit",
         "es": "50% de golpe crítico",
         "pt": "50% de golpe crítico",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/26.png"
       },
       {
         "id": 64,
@@ -153,7 +153,7 @@
         "en": "100 Dodge",
         "es": "100 Esquiva",
         "pt": "100 Esquiva",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/27.png"
       },
       {
         "id": 75,
@@ -161,7 +161,7 @@
         "en": "2 Range",
         "es": "2 Alcance",
         "pt": "2 Alcance",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/1.png"
       },
       {
         "id": 76,
@@ -169,7 +169,7 @@
         "en": "+20 HP (Neutral)",
         "es": "+20 PdV (neutral)",
         "pt": "+20 PV (Neutro)",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/48.png"
       },
       {
         "id": 83,
@@ -177,7 +177,7 @@
         "en": "4 AP",
         "es": "4 PA",
         "pt": "4 PA",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/5.png"
       },
       {
         "id": 86,
@@ -185,7 +185,7 @@
         "en": "100 Elemental Resistance",
         "es": "100 Resistencia elemental",
         "pt": "100 Resistência elementar",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/24.png"
       },
       {
         "id": 92,
@@ -193,7 +193,7 @@
         "en": "1 WP",
         "es": "1 PW",
         "pt": "1 PW",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/10.png"
       },
       {
         "id": 100,
@@ -201,7 +201,7 @@
         "en": "2 AP",
         "es": "2 PA",
         "pt": "2 PA",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/2.png"
       },
       {
         "id": 104,
@@ -209,7 +209,7 @@
         "en": "40% Block",
         "es": "40% de anticipación",
         "pt": "40% de Parada",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/24.png"
       },
       {
         "id": 105,
@@ -217,7 +217,7 @@
         "en": "20 Critical Mastery",
         "es": "20 Dominio crítico",
         "pt": "20 Domínio de crítico",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/25.png"
       },
       {
         "id": 115,
@@ -225,7 +225,7 @@
         "en": "Bonus non identifié",
         "es": "Bonus non identifié",
         "pt": "Bonus non identifié",
-        "picture": null,
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/28.png",
         "unresolved": true
       },
       {
@@ -234,7 +234,7 @@
         "en": "1 AP",
         "es": "1 PA",
         "pt": "1 PA",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/5.png"
       },
       {
         "id": 118,
@@ -242,7 +242,7 @@
         "en": "Bonus non identifié",
         "es": "Bonus non identifié",
         "pt": "Bonus non identifié",
-        "picture": null,
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/1.png",
         "unresolved": true
       },
       {
@@ -251,7 +251,7 @@
         "en": "Swiftness Bonus",
         "es": "Bonus de Velocidad",
         "pt": "Bônus de Velocidade",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/119.png"
       },
       {
         "id": 120,
@@ -259,7 +259,7 @@
         "en": "1 MP",
         "es": "1 PM",
         "pt": "1 PM",
-        "picture": null
+        "picture": "https://vertylo.github.io/wakassets/timePointBonus/9.png"
       }
     ]
   },
