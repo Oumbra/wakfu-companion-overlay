@@ -313,9 +313,20 @@ impl SyncQueue {
                 let body = serde_json::json!({ "entries": entries });
 
                 match send(kind.endpoint_path(), &body) {
-                    Ok(_) => {
+                    Ok(response) => {
                         self.delete_batch(&batch)?;
                         any_sent = true;
+                        // Seule trace d'un envoi RÉUSSI (2026-09-21) : jusqu'ici, seul l'échec
+                        // était journalisé, et rien ne permettait de vérifier après coup qu'un
+                        // achat ou un échange était bien parti — la file SQLite est vidée dès la
+                        // réponse. `inserted` compte, côté serveur, les lignes insérées OU mises
+                        // à jour (voir `server/history/ingest.ts`), donc pas les vrais doublons.
+                        tracing::info!(
+                            kind = kind.as_str(),
+                            sent = batch.len(),
+                            inserted = response.get("inserted").and_then(serde_json::Value::as_i64),
+                            "lot d'historique envoyé au compte"
+                        );
                         // Ce lot est parti : il peut y en avoir d'autres du même type derrière
                         // (`select_batch` re-sélectionne toujours les plus anciens en premier).
                     }
