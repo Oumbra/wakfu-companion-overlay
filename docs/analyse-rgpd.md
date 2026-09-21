@@ -1,6 +1,7 @@
 # Analyse de conformité RGPD — `wakfu-companion-overlay`
 
-Analyse statique du code de l'overlay (version `0.63.1`, branche `dev` au 2026-09-18), menée
+Analyse statique du code de l'overlay (version `0.63.1`, branche `dev` au 2026-09-18, revérifiée
+sur `f443e2a` le 2026-09-21), menée
 crate par crate : `overlay-ingest`, `overlay-engine` (dont le parseur TS vendu, `engine-js/`),
 `overlay-sync`, `overlay-ui`, `overlay-platform`, `overlay-app`, plus les fixtures de test, les
 spikes et la documentation. Chaque constat renvoie à un `fichier:ligne` vérifié à la main.
@@ -31,7 +32,9 @@ Six constats appellent une action, du plus urgent au moins urgent :
 | C5 | **Aucun effacement exerçable** : la déconnexion n'efface que le jeton ; combats, file d'envoi, gabarits d'image, journaux et configuration restent — *✅ traité côté overlay le 2026-09-18 : purge à la déconnexion, bouton « Supprimer les données locales » (fenêtre Options et écran de connexion) ; avec la suppression de la session côté serveur (`DELETE /api/v1/auth/native/session`) ; durée de vie du jeton (30 jours glissants, comme le cookie) annoncée dans la politique le 2026-09-19* | Élevée | §3.5 |
 | C6 | Le **journal applicatif** (14 jours, niveau `info`, pas de plafond) contient des noms de personnages, des auteurs de messages tiers, le code d'appairage et le nom d'utilisateur OS ; une erreur de désérialisation y recopierait un lot entier, chat compris — *✅ traité le 2026-09-18 : plus rien de personnel au niveau `info`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; journaux vidés à la déconnexion et supprimés par le bouton d'effacement (C5)* | Moyenne | §3.6 |
 
-Les constats secondaires (C7 à C17) sont au §3.7. Le plan d'action priorisé est au §6.
+Les constats secondaires (C7 à C19) sont au §3.7 — C18 et C19 viennent d'une revérification
+du code le 2026-09-21 (commits du 19 au 21), tous deux clos le jour même. Le plan d'action
+priorisé est au §6.
 
 ## 1. Rôles et périmètre
 
@@ -92,6 +95,7 @@ Payloads dans `crates/overlay-engine/src/history.rs`.
 | `POST /api/v1/history/fights` | `participants[].name` : **nom de chaque combattant, alliés compris** (donc d'autres joueurs), avec classe, dégâts, soins, sorts, KO, fuite ; `gameServer` | `history.rs:104-128, 138-179` ; construit `session.rs:1862-1911` |
 | `POST /api/v1/history/trades` | **`peerName`** (partenaire d'échange), `selfName`, kamas, objets, `gameServer` | `history.rs:208-218` ; `session.rs:2036-2044` |
 | `POST /api/v1/history/purchases` | Objet, quantité, coût, `gameServer` | `history.rs:181-190` |
+| `POST /api/v1/history/pacts` (depuis le 2026-09-19, `a42a846`) | Objets et quantités extraits d'un pacte, `occurredAt`, `gameServer` — non personnel, mais un élément de l'historique du compte à nommer dans l'information (fait le 2026-09-21, C18) | `history.rs:229-242` |
 | `PATCH /api/v1/settings` clé `roster` | Noms de personnages de l'utilisateur, classe, genre, `id`/`label` de compte, serveur ; **plus tout champ inconnu réémis tel quel** (`#[serde(flatten)] extra`) | `roster.rs:49-91, 271-277` |
 | `PATCH /api/v1/settings` clé `profile` | **Objet `profile` entier reçu du compte, renvoyé tel quel** (pseudo, avatar) pour un simple réglage d'alerte | `crates/overlay-engine/src/profile.rs:278-316` ; `client.rs:129-141` |
 | `PATCH /api/v1/settings` clé `chatFilters` | Mots-clés de recherche saisis par l'utilisateur (peuvent être un pseudo de tiers, cf. test `chat_alert.rs:302-305`) | `chat_alert.rs:74-79, 176-182` |
@@ -113,8 +117,8 @@ tour (`turn_watch/templates.rs:19`, dont le commentaire `:17` affirme à tort «
 | Fichier | Contenu personnel | Chiffré | Purge | Effacé à la déconnexion |
 | --- | --- | --- | --- | --- |
 | `config.toml` (`config.rs:604`) | `log_path` (contient souvent le nom d'utilisateur OS) | Non | — | Non |
-| Trousseau OS `wakfu-companion-overlay/native-session` (`token_store.rs:16-23`) | Jeton de session API | Oui (Credential Manager / Secret Service) | — | Oui |
-| `native-session.token` (`token_store.rs:26-49`), repli si le trousseau échoue | **Jeton en clair** ; `0600` posé après écriture, Unix seulement, **aucune ACL sous Windows** | Non | — | Oui |
+| Trousseau OS `wakfu-companion-overlay/native-session` (`token_store.rs:16-23`) — **un emplacement par déploiement** depuis le 2026-09-21 (`ec43ca6`, `token_store::slot` : `native-session` pour la prod, `native-session@<hôte>` sinon) | Jeton de session API | Oui (Credential Manager / Secret Service) | — | Oui (l'emplacement courant ; l'effacement complet vise tous les emplacements, C19) |
+| `native-session.token` (`token_store.rs:26-49`), repli si le trousseau échoue — même suffixe par déploiement ; `native-session[@<hôte>].issued-at` (date d'émission, pas un secret) à côté | **Jeton en clair** ; `0600` posé après écriture, Unix seulement, **aucune ACL sous Windows** — *✅ C7 : `0600` à la création depuis le 2026-09-19* | Non | — | Oui |
 | `logs/overlay-ui.<date>.log` (`logging.rs:64-76`) | Voir §3.6 | Non | 14 jours, **sans plafond de taille** | Non |
 | `data/fight-<id>.json` (`fight_store.rs:47-76`) | `FightSnapshot` : **noms de tous les combattants, tiers compris**, classe, genre, sorts | Non | Fin de combat, ou 24 h **au démarrage suivant seulement** | Non |
 | `sync-queue.sqlite3` (`queue.rs:118-159`) | `payload_json` **en clair** : participants, `peerName`, objets, kamas | Non | Après envoi réussi ou 10 rejets ; **jamais si hors ligne ou déconnecté** (`background.rs:291-294`) | **Non** |
@@ -525,8 +529,10 @@ politique §5) — voir [`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu
 
 **✅ Et l'overlay l'appelle** (2026-09-19, `background::rotate_token_if_due`) : au démarrage,
 une fois le jeton stocké accepté par `GET /api/v1/settings` et **avant** d'activer la file d'envoi
-— seul endroit du processus qui garde un jeton en mémoire, tout le reste relit le trousseau à
-chaque appel —, s'il a plus de **7 jours** ou si sa date d'émission est inconnue (jeton sauvegardé
+— qui était alors le seul endroit du processus à garder un jeton en mémoire ; depuis le 2026-09-20
+(`92f5472`, `overlay_sync::session`) le jeton courant est publié à l'échelle du processus pour
+les routes référentiel et le relais d'icônes, et retiré à la déconnexion ou sur verdict sans
+session (`background.rs`) —, s'il a plus de **7 jours** ou si sa date d'émission est inconnue (jeton sauvegardé
 par une version antérieure). La date vit à côté du fichier de repli (`native-session.issued-at`,
 `token_store::token_age`, posée par `save_token` à l'appairage comme à la rotation, effacée par
 `clear_token`). Le nouveau jeton est écrit au trousseau avant d'être utilisé ; un échec de la route
@@ -614,6 +620,8 @@ cas « journal détaillé », 2026-09-18).
 | C15 | Énumération de `~/.steam/…/compatdata` et `~/.wine/drive_c/users` pour trouver le log | `discovery.rs:72-100` | Proportionné (métadonnées seulement) ; le mentionner dans la description du traitement |
 | C16 | `WAKFU_COMPANION_API_URL` redirige tous les payloads vers n'importe quelle origine sans avertissement ; `WAKFU_OVERLAY_UPDATE_URL` accepte `http://` — *✅ 2026-09-19 : alerte dans « À propos » quand l'origine est surchargée ; `WAKFU_OVERLAY_UPDATE_URL` refusée hors `https://` et boucle locale* | `client.rs:36-38`, `update/mod.rs:62, 264` | Journaliser en `warn` et afficher l'origine dans « À propos » quand elle diffère du défaut |
 | C17 | Détail technique brut (chemin d'API, message d'erreur) affiché à l'écran de connexion — *✅ 2026-09-19 : bouton « Copier le détail » pour le support (décision : pas de bloc repliable)* | `login.rs:649-677` | Faible ; garder derrière un « Détails » repliable |
+| C18 | **Extractions de pacte absentes de l'information** : flux `POST /api/v1/history/pacts` ajouté le 2026-09-19 (`a42a846`), non personnel (objets, quantités, serveur, date), mais la liste « ce que l'overlay envoie » de « Vos données » et de la politique §1.4 se lit comme exhaustive et ne le citait pas (le §1.2 du site, lui, le cite) — *✅ 2026-09-21 : « vos extractions de pacte » ajouté dans « Vos données » (test verrouillant les quatre types de `HistoryEventKind`) et dans la politique §1.4 du site, quatre langues* | `a_propos_tab.rs` (`SECTIONS`), `translations.ts` | Art. 13 : nommer chaque type d'historique envoyé |
+| C19 | **Effacement complet limité au déploiement courant** : depuis `ec43ca6` (2026-09-21) le trousseau garde un jeton par déploiement, et « Supprimer les données locales » appelait `clear_token`, qui ne vise que l'emplacement de l'exe qui l'appelle — une entrée posée par un autre exe (preview contre dev) survivait ; postes de test seulement, mais le bouton promet une installation neuve — *✅ 2026-09-21 : `token_store::clear_all_tokens` (prod, dev, emplacement courant, et tout emplacement dont un fichier `.token`/`.issued-at` subsiste) appelé par `local_data::purge(Scope::Everything)`* | `token_store.rs`, `local_data.rs` | Viser tous les emplacements à l'effacement complet |
 
 ## 4. Fixtures et tests : règle à instaurer
 
@@ -660,6 +668,7 @@ et [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 | **P2** | ✅ Journal (2026-09-18) : code d'appairage et auteur de chat retirés, `EngineError::Deserialize` expurgée, noms et chemins en `debug`, plafond de 16 Mio/jour, case « Journal détaillé » décochée par défaut ; ✅ contenu des journaux vidé à la déconnexion et par « Supprimer les données locales » (avec C5) | C6 | ✅ Overlay |
 | **P2** | ✅ Jeton de repli (2026-09-19) : `0600` posé à la création (`OpenOptions::mode`), et l'avis « session conservée en clair dans … » dans la section « Compte » de la fenêtre Options. Pas de DPAPI : `%APPDATA%` est déjà réservé au compte par l'ACL du profil, à revoir si le cas se présente | C7 | Overlay |
 | **P2** | ✅ Une seule racine de dossiers (`overlay_engine::app_dirs`, migration de l'ancienne au démarrage, 2026-09-19) ; ✅ icônes relayées par l'API (`GET /api/v1/icons/{folder}/{gfxId}.png`, `vertylo.github.io` ne voit plus l'utilisateur, 2026-09-19 — politique 1.4, 2 et 4 réécrites, « À propos » aussi) ; ✅ GitHub nommé comme seul destinataire tiers ; ✅ démarrage automatique décoché par défaut (2026-09-19) | C10-C13 | Overlay |
+| **P3** | ✅ Revérification du 2026-09-21 : extractions de pacte nommées dans « Vos données » et la politique §1.4 ; effacement complet étendu à tous les emplacements de jeton (`clear_all_tokens`) ; §2.2, §2.3 et §3.5 de ce document réalignés sur le code (`session`, emplacements par déploiement) | C18, C19 | ✅ Overlay + site |
 | **P3** | ✅ `overlay-app` retiré du workspace (2026-09-19) ; ✅ origine d'API surchargée affichée en alerte dans « À propos », `WAKFU_OVERLAY_UPDATE_URL` limitée à `https://` (ou `http://` local) ; ✅ « Copier le détail » sur l'écran d'erreur de connexion ; ✅ écriture partielle de `PATCH /api/v1/settings` : fusion côté serveur (`patch` pour `profile`/`roster`, `c2f3fdb`, 2026-09-19) et correctif envoyé par l'overlay (`AlertProfile::patch_fields`, `Roster::patch_against`, 2026-09-19) | C9, C14, C16, C17 | ✅ Overlay |
 
 ## 7. Ce que ce document ne couvre pas

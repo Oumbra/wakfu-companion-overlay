@@ -1,15 +1,24 @@
 # Analyse RGPD — reste à faire côté overlay
 
 Reliquat de [`analyse-rgpd.md`](analyse-rgpd.md) pour ce dépôt (`wakfu-companion-overlay`), établi
-le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19. **Plus rien à faire côté
-overlay** : les six constats principaux (C1 à C6) et tous les constats secondaires sont clos. Les
-deux autres volets :
+le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19 et revérifié le 2026-09-21
+(`f443e2a`, commits du 19 au 21 : pactes, `overlay_sync::session`, jeton par déploiement).
+**Plus rien à faire côté overlay** : les six constats principaux (C1 à C6) et tous les constats
+secondaires, C18 et C19 compris, sont clos. Les deux autres volets :
 [`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd-site.md) (dépôt du site) et
 [`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
 
 | Prio | Tâche | Constat | État |
 | --- | --- | --- | --- |
 | — | Optionnel, écarté le 2026-09-18 : `--purge-local-data` en ligne de commande ; à rouvrir seulement si un désinstalleur arrive | C5 | — |
+
+## Fait le 2026-09-21 (revérification)
+
+| Constat | Ce qui a été fait | Où |
+| --- | --- | --- |
+| C18 | « vos extractions de pacte » ajouté à la liste de ce qui part au compte dans « Vos données » (flux `POST /api/v1/history/pacts` du 2026-09-19, que la liste — lue comme exhaustive — ne citait pas) ; un test vérifie que les quatre types de `HistoryEventKind` y sont nommés. Même ajout dans la politique §1.4 du site (`wakfu-companion`, quatre langues) | `panels/a_propos_tab.rs::SECTIONS` |
+| C19 | `token_store::clear_all_tokens` : l'effacement complet vise tous les emplacements de jeton (prod, dev, exe courant, et tout `<slot>.token`/`<slot>.issued-at` présent dans le dossier de données), plus seulement celui de l'exe qui l'appelle — une entrée de trousseau posée par un autre déploiement survivait à « Supprimer les données locales » depuis `ec43ca6` | `overlay-sync/src/token_store.rs`, `overlay-ui/src/local_data.rs::purge` |
+| — | `docs/analyse-rgpd.md` réaligné : route `pacts` au §2.2, emplacements par déploiement au §2.3, jeton en mémoire (`overlay_sync::session`) au §3.5 | `docs/analyse-rgpd.md` |
 
 ## Fait le 2026-09-19 (décisions du mainteneur)
 
