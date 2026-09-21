@@ -51,8 +51,14 @@ pub enum IconKind {
     /// (`overlay-ui::panels::combat_spell_block`), résolue par `crate::spells::SpellIndex` depuis
     /// le référentiel embarqué `assets/spells.json`. Même nature que les autres variantes : une
     /// image distante, téléchargée et mise en cache par le même `RemoteIconStore`. Le `gfx_id`
-    /// est le numéro de fichier extrait de l'URL `picture` du référentiel.
+    /// est le numéro de fichier du chemin `picture` du référentiel.
     Spell,
+    /// Icône de bonus PA/PM (`wakassets/timePointBonus/{n}.png`) — les « 1 PM », « 10 PA »… que
+    /// `assets/monster-spells.json` range parmi les sorts des monstres depuis le référentiel
+    /// enrichi du 2026-09-21. Même circuit que [`IconKind::Spell`] ; seul le sous-dossier du CDN
+    /// change, et c'est le dossier du chemin `picture` qui choisit entre les deux
+    /// (`crate::spells::picture_icon`).
+    TimePointBonus,
 }
 
 /// Référence suffisante pour construire le chemin de l'icône réelle — voir `image_path`. `gfx_id` est
@@ -73,6 +79,7 @@ impl IconRef {
             IconKind::Rarity => "rarities",
             IconKind::ItemCategory => "itemTypes",
             IconKind::Spell => "spells",
+            IconKind::TimePointBonus => "timePointBonus",
         }
     }
 

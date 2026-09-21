@@ -10,7 +10,8 @@
 //!
 //! - `spells.json` : 18 classes plus une pseudo-classe `common` de `breedId` −2 pour les sorts
 //!   communs à tout le monde (Maîtrise d'Armes, Charme de Masse, Os à Moelle) ; une entrée par sort
-//!   avec ses noms localisés et l'URL de son image sur le CDN `wakassets`. Depuis la mise à jour du
+//!   avec ses noms localisés et le chemin de son image sur le CDN `wakassets`, relatif à sa racine
+//!   (`spells/2282.png` — voir [`picture_icon`]). Depuis la mise à jour du
 //!   12 sept. 2026 il couvre aussi les mécaniques de classe (Proie, Karcham/Chamrak, Bond du
 //!   félin…), fusionnées dans `spells` avec les sorts de panneau.
 //! - `monster-spells.json` (ajouté le 13 sept. 2026) : un tableau `{ breedId, spells }` par
@@ -77,9 +78,11 @@ pub struct SpellEntry<K> {
     /// JAMAIS de `breedName` : le fichier y écrit « sacrieur », « roublard », « steamer », là où le
     /// reste du dépôt dit `sacrier`/`rogue`/`foggernaut`) ou `breed` du monstre.
     pub owner: K,
-    /// Icône distante (`wakassets/spells/{n}.png`) — même circuit de téléchargement/cache que les
-    /// icônes de monstres (`overlay-ui::remote_icons`), voir `IconKind::Spell`. `None` pour une
-    /// entrée dont le fichier n'a pas d'image (`picture: null`) : sort connu, tuile sans icône.
+    /// Icône distante (`wakassets/spells/{n}.png`, ou `timePointBonus/{n}.png` pour un bonus PA/PM
+    /// de monstre) — même circuit de téléchargement/cache que les icônes de monstres
+    /// (`overlay-ui::remote_icons`), voir `IconKind::Spell` et `IconKind::TimePointBonus`. `None`
+    /// pour une entrée dont le fichier n'a pas d'image (`picture: null`) : sort connu, tuile sans
+    /// icône.
     pub icon: Option<IconRef>,
 }
 
@@ -147,14 +150,23 @@ impl<K: Hash + Eq + Copy> SpellTable<K> {
                 continue;
             };
             for spell in owner.spells {
+                let icon = spell.picture.as_deref().and_then(|picture| {
+                    let icon = picture_icon(picture);
+                    if icon.is_none() {
+                        tracing::warn!(
+                            spell = %spell.fr,
+                            picture,
+                            "image d'un référentiel de sorts hors des dossiers connus, \
+                             entrée gardée sans icône"
+                        );
+                    }
+                    icon
+                });
                 table.insert(SpellEntry {
                     id: spell.id,
                     name: spell.fr,
                     owner: key,
-                    icon: spell.picture.as_deref().map(|picture| IconRef {
-                        kind: IconKind::Spell,
-                        gfx_id: picture_gfx_id(picture),
-                    }),
+                    icon,
                 });
             }
         }
@@ -297,19 +309,38 @@ pub fn referential_path(is_ally: bool) -> &'static str {
     }
 }
 
-/// Numéro d'image à partir de l'URL `picture` du fichier (`…/wakassets/spells/2282.png` → `2282`)
-/// — c'est ce numéro, et non l'URL complète, que `IconRef` transporte : `IconRef::image_path`
-/// reconstruit le chemin `wakassets` (et `overlay_sync::icon_cache` nomme son fichier de cache
-/// d'après lui). Les référentiels doivent donc pointer sur `wakassets/spells/` — vérifié par le
-/// test `toutes_les_images_des_referentiels_sont_sur_wakassets_spells` pour qu'une mise à jour d'un
-/// fichier vers un autre hébergement ne casse pas silencieusement l'affichage.
-fn picture_gfx_id(picture: &str) -> String {
-    let file = picture.rsplit('/').next().unwrap_or(picture);
-    file.strip_suffix(".png").unwrap_or(file).to_string()
+/// L'icône d'une entrée à partir de son chemin `picture` — `<dossier>/<numéro>.png`, relatif à
+/// la racine `wakassets` (`spells/2282.png` → `IconKind::Spell` + `2282`, `timePointBonus/9.png`
+/// → `IconKind::TimePointBonus` + `9`). Le dossier choisit le genre, le numéro est ce qu'`IconRef`
+/// transporte : `IconRef::image_path` reconstruit le même chemin, que l'API relaie
+/// (`overlay_sync::client::icon_url`) et d'après lequel `overlay_sync::icon_cache` nomme son
+/// fichier de cache. Depuis que les icônes passent par l'API (2026-09-19), les référentiels ne
+/// portent plus l'URL du CDN (`https://vertylo.github.io/wakassets/…`) : un préfixe absolu, un
+/// dossier inconnu ou une extension autre que `.png` donnent `None` — entrée connue sans icône,
+/// signalée au journal. Le test `toutes_les_images_des_referentiels_sont_dans_un_dossier_connu`
+/// garantit que les fichiers embarqués n'en contiennent aucun.
+pub fn picture_icon(picture: &str) -> Option<IconRef> {
+    let (folder, file) = picture.split_once('/')?;
+    let kind = PICTURE_FOLDERS
+        .iter()
+        .find_map(|(name, kind)| (*name == folder).then_some(*kind))?;
+    let gfx_id = file.strip_suffix(".png")?;
+    if gfx_id.is_empty() || gfx_id.contains(['/', '\\', '.']) {
+        return None;
+    }
+    Some(IconRef {
+        kind,
+        gfx_id: gfx_id.to_string(),
+    })
 }
 
-/// Préfixe d'URL attendu pour chaque `picture` des référentiels — voir `picture_gfx_id`.
-pub const WAKASSETS_SPELLS_URL_PREFIX: &str = "https://vertylo.github.io/wakassets/spells/";
+/// Dossiers `wakassets` admis dans le champ `picture` des référentiels, et le genre d'icône de
+/// chacun — miroir de `IconRef::primary_folder` pour ces deux genres, et de `ALLOWED_FOLDERS` du
+/// relais d'icônes du site (`server/icons/proxy.ts`, dépôt `wakfu-companion`).
+pub const PICTURE_FOLDERS: &[(&str, IconKind)] = &[
+    ("spells", IconKind::Spell),
+    ("timePointBonus", IconKind::TimePointBonus),
+];
 
 #[cfg(test)]
 mod tests {
@@ -397,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn toutes_les_images_des_referentiels_sont_sur_wakassets_spells() {
+    fn toutes_les_images_des_referentiels_sont_dans_un_dossier_connu() {
         for (file, json) in [
             ("spells.json", SPELLS_JSON),
             ("monster-spells.json", MONSTER_SPELLS_JSON),
@@ -408,15 +439,17 @@ mod tests {
                     let Some(picture) = spell.picture else {
                         continue; // entrée sans image, connue sans icône (voir la doc de module)
                     };
+                    let icon = picture_icon(&picture);
                     assert!(
-                        picture.starts_with(WAKASSETS_SPELLS_URL_PREFIX)
-                            && picture.ends_with(".png"),
-                        "{file} : {} ({}) : image hors de wakassets/spells — `IconRef::image_path` \
-                         ne saurait pas la reconstruire : {}",
+                        icon.is_some(),
+                        "{file} : {} ({}) : image hors des dossiers connus (`PICTURE_FOLDERS`) ou \
+                         URL absolue — `IconRef::image_path` ne saurait pas la reconstruire : {}",
                         spell.fr,
                         spell.id,
                         picture
                     );
+                    // Le chemin du fichier est exactement celui que l'overlay demandera à l'API.
+                    assert_eq!(icon.unwrap().image_path(), picture, "{file} : {}", spell.fr);
                 }
             }
         }
@@ -482,13 +515,39 @@ mod tests {
     }
 
     #[test]
-    fn picture_gfx_id_extrait_le_numero() {
-        assert_eq!(
-            picture_gfx_id("https://vertylo.github.io/wakassets/spells/2282.png"),
-            "2282"
-        );
-        assert_eq!(picture_gfx_id("2282.png"), "2282");
-        assert_eq!(picture_gfx_id("2282"), "2282");
+    fn picture_icon_lit_le_dossier_et_le_numero() {
+        let spell = picture_icon("spells/2282.png").unwrap();
+        assert_eq!(spell.kind, IconKind::Spell);
+        assert_eq!(spell.gfx_id, "2282");
+        assert_eq!(spell.image_path(), "spells/2282.png");
+        let bonus = picture_icon("timePointBonus/9.png").unwrap();
+        assert_eq!(bonus.kind, IconKind::TimePointBonus);
+        assert_eq!(bonus.image_path(), "timePointBonus/9.png");
+        // Ni URL absolue (l'ancien format), ni dossier inconnu, ni autre extension, ni numéro
+        // qui sortirait du dossier.
+        for bad in [
+            "https://vertylo.github.io/wakassets/spells/2282.png",
+            "aptitudes/12.png",
+            "spells/2282.jpg",
+            "spells/2282",
+            "2282.png",
+            "spells/",
+            "spells/../1.png",
+            "spells/a/1.png",
+        ] {
+            assert!(picture_icon(bad).is_none(), "{bad}");
+        }
+    }
+
+    /// Un chemin hors des dossiers connus n'empêche pas le chargement : l'entrée est là, sans
+    /// icône, et l'index ne panique jamais sur un fichier maintenu à la main.
+    #[test]
+    fn un_dossier_inconnu_donne_une_entree_sans_icone() {
+        let index = SpellIndex::from_json_str(
+            r#"[{"breedName":"iop","breedId":8,"spells":[{"id":2,"fr":"B","picture":"autre/2.png"}]}]"#,
+        )
+        .unwrap();
+        assert!(index.find("B", Some("iop")).unwrap().icon.is_none());
     }
 
     #[test]
