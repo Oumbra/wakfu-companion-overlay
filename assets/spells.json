@@ -74,6 +74,54 @@
         "es": "Liberación",
         "pt": "Liberação",
         "picture": "https://vertylo.github.io/wakassets/spells/4631.png"
+      },
+      {
+        "id": 8553,
+        "fr": "Téléportation",
+        "en": "Teleportation",
+        "es": "Teletransportación",
+        "pt": "Teletransporte",
+        "picture": "https://vertylo.github.io/wakassets/spells/664.png"
+      },
+      {
+        "id": 8554,
+        "fr": "Dommages",
+        "en": "Damage",
+        "es": "Daños",
+        "pt": "Danos",
+        "picture": "https://vertylo.github.io/wakassets/spells/576.png"
+      },
+      {
+        "id": 8555,
+        "fr": "Soin",
+        "en": "Heals",
+        "es": "Cura",
+        "pt": "Cura",
+        "picture": "https://vertylo.github.io/wakassets/spells/789.png"
+      },
+      {
+        "id": 8556,
+        "fr": "Armure",
+        "en": "Armor",
+        "es": "Armadura",
+        "pt": "Armadura",
+        "picture": "https://vertylo.github.io/wakassets/spells/841.png"
+      },
+      {
+        "id": 8557,
+        "fr": "Résistances",
+        "en": "Resistance",
+        "es": "Resistencias",
+        "pt": "Resistências",
+        "picture": "https://vertylo.github.io/wakassets/spells/634.png"
+      },
+      {
+        "id": 8558,
+        "fr": "Invocation",
+        "en": "Summons",
+        "es": "Invocación",
+        "pt": "Invocação",
+        "picture": "https://vertylo.github.io/wakassets/spells/3771.png"
       }
     ]
   },
