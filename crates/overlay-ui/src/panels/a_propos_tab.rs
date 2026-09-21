@@ -247,8 +247,8 @@ pub const SECTIONS: &[Section] = &[
                 "Une fois un compte appairé, l'overlay envoie à wakfu-companion.com ce que le \
                  site enregistrerait à votre place : vos combats (nom, classe et dégâts de chaque \
                  participant), vos achats, vos échanges (avec le nom du partenaire), vos \
-                 personnages, vos alertes et vos recherches de chat. Avant l'appairage, rien ne \
-                 part.",
+                 extractions de pacte, vos personnages, vos alertes et vos recherches de chat. \
+                 Avant l'appairage, rien ne part.",
             ),
             info(
                 "Un seul service tiers est contacté : GitHub, à chaque lancement, pour vérifier \
@@ -845,6 +845,16 @@ mod tests {
         assert!(texte.contains("WAKFU est une marque d'Ankama"));
         assert!(texte.contains(CONTACT_EMAIL));
         assert!(texte.contains("jamais téléversé"));
+        // Les quatre types d'historique envoyés au compte (`overlay_engine::HistoryEventKind`),
+        // tous nommés : la liste se lit comme exhaustive, elle doit l'être (2026-09-21).
+        for flux in [
+            "vos combats",
+            "vos achats",
+            "vos échanges",
+            "vos extractions de pacte",
+        ] {
+            assert!(texte.contains(flux), "« {flux} » absent de « Vos données »");
+        }
         // Un seul avertissement dans tout l'onglet : celui de la responsabilité vis-à-vis des CGU.
         let alertes: Vec<&InfoBlock> = SECTIONS
             .iter()
