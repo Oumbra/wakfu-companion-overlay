@@ -1,12 +1,14 @@
 # Analyse RGPD — reste à faire côté overlay
 
-Reliquat de [`analyse-rgpd.md`](analyse-rgpd.md) pour ce dépôt (`wakfu-companion-overlay`), établi
+Reliquat de l'analyse de conformité RGPD menée sur ce dépôt (`wakfu-companion-overlay`), établi
 le 2026-09-18 après vérification dans le code, mis à jour le 2026-09-19 et revérifié le 2026-09-21
 (`f443e2a`, commits du 19 au 21 : pactes, `overlay_sync::session`, jeton par déploiement).
 **Plus rien à faire côté overlay** : les six constats principaux (C1 à C6) et tous les constats
-secondaires, C18 et C19 compris, sont clos. Les deux autres volets :
-[`analyse-rgpd-site.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd-site.md) (dépôt du site) et
-[`analyse-rgpd-mainteneur.md`](analyse-rgpd-mainteneur.md).
+secondaires, C18 et C19 compris, sont clos. L'analyse complète et la fiche des gestes du mainteneur
+(réécriture d'historique, ticket GitHub Support, notes internes) ont été retirées du dépôt le
+2026-09-21, tous leurs points étant clos ; le volet du site vit dans
+[`docs/analyse-rgpd.md`](https://github.com/Oumbra/wakfu-companion/blob/claude/dev/docs/analyse-rgpd.md)
+du dépôt `wakfu-companion` (section 8 pour le reliquat issu de l'overlay).
 
 | Prio | Tâche | Constat | État |
 | --- | --- | --- | --- |
@@ -18,7 +20,7 @@ secondaires, C18 et C19 compris, sont clos. Les deux autres volets :
 | --- | --- | --- |
 | C18 | « vos extractions de pacte » ajouté à la liste de ce qui part au compte dans « Vos données » (flux `POST /api/v1/history/pacts` du 2026-09-19, que la liste — lue comme exhaustive — ne citait pas) ; un test vérifie que les quatre types de `HistoryEventKind` y sont nommés. Même ajout dans la politique §1.4 du site (`wakfu-companion`, quatre langues) | `panels/a_propos_tab.rs::SECTIONS` |
 | C19 | `token_store::clear_all_tokens` : l'effacement complet vise tous les emplacements de jeton (prod, dev, exe courant, et tout `<slot>.token`/`<slot>.issued-at` présent dans le dossier de données), plus seulement celui de l'exe qui l'appelle — une entrée de trousseau posée par un autre déploiement survivait à « Supprimer les données locales » depuis `ec43ca6` | `overlay-sync/src/token_store.rs`, `overlay-ui/src/local_data.rs::purge` |
-| — | `docs/analyse-rgpd.md` réaligné : route `pacts` au §2.2, emplacements par déploiement au §2.3, jeton en mémoire (`overlay_sync::session`) au §3.5 | `docs/analyse-rgpd.md` |
+| — | Analyse complète réalignée (route `pacts` au §2.2, emplacements par déploiement au §2.3, jeton en mémoire (`overlay_sync::session`) au §3.5), puis retirée du dépôt le 2026-09-21 | `efcb787:docs/analyse-rgpd.md` |
 
 ## Fait le 2026-09-19 (décisions du mainteneur)
 
