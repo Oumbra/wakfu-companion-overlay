@@ -501,3 +501,84 @@ fn les_glyphes_d_actions_ne_font_pas_partir_le_panneau() {
         remontees.borrow().gestes
     );
 }
+
+/// L'image de curseur publiée par la dernière passe est-elle `image` (la même instance décodée
+/// une fois pour toutes, voir `overlay_ui::cursor::images`) ?
+fn cursor_is(harness: &Harness<'_>, image: &egui::CustomCursorImage) -> bool {
+    harness
+        .output()
+        .platform_output
+        .cursor_image
+        .as_ref()
+        .is_some_and(|published| std::sync::Arc::ptr_eq(&published.rgba, &image.rgba))
+}
+
+/// **La croix fléchée du jeu sur la lisière de préhension** (2026-09-21, demande utilisateur) :
+/// au survol et pendant tout le geste, le curseur est `wakfu-cursor-move.png` — le `Grab`/
+/// `Grabbing` posé par `panels::drag::from_response`, traduit par `overlay_ui::cursor::apply`.
+/// Verrouillé, la lisière n'existe plus : la flèche de repos, jamais la croix.
+///
+/// Vérifié des deux côtés : posé à droite, le miroir réfléchit les formes à la sortie mais ne
+/// touche pas au curseur publié — la croix doit y être aussi. Le harnais appelle `paint_content`
+/// sans passer par `build_ui`, donc sans la réflexion de l'ENTRÉE (`mirror::mirror_input`, testée
+/// dans `overlay_ui::mirror`) : la lisière se survole aux mêmes coordonnées de mise en page, à
+/// gauche, quel que soit le côté affiché.
+#[test]
+fn la_lisiere_porte_la_croix_flechee_du_jeu() {
+    let images = overlay_ui::cursor::images();
+    for on_right in [false, true] {
+        let chrome = std::rc::Rc::new(std::cell::Cell::new(CombatChrome {
+            locked: true,
+            moved: false,
+        }));
+        let mut harness = harness_for(
+            std::rc::Rc::clone(&chrome),
+            on_right,
+            std::rc::Rc::new(std::cell::RefCell::new(Remontees::default())),
+        );
+        harness.run();
+        let saisie = poignee();
+        let plus_bas = egui::pos2(saisie.x, saisie.y + 60.0);
+
+        // (1) Verrouillé : rien à saisir, donc la flèche de repos.
+        harness.hover_at(saisie);
+        harness.run();
+        assert!(
+            cursor_is(&harness, &images.idle),
+            "à droite = {on_right} : verrouillé, la lisière ne doit pas annoncer qu'elle s'attrape"
+        );
+
+        // (2) Déverrouillé : la croix au survol…
+        chrome.set(CombatChrome {
+            locked: false,
+            moved: false,
+        });
+        harness.run();
+        harness.hover_at(saisie);
+        harness.run();
+        assert!(
+            cursor_is(&harness, &images.moving),
+            "à droite = {on_right} : la croix fléchée au survol de la lisière"
+        );
+
+        // …et pendant tout le geste, jusqu'au relâchement compris.
+        press(&mut harness, saisie, true);
+        harness.run();
+        assert!(
+            cursor_is(&harness, &images.moving),
+            "à droite = {on_right} : la croix fléchée dès l'appui"
+        );
+        harness.event(egui::Event::PointerMoved(plus_bas));
+        harness.run();
+        assert!(
+            cursor_is(&harness, &images.moving),
+            "à droite = {on_right} : la croix fléchée pendant le glissement"
+        );
+        press(&mut harness, plus_bas, false);
+        harness.run();
+        assert!(
+            cursor_is(&harness, &images.moving),
+            "à droite = {on_right} : la croix fléchée tant que la souris est sur la lisière"
+        );
+    }
+}
