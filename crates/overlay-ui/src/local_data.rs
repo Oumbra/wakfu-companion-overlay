@@ -8,7 +8,7 @@
 //! | Portée | Déclencheur | Ce qui part |
 //! | --- | --- | --- |
 //! | [`Scope::OnDisconnect`] | toute déconnexion (fenêtre Options, zone de notification, jeton refusé) — `background::spawn_auth_thread` | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
-//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › À propos › Vos données, écran de connexion) | la racine de dossiers en entier (et l'ancienne, si elle subsiste), le jeton du trousseau système, l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
+//! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › À propos › Vos données, écran de connexion) | la racine de dossiers en entier (et l'ancienne, si elle subsiste), les jetons du trousseau système (tous les déploiements, `token_store::clear_all_tokens`), l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
 //!
 //! Les deux gestes commencent par **effacer la session côté serveur**
 //! ([`revoke_server_session`]) : un jeton effacé du disque restait valide en base, donc utilisable
@@ -189,8 +189,8 @@ fn dedup(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 /// **Efface ce que `scope` emporte** et rend le rapport. Pour [`Scope::Everything`], efface aussi
-/// ce qui ne vit pas dans ces dossiers : le jeton du trousseau système
-/// (`overlay_sync::token_store`), l'inscription au démarrage de l'ordinateur (`crate::autostart` —
+/// ce qui ne vit pas dans ces dossiers : les jetons du trousseau système, un par déploiement
+/// (`overlay_sync::token_store::clear_all_tokens`), l'inscription au démarrage de l'ordinateur (`crate::autostart` —
 /// `HKCU\…\Run` ou un `.desktop`) et, sous Windows, les deux clés de registre de l'identité de
 /// notification et du protocole d'activation (`turn_watch::notify::unregister_identity`).
 ///
@@ -199,8 +199,10 @@ fn dedup(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 pub fn purge(scope: Scope) -> PurgeReport {
     if scope == Scope::Everything {
         // Le jeton d'abord : il est le seul élément effacé dont la perte est irréversible côté
-        // utilisateur (il faudra réappairer), et le seul qui ne soit pas un fichier à nous.
-        overlay_sync::token_store::clear_token();
+        // utilisateur (il faudra réappairer), et le seul qui ne soit pas un fichier à nous. TOUS
+        // les déploiements (2026-09-21) : le trousseau garde un jeton par déploiement depuis
+        // `token_store::slot`, et « installation neuve » veut dire aucun d'eux.
+        overlay_sync::token_store::clear_all_tokens();
         crate::autostart::apply(false);
         #[cfg(windows)]
         crate::turn_watch::notify::unregister_identity();

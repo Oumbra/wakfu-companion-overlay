@@ -77,9 +77,13 @@ fn issued_at_file_path() -> PathBuf {
     data_file(&format!("{}.issued-at", slot()))
 }
 
+fn data_dir() -> Option<PathBuf> {
+    overlay_engine::app_dirs::project_dirs(APP_NAME).map(|dirs| dirs.data_dir().to_path_buf())
+}
+
 fn data_file(name: &str) -> PathBuf {
-    overlay_engine::app_dirs::project_dirs(APP_NAME)
-        .map(|dirs| dirs.data_dir().join(name))
+    data_dir()
+        .map(|dir| dir.join(name))
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
@@ -219,14 +223,64 @@ pub fn load_token() -> Option<String> {
         .or_else(load_token_file)
 }
 
-/// Efface le jeton des deux emplacements possibles, et sa date d'émission — best-effort (une
-/// absence n'est pas une erreur).
+/// Efface le jeton **du déploiement courant** des deux emplacements possibles, et sa date
+/// d'émission — best-effort (une absence n'est pas une erreur). C'est le geste de la déconnexion ;
+/// l'effacement complet passe par [`clear_all_tokens`].
 pub fn clear_token() {
-    if let Ok(e) = entry() {
+    clear_slot(&slot());
+}
+
+/// Efface le jeton de **tous les déploiements** connus sur ce poste — pour « Supprimer les données
+/// locales » (`overlay_ui::local_data`, constat C5 de `docs/analyse-rgpd.md`), qui promet l'état
+/// d'une installation neuve. Depuis le 2026-09-21 chaque déploiement a son emplacement
+/// ([`slot`]) : les fichiers de repli partent avec la racine de dossiers, mais une entrée du
+/// trousseau posée par un autre exe (preview contre dev, release contre prod) survivrait à
+/// [`clear_token`], qui ne vise que l'emplacement de l'exe qui l'appelle.
+///
+/// Les emplacements visés : la prod et le déploiement dev (les deux seuls que `build.rs` fige),
+/// celui de l'exe courant (une surcharge `WAKFU_COMPANION_API_URL`), et tout emplacement dont un
+/// fichier `<slot>.token` ou `<slot>.issued-at` subsiste dans le dossier de données — `save_token`
+/// date chaque émission sur disque, trousseau ou pas, donc un déploiement appairé depuis le
+/// 2026-09-19 y laisse toujours sa trace. Le trousseau, lui, ne s'énumère pas par préfixe.
+pub fn clear_all_tokens() {
+    let mut slots: std::collections::BTreeSet<String> = KNOWN_HOSTS
+        .iter()
+        .map(|host| slot_for(&format!("https://{host}")))
+        .collect();
+    slots.insert(slot());
+    if let Some(dir) = data_dir() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            slots.extend(
+                entries
+                    .flatten()
+                    .filter_map(|entry| slot_from_file_name(&entry.file_name().to_string_lossy())),
+            );
+        }
+    }
+    for slot in slots {
+        clear_slot(&slot);
+    }
+}
+
+/// Hôtes des déploiements figés par `build.rs` — les seuls qu'un exe livré ou de preview vise
+/// sans surcharge à l'exécution.
+const KNOWN_HOSTS: &[&str] = &["wakfu-companion.com", "claude-dev.wakfu-companion.com"];
+
+/// L'emplacement dont `name` est un fichier (`<slot>.token`, `<slot>.issued-at`) — `None` pour
+/// tout autre fichier du dossier de données.
+fn slot_from_file_name(name: &str) -> Option<String> {
+    let stem = name
+        .strip_suffix(".token")
+        .or_else(|| name.strip_suffix(".issued-at"))?;
+    (stem == ACCOUNT || stem.starts_with(&format!("{ACCOUNT}@"))).then(|| stem.to_string())
+}
+
+fn clear_slot(slot: &str) {
+    if let Ok(e) = keyring::Entry::new(APP_NAME, slot) {
         let _ = e.delete_credential();
     }
-    let _ = std::fs::remove_file(token_file_path());
-    let _ = std::fs::remove_file(issued_at_file_path());
+    let _ = std::fs::remove_file(data_file(&format!("{slot}.token")));
+    let _ = std::fs::remove_file(data_file(&format!("{slot}.issued-at")));
 }
 
 #[cfg(test)]
@@ -245,6 +299,23 @@ mod tests {
             slot_for("http://localhost:8788"),
             "native-session@localhost_8788"
         );
+    }
+
+    /// Les emplacements se retrouvent d'après leurs fichiers ; le reste du dossier de données
+    /// (file de synchro, caches) n'en est pas un.
+    #[test]
+    fn un_emplacement_se_retrouve_d_apres_ses_fichiers() {
+        assert_eq!(
+            slot_from_file_name("native-session.token").as_deref(),
+            Some("native-session")
+        );
+        assert_eq!(
+            slot_from_file_name("native-session@localhost_8788.issued-at").as_deref(),
+            Some("native-session@localhost_8788")
+        );
+        assert_eq!(slot_from_file_name("native-session"), None);
+        assert_eq!(slot_from_file_name("sync-queue.sqlite3"), None);
+        assert_eq!(slot_from_file_name("other.token"), None);
     }
 
     /// Garde-fou de non-régression : trouvé en session (2026-09-01) en testant contre un vrai
