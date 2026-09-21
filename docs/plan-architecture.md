@@ -634,7 +634,10 @@ automatiquement par un navigateur, ce qui n'existe pas ici).
 sous Linux). Repli explicite et signalé au journal (pas encore dans l'interface, C7 de
 [`analyse-rgpd.md`](analyse-rgpd.md)) : fichier `0600` sous `$XDG_DATA_HOME/wakfu-overlay/` quand
 aucun Secret Service n'est disponible (WM minimalistes) ou que le trousseau ne relit pas ce qu'il
-a écrit. Ce que ce jeton ouvre et comment il se révoque : §10.
+a écrit. Un emplacement **par déploiement** depuis le 2026-09-21 (`token_store::slot`, dérivé de
+`client::base_url()`) : `native-session` pour la prod, `native-session@<hôte>` pour dev ou un
+`wrangler pages dev` local — un exe de preview et un exe de release sur le même poste ne
+s'écrasent plus leur session. Ce que ce jeton ouvre et comment il se révoque : §10.
 
 ### 7.3 File d'envoi (miroir Rust de `SyncQueueService`) — ✅ fait (lot L5, 2026-09-02)
 
@@ -803,8 +806,9 @@ DERNIER instantané compte.
   du thread Auth (`session::wait_resolved`, couvert par l'écran de chargement), puis rafraîchissent
   — et rafraîchissent encore à chaque nouvelle session (`wait_token_after` : premier « Se
   connecter », reconnexion). Sans session : cache disque, sinon repli embarqué. `gen-catalog-fallback`
-  réutilise le jeton de l'overlay appairé sur le poste (`token_store::load_token`), qui doit
-  l'avoir été contre le déploiement visé.
+  réutilise le jeton de l'overlay appairé sur le poste contre le déploiement visé
+  (`token_store::load_token`, un emplacement de trousseau par déploiement depuis le 2026-09-21 :
+  `native-session` pour la prod, `native-session@<hôte>` sinon — preview et release cohabitent).
 - Cache disque dans `$XDG_CACHE_HOME` / `%LOCALAPPDATA%`, validé par `ETag`/version.
 - Repli hors-ligne : `assets/catalog/catalog-index.json.gz` embarqué (`include_bytes!`), utilisé si
   aucun cache et pas de réseau — l'overlay reste utilisable, avec un bandeau « catalogue daté ».
