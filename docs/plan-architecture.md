@@ -2238,13 +2238,22 @@ ouvert dont « les deux ne peuvent pas vivre en même temps ».
   Jusque-là la bande butait 36 px sous le bord haut (la réserve d'infobulle était bornée avec elle)
   sans que rien ne l'explique à l'écran ; les réserves peuvent maintenant déborder, ce qui rend au
   passage le cas « rangée en bas » atteignable.
+- **La rangée n'apparaît qu'au survol** (2026-09-21, demande utilisateur : « afficher les icônes
+  de verrouillage et de réinitialisation de position seulement lors du survol des overlays »).
+  Pointeur hors de la bande et de la pastille, rien n'est peint ni déclaré ; la zone de survol
+  réunit les deux (air compris), sans quoi quitter la bande pour cliquer le cadenas le ferait
+  disparaître. La réserve de la fenêtre OS, elle, ne change pas — la pastille apparaît sans rien
+  retailler. En mode clic-traversant la fenêtre ne reçoit aucun pointeur : la pastille n'y existe
+  jamais, et elle n'y serait pas cliquable de toute façon. Même règle sur le panneau Combat
+  (§9.1 duovicies).
 
 **Captures** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, paire Kamas/XP empilée),
 `recap_session_ordinaire` (XP ramenée, trois lignes), `recap_tooltip_kamas_au_dessus`,
 `recap_tooltip_duree_reprises`, `recap_tooltip_remise_a_zero`, `recap_confirmation_remise_a_zero`,
-`recap_actions_verrouille`, `recap_actions_deverrouille_deplace`, `recap_actions_en_bas` — chrono
-et heure de début fixés (1 h 23 min 45 s, 20:12), ils n'existent pas dans le fichier par
-construction.
+`recap_actions_verrouille`, `recap_actions_deverrouille_deplace`, `recap_actions_en_bas` (les trois
+rangées d'actions rendues pointeur sur la bande), `recap_actions_hors_survol` (la même bande sans
+pointeur : pas de pastille) — chrono et heure de début fixés (1 h 23 min 45 s, 20:12), ils
+n'existent pas dans le fichier par construction.
 
 ### 9.1 novodecies Démarrage actif par défaut (retiré), bouton « Fermer l'overlay » (2026-09-16)
 
@@ -2548,6 +2557,13 @@ différences près que la demande impose :
   cadenas et son glyphe voisin se suffisent ; la seule conséquence à garder en tête est qu'en mode
   clic-traversant la poignée est inerte (l'OS fait passer les clics à travers), et que plus aucun
   texte de l'interface ne le dit — contrairement à la bande, qui garde sa ligne d'aide.
+- **La pastille n'apparaît qu'au survol du panneau** (2026-09-21, même demande que pour la bande
+  Récap, voir §9.1 octodecies). La zone de survol est le panneau entier (`ui.max_rect()`) : c'est
+  « l'overlay » tel que l'utilisateur le nomme, et ce rectangle est symétrique autour de l'axe du
+  miroir, donc le pointeur réfléchi par `mirror_input` y tombe si et seulement si le vrai y est —
+  aucun cas particulier côté droit. Hors survol, rien n'est peint ni déclaré ; les autres planches
+  de Combat (métriques, sorts, miroir, défilement) sont rendues sans pointeur et ne montrent donc
+  plus la pastille.
 
 **Au passage, un bug d'écriture de config corrigé côté Linux** : `validate_and_commit_options` du
 binaire X11 reconstruisait sa propre `OverlayConfig` au lieu d'appeler `persist_config`, et cette
