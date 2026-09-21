@@ -803,7 +803,8 @@ DERNIER instantané compte.
   du thread Auth (`session::wait_resolved`, couvert par l'écran de chargement), puis rafraîchissent
   — et rafraîchissent encore à chaque nouvelle session (`wait_token_after` : premier « Se
   connecter », reconnexion). Sans session : cache disque, sinon repli embarqué. `gen-catalog-fallback`
-  lit le jeton dans `WAKFU_COMPANION_API_TOKEN`.
+  réutilise le jeton de l'overlay appairé sur le poste (`token_store::load_token`), qui doit
+  l'avoir été contre le déploiement visé.
 - Cache disque dans `$XDG_CACHE_HOME` / `%LOCALAPPDATA%`, validé par `ETag`/version.
 - Repli hors-ligne : `assets/catalog/catalog-index.json.gz` embarqué (`include_bytes!`), utilisé si
   aucun cache et pas de réseau — l'overlay reste utilisable, avec un bandeau « catalogue daté ».
