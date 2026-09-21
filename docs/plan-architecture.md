@@ -748,6 +748,28 @@ ce poste de dev) pour retrouver les formules et raisonnements exacts plutôt que
   lot (`git stash`), sont corrigées au passage — le workspace entier est maintenant propre sous
   `clippy -D warnings`.
 
+**Le rattrapage de `wakfu.log` n'est ingéré qu'une fois le roster connu (2026-09-21).** Vérification
+des trois flux (achats/HDV, échanges, extractions de pacte) sur le vrai `wakfu.log` du jour rejoué
+dans l'`Engine` (`cargo run -p overlay-engine --example dump_sync_events -- <wakfu.log>
+[settings.json]`) puis relus sur `GET /api/v1/history/{purchases,trades,pacts}` du compte dev : les
+trois partent bien — mais le journal montrait « rattrapage initial de wakfu.log terminé » (13:36:16)
+onze secondes AVANT « réglages de compte appliqués à l'Engine » (13:36:27). Tout le rattrapage
+tournait sans roster, et ses événements en gardent la trace pour toujours (la signature, donc le
+`clientKey`, ne dépend pas du roster ; le serveur ne reprend jamais `gameServer` ni ne retire un
+échange) : achats HDV avec `gameServer: null`, échange entre deux personnages du MÊME roster envoyé
+deux fois (une par côté) là où `build_trade_sync_event`/`registerTrade` l'ignorent, combats sans
+classe de roster ni `xpGained` par participant. Depuis la fenêtre de connexion (§9.1 undecies),
+rien ne s'affiche sans compte lié : `spawn_engine_thread` retient donc les lots (`deferred_batches`,
+ordre et `is_initial_load` conservés) et les rejoue d'un trait au premier `ApplySettings`, par le
+même chemin que le direct. `StartupProgress::mark_log_replayed` garde son sens de « fichier lu par
+le watcher » (un utilisateur sans jeton doit pouvoir cliquer « Se connecter » sans attendre) ; une
+relecture (`ChangeLogPath`, chien de garde) vide ce qui est retenu. Vérifié en vrai : « roster
+connu — rejeu des lots de wakfu.log retenus depuis le démarrage batch_count=2 line_count=2657 »,
+puis « lot d'historique envoyé au compte kind="purchase" sent=5 inserted=5 » — nouvelle trace
+d'envoi RÉUSSI (`SyncQueue::flush_once`), seule façon de vérifier après coup qu'un lot est parti,
+la file SQLite étant vidée dès la réponse. Les entrées déjà envoyées sans roster restent telles
+quelles côté serveur (à nettoyer à la main si besoin).
+
 ### 7.4 Synchro des compteurs de Suivi (watchlist) — ✅ fait (2026-09-07)
 
 Mécanisme **VOLONTAIREMENT distinct** de la file d'envoi du §7.3 (`SyncQueue`) — voir §14 point 3
