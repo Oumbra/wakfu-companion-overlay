@@ -202,6 +202,32 @@ Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tou
 | [`s3-window-linux`](spikes/s3-window-linux/) | ✅ validé | `harness.sh` depuis le dossier du spike (Xvfb) |
 | [`s4-capture-hors-focus`](spikes/s4-capture-hors-focus/) | ✅ validé | voir son README (Windows) |
 
+## Projet non officiel — Wakfu, Ankama et vous
+
+Wakfu Companion est un **projet de fan, gratuit et sans but lucratif**, qui n'est ni édité, ni
+hébergé, ni approuvé par Ankama et n'a aucun lien avec cette société. **WAKFU est une marque
+d'Ankama.** Les noms, images, icônes et éléments d'interface du jeu reproduits dans ce dépôt et dans
+le binaire restent la propriété d'Ankama Games et ne servent qu'à illustrer ; tout contenu lui
+appartenant est retiré sur simple demande de sa part (`contact@wakfu-companion.com`).
+
+Les données de jeu affichées (objets, monstres, raretés, catégories) descendent des fichiers que
+Ankama met à disposition des projets communautaires, sous sa
+[licence d'utilisation des données Wakfu](https://static.ankama.com/comm/2019_03/2019-03-11_Licence%20d'utilisation_Donne_es%20Wakfu_v.1%20(1).pdf)
+(usage personnel et non commercial), qui impose la mention suivante :
+
+> WAKFU MMORPG : © 2012-2026 Ankama Studio. Tous droits réservés.
+
+**Ce que l'overlay fait vis-à-vis du client de jeu, et ce que les CGU d'Ankama en disent**, est
+détaillé dans [`docs/analyse-cgu.md`](docs/analyse-cgu.md) et rappelé dans l'onglet « À propos »
+de l'overlay. En deux mots : il lit le fichier `wakfu.log` que le jeu écrit lui-même, ne se
+connecte jamais aux serveurs d'Ankama, ne lit pas la mémoire du client et ne modifie aucun de ses
+fichiers ; deux fonctions optionnelles vont plus loin (frappe d'une commande dans le chat sur
+raccourci, lecture de l'image de la fenêtre pour la notification de tour). Les
+[CGU d'Ankama](https://www.wakfu.com/fr/cgu) n'autorisent **aucun programme tiers par défaut** :
+utiliser cet overlay relève de l'appréciation et de la seule responsabilité de chaque joueur.
+
 ## Licence
 
-[MIT](LICENSE).
+[MIT](LICENSE) pour le code de ce dépôt. Cette licence ne couvre **pas** les éléments appartenant
+à Ankama (voir la section précédente) ni les polices (`assets/fonts/`, OFL et UFL, licences
+jointes) ni les sons (`crates/overlay-ui/assets/sounds/README.md`).
