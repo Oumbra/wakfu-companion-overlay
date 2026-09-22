@@ -115,9 +115,9 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-    SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOPMOST,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -145,7 +145,8 @@ use winit::platform::windows::WindowAttributesExtWindows;
 const COMPLETION_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
-/// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
+/// Délai de grâce avant repli hors topmost (recollage juste au-dessus de sa fenêtre de jeu,
+/// `App::glue_above_game`) — voir `OverlayWindow::pending_demote_since` et
 /// `App::sync_topmost`. Assez court pour qu'un changement de fenêtre volontaire et soutenu
 /// reste respecté rapidement (ne pas recouvrir durablement une autre appli, retour utilisateur
 /// 2026-09-01), assez long pour absorber un aléa de timing d'un seul tick (~50 ms) entre les deux
@@ -376,12 +377,14 @@ struct OverlayWindow {
     /// rien), et même raison de fond : une fenêtre plus haute que son bloc capte les clics sur du
     /// vide. `None` pour toute autre zone.
     last_recap_height: Option<f32>,
-    /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
-    /// rien (voir `App::sync_topmost`).
+    /// État déjà appliqué — `true` : `HWND_TOPMOST` ; `false` : collé juste au-dessus de sa
+    /// fenêtre de jeu, hors bande topmost (voir `App::glue_above_game`). Évite un `SetWindowPos`
+    /// par tick pour rien (voir `App::sync_topmost`).
     is_topmost: bool,
-    /// Dernière réaffirmation PÉRIODIQUE de `HWND_TOPMOST` (voir `App::sync_topmost` et
-    /// `TOPMOST_REASSERT_INTERVAL`) — distincte d'un changement d'état détecté (`is_topmost`),
-    /// qui reste réaffirmé immédiatement quel que soit ce champ.
+    /// Dernière réaffirmation PÉRIODIQUE de l'état courant (voir `App::sync_topmost` et
+    /// `TOPMOST_REASSERT_INTERVAL`) — `HWND_TOPMOST` quand `is_topmost`, recollage au-dessus de
+    /// la fenêtre de jeu sinon. Distincte d'un changement d'état détecté (`is_topmost`), qui reste
+    /// appliqué immédiatement quel que soit ce champ. `None` force la vérification au prochain tick.
     last_topmost_reassert: Option<std::time::Instant>,
     /// Instant depuis lequel `relevant` est retombé à `false` en continu, tant que l'overlay est
     /// encore `HWND_TOPMOST` — `None` tant qu'il est retombé à `false` pour la première fois OU
@@ -1786,8 +1789,10 @@ impl App {
                 // `Surface` recréée de zéro rejoue ce chemin.
                 recreate_surface(&mut overlay.gpu, &overlay.window);
                 overlay.next_redraw_at = Some(std::time::Instant::now());
-                // Le z-order d'une fenêtre masquée n'a pas été suivi pendant son absence :
-                // réaffirmer `HWND_TOPMOST` au prochain tick plutôt qu'à la prochaine échéance
+                // Le z-order d'une fenêtre masquée n'a pas été suivi pendant son absence, et
+                // `ShowWindow(SW_SHOW)` (winit) peut la remonter : réaffirmer son état au prochain
+                // tick — `HWND_TOPMOST` si son jeu a le focus, recollage juste au-dessus de sa
+                // fenêtre de jeu sinon (voir `sync_topmost`) — plutôt qu'à la prochaine échéance
                 // périodique (jusqu'à `TOPMOST_REASSERT_INTERVAL` plus tard).
                 overlay.last_topmost_reassert = None;
             }
@@ -2117,6 +2122,63 @@ impl App {
         match window.window_handle().expect("handle de fenêtre").as_raw() {
             RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
             other => panic!("handle de fenêtre inattendu sur Windows : {other:?}"),
+        }
+    }
+
+    /// `hwnd` porte-t-il `WS_EX_TOPMOST` — appartient-il à la bande topmost du z-order ?
+    fn is_topmost_window(hwnd: HWND) -> bool {
+        let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        ex_style & WS_EX_TOPMOST.0 != 0
+    }
+
+    /// Colle un overlay rétrogradé **juste au-dessus de sa fenêtre de jeu** dans le z-order, hors
+    /// bande topmost — voir `sync_topmost` (correctif 2026-09-23). `hWndInsertAfter` est la fenêtre
+    /// qui précède immédiatement le jeu (`GW_HWNDPREV`, n'importe quel processus) ; s'il n'y en a
+    /// pas, ou si elle est elle-même topmost (le jeu est alors la PREMIÈRE fenêtre non-topmost),
+    /// `HWND_NOTOPMOST` — tête de la bande non-topmost — revient au même endroit. Insérer après
+    /// une fenêtre non-topmost retire au passage `WS_EX_TOPMOST` à l'overlay (règle Win32 : un
+    /// topmost repositionné derrière une fenêtre non-topmost cesse de l'être). Sans effet s'il est
+    /// déjà exactement là (la fenêtre précédant le jeu est l'overlay lui-même).
+    fn glue_above_game(hwnd: HWND, game_hwnd: HWND) {
+        let prev = unsafe { GetWindow(game_hwnd, GW_HWNDPREV) }.unwrap_or_default();
+        if prev == hwnd {
+            return;
+        }
+        let insert_after = if prev.0.is_null() || Self::is_topmost_window(prev) {
+            HWND_NOTOPMOST
+        } else {
+            prev
+        };
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(insert_after),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+
+    /// L'overlay `hwnd` est-il déjà collé au-dessus de sa fenêtre de jeu — c'est-à-dire dans la
+    /// suite CONTIGUË de fenêtres de son groupe (`group` : les overlays de ce même client) qui
+    /// précède immédiatement `game_hwnd` dans le z-order ? Sert à `sync_topmost` à ne pas
+    /// remélanger inutilement des frères déjà bien placés à chaque revérification périodique.
+    fn is_glued_above_game(hwnd: HWND, game_hwnd: HWND, group: &[HWND]) -> bool {
+        let mut cursor = game_hwnd;
+        loop {
+            let Ok(prev) = (unsafe { GetWindow(cursor, GW_HWNDPREV) }) else {
+                return false;
+            };
+            if prev == hwnd {
+                return true;
+            }
+            if !group.contains(&prev) {
+                return false;
+            }
+            cursor = prev;
         }
     }
 
@@ -2514,11 +2576,28 @@ impl App {
     }
 
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
-    /// sinon repli en z-order normal — pour ne plus recouvrir une application quelconque devenue
-    /// active (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus
-    /// l'explorateur de fichiers"), ET pour que passer d'une fenêtre de jeu à l'autre en
-    /// multi-compte fasse remonter le BON overlay au premier plan. Un seul `GetForegroundWindow()`
-    /// par tick, comparé au `HWND` de chaque fenêtre suivie — coût négligeable.
+    /// sinon **collé juste au-dessus de sa fenêtre de jeu dans le z-order, hors bande topmost**
+    /// (`glue_above_game`) — pour ne plus recouvrir une application quelconque devenue active
+    /// (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus l'explorateur
+    /// de fichiers"), ET pour que passer d'une fenêtre de jeu à l'autre en multi-compte fasse
+    /// remonter le BON overlay au premier plan. Un seul `GetForegroundWindow()` par tick, comparé
+    /// au `HWND` de chaque fenêtre suivie — coût négligeable.
+    ///
+    /// **Correctif 2026-09-23** (retour utilisateur, captures à l'appui, journal `session_id=26088`
+    /// : les bascules topmost s'y enchaînent pourtant exactement comme prévu) : le repli était
+    /// `SetWindowPos(HWND_NOTOPMOST)`, qui place la fenêtre **en tête de la bande non-topmost** —
+    /// c'est-à-dire AU-DESSUS de l'application qui vient d'être activée, tant que celle-ci n'est
+    /// pas réactivée. Deux clients côte à côte : les overlays de Canis, rétrogradés 1,5 s après
+    /// le passage sur Zoroark, restaient dessinés PAR-DESSUS la fenêtre de Zoroark (qui, active
+    /// depuis avant la rétrogradation, ne repassait jamais devant eux) ; même chose au-dessus de
+    /// VS Code ou de l'outil de capture. Le modèle voulu est « un groupe d'overlays par fenêtre de
+    /// jeu, qui suit sa fenêtre » : rétrogradé, un overlay est désormais inséré juste au-dessus
+    /// de SA fenêtre de jeu (`GW_HWNDPREV` de celle-ci) — visible tant que son client l'est,
+    /// recouvert dès que n'importe quelle autre fenêtre passe devant ce client, exactement comme
+    /// s'il en faisait partie. Seul le groupe du client au premier plan est topmost. Le recollage
+    /// est revérifié périodiquement (`TOPMOST_REASSERT_INTERVAL`, `is_glued_above_game`) : un
+    /// `ShowWindow` (panneau Combat qui réapparaît au début d'un combat, voir
+    /// `sync_panel_visibility`) ou un tiers peut le défaire.
     ///
     /// **Correctif 2026-09-01** (retour utilisateur, multi-fenêtre) : la politique précédente
     /// (« TOUTE fenêtre de jeu Wakfu remet TOUS les overlays au premier plan ») avait deux défauts
@@ -2573,14 +2652,26 @@ impl App {
         // TOUS les overlays de CE personnage relevant — jamais ceux d'un AUTRE personnage en
         // multi-compte, qui gardent leur propre calcul indépendant.
         let mut relevant_game_hwnds: Vec<HWND> = Vec::new();
+        // Le groupe de chaque fenêtre de jeu : les `HWND` de tous ses overlays — ce que
+        // `is_glued_above_game` doit traverser pour reconnaître un overlay déjà recollé derrière
+        // ses frères (une `Vec` de paires : `HWND` n'est pas `Hash`, et il y a une poignée de
+        // fenêtres au plus).
+        let mut groups: Vec<(HWND, Vec<HWND>)> = Vec::new();
         for overlay in self.windows.values() {
             if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                 continue;
             }
-            let this_relevant =
-                overlay.game_hwnd == foreground || Self::hwnd_of(&overlay.window) == foreground;
+            let hwnd = Self::hwnd_of(&overlay.window);
+            let this_relevant = overlay.game_hwnd == foreground || hwnd == foreground;
             if this_relevant && !relevant_game_hwnds.contains(&overlay.game_hwnd) {
                 relevant_game_hwnds.push(overlay.game_hwnd);
+            }
+            match groups
+                .iter_mut()
+                .find(|(game, _)| *game == overlay.game_hwnd)
+            {
+                Some((_, members)) => members.push(hwnd),
+                None => groups.push((overlay.game_hwnd, vec![hwnd])),
             }
         }
 
@@ -2706,42 +2797,57 @@ impl App {
             // `relevant == false` : retour utilisateur 2026-09-02 (vidéo à l'appui), l'overlay
             // Combat disparaissait « un coup sur deux » en changeant de fenêtre alors que le Suivi
             // du même personnage restait visible au même instant, bien que les deux passent par ce
-            // même code — la démotion en NOTOPMOST était jusqu'ici IMMÉDIATE dès qu'un seul tick
-            // (~50 ms) voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu, ce qui
-            // rend le résultat sensible au moindre aléa d'ordonnancement entre les deux fenêtres
-            // overlay (Windows peut livrer le nouveau premier plan à l'un des deux `SetWindowPos`
-            // un tick avant l'autre). `pending_demote_since` absorbe cet aléa : on ne démote qu'une
-            // fois `relevant` resté faux pendant `TOPMOST_DEMOTE_GRACE` en continu, pas déjà
-            // démoté sinon. Un retour à `relevant == true` avant l'échéance annule la démotion sans
+            // même code — la démotion était jusqu'ici IMMÉDIATE dès qu'un seul tick (~50 ms)
+            // voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu, ce qui rend le
+            // résultat sensible au moindre aléa d'ordonnancement entre les deux fenêtres overlay
+            // (Windows peut livrer le nouveau premier plan à l'un des deux `SetWindowPos` un tick
+            // avant l'autre). `pending_demote_since` absorbe cet aléa : on ne démote qu'une fois
+            // `relevant` resté faux pendant `TOPMOST_DEMOTE_GRACE` en continu, pas déjà démoté
+            // sinon. Un retour à `relevant == true` avant l'échéance annule la démotion sans
             // jamais avoir bougé le z-order (voir la branche `if relevant` ci-dessus, qui vide
             // `pending_demote_since`).
+            let hwnd = Self::hwnd_of(&overlay.window);
             if !overlay.is_topmost {
+                // Déjà rétrogradé : revérifier périodiquement qu'il est toujours collé au-dessus
+                // de sa fenêtre de jeu (voir la doc de cette méthode, correctif 2026-09-23), au
+                // même rythme que la réaffirmation topmost — et dès le prochain tick quand
+                // `sync_panel_visibility` vient de le réafficher (`last_topmost_reassert = None`).
+                let due_for_reassert = overlay
+                    .last_topmost_reassert
+                    .is_none_or(|t| now.duration_since(t) >= TOPMOST_REASSERT_INTERVAL);
+                if !due_for_reassert {
+                    continue;
+                }
+                let group = groups
+                    .iter()
+                    .find(|(game, _)| *game == overlay.game_hwnd)
+                    .map(|(_, members)| members.as_slice())
+                    .unwrap_or(&[]);
+                if !Self::is_glued_above_game(hwnd, overlay.game_hwnd, group) {
+                    Self::glue_above_game(hwnd, overlay.game_hwnd);
+                    tracing::debug!(
+                        "[topmost] {} ({:?}) recollé au-dessus de sa fenêtre de jeu",
+                        overlay.character_name,
+                        overlay.kind
+                    );
+                }
+                overlay.last_topmost_reassert = Some(now);
                 continue;
             }
             let demote_due_at = *overlay.pending_demote_since.get_or_insert(now);
             if now.duration_since(demote_due_at) < TOPMOST_DEMOTE_GRACE {
                 continue;
             }
-            let hwnd = Self::hwnd_of(&overlay.window);
-            unsafe {
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_NOTOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                );
-            }
+            Self::glue_above_game(hwnd, overlay.game_hwnd);
             tracing::info!(
-                "[topmost] {} ({:?}) -> HWND_NOTOPMOST (après {:?} sans pertinence)",
+                "[topmost] {} ({:?}) -> collé au-dessus de sa fenêtre de jeu, hors topmost (après {:?} sans pertinence)",
                 overlay.character_name,
                 overlay.kind,
                 now.duration_since(demote_due_at)
             );
             overlay.is_topmost = false;
             overlay.pending_demote_since = None;
+            overlay.last_topmost_reassert = Some(now);
         }
 
         // **Les fenêtres qui voilent le jeu restent devant tout** (2026-09-17) : chaque
