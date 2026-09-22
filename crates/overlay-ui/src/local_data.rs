@@ -128,6 +128,66 @@ fn shared_dirs() -> Option<directories::ProjectDirs> {
     overlay_engine::app_dirs::project_dirs(SHARED_APP_NAME)
 }
 
+/// **L'overlay a-t-il déjà écrit quelque chose sur cette machine ?** — ce qui décide d'offrir ou
+/// non « Supprimer les données locales » (2026-09-22, demande utilisateur : « ce lien devrait être
+/// proposé uniquement s'il y a des données locales ; à la première connexion, l'utilisateur ne
+/// comprendra pas qu'il s'affiche alors qu'il n'a rien, ça va peut-être l'inquiéter »).
+///
+/// **Ce n'est pas `targets(Everything).iter().any(exists)`**, et c'est tout le piège : le dossier
+/// de configuration et le journal du jour sont créés par le lancement EN COURS, avant même que la
+/// carte s'affiche. Ce test-là répondrait toujours « oui », y compris au tout premier démarrage —
+/// exactement le cas qu'on veut écarter.
+///
+/// Sont donc sondés les seuls dépôts qu'un usage réel laisse derrière lui :
+///
+/// - un jeton de session dans le trousseau — il n'y en a qu'après un appairage ;
+/// - un combat en cours ou un récap de session (`fight_store`) ;
+/// - les compteurs de Suivi (`watchlist`) ;
+/// - un gabarit de tour (`turn_watch::templates`) ;
+/// - l'ancienne racine de configuration, si une migration l'a laissée ;
+/// - un `config.toml` **antérieur au démarrage du processus** — le seul test qui distingue
+///   « déjà utilisé » de « première ouverture », puisque le fichier existe dans les deux cas.
+///
+/// Sondé une fois, au premier affichage de l'écran, et retenu par l'appelant : pas d'accès disque
+/// à chaque frame.
+pub fn has_user_data(process_start: std::time::SystemTime) -> bool {
+    if overlay_sync::token_store::load_token().is_some() {
+        return true;
+    }
+    let mut paths = vec![
+        overlay_engine::fight_store::default_store_dir(),
+        overlay_engine::watchlist::default_store_path(),
+    ];
+    paths.extend(crate::turn_watch::templates::dir());
+    paths
+        .extend(crate::config::legacy_project_dirs().map(|dirs| dirs.project_path().to_path_buf()));
+    if paths.iter().any(|path| not_empty(path)) {
+        return true;
+    }
+    crate::config::config_path().is_some_and(|path| older_than(&path, process_start))
+}
+
+/// Le chemin existe **et porte quelque chose** : un dossier créé mais vide — `data/` posé au
+/// démarrage sans qu'aucun combat n'ait eu lieu — ne compte pas comme une donnée de l'utilisateur.
+fn not_empty(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => std::fs::read_dir(path)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false),
+        Ok(meta) => meta.len() > 0,
+        Err(_) => false,
+    }
+}
+
+/// Le fichier existe et sa dernière écriture précède `instant` — voir [`has_user_data`]. Une
+/// horloge illisible (système de fichiers exotique, date dans le futur après un changement d'heure)
+/// rend `false` : dans le doute, la Carte n'annonce pas des données qu'elle n'a pas vues.
+fn older_than(path: &Path, instant: std::time::SystemTime) -> bool {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .is_ok_and(|modified| modified < instant)
+}
+
 /// **Les chemins que `scope` emporte**, dans l'ordre de suppression et sans doublon.
 ///
 /// Les journaux viennent **en dernier** : le rapport de purge y est écrit par l'appelant, autant

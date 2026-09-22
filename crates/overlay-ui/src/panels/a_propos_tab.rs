@@ -282,7 +282,7 @@ pub const SECTIONS: &[Section] = &[
 
 /// Titre de la section sous laquelle se glissent [`api_override_notice`] et le bloc
 /// « Supprimer les données locales » ([`PURGE_INFO`]).
-const VOS_DONNEES_TITLE: &str = "Vos données";
+pub const VOS_DONNEES_TITLE: &str = "Vos données";
 
 /// Le bloc d'alerte qui précède le bouton « Supprimer les données locales » — ce que « tout »
 /// recouvre, et ce qui reste (le compte, sur le site). Sorti en constante pour être vérifiable
@@ -302,7 +302,7 @@ pub const PURGE_INFO: &str = "« Supprimer les données locales » efface de cet
                               compte et son historique, eux, restent sur le site.";
 
 /// Titre de la première section — celle sous laquelle se peint [`copyright_notice`].
-const WAKFU_COMPANION_TITLE: &str = "Wakfu Companion";
+pub const WAKFU_COMPANION_TITLE: &str = "Wakfu Companion";
 
 /// La mention de droits d'auteur que la **licence d'utilisation des données Wakfu** d'Ankama
 /// (v1 du 2019-03-11, `docs/analyse-cgu.md` §1) impose à tout projet qui exploite ses données de

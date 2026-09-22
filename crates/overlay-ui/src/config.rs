@@ -623,6 +623,12 @@ fn config_file() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("config.toml"))
 }
 
+/// Le chemin de `config.toml` — pour `local_data::has_user_data`, qui a besoin de sa date de
+/// dernière écriture pour distinguer une installation déjà utilisée d'une première ouverture.
+pub fn config_path() -> Option<PathBuf> {
+    config_file()
+}
+
 /// **Déplace ce que l'ancienne racine contenait vers la racine unique, puis la supprime** — à
 /// appeler au démarrage, avant [`load`]. Constat C13 (2026-09-19) : sous Windows, `config.toml`
 /// et `turn-templates/` vivaient sous `%APPDATA%\Oumbra\wakfu-companion-overlay\`, tout le reste

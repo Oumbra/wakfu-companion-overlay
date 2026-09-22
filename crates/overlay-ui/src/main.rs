@@ -1126,6 +1126,20 @@ impl App {
                     state.manual_update = manual_update;
                     overlay.next_redraw_at = Some(std::time::Instant::now());
                 }
+                // **La hauteur de l'écran**, que seul l'hôte connaît : le volet « À propos » ne
+                // dépasse jamais 80 % de celle-ci (voir `panels::login::CARD_HEIGHT`). Relue à
+                // chaque tick plutôt qu'à la création : la fenêtre peut être traînée d'un
+                // moniteur à l'autre, et deux moniteurs n'ont pas la même hauteur.
+                let monitor_height = overlay
+                    .window
+                    .current_monitor()
+                    .map(|monitor| {
+                        monitor.size().height as f32 / overlay.window.scale_factor() as f32
+                    })
+                    .unwrap_or(login::CARD_HEIGHT);
+                if (state.monitor_height - monitor_height).abs() > 1.0 {
+                    state.monitor_height = monitor_height;
+                }
             }
         }
         self.sync_tray_menu(connected);
@@ -3887,6 +3901,10 @@ enum PostRedraw {
     StartManualUpdate,
     /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
     CloseManualUpdate,
+    /// **Ouvrir l'écran de mise à jour de la Carte** et y lancer une recherche (2026-09-22) — le
+    /// lien « Mise à jour » du pied, et « Rechercher à nouveau » de cet écran même. Le même geste
+    /// que l'entrée « Mise à jour » du menu de la zone de notification, dont il partage le code.
+    OpenManualUpdate,
     /// **« Supprimer les données locales »**, *confirmé* — depuis « Vos données » de l'onglet
     /// « À propos » de la fenêtre Options ou depuis la fenêtre de connexion (2026-09-18, constat C5 de
     /// `docs/analyse-rgpd.md` §3.5) : tout ce que l'overlay a écrit sur cette machine est effacé,
@@ -4298,9 +4316,11 @@ impl App {
             if outcome.retry_update {
                 post_redraw = PostRedraw::RetryUpdate;
             }
-            // Écran de mise à jour manuelle (voir `open_manual_update_window`).
+            // Écran de mise à jour manuelle (voir `open_manual_update_window`) — « Rechercher à
+            // nouveau » de cet écran, et « Mise à jour » du pied de la Carte, qui l'ouvre depuis
+            // n'importe quel autre écran (2026-09-22).
             if outcome.check_update {
-                post_redraw = PostRedraw::CheckUpdate;
+                post_redraw = PostRedraw::OpenManualUpdate;
             }
             if outcome.install_update {
                 post_redraw = PostRedraw::StartManualUpdate;
@@ -4535,6 +4555,7 @@ impl App {
                 let _ = self.update_command_tx.send(UpdateCommand::Download);
             }
             PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
+            PostRedraw::OpenManualUpdate => self.open_manual_update_window(event_loop),
         }
     }
 }
@@ -5013,6 +5034,10 @@ fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> Pat
 }
 
 fn main() {
+    // Avant TOUTE écriture sur le disque : `local_data::has_user_data` compare la date de
+    // `config.toml` à cet instant pour distinguer une installation déjà utilisée d'une première
+    // ouverture, et ce fichier est écrit par le démarrage en cours.
+    build_info::mark_process_start();
     // En tout premier, avant la moindre ligne de journal : sans console propre (sous-système
     // `windows`, voir l'attribut en tête de fichier), les couches console de `logging` n'ont un
     // destinataire que si le terminal qui nous a lancés nous prête le sien.

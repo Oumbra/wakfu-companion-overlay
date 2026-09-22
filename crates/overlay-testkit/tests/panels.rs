@@ -6628,6 +6628,14 @@ fn login_states() -> Vec<(&'static str, AuthStatus)> {
     ]
 }
 
+/// **La hauteur d'écran simulée** pour les captures de la Carte. Le volet « À propos » s'ouvre
+/// jusqu'à 80 % de la hauteur du moniteur (`panels::login::ABOUT_SCREEN_RATIO`) : figer celle-ci
+/// garde les références indépendantes de la machine qui les produit.
+const CARTE_MONITEUR: f32 = 1080.0;
+
+/// La hauteur du volet « À propos » ouvert — 80 % de [`CARTE_MONITEUR`].
+const CARTE_A_PROPOS_HAUTEUR: f32 = 864.0;
+
 /// Peint la fenêtre de connexion dans `auth_status`, sur une fenêtre de la hauteur qu'elle demande,
 /// et rend la hauteur mesurée (`LoginOutcome::content_height`) — la même que `main.rs` applique
 /// à la fenêtre OS.
@@ -6645,6 +6653,8 @@ fn capture_login_purge_confirm(nom: &str, height: f32) -> f32 {
         Default::default(),
         false,
         true,
+        false,
+        Some(true),
         height,
     )
 }
@@ -6657,7 +6667,16 @@ fn capture_login_with_update(
     update: overlay_ui::update::UpdateStatus,
     height: f32,
 ) -> f32 {
-    capture_login_card(nom, auth_status, update, false, false, height)
+    capture_login_card(
+        nom,
+        auth_status,
+        update,
+        false,
+        false,
+        false,
+        Some(true),
+        height,
+    )
 }
 
 /// L'écran de **mise à jour manuelle** (2026-09-18) : la même carte, ouverte par l'entrée « Mise
@@ -6668,17 +6687,29 @@ fn capture_login_manual_update(
     update: overlay_ui::update::UpdateStatus,
     height: f32,
 ) -> f32 {
-    capture_login_card(nom, AuthStatus::Connected, update, true, false, height)
+    capture_login_card(
+        nom,
+        AuthStatus::Connected,
+        update,
+        true,
+        false,
+        false,
+        Some(true),
+        height,
+    )
 }
 
 /// Le corps commun des quatre façades ci-dessus — `manual` pose `LoginState::manual_update`,
 /// `purge_confirm` l'écran de confirmation d'effacement des données locales.
+#[allow(clippy::too_many_arguments)]
 fn capture_login_card(
     nom: &str,
     auth_status: AuthStatus,
     update: overlay_ui::update::UpdateStatus,
     manual: bool,
     purge_confirm: bool,
+    about: bool,
+    has_local_data: Option<bool>,
     height: f32,
 ) -> f32 {
     use std::cell::Cell;
@@ -6704,6 +6735,9 @@ fn capture_login_card(
         update,
         manual_update: manual,
         purge_confirm,
+        about,
+        monitor_height: CARTE_MONITEUR,
+        has_local_data,
     };
     let measured = Rc::new(Cell::new(0.0_f32));
     let measured_in = Rc::clone(&measured);
@@ -6788,32 +6822,71 @@ fn verifie_login(nom: &str, height: f32) {
 
 #[test]
 fn fenetre_de_connexion_non_connecte() {
-    verifie_login("login_non_connecte", 462.0);
+    verifie_login("login_non_connecte", CARTE_HAUTEUR);
 }
 
 /// L'écran de confirmation d'effacement, ouvert depuis le lien de l'écran « non connecté » — la
 /// seule interface qui reste quand aucun compte n'est lié (constat C5).
 #[test]
 fn fenetre_de_connexion_effacement_donnees() {
-    let measured = capture_login_purge_confirm("login_effacement", 425.0);
-    assert_eq!(measured, 425.0);
+    let measured = capture_login_purge_confirm("login_effacement", CARTE_HAUTEUR);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 #[test]
 fn fenetre_de_connexion_appairage() {
-    verifie_login("login_appairage", 536.0);
+    verifie_login("login_appairage", CARTE_HAUTEUR);
 }
 
 #[test]
 fn fenetre_de_connexion_erreur() {
-    verifie_login("login_erreur", 443.0);
+    verifie_login("login_erreur", CARTE_HAUTEUR);
 }
 
 /// L'écran de chargement fait exactement la hauteur de l'écran « non connecté » (voir
-/// `panels::login::INITIAL_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
+/// `panels::login::CARD_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
 #[test]
 fn fenetre_de_connexion_chargement() {
-    verifie_login("login_chargement", 462.0);
+    verifie_login("login_chargement", CARTE_HAUTEUR);
+}
+
+/// **L'écran « non connecté » sans donnée locale** (2026-09-22) — le lien « Supprimer les données
+/// locales » disparaît : à la première ouverture, il proposerait d'effacer ce qui n'existe pas.
+/// Même hauteur que tous les autres écrans, c'est tout l'intérêt de la taille figée.
+#[test]
+fn fenetre_de_connexion_sans_donnees_locales() {
+    let measured = capture_login_card(
+        "login_sans_donnees",
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        false,
+        false,
+        Some(false),
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// **Le volet « À propos »** (2026-09-22) : l'en-tête replié, la Carte ouverte à 80 % de la
+/// hauteur de l'écran, le contenu de l'onglet « À propos » de la fenêtre Options dans le langage
+/// du site, et « Retour » collé au bas sans toucher la bordure.
+#[test]
+fn carte_volet_a_propos() {
+    let measured = capture_login_card(
+        "carte_a_propos",
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        false,
+        true,
+        Some(true),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    assert_eq!(
+        measured, CARTE_A_PROPOS_HAUTEUR,
+        "carte_a_propos : le volet mesure {measured} px — 80 % de {CARTE_MONITEUR} attendus"
+    );
 }
 
 // ── Mise à jour automatique (2026-09-15, docs/plan-mise-a-jour.md §8.1) ────────────────────────
@@ -6834,9 +6907,9 @@ fn fenetre_de_connexion_telechargement() {
             received: 4_200_000,
             total: 11_800_000,
         },
-        462.0,
+        CARTE_HAUTEUR,
     );
-    assert_eq!(measured, 462.0);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 /// Une version disponible que l'on n'installe pas automatiquement : signalée sous le rouage,
@@ -6853,9 +6926,9 @@ fn fenetre_de_connexion_version_disponible() {
             notes_url: None,
             checked_at: std::time::Instant::now(),
         },
-        462.0,
+        CARTE_HAUTEUR,
     );
-    assert_eq!(measured, 462.0);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 /// Mise à jour OBLIGATOIRE en échec : la carte passe au rouge, « MISE À JOUR REQUISE », le détail
@@ -6871,16 +6944,19 @@ fn fenetre_de_connexion_mise_a_jour_requise() {
             detail: "réseau : délai dépassé après 5 s".to_string(),
             mandatory: true,
         },
-        LOGIN_UPDATE_REQUIRED_HEIGHT,
+        CARTE_HAUTEUR,
     );
     assert_eq!(
-        measured, LOGIN_UPDATE_REQUIRED_HEIGHT,
+        measured, CARTE_HAUTEUR,
         "login_mise_a_jour_requise : la carte mesure {measured} px — reporter la valeur"
     );
 }
 
-/// Hauteur de l'écran « Mise à jour requise », mesurée par la carte elle-même.
-const LOGIN_UPDATE_REQUIRED_HEIGHT: f32 = 443.0;
+/// **La hauteur de la Carte**, la même pour tous ses écrans ordinaires depuis le 2026-09-22 —
+/// voir `panels::login::CARD_HEIGHT`. Les tests la vérifient un par un : une carte plus haute que
+/// sa fenêtre serait coupée en production, et c'est précisément ce qui arrivait au pied de la
+/// Carte au retour du volet « À propos ».
+const CARTE_HAUTEUR: f32 = overlay_ui::panels::login::CARD_HEIGHT;
 
 // ---------------------------------------------------------------------------------------------
 // Onglet « Personnages » (2026-09-16) — voir `panels::personnages_tab`.
@@ -7522,9 +7598,9 @@ fn ecran_mise_a_jour_recherche() {
     let measured = capture_login_manual_update(
         "login_maj_recherche",
         overlay_ui::update::UpdateStatus::Checking,
-        462.0,
+        CARTE_HAUTEUR,
     );
-    assert_eq!(measured, 462.0);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 /// Téléchargement lancé depuis cet écran : la jauge y reste, l'utilisateur suit la mise à jour là
@@ -7538,9 +7614,9 @@ fn ecran_mise_a_jour_telechargement() {
             received: 4_200_000,
             total: 11_800_000,
         },
-        462.0,
+        CARTE_HAUTEUR,
     );
-    assert_eq!(measured, 462.0);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 /// Le verdict le plus fréquent : « Vous êtes déjà à jour », et de quoi refermer. La version citée
@@ -7552,10 +7628,10 @@ fn ecran_mise_a_jour_a_jour() {
         overlay_ui::update::UpdateStatus::UpToDate {
             checked_at: std::time::Instant::now(),
         },
-        LOGIN_MAJ_A_JOUR_HEIGHT,
+        CARTE_HAUTEUR,
     );
     assert_eq!(
-        measured, LOGIN_MAJ_A_JOUR_HEIGHT,
+        measured, CARTE_HAUTEUR,
         "login_maj_a_jour : la carte mesure {measured} px — reporter la valeur"
     );
 }
@@ -7573,10 +7649,10 @@ fn ecran_mise_a_jour_disponible() {
             notes_url: None,
             checked_at: std::time::Instant::now(),
         },
-        LOGIN_MAJ_DISPONIBLE_HEIGHT,
+        CARTE_HAUTEUR,
     );
     assert_eq!(
-        measured, LOGIN_MAJ_DISPONIBLE_HEIGHT,
+        measured, CARTE_HAUTEUR,
         "login_maj_disponible : la carte mesure {measured} px — reporter la valeur"
     );
 }
@@ -7590,10 +7666,10 @@ fn ecran_mise_a_jour_verification_impossible() {
             reason: "GET /latest.json — erreur réseau : délai dépassé après 10 s".to_string(),
             checked_at: std::time::Instant::now(),
         },
-        LOGIN_MAJ_ECHEC_HEIGHT,
+        CARTE_HAUTEUR,
     );
     assert_eq!(
-        measured, LOGIN_MAJ_ECHEC_HEIGHT,
+        measured, CARTE_HAUTEUR,
         "login_maj_indisponible : la carte mesure {measured} px — reporter la valeur"
     );
 }
@@ -7610,18 +7686,10 @@ fn ecran_mise_a_jour_echec() {
             detail: "réseau : connexion réinitialisée après 4,2 Mo sur 11,8 Mo".to_string(),
             mandatory: false,
         },
-        LOGIN_MAJ_ECHEC_HEIGHT,
+        CARTE_HAUTEUR,
     );
     assert_eq!(
-        measured, LOGIN_MAJ_ECHEC_HEIGHT,
+        measured, CARTE_HAUTEUR,
         "login_maj_echec : la carte mesure {measured} px — reporter la valeur"
     );
 }
-
-/// Hauteurs des écrans de mise à jour manuelle, mesurées par la carte elle-même.
-const LOGIN_MAJ_A_JOUR_HEIGHT: f32 = 382.0;
-const LOGIN_MAJ_DISPONIBLE_HEIGHT: f32 = 432.0;
-/// « Vérification impossible » et « Mise à jour impossible » ont la même composition, donc la même
-/// hauteur — un titre d'une ligne, trois lignes d'explication, le détail technique, le bouton et
-/// le lien.
-const LOGIN_MAJ_ECHEC_HEIGHT: f32 = 473.0;

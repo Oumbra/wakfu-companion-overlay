@@ -3574,6 +3574,9 @@ mod linux_main {
     }
 
     pub fn run() {
+        // Avant TOUTE écriture sur le disque — voir la même ligne dans `main.rs` et
+        // `local_data::has_user_data`.
+        build_info::mark_process_start();
         let log_dir = logging::init();
         logging::install_ctrlc_handler();
         logging::install_panic_hook();

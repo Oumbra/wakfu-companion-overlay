@@ -61,14 +61,48 @@ use crate::ui_icons::UiIcons;
 
 /// Largeur de la carte, et donc de la fenêtre OS (maquette : 400 px).
 pub const WINDOW_WIDTH: f32 = 400.0;
-/// Hauteur de la fenêtre OS sur l'écran de chargement, et celle de l'état « non connecté » qui
-/// lui succède le plus souvent — les deux écrans font exactement la même taille, pour que le
-/// passage de l'un à l'autre ne fasse pas bouger la fenêtre. Mesurée par la carte elle-même
-/// (`LoginOutcome::content_height`, vérifié par `fenetre_de_connexion_non_connecte`) : 385 px à
-/// l'origine, 432 avec la ligne d'acceptation des textes du service (2026-09-18, constat C4), 462
-/// avec le lien « Supprimer les données locales » (le même jour, constat C5). Les autres états sont mesurés à
-/// chaque frame ([`LoginOutcome::content_height`]) et l'hôte ajuste la fenêtre.
-pub const INITIAL_HEIGHT: f32 = 462.0;
+
+/// **La hauteur de la Carte, la même pour tous les écrans ordinaires** (2026-09-22, demande
+/// utilisateur : « si on balaye de chargement à erreur, on fait yo-yo en termes de hauteur, et
+/// c'est assez perturbant »).
+///
+/// Chaque écran se mesurait lui-même et l'hôte retaillait la fenêtre : passer du chargement à
+/// « à jour » la faisait sauter de quatre-vingt-dix pixels, y revenir la rouvrait d'autant. Sur
+/// une fenêtre sans décoration posée au milieu de l'écran, ce mouvement est le plus visible de
+/// toute la Carte — et il ne veut rien dire.
+///
+/// La zone de corps ([`BODY_HEIGHT`]) est donc constante, et le contenu y est **centré
+/// verticalement** — ce que faisait déjà le rouage de l'écran de chargement, seul de son espèce.
+/// Sa valeur est celle de l'écran le plus chargé, l'appairage (titre, explication, encadré du
+/// code, ligne d'attente, deux boutons et un lien), avec une marge de quelques pixels.
+///
+/// **Trois exceptions**, et elles sont voulues : le volet À propos, qui s'ouvre exprès jusqu'à
+/// [`ABOUT_SCREEN_RATIO`] de la hauteur de l'écran ; les écrans défilants à venir, sur la même
+/// mécanique ; et un contenu qui déborde malgré tout — un titre d'échec inhabituellement long —,
+/// auquel cas la Carte grandit de ce qu'il manque plutôt que de rogner le texte.
+pub const CARD_HEIGHT: f32 = HEAD_HEIGHT + RULE_HEIGHT + BODY_HEIGHT + FOOT_HEIGHT;
+/// Hauteur de la zone de corps, marges hautes et basses comprises — voir [`CARD_HEIGHT`].
+const BODY_HEIGHT: f32 = 352.0;
+/// Hauteur de l'en-tête déployé : du haut de la carte au séparateur.
+const HEAD_HEIGHT: f32 = HEAD_PAD_TOP
+    + LOGO_SIZE
+    + 2.0 * HEAD_GAP
+    + BETA_HEIGHT
+    + TITLE_LINE
+    + HEAD_GAP
+    + RULE_MARGIN_TOP;
+/// Hauteur de l'en-tête replié — voir [`paint_head`].
+const HEAD_HEIGHT_COMPACT: f32 = 56.0;
+/// Épaisseur du séparateur gravé (une ligne sombre, une ligne claire).
+const RULE_HEIGHT: f32 = 2.0;
+/// Durée de l'ouverture et de la fermeture du volet À propos — en-tête et hauteur ensemble.
+const ABOUT_MORPH: Duration = Duration::from_millis(220);
+/// Part de la hauteur de l'écran que le volet À propos ne dépasse jamais (demande utilisateur).
+const ABOUT_SCREEN_RATIO: f32 = 0.8;
+/// Hauteur de la fenêtre OS à sa création — [`CARD_HEIGHT`] depuis le 2026-09-22, où tous les
+/// écrans ordinaires ont adopté la même. Ce n'est plus une hauteur « initiale » distincte des
+/// autres ; le nom reste parce que c'est ainsi que l'hôte nomme ce qu'il demande à winit.
+pub const INITIAL_HEIGHT: f32 = CARD_HEIGHT;
 
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
 /// Fond de la carte — `rgba(8,10,14,.96)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
@@ -143,6 +177,14 @@ const CARD_RADIUS: f32 = 10.0;
 const HEAD_PAD_TOP: f32 = 26.0;
 const HEAD_PAD_SIDE: f32 = 18.0;
 const LOGO_SIZE: f32 = 56.0;
+/// Côté du logo dans l'en-tête replié : la moitié, comme demandé.
+const LOGO_SIZE_COMPACT: f32 = 28.0;
+/// Marge latérale du logo dans l'en-tête replié.
+const HEAD_PAD_COMPACT: f32 = 26.0;
+/// Gouttière entre le logo et le titre, puis entre le titre et le badge, en-tête replié.
+const HEAD_COMPACT_GAP: f32 = 10.0;
+/// De combien le badge « beta » monte au-dessus du centre du titre, en-tête replié.
+const BETA_LIFT_COMPACT: f32 = 4.0;
 const HEAD_GAP: f32 = 10.0;
 const BETA_HEIGHT: f32 = 10.0;
 const TITLE_SIZE: f32 = 16.0;
@@ -165,11 +207,15 @@ const BUTTON_RADIUS: f32 = 6.0;
 const BUTTON_FONT: f32 = 14.0;
 const LINK_MARGIN_TOP: f32 = 14.0;
 const LINK_SIZE: f32 = 12.0;
-/// Écart entre la phrase d'acceptation et la ligne de ses deux liens (voir
-/// [`paint_consent_notice`]).
-const CONSENT_GAP: f32 = 3.0;
-/// Ce qui sépare les deux liens de la ligne d'acceptation — le point médian du pied du site.
-const CONSENT_SEPARATOR: &str = "  ·  ";
+// ── Ligne d'acceptation (voir [`paint_consent_notice`]) ────────────────────────────────────────
+/// Ce que l'écran « non connecté » dit avant « Se connecter ». Les deux textes y sont **nommés**,
+/// pas liés : le pied les ouvre, sur tous les écrans.
+const CONSENT_NOTICE: &str = "En vous connectant, vous acceptez les conditions d'utilisation et \
+                              la politique de confidentialité de Wakfu Companion.";
+const CONSENT_SIZE: f32 = 11.0;
+const CONSENT_LINE: f32 = 16.0;
+/// Plus gris que le corps : une mention, pas une phrase du discours.
+const CONSENT_TEXT: Color32 = Color32::from_rgb(0x6b, 0x75, 0x80);
 const CODE_MARGIN_TOP: f32 = 18.0;
 const CODE_PAD_TOP: f32 = 16.0;
 const CODE_PAD_BOTTOM: f32 = 14.0;
@@ -190,7 +236,63 @@ const DETAIL_MARGIN_TOP: f32 = 12.0;
 const DETAIL_PAD_X: f32 = 10.0;
 const DETAIL_PAD_Y: f32 = 8.0;
 const DETAIL_SIZE: f32 = 11.0;
-const FOOT_HEIGHT: f32 = 30.0;
+/// Hauteur du pied : [`FOOT_PAD_TOP`], deux lignes de liens de [`FOOT_LINE`], puis
+/// [`FOOT_PAD_BOTTOM`] — voir [`paint_foot`]. Trente pixels jusqu'au 2026-09-22, où le pied ne
+/// portait que la version.
+const FOOT_HEIGHT: f32 = FOOT_PAD_TOP + 2.0 * FOOT_LINE + FOOT_PAD_BOTTOM;
+const FOOT_PAD_TOP: f32 = 9.0;
+const FOOT_LINE: f32 = 15.0;
+const FOOT_PAD_BOTTOM: f32 = 12.0;
+/// Corps des liens du pied — celui de la version, un point de moins que les liens du corps.
+const FOOT_LINK_SIZE: f32 = 10.0;
+/// Ce qui sépare deux liens d'une même ligne du pied.
+const FOOT_SEPARATOR: &str = "·";
+/// Air de chaque côté du point médian.
+const FOOT_SEPARATOR_PAD: f32 = 6.0;
+const FOOT_SEPARATOR_COLOR: Color32 = Color32::from_rgb(0x45, 0x4d, 0x57);
+/// Lien éteint : celui de la section où l'on se trouve déjà — voir [`paint_foot`].
+const LINK_DISABLED: Color32 = Color32::from_rgb(0x5a, 0x64, 0x70);
+/// Opacité du soulignement, rapportée à la couleur du lien.
+const UNDERLINE_ALPHA: f32 = 0.45;
+/// Air entre le libellé d'un lien externe et sa flèche.
+const LINK_ARROW_GAP: f32 = 3.0;
+/// Côté de la flèche sortante, rapporté au corps du lien.
+const LINK_ARROW_RATIO: f32 = 0.7;
+
+// ── Volet « À propos » (2026-09-22, voir [`paint_about`]) ──────────────────────────────────────
+const ABOUT_PAD_TOP: f32 = 18.0;
+const ABOUT_PAD_BOTTOM: f32 = 8.0;
+const ABOUT_PAD_SIDE: f32 = 24.0;
+/// Marge droite du texte : elle laisse passer la barre de défilement sans la chevaucher.
+const ABOUT_PAD_RIGHT: f32 = 22.0;
+const ABOUT_HEADING_SIZE: f32 = 15.0;
+const ABOUT_HEADING_LINE: f32 = 20.0;
+const ABOUT_HEADING_GAP: f32 = 8.0;
+const ABOUT_BLOCK_GAP: f32 = 8.0;
+const ABOUT_SECTION_GAP: f32 = 18.0;
+const ABOUT_LINKS_GAP: f32 = 6.0;
+/// Bande collante du bas : l'air du dégradé, le bouton, l'air en dessous.
+const BACKBAR_HEIGHT: f32 = BACKBAR_PAD_TOP + BUTTON_HEIGHT + BACKBAR_PAD_BOTTOM;
+const BACKBAR_PAD_TOP: f32 = 12.0;
+/// Ce qui sépare le bouton « Retour » du bas de la Carte. Il n'y en avait pas : le bouton
+/// touchait la bordure, et c'était visible (2026-09-22).
+const BACKBAR_PAD_BOTTOM: f32 = 14.0;
+/// Largeur du bouton « Retour » — resserré plutôt que pleine largeur, pour qu'il ne coure pas
+/// jusqu'aux bordures latérales.
+const BACK_BUTTON_WIDTH: f32 = 180.0;
+/// Barre rouge d'un bloc d'avertissement du volet, et son fond.
+const ALERT_BAR_WIDTH: f32 = 2.0;
+const ALERT_PAD_X: f32 = 10.0;
+const ALERT_PAD_Y: f32 = 6.0;
+const ALERT_FILL: Color32 = Color32::from_rgba_premultiplied(16, 6, 5, 18); // rouge .07
+
+// ── Barre de défilement de la Carte (voir [`style_card_scrollbar`]) ────────────────────────────
+const SCROLLBAR_WIDTH: f32 = 6.0;
+const SCROLLBAR_MARGIN: f32 = 8.0;
+const SCROLLBAR_MIN_LENGTH: f32 = 24.0;
+const SCROLLBAR_HANDLE: Color32 = Color32::from_rgb(0x2a, 0x30, 0x38);
+/// Identifiant de la zone défilante du volet — il porte aussi sa position de défilement.
+const ABOUT_SCROLL_ID: &str = "carte-a-propos";
 /// Côté du rouage de l'écran de chargement — le palier « bloc en cours de chargement » du design
 /// system (`LoaderSize::Medium`, 72 px), assez grand pour être le seul sujet de la carte sans
 /// l'écraser.
@@ -253,6 +355,23 @@ pub struct LoginState {
     /// du jeu » dans la doc de module. Poser la boîte du jeu ici aurait été le seul endroit de
     /// l'overlay où les deux langages visuels se superposent.
     pub purge_confirm: bool,
+    /// **Le volet « À propos » est-il ouvert ?** (2026-09-22) — le lien du pied le lève, le bouton
+    /// « Retour » le baisse, et la Carte revient exactement à l'écran qu'elle montrait : rien
+    /// d'autre n'est mémorisé, parce que rien d'autre n'a changé.
+    ///
+    /// C'est le seul état qui fasse changer la Carte de taille (voir [`CARD_HEIGHT`]) : l'en-tête
+    /// se replie et la fenêtre s'ouvre jusqu'à [`ABOUT_SCREEN_RATIO`] de la hauteur de l'écran, en
+    /// un seul mouvement de [`ABOUT_MORPH`].
+    pub about: bool,
+    /// Hauteur de l'écran sur lequel la fenêtre est posée, en points logiques — posée par l'hôte,
+    /// seul à connaître le moniteur (`window.current_monitor()`). Sert au plafond du volet
+    /// À propos ; une valeur nulle ou absurde le ramène à [`CARD_HEIGHT`], jamais à rien.
+    pub monitor_height: f32,
+    /// **L'overlay a-t-il déjà écrit sur cette machine ?** — `None` tant que la question n'a pas
+    /// été posée au disque (`local_data::has_user_data`), puis la réponse, gardée pour la vie de
+    /// la fenêtre. Elle décide d'offrir ou non « Supprimer les données locales » : à la première
+    /// ouverture, ce lien ne propose d'effacer rien du tout, et inquiète pour rien.
+    pub has_local_data: Option<bool>,
 }
 
 impl LoginState {
@@ -264,6 +383,9 @@ impl LoginState {
             update: UpdateStatus::Idle,
             manual_update: false,
             purge_confirm: false,
+            about: false,
+            monitor_height: CARD_HEIGHT,
+            has_local_data: None,
         }
     }
 }
@@ -397,21 +519,132 @@ pub fn show(
         ctx.request_repaint_after(ANIMATION_FRAME);
     }
 
-    // ── En-tête : logo, titre, badge, séparateur ────────────────────────────────────────────
-    let mut y = card.top() + HEAD_PAD_TOP;
-    let center_x = card.center().x;
-    let logo_rect = Rect::from_center_size(
-        Pos2::new(center_x, y + LOGO_SIZE / 2.0),
-        Vec2::splat(LOGO_SIZE),
-    );
-    egui::Image::new(icons.logo())
-        .fit_to_exact_size(Vec2::splat(LOGO_SIZE))
-        .paint_at(ui, logo_rect);
-    y += LOGO_SIZE + HEAD_GAP;
+    // ── En-tête, séparateur, corps, pied ───────────────────────────────────────────────────
+    // **La Carte a une taille figée** (2026-09-22) — voir [`CARD_HEIGHT`]. Le pied est ancré au
+    // bas de la fenêtre, l'en-tête à son haut, et le corps occupe ce qui reste : aucun écran ne
+    // décide plus de la hauteur, sauf le volet À propos, qui s'ouvre exprès.
+    let about_t = about_progress(&ctx, ui.id(), state);
+    let head_height = paint_head(ui, card, about_t, icons, &mut outcome);
+    paint_rule(ui, card, card.top() + head_height);
 
-    // Le bloc de marque réserve 10 px au-dessus du titre pour le badge (« top: -10px »).
-    let beta_top = y;
-    y += BETA_HEIGHT + HEAD_GAP;
+    let foot_top = card.bottom() - FOOT_HEIGHT;
+    let body_rect = Rect::from_min_max(
+        Pos2::new(
+            card.left(),
+            (card.top() + head_height + RULE_HEIGHT).min(foot_top),
+        ),
+        Pos2::new(card.right(), foot_top),
+    );
+
+    if state.about {
+        paint_about(ui, body_rect, state, phases, &mut outcome);
+    } else {
+        // **Contenu centré dans une zone de hauteur constante.** La hauteur du contenu n'est
+        // connue qu'après l'avoir peint : elle est donc d'abord mesurée dans un `Ui` invisible
+        // (`UiBuilder::invisible`, qui écarte aussi bien les formes que les clics), puis le
+        // vrai passage part du `y` qui centre. Deux passes, mais les galleys sont mises en
+        // cache par egui : la seconde ne remet en page aucun texte.
+        let inner_top = body_rect.top() + BODY_PAD_TOP;
+        let inner_bottom = body_rect.bottom() - BODY_PAD_BOTTOM;
+        let measured = {
+            let probe = Rect::from_min_size(
+                Pos2::new(body_rect.left(), inner_top),
+                Vec2::new(body_rect.width(), f32::INFINITY),
+            );
+            let mut height = 0.0;
+            ui.scope_builder(
+                egui::UiBuilder::new().invisible().max_rect(probe),
+                |probe_ui| {
+                    height = paint_body(
+                        probe_ui,
+                        card,
+                        inner_top,
+                        state,
+                        auth_status,
+                        auth_command_tx,
+                        now,
+                        elapsed,
+                        phases,
+                        &mut LoginOutcome::default(),
+                    ) - inner_top;
+                },
+            );
+            height
+        };
+        let top = (inner_top + ((inner_bottom - inner_top) - measured) / 2.0).max(inner_top);
+        paint_body(
+            ui,
+            card,
+            top,
+            state,
+            auth_status,
+            auth_command_tx,
+            now,
+            elapsed,
+            phases,
+            &mut outcome,
+        );
+    }
+
+    paint_foot(ui, card, foot_top, state, &mut outcome);
+
+    outcome.content_height = card_height(state, about_t);
+    outcome
+}
+
+/// Où en est l'ouverture du volet À propos : 0 en écran ordinaire, 1 volet ouvert, entre les deux
+/// pendant les [`ABOUT_MORPH`] de la transition. Une seule valeur pilote l'en-tête ET la hauteur
+/// de la Carte — un seul mouvement, jamais deux animations qui se croisent.
+fn about_progress(ctx: &egui::Context, id: egui::Id, state: &LoginState) -> f32 {
+    if !state.animate {
+        return if state.about { 1.0 } else { 0.0 };
+    }
+    ctx.animate_bool_with_time(
+        id.with("carte-a-propos"),
+        state.about,
+        ABOUT_MORPH.as_secs_f32(),
+    )
+}
+
+/// **La hauteur que la Carte demande à son hôte, pour la frame en cours.**
+///
+/// Elle est **calculée**, jamais mesurée après coup, et c'est essentiel : l'hôte taille la fenêtre
+/// OS d'après `LoginOutcome::content_height`, qu'il lit à la frame suivante. Une hauteur mesurée
+/// sur ce qui vient d'être peint arriverait donc toujours avec une frame de retard — et la
+/// dernière frame de l'animation garderait la valeur de l'avant-dernière. C'est exactement ce qui
+/// coupait le pied de la Carte au retour du volet À propos (2026-09-22) : la fenêtre se refermait
+/// sur cent pixels de moins, la différence entre l'en-tête déployé et replié.
+fn card_height(state: &LoginState, about_t: f32) -> f32 {
+    let open = (state.monitor_height * ABOUT_SCREEN_RATIO).max(CARD_HEIGHT);
+    (CARD_HEIGHT + (open - CARD_HEIGHT) * about_t).round()
+}
+
+/// **L'en-tête, qui se replie** (2026-09-22, demande utilisateur) — logo, titre, badge « beta »,
+/// et la poignée de déplacement de la fenêtre. Rend sa hauteur.
+///
+/// Deux dispositions, qui sont les bornes d'une interpolation de `t` plutôt que deux fonctions :
+///
+/// | | `t = 0`, déployé | `t = 1`, replié |
+/// | --- | --- | --- |
+/// | hauteur | [`HEAD_HEIGHT`] (156 px) | [`HEAD_HEIGHT_COMPACT`] (56 px) |
+/// | logo | [`LOGO_SIZE`] (56 px), centré | la moitié (28 px), à gauche |
+/// | titre | sous le logo, centré | à droite du logo, sur la même ligne |
+/// | badge | au-dessus du titre, à droite | après le titre |
+///
+/// Replié, l'en-tête rend **cent pixels** au contenu — de quoi lire une section de plus du volet
+/// À propos sans défiler. C'est sa raison d'être, et celle des écrans défilants à venir.
+fn paint_head(
+    ui: &mut egui::Ui,
+    card: Rect,
+    t: f32,
+    icons: &UiIcons,
+    outcome: &mut LoginOutcome,
+) -> f32 {
+    let ctx = ui.ctx().clone();
+    let lerp = |a: f32, b: f32| a + (b - a) * t;
+    let center_x = card.center().x;
+
+    // Le titre d'abord : sa largeur place le logo replié comme le badge, dans les deux poses.
     let title_font = text::label_strong_font(&ctx, TITLE_SIZE);
     let overlay_font = text::label_font(&ctx, TITLE_SIZE);
     let title_main = "WAKFU COMPANION ";
@@ -419,8 +652,29 @@ pub fn show(
     let main_width = spaced_width(ui, title_main, &title_font, TITLE_SPACING);
     let overlay_width = spaced_width(ui, title_overlay, &overlay_font, TITLE_SPACING);
     let title_width = main_width + overlay_width;
-    let title_left = center_x - title_width / 2.0;
-    let title_center_y = y + TITLE_LINE / 2.0;
+
+    let logo_size = lerp(LOGO_SIZE, LOGO_SIZE_COMPACT);
+    let logo_center = Pos2::new(
+        lerp(
+            center_x,
+            card.left() + HEAD_PAD_COMPACT + LOGO_SIZE_COMPACT / 2.0,
+        ),
+        card.top() + lerp(HEAD_PAD_TOP + LOGO_SIZE / 2.0, HEAD_HEIGHT_COMPACT / 2.0),
+    );
+    egui::Image::new(icons.logo())
+        .fit_to_exact_size(Vec2::splat(logo_size))
+        .paint_at(
+            ui,
+            Rect::from_center_size(logo_center, Vec2::splat(logo_size)),
+        );
+
+    let deployed_title_top = card.top() + HEAD_PAD_TOP + LOGO_SIZE + 2.0 * HEAD_GAP + BETA_HEIGHT;
+    let compact_title_left = card.left() + HEAD_PAD_COMPACT + LOGO_SIZE_COMPACT + HEAD_COMPACT_GAP;
+    let title_left = lerp(center_x - title_width / 2.0, compact_title_left);
+    let title_center_y = lerp(
+        deployed_title_top + TITLE_LINE / 2.0,
+        card.top() + HEAD_HEIGHT_COMPACT / 2.0,
+    );
     paint_spaced(
         ui,
         Pos2::new(title_left, title_center_y),
@@ -437,56 +691,452 @@ pub fn show(
         TITLE_OVERLAY,
         TITLE_SPACING,
     );
-    // Badge « beta » — calé sur le bord droit du titre, italique.
+
+    // Badge « beta » : au-dessus du titre à droite déployé, après le titre replié.
     let beta_font = text::label_font(&ctx, BETA_HEIGHT);
     let beta_galley = ui.fonts_mut(|f| f.layout_no_wrap("beta".to_owned(), beta_font, BETA));
-    paint_italic(
-        ui,
-        Pos2::new(
-            title_left + title_width - beta_galley.rect.width(),
-            beta_top + (BETA_HEIGHT - beta_galley.rect.height()) / 2.0,
+    let beta_size = beta_galley.rect.size();
+    let beta_pos = Pos2::new(
+        lerp(
+            title_left + title_width - beta_size.x,
+            title_left + title_width + HEAD_COMPACT_GAP,
         ),
-        beta_galley,
-        BETA,
+        lerp(
+            card.top() + HEAD_PAD_TOP + LOGO_SIZE + HEAD_GAP + (BETA_HEIGHT - beta_size.y) / 2.0,
+            title_center_y - beta_size.y / 2.0 - BETA_LIFT_COMPACT,
+        ),
     );
-    y += TITLE_LINE;
+    paint_italic(ui, beta_pos, beta_galley, BETA);
 
+    let height = lerp(HEAD_HEIGHT, HEAD_HEIGHT_COMPACT);
     // Poignée de déplacement : tout l'en-tête, du haut de la carte au séparateur.
     let head_rect = Rect::from_min_max(
         Pos2::new(card.left(), card.top()),
-        Pos2::new(card.right(), y + HEAD_GAP + RULE_MARGIN_TOP),
+        Pos2::new(card.right(), card.top() + height),
     );
     let head = ui.interact(head_rect, ui.id().with("login-head"), Sense::drag());
     if head.drag_started() {
         outcome.drag_window = true;
     }
+    height
+}
 
-    // Séparateur gravé : 1 px sombre puis 1 px clair, sur la largeur du contenu.
-    y += HEAD_GAP + RULE_MARGIN_TOP;
-    let rule_left = card.left() + HEAD_PAD_SIDE;
-    let rule_right = card.right() - HEAD_PAD_SIDE;
+/// **Y a-t-il quelque chose à effacer sur cette machine ?** — la question n'est posée au disque
+/// qu'une fois par fenêtre, puis retenue (voir `LoginState::has_local_data`).
+fn has_local_data(state: &mut LoginState) -> bool {
+    *state.has_local_data.get_or_insert_with(|| {
+        let answer = crate::local_data::has_user_data(crate::build_info::process_start());
+        tracing::info!(
+            "[données locales] sondage pour la Carte : {}.",
+            if answer {
+                "des données existent"
+            } else {
+                "rien à effacer"
+            }
+        );
+        answer
+    })
+}
+
+/// **Le volet « À propos »** (2026-09-22, demande utilisateur) — les mêmes textes que l'onglet
+/// « À propos » de la fenêtre Options, dans le langage de la Carte.
+///
+/// Une seule source pour les phrases : [`super::a_propos_tab::SECTIONS`], plus la mention de
+/// droits d'auteur et l'avertissement d'effacement du même module. **La fenêtre Options, elle, ne
+/// change pas** : elle garde ses boutons de liens, et c'est la Carte qui porte sa propre table de
+/// liens par section — vide pour « Vos données », dont les deux liens vivent déjà dans le pied,
+/// visible en permanence sous le volet.
+///
+/// La zone défilante occupe tout le corps sauf la bande du bas, qui porte « Retour » : le bouton
+/// reste donc visible quel que soit le défilement, et ne touche aucune bordure (180 px centrés,
+/// [`BACKBAR_PAD_BOTTOM`] sous lui).
+fn paint_about(
+    ui: &mut egui::Ui,
+    body_rect: Rect,
+    state: &mut LoginState,
+    _phases: Phases,
+    outcome: &mut LoginOutcome,
+) {
+    let backbar_top = body_rect.bottom() - BACKBAR_HEIGHT;
+    let scroll_rect = Rect::from_min_max(
+        body_rect.min,
+        Pos2::new(body_rect.right(), backbar_top.max(body_rect.top())),
+    );
+    let mut url = None;
+    let mut purge = false;
+    let has_data = has_local_data(state);
+
+    let mut scroll_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(scroll_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    let output = egui::ScrollArea::vertical()
+        .id_salt(ABOUT_SCROLL_ID)
+        .auto_shrink([false; 2])
+        // La barre est peinte à la main juste après — voir `paint_card_scrollbar`.
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(&mut scroll_ui, |ui| {
+            ui.add_space(ABOUT_PAD_TOP);
+            paint_about_content(ui, scroll_rect.width(), has_data, &mut url, &mut purge);
+            ui.add_space(ABOUT_PAD_BOTTOM);
+        });
+    paint_card_scrollbar(ui, scroll_rect, &output);
+    if let Some(url) = url {
+        outcome.open_url = Some(url);
+    }
+    if purge {
+        tracing::info!("[données locales] effacement demandé depuis le volet À propos.");
+        state.about = false;
+        state.purge_confirm = true;
+    }
+
+    // La bande du bas : un dégradé qui éteint le texte qui passe dessous, puis le bouton.
+    let backbar = Rect::from_min_max(Pos2::new(body_rect.left(), backbar_top), body_rect.max);
+    paint_backbar_fade(ui, backbar);
+    let button_rect = Rect::from_min_size(
+        Pos2::new(
+            body_rect.center().x - BACK_BUTTON_WIDTH / 2.0,
+            backbar.top() + BACKBAR_PAD_TOP,
+        ),
+        Vec2::new(BACK_BUTTON_WIDTH, BUTTON_HEIGHT),
+    );
+    if button(
+        ui,
+        button_rect,
+        "Retour",
+        ButtonKind::Secondary,
+        "carte-a-propos-retour",
+    ) {
+        tracing::info!("[carte] « Retour » — volet À propos refermé.");
+        state.about = false;
+    }
+}
+
+/// Le contenu défilant du volet — voir [`paint_about`]. Peint dans le `Ui` de la zone défilable,
+/// donc avec la mise en page d'egui et non les `y` absolus du reste de la Carte : c'est le seul
+/// écran dont la hauteur n'est pas connue d'avance.
+fn paint_about_content(
+    ui: &mut egui::Ui,
+    width: f32,
+    has_local_data: bool,
+    url: &mut Option<String>,
+    purge: &mut bool,
+) {
+    use super::a_propos_tab::{self, Link, Section};
+    use crate::design::InfoTone;
+
+    let inner = width - ABOUT_PAD_SIDE - ABOUT_PAD_RIGHT;
+    let ctx = ui.ctx().clone();
+    let heading_font = text::label_strong_font(&ctx, ABOUT_HEADING_SIZE);
+    let p_font = text::label_font(&ctx, P_SIZE);
+
+    // La table de liens de la CARTE, section par section — celle de la fenêtre Options reste la
+    // sienne (voir `paint_about`). « Vos données » n'en a plus : ses deux liens sont au pied.
+    let links_of = |section: &Section| -> &'static [Link] {
+        if section.title == a_propos_tab::WAKFU_COMPANION_TITLE {
+            &[Link::Site, Link::Source]
+        } else if section.title == a_propos_tab::VOS_DONNEES_TITLE {
+            // Ses deux liens — politique de confidentialité, conditions d'utilisation — sont au
+            // pied, visible en permanence sous le volet : les répéter ici ne dirait rien de plus.
+            &[]
+        } else {
+            &[Link::WakfuTerms]
+        }
+    };
+
+    let mut y = ui.cursor().top();
+    let left = ui.max_rect().left() + ABOUT_PAD_SIDE;
+    for (index, section) in a_propos_tab::SECTIONS.iter().enumerate() {
+        if index > 0 {
+            y += ABOUT_SECTION_GAP;
+        }
+        y = paint_paragraph(
+            ui,
+            Pos2::new(left, y),
+            inner,
+            section.title,
+            &heading_font,
+            TEXT,
+            ABOUT_HEADING_LINE,
+        ) + ABOUT_HEADING_GAP;
+        for block in section.blocks {
+            y = paint_about_block(ui, left, inner, y, block.text, block.tone, &p_font)
+                + ABOUT_BLOCK_GAP;
+        }
+        // La mention de droits d'auteur d'Ankama porte l'année en cours : elle est calculée, pas
+        // constante (voir `a_propos_tab::copyright_notice`).
+        if section.title == a_propos_tab::WAKFU_COMPANION_TITLE {
+            y = paint_about_block(
+                ui,
+                left,
+                inner,
+                y,
+                &a_propos_tab::copyright_notice(a_propos_tab::copyright_year()),
+                InfoTone::Info,
+                &p_font,
+            ) + ABOUT_BLOCK_GAP;
+        }
+        let section_links = links_of(section);
+        if !section_links.is_empty() {
+            y += ABOUT_LINKS_GAP;
+            let mut x = left;
+            for (i, link) in section_links.iter().enumerate() {
+                if i > 0 {
+                    ui.painter().text(
+                        Pos2::new(x + FOOT_SEPARATOR_PAD, y),
+                        Align2::LEFT_TOP,
+                        FOOT_SEPARATOR,
+                        text::label_font(&ctx, P_SIZE),
+                        FOOT_SEPARATOR_COLOR,
+                    );
+                    x += 2.0 * FOOT_SEPARATOR_PAD
+                        + link_width(ui, FOOT_SEPARATOR, P_SIZE, LinkKind::Internal);
+                }
+                let link = *link;
+                x += link_at(
+                    ui,
+                    Pos2::new(x, y),
+                    link.label(),
+                    P_SIZE,
+                    LinkKind::External,
+                    true,
+                    &format!("carte-a-propos-{}", link.label()),
+                    || {
+                        tracing::info!("[carte] « {} » (À propos) — page demandée.", link.label());
+                        *url = Some(link.url());
+                    },
+                );
+            }
+            y += P_LINE;
+        }
+    }
+
+    // **Le droit à l'effacement** (RGPD art. 17), sous son avertissement — et seulement s'il y a
+    // quelque chose à effacer, comme sur l'écran « non connecté ».
+    if has_local_data {
+        y += ABOUT_SECTION_GAP;
+        y = paint_about_block(
+            ui,
+            left,
+            inner,
+            y,
+            a_propos_tab::PURGE_INFO,
+            InfoTone::Alert,
+            &p_font,
+        ) + ABOUT_LINKS_GAP;
+        let mut clicked = false;
+        y += link_at(
+            ui,
+            Pos2::new(left, y),
+            "Supprimer les données locales",
+            P_SIZE,
+            LinkKind::Danger,
+            true,
+            "carte-a-propos-effacer",
+            || clicked = true,
+        )
+        .min(0.0)
+            + P_LINE;
+        if clicked {
+            *purge = true;
+        }
+    }
+
+    // La zone défilable doit connaître la hauteur du contenu : il est peint en absolu, donc rien
+    // ne l'a allouée.
+    let height = (y - ui.cursor().top()).max(0.0);
+    ui.allocate_space(Vec2::new(width, height));
+}
+
+/// Un bloc d'information du volet : le texte, et pour un ton `Alert` la barre rouge et le fond
+/// discret qui le détachent — ce que le design system du jeu fait avec sa pastille, transposé au
+/// langage du site.
+fn paint_about_block(
+    ui: &mut egui::Ui,
+    left: f32,
+    width: f32,
+    y: f32,
+    body: &str,
+    tone: crate::design::InfoTone,
+    font: &FontId,
+) -> f32 {
+    use crate::design::InfoTone;
+
+    let alert = tone == InfoTone::Alert;
+    let (text_left, text_width, color) = if alert {
+        (
+            left + ALERT_BAR_WIDTH + ALERT_PAD_X,
+            width - ALERT_BAR_WIDTH - 2.0 * ALERT_PAD_X,
+            TEXT,
+        )
+    } else {
+        (left, width, TEXT_MUTED)
+    };
+    let bottom = paint_paragraph(
+        ui,
+        Pos2::new(text_left, y + if alert { ALERT_PAD_Y } else { 0.0 }),
+        text_width,
+        body,
+        font,
+        color,
+        P_LINE,
+    );
+    if !alert {
+        return bottom;
+    }
+    let block = Rect::from_min_max(
+        Pos2::new(left, y),
+        Pos2::new(left + width, bottom + ALERT_PAD_Y),
+    );
+    ui.painter().rect_filled(block, 4.0, ALERT_FILL);
     ui.painter().rect_filled(
-        Rect::from_min_max(Pos2::new(rule_left, y), Pos2::new(rule_right, y + 1.0)),
+        Rect::from_min_max(
+            block.min,
+            Pos2::new(block.left() + ALERT_BAR_WIDTH, block.bottom()),
+        ),
+        0.0,
+        ERROR_DOT,
+    );
+    // Le texte est déjà peint sous le fond : on le repeint par-dessus.
+    paint_paragraph(
+        ui,
+        Pos2::new(text_left, y + ALERT_PAD_Y),
+        text_width,
+        body,
+        font,
+        color,
+        P_LINE,
+    );
+    block.bottom()
+}
+
+/// Le dégradé de la bande « Retour » : le fond de la carte, transparent en haut, opaque sous le
+/// bouton. Peint en quelques bandes plutôt qu'en un dégradé continu — egui n'a pas de brosse à
+/// dégradé, et huit bandes suffisent sur quatorze pixels.
+fn paint_backbar_fade(ui: &egui::Ui, rect: Rect) {
+    const BANDS: usize = 8;
+    let fade_height = BACKBAR_PAD_TOP;
+    for i in 0..BANDS {
+        let t = i as f32 / BANDS as f32;
+        let band = Rect::from_min_max(
+            Pos2::new(rect.left(), rect.top() + fade_height * t),
+            Pos2::new(
+                rect.right(),
+                rect.top() + fade_height * (i + 1) as f32 / BANDS as f32,
+            ),
+        );
+        ui.painter()
+            .rect_filled(band, 0.0, CARD_FILL.gamma_multiply(t));
+    }
+    ui.painter().rect_filled(
+        Rect::from_min_max(Pos2::new(rect.left(), rect.top() + fade_height), rect.max),
+        0.0,
+        CARD_FILL,
+    );
+}
+
+/// **La barre de défilement de la Carte** : celle du site, pas celle du jeu, et peinte ici plutôt
+/// que par egui.
+///
+/// `design::scroll_area` porte les textures 9-slice du jeu et réserve ses 26 px en permanence ;
+/// celle d'egui, elle, se style mais ne se place pas — son rail occupe la largeur qu'il réserve,
+/// et le relevé demande une **poignée qui flotte** : 6 px de large, coins arrondis, à 8 px du bord
+/// de la Carte, sans rail ni flèche, l'accent au survol comme au glisser, et rien du tout quand le
+/// contenu tient dans la hauteur. Une vingtaine de lignes suffisent à la poser exactement là.
+///
+/// Le glisser écrit directement le décalage dans l'état de la zone (`ScrollArea::State::store`) :
+/// c'est ce que fait egui lui-même, et la molette continue de passer par lui.
+fn paint_card_scrollbar(
+    ui: &mut egui::Ui,
+    scroll_rect: Rect,
+    output: &egui::scroll_area::ScrollAreaOutput<()>,
+) {
+    let viewport = output.inner_rect.height();
+    let content = output.content_size.y;
+    let overflow = content - viewport;
+    if overflow <= 0.5 || viewport <= 0.0 {
+        return; // rien ne dépasse : pas de barre, et pas de réserve non plus
+    }
+    let track = Rect::from_min_max(
+        Pos2::new(
+            scroll_rect.right() - SCROLLBAR_MARGIN - SCROLLBAR_WIDTH,
+            scroll_rect.top() + SCROLLBAR_MARGIN,
+        ),
+        Pos2::new(
+            scroll_rect.right() - SCROLLBAR_MARGIN,
+            scroll_rect.bottom() - SCROLLBAR_MARGIN,
+        ),
+    );
+    let handle_height = (track.height() * viewport / content).max(SCROLLBAR_MIN_LENGTH);
+    let travel = (track.height() - handle_height).max(0.0);
+    let offset = output.state.offset.y.clamp(0.0, overflow);
+    let handle = Rect::from_min_size(
+        Pos2::new(track.left(), track.top() + travel * offset / overflow),
+        Vec2::new(SCROLLBAR_WIDTH, handle_height),
+    );
+    let response = ui.interact(
+        handle,
+        ui.id().with("carte-a-propos-poignee"),
+        Sense::click_and_drag(),
+    );
+    let color = if response.is_pointer_button_down_on() {
+        ACCENT_HOVER
+    } else if response.hovered() {
+        ACCENT
+    } else {
+        SCROLLBAR_HANDLE
+    };
+    ui.painter()
+        .rect_filled(handle, SCROLLBAR_WIDTH / 2.0, color);
+    if response.dragged() && travel > 0.0 {
+        let mut state = output.state;
+        state.offset.y =
+            (offset + response.drag_delta().y * overflow / travel).clamp(0.0, overflow);
+        state.store(ui.ctx(), egui::Id::new(ABOUT_SCROLL_ID));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Séparateur gravé sous l'en-tête : 1 px sombre puis 1 px clair, sur la largeur du contenu.
+fn paint_rule(ui: &egui::Ui, card: Rect, y: f32) {
+    let left = card.left() + HEAD_PAD_SIDE;
+    let right = card.right() - HEAD_PAD_SIDE;
+    ui.painter().rect_filled(
+        Rect::from_min_max(Pos2::new(left, y), Pos2::new(right, y + 1.0)),
         0.0,
         RULE_DARK,
     );
     ui.painter().rect_filled(
-        Rect::from_min_max(
-            Pos2::new(rule_left, y + 1.0),
-            Pos2::new(rule_right, y + 2.0),
-        ),
+        Rect::from_min_max(Pos2::new(left, y + 1.0), Pos2::new(right, y + RULE_HEIGHT)),
         0.0,
         RULE_LIGHT,
     );
-    y += 2.0;
+}
 
-    // ── Corps ───────────────────────────────────────────────────────────────────────────────
-    y += BODY_PAD_TOP;
+/// Le corps de la Carte : l'écran que son état commande, peint à partir de `top`. Rend le `y` du
+/// bas de ce qu'il a peint — c'est cette hauteur que [`show`] mesure pour centrer le contenu dans
+/// la zone de corps.
+#[allow(clippy::too_many_arguments)]
+fn paint_body(
+    ui: &mut egui::Ui,
+    card: Rect,
+    top: f32,
+    state: &mut LoginState,
+    auth_status: &AuthStatus,
+    auth_command_tx: &dyn AuthCommandSink,
+    now: Instant,
+    elapsed: Duration,
+    phases: Phases,
+    outcome: &mut LoginOutcome,
+) -> f32 {
+    let ctx = ui.ctx().clone();
+    let center_x = card.center().x;
+    let mut y = top;
     let body_left = card.left() + BODY_PAD_SIDE;
     let body_width = card.width() - 2.0 * BODY_PAD_SIDE;
     let h2_font = text::label_strong_font(&ctx, H2_SIZE);
     let p_font = text::label_font(&ctx, P_SIZE);
-
     // Le compte en cours de vérification (`Connecting`) est un chargement comme les autres : la
     // fenêtre ne dit « non connecté » qu'une fois la réponse connue.
     let loading = state.loading || matches!(auth_status, AuthStatus::Connecting);
@@ -501,32 +1151,13 @@ pub fn show(
     } = &state.update
     {
         y = paint_update_required(
-            ui,
-            body_left,
-            body_width,
-            y,
-            headline,
-            detail,
-            phases,
-            &h2_font,
-            &p_font,
-            &mut outcome,
+            ui, body_left, body_width, y, headline, detail, phases, &h2_font, &p_font, outcome,
         );
     } else if state.manual_update {
         // Recherche de mise à jour demandée depuis le menu de la zone de notification : cet
         // écran occupe toute la carte jusqu'à ce que l'utilisateur le referme.
         y = paint_manual_update(
-            ui,
-            &ctx,
-            card,
-            body_left,
-            body_width,
-            y,
-            state,
-            phases,
-            &h2_font,
-            &p_font,
-            &mut outcome,
+            ui, &ctx, card, body_left, body_width, y, state, phases, &h2_font, &p_font, outcome,
         );
     } else if loading {
         // Le corps prend la place qu'il occuperait sur l'écran « non connecté » (même hauteur
@@ -685,27 +1316,37 @@ pub fn show(
                 }
                 y += BUTTON_HEIGHT;
                 // Information des personnes (art. 12-13 du RGPD, `docs/analyse-rgpd.md` §3.4) :
-                // ce que la connexion engage est dit AVANT le geste, les deux textes à portée
-                // de clic — les mêmes pages que l'onglet « À propos » ouvre.
+                // ce que la connexion engage est dit AVANT le geste. Les deux textes sont nommés,
+                // et le pied les ouvre — voir `paint_consent_notice`.
                 y += LINK_MARGIN_TOP;
-                y += paint_consent_notice(ui, center_x, y, &mut outcome);
+                y += paint_consent_notice(ui, center_x, body_width, y);
                 // **Le droit à l'effacement, exerçable ici** (RGPD art. 17,
                 // `docs/analyse-rgpd.md` §3.5, constat C5) : sans compte lié, cette fenêtre est la
                 // SEULE interface de l'overlay — la fenêtre Options, qui porte le même bouton sous
                 // « Vos données » de l'onglet « À propos », est alors inatteignable. Un lien discret et non un bouton :
                 // ce n'est pas ce qu'on vient faire sur cet écran, mais il faut pouvoir le faire
                 // après s'être déconnecté, c'est-à-dire exactement ici.
-                y += LINK_MARGIN_TOP;
-                y += link(
-                    ui,
-                    Pos2::new(center_x, y),
-                    "Supprimer les données locales",
-                    "login-effacer-donnees",
-                    || {
-                        tracing::info!("[données locales] effacement demandé — confirmation.");
+                //
+                // **Seulement s'il y a quelque chose à effacer** (2026-09-22) : voir
+                // `LoginState::has_local_data` et `local_data::has_user_data`.
+                if has_local_data(state) {
+                    y += LINK_MARGIN_TOP;
+                    let mut confirm = false;
+                    y += link(
+                        ui,
+                        Pos2::new(center_x, y),
+                        "Supprimer les données locales",
+                        LinkKind::Danger,
+                        "login-effacer-donnees",
+                        || {
+                            tracing::info!("[données locales] effacement demandé — confirmation.");
+                            confirm = true;
+                        },
+                    );
+                    if confirm {
                         state.purge_confirm = true;
-                    },
-                );
+                    }
+                }
             }
             AuthStatus::PairingStarted {
                 pairing_code,
@@ -838,6 +1479,7 @@ pub fn show(
                     ui,
                     Pos2::new(center_x, y),
                     "Annuler l'appairage",
+                    LinkKind::Internal,
                     "login-annuler",
                     || {
                         tracing::info!("[connexion] appairage annulé par l'utilisateur.");
@@ -918,29 +1560,8 @@ pub fn show(
             }
         }
     }
-    y += BODY_PAD_BOTTOM;
 
-    // ── Pied : numéro de version, en bas à DROITE, au style exact du badge « beta » ──────────
-    // (demande utilisateur 2026-09-14 : « en bas à droite, en italique et de la même taille que
-    // le mot beta ») — même police, même corps, même gris, même italique simulé.
-    // Police résolue AVANT le verrou des fontes : `label_font` le prend aussi.
-    let version_font = text::label_font(&ctx, VERSION_SIZE);
-    let version_galley = ui.fonts_mut(|f| {
-        f.layout_no_wrap(build_info::banner_label().to_owned(), version_font, VERSION)
-    });
-    paint_italic(
-        ui,
-        Pos2::new(
-            card.right() - FOOT_PAD_SIDE - version_galley.rect.width(),
-            y + (FOOT_HEIGHT - 10.0) / 2.0 - version_galley.rect.height() / 2.0,
-        ),
-        version_galley,
-        VERSION,
-    );
-    y += FOOT_HEIGHT;
-
-    outcome.content_height = (y - card.top()).round();
-    outcome
+    y
 }
 
 /// Ce qui se peint sous le rouage : le libellé de l'étape, sa couleur, et — pendant un
@@ -1314,6 +1935,7 @@ fn paint_manual_update(
                 ui,
                 Pos2::new(card.center().x, y),
                 "Plus tard",
+                LinkKind::Internal,
                 "login-maj-plus-tard",
                 || {
                     tracing::info!("[mise à jour] « Plus tard » — écran de mise à jour refermé.");
@@ -1446,6 +2068,7 @@ fn paint_manual_update_failure(
         ui,
         Pos2::new(card.center().x, y),
         "Fermer",
+        LinkKind::Internal,
         "login-maj-fermer-echec",
         || {
             outcome.close_update = true;
@@ -1690,113 +2313,331 @@ fn button(ui: &mut egui::Ui, rect: Rect, label: &str, kind: ButtonKind, log_name
     }
 }
 
-/// Lien souligné centré sur `center_x` (`.v-link`) — rend sa hauteur, appelle `on_click` au clic.
+/// **Les trois familles de liens de la Carte** (2026-09-22, demande utilisateur) — un lien dit où
+/// il mène avant d'être lu.
+///
+/// | Famille | Couleur | Ce qu'un clic fait |
+/// | --- | --- | --- |
+/// | [`LinkKind::External`] | accent `#00d2ff`, **flèche sortante** | ouvre le navigateur |
+/// | [`LinkKind::Internal`] | gris `#b4bcc5` | change d'écran sans quitter la Carte |
+/// | [`LinkKind::Danger`] | rouge `#ff8a83` | efface quelque chose |
+///
+/// La flèche est réservée à l'externe : rien ne s'ouvre ailleurs pour les deux autres. Elle est
+/// **tracée à la main** ([`paint_external_arrow`]) parce qu'aucune fonte embarquée n'a « ↗ ».
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LinkKind {
+    External,
+    Internal,
+    Danger,
+}
+
+impl LinkKind {
+    /// Couleur au repos, puis au survol.
+    fn colors(self) -> (Color32, Color32) {
+        match self {
+            LinkKind::External => (ACCENT, Color32::from_rgb(0x7c, 0xe6, 0xff)),
+            LinkKind::Internal => (TEXT_DIM, TEXT),
+            LinkKind::Danger => (ERROR_TEXT, Color32::from_rgb(0xff, 0xb0, 0xab)),
+        }
+    }
+}
+
+/// Flèche sortante d'un lien externe : la diagonale et les deux côtés du coin, dans le carré
+/// `rect`. Trois segments, parce que les fontes embarquées (`assets/fonts`, Ubuntu Regular et
+/// Medium) n'ont pas le caractère « ↗ » et qu'un carré blanc vaudrait pire que rien.
+fn paint_external_arrow(ui: &egui::Ui, rect: Rect, color: Color32) {
+    let s = rect.width();
+    let at = |x: f32, y: f32| Pos2::new(rect.left() + s * x, rect.top() + s * y);
+    let stroke = Stroke::new((s * 0.14).max(1.0), color);
+    let painter = ui.painter();
+    painter.line_segment([at(0.15, 0.85), at(0.85, 0.15)], stroke);
+    painter.line_segment([at(0.33, 0.15), at(0.85, 0.15)], stroke);
+    painter.line_segment([at(0.85, 0.15), at(0.85, 0.67)], stroke);
+}
+
+/// Largeur totale qu'occupera [`link_at`] pour ce libellé, flèche comprise.
+fn link_width(ui: &egui::Ui, label: &str, size: f32, kind: LinkKind) -> f32 {
+    let font = text::label_font(ui.ctx(), size);
+    let width = ui
+        .fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, TEXT_DIM))
+        .rect
+        .width();
+    if kind == LinkKind::External {
+        width + LINK_ARROW_GAP + size * LINK_ARROW_RATIO
+    } else {
+        width
+    }
+}
+
+/// Lien souligné dont le coin haut-gauche est `top_left` — rend sa largeur, appelle `on_click` au
+/// clic. `enabled` à `false` le peint éteint et sourd : c'est ainsi que le pied traite le lien de
+/// la section où l'on se trouve déjà, pour qu'aucun lien ne ramène là où l'on est.
+#[allow(clippy::too_many_arguments)]
+fn link_at(
+    ui: &mut egui::Ui,
+    top_left: Pos2,
+    label: &str,
+    size: f32,
+    kind: LinkKind,
+    enabled: bool,
+    log_name: &str,
+    on_click: impl FnOnce(),
+) -> f32 {
+    let font = text::label_font(ui.ctx(), size);
+    let (rest, hover) = kind.colors();
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, rest));
+    let text_size = galley.rect.size();
+    let width = link_width(ui, label, size, kind);
+    let rect = Rect::from_min_size(top_left, Vec2::new(width, text_size.y));
+    if !enabled {
+        ui.painter().galley(rect.min, galley, LINK_DISABLED);
+        return width;
+    }
+    let response = ui
+        .interact(rect, ui.id().with(log_name), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let color = if response.hovered() { hover } else { rest };
+    ui.painter().galley(rect.min, galley, color);
+    let underline_y = rect.top() + text_size.y + 1.0;
+    ui.painter().line_segment(
+        [
+            Pos2::new(rect.left(), underline_y),
+            Pos2::new(rect.left() + text_size.x, underline_y),
+        ],
+        Stroke::new(1.0, color.gamma_multiply(UNDERLINE_ALPHA)),
+    );
+    if kind == LinkKind::External {
+        let side = size * LINK_ARROW_RATIO;
+        paint_external_arrow(
+            ui,
+            Rect::from_min_size(
+                Pos2::new(
+                    rect.left() + text_size.x + LINK_ARROW_GAP,
+                    rect.top() + (text_size.y - side) / 2.0,
+                ),
+                Vec2::splat(side),
+            ),
+            color,
+        );
+    }
+    if response.clicked() {
+        on_click();
+    }
+    width
+}
+
+/// Lien souligné centré sur `top_center.x` — rend sa hauteur, appelle `on_click` au clic.
 fn link(
     ui: &mut egui::Ui,
     top_center: Pos2,
     label: &str,
+    kind: LinkKind,
     log_name: &str,
     on_click: impl FnOnce(),
 ) -> f32 {
+    let width = link_width(ui, label, LINK_SIZE, kind);
+    // Police résolue AVANT le verrou des fontes : `label_font` le prend aussi, et l'imbriquer
+    // bloque le rendu — c'est le piège de tout ce module (voir les autres appels).
     let font = text::label_font(ui.ctx(), LINK_SIZE);
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, TEXT_DIM));
-    let size = galley.rect.size();
-    let rect = Rect::from_min_size(Pos2::new(top_center.x - size.x / 2.0, top_center.y), size);
-    let response = ui
-        .interact(rect, ui.id().with(log_name), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let color = if response.hovered() { TEXT } else { TEXT_DIM };
-    let underline = if response.hovered() {
-        TEXT
-    } else {
-        Color32::from_rgba_premultiplied(69, 74, 80, 128)
-    };
-    ui.painter().galley(rect.min, galley, color);
-    let underline_y = rect.bottom() + 1.0;
-    ui.painter().line_segment(
-        [
-            Pos2::new(rect.left(), underline_y),
-            Pos2::new(rect.right(), underline_y),
-        ],
-        Stroke::new(1.0, underline),
+    let height = ui
+        .fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, TEXT_DIM))
+        .rect
+        .height();
+    link_at(
+        ui,
+        Pos2::new(top_center.x - width / 2.0, top_center.y),
+        label,
+        LINK_SIZE,
+        kind,
+        true,
+        log_name,
+        on_click,
     );
-    if response.clicked() {
-        on_click();
-    }
-    size.y + 2.0
+    height + 2.0
 }
 
-/// La ligne d'acceptation sous « Se connecter » : « En vous connectant, vous acceptez », puis les
-/// deux textes du service en liens, centrés, séparés d'un point médian — ceux de l'onglet
-/// « À propos » ([`super::a_propos_tab::Link`]), pour que libellés et URL n'existent qu'une fois.
-/// Un clic remonte l'URL à l'hôte (`LoginOutcome::open_url`), comme « Rouvrir la page ». Rend la
-/// hauteur occupée.
-fn paint_consent_notice(
+/// **Le pied de la Carte** (2026-09-22, demande utilisateur) — présent sur tous les écrans, volet
+/// À propos compris.
+///
+/// Deux lignes, et leur ordre n'est pas indifférent : **les actions de la Carte d'abord**, les
+/// sorties vers le navigateur ensuite, du plus engageant au moins engageant et du plus court au
+/// plus long.
+///
+/// 1. « Mise à jour » · « À propos » — internes, elles changent l'écran sans quitter la fenêtre ;
+/// 2. « Conditions d'utilisation » · « Politique de confidentialité » — externes, avec flèche.
+///
+/// **Le lien de la section où l'on se trouve est éteint** : on ne revient pas à l'écran de mise à
+/// jour depuis l'écran de mise à jour. La version reste en bas à droite, comme depuis toujours.
+fn paint_foot(
+    ui: &mut egui::Ui,
+    card: Rect,
+    top: f32,
+    state: &mut LoginState,
+    outcome: &mut LoginOutcome,
+) {
+    use super::a_propos_tab::Link;
+
+    let ctx = ui.ctx().clone();
+    let center_x = card.center().x;
+    let mut y = top + FOOT_PAD_TOP;
+
+    // Ligne 1 — les deux sections de la Carte. « Mise à jour » relance la recherche : c'est ce que
+    // fait déjà l'entrée du menu de la zone de notification, et l'écran qui s'ensuit est le même.
+    let on_update = state.manual_update;
+    let on_about = state.about;
+    let mut open_about = false;
+    let mut check_update = false;
+    foot_row(
+        ui,
+        center_x,
+        y,
+        &[
+            ("Mise à jour", LinkKind::Internal, !on_update),
+            ("À propos", LinkKind::Internal, !on_about),
+        ],
+        |index| match index {
+            0 => {
+                tracing::info!("[carte] « Mise à jour » (pied) — recherche demandée.");
+                check_update = true;
+            }
+            _ => {
+                tracing::info!("[carte] « À propos » (pied) — volet ouvert.");
+                open_about = true;
+            }
+        },
+    );
+    if check_update {
+        // C'est l'hôte qui ouvre l'écran de mise à jour (`PostRedraw::OpenManualUpdate`) : il
+        // pose `manual_update`, que cette carte se contente de relire à chaque tick. Le volet, lui,
+        // se referme ici — sinon il resterait par-dessus l'écran qu'on vient de demander.
+        outcome.check_update = true;
+        state.about = false;
+    }
+    if open_about {
+        state.about = true;
+    }
+
+    // Ligne 2 — les deux textes du service, sur le site. Les mêmes libellés et les mêmes URL que
+    // l'onglet « À propos » de la fenêtre Options (`a_propos_tab::Link`) : ils n'existent
+    // qu'une fois.
+    y += FOOT_LINE;
+    let mut url = None;
+    foot_row(
+        ui,
+        center_x,
+        y,
+        &[
+            (Link::TermsOfService.label(), LinkKind::External, true),
+            (Link::PrivacyPolicy.label(), LinkKind::External, true),
+        ],
+        |index| {
+            let link = if index == 0 {
+                Link::TermsOfService
+            } else {
+                Link::PrivacyPolicy
+            };
+            tracing::info!("[carte] « {} » (pied) — page demandée.", link.label());
+            url = Some(link.url());
+        },
+    );
+    if url.is_some() {
+        outcome.open_url = url;
+    }
+
+    // La version, en bas à droite, au style exact du badge « beta » (demande du 2026-09-14 :
+    // « en bas à droite, en italique et de la même taille que le mot beta »).
+    let version_font = text::label_font(&ctx, VERSION_SIZE);
+    let version_galley = ui.fonts_mut(|f| {
+        f.layout_no_wrap(build_info::banner_label().to_owned(), version_font, VERSION)
+    });
+    let version_size = version_galley.rect.size();
+    paint_italic(
+        ui,
+        Pos2::new(
+            card.right() - FOOT_PAD_SIDE - version_size.x,
+            card.bottom() - FOOT_PAD_BOTTOM - version_size.y,
+        ),
+        version_galley,
+        VERSION,
+    );
+}
+
+/// Une ligne de liens du pied, centrée sur `center_x` et séparée de points médians. `on_click`
+/// reçoit l'indice du lien cliqué.
+fn foot_row(
     ui: &mut egui::Ui,
     center_x: f32,
     top: f32,
-    outcome: &mut LoginOutcome,
-) -> f32 {
-    use super::a_propos_tab::Link;
+    links: &[(&str, LinkKind, bool)],
+    mut on_click: impl FnMut(usize),
+) {
+    let font = text::label_font(ui.ctx(), FOOT_LINK_SIZE);
+    let separator_width = ui
+        .fonts_mut(|f| f.layout_no_wrap(FOOT_SEPARATOR.to_owned(), font.clone(), TEXT_DIM))
+        .rect
+        .width();
+    let widths: Vec<f32> = links
+        .iter()
+        .map(|(label, kind, _)| link_width(ui, label, FOOT_LINK_SIZE, *kind))
+        .collect();
+    let total: f32 = widths.iter().sum::<f32>()
+        + (links.len().saturating_sub(1)) as f32 * (separator_width + 2.0 * FOOT_SEPARATOR_PAD);
+    let mut x = center_x - total / 2.0;
+    let mut clicked = None;
+    for (index, ((label, kind, enabled), width)) in links.iter().zip(&widths).enumerate() {
+        if index > 0 {
+            x += FOOT_SEPARATOR_PAD;
+            ui.painter().text(
+                Pos2::new(x, top),
+                Align2::LEFT_TOP,
+                FOOT_SEPARATOR,
+                font.clone(),
+                FOOT_SEPARATOR_COLOR,
+            );
+            x += separator_width + FOOT_SEPARATOR_PAD;
+        }
+        link_at(
+            ui,
+            Pos2::new(x, top),
+            label,
+            FOOT_LINK_SIZE,
+            *kind,
+            *enabled,
+            &format!("carte-pied-{index}-{label}"),
+            || clicked = Some(index),
+        );
+        x += width;
+    }
+    if let Some(index) = clicked {
+        on_click(index);
+    }
+}
 
-    let font = text::label_font(ui.ctx(), LINK_SIZE);
-    let sentence = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            "En vous connectant, vous acceptez".to_owned(),
-            font.clone(),
-            TEXT_DIM,
-        )
+/// **La ligne d'acceptation sous « Se connecter »** — l'information due avant le geste (RGPD
+/// art. 12-13, `docs/analyse-rgpd.md` §3.4, constat C4).
+///
+/// Une phrase, et plus deux liens (2026-09-22, demande utilisateur). Elle en portait jusque-là,
+/// juste au-dessus des deux mêmes liens que le pied venait d'acquérir : « ça ne répète pas la même
+/// chose, parce que là en plus c'est relativement court, on l'a l'un au-dessus de l'autre, c'est
+/// vraiment perturbant ». Les deux textes sont donc **nommés en toutes lettres**, et c'est le pied
+/// qui les ouvre — quelques dizaines de pixels plus bas, sur tous les écrans.
+///
+/// Onze points, en italique et plus gris que le corps : l'information reste donnée avant le geste,
+/// sans prendre la place d'une action — elle occupe deux lignes au lieu des cinq de l'ancienne
+/// composition. Rend la hauteur occupée.
+fn paint_consent_notice(ui: &mut egui::Ui, center_x: f32, width: f32, top: f32) -> f32 {
+    let font = text::label_font(ui.ctx(), CONSENT_SIZE);
+    let galley = ui.fonts_mut(|f| {
+        let mut job = LayoutJob::simple(CONSENT_NOTICE.to_owned(), font, CONSENT_TEXT, width);
+        job.sections[0].format.line_height = Some(CONSENT_LINE);
+        job.halign = egui::Align::Center;
+        f.layout_job(job)
     });
-    let sentence_height = sentence.rect.height();
-    ui.painter().galley(
-        Pos2::new(center_x - sentence.rect.width() / 2.0, top),
-        sentence,
-        TEXT_DIM,
-    );
-    let row_top = top + sentence_height + CONSENT_GAP;
-
-    // Les trois largeurs d'abord, pour centrer la ligne entière et non chaque lien.
-    let width_of = |ui: &mut egui::Ui, s: &str| {
-        ui.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), TEXT_DIM))
-            .rect
-            .width()
-    };
-    let terms_width = width_of(ui, Link::TermsOfService.label());
-    let separator_width = width_of(ui, CONSENT_SEPARATOR);
-    let privacy_width = width_of(ui, Link::PrivacyPolicy.label());
-    let left = center_x - (terms_width + separator_width + privacy_width) / 2.0;
-
-    let row_height = link(
-        ui,
-        Pos2::new(left + terms_width / 2.0, row_top),
-        Link::TermsOfService.label(),
-        "login-conditions",
-        || {
-            tracing::info!("[connexion] conditions d'utilisation demandées.");
-            outcome.open_url = Some(Link::TermsOfService.url());
-        },
-    );
-    ui.painter().text(
-        Pos2::new(left + terms_width, row_top),
-        Align2::LEFT_TOP,
-        CONSENT_SEPARATOR,
-        font,
-        TEXT_DIM,
-    );
-    link(
-        ui,
-        Pos2::new(
-            left + terms_width + separator_width + privacy_width / 2.0,
-            row_top,
-        ),
-        Link::PrivacyPolicy.label(),
-        "login-confidentialite",
-        || {
-            tracing::info!("[connexion] politique de confidentialité demandée.");
-            outcome.open_url = Some(Link::PrivacyPolicy.url());
-        },
-    );
-    sentence_height + CONSENT_GAP + row_height
+    let height = galley.rect.height();
+    // Italique simulé : `paint_italic` cisaille les sommets proportionnellement à leur hauteur
+    // au-dessus de la ligne de base, ce qui vaut ligne par ligne dans un galley qui en a deux.
+    paint_italic(ui, Pos2::new(center_x, top), galley, CONSENT_TEXT);
+    height
 }
 
 /// Trois points cyan qui pulsent, un libellé, et à droite un compte à rebours facultatif — rend
