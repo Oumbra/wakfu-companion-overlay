@@ -570,10 +570,14 @@ bornée au cadre, le côté reste une case des Options), et suit tout déplaceme
   personnage restait visible au même instant bien que les deux passent par exactement le même code
   (`App::sync_topmost`, vérifié identique pour les deux) : un aléa d'ordonnancement Windows d'un
   seul tick entre les deux `SetWindowPos` suffisait à les faire diverger visuellement. Un overlay
-  qui vient de perdre `relevant` n'est désormais démoté qu'après `TOPMOST_DEMOTE_GRACE` (1,5 s)
-  écoulée EN CONTINU sans redevenir pertinent — la réaffirmation en topmost, elle, reste immédiate
-  dès que le focus revient, avant l'échéance. Ne revient pas sur le principe du 2026-09-01 (repli
-  toujours appliqué au bout du délai), absorbe seulement les aléas de timing d'un tick.
+  qui vient de perdre `relevant` n'est désormais démoté qu'après `TOPMOST_DEMOTE_GRACE` écoulée
+  EN CONTINU sans redevenir pertinent — la réaffirmation en topmost, elle, reste immédiate dès que
+  le focus revient, avant l'échéance. Ne revient pas sur le principe du 2026-09-01 (repli toujours
+  appliqué au bout du délai), absorbe seulement les aléas de timing d'un tick.
+  **100 ms depuis le 2026-09-23** (deux ticks) : les 1,5 s initiales, choisies sans mesure,
+  faisaient traîner la disparition bien derrière l'apparition, immédiate (retour utilisateur,
+  vidéo à l'appui : « il devrait disparaître avec le même temps de réponse que l'apparition »).
+  Même valeur côté Linux (`overlay_platform::linux::topmost::DEMOTE_GRACE`).
 - **Fenêtres à durée de vie dynamique** : le motif `Box::leak`/`&'static Window` du mono-fenêtre
   d'origine ne tient plus dès qu'une fenêtre doit pouvoir être détruite (client fermé) —
   `Arc<Window>` à la place (`wgpu::Instance::create_surface` l'accepte directement, donnant un
@@ -3551,7 +3555,7 @@ Architecture, une fois ces prérequis validés :
   - topmost/stacking : `_NET_CLIENT_LIST_STACKING` (exposé par le WM EWMH) comparé avant/après le
     délai de grâce.
 - **Horloge injectable côté X11 aussi** : `sync_topmost`/`sync_windows` s'appuient directement sur
-  `std::time::Instant::now()` (`TOPMOST_DEMOTE_GRACE` 1,5 s, sondage 20 Hz) sans abstraction
+  `std::time::Instant::now()` (`TOPMOST_DEMOTE_GRACE` 100 ms, sondage 20 Hz) sans abstraction
   aujourd'hui. Extraire cette logique derrière une horloge substituable pour la couvrir par des
   tests **unitaires, synchrones, sans Xvfb**, sur le modèle de `overlay-ingest::Tailer::poll` (§12,
   L1). Réserver Xvfb à un très petit nombre de tests d'intégration tolérants en délai, qui vérifient
