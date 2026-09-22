@@ -2379,6 +2379,7 @@ mod linux_main {
         /// Le chemin de `wakfu.log` est le seul réglage qui puisse être refusé : un chemin invalide
         /// est journalisé et ignoré, le reste du volet s'applique quand même.
         fn apply_card_settings(&mut self, settings: &panels::login::CardSettings) {
+            use panels::notifications::ToastClose as _;
             let mut features = self.features;
             features.recap = settings.recap;
             features.recap_cells.duration = settings.recap_duration;
