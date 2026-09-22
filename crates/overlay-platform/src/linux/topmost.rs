@@ -18,9 +18,10 @@
 use std::time::{Duration, Instant};
 
 /// Délai de grâce avant repli — même valeur et même raisonnement que
-/// `overlay_ui::main::TOPMOST_DEMOTE_GRACE` (1,5 s : absorbe un aléa d'un tick de sondage sans
-/// tolérer un vrai changement de fenêtre prolongé).
-pub const DEMOTE_GRACE: Duration = Duration::from_millis(1500);
+/// `overlay_ui::main::TOPMOST_DEMOTE_GRACE` (100 ms, deux ticks de sondage : absorbe un aléa
+/// d'un tick sans que la disparition traîne derrière l'apparition — ramené de 1,5 s le
+/// 2026-09-23, retour utilisateur vidéo à l'appui, voir la constante Windows).
+pub const DEMOTE_GRACE: Duration = Duration::from_millis(100);
 
 /// État topmost de l'overlay entre deux appels à `decide` — équivalent des deux champs
 /// `OverlayWindow::is_topmost`/`pending_demote_since` côté Windows, regroupés ici car ils n'ont de
@@ -163,8 +164,8 @@ mod tests {
         );
         assert_eq!(action, TopmostAction::None);
 
-        // Toujours dans le délai (1,5 s) une seconde plus tard.
-        let (state, action) = decide(state, false, t0 + Duration::from_secs(1));
+        // Toujours dans le délai (100 ms) un tick plus tard.
+        let (state, action) = decide(state, false, t0 + Duration::from_millis(50));
         assert_eq!(
             state,
             TopmostState::Above {
@@ -189,7 +190,7 @@ mod tests {
         let pending = TopmostState::Above {
             pending_demote_since: Some(t(0)),
         };
-        let (state, action) = decide(pending, true, t(0) + Duration::from_millis(500));
+        let (state, action) = decide(pending, true, t(0) + Duration::from_millis(50));
         assert_eq!(
             state,
             TopmostState::Above {

@@ -147,11 +147,15 @@ const COMPLETION_FRAME: std::time::Duration = std::time::Duration::from_millis(1
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// Délai de grâce avant repli hors topmost (recollage juste au-dessus de sa fenêtre de jeu,
 /// `App::glue_above_game`) — voir `OverlayWindow::pending_demote_since` et
-/// `App::sync_topmost`. Assez court pour qu'un changement de fenêtre volontaire et soutenu
-/// reste respecté rapidement (ne pas recouvrir durablement une autre appli, retour utilisateur
-/// 2026-09-01), assez long pour absorber un aléa de timing d'un seul tick (~50 ms) entre les deux
-/// overlays d'un même personnage.
-const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// `App::sync_topmost`. Deux ticks de sondage (~50 ms chacun) : assez pour absorber un aléa
+/// d'un seul tick entre les deux overlays d'un même personnage (le motif du 2026-09-02), et
+/// imperceptible à l'œil — la disparition doit être aussi immédiate que l'apparition.
+///
+/// **1 500 ms jusqu'au 2026-09-23** (retour utilisateur, vidéo à l'appui : « il reste une
+/// seconde cinq, c'est beaucoup trop », journal `session_id=14468` — rétrogradation 1,49 s après
+/// la promotion de l'autre client). Ce délai avait été choisi large sans mesure ; rien dans les
+/// journaux depuis n'a jamais montré un aléa supérieur à un tick.
+const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
 /// Cadence de la surveillance de tour (§9.1 decies) — voir `App::sync_turn_watch`. Le chrono du
 /// widget change à la seconde ; 500 ms suffisent pour voir chaque tour commencer.
 const TURN_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -2587,8 +2591,8 @@ impl App {
     /// : les bascules topmost s'y enchaînent pourtant exactement comme prévu) : le repli était
     /// `SetWindowPos(HWND_NOTOPMOST)`, qui place la fenêtre **en tête de la bande non-topmost** —
     /// c'est-à-dire AU-DESSUS de l'application qui vient d'être activée, tant que celle-ci n'est
-    /// pas réactivée. Deux clients côte à côte : les overlays de Canis, rétrogradés 1,5 s après
-    /// le passage sur Zoroark, restaient dessinés PAR-DESSUS la fenêtre de Zoroark (qui, active
+    /// pas réactivée. Deux clients côte à côte : les overlays de Canis, rétrogradés après le
+    /// passage sur Zoroark, restaient dessinés PAR-DESSUS la fenêtre de Zoroark (qui, active
     /// depuis avant la rétrogradation, ne repassait jamais devant eux) ; même chose au-dessus de
     /// VS Code ou de l'outil de capture. Le modèle voulu est « un groupe d'overlays par fenêtre de
     /// jeu, qui suit sa fenêtre » : rétrogradé, un overlay est désormais inséré juste au-dessus
