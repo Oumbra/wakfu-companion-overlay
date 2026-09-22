@@ -1496,9 +1496,8 @@ fn paint_settings_content(
 ) {
     let left = ui.max_rect().left() + ABOUT_PAD_SIDE;
     let inner = width - ABOUT_PAD_SIDE - ABOUT_PAD_RIGHT;
-    // **Le haut est retenu ici**, pas relu à la fin : les champs de saisie passent par `ui.put`,
-    // qui avance le curseur du `Ui`. Le relire pour calculer la hauteur du contenu donnait une
-    // zone défilable plus courte qu'elle ne l'est, donc pas de barre de défilement du tout.
+    // **Le haut est retenu ici**, pas relu à la fin : tout le volet est peint en `y` absolus, et
+    // le curseur du `Ui` ne suit pas cette peinture.
     let start = ui.cursor().top();
     let mut y = start;
 
@@ -1861,8 +1860,15 @@ fn paint_settings_content(
         y += BUTTON_HEIGHT;
     }
 
-    let height = (y - start).max(0.0);
-    ui.allocate_space(Vec2::new(width, height));
+    // **Un rectangle absolu, pas `allocate_space`** : `allocate_space` part du curseur du `Ui`, et
+    // toute avance de ce curseur s'ajoutait à la hauteur du contenu. La zone défilable descendait
+    // alors bien au-delà du dernier réglage (retour utilisateur, 2026-09-22). De `start` à `y`,
+    // c'est exactement ce qui a été peint.
+    let content = Rect::from_min_max(
+        Pos2::new(ui.max_rect().left(), start),
+        Pos2::new(ui.max_rect().left() + width, y.max(start)),
+    );
+    ui.allocate_rect(content, Sense::hover());
 }
 
 /// Un titre de section : capitales italiques grises, puis son filet.
@@ -2172,16 +2178,19 @@ fn set_numeric_field(
 
     let mut changed = false;
     let value_rect = Rect::from_min_size(rect.min, Vec2::new(NUMF_VALUE_WIDTH, rect.height()));
+    // **La police se résout AVANT `fonts_mut`**, jamais dans sa fermeture — voir le commentaire de
+    // la branche inactive plus bas : `label_font` interroge le contexte, que `fonts_mut` tient
+    // déjà en écriture, et le `RwLock` d'egui n'est pas réentrant.
+    let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
     if enabled {
-        let response = ui.put(
+        let response = set_field_edit(
+            ui,
             value_rect,
+            &font,
+            (log_name, "valeur"),
             egui::TextEdit::singleline(input)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
                 .horizontal_align(egui::Align::Center)
-                .font(text::label_font(ui.ctx(), SET_LABEL_SIZE))
-                .text_color(TEXT)
-                .id(ui.id().with((log_name, "valeur"))),
+                .text_color(TEXT),
         );
         if response.lost_focus() {
             let parsed = notifications::parse_duration(input, *value).clamp(bounds.0, bounds.1);
@@ -2201,8 +2210,7 @@ fn set_numeric_field(
         // numérique était inactif (case décochée, ou alertes pas encore descendues) : « ne répond
         // pas » dès l'ouverture du volet (retour utilisateur, 2026-09-22). En debug, egui panique
         // après dix secondes — d'où le test `carte_volet_parametres_champs_inactifs`.
-        let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
-        let galley = ui.fonts_mut(|f| f.layout_no_wrap(input.clone(), font, fade(TEXT)));
+        let galley = ui.fonts_mut(|f| f.layout_no_wrap(input.clone(), font.clone(), fade(TEXT)));
         ui.painter().galley(
             Pos2::new(
                 value_rect.center().x - galley.rect.width() / 2.0,
@@ -2420,6 +2428,43 @@ fn paint_speaker(ui: &egui::Ui, rect: Rect, color: Color32) {
     }
 }
 
+/// **La zone d'édition d'un champ de la Carte**, posée dans la boîte que l'appelant a peinte.
+///
+/// Deux pièges d'egui, tous deux constatés le 2026-09-22 sur le volet « Paramètres » :
+///
+/// 1. **La valeur se collait en haut du champ.** Un `TextEdit` d'une ligne ne fait que la hauteur
+///    de cette ligne et se pose en HAUT de l'espace qu'on lui donne : le champ actif paraissait
+///    décentré face au champ inactif, dont le texte est peint centré à la main. Le rectangle est
+///    donc réduit à la hauteur d'une ligne, puis centré dans la boîte — le même calcul que
+///    `design::components::input`.
+/// 2. **`ui.put` avançait le curseur du `Ui` parent** jusqu'au bas du champ, alors que tout le
+///    volet est peint en `y` absolus et alloue sa hauteur d'un bloc à la fin. Les deux s'ajoutaient
+///    et la zone défilable descendait plusieurs centaines de pixels sous le contenu. Un `new_child`
+///    a son propre curseur et ne remonte rien au parent.
+///
+/// L'identifiant vient de `log_name`, jamais du compteur automatique du `Ui` : un champ que le
+/// défilement sort du champ visible décalerait sinon l'identité de tous les suivants, et un champ
+/// hériterait du défilement horizontal d'un autre.
+fn set_field_edit(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    font: &egui::FontId,
+    log_name: impl std::hash::Hash + std::fmt::Debug,
+    edit: egui::TextEdit<'_>,
+) -> egui::Response {
+    let id = ui.id().with(log_name);
+    let row = ui.fonts_mut(|f| f.row_height(font));
+    let text_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), row));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).id_salt(id));
+    child.add(
+        edit.frame(egui::Frame::NONE)
+            .margin(egui::Margin::ZERO)
+            .font(font.clone())
+            .desired_width(text_rect.width())
+            .id(id),
+    )
+}
+
 /// Un champ de texte de la Carte — le cadre est peint ici, la saisie est celle d'egui. Rend `true`
 /// quand le contenu vient de changer.
 fn set_text_field(
@@ -2438,16 +2483,16 @@ fn set_text_field(
         egui::StrokeKind::Inside,
     );
     let inner = rect.shrink2(Vec2::new(9.0, 0.0));
-    let response = ui.put(
+    let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
+    let response = set_field_edit(
+        ui,
         inner,
+        &font,
+        log_name,
         egui::TextEdit::singleline(text)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin::ZERO)
             .horizontal_align(align)
-            .font(text::label_font(ui.ctx(), SET_LABEL_SIZE))
             .text_color(TEXT)
-            .hint_text(hint)
-            .id(ui.id().with(log_name)),
+            .hint_text(hint),
     );
     // **À la perte du focus, pas à chaque frappe** : un chemin à demi tapé n'est pas un chemin, et
     // l'hôte rechargerait le moteur à chaque caractère.
