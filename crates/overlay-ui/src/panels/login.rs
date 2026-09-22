@@ -271,15 +271,12 @@ const ABOUT_HEADING_GAP: f32 = 8.0;
 const ABOUT_BLOCK_GAP: f32 = 8.0;
 const ABOUT_SECTION_GAP: f32 = 18.0;
 const ABOUT_LINKS_GAP: f32 = 6.0;
-/// Bande collante du bas : l'air du dégradé, le bouton, l'air en dessous.
+/// Bande collante du bas : l'air au-dessus du bouton, le bouton, l'air en dessous.
 const BACKBAR_HEIGHT: f32 = BACKBAR_PAD_TOP + BUTTON_HEIGHT + BACKBAR_PAD_BOTTOM;
 const BACKBAR_PAD_TOP: f32 = 12.0;
 /// Ce qui sépare le bouton « Retour » du bas de la Carte. Il n'y en avait pas : le bouton
 /// touchait la bordure, et c'était visible (2026-09-22).
 const BACKBAR_PAD_BOTTOM: f32 = 14.0;
-/// Largeur du bouton « Retour » — resserré plutôt que pleine largeur, pour qu'il ne coure pas
-/// jusqu'aux bordures latérales.
-const BACK_BUTTON_WIDTH: f32 = 180.0;
 /// Barre rouge d'un bloc d'avertissement du volet, et son fond.
 const ALERT_BAR_WIDTH: f32 = 2.0;
 const ALERT_PAD_X: f32 = 10.0;
@@ -748,8 +745,10 @@ fn has_local_data(state: &mut LoginState) -> bool {
 /// visible en permanence sous le volet.
 ///
 /// La zone défilante occupe tout le corps sauf la bande du bas, qui porte « Retour » : le bouton
-/// reste donc visible quel que soit le défilement, et ne touche aucune bordure (180 px centrés,
-/// [`BACKBAR_PAD_BOTTOM`] sous lui).
+/// reste donc visible quel que soit le défilement. Il a la largeur des autres boutons de la Carte
+/// — le corps moins ses marges latérales — et **aucun fond derrière lui** : un fond de bande
+/// repeignait [`CARD_FILL`] par-dessus lui-même, ce qui se voyait comme un rectangle plus opaque
+/// courant jusqu'aux bordures latérales (2026-09-22, retour utilisateur).
 fn paint_about(
     ui: &mut egui::Ui,
     body_rect: Rect,
@@ -791,15 +790,18 @@ fn paint_about(
         state.purge_confirm = true;
     }
 
-    // La bande du bas : un dégradé qui éteint le texte qui passe dessous, puis le bouton.
-    let backbar = Rect::from_min_max(Pos2::new(body_rect.left(), backbar_top), body_rect.max);
-    paint_backbar_fade(ui, backbar);
-    let button_rect = Rect::from_min_size(
+    // La bande du bas ne porte que le bouton : aucun fond à elle. La zone défilante s'arrête à
+    // `backbar_top`, donc rien ne passe dessous — un fond n'aurait fait que repeindre `CARD_FILL`
+    // par-dessus lui-même, d'où une bande plus opaque que le reste, jusqu'aux bordures latérales.
+    let button_rect = Rect::from_min_max(
         Pos2::new(
-            body_rect.center().x - BACK_BUTTON_WIDTH / 2.0,
-            backbar.top() + BACKBAR_PAD_TOP,
+            body_rect.left() + BODY_PAD_SIDE,
+            backbar_top + BACKBAR_PAD_TOP,
         ),
-        Vec2::new(BACK_BUTTON_WIDTH, BUTTON_HEIGHT),
+        Pos2::new(
+            body_rect.right() - BODY_PAD_SIDE,
+            backbar_top + BACKBAR_PAD_TOP + BUTTON_HEIGHT,
+        ),
     );
     if button(
         ui,
@@ -1009,31 +1011,6 @@ fn paint_about_block(
         P_LINE,
     );
     block.bottom()
-}
-
-/// Le dégradé de la bande « Retour » : le fond de la carte, transparent en haut, opaque sous le
-/// bouton. Peint en quelques bandes plutôt qu'en un dégradé continu — egui n'a pas de brosse à
-/// dégradé, et huit bandes suffisent sur quatorze pixels.
-fn paint_backbar_fade(ui: &egui::Ui, rect: Rect) {
-    const BANDS: usize = 8;
-    let fade_height = BACKBAR_PAD_TOP;
-    for i in 0..BANDS {
-        let t = i as f32 / BANDS as f32;
-        let band = Rect::from_min_max(
-            Pos2::new(rect.left(), rect.top() + fade_height * t),
-            Pos2::new(
-                rect.right(),
-                rect.top() + fade_height * (i + 1) as f32 / BANDS as f32,
-            ),
-        );
-        ui.painter()
-            .rect_filled(band, 0.0, CARD_FILL.gamma_multiply(t));
-    }
-    ui.painter().rect_filled(
-        Rect::from_min_max(Pos2::new(rect.left(), rect.top() + fade_height), rect.max),
-        0.0,
-        CARD_FILL,
-    );
 }
 
 /// **La barre de défilement de la Carte** : celle du site, pas celle du jeu, et peinte ici plutôt
