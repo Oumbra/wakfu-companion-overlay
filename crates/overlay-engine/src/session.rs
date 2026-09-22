@@ -1839,10 +1839,18 @@ impl SessionState {
     /// simple et strictement meilleur : repli sur la PREMIÈRE instance jointe de ce nom, jamais de
     /// dégâts perdus.
     ///
-    /// Ajoute aussi défensivement le combattant lui-même s'il n'a jamais été vu rejoindre (ne
-    /// devrait pas arriver — voir la doc de `FighterJoinedEntry`, émis pour chaque combattant —
-    /// mais un combat en cours au moment de la connexion peut en avoir manqué le début) : sans
-    /// classe, comme un allié pas encore classifié (voir doc de `FighterDamage::class_name`).
+    /// **Un attaquant que ce combat n'a jamais vu rejoindre ne crédite personne et n'est JAMAIS
+    /// ajouté** (2026-09-23, décision utilisateur, bug réel en multi-compte). Jusqu'ici ce chemin
+    /// l'ajoutait « défensivement », sans classe, au motif qu'un combat déjà en cours à la
+    /// connexion aurait pu en manquer la jointure — hypothèse caduque : le rattrapage rejoue
+    /// `wakfu.log` depuis le début (`Tailer::poll`) et un combat restauré du disque rapporte ses
+    /// combattants avec lui (`restore_fight`). Ce qui arrivait réellement par là, c'était une
+    /// ligne de dégâts d'un AUTRE combat concurrent, mal routée par le parser vers un combat qui
+    /// venait de démarrer et où personne n'avait encore agi — résolue avec un `lastCast` vide,
+    /// elle portait l'attaquant « Inconnu » et créait une ligne « Inconnu » dans le panneau. Le
+    /// routage lui-même est corrigé côté parser (`mostRecentlyActiveFight`, `log-parser.ts`) ;
+    /// cette garde reste la seconde ligne de défense : aucune entité ne naît dans un combat
+    /// autrement que par sa jointure `[_FL_]`, une invocation comprise.
     ///
     /// `None` si `name` est une invocation connue de ce combat (`FightWorking::summon_names`) —
     /// miroir du filtre `summonNames` de `addDamage`/`ensurePresent` côté web : ses actions dont
@@ -1880,9 +1888,12 @@ impl SessionState {
                         .and_then(|ids| ids.first().copied())
                 })
         };
-        let idx = match known_idx {
-            Some(idx) => idx,
-            None => self.upsert_fighter(fight_id, name, true, None, Gender::M, None),
+        let Some(idx) = known_idx else {
+            tracing::debug!(
+                fight_id,
+                "action d'un attaquant jamais vu rejoindre ce combat, ignorée"
+            );
+            return None;
         };
 
         let fight = self
@@ -3389,6 +3400,28 @@ mod tests {
 
         assert!(cast_names(&state, 1, "Oumbra").is_empty());
         assert_eq!(state.fights[&1].snapshot.last_ally_caster, None);
+    }
+
+    /// Une ligne de dégâts dont l'attaquant n'a jamais rejoint CE combat ne crée aucune ligne —
+    /// ni « Inconnu » (attaquant irrésolu par le parser), ni un combattant d'un autre combat
+    /// concurrent mal routé (2026-09-23, voir `fighter_mut`).
+    #[test]
+    fn degats_d_un_attaquant_inconnu_du_combat_ne_creent_aucune_ligne() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(&damage(1, "Inconnu", 5_649), ctx, &mut Vec::new());
+        state.apply(&damage(1, "Canis Furiosus", 7_194), ctx, &mut Vec::new());
+
+        let fight = &state.fights[&1].snapshot;
+        assert_eq!(fight.fighters.len(), 1, "{:?}", fight.fighters);
+        assert_eq!(fight.fighters[0].name, "Oumbra");
+        assert_eq!(fight.fighters[0].total_damage, 0);
     }
 
     #[test]

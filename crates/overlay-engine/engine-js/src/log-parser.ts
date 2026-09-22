@@ -351,6 +351,17 @@ interface FightParseState {
    * simple resynchronisation ("[_FL_] ... join the fight" est réémis de nombreuses fois par
    * combattant au fil d'un même combat, pas seulement à son arrivée). */
   seenFighterIds: Set<number>;
+  /** Horodatage (ms dans la journée, voir timeToMs) de la DERNIÈRE ACTION résolue dans ce combat —
+   * sort lancé, dégât, soin ou armure — `-1` tant que personne n'y a agi. Une jointure
+   * ("[_FL_] ... join the fight") n'en est PAS une : le client la réémet en rafale pour chaque
+   * combattant au démarrage d'un combat, puis régulièrement au fil de celui-ci. Sert à
+   * resolveFightIdForName pour départager un nom porté par PLUSIEURS combats concurrents
+   * (multi-compte : deux personnages dans le même donjon affrontent les mêmes monstres, aux mêmes
+   * noms) — bug réel corrigé le 2026-09-23 : un combat B qui démarrait pendant un combat A, avec
+   * les mêmes noms d'ennemis, avalait par sa rafale de jointures (`currentFightId = B`) les lignes
+   * de dégâts de A dont la cible était ambiguë ; résolues avec l'état de B, où personne n'avait
+   * encore lancé de sort (`lastCast` nul), elles créaient dans B un attaquant « Inconnu ». */
+  lastActionMs: number;
 }
 
 function createFightParseState(): FightParseState {
@@ -362,6 +373,7 @@ function createFightParseState(): FightParseState {
     summonOwners: new Map(),
     pendingSummonCasters: [],
     seenFighterIds: new Set(),
+    lastActionMs: -1,
   };
 }
 
@@ -706,7 +718,10 @@ export class LogParser {
     return state;
   }
 
-  /** Résout le combat d'un combattant nommé : sans ambiguïté si ce nom n'appartient qu'à un seul combat actif, sinon repli sur le dernier combat résolu (voir resolveCurrentFightId). */
+  /** Résout le combat d'un combattant nommé : sans ambiguïté si ce nom n'appartient qu'à un seul
+   * combat actif ; porté par plusieurs combats concurrents, celui où quelqu'un a agi le plus
+   * récemment (voir mostRecentlyActiveFight) ; sinon repli sur le dernier combat résolu (voir
+   * resolveCurrentFightId). */
   private resolveFightIdForName(name: string): number | null {
     const ids = this.nameToFightIds.get(name);
     if (ids && ids.size === 1) {
@@ -714,7 +729,39 @@ export class LogParser {
       this.currentFightId = id;
       return id;
     }
+    if (ids && ids.size > 1) {
+      const preferred = this.mostRecentlyActiveFight(ids);
+      if (preferred !== null) {
+        this.currentFightId = preferred;
+        return preferred;
+      }
+    }
     return this.resolveCurrentFightId();
+  }
+
+  /**
+   * Parmi plusieurs combats concurrents portant le même nom de combattant : celui où quelqu'un a
+   * AGI le plus récemment (voir FightParseState.lastActionMs) — jamais un combat où personne n'a
+   * encore lancé de sort ni infligé/reçu quoi que ce soit, qui ne peut pas être la source d'une
+   * ligne de dégâts. `null` si aucun d'eux n'a encore d'action (l'appelant retombe alors sur le
+   * repli historique). Égalité stricte (même milliseconde) : le combat courant s'il en fait partie.
+   *
+   * Limite assumée : deux combats dont les ennemis portent les mêmes noms restent indiscernables
+   * pour une ligne prise isolément — un dégât de A qui suit de près un sort lancé dans B est encore
+   * attribué à B. Le tri par dernière action réduit la fenêtre d'erreur à cet entrelacement serré,
+   * là où `currentFightId` seul basculait à CHAQUE jointure réémise par le client.
+   */
+  private mostRecentlyActiveFight(ids: Set<number>): number | null {
+    let best: number | null = null;
+    let bestMs = -1;
+    for (const id of ids) {
+      const ms = this.fightStates.get(id)?.lastActionMs ?? -1;
+      if (ms > bestMs || (ms === bestMs && ms >= 0 && id === this.currentFightId)) {
+        best = id;
+        bestMs = ms;
+      }
+    }
+    return bestMs >= 0 ? best : null;
   }
 
   /** "Lancement de l'occupation pour le joueur {nom} {classe}" : le nom du combattant est un préfixe du texte capturé (la classe suit, ex. "Crâ", "Sram"). */
@@ -887,6 +934,7 @@ export class LogParser {
       const fightId = this.resolveFightIdForName(caster);
       const state = this.getFightState(fightId);
       state.lastCast = { caster, spell };
+      state.lastActionMs = this.timeToMs(time);
       state.spellCasters.set(spell.toLowerCase(), caster);
       return { kind: 'spell-cast', time, caster, spell, critical, fightId };
     }
@@ -936,6 +984,7 @@ export class LogParser {
       // concurrent (voir FightParseState). C'est aussi le fightId attribué à l'entrée émise.
       const fightId = this.resolveFightIdForName(target);
       const state = this.getFightState(fightId);
+      state.lastActionMs = this.timeToMs(time);
 
       if (sign === '-') {
         const { attacker, spell, element } = this.resolveEffectTail(target, tail, state, {
@@ -965,15 +1014,12 @@ export class LogParser {
       const amount = parseFrenchNumber(armor[3]);
       const tail = armor[4] ?? '';
       const fightId = this.resolveFightIdForName(target);
-      const { attacker, spell } = this.resolveEffectTail(
-        target,
-        tail,
-        this.getFightState(fightId),
-        {
-          selfFallback: true,
-          riposteFallback: false,
-        },
-      );
+      const state = this.getFightState(fightId);
+      state.lastActionMs = this.timeToMs(time);
+      const { attacker, spell } = this.resolveEffectTail(target, tail, state, {
+        selfFallback: true,
+        riposteFallback: false,
+      });
       return { kind: 'armor', time, target, attacker, spell, amount, fightId };
     }
 

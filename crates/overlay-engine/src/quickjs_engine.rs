@@ -378,6 +378,54 @@ mod tests {
         );
     }
 
+    /// Deux combats concurrents (multi-compte) contre des monstres du même nom : le combat 2
+    /// démarre — rafale de jointures — pendant que le combat 1 est en cours. Un dégât du combat 1
+    /// sur une cible ambiguë (« Grokoko » est dans les deux) doit rester dans le combat 1, crédité
+    /// à son lanceur, et non partir dans le combat 2 où personne n'a encore agi — ce qui y créait
+    /// un attaquant « Inconnu » (bug réel du 2026-09-22, voir `mostRecentlyActiveFight`).
+    fn lignes_deux_combats_concurrents() -> Vec<String> {
+        [
+            " INFO 10:00:00,000 [T] (a:1) - [_FL_] fightId=1 Zoroark breed : 15 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:00,001 [T] (a:1) - [_FL_] fightId=1 Grokoko breed : 4728 [-2] isControlledByAI=true obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:01,000 [T] (a:1) - [Information (combat)] Zoroark lance le sort Croc-en-jambe",
+            " INFO 10:00:01,050 [T] (a:1) - [_FL_] fightId=2 Canis breed : 4 [3] isControlledByAI=false obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:01,051 [T] (a:1) - [_FL_] fightId=2 Grokoko breed : 4728 [-4] isControlledByAI=true obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:01,100 [T] (a:1) - [Information (combat)] Grokoko: -105 PV (Terre)",
+            " INFO 10:00:02,000 [T] (a:1) - [Information (combat)] Canis lance le sort Morsure",
+            " INFO 10:00:02,100 [T] (a:1) - [Information (combat)] Grokoko: -77 PV (Feu)",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
+    #[test]
+    fn un_degat_sur_cible_ambigue_reste_dans_le_combat_ou_quelquun_a_agi() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine
+            .parse_lines(&lignes_deux_combats_concurrents())
+            .expect("parsing");
+        let damages: Vec<(Option<i64>, String, i64)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    fight_id,
+                    attacker,
+                    amount,
+                    ..
+                } => Some((*fight_id, attacker.clone(), *amount)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            damages,
+            vec![
+                (Some(1), "Zoroark".to_string(), 105),
+                (Some(2), "Canis".to_string(), 77),
+            ]
+        );
+    }
+
     #[test]
     fn sans_catalogue_le_repli_dinvocation_avale_nimporte_quel_nouveau_venu() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");

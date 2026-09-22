@@ -14,6 +14,12 @@ parseur diverge donc normalement du dépôt d'origine (décision utilisateur, 20
   générale de 1 s avalait les relancers rapides d'un même sort.
 - 2026-09-13 log-parser.ts + log-entry.model.ts : nouvel événement `turn-ended`
   ("N secondes reportées pour le tour suivant."), frontière de tour pour les homonymes.
+- 2026-09-23 log-parser.ts : `FightParseState.lastActionMs` + `mostRecentlyActiveFight` — un nom
+  de cible porté par plusieurs combats concurrents se résout vers le combat où quelqu'un a agi le
+  plus récemment, jamais vers un combat sans aucune action (bug réel multi-compte : la rafale de
+  jointures d'un combat qui démarre volait les dégâts du combat en cours et y créait un attaquant
+  « Inconnu »). Le même défaut existe côté web (`resolveFightIdForName` y retombe encore sur
+  `currentFightId`) — à reporter.
 
 `src/entry.ts` n'est pas vendu : c'est la façade QuickJS propre à l'overlay. Toute méthode
 publique de `LogParser` qu'elle expose (`parseLine`, `flush`, `reset`, `closeFight`) doit y être
