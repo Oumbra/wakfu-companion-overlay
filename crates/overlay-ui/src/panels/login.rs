@@ -116,6 +116,28 @@ const ANIMATION_FRAME: Duration = Duration::from_millis(33);
 /// Période de la pulsation des trois points d'attente (`v-web-pulse 1.4s`).
 const DOTS_PERIOD: Duration = Duration::from_millis(1400);
 
+// ── Onde de la pastille d'état (2026-09-22) ────────────────────────────────────────────────────
+/// Période de l'onde qui part de la pastille de [`paint_status_row`]. Deux secondes : 1,5 s
+/// paraissait pressé sur une fenêtre qu'on garde ouverte, 3 s ne se remarquait plus (essais
+/// successifs avec l'utilisateur sur maquette).
+const STATUS_PULSE_PERIOD: Duration = Duration::from_secs(2);
+/// Distance que l'onde parcourt au-delà du bord de la pastille avant de s'éteindre.
+const STATUS_PULSE_REACH: f32 = 9.0;
+/// Opacité de l'onde au départ — elle décroît linéairement jusqu'à zéro.
+const STATUS_PULSE_ALPHA: f32 = 0.45;
+/// Part de la période pendant laquelle l'onde court : le reste est le silence entre deux ondes.
+const STATUS_PULSE_DUTY: f32 = 0.7;
+
+// ── Jauge de téléchargement (2026-09-22) ───────────────────────────────────────────────────────
+/// Période du reflet qui balaie le remplissage de la jauge — voir [`paint_card_meter`].
+const SHEEN_PERIOD: Duration = Duration::from_millis(1600);
+/// Largeur du reflet, en fraction de la largeur de la jauge.
+const SHEEN_WIDTH_RATIO: f32 = 0.35;
+/// Piste de la jauge de la Carte — le gris d'un champ du site, pas les bordures du jeu.
+const METER_TRACK: Color32 = Color32::from_rgb(0x1b, 0x20, 0x28);
+/// Remplissage d'une jauge **à l'arrêt** : la couleur s'éteint en même temps que le reflet.
+const METER_STALLED: Color32 = Color32::from_rgb(0x4a, 0x55, 0x60);
+
 // ── Gabarit (maquette v4, valeurs en px logiques) ──────────────────────────────────────────────
 const CARD_RADIUS: f32 = 10.0;
 const HEAD_PAD_TOP: f32 = 26.0;
@@ -246,6 +268,39 @@ impl LoginState {
     }
 }
 
+/// **Les horloges de la carte**, calculées une fois par frame dans [`show`] et passées aux
+/// peintres qui en ont besoin. Chacune est une fraction de sa propre période, ∈ [0, 1[.
+///
+/// Sous `animate == false` — le harnais de captures, dont une frame doit finir par ne plus rien
+/// demander — elles ne valent pas zéro mais une pose choisie : à zéro, le reflet de la jauge est
+/// hors champ et l'onde de la pastille collée à son bord, c'est-à-dire que la référence ne
+/// montrerait rien de ce qu'on vient d'ajouter.
+#[derive(Clone, Copy, Debug)]
+struct Phases {
+    ring: f32,
+    pulse: f32,
+    sheen: f32,
+}
+
+impl Phases {
+    fn new(elapsed: Duration, animate: bool) -> Self {
+        let fraction = |period: Duration| (elapsed.as_secs_f32() / period.as_secs_f32()).fract();
+        if animate {
+            Self {
+                ring: fraction(RING_PERIOD),
+                pulse: fraction(STATUS_PULSE_PERIOD),
+                sheen: fraction(SHEEN_PERIOD),
+            }
+        } else {
+            Self {
+                ring: 0.0,
+                pulse: 0.3,
+                sheen: 0.45,
+            }
+        }
+    }
+}
+
 /// Ce que la fenêtre demande à son hôte — voir la doc de module.
 #[derive(Debug, Default)]
 pub struct LoginOutcome {
@@ -336,12 +391,8 @@ pub fn show(
         Stroke::new(1.0, border),
         egui::StrokeKind::Inside,
     );
-    let phase = if state.animate {
-        (elapsed.as_secs_f32() / RING_PERIOD.as_secs_f32()).fract()
-    } else {
-        0.0
-    };
-    paint_ring(ui, card, phase, ring_style);
+    let phases = Phases::new(elapsed, state.animate);
+    paint_ring(ui, card, phases.ring, ring_style);
     if state.animate {
         ctx.request_repaint_after(ANIMATION_FRAME);
     }
@@ -456,6 +507,7 @@ pub fn show(
             y,
             headline,
             detail,
+            phases,
             &h2_font,
             &p_font,
             &mut outcome,
@@ -471,6 +523,7 @@ pub fn show(
             body_width,
             y,
             state,
+            phases,
             &h2_font,
             &p_font,
             &mut outcome,
@@ -492,7 +545,15 @@ pub fn show(
         ui.put(loader_rect, loader);
         // L'avancement de la mise à jour, sous le rouage — rien tant qu'il n'y a rien à dire
         // (l'écran de chargement d'origine reste identique au pixel près).
-        paint_update_progress(ui, &ctx, body_rect, loader_rect, &state.update, false);
+        paint_update_progress(
+            ui,
+            &ctx,
+            body_rect,
+            loader_rect,
+            &state.update,
+            false,
+            sheen_for(&state.update, phases),
+        );
         y += body_height;
     } else {
         match auth_status {
@@ -796,6 +857,7 @@ pub fn show(
                     y,
                     "CONNEXION IMPOSSIBLE",
                     StatusTone::ERROR,
+                    Some(phases.pulse),
                 );
                 y = paint_paragraph(
                     ui,
@@ -962,8 +1024,18 @@ fn update_progress_line(status: &UpdateStatus, manual: bool) -> Option<UpdatePro
     Some(line)
 }
 
+/// La phase du reflet de la jauge pour cet état : **seul un téléchargement qui avance en a un**.
+/// Vérification, installation et échec n'ont pas de jauge du tout ; une jauge figée en garderait
+/// une, et le reflet promettrait un progrès qui n'a plus lieu.
+fn sheen_for(status: &UpdateStatus, phases: Phases) -> Option<f32> {
+    matches!(status, UpdateStatus::Downloading { .. }).then_some(phases.sheen)
+}
+
 /// Peint sous le rouage ce que [`update_progress_line`] rend pour cet état — rien si elle ne rend
 /// rien.
+///
+/// `sheen` est la phase du reflet de la jauge (voir [`paint_card_meter`]), `None` quand rien
+/// n'avance : le reflet dit « ça continue », et son absence dit le contraire.
 fn paint_update_progress(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -971,6 +1043,7 @@ fn paint_update_progress(
     loader_rect: Rect,
     status: &UpdateStatus,
     manual: bool,
+    sheen: Option<f32>,
 ) {
     let Some((label, color, meter)) = update_progress_line(status, manual) else {
         return;
@@ -993,7 +1066,7 @@ fn paint_update_progress(
             Pos2::new((body_rect.center().x - width / 2.0).round(), y),
             Vec2::new(width, UPDATE_METER_HEIGHT),
         );
-        design::components::meter::paint(ui, meter_rect, fraction, ACCENT);
+        paint_card_meter(ui, meter_rect, fraction, sheen);
         y += UPDATE_METER_HEIGHT + UPDATE_COUNT_MARGIN_TOP;
         let count_font = text::label_font(ctx, UPDATE_COUNT_SIZE);
         let count_galley = ui.fonts_mut(|f| f.layout_no_wrap(count, count_font, TEXT_DIM));
@@ -1003,6 +1076,66 @@ fn paint_update_progress(
             TEXT_DIM,
         );
     }
+}
+
+/// **La jauge de la Carte** — piste arrondie, remplissage, et un reflet qui le balaie.
+///
+/// Pas [`design::components::meter`] : celle-là est la jauge du JEU (deux bordures concentriques,
+/// curseur de fin, reflet fixe au tiers supérieur), et cette fenêtre est du site — voir « Palette
+/// du site, pas du jeu » dans la doc de module. Elle l'a pourtant empruntée jusqu'au 2026-09-22,
+/// faute d'équivalent.
+///
+/// **Le reflet** (2026-09-22, demande utilisateur) : une bande claire de [`SHEEN_WIDTH_RATIO`] de
+/// la largeur traverse la jauge de gauche à droite toutes les [`SHEEN_PERIOD`], écrêtée au
+/// remplissage. Elle court même quand l'octet ne bouge pas — c'est précisément ce qu'elle dit,
+/// « le téléchargement continue » — et `sheen: None` l'éteint dès qu'il s'arrête, en même temps
+/// que la couleur du remplissage ([`METER_STALLED`]).
+fn paint_card_meter(ui: &egui::Ui, rect: Rect, fraction: f32, sheen: Option<f32>) {
+    let radius = rect.height() / 2.0;
+    let painter = ui.painter().with_clip_rect(rect);
+    painter.rect_filled(rect, radius, METER_TRACK);
+    let fraction = fraction.clamp(0.0, 1.0);
+    if fraction <= 0.0 {
+        return;
+    }
+    let fill_rect =
+        Rect::from_min_size(rect.min, Vec2::new(rect.width() * fraction, rect.height()));
+    let fill = if sheen.is_some() {
+        ACCENT
+    } else {
+        METER_STALLED
+    };
+    painter.rect_filled(fill_rect, radius, fill);
+    let Some(phase) = sheen else {
+        return;
+    };
+    // La bande part entièrement à gauche du remplissage et le quitte entièrement à droite : elle
+    // apparaît et disparaît par les bords, jamais au milieu.
+    let band = (rect.width() * SHEEN_WIDTH_RATIO).max(1.0);
+    let travel = fill_rect.width() + 2.0 * band;
+    let left = fill_rect.left() - band + travel * phase.rem_euclid(1.0);
+    let mut mesh = egui::epaint::Mesh::default();
+    let clear = Color32::from_rgba_premultiplied(0, 0, 0, 0);
+    let crest = Color32::from_rgba_premultiplied(191, 191, 191, 191); // blanc .75
+    for (i, (x, color)) in [
+        (left, clear),
+        (left + band / 2.0, crest),
+        (left + band, clear),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        mesh.colored_vertex(Pos2::new(x, fill_rect.top()), color);
+        mesh.colored_vertex(Pos2::new(x, fill_rect.bottom()), color);
+        if i > 0 {
+            let a = (i as u32 - 1) * 2;
+            mesh.add_triangle(a, a + 1, a + 2);
+            mesh.add_triangle(a + 1, a + 2, a + 3);
+        }
+    }
+    ui.painter()
+        .with_clip_rect(fill_rect)
+        .add(egui::Shape::mesh(mesh));
 }
 
 /// **L'écran de mise à jour manuelle** (2026-09-18, demande de l'utilisateur) — ce que montre la
@@ -1036,6 +1169,7 @@ fn paint_manual_update(
     body_width: f32,
     mut y: f32,
     state: &LoginState,
+    phases: Phases,
     h2_font: &FontId,
     p_font: &FontId,
     outcome: &mut LoginOutcome,
@@ -1063,12 +1197,28 @@ fn paint_manual_update(
                 loader = loader.preview_frame(0);
             }
             ui.put(loader_rect, loader);
-            paint_update_progress(ui, ctx, body_rect, loader_rect, &state.update, true);
+            paint_update_progress(
+                ui,
+                ctx,
+                body_rect,
+                loader_rect,
+                &state.update,
+                true,
+                sheen_for(&state.update, phases),
+            );
             y + body_height
         }
         // ── « Vous êtes déjà à jour » ──────────────────────────────────────────────────────────
         UpdateStatus::UpToDate { .. } => {
-            y = paint_status_row(ui, ctx, body_left, y, "À JOUR", StatusTone::ACCENT);
+            y = paint_status_row(
+                ui,
+                ctx,
+                body_left,
+                y,
+                "À JOUR",
+                StatusTone::ACCENT,
+                Some(phases.pulse),
+            );
             y = paint_paragraph(
                 ui,
                 Pos2::new(body_left, y),
@@ -1119,6 +1269,7 @@ fn paint_manual_update(
                 y,
                 "MISE À JOUR DISPONIBLE",
                 StatusTone::ACCENT,
+                Some(phases.pulse),
             );
             y = paint_paragraph(
                 ui,
@@ -1185,6 +1336,7 @@ fn paint_manual_update(
              attendu. Vérifiez votre connexion internet, puis réessayez.",
             reason,
             ManualUpdateRetry::Check,
+            phases,
             h2_font,
             p_font,
             outcome,
@@ -1204,6 +1356,7 @@ fn paint_manual_update(
              Vérifiez votre connexion internet, puis réessayez.",
             detail,
             ManualUpdateRetry::Install,
+            phases,
             h2_font,
             p_font,
             outcome,
@@ -1237,11 +1390,20 @@ fn paint_manual_update_failure(
     explanation: &str,
     detail: &str,
     retry: ManualUpdateRetry,
+    phases: Phases,
     h2_font: &FontId,
     p_font: &FontId,
     outcome: &mut LoginOutcome,
 ) -> f32 {
-    y = paint_status_row(ui, ctx, body_left, y, status_label, StatusTone::ERROR);
+    y = paint_status_row(
+        ui,
+        ctx,
+        body_left,
+        y,
+        status_label,
+        StatusTone::ERROR,
+        Some(phases.pulse),
+    );
     y = paint_paragraph(
         ui,
         Pos2::new(body_left, y),
@@ -1294,6 +1456,11 @@ fn paint_manual_update_failure(
 
 /// La ligne de statut d'un écran de la carte : pastille auréolée puis libellé en capitales, comme
 /// « CONNEXION IMPOSSIBLE ». Rend la position sous la ligne, marge comprise.
+///
+/// **L'onde** (2026-09-22, demande utilisateur) : un anneau part du bord de la pastille, s'écarte
+/// de [`STATUS_PULSE_REACH`] et s'efface, toutes les [`STATUS_PULSE_PERIOD`]. `pulse` est la phase
+/// dans la période, ∈ [0, 1[ ; `None` fige l'onde à son départ — c'est ce que réclame le harnais de
+/// captures, dont une frame doit finir par ne plus rien demander.
 fn paint_status_row(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -1301,15 +1468,28 @@ fn paint_status_row(
     y: f32,
     label: &str,
     tone: StatusTone,
+    pulse: Option<f32>,
 ) -> f32 {
     let font = text::label_strong_font(ctx, STATUS_SIZE);
     let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, tone.text));
     let center_y = y + galley.rect.height() / 2.0;
-    ui.painter().circle_filled(
-        Pos2::new(body_left + STATUS_DOT / 2.0, center_y),
-        STATUS_DOT / 2.0 + 3.0,
-        tone.halo,
-    );
+    let center = Pos2::new(body_left + STATUS_DOT / 2.0, center_y);
+    // L'onde passe SOUS l'auréole et la pastille : elle en sort, elle ne les recouvre pas.
+    if let Some(phase) = pulse {
+        let t = phase.rem_euclid(1.0) / STATUS_PULSE_DUTY;
+        if t <= 1.0 {
+            // Départ vif puis ralentissement — la courbe d'une onde qui se dissipe.
+            let eased = 1.0 - (1.0 - t) * (1.0 - t);
+            let alpha = STATUS_PULSE_ALPHA * (1.0 - t);
+            ui.painter().circle_stroke(
+                center,
+                STATUS_DOT / 2.0 + STATUS_PULSE_REACH * eased,
+                Stroke::new(1.5, tone.dot.gamma_multiply(alpha)),
+            );
+        }
+    }
+    ui.painter()
+        .circle_filled(center, STATUS_DOT / 2.0 + 3.0, tone.halo);
     ui.painter().circle_filled(
         Pos2::new(body_left + STATUS_DOT / 2.0, center_y),
         STATUS_DOT / 2.0,
@@ -1397,6 +1577,7 @@ fn paint_update_required(
     mut y: f32,
     headline: &str,
     detail: &str,
+    phases: Phases,
     h2_font: &FontId,
     p_font: &FontId,
     outcome: &mut LoginOutcome,
@@ -1409,6 +1590,7 @@ fn paint_update_required(
         y,
         "MISE À JOUR REQUISE",
         StatusTone::ERROR,
+        Some(phases.pulse),
     );
     y = paint_paragraph(
         ui,
