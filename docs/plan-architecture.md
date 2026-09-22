@@ -545,12 +545,24 @@ bornée au cadre, le côté reste une case des Options), et suit tout déplaceme
   repositionnement (`set_outer_position`) uniquement si la position cible a changé, pas à chaque
   tick. Même tick pour la création/destruction dynamique des fenêtres overlay (diff par `HWND`
   entre deux scans).
-- **Focus-aware topmost** : chaque overlay reste au-dessus tant qu'une fenêtre de jeu (n'importe
-  laquelle, pas nécessairement la sienne) ou un overlay a le focus (`GetForegroundWindow` comparé
-  aux `HWND` connus), sinon repli en z-order normal via `SetWindowPos(HWND_NOTOPMOST, ...)` — ne
-  recouvre plus une application quelconque devenue active (explorateur de fichiers, navigateur…),
-  retour utilisateur du 2026-09-01. Politique volontairement simplifiée (pas de logique « seulement
-  l'overlay du personnage actif »).
+- **Focus-aware topmost** : chaque overlay reste au-dessus tant que SA fenêtre de jeu, ou un
+  overlay de ce même client, a le focus (`GetForegroundWindow` comparé aux `HWND` connus) ; sinon
+  repli hors bande topmost — ne recouvre plus une application quelconque devenue active
+  (explorateur de fichiers, navigateur…), retour utilisateur du 2026-09-01.
+  **Un groupe d'overlays par fenêtre de jeu, qui suit sa fenêtre (2026-09-23, retour utilisateur
+  multi-compte, captures à l'appui)** : le repli était `SetWindowPos(HWND_NOTOPMOST)`, qui place
+  la fenêtre en TÊTE de la bande non-topmost — donc au-dessus de l'application qui vient d'être
+  activée tant qu'elle n'est pas réactivée : deux clients côte à côte, les overlays du client
+  quitté restaient dessinés par-dessus le client actif (et par-dessus VS Code, l'outil de capture…).
+  Le repli insère désormais l'overlay **juste au-dessus de sa propre fenêtre de jeu** dans le
+  z-order (`hWndInsertAfter` = la fenêtre qui précède le jeu, `GW_HWNDPREV` ; `HWND_NOTOPMOST` si
+  elle est topmost ou absente — `App::glue_above_game`) : il reste visible tant que son client
+  l'est, et passe derrière tout ce qui passe devant ce client, comme s'il en faisait partie. Seul
+  le groupe du client au premier plan est `HWND_TOPMOST`. Le recollage est revérifié à la même
+  cadence que la réaffirmation topmost (`App::is_glued_above_game`) : un `ShowWindow` (panneau
+  Combat qui réapparaît) peut le défaire. Pas de propriété Win32 (`GWLP_HWNDPARENT` vers le
+  processus du jeu) : la destruction du propriétaire détruirait nos fenêtres sous les pieds de
+  winit — le z-order explicite obtient le même résultat sans ce risque.
   **Délai de grâce avant repli (2026-09-02, retour utilisateur, vidéo à l'appui)** : la démotion en
   `HWND_NOTOPMOST` était jusqu'ici IMMÉDIATE dès qu'un seul tick (~50 ms, cadence de sondage §6.5)
   voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu — l'overlay Combat
