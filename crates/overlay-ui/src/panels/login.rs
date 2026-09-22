@@ -71,13 +71,16 @@ pub const WINDOW_WIDTH: f32 = 400.0;
 pub const INITIAL_HEIGHT: f32 = 462.0;
 
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
-/// Fond de la carte — `rgba(8,10,14,.90)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
-/// 2026-09-16 : « rendre moins translucide d'au moins 40 % » (demande utilisateur) — de 22 % à
-/// 10 % de transparence, soit 55 % de translucidité en moins. Posée sur le bureau, et non sur une
-/// page déjà sombre comme au web, la carte laissait voir ce qu'il y avait dessous.
-const CARD_FILL: Color32 = Color32::from_rgba_premultiplied(7, 9, 13, 230); // rgba(8,10,14,.90)
-const CARD_BORDER: Color32 = Color32::from_rgb(0x2a, 0x30, 0x38);
-const CARD_BORDER_PAIRING: Color32 = Color32::from_rgba_premultiplied(0, 46, 56, 56); // cyan .22
+/// Fond de la carte — `rgba(8,10,14,.96)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
+/// 2026-09-16 : « rendre moins translucide d'au moins 40 % » (demande utilisateur) l'a portée à
+/// `.90`, puis le 2026-09-22 à `.96` — sur un inventaire clair, `.90` laissait encore passer assez
+/// de motif pour que le texte devienne pénible à lire à l'usage. Posée sur le bureau, et non sur
+/// une page déjà sombre comme au web, la carte n'a pas le fond que le web lui suppose.
+const CARD_FILL: Color32 = Color32::from_rgba_premultiplied(8, 10, 13, 245); // rgba(8,10,14,.96)
+/// Bordure fixe de la carte, **pour tous les écrans sauf les échecs** : le cyan du site à .22, qui
+/// n'était jusqu'au 2026-09-22 que celle de l'appairage. Le gris d'origine appartenait au liseré
+/// blanc qui a disparu avec lui (voir [`RingStyle`]).
+const CARD_BORDER: Color32 = Color32::from_rgba_premultiplied(0, 46, 56, 56); // cyan .22
 const CARD_BORDER_ERROR: Color32 = Color32::from_rgba_premultiplied(81, 29, 26, 89); // rouge .35
 const ACCENT: Color32 = Color32::from_rgb(0x00, 0xd2, 0xff);
 const ACCENT_HOVER: Color32 = Color32::from_rgb(0x38, 0xdc, 0xff);
@@ -297,29 +300,34 @@ pub fn show(
             ..
         }
     );
-    let (border, ring, ring_soft) = match auth_status {
-        // Mise à jour obligatoire en échec : la carte passe au rouge de l'erreur, quel que soit
-        // l'état du compte (voir `paint_update_required`).
-        _ if update_required => (
-            CARD_BORDER_ERROR,
-            Color32::from_rgb(0xff, 0x5f, 0x57),
-            Color32::from_rgba_premultiplied(41, 15, 13, 46),
-        ),
-        AuthStatus::PairingStarted { .. } => (
-            CARD_BORDER_PAIRING,
-            ACCENT,
-            Color32::from_rgba_premultiplied(0, 32, 38, 38),
-        ),
-        AuthStatus::Disconnected { failure: Some(_) } => (
-            CARD_BORDER_ERROR,
-            Color32::from_rgb(0xff, 0x5f, 0x57),
-            Color32::from_rgba_premultiplied(41, 15, 13, 46),
-        ),
-        _ => (
-            CARD_BORDER,
-            Color32::from_rgba_premultiplied(140, 140, 140, 140),
-            Color32::from_rgba_premultiplied(20, 20, 20, 20),
-        ),
+    // **Le liseré dit ce que fait la carte** (2026-09-22) : bleu au repos, arc-en-ciel dès qu'une
+    // mise à jour travaille, rouge sur un échec. Voir [`RingStyle`].
+    let update_failed = matches!(
+        state.update,
+        UpdateStatus::Failed { .. } | UpdateStatus::Unavailable { .. }
+    );
+    let update_working = matches!(
+        state.update,
+        UpdateStatus::Downloading { .. }
+            | UpdateStatus::Verifying { .. }
+            | UpdateStatus::ReadyToInstall { .. }
+            | UpdateStatus::Installing { .. }
+    ) || (state.manual_update
+        && matches!(state.update, UpdateStatus::Idle | UpdateStatus::Checking));
+    let failed = update_required
+        || update_failed
+        || matches!(auth_status, AuthStatus::Disconnected { failure: Some(_) });
+    let ring_style = if failed {
+        RingStyle::Error
+    } else if update_working {
+        RingStyle::Rainbow
+    } else {
+        RingStyle::Blue
+    };
+    let border = if failed {
+        CARD_BORDER_ERROR
+    } else {
+        CARD_BORDER
     };
     ui.painter().rect_filled(card, CARD_RADIUS, CARD_FILL);
     ui.painter().rect_stroke(
@@ -333,7 +341,7 @@ pub fn show(
     } else {
         0.0
     };
-    paint_ring(ui, card, phase, ring, ring_soft);
+    paint_ring(ui, card, phase, ring_style);
     if state.animate {
         ctx.request_repaint_after(ANIMATION_FRAME);
     }
@@ -1753,20 +1761,88 @@ fn paint_italic(ui: &egui::Ui, top_left: Pos2, galley: Arc<egui::Galley>, color:
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
-/// Anneau lumineux autour de `card` : un dégradé conique qui tourne (`conic-gradient(from angle,
-/// transparent 0deg, soft 200deg, ring 300deg, transparent 360deg)`), réduit au liseré.
+/// **Le ton du liseré animé** (2026-09-22, demande utilisateur) — ce que la carte dit d'elle-même
+/// avant qu'on lise un mot.
+///
+/// Trois états, et un seul par frame :
+///
+/// - [`RingStyle::Blue`] : le repos. C'est l'accent du site qui tourne en permanence — le blanc
+///   translucide d'origine ne voulait rien dire, et la carte est bleue partout ailleurs ;
+/// - [`RingStyle::Rainbow`] : **une mise à jour travaille** — recherche, téléchargement,
+///   vérification, installation. Le spectre entier réparti sur le pourtour : c'est la seule chose
+///   qui bouge quand le rouage tourne dans le vide ;
+/// - [`RingStyle::Error`] : ce qui a échoué, connexion comme mise à jour.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RingStyle {
+    Blue,
+    Rainbow,
+    Error,
+}
+
+impl RingStyle {
+    /// Couleur d'un point du pourtour, repéré par `u` — sa position le long du bord **rapportée au
+    /// périmètre**, phase déjà retranchée (voir [`paint_ring`]).
+    fn color_at(self, u: f32) -> Color32 {
+        let t = u.rem_euclid(1.0) * 360.0;
+        match self {
+            // Le spectre complet, opaque : à 1,5 px d'épaisseur, une comète teintée ne se
+            // distinguerait pas d'une comète grise.
+            RingStyle::Rainbow => egui::ecolor::Hsva::new(t / 360.0, 1.0, 1.0, 1.0).into(),
+            // La comète du site : transparente, puis un halo, puis la tête vive, puis la coupure.
+            _ => {
+                let (bright, soft) = match self {
+                    RingStyle::Error => (
+                        Color32::from_rgb(0xff, 0x5f, 0x57),
+                        Color32::from_rgba_premultiplied(41, 15, 13, 46),
+                    ),
+                    _ => (ACCENT, Color32::from_rgba_premultiplied(0, 32, 38, 38)),
+                };
+                let clear = Color32::from_rgba_premultiplied(bright.r(), bright.g(), bright.b(), 0);
+                if t < 200.0 {
+                    lerp_color(clear, soft, t / 200.0)
+                } else if t < 300.0 {
+                    lerp_color(soft, bright, (t - 200.0) / 100.0)
+                } else {
+                    lerp_color(bright, clear, (t - 300.0) / 60.0)
+                }
+            }
+        }
+    }
+}
+
+/// Interpolation linéaire de deux couleurs prémultipliées.
+fn lerp_color(a: Color32, b: Color32, k: f32) -> Color32 {
+    let k = k.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
+    Color32::from_rgba_premultiplied(
+        mix(a.r(), b.r()),
+        mix(a.g(), b.g()),
+        mix(a.b(), b.b()),
+        mix(a.a(), b.a()),
+    )
+}
+
+/// Liseré lumineux autour de `card` : un dégradé qui **parcourt le bord**, réduit à 1,5 px.
 ///
 /// Un `Mesh` à couleurs par sommet : le pourtour arrondi est échantillonné finement, chaque point
-/// donne quatre sommets (deux de lisière transparents pour l'anticrénelage, deux de cœur colorés
-/// selon l'angle du point vu du centre). `phase` ∈ [0, 1[ est la fraction de tour déjà faite.
-fn paint_ring(ui: &egui::Ui, card: Rect, phase: f32, ring: Color32, ring_soft: Color32) {
+/// donne quatre sommets (deux de lisière transparents pour l'anticrénelage, deux de cœur colorés).
+/// `phase` ∈ [0, 1[ est la fraction de tour déjà faite.
+///
+/// **Paramétré par la longueur d'arc, pas par l'angle** (2026-09-22). Le dégradé conique du web
+/// colore chaque point d'après son angle vu du centre ; transposé tel quel, il donnait une comète
+/// qui **expédiait les petits côtés et rampait sur les grands**. Sur une carte haute — chargement,
+/// connexion, recherche, téléchargement — le bord du bas ne couvre qu'un mince secteur angulaire :
+/// l'animation y passait en une fraction de seconde, au point que l'utilisateur l'a signalée comme
+/// absente, alors qu'elle se voyait bien sur les cartes courtes (« à jour », « erreur »). En
+/// repérant chaque point par la distance parcourue depuis le milieu du bord haut, divisée par le
+/// périmètre, la tête avance à vitesse constante sur les quatre côtés, quelle que soit la hauteur.
+fn paint_ring(ui: &egui::Ui, card: Rect, phase: f32, style: RingStyle) {
     const SAMPLES_PER_EDGE: usize = 24;
     const SAMPLES_PER_CORNER: usize = 16;
     const FEATHER: f32 = 0.75;
     // Le pseudo-élément déborde d'un pixel (`inset: -1px`) : l'anneau chevauche le liseré.
     let outer = card.expand(0.5);
     let radius = CARD_RADIUS + 0.5;
-    let center = outer.center();
 
     // Pourtour dans le sens horaire, en partant du milieu du bord haut — avec la normale sortante
     // de chaque point.
@@ -1836,40 +1912,28 @@ fn paint_ring(ui: &egui::Ui, card: Rect, phase: f32, ring: Color32, ring_soft: C
         }
     }
 
-    let color_at = |p: Pos2| -> Color32 {
-        // Angle horaire depuis midi, vu du centre — celui du dégradé conique CSS.
-        let d = p - center;
-        let angle = d.x.atan2(-d.y).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
-        let t = (angle - phase).rem_euclid(1.0) * 360.0;
-        let lerp = |a: Color32, b: Color32, k: f32| {
-            let k = k.clamp(0.0, 1.0);
-            let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
-            Color32::from_rgba_premultiplied(
-                mix(a.r(), b.r()),
-                mix(a.g(), b.g()),
-                mix(a.b(), b.b()),
-                mix(a.a(), b.a()),
-            )
-        };
-        if t < 200.0 {
-            lerp(Color32::TRANSPARENT, ring_soft, t / 200.0)
-        } else if t < 300.0 {
-            lerp(ring_soft, ring, (t - 200.0) / 100.0)
-        } else {
-            lerp(ring, Color32::TRANSPARENT, (t - 300.0) / 60.0)
-        }
-    };
+    // Longueur d'arc cumulée en chaque point, et périmètre total — voir la doc de la fonction.
+    let count = points.len();
+    let mut travelled = Vec::with_capacity(count);
+    let mut total = 0.0_f32;
+    for i in 0..count {
+        travelled.push(total);
+        total += (points[(i + 1) % count].0 - points[i].0).length();
+    }
+    if total <= 0.0 {
+        return;
+    }
 
     let mut mesh = egui::epaint::Mesh::default();
     let half = RING_WIDTH / 2.0;
-    for (p, normal) in &points {
-        let color = color_at(*p);
+    for (i, (p, normal)) in points.iter().enumerate() {
+        let color = style.color_at(travelled[i] / total - phase);
         mesh.colored_vertex(*p + *normal * (half + FEATHER), Color32::TRANSPARENT);
         mesh.colored_vertex(*p + *normal * half, color);
         mesh.colored_vertex(*p - *normal * half, color);
         mesh.colored_vertex(*p - *normal * (half + FEATHER), Color32::TRANSPARENT);
     }
-    let count = points.len() as u32;
+    let count = count as u32;
     for i in 0..count {
         let a = i * 4;
         let b = ((i + 1) % count) * 4;
