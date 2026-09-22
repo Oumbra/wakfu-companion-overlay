@@ -2194,13 +2194,15 @@ fn set_numeric_field(
             *input = format_step(*value);
         }
     } else {
-        let galley = ui.fonts_mut(|f| {
-            f.layout_no_wrap(
-                input.clone(),
-                text::label_font(ui.ctx(), SET_LABEL_SIZE),
-                fade(TEXT),
-            )
-        });
+        // **La police se résout AVANT `fonts_mut`**, jamais dans sa fermeture : `label_font`
+        // interroge le contexte (`ctx.fonts`, pour vérifier que la famille est liée) alors que
+        // `fonts_mut` le tient déjà en écriture — un verrou réentrant, que le `RwLock` d'egui ne
+        // sait pas rendre. En release, l'overlay se figeait à la première frame où un pas
+        // numérique était inactif (case décochée, ou alertes pas encore descendues) : « ne répond
+        // pas » dès l'ouverture du volet (retour utilisateur, 2026-09-22). En debug, egui panique
+        // après dix secondes — d'où le test `carte_volet_parametres_champs_inactifs`.
+        let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
+        let galley = ui.fonts_mut(|f| f.layout_no_wrap(input.clone(), font, fade(TEXT)));
         ui.painter().galley(
             Pos2::new(
                 value_rect.center().x - galley.rect.width() / 2.0,

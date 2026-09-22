@@ -6741,6 +6741,39 @@ fn capture_login_card(
     has_local_data: Option<bool>,
     height: f32,
 ) -> f32 {
+    let (mut harness, measured) = login_card_harness(
+        auth_status,
+        update,
+        manual,
+        purge_confirm,
+        panel,
+        confirm,
+        has_local_data,
+        None,
+        height,
+    );
+    harness.run();
+    harness.snapshot(nom);
+    measured.get()
+}
+
+/// Le harnais de la Carte, prêt à tourner mais sans capture — pour les tests qui vérifient
+/// qu'une frame ABOUTIT (voir `carte_volet_parametres_champs_inactifs`) sans figer de référence.
+/// `settings` : les réglages que l'hôte fournit au volet « Paramètres » ; `None` laisse le volet
+/// sur son défaut, comme `render_content` en l'absence de `card_settings`. Rend la hauteur mesurée
+/// (`LoginOutcome::content_height`) dans une cellule, relue après `Harness::run`.
+#[allow(clippy::too_many_arguments)]
+fn login_card_harness(
+    auth_status: AuthStatus,
+    update: overlay_ui::update::UpdateStatus,
+    manual: bool,
+    purge_confirm: bool,
+    panel: overlay_ui::panels::login::CardPanel,
+    confirm: Option<overlay_ui::panels::login::CardConfirm>,
+    has_local_data: Option<bool>,
+    mut settings: Option<overlay_ui::panels::login::CardSettings>,
+    height: f32,
+) -> (Harness<'static>, std::rc::Rc<std::cell::Cell<f32>>) {
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -6776,7 +6809,7 @@ fn capture_login_card(
 
     // `Harness::new_ui` ajoute 8 px de marge autour du contenu : la fenêtre fait 400 px de large
     // comme en production, plus ces marges.
-    let mut harness = egui_kittest::Harness::builder()
+    let harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(
             overlay_ui::panels::login::WINDOW_WIDTH + 16.0,
             height + 16.0,
@@ -6820,7 +6853,7 @@ fn capture_login_card(
                     options: None,
                     veiled: false,
                     login: Some(&mut login_state),
-                    card_settings: None,
+                    card_settings: settings.as_mut(),
                 },
             );
             if let Some(h) = outcome.login_height {
@@ -6828,9 +6861,7 @@ fn capture_login_card(
             }
         });
 
-    harness.run();
-    harness.snapshot(nom);
-    measured.get()
+    (harness, measured)
 }
 
 /// Une capture par état — **un harnais par test**, jamais plusieurs dans le même :
@@ -6957,6 +6988,38 @@ fn carte_volet_parametres_sans_compte() {
         CARTE_A_PROPOS_HAUTEUR,
     );
     assert_eq!(measured, CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **Le volet « Paramètres » avec ses pas numériques inactifs** (2026-09-22, retour utilisateur :
+/// l'overlay passait en « ne répond pas » dès l'ouverture du volet) : « Reprendre après une pause
+/// de » décoché, les deux fermetures automatiques décochées, le profil d'alertes pas encore
+/// descendu. Le champ inactif résolvait sa police DEPUIS la fermeture de `fonts_mut` — un verrou
+/// réentrant sur le contexte egui, que rien ne rend : gel définitif en release, panique d'egui
+/// après dix secondes en debug. Les captures existantes, toutes cases cochées, ne passaient jamais
+/// par cette branche. Pas de référence ici : c'est la frame qui doit aboutir, et la hauteur qu'elle
+/// demande.
+#[test]
+fn carte_volet_parametres_champs_inactifs() {
+    let settings = overlay_ui::panels::login::CardSettings {
+        recap_resume: false,
+        suivi_auto_close: false,
+        alerts_available: false,
+        chat_auto_close: false,
+        ..Default::default()
+    };
+    let (mut harness, measured) = login_card_harness(
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        Some(settings),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    harness.run();
+    assert_eq!(measured.get(), CARTE_A_PROPOS_HAUTEUR);
 }
 
 /// **L'écran « Compte connecté »** (2026-09-22) — il n'existait pas : `AuthStatus::Connected`
