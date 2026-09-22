@@ -131,6 +131,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });

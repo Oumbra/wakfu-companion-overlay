@@ -189,6 +189,7 @@ fn harness_sized(
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
         let mut remontees = remontees.borrow_mut();

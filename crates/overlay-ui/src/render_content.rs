@@ -439,6 +439,11 @@ pub struct RenderContent<'a> {
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
     /// (l'horloge de l'anneau animé et le survol vivent d'une frame à l'autre).
     pub login: Option<&'a mut panels::login::LoginState>,
+    /// Les réglages que le volet « Paramètres » de la Carte modifie (2026-09-22) — `Some`
+    /// uniquement pour `kind == OverlayKind::Login`, même règle que `login`. L'hôte les construit
+    /// à partir de `config::OverlayConfig` avant la frame et les relit quand
+    /// `RenderOutcome::settings_changed` le lui dit : il n'y a rien à valider.
+    pub card_settings: Option<&'a mut panels::login::CardSettings>,
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
@@ -553,6 +558,19 @@ pub struct RenderOutcome {
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
+    /// « Fermer » d'un écran de compte de la Carte — voir
+    /// `panels::login::LoginOutcome::close_window`.
+    pub close_login_window: bool,
+    /// Déconnexion confirmée dans la boîte de la Carte — voir
+    /// `panels::login::LoginOutcome::disconnect`.
+    pub disconnect_account: bool,
+    /// Un réglage du volet « Paramètres » de la Carte vient de changer : l'hôte écrit
+    /// `config.toml` et applique.
+    pub settings_changed: bool,
+    /// « Parcourir » de la section « Fichier » du volet — l'hôte ouvre le sélecteur natif.
+    pub browse_log_path: bool,
+    /// Un bouton d'essai du son du volet vient d'être cliqué.
+    pub test_sound: Option<panels::login::CardSound>,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
@@ -651,6 +669,7 @@ pub fn build_ui(
                 recap_chrome: content.recap_chrome,
                 combat_chrome: content.combat_chrome,
                 login: content.login.as_deref_mut(),
+                card_settings: content.card_settings.as_deref_mut(),
             },
         );
     });
@@ -700,6 +719,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         veiled,
         recap_chrome,
         login,
+        card_settings,
     } = content;
 
     let mut outcome = RenderOutcome::default();
@@ -885,12 +905,18 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // `options`).
                 OverlayKind::Login => {
                     if let Some(state) = login {
+                        // Les réglages sont facultatifs pour la même raison que l'état : un
+                        // appelant qui ne les fournit pas voit un volet « Paramètres » sur des
+                        // valeurs par défaut plutôt qu'une panique sur un chemin de rendu.
+                        let mut repli = panels::login::CardSettings::default();
+                        let settings = card_settings.unwrap_or(&mut repli);
                         let login_outcome = panels::login::show(
                             ui,
                             state,
                             icons,
                             auth_status,
                             auth_command_tx,
+                            settings,
                             now,
                         );
                         outcome.open_url = login_outcome.open_url;
@@ -900,6 +926,11 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         outcome.install_update = login_outcome.install_update;
                         outcome.close_update = login_outcome.close_update;
                         outcome.purge_local_data = login_outcome.purge_local_data;
+                        outcome.close_login_window = login_outcome.close_window;
+                        outcome.disconnect_account = login_outcome.disconnect;
+                        outcome.settings_changed = login_outcome.settings_changed;
+                        outcome.browse_log_path = login_outcome.browse_log_path;
+                        outcome.test_sound = login_outcome.test_sound;
                         outcome.login_height = Some(login_outcome.content_height);
                     }
                 }

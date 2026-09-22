@@ -1,6 +1,7 @@
 //! Icône de zone de notification sous Linux/KDE (StatusNotifierItem sur DBus, §17.2 du plan) —
 //! équivalent Linux de `main.rs::install_tray`/`sync_tray_menu`/`handle_tray_menu` (Windows,
-//! `tray-icon`). Même menu (Options / Mise à jour / Déconnecter / Quitter), même politique
+//! `tray-icon`). Même menu (Paramètres / Mise à jour / Déconnecter ou Se connecter / Quitter),
+//! même politique
 //! (jamais fatal si la pose échoue), mais via `ksni` : implémentation pure Rust du protocole SNI,
 //! sans GTK/libappindicator — voir la doc de module de `bin/wakfu-companion-overlay-x11.rs`, qui
 //! expliquait pourquoi `tray-icon` avait été écarté côté Linux. KDE Plasma (et tout hôte SNI,
@@ -20,15 +21,20 @@ use crate::ui_icons;
 /// Les quatre actions du menu — sondées côté binaire X11 par `try_recv`, exactement comme
 /// `hotkey_events` (voir `about_to_wait`).
 pub enum TrayEvent {
-    Options,
+    /// « Paramètres » : ouvre la Carte sur son volet des paramètres (2026-09-22). Elle ouvrait la
+    /// fenêtre Options sur son onglet jusque-là.
+    Settings,
     ManualUpdate,
-    Disconnect,
+    /// La troisième entrée, dont le libellé suit l'état du compte : « Déconnecter » quand il y en
+    /// a un, « Se connecter » sinon. Les deux ouvrent la Carte — voir `menu`.
+    Account,
     Quit,
 }
 
 pub struct LinuxTray {
     event_tx: mpsc::Sender<TrayEvent>,
-    /// Options/Déconnecter ne sont utiles qu'une fois un compte lié — même politique que
+    /// Un compte est-il lié ? Le menu ne grise plus rien (2026-09-22) : cet état ne décide plus
+    /// que du LIBELLÉ de la troisième entrée — même politique que
     /// `main.rs::TrayMenu::enabled_for_account`.
     enabled_for_account: bool,
 }
@@ -66,10 +72,9 @@ impl ksni::Tray for LinuxTray {
         let quit_tx = self.event_tx.clone();
         vec![
             StandardItem {
-                label: "Options".into(),
-                enabled: self.enabled_for_account,
+                label: "Paramètres".into(),
                 activate: Box::new(move |_| {
-                    let _ = options_tx.send(TrayEvent::Options);
+                    let _ = options_tx.send(TrayEvent::Settings);
                 }),
                 ..Default::default()
             }
@@ -84,10 +89,13 @@ impl ksni::Tray for LinuxTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "Déconnecter".into(),
-                enabled: self.enabled_for_account,
+                label: if self.enabled_for_account {
+                    "Déconnecter".into()
+                } else {
+                    "Se connecter".into()
+                },
                 activate: Box::new(move |_| {
-                    let _ = disconnect_tx.send(TrayEvent::Disconnect);
+                    let _ = disconnect_tx.send(TrayEvent::Account);
                 }),
                 ..Default::default()
             }
@@ -117,7 +125,7 @@ pub fn install_tray() -> Option<(ksni::blocking::Handle<LinuxTray>, mpsc::Receiv
     match tray.spawn() {
         Ok(handle) => {
             tracing::info!(
-                "[zone de notification] icône posée — menu Options / Mise à jour / Déconnecter / Quitter."
+                "[zone de notification] icône posée — menu Paramètres / Mise à jour / compte / Quitter."
             );
             Some((handle, event_rx))
         }

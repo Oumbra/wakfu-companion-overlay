@@ -54,8 +54,10 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 use overlay_sync::update::{self, UpdateStatus};
 
+use super::notifications;
 use crate::build_info;
 use crate::design::{self, text};
+use crate::recap_session;
 use crate::render_content::{AuthCommand, AuthCommandSink, AuthStatus};
 use crate::ui_icons::UiIcons;
 
@@ -104,6 +106,11 @@ const ABOUT_SCREEN_RATIO: f32 = 0.8;
 /// autres ; le nom reste parce que c'est ainsi que l'hôte nomme ce qu'il demande à winit.
 pub const INITIAL_HEIGHT: f32 = CARD_HEIGHT;
 
+/// Le temps minimum d'affichage de la recherche de mise à jour — voir
+/// [`LoginState::check_floor_until`]. Trois secondes et demie : trois paraissaient encore
+/// pressées, cinq faisaient attendre (essais sur maquette avec l'utilisateur, 2026-09-22).
+pub const UPDATE_CHECK_FLOOR: Duration = Duration::from_millis(3500);
+
 // ── Palette (dépôt web : `styles.css`, `app-header.component.css`) ─────────────────────────────
 /// Fond de la carte — `rgba(8,10,14,.96)`. Le web est à `.78`, et la fenêtre l'a été jusqu'au
 /// 2026-09-16 : « rendre moins translucide d'au moins 40 % » (demande utilisateur) l'a portée à
@@ -129,6 +136,12 @@ const RULE_LIGHT: Color32 = Color32::from_rgb(0x31, 0x3a, 0x45);
 const SECONDARY_BORDER: Color32 = Color32::from_rgb(0x2a, 0x30, 0x38);
 const SECONDARY_BORDER_HOVER: Color32 = Color32::from_rgb(0x3b, 0x44, 0x4f);
 const SECONDARY_FILL_HOVER: Color32 = Color32::from_rgba_premultiplied(12, 12, 12, 13); // .05
+/// Bouton **destructif** de la Carte ([`ButtonKind::Danger`]) : le bouton bordé, en rouge. Même
+/// rouge que les liens destructifs ([`LinkKind::Danger`]), bordure assourdie pour qu'il ne crie
+/// pas plus fort que le bouton principal de l'écran.
+const DANGER_BORDER: Color32 = Color32::from_rgb(0x5c, 0x2f, 0x2c);
+const DANGER_BORDER_HOVER: Color32 = Color32::from_rgb(0x7a, 0x3b, 0x38);
+const DANGER_FILL_HOVER: Color32 = Color32::from_rgba_premultiplied(18, 7, 6, 20); // rouge .08
 const CODE_BORDER: Color32 = Color32::from_rgba_premultiplied(0, 59, 71, 71); // cyan .28
 const CODE_FILL: Color32 = Color32::from_rgba_premultiplied(0, 11, 13, 13); // cyan .05
 const ERROR_TEXT: Color32 = Color32::from_rgb(0xff, 0x8a, 0x83);
@@ -137,6 +150,10 @@ const ERROR_DOT_HALO: Color32 = Color32::from_rgba_premultiplied(41, 15, 13, 46)
 /// Auréole de la pastille cyan (écran de mise à jour manuelle) — l'accent du site à .18, comme
 /// [`ERROR_DOT_HALO`] l'est du rouge d'erreur.
 const ACCENT_HALO: Color32 = Color32::from_rgba_premultiplied(0, 37, 45, 46);
+/// D'où part la teinte de la pastille arc-en-ciel — voir [`StatusTone::rainbow`]. Trois quarts de
+/// tour, soit le violet : au repos (captures de référence, animation figée) la pastille ne doit
+/// ressembler ni au cyan de « CONNECTÉ » ni au rouge d'un échec.
+const RAINBOW_DOT_OFFSET: f32 = 0.75;
 const DETAIL_FILL: Color32 = Color32::from_rgba_premultiplied(8, 8, 8, 8); // blanc .03
 const VERSION: Color32 = BETA;
 
@@ -265,9 +282,6 @@ const ABOUT_PAD_BOTTOM: f32 = 8.0;
 const ABOUT_PAD_SIDE: f32 = 24.0;
 /// Marge droite du texte : elle laisse passer la barre de défilement sans la chevaucher.
 const ABOUT_PAD_RIGHT: f32 = 22.0;
-const ABOUT_HEADING_SIZE: f32 = 15.0;
-const ABOUT_HEADING_LINE: f32 = 20.0;
-const ABOUT_HEADING_GAP: f32 = 8.0;
 const ABOUT_BLOCK_GAP: f32 = 8.0;
 const ABOUT_SECTION_GAP: f32 = 18.0;
 const ABOUT_LINKS_GAP: f32 = 6.0;
@@ -352,14 +366,27 @@ pub struct LoginState {
     /// du jeu » dans la doc de module. Poser la boîte du jeu ici aurait été le seul endroit de
     /// l'overlay où les deux langages visuels se superposent.
     pub purge_confirm: bool,
-    /// **Le volet « À propos » est-il ouvert ?** (2026-09-22) — le lien du pied le lève, le bouton
-    /// « Retour » le baisse, et la Carte revient exactement à l'écran qu'elle montrait : rien
-    /// d'autre n'est mémorisé, parce que rien d'autre n'a changé.
+    /// **Le volet ouvert par-dessus l'écran en cours**, s'il y en a un — voir [`CardPanel`]. Le
+    /// lien du pied le lève, le bouton « Retour » le baisse, et la Carte revient exactement à
+    /// l'écran qu'elle montrait : rien d'autre n'est mémorisé, parce que rien d'autre n'a changé.
+    pub panel: CardPanel,
+    /// **La question posée par-dessus tout le reste**, s'il y en a une — voir [`CardConfirm`].
+    pub confirm: Option<CardConfirm>,
+    /// Les champs de saisie du volet des paramètres, le temps qu'il est ouvert — voir
+    /// [`SettingsInputs`]. Repris à la valeur en vigueur à chaque ouverture.
+    pub settings_inputs: Option<SettingsInputs>,
+    /// **Le plancher de la recherche de mise à jour** (2026-09-22, demande utilisateur) : jusqu'à
+    /// cet instant, la Carte montre la recherche quoi qu'en dise le thread de mise à jour.
     ///
-    /// C'est le seul état qui fasse changer la Carte de taille (voir [`CARD_HEIGHT`]) : l'en-tête
-    /// se replie et la fenêtre s'ouvre jusqu'à [`ABOUT_SCREEN_RATIO`] de la hauteur de l'écran, en
-    /// un seul mouvement de [`ABOUT_MORPH`].
-    pub about: bool,
+    /// Une recherche demandée depuis le menu de la zone de notification peut répondre en deux
+    /// cents millisecondes — et plus vite encore quand la vérification du démarrage a déjà eu
+    /// lieu. L'écran clignotait, ou ne s'affichait pas du tout, et l'utilisateur se retrouvait
+    /// devant « Vous êtes déjà à jour » sans savoir si son clic avait fait quoi que ce soit. La
+    /// recherche reste donc affichée `max(durée réelle, `[`UPDATE_CHECK_FLOOR`]`)`.
+    ///
+    /// **Seulement pour une recherche DEMANDÉE** : la vérification automatique du démarrage garde
+    /// sa durée réelle — elle n'a rien à prouver, et rien ne doit retarder l'ouverture.
+    pub check_floor_until: Option<Instant>,
     /// Hauteur de l'écran sur lequel la fenêtre est posée, en points logiques — posée par l'hôte,
     /// seul à connaître le moniteur (`window.current_monitor()`). Sert au plafond du volet
     /// À propos ; une valeur nulle ou absurde le ramène à [`CARD_HEIGHT`], jamais à rien.
@@ -380,7 +407,10 @@ impl LoginState {
             update: UpdateStatus::Idle,
             manual_update: false,
             purge_confirm: false,
-            about: false,
+            panel: CardPanel::None,
+            confirm: None,
+            settings_inputs: None,
+            check_floor_until: None,
             monitor_height: CARD_HEIGHT,
             has_local_data: None,
         }
@@ -450,6 +480,52 @@ pub struct LoginOutcome {
     /// programme — comme l'action `PurgeLocalData` de la fenêtre Options, dont c'est le pendant
     /// pour un overlay sans compte lié, où cette fenêtre est la seule interface.
     pub purge_local_data: bool,
+    /// « Fermer » d'un écran de compte : l'utilisateur referme la Carte sans rien engager.
+    ///
+    /// **L'écran de connexion en a un depuis le 2026-09-22** (demande utilisateur) : il n'avait
+    /// aucune sortie, et la mention de consentement juste au-dessus engage sur les conditions
+    /// d'utilisation et la politique de confidentialité. Un consentement qu'on ne peut pas
+    /// refuser n'en est pas un (`docs/analyse-rgpd.md` §3.4). L'overlay reste dans la zone de
+    /// notification, d'où l'entrée « Se connecter » le ramène.
+    pub close_window: bool,
+    /// Déconnexion **confirmée** dans la boîte de la Carte — voir [`CardConfirm`].
+    pub disconnect: bool,
+    /// Un réglage du volet « Paramètres » vient de changer : l'hôte écrit `config.toml` et
+    /// applique. **Il n'y a rien à valider** — voir la section « Volet Paramètres ».
+    pub settings_changed: bool,
+    /// « Parcourir » de la section « Fichier » : l'hôte ouvre le sélecteur natif.
+    pub browse_log_path: bool,
+    /// Un bouton d'essai du son vient d'être cliqué.
+    pub test_sound: Option<CardSound>,
+}
+
+/// **Les volets de la Carte** — les écrans qui se lèvent par-dessus l'écran en cours, depuis les
+/// liens du pied, et qu'un bouton « Retour » referme.
+///
+/// Ce sont les seuls états qui fassent changer la Carte de taille (voir [`CARD_HEIGHT`]) :
+/// l'en-tête se replie et la fenêtre s'ouvre jusqu'à [`ABOUT_SCREEN_RATIO`] de la hauteur de
+/// l'écran, en un seul mouvement de [`ABOUT_MORPH`]. Les écrans ordinaires, eux, gardent tous la
+/// même taille.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CardPanel {
+    #[default]
+    None,
+    /// Ce qu'est le programme, ce qu'il fait des données — voir [`paint_about`].
+    About,
+    /// Les réglages de l'overlay, dans le langage de la Carte — voir
+    /// [`super::card_settings::paint`] (2026-09-22).
+    Settings,
+}
+
+/// Ce que la boîte de confirmation de la Carte demande. Une seule question à la fois, posée
+/// **par-dessus** l'écran en cours plutôt qu'à sa place : l'utilisateur voit d'où il vient, et
+/// « Annuler » l'y remet exactement (2026-09-22, demande utilisateur).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CardConfirm {
+    /// Ouverte par « Se déconnecter » — celui de l'écran « Compte connecté », celui de la section
+    /// « Compte » du volet des paramètres, et l'entrée du menu de la zone de notification, qui
+    /// n'avait aucune garde jusque-là.
+    Disconnect,
 }
 
 /// Peint la fenêtre de connexion dans tout `ui` et rend ce qu'elle demande à l'hôte.
@@ -459,6 +535,7 @@ pub fn show(
     icons: &UiIcons,
     auth_status: &AuthStatus,
     auth_command_tx: &dyn AuthCommandSink,
+    settings: &mut CardSettings,
     now: Instant,
 ) -> LoginOutcome {
     let mut outcome = LoginOutcome::default();
@@ -520,8 +597,8 @@ pub fn show(
     // **La Carte a une taille figée** (2026-09-22) — voir [`CARD_HEIGHT`]. Le pied est ancré au
     // bas de la fenêtre, l'en-tête à son haut, et le corps occupe ce qui reste : aucun écran ne
     // décide plus de la hauteur, sauf le volet À propos, qui s'ouvre exprès.
-    let about_t = about_progress(&ctx, ui.id(), state);
-    let head_height = paint_head(ui, card, about_t, icons, &mut outcome);
+    let panel_t = panel_progress(&ctx, ui.id(), state);
+    let head_height = paint_head(ui, card, panel_t, icons, &mut outcome);
     paint_rule(ui, card, card.top() + head_height);
 
     let foot_top = card.bottom() - FOOT_HEIGHT;
@@ -533,8 +610,28 @@ pub fn show(
         Pos2::new(card.right(), foot_top),
     );
 
-    if state.about {
-        paint_about(ui, body_rect, state, phases, &mut outcome);
+    // **La boîte de confirmation gèle ce qu'il y a dessous** : l'écran reste lisible — on voit
+    // d'où l'on vient — mais aucun de ses gestes ne répond tant que la question est posée. Le
+    // corps et le pied sont donc peints dans un `Ui` enfant, désactivé le temps de la question ;
+    // l'en-tête, lui, reste sur le `Ui` parent, pour qu'on puisse encore déplacer la fenêtre.
+    let asking = state.confirm.is_some();
+    let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(card));
+    if asking {
+        body_ui.disable();
+    }
+    let inner_ui = &mut body_ui;
+
+    if state.panel == CardPanel::Settings {
+        paint_settings(
+            inner_ui,
+            body_rect,
+            state,
+            settings,
+            matches!(auth_status, AuthStatus::Connected),
+            &mut outcome,
+        );
+    } else if state.panel == CardPanel::About {
+        paint_about(inner_ui, body_rect, state, phases, &mut outcome);
     } else {
         // **Contenu centré dans une zone de hauteur constante.** La hauteur du contenu n'est
         // connue qu'après l'avoir peint : elle est donc d'abord mesurée dans un `Ui` invisible
@@ -549,7 +646,7 @@ pub fn show(
                 Vec2::new(body_rect.width(), f32::INFINITY),
             );
             let mut height = 0.0;
-            ui.scope_builder(
+            inner_ui.scope_builder(
                 egui::UiBuilder::new().invisible().max_rect(probe),
                 |probe_ui| {
                     height = paint_body(
@@ -570,7 +667,7 @@ pub fn show(
         };
         let top = (inner_top + ((inner_bottom - inner_top) - measured) / 2.0).max(inner_top);
         paint_body(
-            ui,
+            inner_ui,
             card,
             top,
             state,
@@ -583,24 +680,27 @@ pub fn show(
         );
     }
 
-    paint_foot(ui, card, foot_top, state, &mut outcome);
+    paint_foot(inner_ui, card, foot_top, state, &mut outcome);
+    drop(body_ui);
 
-    outcome.content_height = card_height(state, about_t);
+    if let Some(confirm) = state.confirm {
+        paint_confirm(ui, card, confirm, phases, state, &mut outcome);
+    }
+
+    outcome.content_height = card_height(state, panel_t);
     outcome
 }
 
-/// Où en est l'ouverture du volet À propos : 0 en écran ordinaire, 1 volet ouvert, entre les deux
-/// pendant les [`ABOUT_MORPH`] de la transition. Une seule valeur pilote l'en-tête ET la hauteur
-/// de la Carte — un seul mouvement, jamais deux animations qui se croisent.
-fn about_progress(ctx: &egui::Context, id: egui::Id, state: &LoginState) -> f32 {
+/// Où en est l'ouverture d'un volet : 0 en écran ordinaire, 1 volet ouvert, entre les deux pendant
+/// les [`ABOUT_MORPH`] de la transition. Une seule valeur pilote l'en-tête ET la hauteur de la
+/// Carte — un seul mouvement, jamais deux animations qui se croisent. Les deux volets partagent
+/// la même : passer de l'un à l'autre ne referme donc pas la fenêtre entre-temps.
+fn panel_progress(ctx: &egui::Context, id: egui::Id, state: &LoginState) -> f32 {
+    let open = state.panel != CardPanel::None;
     if !state.animate {
-        return if state.about { 1.0 } else { 0.0 };
+        return if open { 1.0 } else { 0.0 };
     }
-    ctx.animate_bool_with_time(
-        id.with("carte-a-propos"),
-        state.about,
-        ABOUT_MORPH.as_secs_f32(),
-    )
+    ctx.animate_bool_with_time(id.with("carte-volet"), open, ABOUT_MORPH.as_secs_f32())
 }
 
 /// **La hauteur que la Carte demande à son hôte, pour la frame en cours.**
@@ -611,9 +711,9 @@ fn about_progress(ctx: &egui::Context, id: egui::Id, state: &LoginState) -> f32 
 /// dernière frame de l'animation garderait la valeur de l'avant-dernière. C'est exactement ce qui
 /// coupait le pied de la Carte au retour du volet À propos (2026-09-22) : la fenêtre se refermait
 /// sur cent pixels de moins, la différence entre l'en-tête déployé et replié.
-fn card_height(state: &LoginState, about_t: f32) -> f32 {
+fn card_height(state: &LoginState, panel_t: f32) -> f32 {
     let open = (state.monitor_height * ABOUT_SCREEN_RATIO).max(CARD_HEIGHT);
-    (CARD_HEIGHT + (open - CARD_HEIGHT) * about_t).round()
+    (CARD_HEIGHT + (open - CARD_HEIGHT) * panel_t).round()
 }
 
 /// **L'en-tête, qui se replie** (2026-09-22, demande utilisateur) — logo, titre, badge « beta »,
@@ -786,7 +886,7 @@ fn paint_about(
     }
     if purge {
         tracing::info!("[données locales] effacement demandé depuis le volet À propos.");
-        state.about = false;
+        state.panel = CardPanel::None;
         state.purge_confirm = true;
     }
 
@@ -811,7 +911,7 @@ fn paint_about(
         "carte-a-propos-retour",
     ) {
         tracing::info!("[carte] « Retour » — volet À propos refermé.");
-        state.about = false;
+        state.panel = CardPanel::None;
     }
 }
 
@@ -830,7 +930,6 @@ fn paint_about_content(
 
     let inner = width - ABOUT_PAD_SIDE - ABOUT_PAD_RIGHT;
     let ctx = ui.ctx().clone();
-    let heading_font = text::label_strong_font(&ctx, ABOUT_HEADING_SIZE);
     let p_font = text::label_font(&ctx, P_SIZE);
 
     // La table de liens de la CARTE, section par section — celle de la fenêtre Options reste la
@@ -853,15 +952,9 @@ fn paint_about_content(
         if index > 0 {
             y += ABOUT_SECTION_GAP;
         }
-        y = paint_paragraph(
-            ui,
-            Pos2::new(left, y),
-            inner,
-            section.title,
-            &heading_font,
-            TEXT,
-            ABOUT_HEADING_LINE,
-        ) + ABOUT_HEADING_GAP;
+        // Le même titre de section que le volet des paramètres — italique gris, filet dessous
+        // (2026-09-22, demande utilisateur) : ils étaient en blanc, et rien ne les reliait.
+        y = set_heading(ui, left, inner, y, section.title);
         for block in section.blocks {
             y = paint_about_block(ui, left, inner, y, block.text, block.tone, &p_font)
                 + ABOUT_BLOCK_GAP;
@@ -1011,6 +1104,1352 @@ fn paint_about_block(
         P_LINE,
     );
     block.bottom()
+}
+
+// ── La boîte de confirmation de la Carte ───────────────────────────────────────────────────────
+const CONFIRM_SCRIM: Color32 = Color32::from_rgba_premultiplied(3, 4, 7, 189); // #040609 à .74
+const CONFIRM_FILL: Color32 = Color32::from_rgb(0x0d, 0x11, 0x17);
+const CONFIRM_WIDTH: f32 = 300.0;
+const CONFIRM_RADIUS: f32 = 8.0;
+const CONFIRM_PAD_X: f32 = 20.0;
+const CONFIRM_PAD_TOP: f32 = 18.0;
+const CONFIRM_PAD_BOTTOM: f32 = 16.0;
+const CONFIRM_TITLE_SIZE: f32 = 14.0;
+const CONFIRM_TITLE_LINE: f32 = 20.0;
+const CONFIRM_BODY_SIZE: f32 = 12.0;
+const CONFIRM_BODY_LINE: f32 = 17.0;
+const CONFIRM_TITLE_GAP: f32 = 8.0;
+const CONFIRM_ACTIONS_GAP: f32 = 16.0;
+const CONFIRM_BUTTON_HEIGHT: f32 = 34.0;
+
+/// **La question, posée par-dessus la Carte** (2026-09-22) — voile sur toute la fenêtre, panneau
+/// de [`CONFIRM_WIDTH`] au centre, et le **liseré animé de la Carte** autour de lui : c'est ce qui
+/// le rattache à la Carte plutôt qu'au jeu, dont la boîte (`design::confirm_dialog`) parle un
+/// autre langage.
+///
+/// L'entrée « Déconnecter » de la zone de notification n'avait aucune garde jusqu'à ce jour : elle
+/// envoyait `AuthCommand::Disconnect` sans rien demander.
+fn paint_confirm(
+    ui: &mut egui::Ui,
+    card: Rect,
+    confirm: CardConfirm,
+    phases: Phases,
+    state: &mut LoginState,
+    outcome: &mut LoginOutcome,
+) {
+    let CardConfirm::Disconnect = confirm;
+    let question = "Déconnecter le compte de l'overlay ?";
+    let body = "La session enregistrée est effacée. L'overlay revient à son écran de connexion, \
+                et il faudra réappairer l'application pour le réutiliser.";
+
+    // Le voile absorbe aussi les clics : rien de ce qu'il couvre ne doit répondre.
+    ui.interact(
+        card,
+        ui.id().with("carte-confirmation-voile"),
+        Sense::click(),
+    );
+    ui.painter().rect_filled(card, CARD_RADIUS, CONFIRM_SCRIM);
+
+    let ctx = ui.ctx().clone();
+    let title_font = text::label_strong_font(&ctx, CONFIRM_TITLE_SIZE);
+    let body_font = text::label_font(&ctx, CONFIRM_BODY_SIZE);
+    let inner_width = CONFIRM_WIDTH - 2.0 * CONFIRM_PAD_X;
+    let title_height = wrapped_height(ui, question, &title_font, inner_width, CONFIRM_TITLE_LINE);
+    let body_height = wrapped_height(ui, body, &body_font, inner_width, CONFIRM_BODY_LINE);
+    let height = CONFIRM_PAD_TOP
+        + title_height
+        + CONFIRM_TITLE_GAP
+        + body_height
+        + CONFIRM_ACTIONS_GAP
+        + CONFIRM_BUTTON_HEIGHT
+        + CONFIRM_PAD_BOTTOM;
+    let box_rect = Rect::from_center_size(card.center(), Vec2::new(CONFIRM_WIDTH, height));
+
+    ui.painter()
+        .rect_filled(box_rect, CONFIRM_RADIUS, CONFIRM_FILL);
+    paint_ring_with_radius(ui, box_rect, phases.ring, RingStyle::Blue, CONFIRM_RADIUS);
+
+    let left = box_rect.left() + CONFIRM_PAD_X;
+    let mut y = box_rect.top() + CONFIRM_PAD_TOP;
+    y = paint_paragraph(
+        ui,
+        Pos2::new(left, y),
+        inner_width,
+        question,
+        &title_font,
+        TEXT,
+        CONFIRM_TITLE_LINE,
+    ) + CONFIRM_TITLE_GAP;
+    y = paint_paragraph(
+        ui,
+        Pos2::new(left, y),
+        inner_width,
+        body,
+        &body_font,
+        TEXT_MUTED,
+        CONFIRM_BODY_LINE,
+    ) + CONFIRM_ACTIONS_GAP;
+
+    let half = (inner_width - ACTIONS_GAP) / 2.0;
+    let cancel_rect =
+        Rect::from_min_size(Pos2::new(left, y), Vec2::new(half, CONFIRM_BUTTON_HEIGHT));
+    let confirm_rect = Rect::from_min_size(
+        Pos2::new(left + half + ACTIONS_GAP, y),
+        Vec2::new(half, CONFIRM_BUTTON_HEIGHT),
+    );
+    if button(
+        ui,
+        cancel_rect,
+        "Annuler",
+        ButtonKind::Secondary,
+        "carte-confirmation-annuler",
+    ) || ui.input(|i| i.key_pressed(egui::Key::Escape))
+    {
+        tracing::info!("[connexion] déconnexion annulée.");
+        state.confirm = None;
+    }
+    if button(
+        ui,
+        confirm_rect,
+        "Déconnecter",
+        ButtonKind::Danger,
+        "carte-confirmation-deconnecter",
+    ) {
+        tracing::info!("[connexion] déconnexion confirmée depuis la Carte.");
+        state.confirm = None;
+        outcome.disconnect = true;
+    }
+}
+
+/// La hauteur qu'un texte occupera une fois replié sur `width`, sans le peindre — de quoi tailler
+/// la boîte avant d'y écrire.
+fn wrapped_height(ui: &egui::Ui, text: &str, font: &FontId, width: f32, line: f32) -> f32 {
+    let galley = ui.fonts_mut(|f| {
+        let mut job = LayoutJob::simple(text.to_owned(), font.clone(), TEXT, width);
+        for row in &mut job.sections {
+            row.format.line_height = Some(line);
+        }
+        f.layout_job(job)
+    });
+    galley.rect.height()
+}
+
+// ══ Volet « Paramètres » (2026-09-22, demande utilisateur) ════════════════════════════════════
+//
+// Les mêmes réglages que l'onglet « Paramètres » de la fenêtre Options, dans le langage de la
+// Carte. Trois différences de fond, toutes voulues et validées sur maquette :
+//
+// 1. **Rien à valider.** Un geste écrit la configuration tout de suite — pas de brouillon, pas de
+//    pied « Annuler / Valider ». La fenêtre Options garde le sien : c'est elle qui a une garde
+//    contre l'abandon, pas cette Carte, où chaque case est son propre engagement.
+// 2. **Les libellés sont plus courts**, pour qu'un champ tienne sur la ligne de sa case dans
+//    400 px (« Fermeture automatique après » et non « … des notifications de décompte »). Rien
+//    de ceci ne remonte vers la fenêtre Options : elle ne change pas.
+// 3. **Les sections qui règlent des réglages de compte sont masquées hors connexion** — Suivi,
+//    Alertes, Chat, Compte. Cinq sections restent, et ce sont exactement celles qu'un overlay
+//    sans compte lié peut honorer.
+
+/// Ce que le volet des paramètres lit et écrit, à plat — l'hôte le construit à partir de
+/// `config::OverlayConfig` (et du profil d'alertes du compte) avant chaque frame, et le relit
+/// quand [`LoginOutcome::settings_changed`] le lui dit.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CardSettings {
+    pub recap: bool,
+    pub recap_duration: bool,
+    pub recap_fights: bool,
+    pub recap_challenges: bool,
+    pub recap_resume: bool,
+    pub recap_resume_minutes: i64,
+    pub combat: bool,
+    pub spells: bool,
+    pub combat_always_visible: bool,
+    pub combat_on_right: bool,
+    pub turn_notification: bool,
+    pub turn_notification_muted: bool,
+    pub suivi_muted: bool,
+    pub suivi_auto_close: bool,
+    pub suivi_seconds: f32,
+    pub suivi_remove_on_complete: bool,
+    pub suivi_completion_animation: bool,
+    /// La fermeture automatique des alertes vit sur le COMPTE (`overlay_engine::AlertProfile`),
+    /// pas dans `config.toml` : tant qu'elle n'est pas descendue, la ligne est inerte.
+    pub alerts_available: bool,
+    pub alerts_auto_close: bool,
+    pub alerts_seconds: f32,
+    pub chat_muted: bool,
+    pub chat_auto_close: bool,
+    pub chat_seconds: f32,
+    pub start_with_os: bool,
+    pub log_path: String,
+    pub verbose_log: bool,
+}
+
+impl Default for CardSettings {
+    /// « Tout actif », comme `FeatureToggles` — un volet dont les cases seraient toutes décochées
+    /// par défaut mentirait sur l'overlay livré, et c'est cette valeur que voient les tests.
+    fn default() -> Self {
+        Self {
+            recap: true,
+            recap_duration: true,
+            recap_fights: true,
+            recap_challenges: true,
+            recap_resume: true,
+            recap_resume_minutes: 15,
+            combat: true,
+            spells: true,
+            combat_always_visible: false,
+            combat_on_right: false,
+            turn_notification: true,
+            turn_notification_muted: false,
+            suivi_muted: false,
+            suivi_auto_close: true,
+            suivi_seconds: 8.0,
+            suivi_remove_on_complete: true,
+            suivi_completion_animation: true,
+            alerts_available: true,
+            alerts_auto_close: true,
+            alerts_seconds: 6.0,
+            chat_muted: false,
+            chat_auto_close: true,
+            chat_seconds: 6.0,
+            start_with_os: false,
+            log_path: String::new(),
+            verbose_log: false,
+        }
+    }
+}
+
+/// Les quatre sons que le volet sait faire essayer — l'hôte les joue, la Carte ne connaît pas le
+/// moteur audio.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CardSound {
+    Turn,
+    Countdown,
+    Alert,
+    Chat,
+}
+
+/// Les champs de saisie du volet, le temps qu'il est ouvert : un nombre en cours de frappe n'est
+/// pas encore un nombre (« 1 » avant « 12 »), donc la valeur ne remonte qu'à la perte du focus.
+/// Même mécanique que les champs de durée de la fenêtre Options (`panels::notifications`).
+#[derive(Clone, Debug, Default)]
+pub struct SettingsInputs {
+    suivi: String,
+    alerts: String,
+    chat: String,
+    resume: String,
+    /// Le chemin de `wakfu.log` en cours de frappe. Il ne devient le chemin retenu qu'à la perte
+    /// du focus — c'est l'hôte qui le valide ensuite (`discovery::validate_log_path`), comme pour
+    /// « Valider » de la fenêtre Options.
+    path: String,
+}
+
+impl SettingsInputs {
+    fn from_settings(settings: &CardSettings) -> Self {
+        Self {
+            suivi: notifications::format_duration(settings.suivi_seconds),
+            alerts: notifications::format_duration(settings.alerts_seconds),
+            chat: notifications::format_duration(settings.chat_seconds),
+            resume: settings.recap_resume_minutes.to_string(),
+            path: settings.log_path.clone(),
+        }
+    }
+}
+
+const SETTINGS_SCROLL_ID: &str = "carte-parametres";
+const SET_PAD_TOP: f32 = 18.0;
+const SET_PAD_BOTTOM: f32 = 8.0;
+const SET_SECTION_GAP: f32 = 22.0;
+/// Titre de section — **le style du mot « OVERLAY » de l'en-tête** : italique, gris, capitales
+/// espacées (2026-09-22, demande utilisateur). L'accent était déjà pris par le titre, les liens,
+/// les cases cochées, la pastille, la jauge et le liseré : neuf titres de plus en faisaient une
+/// page bleue.
+const SET_HEADING_SIZE: f32 = 12.0;
+const SET_HEADING_SPACING: f32 = 0.9;
+/// Entre le titre et son filet, puis entre le filet et le premier réglage.
+const SET_HEADING_GAP: f32 = 6.0;
+const SET_HEADING_AFTER: f32 = 9.0;
+const SET_RULE_COLOR: Color32 = Color32::from_rgb(0x1c, 0x23, 0x2b);
+const SET_ROW_GAP: f32 = 5.0;
+const SET_LABEL_SIZE: f32 = 13.0;
+const SET_LABEL_LINE: f32 = 18.0;
+const SET_NOTE_SIZE: f32 = 12.0;
+const SET_NOTE_LINE: f32 = 17.0;
+const SET_NOTE_GAP: f32 = 8.0;
+const CHECK_SIZE: f32 = 16.0;
+const CHECK_GAP: f32 = 10.0;
+const CHECK_RADIUS: f32 = 3.0;
+/// Un réglage dépendant commence là où commence le LIBELLÉ de celui dont il dépend — la même
+/// géométrie que la fenêtre Options.
+const SET_INDENT: f32 = CHECK_SIZE + CHECK_GAP;
+const CHECK_FILL: Color32 = DETAIL_FILL;
+/// **Ce qui est inactif s'estompe d'un bloc** (variante B, choisie sur maquette le 2026-09-22) :
+/// cadre, fond, valeur et chevrons partent ensemble, donc le champ cesse d'être un objet et pas
+/// seulement un texte — et la valeur reste devinable, on sait ce qu'on retrouvera en recochant.
+const SET_DISABLED_OPACITY: f32 = 0.3;
+const NUMF_HEIGHT: f32 = 26.0;
+const NUMF_VALUE_WIDTH: f32 = 34.0;
+const NUMF_CHEV_WIDTH: f32 = 16.0;
+const NUMF_WIDTH: f32 = NUMF_VALUE_WIDTH + NUMF_CHEV_WIDTH;
+const NUMF_RADIUS: f32 = 5.0;
+const NUMF_GAP: f32 = 8.0;
+const UNIT_SIZE: f32 = 12.0;
+const SET_ROW_HEIGHT: f32 = 28.0;
+const SET_FIELD_HEIGHT: f32 = 30.0;
+const SET_FIELD_RADIUS: f32 = 6.0;
+const ICON_BUTTON_SIZE: f32 = 30.0;
+const SET_BUTTON_HEIGHT: f32 = 30.0;
+
+/// Le volet des paramètres — même charpente que [`paint_about`] : une zone défilante, la barre
+/// peinte à la main, et la bande « Retour » en bas.
+fn paint_settings(
+    ui: &mut egui::Ui,
+    body_rect: Rect,
+    state: &mut LoginState,
+    settings: &mut CardSettings,
+    connected: bool,
+    outcome: &mut LoginOutcome,
+) {
+    let backbar_top = body_rect.bottom() - BACKBAR_HEIGHT;
+    let scroll_rect = Rect::from_min_max(
+        body_rect.min,
+        Pos2::new(body_rect.right(), backbar_top.max(body_rect.top())),
+    );
+    let mut scroll_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(scroll_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    let inputs = state
+        .settings_inputs
+        .get_or_insert_with(|| SettingsInputs::from_settings(settings));
+    let mut changed = false;
+    let mut sound = None;
+    let mut browse = false;
+    let mut disconnect = false;
+    let output = egui::ScrollArea::vertical()
+        .id_salt(SETTINGS_SCROLL_ID)
+        .auto_shrink([false; 2])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(&mut scroll_ui, |ui| {
+            ui.add_space(SET_PAD_TOP);
+            paint_settings_content(
+                ui,
+                scroll_rect.width(),
+                settings,
+                inputs,
+                connected,
+                &mut changed,
+                &mut sound,
+                &mut browse,
+                &mut disconnect,
+            );
+            ui.add_space(SET_PAD_BOTTOM);
+        });
+    paint_card_scrollbar(ui, scroll_rect, &output);
+
+    outcome.settings_changed |= changed;
+    if sound.is_some() {
+        outcome.test_sound = sound;
+    }
+    outcome.browse_log_path |= browse;
+    if disconnect {
+        tracing::info!("[connexion] « Se déconnecter » (paramètres) — confirmation demandée.");
+        state.confirm = Some(CardConfirm::Disconnect);
+    }
+
+    let button_rect = Rect::from_min_max(
+        Pos2::new(
+            body_rect.left() + BODY_PAD_SIDE,
+            backbar_top + BACKBAR_PAD_TOP,
+        ),
+        Pos2::new(
+            body_rect.right() - BODY_PAD_SIDE,
+            backbar_top + BACKBAR_PAD_TOP + BUTTON_HEIGHT,
+        ),
+    );
+    if button(
+        ui,
+        button_rect,
+        "Retour",
+        ButtonKind::Secondary,
+        "carte-parametres-retour",
+    ) {
+        tracing::info!("[carte] « Retour » — volet Paramètres refermé.");
+        state.panel = CardPanel::None;
+    }
+}
+
+/// Les neuf sections, dans l'ordre de la fenêtre Options. Peint en `y` absolus comme le reste de
+/// la Carte, puis alloue sa hauteur pour que la zone défilante la connaisse.
+#[allow(clippy::too_many_arguments)]
+fn paint_settings_content(
+    ui: &mut egui::Ui,
+    width: f32,
+    settings: &mut CardSettings,
+    inputs: &mut SettingsInputs,
+    connected: bool,
+    changed: &mut bool,
+    sound: &mut Option<CardSound>,
+    browse: &mut bool,
+    disconnect: &mut bool,
+) {
+    let left = ui.max_rect().left() + ABOUT_PAD_SIDE;
+    let inner = width - ABOUT_PAD_SIDE - ABOUT_PAD_RIGHT;
+    // **Le haut est retenu ici**, pas relu à la fin : les champs de saisie passent par `ui.put`,
+    // qui avance le curseur du `Ui`. Le relire pour calculer la hauteur du contenu donnait une
+    // zone défilable plus courte qu'elle ne l'est, donc pas de barre de défilement du tout.
+    let start = ui.cursor().top();
+    let mut y = start;
+
+    // ── Recap ─────────────────────────────────────────────────────────────────────────────
+    y = set_heading(ui, left, inner, y, "Recap");
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Activer le récap de session",
+        &mut settings.recap,
+        true,
+        "carte-recap-actif",
+        changed,
+    );
+    let recap_on = settings.recap;
+    for (value, label, log) in [
+        (
+            &mut settings.recap_duration,
+            "Afficher la durée de la session",
+            "carte-recap-duree",
+        ),
+        (
+            &mut settings.recap_fights,
+            "Afficher les combats (victoires / défaites)",
+            "carte-recap-combats",
+        ),
+        (
+            &mut settings.recap_challenges,
+            "Afficher les challenges (réussis / échoués)",
+            "carte-recap-challenges",
+        ),
+    ] {
+        y = set_check(
+            ui,
+            left + SET_INDENT,
+            inner - SET_INDENT,
+            y,
+            label,
+            value,
+            recap_on,
+            log,
+            changed,
+        );
+    }
+    let mut minutes = settings.recap_resume_minutes as f32;
+    y = set_check_num(
+        ui,
+        left,
+        y,
+        "Reprendre après une pause de",
+        &mut settings.recap_resume,
+        &mut minutes,
+        &mut inputs.resume,
+        "min",
+        recap_session::RESUME_STEP_MINUTES as f32,
+        (
+            recap_session::MIN_RESUME_MINUTES as f32,
+            recap_session::MAX_RESUME_MINUTES as f32,
+        ),
+        "carte-recap-reprise",
+        changed,
+    );
+    settings.recap_resume_minutes = minutes.round() as i64;
+
+    // ── Combat ────────────────────────────────────────────────────────────────────────────
+    y += SET_SECTION_GAP;
+    y = set_heading(ui, left, inner, y, "Combat");
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Activer le détail des combats",
+        &mut settings.combat,
+        true,
+        "carte-combat-actif",
+        changed,
+    );
+    let combat_on = settings.combat;
+    y = set_check(
+        ui,
+        left + SET_INDENT,
+        inner - SET_INDENT,
+        y,
+        "Activer le suivi des sorts",
+        &mut settings.spells,
+        combat_on,
+        "carte-combat-sorts",
+        changed,
+    );
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Afficher le panneau de combat en dehors des combats",
+        &mut settings.combat_always_visible,
+        combat_on,
+        "carte-combat-toujours-visible",
+        changed,
+    );
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Afficher le panneau de combat à droite de la fenêtre de jeu",
+        &mut settings.combat_on_right,
+        combat_on,
+        "carte-combat-a-droite",
+        changed,
+    );
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Me prévenir quand un de mes personnages doit jouer",
+        &mut settings.turn_notification,
+        true,
+        "carte-notification-de-tour",
+        changed,
+    );
+    let turn_on = settings.turn_notification;
+    y = set_mute_row(
+        ui,
+        left + SET_INDENT,
+        inner - SET_INDENT,
+        y,
+        &mut settings.turn_notification_muted,
+        turn_on,
+        CardSound::Turn,
+        "carte-notification-de-tour-sans-son",
+        changed,
+        sound,
+    );
+
+    if connected {
+        // ── Suivi ─────────────────────────────────────────────────────────────────────────
+        y += SET_SECTION_GAP;
+        y = set_heading(ui, left, inner, y, "Suivi");
+        y = set_mute_row(
+            ui,
+            left,
+            inner,
+            y,
+            &mut settings.suivi_muted,
+            true,
+            CardSound::Countdown,
+            "carte-suivi-sans-son",
+            changed,
+            sound,
+        );
+        y = set_check_num(
+            ui,
+            left,
+            y,
+            "Fermeture automatique après",
+            &mut settings.suivi_auto_close,
+            &mut settings.suivi_seconds,
+            &mut inputs.suivi,
+            "sec.",
+            1.0,
+            (1.0, 60.0),
+            "carte-suivi-fermeture",
+            changed,
+        );
+        y = set_check(
+            ui,
+            left,
+            inner,
+            y,
+            "Supprimer les éléments suivis lorsqu'ils sont complétés",
+            &mut settings.suivi_remove_on_complete,
+            true,
+            "carte-suivi-retrait",
+            changed,
+        );
+        let remove_on = settings.suivi_remove_on_complete;
+        y = set_check(
+            ui,
+            left + SET_INDENT,
+            inner - SET_INDENT,
+            y,
+            "Activer l'animation de complétion",
+            &mut settings.suivi_completion_animation,
+            remove_on,
+            "carte-suivi-animation",
+            changed,
+        );
+
+        // ── Alertes ───────────────────────────────────────────────────────────────────────
+        y += SET_SECTION_GAP;
+        y = set_heading(ui, left, inner, y, "Alertes");
+        y = set_test_row(
+            ui,
+            left,
+            inner,
+            y,
+            "Tester le son des notifications",
+            true,
+            CardSound::Alert,
+            "carte-alertes-tester",
+            sound,
+        );
+        let alerts_ready = settings.alerts_available;
+        y = set_check_num_enabled(
+            ui,
+            left,
+            y,
+            "Fermeture automatique après",
+            &mut settings.alerts_auto_close,
+            &mut settings.alerts_seconds,
+            &mut inputs.alerts,
+            "sec.",
+            1.0,
+            (1.0, 60.0),
+            alerts_ready,
+            "carte-alertes-fermeture",
+            changed,
+        );
+
+        // ── Chat ──────────────────────────────────────────────────────────────────────────
+        y += SET_SECTION_GAP;
+        y = set_heading(ui, left, inner, y, "Chat");
+        y = set_mute_row(
+            ui,
+            left,
+            inner,
+            y,
+            &mut settings.chat_muted,
+            true,
+            CardSound::Chat,
+            "carte-chat-sans-son",
+            changed,
+            sound,
+        );
+        y = set_check_num(
+            ui,
+            left,
+            y,
+            "Fermeture automatique après",
+            &mut settings.chat_auto_close,
+            &mut settings.chat_seconds,
+            &mut inputs.chat,
+            "sec.",
+            1.0,
+            (1.0, 60.0),
+            "carte-chat-fermeture",
+            changed,
+        );
+    }
+
+    // ── Démarrage ─────────────────────────────────────────────────────────────────────────
+    y += SET_SECTION_GAP;
+    y = set_heading(ui, left, inner, y, "Démarrage");
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Lancer l'overlay au démarrage de l'ordinateur",
+        &mut settings.start_with_os,
+        true,
+        "carte-demarrage-auto",
+        changed,
+    );
+
+    // ── Fichier ───────────────────────────────────────────────────────────────────────────
+    y += SET_SECTION_GAP;
+    y = set_heading(ui, left, inner, y, "Fichier");
+    y = set_note(
+        ui,
+        left,
+        inner,
+        y,
+        "L'overlay trouve wakfu.log tout seul dans presque tous les cas. Ce champ sert quand il \
+         n'y arrive pas.",
+    );
+    let browse_width = 92.0_f32;
+    let field_rect = Rect::from_min_size(
+        Pos2::new(left, y),
+        Vec2::new(inner - browse_width - NUMF_GAP, SET_FIELD_HEIGHT),
+    );
+    if set_text_field(
+        ui,
+        field_rect,
+        &mut inputs.path,
+        "Chemin vers wakfu.log",
+        egui::Align::LEFT,
+        "carte-chemin",
+    ) && inputs.path != settings.log_path
+    {
+        settings.log_path = inputs.path.clone();
+        *changed = true;
+    }
+    let browse_rect = Rect::from_min_size(
+        Pos2::new(left + inner - browse_width, y),
+        Vec2::new(browse_width, SET_BUTTON_HEIGHT),
+    );
+    if button(
+        ui,
+        browse_rect,
+        "Parcourir",
+        ButtonKind::Secondary,
+        "carte-parcourir",
+    ) {
+        *browse = true;
+    }
+    y += SET_FIELD_HEIGHT;
+
+    // ── Journal ───────────────────────────────────────────────────────────────────────────
+    y += SET_SECTION_GAP;
+    y = set_heading(ui, left, inner, y, "Journal");
+    y = set_note(
+        ui,
+        left,
+        inner,
+        y,
+        "Le journal technique reste sur cet ordinateur, quatorze jours, et sert à diagnostiquer \
+         un problème.",
+    );
+    y = set_check(
+        ui,
+        left,
+        inner,
+        y,
+        "Journal détaillé",
+        &mut settings.verbose_log,
+        true,
+        "carte-journal-detaille",
+        changed,
+    );
+
+    // ── Compte ────────────────────────────────────────────────────────────────────────────
+    if connected {
+        y += SET_SECTION_GAP;
+        y = set_heading(ui, left, inner, y, "Compte");
+        y = set_note(
+            ui,
+            left,
+            inner,
+            y,
+            "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
+             suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
+             à son écran de connexion.",
+        );
+        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(inner, BUTTON_HEIGHT));
+        if button(
+            ui,
+            rect,
+            "Se déconnecter",
+            ButtonKind::Danger,
+            "carte-parametres-deconnecter",
+        ) {
+            *disconnect = true;
+        }
+        y += BUTTON_HEIGHT;
+    }
+
+    let height = (y - start).max(0.0);
+    ui.allocate_space(Vec2::new(width, height));
+}
+
+/// Un titre de section : capitales italiques grises, puis son filet.
+fn set_heading(ui: &mut egui::Ui, left: f32, width: f32, y: f32, label: &str) -> f32 {
+    let font = text::label_font(ui.ctx(), SET_HEADING_SIZE);
+    let upper = label.to_uppercase();
+    let height = ui
+        .fonts_mut(|f| f.layout_no_wrap(upper.clone(), font.clone(), TEXT_DIM))
+        .rect
+        .height();
+    paint_spaced_italic(
+        ui,
+        Pos2::new(left, y + height / 2.0),
+        &upper,
+        &font,
+        TEXT_DIM,
+        SET_HEADING_SPACING,
+    );
+    let rule_y = y + height + SET_HEADING_GAP;
+    ui.painter().rect_filled(
+        Rect::from_min_size(Pos2::new(left, rule_y), Vec2::new(width, 1.0)),
+        0.0,
+        SET_RULE_COLOR,
+    );
+    rule_y + 1.0 + SET_HEADING_AFTER
+}
+
+/// Une phrase d'explication de section — le gris du corps, en plus petit.
+fn set_note(ui: &mut egui::Ui, left: f32, width: f32, y: f32, text: &str) -> f32 {
+    let font = text::label_font(ui.ctx(), SET_NOTE_SIZE);
+    paint_paragraph(
+        ui,
+        Pos2::new(left, y),
+        width,
+        text,
+        &font,
+        TEXT_MUTED,
+        SET_NOTE_LINE,
+    ) + SET_NOTE_GAP
+}
+
+/// Une case à cocher de la Carte : carré de 16 px, coche sombre sur fond accent. Rend le `y`
+/// suivant, et lève `changed` si l'utilisateur vient de la basculer.
+#[allow(clippy::too_many_arguments)]
+fn set_check(
+    ui: &mut egui::Ui,
+    left: f32,
+    width: f32,
+    y: f32,
+    label: &str,
+    value: &mut bool,
+    enabled: bool,
+    log_name: &str,
+    changed: &mut bool,
+) -> f32 {
+    let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
+    let color = if enabled { TEXT } else { LINK_DISABLED };
+    let galley =
+        ui.fonts_mut(|f| f.layout(label.to_owned(), font, color, (width - SET_INDENT).max(1.0)));
+    let text_height = galley.rect.height().max(SET_LABEL_LINE);
+    let row = Rect::from_min_size(Pos2::new(left, y), Vec2::new(width, text_height));
+    let response = if enabled {
+        let response = ui
+            .interact(row, ui.id().with(log_name), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            *value = !*value;
+            *changed = true;
+            tracing::info!(
+                "[carte] « {label} » — {}.",
+                if *value { "coché" } else { "décoché" }
+            );
+        }
+        Some(response)
+    } else {
+        None
+    };
+    let hovered = response.map(|r| r.hovered()).unwrap_or(false);
+    let box_rect = Rect::from_min_size(
+        Pos2::new(left, y + (SET_LABEL_LINE - CHECK_SIZE) / 2.0),
+        Vec2::splat(CHECK_SIZE),
+    );
+    let fade = |c: Color32| {
+        if enabled {
+            c
+        } else {
+            c.gamma_multiply(SET_DISABLED_OPACITY)
+        }
+    };
+    if *value {
+        ui.painter()
+            .rect_filled(box_rect, CHECK_RADIUS, fade(ACCENT));
+        paint_check_mark(ui, box_rect, fade(ON_ACCENT));
+    } else {
+        ui.painter()
+            .rect_filled(box_rect, CHECK_RADIUS, fade(CHECK_FILL));
+        ui.painter().rect_stroke(
+            box_rect.shrink(0.5),
+            CHECK_RADIUS,
+            Stroke::new(
+                1.0,
+                fade(if hovered {
+                    SECONDARY_BORDER_HOVER
+                } else {
+                    SECONDARY_BORDER
+                }),
+            ),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter()
+        .galley(Pos2::new(left + SET_INDENT, y), galley, color);
+    y + text_height + SET_ROW_GAP
+}
+
+/// La coche : deux segments, comme le `border-width: 0 2px 2px 0` incliné du web.
+fn paint_check_mark(ui: &egui::Ui, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(2.0, color);
+    let left = Pos2::new(
+        rect.left() + rect.width() * 0.26,
+        rect.top() + rect.height() * 0.52,
+    );
+    let bottom = Pos2::new(
+        rect.left() + rect.width() * 0.44,
+        rect.top() + rect.height() * 0.72,
+    );
+    let right = Pos2::new(
+        rect.left() + rect.width() * 0.76,
+        rect.top() + rect.height() * 0.30,
+    );
+    ui.painter().line_segment([left, bottom], stroke);
+    ui.painter().line_segment([bottom, right], stroke);
+}
+
+/// Une case et son pas numérique **sur la même ligne** (2026-09-22, demande utilisateur) : le
+/// libellé s'arrête là où le nombre commence, et l'unité le ferme. C'est le libellé qui a été
+/// raccourci pour tenir dans 400 px, pas la police.
+#[allow(clippy::too_many_arguments)]
+fn set_check_num(
+    ui: &mut egui::Ui,
+    left: f32,
+    y: f32,
+    label: &str,
+    on: &mut bool,
+    value: &mut f32,
+    input: &mut String,
+    unit: &str,
+    step: f32,
+    bounds: (f32, f32),
+    log_name: &str,
+    changed: &mut bool,
+) -> f32 {
+    set_check_num_enabled(
+        ui, left, y, label, on, value, input, unit, step, bounds, true, log_name, changed,
+    )
+}
+
+/// Comme [`set_check_num`], avec une disponibilité en plus : la fermeture automatique des alertes
+/// vit sur le compte, et la ligne entière est inerte tant qu'elle n'est pas descendue.
+#[allow(clippy::too_many_arguments)]
+fn set_check_num_enabled(
+    ui: &mut egui::Ui,
+    left: f32,
+    y: f32,
+    label: &str,
+    on: &mut bool,
+    value: &mut f32,
+    input: &mut String,
+    unit: &str,
+    step: f32,
+    bounds: (f32, f32),
+    available: bool,
+    log_name: &str,
+    changed: &mut bool,
+) -> f32 {
+    let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
+    let color = if available { TEXT } else { LINK_DISABLED };
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, color));
+    let label_width = galley.rect.width();
+    let center_y = y + SET_ROW_HEIGHT / 2.0;
+
+    let row = Rect::from_min_size(
+        Pos2::new(left, y),
+        Vec2::new(SET_INDENT + label_width, SET_ROW_HEIGHT),
+    );
+    let hovered = if available {
+        let response = ui
+            .interact(row, ui.id().with(log_name), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            *on = !*on;
+            *changed = true;
+            tracing::info!(
+                "[carte] « {label} » — {}.",
+                if *on { "coché" } else { "décoché" }
+            );
+        }
+        response.hovered()
+    } else {
+        false
+    };
+    let fade = |c: Color32| {
+        if available {
+            c
+        } else {
+            c.gamma_multiply(SET_DISABLED_OPACITY)
+        }
+    };
+    let box_rect = Rect::from_min_size(
+        Pos2::new(left, center_y - CHECK_SIZE / 2.0),
+        Vec2::splat(CHECK_SIZE),
+    );
+    if *on {
+        ui.painter()
+            .rect_filled(box_rect, CHECK_RADIUS, fade(ACCENT));
+        paint_check_mark(ui, box_rect, fade(ON_ACCENT));
+    } else {
+        ui.painter()
+            .rect_filled(box_rect, CHECK_RADIUS, fade(CHECK_FILL));
+        ui.painter().rect_stroke(
+            box_rect.shrink(0.5),
+            CHECK_RADIUS,
+            Stroke::new(
+                1.0,
+                fade(if hovered {
+                    SECONDARY_BORDER_HOVER
+                } else {
+                    SECONDARY_BORDER
+                }),
+            ),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let label_height = galley.rect.height();
+    ui.painter().galley(
+        Pos2::new(left + SET_INDENT, center_y - label_height / 2.0),
+        galley,
+        color,
+    );
+
+    // Le pas, puis son unité.
+    let live = available && *on;
+    let field_rect = Rect::from_min_size(
+        Pos2::new(
+            left + SET_INDENT + label_width + NUMF_GAP,
+            center_y - NUMF_HEIGHT / 2.0,
+        ),
+        Vec2::new(NUMF_WIDTH, NUMF_HEIGHT),
+    );
+    if set_numeric_field(ui, field_rect, value, input, step, bounds, live, log_name) {
+        *changed = true;
+    }
+    let unit_font = text::label_font(ui.ctx(), UNIT_SIZE);
+    let unit_color = if live {
+        TEXT_DIM
+    } else {
+        TEXT_DIM.gamma_multiply(SET_DISABLED_OPACITY)
+    };
+    let unit_galley = ui.fonts_mut(|f| f.layout_no_wrap(unit.to_owned(), unit_font, unit_color));
+    ui.painter().galley(
+        Pos2::new(
+            field_rect.right() + 6.0,
+            center_y - unit_galley.rect.height() / 2.0,
+        ),
+        unit_galley,
+        unit_color,
+    );
+    y + SET_ROW_HEIGHT + SET_ROW_GAP
+}
+
+/// Le pas numérique : une valeur qu'on tape, deux chevrons qu'on clique. Rend `true` si la valeur
+/// a changé.
+#[allow(clippy::too_many_arguments)]
+fn set_numeric_field(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    value: &mut f32,
+    input: &mut String,
+    step: f32,
+    bounds: (f32, f32),
+    enabled: bool,
+    log_name: &str,
+) -> bool {
+    let fade = |c: Color32| {
+        if enabled {
+            c
+        } else {
+            c.gamma_multiply(SET_DISABLED_OPACITY)
+        }
+    };
+    ui.painter()
+        .rect_filled(rect, NUMF_RADIUS, fade(CHECK_FILL));
+    ui.painter().rect_stroke(
+        rect.shrink(0.5),
+        NUMF_RADIUS,
+        Stroke::new(1.0, fade(SECONDARY_BORDER)),
+        egui::StrokeKind::Inside,
+    );
+    let chev_x = rect.right() - NUMF_CHEV_WIDTH;
+    ui.painter().line_segment(
+        [
+            Pos2::new(chev_x, rect.top() + 1.0),
+            Pos2::new(chev_x, rect.bottom() - 1.0),
+        ],
+        Stroke::new(1.0, fade(Color32::from_rgb(0x22, 0x28, 0x2f))),
+    );
+
+    let mut changed = false;
+    let value_rect = Rect::from_min_size(rect.min, Vec2::new(NUMF_VALUE_WIDTH, rect.height()));
+    if enabled {
+        let response = ui.put(
+            value_rect,
+            egui::TextEdit::singleline(input)
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::ZERO)
+                .horizontal_align(egui::Align::Center)
+                .font(text::label_font(ui.ctx(), SET_LABEL_SIZE))
+                .text_color(TEXT)
+                .id(ui.id().with((log_name, "valeur"))),
+        );
+        if response.lost_focus() {
+            let parsed = notifications::parse_duration(input, *value).clamp(bounds.0, bounds.1);
+            let parsed = (parsed / step).round() * step;
+            let parsed = parsed.clamp(bounds.0, bounds.1);
+            if (parsed - *value).abs() > f32::EPSILON {
+                *value = parsed;
+                changed = true;
+            }
+            *input = format_step(*value);
+        }
+    } else {
+        let galley = ui.fonts_mut(|f| {
+            f.layout_no_wrap(
+                input.clone(),
+                text::label_font(ui.ctx(), SET_LABEL_SIZE),
+                fade(TEXT),
+            )
+        });
+        ui.painter().galley(
+            Pos2::new(
+                value_rect.center().x - galley.rect.width() / 2.0,
+                value_rect.center().y - galley.rect.height() / 2.0,
+            ),
+            galley,
+            fade(TEXT),
+        );
+    }
+
+    // Les deux chevrons, empilés.
+    for (index, delta) in [(0usize, step), (1usize, -step)] {
+        let cell = Rect::from_min_size(
+            Pos2::new(chev_x, rect.top() + index as f32 * rect.height() / 2.0),
+            Vec2::new(NUMF_CHEV_WIDTH, rect.height() / 2.0),
+        );
+        let hovered = if enabled {
+            let response = ui
+                .interact(cell, ui.id().with((log_name, "pas", index)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                let next = (*value + delta).clamp(bounds.0, bounds.1);
+                if (next - *value).abs() > f32::EPSILON {
+                    *value = next;
+                    *input = format_step(next);
+                    changed = true;
+                }
+            }
+            response.hovered()
+        } else {
+            false
+        };
+        if hovered {
+            ui.painter()
+                .rect_filled(cell, 0.0, ACCENT.gamma_multiply(0.1));
+        }
+        let color = if !enabled {
+            TITLE_OVERLAY.gamma_multiply(SET_DISABLED_OPACITY)
+        } else if hovered {
+            ACCENT
+        } else {
+            TITLE_OVERLAY
+        };
+        paint_chevron(ui, cell, delta > 0.0, color);
+    }
+    changed
+}
+
+/// Un nombre tel que le champ l'affiche : sans décimale quand il est rond.
+fn format_step(value: f32) -> String {
+    notifications::format_duration(value)
+}
+
+/// Un chevron, haut ou bas — deux segments de 4,5 px.
+fn paint_chevron(ui: &egui::Ui, cell: Rect, up: bool, color: Color32) {
+    let center = cell.center();
+    let half = 2.4;
+    let rise = if up { -1.8 } else { 1.8 };
+    let stroke = Stroke::new(1.2, color);
+    ui.painter().line_segment(
+        [
+            Pos2::new(center.x - half, center.y - rise / 2.0),
+            Pos2::new(center.x, center.y + rise / 2.0),
+        ],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [
+            Pos2::new(center.x, center.y + rise / 2.0),
+            Pos2::new(center.x + half, center.y - rise / 2.0),
+        ],
+        stroke,
+    );
+}
+
+/// « Couper le son des notifications » et son bouton d'essai, sur une ligne.
+#[allow(clippy::too_many_arguments)]
+fn set_mute_row(
+    ui: &mut egui::Ui,
+    left: f32,
+    width: f32,
+    y: f32,
+    muted: &mut bool,
+    enabled: bool,
+    channel: CardSound,
+    log_name: &str,
+    changed: &mut bool,
+    sound: &mut Option<CardSound>,
+) -> f32 {
+    let button_rect = Rect::from_min_size(
+        Pos2::new(
+            left + width - ICON_BUTTON_SIZE,
+            y + (SET_ROW_HEIGHT - ICON_BUTTON_SIZE) / 2.0,
+        ),
+        Vec2::splat(ICON_BUTTON_SIZE),
+    );
+    let after = set_check(
+        ui,
+        left,
+        width - ICON_BUTTON_SIZE - NUMF_GAP,
+        y + (SET_ROW_HEIGHT - SET_LABEL_LINE) / 2.0,
+        notifications::MUTE_LABEL,
+        muted,
+        enabled,
+        log_name,
+        changed,
+    );
+    if set_sound_button(ui, button_rect, enabled && !*muted, log_name) {
+        *sound = Some(channel);
+    }
+    after.max(y + SET_ROW_HEIGHT + SET_ROW_GAP)
+}
+
+/// « Tester le son des notifications » : la même ligne, sans case — c'est le cas des alertes, dont
+/// la sourdine n'existe pas.
+#[allow(clippy::too_many_arguments)]
+fn set_test_row(
+    ui: &mut egui::Ui,
+    left: f32,
+    width: f32,
+    y: f32,
+    label: &str,
+    enabled: bool,
+    channel: CardSound,
+    log_name: &str,
+    sound: &mut Option<CardSound>,
+) -> f32 {
+    let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, TEXT));
+    let center_y = y + SET_ROW_HEIGHT / 2.0;
+    ui.painter().galley(
+        Pos2::new(left, center_y - galley.rect.height() / 2.0),
+        galley,
+        TEXT,
+    );
+    let button_rect = Rect::from_min_size(
+        Pos2::new(
+            left + width - ICON_BUTTON_SIZE,
+            center_y - ICON_BUTTON_SIZE / 2.0,
+        ),
+        Vec2::splat(ICON_BUTTON_SIZE),
+    );
+    if set_sound_button(ui, button_rect, enabled, log_name) {
+        *sound = Some(channel);
+    }
+    y + SET_ROW_HEIGHT + SET_ROW_GAP
+}
+
+/// Le bouton d'essai du son : un carré bordé comme les champs, avec un haut-parleur tracé à la
+/// main — aucune fonte embarquée n'a ce glyphe, et le design system du jeu n'a pas sa place ici.
+fn set_sound_button(ui: &mut egui::Ui, rect: Rect, enabled: bool, log_name: &str) -> bool {
+    let response = if enabled {
+        Some(
+            ui.interact(rect, ui.id().with((log_name, "tester")), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand),
+        )
+    } else {
+        None
+    };
+    let hovered = response.as_ref().map(|r| r.hovered()).unwrap_or(false);
+    let fade = |c: Color32| {
+        if enabled {
+            c
+        } else {
+            c.gamma_multiply(SET_DISABLED_OPACITY)
+        }
+    };
+    ui.painter()
+        .rect_filled(rect, SET_FIELD_RADIUS, fade(CHECK_FILL));
+    ui.painter().rect_stroke(
+        rect.shrink(0.5),
+        SET_FIELD_RADIUS,
+        Stroke::new(
+            1.0,
+            fade(if hovered {
+                SECONDARY_BORDER_HOVER
+            } else {
+                SECONDARY_BORDER
+            }),
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let color = fade(if hovered { ACCENT } else { TEXT_MUTED });
+    paint_speaker(ui, rect, color);
+    response.map(|r| r.clicked()).unwrap_or(false)
+}
+
+/// Un haut-parleur : le corps plein, puis deux ondes.
+fn paint_speaker(ui: &egui::Ui, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let body = vec![
+        Pos2::new(c.x - 6.0, c.y - 2.0),
+        Pos2::new(c.x - 3.5, c.y - 2.0),
+        Pos2::new(c.x - 0.5, c.y - 5.0),
+        Pos2::new(c.x - 0.5, c.y + 5.0),
+        Pos2::new(c.x - 3.5, c.y + 2.0),
+        Pos2::new(c.x - 6.0, c.y + 2.0),
+    ];
+    ui.painter().add(egui::Shape::convex_polygon(
+        body,
+        color,
+        Stroke::new(1.0, color),
+    ));
+    for (radius, width) in [(3.2_f32, 1.1_f32), (5.6, 1.1)] {
+        let mut points = Vec::new();
+        for i in 0..=8 {
+            let angle = -0.9 + 1.8 * i as f32 / 8.0;
+            points.push(Pos2::new(
+                c.x + 0.6 + angle.cos() * radius,
+                c.y + angle.sin() * radius,
+            ));
+        }
+        ui.painter()
+            .add(egui::Shape::line(points, Stroke::new(width, color)));
+    }
+}
+
+/// Un champ de texte de la Carte — le cadre est peint ici, la saisie est celle d'egui. Rend `true`
+/// quand le contenu vient de changer.
+fn set_text_field(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    text: &mut String,
+    hint: &str,
+    align: egui::Align,
+    log_name: &str,
+) -> bool {
+    ui.painter().rect_filled(rect, SET_FIELD_RADIUS, CHECK_FILL);
+    ui.painter().rect_stroke(
+        rect.shrink(0.5),
+        SET_FIELD_RADIUS,
+        Stroke::new(1.0, SECONDARY_BORDER),
+        egui::StrokeKind::Inside,
+    );
+    let inner = rect.shrink2(Vec2::new(9.0, 0.0));
+    let response = ui.put(
+        inner,
+        egui::TextEdit::singleline(text)
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::ZERO)
+            .horizontal_align(align)
+            .font(text::label_font(ui.ctx(), SET_LABEL_SIZE))
+            .text_color(TEXT)
+            .hint_text(hint)
+            .id(ui.id().with(log_name)),
+    );
+    // **À la perte du focus, pas à chaque frappe** : un chemin à demi tapé n'est pas un chemin, et
+    // l'hôte rechargerait le moteur à chaque caractère.
+    response.lost_focus()
 }
 
 /// **La barre de défilement de la Carte** : celle du site, pas celle du jeu, et peinte ici plutôt
@@ -1245,14 +2684,30 @@ fn paint_body(
                 }
                 y += BUTTON_HEIGHT;
             }
-            AuthStatus::Disconnected { failure: None }
-            | AuthStatus::Connecting
-            | AuthStatus::Connected => {
+            // **L'écran d'un compte lié** (2026-09-22) — il n'existait pas : `Connected` tombait
+            // dans la branche ci-dessous et affichait « vous n'êtes pas connecté », ce qui ne se
+            // voyait jamais, la fenêtre se refermant dès la validation du compte. L'entrée
+            // « Déconnecter » du menu de la zone de notification change cela : il faut un écran
+            // derrière la boîte de confirmation, et un endroit où revenir si elle est annulée.
+            //
+            // Il ne dit que ce que l'overlay SAIT : ni adresse électronique, ni nom de compte —
+            // rien qu'un jeton de session. Il fait face à l'écran de connexion, ligne pour ligne
+            // (pastille, titre, deux boutons).
+            AuthStatus::Connected => {
+                y = paint_status_row(
+                    ui,
+                    &ctx,
+                    body_left,
+                    y,
+                    "Connecté",
+                    StatusTone::ACCENT,
+                    state.animate.then_some(phases.pulse),
+                );
                 y = paint_paragraph(
                     ui,
                     Pos2::new(body_left, y),
                     body_width,
-                    "Vous n'êtes pas connecté",
+                    "Ce poste est appairé",
                     &h2_font,
                     TEXT,
                     H2_LINE,
@@ -1261,7 +2716,78 @@ fn paint_body(
                     ui,
                     Pos2::new(body_left, y),
                     body_width,
-                    "Associez ce poste à votre compte Wakfu Companion pour activer le suivi des \
+                    "Vos combats, vos achats et vos échanges partent vers wakfu-companion.com au \
+                     fil de la session. L'overlay ne détient qu'un jeton de session : ni votre \
+                     adresse électronique, ni votre mot de passe.",
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
+                ) + P_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Les réglages sont dans « Paramètres », au pied de cette fenêtre.",
+                    &p_font,
+                    TEXT_MUTED,
+                    P_LINE,
+                );
+                y += ACTIONS_MARGIN_TOP;
+                let half = (body_width - ACTIONS_GAP) / 2.0;
+                let disconnect_rect =
+                    Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(half, BUTTON_HEIGHT));
+                let close_rect = Rect::from_min_size(
+                    Pos2::new(body_left + half + ACTIONS_GAP, y),
+                    Vec2::new(half, BUTTON_HEIGHT),
+                );
+                if button(
+                    ui,
+                    disconnect_rect,
+                    "Se déconnecter",
+                    ButtonKind::Danger,
+                    "carte-se-deconnecter",
+                ) {
+                    tracing::info!("[connexion] « Se déconnecter » — confirmation demandée.");
+                    state.confirm = Some(CardConfirm::Disconnect);
+                }
+                if button(
+                    ui,
+                    close_rect,
+                    "Fermer",
+                    ButtonKind::Secondary,
+                    "carte-fermer",
+                ) {
+                    tracing::info!("[carte] « Fermer » depuis l'écran du compte.");
+                    outcome.close_window = true;
+                }
+                y += BUTTON_HEIGHT;
+            }
+            AuthStatus::Disconnected { failure: None } | AuthStatus::Connecting => {
+                // La pastille arc-en-ciel fait face à celle de l'écran connecté — voir
+                // [`StatusTone::rainbow`].
+                y = paint_status_row(
+                    ui,
+                    &ctx,
+                    body_left,
+                    y,
+                    "Non connecté",
+                    StatusTone::rainbow(phases.ring + RAINBOW_DOT_OFFSET),
+                    state.animate.then_some(phases.pulse),
+                );
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Ce poste n'est pas appairé",
+                    &h2_font,
+                    TEXT,
+                    H2_LINE,
+                ) + H2_GAP;
+                y = paint_paragraph(
+                    ui,
+                    Pos2::new(body_left, y),
+                    body_width,
+                    "Associez-le à votre compte Wakfu Companion pour activer le suivi des \
                  combats, du butin et de l'historique.",
                     &p_font,
                     TEXT_MUTED,
@@ -1277,19 +2803,34 @@ fn paint_body(
                     P_LINE,
                 );
                 y += ACTIONS_MARGIN_TOP;
-                let button_rect = Rect::from_min_size(
-                    Pos2::new(body_left, y),
-                    Vec2::new(body_width, BUTTON_HEIGHT),
+                // **« Fermer » à côté de « Se connecter »** (2026-09-22) — voir
+                // [`LoginOutcome::close_window`] : l'écran n'avait aucune sortie.
+                let half = (body_width - ACTIONS_GAP) / 2.0;
+                let connect_rect =
+                    Rect::from_min_size(Pos2::new(body_left, y), Vec2::new(half, BUTTON_HEIGHT));
+                let close_rect = Rect::from_min_size(
+                    Pos2::new(body_left + half + ACTIONS_GAP, y),
+                    Vec2::new(half, BUTTON_HEIGHT),
                 );
                 if button(
                     ui,
-                    button_rect,
+                    connect_rect,
                     "Se connecter",
                     ButtonKind::Primary,
                     "login-se-connecter",
                 ) {
                     tracing::info!("[connexion] « Se connecter » — appairage demandé.");
                     auth_command_tx.send(AuthCommand::Retry);
+                }
+                if button(
+                    ui,
+                    close_rect,
+                    "Fermer",
+                    ButtonKind::Secondary,
+                    "login-fermer",
+                ) {
+                    tracing::info!("[carte] « Fermer » depuis l'écran de connexion.");
+                    outcome.close_window = true;
                 }
                 y += BUTTON_HEIGHT;
                 // Information des personnes (art. 12-13 du RGPD, `docs/analyse-rgpd.md` §3.4) :
@@ -2125,6 +3666,19 @@ impl StatusTone {
         dot: ACCENT,
         halo: ACCENT_HALO,
     };
+
+    /// **Ce qui attend l'utilisateur** : « NON CONNECTÉ ». La pastille prend les couleurs du
+    /// liseré arc-en-ciel, et sa teinte tourne au même rythme (2026-09-22, demande utilisateur) —
+    /// elle fait face à la pastille accent de « CONNECTÉ ». Le libellé, lui, reste gris : la
+    /// couleur vit dans la pastille, pas dans le mot.
+    fn rainbow(phase: f32) -> Self {
+        let dot = RingStyle::Rainbow.color_at(phase);
+        Self {
+            text: BETA,
+            dot,
+            halo: dot.gamma_multiply(0.18),
+        }
+    }
 }
 
 /// L'encadré du détail technique (police à chasse fixe, une ligne, tronquée au besoin) — le même
@@ -2236,6 +3790,9 @@ fn paint_update_required(
 enum ButtonKind {
     Primary,
     Secondary,
+    /// Ce qui efface quelque chose — « Se déconnecter ». La forme du bouton bordé, le rouge des
+    /// liens destructifs (2026-09-22).
+    Danger,
 }
 
 /// Bouton du site (`.btn-primary` / `.v-btn-secondary`) : plein cyan ou bordé, texte centré.
@@ -2268,6 +3825,23 @@ fn button(ui: &mut egui::Ui, rect: Rect, label: &str, kind: ButtonKind, log_name
                 },
             ),
             TEXT,
+            text::label_strong_font(ui.ctx(), BUTTON_FONT),
+        ),
+        ButtonKind::Danger => (
+            if hovered {
+                DANGER_FILL_HOVER
+            } else {
+                Color32::TRANSPARENT
+            },
+            Stroke::new(
+                1.0,
+                if hovered {
+                    DANGER_BORDER_HOVER
+                } else {
+                    DANGER_BORDER
+                },
+            ),
+            ERROR_TEXT,
             text::label_strong_font(ui.ctx(), BUTTON_FONT),
         ),
     };
@@ -2461,25 +4035,37 @@ fn paint_foot(
     // Ligne 1 — les deux sections de la Carte. « Mise à jour » relance la recherche : c'est ce que
     // fait déjà l'entrée du menu de la zone de notification, et l'écran qui s'ensuit est le même.
     let on_update = state.manual_update;
-    let on_about = state.about;
-    let mut open_about = false;
+    let mut open_panel = None;
     let mut check_update = false;
     foot_row(
         ui,
         center_x,
         y,
         &[
+            (
+                "Paramètres",
+                LinkKind::Internal,
+                state.panel != CardPanel::Settings,
+            ),
             ("Mise à jour", LinkKind::Internal, !on_update),
-            ("À propos", LinkKind::Internal, !on_about),
+            (
+                "À propos",
+                LinkKind::Internal,
+                state.panel != CardPanel::About,
+            ),
         ],
         |index| match index {
             0 => {
+                tracing::info!("[carte] « Paramètres » (pied) — volet ouvert.");
+                open_panel = Some(CardPanel::Settings);
+            }
+            1 => {
                 tracing::info!("[carte] « Mise à jour » (pied) — recherche demandée.");
                 check_update = true;
             }
             _ => {
                 tracing::info!("[carte] « À propos » (pied) — volet ouvert.");
-                open_about = true;
+                open_panel = Some(CardPanel::About);
             }
         },
     );
@@ -2488,10 +4074,13 @@ fn paint_foot(
         // pose `manual_update`, que cette carte se contente de relire à chaque tick. Le volet, lui,
         // se referme ici — sinon il resterait par-dessus l'écran qu'on vient de demander.
         outcome.check_update = true;
-        state.about = false;
+        state.panel = CardPanel::None;
     }
-    if open_about {
-        state.about = true;
+    if let Some(panel) = open_panel {
+        state.panel = panel;
+        // Les champs de saisie du volet des paramètres repartent de la valeur en vigueur à chaque
+        // ouverture — voir [`SettingsInputs`].
+        state.settings_inputs = None;
     }
 
     // Ligne 2 — les deux textes du service, sur le site. Les mêmes libellés et les mêmes URL que
@@ -2837,12 +4426,24 @@ fn lerp_color(a: Color32, b: Color32, k: f32) -> Color32 {
 /// repérant chaque point par la distance parcourue depuis le milieu du bord haut, divisée par le
 /// périmètre, la tête avance à vitesse constante sur les quatre côtés, quelle que soit la hauteur.
 fn paint_ring(ui: &egui::Ui, card: Rect, phase: f32, style: RingStyle) {
+    paint_ring_with_radius(ui, card, phase, style, CARD_RADIUS);
+}
+
+/// Le même liseré, à un autre rayon : la boîte de confirmation le porte à 8 px au lieu de 10
+/// ([`paint_confirm`]).
+fn paint_ring_with_radius(
+    ui: &egui::Ui,
+    card: Rect,
+    phase: f32,
+    style: RingStyle,
+    card_radius: f32,
+) {
     const SAMPLES_PER_EDGE: usize = 24;
     const SAMPLES_PER_CORNER: usize = 16;
     const FEATHER: f32 = 0.75;
     // Le pseudo-élément déborde d'un pixel (`inset: -1px`) : l'anneau chevauche le liseré.
     let outer = card.expand(0.5);
-    let radius = CARD_RADIUS + 0.5;
+    let radius = card_radius + 0.5;
 
     // Pourtour dans le sens horaire, en partant du milieu du bord haut — avec la normale sortante
     // de chaque point.

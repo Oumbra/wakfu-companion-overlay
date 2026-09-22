@@ -149,6 +149,7 @@ fn harness_for(fight: FightSnapshot) -> Harness<'static> {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     })

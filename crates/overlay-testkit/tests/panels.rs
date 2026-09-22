@@ -205,6 +205,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -283,6 +284,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -387,6 +389,7 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -484,6 +487,7 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         options: None,
                         veiled: false,
                         login: None,
+                        card_settings: None,
                     },
                 );
                 if outcome.recap_reset_requested {
@@ -640,6 +644,7 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                         options: None,
                         veiled: false,
                         login: None,
+                        card_settings: None,
                     },
                 );
                 if outcome.recap_drag != panels::recap::RecapDrag::None {
@@ -783,6 +788,7 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
             if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
@@ -873,6 +879,7 @@ fn confirmation_de_reinitialisation_d_un_compteur_nomme_l_objet() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
             if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
@@ -966,6 +973,7 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -1047,6 +1055,7 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -1116,6 +1125,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -1282,6 +1292,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -1362,6 +1373,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -1502,6 +1514,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -1654,6 +1667,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -1759,6 +1773,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -1928,6 +1943,7 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         options: None,
                         veiled: false,
                         login: None,
+                        card_settings: None,
                     },
                 );
                 if outcome.watchlist_edit.is_some() {
@@ -2058,6 +2074,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -2421,6 +2438,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     options: None,
                     veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -2527,6 +2545,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -2624,6 +2643,7 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     combat_chrome: Default::default(),
                     options: None,
                     login: None,
+                    card_settings: None,
                     veiled: false,
                 },
             );
@@ -2722,6 +2742,7 @@ fn panneau_options_ne_panique_pas() {
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -3013,6 +3034,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 options: Some(&mut options_state),
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -3137,6 +3159,7 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         options: Some(&mut options_state),
                         veiled: true,
                         login: None,
+                        card_settings: None,
                     },
                 );
                 if !matches!(outcome.options_action, OptionsModalAction::None) {
@@ -5896,6 +5919,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -6556,6 +6580,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -6653,7 +6678,8 @@ fn capture_login_purge_confirm(nom: &str, height: f32) -> f32 {
         Default::default(),
         false,
         true,
-        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
         Some(true),
         height,
     )
@@ -6673,7 +6699,8 @@ fn capture_login_with_update(
         update,
         false,
         false,
-        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
         Some(true),
         height,
     )
@@ -6693,7 +6720,8 @@ fn capture_login_manual_update(
         update,
         true,
         false,
-        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
         Some(true),
         height,
     )
@@ -6708,7 +6736,8 @@ fn capture_login_card(
     update: overlay_ui::update::UpdateStatus,
     manual: bool,
     purge_confirm: bool,
-    about: bool,
+    panel: overlay_ui::panels::login::CardPanel,
+    confirm: Option<overlay_ui::panels::login::CardConfirm>,
     has_local_data: Option<bool>,
     height: f32,
 ) -> f32 {
@@ -6735,7 +6764,10 @@ fn capture_login_card(
         update,
         manual_update: manual,
         purge_confirm,
-        about,
+        panel,
+        confirm,
+        settings_inputs: None,
+        check_floor_until: None,
         monitor_height: CARTE_MONITEUR,
         has_local_data,
     };
@@ -6788,6 +6820,7 @@ fn capture_login_card(
                     options: None,
                     veiled: false,
                     login: Some(&mut login_state),
+                    card_settings: None,
                 },
             );
             if let Some(h) = outcome.login_height {
@@ -6861,10 +6894,77 @@ fn fenetre_de_connexion_sans_donnees_locales() {
         Default::default(),
         false,
         false,
-        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
         Some(false),
         CARTE_HAUTEUR,
     );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// **La boîte de confirmation de la Carte** (2026-09-22) — le voile sur toute la fenêtre, le
+/// panneau au liseré animé, et l'écran du compte lisible derrière. C'est ce que l'entrée
+/// « Déconnecter » du menu de la zone de notification ouvre : elle envoyait la commande sans rien
+/// demander jusqu'à ce jour.
+#[test]
+fn carte_confirmation_deconnexion() {
+    let measured = capture_login_card(
+        "carte_confirmation",
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::None,
+        Some(overlay_ui::panels::login::CardConfirm::Disconnect),
+        Some(true),
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// **Le volet « Paramètres », compte lié** (2026-09-22) : les neuf sections dans l'ordre de
+/// l'onglet de la fenêtre Options, titres en italique gris, champs de durée sur la ligne de leur
+/// case, et « Retour » en bas.
+#[test]
+fn carte_volet_parametres() {
+    let measured = capture_login_card(
+        "carte_parametres",
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **Le volet « Paramètres » sans compte lié** : Suivi, Alertes, Chat et Compte disparaissent —
+/// leurs réglages vivent sur le compte. Cinq sections restent, et la mise en page ne change pas.
+#[test]
+fn carte_volet_parametres_sans_compte() {
+    let measured = capture_login_card(
+        "carte_parametres_sans_compte",
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **L'écran « Compte connecté »** (2026-09-22) — il n'existait pas : `AuthStatus::Connected`
+/// tombait dans la branche « non connecté ». C'est l'écran que l'entrée « Déconnecter » du menu
+/// de la zone de notification ouvre, la boîte de confirmation par-dessus.
+#[test]
+fn carte_compte_connecte() {
+    let measured = capture_login("login_connecte", AuthStatus::Connected, CARTE_HAUTEUR);
     assert_eq!(measured, CARTE_HAUTEUR);
 }
 
@@ -6879,7 +6979,8 @@ fn carte_volet_a_propos() {
         Default::default(),
         false,
         false,
-        true,
+        overlay_ui::panels::login::CardPanel::About,
+        None,
         Some(true),
         CARTE_A_PROPOS_HAUTEUR,
     );
@@ -7391,6 +7492,7 @@ fn capture_rangee_actions_survolee(chrome: panels::recap::RecapChrome, nom: &str
                 options: None,
                 veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -7496,6 +7598,7 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                         options: None,
                         veiled: false,
                         login: None,
+                        card_settings: None,
                     },
                 );
                 if outcome.recap_drag != panels::recap::RecapDrag::None {

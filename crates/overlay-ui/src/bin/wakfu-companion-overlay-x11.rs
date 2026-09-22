@@ -388,6 +388,10 @@ mod linux_main {
         /// **Déclencheur posé le 2026-09-18** : l'entrée « Mise à jour » du menu de la zone de
         /// notification (`tray`) le fait passer à `true`, comme côté Windows.
         manual_update: bool,
+        /// Voir `main.rs::App::login_dismissed`.
+        login_dismissed: bool,
+        /// Voir `main.rs::App::account_card`.
+        account_card: bool,
         /// Icône de zone de notification (StatusNotifierItem/DBus, §17.2 du plan) — voir
         /// `overlay_ui::linux_tray`, équivalent Linux de `main.rs::App::tray`. `None` si la pose a
         /// échoué (pas de bus de session, pas d'hôte SNI — jamais fatal).
@@ -666,6 +670,8 @@ mod linux_main {
                 pending_dialog: None,
                 pending_recipe: None,
                 manual_update: false,
+                login_dismissed: false,
+                account_card: false,
                 tray: None,
                 tray_rx: None,
                 tray_synced_connected: false,
@@ -758,7 +764,7 @@ mod linux_main {
             if connected {
                 // Seule exception à « compte lié = pas de fenêtre de connexion » : l'écran de
                 // mise à jour demandé à la main (voir `App::manual_update`).
-                if self.manual_update {
+                if self.manual_update || self.account_card {
                     if !has_login {
                         self.create_login_window(event_loop);
                     }
@@ -793,7 +799,7 @@ mod linux_main {
                         before - self.windows.len()
                     );
                 }
-                if !has_login {
+                if !has_login && !self.login_dismissed {
                     self.create_login_window(event_loop);
                 }
                 // Le compte quitté est acté — jamais pendant le chargement, voir le champ.
@@ -848,10 +854,78 @@ mod linux_main {
             let _ = self.update_command_tx.send(UpdateCommand::Check {
                 install_if_available: false,
             });
+            self.login_dismissed = false;
             self.sync_session_windows(event_loop);
-            if let Some(overlay) = self.windows.values().find(|w| w.kind == OverlayKind::Login) {
+            let floor = std::time::Instant::now() + panels::login::UPDATE_CHECK_FLOOR;
+            if let Some(overlay) = self
+                .windows
+                .values_mut()
+                .find(|w| w.kind == OverlayKind::Login)
+            {
+                if let Some(state) = overlay.login_state.as_mut() {
+                    state.panel = panels::login::CardPanel::None;
+                    state.update = UpdateStatus::Checking;
+                    state.check_floor_until = Some(floor);
+                }
                 overlay.window.focus_window();
             }
+        }
+
+        /// Voir `main.rs::App::open_settings_card`.
+        fn open_settings_card(&mut self, event_loop: &ActiveEventLoop) {
+            tracing::info!(">>> Paramètres (zone de notification).");
+            self.login_dismissed = false;
+            self.account_card = true;
+            self.sync_session_windows(event_loop);
+            self.focus_card(panels::login::CardPanel::Settings, None);
+        }
+
+        /// Voir `main.rs::App::open_disconnect_card`.
+        fn open_disconnect_card(&mut self, event_loop: &ActiveEventLoop) {
+            tracing::info!(">>> Déconnexion demandée (zone de notification) — confirmation.");
+            self.login_dismissed = false;
+            self.account_card = true;
+            self.sync_session_windows(event_loop);
+            self.focus_card(
+                panels::login::CardPanel::None,
+                Some(panels::login::CardConfirm::Disconnect),
+            );
+        }
+
+        /// Voir `main.rs::App::open_login_card`.
+        fn open_login_card(&mut self, event_loop: &ActiveEventLoop) {
+            tracing::info!(">>> Écran de connexion demandé (zone de notification).");
+            self.login_dismissed = false;
+            self.sync_session_windows(event_loop);
+            self.focus_card(panels::login::CardPanel::None, None);
+        }
+
+        /// Voir `main.rs::App::focus_card`.
+        fn focus_card(
+            &mut self,
+            panel: panels::login::CardPanel,
+            confirm: Option<panels::login::CardConfirm>,
+        ) {
+            if let Some(overlay) = self
+                .windows
+                .values_mut()
+                .find(|w| w.kind == OverlayKind::Login)
+            {
+                if let Some(state) = overlay.login_state.as_mut() {
+                    state.panel = panel;
+                    state.settings_inputs = None;
+                    state.confirm = confirm;
+                }
+                overlay.window.focus_window();
+            }
+        }
+
+        /// Voir `main.rs::App::close_login_window`.
+        fn close_login_window(&mut self) {
+            self.windows.retain(|_, w| w.kind != OverlayKind::Login);
+            self.manual_update = false;
+            self.account_card = false;
+            self.login_dismissed = true;
         }
 
         /// Sonde `tray_rx` sans bloquer, comme `hotkey_events` — voir `about_to_wait`. Même
@@ -865,22 +939,20 @@ mod linux_main {
             let events: Vec<_> = rx.try_iter().collect();
             for event in events {
                 match event {
-                    overlay_ui::linux_tray::TrayEvent::Options => {
-                        tracing::info!(">>> Options (zone de notification)");
-                        self.open_options_modal(
-                            event_loop,
-                            None,
-                            options_modal::OptionsTab::Parametres,
-                        );
+                    overlay_ui::linux_tray::TrayEvent::Settings => {
+                        self.open_settings_card(event_loop);
                     }
                     overlay_ui::linux_tray::TrayEvent::ManualUpdate => {
                         self.open_manual_update_window(event_loop);
                     }
-                    overlay_ui::linux_tray::TrayEvent::Disconnect => {
-                        tracing::info!(
-                            ">>> Déconnexion du compte demandée (zone de notification)."
-                        );
-                        let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+                    overlay_ui::linux_tray::TrayEvent::Account => {
+                        // Une entrée, deux destinations selon l'état du compte — voir
+                        // `linux_tray::LinuxTray::menu`.
+                        if self.auth_status.load().is_connected() {
+                            self.open_disconnect_card(event_loop);
+                        } else {
+                            self.open_login_card(event_loop);
+                        }
                     }
                     overlay_ui::linux_tray::TrayEvent::Quit => {
                         logging::log_session_end("Quitter (zone de notification)");
@@ -2296,6 +2368,135 @@ mod linux_main {
             config::save(&saved);
         }
 
+        /// **Ce que le volet « Paramètres » de la Carte vient d'écrire** (2026-09-22) — appliqué et
+        /// persisté tout de suite.
+        ///
+        /// C'est toute la différence avec [`Self::validate_and_commit_options`] : la fenêtre Options
+        /// travaille sur un brouillon que « Valider » commit d'un bloc, la Carte n'en a pas. Chaque
+        /// case est son propre engagement, donc chaque geste passe ici, et le fichier est réécrit une
+        /// fois par geste — `config::save` l'écrit en entier de toute façon.
+        ///
+        /// Le chemin de `wakfu.log` est le seul réglage qui puisse être refusé : un chemin invalide
+        /// est journalisé et ignoré, le reste du volet s'applique quand même.
+        fn apply_card_settings(&mut self, settings: &panels::login::CardSettings) {
+            let mut features = self.features;
+            features.recap = settings.recap;
+            features.recap_cells.duration = settings.recap_duration;
+            features.recap_cells.fights = settings.recap_fights;
+            features.recap_cells.challenges = settings.recap_challenges;
+            features.combat = settings.combat;
+            features.spells = settings.spells;
+            if features != self.features {
+                self.features = features;
+                let _ = self
+                    .settings_tx
+                    .send(EngineCommand::SetFeatures(self.features));
+            }
+
+            self.combat_always_visible = settings.combat_always_visible;
+            self.combat_on_right = settings.combat_on_right;
+            self.turn_notification = settings.turn_notification;
+            self.turn_notification_muted = settings.turn_notification_muted;
+
+            let mut mutes = self.alert_mutes;
+            mutes.suivi = settings.suivi_muted;
+            mutes.chat = settings.chat_muted;
+            if mutes != self.alert_mutes {
+                self.alert_mutes = mutes;
+                let _ = self
+                    .settings_tx
+                    .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+            }
+
+            let mut countdown = self.countdown_toast;
+            countdown.manual_close = !settings.suivi_auto_close;
+            countdown.duration_seconds = settings.suivi_seconds;
+            if countdown != self.countdown_toast {
+                self.countdown_toast = countdown;
+                let _ = self
+                    .settings_tx
+                    .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+            }
+
+            let mut chat_toast = self.chat_toast;
+            chat_toast.manual_close = !settings.chat_auto_close;
+            chat_toast.duration_seconds = settings.chat_seconds;
+            if chat_toast != self.chat_toast {
+                self.chat_toast = chat_toast;
+                let _ = self
+                    .settings_tx
+                    .send(EngineCommand::SetChatToast(self.chat_toast));
+            }
+
+            self.completion.remove = settings.suivi_remove_on_complete;
+            self.completion.animate = settings.suivi_completion_animation;
+
+            let mut resume = self.recap_session.resume_settings();
+            resume.enabled = settings.recap_resume;
+            resume.minutes = settings.recap_resume_minutes;
+            self.recap_session.set_resume_settings(resume);
+
+            // Le profil d'alertes vit sur le COMPTE : appliqué localement d'abord, puis écrit au
+            // compte depuis un thread — même chemin et mêmes précautions que `commit_alerts`.
+            if settings.alerts_available {
+                let connu = self.alert_profile.load();
+                if let Some(profil) = connu.as_ref().as_ref() {
+                    let mut draft = profil.clone();
+                    draft.set_manual_close(!settings.alerts_auto_close);
+                    draft.set_duration(settings.alerts_seconds);
+                    if &draft != profil {
+                        let _ = self
+                            .settings_tx
+                            .send(EngineCommand::SetAlertProfile(draft.clone()));
+                        let fields = draft.patch_fields();
+                        thread::spawn(move || match overlay_sync::token_store::load_token() {
+                            Some(token) => {
+                                match overlay_sync::client::patch_profile(&token, &fields) {
+                                    Ok(_) => {
+                                        tracing::info!(
+                                            "[carte] alertes enregistrées sur le compte."
+                                        )
+                                    }
+                                    Err(err) => tracing::warn!(
+                                        %err,
+                                        "[carte] échec de l'enregistrement des alertes"
+                                    ),
+                                }
+                            }
+                            None => tracing::info!(
+                                "[carte] alertes appliquées localement — aucun compte lié."
+                            ),
+                        });
+                    }
+                }
+            }
+
+            overlay_ui::autostart::apply(settings.start_with_os);
+
+            if settings.verbose_log != self.verbose_log {
+                self.verbose_log = settings.verbose_log;
+                logging::set_verbose(self.verbose_log);
+            }
+
+            let candidate = PathBuf::from(settings.log_path.trim());
+            if !candidate.as_os_str().is_empty() && candidate != self.log_path {
+                match discovery::validate_log_path(&candidate) {
+                    Ok(()) => {
+                        tracing::info!("[carte] nouveau fichier de log : {}", candidate.display());
+                        self.log_path = candidate.clone();
+                        let _ = self
+                            .settings_tx
+                            .send(EngineCommand::ChangeLogPath(candidate));
+                    }
+                    Err(err) => tracing::info!("[carte] chemin refusé : {}", err.message()),
+                }
+            }
+
+            self.persist_config();
+            // Le geste et son effet dans la même passe — même raison que « Valider ».
+            self.sync_panel_visibility();
+        }
+
         fn validate_and_commit_options(
             &mut self,
             options_window_id: WindowId,
@@ -2615,6 +2816,14 @@ mod linux_main {
                 /// (constat C5 de `docs/analyse-rgpd.md` §3.5) : tout ce que l'overlay a écrit
                 /// sur cette machine est effacé, puis le programme s'arrête.
                 PurgeLocalData,
+                /// Un réglage du volet « Paramètres » de la Carte — voir `main.rs`.
+                ApplyCardSettings(Box<panels::login::CardSettings>),
+                /// Un bouton d'essai du son du volet « Paramètres » de la Carte.
+                TestCardSound(panels::login::CardSound),
+                /// « Fermer » d'un écran de compte de la Carte.
+                CloseCard,
+                /// « Déconnecter » **confirmé** dans la boîte de la Carte.
+                DisconnectFromCard,
                 /// « Réessayer » de l'écran « Mise à jour requise ».
                 RetryUpdate,
                 /// « Fermer l'overlay », après confirmation — voir `main.rs`.
@@ -2781,6 +2990,43 @@ mod linux_main {
                         locked: self.combat_locked,
                         moved: self.combat_position_y.is_some(),
                     };
+                    // **Les réglages du volet « Paramètres » de la Carte** — voir
+                    // `main.rs::App::redraw` : pris à neuf à chaque frame, la Carte n'a pas de
+                    // brouillon.
+                    let mut card_settings = (overlay.kind == OverlayKind::Login).then(|| {
+                        use panels::notifications::ToastClose as _;
+                        let alerts = self.alert_profile.load();
+                        let alerts = alerts.as_ref().as_ref();
+                        let resume = self.recap_session.resume_settings();
+                        panels::login::CardSettings {
+                            recap: self.features.recap,
+                            recap_duration: self.features.recap_cells.duration,
+                            recap_fights: self.features.recap_cells.fights,
+                            recap_challenges: self.features.recap_cells.challenges,
+                            recap_resume: resume.enabled,
+                            recap_resume_minutes: resume.minutes,
+                            combat: self.features.combat,
+                            spells: self.features.spells,
+                            combat_always_visible: self.combat_always_visible,
+                            combat_on_right: self.combat_on_right,
+                            turn_notification: self.turn_notification,
+                            turn_notification_muted: self.turn_notification_muted,
+                            suivi_muted: self.alert_mutes.suivi,
+                            suivi_auto_close: !self.countdown_toast.manual_close,
+                            suivi_seconds: self.countdown_toast.duration_seconds,
+                            suivi_remove_on_complete: self.completion.remove,
+                            suivi_completion_animation: self.completion.animate,
+                            alerts_available: alerts.is_some(),
+                            alerts_auto_close: alerts.map(|p| !p.manual_close()).unwrap_or(true),
+                            alerts_seconds: alerts.map(|p| p.duration_seconds()).unwrap_or(6.0),
+                            chat_muted: self.alert_mutes.chat,
+                            chat_auto_close: !self.chat_toast.manual_close,
+                            chat_seconds: self.chat_toast.duration_seconds,
+                            start_with_os: overlay_ui::autostart::is_enabled(),
+                            log_path: self.log_path.display().to_string(),
+                            verbose_log: self.verbose_log,
+                        }
+                    });
                     // La vue de la session du Récap — voir `main.rs`.
                     let recap_view = panels::recap::RecapView {
                         totals: self.recap_session.totals(&snapshot.totals),
@@ -2792,8 +3038,17 @@ mod linux_main {
                     // (jamais figé à l'ouverture, voir `OptionsModalState::update`).
                     let update_status = self.update_status.load();
                     if let Some(state) = overlay.login_state.as_mut() {
-                        if state.update != **update_status {
-                            state.update = (**update_status).clone();
+                        // **Le plancher de la recherche** — voir
+                        // `panels::login::LoginState::check_floor_until`.
+                        if state.check_floor_until.is_some_and(|until| now < until) {
+                            if !matches!(state.update, UpdateStatus::Checking) {
+                                state.update = UpdateStatus::Checking;
+                            }
+                        } else {
+                            state.check_floor_until = None;
+                            if state.update != **update_status {
+                                state.update = (**update_status).clone();
+                            }
                         }
                     }
                     if let Some(state) = overlay.options_state.as_mut() {
@@ -2841,6 +3096,7 @@ mod linux_main {
                             options: overlay.options_state.as_mut(),
                             veiled,
                             login: overlay.login_state.as_mut(),
+                            card_settings: card_settings.as_mut(),
                         },
                     );
                     // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — voir
@@ -3059,6 +3315,24 @@ mod linux_main {
                         if outcome.purge_local_data {
                             post_redraw = PostRedraw::PurgeLocalData;
                         }
+                        // Le volet « Paramètres » de la Carte — voir `main.rs`.
+                        if outcome.settings_changed {
+                            if let Some(settings) = card_settings.take() {
+                                post_redraw = PostRedraw::ApplyCardSettings(Box::new(settings));
+                            }
+                        }
+                        if outcome.browse_log_path {
+                            post_redraw = PostRedraw::BrowseOptions;
+                        }
+                        if let Some(sound) = outcome.test_sound {
+                            post_redraw = PostRedraw::TestCardSound(sound);
+                        }
+                        if outcome.close_login_window {
+                            post_redraw = PostRedraw::CloseCard;
+                        }
+                        if outcome.disconnect_account {
+                            post_redraw = PostRedraw::DisconnectFromCard;
+                        }
                     }
                     if outcome.close_toast {
                         self.watchlist_toast.store(Arc::new(None));
@@ -3259,6 +3533,23 @@ mod linux_main {
                 // Voir `main.rs::App::purge_local_data_and_quit` — même geste, même ordre : la
                 // borne de fin de session d'abord (après, il n'y a plus de journal où l'écrire),
                 // le récap avant le reste (son `Drop` le réécrirait), puis la sortie.
+                PostRedraw::ApplyCardSettings(settings) => self.apply_card_settings(&settings),
+                PostRedraw::TestCardSound(sound) => match sound {
+                    panels::login::CardSound::Turn => overlay_ui::alert_sound::play_turn_alert(),
+                    panels::login::CardSound::Countdown => {
+                        overlay_ui::alert_sound::play_countdown_alert()
+                    }
+                    panels::login::CardSound::Alert => overlay_ui::alert_sound::play_loot_alert(),
+                    panels::login::CardSound::Chat => overlay_ui::alert_sound::play_chat_alert(),
+                },
+                PostRedraw::CloseCard => {
+                    tracing::info!(">>> Carte fermée par son bouton « Fermer ».");
+                    self.close_login_window();
+                }
+                PostRedraw::DisconnectFromCard => {
+                    tracing::info!(">>> Déconnexion du compte demandée (Carte).");
+                    let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+                }
                 PostRedraw::PurgeLocalData => {
                     tracing::warn!(
                         ">>> Effacement des données locales confirmé — l'overlay efface tout ce \
