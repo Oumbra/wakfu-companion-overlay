@@ -41,6 +41,11 @@ const SYNC_BATCH_SIZE: usize = 50;
 /// Miroir de `MAX_ATTEMPTS` — seuls les 4xx non classés (voir `Rejection::Counted`)
 /// comptent, jamais un simple problème réseau.
 const MAX_ATTEMPTS: i64 = 10;
+/// Plafond des entrées retirées pour refus 400/413 **en un passage** (audit de sécurité du
+/// 2026-09-23, O2). Au-delà, le passage s'arrête en réessayable : même si le contrôle
+/// ([`SyncQueue::flush_once`]) se trompait, un refus généralisé du serveur ne peut jamais vider la
+/// file d'un coup — au pire trois entrées par passage, backoff compris entre deux.
+const MAX_SPLIT_DELETIONS_PER_PASS: usize = 3;
 /// Âge au-delà duquel une entrée encore en file est abandonnée (`prune_older_than`, 2026-09-18)
 /// — **sans équivalent web, et volontairement large** : la file n'accumule que ce que le serveur
 /// n'a pas encore accepté, et une entrée y attend en clair, avec les pseudonymes des autres
@@ -124,14 +129,20 @@ enum Rejection {
     KindBlocked,
     /// 413 (lot trop volumineux) ou 400 (lot refusé à la validation — le serveur rejette le lot
     /// entier dès la première entrée invalide, `server/history/parse.ts::parseBatch`) : le lot est
-    /// **redivisé** par moitié jusqu'à isoler l'entrée fautive, qui seule est retirée de la file.
+    /// **redivisé** par moitié jusqu'à isoler l'entrée fautive, qui seule est retirée de la file —
+    /// **seulement si un contrôle montre que le refus lui est propre** (audit du 2026-09-23, O2) :
+    /// voir [`SyncQueue::flush_once`]. Sans ce contrôle, un 400 GÉNÉRALISÉ (serveur mal déployé,
+    /// schéma changé) isolait puis supprimait chaque entrée l'une après l'autre : toute la file y
+    /// passait en un seul passage.
     Split,
     /// 429 — limite de débit du compte ; `Retry-After` honoré.
     Throttled(Option<std::time::Duration>),
     /// Autre 4xx (404, 405, 409, 422…) : comportement historique, miroir de `permanent` côté web
     /// — une tentative de plus pour chaque entrée, abandon au bout de `MAX_ATTEMPTS`.
     Counted,
-    /// 5xx, réseau, réponse illisible : réessai après backoff, aucune tentative consommée.
+    /// 5xx, réseau, réponse illisible — y compris un **2xx qui n'est pas du JSON** (page HTML
+    /// d'une SPA servie en « fail open » par l'hébergeur, constat S6) : réessai après backoff,
+    /// aucune tentative consommée, rien retiré de la file.
     Transient,
 }
 
@@ -384,7 +395,8 @@ impl SyncQueue {
     ///
     /// **Ce que devient un lot refusé** — voir [`Rejection`] (2026-09-23) : 401 arrête tout
     /// ([`FlushOutcome::Unauthorized`]) ; 403 suspend ce type et passe au suivant ; 400/413
-    /// redivisent le lot jusqu'à isoler l'entrée fautive, retirée seule ; 429, 5xx et réseau
+    /// redivisent le lot jusqu'à isoler l'entrée fautive, retirée seule après contrôle (voir
+    /// plus bas) ; 429, 5xx, réseau et réponse 2xx illisible
     /// arrêtent le passage (réessayable, miroir de `drain()` côté web qui `break` sur le premier
     /// échec) ; les autres 4xx consomment une tentative.
     ///
@@ -393,6 +405,18 @@ impl SyncQueue {
     /// en 400. En 200, les entrées que le serveur a ignorées une à une (`rejected: [{ index,
     /// clientKey?, error }]`, champ facultatif) sont journalisées puis retirées comme les autres :
     /// les renvoyer n'y changerait rien.
+    ///
+    /// **Contrôle avant de retirer une entrée isolée** (audit du 2026-09-23, O2) : une entrée seule
+    /// refusée en 400/413 n'est retirée que si le serveur a accepté, dans ce même passage, un autre
+    /// lot du même type, ou accepte l'entrée SUIVANTE envoyée seule juste après (la sonde). Si la
+    /// sonde est refusée à son tour — deux entrées isolées refusées d'affilée — le refus est
+    /// **général** : passage arrêté en réessayable, rien retiré. Une entrée seule en file, sans
+    /// contrôle possible, consomme une tentative (comme [`Rejection::Counted`]). Et jamais plus de
+    /// [`MAX_SPLIT_DELETIONS_PER_PASS`] retraits par passage.
+    ///
+    /// Une réponse 2xx doit être un objet JSON : tout autre corps (page HTML servie en 200 par un
+    /// hébergeur en « fail open », constat S6 — `client::parse_json_body` refuse déjà ce qui n'est
+    /// pas `application/json`) est un échec réessayable, jamais un succès qui viderait le lot.
     ///
     /// `send` reçoit le chemin d'API relatif (`"/api/v1/history/fights"`, etc.) et le corps
     /// `{ "entries": [...] }` déjà construit (`clientKey` inclus) — production :
@@ -404,6 +428,8 @@ impl SyncQueue {
     ) -> Result<FlushOutcome, SyncError> {
         let mut any_sent = false;
         let now = now_ms();
+        // Entrées retirées pour refus 400/413 dans ce passage, tous types confondus.
+        let mut split_deletions = 0usize;
 
         // Même ordre que le web (`drain`, parcours des clés d'`HISTORY_ENDPOINTS`) : un type
         // d'événement par requête, les endpoints étant distincts.
@@ -419,8 +445,32 @@ impl SyncQueue {
             // Taille du lot pour CE type : réduite de moitié à chaque 400/413 (voir
             // `Rejection::Split`), rétablie une fois l'entrée fautive écartée.
             let mut limit = SYNC_BATCH_SIZE;
+            // Le serveur a-t-il accepté un lot de ce type dans ce passage ? Si oui, un refus
+            // d'entrée isolée lui est propre (le serveur n'est pas en refus général).
+            let mut kind_accepted = false;
+            // Entrée isolée refusée, en attente de la sonde (l'entrée suivante envoyée seule).
+            let mut suspect: Option<QueuedEvent> = None;
+            // L'envoi précédent (de ce type, dans ce passage) était-il une entrée isolée refusée ?
+            let mut previous_isolated_refused = false;
             loop {
-                let rows = self.select_batch(kind, limit)?;
+                let rows = match &suspect {
+                    // Sonde : l'entrée qui SUIT le suspect, seule.
+                    Some(held) => {
+                        let rows: Vec<QueuedEvent> = self
+                            .select_batch(kind, 2)?
+                            .into_iter()
+                            .filter(|row| row.id != held.id)
+                            .take(1)
+                            .collect();
+                        if rows.is_empty() {
+                            // Plus rien pour contrôler : le suspect consomme une tentative.
+                            let held = suspect.take().expect("suspect présent");
+                            return self.retry_counted(kind, &held);
+                        }
+                        rows
+                    }
+                    None => self.select_batch(kind, limit)?,
+                };
                 if rows.is_empty() {
                     break;
                 }
@@ -430,11 +480,22 @@ impl SyncQueue {
                 }
                 let body = serde_json::json!({ "entries": entries });
 
-                match send(kind.endpoint_path(), &body) {
+                let result = send(kind.endpoint_path(), &body).and_then(|response| {
+                    if response.is_object() {
+                        Ok(response)
+                    } else {
+                        Err(SyncError::Json(
+                            "réponse 2xx inattendue : un objet JSON était attendu".to_string(),
+                        ))
+                    }
+                });
+                match result {
                     Ok(response) => {
                         let rejected = log_rejected_entries(kind, &response);
                         self.delete_batch(&batch)?;
                         any_sent = true;
+                        kind_accepted = true;
+                        previous_isolated_refused = false;
                         // Seule trace d'un envoi RÉUSSI (2026-09-21) : jusqu'ici, seul l'échec
                         // était journalisé, et rien ne permettait de vérifier après coup qu'un
                         // achat ou un échange était bien parti — la file SQLite est vidée dès la
@@ -447,6 +508,15 @@ impl SyncQueue {
                             inserted = response.get("inserted").and_then(serde_json::Value::as_i64),
                             "lot d'historique envoyé au compte"
                         );
+                        // La sonde est passée : le refus du suspect lui était propre.
+                        if let Some(held) = suspect.take() {
+                            if let Some(outcome) =
+                                self.drop_refused(kind, &held, &mut split_deletions)?
+                            {
+                                return Ok(outcome);
+                            }
+                            limit = SYNC_BATCH_SIZE;
+                        }
                         // Ce lot est parti : il peut y en avoir d'autres du même type derrière
                         // (`select_batch` re-sélectionne toujours les plus anciens en premier).
                     }
@@ -464,7 +534,25 @@ impl SyncQueue {
                             self.blocked.push((kind, err.to_string()));
                             break;
                         }
+                        Rejection::Split
+                            if batch.len() == 1
+                                && (suspect.is_some() || previous_isolated_refused) =>
+                        {
+                            // Deux entrées isolées refusées d'affilée : le serveur refuse tout,
+                            // pas une entrée. Rien n'est retiré, réessai après backoff.
+                            tracing::warn!(
+                                kind = kind.as_str(),
+                                %err,
+                                "refus généralisé du serveur (deux entrées isolées refusées d'affilée) — rien retiré, réessai plus tard"
+                            );
+                            self.consecutive_failures += 1;
+                            return Ok(FlushOutcome::Retry {
+                                reason: err.to_string(),
+                                after: None,
+                            });
+                        }
                         Rejection::Split if batch.len() > 1 => {
+                            previous_isolated_refused = false;
                             limit = batch.len() / 2;
                             tracing::info!(
                                 kind = kind.as_str(),
@@ -474,13 +562,24 @@ impl SyncQueue {
                             );
                         }
                         Rejection::Split => {
-                            self.delete_batch(&batch)?;
-                            limit = SYNC_BATCH_SIZE;
-                            tracing::warn!(
-                                kind = kind.as_str(),
-                                %err,
-                                "entrée d'historique refusée définitivement par le serveur — retirée de la file"
-                            );
+                            let held = batch.into_iter().next().expect("lot d'une entrée");
+                            previous_isolated_refused = true;
+                            if kind_accepted {
+                                // Contrôle déjà fait : ce passage a vu le serveur accepter ce type.
+                                if let Some(outcome) =
+                                    self.drop_refused(kind, &held, &mut split_deletions)?
+                                {
+                                    return Ok(outcome);
+                                }
+                                limit = SYNC_BATCH_SIZE;
+                            } else {
+                                tracing::info!(
+                                    kind = kind.as_str(),
+                                    %err,
+                                    "entrée d'historique isolée refusée — sonde avec l'entrée suivante avant de la retirer"
+                                );
+                                suspect = Some(held);
+                            }
                         }
                         Rejection::Throttled(after) => {
                             self.consecutive_failures += 1;
@@ -514,6 +613,56 @@ impl SyncQueue {
             FlushOutcome::Synced
         } else {
             FlushOutcome::Idle
+        })
+    }
+
+    /// Retire une entrée isolée dont le refus (400/413) a été contrôlé — sauf si le plafond
+    /// [`MAX_SPLIT_DELETIONS_PER_PASS`] est atteint : `Some(Retry)` alors, et l'entrée reste.
+    fn drop_refused(
+        &mut self,
+        kind: HistoryEventKind,
+        held: &QueuedEvent,
+        split_deletions: &mut usize,
+    ) -> Result<Option<FlushOutcome>, SyncError> {
+        if *split_deletions >= MAX_SPLIT_DELETIONS_PER_PASS {
+            tracing::warn!(
+                kind = kind.as_str(),
+                max = MAX_SPLIT_DELETIONS_PER_PASS,
+                "plafond de retraits par passage atteint — entrée refusée conservée, réessai plus tard"
+            );
+            self.consecutive_failures += 1;
+            return Ok(Some(FlushOutcome::Retry {
+                reason: format!(
+                    "plus de {MAX_SPLIT_DELETIONS_PER_PASS} entrées refusées en un passage"
+                ),
+                after: None,
+            }));
+        }
+        self.delete_batch(std::slice::from_ref(held))?;
+        *split_deletions += 1;
+        tracing::warn!(
+            kind = kind.as_str(),
+            "entrée d'historique refusée définitivement par le serveur — retirée de la file"
+        );
+        Ok(None)
+    }
+
+    /// Entrée isolée refusée sans contrôle possible (seule de son type en file) : une tentative de
+    /// plus, abandon au bout de `MAX_ATTEMPTS` — comme un 4xx non classé.
+    fn retry_counted(
+        &mut self,
+        kind: HistoryEventKind,
+        held: &QueuedEvent,
+    ) -> Result<FlushOutcome, SyncError> {
+        self.bump_attempts_and_prune(std::slice::from_ref(held))?;
+        self.consecutive_failures += 1;
+        tracing::info!(
+            kind = kind.as_str(),
+            "entrée d'historique isolée refusée, sans autre entrée pour contrôler — une tentative consommée"
+        );
+        Ok(FlushOutcome::Retry {
+            reason: "entrée refusée par le serveur (400/413), aucun contrôle possible".to_string(),
+            after: None,
         })
     }
 
@@ -1113,17 +1262,168 @@ mod tests {
         assert_eq!(sent.len(), 5);
     }
 
-    /// 413 sur une entrée seule : trop grosse pour le serveur, retirée de la file.
+    /// 413 sur une entrée seule, sans aucune autre entrée pour contrôler que le refus lui est
+    /// propre : une tentative consommée (O2) — abandon au bout de `MAX_ATTEMPTS`, jamais d'emblée.
     #[test]
-    fn un_413_sur_une_entree_seule_la_retire() {
+    fn un_413_sur_une_entree_seule_consomme_une_tentative() {
         let mut queue = SyncQueue::open_in_memory().unwrap();
         queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
-        let transport = FakeTransport::new(vec![Err(http_err(413, None, None))]);
-        let outcome = queue
-            .flush_once("uid-1", |p, b| transport.send(p, b))
+        for pass in 1..=MAX_ATTEMPTS {
+            let transport = FakeTransport::new(vec![Err(http_err(413, None, None))]);
+            let outcome = queue
+                .flush_once("uid-1", |p, b| transport.send(p, b))
+                .unwrap();
+            assert!(matches!(outcome, FlushOutcome::Retry { .. }));
+            let expected = if pass < MAX_ATTEMPTS { 1 } else { 0 };
+            assert_eq!(queue.pending_count().unwrap(), expected, "passage {pass}");
+        }
+    }
+
+    fn enqueue_purchases(queue: &SyncQueue, count: usize) {
+        for i in 0..count {
+            queue
+                .enqueue(&purchase_event(&format!("p{i:03}"), &format!("Objet {i}")))
+                .unwrap();
+        }
+    }
+
+    /// O2 : un 400 GÉNÉRALISÉ (tout est refusé) ne retire RIEN — la sonde (entrée suivante,
+    /// seule) est refusée elle aussi, le passage s'arrête en réessayable. Plusieurs passages
+    /// d'affilée ne vident pas davantage la file.
+    #[test]
+    fn un_400_generalise_ne_supprime_rien() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        enqueue_purchases(&queue, 120);
+        for _ in 0..5 {
+            let outcome = queue
+                .flush_once("uid-1", |_, _| Err(http_err(400, None, None)))
+                .unwrap();
+            assert!(matches!(outcome, FlushOutcome::Retry { after: None, .. }));
+        }
+        assert_eq!(queue.pending_count().unwrap(), 120);
+        let attempts: i64 = queue
+            .conn
+            .query_row("SELECT MAX(attempts) FROM sync_queue", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(outcome, FlushOutcome::Idle);
+        assert_eq!(attempts, 0, "un refus général ne consomme aucune tentative");
+        assert_eq!(queue.consecutive_failures(), 5);
+    }
+
+    /// O2 : même un contrôle trompeur ne retire jamais plus de `MAX_SPLIT_DELETIONS_PER_PASS`
+    /// entrées en un passage (ici cinq entrées invalides, une sur deux en tête de file : chacune
+    /// est bien isolée et contrôlée, mais seules les trois premières partent ce passage).
+    #[test]
+    fn les_retraits_sont_plafonnes_par_passage() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        enqueue_purchases(&queue, 20);
+        let bad: Vec<String> = (0..10).step_by(2).map(|i| format!("Objet {i}")).collect();
+        let outcome = queue
+            .flush_once("uid-1", |_, body| {
+                let names = sent_item_names(body);
+                if names.iter().any(|name| bad.contains(name)) {
+                    return Err(http_err(400, None, None));
+                }
+                Ok(serde_json::json!({}))
+            })
+            .unwrap();
+        assert!(matches!(outcome, FlushOutcome::Retry { .. }));
+        let removed = 20 - queue.pending_count().unwrap();
+        // Les entrées valides parties ne comptent pas ; seules les invalides retirées sont
+        // plafonnées. Restent les 5 - 3 invalides non retirées.
+        let remaining: Vec<String> = {
+            let mut stmt = queue
+                .conn
+                .prepare("SELECT payload_json FROM sync_queue")
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(|p| {
+                    serde_json::from_str::<Value>(&p.unwrap()).unwrap()["itemName"]
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect()
+        };
+        let bad_left = remaining.iter().filter(|n| bad.contains(n)).count();
+        assert_eq!(bad_left, 5 - MAX_SPLIT_DELETIONS_PER_PASS);
+        assert!(removed >= MAX_SPLIT_DELETIONS_PER_PASS);
+    }
+
+    /// O2 : l'entrée invalide en TÊTE de file (aucun lot accepté avant elle) est retirée après
+    /// que la sonde — l'entrée suivante, seule — a été acceptée.
+    #[test]
+    fn un_400_en_tete_de_file_est_retire_apres_sonde() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        enqueue_purchases(&queue, 4);
+        let mut sent = Vec::new();
+        let outcome = queue
+            .flush_once("uid-1", |_, body| {
+                let names = sent_item_names(body);
+                if names.iter().any(|name| name == "Objet 0") {
+                    return Err(http_err(400, None, None));
+                }
+                sent.extend(names);
+                Ok(serde_json::json!({}))
+            })
+            .unwrap();
+        assert_eq!(outcome, FlushOutcome::Synced);
         assert_eq!(queue.pending_count().unwrap(), 0);
+        sent.sort();
+        assert_eq!(sent, vec!["Objet 1", "Objet 2", "Objet 3"]);
+    }
+
+    /// O2 : deux entrées isolées refusées d'affilée dans un passage — même après qu'un lot a été
+    /// accepté — font conclure à un refus général : la première est retirée, la seconde gardée.
+    #[test]
+    fn deux_entrees_isolees_refusees_d_affilee_arretent_le_passage() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        enqueue_purchases(&queue, 5);
+        let outcome = queue
+            .flush_once("uid-1", |_, body| {
+                let names = sent_item_names(body);
+                if names
+                    .iter()
+                    .any(|name| name == "Objet 3" || name == "Objet 4")
+                {
+                    return Err(http_err(400, None, None));
+                }
+                Ok(serde_json::json!({}))
+            })
+            .unwrap();
+        assert!(matches!(outcome, FlushOutcome::Retry { .. }));
+        assert_eq!(
+            queue.pending_count().unwrap(),
+            1,
+            "« Objet 4 » reste en file"
+        );
+    }
+
+    /// S6 : un 2xx dont le corps n'est pas l'objet JSON attendu (page HTML d'un hébergeur en
+    /// « fail open », déjà convertie en `SyncError::Json` par le client, ou JSON d'une autre
+    /// forme) n'est JAMAIS un succès qui viderait la file, ni un refus définitif.
+    #[test]
+    fn un_2xx_non_json_est_reessayable_sans_rien_retirer() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        enqueue_purchases(&queue, 3);
+        for response in [
+            Err(SyncError::Json("content-type text/html".to_string())),
+            Ok(Value::String("<!doctype html>".to_string())),
+            Ok(serde_json::json!([])),
+        ] {
+            let transport = FakeTransport::new(vec![response]);
+            let outcome = queue
+                .flush_once("uid-1", |p, b| transport.send(p, b))
+                .unwrap();
+            assert!(matches!(outcome, FlushOutcome::Retry { after: None, .. }));
+            assert_eq!(transport.calls.borrow().len(), 1);
+        }
+        assert_eq!(queue.pending_count().unwrap(), 3);
+        let attempts: i64 = queue
+            .conn
+            .query_row("SELECT MAX(attempts) FROM sync_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(attempts, 0);
     }
 
     /// 400 : l'entrée invalide est isolée par redivision et retirée seule — les quatre autres
