@@ -62,6 +62,11 @@ on:
 # Le travail se fait par rafales de petits commits successifs sur `dev` (voir l'historique) : sans
 # ce garde-fou, chaque push d'une rafale lançait cinq jobs complets dont seul le dernier importait.
 # Seul le run le plus récent d'une même branche survit ; les précédents sont annulés.
+# Lecture seule : ce workflow ne publie rien (audit de sécurité du 2026-09-23). Sans ce bloc, le
+# jeton hérite des droits par défaut du dépôt, écriture comprise.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -83,7 +88,7 @@ jobs:
   fmt:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Purement textuel, aucune compilation : d'où sa place dans le job le plus rapide. Vérifie que
       # l'image de base du rendu porte le MÊME digest dans `ci.yml`, `regen-captures.yml` et
       # `.github/ci-image/Dockerfile` — une divergence ferait régénérer les références sous un Mesa
@@ -105,7 +110,7 @@ jobs:
   clippy-linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - name: dépendances système (rendu logiciel egui_kittest + son rodio)
@@ -113,7 +118,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             . -> target
@@ -145,7 +150,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates curl git
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: environnement de rendu épinglé (Mesa/lavapipe, instantané daté — voir le script)
         run: bash scripts/setup-render-env.sh
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
@@ -154,7 +159,7 @@ jobs:
             | sh -s -- -y --no-modify-path --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
       - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform
@@ -190,7 +195,7 @@ jobs:
       # contrat : si le gate est rouge, ces images existent forcément.
       - name: "captures en écart — rendu obtenu et diff (diagnostic)"
         if: always() && steps.captures.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: captures-en-ecart
           path: |
@@ -202,11 +207,11 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
       - run: cargo build --workspace
@@ -228,10 +233,10 @@ jobs:
   mem-budget:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: xtask -> target
       - run: cargo run --manifest-path xtask/Cargo.toml --release -- mem-budget

@@ -43,8 +43,10 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Lecture seule par défaut ; seul le job `publish` écrit (tag et Release). Audit de sécurité du
+# 2026-09-23 : un droit d'écriture donné à tout le workflow l'était aussi aux jobs de compilation.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -52,6 +54,9 @@ env:
 jobs:
   version:
     name: version à publier
+    # `workflow_dispatch` peut viser n'importe quelle branche : jamais de Release signée depuis
+    # autre chose que `main` (les jobs suivants en dépendent et sont sautés avec lui).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.read.outputs.version }}
@@ -59,7 +64,7 @@ jobs:
       exists: ${{ steps.tag.outputs.exists }}
       commit: ${{ steps.read.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: lire [workspace.package] version
@@ -91,11 +96,11 @@ jobs:
     if: needs.version.outputs.exists == 'false'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
           # Le cache des jobs de `ci.yml` est en profil dev : une clé distincte évite de le
@@ -107,7 +112,7 @@ jobs:
           # surcharge prévue pour une chaîne de release, prioritaire sur `git`.
           WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
         run: cargo build --release -p overlay-ui --bin wakfu-companion-overlay
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-x86_64
           path: target/release/wakfu-companion-overlay.exe
@@ -120,7 +125,7 @@ jobs:
     if: needs.version.outputs.exists == 'false'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - name: dépendances système (son rodio/alsa)
@@ -128,7 +133,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
           key: release
@@ -136,7 +141,7 @@ jobs:
         env:
           WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
         run: cargo build --release -p overlay-ui --bin wakfu-companion-overlay-x11
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-x86_64
           path: target/release/wakfu-companion-overlay-x11
@@ -146,12 +151,18 @@ jobs:
   publish:
     name: assets, manifeste signé, Release
     needs: [version, build-windows, build-linux]
+    # Environnement GitHub `release` : y déplacer MINISIGN_SECRET_KEY et MINISIGN_PASSWORD, et le
+    # restreindre à la branche `main` (réglage du dépôt) — seul ce job peut alors lire la clé de
+    # signature des mises à jour, jamais un workflow poussé sur `dev`.
+    environment: release
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: binaries
       - name: assets de la Release précédente (mesure du différentiel)
@@ -165,7 +176,7 @@ jobs:
           ls -l previous || true
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: xtask -> target
       - name: xtask dist
@@ -217,7 +228,7 @@ jobs:
           } > notes.md
           cat notes.md
       - name: Release GitHub
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.tag }}
