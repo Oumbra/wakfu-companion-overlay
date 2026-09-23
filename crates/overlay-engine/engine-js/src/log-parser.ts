@@ -176,8 +176,12 @@ const MARKET_OCCUPATION_END_RE = /^On (?:arrête|annule) l'occupation MARKET sur
 const WALKON_RE = /^Action \[WALKON\] performed on interactive element : \d+$/;
 /** Ligne technique émise une seule fois, tout au début de chaque session client ("1.92 (build -1
  * [2026-08-20 @ 14H18min45])") — seule source fiable de la date CALENDAIRE réelle du fichier (le
- * reste du log n'expose que l'heure HH:MM:SS,mmm, voir HEADER_RE). Voir LogDateAnchorEntry. */
-const CLIENT_BUILD_DATE_RE = /\[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]/;
+ * reste du log n'expose que l'heure HH:MM:SS,mmm, voir HEADER_RE). Voir LogDateAnchorEntry.
+ * Ancrée sur TOUTE la ligne technique : non ancrée, un joueur tiers qui écrivait
+ * `[2019-01-01 @ 00H00min00]` dans un canal public (Commerce, Recrutement…) redatait tout
+ * l'historique qui suivait, synchronisation serveur comprise. */
+const CLIENT_BUILD_DATE_RE =
+  /^\d+(?:\.\d+)* \(build -?\d+ \[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]\)\s*$/;
 
 /**
  * Extrait uniquement l'heure d'une ligne brute (et, le cas échéant, la date calendaire si cette ligne
@@ -238,7 +242,17 @@ const IGNORED_TAG = 'Parade !';
 /** "le joueur X donne : NK ; 1xObjet (refId=I) 2xAutre (refId=J) " — répété une fois par participant dans le résumé final d'un échange. */
 const TRADE_DONNE_RE =
   /le joueur (.+?) donne\s*:\s*(\d+)\s*K\s*;\s*(.*?)(?=le joueur .+? donne\s*:|$)/g;
-const TRADE_ITEM_RE = /(\d+)\s*x\s*(.+?)\s*\(refId=-?\d+\)/g;
+/** Fin d'un objet échangé : chaque objet se termine par son `(refId=N)`. Le découpage se fait sur ce
+ * marqueur, puis `TRADE_ITEM_RE` lit la quantité et le nom dans le segment isolé. L'ancienne regex
+ * unique `(\d+)\s*x\s*(.+?)\s*\(refId=…\)` était cubique (2 000 espaces après `1x` : 2,5 s,
+ * 4 000 : 20 s) — de quoi figer l'ingestion sur une ligne corrompue. */
+const TRADE_REFID_RE = /\(refId=-?\d+\)/g;
+const TRADE_ITEM_RE = /(\d+)\s*x\s*([\s\S]+)$/;
+/** Plafond d'un enregistrement multi-lignes en attente : un fichier corrompu (aucune ligne d'en-tête
+ * pendant des Mo) ne doit pas faire grossir le tampon sans limite. Un résumé d'échange réel tient
+ * en quelques lignes. */
+const MAX_PENDING_PARTS = 200;
+const MAX_PENDING_CHARS = 32 * 1024;
 
 const DAMAGE_ELEMENTS = new Set<string>([
   'Neutre',
@@ -416,7 +430,7 @@ export class LogParser {
   private currentFightId: number | null = null;
 
   /** Ligne en cours d'accumulation : un enregistrement Java peut s'étaler sur plusieurs lignes physiques (ex. résumé d'échange), la suite n'ayant pas d'en-tête LEVEL/horodatage. */
-  private pending: { time: string; parts: string[] } | null = null;
+  private pending: { time: string; parts: string[]; chars: number } | null = null;
 
   /** Horodatage (ms depuis minuit) de la dernière occurrence de chaque signature d'événement, pour ignorer les doublons multi-compte. */
   private readonly recentSignatures = new Map<string, number>();
@@ -430,12 +444,27 @@ export class LogParser {
       const flushed = this.flushPending();
       const [, level, time, firstPart] = headerMatch;
       // WARN/ERROR toujours ignorées : on ne les bufferise même pas.
-      this.pending = level === 'INFO' ? { time, parts: [firstPart] } : null;
+      this.pending =
+        level === 'INFO' ? { time, parts: [firstPart], chars: firstPart.length } : null;
       return flushed;
     }
 
     // Suite d'un enregistrement multi-lignes (ex. résumé d'échange) : pas d'en-tête sur cette ligne.
-    this.pending?.parts.push(line.trim());
+    const pending = this.pending;
+    if (pending) {
+      const part = line.trim();
+      if (
+        pending.parts.length >= MAX_PENDING_PARTS ||
+        pending.chars + part.length > MAX_PENDING_CHARS
+      ) {
+        // Enregistrement anormalement long : abandonné plutôt que tronqué (un contenu partiel
+        // produirait une entrée fausse, pas seulement incomplète).
+        this.pending = null;
+        return null;
+      }
+      pending.parts.push(part);
+      pending.chars += part.length;
+    }
     return null;
   }
 
@@ -588,8 +617,12 @@ export class LogParser {
       const kamas = Number(match[2]);
       const itemsText = match[3];
       const items: { name: string; quantity: number }[] = [];
-      for (const itemMatch of itemsText.matchAll(TRADE_ITEM_RE)) {
-        items.push({ quantity: Number(itemMatch[1]), name: itemMatch[2].trim() });
+      let segmentStart = 0;
+      for (const refId of itemsText.matchAll(TRADE_REFID_RE)) {
+        const segment = itemsText.slice(segmentStart, refId.index).trim();
+        segmentStart = (refId.index ?? 0) + refId[0].length;
+        const itemMatch = TRADE_ITEM_RE.exec(segment);
+        if (itemMatch) items.push({ quantity: Number(itemMatch[1]), name: itemMatch[2].trim() });
       }
       sides.push({ playerName, items, kamas });
     }

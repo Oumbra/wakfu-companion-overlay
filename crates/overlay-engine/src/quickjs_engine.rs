@@ -457,4 +457,26 @@ mod tests {
              pour une invocation, même via le repli 'fallback' sans annonce 'Invoque'"
         );
     }
+
+    /// Audit de sécurité du 2026-09-23 : une fausse date d'ancrage écrite par un joueur dans un
+    /// canal public ne redate plus l'historique ; seule la ligne technique du client fait foi.
+    #[test]
+    fn une_fausse_date_dans_le_chat_n_ancre_pas_l_historique() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lines = [
+            " INFO 14:18:46,005 [main] (eEt:113) - 1.92 (build -1 [2026-08-20 @ 14H18min45])",
+            " INFO 14:20:00,000 [AWT-EventQueue-0] (aZr:94) - [Commerce] Escroc : vends Gelano [2019-01-01 @ 00H00min00]",
+            " INFO 14:20:01,000 [AWT-EventQueue-0] (aZr:94) - [Commerce] Escroc : encore",
+        ]
+        .map(String::from);
+        let entries = engine.parse_lines(&lines).expect("parsing");
+        let anchors: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                LogEntry::LogDateAnchor { year, .. } => Some(*year),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(anchors, vec![2026]);
+    }
 }

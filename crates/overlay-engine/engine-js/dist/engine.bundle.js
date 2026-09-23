@@ -53,7 +53,7 @@
   var MARKET_OCCUPATION_START_RE = /^Lancement de l'occupation MARKET sur la board\b/;
   var MARKET_OCCUPATION_END_RE = /^On (?:arrête|annule) l'occupation MARKET sur la board\b/;
   var WALKON_RE = /^Action \[WALKON\] performed on interactive element : \d+$/;
-  var CLIENT_BUILD_DATE_RE = /\[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]/;
+  var CLIENT_BUILD_DATE_RE = /^\d+(?:\.\d+)* \(build -?\d+ \[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]\)\s*$/;
   var FIGHTER_JOIN_RE = /^fightId=(-?\d+) (.+?) breed : (\d+) \[(-?\d+)\] isControlledByAI=(true|false) obstacleId : (-?\d+) join the fight/;
   var DAMAGE_RE = new RegExp(`^(.+?): ([+-])(${NUM}) PV\\b(.*)$`);
   var ARMOR_RE = new RegExp(`^(.+?): ([+-]?)(${NUM}) Armure\\b(.*)$`);
@@ -62,7 +62,10 @@
   var STATUS_REMOVE_RE = /^(.+?): n'est plus sous l'emprise de '(.+?)'\.?$/;
   var IGNORED_TAG = "Parade !";
   var TRADE_DONNE_RE = /le joueur (.+?) donne\s*:\s*(\d+)\s*K\s*;\s*(.*?)(?=le joueur .+? donne\s*:|$)/g;
-  var TRADE_ITEM_RE = /(\d+)\s*x\s*(.+?)\s*\(refId=-?\d+\)/g;
+  var TRADE_REFID_RE = /\(refId=-?\d+\)/g;
+  var TRADE_ITEM_RE = /(\d+)\s*x\s*([\s\S]+)$/;
+  var MAX_PENDING_PARTS = 200;
+  var MAX_PENDING_CHARS = 32 * 1024;
   var DAMAGE_ELEMENTS = /* @__PURE__ */ new Set([
     "Neutre",
     "Terre",
@@ -120,10 +123,19 @@
       if (headerMatch) {
         const flushed = this.flushPending();
         const [, level, time, firstPart] = headerMatch;
-        this.pending = level === "INFO" ? { time, parts: [firstPart] } : null;
+        this.pending = level === "INFO" ? { time, parts: [firstPart], chars: firstPart.length } : null;
         return flushed;
       }
-      this.pending?.parts.push(line.trim());
+      const pending = this.pending;
+      if (pending) {
+        const part = line.trim();
+        if (pending.parts.length >= MAX_PENDING_PARTS || pending.chars + part.length > MAX_PENDING_CHARS) {
+          this.pending = null;
+          return null;
+        }
+        pending.parts.push(part);
+        pending.chars += part.length;
+      }
       return null;
     }
     /**
@@ -256,8 +268,12 @@
         const kamas = Number(match[2]);
         const itemsText = match[3];
         const items = [];
-        for (const itemMatch of itemsText.matchAll(TRADE_ITEM_RE)) {
-          items.push({ quantity: Number(itemMatch[1]), name: itemMatch[2].trim() });
+        let segmentStart = 0;
+        for (const refId of itemsText.matchAll(TRADE_REFID_RE)) {
+          const segment = itemsText.slice(segmentStart, refId.index).trim();
+          segmentStart = (refId.index ?? 0) + refId[0].length;
+          const itemMatch = TRADE_ITEM_RE.exec(segment);
+          if (itemMatch) items.push({ quantity: Number(itemMatch[1]), name: itemMatch[2].trim() });
         }
         sides.push({ playerName, items, kamas });
       }
