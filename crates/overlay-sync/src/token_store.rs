@@ -139,30 +139,55 @@ fn save_token_file(token: &str) -> Result<(), SyncError> {
 fn save_token_file_at(path: &std::path::Path, token: &str) -> Result<(), SyncError> {
     use std::io::Write as _;
 
+    let io_err = |err: std::io::Error| SyncError::TokenStore(err.to_string());
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| SyncError::TokenStore(err.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(io_err)?;
     }
-    // **Le mode restrictif se pose à la création, pas après** (constat C7, 2026-09-19) : un
-    // `fs::write` puis `set_permissions` laissait le fichier lisible par tout utilisateur de la
-    // machine (umask courante, `0644`) le temps de l'écriture. `mode(0o600)` ne vaut qu'à la
-    // création — un fichier déjà là garde ses bits, d'où le `set_permissions` conservé derrière.
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+    // **Écriture atomique dans un fichier neuf, privé dès sa création** (2026-09-23). Jusque-là le
+    // fichier de repli était ouvert en `truncate` sur place : un arrêt pendant l'écriture laissait
+    // un jeton vide ou tronqué (session perdue au lancement suivant), et un fichier préexistant
+    // gardait ses bits (`0644` d'une ancienne version) jusqu'au `set_permissions` qui suivait
+    // l'écriture — le jeton neuf y était lisible par tout compte de la machine dans l'intervalle.
+    //
+    // Désormais : un fichier temporaire à côté (même dossier, donc même système de fichiers),
+    // créé `create_new` en `0600` sous Unix — le mode vaut dès la création puisque le fichier ne
+    // préexiste jamais —, écrit, `sync_all`, puis renommé sur le fichier final. `rename` remplace
+    // atomiquement la cible (Unix comme Windows, `MOVEFILE_REPLACE_EXISTING`) : un lecteur voit
+    // l'ancien jeton ou le nouveau, jamais un entre-deux, et le fichier final hérite des bits du
+    // temporaire. Sous Windows, pas de mode : `%APPDATA%` est déjà réservé au compte utilisateur
+    // par l'ACL héritée du profil (comportement inchangé).
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "token".to_string());
+    let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+    // Reste d'un arrêt brutal du MÊME pid (réutilisé) : `create_new` refuserait de l'ouvrir.
+    let _ = std::fs::remove_file(&tmp);
+    let written = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(token.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io_err(err));
     }
-    let mut file = options
-        .open(path)
-        .map_err(|err| SyncError::TokenStore(err.to_string()))?;
-    file.write_all(token.as_bytes())
-        .map_err(|err| SyncError::TokenStore(err.to_string()))?;
+    // Le renommage lui-même n'est durable qu'une fois le dossier synchronisé (Unix) —
+    // best-effort : le jeton est déjà complet sur disque, seul l'ancien nom pourrait revenir.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|err| SyncError::TokenStore(err.to_string()))?;
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
     }
     // Sous Windows, `%APPDATA%` est déjà réservé au compte utilisateur par l'ACL héritée du
     // profil ; pas de DPAPI pour l'instant (choix du 2026-09-19 : signaler d'abord, chiffrer
@@ -395,8 +420,32 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "jeton-de-test-mode-2",
-            "tronqué puis réécrit, pas complété"
+            "remplacé, pas complété"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Écriture par fichier temporaire + renommage : rien ne traîne à côté du jeton, et un
+    /// temporaire abandonné par un arrêt brutal n'empêche pas la sauvegarde suivante.
+    #[test]
+    fn l_ecriture_du_fichier_de_repli_est_atomique_et_ne_laisse_rien() {
+        let dir = std::env::temp_dir().join(format!("token-store-atomic-{}", std::process::id()));
+        let path = dir.join("native-session.token");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let stale = dir.join(format!(".native-session.token.{}.tmp", std::process::id()));
+        std::fs::write(&stale, "reste d'un arrêt brutal").unwrap();
+
+        save_token_file_at(&path, "jeton-atomique-1").unwrap();
+        save_token_file_at(&path, "jeton-atomique-2").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "jeton-atomique-2");
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["native-session.token".to_string()], "{names:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
