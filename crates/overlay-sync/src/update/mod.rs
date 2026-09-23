@@ -82,18 +82,57 @@ fn override_base() -> Option<String> {
 
 /// `https://` partout, `http://` vers `127.0.0.1`, `localhost` ou `[::1]` uniquement. Même règle
 /// pour l'origine de l'API (`client::base_url_override`).
+///
+/// **Autorité stricte** (audit de sécurité du 2026-09-23, O8) : aucune information d'utilisateur
+/// (`user:mdp@`) n'est admise, ni en `http://` ni en `https://`. Sans cette règle,
+/// `http://localhost:1@evil.example/` passait pour la boucle locale alors que la requête part, EN
+/// CLAIR, vers `evil.example` — jeton porteur et historique compris. Le port, s'il est donné, ne
+/// porte que des chiffres ; tout caractère inattendu (espace, contrôle, `\`) fait refuser.
 pub(crate) fn override_allowed(base: &str) -> bool {
-    if base.starts_with("https://") {
-        return true;
-    }
-    let Some(rest) = base.strip_prefix("http://") else {
+    let (rest, loopback_only) = if let Some(rest) = base.strip_prefix("https://") {
+        (rest, false)
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        (rest, true)
+    } else {
         return false;
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = host
-        .strip_prefix("[::1]")
-        .map_or_else(|| host.split(':').next().unwrap_or(""), |_| "[::1]");
-    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty()
+        || authority
+            .chars()
+            .any(|c| c == '@' || c == '\\' || c.is_whitespace() || c.is_control())
+        || base.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
+    let (host, port) = if let Some(after) = authority.strip_prefix('[') {
+        // Littéral IPv6 : `[addr]` puis, éventuellement, `:port`.
+        let Some((addr, tail)) = after.split_once(']') else {
+            return false;
+        };
+        let port = match tail {
+            "" => None,
+            _ => match tail.strip_prefix(':') {
+                Some(port) => Some(port),
+                None => return false,
+            },
+        };
+        (format!("[{addr}]"), port)
+    } else {
+        match authority.split_once(':') {
+            Some((host, port)) => (host.to_owned(), Some(port)),
+            None => (authority.to_owned(), None),
+        }
+    };
+    if host.is_empty() || host == "[]" {
+        return false;
+    }
+    if let Some(port) = port {
+        if port.is_empty() || port.len() > 5 || !port.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+    }
+    !loopback_only || matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")
 }
 
 /// URL du manifeste (et de sa signature : même base, `SIGNATURE_NAME`).
@@ -324,6 +363,37 @@ mod tests {
         assert!(!override_allowed("http://127.0.0.1.evil.com/"));
         assert!(!override_allowed("ftp://127.0.0.1/"));
         assert!(!override_allowed("127.0.0.1:8000"));
+    }
+
+    /// O8 : une information d'utilisateur dans l'autorité ferait partir la requête ailleurs
+    /// qu'annoncé (`http://localhost:1@evil.example/` vise `evil.example`, en clair).
+    #[test]
+    fn surcharge_sans_information_d_utilisateur() {
+        for refused in [
+            "http://localhost:1@evil.example/",
+            "http://127.0.0.1@evil.example/",
+            "http://[::1]@evil.example/",
+            "http://[::1]evil.example/",
+            "http://localhost:80:80/",
+            "http://localhost:abc/",
+            "http://localhost:/",
+            "http://localhost\\@evil.example/",
+            "http:// localhost/",
+            "https://user:pass@example.com/dist",
+            "https://@example.com/",
+            "https:///dist",
+            "https://",
+        ] {
+            assert!(!override_allowed(refused), "{refused}");
+        }
+        for accepted in [
+            "http://localhost:8788",
+            "http://127.0.0.1:8000/dist?x=@y",
+            "http://[::1]/",
+            "https://example.com:8443/dist",
+        ] {
+            assert!(override_allowed(accepted), "{accepted}");
+        }
     }
 
     #[test]
