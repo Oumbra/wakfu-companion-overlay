@@ -66,14 +66,14 @@ fn entry() -> Result<keyring::Entry, SyncError> {
     keyring::Entry::new(APP_NAME, &slot()).map_err(|err| SyncError::TokenStore(err.to_string()))
 }
 
-fn token_file_path() -> PathBuf {
+fn token_file_path() -> Option<PathBuf> {
     data_file(&format!("{}.token", slot()))
 }
 
 /// **Quand le jeton courant a été émis** — secondes Unix, à côté du fichier de repli. Ce n'est pas
 /// un secret (une date), et le trousseau n'a pas de place pour une seconde valeur : un fichier
 /// suffit. Écrit par [`save_token`], lu par [`token_age`], retiré par [`clear_token`].
-fn issued_at_file_path() -> PathBuf {
+fn issued_at_file_path() -> Option<PathBuf> {
     data_file(&format!("{}.issued-at", slot()))
 }
 
@@ -81,10 +81,11 @@ fn data_dir() -> Option<PathBuf> {
     overlay_engine::app_dirs::project_dirs(APP_NAME).map(|dirs| dirs.data_dir().to_path_buf())
 }
 
-fn data_file(name: &str) -> PathBuf {
-    data_dir()
-        .map(|dir| dir.join(name))
-        .unwrap_or_else(|| PathBuf::from(name))
+/// Un fichier du dossier de données — `None` quand ce dossier est introuvable (aucun `HOME`,
+/// profil incomplet). **Jamais de repli sur un chemin relatif** (audit de sécurité du 2026-09-23,
+/// O6) : le jeton en clair aurait atterri dans le répertoire courant du processus, n'importe où.
+fn data_file(name: &str) -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join(name))
 }
 
 /// Depuis combien de temps le jeton courant a été émis — `None` si la date n'a jamais été
@@ -92,7 +93,7 @@ fn data_file(name: &str) -> PathBuf {
 /// C'est ce que `background::attempt_connect` compare au seuil de rotation ; un âge inconnu vaut
 /// « à renouveler », ce qui pose la date au passage.
 pub fn token_age() -> Option<Duration> {
-    let secs: u64 = std::fs::read_to_string(issued_at_file_path())
+    let secs: u64 = std::fs::read_to_string(issued_at_file_path()?)
         .ok()?
         .trim()
         .parse()
@@ -103,7 +104,10 @@ pub fn token_age() -> Option<Duration> {
 }
 
 fn record_issued_now() {
-    let path = issued_at_file_path();
+    let Some(path) = issued_at_file_path() else {
+        tracing::warn!("dossier de données introuvable — date d'émission du jeton non enregistrée");
+        return;
+    };
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -124,16 +128,22 @@ fn record_issued_now() {
 /// (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) — le `warn!` du journal ne suffit pas, il ne
 /// le lit pas. `clear_token` (déconnexion, effacement) retire le fichier, et l'avis avec lui.
 pub fn token_file_in_use() -> bool {
-    token_file_path().is_file()
+    token_file_path().is_some_and(|path| path.is_file())
 }
 
 /// Où vit le fichier de repli — pour le dire à l'utilisateur à côté de [`token_file_in_use`].
+/// Sans dossier de données, le seul nom du fichier (affichage uniquement : rien n'y est écrit).
 pub fn token_file_location() -> PathBuf {
-    token_file_path()
+    token_file_path().unwrap_or_else(|| PathBuf::from(format!("{}.token", slot())))
 }
 
 fn save_token_file(token: &str) -> Result<(), SyncError> {
-    save_token_file_at(&token_file_path(), token)
+    let path = token_file_path().ok_or_else(|| {
+        SyncError::TokenStore(
+            "dossier de données introuvable — jeton non enregistré sur disque".to_string(),
+        )
+    })?;
+    save_token_file_at(&path, token)
 }
 
 fn save_token_file_at(path: &std::path::Path, token: &str) -> Result<(), SyncError> {
@@ -200,7 +210,7 @@ fn save_token_file_at(path: &std::path::Path, token: &str) -> Result<(), SyncErr
 }
 
 fn load_token_file() -> Option<String> {
-    std::fs::read_to_string(token_file_path())
+    std::fs::read_to_string(token_file_path()?)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -222,6 +232,11 @@ fn load_token_file() -> Option<String> {
 /// Une fois le jeton dans le trousseau, un fichier de repli laissé par une sauvegarde antérieure
 /// est supprimé : il contiendrait un jeton en clair, périmé, et l'avis des Options resterait
 /// affiché à tort.
+///
+/// **Réciproquement** (audit de sécurité du 2026-09-23, O6) : quand une sauvegarde — une rotation
+/// typiquement — retombe sur le fichier, l'entrée du trousseau est effacée (best-effort). Elle
+/// porterait l'ANCIEN jeton, et [`load_token`] la préférait : l'overlay repartait au lancement
+/// suivant avec un jeton révoqué par la rotation.
 pub fn save_token(token: &str) -> Result<(), SyncError> {
     record_issued_now();
     if verify_keyring_write(token) {
@@ -229,7 +244,11 @@ pub fn save_token(token: &str) -> Result<(), SyncError> {
         return Ok(());
     }
     tracing::warn!("trousseau OS indisponible ou écriture non relisible — repli fichier");
-    save_token_file(token)
+    save_token_file(token)?;
+    if let Ok(stale) = entry() {
+        let _ = stale.delete_credential();
+    }
+    Ok(())
 }
 
 /// Écrit dans le trousseau puis relit via une `Entry` FRAÎCHE (jamais celle qui a écrit) pour
@@ -246,22 +265,30 @@ fn verify_keyring_write(token: &str) -> bool {
 
 /// `None` si aucun jeton n'a jamais été enregistré (ou trousseau ET fichier absents/illisibles) —
 /// jamais une erreur : l'overlay doit pouvoir démarrer sans compte lié et afficher sa fenêtre de connexion.
+///
+/// **Le fichier de repli prime s'il existe** (audit de sécurité du 2026-09-23, O6) : il n'est
+/// écrit que quand le trousseau a manqué, et [`save_token`] le supprime dès qu'une écriture au
+/// trousseau réussit — sa présence dit donc qu'il porte le jeton le PLUS RÉCENT. L'entrée du
+/// trousseau, elle, peut être celle d'avant une rotation retombée sur le fichier (si son effacement
+/// a lui aussi échoué). Le jeton du fichier est ensuite migré vers le trousseau dès qu'il répond.
 pub fn load_token() -> Option<String> {
-    if let Some(token) = entry().ok().and_then(|e| e.get_password().ok()) {
+    if let Some(token) = load_token_file() {
+        // Jeton resté dans le fichier de repli (sauvegardé avant que le trousseau ne soit
+        // réellement compilé, ou pendant une indisponibilité passagère) : migré dès que le
+        // trousseau répond.
+        if verify_keyring_write(&token) {
+            remove_token_file();
+            tracing::info!("jeton natif migré du fichier de repli vers le trousseau OS");
+        }
         return Some(token);
     }
-    let token = load_token_file()?;
-    // Jeton resté dans le fichier de repli (sauvegardé avant que le trousseau ne soit réellement
-    // compilé, ou pendant une indisponibilité passagère) : migré dès que le trousseau répond.
-    if verify_keyring_write(&token) {
-        remove_token_file();
-        tracing::info!("jeton natif migré du fichier de repli vers le trousseau OS");
-    }
-    Some(token)
+    entry().ok().and_then(|e| e.get_password().ok())
 }
 
 fn remove_token_file() {
-    let path = token_file_path();
+    let Some(path) = token_file_path() else {
+        return;
+    };
     match std::fs::remove_file(&path) {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -327,8 +354,11 @@ fn clear_slot(slot: &str) {
     if let Ok(e) = keyring::Entry::new(APP_NAME, slot) {
         let _ = e.delete_credential();
     }
-    let _ = std::fs::remove_file(data_file(&format!("{slot}.token")));
-    let _ = std::fs::remove_file(data_file(&format!("{slot}.issued-at")));
+    for name in [format!("{slot}.token"), format!("{slot}.issued-at")] {
+        if let Some(path) = data_file(&name) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -387,6 +417,12 @@ mod tests {
                 // Daté à la sauvegarde : c'est ce que la rotation au démarrage consulte.
                 let age = token_age().expect("date d'émission enregistrée avec le jeton");
                 assert!(age < Duration::from_secs(60), "{age:?}");
+
+                // O6 : un fichier de repli présent porte le jeton le plus récent (une rotation
+                // retombée sur le fichier) — il prime sur une entrée du trousseau restée derrière.
+                save_token_file("jeton-de-test-plus-recent").unwrap();
+                assert_eq!(load_token().as_deref(), Some("jeton-de-test-plus-recent"));
+                assert_eq!(load_token().as_deref(), Some("jeton-de-test-plus-recent"));
 
                 clear_token();
                 assert!(
