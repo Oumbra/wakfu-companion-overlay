@@ -10,15 +10,26 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="30.0.1"
+# Empreinte SHA-256 publiée par l'index crates.io (`cksum` de wgpu-hal 30.0.1) : ce code est compilé
+# dans le binaire livré, il ne doit jamais venir d'un téléchargement non vérifié. Changer de
+# version = changer cette empreinte, relevée sur https://index.crates.io/wg/pu/wgpu-hal.
+SHA256="b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58"
 DEST="vendor/wgpu-hal-${VERSION}"
+
+CRATE="$(mktemp)"
+trap 'rm -f "$CRATE"' EXIT
+# crates.io rejette (403) toute requête sans User-Agent identifiable.
+curl -sSfL -A "wakfu-companion-overlay (github.com/Oumbra/wakfu-companion-overlay)" \
+  "https://crates.io/api/v1/crates/wgpu-hal/${VERSION}/download" \
+  -o "$CRATE"
+echo "${SHA256}  ${CRATE}" | sha256sum -c --quiet - || {
+  echo "ERREUR : empreinte SHA-256 inattendue pour wgpu-hal ${VERSION} — archive refusée." >&2
+  exit 1
+}
 
 rm -rf "$DEST"
 mkdir -p vendor
-# crates.io rejette (403) toute requête sans User-Agent identifiable.
-curl -sSL -A "wakfu-companion-overlay (github.com/Oumbra/wakfu-companion-overlay)" \
-  "https://crates.io/api/v1/crates/wgpu-hal/${VERSION}/download" \
-  -o "/tmp/wgpu-hal-${VERSION}.crate"
-tar -xzf "/tmp/wgpu-hal-${VERSION}.crate" -C vendor
+tar -xzf "$CRATE" -C vendor
 patch -p1 -d "$DEST" < patches/wgpu-hal-30.0.1-directcomposition.patch
 
 echo "OK : $DEST prêt (patch DirectComposition appliqué)."
