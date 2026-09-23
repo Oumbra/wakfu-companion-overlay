@@ -288,10 +288,39 @@ fn parse_json_body(
     // Statut AVANT le corps : une réponse d'erreur n'est pas forcément du JSON (page HTML d'un
     // proxy, corps vide), et un 401 doit remonter comme `Http`, jamais comme `Json`.
     let mut response = ensure_success(path, response)?;
+    // **Constat S6 (2026-09-23)** : quota de l'hébergeur épuisé, le site passe en « fail open » et
+    // TOUTE URL `/api/*` répond `200 text/html` (l'`index.html` de la SPA). Un 2xx qui n'annonce
+    // pas du JSON n'est donc pas une réponse de l'API : `SyncError::Json`, que la file d'envoi
+    // traite comme une panne réessayable (`queue::Rejection::Transient`) — jamais comme un succès
+    // qui retirerait un lot, ni comme un refus définitif.
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if !is_json_content_type(content_type) {
+        return Err(SyncError::Json(format!(
+            "réponse 2xx non JSON pour {path} (content-type « {} »)",
+            content_type.chars().take(64).collect::<String>()
+        )));
+    }
     response
         .body_mut()
         .read_json()
         .map_err(|err| SyncError::Json(err.to_string()))
+}
+
+/// `application/json`, ou un type `application/*+json` (paramètres comme `; charset=utf-8`
+/// ignorés, casse indifférente).
+fn is_json_content_type(value: &str) -> bool {
+    let essence = value
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    essence == "application/json"
+        || (essence.starts_with("application/") && essence.ends_with("+json"))
 }
 
 /// Plafond d'un `Retry-After` honoré (2026-09-23) : au-delà, la file réessaie quand même au bout
@@ -641,7 +670,9 @@ pub fn fetch_game_servers() -> Result<Value, SyncError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{error_code, parse_retry_after, DEFAULT_BASE_URL, MAX_RETRY_AFTER};
+    use super::{
+        error_code, is_json_content_type, parse_retry_after, DEFAULT_BASE_URL, MAX_RETRY_AFTER,
+    };
     use std::time::Duration;
 
     /// 1994-11-06T08:49:37Z — l'exemple de la RFC 9110.
@@ -704,6 +735,30 @@ mod tests {
         assert_eq!(error_code(r#"{"error":"non authentifié"}"#), None);
         assert_eq!(error_code("<html>502</html>"), None);
         assert_eq!(error_code(""), None);
+    }
+
+    /// S6 : seul un type JSON est une réponse de l'API — la page HTML d'une SPA servie en 200
+    /// (hébergeur en « fail open ») ne l'est pas.
+    #[test]
+    fn seul_un_content_type_json_est_accepte() {
+        for ok in [
+            "application/json",
+            "application/json; charset=utf-8",
+            "Application/JSON",
+            "application/problem+json",
+        ] {
+            assert!(is_json_content_type(ok), "{ok}");
+        }
+        for ko in [
+            "",
+            "text/html",
+            "text/html; charset=utf-8",
+            "text/plain",
+            "application/jsonp",
+            "text/json+html",
+        ] {
+            assert!(!is_json_content_type(ko), "{ko}");
+        }
     }
 
     /// Le défaut compilé est l'une des deux origines connues, jamais une valeur vide ni un
