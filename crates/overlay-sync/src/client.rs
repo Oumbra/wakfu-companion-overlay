@@ -367,12 +367,22 @@ fn ensure_success(
 
 /// Le champ `code` d'un corps d'erreur JSON — `None` si le corps n'est pas du JSON ou n'en porte
 /// pas (ancienne version du serveur, page d'un proxy).
+///
+/// **Forme imposée** (audit de sécurité du 2026-09-23, O10) : `^[a-z0-9_]{1,64}$`, comme tous les
+/// codes que pose le serveur (`history_quota_exceeded`, `rate_limited`…). Ce code finit au journal
+/// et dans l'interface ; une valeur arbitraire (proxy, serveur compromis) ne doit y injecter ni
+/// saut de ligne, ni texte trompeur, ni volume.
 fn error_code(body: &str) -> Option<String> {
-    serde_json::from_str::<Value>(body)
+    let code = serde_json::from_str::<Value>(body)
         .ok()?
         .get("code")?
-        .as_str()
-        .map(str::to_string)
+        .as_str()?
+        .to_string();
+    let valid = (1..=64).contains(&code.len())
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    valid.then_some(code)
 }
 
 fn now_ms() -> i64 {
@@ -735,6 +745,29 @@ mod tests {
         assert_eq!(error_code(r#"{"error":"non authentifié"}"#), None);
         assert_eq!(error_code("<html>502</html>"), None);
         assert_eq!(error_code(""), None);
+    }
+
+    /// O10 : un `code` hors de `^[a-z0-9_]{1,64}$` n'est jamais repris (journal, interface).
+    #[test]
+    fn code_d_erreur_de_forme_inattendue_ignore() {
+        assert_eq!(
+            error_code(r#"{"code":"rate_limited_2"}"#).as_deref(),
+            Some("rate_limited_2")
+        );
+        for body in [
+            r#"{"code":""}"#,
+            r#"{"code":"Quota"}"#,
+            r#"{"code":"a b"}"#,
+            r#"{"code":"x\nFAUX: jeton"}"#,
+            r#"{"code":"é"}"#,
+            r#"{"code":42}"#,
+        ] {
+            assert_eq!(error_code(body), None, "{body}");
+        }
+        let long = format!(r#"{{"code":"{}"}}"#, "a".repeat(65));
+        assert_eq!(error_code(&long), None);
+        let max = format!(r#"{{"code":"{}"}}"#, "a".repeat(64));
+        assert!(error_code(&max).is_some());
     }
 
     /// S6 : seul un type JSON est une réponse de l'API — la page HTML d'une SPA servie en 200
