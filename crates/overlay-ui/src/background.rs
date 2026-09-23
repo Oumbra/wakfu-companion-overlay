@@ -291,6 +291,13 @@ pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
 /// backoff après un échec réessayable (`FlushOutcome::Retry`, voir `backoff_delay` — 15 s à 5 min,
 /// doublé à chaque échec consécutif, miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS` côté web).
 ///
+/// **Le backoff tient même quand une commande réveille le thread** (audit de sécurité du
+/// 2026-09-23, O3) : `next_history_attempt` retient l'instant du prochain envoi autorisé après un
+/// échec. Un `Enqueue` ou un `SyncWatchlist` reçu avant cet instant met en file mais n'envoie rien
+/// — sans quoi chaque combat terminé relançait un `flush_once` immédiat, `Retry-After` d'un 429
+/// compris, et l'overlay martelait un serveur déjà en difficulté. Seul `Activate` (nouvelle
+/// session) lève l'attente.
+///
 /// **Compteurs de Suivi (`SyncCommand::SyncWatchlist`, §14 point 3 du plan, chantier fermé le
 /// 2026-09-07)** — même thread, mécanisme VOLONTAIREMENT séparé de la file `SyncQueue` ci-dessus :
 /// pas de file SQLite ni de `client_key` idempotent (la valeur ENTIÈRE remplace la clé côté
@@ -300,7 +307,8 @@ pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
 /// essai (miroir de `WRITE_DEBOUNCE_MS` côté web, `RemoteUserDataRepository`) : un compteur qui
 /// s'incrémente à chaque kill d'un combat ne doit pas déclencher une requête par kill. Un nouvel
 /// instantané reçu PENDANT l'attente (débounce ou backoff) remplace le précédent et relance un
-/// débounce complet — rien n'est perdu (`WatchlistState` garde de toute façon le fichier local
+/// débounce complet — sans jamais avancer un backoff en cours (O3) : l'essai suivant a lieu au plus
+/// tard des deux instants. Rien n'est perdu (`WatchlistState` garde de toute façon le fichier local
 /// comme vérité, voir sa doc), seul le nombre de requêtes est réduit.
 ///
 /// **Session refusée en cours de route** (401, 2026-09-23) : historique ou Suivi, le thread cesse
@@ -357,6 +365,9 @@ pub fn spawn_sync_thread(
             // mécanismes n'ont ni la même cause de délai ni le même état.
             let mut watchlist_ready_at: Option<std::time::Instant> = None;
             let mut watchlist_consecutive_failures: u32 = 0;
+            // Prochain envoi d'historique autorisé après un échec réessayable (voir la doc
+            // ci-dessus, O3) — `None` : rien n'empêche d'envoyer.
+            let mut next_history_attempt: Option<std::time::Instant> = None;
             // Pas de compte connu au démarrage : n'attend qu'une commande, ne sonde jamais pour
             // rien (même philosophie que `settings_rx.try_recv()` côté thread Engine).
             let mut wait = std::time::Duration::from_secs(3600);
@@ -377,8 +388,10 @@ pub fn spawn_sync_thread(
                             ),
                             Err(err) => tracing::warn!(%err, "propriétaire de la file de synchro illisible"),
                         }
-                        // Nouvelle session : un type suspendu (403) a droit à un nouvel essai.
+                        // Nouvelle session : un type suspendu (403) a droit à un nouvel essai, et
+                        // l'envoi n'attend plus le backoff de la session précédente.
                         queue.unblock_all();
+                        next_history_attempt = None;
                         account = Some((uid, token));
                         // Ce qui attendait depuis plus d'un mois n'a plus de sens — voir
                         // `MAX_PENDING_AGE` ; ensuite seulement, ce que le démarrage a retenu.
@@ -416,16 +429,25 @@ pub fn spawn_sync_thread(
                     }
                     Ok(SyncCommand::SyncWatchlist(entries)) => {
                         pending_watchlist = Some(entries);
-                        watchlist_consecutive_failures = 0;
-                        watchlist_ready_at = Some(std::time::Instant::now() + WATCHLIST_DEBOUNCE);
+                        // Débounce relancé, mais jamais avant la fin d'un backoff en cours (O3) ;
+                        // le compteur d'échecs ne repart de zéro qu'après un envoi réussi.
+                        let debounced = std::time::Instant::now() + WATCHLIST_DEBOUNCE;
+                        watchlist_ready_at = Some(match watchlist_ready_at {
+                            Some(at) if watchlist_consecutive_failures > 0 => at.max(debounced),
+                            _ => debounced,
+                        });
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {} // réessai programmé (backoff) — retombe sur le flush ci-dessous
                     Err(mpsc::RecvTimeoutError::Disconnected) => break, // App fermée
                 }
 
-                let history_wait = match &account {
-                    None => std::time::Duration::from_secs(3600),
-                    Some((uid, token)) => {
+                let backoff = history_backoff_remaining(next_history_attempt, std::time::Instant::now());
+                let history_wait = match (&account, backoff) {
+                    (None, _) => std::time::Duration::from_secs(3600),
+                    // Backoff en cours : les commandes reçues sont en file, rien n'est envoyé.
+                    (Some(_), Some(remaining)) => remaining,
+                    (Some((uid, token)), None) => {
+                        next_history_attempt = None;
                         match queue.flush_once(uid, |path, body| {
                             overlay_sync::post_json_authenticated(token, path, body)
                         }) {
@@ -444,6 +466,7 @@ pub fn spawn_sync_thread(
                                     delay_s = delay.as_secs(),
                                     "échec d'envoi de l'historique — nouvel essai après un délai"
                                 );
+                                next_history_attempt = Some(std::time::Instant::now() + delay);
                                 delay
                             }
                             Ok(overlay_sync::FlushOutcome::Unauthorized(reason)) => {
@@ -452,7 +475,9 @@ pub fn spawn_sync_thread(
                             }
                             Err(err) => {
                                 tracing::warn!(%err, "erreur de file de synchro (SQLite)");
-                                std::time::Duration::from_secs(60)
+                                let delay = std::time::Duration::from_secs(60);
+                                next_history_attempt = Some(std::time::Instant::now() + delay);
+                                delay
                             }
                         }
                     }
@@ -493,6 +518,16 @@ fn session_refused(
         "[compte] jeton refusé par le serveur (401) en cours de session — synchronisation suspendue, reconnexion proposée ; la file d'envoi est conservée"
     );
     let _ = auth_tx.send(AuthCommand::SessionExpired);
+}
+
+/// Temps restant avant le prochain envoi d'historique autorisé — `None` quand rien n'empêche
+/// d'envoyer maintenant (aucun échec en cours, ou backoff écoulé). Voir `next_history_attempt`
+/// dans `spawn_sync_thread` (O3).
+fn history_backoff_remaining(
+    next_attempt: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> Option<std::time::Duration> {
+    next_attempt.filter(|at| *at > now).map(|at| at - now)
 }
 
 /// Délai avant le prochain passage après un échec réessayable : celui qu'impose le serveur
@@ -1251,6 +1286,23 @@ mod tests {
         assert_eq!(retry_delay(None, 1), Duration::from_secs(15));
         assert_eq!(retry_delay(None, 3), Duration::from_secs(60));
         assert_eq!(retry_delay(None, 30), Duration::from_secs(300));
+    }
+
+    /// O3 : tant que le backoff court, aucun envoi — une commande reçue entre-temps ne l'abrège
+    /// pas ; une fois l'instant passé (ou sans échec), l'envoi est permis.
+    #[test]
+    fn le_backoff_d_historique_retient_l_envoi_jusqu_a_son_terme() {
+        let now = std::time::Instant::now();
+        assert_eq!(history_backoff_remaining(None, now), None);
+        assert_eq!(
+            history_backoff_remaining(Some(now + Duration::from_secs(30)), now),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(history_backoff_remaining(Some(now), now), None);
+        assert_eq!(
+            history_backoff_remaining(Some(now), now + Duration::from_secs(1)),
+            None
+        );
     }
 
     /// Un 401 prévient le thread Auth UNE fois, et coupe l'envoi : le compte est oublié jusqu'au
