@@ -22,6 +22,7 @@
 
 use std::process::Command;
 
+use overlay_ingest::privacy::redact_path;
 use overlay_sync::update::apply::UPDATED_FROM_FLAG;
 
 /// Lance un nouveau process de l'overlay avec les arguments de celui-ci, et renvoie. **L'appelant
@@ -40,14 +41,22 @@ pub fn relaunch() -> Result<(), String> {
         .env(crate::single_instance::RELAUNCH_ENV, "1")
         .args(&args)
         .spawn()
-        .map_err(|err| format!("relance de {} : {err}", exe.display()))?;
+        .map_err(|err| format!("relance de {} : {err}", redact_path(&exe)))?;
+    // Chemins rédigés (audit du 2026-09-23, O10) : l'exe et un `wakfu.log` passé en argument
+    // portent le nom d'utilisateur du système — voir `overlay_ingest::privacy`.
     tracing::info!(
         "[redémarrage] {} relancé{}.",
-        exe.display(),
+        redact_path(&exe),
         if args.is_empty() {
             String::new()
         } else {
-            format!(" avec {}", args.join(" "))
+            format!(
+                " avec {}",
+                args.iter()
+                    .map(|arg| overlay_ingest::privacy::redact_path_str(arg))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
         }
     );
     Ok(())
