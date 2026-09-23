@@ -29,6 +29,15 @@ jamais dans une session Claude. Depuis l'audit de sécurité du 2026-09-23, le j
 `MINISIGN_PASSWORD` doivent être des secrets de cet environnement (pas du dépôt), et l'environnement
 restreint à la branche `main` — sinon n'importe quel workflow poussé sur `dev` (session Claude
 comprise) peut lire la clé qui signe les mises à jour de tous les utilisateurs. Toute action tierce
-s'épingle par SHA de commit, avec la version en commentaire (`uses: owner/action@<sha> # vX.Y.Z`). La clé publique (`wakfu-overlay.pub`) est un fichier d'outillage
+s'épingle par SHA de commit, avec la version en commentaire (`uses: owner/action@<sha> # vX.Y.Z`).
+Dans le job `publish`, `xtask` est **compilé dans une étape sans secret** puis seul le binaire
+compilé (`xtask/target/release/xtask dist`) s'exécute avec `MINISIGN_*` : un `cargo run` dans
+l'étape signée exposait la clé à tous les `build.rs`/proc-macros des dépendances de xtask. Ne pas
+réintroduire de `cargo run`/`cargo build` dans une étape qui reçoit un secret ; les checkouts
+des jobs de compilation et de publication se font en `persist-credentials: false` (idem `regen-captures.yml`, où seule l'étape de push
+reçoit le jeton). Dependabot (`.github/dependabot.yml`) propose les montées d'actions et de
+crates sur `dev`, cooldown 7 jours, jamais fusionnées automatiquement.
+
+La clé publique (`wakfu-overlay.pub`) est un fichier d'outillage
 tant qu'aucun code ne l'embarque : son ajout était un `chore:`, pas un `feat:` (cas vécu dans
 `.claude/rules/versioning.md`).
