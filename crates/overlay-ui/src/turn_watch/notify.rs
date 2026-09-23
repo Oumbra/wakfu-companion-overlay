@@ -289,6 +289,11 @@ pub fn show(title: &str, body: &str, hwnd: isize) -> windows::core::Result<()> {
 /// une entrée soi-même** — voir [`focus_via_decoy`]. L'appel direct reste tenté d'abord, il
 /// suffit quand le process est lancé depuis une fenêtre ordinaire (test à la main).
 pub fn focus_window(hwnd: isize) {
+    // L'URI peut être lancée par n'importe quelle page web (`wakfu-companion:focus?hwnd=N`) :
+    // seule une fenêtre du client Wakfu est acceptée, jamais une autre fenêtre du bureau.
+    if !crate::game_window::is_game_window(hwnd) {
+        return;
+    }
     let hwnd = HWND(hwnd as *mut _);
     // Ce process n'a pas de journal (voir `main`) : une ligne horodatée dans `focus.log`, à côté
     // des gabarits, dit s'il a été lancé et ce que Windows a répondu.

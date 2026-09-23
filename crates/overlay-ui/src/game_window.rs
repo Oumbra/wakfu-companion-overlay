@@ -62,6 +62,8 @@ pub struct GameRect {
     pub client_top: i32,
 }
 
+#[cfg(target_os = "windows")]
+pub use imp::is_game_window;
 pub use imp::{cursor_position, GameWindowTracker};
 
 #[cfg(target_os = "windows")]
@@ -95,6 +97,16 @@ mod imp {
     /// Suffixe distinctif et invariant du titre de la fenêtre du client Wakfu — voir le
     /// commentaire de module.
     const TITLE_SUFFIX: &str = " - WAKFU";
+
+    /// `hwnd` désigne-t-il une fenêtre du client Wakfu, encore ouverte ? Même critère de titre
+    /// que [`GameWindowTracker::scan`]. Sert au process lancé par le protocole
+    /// `wakfu-companion:focus?hwnd=…` (`turn_watch::notify::focus_window`) : l'URI peut venir de
+    /// n'importe quelle page web, qui ne doit pas pouvoir faire passer au premier plan — avec un
+    /// clic synthétique — une autre fenêtre du bureau (audit de sécurité du 2026-09-23).
+    pub fn is_game_window(hwnd: isize) -> bool {
+        let hwnd = HWND(hwnd as *mut _);
+        unsafe { IsWindow(Some(hwnd)) }.as_bool() && window_title(hwnd).ends_with(TITLE_SUFFIX)
+    }
 
     /// Une fenêtre de jeu trouvée — `hwnd` sert de clé stable tant que la fenêtre vit (voir
     /// `main.rs::sync_windows`, qui diffuse un scan contre l'état précédent par `hwnd`).

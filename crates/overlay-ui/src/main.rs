@@ -5467,12 +5467,23 @@ fn main() {
     // `turn_watch::notify`) : ce process n'existe que pour donner le premier plan à la fenêtre
     // du personnage, ce que l'overlay déjà en cours n'a pas le droit de faire. Rien d'autre n'est
     // initialisé — pas de journal, pas de moteur — et il se termine aussitôt.
-    if let Some(hwnd) = std::env::args()
-        .nth(1)
+    let first_arg = std::env::args().nth(1);
+    if let Some(hwnd) = first_arg
         .as_deref()
         .and_then(turn_watch::notify::parse_focus_uri)
     {
         turn_watch::notify::focus_window(hwnd);
+        return;
+    }
+    // Toute autre URI du protocole (une page web peut en lancer une, `wakfu-companion:x`) : jamais
+    // une seconde instance complète de l'overlay, qui prendrait l'URI pour un chemin de journal et
+    // partagerait la file de synchronisation et le jeton avec l'instance en cours.
+    if first_arg.as_deref().is_some_and(|arg| {
+        arg.get(..turn_watch::notify::PROTOCOL.len() + 1)
+            .is_some_and(|prefix| {
+                prefix.eq_ignore_ascii_case(&format!("{}:", turn_watch::notify::PROTOCOL))
+            })
+    }) {
         return;
     }
     let log_dir = logging::init();
