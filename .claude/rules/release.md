@@ -24,6 +24,11 @@ déploiement dev (`claude-dev.wakfu-companion.com`) n'est utilisé qu'en local v
 `crates/overlay-ui/preview.{ps1,sh}` (`WAKFU_COMPANION_API_URL`).
 
 La clé privée de signature ne vit **que** dans les secrets GitHub Actions — jamais dans le dépôt,
-jamais dans une session Claude. La clé publique (`wakfu-overlay.pub`) est un fichier d'outillage
+jamais dans une session Claude. Depuis l'audit de sécurité du 2026-09-23, le job `publish` de
+`release.yml` est rattaché à l'**environnement GitHub `release`** : `MINISIGN_SECRET_KEY` et
+`MINISIGN_PASSWORD` doivent être des secrets de cet environnement (pas du dépôt), et l'environnement
+restreint à la branche `main` — sinon n'importe quel workflow poussé sur `dev` (session Claude
+comprise) peut lire la clé qui signe les mises à jour de tous les utilisateurs. Toute action tierce
+s'épingle par SHA de commit, avec la version en commentaire (`uses: owner/action@<sha> # vX.Y.Z`). La clé publique (`wakfu-overlay.pub`) est un fichier d'outillage
 tant qu'aucun code ne l'embarque : son ajout était un `chore:`, pas un `feat:` (cas vécu dans
 `.claude/rules/versioning.md`).
