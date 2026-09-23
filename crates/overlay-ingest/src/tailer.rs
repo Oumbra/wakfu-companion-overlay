@@ -17,6 +17,9 @@ pub const MAX_BATCH_LINES: usize = 2000;
 /// la doc de `Tailer::identity_prefix` pour pourquoi. Quelques dizaines d'octets suffisent (une
 /// ligne de log typique), coût négligeable face au reste d'un `poll()`.
 const IDENTITY_PREFIX_LEN: usize = 64;
+/// Plafond d'une ligne encore incomplète gardée entre deux `poll()` — une vraie ligne de
+/// `wakfu.log` tient en quelques centaines d'octets (résumé d'échange compris).
+const MAX_PARTIAL_LINE_BYTES: usize = 1024 * 1024;
 
 /// Un lot de lignes complètes fraîchement lues, dans l'ordre du fichier.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,16 +135,33 @@ impl Tailer {
         self.caught_up = true;
         self.pending.extend_from_slice(&buf);
 
+        // Découpage en UNE passe, puis un seul `drain` du consommé : l'ancien `drain(..=pos)` par
+        // ligne recopiait toute la fin du tampon à chaque ligne — quadratique, 49 s pour un
+        // rattrapage de 16 Mo (audit de sécurité du 2026-09-23 ; le contenu du chat, écrit par des
+        // tiers, suffit à gonfler le fichier).
         let mut lines = Vec::new();
-        while let Some(pos) = self.pending.iter().position(|&b| b == b'\n') {
-            let mut raw: Vec<u8> = self.pending.drain(..=pos).collect();
-            raw.pop(); // '\n'
+        let mut consumed = 0;
+        while let Some(rel) = self.pending[consumed..].iter().position(|&b| b == b'\n') {
+            let end = consumed + rel;
+            let mut raw = &self.pending[consumed..end];
             if raw.last() == Some(&b'\r') {
-                raw.pop(); // CRLF éventuel
+                raw = &raw[..raw.len() - 1]; // CRLF éventuel
             }
             // Décodage UTF-8 strict avec remplacement (§5.2) : une ligne corrompue ne doit jamais
             // interrompre l'ingestion des suivantes.
-            lines.push(String::from_utf8_lossy(&raw).into_owned());
+            lines.push(String::from_utf8_lossy(raw).into_owned());
+            consumed = end + 1;
+        }
+        self.pending.drain(..consumed);
+        if self.pending.len() > MAX_PARTIAL_LINE_BYTES {
+            // Reliquat sans fin de ligne démesuré (fichier corrompu, ou autre chose qu'un journal) :
+            // abandonné plutôt que gardé en mémoire indéfiniment. La suite de cette « ligne », quand
+            // son `\n` arrivera, sera un fragment sans en-tête que le parseur ignore.
+            tracing::warn!(
+                bytes = self.pending.len(),
+                "ligne incomplète démesurée abandonnée"
+            );
+            self.pending.clear();
         }
 
         if lines.is_empty() {

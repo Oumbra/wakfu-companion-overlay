@@ -177,3 +177,41 @@ fn encodage_invalide_ne_bloque_pas_lingestion() {
     // La ligne corrompue est remplacée (U+FFFD), pas perdue ni fatale pour l'ingestion.
     assert!(batches[0].lines[1].contains('\u{FFFD}'));
 }
+
+/// Une ligne incomplète démesurée (fichier corrompu) n'est pas gardée en mémoire entre deux
+/// `poll()` : elle est abandonnée, et les lignes suivantes restent lues normalement.
+#[test]
+fn une_ligne_incomplete_demesuree_est_abandonnee() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wakfu.log");
+    write_new(&path, &"x".repeat(2 * 1024 * 1024));
+
+    let mut tailer = Tailer::new(&path);
+    assert!(tailer.poll().unwrap().is_empty());
+
+    append(&path, "fin du fragment\nligne suivante\n");
+    let batches = tailer.poll().unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].lines, vec!["fin du fragment", "ligne suivante"]);
+}
+
+/// Un gros rattrapage se découpe en temps linéaire : 200 000 lignes d'un coup, dont des fins de
+/// ligne CRLF, toutes restituées dans l'ordre.
+#[test]
+fn gros_rattrapage_decoupe_en_une_passe() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wakfu.log");
+    let contents: String = (0..200_000).map(|i| format!("ligne {i}\r\n")).collect();
+    write_new(&path, &contents);
+
+    let mut tailer = Tailer::new(&path);
+    let lines: Vec<String> = tailer
+        .poll()
+        .unwrap()
+        .into_iter()
+        .flat_map(|batch| batch.lines)
+        .collect();
+    assert_eq!(lines.len(), 200_000);
+    assert_eq!(lines[0], "ligne 0");
+    assert_eq!(lines[199_999], "ligne 199999");
+}
